@@ -1,0 +1,16 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Each user can read/write ONLY their own data namespace.
+    // users/{uid}/kv/{anything}  — the key-value docs CalorieIQ stores.
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Everything else is denied by default.
+    // NOTE: trainer -> client data sharing (a trainer reading their clients'
+    // docs) is intentionally NOT here yet. That needs the role model from
+    // Session 3 (Admin / Trainer / Client). We'll extend these rules then.
+  }
+}
