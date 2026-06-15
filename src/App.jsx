@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { ROLES, getProfile, joinTrainer, getMyClients, myInviteCode } from "./profile.js";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
@@ -6734,6 +6735,133 @@ Respond in this exact JSON format (no markdown, no backticks):
   );
 }
 
+// ─── Role system (MVP scaffolding — Session 3) ──────────────────────────────
+// Self-contained panel shown on the client-list screen. Reads the signed-in
+// user's role from their profile and shows either:
+//   • client  → "Join your trainer" (paste invite code) / current trainer
+//   • trainer → their invite code (copyable) + their list of clients
+// Full dashboards are a later session; this just makes the role system usable
+// and proves the trainer-sees-clients security rule works end to end.
+function RolePanel() {
+  const [profile, setProfile] = useState(undefined); // undefined = loading
+  const [code, setCode] = useState("");
+  const [clients, setClients] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const load = async () => {
+    const p = await getProfile();
+    setProfile(p || null);
+    if (p && (p.role === ROLES.HEAD_TRAINER || p.role === ROLES.SUB_TRAINER)) {
+      try { setClients(await getMyClients()); } catch { /* ignore */ }
+    }
+  };
+  useEffect(() => { load(); }, []);
+
+  if (!profile) return null; // loading, or no profile (AuthGate guarantees one)
+
+  const isTrainer = profile.role === ROLES.HEAD_TRAINER || profile.role === ROLES.SUB_TRAINER;
+
+  const join = async () => {
+    const c = code.trim();
+    if (!c) { setMsg("Paste your trainer's invite code first."); return; }
+    setBusy(true); setMsg("");
+    try {
+      await joinTrainer(c);
+      setMsg("Linked to your trainer.");
+      setCode("");
+      await load();
+    } catch (e) {
+      setMsg((e && e.message) || "Could not link to that trainer.");
+    } finally { setBusy(false); }
+  };
+
+  const copyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(myInviteCode());
+      setCopied(true); setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard unavailable */ }
+  };
+
+  const field = { padding:"10px 12px", fontSize:".9rem", borderRadius:"8px",
+    border:"1px solid rgba(255,255,255,.15)", background:"rgba(255,255,255,.05)",
+    color:"var(--text)", flex:1, minWidth:0 };
+  const btn = { padding:"10px 14px", fontSize:".85rem", fontWeight:700, borderRadius:"8px",
+    border:"none", background:"var(--accent)", color:"#111", cursor:"pointer" };
+
+  return (
+    <div className="card">
+      <div className="card-title">
+        {isTrainer ? "🧑‍🏫 Trainer" : "🙋 Client"}
+        <span style={{ fontWeight:400, color:"var(--muted)", fontSize:".8rem", marginLeft:8 }}>
+          {profile.email}
+        </span>
+      </div>
+
+      {isTrainer ? (
+        <>
+          <div className="card-sub">
+            Share your invite code with clients so they can link to you.
+          </div>
+          <div style={{ display:"flex", gap:"8px", alignItems:"center", margin:"4px 0 14px" }}>
+            <code style={{ ...field, fontFamily:"monospace", display:"inline-block" }}>
+              {myInviteCode()}
+            </code>
+            <button style={btn} onClick={copyCode}>{copied ? "Copied!" : "Copy code"}</button>
+          </div>
+          <div className="card-sub" style={{ marginBottom:6 }}>
+            Your clients ({clients.length})
+          </div>
+          {clients.length === 0 ? (
+            <div style={{ color:"var(--muted)", fontSize:".85rem" }}>
+              No clients linked yet.
+            </div>
+          ) : (
+            <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+              {clients.map((c) => (
+                <div key={c.uid} style={{ display:"flex", justifyContent:"space-between",
+                  padding:"8px 10px", borderRadius:"8px", background:"rgba(255,255,255,.04)" }}>
+                  <span>{c.displayName || c.email || c.uid}</span>
+                  <span style={{ color:"var(--muted)", fontSize:".78rem" }}>{c.role}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {profile.assignedTrainerId ? (
+            <div className="card-sub">
+              You're linked to trainer:{" "}
+              <code style={{ fontFamily:"monospace", color:"var(--text)" }}>
+                {profile.assignedTrainerId}
+              </code>
+            </div>
+          ) : (
+            <>
+              <div className="card-sub">
+                Have a trainer? Paste their invite code to link your account.
+              </div>
+              <div style={{ display:"flex", gap:"8px", alignItems:"center", margin:"4px 0" }}>
+                <input
+                  style={field} value={code} placeholder="Trainer invite code"
+                  onChange={(e) => setCode(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && join()}
+                />
+                <button style={btn} onClick={join} disabled={busy}>
+                  {busy ? "…" : "Join"}
+                </button>
+              </div>
+            </>
+          )}
+        </>
+      )}
+      {msg && <div style={{ marginTop:8, fontSize:".82rem", color:"var(--muted)" }}>{msg}</div>}
+    </div>
+  );
+}
+
 function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading,
   onCreateFolder, onRenameFolder, onDeleteFolder, onMoveProfile,
   confirmDeleteId, confirmFolderDel, onRecover, onExport, onImport,
@@ -6803,6 +6931,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
         <div className="tagline">Maintenance · Deficit · Cardio · Strength · Timeline</div>
       </div>
       <div className="container">
+        <RolePanel />
         <div className="card">
           <div className="card-title">📂 Client Profiles</div>
           <div className="card-sub">

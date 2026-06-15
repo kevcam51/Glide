@@ -2,7 +2,7 @@
 // authenticated, then renders children (the real CalorieIQ app). Because the
 // app only mounts when a user exists, storage.js can always assume a uid.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { auth, googleProvider } from "./firebase.js";
 import {
   onAuthStateChanged,
@@ -12,6 +12,7 @@ import {
   signOut,
   sendPasswordResetEmail,
 } from "firebase/auth";
+import { createProfile, hasProfile, ROLES } from "./profile.js";
 
 export function useAuth() {
   const [user, setUser] = useState(undefined); // undefined = still loading
@@ -42,11 +43,55 @@ export default function AuthGate({ children }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  // role chosen on the signup form ("client" maps to client, "trainer" -> head_trainer)
+  const [signupRole, setSignupRole] = useState(ROLES.CLIENT);
+  // profile-completion gate: every signed-in user must have a users/{uid} profile
+  const [profileChecked, setProfileChecked] = useState(false);
+  const [needsProfile, setNeedsProfile] = useState(false);
+  // set true the moment we create a profile this session, so the gate effect
+  // doesn't race the write and re-prompt for a role we just chose
+  const createdRef = useRef(false);
+
+  // When a user signs in, ensure they have a profile doc. If not (first Google
+  // sign-in, or a pre-Session-3 account), show the one-time role chooser.
+  useEffect(() => {
+    let cancelled = false;
+    if (!user) {
+      setProfileChecked(false);
+      setNeedsProfile(false);
+      createdRef.current = false;
+      return;
+    }
+    if (createdRef.current) {
+      setNeedsProfile(false);
+      setProfileChecked(true);
+      return;
+    }
+    setProfileChecked(false);
+    hasProfile(user.uid)
+      .then((has) => {
+        if (cancelled) return;
+        setNeedsProfile(!has);
+        setProfileChecked(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setNeedsProfile(true);
+        setProfileChecked(true);
+      });
+    return () => { cancelled = true; };
+  }, [user]);
 
   if (user === undefined) {
     return <div style={S.center}>Loading…</div>;
   }
   if (user) {
+    if (!profileChecked) {
+      return <div style={S.center}>Loading…</div>;
+    }
+    if (needsProfile) {
+      return <RoleChooser user={user} onDone={() => setNeedsProfile(false)} />;
+    }
     return (
       <>
         <SignOutButton />
@@ -59,7 +104,15 @@ export default function AuthGate({ children }) {
     setError(""); setNotice(""); setBusy(true);
     try {
       if (mode === "signup") {
-        await createUserWithEmailAndPassword(auth, email.trim(), password);
+        const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+        createdRef.current = true; // skip the gate's re-check for this fresh account
+        await createProfile({
+          uid: cred.user.uid,
+          email: cred.user.email,
+          role: signupRole,
+        });
+        setNeedsProfile(false);
+        setProfileChecked(true);
       } else {
         await signInWithEmailAndPassword(auth, email.trim(), password);
       }
@@ -109,6 +162,10 @@ export default function AuthGate({ children }) {
           autoComplete={mode === "signup" ? "new-password" : "current-password"}
         />
 
+        {mode === "signup" && (
+          <RoleToggle value={signupRole} onChange={setSignupRole} />
+        )}
+
         {error && <div style={S.error}>{error}</div>}
         {notice && <div style={S.notice}>{notice}</div>}
 
@@ -134,6 +191,64 @@ export default function AuthGate({ children }) {
             </button>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Two-option role picker shown on the signup form. "trainer" maps to head_trainer
+// (a self-signup trainer is the head of their own tree).
+function RoleToggle({ value, onChange }) {
+  const opt = (role, label) => (
+    <button
+      type="button"
+      onClick={() => onChange(role)}
+      style={{ ...S.toggleBtn, ...(value === role ? S.toggleBtnActive : {}) }}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div>
+      <div style={S.toggleLabel}>I'm a…</div>
+      <div style={S.toggleRow}>
+        {opt(ROLES.CLIENT, "Client")}
+        {opt(ROLES.HEAD_TRAINER, "Trainer")}
+      </div>
+    </div>
+  );
+}
+
+// One-time "trainer or client?" screen for signed-in users who don't yet have a
+// profile (first Google sign-in, or accounts created before Session 3 existed).
+function RoleChooser({ user, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const choose = async (role) => {
+    setError(""); setBusy(true);
+    try {
+      await createProfile({ uid: user.uid, email: user.email, role });
+      onDone();
+    } catch (e) {
+      setError(prettyError(e));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={S.center}>
+      <SignOutButton />
+      <div style={S.card}>
+        <h1 style={S.brand}>CalorieIQ</h1>
+        <p style={S.sub}>One quick thing — are you a trainer or a client?</p>
+        {error && <div style={S.error}>{error}</div>}
+        <button style={S.primary} disabled={busy} onClick={() => choose(ROLES.CLIENT)}>
+          I'm a client
+        </button>
+        <button style={S.google} disabled={busy} onClick={() => choose(ROLES.HEAD_TRAINER)}>
+          I'm a trainer
+        </button>
       </div>
     </div>
   );
@@ -182,6 +297,13 @@ const S = {
   },
   row: { display: "flex", justifyContent: "space-between", marginTop: 4 },
   link: { background: "none", border: "none", color: "#2563eb", cursor: "pointer", fontSize: 13, padding: 0 },
+  toggleLabel: { fontSize: 13, color: "#6b7280", marginBottom: 6 },
+  toggleRow: { display: "flex", gap: 8 },
+  toggleBtn: {
+    flex: 1, padding: "10px 12px", fontSize: 14, fontWeight: 600, borderRadius: 10,
+    border: "1px solid #d1d5db", background: "#fff", color: "#374151", cursor: "pointer",
+  },
+  toggleBtnActive: { background: "#111827", color: "#fff", borderColor: "#111827" },
   error: { color: "#b91c1c", fontSize: 13, background: "#fef2f2", padding: "8px 10px", borderRadius: 8 },
   notice: { color: "#065f46", fontSize: 13, background: "#ecfdf5", padding: "8px 10px", borderRadius: 8 },
 };

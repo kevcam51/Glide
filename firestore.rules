@@ -2,15 +2,86 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Each user can read/write ONLY their own data namespace.
-    // users/{uid}/kv/{anything}  — the key-value docs CalorieIQ stores.
-    match /users/{uid}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+    function isSignedIn() { return request.auth != null; }
+
+    // Admin is hardcoded by uid. Kevin: paste your Firebase Auth User UID here
+    // (Firebase console -> Authentication -> Users -> your account -> User UID).
+    function isAdmin() {
+      return isSignedIn() && request.auth.uid in [
+        "G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"
+      ];
     }
 
-    // Everything else is denied by default.
-    // NOTE: trainer -> client data sharing (a trainer reading their clients'
-    // docs) is intentionally NOT here yet. That needs the role model from
-    // Session 3 (Admin / Trainer / Client). We'll extend these rules then.
+    function profileExists(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid));
+    }
+    function profileData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    // assignedTrainerId of ownerUid, or null if the profile or the field is
+    // missing. The exists() guard + .get(...,null) default keep this from
+    // throwing on a missing profile or absent/null field (which would
+    // otherwise deny — or worse, error — unpredictably).
+    function assignedTrainerOf(ownerUid) {
+      return profileExists(ownerUid)
+        ? profileData(ownerUid).get('assignedTrainerId', null)
+        : null;
+    }
+
+    // Is the requester the direct trainer of ownerUid?
+    function isDirectTrainer(ownerUid) {
+      return assignedTrainerOf(ownerUid) != null
+        && request.auth.uid == assignedTrainerOf(ownerUid);
+    }
+
+    // Is the requester the head above ownerUid's direct trainer?
+    // Guarded so a missing trainer profile can't throw the nested get().
+    function isHeadOfTrainer(ownerUid) {
+      return assignedTrainerOf(ownerUid) != null
+        && profileExists(assignedTrainerOf(ownerUid))
+        && request.auth.uid ==
+             profileData(assignedTrainerOf(ownerUid)).get('headTrainerId', null);
+    }
+
+    function canAccessUserData(ownerUid) {
+      return isSignedIn() && (
+        // owner and admin first so the common path does NO document lookups
+        request.auth.uid == ownerUid
+        || isAdmin()
+        || isDirectTrainer(ownerUid)
+        || isHeadOfTrainer(ownerUid)
+      );
+    }
+
+    match /users/{uid} {
+      // READ: any signed-in user (MVP simplification so join + client-list
+      // queries work). Tighten later per docs/BLAZE_MIGRATION.md.
+      allow read: if isSignedIn();
+
+      // CREATE: only your own uid; role must be client or head_trainer ONLY
+      // (never admin / sub_trainer); uid field must equal the doc id.
+      allow create: if isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.role in ['client', 'head_trainer'];
+
+      // UPDATE: admin anything; owner may update own profile but MUST NOT
+      // change role (blocks self-promotion); nobody else.
+      allow update: if isAdmin()
+        || (
+          request.auth.uid == uid
+          && request.resource.data.role == resource.data.role
+        );
+
+      // DELETE: admin only.
+      allow delete: if isAdmin();
+
+      // Sensitive per-user app data. Owner, admin, the owner's direct trainer,
+      // or the head above that trainer may read AND write.
+      match /kv/{docId} {
+        allow read, write: if canAccessUserData(uid);
+      }
+    }
   }
 }
