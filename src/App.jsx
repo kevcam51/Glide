@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer } from "./profile.js";
+import { getForUser, setForUser, deleteForUser } from "./clientData.js";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
@@ -6769,6 +6770,12 @@ function RolePanel() {
   const [lastInput, setLastInput] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [localProfiles, setLocalProfiles] = useState([]); // trainer's own profiles
+  const [clientPlans, setClientPlans] = useState({}); // clientUid -> { name, weight } if they have a linked plan
+  const [linkingFor, setLinkingFor] = useState(null); // clientUid we're choosing a profile for
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [pendingLink, setPendingLink] = useState(null); // { clientUid, localId, label } awaiting confirm
+  const [confirmUnlink, setConfirmUnlink] = useState(null); // clientUid awaiting unlink confirm
 
   const load = async () => {
     let p = await getProfile();
@@ -6792,8 +6799,29 @@ function RolePanel() {
     setProfile(p || null);
     if (p) { const [f, l] = splitName(p); setFirstInput(f); setLastInput(l); }
     if (p && (p.role === ROLES.HEAD_TRAINER || p.role === ROLES.SUB_TRAINER)) {
-      try { setClients(await getMyClients()); } catch { /* ignore */ }
+      let cs = [];
+      try { cs = await getMyClients(); setClients(cs); } catch { /* ignore */ }
       try { setInviteCode(await ensureInviteCode()); } catch { /* ignore */ }
+      // The trainer's own saved profiles, to offer when linking a plan.
+      try {
+        const r = await window.storage.get(STORAGE_INDEX);
+        if (r && r.value) setLocalProfiles(JSON.parse(r.value));
+      } catch { /* ignore */ }
+      // For each linked client account, see if they already have a linked plan
+      // (stored in THEIR account as caliq-self) — proves the connection exists.
+      try {
+        const plans = {};
+        await Promise.all((cs || []).map(async (c) => {
+          try {
+            const r = await getForUser(c.uid, "caliq-self");
+            if (r && r.value) {
+              const d = (JSON.parse(r.value) || {}).data || {};
+              plans[c.uid] = { name: `${d.firstName || ""} ${d.lastName || ""}`.trim(), weight: d.weightLbs || "" };
+            }
+          } catch { /* not linked / no access */ }
+        }));
+        setClientPlans(plans);
+      } catch { /* ignore */ }
     } else if (p && p.assignedTrainerId) {
       // Client view: look up the trainer's friendly name to display instead of
       // their raw uid.
@@ -6871,11 +6899,47 @@ function RolePanel() {
     } finally { setBusy(false); }
   };
 
+  // Copy one of the trainer's own profiles into a linked client's account, so it
+  // becomes the shared, both-can-edit plan that lives in the client's account.
+  const linkPlan = async (clientUid, localId) => {
+    setLinkBusy(true); setMsg("");
+    try {
+      let payload = JSON.stringify({ data: {}, step: 0 });
+      try {
+        const r = await window.storage.get(profileKey(localId));
+        if (r && r.value) payload = r.value;
+      } catch { /* fall back to a blank plan */ }
+      await setForUser(clientUid, "caliq-self", payload);
+      setMsg("Plan linked to the client's account.");
+      setLinkingFor(null);
+      setPendingLink(null);
+      await load();
+    } catch (e) {
+      setMsg((e && e.message) || "Couldn't link that plan — is the client still linked to you?");
+    } finally { setLinkBusy(false); }
+  };
+
+  // Remove a linked client's shared plan from their account.
+  const unlinkPlan = async (clientUid) => {
+    setLinkBusy(true); setMsg("");
+    try {
+      await deleteForUser(clientUid, "caliq-self");
+      setMsg("Plan unlinked from the client's account.");
+      setConfirmUnlink(null);
+      await load();
+    } catch (e) {
+      setMsg((e && e.message) || "Couldn't unlink that plan.");
+    } finally { setLinkBusy(false); }
+  };
+
   const field = { padding:"10px 12px", fontSize:".9rem", borderRadius:"8px",
     border:"1px solid rgba(255,255,255,.15)", background:"rgba(255,255,255,.05)",
     color:"var(--text)", flex:1, minWidth:0 };
   const btn = { padding:"10px 14px", fontSize:".85rem", fontWeight:700, borderRadius:"8px",
     border:"none", background:"var(--accent)", color:"#111", cursor:"pointer" };
+  const btnGhost = { padding:"7px 10px", fontSize:".78rem", fontWeight:600, borderRadius:"8px",
+    border:"1px solid rgba(255,255,255,.2)", background:"transparent", color:"var(--text)",
+    cursor:"pointer", textAlign:"left" };
 
   return (
     <div className="card">
@@ -6941,13 +7005,80 @@ function RolePanel() {
             </div>
           ) : (
             <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
-              {clients.map((c) => (
-                <div key={c.uid} style={{ display:"flex", justifyContent:"space-between",
-                  padding:"8px 10px", borderRadius:"8px", background:"rgba(255,255,255,.04)" }}>
-                  <span>{c.displayName || c.email || c.uid}</span>
-                  <span style={{ color:"var(--muted)", fontSize:".78rem" }}>{c.role}</span>
-                </div>
-              ))}
+              {clients.map((c) => {
+                const plan = clientPlans[c.uid];
+                const cname = c.displayName || c.email || "this client";
+                return (
+                  <div key={c.uid} style={{ padding:"8px 10px", borderRadius:"8px",
+                    background:"rgba(255,255,255,.04)" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                      <span>{c.displayName || c.email || c.uid}</span>
+                      <span style={{ color: plan ? "#39d98a" : "var(--muted)", fontSize:".74rem", fontWeight:600 }}>
+                        {plan ? "✓ Plan linked" : "No plan yet"}
+                      </span>
+                    </div>
+
+                    {confirmUnlink === c.uid ? (
+                      <div style={{ marginTop:8 }}>
+                        <div style={{ fontSize:".78rem", color:"var(--text)", marginBottom:8 }}>
+                          Unlink <strong>{cname}</strong>'s plan? This removes it from their account
+                          and they'll lose access to it.
+                        </div>
+                        <div style={{ display:"flex", gap:"8px" }}>
+                          <button style={{ ...btn, background:"#e5484d", color:"#fff" }} disabled={linkBusy}
+                            onClick={() => unlinkPlan(c.uid)}>{linkBusy ? "…" : "Yes, unlink"}</button>
+                          <button style={btnGhost} disabled={linkBusy}
+                            onClick={() => setConfirmUnlink(null)}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : pendingLink && pendingLink.clientUid === c.uid ? (
+                      <div style={{ marginTop:8 }}>
+                        <div style={{ fontSize:".78rem", color:"var(--text)", marginBottom:8 }}>
+                          Link <strong>{pendingLink.label}</strong> to <strong>{cname}</strong>?
+                          {plan ? " This replaces their current linked plan." : ""}
+                        </div>
+                        <div style={{ display:"flex", gap:"8px" }}>
+                          <button style={btn} disabled={linkBusy}
+                            onClick={() => linkPlan(c.uid, pendingLink.localId)}>{linkBusy ? "…" : "Confirm"}</button>
+                          <button style={btnGhost} disabled={linkBusy}
+                            onClick={() => setPendingLink(null)}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : linkingFor === c.uid ? (
+                      <div style={{ marginTop:8 }}>
+                        <div style={{ fontSize:".74rem", color:"var(--muted)", marginBottom:4 }}>
+                          Pick one of your profiles to link to this client:
+                        </div>
+                        <div style={{ display:"flex", flexDirection:"column", gap:"4px",
+                          maxHeight:170, overflow:"auto" }}>
+                          {localProfiles.length === 0 ? (
+                            <div style={{ fontSize:".78rem", color:"var(--muted)" }}>
+                              No saved profiles yet — create one under “All clients” first.
+                            </div>
+                          ) : localProfiles.map((lp) => (
+                            <button key={lp.id} style={btnGhost} disabled={linkBusy}
+                              onClick={() => { setPendingLink({ clientUid:c.uid, localId:lp.id, label: lp.name || "Unnamed profile" }); setLinkingFor(null); }}>
+                              {lp.name || "Unnamed profile"}{lp.weight ? ` · ${lp.weight} lbs` : ""}
+                            </button>
+                          ))}
+                        </div>
+                        <button style={{ ...btnGhost, marginTop:6 }} disabled={linkBusy}
+                          onClick={() => setLinkingFor(null)}>Cancel</button>
+                      </div>
+                    ) : (
+                      <div style={{ display:"flex", gap:"8px", marginTop:6, flexWrap:"wrap" }}>
+                        <button style={btnGhost} onClick={() => setLinkingFor(c.uid)}>
+                          {plan ? "Re-link a different profile" : "Link a profile"}
+                        </button>
+                        {plan && (
+                          <button style={{ ...btnGhost, color:"#e5484d", borderColor:"rgba(229,72,77,.4)" }}
+                            onClick={() => setConfirmUnlink(c.uid)}>Unlink</button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </>

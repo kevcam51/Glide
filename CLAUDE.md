@@ -122,6 +122,21 @@ enabled (Blaze has no default spending cap).
   weight → goal with "N lbs to go" (larger/brighter text, `lbs` on every number), plus a **progress
   bar** that fills using the client's *earliest weigh-in check-in* as the starting baseline — the
   bar only appears once there's at least one weigh-in to measure against, so it's never misleading.
+- Session 8 (in progress): **Connecting accounts to profiles — linking (Phase 1, non-Blaze).**
+  First slice of the "two kinds of client" work. New file `src/clientData.js` adds cross-account
+  kv access (`getForUser`/`setForUser`/`deleteForUser`/`listForUser`) — a separate accessor that
+  takes a target uid and works ONLY where `firestore.rules` already grant trainer→client access;
+  it does NOT touch the `window.storage` interface. In the role panel, each linked client now
+  shows a plan status ("✓ Plan linked" / "No plan yet") and a **Link a profile** action: the
+  trainer picks one of their own saved profiles and its data is copied into the *client's* account
+  under the key `caliq-self` (so both can later edit the single shared copy). Both actions are
+  guarded by inline confirmations — "Link [profile] to [client]?" and a red **Unlink** with "Unlink
+  [client]'s plan? This removes it from their account." No `firestore.rules` change (relies on the
+  existing trainer↔client kv access; verified by a real linked test account). **Still to do in this
+  thread:** auto-create a blank `caliq-self` on join; let the trainer OPEN a linked client's
+  `caliq-self` in the full editor and save back to the client's account (the save-routing branch);
+  and the **Client Dashboard** so the client sees/edits their own plan. Assumption: one shared
+  "self" plan per client (multiple plans per client is a later roadmap item).
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
   testing — these are not real users and can be cleared.
 
@@ -133,7 +148,33 @@ enabled (Blaze has no default spending cap).
 
 - Role-aware dashboards: **Trainer overview shipped (Session 7).** Still to do: the **Client
   Dashboard** (a client's own home view) and connecting a linked client *account* to a managed
-  nutrition *profile* (the "two kinds of client" gap — bigger, no Blaze, its own step).
+  nutrition *profile* (the "two kinds of client" gap — in progress; one shared "self" plan in the
+  client's account, both can edit; no Blaze).
+- **Multiple plans per client (later enhancement).** Default is one plan per client; this adds the
+  option of several, with one marked active. Useful cases: diet/training **phases** (cut →
+  maintenance → bulk; or hypertrophy → strength → peak/power mesocycles); **goal-specific**
+  programs (marathon training vs. strength); **seasonal/periodized** (off-season vs. contest prep,
+  incl. peak week); **draft vs. active** (prep next month's plan while they follow the current one);
+  **history** (keep finished plans as records instead of overwriting); **injury/rehab** modified
+  program during recovery; **travel/vacation** lighter or bodyweight-only block; **reverse-diet**
+  after a cut; **progression templates** (beginner → intermediate → advanced); **split variants**
+  (push/pull/legs vs. upper/lower) to switch between; **reusable plan templates / a plan library**
+  the trainer clones across clients; **medical/dietary-restriction variants**; and **A/B approaches**
+  to see what works for a given client. No Blaze needed — it's a data-model + UI change (a list of
+  plans per client with an "active" flag).
+- **Edit history / activity log (who-changed-what).** Since both trainer and client edit the same
+  shared plan, track every meaningful change as an append-only event: **who** (uid + role + name),
+  **when** (timestamp), **what** (e.g. "added a meal," "logged 182 lbs," "changed goal to 160,"
+  "edited Tuesday cardio"), and ideally the before→after. Surface it as a **timeline/feed** on the
+  profile or dashboard. Value: accountability + coaching insight (is the client logging daily?),
+  and it resolves the "who overwrote whom" risk of shared editing (could later enable revert). It
+  also feeds the future **notification center** (notify trainer when a client logs). Store as
+  structured events (not raw diffs) for readability, and log meaningful actions rather than every
+  keystroke. **Two tiers:** a basic *cooperative* history can be done **non-Blaze** (each side
+  writes its own events into the shared plan's history) — but it's not tamper-proof (a writer could
+  forge/omit entries). A **trustworthy, tamper-resistant** audit trail (authoritative server
+  timestamps, can't fake another user's identity) needs **Cloud Functions → Blaze**. Recommend the
+  basic version alongside the shared-editing work, with the hardened version arriving with Blaze.
 - **Consistency-based time-to-goal estimate** — as the trainer (or client) logs weight + body-fat
   % over time, use the *actual* observed rate of change (not just the theoretical 1 lb/wk deficit
   the app currently assumes) to project a realistic ETA to goal weight / goal BF%. Builds on the
