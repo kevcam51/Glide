@@ -6950,24 +6950,30 @@ function RolePanel() {
         </span>
       </div>
 
-      <div className="card-sub" style={{ marginBottom:6 }}>
-        Your name{isTrainer ? "" : " (optional)"}
-      </div>
-      <div style={{ display:"flex", gap:"8px", alignItems:"center", margin:"0 0 16px" }}>
-        <input
-          style={field} value={firstInput} placeholder="First name"
-          onChange={(e) => setFirstInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && saveName()}
-        />
-        <input
-          style={field} value={lastInput} placeholder="Last name"
-          onChange={(e) => setLastInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && saveName()}
-        />
-        <button style={btn} onClick={saveName} disabled={savingName}>
-          {savingName ? "…" : "Save"}
-        </button>
-      </div>
+      {/* Name editor shows only until a name is set — keeps the home clean.
+          (Editing an existing name will move into the profile side menu later.) */}
+      {!profile.displayName && (
+        <>
+          <div className="card-sub" style={{ marginBottom:6 }}>
+            Your name{isTrainer ? "" : " (optional)"}
+          </div>
+          <div style={{ display:"flex", gap:"8px", alignItems:"center", margin:"0 0 16px" }}>
+            <input
+              style={field} value={firstInput} placeholder="First name"
+              onChange={(e) => setFirstInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && saveName()}
+            />
+            <input
+              style={field} value={lastInput} placeholder="Last name"
+              onChange={(e) => setLastInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && saveName()}
+            />
+            <button style={btn} onClick={saveName} disabled={savingName}>
+              {savingName ? "…" : "Save"}
+            </button>
+          </div>
+        </>
+      )}
 
       {isTrainer ? (
         <>
@@ -7335,6 +7341,41 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients }) {
               })}
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Client home (Session 8) ────────────────────────────────────────────────
+// A client manages just their own plan (stored in their own account as
+// "caliq-self"). This is their landing screen: the role panel (their trainer
+// link) plus a button to open/edit their plan in the normal editor. The plan a
+// trainer "links" to them is the very same caliq-self, so both edit one copy.
+function ClientHome({ onOpenPlan }) {
+  return (
+    <div className="prof-screen">
+      <style>{css}</style>
+      <div className="header">
+        <div className="logo">CALORIE<span>IQ</span></div>
+        <div className="tagline">Maintenance · Deficit · Cardio · Strength · Timeline</div>
+      </div>
+      <div className="container">
+        <RolePanel />
+        <div className="card">
+          <div className="card-title">📋 My Plan</div>
+          <div className="card-sub">
+            Your nutrition &amp; training plan. Open it to view your targets, log
+            your day, or make changes.
+          </div>
+          <button
+            onClick={onOpenPlan}
+            style={{ marginTop:12, width:"100%", padding:"12px 14px", fontSize:".95rem",
+              fontWeight:700, borderRadius:"10px", border:"none", background:"var(--accent)",
+              color:"#0b0b12", cursor:"pointer" }}
+          >
+            Open my plan
+          </button>
         </div>
       </div>
     </div>
@@ -8085,6 +8126,11 @@ export default function App() {
   const STEP_ICONS = ["👤","🎯","🏃","🔥","💪","📊"];
 
   if (screen === "profiles") {
+    // A client manages just their own plan (stored in their account as
+    // "caliq-self"), not a list of other people's profiles.
+    if (role === ROLES.CLIENT) {
+      return <ClientHome onOpenPlan={() => selectProfile("self")} />;
+    }
     const isTrainerHome = role === ROLES.HEAD_TRAINER || role === ROLES.SUB_TRAINER;
     if (isTrainerHome && homeTab === "dashboard") {
       return <TrainerDashboard
@@ -8116,11 +8162,11 @@ export default function App() {
         <div className="prof-header-bar">
           <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
             <button className="prof-switch-btn" onClick={goBack} style={{background:"var(--accent)",color:"#0b0b12",borderColor:"var(--accent)",fontWeight:700,minWidth:"36px",padding:"6px 12px"}}>
-              ← {(showDash && step===5) ? "Clients" : step <= 4 ? (navFrom === "results" ? "Results" : "Dashboard") : "Dashboard"}
+              ← {(showDash && step===5) ? (role === ROLES.CLIENT ? "Home" : "Clients") : step <= 4 ? (navFrom === "results" ? "Results" : "Dashboard") : "Dashboard"}
             </button>
             <div className="prof-header-name">📂 {fullName(data) || "New Client"}</div>
           </div>
-          <button className="prof-switch-btn" onClick={goToProfiles}>All Clients</button>
+          <button className="prof-switch-btn" onClick={goToProfiles}>{role === ROLES.CLIENT ? "My Home" : "All Clients"}</button>
         </div>
         <div className="container">
           <div className="steps-wrap">

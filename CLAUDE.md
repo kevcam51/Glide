@@ -132,11 +132,18 @@ enabled (Blaze has no default spending cap).
   under the key `caliq-self` (so both can later edit the single shared copy). Both actions are
   guarded by inline confirmations — "Link [profile] to [client]?" and a red **Unlink** with "Unlink
   [client]'s plan? This removes it from their account." No `firestore.rules` change (relies on the
-  existing trainer↔client kv access; verified by a real linked test account). **Still to do in this
-  thread:** auto-create a blank `caliq-self` on join; let the trainer OPEN a linked client's
-  `caliq-self` in the full editor and save back to the client's account (the save-routing branch);
-  and the **Client Dashboard** so the client sees/edits their own plan. Assumption: one shared
-  "self" plan per client (multiple plans per client is a later roadmap item).
+  existing trainer↔client kv access; verified by a real linked test account).
+  **Client home added:** a signed-in **client** now lands on a `ClientHome` screen (role panel +
+  an "Open my plan" button) instead of the trainer's profile manager; opening it runs
+  `selectProfile("self")`, which reuses the existing editor on the key `caliq-self` (since
+  `profileKey("self")` === `caliq-self`) in the client's *own* storage — so the plan a trainer
+  linked is the very same file the client opens and edits (one shared copy; created on the client's
+  first save if none was linked). Header buttons relabel for clients ("My Home" / "← Home").
+  **Still to do in this thread:** let the trainer OPEN a linked client's `caliq-self` in the full
+  editor and save back to the client's account (cross-account save-routing branch — part C); an
+  explicit auto-create on join (today it's created on the client's first edit); and enriching
+  ClientHome with a plan summary. Assumption: one shared "self" plan per client (multiple plans per
+  client is a later roadmap item).
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
   testing — these are not real users and can be cleared.
 
@@ -162,6 +169,21 @@ enabled (Blaze has no default spending cap).
   the trainer clones across clients; **medical/dietary-restriction variants**; and **A/B approaches**
   to see what works for a given client. No Blaze needed — it's a data-model + UI change (a list of
   plans per client with an "active" flag).
+- **Requests / to-dos between trainer and client (Kevin's idea).** Either side can send the other a
+  small actionable request that surfaces on the recipient's home screen. Trainer → client examples:
+  "enter your name," "log today's food," "record your workout," "do a weigh-in." It pops up as a
+  task card on the client's home; the client fills it in. Client → trainer examples: "please enter
+  this for me," "record this food/workout for me." Trainer-side display: a little request badge next
+  to that client's folder; requests from **non-clients** (not linked) collect under a "Requests"
+  section on the trainer home. Trainers can **turn off receiving requests**, especially from
+  non-clients. Notifications are a later add-on (see notification center). **Blaze split:** the
+  **trainer → client** direction is doable **non-Blaze** (the trainer already has write access to the
+  client's account, so the request is written into the client's kv, e.g. `caliq-requests`). The
+  **client → trainer** direction is NOT possible safely without server-side logic — a client can't
+  write into the trainer's account under the current rules — so it needs **Cloud Functions / Blaze**
+  (same constraint as notifications/messaging). Recommend building the trainer→client half now and
+  the client→trainer half with Blaze. Store requests as structured items (id, from, to, type,
+  prompt, status open/done, timestamps).
 - **Edit history / activity log (who-changed-what).** Since both trainer and client edit the same
   shared plan, track every meaningful change as an append-only event: **who** (uid + role + name),
   **when** (timestamp), **what** (e.g. "added a meal," "logged 182 lbs," "changed goal to 160,"
