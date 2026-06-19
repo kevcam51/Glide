@@ -5687,8 +5687,10 @@ function MealLog({ meals, onAddMeal, onRemoveMeal }) {
   // Which meal's add-form is open: "Breakfast"/"Lunch"/"Dinner"/"Snack",
   // "other", or null (none open).
   const [addingTo, setAddingTo] = useState(null);
+  const [open, setOpen] = useState(false); // the whole section is a collapsible dropdown
 
   const list = meals || [];
+  const loggedTotal = list.reduce((s, m) => s + (m.calories || 0), 0);
   const TYPES = ["Breakfast", "Lunch", "Dinner", "Snack"];
 
   const resetFields = () => { setName(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); };
@@ -5767,9 +5769,21 @@ function MealLog({ meals, onAddMeal, onRemoveMeal }) {
   return (
     <div style={{ padding:"12px 14px", background:"var(--s2)", borderRadius:"8px",
       border:"1px solid var(--border)", marginBottom:"6px" }}>
-      <div className="sec-title" style={{ marginTop:0 }}>🍽️ Meals &amp; Food Today</div>
+      <div onClick={() => setOpen((o) => !o)}
+        style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer" }}>
+        <div className="sec-title" style={{ marginTop:0, marginBottom:0 }}>🍽️ Meals &amp; Food Today</div>
+        <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
+          {list.length > 0 && (
+            <span style={{ fontSize:".78rem", color:"var(--muted)" }}>
+              {loggedTotal.toLocaleString()} cal · {list.length} item{list.length!==1?"s":""}
+            </span>
+          )}
+          <span style={{ color:"var(--muted)", fontSize:".8rem" }}>{open ? "▾" : "▸"}</span>
+        </div>
+      </div>
 
-      <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
+      {open && (
+      <div style={{ display:"flex", flexDirection:"column", gap:"10px", marginTop:"10px" }}>
         {TYPES.map((t) => {
           const items = list.filter((m) => m.type === t);
           const subtotal = items.reduce((s, m) => s + (m.calories||0), 0);
@@ -5814,6 +5828,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal }) {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
