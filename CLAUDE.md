@@ -177,6 +177,25 @@ enabled (Blaze has no default spending cap).
   badge + action + relative time). This is the *cooperative* tier (each side records its own
   actions; not tamper-proof) — the hardened, server-stamped version comes with Blaze. No
   `firestore.rules` change.
+- Session 11: **Logging UX fixes, editable entries, activity feed upgrades, and the local↔shared
+  profile model.**
+  (1) **No more save-on-keystroke:** water / weight / "Add Calories" now commit only on **Enter or
+  a "Log" button** (controlled drafts in `DailyDashboard`), fixing bogus history like "logged 1 lbs"
+  while typing. (2) **Editable log entries:** each meal/food has a **✎ edit** (new `onEditMeal`) that
+  re-opens the entry pre-filled and adjusts totals by the diff; plus delete. (3) **Activity feed:**
+  trainer vs client **name colors** (`histNameColor`), a full-screen **"View all changes"** overlay
+  with a **search** box (date / month / name / action), and a **↻ Refresh** (`reloadPlanLive`) that
+  re-pulls log + history (the shared plan isn't live-synced; real-time would need Blaze). (4) Opening
+  a linked client via **"Open plan"** now lands on the **Daily Dashboard** (where logging + activity
+  live) and shows a **"🔗 Shared client plan"** banner so the trainer knows they're in the client's
+  account. (5) **Local↔shared profile model (Kevin's design):** linking a local file now **moves** the
+  plan into the client's account and **removes the local duplicate** (`removeLocalProfileById`); a new
+  **"Copy to local file"** snapshots a client's plan into a fresh local file for sims/templates/backups
+  (`copyClientToLocal`); **Unlink** first saves a local copy then removes the client's plan (no data
+  loss). The trainer home is relabeled **"Local Plans Overview"** (local-only); connected clients live
+  in the role panel's "Your clients" with Open plan / Copy to local / Unlink. **Deferred:** showing
+  connected clients (live data) in the dashboard overview itself — currently the overview is local
+  plans only. No `firestore.rules` change in this session.
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
   testing — these are not real users and can be cleared.
 
@@ -230,6 +249,18 @@ enabled (Blaze has no default spending cap).
   forge/omit entries). A **trustworthy, tamper-resistant** audit trail (authoritative server
   timestamps, can't fake another user's identity) needs **Cloud Functions → Blaze**. Recommend the
   basic version alongside the shared-editing work, with the hardened version arriving with Blaze.
+- **Calendar view (Kevin's idea).** A calendar that toggles **daily / weekly / monthly** (Google-
+  Calendar style) showing a client's past, current, and future scheduled workouts — and a place to
+  **log food + workouts** both now AND in the past (back-dated entries). Coaching value: a trainer
+  can show a client their historical food/workout logs to explain why results did or didn't happen,
+  reinforcing why following the program matters. Needs the ability to **edit/log on past dates**
+  (the daily log is already keyed by date `caliq-log-{id}-{YYYY-MM-DD}`, so back-dated logging is a
+  natural extension). No Blaze needed for the manual version. Likely a big UI step; plan carefully.
+- **"Simulation" tab (Kevin's idea).** A separate mode where a trainer (or client) builds/simulates
+  a complete workout + nutrition program and sees an **estimated results projection** — saved
+  **separately from the client's real plan** (a sandbox, not their active program). Use cases:
+  a sales tool to show a prospect their potential results and convert them, or a motivation tool for
+  existing clients. Builds on the app's existing projection math (weeksToGoal, etc.). No Blaze.
 - **Consistency-based time-to-goal estimate** — as the trainer (or client) logs weight + body-fat
   % over time, use the *actual* observed rate of change (not just the theoretical 1 lb/wk deficit
   the app currently assumes) to project a realistic ETA to goal weight / goal BF%. Builds on the

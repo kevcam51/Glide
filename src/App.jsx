@@ -5677,7 +5677,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
 // detailed (named food + macros + meal type) or as simple (just calories,
 // optionally tagged to a meal) as the user wants. This is the manual/free tier;
 // the food-library API (Blaze) will later auto-fill these same fields.
-function MealLog({ meals, onAddMeal, onRemoveMeal }) {
+function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal }) {
   const [name, setName] = useState("");
   const [cals, setCals] = useState("");
   const [showMacros, setShowMacros] = useState(false);
@@ -5687,6 +5687,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal }) {
   // Which meal's add-form is open: "Breakfast"/"Lunch"/"Dinner"/"Snack",
   // "other", or null (none open).
   const [addingTo, setAddingTo] = useState(null);
+  const [editingId, setEditingId] = useState(null); // set when editing an existing entry
   const [open, setOpen] = useState(false); // the whole section is a collapsible dropdown
 
   const list = meals || [];
@@ -5694,13 +5695,26 @@ function MealLog({ meals, onAddMeal, onRemoveMeal }) {
   const TYPES = ["Breakfast", "Lunch", "Dinner", "Snack"];
 
   const resetFields = () => { setName(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); };
-  const openForm = (key) => { resetFields(); setAddingTo(key); };
-  const closeForm = () => { resetFields(); setAddingTo(null); };
+  const openForm = (key) => { resetFields(); setEditingId(null); setAddingTo(key); };
+  const closeForm = () => { resetFields(); setEditingId(null); setAddingTo(null); };
+  // Open the form pre-filled to fix an existing entry.
+  const openEdit = (m) => {
+    setName(m.name || "");
+    setCals(String(m.calories || ""));
+    setProtein(m.protein ? String(m.protein) : "");
+    setCarbs(m.carbs ? String(m.carbs) : "");
+    setFat(m.fat ? String(m.fat) : "");
+    setShowMacros(!!(m.protein || m.carbs || m.fat));
+    setEditingId(m.id);
+    setAddingTo(m.type || "other");
+  };
   const submit = () => {
     const c = parseInt(cals);
     if (!c || c <= 0) return; // calories are the one required field
-    onAddMeal({ name: name.trim(), type: addingTo === "other" ? "" : addingTo, calories: c,
-      protein: parseInt(protein) || 0, carbs: parseInt(carbs) || 0, fat: parseInt(fat) || 0 });
+    const payload = { name: name.trim(), type: addingTo === "other" ? "" : addingTo, calories: c,
+      protein: parseInt(protein) || 0, carbs: parseInt(carbs) || 0, fat: parseInt(fat) || 0 };
+    if (editingId) onEditMeal(editingId, payload);
+    else onAddMeal(payload);
     closeForm();
   };
 
@@ -5722,6 +5736,9 @@ function MealLog({ meals, onAddMeal, onRemoveMeal }) {
         ) : null}
       </span>
       <span style={{ fontWeight:700, fontSize:".82rem" }}>{(m.calories||0).toLocaleString()} cal</span>
+      <button onClick={() => openEdit(m)} title="Edit"
+        style={{ border:"none", background:"transparent", color:"var(--muted)",
+          cursor:"pointer", fontSize:".9rem", lineHeight:1 }}>✎</button>
       <button onClick={() => onRemoveMeal(m.id)} title="Remove"
         style={{ border:"none", background:"transparent", color:"var(--muted)",
           cursor:"pointer", fontSize:"1rem", lineHeight:1 }}>✕</button>
@@ -5758,7 +5775,9 @@ function MealLog({ meals, onAddMeal, onRemoveMeal }) {
       <div style={{ display:"flex", gap:"6px" }}>
         <button onClick={submit}
           style={{ padding:"8px 16px", fontSize:".82rem", fontWeight:700, borderRadius:"8px",
-            border:"none", background:"var(--accent)", color:"#0b0b12", cursor:"pointer" }}>Add</button>
+            border:"none", background:"var(--accent)", color:"#0b0b12", cursor:"pointer" }}>
+          {editingId ? "Save changes" : "Add"}
+        </button>
         <button onClick={closeForm}
           style={{ padding:"8px 12px", fontSize:".82rem", borderRadius:"8px",
             border:"1px solid var(--border)", background:"transparent", color:"var(--muted)", cursor:"pointer" }}>Cancel</button>
@@ -5836,14 +5855,13 @@ function MealLog({ meals, onAddMeal, onRemoveMeal }) {
 // ─── Recent activity feed (Session 10) ──────────────────────────────────────
 // A collapsible who-changed-what log for the plan. Cooperative tier (each side
 // records its own actions); a tamper-proof version arrives with Blaze.
-function ActivityFeed({ history }) {
-  const [showAll, setShowAll] = useState(false);
-  const list = history || [];
-  const shown = showAll ? list : list.slice(0, 3); // keep the tile short by default
+// Trainer vs client name colours so it's obvious who made a change.
+const histNameColor = (role) => (role === ROLES.CLIENT ? "#4fc3f7" : "var(--accent)");
 
-  const row = (ev) => (
-    <div key={ev.id} style={{ display:"flex", gap:"8px", fontSize:".8rem", alignItems:"baseline" }}>
-      <span style={{ fontWeight:700 }}>{ev.name}</span>
+function ActivityRow({ ev }) {
+  return (
+    <div style={{ display:"flex", gap:"8px", fontSize:".8rem", alignItems:"baseline" }}>
+      <span style={{ fontWeight:700, color: histNameColor(ev.role) }}>{ev.name}</span>
       <span style={{ fontSize:".64rem", color:"var(--muted)", border:"1px solid var(--border)",
         borderRadius:"4px", padding:"0 4px" }}>
         {ev.role === ROLES.CLIENT ? "client" : "trainer"}
@@ -5852,49 +5870,125 @@ function ActivityFeed({ history }) {
       <span style={{ color:"var(--muted)", fontSize:".7rem", whiteSpace:"nowrap" }}>{timeAgo(ev.ts)}</span>
     </div>
   );
+}
+
+function ActivityFeed({ history, onRefresh }) {
+  const [showFull, setShowFull] = useState(false);
+  const [query, setQuery] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const list = history || [];
+
+  const doRefresh = async (e) => {
+    if (e) e.stopPropagation();
+    if (!onRefresh) return;
+    setRefreshing(true);
+    try { await onRefresh(); } catch (err) { /* ignore */ }
+    setTimeout(() => setRefreshing(false), 400);
+  };
+
+  const matches = (ev) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    const d = new Date(ev.ts);
+    const hay = `${ev.name} ${ev.action} ${d.toLocaleDateString()} ` +
+      `${d.toLocaleString("en-US", { month:"long", day:"numeric", year:"numeric" })}`.toLowerCase();
+    return hay.toLowerCase().includes(q);
+  };
+  const filtered = list.filter(matches);
 
   return (
-    <div style={{ padding:"12px 14px", background:"var(--s2)", borderRadius:"8px",
-      border:"1px solid var(--border)", marginBottom:"6px" }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <div className="sec-title" style={{ marginTop:0, marginBottom:0 }}>🕓 Recent Activity</div>
+    <>
+      <div style={{ padding:"12px 14px", background:"var(--s2)", borderRadius:"8px",
+        border:"1px solid var(--border)", marginBottom:"6px" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div className="sec-title" style={{ marginTop:0, marginBottom:0 }}>🕓 Recent Activity</div>
+          <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
+            {list.length > 0 && (
+              <span style={{ fontSize:".72rem", color:"var(--muted)" }}>
+                {list.length} change{list.length!==1?"s":""}
+              </span>
+            )}
+            {onRefresh && (
+              <button onClick={doRefresh} title="Refresh"
+                style={{ border:"none", background:"transparent", color:"var(--accent)",
+                  cursor:"pointer", fontSize:".95rem", lineHeight:1, padding:0 }}>
+                {refreshing ? "…" : "↻"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {list.length === 0 ? (
+          <div style={{ fontSize:".8rem", color:"var(--muted)", marginTop:"8px" }}>
+            No activity yet. Logging food, weight, or editing the plan will show up here.
+          </div>
+        ) : (
+          <div style={{ display:"flex", flexDirection:"column", gap:"7px", marginTop:"10px" }}>
+            {list.slice(0, 3).map((ev) => <ActivityRow key={ev.id} ev={ev} />)}
+          </div>
+        )}
+
         {list.length > 0 && (
-          <span style={{ fontSize:".72rem", color:"var(--muted)" }}>
-            {list.length} change{list.length!==1?"s":""}
-          </span>
+          <button onClick={() => { setQuery(""); setShowFull(true); }}
+            style={{ marginTop:"8px", border:"none", background:"transparent", color:"var(--accent)",
+              cursor:"pointer", fontSize:".76rem", fontWeight:600, padding:"2px 0" }}>
+            View all changes →
+          </button>
         )}
       </div>
 
-      {list.length === 0 ? (
-        <div style={{ fontSize:".8rem", color:"var(--muted)", marginTop:"8px" }}>
-          No activity yet. Logging food, weight, or editing the plan will show up here.
-        </div>
-      ) : (
-        <div style={{ display:"flex", flexDirection:"column", gap:"7px", marginTop:"10px",
-          maxHeight: showAll ? "260px" : "none", overflowY: showAll ? "auto" : "visible" }}>
-          {shown.map(row)}
+      {showFull && (
+        <div onClick={() => setShowFull(false)}
+          style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.6)", zIndex:10000,
+            display:"flex", alignItems:"flex-start", justifyContent:"center", padding:"24px 16px", overflowY:"auto" }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ width:"100%", maxWidth:"560px", maxHeight:"85vh", background:"#14141c",
+              border:"1px solid var(--border)", borderRadius:"12px", padding:"16px",
+              display:"flex", flexDirection:"column", gap:"10px" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div className="sec-title" style={{ margin:0 }}>🕓 All Activity ({list.length})</div>
+              <button onClick={() => setShowFull(false)}
+                style={{ border:"none", background:"transparent", color:"var(--muted)",
+                  cursor:"pointer", fontSize:"1.2rem", lineHeight:1 }}>✕</button>
+            </div>
+            <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by date, month, name, or action…"
+              style={{ padding:"10px 12px", fontSize:".88rem", borderRadius:"8px",
+                border:"1px solid var(--border)", background:"var(--s2)", color:"var(--text)" }} />
+            <div style={{ display:"flex", flexDirection:"column", gap:"8px", overflowY:"auto", flex:1 }}>
+              {filtered.length === 0 ? (
+                <div style={{ fontSize:".82rem", color:"var(--muted)", padding:"8px 0" }}>
+                  No changes match “{query}”.
+                </div>
+              ) : filtered.map((ev) => <ActivityRow key={ev.id} ev={ev} />)}
+            </div>
+          </div>
         </div>
       )}
-
-      {list.length > 3 && (
-        <button onClick={() => setShowAll((s) => !s)}
-          style={{ marginTop:"8px", border:"none", background:"transparent", color:"var(--accent)",
-            cursor:"pointer", fontSize:".76rem", fontWeight:600, padding:"2px 0" }}>
-          {showAll ? "Show less" : `View all ${list.length} →`}
-        </button>
-      )}
-    </div>
+    </>
   );
 }
 
 function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
-  onUpdateCardio, onUpdateStrength, onAddMeal, onRemoveMeal, history }) {
+  onUpdateCardio, onUpdateStrength, onAddMeal, onRemoveMeal, onEditMeal, history, onRefresh, isRemote }) {
 
   const [editingWorkout, setEditingWorkout] = useState(null);
   const [expandedStat, setExpandedStat] = useState(null);
   const [expandedSnap, setExpandedSnap] = useState(false);
   const [showMacros, setShowMacros] = useState(false);
+  // Drafts so water/weight only save when you press Enter or tap Log — not on
+  // every keystroke (which used to log "weight: 1 lbs" as you typed).
+  const [waterDraft, setWaterDraft] = useState("");
+  const [weightDraft, setWeightDraft] = useState("");
+  const [calDraft, setCalDraft] = useState("");
+  useEffect(() => { setWaterDraft(dailyLog.water ? String(dailyLog.water) : ""); }, [dailyLog.water]);
+  useEffect(() => { setWeightDraft(dailyLog.weight ? String(dailyLog.weight) : ""); }, [dailyLog.weight]);
+  const commitWater = () => { const v = parseInt(waterDraft); onLogUpdate("water", isNaN(v) ? 0 : v); };
+  const commitWeight = () => { const v = parseFloat(weightDraft); onLogUpdate("weight", isNaN(v) ? 0 : v); };
+  const commitCal = () => { const v = parseInt(calDraft); if (v > 0) { onLogUpdate("calories", (dailyLog.calories||0) + v); setCalDraft(""); } };
+  const logBtn = { padding:"7px 12px", fontSize:".8rem", fontWeight:700, borderRadius:"8px",
+    border:"none", background:"var(--accent)", color:"#0b0b12", cursor:"pointer", whiteSpace:"nowrap" };
 
   useEffect(() => {
     if (editingWorkout) {
@@ -5931,6 +6025,13 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
 
   return (
     <div className="dash">
+      {isRemote && (
+        <div style={{ padding:"8px 12px", borderRadius:"8px", marginBottom:"10px",
+          background:"rgba(232,255,79,.08)", border:"1px solid var(--accent)",
+          color:"var(--accent)", fontSize:".78rem", fontWeight:600 }}>
+          🔗 Shared client plan — you're viewing {fullName(data) || "this client"}'s account. Your changes save to their login, and you both see the same activity.
+        </div>
+      )}
       <div className="dash-date">{today.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
       <div className="dash-greeting">{firstName ? `Hey ${firstName}` : "Your Daily Plan"}</div>
 
@@ -6111,10 +6212,12 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
               <div style={{marginTop:"10px"}}>
                 <div style={{fontSize:".72rem",color:"var(--muted)",fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",marginBottom:"6px"}}>Quick Add</div>
                 <div style={{display:"flex",gap:"8px",alignItems:"center",marginBottom:"8px"}}>
-                  <input type="number" inputMode="numeric" placeholder="Set water oz" value={dailyLog.water||""} onClick={e=>e.stopPropagation()}
-                    onChange={e=>{e.stopPropagation();onLogUpdate("water",parseInt(e.target.value)||0);}}
+                  <input type="number" inputMode="numeric" placeholder="Set water oz" value={waterDraft} onClick={e=>e.stopPropagation()}
+                    onChange={e=>{e.stopPropagation();setWaterDraft(e.target.value);}}
+                    onKeyDown={e=>{ if(e.key==="Enter"){ e.stopPropagation(); commitWater(); } }}
                     style={{flex:1,padding:"10px 12px",borderRadius:"8px",border:"1.5px solid #4fc3f7",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".88rem"}} />
                   <span style={{fontSize:".78rem",color:"var(--muted)"}}>oz</span>
+                  <button onClick={e=>{e.stopPropagation();commitWater();}} style={logBtn}>Log</button>
                 </div>
                 <div style={{display:"flex",gap:"8px"}}>
                   {[8,16,32].map(v=>(
@@ -6146,11 +6249,13 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           </div>
         </div>
         <input className="dash-log-input" type="number" inputMode="numeric" placeholder="0"
+          value={calDraft}
           onClick={e=>e.stopPropagation()}
-          onBlur={e=>{ const v=parseInt(e.target.value); if(v>0){ onLogUpdate("calories",(dailyLog.calories||0)+v); e.target.value=""; }}}
-          onKeyDown={e=>{ if(e.key==="Enter"){ e.target.blur(); }}}
+          onChange={e=>setCalDraft(e.target.value)}
+          onKeyDown={e=>{ if(e.key==="Enter"){ e.stopPropagation(); commitCal(); }}}
         />
         <span className="dash-log-unit">cal</span>
+        <button style={logBtn} onClick={e=>{e.stopPropagation();commitCal();}}>Log</button>
       </div>
 
       {showMacros && (
@@ -6223,7 +6328,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         </div>
       )}
 
-      <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} />
+      <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} />
 
       <div className="dash-log-row">
         <span className="dash-log-icon">💧</span>
@@ -6232,8 +6337,10 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <div className="dash-log-sub">Target: ~{Math.round(Number(weightLbs)*0.5)} oz/day</div>
         </div>
         <input className="dash-log-input" type="number" inputMode="numeric"
-          value={dailyLog.water||""} onChange={e=>onLogUpdate("water",parseInt(e.target.value)||0)}/>
+          value={waterDraft} onChange={e=>setWaterDraft(e.target.value)}
+          onKeyDown={e=>{ if(e.key==="Enter") commitWater(); }}/>
         <span className="dash-log-unit">oz</span>
+        <button style={logBtn} onClick={commitWater}>Log</button>
       </div>
       <div className="dash-log-row">
         <span className="dash-log-icon">⚖️</span>
@@ -6242,8 +6349,10 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <div className="dash-log-sub">{hasGoal?`Goal: ${goalWeight} lbs`:"Track your trend"}</div>
         </div>
         <input className="dash-log-input" type="number" inputMode="decimal" step="0.1"
-          value={dailyLog.weight||""} onChange={e=>onLogUpdate("weight",parseFloat(e.target.value)||0)}/>
+          value={weightDraft} onChange={e=>setWeightDraft(e.target.value)}
+          onKeyDown={e=>{ if(e.key==="Enter") commitWeight(); }}/>
         <span className="dash-log-unit">lbs</span>
+        <button style={logBtn} onClick={commitWeight}>Log</button>
       </div>
 
       {/* Today's workout — editable */}
@@ -6385,7 +6494,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         </button>
       </div>
 
-      <ActivityFeed history={history} />
+      <ActivityFeed history={history} onRefresh={onRefresh} />
 
       {/* Shareable progress card — tappable */}
       <div className="share-card" style={{cursor:"pointer",borderColor:expandedSnap?"var(--green)":"var(--accent)"}} onClick={()=>setExpandedSnap(v=>!v)}>
@@ -6976,7 +7085,7 @@ function clearInviteFromUrl() {
   } catch { /* ignore */ }
 }
 
-function RolePanel({ onOpenClientPlan } = {}) {
+function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
   const [profile, setProfile] = useState(undefined); // undefined = loading
   const [code, setCode] = useState("");
   const [clients, setClients] = useState([]);
@@ -7129,7 +7238,9 @@ function RolePanel({ onOpenClientPlan } = {}) {
         if (r && r.value) payload = r.value;
       } catch { /* fall back to a blank plan */ }
       await setForUser(clientUid, "caliq-self", payload);
-      setMsg("Plan linked to the client's account.");
+      // The plan now lives in the client's account — remove the local duplicate.
+      if (onLinked) await onLinked(localId);
+      setMsg("Plan linked — it now lives in the client's account (local copy removed).");
       setLinkingFor(null);
       setPendingLink(null);
       await load();
@@ -7138,12 +7249,25 @@ function RolePanel({ onOpenClientPlan } = {}) {
     } finally { setLinkBusy(false); }
   };
 
-  // Remove a linked client's shared plan from their account.
+  // Save a local snapshot of a client's plan (sim / template / backup).
+  const copyLocal = async (clientUid) => {
+    setLinkBusy(true); setMsg("");
+    try {
+      if (onCopyToLocal) await onCopyToLocal(clientUid);
+      setMsg("Saved a local copy to your files.");
+    } catch (e) {
+      setMsg((e && e.message) || "Couldn't copy to a local file.");
+    } finally { setLinkBusy(false); }
+  };
+
+  // Unlink a client's shared plan. We first save a local copy so the plan is
+  // never lost, then remove it from the client's account.
   const unlinkPlan = async (clientUid) => {
     setLinkBusy(true); setMsg("");
     try {
+      if (onCopyToLocal) await onCopyToLocal(clientUid); // keep a local backup
       await deleteForUser(clientUid, "caliq-self");
-      setMsg("Plan unlinked from the client's account.");
+      setMsg("Unlinked. A local copy was saved to your files.");
       setConfirmUnlink(null);
       await load();
     } catch (e) {
@@ -7246,8 +7370,8 @@ function RolePanel({ onOpenClientPlan } = {}) {
                     {confirmUnlink === c.uid ? (
                       <div style={{ marginTop:8 }}>
                         <div style={{ fontSize:".78rem", color:"var(--text)", marginBottom:8 }}>
-                          Unlink <strong>{cname}</strong>'s plan? This removes it from their account
-                          and they'll lose access to it.
+                          Unlink <strong>{cname}</strong>'s plan? We'll save a local copy to your
+                          files first, then remove it from their account.
                         </div>
                         <div style={{ display:"flex", gap:"8px" }}>
                           <button style={{ ...btn, background:"#e5484d", color:"#fff" }} disabled={linkBusy}
@@ -7300,6 +7424,10 @@ function RolePanel({ onOpenClientPlan } = {}) {
                         <button style={btnGhost} onClick={() => setLinkingFor(c.uid)}>
                           {plan ? "Re-link a different profile" : "Link a profile"}
                         </button>
+                        {plan && onCopyToLocal && (
+                          <button style={btnGhost} disabled={linkBusy}
+                            onClick={() => copyLocal(c.uid)}>Copy to local file</button>
+                        )}
                         {plan && (
                           <button style={{ ...btnGhost, color:"#e5484d", borderColor:"rgba(229,72,77,.4)" }}
                             onClick={() => setConfirmUnlink(c.uid)}>Unlink</button>
@@ -7409,7 +7537,7 @@ function computeClientCalories(d) {
   return { tdee, target };
 }
 
-function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan }) {
+function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal }) {
   const [details, setDetails] = useState({}); // id -> { tdee, target }
   const [lastLog, setLastLog] = useState({}); // id -> "YYYY-MM-DD"
   const [sort, setSort] = useState("attention");
@@ -7490,16 +7618,20 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         <div className="tagline">Maintenance · Deficit · Cardio · Strength · Timeline</div>
       </div>
       <div className="container">
-        <RolePanel onOpenClientPlan={onOpenClientPlan} />
+        <RolePanel onOpenClientPlan={onOpenClientPlan} onLinked={onLinked} onCopyToLocal={onCopyToLocal} />
         <div style={{ display: "flex", gap: "8px", margin: "0 0 14px" }}>
           <button style={tabBtn(true)} disabled>Dashboard</button>
           <button style={tabBtn(false)} onClick={onManageClients}>All clients</button>
         </div>
         <div className="card">
-          <div className="card-title">📊 Client Overview</div>
+          <div className="card-title">📊 Local Plans Overview</div>
+          <div className="card-sub" style={{ marginBottom:6 }}>
+            📄 Local plans (not connected to a client login). Your connected clients are under
+            “Your clients” above — open those for the shared plan.
+          </div>
           <div className="card-sub">
             {loading ? "Loading…"
-              : `${profiles.length} client${profiles.length !== 1 ? "s" : ""} · ${complete} with a complete plan · ${activeWeek} active this week`}
+              : `${profiles.length} local plan${profiles.length !== 1 ? "s" : ""} · ${complete} complete · ${activeWeek} active this week`}
           </div>
 
           {!loading && profiles.length > 0 && (
@@ -7609,7 +7741,7 @@ function ClientHome({ onOpenPlan }) {
 function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading,
   onCreateFolder, onRenameFolder, onDeleteFolder, onMoveProfile,
   confirmDeleteId, confirmFolderDel, onRecover, onExport, onImport,
-  onClipCopy, onClipPaste, showDashboardTab, onShowDashboard, onOpenClientPlan }) {
+  onClipCopy, onClipPaste, showDashboardTab, onShowDashboard, onOpenClientPlan, onLinked, onCopyToLocal }) {
 
   const [openFolders, setOpenFolders] = useState({});
   const [dragId, setDragId] = useState(null);
@@ -7675,7 +7807,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
         <div className="tagline">Maintenance · Deficit · Cardio · Strength · Timeline</div>
       </div>
       <div className="container">
-        <RolePanel onOpenClientPlan={onOpenClientPlan} />
+        <RolePanel onOpenClientPlan={onOpenClientPlan} onLinked={onLinked} onCopyToLocal={onCopyToLocal} />
         {showDashboardTab && (
           <div style={{ display:"flex", gap:"8px", margin:"0 0 14px" }}>
             <button
@@ -8145,15 +8277,45 @@ export default function App() {
         const merged = {...EMPTY_DATA, ...d, cardio:{...defaultCardio,...(d.cardio||{})}, strength:{...defaultStrength,...(d.strength||{})}};
         setData(merged);
         lastSnapshotRef.current = merged;
-        setStep(parsed.step || 0);
-        setShowDash((parsed.step || 0) >= 5);
       } else {
-        setData({...EMPTY_DATA}); lastSnapshotRef.current = {...EMPTY_DATA}; setStep(0); setShowDash(false);
+        setData({...EMPTY_DATA}); lastSnapshotRef.current = {...EMPTY_DATA};
       }
-    } catch(e) { setData({...EMPTY_DATA}); lastSnapshotRef.current = {...EMPTY_DATA}; setStep(0); }
+    } catch(e) { setData({...EMPTY_DATA}); lastSnapshotRef.current = {...EMPTY_DATA}; }
+    // Open a linked client straight to the Daily Dashboard (where logging + the
+    // Recent Activity feed live) — the trainer is checking in, not re-running setup.
+    setStep(5);
+    setShowDash(true);
     setActiveRemoteUid(clientUid);
     setActiveId("self");
     setScreen("app");
+  };
+
+  // When a local file is linked to a client, the plan now lives in the client's
+  // account — remove the local duplicate so there's one source of truth.
+  const removeLocalProfileById = async (localId) => {
+    let up = profiles;
+    setProfiles(prev => { up = prev.filter(p => p.id !== localId); return up; });
+    await saveIndex(up);
+    try { await window.storage.delete(profileKey(localId)); } catch(e) {}
+  };
+
+  // Snapshot a client's shared plan into a NEW local file (for a simulation,
+  // template, or backup). Leaves the client's own plan untouched. Returns id.
+  const copyClientToLocal = async (clientUid) => {
+    let parsed = { data: {}, step: 0 };
+    try {
+      const r = await getForUser(clientUid, "caliq-self");
+      if (r && r.value) parsed = JSON.parse(r.value);
+    } catch(e) {}
+    const d = parsed.data || {};
+    const id = `c${Date.now()}`;
+    const np = { id, name: (fullName(d) || "Copied plan") + " (local)", weight: d.weightLbs||"",
+      goal: d.goalWeight||"", lastSaved: Date.now(), stepLabel: "Local copy", folderId: null };
+    let up = profiles;
+    setProfiles(prev => { up = [...prev, np]; return up; });
+    await saveIndex(up);
+    try { await window.storage.set(profileKey(id), JSON.stringify({ data: d, step: parsed.step||0 })); } catch(e) {}
+    return id;
   };
 
   const createProfile = (folderId) => {
@@ -8477,6 +8639,46 @@ export default function App() {
     appendHistory([`removed ${m.name || "a food"}${m.type ? ` from ${m.type}` : ""}`]);
   };
 
+  // Edit a logged food/meal in place; adjusts the day's totals by the difference.
+  const onEditMeal = (id, fields) => {
+    const meals = dailyLog.meals || [];
+    const idx = meals.findIndex(x => x.id === id);
+    if (idx < 0) return;
+    const old = meals[idx];
+    const upd = { ...old,
+      name: fields.name || "", type: fields.type != null ? fields.type : old.type,
+      calories: Number(fields.calories)||0, protein: Number(fields.protein)||0,
+      carbs: Number(fields.carbs)||0, fat: Number(fields.fat)||0 };
+    const newMeals = meals.slice(); newMeals[idx] = upd;
+    const updated = {
+      ...dailyLog,
+      meals: newMeals,
+      calories: Math.max(0, (dailyLog.calories||0) - (old.calories||0) + upd.calories),
+      protein: Math.max(0, (dailyLog.protein||0) - (old.protein||0) + upd.protein),
+      carbs: Math.max(0, (dailyLog.carbs||0) - (old.carbs||0) + upd.carbs),
+      fat: Math.max(0, (dailyLog.fat||0) - (old.fat||0) + upd.fat),
+    };
+    setDailyLog(updated);
+    persistLog(updated);
+    appendHistory([`edited ${upd.name || "a food"}${upd.type ? ` in ${upd.type}` : ""} (${upd.calories} cal)`]);
+  };
+
+  // Pull the latest daily log + history for the active plan on demand. Lets a
+  // trainer (or client) see what the other side logged without re-opening, since
+  // the shared plan isn't live-synced (real-time would need Blaze).
+  const reloadPlanLive = async () => {
+    if (!activeId) return;
+    const v = await logRead(`caliq-log-${activeId}-${todayKey}`);
+    let parsed = {calories:0, water:0, weight:0, meals:[]};
+    if (v) { try { parsed = JSON.parse(v); } catch(e) {} }
+    setDailyLog(parsed);
+    const hv = await logRead(`caliq-history-${activeId}`);
+    let hist = [];
+    if (hv) { try { hist = JSON.parse(hv); } catch(e) {} }
+    historyRef.current = hist;
+    setHistory(hist);
+  };
+
   // Load daily log when the active plan changes (own profile or a linked client)
   useEffect(() => {
     if (!activeId) return;
@@ -8545,6 +8747,7 @@ export default function App() {
         profiles={profiles} loading={loading}
         onSelect={selectProfile} onManageClients={()=>setHomeTab("clients")}
         onOpenClientPlan={openClientPlan}
+        onLinked={removeLocalProfileById} onCopyToLocal={copyClientToLocal}
       />;
     }
     return <ProfileSelector
@@ -8557,6 +8760,7 @@ export default function App() {
       onClipCopy={clipboardExport} onClipPaste={clipboardImport}
       showDashboardTab={isTrainerHome} onShowDashboard={()=>setHomeTab("dashboard")}
       onOpenClientPlan={openClientPlan}
+      onLinked={removeLocalProfileById} onCopyToLocal={copyClientToLocal}
     />;
   }
 
@@ -8612,7 +8816,7 @@ export default function App() {
               onOpenPlan={()=>{setNavFrom("dashboard");setStepAndSave(0);}} onOpenResults={()=>{setNavFrom("dashboard");setShowDash(false);}}
               onEditWorkouts={()=>{setNavFrom("dashboard");setStepAndSave(3);}}
               onLogUpdate={onLogUpdate} dailyLog={dailyLog} streak={streak}
-              onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} history={history}
+              onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
               onUpdateCardio={(day,idx,field,val)=>setDataAndSave(p=>{
                 if (field==="_replace") return {...p, cardio:{...p.cardio,[day]:val}};
                 const sessions = Array.isArray(p.cardio[day]) ? [...p.cardio[day]] : [];
