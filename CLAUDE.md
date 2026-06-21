@@ -205,10 +205,46 @@ enabled (Blaze has no default spending cap).
   profile index (helper `renameProfile`) with a **✎** control on both the dashboard local cards and
   the All-clients `ProfileCard`; display is `customName || name`, and `autoSave` preserves it. Good
   for naming sims/templates/backups. No `firestore.rules` change.
+- Session 13: **Client Dashboard (the client's own home view, non-Blaze).** The signed-in client's
+  landing screen (`ClientHome`) is now a real dashboard instead of just a "Open my plan" button. It
+  reads the client's own `caliq-self` plan + today's log and shows: a greeting, a **🎯 Weight & goal**
+  card (current weight → goal, "lbs to lose/gain", **previous** weigh-in with the delta, and "▼ X lbs
+  lost since start"), and a **🍽️ Today** card (calories consumed vs. target with a left/over indicator).
+  **Quick-log right on the dashboard:** add **or remove** calories (clamped at 0), and **✎ Log** today's
+  weight inline — both commit on Log/Enter (not per keystroke). A subtle **↻ Refresh** re-pulls the
+  shared plan (not live-synced; real-time needs Blaze). **Weight tracking + progress chart:** logging a
+  weight updates the plan's current weight (so the card, "lbs to go", and the weight-based calorie
+  target all re-derive) and records a **check-in** in `data.checkIns` (the app's standard weight-history
+  source — feeds the existing `ProgressChart` and the trainer view). Per Kevin's choice, **every weigh-in
+  is its own point** (not one-per-day). A **📈 Progress** popup reuses `ProgressChart` (new opt-in props
+  `showValues` = value label at each dot, and `pxPerPoint` = fixed per-point spacing + a horizontal-scroll
+  frame so many weigh-ins flow sideways instead of cluttering); value labels are placed on the outside of
+  each vertex with a dark halo and pushed clear of the goal line, and the goal label is drawn last with a
+  halo so nothing covers it. The popup also lists the weigh-ins with a **✕ delete** (fixes a mistaken
+  entry; re-points current weight to the latest remaining weigh-in, or back to the starting weight).
+  Implementation notes: weight writes go through an **in-memory plan ref** (`planWrapRef`) updated
+  synchronously before the async Firestore write, so rapid logs each append a point instead of racing the
+  network (the earlier bug). New plan field `startWeightLbs` (baseline, captured on first weigh-in;
+  display-only — chart synthesizes a "start → now" segment until there are 2+ real points). Quick-logs
+  still append to `caliq-history-self` so the trainer's activity feed reflects them. No `firestore.rules`
+  change. **Deferred from this session:** a confirm step before deleting a weigh-in (currently immediate),
+  and the weight-range feature + page cleanup below.
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
-  testing — these are not real users and can be cleared.
+  testing — these are not real users and can be cleared. The Session-13 testing also left **test
+  weigh-ins/check-ins** in the test client's `caliq-self` — also clearable.
 
 ## Roadmap (not yet built)
+
+- **Weight range / goal band (Kevin's idea).** Instead of a single goal number, let the trainer or
+  client set a **healthy weight range** (e.g. 190–198) — people rarely hold one exact weight and tend
+  to fluctuate several lbs up/down with consistency, so a band is a more realistic goal. Should be
+  settable **at profile creation** and **easily addable/editable later**. Display it subtly under the
+  Weight & goal card (small, not bold), and it could shade a band on the progress chart; logging within
+  range could count as "on target." Data-model + UI change (new `goalRangeLow`/`goalRangeHigh` fields on
+  the plan); no Blaze. Good candidate for the next session.
+- **UI cleanup pass on the other pages.** The new Client Dashboard set the visual bar (clean, card-based,
+  clear CTAs); bring the older screens (the full plan editor / Results, trainer pages) up to the same
+  look. Cosmetic only; no Blaze. Kevin flagged this as a later task.
 
 - **Planned rebrand:** "CalorieIQ" and most "Cal-" prefixed names are crowded in the app stores;
   a more distinctive name/domain may replace it later. No code impact — the Firebase project ID

@@ -6838,7 +6838,7 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
 
 // ─── Progress Chart (from check-in history) ──────────────────────────────────
 
-function ProgressChart({ checkIns, goalWeight, currentWeight }) {
+function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerPoint }) {
   const sorted = [...(checkIns || [])].filter(c => c.weight).sort((a, b) => a.timestamp - b.timestamp);
   if (sorted.length < 2) return (
     <div className="card" style={{padding:"16px",textAlign:"center",color:"var(--muted)",fontSize:".84rem",lineHeight:1.6}}>
@@ -6846,8 +6846,14 @@ function ProgressChart({ checkIns, goalWeight, currentWeight }) {
     </div>
   );
 
-  const W = 500, H = 220;
+  const H = 220;
   const PAD = { top: 20, right: 50, bottom: 40, left: 60 };
+  // With pxPerPoint set, the chart width grows with the number of points (fixed
+  // spacing per weigh-in) so labels don't overlap and it scrolls sideways. Without
+  // it, the chart stays a fixed responsive 500-wide (the full-plan view).
+  const W = pxPerPoint
+    ? PAD.left + PAD.right + Math.max(1, sorted.length - 1) * pxPerPoint
+    : 500;
   const chartW = W - PAD.left - PAD.right;
   const chartH = H - PAD.top - PAD.bottom;
 
@@ -6888,7 +6894,10 @@ function ProgressChart({ checkIns, goalWeight, currentWeight }) {
         </div>
       </div>
 
-      <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto",display:"block"}}>
+      <div style={{ overflowX: pxPerPoint ? "auto" : "visible" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={pxPerPoint
+          ? {width: `${W}px`, height: "auto", display: "block"}
+          : {width: "100%", height: "auto", display: "block"}}>
         {/* Grid */}
         {Array.from({length: 5}, (_, i) => {
           const y = PAD.top + (chartH * i / 4);
@@ -6901,13 +6910,10 @@ function ProgressChart({ checkIns, goalWeight, currentWeight }) {
           );
         })}
 
-        {/* Goal line */}
+        {/* Goal line (label is drawn last, below, so nothing covers it) */}
         {goal && (
-          <>
-            <line x1={PAD.left} y1={PAD.top + yScale(goal)} x2={PAD.left + chartW} y2={PAD.top + yScale(goal)}
-              stroke="rgba(232,255,79,.4)" strokeWidth="1.5" strokeDasharray="6 4" />
-            <text x={PAD.left + chartW + 6} y={PAD.top + yScale(goal) + 4} fill="#e8ff4f" fontSize="10" fontFamily="DM Sans,sans-serif">{goal}</text>
-          </>
+          <line x1={PAD.left} y1={PAD.top + yScale(goal)} x2={PAD.left + chartW} y2={PAD.top + yScale(goal)}
+            stroke="rgba(232,255,79,.4)" strokeWidth="1.5" strokeDasharray="6 4" />
         )}
 
         {/* Weight line */}
@@ -6915,8 +6921,36 @@ function ProgressChart({ checkIns, goalWeight, currentWeight }) {
 
         {/* Dots */}
         {sorted.map((c, i) => (
-          <circle key={i} cx={PAD.left + xScale(i)} cy={PAD.top + yScale(c.weight)} r="4" fill="#4fffb0" stroke="#0d0d18" strokeWidth="2" />
+          <circle key={i} cx={PAD.left + xScale(i)} cy={PAD.top + yScale(c.weight)} r={showValues ? 5 : 4} fill="#4fffb0" stroke="#0d0d18" strokeWidth="2" />
         ))}
+
+        {/* Weight value labels at each dot (opt-in). Placed on the OUTSIDE of each
+            vertex — above peaks, below valleys — so they sit away from the line,
+            with a dark halo (paint-order stroke) so they stay readable over it. */}
+        {showValues && sorted.map((c, i) => {
+          const dotY = PAD.top + yScale(c.weight);
+          const prevW = i > 0 ? sorted[i - 1].weight : null;
+          const nextW = i < sorted.length - 1 ? sorted[i + 1].weight : null;
+          const neighborAvg = (prevW != null && nextW != null) ? (prevW + nextW) / 2
+            : (prevW != null ? prevW : nextW);
+          // Peak (>= neighbors) → label above; valley → below.
+          let above = neighborAvg == null ? true : c.weight >= neighborAvg;
+          // If this dot is near the goal line, push its label to the side AWAY
+          // from the line so the number never sits on the dashed goal line.
+          if (goal) {
+            const goalY = PAD.top + yScale(goal);
+            if (Math.abs(dotY - goalY) < 30) above = dotY <= goalY;
+          }
+          if (dotY < PAD.top + 16) above = false;            // too near top → push below
+          if (dotY > PAD.top + chartH - 16) above = true;    // too near bottom → push above
+          return (
+            <text key={`v${i}`} x={PAD.left + xScale(i)} y={dotY + (above ? -13 : 19)}
+              textAnchor="middle" fill="#e8e8ff" fontSize="11" fontWeight="700" fontFamily="DM Sans,sans-serif"
+              stroke="#0d0d18" strokeWidth="3.5" paintOrder="stroke" strokeLinejoin="round">
+              {c.weight}
+            </text>
+          );
+        })}
 
         {/* X axis labels */}
         {sorted.filter((_, i) => i === 0 || i === sorted.length - 1 || i === Math.floor(sorted.length / 2)).map((c, idx) => {
@@ -6928,7 +6962,18 @@ function ProgressChart({ checkIns, goalWeight, currentWeight }) {
             </text>
           );
         })}
+
+        {/* Goal label — drawn last with a dark halo so the value labels never
+            cover it; sits just left of the line's right end. */}
+        {goal && (
+          <text x={PAD.left + chartW + 8} y={PAD.top + yScale(goal) + 4}
+            fill="#e8ff4f" fontSize="11" fontWeight="700" fontFamily="DM Sans,sans-serif"
+            stroke="#0d0d18" strokeWidth="3.5" paintOrder="stroke" strokeLinejoin="round">
+            {goal}
+          </text>
+        )}
       </svg>
+      </div>
 
       <div style={{display:"flex",gap:"16px",marginTop:"10px",justifyContent:"center",flexWrap:"wrap"}}>
         <div style={{textAlign:"center"}}>
@@ -7760,7 +7805,14 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
   const [log, setLog] = useState({});                  // today's daily log
   const [calDraft, setCalDraft] = useState("");
   const [wtDraft, setWtDraft] = useState("");
-  const [msg, setMsg] = useState("");
+  const [showWt, setShowWt] = useState(false);     // inline weight-log input open
+  const [showChart, setShowChart] = useState(false); // progress chart popup open
+  const [msg, setMsg] = useState("");              // calorie-log message
+  const [wtMsg, setWtMsg] = useState("");          // weight-log message
+  // The full plan wrapper ({data, step, …}) kept in memory so weight logging
+  // appends to the latest in-memory copy (no Firestore round-trip per log, which
+  // would race and drop points when logging quickly).
+  const planWrapRef = useRef(null);
 
   const todayKey = new Date().toISOString().slice(0, 10);
   const logKey = `caliq-log-self-${todayKey}`;
@@ -7768,8 +7820,10 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
   const load = async () => {
     try {
       const r = await window.storage.get("caliq-self");
-      setPlanData(r && r.value ? ((JSON.parse(r.value) || {}).data || null) : null);
-    } catch { setPlanData(null); }
+      const obj = r && r.value ? (JSON.parse(r.value) || {}) : null;
+      planWrapRef.current = obj;
+      setPlanData(obj ? (obj.data || null) : null);
+    } catch { planWrapRef.current = null; setPlanData(null); }
     try {
       const r = await window.storage.get(logKey);
       setLog(r && r.value ? (JSON.parse(r.value) || {}) : {});
@@ -7794,25 +7848,90 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
     setLog(updated);
     try { await window.storage.set(logKey, JSON.stringify(updated)); } catch { /* ignore */ }
   };
-  const addCalories = async () => {
+  // Add (sign +1) or remove (sign -1) calories from today's running total,
+  // clamped so it can't go below zero.
+  const adjustCalories = async (sign) => {
     const v = Number(calDraft);
     if (!v || v <= 0) { setCalDraft(""); return; }
-    await writeLog({ ...log, calories: (log.calories || 0) + v });
-    await appendHistory(`logged ${v} cal`);
-    setCalDraft(""); setMsg(`Added ${v} cal to today.`);
+    const next = Math.max(0, (log.calories || 0) + sign * v);
+    await writeLog({ ...log, calories: next });
+    await appendHistory(sign > 0 ? `logged ${v} cal` : `removed ${v} cal`);
+    setCalDraft(""); setMsg(sign > 0 ? `Added ${v} cal to today.` : `Removed ${v} cal from today.`);
   };
+  // Log today's weight: records it in the daily log AND updates the plan's
+  // current weight (so the card, "lbs to go", and calorie target all reflect it).
+  // The first weigh-in captures a starting baseline so we can show total change.
   const logWeight = async () => {
     const v = Number(wtDraft);
     if (!v || v <= 0) { setWtDraft(""); return; }
     await writeLog({ ...log, weight: v });
+    try {
+      // Work from the in-memory plan (updated synchronously before the async
+      // write) so rapid logs each append a point instead of racing the network.
+      const obj = planWrapRef.current
+        ? JSON.parse(JSON.stringify(planWrapRef.current)) : { data: {}, step: 0 };
+      const d = obj.data || (obj.data = {});
+      const prev = Number(d.weightLbs) || v;
+      if (d.startWeightLbs == null || d.startWeightLbs === "") d.startWeightLbs = prev;
+      d.weightLbs = v;
+      // Record in check-in history — the app's weight-history source (feeds the
+      // progress chart + trainer view). Every weigh-in is its own point (so the
+      // chart shows a dot per log, even multiple on the same day).
+      if (!Array.isArray(d.checkIns)) d.checkIns = [];
+      d.checkIns.push({ date: todayKey, timestamp: Date.now(), weight: v, calories: null,
+        hitTarget: null, workedOut: null, mood: null, notes: "", bodyFat: null,
+        loggedBy: "client", isFuturePlan: false });
+      planWrapRef.current = obj;   // update memory FIRST so the next log stacks
+      setPlanData(d);
+      await window.storage.set("caliq-self", JSON.stringify(obj));
+    } catch { /* ignore */ }
     await appendHistory(`logged weight: ${v} lbs`);
-    setWtDraft(""); setMsg(`Logged today's weigh-in: ${v} lbs.`);
+    setWtDraft(""); setWtMsg(`Logged today's weight: ${v} lbs.`);
+  };
+
+  // Delete a single weigh-in (by its timestamp). Re-points current weight to the
+  // latest remaining weigh-in (or back to the starting weight if none remain).
+  const deleteWeighIn = async (ts) => {
+    try {
+      const obj = planWrapRef.current ? JSON.parse(JSON.stringify(planWrapRef.current)) : null;
+      if (!obj || !Array.isArray((obj.data || {}).checkIns)) return;
+      const d = obj.data;
+      const removed = d.checkIns.find(c => c.timestamp === ts);
+      d.checkIns = d.checkIns.filter(c => c.timestamp !== ts);
+      const remaining = d.checkIns.filter(c => c.weight).sort((a, b) => a.timestamp - b.timestamp);
+      if (remaining.length) d.weightLbs = remaining[remaining.length - 1].weight;
+      else if (d.startWeightLbs) d.weightLbs = d.startWeightLbs;
+      planWrapRef.current = obj;
+      setPlanData(d);
+      await window.storage.set("caliq-self", JSON.stringify(obj));
+      await appendHistory(`deleted a weigh-in${removed && removed.weight ? `: ${removed.weight} lbs` : ""}`);
+    } catch { /* ignore */ }
   };
 
   const cal = planData ? computeClientCalories(planData) : null;
   const w = planData ? Number(planData.weightLbs) : 0;
   const g = planData ? Number(planData.goalWeight) : 0;
   const toGo = (w && g) ? Math.round((w - g) * 10) / 10 : null;
+  const start = planData ? Number(planData.startWeightLbs) : 0;
+  const change = (start && w) ? Math.round((w - start) * 10) / 10 : null; // since start
+  // Is the change moving toward the goal? (loss-goal: down good; gain-goal: up good)
+  const towardGoal = (g && start && change) ? ((g < start) ? change < 0 : change > 0) : null;
+  // Previous weigh-in (so the client can see the difference): the reading just
+  // before the current one, falling back to the starting weight.
+  const weighIns = [...((planData && planData.checkIns) || [])].filter(c => c.weight)
+    .sort((a, b) => a.timestamp - b.timestamp);
+  const prevWeight = weighIns.length >= 2 ? weighIns[weighIns.length - 2].weight
+    : (start && start !== w ? start : null);
+  // Chart data: once there are 2+ real weigh-ins, use them as-is. Until then,
+  // prepend the starting weight (display only — not written to the account) so a
+  // line shows from "start → now" right after the first weigh-in.
+  const allCheckIns = (planData && planData.checkIns) || [];
+  let chartCheckIns = allCheckIns;
+  if (weighIns.length === 1 && start && start !== w) {
+    const firstTs = weighIns[0].timestamp || Date.now();
+    chartCheckIns = [{ date: new Date(firstTs - 86400000).toISOString().slice(0, 10),
+      timestamp: firstTs - 86400000, weight: start, hitTarget: null }, ...allCheckIns];
+  }
   const consumed = log.calories || 0;
   const target = cal ? cal.target : null;
   const remaining = target != null ? target - consumed : null;
@@ -7828,6 +7947,10 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
     color: "#0b0b12", cursor: "pointer" };
   const ghostOpen = { ...openBtn, background: "transparent", color: "var(--text)",
     border: "1px solid var(--border,rgba(255,255,255,.2))" };
+  const miniBtn = { padding: "5px 9px", fontSize: ".74rem", fontWeight: 600, borderRadius: "7px",
+    border: "1px solid var(--border,rgba(255,255,255,.2))", background: "transparent",
+    color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap" };
+  const miniBtnActive = { background: "var(--accent)", color: "#0b0b12", border: "none" };
 
   return (
     <div className="prof-screen">
@@ -7837,11 +7960,17 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
         <div className="tagline">Maintenance · Deficit · Cardio · Strength · Timeline</div>
       </div>
       <div className="container">
-        {firstName ? (
-          <div style={{ fontSize: "1.15rem", fontWeight: 700, margin: "0 0 14px" }}>
-            Hi, {firstName} 👋
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "0 0 14px" }}>
+          <div style={{ fontSize: "1.15rem", fontWeight: 700 }}>
+            {firstName ? `Hi, ${firstName} 👋` : ""}
           </div>
-        ) : null}
+          <button onClick={load} title="Reload the latest from your plan"
+            style={{ padding: "6px 10px", fontSize: ".78rem", fontWeight: 600, borderRadius: "8px",
+              border: "1px solid var(--border,rgba(255,255,255,.2))", background: "transparent",
+              color: "var(--muted)", cursor: "pointer", whiteSpace: "nowrap" }}>
+            ↻ Refresh
+          </button>
+        </div>
 
         {planData === undefined ? (
           <div className="card"><div className="card-sub">Loading your plan…</div></div>
@@ -7859,21 +7988,50 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
           <>
             {/* Weight → goal */}
             <div className="card">
-              <div className="card-title">🎯 Weight &amp; goal</div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <div className="card-title" style={{ marginBottom: 0 }}>🎯 Weight &amp; goal</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button style={miniBtn} onClick={() => setShowChart(true)} title="See your progress chart">📈 Progress</button>
+                  <button style={{ ...miniBtn, ...(showWt ? miniBtnActive : {}) }}
+                    onClick={() => setShowWt(s => !s)} title="Log today's weight">
+                    {showWt ? "Close" : "✎ Log"}
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
                 <span style={{ fontSize: "1.6rem", fontWeight: 800 }}>{w} lbs</span>
                 {g ? <span style={{ color: "var(--muted)" }}>→ {g} lbs</span> : null}
               </div>
+              {prevWeight != null && (
+                <div style={{ marginTop: 4, fontSize: ".8rem", color: "var(--muted)" }}>
+                  Previous: {prevWeight} lbs{w ? ` (${w - prevWeight > 0 ? "+" : ""}${Math.round((w - prevWeight) * 10) / 10} lbs)` : ""}
+                </div>
+              )}
               {toGo != null && toGo !== 0 && (
                 <div style={{ marginTop: 6, color: "var(--accent)", fontWeight: 700 }}>
                   {Math.abs(toGo)} lbs to {toGo > 0 ? "lose" : "gain"}
                 </div>
               )}
-              {log.weight ? (
-                <div style={{ marginTop: 6, fontSize: ".82rem", color: "var(--muted)" }}>
-                  Today's weigh-in: {log.weight} lbs
+              {change != null && change !== 0 && (
+                <div style={{ marginTop: 6, fontSize: ".82rem", fontWeight: 600,
+                  color: towardGoal == null ? "var(--muted)" : towardGoal ? "#39d98a" : "#e5848d" }}>
+                  {change < 0 ? "▼" : "▲"} {Math.abs(change)} lbs {change < 0 ? "lost" : "gained"} since start
                 </div>
-              ) : null}
+              )}
+              {showWt && (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: ".82rem", color: "var(--muted)", marginBottom: 6 }}>
+                    Log today's weight
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input style={field} type="number" inputMode="decimal" placeholder="Today's weight (lbs)"
+                      value={wtDraft} onChange={e => setWtDraft(e.target.value)}
+                      onKeyDown={e => { if (e.key === "Enter") logWeight(); }} autoFocus />
+                    <button style={logBtn} onClick={logWeight}>Log</button>
+                  </div>
+                  {wtMsg ? <div style={{ marginTop: 8, fontSize: ".82rem", color: "var(--muted)" }}>{wtMsg}</div> : null}
+                </div>
+              )}
             </div>
 
             {/* Today's calories + quick-log */}
@@ -7893,16 +8051,13 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
               )}
 
               <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                <input style={field} type="number" inputMode="numeric" placeholder="Add calories"
+                <input style={field} type="number" inputMode="numeric" placeholder="Calories"
                   value={calDraft} onChange={e => setCalDraft(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") addCalories(); }} />
-                <button style={logBtn} onClick={addCalories}>Log</button>
-              </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <input style={field} type="number" inputMode="decimal" placeholder="Today's weight (lbs)"
-                  value={wtDraft} onChange={e => setWtDraft(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") logWeight(); }} />
-                <button style={logBtn} onClick={logWeight}>Log</button>
+                  onKeyDown={e => { if (e.key === "Enter") adjustCalories(1); }} />
+                <button style={{ ...logBtn, background: "transparent", color: "var(--text)",
+                  border: "1px solid var(--border,rgba(255,255,255,.2))" }}
+                  title="Subtract from today" onClick={() => adjustCalories(-1)}>− Remove</button>
+                <button style={logBtn} title="Add to today" onClick={() => adjustCalories(1)}>+ Add</button>
               </div>
               {msg ? <div style={{ marginTop: 8, fontSize: ".82rem", color: "var(--muted)" }}>{msg}</div> : null}
             </div>
@@ -7915,6 +8070,50 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
           <RolePanel />
         </div>
       </div>
+
+      {/* Progress chart popup — reuses the existing ProgressChart, in a
+          horizontally-scrollable frame so many weigh-ins scroll sideways. */}
+      {showChart && (
+        <div onClick={() => setShowChart(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 1000,
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "var(--bg,#0d0d18)", borderRadius: 14, padding: 16, width: "100%",
+              maxWidth: 640, maxHeight: "88vh", overflow: "auto",
+              border: "1px solid var(--border,rgba(255,255,255,.12))" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div style={{ fontSize: "1.05rem", fontWeight: 800 }}>📈 Weight progress</div>
+              <button style={miniBtn} onClick={() => setShowChart(false)}>✕ Close</button>
+            </div>
+            <ProgressChart checkIns={chartCheckIns} goalWeight={g} currentWeight={w} showValues pxPerPoint={64} />
+
+            {/* Weigh-in list with delete — fix a mistaken entry. */}
+            {weighIns.length > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: ".8rem", color: "var(--muted)", marginBottom: 6 }}>
+                  Weigh-ins ({weighIns.length}) — tap ✕ to remove a mistake
+                </div>
+                <div style={{ maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+                  {[...weighIns].reverse().map((c) => (
+                    <div key={c.timestamp} style={{ display: "flex", justifyContent: "space-between",
+                      alignItems: "center", padding: "6px 10px", borderRadius: 8, background: "rgba(255,255,255,.04)" }}>
+                      <span style={{ fontSize: ".88rem", fontWeight: 600 }}>
+                        {c.weight} lbs
+                        <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: ".76rem", marginLeft: 8 }}>
+                          {new Date(c.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                        </span>
+                      </span>
+                      <button onClick={() => deleteWeighIn(c.timestamp)} title="Delete this weigh-in"
+                        style={{ background: "transparent", border: "none", color: "#e5484d",
+                          cursor: "pointer", fontSize: "1rem", lineHeight: 1, padding: "2px 6px" }}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
