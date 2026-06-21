@@ -1911,6 +1911,27 @@ function StepGoalWeight({ data, onChange, onBack, onNext }) {
           <div className="error-box">⚠️ Goal must be less than your current weight ({current} lbs).</div>
         )}
 
+        {/* Goal weight range (optional band the client aims to stay within) */}
+        <div className="field" style={{marginTop:"12px"}}>
+          <label>Goal weight range <span className="field-hint">optional — a healthy band to stay within</span></label>
+          <div style={{display:"flex", gap:"8px", alignItems:"center"}}>
+            <input inputMode="decimal" placeholder="Low e.g. 190" value={data.goalRangeLow || ""}
+              onChange={e => { let v = e.target.value.replace(/[^0-9.]/g,""); const p=v.split("."); if(p.length>2) v=p[0]+"."+p.slice(1).join(""); onChange("goalRangeLow", v); }}
+              maxLength={6} style={{textAlign:"center", fontWeight:600}} />
+            <span style={{color:"var(--muted)", fontSize:".85rem"}}>to</span>
+            <input inputMode="decimal" placeholder="High e.g. 198" value={data.goalRangeHigh || ""}
+              onChange={e => { let v = e.target.value.replace(/[^0-9.]/g,""); const p=v.split("."); if(p.length>2) v=p[0]+"."+p.slice(1).join(""); onChange("goalRangeHigh", v); }}
+              maxLength={6} style={{textAlign:"center", fontWeight:600}} />
+            <span className="field-hint">lbs</span>
+          </div>
+          {(() => {
+            const lo = Number(data.goalRangeLow), hi = Number(data.goalRangeHigh);
+            if (lo > 0 && hi > 0 && lo >= hi) return <div className="error-box">⚠️ The low end should be below the high end.</div>;
+            if (lo > 0 && hi > 0) return <div style={{fontSize:".72rem", color:"var(--muted)", marginTop:"4px"}}>You'll aim to stay between {lo} and {hi} lbs.</div>;
+            return null;
+          })()}
+        </div>
+
         {/* Body Fat Goal */}
         {data.bodyFat && Number(data.bodyFat) > 0 && (
           <div className="field" style={{marginTop:"12px"}}>
@@ -2841,7 +2862,8 @@ function Results({ data, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSa
           <StreakBadges checkIns={data.checkIns || []} />
           <DailyCheckIn data={data} onSaveCheckIn={onSaveCheckIn} />
           {(data.checkIns || []).length >= 1 && (
-            <ProgressChart checkIns={data.checkIns} goalWeight={data.goalWeight} currentWeight={data.weightLbs} />
+            <ProgressChart checkIns={data.checkIns} goalWeight={data.goalWeight} currentWeight={data.weightLbs}
+              rangeLow={data.goalRangeLow} rangeHigh={data.goalRangeHigh} />
           )}
           <AICoach data={data} tdee={tdee} totalBurn={totalBurn} totalStrBurn={totalStrBurn} activeDays={activeDays} activeStrDays={activeStrDays} />
 
@@ -6838,7 +6860,7 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
 
 // ─── Progress Chart (from check-in history) ──────────────────────────────────
 
-function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerPoint }) {
+function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerPoint, rangeLow, rangeHigh }) {
   const sorted = [...(checkIns || [])].filter(c => c.weight).sort((a, b) => a.timestamp - b.timestamp);
   if (sorted.length < 2) return (
     <div className="card" style={{padding:"16px",textAlign:"center",color:"var(--muted)",fontSize:".84rem",lineHeight:1.6}}>
@@ -6859,7 +6881,11 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
 
   const weights = sorted.map(c => c.weight);
   const goal = Number(goalWeight) || null;
-  const allVals = [...weights, ...(goal ? [goal] : [])];
+  // Optional goal-range band (low–high). Both must be present and ordered.
+  const rLo = Number(rangeLow) || null;
+  const rHi = Number(rangeHigh) || null;
+  const hasBand = rLo && rHi && rLo < rHi;
+  const allVals = [...weights, ...(goal ? [goal] : []), ...(hasBand ? [rLo, rHi] : [])];
   const yMin = Math.min(...allVals) - 3;
   const yMax = Math.max(...allVals) + 3;
   const yRange = yMax - yMin;
@@ -6909,6 +6935,13 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
             </g>
           );
         })}
+
+        {/* Goal-range band (low–high) shaded behind the line */}
+        {hasBand && (
+          <rect x={PAD.left} y={PAD.top + yScale(rHi)} width={chartW}
+            height={Math.max(0, yScale(rLo) - yScale(rHi))}
+            fill="rgba(79,255,176,.10)" stroke="rgba(79,255,176,.25)" strokeWidth="1" />
+        )}
 
         {/* Goal line (label is drawn last, below, so nothing covers it) */}
         {goal && (
@@ -7912,6 +7945,15 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
   const w = planData ? Number(planData.weightLbs) : 0;
   const g = planData ? Number(planData.goalWeight) : 0;
   const toGo = (w && g) ? Math.round((w - g) * 10) / 10 : null;
+  // Optional goal-range band (low–high) and where the current weight sits in it.
+  const rLo = planData ? Number(planData.goalRangeLow) : 0;
+  const rHi = planData ? Number(planData.goalRangeHigh) : 0;
+  const hasRange = rLo > 0 && rHi > 0 && rLo < rHi;
+  const inRange = hasRange && w >= rLo && w <= rHi;
+  const rangeGap = !hasRange ? null
+    : w < rLo ? Math.round((rLo - w) * 10) / 10   // below the band
+    : w > rHi ? Math.round((w - rHi) * 10) / 10   // above the band
+    : 0;
   const start = planData ? Number(planData.startWeightLbs) : 0;
   const change = (start && w) ? Math.round((w - start) * 10) / 10 : null; // since start
   // Is the change moving toward the goal? (loss-goal: down good; gain-goal: up good)
@@ -8012,6 +8054,17 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
                   {Math.abs(toGo)} lbs to {toGo > 0 ? "lose" : "gain"}
                 </div>
               )}
+              {hasRange && (
+                <div style={{ marginTop: 6, fontSize: ".8rem" }}>
+                  <span style={{ color: "var(--muted)" }}>Range: {rLo}–{rHi} lbs</span>
+                  {" · "}
+                  <span style={{ fontWeight: 600, color: inRange ? "#39d98a" : "#f0a020" }}>
+                    {inRange ? "✅ in range"
+                      : w < rLo ? `${rangeGap} lbs below range`
+                      : `${rangeGap} lbs above range`}
+                  </span>
+                </div>
+              )}
               {change != null && change !== 0 && (
                 <div style={{ marginTop: 6, fontSize: ".82rem", fontWeight: 600,
                   color: towardGoal == null ? "var(--muted)" : towardGoal ? "#39d98a" : "#e5848d" }}>
@@ -8085,7 +8138,8 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
               <div style={{ fontSize: "1.05rem", fontWeight: 800 }}>📈 Weight progress</div>
               <button style={miniBtn} onClick={() => setShowChart(false)}>✕ Close</button>
             </div>
-            <ProgressChart checkIns={chartCheckIns} goalWeight={g} currentWeight={w} showValues pxPerPoint={64} />
+            <ProgressChart checkIns={chartCheckIns} goalWeight={g} currentWeight={w} showValues pxPerPoint={64}
+              rangeLow={rLo} rangeHigh={rHi} />
 
             {/* Weigh-in list with delete — fix a mistaken entry. */}
             {weighIns.length > 0 && (

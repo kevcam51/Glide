@@ -229,19 +229,22 @@ enabled (Blaze has no default spending cap).
   still append to `caliq-history-self` so the trainer's activity feed reflects them. No `firestore.rules`
   change. **Deferred from this session:** a confirm step before deleting a weigh-in (currently immediate),
   and the weight-range feature + page cleanup below.
+- Session 14: **Weight range / goal band (non-Blaze).** A plan can now carry an optional healthy
+  **weight range** (low–high) in addition to the single goal weight — people rarely hold one exact
+  weight, so a band is a more realistic target. Entered as **low + high bounds** (Kevin's choice; most
+  flexible, can be off-center from the goal) in the plan's **Goal Weight** step (new fields
+  `goalRangeLow`/`goalRangeHigh` on `data`, so it's set at creation AND editable later there; they ride
+  the normal save — no storage change). Display: the Client Dashboard's **🎯 Weight & goal** card shows
+  **"Range: 190–198 lbs · ✅ in range"** (green) or **"X lbs below/above range"** (amber) based on the
+  current weight; `ProgressChart` gained `rangeLow`/`rangeHigh` props that **shade the band** behind the
+  line (shown in both the dashboard popup and the full-plan Results chart). Fully optional — blank =
+  unchanged behavior. No `firestore.rules` change.
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
   testing — these are not real users and can be cleared. The Session-13 testing also left **test
   weigh-ins/check-ins** in the test client's `caliq-self` — also clearable.
 
 ## Roadmap (not yet built)
 
-- **Weight range / goal band (Kevin's idea).** Instead of a single goal number, let the trainer or
-  client set a **healthy weight range** (e.g. 190–198) — people rarely hold one exact weight and tend
-  to fluctuate several lbs up/down with consistency, so a band is a more realistic goal. Should be
-  settable **at profile creation** and **easily addable/editable later**. Display it subtly under the
-  Weight & goal card (small, not bold), and it could shade a band on the progress chart; logging within
-  range could count as "on target." Data-model + UI change (new `goalRangeLow`/`goalRangeHigh` fields on
-  the plan); no Blaze. Good candidate for the next session.
 - **UI cleanup pass on the other pages.** The new Client Dashboard set the visual bar (clean, card-based,
   clear CTAs); bring the older screens (the full plan editor / Results, trainer pages) up to the same
   look. Cosmetic only; no Blaze. Kevin flagged this as a later task.
