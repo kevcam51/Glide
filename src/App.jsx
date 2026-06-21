@@ -8825,6 +8825,14 @@ export default function App() {
   const saveTimer = useRef(null);
 
   // Load profiles and folders on mount
+  // Scroll to the top whenever the active view changes, so each screen starts
+  // clean instead of mid-page (pairs with the .page-transition fade). Instant
+  // jump avoids a long smooth-scroll competing with the fade-in.
+  useEffect(() => {
+    try { window.scrollTo({ top: 0, behavior: "instant" }); }
+    catch { window.scrollTo(0, 0); }
+  }, [screen, step, showDash, homeTab]);
+
   useEffect(()=>{
     (async()=>{
       try {
