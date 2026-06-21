@@ -2749,9 +2749,57 @@ function StepCardio({ data, onChange, onBack, onNext }) {
   );
 }
 
+// ─── Simulation results summary (Session 20) ─────────────────────────────────
+// A sales/motivation-framed before→after card shown at the top of a SIMULATION's
+// Results. Reuses the same projection math as the Timeline tab (weeksToGoal /
+// friendlyTime) — diet alone, and diet + the plan's weekly cardio burn.
+function SimulationSummary({ data, totalBurn }) {
+  const current = Number(data.weightLbs) || 0;
+  const goal = Number(data.goalWeight) || 0;
+  if (!current || !goal || current === goal) return null;
+  const losing = goal < current;
+  const diff = Math.round(Math.abs(current - goal) * 10) / 10;
+  const wksDiet = losing ? weeksToGoal(diff, 3500) : null;
+  const wksCardio = losing && totalBurn > 0 ? weeksToGoal(diff, 3500 + totalBurn) : null;
+  const bestWks = wksCardio || wksDiet;
+  const targetDate = bestWks
+    ? new Date(Date.now() + bestWks * 7 * 86400000).toLocaleDateString(undefined, { month: "long", year: "numeric" })
+    : null;
+  const stat = { flex: 1, textAlign: "center" };
+  const big = { fontFamily: "'Bebas Neue',sans-serif", fontSize: "2.4rem", lineHeight: 1 };
+  const lbl = { fontSize: ".66rem", letterSpacing: ".5px", textTransform: "uppercase", color: "var(--muted)", marginTop: 4 };
+  return (
+    <div className="card" style={{ border: "1px solid rgba(181,123,255,.45)", background: "linear-gradient(180deg,rgba(181,123,255,.1),transparent)" }}>
+      <div style={{ fontSize: ".7rem", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--purple)", textAlign: "center", marginBottom: 10 }}>
+        🧪 Simulated Results · what's possible
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+        <div style={stat}><div style={{ ...big, color: "var(--text)" }}>{current}</div><div style={lbl}>lbs today</div></div>
+        <div style={{ fontSize: "1.6rem", color: "var(--purple)" }}>→</div>
+        <div style={stat}><div style={{ ...big, color: "var(--accent)" }}>{goal}</div><div style={lbl}>lbs goal</div></div>
+      </div>
+      <div style={{ textAlign: "center", marginTop: 12, fontSize: "1.05rem", fontWeight: 700, color: "var(--text)" }}>
+        {losing ? `Lose ${diff} lbs` : `Gain ${diff} lbs`}
+        {bestWks ? <span style={{ color: "var(--green)" }}> in {friendlyTime(bestWks)}</span> : null}
+      </div>
+      {targetDate && (
+        <div style={{ textAlign: "center", marginTop: 4, fontSize: ".82rem", color: "var(--muted-light)" }}>
+          On track to hit goal by <strong style={{ color: "var(--text)" }}>{targetDate}</strong>
+          {wksCardio && wksDiet && wksCardio < wksDiet
+            ? ` — ${friendlyTime(wksDiet - wksCardio)} faster with the cardio in this plan`
+            : ""}
+        </div>
+      )}
+      <div style={{ textAlign: "center", marginTop: 10, fontSize: ".72rem", color: "var(--muted)" }}>
+        Projection assumes consistent adherence — actual results vary.
+      </div>
+    </div>
+  );
+}
+
 // ─── Results ─────────────────────────────────────────────────────────────────
 
-function Results({ data, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes }) {
+function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes }) {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
   const [showEdit, setShowEdit] = useState(false);
@@ -2885,6 +2933,8 @@ function Results({ data, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSa
 
   return (
     <div className="fu">
+
+      {isSimulation && <SimulationSummary data={data} totalBurn={totalBurn} />}
 
       {/* ── Basic / Pro Toggle ── */}
       <div style={{display:"flex",gap:"4px",background:"var(--s2)",padding:"4px",borderRadius:"12px",border:"1px solid var(--border)",marginBottom:"16px"}}>
@@ -7745,7 +7795,7 @@ function computeClientCalories(d) {
   return { tdee, target };
 }
 
-function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename, meUid, meName, meRole }) {
+function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename, onNewSimulation, onConvertSimulation, meUid, meName, meRole }) {
   const [details, setDetails] = useState({}); // id -> { tdee, target }
   const [lastLog, setLastLog] = useState({}); // id -> "YYYY-MM-DD"
   const [sort, setSort] = useState("attention");
@@ -7764,6 +7814,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const [reqDraft, setReqDraft] = useState("");
   const [reqBusy, setReqBusy] = useState(false);
   const [showDoneFor, setShowDoneFor] = useState(null); // clientUid whose done-list is expanded
+  const [convertSimFor, setConvertSimFor] = useState(null); // sim id awaiting convert confirm
 
   // Load connected clients (real accounts) and read each one's SHARED plan
   // (caliq-self in their account) so the overview shows live data, not a copy.
@@ -7920,13 +7971,16 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     return Math.floor((Date.now() - logTs(p)) / 86400000);
   };
 
-  const sorted = [...profiles].sort((a, b) => {
+  // Simulations are sandbox plans kept separate from real client plans.
+  const realPlans = profiles.filter((p) => !p.isSimulation);
+  const sims = profiles.filter((p) => p.isSimulation);
+  const sorted = [...realPlans].sort((a, b) => {
     if (sort === "name") return (a.name || "").localeCompare(b.name || "");
     if (sort === "recent") return lastActiveTs(b) - lastActiveTs(a);
     return lastActiveTs(a) - lastActiveTs(b); // "attention": quietest first
   });
-  const complete = profiles.filter((p) => p.stepLabel === "Results").length;
-  const activeWeek = profiles.filter((p) => Date.now() - lastActiveTs(p) < 7 * 86400000).length;
+  const complete = realPlans.filter((p) => p.stepLabel === "Results").length;
+  const activeWeek = realPlans.filter((p) => Date.now() - lastActiveTs(p) < 7 * 86400000).length;
 
   const tabBtn = (active) => ({
     flex: 1, padding: "10px", fontSize: ".85rem", fontWeight: 700, borderRadius: "8px",
@@ -8150,10 +8204,10 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           </div>
           <div className="card-sub">
             {loading ? "Loading…"
-              : `${profiles.length} local plan${profiles.length !== 1 ? "s" : ""} · ${complete} complete · ${activeWeek} active this week`}
+              : `${realPlans.length} local plan${realPlans.length !== 1 ? "s" : ""} · ${complete} complete · ${activeWeek} active this week`}
           </div>
 
-          {!loading && profiles.length > 0 && (
+          {!loading && realPlans.length > 0 && (
             <div style={{ display: "flex", gap: "6px", margin: "12px 0 4px" }}>
               {[["attention", "Needs attention"], ["recent", "Last active"], ["name", "Name"]].map(([k, lbl]) => (
                 <button key={k} onClick={() => setSort(k)}
@@ -8166,7 +8220,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
             </div>
           )}
 
-          {loading ? null : profiles.length === 0 ? (
+          {loading ? null : realPlans.length === 0 ? (
             <div style={{ color: "var(--muted)", fontSize: ".85rem", padding: "8px 0" }}>
               No clients yet. Switch to “All clients” to add your first one.
             </div>
@@ -8232,6 +8286,70 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                       color: "var(--muted)", marginTop: 8 }}>
                       <span>🔥 {det && det.target != null ? `${det.target.toLocaleString()} cal/day` : "—"}</span>
                       <span>🕑 {ds === null ? "no logs yet" : ds === 0 ? "active today" : ds === 1 ? "1 day ago" : `${ds} days ago`}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Simulations — sandbox what-if plans (Session 20) */}
+        <div className="card">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <div className="card-title" style={{ marginBottom: 0 }}>🧪 Simulations</div>
+            <button onClick={onNewSimulation}
+              style={{ padding: "8px 12px", fontSize: ".78rem", fontWeight: 700, borderRadius: 8, cursor: "pointer",
+                border: "none", background: "var(--purple)", color: "#0b0b12", whiteSpace: "nowrap" }}>
+              + New Simulation
+            </button>
+          </div>
+          <div className="card-sub" style={{ marginTop: 6 }}>
+            Sandbox what-if plans — build a program and show the projected results. Not a real client
+            plan; convert one to a client plan when you're ready.
+          </div>
+          {sims.length === 0 ? (
+            <div style={{ color: "var(--muted)", fontSize: ".85rem", padding: "6px 0" }}>
+              No simulations yet — tap “+ New Simulation” to build a what-if program.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "6px" }}>
+              {sims.map((p) => {
+                const det = details[p.id];
+                const w = Number(p.weight), g = Number(p.goal);
+                const toGo = (w && g) ? Math.round((w - g) * 10) / 10 : null;
+                return (
+                  <div key={p.id} onClick={() => onSelect(p.id)}
+                    style={{ cursor: "pointer", padding: "12px 14px", borderRadius: "10px",
+                      background: "rgba(181,123,255,.06)", border: "1px solid rgba(181,123,255,.35)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <span style={{ fontWeight: 700, fontSize: ".95rem" }}>{p.customName || p.name || "Untitled simulation"}</span>
+                      <span style={{ fontSize: ".66rem", fontWeight: 700, color: "var(--purple)" }}>🧪 SANDBOX</span>
+                    </div>
+                    <div style={{ fontSize: ".9rem", color: "var(--text)" }}>
+                      ⚖️ {p.weight ? `${p.weight} lbs` : "—"}{p.goal ? ` → ${p.goal} lbs` : ""}
+                      {toGo !== null && toGo > 0 ? ` · ${toGo} lbs to go` : ""}
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }} onClick={(e) => e.stopPropagation()}>
+                      <button onClick={() => onSelect(p.id)}
+                        style={{ padding: "7px 11px", fontSize: ".76rem", fontWeight: 700, borderRadius: 6, cursor: "pointer",
+                          border: "none", background: "var(--purple)", color: "#0b0b12" }}>Open</button>
+                      {convertSimFor === p.id ? (
+                        <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                          <button onClick={() => { onConvertSimulation(p.id); setConvertSimFor(null); }}
+                            style={{ padding: "7px 11px", fontSize: ".76rem", fontWeight: 700, borderRadius: 6, cursor: "pointer",
+                              border: "none", background: "var(--accent)", color: "#0b0b12" }}>Confirm — make it a client plan</button>
+                          <button onClick={() => setConvertSimFor(null)}
+                            style={{ padding: "7px 11px", fontSize: ".76rem", fontWeight: 600, borderRadius: 6, cursor: "pointer",
+                              border: "1px solid var(--border,rgba(255,255,255,.2))", background: "transparent", color: "var(--text)" }}>Cancel</button>
+                        </span>
+                      ) : (
+                        <button onClick={() => setConvertSimFor(p.id)}
+                          style={{ padding: "7px 11px", fontSize: ".76rem", fontWeight: 600, borderRadius: 6, cursor: "pointer",
+                            border: "1px solid var(--border,rgba(255,255,255,.2))", background: "transparent", color: "var(--text)" }}>
+                          Convert to client plan →
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -8721,7 +8839,9 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
   useEffect(()=>{ if(showNewFolder && folderInputRef.current) folderInputRef.current.focus(); },[showNewFolder]);
 
   const toggleFolder = (id) => setOpenFolders(p=>({...p,[id]:!p[id]}));
-  const sorted = [...profiles].sort((a,b)=>(b.lastSaved||0)-(a.lastSaved||0));
+  // Simulations are sandbox plans — they live in their own section on the
+  // dashboard, not in the All-clients folders.
+  const sorted = [...profiles].filter(p=>!p.isSimulation).sort((a,b)=>(b.lastSaved||0)-(a.lastSaved||0));
   const unfiled = sorted.filter(p=>!p.folderId);
   const inFolder = (fid) => sorted.filter(p=>p.folderId===fid);
 
@@ -9312,9 +9432,10 @@ export default function App() {
     });
   };
 
-  const createProfile = (folderId) => {
+  const createProfile = (folderId, opts) => {
     const id = `c${Date.now()}`;
-    const np = { id, name:"", weight:"", goal:"", lastSaved:Date.now(), stepLabel:"Personal", folderId: folderId||null };
+    const np = { id, name:"", weight:"", goal:"", lastSaved:Date.now(), stepLabel:"Personal", folderId: folderId||null,
+      isSimulation: !!(opts && opts.isSimulation) };
     const up = [...profiles, np];
     setProfiles(up);
     saveIndex(up);
@@ -9325,6 +9446,18 @@ export default function App() {
     setActiveId(id);
     setScreen("app");
   };
+
+  // Convert a simulation into a real local plan (clears the sandbox flag so it
+  // moves out of "Simulations" and into "Local Plans", ready to link to a client).
+  const convertSimulation = (id) => {
+    setProfiles(prev => {
+      const up = prev.map(p => p.id === id ? { ...p, isSimulation: false } : p);
+      saveIndex(up);
+      return up;
+    });
+  };
+  // Is the currently-open plan a simulation? (drives the editor banner + summary)
+  const activeIsSim = !!(profiles.find(p => p.id === activeId) || {}).isSimulation;
 
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const deleteProfile = async (id, name) => {
@@ -9744,6 +9877,8 @@ export default function App() {
         onOpenClientPlan={openClientPlan}
         onLinked={removeLocalProfileById} onCopyToLocal={copyClientToLocal}
         onRename={renameProfile}
+        onNewSimulation={()=>createProfile(null,{isSimulation:true})}
+        onConvertSimulation={convertSimulation}
         meUid={meUid} meName={meName} meRole={role}
       />;
     }
@@ -9781,6 +9916,15 @@ export default function App() {
           <button className="prof-switch-btn" onClick={goToProfiles}>{role === ROLES.CLIENT ? "My Home" : "All Clients"}</button>
         </div>
         <div className="container">
+          {activeIsSim && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", marginBottom: 14,
+              borderRadius: 10, background: "rgba(181,123,255,.1)", border: "1px solid rgba(181,123,255,.4)" }}>
+              <span style={{ fontSize: "1.1rem" }}>🧪</span>
+              <span style={{ fontSize: ".82rem", color: "var(--text)" }}>
+                <strong>Simulation</strong> — a sandbox projection, not a real client plan.
+              </span>
+            </div>
+          )}
           <div className="steps-wrap">
             {step < LBLS.length - 1 && (
               <div className="step-name-row">
@@ -9838,7 +9982,7 @@ export default function App() {
             <div style={{marginBottom:"12px"}}>
               <button className="dash-nav-btn" style={{width:"100%"}} onClick={()=>setShowDash(true)}>📊 Back to Dashboard</button>
             </div>
-            <Results data={data} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
+            <Results data={data} isSimulation={activeIsSim} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
             onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
               // One entry per date: replace any existing check-ins for this date.
               const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);
