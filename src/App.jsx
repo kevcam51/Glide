@@ -2744,12 +2744,13 @@ function StepCardio({ data, onChange, onBack, onNext }) {
 
 // ─── Results ─────────────────────────────────────────────────────────────────
 
-function Results({ data, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onUpdateNotes }) {
+function Results({ data, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes }) {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
   const [showEdit, setShowEdit] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [openResultDay, setOpenResultDay] = useState(null);
+  const [showWeightModal, setShowWeightModal] = useState(false); // Pro Tracking chart popup
   const { gender, age, weightLbs, heightFt, heightIn, activityLevel, firstName, cardio } = data;
   const actObj = ACTIVITY_LEVELS.find(a=>a.id===activityLevel);
   const bmr    = calcBMR(gender, Number(weightLbs), Number(heightFt), Number(heightIn), Number(age));
@@ -2896,8 +2897,20 @@ function Results({ data, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSa
           <StreakBadges checkIns={data.checkIns || []} />
           <DailyCheckIn data={data} onSaveCheckIn={onSaveCheckIn} />
           {(data.checkIns || []).length >= 1 && (
-            <ProgressChart checkIns={data.checkIns} goalWeight={data.goalWeight} currentWeight={data.weightLbs}
-              rangeLow={data.goalRangeLow} rangeHigh={data.goalRangeHigh} />
+            <div onClick={() => setShowWeightModal(true)} style={{ cursor: "pointer" }}
+              title="Tap to manage weigh-ins">
+              <ProgressChart checkIns={data.checkIns} goalWeight={data.goalWeight} currentWeight={data.weightLbs}
+                rangeLow={data.goalRangeLow} rangeHigh={data.goalRangeHigh} showValues pxPerPoint={64} />
+              <div style={{ textAlign: "center", fontSize: ".72rem", color: "var(--muted)", marginTop: -6 }}>
+                Tap chart to add / remove weigh-ins
+              </div>
+            </div>
+          )}
+          {showWeightModal && (
+            <WeightChartModal checkIns={data.checkIns || []} goalWeight={data.goalWeight}
+              currentWeight={data.weightLbs} rangeLow={data.goalRangeLow} rangeHigh={data.goalRangeHigh}
+              startWeight={data.startWeightLbs}
+              onDelete={onDeleteCheckIn} onClose={() => setShowWeightModal(false)} />
           )}
           <AICoach data={data} tdee={tdee} totalBurn={totalBurn} totalStrBurn={totalStrBurn} activeDays={activeDays} activeStrDays={activeStrDays} />
 
@@ -7148,6 +7161,66 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
   );
 }
 
+// Full-screen weight-progress popup: the scrollable, value-labeled chart plus a
+// list of weigh-ins each with a ✕ to delete. Used by both the Client Dashboard
+// and the Pro Tracking section. `onDelete(timestamp)` is optional (omit to make
+// it read-only). `startWeight` lets the chart draw a "start → now" segment when
+// there's only one real weigh-in yet.
+function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, rangeHigh, startWeight, onDelete, onClose }) {
+  const miniBtn = { padding: "5px 9px", fontSize: ".74rem", fontWeight: 600, borderRadius: "7px",
+    border: "1px solid var(--border,rgba(255,255,255,.2))", background: "transparent",
+    color: "var(--text)", cursor: "pointer", whiteSpace: "nowrap" };
+  const w = Number(currentWeight) || 0;
+  const start = Number(startWeight) || 0;
+  const weighIns = [...(checkIns || [])].filter(c => c.weight).sort((a, b) => a.timestamp - b.timestamp);
+  let chartCheckIns = checkIns || [];
+  if (weighIns.length === 1 && start && start !== w) {
+    const firstTs = weighIns[0].timestamp || Date.now();
+    chartCheckIns = [{ date: new Date(firstTs - 86400000).toISOString().slice(0, 10),
+      timestamp: firstTs - 86400000, weight: start, hitTarget: null }, ...(checkIns || [])];
+  }
+  return (
+    <div onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 1000,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={e => e.stopPropagation()}
+        style={{ background: "var(--bg,#0d0d18)", borderRadius: 14, padding: 16, width: "100%",
+          maxWidth: 640, maxHeight: "88vh", overflow: "auto",
+          border: "1px solid var(--border,rgba(255,255,255,.12))" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ fontSize: "1.05rem", fontWeight: 800 }}>📈 Weight progress</div>
+          <button style={miniBtn} onClick={onClose}>✕ Close</button>
+        </div>
+        <ProgressChart checkIns={chartCheckIns} goalWeight={goalWeight} currentWeight={w} showValues pxPerPoint={64}
+          rangeLow={rangeLow} rangeHigh={rangeHigh} />
+        {onDelete && weighIns.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: ".8rem", color: "var(--muted)", marginBottom: 6 }}>
+              Weigh-ins ({weighIns.length}) — tap ✕ to remove a mistake
+            </div>
+            <div style={{ maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+              {[...weighIns].reverse().map((c) => (
+                <div key={c.timestamp} style={{ display: "flex", justifyContent: "space-between",
+                  alignItems: "center", padding: "6px 10px", borderRadius: 8, background: "rgba(255,255,255,.04)" }}>
+                  <span style={{ fontSize: ".88rem", fontWeight: 600 }}>
+                    {c.weight} lbs
+                    <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: ".76rem", marginLeft: 8 }}>
+                      {new Date(c.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                    </span>
+                  </span>
+                  <button onClick={() => onDelete(c.timestamp)} title="Delete this weigh-in"
+                    style={{ background: "transparent", border: "none", color: "#e5484d",
+                      cursor: "pointer", fontSize: "1rem", lineHeight: 1, padding: "2px 6px" }}>✕</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── AI Coaching Insights ────────────────────────────────────────────────────
 
 function AICoach({ data, tdee, totalBurn, totalStrBurn, activeDays, activeStrDays }) {
@@ -8085,16 +8158,6 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
     .sort((a, b) => a.timestamp - b.timestamp);
   const prevWeight = weighIns.length >= 2 ? weighIns[weighIns.length - 2].weight
     : (start && start !== w ? start : null);
-  // Chart data: once there are 2+ real weigh-ins, use them as-is. Until then,
-  // prepend the starting weight (display only — not written to the account) so a
-  // line shows from "start → now" right after the first weigh-in.
-  const allCheckIns = (planData && planData.checkIns) || [];
-  let chartCheckIns = allCheckIns;
-  if (weighIns.length === 1 && start && start !== w) {
-    const firstTs = weighIns[0].timestamp || Date.now();
-    chartCheckIns = [{ date: new Date(firstTs - 86400000).toISOString().slice(0, 10),
-      timestamp: firstTs - 86400000, weight: start, hitTarget: null }, ...allCheckIns];
-  }
   // Realistic time-to-goal from the client's ACTUAL logged trend (not the
   // theoretical 1 lb/wk). Needs a few weigh-ins spread over time.
   const trend = planData ? weightTrend(planData.checkIns) : null;
@@ -8305,49 +8368,11 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
         </div>
       </div>
 
-      {/* Progress chart popup — reuses the existing ProgressChart, in a
-          horizontally-scrollable frame so many weigh-ins scroll sideways. */}
+      {/* Progress chart popup (shared component) */}
       {showChart && (
-        <div onClick={() => setShowChart(false)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 1000,
-            display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <div onClick={e => e.stopPropagation()}
-            style={{ background: "var(--bg,#0d0d18)", borderRadius: 14, padding: 16, width: "100%",
-              maxWidth: 640, maxHeight: "88vh", overflow: "auto",
-              border: "1px solid var(--border,rgba(255,255,255,.12))" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <div style={{ fontSize: "1.05rem", fontWeight: 800 }}>📈 Weight progress</div>
-              <button style={miniBtn} onClick={() => setShowChart(false)}>✕ Close</button>
-            </div>
-            <ProgressChart checkIns={chartCheckIns} goalWeight={g} currentWeight={w} showValues pxPerPoint={64}
-              rangeLow={rLo} rangeHigh={rHi} />
-
-            {/* Weigh-in list with delete — fix a mistaken entry. */}
-            {weighIns.length > 0 && (
-              <div style={{ marginTop: 14 }}>
-                <div style={{ fontSize: ".8rem", color: "var(--muted)", marginBottom: 6 }}>
-                  Weigh-ins ({weighIns.length}) — tap ✕ to remove a mistake
-                </div>
-                <div style={{ maxHeight: 180, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
-                  {[...weighIns].reverse().map((c) => (
-                    <div key={c.timestamp} style={{ display: "flex", justifyContent: "space-between",
-                      alignItems: "center", padding: "6px 10px", borderRadius: 8, background: "rgba(255,255,255,.04)" }}>
-                      <span style={{ fontSize: ".88rem", fontWeight: 600 }}>
-                        {c.weight} lbs
-                        <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: ".76rem", marginLeft: 8 }}>
-                          {new Date(c.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                        </span>
-                      </span>
-                      <button onClick={() => deleteWeighIn(c.timestamp)} title="Delete this weigh-in"
-                        style={{ background: "transparent", border: "none", color: "#e5484d",
-                          cursor: "pointer", fontSize: "1rem", lineHeight: 1, padding: "2px 6px" }}>✕</button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        <WeightChartModal checkIns={(planData && planData.checkIns) || []} goalWeight={g} currentWeight={w}
+          rangeLow={rLo} rangeHigh={rHi} startWeight={start}
+          onDelete={deleteWeighIn} onClose={() => setShowChart(false)} />
       )}
     </div>
   );
@@ -9489,6 +9514,16 @@ export default function App() {
               // One entry per date: replace any existing check-ins for this date.
               const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);
               return {...p, checkIns:[...others, checkin]};
+            })}
+            onDeleteCheckIn={(ts)=>setDataAndSave(p=>{
+              const checkIns = (p.checkIns||[]).filter(c => c.timestamp !== ts);
+              // Re-point current weight to the latest remaining weigh-in, or back
+              // to the starting weight if no weigh-ins remain (matches ClientHome).
+              const remaining = checkIns.filter(c => c.weight).sort((a,b)=>a.timestamp-b.timestamp);
+              const next = {...p, checkIns};
+              if (remaining.length) next.weightLbs = remaining[remaining.length-1].weight;
+              else if (p.startWeightLbs) next.weightLbs = p.startWeightLbs;
+              return next;
             })}
             onUpdateNotes={(text)=>setDataAndSave(p=>({...p, trainerNotes:text}))}
             onUpdateCardio={(day,idx,field,val)=>setDataAndSave(p=>{

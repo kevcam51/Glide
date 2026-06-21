@@ -261,6 +261,18 @@ enabled (Blaze has no default spending cap).
   is outlined, the selected date is filled, and ‹ › navigate months (any past/future date reachable).
   Tapping a day selects it — which, via the Session-15 pre-fill, loads any existing entry for editing.
   Pure UI; reads `data.checkIns`. No `firestore.rules` change.
+- Session 17: **Shared weight-progress popup in Results, too (non-Blaze).** The full-screen
+  weight-progress popup (the value-labeled, horizontally-scrollable `ProgressChart` plus a list of
+  weigh-ins each with a **✕ delete**) was extracted out of the Client Dashboard into a single reusable
+  component, `WeightChartModal`, and is now ALSO available from the full-plan **Results → Pro Tracking**
+  chart: a "Tap chart to add / remove weigh-ins" hint sits under the chart, and tapping it opens the same
+  popup the client sees. New `onDeleteCheckIn` handler on `Results` (wired in App) removes a weigh-in by
+  timestamp and re-points current weight to the latest remaining weigh-in, or back to `startWeightLbs` if
+  none remain — matching the client-side `deleteWeighIn`. `WeightChartModal` takes an optional
+  `startWeight` (draws a "start → now" segment when only one real weigh-in exists) and an optional
+  `onDelete(timestamp)` (omit for read-only). ClientHome's old inline modal was replaced by the shared
+  component (its `deleteWeighIn` passed as `onDelete`). Pure refactor + one new handler; trainer and
+  client now manage weigh-ins from the exact same UI. No `firestore.rules` change.
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
   testing — these are not real users and can be cleared. The Session-13/14 testing also left **test
   weigh-ins/check-ins** (incl. some old same-day duplicates from before the Session-15 one-per-date
