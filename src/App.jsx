@@ -7610,6 +7610,28 @@ function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
   );
 }
 
+// ─── Trainer → client requests (Session 19) ─────────────────────────────────
+// A trainer sends a linked client a small actionable to-do that surfaces on the
+// client's home screen. Stored as an append-only array in the CLIENT's account
+// under "caliq-requests" — the trainer already has write access there via
+// firestore.rules (trainer ↔ client kv), so no rules change. Each item:
+//   { id, fromUid, fromName, type, prompt, status:"open"|"done", createdAt, doneAt }
+// The reverse direction (client → trainer) needs server-side writes (Blaze).
+const REQUEST_TEMPLATES = [
+  { type: "log_food",    icon: "🍽️", label: "Log today's food",  prompt: "Please log what you ate today." },
+  { type: "weigh_in",    icon: "⚖️", label: "Do a weigh-in",     prompt: "Please record today's weight." },
+  { type: "log_workout", icon: "🏋️", label: "Record a workout",  prompt: "Please record your workout for today." },
+  { type: "enter_info",  icon: "📝", label: "Enter your info",   prompt: "Please fill in your details and goals so we can build your plan." },
+];
+const REQUEST_KEY = "caliq-requests";
+
+// Read / write a user's request list (trainer reads a client's via getForUser;
+// the client reads their own via window.storage). Always newest-first, capped.
+async function readRequestsFor(uid, getForUser) {
+  try { const r = await getForUser(uid, REQUEST_KEY); return r && r.value ? (JSON.parse(r.value) || []) : []; }
+  catch { return []; }
+}
+
 // ─── Trainer overview dashboard (Session 7) ─────────────────────────────────
 // A role-aware home view for trainers: every client profile at a glance —
 // weight vs goal, daily calorie target, last activity, and plan status. Reads
@@ -7642,7 +7664,7 @@ function computeClientCalories(d) {
   return { tdee, target };
 }
 
-function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename }) {
+function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename, meUid, meName, meRole }) {
   const [details, setDetails] = useState({}); // id -> { tdee, target }
   const [lastLog, setLastLog] = useState({}); // id -> "YYYY-MM-DD"
   const [sort, setSort] = useState("attention");
@@ -7655,6 +7677,12 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const [confirmUnlink, setConfirmUnlink] = useState(null); // clientUid awaiting unlink confirm
   const [linkBusy, setLinkBusy] = useState(false);
   const [cMsg, setCMsg] = useState("");
+  // Request composer (Session 19): clientUid currently composing, the free-text
+  // custom draft, and a busy flag while a request write is in flight.
+  const [composingFor, setComposingFor] = useState(null);
+  const [reqDraft, setReqDraft] = useState("");
+  const [reqBusy, setReqBusy] = useState(false);
+  const [showDoneFor, setShowDoneFor] = useState(null); // clientUid whose done-list is expanded
 
   // Load connected clients (real accounts) and read each one's SHARED plan
   // (caliq-self in their account) so the overview shows live data, not a copy.
@@ -7674,13 +7702,14 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           if (!lastLogDate || d > lastLogDate) lastLogDate = d;
         });
       } catch (e) { /* ignore */ }
+      const requests = await readRequestsFor(c.uid, getForUser);
       const cal = data ? computeClientCalories(data) : null;
       const nm = data && (data.firstName || data.lastName)
         ? `${data.firstName || ""} ${data.lastName || ""}`.trim()
         : (c.displayName || c.email || "Client");
       return { uid: c.uid, name: nm, hasPlan: !!data,
         weight: data ? data.weightLbs : "", goal: data ? data.goalWeight : "",
-        target: cal ? cal.target : null, lastLogDate };
+        target: cal ? cal.target : null, lastLogDate, requests };
     }));
     setClients(rows);
   };
@@ -7717,6 +7746,43 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       await loadClients();
     } catch (e) { setCMsg((e && e.message) || "Couldn't unlink that plan."); }
     finally { setLinkBusy(false); }
+  };
+
+  // Send a request to a client: append to their caliq-requests and drop a note
+  // into their activity history so the feed reflects it. (Session 19)
+  const sendRequest = async (clientUid, item) => {
+    setReqBusy(true); setCMsg("");
+    try {
+      const cur = await readRequestsFor(clientUid, getForUser);
+      const now = Date.now();
+      const req = { id: `r${now}${Math.floor(Math.random() * 1000)}`,
+        fromUid: meUid, fromName: meName || "Your trainer",
+        type: item.type || "custom", prompt: item.prompt,
+        status: "open", createdAt: now, doneAt: null };
+      await setForUser(clientUid, REQUEST_KEY, JSON.stringify([req, ...cur].slice(0, 100)));
+      try {
+        const hr = await getForUser(clientUid, "caliq-history-self");
+        const hist = hr && hr.value ? (JSON.parse(hr.value) || []) : [];
+        const ev = { id: `e${now}${Math.floor(Math.random() * 1000)}`, uid: meUid,
+          role: meRole || "head_trainer", name: meName || "Your trainer",
+          action: `sent a request: "${item.prompt}"`, ts: now };
+        await setForUser(clientUid, "caliq-history-self", JSON.stringify([ev, ...hist].slice(0, 250)));
+      } catch { /* history is best-effort */ }
+      setComposingFor(null); setReqDraft("");
+      setCMsg("Request sent.");
+      await loadClients();
+    } catch (e) { setCMsg((e && e.message) || "Couldn't send that request."); }
+    finally { setReqBusy(false); }
+  };
+  // Remove a request the trainer sent (e.g. by mistake, or to clear a done one).
+  const cancelRequest = async (clientUid, reqId) => {
+    setReqBusy(true);
+    try {
+      const cur = await readRequestsFor(clientUid, getForUser);
+      await setForUser(clientUid, REQUEST_KEY, JSON.stringify(cur.filter((r) => r.id !== reqId)));
+      await loadClients();
+    } catch { /* ignore */ }
+    finally { setReqBusy(false); }
   };
 
   useEffect(() => {
@@ -7818,13 +7884,24 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                   border:"1px solid var(--border,rgba(255,255,255,.2))", background:"transparent",
                   color:"var(--text)", cursor:"pointer", textAlign:"left" };
                 const mPrimary = { ...mBtn, background:"var(--accent)", color:"#0b0b12", border:"none", fontWeight:700 };
+                const reqs = c.requests || [];
+                const openReqs = reqs.filter((r) => r.status !== "done");
+                const doneReqs = reqs.filter((r) => r.status === "done");
                 return (
                   <div key={c.uid}
                     style={{ padding: "12px 14px", borderRadius: "10px",
                       background: "rgba(255,255,255,.04)", border: "1px solid var(--accent)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                       <span style={{ fontWeight: 700, fontSize: ".95rem" }}>{c.name}</span>
-                      <span style={{ fontSize: ".7rem", color: "var(--accent)", fontWeight: 700 }}>🔗 Shared</span>
+                      <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        {openReqs.length > 0 && (
+                          <span style={{ fontSize: ".68rem", fontWeight: 700, color: "#0b0b12",
+                            background: "var(--accent)", borderRadius: 10, padding: "2px 8px" }}>
+                            📬 {openReqs.length} open
+                          </span>
+                        )}
+                        <span style={{ fontSize: ".7rem", color: "var(--accent)", fontWeight: 700 }}>🔗 Shared</span>
+                      </span>
                     </div>
                     {c.hasPlan ? (
                       <>
@@ -7892,8 +7969,11 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                       </div>
                     ) : (
                       <div style={{ display: "flex", gap: "8px", marginTop: 10, flexWrap: "wrap" }}>
+                        <button style={mPrimary} onClick={() => { setComposingFor(composingFor === c.uid ? null : c.uid); setReqDraft(""); }}>
+                          ✉️ Send request
+                        </button>
                         {c.hasPlan && (
-                          <button style={mPrimary} onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>Open plan</button>
+                          <button style={mBtn} onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>Open plan</button>
                         )}
                         <button style={mBtn} onClick={() => setLinkingFor(c.uid)}>
                           {c.hasPlan ? "Re-link a different plan" : "Link a profile"}
@@ -7904,6 +7984,72 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         {c.hasPlan && (
                           <button style={{ ...mBtn, color: "#e5484d", borderColor: "rgba(229,72,77,.4)" }}
                             onClick={() => setConfirmUnlink(c.uid)}>Unlink</button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Request composer (Session 19) */}
+                    {composingFor === c.uid && (
+                      <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8,
+                        background: "rgba(255,255,255,.03)", border: "1px solid var(--border,rgba(255,255,255,.12))" }}>
+                        <div style={{ fontSize: ".74rem", color: "var(--muted)", marginBottom: 6 }}>
+                          Quick requests — tap to send:
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                          {REQUEST_TEMPLATES.map((t) => (
+                            <button key={t.type} style={mBtn} disabled={reqBusy}
+                              onClick={() => sendRequest(c.uid, t)}>
+                              {t.icon} {t.label}
+                            </button>
+                          ))}
+                        </div>
+                        <div style={{ fontSize: ".74rem", color: "var(--muted)", marginBottom: 4 }}>
+                          Or write a custom message:
+                        </div>
+                        <textarea value={reqDraft} onChange={(e) => setReqDraft(e.target.value)}
+                          placeholder="e.g. Send me a progress photo this week"
+                          rows={2} style={{ width: "100%", boxSizing: "border-box", borderRadius: 6, resize: "vertical",
+                            border: "1px solid var(--border,rgba(255,255,255,.2))", background: "var(--bg,#0d0d18)",
+                            color: "var(--text)", padding: "8px 10px", fontSize: ".82rem", fontFamily: "inherit" }} />
+                        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                          <button style={{ ...mPrimary, opacity: reqDraft.trim() && !reqBusy ? 1 : .5 }}
+                            disabled={!reqDraft.trim() || reqBusy}
+                            onClick={() => sendRequest(c.uid, { type: "custom", prompt: reqDraft.trim() })}>
+                            {reqBusy ? "Sending…" : "Send custom"}
+                          </button>
+                          <button style={mBtn} disabled={reqBusy} onClick={() => { setComposingFor(null); setReqDraft(""); }}>Cancel</button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Sent requests — open (with cancel) + collapsible done list */}
+                    {(openReqs.length > 0 || doneReqs.length > 0) && (
+                      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+                        {openReqs.map((r) => (
+                          <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                            gap: 8, fontSize: ".8rem", padding: "6px 10px", borderRadius: 6,
+                            background: "rgba(232,255,79,.06)", border: "1px solid rgba(232,255,79,.18)" }}>
+                            <span style={{ color: "var(--text)" }}>📬 {r.prompt}</span>
+                            <button onClick={() => cancelRequest(c.uid, r.id)} disabled={reqBusy} title="Cancel this request"
+                              style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", fontSize: ".9rem" }}>✕</button>
+                          </div>
+                        ))}
+                        {doneReqs.length > 0 && (
+                          <>
+                            <button onClick={() => setShowDoneFor(showDoneFor === c.uid ? null : c.uid)}
+                              style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer",
+                                fontSize: ".74rem", textAlign: "left", padding: "2px 0" }}>
+                              {showDoneFor === c.uid ? "▾" : "▸"} {doneReqs.length} completed
+                            </button>
+                            {showDoneFor === c.uid && doneReqs.map((r) => (
+                              <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                                gap: 8, fontSize: ".78rem", padding: "5px 10px", borderRadius: 6, background: "rgba(255,255,255,.03)" }}>
+                                <span style={{ color: "var(--muted)" }}>✓ {r.prompt}</span>
+                                <button onClick={() => cancelRequest(c.uid, r.id)} disabled={reqBusy} title="Remove"
+                                  style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", fontSize: ".9rem" }}>✕</button>
+                              </div>
+                            ))}
+                          </>
                         )}
                       </div>
                     )}
@@ -8034,6 +8180,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
   const [showChart, setShowChart] = useState(false); // progress chart popup open
   const [msg, setMsg] = useState("");              // calorie-log message
   const [wtMsg, setWtMsg] = useState("");          // weight-log message
+  const [requests, setRequests] = useState([]);    // trainer → client requests (Session 19)
   // The full plan wrapper ({data, step, …}) kept in memory so weight logging
   // appends to the latest in-memory copy (no Firestore round-trip per log, which
   // would race and drop points when logging quickly).
@@ -8053,8 +8200,23 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
       const r = await window.storage.get(logKey);
       setLog(r && r.value ? (JSON.parse(r.value) || {}) : {});
     } catch { setLog({}); }
+    try {
+      const r = await window.storage.get(REQUEST_KEY);
+      setRequests(r && r.value ? (JSON.parse(r.value) || []) : []);
+    } catch { setRequests([]); }
   };
   useEffect(() => { load(); }, []);
+
+  // Mark a request done (the client completed it). Updates status in their own
+  // caliq-requests and notes it in history so the trainer's feed reflects it.
+  const markRequestDone = async (id) => {
+    const next = requests.map((r) => r.id === id
+      ? { ...r, status: "done", doneAt: Date.now() } : r);
+    setRequests(next);
+    try { await window.storage.set(REQUEST_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+    const done = requests.find((r) => r.id === id);
+    if (done) await appendHistory(`completed request: "${done.prompt}"`);
+  };
 
   // Cooperative history (same shape App.appendHistory writes) so the trainer's
   // activity feed reflects quick-logs done from this dashboard.
@@ -8209,6 +8371,42 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
             ↻ Refresh
           </button>
         </div>
+
+        {/* Trainer requests — actionable to-dos at the very top (Session 19). */}
+        {requests.filter((r) => r.status !== "done").length > 0 && (
+          <div className="card" style={{ border: "1px solid var(--accent)", background: "rgba(232,255,79,.05)" }}>
+            <div className="card-title" style={{ marginBottom: 4 }}>📬 From your trainer</div>
+            <div className="card-sub" style={{ marginBottom: 12 }}>
+              {requests.filter((r) => r.status !== "done").length} thing{requests.filter((r) => r.status !== "done").length !== 1 ? "s" : ""} to do
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {requests.filter((r) => r.status !== "done").map((r) => {
+                const tmpl = REQUEST_TEMPLATES.find((t) => t.type === r.type);
+                return (
+                  <div key={r.id} style={{ padding: "10px 12px", borderRadius: 8,
+                    background: "rgba(255,255,255,.04)", border: "1px solid var(--border,rgba(255,255,255,.12))" }}>
+                    <div style={{ fontSize: ".9rem", color: "var(--text)", marginBottom: 8 }}>
+                      {tmpl ? `${tmpl.icon} ` : "📝 "}{r.prompt}
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button onClick={onOpenPlan}
+                        style={{ padding: "7px 12px", fontSize: ".8rem", fontWeight: 700, borderRadius: 7,
+                          border: "none", background: "var(--accent)", color: "#0b0b12", cursor: "pointer" }}>
+                        Do it now →
+                      </button>
+                      <button onClick={() => markRequestDone(r.id)}
+                        style={{ padding: "7px 12px", fontSize: ".8rem", fontWeight: 600, borderRadius: 7,
+                          border: "1px solid var(--border,rgba(255,255,255,.2))", background: "transparent",
+                          color: "var(--text)", cursor: "pointer" }}>
+                        ✓ Mark done
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {planData === undefined ? (
           <div className="card"><div className="card-sub">Loading your plan…</div></div>
@@ -9426,6 +9624,7 @@ export default function App() {
         onOpenClientPlan={openClientPlan}
         onLinked={removeLocalProfileById} onCopyToLocal={copyClientToLocal}
         onRename={renameProfile}
+        meUid={meUid} meName={meName} meRole={role}
       />;
     }
     return <ProfileSelector

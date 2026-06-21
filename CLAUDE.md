@@ -296,6 +296,24 @@ enabled (Blaze has no default spending cap).
   test trainer account (`trainer.uitest@calorieiq-test.com`) + a "Test Client" local plan were created
   in Firebase during this session for visual testing; clearable. `.claude/launch.json` was added (dev
   server preview config).
+- Session 19: **Trainer → client requests (non-Blaze).** A trainer can send a linked client a small
+  actionable to-do that surfaces on the client's home screen. **Storage:** an append-only array in the
+  CLIENT's account under `caliq-requests` (item shape `{ id, fromUid, fromName, type, prompt,
+  status:"open"|"done", createdAt, doneAt }`, newest-first, capped 100). The trainer already has write
+  access to the client's kv via `firestore.rules` (trainer↔client), so **no rules change**. **Trainer
+  side** (`TrainerDashboard` connected-clients card): a **✉️ Send request** button opens a composer with
+  4 quick templates (`REQUEST_TEMPLATES`: log food / weigh-in / record workout / enter info) **plus a
+  custom free-text** message; sends via `getForUser`→`setForUser` (read-append-write) and drops a note
+  into the client's `caliq-history-self` so the activity feed reflects it. Each client card shows a
+  **📬 N open** badge, the open requests (each with a ✕ to cancel), and a collapsible "N completed"
+  list. New props `meUid`/`meName`/`meRole` passed to `TrainerDashboard`; new module-level
+  `REQUEST_TEMPLATES`, `REQUEST_KEY`, `readRequestsFor`. **Client side** (`ClientHome`): open requests
+  render as task cards at the very TOP of the home (above the plan, so "enter your info" works before a
+  plan exists) — each with **"Do it now →"** (opens their plan) and **"✓ Mark done"** (sets status=done,
+  writes back to their own `caliq-requests`, logs to history). The reverse direction (client → trainer)
+  needs server-side writes and waits for **Blaze**. Verified end-to-end with a second test account
+  (`client.uitest@calorieiq-test.com`, "Casey Client", auto-linked to the test trainer via the invite
+  link): send → receive → mark done → trainer sees completed. No `firestore.rules` change.
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
   testing — these are not real users and can be cleared. The Session-13/14 testing also left **test
   weigh-ins/check-ins** (incl. some old same-day duplicates from before the Session-15 one-per-date
@@ -328,7 +346,9 @@ enabled (Blaze has no default spending cap).
   the trainer clones across clients; **medical/dietary-restriction variants**; and **A/B approaches**
   to see what works for a given client. No Blaze needed — it's a data-model + UI change (a list of
   plans per client with an "active" flag).
-- **Requests / to-dos between trainer and client (Kevin's idea).** Either side can send the other a
+- **Requests / to-dos between trainer and client (Kevin's idea).** **Trainer→client half BUILT
+  (Session 19)** — see the build log above; the **client→trainer** half below still needs Blaze.
+  Either side can send the other a
   small actionable request that surfaces on the recipient's home screen. Trainer → client examples:
   "enter your name," "log today's food," "record your workout," "do a weigh-in." It pops up as a
   task card on the client's home; the client fills it in. Client → trainer examples: "please enter
