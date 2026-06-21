@@ -364,6 +364,24 @@ enabled (Blaze has no default spending cap).
   `linkPlan`, and `unlinkPlan` all generalized from `"caliq-self"` to the active plan's key (so per-plan
   logs/history route correctly for the trainer too). Verified end-to-end: back-compat load, trainer
   create/switch/active, client switch with fully separate per-plan data. No `firestore.rules` change.
+- Session 22: **Calendar view — month / week / day + back-dated logging (non-Blaze).** A full calendar
+  over a plan's daily logs + check-ins, reached via a **📅 Calendar** button on the Daily Dashboard
+  (`CalendarView` component; works for the client AND a trainer viewing a client because it goes through
+  the existing remote-aware log I/O). **Three views** via a Month/Week/Day toggle: **Month** = grid with
+  per-day indicator dots (🟢 food logged · 🔵 weigh-in · 🟠 workout · ◦ scheduled-workout-that-weekday),
+  today outlined, tap a day → Day view; **Week** = the 7 days of a week with per-day summaries; **Day** =
+  one date's detail with **back-dated logging** — calories (quick +100/+250/+500/Clear) + meals (reuses
+  `MealLog`), **weight** (`WeightDayLogger`, commits on Log/Enter), and **mark workout done**, plus the
+  recurring schedule for that weekday (`data.cardio`/`data.strength`, keyed by full day name). **Data
+  plumbing:** date keys are UTC `YYYY-MM-DD` to match existing log keys; new App callbacks `onReadDay`/
+  `onWriteDay`/`onListLoggedDays` (built on the remote-aware `logRead`/`logWrite` + a new `logList`) read/
+  write/list `caliq-log-{activeId}-{date}`; weight/workout write to `data.checkIns` via the existing
+  `onSaveCheckIn` (replace-by-date) so they feed the progress chart too. Verified end-to-end: logged
+  food + weight + a workout on a PAST date, indicators appeared in month + week, all three views correct.
+  Known minor: two check-in writes in the SAME tick (e.g. weight + workout before a re-render) can
+  overwrite since each rebuilds the full entry from current `data` — fine for normal tapping. No
+  `firestore.rules` change. **Roadmap note:** this builds the broader calendar the Session-16 highlighted-
+  date check-in picker hinted at; daily/weekly/monthly are all shipped here.
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
   testing — these are not real users and can be cleared. The Session-13/14 testing also left **test
   weigh-ins/check-ins** (incl. some old same-day duplicates from before the Session-15 one-per-date

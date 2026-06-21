@@ -6087,10 +6087,301 @@ function ActivityFeed({ history, onRefresh }) {
   );
 }
 
+// ─── Calendar view (Session 22) ──────────────────────────────────────────────
+// Month / week / day calendar over a plan's daily logs + check-ins. Each day
+// shows indicators (food logged / weigh-in / workout / scheduled workout) and
+// can be opened to log or back-date food, weight, and workouts. Date keys are
+// UTC YYYY-MM-DD to match the app's existing log keys (caliq-log-{id}-{date}).
+function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn }) {
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const keyOf = (y, m, d) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
+  const parseKey = (k) => { const [y, m, d] = k.split("-").map(Number); return { y, m: m - 1, d }; };
+  const mondayIdx = (k) => (new Date(k + "T00:00:00Z").getUTCDay() + 6) % 7; // Mon=0..Sun=6
+  const weekdayName = (k) => DAYS[mondayIdx(k)];
+  const fmtLong = (k) => new Date(k + "T00:00:00Z").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  const fmtShort = (k) => new Date(k + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+
+  const [view, setView] = useState("month");
+  const tp = parseKey(todayKey);
+  const [cur, setCur] = useState({ y: tp.y, m: tp.m });   // month cursor
+  const [weekStart, setWeekStart] = useState(null);       // Monday key of the shown week
+  const [sel, setSel] = useState(todayKey);               // selected day
+  const [loggedDays, setLoggedDays] = useState([]);       // dates with a log entry
+  const [dayLog, setDayLog] = useState(null);             // selected day's log
+
+  useEffect(() => { (async () => setLoggedDays(await onListLoggedDays()))(); }, []);
+  useEffect(() => { (async () => setDayLog(await onReadDay(sel)))(); }, [sel]);
+
+  // Check-in lookup by date (weight / workout / mood).
+  const ciByDate = {};
+  (data.checkIns || []).forEach((c) => { ciByDate[c.date] = c; });
+  const scheduledFor = (k) => {
+    const dn = weekdayName(k);
+    const c = (data.cardio && data.cardio[dn]) || [];
+    const s = (data.strength && data.strength[dn]) || [];
+    return c.length + s.length;
+  };
+  const markLogged = (k) => setLoggedDays((prev) => prev.includes(k) ? prev : [...prev, k]);
+
+  // Indicator dots for a day cell.
+  const dots = (k) => {
+    const ci = ciByDate[k];
+    return { food: loggedDays.includes(k), weight: !!(ci && ci.weight), workout: !!(ci && ci.workedOut), sched: scheduledFor(k) > 0 };
+  };
+
+  // ── Day-detail back-dated logging ──
+  const writeDay = (next) => { setDayLog(next); onWriteDay(sel, next); if ((next.calories || 0) > 0 || (next.meals || []).length) markLogged(sel); };
+  const addCal = (n) => writeDay({ ...(dayLog || {}), calories: Math.max(0, (dayLog?.calories || 0) + n) });
+  const addMeal = (meal) => {
+    const m = { id: `m${Date.now()}${Math.floor(Math.random() * 1000)}`, name: meal.name || "", type: meal.type || "",
+      calories: Number(meal.calories) || 0, protein: Number(meal.protein) || 0, carbs: Number(meal.carbs) || 0, fat: Number(meal.fat) || 0 };
+    const d = dayLog || {};
+    writeDay({ ...d, meals: [...(d.meals || []), m], calories: (d.calories || 0) + m.calories,
+      protein: (d.protein || 0) + m.protein, carbs: (d.carbs || 0) + m.carbs, fat: (d.fat || 0) + m.fat });
+  };
+  const removeMeal = (id) => {
+    const d = dayLog || {}; const m = (d.meals || []).find((x) => x.id === id); if (!m) return;
+    writeDay({ ...d, meals: (d.meals || []).filter((x) => x.id !== id), calories: Math.max(0, (d.calories || 0) - m.calories),
+      protein: Math.max(0, (d.protein || 0) - m.protein), carbs: Math.max(0, (d.carbs || 0) - m.carbs), fat: Math.max(0, (d.fat || 0) - m.fat) });
+  };
+  const editMeal = (id, fields) => {
+    const d = dayLog || {}; const old = (d.meals || []).find((x) => x.id === id); if (!old) return;
+    const nm = { ...old, ...fields, calories: Number(fields.calories) || 0, protein: Number(fields.protein) || 0, carbs: Number(fields.carbs) || 0, fat: Number(fields.fat) || 0 };
+    writeDay({ ...d, meals: (d.meals || []).map((x) => x.id === id ? nm : x),
+      calories: Math.max(0, (d.calories || 0) - old.calories + nm.calories),
+      protein: Math.max(0, (d.protein || 0) - old.protein + nm.protein),
+      carbs: Math.max(0, (d.carbs || 0) - old.carbs + nm.carbs),
+      fat: Math.max(0, (d.fat || 0) - old.fat + nm.fat) });
+  };
+
+  const navBtn = { padding: "6px 12px", fontSize: ".85rem", fontWeight: 700, borderRadius: 8, cursor: "pointer",
+    border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)" };
+  const tabBtn = (on) => ({ flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "inherit",
+    fontSize: ".82rem", fontWeight: 700, background: on ? "var(--accent)" : "transparent", color: on ? "#0b0b12" : "var(--muted)" });
+
+  // Header (shared across views)
+  const header = (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ fontSize: "1.15rem", fontWeight: 800 }}>📅 Calendar</div>
+        <button style={navBtn} onClick={onClose}>✕ Close</button>
+      </div>
+      <div style={{ display: "flex", gap: 4, background: "var(--s2)", padding: 4, borderRadius: 10, marginBottom: 14 }}>
+        {["month", "week", "day"].map((v) => (
+          <button key={v} style={tabBtn(view === v)} onClick={() => {
+            if (v === "week" && !weekStart) { const off = mondayIdx(sel); const p = parseKey(sel); setWeekStart(keyOf(p.y, p.m, p.d - off)); }
+            setView(v);
+          }}>{v[0].toUpperCase() + v.slice(1)}</button>
+        ))}
+      </div>
+    </>
+  );
+
+  const legend = (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center", fontSize: ".68rem", color: "var(--muted)", marginTop: 10 }}>
+      <span><span style={{ color: "var(--green)" }}>●</span> food</span>
+      <span><span style={{ color: "var(--blue)" }}>●</span> weigh-in</span>
+      <span><span style={{ color: "var(--orange)" }}>●</span> workout</span>
+      <span><span style={{ color: "var(--muted)" }}>◦</span> scheduled</span>
+    </div>
+  );
+
+  const DayDots = ({ k }) => {
+    const d = dots(k);
+    return (
+      <div style={{ display: "flex", gap: 2, justifyContent: "center", height: 6, marginTop: 2 }}>
+        {d.food && <span style={{ width: 5, height: 5, borderRadius: 3, background: "var(--green)" }} />}
+        {d.weight && <span style={{ width: 5, height: 5, borderRadius: 3, background: "var(--blue)" }} />}
+        {d.workout && <span style={{ width: 5, height: 5, borderRadius: 3, background: "var(--orange)" }} />}
+        {!d.workout && d.sched && <span style={{ width: 5, height: 5, borderRadius: 3, border: "1px solid var(--muted)" }} />}
+      </div>
+    );
+  };
+
+  // ── Month view ──
+  const monthView = () => {
+    const first = new Date(Date.UTC(cur.y, cur.m, 1));
+    const startPad = (first.getUTCDay() + 6) % 7; // Mon-first
+    const daysIn = new Date(Date.UTC(cur.y, cur.m + 1, 0)).getUTCDate();
+    const cells = [];
+    for (let i = 0; i < startPad; i++) cells.push(null);
+    for (let d = 1; d <= daysIn; d++) cells.push(d);
+    while (cells.length % 7) cells.push(null);
+    const monthLbl = first.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    return (
+      <>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <button style={navBtn} onClick={() => setCur((c) => c.m === 0 ? { y: c.y - 1, m: 11 } : { y: c.y, m: c.m - 1 })}>‹</button>
+          <div style={{ fontWeight: 800, fontSize: "1rem" }}>{monthLbl}</div>
+          <button style={navBtn} onClick={() => setCur((c) => c.m === 11 ? { y: c.y + 1, m: 0 } : { y: c.y, m: c.m + 1 })}>›</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4 }}>
+          {DAY_SHORT.map((d) => <div key={d} style={{ textAlign: "center", fontSize: ".62rem", color: "var(--muted)", textTransform: "uppercase" }}>{d[0]}</div>)}
+          {cells.map((d, i) => {
+            if (!d) return <div key={i} />;
+            const k = keyOf(cur.y, cur.m, d);
+            const isToday = k === todayKey;
+            return (
+              <button key={i} onClick={() => { setSel(k); setView("day"); }}
+                style={{ aspectRatio: "1", borderRadius: 8, cursor: "pointer", padding: 2,
+                  border: isToday ? "1px solid var(--accent)" : "1px solid var(--border)",
+                  background: k === sel ? "rgba(232,255,79,.12)" : "var(--surface)", color: "var(--text)",
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ fontSize: ".8rem", fontWeight: isToday ? 800 : 500 }}>{d}</span>
+                <DayDots k={k} />
+              </button>
+            );
+          })}
+        </div>
+        {legend}
+      </>
+    );
+  };
+
+  // ── Week view ──
+  const weekView = () => {
+    const ws = weekStart || (() => { const off = mondayIdx(sel); const p = parseKey(sel); return keyOf(p.y, p.m, p.d - off); })();
+    const wp = parseKey(ws);
+    const days = Array.from({ length: 7 }, (_, i) => keyOf(wp.y, wp.m, wp.d + i));
+    const shift = (n) => { const p = parseKey(ws); setWeekStart(keyOf(p.y, p.m, p.d + n)); };
+    return (
+      <>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <button style={navBtn} onClick={() => shift(-7)}>‹</button>
+          <div style={{ fontWeight: 800, fontSize: ".9rem" }}>{fmtShort(days[0])} – {fmtShort(days[6])}</div>
+          <button style={navBtn} onClick={() => shift(7)}>›</button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {days.map((k) => {
+            const ci = ciByDate[k]; const isToday = k === todayKey;
+            return (
+              <button key={k} onClick={() => { setSel(k); setView("day"); }}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, cursor: "pointer",
+                  border: isToday ? "1px solid var(--accent)" : "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", textAlign: "left" }}>
+                <div style={{ width: 42 }}>
+                  <div style={{ fontSize: ".66rem", color: "var(--muted)", textTransform: "uppercase" }}>{DAY_SHORT[mondayIdx(k)]}</div>
+                  <div style={{ fontSize: "1.1rem", fontWeight: 800 }}>{parseKey(k).d}</div>
+                </div>
+                <div style={{ flex: 1, fontSize: ".78rem", color: "var(--muted)", display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  {loggedDays.includes(k) && <span style={{ color: "var(--green)" }}>🍽️ logged</span>}
+                  {ci && ci.weight && <span style={{ color: "var(--blue)" }}>⚖️ {ci.weight}</span>}
+                  {ci && ci.workedOut && <span style={{ color: "var(--orange)" }}>🏋️ done</span>}
+                  {scheduledFor(k) > 0 && <span>◦ {scheduledFor(k)} scheduled</span>}
+                  {!loggedDays.includes(k) && !(ci && (ci.weight || ci.workedOut)) && scheduledFor(k) === 0 && <span>—</span>}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </>
+    );
+  };
+
+  // ── Day view (with back-dated logging) ──
+  const dayView = () => {
+    const ci = ciByDate[sel] || {};
+    const dn = weekdayName(sel);
+    const cardio = (data.cardio && data.cardio[dn]) || [];
+    const strength = (data.strength && data.strength[dn]) || [];
+    const cals = dayLog ? (dayLog.calories || 0) : 0;
+    const target = tdee ? Math.round(tdee) : null;
+    const goStep = (n) => { const p = parseKey(sel); setSel(keyOf(p.y, p.m, p.d + n)); };
+    const card = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 16, marginBottom: 12 };
+    const lbl = { fontFamily: "'Bebas Neue',sans-serif", fontSize: "1.1rem", letterSpacing: 1.5, color: "var(--accent)", marginBottom: 10 };
+    const quick = { padding: "6px 10px", fontSize: ".78rem", fontWeight: 700, borderRadius: 7, cursor: "pointer", border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)" };
+    return (
+      <>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <button style={navBtn} onClick={() => goStep(-1)}>‹</button>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontWeight: 800, fontSize: ".95rem" }}>{fmtLong(sel)}</div>
+            {sel === todayKey ? <div style={{ fontSize: ".7rem", color: "var(--accent)" }}>Today</div>
+              : sel < todayKey ? <div style={{ fontSize: ".7rem", color: "var(--muted)" }}>Back-dated entry</div>
+              : <div style={{ fontSize: ".7rem", color: "var(--muted)" }}>Future date</div>}
+          </div>
+          <button style={navBtn} onClick={() => goStep(1)}>›</button>
+        </div>
+
+        {/* Food */}
+        <div style={card}>
+          <div style={lbl}>🍽️ Food</div>
+          <div style={{ fontSize: "1.6rem", fontWeight: 800, fontFamily: "'Bebas Neue',sans-serif" }}>
+            {cals.toLocaleString()}{target ? <span style={{ fontSize: ".9rem", color: "var(--muted)", fontWeight: 400 }}> / {target.toLocaleString()} cal</span> : " cal"}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+            {[100, 250, 500].map((n) => <button key={n} style={quick} onClick={() => addCal(n)}>+{n}</button>)}
+            <button style={quick} onClick={() => addCal(-(dayLog?.calories || 0))}>Clear</button>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <MealLog meals={(dayLog && dayLog.meals) || []} onAddMeal={addMeal} onRemoveMeal={removeMeal} onEditMeal={editMeal} />
+          </div>
+        </div>
+
+        {/* Weight */}
+        <div style={card}>
+          <div style={lbl}>⚖️ Weight</div>
+          <WeightDayLogger date={sel} existing={ci.weight} onSave={(w) => {
+            onSaveCheckIn({ date: sel, timestamp: new Date(sel + "T12:00:00Z").getTime(), weight: w,
+              calories: null, hitTarget: null, workedOut: ci.workedOut ?? null, mood: ci.mood ?? null,
+              notes: ci.notes || "", bodyFat: ci.bodyFat ?? null, loggedBy: "calendar", isFuturePlan: sel > todayKey });
+          }} />
+        </div>
+
+        {/* Workout */}
+        <div style={card}>
+          <div style={lbl}>🏋️ Workout</div>
+          {(cardio.length + strength.length) > 0 ? (
+            <div style={{ fontSize: ".82rem", color: "var(--text-secondary)", marginBottom: 10 }}>
+              Scheduled for {dn}: {[...cardio.map((x) => x.type || "cardio"), ...strength.map((x) => x.type || "strength")].join(", ")}
+            </div>
+          ) : (
+            <div style={{ fontSize: ".82rem", color: "var(--muted)", marginBottom: 10 }}>No workout scheduled for {dn}.</div>
+          )}
+          <button onClick={() => onSaveCheckIn({ date: sel, timestamp: new Date(sel + "T12:00:00Z").getTime(),
+            weight: ci.weight ?? null, calories: null, hitTarget: null, workedOut: !ci.workedOut, mood: ci.mood ?? null,
+            notes: ci.notes || "", bodyFat: ci.bodyFat ?? null, loggedBy: "calendar", isFuturePlan: sel > todayKey })}
+            style={{ padding: "9px 14px", fontSize: ".84rem", fontWeight: 700, borderRadius: 9, cursor: "pointer", border: "none",
+              background: ci.workedOut ? "var(--orange)" : "var(--accent)", color: "#0b0b12" }}>
+            {ci.workedOut ? "✓ Worked out — tap to undo" : "Mark workout done"}
+          </button>
+        </div>
+      </>
+    );
+  };
+
+  return (
+    <div>
+      {header}
+      {view === "month" && monthView()}
+      {view === "week" && weekView()}
+      {view === "day" && dayView()}
+    </div>
+  );
+}
+
+// Small controlled weight input for a calendar day (commits on Log/Enter only).
+function WeightDayLogger({ date, existing, onSave }) {
+  const [draft, setDraft] = useState("");
+  useEffect(() => { setDraft(existing ? String(existing) : ""); }, [date, existing]);
+  const commit = () => { const v = parseFloat(draft); if (v > 0) onSave(v); };
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <input value={draft} onChange={(e) => setDraft(e.target.value)} inputMode="decimal" placeholder="e.g. 182"
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
+        style={{ flex: 1, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)", fontSize: ".95rem" }} />
+      <button onClick={commit} style={{ padding: "10px 16px", fontWeight: 700, borderRadius: 8, border: "none", background: "var(--accent)", color: "#0b0b12", cursor: "pointer" }}>
+        {existing ? "Update" : "Log"}
+      </button>
+    </div>
+  );
+}
+
 function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
-  onUpdateCardio, onUpdateStrength, onAddMeal, onRemoveMeal, onEditMeal, history, onRefresh, isRemote }) {
+  onUpdateCardio, onUpdateStrength, onAddMeal, onRemoveMeal, onEditMeal, history, onRefresh, isRemote,
+  onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn }) {
 
+  const [showCalendar, setShowCalendar] = useState(false);
   const [editingWorkout, setEditingWorkout] = useState(null);
   const [expandedStat, setExpandedStat] = useState(null);
   const [expandedSnap, setExpandedSnap] = useState(false);
@@ -6141,6 +6432,15 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const toLose = hasGoal ? Number(weightLbs) - Number(goalWeight) : null;
   const currentWeight = dailyLog.weight || Number(weightLbs);
 
+  if (showCalendar) {
+    return (
+      <div className="dash">
+        <CalendarView data={data} tdee={tdee} onClose={() => setShowCalendar(false)}
+          onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
+          onSaveCheckIn={onSaveCheckIn} onDeleteCheckIn={onDeleteCheckIn} />
+      </div>
+    );
+  }
   return (
     <div className="dash">
       {isRemote && (
@@ -6152,6 +6452,12 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       )}
       <div className="dash-date">{today.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
       <div className="dash-greeting">{firstName ? `Hey ${firstName}` : "Your Daily Plan"}</div>
+      <button onClick={() => setShowCalendar(true)}
+        style={{ display:"block", margin:"0 auto 16px", padding:"9px 16px", fontSize:".82rem", fontWeight:700,
+          borderRadius:"10px", cursor:"pointer", border:"1px solid var(--border)",
+          background:"var(--s2)", color:"var(--text)" }}>
+        📅 Calendar
+      </button>
 
       {/* Streak */}
       <div className="dash-streak">
@@ -9968,9 +10274,31 @@ export default function App() {
       else window.storage.set(key, value);
     } catch (e) {}
   };
+  // Remote-aware key listing (for the calendar's per-day indicators). Returns the
+  // kv keys matching a prefix in whichever account the active plan lives in.
+  const logList = async (prefix) => {
+    try {
+      if (activeRemoteUid) { const r = await listForUser(activeRemoteUid, prefix); return r.keys || []; }
+      const r = await window.storage.list(prefix); return r.keys || [];
+    } catch (e) { return []; }
+  };
   const persistLog = (logObj) => {
     if (!activeId) return;
     logWrite(`caliq-log-${activeId}-${todayKey}`, JSON.stringify(logObj));
+  };
+  // Calendar back-dated logging: read / write / list any date's log for the
+  // active plan (today's log keeps its own state; these are for other dates).
+  const onReadDay = async (date) => {
+    const v = await logRead(`caliq-log-${activeId}-${date}`);
+    return v ? (JSON.parse(v) || {}) : {};
+  };
+  const onWriteDay = (date, logObj) => {
+    logWrite(`caliq-log-${activeId}-${date}`, JSON.stringify(logObj));
+    if (date === todayKey) setDailyLog(logObj); // keep today's live state in sync
+  };
+  const onListLoggedDays = async () => {
+    const keys = await logList(`caliq-log-${activeId}-`);
+    return keys.map((k) => k.slice(-10)); // trailing YYYY-MM-DD
   };
 
   // Append one or more events to the active plan's edit history. Stored with the
@@ -10237,6 +10565,18 @@ export default function App() {
               onEditWorkouts={()=>{setNavFrom("dashboard");setStepAndSave(3);}}
               onLogUpdate={onLogUpdate} dailyLog={dailyLog} streak={streak}
               onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
+              onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
+              onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
+                const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);
+                return {...p, checkIns:[...others, checkin]};
+              })}
+              onDeleteCheckIn={(ts)=>setDataAndSave(p=>{
+                const checkIns = (p.checkIns||[]).filter(c => c.timestamp !== ts);
+                const remaining = checkIns.filter(c => c.weight).sort((a,b)=>a.timestamp-b.timestamp);
+                const next = {...p, checkIns};
+                if (remaining.length) next.weightLbs = remaining[remaining.length-1].weight;
+                return next;
+              })}
               onUpdateCardio={(day,idx,field,val)=>setDataAndSave(p=>{
                 if (field==="_replace") return {...p, cardio:{...p.cardio,[day]:val}};
                 const sessions = Array.isArray(p.cardio[day]) ? [...p.cardio[day]] : [];
