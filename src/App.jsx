@@ -128,6 +128,40 @@ function formatWeeks(w) {
   const mo = Math.round(w / 4.33);
   return `~${mo} month${mo !== 1 ? "s" : ""}`;
 }
+
+// Observed weight trend from logged weigh-ins, via least-squares regression of
+// weight vs. time. Returns { ratePerWeek (lbs/wk; negative = losing), spanDays,
+// n } or null when there isn't enough spread to be meaningful (need 2+ points
+// across at least ~3 days, so same-day logs don't produce a bogus rate).
+function weightTrend(checkIns) {
+  const pts = [...(checkIns || [])].filter(c => c.weight && c.timestamp)
+    .sort((a, b) => a.timestamp - b.timestamp);
+  if (pts.length < 2) return null;
+  const t0 = pts[0].timestamp;
+  const spanDays = (pts[pts.length - 1].timestamp - t0) / 86400000;
+  if (spanDays < 3) return null;
+  const xs = pts.map(p => (p.timestamp - t0) / 86400000); // days since first
+  const ys = pts.map(p => p.weight);
+  const n = xs.length;
+  const sx = xs.reduce((a, b) => a + b, 0);
+  const sy = ys.reduce((a, b) => a + b, 0);
+  const sxx = xs.reduce((a, b) => a + b * b, 0);
+  const sxy = xs.reduce((a, _, i) => a + xs[i] * ys[i], 0);
+  const denom = n * sxx - sx * sx;
+  if (denom === 0) return null;
+  const slopePerDay = (n * sxy - sx * sy) / denom; // lbs/day
+  return { ratePerWeek: slopePerDay * 7, spanDays, n };
+}
+
+// Weeks to move from `current` to `target` at `ratePerWeek`. Returns null when
+// the trend isn't heading toward the target (wrong direction / flat).
+function etaWeeks(current, target, ratePerWeek) {
+  const remaining = target - current; // signed
+  if (Math.abs(remaining) < 0.05) return 0; // effectively there
+  if (!ratePerWeek) return null;
+  if ((remaining < 0) === (ratePerWeek < 0)) return remaining / ratePerWeek;
+  return null; // trending away
+}
 function projectedLoss(weeks, weeklyDeficitCal) {
   return (weeklyDeficitCal / 3500) * weeks;
 }
@@ -1450,7 +1484,7 @@ body{
 .checkin-mood{display:flex;gap:6px}
 .mood-btn{
   flex:1;padding:10px 4px;border-radius:8px;border:1.5px solid var(--border);
-  background:var(--s2);cursor:pointer;font-size:1.2rem;text-align:center;
+  background:var(--s2);color:var(--text);cursor:pointer;font-size:1.2rem;text-align:center;
   transition:all .15s;-webkit-tap-highlight-color:transparent;
 }
 .mood-btn.active{border-color:var(--accent);background:var(--accent-dim)}
@@ -6642,6 +6676,25 @@ function DailyCheckIn({ data, onSaveCheckIn }) {
   const isPast = checkDate < today;
   const canSave = weight && hitTarget !== null && checkDate;
 
+  // When the date changes, pre-fill the form from any existing entry for that
+  // date (so saving edits it), or reset to a blank entry for a new date.
+  useEffect(() => {
+    const ex = (data.checkIns || []).find(c => c.date === checkDate);
+    if (ex) {
+      setWeight(ex.weight != null ? String(ex.weight) : "");
+      setCalories(ex.calories != null ? String(ex.calories) : "");
+      setHitTarget(ex.hitTarget ?? null);
+      setWorkedOut(ex.workedOut ?? null);
+      setMood(ex.mood ?? null);
+      setNotes(ex.notes || "");
+      setBodyFatLog(ex.bodyFat != null ? String(ex.bodyFat) : "");
+    } else {
+      setWeight(data.weightLbs || "");
+      setCalories(""); setHitTarget(null); setWorkedOut(null); setMood(null);
+      setNotes(""); setBodyFatLog("");
+    }
+  }, [checkDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSave = () => {
     const checkin = {
       date: checkDate,
@@ -6682,8 +6735,8 @@ function DailyCheckIn({ data, onSaveCheckIn }) {
           style={{width:"100%",padding:"10px 12px",borderRadius:"8px",border:`1.5px solid ${isFuture?"var(--purple)":isPast?"var(--yellow)":"var(--border)"}`,background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".88rem",outline:"none"}} />
       </div>
       {existingForDate && (
-        <div style={{fontSize:".78rem",color:"var(--yellow)",marginBottom:"10px",padding:"8px 10px",background:"rgba(255,204,68,.06)",borderRadius:"8px",border:"1px solid rgba(255,204,68,.15)"}}>
-          ⚠️ A check-in already exists for {checkDate} ({existingForDate.weight} lbs). Saving will add another entry for this date.
+        <div style={{fontSize:".78rem",color:"var(--green)",marginBottom:"10px",padding:"8px 10px",background:"rgba(79,255,176,.06)",borderRadius:"8px",border:"1px solid rgba(79,255,176,.15)"}}>
+          ✏️ Editing your existing entry for {checkDate}. Saving updates it (one entry per date).
         </div>
       )}
 
@@ -7900,7 +7953,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
     await writeLog({ ...log, weight: v });
     try {
       // Work from the in-memory plan (updated synchronously before the async
-      // write) so rapid logs each append a point instead of racing the network.
+      // write) so rapid logs stay consistent instead of racing the network.
       const obj = planWrapRef.current
         ? JSON.parse(JSON.stringify(planWrapRef.current)) : { data: {}, step: 0 };
       const d = obj.data || (obj.data = {});
@@ -7908,13 +7961,14 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
       if (d.startWeightLbs == null || d.startWeightLbs === "") d.startWeightLbs = prev;
       d.weightLbs = v;
       // Record in check-in history — the app's weight-history source (feeds the
-      // progress chart + trainer view). Every weigh-in is its own point (so the
-      // chart shows a dot per log, even multiple on the same day).
+      // progress chart + trainer view). One entry per day: replace today's
+      // weigh-in (and clear any same-day duplicates), matching the check-in editor.
       if (!Array.isArray(d.checkIns)) d.checkIns = [];
-      d.checkIns.push({ date: todayKey, timestamp: Date.now(), weight: v, calories: null,
-        hitTarget: null, workedOut: null, mood: null, notes: "", bodyFat: null,
-        loggedBy: "client", isFuturePlan: false });
-      planWrapRef.current = obj;   // update memory FIRST so the next log stacks
+      d.checkIns = d.checkIns.filter(c => c.date !== todayKey);
+      d.checkIns.push({ date: todayKey, timestamp: new Date(todayKey + "T12:00:00").getTime(),
+        weight: v, calories: null, hitTarget: null, workedOut: null, mood: null, notes: "",
+        bodyFat: null, loggedBy: "client", isFuturePlan: false });
+      planWrapRef.current = obj;   // update memory FIRST so the next log is consistent
       setPlanData(d);
       await window.storage.set("caliq-self", JSON.stringify(obj));
     } catch { /* ignore */ }
@@ -7974,6 +8028,19 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
     chartCheckIns = [{ date: new Date(firstTs - 86400000).toISOString().slice(0, 10),
       timestamp: firstTs - 86400000, weight: start, hitTarget: null }, ...allCheckIns];
   }
+  // Realistic time-to-goal from the client's ACTUAL logged trend (not the
+  // theoretical 1 lb/wk). Needs a few weigh-ins spread over time.
+  const trend = planData ? weightTrend(planData.checkIns) : null;
+  const rate = trend ? trend.ratePerWeek : null;           // lbs/wk, signed
+  const goalEtaWks = (rate != null && g) ? etaWeeks(w, g, rate) : null;
+  const rangeEdge = (hasRange && !inRange) ? (w > rHi ? rHi : rLo) : null;
+  const rangeEtaWks = (rate != null && rangeEdge != null) ? etaWeeks(w, rangeEdge, rate) : null;
+  const etaDate = (wks) => {
+    if (wks == null || wks > 260) return null; // cap absurd projections (~5 yrs)
+    const d = new Date(Date.now() + wks * 7 * 86400000);
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  };
+
   const consumed = log.calories || 0;
   const target = cal ? cal.target : null;
   const remaining = target != null ? target - consumed : null;
@@ -8084,6 +8151,53 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
                   </div>
                   {wtMsg ? <div style={{ marginTop: 8, fontSize: ".82rem", color: "var(--muted)" }}>{wtMsg}</div> : null}
                 </div>
+              )}
+            </div>
+
+            {/* Projected timeline from the actual logged trend */}
+            <div className="card">
+              <div className="card-title">⏳ Time to goal</div>
+              {!g ? (
+                <div className="card-sub">Set a goal weight to see your projected timeline.</div>
+              ) : rate == null ? (
+                <div className="card-sub">
+                  Log a few weigh-ins over the next couple of weeks and we'll project your
+                  timeline from your <em>actual</em> rate of progress.
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: ".9rem", fontWeight: 600 }}>
+                    {Math.abs(rate) < 0.05
+                      ? "Your weight is holding steady right now."
+                      : `${rate < 0 ? "Losing" : "Gaining"} about ${Math.abs(Math.round(rate * 10) / 10)} lbs/week`}
+                    <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: ".78rem" }}>
+                      {" "}· from {trend.n} weigh-ins
+                    </span>
+                  </div>
+                  {goalEtaWks == null ? (
+                    <div style={{ marginTop: 6, fontSize: ".84rem", color: "#f0a020", fontWeight: 600 }}>
+                      Not trending toward your goal yet — adjust and keep logging.
+                    </div>
+                  ) : goalEtaWks === 0 ? (
+                    <div style={{ marginTop: 6, fontSize: ".84rem", color: "#39d98a", fontWeight: 700 }}>
+                      🎉 You're at your goal weight!
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 6, fontSize: ".88rem" }}>
+                      Reach <strong>{g} lbs</strong> by{" "}
+                      <strong style={{ color: "var(--accent)" }}>{etaDate(goalEtaWks) || "—"}</strong>
+                      <span style={{ color: "var(--muted)" }}> · ~{friendlyTime(goalEtaWks)}</span>
+                    </div>
+                  )}
+                  {rangeEtaWks != null && rangeEtaWks > 0 && etaDate(rangeEtaWks) && (
+                    <div style={{ marginTop: 4, fontSize: ".82rem", color: "var(--muted)" }}>
+                      Into your range (~{rangeEdge} lbs) by {etaDate(rangeEtaWks)}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 8, fontSize: ".68rem", color: "var(--muted)", fontStyle: "italic" }}>
+                    Estimate from your logged trend — it sharpens as you log more.
+                  </div>
+                </>
               )}
             </div>
 
@@ -9304,7 +9418,11 @@ export default function App() {
               <button className="dash-nav-btn" style={{width:"100%"}} onClick={()=>setShowDash(true)}>📊 Back to Dashboard</button>
             </div>
             <Results data={data} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
-            onSaveCheckIn={(checkin)=>setDataAndSave(p=>({...p, checkIns:[...(p.checkIns||[]), checkin]}))}
+            onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
+              // One entry per date: replace any existing check-ins for this date.
+              const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);
+              return {...p, checkIns:[...others, checkin]};
+            })}
             onUpdateNotes={(text)=>setDataAndSave(p=>({...p, trainerNotes:text}))}
             onUpdateCardio={(day,idx,field,val)=>setDataAndSave(p=>{
               if (field==="_replace") return {...p, cardio:{...p.cardio,[day]:val}};

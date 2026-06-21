@@ -239,9 +239,27 @@ enabled (Blaze has no default spending cap).
   current weight; `ProgressChart` gained `rangeLow`/`rangeHigh` props that **shade the band** behind the
   line (shown in both the dashboard popup and the full-plan Results chart). Fully optional — blank =
   unchanged behavior. No `firestore.rules` change.
+- Session 15: **Realistic time-to-goal + one-entry-per-date consolidation (non-Blaze).**
+  (1) **Time to goal:** a new **⏳ Time to goal** card on the Client Dashboard projects an ETA from the
+  client's **actual logged trend**, not the theoretical 1 lb/wk. Module helpers `weightTrend(checkIns)`
+  (least-squares regression of weight vs. time → `ratePerWeek`; needs 2+ weigh-ins spread over ≥3 days,
+  so same-day logs don't produce a bogus rate) and `etaWeeks(current, target, rate)` (null if trending
+  away). Shows the observed rate, a projected **date to reach the goal** (reusing `friendlyTime`), and a
+  date to reach the **range** edge if set; honest fallbacks for not-enough-data / trending-away / at-goal;
+  ETAs over ~5 yrs are suppressed. (2) **One weigh-in per date everywhere:** the check-in editor now
+  **replaces** an existing same-date entry instead of appending (`onSaveCheckIn` filters out the same
+  `date` before adding), and selecting a date **pre-fills** the form from its existing entry so you can
+  edit it; the old yellow "already exists" warning is now a friendly green "editing this entry" note. The
+  dashboard quick weight-log was changed to match — it replaces today's weigh-in (and clears same-day
+  duplicates) instead of adding a point per tap (reverses the Session-13 "every log a dot" choice, per
+  Kevin, to stop clutter). (3) **Bug fix:** `.mood-btn` (the check-in Yes/No/Rest-Day buttons) had no
+  `color`, so the text fell back to the browser's dark default and was invisible on the dark theme —
+  added `color:var(--text)`. No `firestore.rules` change.
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
-  testing — these are not real users and can be cleared. The Session-13 testing also left **test
-  weigh-ins/check-ins** in the test client's `caliq-self` — also clearable.
+  testing — these are not real users and can be cleared. The Session-13/14 testing also left **test
+  weigh-ins/check-ins** (incl. some old same-day duplicates from before the Session-15 one-per-date
+  change) in the test client's `caliq-self` — clearable via the 📈 Progress list's ✕ or by re-saving
+  that date.
 
 ## Roadmap (not yet built)
 
@@ -304,6 +322,9 @@ enabled (Blaze has no default spending cap).
   reinforcing why following the program matters. Needs the ability to **edit/log on past dates**
   (the daily log is already keyed by date `caliq-log-{id}-{YYYY-MM-DD}`, so back-dated logging is a
   natural extension). No Blaze needed for the manual version. Likely a big UI step; plan carefully.
+  **Kevin's refinement:** the check-in flow should open a **calendar date-picker** where dates that
+  already have a check-in are **highlighted**, so you can see at a glance which days are logged (and
+  jump to one to edit it). This pairs with the now one-entry-per-date model (Session 15).
 - **"Simulation" tab (Kevin's idea).** A separate mode where a trainer (or client) builds/simulates
   a complete workout + nutrition program and sees an **estimated results projection** — saved
   **separately from the client's real plan** (a sandbox, not their active program). Use cases:
