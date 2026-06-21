@@ -273,6 +273,29 @@ enabled (Blaze has no default spending cap).
   `onDelete(timestamp)` (omit for read-only). ClientHome's old inline modal was replaced by the shared
   component (its `deleteWeighIn` passed as `onDelete`). Pure refactor + one new handler; trainer and
   client now manage weigh-ins from the exact same UI. No `firestore.rules` change.
+- Session 18: **UI polish pass (smoothness + cleanup, non-Blaze).** A cosmetic-only sweep to make
+  the app feel more polished and cohesive; no logic or data changes. (1) **Page transitions:** a
+  reusable `.page-transition` class (reuses the house `fadeUp` keyframe, .28s) replays a subtle
+  fade-slide on every screen change — wizard steps, Dashboard ↔ Full Plan, and the trainer/client
+  home screens (`.prof-screen` roots). The main-app flow wraps the step content in a `key`ed
+  `<div className="page-transition">` (key = step / dashboard-vs-results) so it animates on
+  navigation but NOT on every keystroke/save. Honors `prefers-reduced-motion` (disables animations
+  + smooth scroll). (2) **Scroll-to-top on navigation:** a `useEffect` keyed on
+  `[screen, step, showDash, homeTab]` jumps to the top on any view change so screens start clean
+  instead of mid-page. (3) **Removed vestigial wizard chrome:** the leftover step-dots row no longer
+  renders once past the wizard (it was showing as a faint dash row atop the Daily Dashboard and Full
+  Plan). (4) **Cleaner disabled states:** disabled primary buttons (`.btn-p:disabled`) and the
+  check-in Save button (`.checkin-submit:disabled`) now use a neutral surface + muted text instead of
+  a 30%-opacity accent (which read as a muddy olive). (5) **Slimmer No-Cardio Daily Breakdown:** in
+  the Results "No Cardio" tab, the per-day 4-cell target grid was removed — it repeated the same
+  numbers on every day (identical to the Daily Targets card above; `tdee` isn't per-day in that tab).
+  Day cards are now compact rows (day + cardio summary + burn + tap-to-edit); the **+Cardio** tab's
+  grid, which IS per-day meaningful (`floor(tdee - t.cut + burned)`), is unchanged. Spacing was
+  reviewed and left as-is — the app is already on a consistent 640px-container / 16px-card-gap rhythm,
+  so a blanket change was judged higher-risk than its worth. No `firestore.rules` change. A throwaway
+  test trainer account (`trainer.uitest@calorieiq-test.com`) + a "Test Client" local plan were created
+  in Firebase during this session for visual testing; clearable. `.claude/launch.json` was added (dev
+  server preview config).
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
   testing — these are not real users and can be cleared. The Session-13/14 testing also left **test
   weigh-ins/check-ins** (incl. some old same-day duplicates from before the Session-15 one-per-date
