@@ -8372,12 +8372,6 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         <div className="tagline">Maintenance · Deficit · Cardio · Strength · Timeline</div>
       </div>
       <div className="container">
-        <RolePanel onOpenClientPlan={onOpenClientPlan} onLinked={onLinked} onCopyToLocal={onCopyToLocal} />
-        <div style={{ display: "flex", gap: "8px", margin: "0 0 14px" }}>
-          <button style={tabBtn(true)} disabled>Dashboard</button>
-          <button style={tabBtn(false)} onClick={onManageClients}>All clients</button>
-        </div>
-
         {clients.length > 0 && (
           <div className="card">
             <div className="card-title">🔗 Your Connected Clients</div>
@@ -9462,23 +9456,6 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
         <div className="tagline">Maintenance · Deficit · Cardio · Strength · Timeline</div>
       </div>
       <div className="container">
-        <RolePanel onOpenClientPlan={onOpenClientPlan} onLinked={onLinked} onCopyToLocal={onCopyToLocal} />
-        {showDashboardTab && (
-          <div style={{ display:"flex", gap:"8px", margin:"0 0 14px" }}>
-            <button
-              style={{ flex:1, padding:"10px", fontSize:".85rem", fontWeight:700, borderRadius:"8px",
-                border:"1px solid var(--border,rgba(255,255,255,.12))", cursor:"pointer",
-                background:"transparent", color:"var(--text)" }}
-              onClick={onShowDashboard}
-            >Dashboard</button>
-            <button
-              style={{ flex:1, padding:"10px", fontSize:".85rem", fontWeight:700, borderRadius:"8px",
-                border:"1px solid var(--border,rgba(255,255,255,.12))", cursor:"default",
-                background:"var(--accent)", color:"#0b0b12" }}
-              disabled
-            >All clients</button>
-          </div>
-        )}
         <div className="card">
           <div className="card-title">📂 Client Profiles</div>
           <div className="card-sub">
@@ -10637,7 +10614,6 @@ export default function App() {
             </button>
             <div className="prof-header-name">📂 {fullName(data) || "New Client"}</div>
           </div>
-          <button className="prof-switch-btn" onClick={goToProfiles}>{role === ROLES.CLIENT ? "My Home" : "All Clients"}</button>
         </div>
         <div className="container">
           {activeIsSim && (
