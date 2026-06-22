@@ -395,6 +395,27 @@ enabled (Blaze has no default spending cap).
   with the dark theme); sign-out now lives only in the menu (the button still shows on the login / role-
   chooser screens). New imports in App: `auth` (./firebase) + `signOut` (firebase/auth). Verified:
   hamburger on all screens, nav works + closes, name edit pre-fills/saves. No `firestore.rules` change.
+- Session 24: **Declutter pass — sleeker app via the side menu (non-Blaze).** Now that Session 23
+  added the menu, this pass pulls secondary chrome OFF the screens and INTO it. (1) **Slim top bar:**
+  the tall logo+tagline `.header` is now a thin bar (logo 2.2→1.5rem, padding 22→13px, tagline
+  `display:none`), recovering vertical space on every screen; the fixed hamburger sits in its left
+  gutter. (2) **Invite → menu:** the trainer's invite-code/copy-link card was removed from the home
+  and rebuilt in `SideMenu` under **📨 Invite clients** (loads the code via `ensureInviteCode`, Copy
+  code + Copy invite link); RolePanel's trainer branch is now a one-line pointer. (3) **Removed
+  redundant nav:** dropped the Dashboard/All-clients toggle (trainer Dashboard + All-clients views)
+  and the duplicate "All Clients/My Home" button in the in-plan header — the menu's Dashboard / All
+  clients cover it; the contextual "← Back" stays. (4) **Trainer role card removed:** the leftover
+  "TRAINER · invite pointer" `RolePanel` card is gone from both trainer screens (identity + invite are
+  in the menu), so the trainer home leads straight with **Connected Clients** and the All-clients view
+  with **Client Profiles**. **Client side of #4 was intentionally NOT done** (Kevin's call): the
+  client's "your trainer / Leave / join-by-code" panel stays on the client home because it's useful
+  account info AND it carries the **invite auto-link** side effect (a client opening `?invite=CODE`
+  gets linked there) — moving it would mean relocating that auto-link, higher risk for low reward.
+  **Bug fix (same session):** `Results` read `ACTIVITY_LEVELS.find(...).multiplier` with no fallback,
+  so opening the Full Plan of an **incomplete plan** (no `activityLevel`) threw "Cannot read properties
+  of undefined (reading 'multiplier')" and blanked the screen — now falls back to `ACTIVITY_LEVELS[0]`
+  (matching `computeClientCalories` / App's `computedTdee`). This was a pre-existing latent bug exposed
+  by multi-plan + tap-to-open (a client's active plan can be an empty one). No `firestore.rules` change.
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
   testing — these are not real users and can be cleared. The Session-13/14 testing also left **test
   weigh-ins/check-ins** (incl. some old same-day duplicates from before the Session-15 one-per-date
