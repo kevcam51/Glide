@@ -9177,9 +9177,9 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            {/* Weight → goal (hero — biggest element on the screen) */}
+            {/* Weight → goal HERO (Option 2: big number + stat tiles + progress bar) */}
             <div className={cardCls}>
-              <div className="flex justify-between items-center gap-2 mb-3">
+              <div className="flex justify-between items-center gap-2 mb-1">
                 <div className="font-display text-base tracking-wide text-primary uppercase">🎯 Weight &amp; goal</div>
                 <div className="flex gap-1.5">
                   <button className={miniBtnCls} onClick={() => setShowChart(true)} title="See your progress chart">📈 Progress</button>
@@ -9189,39 +9189,50 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
                   </button>
                 </div>
               </div>
-              <div className="flex items-baseline gap-3 flex-wrap">
-                <span className="font-display text-5xl leading-none">{w}<span className="text-2xl text-muted ml-1">lbs</span></span>
-                {g ? <span className="text-muted text-lg">→ {g} lbs</span> : null}
-              </div>
-              {toGo != null && toGo !== 0 && (
-                <div className="mt-3 inline-block px-2.5 py-1 rounded-full text-primary font-bold text-sm"
-                  style={{ background: "color-mix(in srgb, var(--color-primary) 15%, transparent)" }}>
-                  {Math.abs(toGo)} lbs to {toGo > 0 ? "lose" : "gain"}
-                </div>
-              )}
+              {/* Hero current weight + previous weigh-in line */}
+              <div className="font-display text-6xl leading-none mt-1">{w}<span className="text-2xl text-muted ml-1">lbs</span></div>
               {prevWeight != null && (
-                <div className="mt-2 text-sm text-muted">
+                <div className="mt-1.5 text-sm text-muted">
                   Previous: {prevWeight} lbs{w ? ` (${w - prevWeight > 0 ? "+" : ""}${Math.round((w - prevWeight) * 10) / 10} lbs)` : ""}
                 </div>
               )}
+              {/* Glanceable stat tiles */}
+              <div className="grid grid-cols-3 gap-2 mt-4">
+                <div className="bg-surface2 rounded-lg py-3 text-center">
+                  <div className="font-display text-2xl leading-none text-fg">{g || "—"}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted mt-1">Goal</div>
+                </div>
+                <div className="bg-surface2 rounded-lg py-3 text-center">
+                  <div className={`font-display text-2xl leading-none ${toGo != null && toGo !== 0 ? "text-primary" : "text-fg"}`}>{toGo != null ? Math.abs(toGo) : "—"}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted mt-1">lbs to {toGo != null && toGo < 0 ? "gain" : "go"}</div>
+                </div>
+                <div className="bg-surface2 rounded-lg py-3 text-center">
+                  <div className={`font-display text-2xl leading-none ${change == null ? "text-fg" : towardGoal ? "text-success" : "text-danger"}`}>{change != null ? `${change < 0 ? "−" : "+"}${Math.abs(change)}` : "—"}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted mt-1">Since start</div>
+                </div>
+              </div>
+              {/* Progress bar from start → goal */}
+              {g && start && start !== g && (
+                <div className="mt-4">
+                  <div className="h-2.5 rounded-full bg-surface2 overflow-hidden">
+                    <div className="h-full bg-primary rounded-full" style={{ width: `${Math.max(2, Math.min(100, Math.round(((start - w) / (start - g)) * 100)))}%` }} />
+                  </div>
+                  <div className="flex justify-between text-[11px] text-muted mt-1">
+                    <span>Start {start}</span><span>Goal {g}</span>
+                  </div>
+                </div>
+              )}
               {hasRange && (
-                <div className="mt-1.5 text-sm">
-                  <span className="text-muted">Range: {rLo}–{rHi} lbs</span>
+                <div className="mt-3 text-sm">
+                  <span className="text-muted">Healthy range: {rLo}–{rHi} lbs</span>
                   {" · "}
                   <span className={`font-semibold ${inRange ? "text-success" : "text-warn"}`}>
-                    {inRange ? "✅ in range"
-                      : w < rLo ? `${rangeGap} lbs below range`
-                      : `${rangeGap} lbs above range`}
+                    {inRange ? "✅ in range" : w < rLo ? `${rangeGap} below` : `${rangeGap} above`}
                   </span>
                 </div>
               )}
-              {change != null && change !== 0 && (
-                <div className={`mt-1.5 text-sm font-semibold ${towardGoal == null ? "text-muted" : towardGoal ? "text-success" : "text-danger"}`}>
-                  {change < 0 ? "▼" : "▲"} {Math.abs(change)} lbs {change < 0 ? "lost" : "gained"} since start
-                </div>
-              )}
               {showWt && (
-                <div className="mt-3">
+                <div className="mt-4">
                   <div className="text-sm text-muted mb-1.5">Log today's weight</div>
                   <div className="flex gap-2">
                     <input className={inputCls} type="number" inputMode="decimal" placeholder="Today's weight (lbs)"
@@ -9281,13 +9292,19 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
             <div className={cardCls}>
               <div className="font-display text-base tracking-wide text-primary uppercase mb-2">🍽️ Today</div>
               {target != null ? (
-                <div className="flex items-baseline gap-2 flex-wrap">
-                  <span className="font-display text-4xl leading-none">{consumed.toLocaleString()}</span>
-                  <span className="text-muted">/ {target.toLocaleString()} cal</span>
-                  <span className={`ml-auto font-bold ${remaining >= 0 ? "text-success" : "text-danger"}`}>
-                    {remaining >= 0 ? `${remaining.toLocaleString()} left` : `${Math.abs(remaining).toLocaleString()} over`}
-                  </span>
-                </div>
+                <>
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="font-display text-4xl leading-none">{consumed.toLocaleString()}</span>
+                    <span className="text-muted">/ {target.toLocaleString()} cal</span>
+                    <span className={`ml-auto font-bold ${remaining >= 0 ? "text-success" : "text-danger"}`}>
+                      {remaining >= 0 ? `${remaining.toLocaleString()} left` : `${Math.abs(remaining).toLocaleString()} over`}
+                    </span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-surface2 overflow-hidden mt-3">
+                    <div className="h-full rounded-full" style={{ width: `${Math.max(0, Math.min(100, Math.round((consumed / target) * 100)))}%`,
+                      background: remaining >= 0 ? "var(--color-primary)" : "var(--color-danger)" }} />
+                  </div>
+                </>
               ) : (
                 <div className="text-muted text-sm">Finish your plan to see a daily calorie target.</div>
               )}
