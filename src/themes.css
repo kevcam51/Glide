@@ -72,21 +72,22 @@
   --font-display: 'Nunito', system-ui, sans-serif;
 }
 
-/* 4) Dark / Pro — deep charcoal, refined teal + sky, sharp corners. */
+/* 4) Dark / Pro — Smooth Training brand: near-black surfaces + the logo's bright
+ *    cyan (#08DCE0) as primary. Sharp, premium, data-forward. */
 [data-theme="pro"] {
-  --color-bg: #0a0e14;
-  --color-surface: #111722;
-  --color-surface2: #18202c;
-  --color-border: #243042;
-  --color-fg: #e6edf3;
-  --color-muted: #8b98a8;
-  --color-primary: #2dd4bf;
-  --color-primaryfg: #04201c;
-  --color-accent: #38bdf8;
-  --color-success: #34d399;
+  --color-bg: #060809;          /* reads black like the logo, with a touch of depth */
+  --color-surface: #0e1517;
+  --color-surface2: #15201f;
+  --color-border: #1f2e2d;      /* faint cyan-tinted hairline */
+  --color-fg: #eafcfc;          /* near-white, faint cyan cast */
+  --color-muted: #7e9a9a;       /* muted cyan-grey */
+  --color-primary: #08dce0;     /* Smooth Training cyan (sampled from the logo) */
+  --color-primaryfg: #04201f;   /* near-black text on cyan */
+  --color-accent: #3bc9ff;      /* cool sky-blue, complements cyan without muddying green */
+  --color-success: #2fe0a8;
   --color-warn: #fbbf24;
   --color-danger: #f87171;
-  --radius-card: 8px;
+  --radius-card: 10px;
   --font-sans: 'Sora', system-ui, sans-serif;
   --font-display: 'Sora', system-ui, sans-serif;
 }
