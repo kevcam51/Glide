@@ -6021,6 +6021,38 @@ function ActivityRow({ ev }) {
   );
 }
 
+// Match an activity event's timestamp against a relative-time search query like
+// "today", "yesterday", "3 days ago", "2 weeks", "last month", "1 mo ago". Lets
+// the activity search filter by age, not just the literal date/name/action text.
+// Returns true on a match, false if the query isn't a recognized time phrase.
+function relativeTimeMatch(eventDate, q) {
+  const startOfDay = (dt) => new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+  const now = new Date();
+  const today = startOfDay(now);
+  const evDay = startOfDay(eventDate);
+  const daysAgo = Math.round((today - evDay) / 86400000);
+
+  if (q === "today") return daysAgo === 0;
+  if (q === "yesterday") return daysAgo === 1;
+  if (q === "this week") return daysAgo >= 0 && daysAgo <= 6;
+  if (q === "last week") return daysAgo >= 7 && daysAgo <= 13;
+  if (q === "this month") return eventDate.getFullYear() === now.getFullYear() && eventDate.getMonth() === now.getMonth();
+  if (q === "last month") {
+    const t = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return eventDate.getFullYear() === t.getFullYear() && eventDate.getMonth() === t.getMonth();
+  }
+  // "N unit [ago]" — e.g. "3 days ago", "2 weeks", "1 mo", "6 months ago".
+  const m = q.match(/^(\d+)\s*(days?|d|weeks?|w|months?|mo|m)\.?\s*(ago)?$/);
+  if (!m) return false;
+  const n = parseInt(m[1], 10);
+  const unit = m[2];
+  if (unit === "d" || unit.startsWith("day")) return daysAgo === n;               // exact day
+  if (unit === "w" || unit.startsWith("week")) return Math.abs(daysAgo - n * 7) <= 3; // ~that week
+  // months ("m", "mo", "month", "months") — that calendar month N months back
+  const t = new Date(now.getFullYear(), now.getMonth() - n, 1);
+  return eventDate.getFullYear() === t.getFullYear() && eventDate.getMonth() === t.getMonth();
+}
+
 function ActivityFeed({ history, onRefresh }) {
   const [showFull, setShowFull] = useState(false);
   const [query, setQuery] = useState("");
@@ -6041,7 +6073,9 @@ function ActivityFeed({ history, onRefresh }) {
     const d = new Date(ev.ts);
     const hay = `${ev.name} ${ev.action} ${d.toLocaleDateString()} ` +
       `${d.toLocaleString("en-US", { month:"long", day:"numeric", year:"numeric" })}`.toLowerCase();
-    return hay.toLowerCase().includes(q);
+    if (hay.toLowerCase().includes(q)) return true;
+    // Also match relative-time phrases like "3 days ago", "2 weeks", "last month".
+    return relativeTimeMatch(d, q);
   };
   const filtered = list.filter(matches);
 
@@ -6101,7 +6135,7 @@ function ActivityFeed({ history, onRefresh }) {
                   cursor:"pointer", fontSize:"1.2rem", lineHeight:1 }}>✕</button>
             </div>
             <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by date, month, name, or action…"
+              placeholder="Search by name, action, date, or '3 days ago', '2 weeks', 'last month'…"
               style={{ padding:"10px 12px", fontSize:".88rem", borderRadius:"8px",
                 border:"1px solid var(--border)", background:"var(--s2)", color:"var(--text)" }} />
             <div style={{ display:"flex", flexDirection:"column", gap:"8px", overflowY:"auto", flex:1 }}>

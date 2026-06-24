@@ -596,6 +596,15 @@ enabled (Blaze has no default spending cap).
   used from it — left as-is. Verified live (Results Basic + Pro, Daily Dashboard): headings render in Sora,
   no overflow, no console errors, `npm run build` passes. The app's typography is now consistent everywhere.
   No `firestore.rules` change.
+- Session 33: **Activity-log search now understands relative time.** The "View all changes" overlay's search
+  (`ActivityFeed`) previously matched only the literal name/action/date text. Added a module-level
+  `relativeTimeMatch(eventDate, q)` that recognizes time phrases — `today`, `yesterday`, `this/last week`,
+  `this/last month`, and `N day(s)/week(s)/month(s) [ago]` (incl. abbreviations `d`/`w`/`mo`/`m`) — and
+  filters events by age. Wired into `matches` as an additive OR after the text-haystack check (so typing an
+  action word still works); days = exact day, weeks = ±3-day window around N×7, months = that calendar month.
+  Placeholder updated to hint the new capability. Logic unit-tested (15 cases) + verified live: "today" shows
+  today's entries (incl. ones with no "today" in their text), "2 days ago" shows only the 2-days-ago entries.
+  Filters live as you type. No `firestore.rules` change.
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
   testing — these are not real users and can be cleared. The Session-13/14 testing also left **test
   weigh-ins/check-ins** (incl. some old same-day duplicates from before the Session-15 one-per-date
