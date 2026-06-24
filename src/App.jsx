@@ -5813,7 +5813,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
 // detailed (named food + macros + meal type) or as simple (just calories,
 // optionally tagged to a meal) as the user wants. This is the manual/free tier;
 // the food-library API (Blaze) will later auto-fill these same fields.
-function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal }) {
+function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const [name, setName] = useState("");
   const [cals, setCals] = useState("");
   const [showMacros, setShowMacros] = useState(false);
@@ -5895,10 +5895,34 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal }) {
     </div>
   );
 
+  // One-tap re-add of a recently logged food into the meal type being added.
+  const quickAddRecent = (f) => {
+    onAddMeal({ name: f.name, type: addingTo === "other" ? "" : addingTo,
+      calories: f.calories || 0, protein: f.protein || 0, carbs: f.carbs || 0, fat: f.fat || 0 });
+    closeForm();
+  };
+
   // The inline add-form, shown under whichever meal you tapped "+ Add" on.
   const addForm = () => (
     <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"6px",
       padding:"8px", borderRadius:"8px", background:"rgba(255,255,255,.04)" }}>
+      {/* Recently logged foods — tap to re-add instantly (only when adding new) */}
+      {!editingId && (recentFoods || []).length > 0 && (
+        <div>
+          <div style={{ fontSize:".68rem", color:"var(--muted)", marginBottom:"4px",
+            textTransform:"uppercase", letterSpacing:".5px", fontWeight:700 }}>Recent — tap to add</div>
+          <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+            {(recentFoods || []).slice(0, 8).map((f, i) => (
+              <button key={i} onClick={() => quickAddRecent(f)}
+                style={{ padding:"5px 9px", fontSize:".74rem", borderRadius:"999px", cursor:"pointer",
+                  border:"1px solid var(--border)", background:"var(--s2)", color:"var(--text)",
+                  whiteSpace:"nowrap", maxWidth:"100%", overflow:"hidden", textOverflow:"ellipsis" }}>
+                {f.name} <span style={{ color:"var(--muted)" }}>· {(f.calories||0)} cal</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
         <input autoFocus style={{ ...inp, flex:"2 1 140px" }} placeholder="Food (optional)"
           value={name} onChange={(e) => setName(e.target.value)}
@@ -6456,7 +6480,7 @@ function WeightDayLogger({ date, existing, onSave }) {
 
 function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
-  onUpdateCardio, onUpdateStrength, onAddMeal, onRemoveMeal, onEditMeal, history, onRefresh, isRemote,
+  onUpdateCardio, onUpdateStrength, onAddMeal, onRemoveMeal, onEditMeal, recentFoods, history, onRefresh, isRemote,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn }) {
 
   const [showCalendar, setShowCalendar] = useState(false);
@@ -6838,7 +6862,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         </div>
       )}
 
-      <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} />
+      <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} />
 
       <div className="dash-log-row">
         <span className="dash-log-icon">💧</span>
@@ -10084,6 +10108,8 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const historyRef = useRef([]);              // mirror of history (avoids stale closures)
   const lastSnapshotRef = useRef(null);       // last data we diffed plan-edits against
+  const [recentFoods, setRecentFoods] = useState([]); // named foods for one-tap re-add
+  const recentFoodsRef = useRef([]);          // mirror (avoids stale closures in handlers)
   const [meName, setMeName] = useState("");   // current user's display name
   const [meUid, setMeUid] = useState("");     // current user's uid
   const [meEmail, setMeEmail] = useState(""); // current user's email (for the menu)
@@ -10613,12 +10639,26 @@ export default function App() {
     if (field === "calories" && value > 0) setStreak(s => Math.max(s, 1));
   };
 
+  // Remember a named food for one-tap re-add later. Deduped by name (latest
+  // cals/macros win), newest first, capped. Stored remote-aware with the plan.
+  const upsertRecentFood = (m) => {
+    const name = (m.name || "").trim();
+    if (!name || !activeId) return;
+    const key = name.toLowerCase();
+    const entry = { name, calories: m.calories||0, protein: m.protein||0, carbs: m.carbs||0, fat: m.fat||0 };
+    const next = [entry, ...recentFoodsRef.current.filter(f => (f.name||"").toLowerCase() !== key)].slice(0, 24);
+    recentFoodsRef.current = next;
+    setRecentFoods(next);
+    logWrite(`caliq-foods-${activeId}`, JSON.stringify(next));
+  };
+
   // Add a logged food/meal: appends to the day's meals and rolls its calories +
   // macros into the day's totals (Option A — meals add to the running total).
   const onAddMeal = (meal) => {
     const m = { id:`m${Date.now()}${Math.floor(Math.random()*1000)}`,
       name: meal.name||"", type: meal.type||"", calories: Number(meal.calories)||0,
       protein: Number(meal.protein)||0, carbs: Number(meal.carbs)||0, fat: Number(meal.fat)||0 };
+    upsertRecentFood(m);
     const updated = {
       ...dailyLog,
       meals: [...(dailyLog.meals||[]), m],
@@ -10662,6 +10702,7 @@ export default function App() {
       calories: Number(fields.calories)||0, protein: Number(fields.protein)||0,
       carbs: Number(fields.carbs)||0, fat: Number(fields.fat)||0 };
     const newMeals = meals.slice(); newMeals[idx] = upd;
+    upsertRecentFood(upd);
     const updated = {
       ...dailyLog,
       meals: newMeals,
@@ -10716,6 +10757,12 @@ export default function App() {
       if (hv) { try { hist = JSON.parse(hv); } catch(e) {} }
       historyRef.current = hist;
       setHistory(hist);
+      // Load recently-logged foods (for one-tap re-add in the meal log)
+      const fv = await logRead(`caliq-foods-${activeId}`);
+      let foods = [];
+      if (fv) { try { foods = JSON.parse(fv) || []; } catch(e) {} }
+      recentFoodsRef.current = foods;
+      setRecentFoods(foods);
     })();
   }, [activeId, activeRemoteUid]);
 
@@ -10872,7 +10919,7 @@ export default function App() {
               onOpenPlan={()=>{setNavFrom("dashboard");setStepAndSave(0);}} onOpenResults={()=>{setNavFrom("dashboard");setShowDash(false);}}
               onEditWorkouts={()=>{setNavFrom("dashboard");setStepAndSave(3);}}
               onLogUpdate={onLogUpdate} dailyLog={dailyLog} streak={streak}
-              onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
+              onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
               onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
               onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
                 const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);

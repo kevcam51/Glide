@@ -788,3 +788,16 @@ enabled (Blaze has no default spending cap).
   carbs/fat`. Verified live (Test Client): targets show 200g/225g/74g for a 200lb client; bars render
   45/200, 70/225, 12/74 from logged macros. No `firestore.rules` change. **Note:** macro split uses common
   coaching defaults (1g/lb protein, 28% fat) — easily adjustable; could become trainer-editable later.
+- Session 38: **One-tap re-add of recently logged foods (meal log).** Repetitive food entry is the #1
+  friction in self-logging, so named foods are now remembered for instant re-add. New remote-aware store
+  `caliq-foods-{activeId}` (a list of `{name, calories, protein, carbs, fat}`, deduped by lowercased name —
+  latest macros win — newest-first, capped 24). App: `recentFoods` state + `recentFoodsRef`; loaded in the
+  daily-log effect; `upsertRecentFood(m)` called from `onAddMeal` and `onEditMeal` (only when the food has a
+  name); written via the existing remote-aware `logWrite` so a trainer logging for a client builds the
+  CLIENT's list. Threaded `recentFoods` → `DailyDashboard` → `MealLog`. In `MealLog`'s add-form (new entries
+  only, not when editing), a **"RECENT — TAP TO ADD"** pill row shows the last 8 foods; tapping one calls
+  `onAddMeal` with that food's name+cals+macros tagged to the meal type being added, then closes the form
+  (one tap). Verified live end-to-end (Test Client): logged "Oatmeal 300", reopened the Dinner form → chip
+  appeared → tapped it → total went 900→1,200 cal (3 items), form closed. The calendar back-dated day-logger
+  reuses `MealLog` without `recentFoods` (no chips there — fine). No `firestore.rules` change (the foods key
+  rides the existing trainer↔client kv access).
