@@ -5828,7 +5828,21 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal }) {
 
   const list = meals || [];
   const loggedTotal = list.reduce((s, m) => s + (m.calories || 0), 0);
+  // Daily macro totals (each food can carry protein/carbs/fat grams).
+  const totP = list.reduce((s, m) => s + (m.protein || 0), 0);
+  const totC = list.reduce((s, m) => s + (m.carbs || 0), 0);
+  const totF = list.reduce((s, m) => s + (m.fat || 0), 0);
+  const hasMacros = totP > 0 || totC > 0 || totF > 0;
   const TYPES = ["Breakfast", "Lunch", "Dinner", "Snack"];
+  // Compact protein/carbs/fat chips — colour-coded, shown when any are logged.
+  const MacroSummary = ({ small }) => (
+    <span style={{ display:"inline-flex", gap: small ? "8px" : "12px", flexWrap:"wrap",
+      fontSize: small ? ".72rem" : ".8rem", fontWeight:600 }}>
+      <span style={{ color:"var(--accent)" }}>{totP}g <span style={{ color:"var(--muted)", fontWeight:400 }}>protein</span></span>
+      <span style={{ color:"var(--yellow)" }}>{totC}g <span style={{ color:"var(--muted)", fontWeight:400 }}>carbs</span></span>
+      <span style={{ color:"var(--orange)" }}>{totF}g <span style={{ color:"var(--muted)", fontWeight:400 }}>fat</span></span>
+    </span>
+  );
 
   const resetFields = () => { setName(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); };
   const openForm = (key) => { resetFields(); setEditingId(null); setAddingTo(key); };
@@ -5937,6 +5951,13 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal }) {
         </div>
       </div>
 
+      {/* When collapsed, still surface the day's macro totals at a glance. */}
+      {!open && hasMacros && (
+        <div style={{ marginTop:"6px" }}>
+          <MacroSummary small />
+        </div>
+      )}
+
       {open && (
       <div style={{ display:"flex", flexDirection:"column", gap:"10px", marginTop:"10px" }}>
         {TYPES.map((t) => {
@@ -5977,9 +5998,14 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal }) {
         </div>
 
         {list.length > 0 && (
-          <div style={{ fontSize:".72rem", color:"var(--muted)", textAlign:"right",
-            borderTop:"1px solid var(--border)", paddingTop:"6px" }}>
-            {list.reduce((s, m) => s + (m.calories||0), 0).toLocaleString()} cal from {list.length} item{list.length!==1?"s":""}
+          <div style={{ borderTop:"1px solid var(--border)", paddingTop:"8px",
+            display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+            {hasMacros
+              ? <MacroSummary />
+              : <span style={{ fontSize:".72rem", color:"var(--muted)" }}>Tip: add macros when logging to track protein, carbs &amp; fat.</span>}
+            <span style={{ fontSize:".78rem", fontWeight:700, color:"var(--text)" }}>
+              {loggedTotal.toLocaleString()} cal · {list.length} item{list.length!==1?"s":""}
+            </span>
           </div>
         )}
       </div>

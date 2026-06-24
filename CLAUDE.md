@@ -634,6 +634,17 @@ enabled (Blaze has no default spending cap).
   Session-32 font unification; only DM Sans (the in-plan body font) is still pulled from it. Zero Bebas refs
   remain in the file. Verified live (Strength step → Custom Exercise panel renders on-brand, purple Save
   button); no console errors; `npm run build` passes. The whole app is now consistently on the brand system.
+- Session 36: **Daily macro totals in the meal log.** The `MealLog` (Daily Dashboard "🍽️ Meals & Food
+  Today") captured protein/carbs/fat grams per food but never summed them — the footer only showed calories.
+  Added day totals computed from the `meals` prop already passed in (no new data, no plumbing): `totP`/
+  `totC`/`totF` + a reusable `MacroSummary` chip row (colour-coded — protein cyan `--accent`, carbs
+  `--yellow`, fat `--orange`). Shows in the open-view footer (left of the cal/items total; when no macros
+  are logged it shows a "add macros to track…" tip instead) AND under the collapsed header so it's glanceable
+  without expanding. Display-only, kept the component's existing inline-style approach (brand-aligned since
+  the Session-31 token retune). Verified live: logged "Chicken & rice 600cal 45p/70c/12f" → footer shows
+  "45g protein · 70g carbs · 12g fat · 600 cal". No `firestore.rules` change. (Bug caught + fixed during the
+  edit: a duplicated `</div>` in the header broke the build; the live console showed stale Vite HMR errors
+  from that moment — the clean `npm run build` + a fresh reload confirmed the file is healthy.)
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
   testing — these are not real users and can be cleared. The Session-13/14 testing also left **test
   weigh-ins/check-ins** (incl. some old same-day duplicates from before the Session-15 one-per-date
