@@ -801,3 +801,14 @@ enabled (Blaze has no default spending cap).
   appeared → tapped it → total went 900→1,200 cal (3 items), form closed. The calendar back-dated day-logger
   reuses `MealLog` without `recentFoods` (no chips there — fine). No `firestore.rules` change (the foods key
   rides the existing trainer↔client kv access).
+- Session 39: **Editable macro targets (coach or client).** The Session-37 macro targets were computed-only;
+  now they're overridable per plan. Stored as `data.macroTargets = {protein, carbs, fat}` (grams) — rides
+  the existing remote-aware plan save, so a coach editing a client's plan AND the client on their own
+  dashboard can both set them. `DailyDashboard` now prefers `data.macroTargets` over the auto estimates
+  (protein 1g/lb, fat 28% cal, carbs remainder); `macrosCustom` flags which is active. New App handler
+  `onSetMacroTargets(t|null)` (set via `setDataAndSave`; `null` deletes the key → back to auto). UI: in the
+  expanded macro section, an **"✎ Edit targets"** link opens inline Protein/Carbs/Fat g inputs (pre-filled
+  with current effective values) + **Save targets** and (when custom) **Reset to auto**; the disclaimer line
+  shows "Custom targets set by you" vs "Estimates from bodyweight & calorie goal". Verified live (Test
+  Client): set protein 200→180 → log-row + progress bar updated to 180g, "Custom" label shown; Reset to auto
+  → back to computed 200g. No `firestore.rules` change. Defaults unchanged (1g/lb, 28% fat) — now adjustable.

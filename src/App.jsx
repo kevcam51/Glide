@@ -6481,13 +6481,15 @@ function WeightDayLogger({ date, existing, onSave }) {
 function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onRemoveMeal, onEditMeal, recentFoods, history, onRefresh, isRemote,
-  onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn }) {
+  onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets }) {
 
   const [showCalendar, setShowCalendar] = useState(false);
   const [editingWorkout, setEditingWorkout] = useState(null);
   const [expandedStat, setExpandedStat] = useState(null);
   const [expandedSnap, setExpandedSnap] = useState(false);
   const [showMacros, setShowMacros] = useState(false);
+  const [editMacros, setEditMacros] = useState(false); // macro-target editor open
+  const [mtDraft, setMtDraft] = useState({ protein:"", carbs:"", fat:"" });
   // Drafts so water/weight only save when you press Enter or tap Log — not on
   // every keystroke (which used to log "weight: 1 lbs" as you typed).
   const [waterDraft, setWaterDraft] = useState("");
@@ -6524,11 +6526,17 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const logged = dailyLog.calories || 0;
   const remaining = Math.max(0, target - logged);
   const pct = Math.min(100, Math.round((logged / target) * 100));
-  // Macro targets (estimates): protein 1g/lb bodyweight, fat 28% of calories,
-  // carbs fill the remaining calories. Shown as logged-vs-target progress.
-  const proteinTarget = Math.round(Number(weightLbs) * 1.0) || 0;
-  const fatTarget = Math.round(target * 0.28 / 9);
-  const carbsTarget = Math.max(0, Math.round((target - proteinTarget * 4 - fatTarget * 9) / 4));
+  // Macro targets. Default (estimates): protein 1g/lb bodyweight, fat 28% of
+  // calories, carbs fill the remaining calories. A coach or client can override
+  // any/all of them per plan via data.macroTargets — those take precedence.
+  const mt = data.macroTargets || null;
+  const autoProtein = Math.round(Number(weightLbs) * 1.0) || 0;
+  const autoFat = Math.round(target * 0.28 / 9);
+  const proteinTarget = mt && mt.protein != null ? mt.protein : autoProtein;
+  const fatTarget = mt && mt.fat != null ? mt.fat : autoFat;
+  const carbsTarget = mt && mt.carbs != null ? mt.carbs
+    : Math.max(0, Math.round((target - proteinTarget * 4 - fatTarget * 9) / 4));
+  const macrosCustom = !!mt;
 
   // Ring SVG
   const ringR = 58, ringC = 2 * Math.PI * ringR;
@@ -6827,7 +6835,46 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             />
             <span className="dash-log-unit">g</span>
           </div>
-          <div style={{fontSize:".6rem",color:"var(--muted)",padding:"4px 8px",fontStyle:"italic"}}>*Macro targets are estimates based on bodyweight and calorie goals</div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"8px",padding:"4px 8px",flexWrap:"wrap"}}>
+            <span style={{fontSize:".6rem",color:"var(--muted)",fontStyle:"italic"}}>
+              *{macrosCustom ? "Custom targets set by you" : "Estimates from bodyweight & calorie goal"}
+            </span>
+            {onSetMacroTargets && (
+              <button onClick={()=>{ setMtDraft({ protein:String(proteinTarget), carbs:String(carbsTarget), fat:String(fatTarget) }); setEditMacros(v=>!v); }}
+                style={{border:"none",background:"transparent",color:"var(--accent)",cursor:"pointer",fontSize:".72rem",fontWeight:600,padding:0,textDecoration:"underline"}}>
+                {editMacros ? "Close" : "✎ Edit targets"}
+              </button>
+            )}
+          </div>
+          {editMacros && onSetMacroTargets && (
+            <div style={{padding:"10px 8px",display:"flex",flexDirection:"column",gap:"8px"}}>
+              <div style={{display:"flex",gap:"6px"}}>
+                {[["protein","Protein"],["carbs","Carbs"],["fat","Fat"]].map(([k,lbl])=>(
+                  <div key={k} style={{flex:1}}>
+                    <div style={{fontSize:".62rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:"3px"}}>{lbl} g</div>
+                    <input type="number" inputMode="numeric" value={mtDraft[k]}
+                      onChange={e=>setMtDraft(d=>({...d,[k]:e.target.value}))}
+                      style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:"7px",border:"1px solid var(--border)",background:"var(--s2)",color:"var(--text)",fontSize:".85rem"}} />
+                  </div>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:"6px"}}>
+                <button onClick={()=>{
+                    onSetMacroTargets({ protein:Math.max(0,parseInt(mtDraft.protein)||0), carbs:Math.max(0,parseInt(mtDraft.carbs)||0), fat:Math.max(0,parseInt(mtDraft.fat)||0) });
+                    setEditMacros(false);
+                  }}
+                  style={{padding:"8px 14px",fontSize:".8rem",fontWeight:700,borderRadius:"7px",border:"none",background:"var(--accent)",color:"#0b0b12",cursor:"pointer"}}>Save targets</button>
+                {macrosCustom && (
+                  <button onClick={()=>{ onSetMacroTargets(null); setEditMacros(false); }}
+                    style={{padding:"8px 12px",fontSize:".8rem",borderRadius:"7px",border:"1px solid var(--border)",background:"transparent",color:"var(--muted)",cursor:"pointer"}}>Reset to auto</button>
+                )}
+              </div>
+              <div style={{fontSize:".62rem",color:"var(--muted)",fontStyle:"italic"}}>
+                Saving locks these targets for this plan. "Reset to auto" returns to the
+                bodyweight/calorie-based estimates that adjust as the plan changes.
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -10920,6 +10967,7 @@ export default function App() {
               onEditWorkouts={()=>{setNavFrom("dashboard");setStepAndSave(3);}}
               onLogUpdate={onLogUpdate} dailyLog={dailyLog} streak={streak}
               onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
+              onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; return n; })}
               onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
               onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
                 const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);
