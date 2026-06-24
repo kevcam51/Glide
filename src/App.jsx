@@ -9347,40 +9347,52 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
     if (dragId) { onMoveProfile(dragId, folderId); setDragId(null); setDragOverFolder(null); }
   };
 
+  // Tailwind class strings (Session 29 redesign — brand theme via data-theme="pro").
+  const cardCls = "bg-surface border border-border rounded-card p-5 mb-3";
+  const sectionTitleCls = "font-display text-lg tracking-wider text-primary mb-1";
+  const subCls = "text-sm text-muted leading-relaxed";
+  const primaryBtnCls = "px-4 py-2.5 rounded-lg text-sm font-bold border-none bg-primary text-primaryfg cursor-pointer whitespace-nowrap disabled:opacity-55";
+  const ghostBtnCls = "px-3 py-2 rounded-lg text-xs font-semibold border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap disabled:opacity-55";
+  const inputCls = "flex-1 min-w-0 box-border rounded-lg border border-border bg-surface2 text-fg px-3 py-2 text-sm outline-none placeholder:text-muted";
+
   const ProfileCard = ({ p }) => {
     const displayName = p.customName || p.name || "Unnamed Client";
     if (renamingId === p.id) {
       return (
-        <div className="prof-card" onClick={e=>e.stopPropagation()}>
-          <input autoFocus className="folder-input" style={{ flex:1 }} value={renameDraft}
+        <div className="flex items-center gap-1.5 p-3 rounded-[10px] bg-surface2 border border-border" onClick={e=>e.stopPropagation()}>
+          <input autoFocus className={inputCls} value={renameDraft}
             placeholder="Plan name" onChange={e=>setRenameDraft(e.target.value)}
             onKeyDown={e=>{ if(e.key==="Enter"){ onRename && onRename(p.id, renameDraft); setRenamingId(null); } }} />
-          <button className="prof-new-btn" style={{ flex:"0 0 auto", minHeight:0, padding:"8px 12px", fontSize:".8rem" }}
+          <button className={primaryBtnCls + " !px-3 !py-2"}
             onClick={()=>{ onRename && onRename(p.id, renameDraft); setRenamingId(null); }}>Save</button>
-          <button className="folder-act-btn" onClick={()=>setRenamingId(null)}>Cancel</button>
+          <button className={ghostBtnCls} onClick={()=>setRenamingId(null)}>Cancel</button>
         </div>
       );
     }
     return (
-      <div className={`prof-card${dragId===p.id?" drag-ghost":""}`}
+      <div className={`flex items-center gap-3 p-3 rounded-[10px] bg-surface2 border border-border cursor-pointer transition-opacity ${dragId===p.id?"opacity-40":""}`}
         draggable="true"
         onDragStart={e=>onDragStart(e,p.id)}
         onDragEnd={onDragEnd}
         onClick={()=>onSelect(p.id)}>
-        <div className="prof-avatar">{(displayName||"?").slice(0,2).toUpperCase()}</div>
-        <div className="prof-info">
-          <div className="prof-name">{displayName}</div>
-          <div className="prof-meta">
+        <div className="flex-none w-10 h-10 rounded-full bg-primary text-primaryfg font-bold text-sm flex items-center justify-center">
+          {(displayName||"?").slice(0,2).toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold text-[.92rem] text-fg truncate">{displayName}</div>
+          <div className="text-xs text-muted truncate">
             {p.weight ? `${p.weight} lbs` : "—"}
             {p.goal ? ` → ${p.goal} lbs` : ""}
             {p.lastSaved ? ` · ${new Date(p.lastSaved).toLocaleDateString()}` : ""}
             {p.stepLabel ? ` · ${p.stepLabel}` : ""}
           </div>
         </div>
-        <button className="prof-del" title="Rename"
+        <button className="flex-none border-none bg-transparent text-muted cursor-pointer text-[.95rem] px-1" title="Rename"
           onClick={e=>{e.stopPropagation(); setRenameDraft(displayName); setRenamingId(p.id);}}>✎</button>
-        <button className="prof-del"
-          style={confirmDeleteId===p.id?{background:"rgba(255,79,107,.15)",color:"var(--red)",borderRadius:"6px",padding:"2px 8px",fontSize:".68rem",border:"1px solid rgba(255,79,107,.3)"}:{}}
+        <button
+          className={confirmDeleteId===p.id
+            ? "flex-none cursor-pointer rounded-md border border-[rgba(248,113,113,.3)] bg-[rgba(248,113,113,.15)] text-danger text-[.68rem] font-bold px-2 py-0.5"
+            : "flex-none border-none bg-transparent text-muted cursor-pointer text-[.95rem] px-1"}
           onClick={e=>{e.stopPropagation();onDelete(p.id,p.name)}}
           title="Delete">{confirmDeleteId===p.id?"Confirm?":"✕"}</button>
       </div>
@@ -9388,16 +9400,16 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
   };
 
   return (
-    <div className="prof-screen page-transition">
+    <div data-theme="pro" className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
-      <div className="header">
-        <div className="logo">CALORIE<span>IQ</span></div>
-        <div className="tagline">Maintenance · Deficit · Cardio · Strength · Timeline</div>
+      {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
+      <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border">
+        <span className="font-display text-2xl tracking-[2px] text-primary">CALORIE<span className="text-fg">IQ</span></span>
       </div>
-      <div className="container">
-        <div className="card">
-          <div className="card-title">📂 Client Profiles</div>
-          <div className="card-sub">
+      <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
+        <div className={cardCls}>
+          <div className={sectionTitleCls}>📂 Client Profiles</div>
+          <div className={subCls}>
             {loading ? "Loading saved profiles..." : profiles.length > 0
               ? `${profiles.length} client${profiles.length!==1?"s":""} · ${folders.length} folder${folders.length!==1?"s":""}. Drag and drop clients between folders.`
               : "No saved profiles yet. Create a folder for your team, then add clients."
@@ -9406,39 +9418,39 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
 
           {/* Dashboard Stats */}
           {!loading && profiles.length > 0 && (
-            <div className="dash-stats">
-              <div className="dash-stat">
-                <div className="dash-stat-val c-acc">{profiles.length}</div>
-                <div className="dash-stat-lbl">Total Clients</div>
+            <div className="grid grid-cols-3 gap-2 my-4">
+              <div className="bg-surface2 border border-border rounded-lg py-3 text-center">
+                <div className="font-display text-2xl text-primary">{profiles.length}</div>
+                <div className="text-[.66rem] uppercase tracking-wide text-muted mt-0.5">Total Clients</div>
               </div>
-              <div className="dash-stat">
-                <div className="dash-stat-val c-grn">{profiles.filter(p => p.lastSaved && (Date.now() - p.lastSaved) < 7*86400000).length}</div>
-                <div className="dash-stat-lbl">Active This Week</div>
+              <div className="bg-surface2 border border-border rounded-lg py-3 text-center">
+                <div className="font-display text-2xl text-success">{profiles.filter(p => p.lastSaved && (Date.now() - p.lastSaved) < 7*86400000).length}</div>
+                <div className="text-[.66rem] uppercase tracking-wide text-muted mt-0.5">Active This Week</div>
               </div>
-              <div className="dash-stat">
-                <div className="dash-stat-val c-org">{folders.length}</div>
-                <div className="dash-stat-lbl">Folders</div>
+              <div className="bg-surface2 border border-border rounded-lg py-3 text-center">
+                <div className="font-display text-2xl text-warn">{folders.length}</div>
+                <div className="text-[.66rem] uppercase tracking-wide text-muted mt-0.5">Folders</div>
               </div>
             </div>
           )}
 
           {/* Folder creation */}
-          <div className="folder-bar">
+          <div className="my-3">
             {showNewFolder ? (
-              <div style={{flex:1,display:"flex",gap:"8px"}}>
-                <input type="text" className="folder-input" placeholder="Folder name (e.g. Kevin's Clients)"
+              <div className="flex gap-2">
+                <input type="text" className={inputCls} placeholder="Folder name (e.g. Kevin's Clients)"
                   ref={folderInputRef}
                   value={newFolderName} onChange={e=>setNewFolderName(e.target.value)}
                   onKeyDown={e=>{ if(e.key==="Enter"&&newFolderName.trim()){ onCreateFolder(newFolderName.trim()); setNewFolderName(""); setShowNewFolder(false); }}}
                   />
-                <button className="prof-new-btn" style={{flex:"0 0 auto",minHeight:0,padding:"8px 14px",fontSize:".8rem"}}
+                <button className={primaryBtnCls}
                   onClick={()=>{ if(newFolderName.trim()){ onCreateFolder(newFolderName.trim()); setNewFolderName(""); setShowNewFolder(false); }}}>
                   Create
                 </button>
-                <button className="folder-act-btn" onClick={()=>{setShowNewFolder(false);setNewFolderName("")}}>Cancel</button>
+                <button className={ghostBtnCls} onClick={()=>{setShowNewFolder(false);setNewFolderName("")}}>Cancel</button>
               </div>
             ) : (
-              <button className="folder-new-btn" onClick={()=>setShowNewFolder(true)}>📁 + New Folder</button>
+              <button className="w-full py-2.5 rounded-lg border border-dashed border-border bg-transparent text-fg text-sm font-semibold cursor-pointer" onClick={()=>setShowNewFolder(true)}>📁 + New Folder</button>
             )}
           </div>
 
@@ -9449,38 +9461,39 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
             const isDragOver = dragOverFolder === folder.id;
             return (
               <div key={folder.id}
-                className={`folder-section${isDragOver?" drag-over":""}`}
+                className={`rounded-[10px] border mb-2.5 ${isDragOver?"border-primary bg-[rgba(8,220,224,.06)]":"border-border"}`}
                 onDragOver={e=>onFolderDragOver(e,folder.id)}
                 onDragLeave={onFolderDragLeave}
                 onDrop={e=>onFolderDrop(e,folder.id)}>
-                <div className="folder-header" onClick={()=>toggleFolder(folder.id)}>
-                  <span className="folder-icon">{isOpen?"📂":"📁"}</span>
+                <div className="flex items-center gap-2 px-3 py-2.5 cursor-pointer" onClick={()=>toggleFolder(folder.id)}>
+                  <span className="text-base">{isOpen?"📂":"📁"}</span>
                   {editingFolder===folder.id ? (
-                    <input type="text" className="folder-input" style={{flex:1}} value={editName}
+                    <input type="text" className={inputCls} value={editName}
                       onChange={e=>setEditName(e.target.value)}
                       onKeyDown={e=>{ if(e.key==="Enter"){ onRenameFolder(folder.id,editName); setEditingFolder(null); } if(e.key==="Escape") setEditingFolder(null); }}
                       onClick={e=>e.stopPropagation()} autoFocus />
                   ) : (
-                    <span className="folder-name">{folder.name}</span>
+                    <span className="flex-1 font-semibold text-[.92rem] text-fg">{folder.name}</span>
                   )}
-                  <span className="folder-count">{clients.length}</span>
-                  <span className={`folder-chevron${isOpen?" open":""}`}>▼</span>
+                  <span className="text-[.7rem] font-bold text-muted bg-surface2 rounded-full px-2 py-0.5">{clients.length}</span>
+                  <span className={`text-muted text-xs transition-transform ${isOpen?"rotate-0":"-rotate-90"}`}>▼</span>
                 </div>
                 {isOpen && (
                   <>
-                    <div className="folder-body">
+                    <div className="flex flex-col gap-2 px-3 pb-2">
                       {clients.length === 0 && (
-                        <div className="drop-zone-hint">
+                        <div className="text-xs text-muted italic py-3 text-center border border-dashed border-border rounded-lg">
                           {dragId ? "Drop here to move client into this folder" : "No clients yet — drag one here or create new"}
                         </div>
                       )}
                       {clients.map(p=><ProfileCard key={p.id} p={p}/>)}
                     </div>
-                    <div className="folder-actions">
-                      <button className="folder-act-btn" onClick={e=>{e.stopPropagation();onNew(folder.id)}}>+ Add Client</button>
-                      <button className="folder-act-btn" onClick={e=>{e.stopPropagation();setEditingFolder(folder.id);setEditName(folder.name)}}>Rename</button>
-                      <button className={`folder-act-btn${confirmFolderDel===folder.id?" del":""}`}
-                        style={confirmFolderDel===folder.id?{borderColor:"var(--red)",color:"var(--red)",fontWeight:700}:{}}
+                    <div className="flex flex-wrap gap-2 px-3 pb-3">
+                      <button className={ghostBtnCls} onClick={e=>{e.stopPropagation();onNew(folder.id)}}>+ Add Client</button>
+                      <button className={ghostBtnCls} onClick={e=>{e.stopPropagation();setEditingFolder(folder.id);setEditName(folder.name)}}>Rename</button>
+                      <button className={confirmFolderDel===folder.id
+                          ? "px-3 py-2 rounded-lg text-xs font-bold border border-[rgba(248,113,113,.4)] bg-transparent text-danger cursor-pointer whitespace-nowrap"
+                          : ghostBtnCls}
                         onClick={e=>{e.stopPropagation();onDeleteFolder(folder.id)}}>
                         {confirmFolderDel===folder.id?"Tap Again to Delete":"Delete Folder"}
                       </button>
@@ -9493,18 +9506,18 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
 
           {/* Unfiled clients */}
           {unfiled.length > 0 && (
-            <div className={`folder-section${dragOverFolder==="unfiled"?" drag-over":""}`}
+            <div className={`rounded-[10px] border mb-2.5 ${dragOverFolder==="unfiled"?"border-primary bg-[rgba(8,220,224,.06)]":"border-border"}`}
               onDragOver={e=>onFolderDragOver(e,"unfiled")}
               onDragLeave={onFolderDragLeave}
               onDrop={e=>onFolderDrop(e,null)}>
-              <div className="folder-header" onClick={()=>toggleFolder("unfiled")}>
-                <span className="folder-icon">{openFolders["unfiled"]!==false?"📋":"📋"}</span>
-                <span className="folder-name" style={{color:"var(--muted)"}}>Unfiled</span>
-                <span className="folder-count">{unfiled.length}</span>
-                <span className={`folder-chevron${openFolders["unfiled"]!==false?" open":""}`}>▼</span>
+              <div className="flex items-center gap-2 px-3 py-2.5 cursor-pointer" onClick={()=>toggleFolder("unfiled")}>
+                <span className="text-base">📋</span>
+                <span className="flex-1 font-semibold text-[.92rem] text-muted">Unfiled</span>
+                <span className="text-[.7rem] font-bold text-muted bg-surface2 rounded-full px-2 py-0.5">{unfiled.length}</span>
+                <span className={`text-muted text-xs transition-transform ${openFolders["unfiled"]!==false?"rotate-0":"-rotate-90"}`}>▼</span>
               </div>
               {openFolders["unfiled"]!==false && (
-                <div className="folder-body">
+                <div className="flex flex-col gap-2 px-3 pb-3">
                   {unfiled.map(p=><ProfileCard key={p.id} p={p}/>)}
                 </div>
               )}
@@ -9512,22 +9525,22 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
           )}
 
           {/* New client (unfiled) */}
-          <button className="prof-new-btn" style={{marginTop:"12px"}} onClick={()=>onNew(null)}>+ New Client Profile</button>
+          <button className={`${primaryBtnCls} w-full py-3 mt-3`} onClick={()=>onNew(null)}>+ New Client Profile</button>
         </div>
 
         {/* Export / Import / Recovery */}
-        <div className="card" style={{padding:"16px",marginTop:"12px"}}>
-          <div style={{fontSize:".82rem",fontWeight:700,color:"var(--text-secondary)",marginBottom:"4px"}}>📦 Data Management</div>
-          <div style={{fontSize:".73rem",color:"var(--muted)",marginBottom:"12px",lineHeight:1.5}}>
+        <div className={cardCls}>
+          <div className="text-[.82rem] font-bold text-fg mb-1">📦 Data Management</div>
+          <div className="text-[.73rem] text-muted mb-3 leading-relaxed">
             📱 <strong>Phone/iPad:</strong> Use Copy & Paste to move data between devices. <strong>Laptop:</strong> File export also works.
           </div>
-          <div style={{fontSize:".65rem",color:"var(--accent)",lineHeight:1.4,marginBottom:"12px",fontStyle:"italic"}}>
+          <div className="text-[.65rem] text-primary leading-snug mb-3 italic">
             ℹ️ This section is only needed in the current version. Once CalorieIQ becomes a web app, your data syncs automatically across all devices — no exporting or importing needed.
           </div>
 
           {/* Clipboard — primary method for mobile */}
-          <div style={{display:"flex",gap:"8px",marginBottom:"8px",flexWrap:"wrap"}}>
-            <button className="save-bar-btn" style={{flex:"1 1 140px",minHeight:"44px",fontSize:".82rem",borderColor:"var(--green)",color:"var(--green)",background:"rgba(79,255,176,.06)"}}
+          <div className="flex gap-2 mb-2 flex-wrap">
+            <button className="flex-[1_1_140px] min-h-[44px] text-[.82rem] font-semibold rounded-lg border border-success text-success bg-[rgba(47,224,168,.08)] cursor-pointer"
               onClick={async ()=>{
                 setClipMsg("Copying...");
                 const result = await onClipCopy();
@@ -9540,31 +9553,25 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
               }}>
               📋 Copy All to Clipboard
             </button>
-            <button className="save-bar-new" style={{flex:"1 1 140px",minHeight:"44px",fontSize:".82rem"}}
+            <button className="flex-[1_1_140px] min-h-[44px] text-[.82rem] font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer"
               onClick={()=>{setShowPasteBox(v=>!v); setPasteText("");}}>
               📋 Paste to Restore
             </button>
           </div>
 
-          {clipMsg && <div style={{fontSize:".8rem",color:clipMsg.startsWith("✅")?"var(--green)":clipMsg.startsWith("⚠️")?"var(--yellow)":"var(--muted)",marginBottom:"8px",textAlign:"center",lineHeight:1.4}}>{clipMsg}</div>}
+          {clipMsg && <div className={`text-sm mb-2 text-center leading-snug ${clipMsg.startsWith("✅")?"text-success":clipMsg.startsWith("⚠️")?"text-warn":"text-muted"}`}>{clipMsg}</div>}
 
           {showPasteBox && (
-            <div style={{marginBottom:"10px"}}>
+            <div className="mb-2.5">
               <textarea
                 ref={pasteRef}
-                type="text"
                 placeholder="Paste your CalorieIQ backup here..."
                 value={pasteText}
                 onChange={e=>setPasteText(e.target.value)}
-                style={{
-                  width:"100%", minHeight:"80px", padding:"12px", borderRadius:"8px",
-                  border:"1.5px solid var(--accent)", background:"var(--s2)",
-                  color:"var(--text)", fontFamily:"monospace", fontSize:".75rem",
-                  resize:"vertical", outline:"none",
-                }}
+                className="w-full min-h-[80px] p-3 rounded-lg border border-primary bg-surface2 text-fg font-mono text-[.75rem] resize-y outline-none"
               />
-              <div style={{display:"flex",gap:"8px",marginTop:"6px"}}>
-                <button className="save-bar-btn" style={{flex:1,minHeight:"38px",fontSize:".8rem"}}
+              <div className="flex gap-2 mt-1.5">
+                <button className={`${primaryBtnCls} flex-1`}
                   disabled={!pasteText.trim()}
                   onClick={async ()=>{
                     setClipMsg("Importing...");
@@ -9575,15 +9582,15 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
                   }}>
                   Import Pasted Data
                 </button>
-                <button className="folder-act-btn" onClick={()=>{setShowPasteBox(false);setPasteText("");}}>Cancel</button>
+                <button className={ghostBtnCls} onClick={()=>{setShowPasteBox(false);setPasteText("");}}>Cancel</button>
               </div>
             </div>
           )}
 
           {/* File export/import — secondary method */}
-          <div style={{fontSize:".72rem",color:"var(--muted)",letterSpacing:".5px",textTransform:"uppercase",fontWeight:700,marginBottom:"8px",marginTop:"6px"}}>Or use file export</div>
-          <div style={{display:"flex",gap:"8px",marginBottom:"10px",flexWrap:"wrap"}}>
-            <button className="save-bar-btn" style={{flex:"1 1 140px",minHeight:"42px",fontSize:".8rem"}}
+          <div className="text-[.72rem] text-muted tracking-wide uppercase font-bold mb-2 mt-1.5">Or use file export</div>
+          <div className="flex gap-2 mb-2.5 flex-wrap">
+            <button className="flex-[1_1_140px] min-h-[42px] text-[.8rem] font-bold rounded-lg border-none bg-primary text-primaryfg cursor-pointer"
               onClick={async ()=>{
                 setExportMsg("Packaging...");
                 const ok = await onExport();
@@ -9592,7 +9599,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
               }}>
               📤 Export All Clients
             </button>
-            <button className="save-bar-new" style={{flex:"1 1 140px",minHeight:"42px",fontSize:".8rem"}}
+            <button className="flex-[1_1_140px] min-h-[42px] text-[.8rem] font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer"
               onClick={()=>importInputRef.current?.click()}>
               📥 Import From File
             </button>
@@ -9608,14 +9615,14 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
               }}/>
           </div>
 
-          {exportMsg && <div style={{fontSize:".8rem",color: exportMsg.startsWith("✅")?"var(--green)":exportMsg.startsWith("❌")?"var(--red)":"var(--muted)",marginBottom:"8px",textAlign:"center"}}>{exportMsg}</div>}
+          {exportMsg && <div className={`text-sm mb-2 text-center ${exportMsg.startsWith("✅")?"text-success":exportMsg.startsWith("❌")?"text-danger":"text-muted"}`}>{exportMsg}</div>}
 
-          <div style={{fontSize:".73rem",color:"var(--muted)",lineHeight:1.5,marginBottom:"10px"}}>
+          <div className="text-[.73rem] text-muted leading-relaxed mb-2.5">
             💡 <strong>Export</strong> downloads a JSON backup of all your clients, folders, and data. <strong>Import</strong> loads a backup file and merges it with your current profiles — no data is overwritten.
           </div>
 
-          {recoverMsg && <div style={{fontSize:".8rem",color:"var(--green)",marginBottom:"8px",textAlign:"center"}}>{recoverMsg}</div>}
-          <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontFamily:"inherit",fontSize:".73rem",textDecoration:"underline",padding:"4px",width:"100%",textAlign:"center"}}
+          {recoverMsg && <div className="text-sm text-success mb-2 text-center">{recoverMsg}</div>}
+          <button className="bg-transparent border-none text-muted cursor-pointer text-[.73rem] underline p-1 w-full text-center"
             onClick={async ()=>{
               setRecoverMsg("Scanning storage...");
               const count = await onRecover();
@@ -9626,7 +9633,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
           </button>
         </div>
 
-        <div className="privacy-note">🔒 All data is stored locally on your device — nothing is sent to a server.</div>
+        <div className="text-center text-xs text-muted py-3">🔒 All data is stored locally on your device — nothing is sent to a server.</div>
       </div>
     </div>
   );

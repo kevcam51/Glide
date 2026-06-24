@@ -519,6 +519,23 @@ enabled (Blaze has no default spending cap).
   header, Connected Clients card, client card, request composer, plans manager, Local Plans cards/chips all
   render on-brand; no console errors; `npm run build` passes. **Not yet migrated (later passes):** the
   All-clients `ProfileSelector`, the setup wizard, and the full-plan/Results editor. No `firestore.rules` change.
+- Session 29: **All-clients screen (`ProfileSelector`) redesigned in Tailwind + brand theme (Option 3 continues).**
+  The trainer's "All clients" view (local profile + folder manager + data import/export) was migrated — this
+  completes the trainer-facing screens. **All logic/handlers/state untouched** (drag-and-drop move, folder
+  create/rename/delete, profile rename/delete-confirm, clipboard copy/paste, file export/import, recover) —
+  only the markup/styling changed. This screen was heavier than the dashboards because it relied on a large
+  set of shared `css`-block classes (`.prof-card`/`.prof-avatar`/`.folder-section`/`.folder-header`/
+  `.folder-act-btn`/`.dash-stat`/`.save-bar-btn` …) that don't pick up the brand tokens, so it needed a real
+  markup rewrite rather than a wrapper. Wrapped in `data-theme="pro"` with the slim brand header + `max-w-[640px]`
+  container; class-string consts (`cardCls`/`sectionTitleCls`/`subCls`/`primaryBtnCls`/`ghostBtnCls`/`inputCls`).
+  **Drag-and-drop visuals** were ported from the old `.drag-ghost`/`.drag-over` classes to conditional Tailwind
+  (`opacity-40` on the dragged card; `border-primary bg-[rgba(8,220,224,.06)]` cyan highlight on the drop-target
+  folder); the folder chevron rotates via `rotate-0`/`-rotate-90`. Stat tiles use semantic colors
+  (`text-primary`/`text-success`/`text-warn`); the green "Copy to Clipboard" CTA uses `border-success`/`text-success`.
+  Avatars are cyan (`bg-primary text-primaryfg`). Verified live as `trainer.uitest` (3 unfiled clients): header,
+  stat tiles, folder/unfiled sections, profile cards, New-Folder input, and the full Data Management section all
+  render on-brand; no console errors; `npm run build` passes. **Not yet migrated:** the setup wizard and the
+  full-plan/Results editor (the two biggest screens). No `firestore.rules` change.
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
   testing — these are not real users and can be cleared. The Session-13/14 testing also left **test
   weigh-ins/check-ins** (incl. some old same-day duplicates from before the Session-15 one-per-date
