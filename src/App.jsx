@@ -1791,6 +1791,23 @@ const WZ = {
 const wzGbtn = (active) => `min-h-[48px] p-4 rounded-lg border-2 cursor-pointer font-semibold flex items-center justify-center gap-2 transition-colors ${active ? "border-primary text-primary bg-[rgba(8,220,224,.08)]" : "border-border text-muted bg-surface2"}`;
 // Large scannable selection row (activity levels, exercises) — cyan when active.
 const wzAbtn = (active) => `w-full min-h-[60px] px-4 py-3.5 rounded-lg border-2 cursor-pointer flex items-center gap-3.5 text-left transition-colors ${active ? "border-primary bg-[rgba(8,220,224,.06)]" : "border-border bg-surface2"}`;
+// Shared widget classes for the workout steps (Strength + Cardio): quick-fill
+// panels, per-day cards, etc.
+const WZW = {
+  toggle: "w-full text-left px-3.5 py-3 rounded-lg border border-border bg-surface2 text-fg text-sm font-semibold cursor-pointer mb-2.5",
+  panel: "fu rounded-lg border border-border bg-bg p-3.5 mb-3",
+  select: WZ.input + " appearance-none",
+  dayCard: "rounded-lg border border-border bg-surface2 mb-2.5 overflow-hidden",
+  dayHeader: "flex items-center gap-3 px-3 py-3 cursor-pointer",
+  dayChip: "shrink-0 min-w-[44px] text-center text-[.7rem] font-bold uppercase tracking-wide text-primary bg-[rgba(8,220,224,.1)] rounded-md py-1",
+  dayBody: "px-3 pb-3 border-t border-border",
+  warn: "text-[.82rem] text-warn bg-[rgba(251,191,36,.08)] border border-[rgba(251,191,36,.3)] rounded-lg px-3.5 py-3 my-2 leading-relaxed",
+  clearDay: "w-full mt-2 py-2.5 rounded-lg border border-border bg-transparent text-muted text-sm font-semibold cursor-pointer",
+  primaryBtn: "min-h-[44px] rounded-lg bg-primary text-primaryfg font-bold text-sm px-4 cursor-pointer disabled:bg-surface2 disabled:text-muted disabled:cursor-not-allowed",
+  ghostBtn: "min-h-[44px] rounded-lg border border-border bg-surface2 text-fg font-semibold text-sm px-4 cursor-pointer",
+};
+const wzFillDay = (sel) => `min-h-[40px] rounded-md border text-sm font-semibold cursor-pointer ${sel ? "border-primary bg-[rgba(8,220,224,.12)] text-primary" : "border-border bg-surface2 text-fg"}`;
+const wzPreset = "px-2.5 py-1 rounded-md border border-border bg-surface2 text-fg text-[.72rem] cursor-pointer";
 
 function BottomNav({ onBack, onNext, nextLabel = "Next →", nextDisabled = false, showBack = true }) {
   // Brand-themed fixed bottom bar (Session 30). data-theme="pro" makes it self-
@@ -2365,24 +2382,24 @@ function StepStrength({ data, onChange, onBack, onNext }) {
   const getEx = id => allExercises.find(e=>e.id===id) || REST_ST;
 
   return (
-    <div className="fu">
-      <div className="card">
-        <div className="card-title">💪 Strength Training Plan</div>
-        <div className="card-sub">
+    <div data-theme="pro" className="fu text-fg">
+      <div className={WZ.card}>
+        <div className={WZ.title}>💪 Strength Training Plan</div>
+        <div className={WZ.sub}>
           Assign strength workouts to each day. You can add multiple sessions per day.
           Calorie burn is estimated using MET values from the
           <em> 2011 Compendium of Physical Activities</em> (Ainsworth et al., MSSE).
         </div>
 
         {/* Quick Fill */}
-        <button className="quick-fill-toggle" onClick={()=>setShowFill(v=>!v)}>
+        <button className={WZW.toggle} onClick={()=>setShowFill(v=>!v)}>
           ⚡ Quick Fill — Apply one exercise to multiple days {showFill?"▲":"▼"}
         </button>
         {showFill && (
-          <div className="quick-fill-panel fu">
-            <div className="field">
-              <label>Exercise</label>
-              <select value={fillType} onChange={e=>setFillType(e.target.value)}>
+          <div className={WZW.panel}>
+            <div className="mb-4">
+              <label className={WZ.label}>Exercise</label>
+              <select className={WZW.select} value={fillType} onChange={e=>setFillType(e.target.value)}>
                 {STRENGTH_GROUPS.map(cat=>(
                   <optgroup key={cat} label={cat}>
                     {STRENGTH_EXERCISES.filter(e=>e.cat===cat).map(e=>(
@@ -2392,73 +2409,70 @@ function StepStrength({ data, onChange, onBack, onNext }) {
                 ))}
               </select>
             </div>
-            <div className="field">
-              <label>Duration</label>
-              <select value={fillDuration} onChange={e=>setFillDuration(Number(e.target.value))}>
+            <div className="mb-4">
+              <label className={WZ.label}>Duration</label>
+              <select className={WZW.select} value={fillDuration} onChange={e=>setFillDuration(Number(e.target.value))}>
                 {ST_DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
               </select>
             </div>
-            <div className="field">
-              <label>Apply to days</label>
-              <div className="fill-day-grid">
+            <div className="mb-4">
+              <label className={WZ.label}>Apply to days</label>
+              <div className="grid grid-cols-7 gap-1.5">
                 {DAYS.map((day,i)=>(
-                  <button key={day}
-                    className={`fill-day-btn${fillDays.includes(day)?" selected":""}`}
-                    onClick={()=>toggleFillDay(day)}>
+                  <button key={day} className={wzFillDay(fillDays.includes(day))} onClick={()=>toggleFillDay(day)}>
                     {DAY_SHORT[i]}
                   </button>
                 ))}
               </div>
             </div>
-            <div style={{display:"flex",gap:"8px",marginTop:"4px"}}>
-              <button className="btn btn-p" style={{fontSize:".9rem",letterSpacing:"1px",minHeight:"44px",flex:1}}
-                disabled={!fillDays.length} onClick={applyFill}>
+            <div className="flex gap-2 mt-1">
+              <button className={`${WZW.primaryBtn} flex-1`} disabled={!fillDays.length} onClick={applyFill}>
                 Apply to {fillDays.length||"0"} day{fillDays.length!==1?"s":""}
               </button>
             </div>
-            <div style={{display:"flex",gap:"6px",marginTop:"8px",flexWrap:"wrap"}}>
-              <span style={{fontSize:".72rem",color:"var(--muted)",alignSelf:"center"}}>Presets:</span>
+            <div className="flex gap-1.5 mt-2 flex-wrap">
+              <span className="text-[.72rem] text-muted self-center">Presets:</span>
               {[
                 {label:"MWF", days:["Monday","Wednesday","Friday"]},
                 {label:"M–F", days:["Monday","Tuesday","Wednesday","Thursday","Friday"]},
                 {label:"All 7",days:DAYS},
               ].map(p=>(
-                <button key={p.label} className="fill-preset-btn" onClick={()=>setFillDays(p.days)}>{p.label}</button>
+                <button key={p.label} className={wzPreset} onClick={()=>setFillDays(p.days)}>{p.label}</button>
               ))}
             </div>
           </div>
         )}
 
         {/* Movement Pattern Combos */}
-        <button className="quick-fill-toggle" style={{borderColor:"rgba(79,255,176,.25)",background:"rgba(79,255,176,.025)",color:"var(--green)"}} onClick={()=>setShowCombos(v=>!v)}>
+        <button className="w-full text-left px-3.5 py-3 rounded-lg border border-[rgba(47,224,168,.3)] bg-[rgba(47,224,168,.05)] text-success text-sm font-semibold cursor-pointer mb-2.5" onClick={()=>setShowCombos(v=>!v)}>
           🔀 Movement Combos — Pair patterns for a training day {showCombos?"▲":"▼"}
         </button>
         {showCombos && (
-          <div className="quick-fill-panel fu">
-            <p style={{fontSize:".78rem",color:"var(--muted)",marginBottom:"12px",lineHeight:1.5}}>
+          <div className={WZW.panel}>
+            <p className="text-[.78rem] text-muted mb-3 leading-relaxed">
               Pick a combo and assign it to days. Each pattern adds one exercise to that day.
             </p>
-            <div className="field">
-              <label>Select a combo</label>
-              <select value={comboChoice} onChange={e=>setComboChoice(e.target.value)}>
+            <div className="mb-4">
+              <label className={WZ.label}>Select a combo</label>
+              <select className={WZW.select} value={comboChoice} onChange={e=>setComboChoice(e.target.value)}>
                 {COMBOS.map(c=><option key={c.id} value={c.id}>{c.label}</option>)}
               </select>
             </div>
-            <div style={{fontSize:".76rem",color:"var(--muted)",marginBottom:"8px",lineHeight:1.5}}>
+            <div className="text-[.76rem] text-muted mb-2 leading-relaxed">
               {COMBOS.find(c=>c.id===comboChoice)?.desc}
             </div>
-            <div className="field">
-              <label>Apply to days</label>
-              <div className="fill-day-grid">
+            <div className="mb-4">
+              <label className={WZ.label}>Apply to days</label>
+              <div className="grid grid-cols-7 gap-1.5">
                 {DAYS.map((day,i)=>(
-                  <button key={day} className={`fill-day-btn${comboDays.includes(day)?" selected":""}`}
+                  <button key={day} className={wzFillDay(comboDays.includes(day))}
                     onClick={()=>setComboDays(prev=>prev.includes(day)?prev.filter(d=>d!==day):[...prev,day])}>
                     {DAY_SHORT[i]}
                   </button>
                 ))}
               </div>
             </div>
-            <button className="btn btn-p" style={{fontSize:".9rem",letterSpacing:"1px",minHeight:"44px",width:"100%"}}
+            <button className={`${WZW.primaryBtn} w-full`}
               disabled={!comboDays.length}
               onClick={()=>{
                 const combo = COMBOS.find(c=>c.id===comboChoice);
@@ -2489,33 +2503,33 @@ function StepStrength({ data, onChange, onBack, onNext }) {
           }, 0);
           const isOpen = openDay === day;
           return (
-            <div className="day-card" key={day}>
-              <div className="day-card-header" onClick={()=>setOpenDay(isOpen?null:day)}>
-                <div className="day-chip">{DAY_SHORT[i]}</div>
-                <div className={`day-cardio-name${isRest?" rest":""}`}>
+            <div className={WZW.dayCard} key={day}>
+              <div className={WZW.dayHeader} onClick={()=>setOpenDay(isOpen?null:day)}>
+                <div className={WZW.dayChip}>{DAY_SHORT[i]}</div>
+                <div className={`text-[.88rem] ${isRest?"text-muted":"text-fg font-semibold"}`}>
                   {isRest ? "😴 Rest Day" : sessions.length === 1
                     ? `${getEx(sessions[0].type).icon} ${getEx(sessions[0].type).label} · ${sessions[0].duration}m`
                     : `${sessions.length} sessions`
                   }
                 </div>
-                <div className={`day-burn${totalBurned===0?" zero":""}`}>{totalBurned>0?`~${totalBurned} cal`:""}</div>
-                <div className={`day-chevron${isOpen?" open":""}`}>▼</div>
+                <div className={WZW.dayBurn}>{totalBurned>0?`~${totalBurned} cal`:""}</div>
+                <div className={`text-muted text-xs transition-transform ${isOpen?"rotate-0":"-rotate-90"}`}>▼</div>
               </div>
               {isOpen && (
-                <div className="day-card-body">
+                <div className={WZW.dayBody}>
                   {sessions.map((sess, idx) => {
                     const ex = getEx(sess.type);
                     const burn = calcStrengthBurn(ex.met, Number(data.weightLbs), sess.duration);
                     return (
-                      <div key={idx} style={{padding:"10px 0",borderBottom:idx<sessions.length-1?"1px solid var(--border)":"none"}}>
+                      <div key={idx} className="py-2.5" style={{borderBottom:idx<sessions.length-1?"1px solid var(--color-border)":"none"}}>
                         {sessions.length > 1 && (
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px"}}>
-                            <span style={{fontSize:".72rem",color:"var(--muted)",fontWeight:700,letterSpacing:"1px",textTransform:"uppercase"}}>Session {idx+1}</span>
-                            <button style={{background:"none",border:"none",color:"var(--red)",cursor:"pointer",fontSize:".78rem",fontFamily:"inherit",padding:"2px 6px"}} onClick={()=>removeSession(day,idx)}>✕ Remove</button>
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="text-[.72rem] text-muted font-bold tracking-wide uppercase">Session {idx+1}</span>
+                            <button className="bg-transparent border-none text-danger cursor-pointer text-[.78rem] px-1.5" onClick={()=>removeSession(day,idx)}>✕ Remove</button>
                           </div>
                         )}
-                        <div className="field">
-                          <label>Exercise <span className="field-hint">type to search or browse below</span></label>
+                        <div className="mb-4">
+                          <label className={WZ.label}>Exercise <span className={WZ.hint}>type to search or browse below</span></label>
                           <SearchableSelect
                             exercises={STRENGTH_EXERCISES}
                             groups={STRENGTH_GROUPS}
@@ -2523,7 +2537,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
                             onChange={val=>updSession(day,idx,"type",val)}
                             placeholder="Search exercises... (e.g. squat, curl, press)"
                           />
-                          <select value={sess.type} onChange={e=>updSession(day,idx,"type",e.target.value)}>
+                          <select className={WZW.select} value={sess.type} onChange={e=>updSession(day,idx,"type",e.target.value)}>
                             {STRENGTH_GROUPS.map(cat=>(
                               <optgroup key={cat} label={cat}>
                                 {STRENGTH_EXERCISES.filter(e=>e.cat===cat).map(e=>(
@@ -2533,23 +2547,22 @@ function StepStrength({ data, onChange, onBack, onNext }) {
                             ))}
                           </select>
                         </div>
-                        <div className="field">
-                          <label>Duration</label>
-                          <select value={sess.duration} onChange={e=>updSession(day,idx,"duration",Number(e.target.value))}>
+                        <div className="mb-4">
+                          <label className={WZ.label}>Duration</label>
+                          <select className={WZW.select} value={sess.duration} onChange={e=>updSession(day,idx,"duration",Number(e.target.value))}>
                             {ST_DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
                           </select>
                         </div>
-                        {ex.note && <div style={{fontSize:".75rem",color:"var(--muted)",padding:"4px 0"}}>🎯 Muscles: {ex.note}</div>}
-                        {burn > 0 && <div style={{fontSize:".78rem",color:"var(--orange)",fontWeight:600}}>~{burn} cal</div>}
+                        {ex.note && <div className="text-[.75rem] text-muted py-1">🎯 Muscles: {ex.note}</div>}
+                        {burn > 0 && <div className="text-[.78rem] text-warn font-semibold">~{burn} cal</div>}
                       </div>
                     );
                   })}
-                  <button className="quick-fill-toggle" style={{marginTop:"10px",marginBottom:"6px",borderStyle:"solid",fontSize:".8rem",padding:"10px 14px"}}
-                    onClick={()=>addSession(day)}>
+                  <button className={`${WZW.toggle} mt-2.5 mb-1.5`} onClick={()=>addSession(day)}>
                     + Add Another Session
                   </button>
                   {sessions.length > 0 && (
-                    <button className="clear-day-btn" onClick={()=>{ setSessions(day,[]); setOpenDay(null); }}>
+                    <button className={WZW.clearDay} onClick={()=>{ setSessions(day,[]); setOpenDay(null); }}>
                       Set as Rest Day
                     </button>
                   )}
@@ -2563,9 +2576,9 @@ function StepStrength({ data, onChange, onBack, onNext }) {
       <CustomExerciseCreator exerciseType="strength" onAdd={(ex)=>onChange("customExercises",[...(data.customExercises||[]),ex])} />
 
       {DAYS.every(day => getSessions(day).length === 0) && (
-        <div className="warn-box">💡 All 7 days are set to rest — no worries! Your results will still work. Adding even 1–2 strength days will unlock muscle gain projections and EPOC afterburn data.</div>
+        <div className={WZW.warn}>💡 All 7 days are set to rest — no worries! Your results will still work. Adding even 1–2 strength days will unlock muscle gain projections and EPOC afterburn data.</div>
       )}
-      <div style={{fontSize:".6rem",color:"var(--muted)",textAlign:"center",margin:"8px 0",fontStyle:"italic"}}>⚠️ Calorie burn estimates use MET values — actual burn varies by intensity, form, and individual metabolism.</div>
+      <div className="text-[.6rem] text-muted text-center my-2 italic">⚠️ Calorie burn estimates use MET values — actual burn varies by intensity, form, and individual metabolism.</div>
       <BottomNav onBack={onBack} onNext={onNext} nextLabel="See Results →"/>
     </div>
   );
@@ -2609,21 +2622,21 @@ function StepCardio({ data, onChange, onBack, onNext }) {
   const fillCardioObj = ALL_CARDIO.find(c=>c.id===fillType)||ALL_CARDIO[0];
 
   return (
-    <div className="fu">
-      <div className="card">
-        <div className="card-title">Weekly Cardio Plan</div>
-        <div className="card-sub">Tap a day to set your cardio. Calories estimated from your weight in real time.</div>
+    <div data-theme="pro" className="fu text-fg">
+      <div className={WZ.card}>
+        <div className={WZ.title}>Weekly Cardio Plan</div>
+        <div className={WZ.sub}>Tap a day to set your cardio. Calories estimated from your weight in real time.</div>
 
         {/* ── Quick Fill ── */}
-        <button className="quick-fill-toggle" onClick={()=>setShowFill(v=>!v)}>
+        <button className={WZW.toggle} onClick={()=>setShowFill(v=>!v)}>
           ⚡ Quick Fill — Apply one exercise to multiple days {showFill?"▲":"▼"}
         </button>
 
         {showFill && (
-          <div className="quick-fill-panel fu">
-            <div className="field">
-              <label>Exercise to apply</label>
-              <select value={fillType} onChange={e=>setFillType(e.target.value)}>
+          <div className={WZW.panel}>
+            <div className="mb-4">
+              <label className={WZ.label}>Exercise to apply</label>
+              <select className={WZW.select} value={fillType} onChange={e=>setFillType(e.target.value)}>
                 {CARDIO_GROUPS.filter(g=>g.group!=="😴 Rest").map(grp=>(
                   <optgroup key={grp.group} label={grp.group}>
                     {grp.options.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
@@ -2631,54 +2644,35 @@ function StepCardio({ data, onChange, onBack, onNext }) {
                 ))}
               </select>
             </div>
-            <div className="field">
-              <label>Duration</label>
-              <select value={fillDuration} onChange={e=>setFillDuration(Number(e.target.value))}>
+            <div className="mb-4">
+              <label className={WZ.label}>Duration</label>
+              <select className={WZW.select} value={fillDuration} onChange={e=>setFillDuration(Number(e.target.value))}>
                 {DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
               </select>
             </div>
-            <div className="field">
-              <label>Apply to these days</label>
-              <div className="fill-day-grid">
-                {DAYS.map((day,i)=>{
-                  const sel = fillDays.includes(day);
-                  return (
-                    <button
-                      key={day}
-                      className={`fill-day-btn${sel?" selected":""}`}
-                      onClick={()=>toggleFillDay(day)}
-                    >{DAY_SHORT[i]}</button>
-                  );
-                })}
+            <div className="mb-4">
+              <label className={WZ.label}>Apply to these days</label>
+              <div className="grid grid-cols-7 gap-1.5">
+                {DAYS.map((day,i)=>(
+                  <button key={day} className={wzFillDay(fillDays.includes(day))} onClick={()=>toggleFillDay(day)}>{DAY_SHORT[i]}</button>
+                ))}
               </div>
             </div>
-            <div style={{display:"flex",gap:"8px",marginTop:"4px"}}>
-              <button
-                className="btn btn-p"
-                style={{fontSize:".9rem",letterSpacing:"1px",minHeight:"44px",flex:1}}
-                disabled={!fillDays.length}
-                onClick={applyFill}
-              >
+            <div className="flex gap-2 mt-1">
+              <button className={`${WZW.primaryBtn} flex-1`} disabled={!fillDays.length} onClick={applyFill}>
                 Apply to {fillDays.length||"0"} day{fillDays.length!==1?"s":""}
               </button>
-              <button
-                className="btn btn-g"
-                style={{fontSize:".9rem",letterSpacing:"1px",minHeight:"44px",flex:"0 0 auto",padding:"0 14px"}}
-                onClick={()=>{ setFillDays(DAYS.slice(0,5)); }}
-              >MWF→Fri</button>
+              <button className={WZW.ghostBtn} onClick={()=>{ setFillDays(DAYS.slice(0,5)); }}>MWF→Fri</button>
             </div>
             {/* Quick presets */}
-            <div style={{display:"flex",gap:"6px",marginTop:"8px",flexWrap:"wrap"}}>
-              <span style={{fontSize:".72rem",color:"var(--muted)",alignSelf:"center"}}>Presets:</span>
+            <div className="flex gap-1.5 mt-2 flex-wrap">
+              <span className="text-[.72rem] text-muted self-center">Presets:</span>
               {[
                 {label:"MWF",  days:["Monday","Wednesday","Friday"]},
                 {label:"M–F",  days:["Monday","Tuesday","Wednesday","Thursday","Friday"]},
                 {label:"All 7",days:DAYS},
               ].map(p=>(
-                <button key={p.label}
-                  className="fill-preset-btn"
-                  onClick={()=>setFillDays(p.days)}
-                >{p.label}</button>
+                <button key={p.label} className={wzPreset} onClick={()=>setFillDays(p.days)}>{p.label}</button>
               ))}
             </div>
           </div>
@@ -2694,33 +2688,33 @@ function StepCardio({ data, onChange, onBack, onNext }) {
           }, 0);
           const isOpen = openDay===day;
           return (
-            <div className="day-card" key={day}>
-              <div className="day-card-header" onClick={()=>setOpenDay(isOpen?null:day)}>
-                <div className="day-chip">{DAY_SHORT[i]}</div>
-                <div className={`day-cardio-name${isRest?" rest":""}`}>
+            <div className={WZW.dayCard} key={day}>
+              <div className={WZW.dayHeader} onClick={()=>setOpenDay(isOpen?null:day)}>
+                <div className={WZW.dayChip}>{DAY_SHORT[i]}</div>
+                <div className={`text-[.88rem] ${isRest?"text-muted":"text-fg font-semibold"}`}>
                   {isRest ? "😴 Rest Day" : sessions.length === 1
                     ? `${(ALL_CARDIO.find(c=>c.id===sessions[0].type)||{icon:"🏃"}).icon} ${(ALL_CARDIO.find(c=>c.id===sessions[0].type)||{label:"Cardio"}).label} · ${sessions[0].duration}m`
                     : `${sessions.length} sessions`
                   }
                 </div>
-                <div className={`day-burn${totalBurned===0?" zero":""}`}>{totalBurned>0?`~${totalBurned} cal`:""}</div>
-                <div className={`day-chevron${isOpen?" open":""}`}>▼</div>
+                <div className={WZW.dayBurn}>{totalBurned>0?`~${totalBurned} cal`:""}</div>
+                <div className={`text-muted text-xs transition-transform ${isOpen?"rotate-0":"-rotate-90"}`}>▼</div>
               </div>
               {isOpen && (
-                <div className="day-card-body">
+                <div className={WZW.dayBody}>
                   {sessions.map((sess, idx) => {
                     const co = ALL_CARDIO.find(c=>c.id===sess.type)||ALL_CARDIO[ALL_CARDIO.length-1];
                     const burn = calcBurn(co.met, Number(data.weightLbs), sess.duration);
                     return (
-                      <div key={idx} style={{padding:"10px 0",borderBottom:idx<sessions.length-1?"1px solid var(--border)":"none"}}>
+                      <div key={idx} className="py-2.5" style={{borderBottom:idx<sessions.length-1?"1px solid var(--color-border)":"none"}}>
                         {sessions.length > 1 && (
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px"}}>
-                            <span style={{fontSize:".72rem",color:"var(--muted)",fontWeight:700,letterSpacing:"1px",textTransform:"uppercase"}}>Session {idx+1}</span>
-                            <button style={{background:"none",border:"none",color:"var(--red)",cursor:"pointer",fontSize:".78rem",fontFamily:"inherit",padding:"2px 6px"}} onClick={()=>removeWorkout(day,idx)}>✕ Remove</button>
+                          <div className="flex justify-between items-center mb-2">
+                            <span className="text-[.72rem] text-muted font-bold tracking-wide uppercase">Session {idx+1}</span>
+                            <button className="bg-transparent border-none text-danger cursor-pointer text-[.78rem] px-1.5" onClick={()=>removeWorkout(day,idx)}>✕ Remove</button>
                           </div>
                         )}
-                        <div className="field">
-                          <label>Exercise <span className="field-hint">type to search or browse below</span></label>
+                        <div className="mb-4">
+                          <label className={WZ.label}>Exercise <span className={WZ.hint}>type to search or browse below</span></label>
                           <SearchableSelect
                             exercises={ALL_CARDIO}
                             groups={CARDIO_GROUPS.map(g=>g.group)}
@@ -2728,7 +2722,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
                             onChange={val=>updateWorkout(day,idx,"type",val)}
                             placeholder="Search cardio... (e.g. treadmill, bike, swim)"
                           />
-                          <select value={sess.type} onChange={e=>updateWorkout(day,idx,"type",e.target.value)}>
+                          <select className={WZW.select} value={sess.type} onChange={e=>updateWorkout(day,idx,"type",e.target.value)}>
                             {CARDIO_GROUPS.map(grp=>(
                               <optgroup key={grp.group} label={grp.group}>
                                 {grp.options.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
@@ -2737,23 +2731,22 @@ function StepCardio({ data, onChange, onBack, onNext }) {
                           </select>
                         </div>
                         {sess.type!=="rest" && (
-                          <div className="field">
-                            <label>Duration</label>
-                            <select value={sess.duration} onChange={e=>updateWorkout(day,idx,"duration",Number(e.target.value))}>
+                          <div className="mb-4">
+                            <label className={WZ.label}>Duration</label>
+                            <select className={WZW.select} value={sess.duration} onChange={e=>updateWorkout(day,idx,"duration",Number(e.target.value))}>
                               {DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
                             </select>
                           </div>
                         )}
-                        {burn > 0 && <div style={{fontSize:".78rem",color:"var(--orange)",fontWeight:600}}>~{burn} cal</div>}
+                        {burn > 0 && <div className="text-[.78rem] text-warn font-semibold">~{burn} cal</div>}
                       </div>
                     );
                   })}
-                  <button className="quick-fill-toggle" style={{marginTop:"10px",marginBottom:"6px",borderStyle:"solid",fontSize:".8rem",padding:"10px 14px"}}
-                    onClick={()=>addWorkout(day)}>
+                  <button className={`${WZW.toggle} mt-2.5 mb-1.5`} onClick={()=>addWorkout(day)}>
                     + Add {sessions.length > 0 ? "Another" : "a"} Session
                   </button>
                   {sessions.length > 0 && (
-                    <button className="clear-day-btn"
+                    <button className={WZW.clearDay}
                       onClick={()=>{ onChange("cardio",{...data.cardio,[day]:[]}); setOpenDay(null); }}>
                       Set as Rest Day
                     </button>
@@ -2768,9 +2761,9 @@ function StepCardio({ data, onChange, onBack, onNext }) {
       <CustomExerciseCreator exerciseType="cardio" onAdd={(ex)=>onChange("customExercises",[...(data.customExercises||[]),ex])} />
 
       {DAYS.every(day => !Array.isArray(data.cardio[day]) || data.cardio[day].length === 0) && (
-        <div className="warn-box">💡 All 7 days are set to rest — that's totally fine! Your results will still calculate based on diet alone. But if you'd like to add even one cardio session, it'll speed things up.</div>
+        <div className={WZW.warn}>💡 All 7 days are set to rest — that's totally fine! Your results will still calculate based on diet alone. But if you'd like to add even one cardio session, it'll speed things up.</div>
       )}
-      <div style={{fontSize:".6rem",color:"var(--muted)",textAlign:"center",margin:"8px 0",fontStyle:"italic"}}>⚠️ Cardio calorie estimates are approximations — actual burn depends on effort, body composition, and conditions.</div>
+      <div className="text-[.6rem] text-muted text-center my-2 italic">⚠️ Cardio calorie estimates are approximations — actual burn depends on effort, body composition, and conditions.</div>
       <BottomNav onBack={onBack} onNext={onNext} nextLabel="Next — Strength →"/>
     </div>
   );
@@ -10571,47 +10564,46 @@ export default function App() {
       {chrome}
       <style>{css}</style>
       {saving && <div className="prof-save-badge">✓ Saved</div>}
-      <div className="app">
-        <div className="header">
-          <div className="logo">CALORIE<span>IQ</span></div>
-          <div className="tagline">Maintenance · Deficit · Cardio · Strength · Timeline</div>
+      <div className="app" data-theme="pro">
+        {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
+        <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border mb-3">
+          <span className="font-display text-2xl tracking-[2px] text-primary">CALORIE<span className="text-fg">IQ</span></span>
         </div>
-        <div className="prof-header-bar">
-          <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
-            <button className="prof-switch-btn" onClick={goBack} style={{background:"var(--accent)",color:"#0b0b12",borderColor:"var(--accent)",fontWeight:700,minWidth:"36px",padding:"6px 12px"}}>
+        <div className="max-w-[640px] mx-auto px-4">
+          <div className="flex gap-2 items-center mb-3">
+            <button onClick={goBack} className="bg-primary text-primaryfg font-bold rounded-lg px-3 py-1.5 text-sm cursor-pointer whitespace-nowrap">
               ← {(showDash && step===5) ? (role === ROLES.CLIENT ? "Home" : "Clients") : step <= 4 ? (navFrom === "results" ? "Results" : "Dashboard") : "Dashboard"}
             </button>
-            <div className="prof-header-name">📂 {fullName(data) || "New Client"}</div>
+            <div className="text-muted text-sm truncate">📂 {fullName(data) || "New Client"}</div>
           </div>
         </div>
         <div className="container">
           {activeIsSim && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", marginBottom: 14,
-              borderRadius: 10, background: "rgba(181,123,255,.1)", border: "1px solid rgba(181,123,255,.4)" }}>
-              <span style={{ fontSize: "1.1rem" }}>🧪</span>
-              <span style={{ fontSize: ".82rem", color: "var(--text)" }}>
+            <div className="flex items-center gap-2 px-3.5 py-2.5 mb-3.5 rounded-[10px] bg-[rgba(181,123,255,.1)] border border-[rgba(181,123,255,.4)]">
+              <span className="text-[1.1rem]">🧪</span>
+              <span className="text-[.82rem] text-fg">
                 <strong>Simulation</strong> — a sandbox projection, not a real client plan.
               </span>
             </div>
           )}
-          <div className="steps-wrap">
+          <div className="mb-6">
             {step < LBLS.length - 1 && (
-              <div className="step-name-row">
+              <div className="flex justify-center gap-1 mb-2">
                 {LBLS.slice(0,-1).map((lbl,i)=>(
-                  <div key={lbl} className={`step-name-item${i===step?" active":i<step?" done":""}`}>{STEP_ICONS[i]}</div>
+                  <div key={lbl} className={`text-[.65rem] tracking-wide uppercase flex-1 text-center max-w-[80px] ${i===step?"text-primary font-bold":i<step?"text-primary opacity-45":"text-muted"}`}>{STEP_ICONS[i]}</div>
                 ))}
               </div>
             )}
-            <div className="step-lbl">
+            <div className="text-[.72rem] text-muted tracking-wide uppercase text-center mb-2.5 font-medium">
               {step < LBLS.length - 1
                 ? `Step ${step+1} of ${LBLS.length-1} — ${LBLS[step]}`
                 : showDash ? "📊 Daily Dashboard" : "✅ Your Personalized Plan"
               }
             </div>
             {step < LBLS.length - 1 && (
-              <div className="steps-bar">
+              <div className="flex gap-1.5 justify-center">
                 {LBLS.slice(0,-1).map((_,i)=>(
-                  <div key={i} className={`step-dot${i===step?" active":i<step?" done":""}`}/>
+                  <div key={i} className={`flex-1 max-w-[56px] h-1 rounded-full ${i===step?"bg-primary":i<step?"bg-primary opacity-30":"bg-border"}`}/>
                 ))}
               </div>
             )}

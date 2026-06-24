@@ -536,21 +536,27 @@ enabled (Blaze has no default spending cap).
   stat tiles, folder/unfiled sections, profile cards, New-Folder input, and the full Data Management section all
   render on-brand; no console errors; `npm run build` passes. **Not yet migrated:** the setup wizard and the
   full-plan/Results editor (the two biggest screens). No `firestore.rules` change.
-- Session 30 (in progress): **Setup wizard → Tailwind + brand theme (Option 3 — the in-plan flow).** Kevin
-  chose to migrate the whole in-plan flow (wizard + Results) together for visual consistency. **Useful
-  context:** the in-plan screens were already dark+cyan from the Session-25 accent recolor, so this is more
-  a consistency/polish migration (brand tokens + Sora headings + surface shades) than a dramatic reskin —
-  and a partially-migrated wizard still looks coherent (old chrome/steps and new ones all read dark+cyan).
-  **Done this checkpoint:** `BottomNav` (now a self-contained `data-theme="pro"` fixed bar) + shared
-  module-level wizard helpers `WZ` (class strings: card/title/sub/label/hint/input/err/tip), `wzGbtn(active)`
-  (gender-style toggle), `wzAbtn(active)` (large selection row); and **steps 1–3** — `StepPersonal`,
-  `StepGoalWeight`, `StepActivity` — fully rewritten with brand tokens (logic/validation/calcs untouched).
-  Each step root carries its own `data-theme="pro"`. Verified live (trainer.uitest → new client → walked
-  steps 1→2→3): all render on-brand, no console errors, build passes. **Still TODO:** step 4 (`StepStrength`)
-  + step 5 (`StepCardio`) — each a mini-app (quick-fill panels, movement combos, per-day exercise cards) plus
-  the shared `SearchableSelect`/`CustomExerciseCreator` sub-components; the shared App chrome (`.header`/
-  `.prof-header-bar`/`.steps-wrap` step-progress — these live in App's main return and are shared with
-  Results); and the **~3,000-line `Results`** component (its own multi-pass effort). No `firestore.rules` change.
+- Session 30: **Setup wizard (all 5 steps + shared chrome) → Tailwind + brand theme (Option 3 — the in-plan
+  flow).** Kevin chose to migrate the whole in-plan flow (wizard + Results) together for visual consistency.
+  **Useful context:** the in-plan screens were already dark+cyan from the Session-25 accent recolor, so this
+  is more a consistency/polish migration (brand tokens + Sora headings + surface shades) than a dramatic
+  reskin — and even a partially-migrated wizard reads coherently (old + new both dark+cyan). **Done:**
+  (1) `BottomNav` — self-contained `data-theme="pro"` fixed bar. (2) Shared module-level helpers: `WZ` (class
+  strings card/title/sub/label/hint/input/err/tip), `wzGbtn(active)` (gender toggle), `wzAbtn(active)` (large
+  selection row), and `WZW` + `wzFillDay`/`wzPreset` for the workout steps (quick-fill panels, per-day cards,
+  selects). (3) **All 5 steps** — `StepPersonal`, `StepGoalWeight`, `StepActivity`, `StepCardio` (step 4),
+  `StepStrength` (step 5) — rewritten with brand tokens; **all logic/validation/calcs/handlers untouched**
+  (input filtering, BF%/BMI math, quick-fill, movement combos, per-day sessions). Each step root carries its
+  own `data-theme="pro"`. The Movement Combos toggle keeps its distinct **green** (`text-success`) identity;
+  the sim banner keeps **purple**. (4) **Shared App chrome** (in App's main return, shared with Results):
+  `.app` got `data-theme="pro"`; the `.header`/`.prof-header-bar`/`.steps-wrap` step-progress were rewritten
+  to the brand header bar + cyan back-button + token-based step icons/label/dots (the `.app`/`.container`
+  classes kept for layout). Verified live (trainer.uitest → new client → walked all 5 steps): header, back-bar,
+  step indicator, every step body + quick-fill/combo panels/day-cards render on-brand; no console errors;
+  `npm run build` passes. **Still old-styled (acceptable interim, render dark+cyan):** the `SearchableSelect`
+  and `CustomExerciseCreator` sub-components inside the workout steps. **Next:** the **~3,000-line `Results`**
+  component (its own multi-pass effort) — the chrome around it is already branded; only its body remains. The
+  step-5 `DailyDashboard` (in-plan daily view) is also still old. No `firestore.rules` change.
 - **Known state:** there are test accounts and test client profiles in Firestore from manual
   testing — these are not real users and can be cleared. The Session-13/14 testing also left **test
   weigh-ins/check-ins** (incl. some old same-day duplicates from before the Session-15 one-per-date
