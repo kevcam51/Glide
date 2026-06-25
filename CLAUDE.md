@@ -1027,3 +1027,16 @@ enabled (Blaze has no default spending cap).
   structured requests, cooperative history, API-ready meal form, client-side food search to proxy); cost notes
   (AI is the real driver); and open product decisions before Stripe. **Doc only — no code, nothing enabled.**
   Kevin owns the billing/enablement steps. No `firestore.rules` change.
+- Session 53: **Rebrand — "CalorieIQ" → "Glide".** Kevin chose the new name **Glide**. Applied across all
+  user-visible surfaces: the header wordmark on every screen (was the two-tone `CALORIE`+colored `IQ` span,
+  now a single cyan **GLIDE** wordmark — `Glide` doesn't split, so dropped the inner span; ~6 header spots +
+  the side-menu `.logo`), the login + role-chooser brand (`AuthGate` `<h1>`), the page `<title>` (now "Glide"),
+  `package.json` name (`glide`), the shareable plan-card branding ("CALORIEIQ — Powered by Science" → "GLIDE —
+  …", "CALORIEIQ" → "GLIDE"), all prose/disclaimers/welcome/share-text/backup-message/placeholder strings, the
+  dev `Showcase` logo, and internal comments in firebase/storage/profile/themes. **The Firebase project ID
+  stays `calorieiq-29762`** (it's in `VITE_FIREBASE_*` env, not the display name) — no infra/config change, so
+  this was purely a UI-text swap, exactly as the roadmap anticipated. Backup files are now named
+  `Glide-Backup-{date}.json` (old `CalorieIQ-Backup-*.json` still import fine — import doesn't check the name).
+  Verified live: header renders "GLIDE" in cyan, `document.title` = "Glide", no "CalorieIQ"/"CALORIEIQ" strings
+  remain in `src/` or `index.html`, no console errors, `npm run build` passes. **Domain swap is separate** (a
+  Vercel/DNS change Kevin makes when ready). No `firestore.rules` change.

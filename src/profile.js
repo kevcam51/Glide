@@ -1,4 +1,4 @@
-// profile.js — user profile + role management for CalorieIQ
+// profile.js — user profile + role management for Glide
 import { auth, db } from "./firebase.js";
 import {
   doc, getDoc, setDoc, updateDoc,

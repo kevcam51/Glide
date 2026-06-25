@@ -1,4 +1,4 @@
-// CalorieIQ storage layer — Firestore-backed, drop-in replacement for the old
+// Glide storage layer — Firestore-backed, drop-in replacement for the old
 // localStorage polyfill. The rest of the app keeps calling window.storage.get/
 // set/delete/list exactly as before; only the implementation underneath changed.
 //

@@ -106,7 +106,7 @@ export default function Showcase() {
         style={{ backdropFilter: "saturate(140%) blur(6px)" }}>
         <div className="max-w-3xl mx-auto flex flex-wrap items-center gap-3">
           <div className="font-display text-xl tracking-wide text-fg mr-1">
-            CALORIE<span className="text-primary">IQ</span>
+            GLIDE
             <span className="ml-2 text-[11px] uppercase tracking-widest text-muted align-middle">design preview</span>
           </div>
           <div className="flex flex-wrap gap-2 ml-auto">

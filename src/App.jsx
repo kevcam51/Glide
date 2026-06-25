@@ -1758,7 +1758,7 @@ function CustomExerciseCreator({ exerciseType, onAdd }) {
             {saved ? "✓ Added!" : `Save Custom Exercise`}
           </button>
           <div className="text-[.6rem] text-muted mt-1.5 italic text-center">
-            ⭐ Custom exercises are marked with a star and labeled "User Estimate" to distinguish them from CalorieIQ's library. Calorie values are your estimates, not validated.
+            ⭐ Custom exercises are marked with a star and labeled "User Estimate" to distinguish them from Glide's library. Calorie values are your estimates, not validated.
           </div>
         </div>
       )}
@@ -1850,7 +1850,7 @@ function StepPersonal({ data, onChange, onNext }) {
       <div className="flex items-start gap-3.5 p-4 mb-4 rounded-card border border-primary bg-[rgba(8,220,224,.06)]">
         <div className="text-[2.2rem] leading-none shrink-0 mt-0.5">👋</div>
         <div>
-          <div className="font-display text-xl tracking-wide text-primary mb-1">Welcome to CalorieIQ</div>
+          <div className="font-display text-xl tracking-wide text-primary mb-1">Welcome to Glide</div>
           <div className="text-[.84rem] text-muted leading-relaxed">Answer a few quick questions and we'll build your personalized plan. Takes about 2 minutes.</div>
         </div>
       </div>
@@ -3429,7 +3429,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           {/* Disclaimer */}
           <div style={{marginTop:"16px",padding:"14px",background:"rgba(255,204,68,.04)",border:"1px solid rgba(255,204,68,.15)",borderRadius:"var(--radius-sm)",fontSize:".75rem",color:"var(--muted)",lineHeight:1.6}}>
             <strong style={{color:"var(--yellow)",display:"block",marginBottom:"4px"}}>⚠️ Important Disclaimer</strong>
-            All calorie targets, heart rate zones, macro calculations, body weight projections, muscle gain estimates, and timelines shown in CalorieIQ are <strong style={{color:"var(--text)"}}>estimates based on established formulas and published research</strong> — they are not exact measurements. Individual results vary based on genetics, metabolism, sleep, stress, hydration, medication, and other factors. Heart rate zones are calculated from a formula and may differ from your actual physiological thresholds. These tools are intended for <strong style={{color:"var(--text)"}}>educational and coaching purposes only</strong> and should not replace advice from a physician, registered dietitian, or certified healthcare provider. Always consult a medical professional before starting any new diet or exercise program.
+            All calorie targets, heart rate zones, macro calculations, body weight projections, muscle gain estimates, and timelines shown in Glide are <strong style={{color:"var(--text)"}}>estimates based on established formulas and published research</strong> — they are not exact measurements. Individual results vary based on genetics, metabolism, sleep, stress, hydration, medication, and other factors. Heart rate zones are calculated from a formula and may differ from your actual physiological thresholds. These tools are intended for <strong style={{color:"var(--text)"}}>educational and coaching purposes only</strong> and should not replace advice from a physician, registered dietitian, or certified healthcare provider. Always consult a medical professional before starting any new diet or exercise program.
           </div>
           <p className="footnote">On cardio days you can eat more and still hit your deficit. Targets floored at 1,200 cal/day.</p>
         </div>
@@ -3530,7 +3530,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
 
       {/* ─ Global Disclaimer ─ */}
       <div style={{marginTop:"20px",padding:"14px",background:"rgba(255,204,68,.04)",border:"1px solid rgba(255,204,68,.15)",borderRadius:"var(--radius-sm)",fontSize:".73rem",color:"var(--muted)",lineHeight:1.6}}>
-        <strong style={{color:"var(--yellow)"}}>⚠️ Disclaimer:</strong> All numbers in CalorieIQ are <strong style={{color:"var(--text)"}}>estimates</strong> based on published formulas (Mifflin-St Jeor, Tanaka, Ainsworth MET Compendium). Individual results vary. These tools are for educational and coaching purposes — not medical advice. Consult a healthcare provider before starting any diet or exercise program.
+        <strong style={{color:"var(--yellow)"}}>⚠️ Disclaimer:</strong> All numbers in Glide are <strong style={{color:"var(--text)"}}>estimates</strong> based on published formulas (Mifflin-St Jeor, Tanaka, Ainsworth MET Compendium). Individual results vary. These tools are for educational and coaching purposes — not medical advice. Consult a healthcare provider before starting any diet or exercise program.
       </div>
 
       {/* ─ Edit / Start Over bar ─ */}
@@ -4501,7 +4501,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
             <div style={{fontSize:".92rem",fontWeight:700,color:"var(--accent)",marginBottom:"8px"}}>What Our Formula Uses</div>
 
             <p style={{marginBottom:"12px"}}>
-              CalorieIQ uses the <strong style={{color:"var(--text)"}}>Aragon/Helms model</strong> — the most respected evidence-based muscle gain rate model in sports science. We adjust it for:
+              Glide uses the <strong style={{color:"var(--text)"}}>Aragon/Helms model</strong> — the most respected evidence-based muscle gain rate model in sports science. We adjust it for:
             </p>
 
             <div style={{padding:"10px 14px",background:"var(--s2)",borderRadius:"8px",marginBottom:"12px",fontSize:".78rem",lineHeight:1.8}}>
@@ -4515,7 +4515,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
             <div style={{fontSize:".92rem",fontWeight:700,color:"var(--green)",marginBottom:"8px"}}>What This Means for You</div>
 
             <p style={{marginBottom:"12px"}}>
-              The muscle gain projections in CalorieIQ are <strong style={{color:"var(--text)"}}>population averages, not individual guarantees</strong>. Your actual results may be 30–50% higher or lower than projected depending on the factors listed above.
+              The muscle gain projections in Glide are <strong style={{color:"var(--text)"}}>population averages, not individual guarantees</strong>. Your actual results may be 30–50% higher or lower than projected depending on the factors listed above.
             </p>
 
             <p style={{marginBottom:"12px"}}>
@@ -4523,7 +4523,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
             </p>
 
             <div style={{padding:"12px 14px",background:"rgba(255,204,68,.06)",borderRadius:"8px",border:"1px solid rgba(255,204,68,.2)",fontSize:".78rem",lineHeight:1.6}}>
-              <strong style={{color:"var(--yellow)"}}>⚠️ Not Medical or Professional Advice:</strong> All muscle gain projections, macro recommendations, supplement information, and training suggestions in CalorieIQ are for <strong style={{color:"var(--text)"}}>educational and coaching purposes only</strong>. They are not a substitute for guidance from a certified personal trainer, registered dietitian, or physician. Always consult a qualified professional before making significant changes to your training or nutrition program.
+              <strong style={{color:"var(--yellow)"}}>⚠️ Not Medical or Professional Advice:</strong> All muscle gain projections, macro recommendations, supplement information, and training suggestions in Glide are for <strong style={{color:"var(--text)"}}>educational and coaching purposes only</strong>. They are not a substitute for guidance from a certified personal trainer, registered dietitian, or physician. Always consult a qualified professional before making significant changes to your training or nutrition program.
             </div>
           </div>
         )}
@@ -5805,7 +5805,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
 // ─── Profile Selector ─────────────────────────────────────────────────────────
 
 // ─── Daily Dashboard ──────────────────────────────────────────────────────────
-// The primary view after plan setup — transforms CalorieIQ from a calculator
+// The primary view after plan setup — transforms Glide from a calculator
 // into a daily-use platform. This is what drives retention and daily engagement.
 
 // ─── Meal / food log (Session 9) ────────────────────────────────────────────
@@ -7455,7 +7455,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           </div>
         )}
 
-        <div className="share-brand">CALORIEIQ — Powered by Science</div>
+        <div className="share-brand">GLIDE — Powered by Science</div>
       </div>
 
       {/* Navigation */}
@@ -7743,15 +7743,15 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
   const targetCals = Math.max(1200, tdee - 500 + Math.round(totalBurn / 7));
 
   const handleShare = async () => {
-    const text = `🏋️ ${fullName(data) || "My"} CalorieIQ Plan\n\n` +
+    const text = `🏋️ ${fullName(data) || "My"} Glide Plan\n\n` +
       `📊 Maintenance: ${tdee.toLocaleString()} cal/day\n` +
       `🎯 Target (1lb/wk): ${targetCals.toLocaleString()} cal/day\n` +
       `🔥 Weekly burn: ${(totalBurn + totalStrBurn).toLocaleString()} cal\n` +
       (hasGoal ? `⚖️ Goal: ${weightLbs} → ${goalWeight} lbs\n` : "") +
-      `\nBuilt with CalorieIQ`;
+      `\nBuilt with Glide`;
     try {
       if (navigator.share) {
-        await navigator.share({ title: `${fullName(data) || "My"} CalorieIQ Plan`, text });
+        await navigator.share({ title: `${fullName(data) || "My"} Glide Plan`, text });
       } else {
         await navigator.clipboard.writeText(text);
       }
@@ -7760,7 +7760,7 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
 
   return (
     <div className="share-card">
-      <div className="share-card-brand">CALORIEIQ</div>
+      <div className="share-card-brand">GLIDE</div>
       <div className="share-card-name">{fullName(data) || "Your"} Plan</div>
       <div className="share-card-stats">
         <div className="scs-item">
@@ -8807,7 +8807,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
       <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border">
-        <span className="font-display text-2xl tracking-[2px] text-primary">CALORIE<span className="text-fg">IQ</span></span>
+        <span className="font-display text-2xl tracking-[2px] text-primary">GLIDE</span>
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
         {clients.length > 0 && (
@@ -9342,7 +9342,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
     <div data-theme="pro" className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
       <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border">
-        <span className="font-display text-2xl tracking-[2px] text-primary">CALORIE<span className="text-fg">IQ</span></span>
+        <span className="font-display text-2xl tracking-[2px] text-primary">GLIDE</span>
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
         <div className="text-2xl font-extrabold tracking-tight mb-1">📊 Coaching Dashboard</div>
@@ -9755,7 +9755,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
       <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border">
-        <span className="font-display text-2xl tracking-[2px] text-primary">CALORIE<span className="text-fg">IQ</span></span>
+        <span className="font-display text-2xl tracking-[2px] text-primary">GLIDE</span>
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
         <div className="flex items-center justify-between mb-5">
@@ -10131,7 +10131,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
       <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border">
-        <span className="font-display text-2xl tracking-[2px] text-primary">CALORIE<span className="text-fg">IQ</span></span>
+        <span className="font-display text-2xl tracking-[2px] text-primary">GLIDE</span>
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
         <div className={cardCls}>
@@ -10262,7 +10262,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
             📱 <strong>Phone/iPad:</strong> Use Copy & Paste to move data between devices. <strong>Laptop:</strong> File export also works.
           </div>
           <div className="text-[.65rem] text-primary leading-snug mb-3 italic">
-            ℹ️ This section is only needed in the current version. Once CalorieIQ becomes a web app, your data syncs automatically across all devices — no exporting or importing needed.
+            ℹ️ This section is only needed in the current version. Once Glide becomes a web app, your data syncs automatically across all devices — no exporting or importing needed.
           </div>
 
           {/* Clipboard — primary method for mobile */}
@@ -10292,7 +10292,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
             <div className="mb-2.5">
               <textarea
                 ref={pasteRef}
-                placeholder="Paste your CalorieIQ backup here..."
+                placeholder="Paste your Glide backup here..."
                 value={pasteText}
                 onChange={e=>setPasteText(e.target.value)}
                 className="w-full min-h-[80px] p-3 rounded-lg border border-primary bg-surface2 text-fg font-mono text-[.75rem] resize-y outline-none"
@@ -10461,7 +10461,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, onHo
         display: "flex", flexDirection: "column", padding: "16px 12px",
         paddingTop: "calc(16px + env(safe-area-inset-top,0px))" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 4px 12px" }}>
-          <div className="logo" style={{ fontSize: "1.4rem" }}>CALORIE<span>IQ</span></div>
+          <div className="logo" style={{ fontSize: "1.4rem" }}>GLIDE</div>
           <button onClick={onClose} style={{ ...item, width: "auto", padding: "6px 10px", fontSize: "1.1rem" }}>✕</button>
         </div>
 
@@ -10920,7 +10920,7 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `CalorieIQ-Backup-${new Date().toISOString().slice(0,10)}.json`;
+      a.download = `Glide-Backup-${new Date().toISOString().slice(0,10)}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -10976,7 +10976,7 @@ export default function App() {
         await saveFolders(newFolders);
       }
       return { ok: true, msg: `Imported ${imported} profile${imported!==1?"s":""}${newFolders.length > folders.length ? ` and ${newFolders.length - folders.length} folder(s)` : ""}` };
-    } catch(e) { return { ok: false, msg: "Failed to read file — make sure it's a CalorieIQ backup JSON" }; }
+    } catch(e) { return { ok: false, msg: "Failed to read file — make sure it's a Glide backup JSON" }; }
   };
 
   // ── Clipboard backup: copy all data as text ──
@@ -11034,7 +11034,7 @@ export default function App() {
       await saveIndex(newProfiles);
       if (newFolders.length > folders.length) { setFolders(newFolders); await saveFolders(newFolders); }
       return { ok:true, msg:`Imported ${imported} profile${imported!==1?"s":""}` };
-    } catch(e) { return { ok:false, msg:"Invalid data — make sure you pasted a CalorieIQ backup" }; }
+    } catch(e) { return { ok:false, msg:"Invalid data — make sure you pasted a Glide backup" }; }
   };
 
   // ── Daily log handler ──
@@ -11349,7 +11349,7 @@ export default function App() {
       <div className="app" data-theme="pro">
         {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
         <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border mb-3">
-          <span className="font-display text-2xl tracking-[2px] text-primary">CALORIE<span className="text-fg">IQ</span></span>
+          <span className="font-display text-2xl tracking-[2px] text-primary">GLIDE</span>
         </div>
         <div className="max-w-[640px] mx-auto px-4">
           <div className="flex gap-2 items-center mb-3">

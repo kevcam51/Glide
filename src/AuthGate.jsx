@@ -1,5 +1,5 @@
 // AuthGate — wraps the app. Shows a login/signup screen until the user is
-// authenticated, then renders children (the real CalorieIQ app). Because the
+// authenticated, then renders children (the real Glide app). Because the
 // app only mounts when a user exists, storage.js can always assume a uid.
 
 import { useState, useEffect, useRef } from "react";
@@ -162,7 +162,7 @@ export default function AuthGate({ children }) {
   return (
     <div style={S.center}>
       <div style={S.card}>
-        <h1 style={S.brand}>CalorieIQ</h1>
+        <h1 style={S.brand}>Glide</h1>
         <p style={S.sub}>{mode === "signup" ? "Create your account" : "Sign in"}</p>
 
         {inviteParam && (
@@ -289,7 +289,7 @@ function RoleChooser({ user, onDone }) {
     <div style={S.center}>
       <SignOutButton />
       <div style={S.card}>
-        <h1 style={S.brand}>CalorieIQ</h1>
+        <h1 style={S.brand}>Glide</h1>
         <p style={S.sub}>One quick thing — what's your name, and are you a trainer or a client?</p>
         <div style={{ display: "flex", gap: 8 }}>
           <input

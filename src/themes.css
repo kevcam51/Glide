@@ -1,4 +1,4 @@
-/* ─── CalorieIQ theme token sets ──────────────────────────────────────────────
+/* ─── Glide theme token sets ──────────────────────────────────────────────
  * Each [data-theme="…"] block defines one complete "look" by overriding the
  * Tailwind design tokens (--color-*, --font-*, --radius-card) DIRECTLY. index.css
  * maps these tokens to utilities (bg-surface, text-primary, font-display,

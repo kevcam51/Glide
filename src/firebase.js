@@ -1,4 +1,4 @@
-// Firebase initialization for CalorieIQ
+// Firebase initialization for Glide
 // Config values come from Vite env vars (.env.local locally, Vercel env vars in prod).
 // NOTE: The Firebase "apiKey" is NOT a secret — it only identifies your project to
 // Google. Real security comes from Auth + Firestore rules (firestore.rules). It is
