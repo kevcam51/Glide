@@ -5823,8 +5823,19 @@ async function searchFoods(query) {
   const key = (import.meta.env && import.meta.env.VITE_USDA_API_KEY) || "DEMO_KEY";
   const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${key}` +
     `&query=${encodeURIComponent(query)}&pageSize=8`;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(r.status === 429 ? "Search limit reached — try again shortly." : `Search failed (${r.status}).`);
+  let r;
+  try {
+    r = await fetch(url);
+  } catch {
+    // Network-level failure. On the shared DEMO_KEY this is usually a quota
+    // block (the rate-limit response has no CORS header, so it surfaces here).
+    throw new Error("Food search is temporarily unavailable — try again in a moment.");
+  }
+  if (!r.ok) {
+    throw new Error(r.status === 429
+      ? "Food search limit reached — try again in a bit (or add a free USDA API key)."
+      : "Food search is temporarily unavailable — try again in a moment.");
+  }
   const j = await r.json();
   const tidy = (s) => (s || "Food").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
   return (j.foods || []).map((x) => {
