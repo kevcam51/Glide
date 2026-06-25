@@ -6437,7 +6437,11 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                   {loggedDays.includes(k) && !(cal > 0) && <span style={{ color: "var(--green)" }}>🍽️ logged</span>}
                   {ci && ci.weight && <span style={{ color: "var(--blue)" }}>⚖️ {ci.weight}</span>}
                   {ci && ci.workedOut && <span style={{ color: "var(--orange)" }}>🏋️ done</span>}
-                  {scheduledFor(k) > 0 && <span>◦ {scheduledFor(k)} scheduled</span>}
+                  {scheduledFor(k) > 0 && !(ci && ci.workedOut) && (
+                    k < todayKey
+                      ? <span style={{ color: "var(--red)" }}>✗ missed workout</span>
+                      : <span>◦ {scheduledFor(k)} scheduled</span>
+                  )}
                   {!loggedDays.includes(k) && !(ci && (ci.weight || ci.workedOut)) && scheduledFor(k) === 0 && <span>—</span>}
                 </div>
               </button>
@@ -6459,6 +6463,24 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
               <span style={{ fontSize: ".82rem", fontWeight: 700 }}>
                 avg <span style={{ color: "var(--accent)" }}>{avg.toLocaleString()}</span> cal/day
                 {calTarget ? <span style={{ color: "var(--muted)", fontWeight: 400 }}> · target {calTarget.toLocaleString()}</span> : null}
+              </span>
+            </div>
+          );
+        })()}
+        {/* Weekly workout-adherence roll-up: completed vs scheduled this week */}
+        {(() => {
+          const scheduledDays = days.filter((k) => scheduledFor(k) > 0);
+          const doneDays = days.filter((k) => ciByDate[k] && ciByDate[k].workedOut);
+          if (scheduledDays.length === 0 && doneDays.length === 0) return null;
+          const onPace = doneDays.length >= scheduledDays.length;
+          return (
+            <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "var(--s2)", border: "1px solid var(--border)",
+              display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <span style={{ fontSize: ".74rem", color: "var(--muted)" }}>🏋️ Workouts</span>
+              <span style={{ fontSize: ".82rem", fontWeight: 700 }}>
+                {scheduledDays.length > 0
+                  ? <><span style={{ color: onPace ? "var(--green)" : "var(--yellow)" }}>{doneDays.length}</span><span style={{ color: "var(--muted)", fontWeight: 400 }}> / {scheduledDays.length} scheduled done</span></>
+                  : <><span style={{ color: "var(--green)" }}>{doneDays.length}</span><span style={{ color: "var(--muted)", fontWeight: 400 }}> done this week</span></>}
               </span>
             </div>
           );
@@ -9098,6 +9120,15 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
       const start = weighIns.length ? Number(weighIns[0].weight)
         : (data && data.startWeightLbs ? Number(data.startWeightLbs) : null);
       const lbsLost = (start && cur) ? Math.round((start - cur) * 10) / 10 : null;
+      // Week-over-week weight change: latest weigh-in vs the most recent weigh-in
+      // at least 7 days older (the trailing-7-day delta). Negative = lost weight.
+      let wowDelta = null;
+      if (weighIns.length >= 2) {
+        const latest = weighIns[weighIns.length - 1];
+        const cutoff = (latest.timestamp || 0) - 7 * 86400000;
+        const prior = [...weighIns].reverse().find((w) => (w.timestamp || 0) <= cutoff);
+        if (prior) wowDelta = Math.round((Number(latest.weight) - Number(prior.weight)) * 10) / 10;
+      }
       const trend = weightTrend(checkIns);
       const onTrack = (trend && cur && goal && goal !== cur) ? (etaWeeks(cur, goal, trend.ratePerWeek) != null) : null;
       const lastLogDate = dates.length ? [...dates].sort().slice(-1)[0] : null;
@@ -9114,7 +9145,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
         ? `${data.firstName || ""} ${data.lastName || ""}`.trim()
         : (c.displayName || c.email || "Client");
       return { uid: c.uid, name: nm, hasPlan: !!data, cur, goal, start, lbsLost, onTrack,
-        ratePerWeek: trend ? trend.ratePerWeek : null,
+        ratePerWeek: trend ? trend.ratePerWeek : null, wowDelta,
         lastLogDate, daysSince, activeThisWeek, openReqs, last7 };
     }));
     setClients(rows);
@@ -9131,6 +9162,10 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
   const totalLbsLost = Math.round(clients.reduce((s, c) => s + (c.lbsLost && c.lbsLost > 0 ? c.lbsLost : 0), 0) * 10) / 10;
   const onTrackCount = clients.filter((c) => c.onTrack === true).length;
   const withProgress = clients.filter((c) => c.lbsLost != null).sort((a, b) => (b.lbsLost || 0) - (a.lbsLost || 0));
+  // Roster for the "This week" card: every client with a plan, least-active first.
+  const roster = clients.filter((c) => c.hasPlan)
+    .map((c) => ({ ...c, logged7: c.last7.filter(Boolean).length }))
+    .sort((a, b) => a.logged7 - b.logged7);
 
   // Brand class strings (match TrainerDashboard)
   const cardCls = "bg-surface border border-border rounded-card p-5 mb-4";
@@ -9222,6 +9257,28 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* This week — roster-wide logging consistency + weight pulse */}
+            <div className={cardCls}>
+              <div className={titleCls}>🗓️ This week</div>
+              <div className={`${subCls} mb-2`}>Last 7 days at a glance — who's logging, and which way the scale moved.</div>
+              <div className="flex flex-col gap-1.5">
+                {roster.map((c) => (
+                  <div key={c.uid} className={rowCls} onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>
+                    <span className="font-semibold text-[.9rem] truncate flex-1 min-w-0">{c.name}</span>
+                    <span className="flex items-center gap-2.5 whitespace-nowrap">
+                      <Last7 days={c.last7} />
+                      <span className="text-[.74rem] text-muted w-7 text-right">{c.logged7}/7</span>
+                      {c.wowDelta != null && Math.abs(c.wowDelta) >= 0.1 ? (
+                        <span className={`text-[.74rem] ${c.wowDelta < 0 ? "text-success" : "text-warn"}`}>{c.wowDelta < 0 ? "▼" : "▲"} {Math.abs(c.wowDelta)} lb</span>
+                      ) : (
+                        <span className="text-[.74rem] text-muted">—</span>
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* Open requests across clients */}

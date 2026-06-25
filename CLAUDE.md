@@ -925,3 +925,21 @@ enabled (Blaze has no default spending cap).
   work was authored alongside the Session-45 timezone fix and got bundled into that single pushed commit
   (`77bc27b`) by the background task that landed the date fix — it's live, just co-committed. No
   `firestore.rules` change.
+- Session 47: **Coaching Dashboard "This week" card + calendar workout adherence (non-Blaze).** Three
+  trainer/calendar enhancements. (1) **"🗓️ This week" roster card** (`TrainerAnalytics`, between Needs-
+  attention and Open-requests): EVERY connected client with a plan, **least-active first**, each row showing
+  the 7-day logging strip (the `Last7` dots, reused), an "N/7" count, and a **week-over-week weight delta**.
+  (2) **Week-over-week weight delta** (`wowDelta` on each client row in `load()`): the trailing-7-day weight
+  change = latest weigh-in minus the most recent weigh-in ≥7 days older (▼ green = lost, ▲ amber = gained;
+  "—" when <2 weigh-ins or none ≥7 days apart). Deliberately kept OFF the 📈 Progress rows (which already
+  show net lbs lost + the all-data `ratePerWeek` from S46) and put on the "This week" card so the two cards
+  stay distinct: This week = recent activity + recent scale move; Progress = overall trend + on-track.
+  (3) **Calendar week-view workout adherence** (`CalendarView.weekView`): past **scheduled-but-not-done** days
+  now show "✗ missed workout" (red) instead of "◦ N scheduled"; a **weekly workout roll-up** below the S44
+  calorie roll-up shows `{done}/{scheduled} scheduled done` (green if on pace, amber if behind) or, when the
+  plan has no scheduled workouts, `{done} done this week`. Computed from `scheduledFor(k)` + `ciByDate[k]
+  .workedOut` (no new reads). Verified live (trainer.uitest → Casey): "This week" shows Casey 1/7 · ▼ 8 lb;
+  marking a workout done on Wed 24 made the day show "🏋️ done" and the roll-up read "1 done this week"; no
+  console errors; `npm run build` passes. **Deferred:** per-day **macro adherence** in the calendar (needs a
+  per-day macro load alongside `dayCals`, a bigger change) and live-testing the "✗ missed"/`/N scheduled`
+  branches (test client has no scheduled workouts; logic is build-verified). No `firestore.rules` change.
