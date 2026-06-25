@@ -8996,6 +8996,32 @@ const ATTENTION_DAYS = 3; // no logs in this many days → "needs attention"
 function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole }) {
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [nudged, setNudged] = useState({}); // clientUid -> true once a nudge is sent (transient ✓)
+  const [nudgeBusy, setNudgeBusy] = useState(null); // clientUid currently sending
+
+  // One-tap "nudge": send a "log today's food" request straight to a client from
+  // the needs-attention list (same write path as TrainerDashboard.sendRequest).
+  const sendNudge = async (clientUid) => {
+    setNudgeBusy(clientUid);
+    try {
+      const cur = await readRequestsFor(clientUid, getForUser);
+      const now = Date.now();
+      const prompt = "Please log today's food — checking in on your progress.";
+      const req = { id: `r${now}${Math.floor(Math.random() * 1000)}`, fromUid: meUid,
+        fromName: meName || "Your trainer", type: "log_food", prompt, status: "open", createdAt: now, doneAt: null };
+      await setForUser(clientUid, REQUEST_KEY, JSON.stringify([req, ...cur].slice(0, 100)));
+      try {
+        const hr = await getForUser(clientUid, "caliq-history-self");
+        const hist = hr && hr.value ? (JSON.parse(hr.value) || []) : [];
+        const ev = { id: `e${now}${Math.floor(Math.random() * 1000)}`, uid: meUid,
+          role: meRole || "head_trainer", name: meName || "Your trainer", action: `sent a request: "${prompt}"`, ts: now };
+        await setForUser(clientUid, "caliq-history-self", JSON.stringify([ev, ...hist].slice(0, 250)));
+      } catch { /* history best-effort */ }
+      setNudged((n) => ({ ...n, [clientUid]: true }));
+      await load();
+    } catch { /* ignore */ }
+    finally { setNudgeBusy(null); }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -9090,15 +9116,23 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
             {/* Needs attention */}
             <div className={cardCls}>
               <div className={titleCls}>⚠️ Needs attention</div>
-              <div className={`${subCls} mb-2`}>No logs in {ATTENTION_DAYS}+ days — tap to open their plan.</div>
+              <div className={`${subCls} mb-2`}>No logs in {ATTENTION_DAYS}+ days — tap a name to open their plan, or 📤 Nudge to send a "log your food" reminder.</div>
               {needsAttention.length === 0 ? (
                 <div className="text-sm text-success py-1">🎉 Everyone's logged recently. Nice coaching.</div>
               ) : (
                 <div className="flex flex-col gap-1.5">
                   {needsAttention.map((c) => (
-                    <div key={c.uid} className={rowCls} onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>
-                      <span className="font-semibold text-[.9rem] truncate">{c.name}</span>
-                      <span className="text-[.78rem] text-warn whitespace-nowrap">🕑 {lastActiveLabel(c)} →</span>
+                    <div key={c.uid} className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg bg-surface2">
+                      <span className="flex-1 min-w-0 cursor-pointer" onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>
+                        <span className="font-semibold text-[.9rem] truncate block">{c.name}</span>
+                        <span className="text-[.74rem] text-warn whitespace-nowrap">🕑 {lastActiveLabel(c)}</span>
+                      </span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); if (!nudged[c.uid] && nudgeBusy !== c.uid) sendNudge(c.uid); }}
+                        disabled={nudgeBusy === c.uid || nudged[c.uid]}
+                        className={`shrink-0 px-2.5 py-1.5 rounded-md text-xs font-bold cursor-pointer whitespace-nowrap border ${nudged[c.uid] ? "border-success text-success bg-transparent" : "border-primary text-primary bg-[rgba(8,220,224,.08)]"} disabled:cursor-default`}>
+                        {nudged[c.uid] ? "✓ Nudged" : nudgeBusy === c.uid ? "…" : "📤 Nudge"}
+                      </button>
                     </div>
                   ))}
                 </div>

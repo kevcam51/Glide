@@ -865,3 +865,13 @@ enabled (Blaze has no default spending cap).
   "Current state" section — a fast-path digest (brand redesign done, nutrition tier done, analytics done, the
   page-transition/createPortal gotcha, Blaze line) so a fresh chat can get oriented without reading every
   session entry. Keep it updated.
+- Session 43: **Coaching Dashboard — one-tap "Nudge" from needs-attention rows.** Trainer workflow win on
+  `TrainerAnalytics` (S34): each "⚠️ Needs attention" client row now has a **📤 Nudge** button that sends a
+  "Please log today's food…" request straight to that client without opening their plan — same write path as
+  `TrainerDashboard.sendRequest` (append to the client's `caliq-requests` via `setForUser` + a
+  `caliq-history-self` note). New `sendNudge(uid)` + transient `nudged`/`nudgeBusy` state; the button shows
+  "📤 Nudge" → "…" → "✓ Nudged" (disabled once sent). The row name still taps to open the plan (split the
+  click targets). After sending, `load()` refreshes so the new request shows in the "📬 Open requests" card +
+  the OPEN REQUESTS tile. Verified live (Casey, 3 days): nudge → "✓ Nudged", tile 0→1, request listed under
+  Open requests (and it'll appear on the client's home). No `firestore.rules` change (rides existing
+  trainer↔client kv access).
