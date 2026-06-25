@@ -5840,6 +5840,15 @@ async function searchFoods(query) {
   }).filter((f) => f.kcal > 0);
 }
 
+// Brand wordmark — "GLI" in brand cyan + "DE" in white, mirroring the old
+// CALORIE+IQ two-tone. Centralized so the treatment lives in one place; used in
+// every screen's header bar.
+function BrandLogo() {
+  return (
+    <span className="font-display text-2xl tracking-[2px] text-primary">GLI<span className="text-fg">DE</span></span>
+  );
+}
+
 function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const [name, setName] = useState("");
   const [cals, setCals] = useState("");
@@ -8807,7 +8816,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
       <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border">
-        <span className="font-display text-2xl tracking-[2px] text-primary">GLIDE</span>
+        <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
         {clients.length > 0 && (
@@ -9342,7 +9351,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
     <div data-theme="pro" className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
       <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border">
-        <span className="font-display text-2xl tracking-[2px] text-primary">GLIDE</span>
+        <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
         <div className="text-2xl font-extrabold tracking-tight mb-1">📊 Coaching Dashboard</div>
@@ -9755,7 +9764,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
       <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border">
-        <span className="font-display text-2xl tracking-[2px] text-primary">GLIDE</span>
+        <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
         <div className="flex items-center justify-between mb-5">
@@ -10131,7 +10140,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
       <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border">
-        <span className="font-display text-2xl tracking-[2px] text-primary">GLIDE</span>
+        <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
         <div className={cardCls}>
@@ -10461,7 +10470,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, onHo
         display: "flex", flexDirection: "column", padding: "16px 12px",
         paddingTop: "calc(16px + env(safe-area-inset-top,0px))" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 4px 12px" }}>
-          <div className="logo" style={{ fontSize: "1.4rem" }}>GLIDE</div>
+          <div className="logo" style={{ fontSize: "1.4rem" }}>GLI<span>DE</span></div>
           <button onClick={onClose} style={{ ...item, width: "auto", padding: "6px 10px", fontSize: "1.1rem" }}>✕</button>
         </div>
 
@@ -11349,7 +11358,7 @@ export default function App() {
       <div className="app" data-theme="pro">
         {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
         <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border mb-3">
-          <span className="font-display text-2xl tracking-[2px] text-primary">GLIDE</span>
+          <BrandLogo />
         </div>
         <div className="max-w-[640px] mx-auto px-4">
           <div className="flex gap-2 items-center mb-3">

@@ -1040,3 +1040,12 @@ enabled (Blaze has no default spending cap).
   Verified live: header renders "GLIDE" in cyan, `document.title` = "Glide", no "CalorieIQ"/"CALORIEIQ" strings
   remain in `src/` or `index.html`, no console errors, `npm run build` passes. **Domain swap is separate** (a
   Vercel/DNS change Kevin makes when ready). No `firestore.rules` change.
+- Session 54: **Two-tone Glide wordmark + `BrandLogo` component.** Kevin wanted the flat all-cyan **GLIDE**
+  to carry some white, mirroring the old `CALORIE`(cyan)+`IQ`(white) treatment. Split it **GLI** (brand cyan
+  `text-primary`) + **DE** (white `text-fg`). Centralized the header wordmark into a new module-level
+  **`BrandLogo`** component (`GLI<span class="text-fg">DE</span>`) and replaced the 5 identical header spans
+  (TrainerDashboard, TrainerAnalytics, ClientHome, ProfileSelector, App main) with `<BrandLogo />` so the
+  treatment lives in one place. The side-menu `.logo` got the same split inline (`GLI<span>DE</span>` — the
+  existing `.logo span{color:var(--text)}` rule already renders the inner span white). `AuthGate` (login/role
+  chooser) and the dev `Showcase` were left as-is for now (their own brand markup). Verified live (header +
+  menu both render GLI cyan + DE white), no console errors, `npm run build` passes. No `firestore.rules` change.
