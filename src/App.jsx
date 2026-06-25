@@ -6249,20 +6249,24 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
     setDayCals((prev) => { const next = { ...prev }; entries.forEach(([k, v]) => { next[k] = v; }); return next; });
     setDayProt((prev) => { const next = { ...prev }; entries.forEach(([k, , p]) => { next[k] = p; }); return next; });
   };
-  // Visible-month logged days (bounded ≤31).
+  // Visible-month logged days (bounded ≤31). Loaded regardless of whether a
+  // calorie target exists: the totals feed the week-view numbers + roll-ups and
+  // the month tooltips; the target only drives the green/amber adherence tint
+  // (which degrades gracefully when absent). Gating on calTarget previously left
+  // dayCals empty for any plan missing gender/age/height (e.g. a partially set-up
+  // client a trainer opens), making logged days show "🍽️ logged" instead of "N cal".
   useEffect(() => {
-    if (!calTarget) return;
     const prefix = `${cur.y}-${String(cur.m + 1).padStart(2, "0")}-`;
     loadCals(loggedDays.filter((k) => k.startsWith(prefix)));
-  }, [cur, loggedDays, calTarget]);
+  }, [cur, loggedDays]);
   // Visible week's 7 days (can cross a month boundary, so loaded separately).
   useEffect(() => {
-    if (!calTarget || view !== "week") return;
+    if (view !== "week") return;
     const ws = weekStart || (() => { const off = (new Date(sel + "T00:00:00Z").getUTCDay() + 6) % 7; const p = sel.split("-").map(Number); return new Date(Date.UTC(p[0], p[1] - 1, p[2] - off)).toISOString().slice(0, 10); })();
     const wp = ws.split("-").map(Number);
     const days = Array.from({ length: 7 }, (_, i) => new Date(Date.UTC(wp[0], wp[1] - 1, wp[2] + i)).toISOString().slice(0, 10));
     loadCals(days);
-  }, [weekStart, view, sel, loggedDays, calTarget]);
+  }, [weekStart, view, sel, loggedDays]);
 
   // Check-in lookup by date (weight / workout / mood).
   const ciByDate = {};

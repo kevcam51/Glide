@@ -959,3 +959,25 @@ enabled (Blaze has no default spending cap).
   — the per-day `loadCals` reads via `getForUser` don't surface in the week/month within a session (the
   client's own calendar on local `window.storage` works fine; the Day view's single remote read works too).
   This affects the S42/S44 calorie adherence the same way; flagged for a separate fix. No `firestore.rules` change.
+- Session 49: **Calendar adherence roll-ups now populate for incomplete plans (the S48 "remote" limitation —
+  actually a misdiagnosis) (non-Blaze).** The S48 note blamed the remote read path for the calorie/protein
+  roll-ups not showing when a trainer views a connected client's calendar. **Live debugging showed the remote
+  read path is fine** — `onListLoggedDays`→`listForUser` correctly returned Casey's logged days and
+  `onReadDay`→`getForUser` correctly returned each day's calories/protein. The real root cause: both
+  `loadCals` effects in `CalendarView` early-returned on `if (!calTarget) return;`, and `calTarget` =
+  `computeClientCalories(data).target` is **null whenever the plan lacks gender/age/height** (that function
+  returns null on `!d.gender`). The test client Casey's plan has weight + goal but empty gender/age/height, so
+  `calTarget` was null → the effects bailed → `dayCals`/`dayProt` stayed empty → every logged day showed
+  "🍽️ logged" instead of "N cal" and no roll-ups rendered. The real differentiator was **complete vs incomplete
+  plan**, not remote vs local — the local Test/Prospect plans just happen to be fully filled in. **Fix:** removed
+  the `!calTarget` guard (and the now-unused `calTarget` dep) from both per-day load effects (the month-visible
+  loop and the week's-7-days loop) so the totals load regardless of whether a calorie goal exists. The target is
+  only needed for the green/amber **adherence tint** (month) and the "· target N" suffix (roll-ups), and those
+  render paths already guard with `calTarget && …`, so they degrade gracefully: an incomplete plan shows the
+  totals in neutral green with no over/under judgement (honest — you can't assess adherence without a goal),
+  while a complete plan is unchanged (the guard never fired for it, so behavior is identical). Verified live as
+  trainer.uitest: (1) **remote Casey** (incomplete plan) week view now shows Wed 24 = "700 cal" + "🍗 60g/188",
+  calorie roll-up "1/7 day logged · avg 700 cal/day", protein roll-up "avg 60g/day · target 188g"; (2) **local
+  Prospect Pat** (complete plan, target 2,569) regression-checked — logged 250 cal showed green with the green
+  left-accent and roll-up "avg 250 cal/day · target 2,569". Clean console (the dep-array warnings seen mid-edit
+  were HMR buffer artifacts — gone after a fresh server start). `npm run build` passes. No `firestore.rules` change.
