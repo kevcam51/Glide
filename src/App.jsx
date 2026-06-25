@@ -6195,13 +6195,21 @@ function ActivityFeed({ history, onRefresh }) {
   );
 }
 
+// LOCAL-calendar YYYY-MM-DD (NOT UTC). The daily log / check-in keys must reflect
+// the user's own day: Smooth Training is in Miami (Eastern), where after ~8pm the
+// UTC date is already tomorrow, so a UTC key wrote evening logs onto the wrong day
+// and marked the wrong "today" on the calendars (Session 45 fix). Use this for any
+// "now → date key" computation so reads and writes agree on the local day.
+const ymdLocal = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
 // ─── Calendar view (Session 22) ──────────────────────────────────────────────
 // Month / week / day calendar over a plan's daily logs + check-ins. Each day
 // shows indicators (food logged / weigh-in / workout / scheduled workout) and
 // can be opened to log or back-date food, weight, and workouts. Date keys are
-// UTC YYYY-MM-DD to match the app's existing log keys (caliq-log-{id}-{date}).
+// local YYYY-MM-DD (Session 45) so they match the user's own calendar day.
 function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn }) {
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = ymdLocal();
   const keyOf = (y, m, d) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
   const parseKey = (k) => { const [y, m, d] = k.split("-").map(Number); return { y, m: m - 1, d }; };
   const mondayIdx = (k) => (new Date(k + "T00:00:00Z").getUTCDay() + 6) % 7; // Mon=0..Sun=6
@@ -7302,7 +7310,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
 // today is outlined. Tapping a day selects it (which pre-fills the form).
 function CheckInCalendar({ checkIns, selected, onSelect }) {
   const recorded = new Set((checkIns || []).filter(c => c.date).map(c => c.date));
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = ymdLocal();
   const sel = selected || todayStr;
   const selDate = new Date(sel + "T12:00:00");
   const [view, setView] = useState({ y: selDate.getFullYear(), m: selDate.getMonth() });
@@ -7366,7 +7374,7 @@ function CheckInCalendar({ checkIns, selected, onSelect }) {
 }
 
 function DailyCheckIn({ data, onSaveCheckIn }) {
-  const [checkDate, setCheckDate] = useState(new Date().toISOString().slice(0, 10));
+  const [checkDate, setCheckDate] = useState(ymdLocal());
   const [weight, setWeight] = useState(data.weightLbs || "");
   const [calories, setCalories] = useState("");
   const [hitTarget, setHitTarget] = useState(null);
@@ -7376,7 +7384,7 @@ function DailyCheckIn({ data, onSaveCheckIn }) {
   const [bodyFatLog, setBodyFatLog] = useState("");
   const [saved, setSaved] = useState(false);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = ymdLocal();
   const isFuture = checkDate > today;
   const isPast = checkDate < today;
   const canSave = weight && hitTarget !== null && checkDate;
@@ -7508,13 +7516,13 @@ function StreakBadges({ checkIns }) {
   // Calculate streak from check-ins
   const sorted = [...(checkIns || [])].sort((a, b) => b.timestamp - a.timestamp);
   let streak = 0;
-  const today = new Date().toISOString().slice(0, 10);
-  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const today = ymdLocal();
+  const yesterday = ymdLocal(new Date(Date.now() - 86400000));
   const dates = new Set(sorted.map(c => c.date));
 
   if (dates.has(today) || dates.has(yesterday)) {
     let checkDate = dates.has(today) ? new Date() : new Date(Date.now() - 86400000);
-    while (dates.has(checkDate.toISOString().slice(0, 10))) {
+    while (dates.has(ymdLocal(checkDate))) {
       streak++;
       checkDate = new Date(checkDate.getTime() - 86400000);
     }
@@ -7544,7 +7552,7 @@ function StreakBadges({ checkIns }) {
             <div className="streak-lbl">day streak</div>
           </div>
           <div style={{marginLeft:"auto",textAlign:"right"}}>
-            <div style={{fontSize:".85rem",fontWeight:700,color:"var(--text)"}}>{totalCheckIns} check-ins</div>
+            <div style={{fontSize:".85rem",fontWeight:700,color:"var(--text)"}}>{totalCheckIns} {totalCheckIns === 1 ? "check-in" : "check-ins"}</div>
             <div style={{fontSize:".72rem",color: adherencePct >= 80 ? "var(--green)" : adherencePct >= 50 ? "var(--yellow)" : "var(--red)"}}>{adherencePct}% adherence</div>
           </div>
         </div>
@@ -7673,7 +7681,7 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}}>
         <div>
           <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",letterSpacing:"2px",color:"var(--accent)"}}>📈 Progress</div>
-          <div style={{fontSize:".74rem",color:"var(--muted)"}}>{sorted.length} weigh-ins · {checkIns.length} check-ins</div>
+          <div style={{fontSize:".74rem",color:"var(--muted)"}}>{sorted.length} {sorted.length === 1 ? "weigh-in" : "weigh-ins"} · {checkIns.length} {checkIns.length === 1 ? "check-in" : "check-ins"}</div>
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.3rem",color:trendColor}}>
@@ -8888,9 +8896,9 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         <div className={cardCls}>
           <div className={`${sectionTitleCls} whitespace-nowrap`}>📋 Local Plans</div>
           <div className="flex gap-1.5 mt-2">
-            <button onClick={onNewPlan} className={mBtnCls}>+ Plan</button>
+            <button onClick={onNewPlan} className={mPrimaryCls}>+ Plan</button>
             <button onClick={onNewSimulation}
-              className="px-2.5 py-2 rounded-md text-xs font-bold border-none bg-[#b57bff] text-[#0b0b12] cursor-pointer whitespace-nowrap">
+              className="px-2.5 py-2 rounded-md text-xs font-bold border border-[#b57bff] bg-transparent text-[#b57bff] cursor-pointer whitespace-nowrap">
               + 🧪 Simulation
             </button>
           </div>
@@ -9036,6 +9044,14 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
   const [loading, setLoading] = useState(true);
   const [nudged, setNudged] = useState({}); // clientUid -> true once a nudge is sent (transient ✓)
   const [nudgeBusy, setNudgeBusy] = useState(null); // clientUid currently sending
+  const [attnDays, setAttnDays] = useState(ATTENTION_DAYS); // coach-configurable "needs attention" threshold (persisted)
+
+  // Persist the attention threshold to the trainer's own account so it sticks
+  // between visits (their own window.storage — no cross-account access needed).
+  const saveAttn = async (d) => {
+    setAttnDays(d);
+    try { await window.storage.set("caliq-coach-prefs", JSON.stringify({ attnDays: d })); } catch { /* best-effort */ }
+  };
 
   // One-tap "nudge": send a "log today's food" request straight to a client from
   // the needs-attention list (same write path as TrainerDashboard.sendRequest).
@@ -9063,6 +9079,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
 
   const load = async () => {
     setLoading(true);
+    try { const pr = await window.storage.get("caliq-coach-prefs"); const p = JSON.parse(pr.value || "{}"); if (p.attnDays) setAttnDays(p.attnDays); } catch { /* no prefs saved yet */ }
     let cs = [];
     try { cs = await getMyClients(); } catch { /* ignore */ }
     const rows = await Promise.all((cs || []).map(async (c) => {
@@ -9087,11 +9104,17 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
       const daysSince = lastLogDate
         ? Math.floor((Date.now() - new Date(lastLogDate + "T00:00:00").getTime()) / 86400000) : null;
       const activeThisWeek = dates.some((d) => (Date.now() - new Date(d + "T00:00:00").getTime()) / 86400000 <= 7);
+      // 7-day logging-consistency strip: index 0 = 6 days ago … index 6 = today.
+      // Keys are matched in the same (local) scheme the logs are stored under.
+      const last7 = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(); d.setDate(d.getDate() - (6 - i));
+        return dates.includes(ymdLocal(d));
+      });
       const nm = data && (data.firstName || data.lastName)
         ? `${data.firstName || ""} ${data.lastName || ""}`.trim()
         : (c.displayName || c.email || "Client");
       return { uid: c.uid, name: nm, hasPlan: !!data, cur, goal, start, lbsLost, onTrack,
-        lastLogDate, daysSince, activeThisWeek, openReqs };
+        lastLogDate, daysSince, activeThisWeek, openReqs, last7 };
     }));
     setClients(rows);
     setLoading(false);
@@ -9101,7 +9124,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
   // Aggregates
   const total = clients.length;
   const activeWeek = clients.filter((c) => c.activeThisWeek).length;
-  const needsAttention = clients.filter((c) => c.hasPlan && (c.daysSince === null || c.daysSince >= ATTENTION_DAYS))
+  const needsAttention = clients.filter((c) => c.hasPlan && (c.daysSince === null || c.daysSince >= attnDays))
     .sort((a, b) => (b.daysSince === null ? 1e9 : b.daysSince) - (a.daysSince === null ? 1e9 : a.daysSince));
   const openReqRows = clients.flatMap((c) => c.openReqs.map((r) => ({ ...r, clientUid: c.uid, clientName: c.name })));
   const totalLbsLost = Math.round(clients.reduce((s, c) => s + (c.lbsLost && c.lbsLost > 0 ? c.lbsLost : 0), 0) * 10) / 10;
@@ -9122,6 +9145,17 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
       <div className={`font-display text-2xl ${color}`}>{value}</div>
       <div className="text-[.62rem] uppercase tracking-wide text-muted mt-0.5 leading-tight">{label}</div>
     </div>
+  );
+
+  // 7-day logging-consistency strip — one dot per day (6 days ago → today),
+  // filled green when the client logged that day. The last dot (today) is ringed.
+  const Last7 = ({ days }) => (
+    <span className="inline-flex gap-[3px] items-center" title={`Logged ${days.filter(Boolean).length} of the last 7 days`}>
+      {days.map((on, i) => (
+        <span key={i}
+          className={`w-2 h-2 rounded-full ${on ? "bg-success" : "bg-border"} ${i === 6 ? "ring-1 ring-muted" : ""}`} />
+      ))}
+    </span>
   );
 
   return (
@@ -9154,7 +9188,16 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
             {/* Needs attention */}
             <div className={cardCls}>
               <div className={titleCls}>⚠️ Needs attention</div>
-              <div className={`${subCls} mb-2`}>No logs in {ATTENTION_DAYS}+ days — tap a name to open their plan, or 📤 Nudge to send a "log your food" reminder.</div>
+              <div className={`${subCls} mb-2`}>No logs in {attnDays}+ days — tap a name to open their plan, or 📤 Nudge to send a "log your food" reminder.</div>
+              <div className="flex items-center gap-1.5 mb-3">
+                <span className="text-[.7rem] uppercase tracking-wide text-muted mr-0.5">Flag after</span>
+                {[2, 3, 5, 7].map((d) => (
+                  <button key={d} onClick={() => saveAttn(d)}
+                    className={`px-2 py-1 rounded-md text-xs font-bold cursor-pointer border ${attnDays === d ? "border-primary text-primaryfg bg-primary" : "border-border text-muted bg-transparent"}`}>
+                    {d}d
+                  </button>
+                ))}
+              </div>
               {needsAttention.length === 0 ? (
                 <div className="text-sm text-success py-1">🎉 Everyone's logged recently. Nice coaching.</div>
               ) : (
@@ -9163,7 +9206,10 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
                     <div key={c.uid} className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg bg-surface2">
                       <span className="flex-1 min-w-0 cursor-pointer" onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>
                         <span className="font-semibold text-[.9rem] truncate block">{c.name}</span>
-                        <span className="text-[.74rem] text-warn whitespace-nowrap">🕑 {lastActiveLabel(c)}</span>
+                        <span className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[.74rem] text-warn whitespace-nowrap">🕑 {lastActiveLabel(c)}</span>
+                          <Last7 days={c.last7} />
+                        </span>
                       </span>
                       <button
                         onClick={(e) => { e.stopPropagation(); if (!nudged[c.uid] && nudgeBusy !== c.uid) sendNudge(c.uid); }}
@@ -9269,7 +9315,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
   // would race and drop points when logging quickly).
   const planWrapRef = useRef(null);
 
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = ymdLocal();
   const logKey = planLogPrefix(activePlanId) + todayKey;
   const get = (k) => window.storage.get(k);
   const set = (k, v) => window.storage.set(k, v);
@@ -10762,7 +10808,7 @@ export default function App() {
   };
 
   // ── Daily log handler ──
-  const todayKey = new Date().toISOString().slice(0,10);
+  const todayKey = ymdLocal();
   // Daily logs live with the plan: when a trainer is editing a LINKED client's
   // plan (activeRemoteUid set), the log reads/writes go to the CLIENT's account;
   // otherwise they use the signed-in user's own storage.
@@ -10938,7 +10984,7 @@ export default function App() {
       let s = 0;
       for (let i = 0; i < 365; i++) {
         const d = new Date(); d.setDate(d.getDate() - i);
-        const dk = d.toISOString().slice(0,10);
+        const dk = ymdLocal(d);
         const lv = await logRead(`caliq-log-${activeId}-${dk}`);
         if (lv) { try { const p = JSON.parse(lv); if (p.calories > 0) { s++; continue; } } catch(e) {} }
         if (i === 0) continue; // today might not have logs yet
@@ -10961,7 +11007,7 @@ export default function App() {
       let days = 0, cal = 0, p = 0, c = 0, f = 0;
       for (let i = 0; i < 7; i++) {
         const d = new Date(); d.setDate(d.getDate() - i);
-        const dk = d.toISOString().slice(0, 10);
+        const dk = ymdLocal(d);
         const lv = await logRead(`caliq-log-${activeId}-${dk}`);
         if (!lv) continue;
         try {

@@ -884,3 +884,24 @@ enabled (Blaze has no default spending cap).
   can cross a month boundary, so loaded separately from the month effect). Verified live (Test Client): Wed 24
   shows "1,200 cal" green w/ accent, footer "1/7 day logged · avg 1,200 · target 2,365". No `firestore.rules`
   change.
+- Session 45: **Timezone bug fix — daily-log "today" keys are now LOCAL, not UTC.** The app keyed every
+  daily log + check-in + "today" off `new Date().toISOString().slice(0,10)`, which is **always UTC**. For
+  our Eastern-time audience (Smooth Training is in Miami), after ~8pm local the UTC date is already
+  tomorrow, so **evening food/calorie/weight logs landed under tomorrow's date** and the calendars marked
+  the wrong day as "today" (e.g. at 8:50pm EDT on Jun 24 the check-in calendar highlighted the 25th). This
+  **reverses the deliberate Session-22 "keys are UTC YYYY-MM-DD" choice** — that decision was the source of
+  the bug. **Fix:** added a module-level `ymdLocal(d=new Date())` helper (returns local `YYYY-MM-DD` from
+  `getFullYear/getMonth/getDate`) and replaced **every "now → date key" computation** with it across all
+  sites: `CalendarView`/`CheckInCalendar`/`DailyCheckIn` "today", `ClientHome.todayKey`, the main-App
+  daily-log effect `todayKey`, the streak loop + 7-day "This Week" loop (was `new Date(); setDate(-i);
+  toISOString()`), `StreakBadges` (today/yesterday + the streak walk), and the trainer dashboard's 7-day
+  consistency strip (was `setUTCDate`). **Left as-is on purpose:** pure grid-string generators that build
+  keys from explicit y/m/d via `Date.UTC(...).toISOString()` (deterministic, tz-independent — `keyOf`, the
+  week math, the `+"T00:00:00Z"`/`+"T12:00:00"` key→timestamp parsers) and the cosmetic backup-file name.
+  **Existing data: fix-forward, NO migration (Kevin's call).** Historical UTC-keyed logs stay where they
+  are (daytime ones were already correct; evening ones remain off-by-one, as they already were) — a precise
+  auto-migration isn't safe because meal entries don't all carry a timestamp to tell mis-dated from correct.
+  Only new logs use local keys. Verified **live in the actual evening bug window** (browser tz
+  America/New_York, `now_local`=2026-06-24 vs `now_utc`=2026-06-25): Daily Dashboard header reads
+  "WEDNESDAY, JUNE 24" and the month calendar outlines **24** as today (pre-fix it outlined 25); `npm run
+  build` passes, no console errors. No `firestore.rules` change.
