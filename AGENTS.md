@@ -1016,3 +1016,14 @@ enabled (Blaze has no default spending cap).
   expired ("⚠️ Your trial has ended…") banners render on-brand in the menu; mock reverted. `npm run build`
   passes. No `firestore.rules` change (the new fields are owner-written on the existing profile doc; reads use
   the already-open profile access).
+- Session 52: **Blaze move — planning doc (`docs/BLAZE_ROADMAP.md`).** Wrote the product/infra game plan for
+  moving to the Firebase Blaze plan, the gate for all remaining server-side features. Complements the existing
+  `BLAZE_MIGRATION.md` (which covers the *security* side — custom-claims). Covers: why Blaze is required
+  (AI coaching, photo meal tracking, client→trainer requests, notifications, messaging, Stripe — each needs
+  Cloud Functions/Storage/secrets that can't ship in the browser); a **Day-1 enablement checklist** (budget +
+  alerts FIRST, enable Blaze, kill-switch, init Functions/Storage, secrets in Secret Manager not `VITE_*`); a
+  **recommended build order** (claims migration → client→trainer requests → notifications → AI text → photo
+  track → messaging → Stripe); **what's already prepped** so each is smaller than it looks (live trial fields,
+  structured requests, cooperative history, API-ready meal form, client-side food search to proxy); cost notes
+  (AI is the real driver); and open product decisions before Stripe. **Doc only — no code, nothing enabled.**
+  Kevin owns the billing/enablement steps. No `firestore.rules` change.
