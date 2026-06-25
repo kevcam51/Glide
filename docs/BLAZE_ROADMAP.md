@@ -116,3 +116,13 @@ Sequenced by value-to-effort and dependency. Each is its own milestone.
 - Final trial lengths per role (currently both 30 days; revisit).
 - Hard-gate behavior at trial end (currently soft) — lock which features?
 - Plan tiers/pricing for clients vs. trainers; how the revenue split is presented.
+
+## Launch finish-up (deferred until after the Blaze build)
+
+- **Buy a clean Glide custom domain** (e.g. `glide.app` / `getglide.com`) and add it in Vercel →
+  Settings → Domains + DNS. The repo (GitHub `Glide`) and Vercel project (`glide`) are already
+  renamed; only the public URL is still `calorieiq-jet.vercel.app`. Optional free interim: flip
+  Vercel → Settings → Deployment Protection → Vercel Authentication to "Only Preview Deployments"
+  to expose `glide-kevcam51s-projects.vercel.app` publicly. (Firebase project ID stays `calorieiq-29762`.)
+- **Rename the local project folder** `~/Desktop/calorieiq` → `~/Desktop/glide` (do it with the
+  editor/dev server closed: `mv ~/Desktop/calorieiq ~/Desktop/glide`).

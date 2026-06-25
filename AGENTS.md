@@ -1058,3 +1058,16 @@ enabled (Blaze has no default spending cap).
   existing `.logo span{color:var(--text)}` rule already renders the inner span white). `AuthGate` (login/role
   chooser) and the dev `Showcase` were left as-is for now (their own brand markup). Verified live (header +
   menu both render GLI cyan + DE white), no console errors, `npm run build` passes. No `firestore.rules` change.
+- Session 55: **Renamed GitHub repo + Vercel project to Glide (dev-side); custom domain deferred.**
+  Kevin renamed the **GitHub repo** `calorieiq` → **`Glide`** (case-insensitive; local `origin` updated to
+  `https://github.com/kevcam51/Glide.git`, push/fetch verified). Renamed the **Vercel project** `calorieiq` →
+  `glide` via `vercel project rename` and redeployed prod, so Vercel auto-created glide-branded production
+  aliases (`glide-kevcam51s-projects.vercel.app`). **Current public URL is still `calorieiq-jet.vercel.app`**
+  (Vercel pins the original production domain on rename; the glide aliases exist but sit behind **Deployment
+  Protection / Vercel Authentication**). The **local folder stays `~/Desktop/calorieiq`** (renaming it
+  mid-session would break the running tooling — do it later when closed: `mv ~/Desktop/calorieiq
+  ~/Desktop/glide`). **Firebase project ID stays `calorieiq-29762`** (never change — it's in `VITE_FIREBASE_*`).
+  **DEFERRED (do after the Blaze work):** (1) buy a clean custom domain (e.g. `glide.app` / `getglide.com`) and
+  add it in Vercel → Settings → Domains + DNS; (2) optionally, for a free interim glide URL, flip Vercel
+  → Settings → Deployment Protection → Vercel Authentication to "Only Preview Deployments" so
+  `glide-kevcam51s-projects.vercel.app` serves publicly. No code/`firestore.rules` change.
