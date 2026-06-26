@@ -137,10 +137,10 @@ export async function ensureInviteCode(uid = auth.currentUser && auth.currentUse
   let code = null;
   for (let attempt = 0; attempt < 5; attempt++) {
     const candidate = generateCode();
-    const dupe = await getDocs(
-      query(collection(db, "users"), where("inviteCode", "==", candidate))
-    );
-    if (dupe.empty) { code = candidate; break; }
+    // Uniqueness via the lookup collection (a single doc read). 7 chars from a
+    // 31-char alphabet ≈ 27B combos, so collisions are effectively impossible.
+    const taken = (await getDoc(inviteCodeRef(candidate))).exists();
+    if (!taken) { code = candidate; break; }
   }
   if (!code) throw new Error("Could not generate a unique invite code — try again.");
 
@@ -162,13 +162,21 @@ export async function joinTrainer(input) {
 
   let trainerUid = null;
 
-  // 1) Friendly-code lookup.
+  // 1) Friendly-code lookup. Prefer the inviteCodes lookup collection (a single
+  // doc read — works even after profile-doc reads are locked down). Fall back to
+  // the legacy users query for any code not yet mirrored into the collection.
   const normalized = normalizeCode(raw);
   if (normalized.length === CODE_LEN) {
-    const snap = await getDocs(
-      query(collection(db, "users"), where("inviteCode", "==", normalized))
-    );
-    if (!snap.empty) trainerUid = snap.docs[0].id;
+    try {
+      const codeSnap = await getDoc(inviteCodeRef(normalized));
+      if (codeSnap.exists() && codeSnap.data().trainerUid) trainerUid = codeSnap.data().trainerUid;
+    } catch (e) { /* fall through to legacy query */ }
+    if (!trainerUid) {
+      const snap = await getDocs(
+        query(collection(db, "users"), where("inviteCode", "==", normalized))
+      );
+      if (!snap.empty) trainerUid = snap.docs[0].id;
+    }
   }
 
   // 2) Fallback: treat the input as a raw trainer uid.
