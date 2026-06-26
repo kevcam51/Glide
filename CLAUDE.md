@@ -1120,3 +1120,27 @@ enabled (Blaze has no default spending cap).
   inviteCode query); (c) tighten `users` read to owner + admin + trainer-chain + the constrained client-list
   queries, with full attack-case tests. **NOT yet started** — deferred as focused work (security-critical;
   avoid rushing at the end of a long session). Claims foundation (A/B-partial/C) remains live + safe.
+- Session 58: **Profile-read hardening — steps (a) + (b) DONE & LIVE; (c) scoped, deliberately deferred.**
+  (a) **`inviteCodes/{code}` lookup collection** added (doc id = code, data `{trainerUid}`): rules allow signed-in
+  read, **create only when pointing at yourself**, **update only by the owning trainer** (no code hijacking),
+  delete by owner/admin. `profile.js` mirrors codes best-effort (`writeInviteCodeMirror`), incl. backfilling
+  existing trainers when they open their invite panel. **Rules PUBLISHED** (`firebase deploy --only
+  firestore:rules`) — additive, existing `users`/`kv` rules untouched. Emulator suite now **36 pass** (added 7
+  invite-code cases incl. hijack attacks). **Verified LIVE against prod** via authenticated Firestore REST as
+  `trainer.uitest`: claim-pointing-to-self → 200, hijack (point to someone else) → **403**, read → 200, owner
+  delete → 200. (b) **join-resolution switched to the lookup**: `joinTrainer` reads `inviteCodes/{code}` first
+  (legacy users-query kept as fallback for un-mirrored codes); `ensureInviteCode` checks uniqueness against the
+  lookup. Verified live: a `client.uitest` read of the trainer's mirrored code resolves to the correct trainer
+  uid. Committed + pushed (`cb46058`, `8a44d5f`). The only remaining `where("inviteCode")` is the join fallback;
+  the other users-queries are just the client/sub-trainer lists.
+  **(c) — the actual profile-read lockdown — NOT yet done (highest-risk; do fresh):** today `users` is
+  `allow read: if isSignedIn()` (any signed-in user reads ANY profile). **Design:** split by `resource.data.role`
+  — **trainer** profiles (`head_trainer`/`sub_trainer`) stay readable by any signed-in user (the "directory":
+  needed for join validation + showing the client their trainer's name), while **client** profiles are limited
+  to owner + admin + their trainer-chain. Use **`resource.data`** (the doc being read) not `get()` so the
+  **`list` queries stay valid** — `getMyClients` (where `assignedTrainerId == me`) and `getMySubTrainers` (where
+  `headTrainerId == me`) are *queries*; a wrong `list` rule silently returns nothing and breaks the trainer
+  dashboards. **Before implementing (c): enumerate EVERY profile read/list path** (getProfile, joinTrainer's
+  trainer read, ClientHome trainer-name read, getMyClients, getMySubTrainers, dashboards) and cover each with
+  emulator allow-tests + cross-client/attack denials; then Kevin PUBLISHES. Steps (a)/(b) are safe to leave live
+  indefinitely without (c).
