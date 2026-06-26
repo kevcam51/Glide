@@ -33,7 +33,10 @@ unified platform that complements and eventually replaces these.
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
 - `npm run test:rules` — Firestore security-rules tests against the Firebase emulator. The
-  emulator needs Java (Temurin JDK); if missing, install it before running.
+  emulator needs Java (Temurin JDK). A local JDK is installed at `~/.glide-jdk` (Temurin 21, no
+  brew/sudo on this machine) — run with it via:
+  `JAVA_HOME="$HOME/.glide-jdk/jdk-21.0.11+10/Contents/Home" PATH="$JAVA_HOME/bin:$PATH" npm run test:rules`
+  (29 tests currently pass).
 
 ## Important files
 
@@ -1097,3 +1100,23 @@ enabled (Blaze has no default spending cap).
   Stage D — switch `firestore.rules` to `request.auth.token.role` **with a doc-get fallback** (emulator-tested
   incl. attack cases via `npm run test:rules`, then Kevin PUBLISHES). The AI chat does NOT depend on any of
   this (the spec reads role from the Firestore profile).
+- Session 57: **Claims Stage C (token refresh) + Java/rules-test harness set up + profile-read hardening
+  scoped.** (1) **Stage C done:** `AuthGate` now forces `user.getIdToken(true)` once on sign-in so custom
+  claims set server-side land in the session token without a re-login (committed `16ec3ca`; verified app still
+  renders, no console errors). (2) **Test harness unblocked:** no brew/sudo on this machine, so installed a
+  local **Temurin 21 JDK at `~/.glide-jdk`**; `npm run test:rules` now runs (see Key commands for the
+  `JAVA_HOME=…` incantation) — **baseline 29/29 pass**. This unblocks ALL future `firestore.rules` work.
+  (3) **Stage D reconsidered → profile-read hardening.** Key finding: the *current* rules barely benefit from
+  custom claims — `isAdmin()` is already UID-based (optimal), and the kv trainer/head checks read the
+  **target** user's linkage (not the requester's role), so the requester's claims can't replace those
+  `get()`s. So a claims-substitution rules rewrite is low-value + adds lockout risk; **skipped.** The genuinely
+  valuable hardening (migration-doc step 5) is **locking down profile-doc reads** (today `allow read: if
+  isSignedIn()` lets ANY signed-in user read ANY profile). **It's a multi-file refactor, not a rules tweak**,
+  because `profile.js` relies on broad `users` queries: invite-code resolution `where('inviteCode','==',code)`
+  (run by a not-yet-linked client) and client lists `where('assignedTrainerId'|'headTrainerId','==',uid)`.
+  **Planned increments (all gated by the now-working emulator tests; Kevin must PUBLISH rules after):**
+  (a) ADD an `inviteCodes/{code}` lookup collection (trainer writes own code→uid; public/signed-in read) — purely
+  additive, no risk; (b) switch `profile.js` invite resolution to read that collection (drop the broad
+  inviteCode query); (c) tighten `users` read to owner + admin + trainer-chain + the constrained client-list
+  queries, with full attack-case tests. **NOT yet started** — deferred as focused work (security-critical;
+  avoid rushing at the end of a long session). Claims foundation (A/B-partial/C) remains live + safe.
