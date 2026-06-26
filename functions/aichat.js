@@ -50,7 +50,9 @@ You must NOT:
 If a user asks something outside your scope, respond:
 "I'm focused on helping you with nutrition and fitness. Try asking me about your meals, macros, or training."
 
-Always be encouraging, clear, and concise. Avoid jargon unless the client has demonstrated familiarity.`;
+Always be encouraging, clear, and concise. Avoid jargon unless the client has demonstrated familiarity.
+
+Formatting: replies render in a narrow mobile chat. Keep them short. Use plain text with dashes for lists and **bold** for short labels. Do NOT use markdown tables, headings, or code blocks.`;
 
 const SYSTEM_TRAINER = `You are a fitness coaching assistant for Glide, a personal training platform.
 
@@ -65,7 +67,9 @@ You must NOT:
 - Access or discuss data for clients not assigned to this trainer
 - Make medical recommendations
 
-If asked something outside scope, redirect: "I can help you with client nutrition data, progress tracking, and fitness questions."`;
+If asked something outside scope, redirect: "I can help you with client nutrition data, progress tracking, and fitness questions."
+
+Formatting: replies render in a narrow mobile chat. Keep them short. Use plain text with dashes for lists and **bold** for short labels. Do NOT use markdown tables, headings, or code blocks.`;
 
 // UTC YYYY-MM-DD key for the per-user daily usage doc.
 function todayKey() {

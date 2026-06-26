@@ -1191,3 +1191,51 @@ enabled (Blaze has no default spending cap).
   dashboard/calendar/weekly cards). (4) **Stage 4 — SSE streaming** (needs an `onRequest` HTTP function, not the
   callable), then **photo logging** (paid tier, vision). **Reminders:** firebase CLI reauth if creds expire =
   `firebase login --reauth --no-localhost`; rules-test Java at `~/.glide-jdk` (S57); model id `claude-sonnet-4-6`.
+- Session 61: **AI chat Stage 1 — client UI built + LIVE end-to-end (client AND trainer), four infra gates fixed. ⭐ RESUME HERE.**
+  Built the custom React chat per `glide-ai-meal-logging-spec.md` §9 and got the whole chain working in production.
+  **Frontend:** `src/firebase.js` now exports `functions = getFunctions(app,"us-central1")`; `App.jsx` imports
+  `httpsCallable` and defines module-level `callAiChat = httpsCallable(functions,"aiChat")` + a new **`AIChatPanel`**
+  component (floating "✨ Ask Glide" button → collapsible chat, self-themed `data-theme="pro"`, rendered via
+  `createPortal(…, document.body)` to escape the page-transition transform trap; role-aware empty-state suggestions;
+  maps callable error codes → friendly messages incl. `resource-exhausted` = daily-limit; sends `{messages:[{role,
+  content}]}` and renders `reply`). Mounted for the **client** (inside `ClientHome`) AND **trainers** (added
+  `<AIChatPanel role={role}/>` to the TrainerDashboard / TrainerAnalytics / ProfileSelector return fragments) — the
+  backend already selects the client-vs-trainer system prompt + budget tier by the caller's profile role, so trainers
+  on a (future) pro plan get the coaching assistant with the 60k tier. **Deliberately NOT mounted in the in-plan
+  wizard/Results editor** (would overlap the fixed `BottomNav`). New module-level **`RichText`** renders **bold** +
+  line breaks so replies read cleanly in the narrow chat (no full markdown/tables); both system prompts in
+  `functions/aichat.js` were tuned to "keep it short, plain text, dashes for lists, **bold** labels, NO markdown
+  tables/headings/code blocks" and redeployed. **Fixed the long-broken `AICoach`** ("AI Coaching Insights" in
+  Results→Pro): it used to call `api.anthropic.com` directly from the browser with NO key (never worked) — rewired
+  to `callAiChat` (secure, budgeted, role-based) returning free-form text rendered via `RichText` (replaced the old
+  JSON-parse render). **VERIFIED LIVE** (preview, signed in as `client.uitest` and `trainer.uitest`): real replies
+  from `claude-sonnet-4-6`, multi-turn context, the off-topic redirect fires, role-correct prompts (trainer reply is
+  client-management framed), budget accounting increments `users/{uid}/aiUsage/{date}` (client got the **assisted**
+  40k tier via `assignedTrainerId`; trainer gets 60k), clean formatting, `npm run build` passes, no console errors.
+  (AICoach itself is build-verified + reuses the proven callAiChat/RichText path; spot-check it in a *completed*
+  plan's Results→Pro since the test plans are incomplete.)
+  **⚠️ FOUR PROD INFRA GATES had to be fixed before the live call worked — all done, but know them for any new
+  callable:** (1) **Org policy blocked public invoker.** The project is under the `smoothtraining.com` Google
+  Workspace, whose **Domain restricted sharing** org policy (`iam.allowedPolicyMemberDomains`) refuses the `allUsers`
+  Cloud-Run invoker grant every Firebase callable needs → browser preflight got `OPTIONS 403`. Kevin granted himself
+  **Organization Policy Administrator** at the **org** scope (he was already Organization Administrator, which can
+  *view* but not *edit* org policies), then **overrode the policy to "Allow All" for the `calorieiq` project only**.
+  (2) **Invoker binding only set on CREATE, not UPDATE** — `firebase deploy` of an existing callable does NOT
+  re-apply the public-invoker IAM, so the S60 first-deploy flake left it unset; fix = `firebase functions:delete
+  aiChat` then deploy fresh (after the org-policy fix the create succeeds with no IAM error). (3) **The S60
+  `ANTHROPIC_API_KEY` secret was invalid** (a corrupted 538-char paste; a real key is ~108 chars `sk-ant-api03-…`) →
+  function threw, surfaced as 500/`internal`. Kevin re-set it via `firebase functions:secrets:set ANTHROPIC_API_KEY`
+  (now version 2, ENABLED) — verify a key with a direct `curl https://api.anthropic.com/v1/messages` (HTTP 200). (4)
+  **Function's runtime service account lacked Firestore access** — `350381584449-compute@developer.gserviceaccount.com`
+  was missing **Cloud Datastore User**, so the Admin-SDK profile/usage reads threw `7 PERMISSION_DENIED` (the S56
+  note that it was granted was stale — it wasn't on the account). Kevin added **Cloud Datastore User** to that SA in
+  project IAM (no redeploy needed; IAM is read at runtime). **Diagnosis tip:** `OPTIONS 403` = invoker/org-policy;
+  `POST 500 internal` = inside the function (read its `console.error` via `firebase functions:log`, but it lags 1–2
+  min — also test the key with curl and the SA roles in IAM). **Committed:** _(pending Kevin's go-ahead to commit +
+  push; pushing `main` auto-deploys the UI to Vercel)._
+  **NEXT:** Stage 2 — function-calling tools (`get_meal_logs`/`get_calorie_targets`/`get_trainer_clients`/
+  `get_client_last_log` per the spec) so it answers "what did I eat this week?" / "which clients haven't logged?".
+  Then Stage 3 (conversational meal-write into `caliq-log-{id}-{date}`), Stage 4 (SSE streaming via an `onRequest`
+  HTTP fn), photo logging (paid/vision). Minor polish backlog: pro-plan subscription gate on the chat button (waits
+  for Stripe; budget tiers already role-based server-side), align the AI daily-budget date to local tz (currently
+  UTC in `aichat.js` `todayKey` — correct/un-spoofable for a budget, but resets ~8pm ET).

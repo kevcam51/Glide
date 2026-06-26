@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo } from "./profile.js";
 import { getForUser, setForUser, deleteForUser, listForUser } from "./clientData.js";
-import { auth } from "./firebase.js";
+import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
+import { httpsCallable } from "firebase/functions";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
@@ -8066,7 +8067,7 @@ function AICoach({ data, tdee, totalBurn, totalStrBurn, activeDays, activeStrDay
         ? (recent.filter(c=>c.mood!=null).reduce((s,c)=>s+c.mood,0) / recent.filter(c=>c.mood!=null).length).toFixed(1)
         : null;
 
-      const prompt = `You are an expert fitness coach analyzing a client's data. Be specific, actionable, and encouraging. Use their actual numbers. Keep it under 250 words total.
+      const prompt = `Analyze this client's fitness profile as their coach. Be specific, actionable, and encouraging, and use their actual numbers. Keep it under 220 words. Structure it as: a one-line summary, a short "Wins" list, a short "Focus areas" list, and a closing line of motivation. Use simple formatting (dashes for lists, **bold** for short labels) — no tables.
 
 CLIENT PROFILE:
 - Name: ${fullName(data) || "Client"}
@@ -8078,27 +8079,19 @@ CLIENT PROFILE:
 - Weight trend: ${weightTrend}
 - Adherence: ${adherence !== null ? adherence + "%" : "no data yet"}
 - Average mood (0-4 scale): ${avgMood || "no data"}
-- Total check-ins: ${checkIns.length}
+- Total check-ins: ${checkIns.length}`;
 
-Respond in this exact JSON format (no markdown, no backticks):
-{"summary":"One sentence overview of where they are","wins":["specific win 1","specific win 2"],"focus":["specific action item 1","specific action item 2","specific action item 3"],"motivation":"A personalized, specific encouragement message based on their actual data"}`;
-
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-      const result = await response.json();
-      const text = result.content?.find(c => c.type === "text")?.text || "";
-      const clean = text.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean);
-      setInsights(parsed);
+      // Routed through the secure aiChat Cloud Function (role-based prompt +
+      // daily token budget) — replaces the old keyless direct API call that
+      // never worked from the browser.
+      const res = await callAiChat({ messages: [{ role: "user", content: prompt }] });
+      const text = (res.data && res.data.reply) || "";
+      if (!text) throw new Error("empty");
+      setInsights(text);
     } catch (e) {
-      setError("Couldn't generate insights right now. Try again in a moment.");
+      const code = (e && e.code) || "";
+      if (code.includes("resource-exhausted")) setError("You've reached today's AI usage limit. It resets tomorrow.");
+      else setError("Couldn't generate insights right now. Try again in a moment.");
     }
     setLoading(false);
   };
@@ -8123,33 +8116,11 @@ Respond in this exact JSON format (no markdown, no backticks):
 
       {insights && (
         <div style={{animation:"fadeUp .3s ease both"}}>
-          <div style={{fontSize:".88rem",color:"var(--text)",fontWeight:600,marginBottom:"10px",lineHeight:1.5}}>{insights.summary}</div>
+          <div style={{fontSize:".86rem",color:"var(--text)",lineHeight:1.6,whiteSpace:"normal"}}>
+            <RichText text={insights} />
+          </div>
 
-          {insights.wins?.length > 0 && (
-            <div style={{marginBottom:"12px"}}>
-              <div style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:"1px",color:"var(--green)",fontWeight:700,marginBottom:"6px"}}>Wins</div>
-              {insights.wins.map((w, i) => (
-                <div key={i} style={{fontSize:".82rem",color:"var(--muted)",lineHeight:1.5,padding:"4px 0",paddingLeft:"16px",borderLeft:"2px solid var(--green)"}}>✅ {w}</div>
-              ))}
-            </div>
-          )}
-
-          {insights.focus?.length > 0 && (
-            <div style={{marginBottom:"12px"}}>
-              <div style={{fontSize:".68rem",textTransform:"uppercase",letterSpacing:"1px",color:"var(--accent)",fontWeight:700,marginBottom:"6px"}}>Focus Areas</div>
-              {insights.focus.map((f, i) => (
-                <div key={i} style={{fontSize:".82rem",color:"var(--muted)",lineHeight:1.5,padding:"4px 0",paddingLeft:"16px",borderLeft:"2px solid var(--accent)"}}>🎯 {f}</div>
-              ))}
-            </div>
-          )}
-
-          {insights.motivation && (
-            <div style={{padding:"12px 14px",borderRadius:"8px",background:"rgba(181,123,255,.06)",border:"1px solid rgba(181,123,255,.15)",fontSize:".84rem",color:"var(--text)",lineHeight:1.6,fontStyle:"italic"}}>
-              💬 {insights.motivation}
-            </div>
-          )}
-
-          <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontFamily:"inherit",fontSize:".73rem",textDecoration:"underline",padding:"8px 0",marginTop:"6px"}}
+          <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontFamily:"inherit",fontSize:".73rem",textDecoration:"underline",padding:"8px 0",marginTop:"10px"}}
             onClick={()=>{setInsights(null);generateInsights();}}>
             🔄 Regenerate insights
           </button>
@@ -9509,6 +9480,174 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
   );
 }
 
+// ─── AI chat panel (Session 61) ─────────────────────────────────────────────
+// Stage-1 conversational assistant: a collapsible chat dismissed to a floating
+// button (per the spec's UI notes). It calls the server-side `aiChat` callable
+// (functions/aichat.js) — the system prompt, role scope, and daily token budget
+// are all enforced there; the browser only sends the message thread and renders
+// the reply. SSE streaming + meal-write + tools are later stages, so this just
+// awaits the full reply. Rendered via createPortal so its fixed positioning
+// escapes the .page-transition transform trap (same fix as the other modals).
+const callAiChat = httpsCallable(functions, "aiChat");
+
+// Lightweight markdown renderer for AI replies — handles **bold** and line
+// breaks so responses read cleanly in the narrow chat (full markdown/tables are
+// intentionally not parsed; the system prompt asks the model to keep formatting
+// simple). Used by the chat bubbles and the AI Coaching Insights card.
+function RichText({ text }) {
+  const lines = String(text == null ? "" : text).split("\n");
+  return (
+    <>
+      {lines.map((line, i) => {
+        const parts = line.split(/(\*\*[^*]+\*\*)/g).map((seg, j) =>
+          /^\*\*[^*]+\*\*$/.test(seg)
+            ? <strong key={j}>{seg.slice(2, -2)}</strong>
+            : <span key={j}>{seg}</span>
+        );
+        return <div key={i} className={line.trim() ? "" : "h-2"}>{parts}</div>;
+      })}
+    </>
+  );
+}
+
+function AIChatPanel({ role }) {
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState([]); // {role:'user'|'assistant', content}
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [warn, setWarn] = useState(false); // ≥80% of daily budget used
+  const scrollRef = useRef(null);
+
+  // Auto-scroll to the newest message whenever the thread or busy state changes.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, busy, open]);
+
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || busy) return;
+    setError("");
+    const next = [...messages, { role: "user", content: text }];
+    setMessages(next);
+    setDraft("");
+    setBusy(true);
+    try {
+      const res = await callAiChat({ messages: next });
+      const reply = (res.data && res.data.reply) || "";
+      setMessages([...next, { role: "assistant", content: reply || "(no response)" }]);
+      if (res.data && res.data.usage && res.data.usage.warn) setWarn(true);
+    } catch (e) {
+      // Firebase callable errors carry a `code` like "functions/resource-exhausted".
+      const code = (e && e.code) || "";
+      if (code.includes("resource-exhausted")) {
+        setError("You've reached today's AI usage limit. It resets tomorrow.");
+      } else if (code.includes("unauthenticated")) {
+        setError("Please sign in again to use the assistant.");
+      } else {
+        setError("The assistant is temporarily unavailable. Please try again.");
+      }
+    }
+    setBusy(false);
+  };
+
+  const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
+  const suggestions = isTrainer
+    ? ["Which clients need attention?", "Tips to improve client adherence"]
+    : ["I had 2 eggs and toast for breakfast", "How much protein should I eat?"];
+
+  const bubbleUser = "self-end max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-3.5 py-2.5 text-[.9rem] text-primaryfg whitespace-pre-wrap break-words";
+  const bubbleAI = "self-start max-w-[90%] rounded-2xl rounded-bl-sm bg-surface2 px-3.5 py-2.5 text-[.9rem] text-fg whitespace-pre-wrap break-words";
+
+  return createPortal(
+    <div data-theme="pro" style={{ fontFamily: "var(--font-sans)" }}>
+      {/* Floating launcher button */}
+      {!open && (
+        <button onClick={() => setOpen(true)} aria-label="Open AI assistant"
+          className="fixed z-[1000] flex items-center gap-2 rounded-full border-none bg-primary px-4 py-3 font-bold text-primaryfg shadow-lg cursor-pointer"
+          style={{ right: "calc(16px + env(safe-area-inset-right,0px))", bottom: "calc(18px + env(safe-area-inset-bottom,0px))" }}>
+          <span className="text-[1.15rem]">✨</span>
+          <span className="text-[.9rem]">Ask Glide</span>
+        </button>
+      )}
+
+      {/* Chat panel */}
+      {open && (
+        <div className="fixed z-[1000] flex flex-col overflow-hidden rounded-card border border-border bg-surface text-fg shadow-2xl"
+          style={{
+            right: "calc(16px + env(safe-area-inset-right,0px))",
+            bottom: "calc(18px + env(safe-area-inset-bottom,0px))",
+            left: "max(16px, calc(100vw - 16px - 420px))",
+            top: "max(16px, calc(100vh - 18px - 640px))",
+            maxWidth: 420,
+          }}>
+          {/* Header */}
+          <div className="flex items-center gap-2 border-b border-border bg-surface2 px-4 py-3">
+            <span className="text-[1.15rem]">✨</span>
+            <div className="flex flex-col leading-tight">
+              <span className="font-display text-sm uppercase tracking-wide text-primary">Glide AI</span>
+              <span className="text-[.68rem] text-muted">Nutrition &amp; fitness assistant</span>
+            </div>
+            <button onClick={() => setOpen(false)} aria-label="Close"
+              className="ml-auto rounded-md border-none bg-transparent px-2 py-1 text-lg text-muted cursor-pointer hover:text-fg">✕</button>
+          </div>
+
+          {/* Message thread */}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2.5">
+            {messages.length === 0 ? (
+              <div className="flex flex-col gap-3 py-2">
+                <div className="text-[.85rem] text-muted">
+                  {isTrainer
+                    ? "Ask about your clients' nutrition data, progress, or fitness science."
+                    : "Tell me what you ate, or ask me anything about nutrition, macros, or training."}
+                </div>
+                <div className="flex flex-col gap-2">
+                  {suggestions.map((s, i) => (
+                    <button key={i} onClick={() => setDraft(s)}
+                      className="text-left rounded-lg border border-border bg-surface2 px-3 py-2 text-[.82rem] text-fg cursor-pointer hover:border-primary">
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              messages.map((m, i) => (
+                <div key={i} className={m.role === "user" ? bubbleUser : bubbleAI}>
+                  {m.role === "user" ? m.content : <RichText text={m.content} />}
+                </div>
+              ))
+            )}
+            {busy && <div className={bubbleAI + " text-muted"}>Thinking…</div>}
+            {error && <div className="self-stretch rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-[.82rem] text-danger">{error}</div>}
+            {warn && !error && (
+              <div className="self-stretch rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[.78rem] text-warn">
+                You're nearing today's AI usage limit.
+              </div>
+            )}
+          </div>
+
+          {/* Composer */}
+          <div className="border-t border-border bg-surface px-3 py-3">
+            <div className="flex items-end gap-2">
+              <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={1}
+                placeholder="Message Glide AI…"
+                className="flex-1 resize-none box-border max-h-28 rounded-xl border border-border bg-surface2 px-3.5 py-2.5 text-[.9rem] text-fg outline-none placeholder:text-muted"
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
+              <button onClick={send} disabled={busy || !draft.trim()} aria-label="Send"
+                className="rounded-xl border-none bg-primary px-3.5 py-2.5 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50 disabled:cursor-default">
+                {busy ? "…" : "Send"}
+              </button>
+            </div>
+            <div className="mt-1.5 text-[.66rem] text-muted">AI estimates can be off — confirm important numbers.</div>
+          </div>
+        </div>
+      )}
+    </div>,
+    document.body
+  );
+}
+
 // ─── Client home (Session 8) ────────────────────────────────────────────────
 // A client manages just their own plan (stored in their own account as
 // "caliq-self"). This is their landing screen: the role panel (their trainer
@@ -10048,6 +10187,9 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
           onMarkDone={() => markRequestDone(quickReq.id)}
           onClose={() => setQuickReq(null)} />
       )}
+
+      {/* AI assistant — floating button + collapsible chat (Session 61). */}
+      <AIChatPanel role={role} />
     </div>
   );
 }
@@ -11330,7 +11472,7 @@ export default function App() {
         onOpenClientPlan={openClientPlan}
         onGoClients={() => setHomeTab("clients")}
         meUid={meUid} meName={meName} meRole={role}
-      /></>;
+      /><AIChatPanel role={role} /></>;
     }
     if (isTrainerHome && homeTab === "dashboard") {
       return <>{chrome}<TrainerDashboard
@@ -11344,7 +11486,7 @@ export default function App() {
         onConvertSimulation={convertSimulation}
         onDeletePlan={removeLocalProfileById}
         meUid={meUid} meName={meName} meRole={role}
-      /></>;
+      /><AIChatPanel role={role} /></>;
     }
     return <>{chrome}<ProfileSelector
       profiles={profiles} folders={folders} loading={loading}
@@ -11358,7 +11500,7 @@ export default function App() {
       onOpenClientPlan={openClientPlan}
       onLinked={removeLocalProfileById} onCopyToLocal={copyClientToLocal}
       onRename={renameProfile}
-    /></>;
+    /><AIChatPanel role={role} /></>;
   }
 
   return (
