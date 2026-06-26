@@ -83,3 +83,7 @@ exports.backfillRoleClaims = onCall(async (request) => {
   }
   return { total: snap.size, set, skip, missing };
 });
+
+// AI chat (Stage 1) — defined in ./aichat.js. Required after initializeApp()
+// above so it shares the initialized Admin app.
+exports.aiChat = require("./aichat").aiChat;
