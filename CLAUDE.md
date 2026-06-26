@@ -1071,3 +1071,29 @@ enabled (Blaze has no default spending cap).
   add it in Vercel → Settings → Domains + DNS; (2) optionally, for a free interim glide URL, flip Vercel
   → Settings → Deployment Protection → Vercel Authentication to "Only Preview Deployments" so
   `glide-kevcam51s-projects.vercel.app` serves publicly. No code/`firestore.rules` change.
+- Session 56: **Blaze ENABLED + first Cloud Functions (custom-claims migration, Stage 1 — security hardening).**
+  Kevin upgraded the Firebase project to **Blaze** (budget set). Built the first server-side code in new
+  `functions/` (Node 22, `us-central1`, firebase-functions v6): **`syncRoleClaims`** (Firestore trigger on
+  `users/{uid}` — mirrors `role` + `assignedTrainerId`/`headTrainerId` into tamper-proof Auth **custom
+  claims**; admin role is forced by UID `G7QUZ8…`, never self-assigned) and **`backfillRoleClaims`** (admin
+  callable to claim existing users). `firebase.json` gained a `functions` block. **Deployed + VERIFIED LIVE:**
+  a profile write fires the trigger and sets the claim (confirmed `trainer.uitest` →
+  `{"role":"head_trainer",…}` via `firebase auth:export`).
+  **⚠️ HARD-WON SETUP GOTCHAS (don't re-litigate):** first 2nd-gen deploy needed retries while Eventarc
+  service-agent perms propagated. The build kept failing until **three IAM roles were granted to the project's
+  Compute Engine default service account** (`350381584449-compute@developer.gserviceaccount.com`, which 2nd-gen
+  builds + the function runtime use): **Cloud Build Service Account** (`roles/cloudbuild.builds.builder`, to
+  build), **Firebase Authentication Admin** (`roles/firebaseauth.admin`, so the function can `setCustomUserClaims`),
+  and **Cloud Datastore User** (`roles/datastore.user`, so it can read Firestore). A partial early deploy left
+  `syncRoleClaims` stuck as an `https` stub → had to `firebase functions:delete syncRoleClaims` then redeploy.
+  The `firebase functions:shell` REPL was unreliable for a manual backfill (lazy module load → admin app /
+  creds context issues). Firebase CLI is logged in as **kevin@smoothtraining.com**; tokens expire — if calls
+  say "credentials no longer valid", run **`firebase login --reauth --no-localhost`** (the plain localhost
+  callback failed; the code-paste flow works).
+  **Backfill status:** the trigger claims any user on their next profile write; `trainer.uitest` done; the
+  others (kevin admin, `client.uitest`, `kevincameron51`) will claim when next written. **NOT a blocker** —
+  Stage D rules keep a doc-`get()` fallback so unclaimed users are never locked out.
+  **Remaining (next):** Stage C — app forces `getIdToken(true)` on load so new claims reach live sessions;
+  Stage D — switch `firestore.rules` to `request.auth.token.role` **with a doc-get fallback** (emulator-tested
+  incl. attack cases via `npm run test:rules`, then Kevin PUBLISHES). The AI chat does NOT depend on any of
+  this (the spec reads role from the Firestore profile).
