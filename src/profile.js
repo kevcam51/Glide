@@ -13,6 +13,19 @@ export const ROLES = {
 };
 
 const profileRef = (uid) => doc(db, "users", uid);
+const inviteCodeRef = (code) => doc(db, "inviteCodes", code);
+
+// Best-effort mirror of a trainer's invite code into the `inviteCodes` lookup
+// collection (doc id = code, data = { trainerUid }). This lets join-by-code
+// resolve with a single doc read instead of querying all users, which in turn
+// lets us lock down profile-doc reads later. Non-fatal on failure (e.g. rules
+// not yet published, or a rare code collision) — `profile.inviteCode` stays the
+// source of truth.
+async function writeInviteCodeMirror(code, trainerUid) {
+  try {
+    await setDoc(inviteCodeRef(code), { trainerUid, createdAt: serverTimestamp() }, { merge: true });
+  } catch (e) { /* non-fatal */ }
+}
 
 // Create a profile at signup. role MUST be 'client' or 'head_trainer'.
 export async function createProfile({ uid, email, role, displayName = "", firstName = "", lastName = "" }) {
@@ -115,7 +128,11 @@ export async function ensureInviteCode(uid = auth.currentUser && auth.currentUse
   if (!uid) throw new Error("Not signed in");
   const snap = await getDoc(profileRef(uid));
   const prof = snap.exists() ? snap.data() : null;
-  if (prof && prof.inviteCode) return prof.inviteCode;
+  if (prof && prof.inviteCode) {
+    // Backfill the lookup mirror for trainers who got their code before it existed.
+    await writeInviteCodeMirror(prof.inviteCode, uid);
+    return prof.inviteCode;
+  }
 
   let code = null;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -128,6 +145,7 @@ export async function ensureInviteCode(uid = auth.currentUser && auth.currentUse
   if (!code) throw new Error("Could not generate a unique invite code — try again.");
 
   await updateDoc(profileRef(uid), { inviteCode: code });
+  await writeInviteCodeMirror(code, uid);
   return code;
 }
 

@@ -66,6 +66,8 @@ await testEnv.withSecurityRulesDisabled(async (ctx) => {
   for (const u of [C1, C2, C3, T2]) {
     await setDoc(doc(db, "users", u, "kv", "caliq-index"), { k: "caliq-index", value: "[]" });
   }
+  // An invite code already claimed by head trainer H (for hijack/read tests).
+  await setDoc(doc(db, "inviteCodes", "HEADCODE"), { trainerUid: H, createdAt: 1 });
 });
 
 // ---- auth contexts ----------------------------------------------------------
@@ -118,6 +120,16 @@ await check("signed-out cannot read a profile", assertFails(getDoc(prof(anon, C1
 await check("non-admin cannot delete a profile", assertFails(deleteDoc(prof(c1, C1))));
 await check("admin can change anyone's role", assertSucceeds(updateDoc(prof(admin, S), { role: "head_trainer" })));
 await check("admin can delete a profile", assertSucceeds(deleteDoc(prof(admin, C3))));
+
+const code = (db, c) => doc(db, "inviteCodes", c);
+console.log("\nINVITE CODES — lookup collection:");
+await check("trainer claims a new code pointing to self", assertSucceeds(setDoc(code(head, "NEWHEAD"), { trainerUid: H, createdAt: 2 })));
+await check("any signed-in user reads a code", assertSucceeds(getDoc(code(c1, "HEADCODE"))));
+await check("owner refreshes own existing code", assertSucceeds(setDoc(code(head, "HEADCODE"), { trainerUid: H, createdAt: 3 })));
+await check("cannot claim a code pointing to someone else", assertFails(setDoc(code(t2, "T2FAKE"), { trainerUid: H, createdAt: 4 })));
+await check("cannot hijack another trainer's existing code", assertFails(setDoc(code(t2, "HEADCODE"), { trainerUid: T2, createdAt: 5 })));
+await check("signed-out cannot read a code", assertFails(getDoc(code(anon, "HEADCODE"))));
+await check("signed-out cannot claim a code", assertFails(setDoc(code(anon, "ANONCODE"), { trainerUid: "x", createdAt: 6 })));
 
 console.log(`\n==== ${passed} passed, ${failed} failed ====`);
 if (failures.length) console.log("FAILED:", failures.join(" | "));

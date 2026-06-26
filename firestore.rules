@@ -83,5 +83,24 @@ service cloud.firestore {
         allow read, write: if canAccessUserData(uid);
       }
     }
+
+    // Friendly invite-code lookup: doc id = the CODE, data = { trainerUid }.
+    // Lets a not-yet-linked client resolve a code to a trainer with a single
+    // doc read instead of querying the whole users collection — which is what
+    // lets us tighten profile-doc reads later (docs/BLAZE_MIGRATION.md step 5).
+    // A code can only be claimed by the trainer it points to, and once claimed
+    // cannot be overwritten by anyone else (no code hijacking).
+    match /inviteCodes/{code} {
+      allow read: if isSignedIn();
+      // create only when the doc doesn't exist yet, pointing at yourself
+      allow create: if isSignedIn()
+        && request.resource.data.trainerUid == request.auth.uid;
+      // update only by the trainer the code already points to (refresh), still self
+      allow update: if isSignedIn()
+        && resource.data.trainerUid == request.auth.uid
+        && request.resource.data.trainerUid == request.auth.uid;
+      allow delete: if isAdmin()
+        || (isSignedIn() && resource.data.trainerUid == request.auth.uid);
+    }
   }
 }
