@@ -9510,14 +9510,56 @@ function RichText({ text }) {
   );
 }
 
+// Downscale a chosen photo to a JPEG data URL (max ~1024px long edge) to keep
+// upload size + vision token cost down for photo meal logging (Session 65).
+function downscaleImage(file, maxDim = 1024, quality = 0.8) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read failed"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("decode failed"));
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+// Parse a base64 image data URL into an Anthropic image content block.
+function imageBlockFromDataUrl(dataUrl) {
+  const m = /^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/.exec(dataUrl || "");
+  return m ? { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } } : null;
+}
+
 function AIChatPanel({ role, onDataChanged }) {
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState([]); // {role:'user'|'assistant', content}
+  const [messages, setMessages] = useState([]); // {role:'user'|'assistant', content, image?}
   const [draft, setDraft] = useState("");
+  const [pendingImage, setPendingImage] = useState(null); // dataURL of a photo to send
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [warn, setWarn] = useState(false); // ≥80% of daily budget used
   const scrollRef = useRef(null);
+  const fileRef = useRef(null);
+
+  const pickImage = () => { if (fileRef.current) fileRef.current.click(); };
+  const onFile = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = ""; // allow re-picking the same file
+    if (!f) return;
+    if (!f.type.startsWith("image/")) { setError("Please choose an image."); return; }
+    setError("");
+    try { setPendingImage(await downscaleImage(f)); }
+    catch { setError("Couldn't read that photo. Try another."); }
+  };
 
   // Auto-scroll to the newest message whenever the thread or busy state changes.
   useEffect(() => {
@@ -9527,14 +9569,26 @@ function AIChatPanel({ role, onDataChanged }) {
 
   const send = async () => {
     const text = draft.trim();
-    if (!text || busy) return;
+    if ((!text && !pendingImage) || busy) return;
     setError("");
-    const next = [...messages, { role: "user", content: text }];
+    const next = [...messages, { role: "user", content: text, image: pendingImage || undefined }];
     setMessages(next);
     setDraft("");
+    setPendingImage(null);
     setBusy(true);
     try {
-      const res = await callAiChat({ messages: next });
+      // Build the API payload. Send the image block only on the most recent
+      // message (older turns go as text) to bound vision token cost.
+      const apiMsgs = next.map((m, i) => {
+        if (m.image && i === next.length - 1) {
+          const blk = imageBlockFromDataUrl(m.image);
+          const content = [{ type: "text", text: m.content || "Here's a photo of my meal — estimate the calories and macros, then we can log it." }];
+          if (blk) content.push(blk);
+          return { role: m.role, content };
+        }
+        return { role: m.role, content: m.content || (m.image ? "(I sent a photo of my meal.)" : "") };
+      });
+      const res = await callAiChat({ messages: apiMsgs });
       const reply = (res.data && res.data.reply) || "";
       setMessages([...next, { role: "assistant", content: reply || "(no response)" }]);
       if (res.data && res.data.usage && res.data.usage.warn) setWarn(true);
@@ -9616,6 +9670,9 @@ function AIChatPanel({ role, onDataChanged }) {
             ) : (
               messages.map((m, i) => (
                 <div key={i} className={m.role === "user" ? bubbleUser : bubbleAI}>
+                  {m.image && (
+                    <img src={m.image} alt="meal photo" className="mb-1.5 max-h-44 w-auto rounded-lg" />
+                  )}
                   {m.role === "user" ? m.content : <RichText text={m.content} />}
                 </div>
               ))
@@ -9631,17 +9688,28 @@ function AIChatPanel({ role, onDataChanged }) {
 
           {/* Composer */}
           <div className="border-t border-border bg-surface px-3 py-3">
+            {pendingImage && (
+              <div className="mb-2 flex items-center gap-2">
+                <img src={pendingImage} alt="meal to send" className="h-14 w-14 rounded-lg object-cover" />
+                <span className="text-[.78rem] text-muted">Photo attached — add a note or just send.</span>
+                <button onClick={() => setPendingImage(null)} aria-label="Remove photo"
+                  className="ml-auto rounded-md border-none bg-transparent px-2 py-1 text-muted cursor-pointer hover:text-fg">✕</button>
+              </div>
+            )}
             <div className="flex items-end gap-2">
+              <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFile} />
+              <button onClick={pickImage} disabled={busy} aria-label="Add a photo" title="Photo of your meal"
+                className="rounded-xl border border-border bg-surface2 px-3 py-2.5 text-[1.05rem] text-fg cursor-pointer disabled:opacity-50">📷</button>
               <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={1}
-                placeholder="Message Glide AI…"
+                placeholder={pendingImage ? "Add a note (optional)…" : "Message Glide AI…"}
                 className="flex-1 resize-none box-border max-h-28 rounded-xl border border-border bg-surface2 px-3.5 py-2.5 text-[.9rem] text-fg outline-none placeholder:text-muted"
                 onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
-              <button onClick={send} disabled={busy || !draft.trim()} aria-label="Send"
+              <button onClick={send} disabled={busy || (!draft.trim() && !pendingImage)} aria-label="Send"
                 className="rounded-xl border-none bg-primary px-3.5 py-2.5 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50 disabled:cursor-default">
                 {busy ? "…" : "Send"}
               </button>
             </div>
-            <div className="mt-1.5 text-[.66rem] text-muted">AI estimates can be off — confirm important numbers.</div>
+            <div className="mt-1.5 text-[.66rem] text-muted">📷 Snap a meal to log it. AI estimates can be off — confirm important numbers.</div>
           </div>
         </div>
       )}

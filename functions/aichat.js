@@ -89,12 +89,39 @@ function todayLocal() {
   }
 }
 
+// Allowed image media types + a base64 size cap (~7MB) for photo meal logging.
+const IMG_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const MAX_IMG_B64 = 7 * 1024 * 1024;
+
+// Sanitize one message's content: a plain string, or an array of text/image
+// blocks (photo logging). Returns a safe content value, or null to drop it.
+function sanitizeContent(content) {
+  if (typeof content === "string") return content.slice(0, 8000);
+  if (!Array.isArray(content)) return null;
+  const blocks = [];
+  for (const b of content) {
+    if (!b || typeof b !== "object") continue;
+    if (b.type === "text" && typeof b.text === "string") {
+      blocks.push({ type: "text", text: b.text.slice(0, 8000) });
+    } else if (b.type === "image" && b.source && b.source.type === "base64"
+        && IMG_TYPES.has(b.source.media_type) && typeof b.source.data === "string"
+        && b.source.data.length <= MAX_IMG_B64) {
+      blocks.push({ type: "image", source: { type: "base64", media_type: b.source.media_type, data: b.source.data } });
+    }
+  }
+  return blocks.length ? blocks : null;
+}
+
 // Keep only the last 10 exchanges (20 messages) to cap context cost (spec §6).
 function capHistory(messages) {
   const arr = Array.isArray(messages) ? messages : [];
-  const clean = arr
-    .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
-    .map((m) => ({ role: m.role, content: m.content.slice(0, 8000) }));
+  const clean = [];
+  for (const m of arr) {
+    if (!m || (m.role !== "user" && m.role !== "assistant")) continue;
+    const content = sanitizeContent(m.content);
+    if (content == null) continue;
+    clean.push({ role: m.role, content });
+  }
   return clean.slice(-20);
 }
 
@@ -130,7 +157,7 @@ Today's date is ${todayLocal()} (use it to resolve "today", "yesterday", "this w
 You have tools to read the user's real logged data — use them whenever a question depends on actual numbers (what they ate, their targets, client activity) rather than guessing. Call get_nutrition_targets to know the goals before judging whether a day was over/under. Don't expose internal ids to the user; refer to clients by name.
 
 You can also TAKE ACTIONS for the user via tools — but you must CONFIRM the specifics first and only act after an explicit go-ahead (never act prematurely):
-- log_meal: estimate calories + protein/carbs/fat from a described meal, show the breakdown, ask the meal type if unclear, support corrections ("make it one egg"), then log it.
+- log_meal: estimate calories + protein/carbs/fat from a described meal, show the breakdown, ask the meal type if unclear, support corrections ("make it one egg"), then log it. If the user sends a PHOTO of food, identify the items and portions from the image, then estimate + confirm + log the same way (note out loud that photo estimates are approximate).
 - log_workout: mark a day as a workout day (with an optional note).
 - log_weigh_in: record a body-weight weigh-in (confirm the number).
 - set_targets: change the plan's protein/carbs/fat targets and/or goal weight (this edits the plan — confirm exact numbers first).

@@ -1331,3 +1331,23 @@ enabled (Blaze has no default spending cap).
   notes for a client → AI drafts a program from them"; not needed now. **Reminders:** model `claude-sonnet-4-6`;
   firebase reauth = `firebase login --reauth --no-localhost`; the AI's powers = the tool set, each new ability is one
   contained, access-checked tool.
+- Session 65: **AI chat — PHOTO meal logging (vision). DEPLOYED & LIVE.** Snap a meal → the AI (Claude vision) identifies
+  the food, estimates macros, confirms, and logs it via the existing `log_meal` path — the spec's premium photo tier.
+  **Frontend (`AIChatPanel`):** a **📷 button** + hidden `<input type="file" accept="image/*" capture="environment">`
+  (opens the camera on mobile); `downscaleImage()` canvases the chosen photo to a ≤1024px JPEG data URL (caps upload +
+  vision-token cost); a pending-photo thumbnail + ✕ in the composer; Send enabled with just a photo. `send()` builds the
+  API payload with an Anthropic image content block (`imageBlockFromDataUrl`) **only on the most recent message** (older
+  turns go as text — bounds token cost); the user bubble renders the photo thumbnail. New module helpers
+  `downscaleImage`/`imageBlockFromDataUrl`. **Backend (`aichat.js`):** `capHistory` now accepts array content via a new
+  `sanitizeContent()` that keeps text blocks + validates image blocks (base64, media_type in jpeg/png/webp/gif, ≤7MB);
+  system prompt gained a line telling it to identify food from a photo then estimate→confirm→log like a described meal
+  (noting photo estimates are approximate). `claude-sonnet-4-6` is vision-capable. **Not paywalled yet** — gated by the
+  per-user daily token budget (image tokens count against it, so cost stays bounded); the real pro-plan gate attaches
+  with Stripe. **Frontend changed → `npm run build` passes; pushing redeploys Vercel.** Backend deployed. **VERIFIED LIVE
+  (client.uitest / Casey):** injected a synthetic egg+toast-on-a-plate photo through the file input → AI correctly said
+  "1 fried egg + 1 slice of toast", estimated ~230 cal / 8p/20c/11f, flagged it's approximate, asked the meal type;
+  "it's breakfast, log it" → logged. **Independently confirmed via the app's own Daily Dashboard** (Sat Jun 27):
+  "230 LOGGED SO FAR" and the Meals & Food Today card shows the meal at 8g/20g/11g. No console/tool errors. Committed.
+  **NEXT (AI roadmap remaining):** Stage 4 **SSE streaming** (replies word-by-word; needs an `onRequest` HTTP fn +
+  EventSource client, not the callable) and the optional **Accept/Edit confirm card** (spec §9) instead of the
+  conversational confirm. Plan-structure builder still deferred. Model `claude-sonnet-4-6`.
