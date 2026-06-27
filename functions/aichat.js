@@ -13,6 +13,7 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const Anthropic = require("@anthropic-ai/sdk");
+const { buildTools, runTool } = require("./aitools");
 
 const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
 
@@ -77,6 +78,17 @@ function todayKey() {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 
+// Today's date in the app's audience timezone (Miami / Eastern), as YYYY-MM-DD,
+// so the AI can resolve "today" / "this week" against the user's local day
+// (the app keys daily logs by local date). en-CA gives ISO-style output.
+function todayLocal() {
+  try {
+    return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  } catch (e) {
+    return todayKey();
+  }
+}
+
 // Keep only the last 10 exchanges (20 messages) to cap context cost (spec §6).
 function capHistory(messages) {
   const arr = Array.isArray(messages) ? messages : [];
@@ -109,18 +121,50 @@ exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], region: "us-central1", m
       "You've reached today's AI usage limit. It resets tomorrow.");
   }
 
-  const system = (role === "client") ? SYSTEM_CLIENT : SYSTEM_TRAINER;
+  const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
+  const baseSystem = (role === "client") ? SYSTEM_CLIENT : SYSTEM_TRAINER;
+  const system = `${baseSystem}
+
+Today's date is ${todayLocal()} (use it to resolve "today", "yesterday", "this week", etc.).
+
+You have tools to read the user's real logged data — use them whenever a question depends on actual numbers (what they ate, their targets, client activity) rather than guessing. Call get_nutrition_targets to know the goals before judging whether a day was over/under. Don't expose internal ids to the user; refer to clients by name.`;
+
+  const tools = buildTools(role);
+  const toolCtx = { callerUid: uid, role, isTrainer };
   const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
 
+  // Function-calling loop: the model may call tools (which read Firestore with
+  // server-side access checks), we feed results back, repeat until it answers.
+  // Bounded by MAX_TOOL_ROUNDS to cap latency/cost; usage accumulates for the
+  // daily budget.
+  const MAX_TOOL_ROUNDS = 5;
+  const convo = messages.slice();
+  let spent = 0;
   let resp;
   try {
-    resp = await client.messages.create({ model: MODEL, max_tokens: 1024, system, messages });
+    resp = await client.messages.create({ model: MODEL, max_tokens: 1024, system, tools, messages: convo });
+    spent += (resp.usage && (resp.usage.input_tokens + resp.usage.output_tokens)) || 0;
+    let rounds = 0;
+    while (resp.stop_reason === "tool_use" && rounds < MAX_TOOL_ROUNDS) {
+      rounds++;
+      const toolUses = (resp.content || []).filter((b) => b.type === "tool_use");
+      const results = [];
+      for (const tu of toolUses) {
+        let out;
+        try { out = await runTool(tu.name, tu.input || {}, toolCtx); }
+        catch (e) { console.error("aiChat tool error:", tu.name, e && e.message); out = { error: "That lookup failed." }; }
+        results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(out).slice(0, 60000) });
+      }
+      convo.push({ role: "assistant", content: resp.content });
+      convo.push({ role: "user", content: results });
+      resp = await client.messages.create({ model: MODEL, max_tokens: 1024, system, tools, messages: convo });
+      spent += (resp.usage && (resp.usage.input_tokens + resp.usage.output_tokens)) || 0;
+    }
   } catch (e) {
     console.error("aiChat Anthropic error:", e && e.message);
     throw new HttpsError("internal", "The AI assistant is temporarily unavailable. Please try again.");
   }
 
-  const spent = (resp.usage && (resp.usage.input_tokens + resp.usage.output_tokens)) || 0;
   await usageRef.set({ tokens: admin.firestore.FieldValue.increment(spent),
     updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
 

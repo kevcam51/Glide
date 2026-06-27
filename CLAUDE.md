@@ -1239,3 +1239,38 @@ enabled (Blaze has no default spending cap).
   HTTP fn), photo logging (paid/vision). Minor polish backlog: pro-plan subscription gate on the chat button (waits
   for Stripe; budget tiers already role-based server-side), align the AI daily-budget date to local tz (currently
   UTC in `aichat.js` `todayKey` — correct/un-spoofable for a budget, but resets ~8pm ET).
+- Session 62: **AI chat Stage 2 — data-aware tools (function calling) DEPLOYED & LIVE.** The AI can now read REAL
+  logged data, so it answers "what did I eat this week?" / "which clients haven't logged?" with actual numbers
+  instead of guessing. New **`functions/aitools.js`** exports `buildTools(role)` + `runTool(name,input,ctx)`, wired
+  into `aichat.js` via an Anthropic function-calling loop (bounded to `MAX_TOOL_ROUNDS = 5`; token usage accumulates
+  across all rounds for the daily budget). Three tools: **`get_nutrition_log`** (per-day calories/macros + the foods
+  eaten + weigh-in + workedOut, for a date range — one Firestore range query over `caliq-log-{plan}-{date}`, capped at
+  31 days), **`get_nutrition_targets`** (calorie + macro targets + current/goal weight), and **`list_clients`**
+  (trainers only — each client's last-log date + days-since, via getMyclients-style `where(assignedTrainerId==me)` +
+  a per-client log range query). System prompt now injects **today's date** (computed in `America/New_York` so
+  "today"/"this week" resolve to the user's local day, matching the S45 local-date log keys).
+  **⚠️ SECURITY — enforced server-side in `aitools.js`, NOT by the model (this is the whole point):** a **client**
+  caller's data tools ALWAYS use `request.auth.uid` — clients don't even get a `clientId` param, so the model cannot
+  target another user. A **trainer/admin** caller may pass a `clientId` (from `list_clients`) but `resolveTargetUid`
+  verifies that client's `assignedTrainerId`/`headTrainerId` == caller (or admin) BEFORE returning data; an
+  unauthorized id returns `{error}` to the model, never data. So "ask the AI to read someone else's logs" structurally
+  can't leak.
+  **Data-model reconciliation:** ported `computeClientCalories` (Mifflin-St Jeor BMR × activity − 500, min 1200) + the
+  dashboard macro defaults (protein 1g/lb, fat 28% cal, carbs remainder; `data.macroTargets` overrides) into the
+  function so server-side targets match the app. The scheduled-exercise calorie add-back is intentionally omitted
+  (small; zero for all-rest-days plans) — `get_nutrition_targets` notes the target is the baseline diet target.
+  kv reads mirror `src/storage.js` exactly: `users/{uid}/kv/{encodeURIComponent(key)}` docs with a JSON-string
+  `value` field; prefix listing uses a Firestore range query `where('k','>=',prefix).where('k','<=',prefix+'')`.
+  **Deployed** (`firebase deploy --only functions:aiChat`; backend-only — NO Vercel redeploy needed). **VERIFIED LIVE**
+  (preview): trainer.uitest asked "which clients haven't logged + what's Casey eating" → it called all three tools and
+  returned Casey's ACTUAL logged days (Jun 21 700cal/weigh-in 188; Jun 24 Chicken bowl 700cal/60g + workout; Jun 25
+  Salmon 278cal/30p/6c/16f), missing-day list, and the 188g protein target. client.uitest (Casey) asked "what did I
+  eat this week + am I hitting protein?" → real numbers from HER OWN log only (Thu 30g vs 188g target). No console
+  errors; no tool errors in `firebase functions:log`. (One transient `7 PERMISSION_DENIED` right after the deploy =
+  the same cold-start service-agent propagation race seen in S60/S61 on a fresh revision; both live tests AFTER it
+  succeeded — self-heals.) Committed (this session).
+  **NEXT:** Stage 3 — conversational meal LOGGING (parse a described meal → confirm card → WRITE into the existing
+  `caliq-log-{plan}-{date}` `meals[]` store via a new write tool / callable, reconciling the spec's richer
+  `components`/`totals`/`giEstimate` with the app's `meals[]` so AI-logged meals show in the dashboard/calendar/weekly
+  cards). Then Stage 4 — SSE streaming (needs an `onRequest` HTTP fn, not the callable) — and photo logging (paid/
+  vision). Same reminders: model `claude-sonnet-4-6`; firebase reauth = `firebase login --reauth --no-localhost`.
