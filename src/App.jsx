@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo } from "./profile.js";
-import { getForUser, setForUser, deleteForUser, listForUser } from "./clientData.js";
+import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } from "./clientData.js";
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -10755,6 +10755,18 @@ const STORAGE_INDEX = "caliq-index";
 const STORAGE_FOLDERS = "caliq-folders";
 const profileKey = (id) => `caliq-${id}`;
 
+// Normalize a stored plan's `data` object into the shape the editor expects
+// (back-compat name migration + cardio/strength defaults). Used by the live-sync
+// listener and the manual Refresh so they merge exactly like openClientPlan.
+function buildMergedData(d) {
+  d = d || {};
+  if (d.name && !d.firstName) {
+    const parts = d.name.trim().split(/\s+/);
+    d.firstName = parts[0] || ""; d.lastName = parts.slice(1).join(" ") || ""; delete d.name;
+  }
+  return {...EMPTY_DATA, ...d, cardio:{...defaultCardio,...(d.cardio||{})}, strength:{...defaultStrength,...(d.strength||{})}};
+}
+
 // ─── Edit history helpers (Session 10) ──────────────────────────────────────
 // Short "x ago" label for an event timestamp.
 function timeAgo(ts) {
@@ -10982,6 +10994,10 @@ export default function App() {
     }
   };
   const saveTimer = useRef(null);
+  // The exact plan-wrapper payload we last wrote to a remote client's account, so
+  // the live-sync listener can ignore our own echoed write (vs. a real change
+  // from the client / AI). Pairs with the onSnapshot effect below.
+  const lastRemoteWriteRef = useRef(null);
 
   // Load profiles and folders on mount
   // Scroll to the top whenever the active view changes, so each screen starts
@@ -11031,6 +11047,7 @@ export default function App() {
         if (remote) {
           // Editing a linked client's plan — save straight into THEIR account.
           // (No local index update; this profile doesn't live in our list.)
+          lastRemoteWriteRef.current = payload; // mark our own write so live-sync ignores its echo
           await setForUser(remote, planDataKey(activeId), payload);
           recordPlanEdits(newData||data);
           setSaving(true);
@@ -11047,6 +11064,7 @@ export default function App() {
         setSaving(true);
         setTimeout(()=>setSaving(false), 1200);
       } catch(e) {}
+      finally { saveTimer.current = null; } // debounce done — clears the "edit in flight" guard
     }, 600);
   };
 
@@ -11562,11 +11580,18 @@ export default function App() {
     appendHistory([`edited ${upd.name || "a food"}${upd.type ? ` in ${upd.type}` : ""} (${upd.calories} cal)`]);
   };
 
-  // Pull the latest daily log + history for the active plan on demand. Lets a
-  // trainer (or client) see what the other side logged without re-opening, since
-  // the shared plan isn't live-synced (real-time would need Blaze).
+  // Pull the latest plan structure + daily log + history for the active plan on
+  // demand. A trainer's view of a remote client is now live-synced (the effect
+  // below), so this is mostly a manual fallback and the path the client's own
+  // view uses (where the listener doesn't run).
   const reloadPlanLive = async () => {
     if (!activeId) return;
+    // Plan structure (weigh-ins, targets, goal, workout schedule). Don't clobber
+    // an in-flight local edit.
+    if (!saveTimer.current) {
+      const pv = await logRead(planDataKey(activeId));
+      if (pv) { try { const wrap = JSON.parse(pv); const merged = buildMergedData(wrap.data); setData(merged); lastSnapshotRef.current = merged; } catch(e) {} }
+    }
     const v = await logRead(`caliq-log-${activeId}-${todayKey}`);
     let parsed = {calories:0, water:0, weight:0, meals:[]};
     if (v) { try { parsed = JSON.parse(v); } catch(e) {} }
@@ -11577,6 +11602,47 @@ export default function App() {
     historyRef.current = hist;
     setHistory(hist);
   };
+
+  // ── Live sync: a trainer's view of a linked client's plan ──
+  // When a client (or the AI on their behalf) edits concurrently, the open plan
+  // updates without a manual Refresh. Only active when viewing a REMOTE client's
+  // plan (activeRemoteUid set); the client's own view uses window.storage and is
+  // refreshed via its own loaders / the AI's onDataChanged callback.
+  useEffect(() => {
+    if (!activeRemoteUid || !activeId) return;
+    const uid = activeRemoteUid;
+    const pid = activeId;
+    const unsubs = [];
+
+    // 1) Plan structure (weigh-ins → checkIns, macroTargets, goalWeight, workouts)
+    unsubs.push(subscribeForUser(uid, planDataKey(pid), (value) => {
+      if (value == null) return;
+      if (saveTimer.current) return;                 // a local edit is mid-debounce — don't clobber it
+      if (value === lastRemoteWriteRef.current) return; // our own echoed write
+      let wrap; try { wrap = JSON.parse(value); } catch(e) { return; }
+      const merged = buildMergedData(wrap.data);
+      if (JSON.stringify(merged) === JSON.stringify(lastSnapshotRef.current)) return; // no real change
+      setData(merged);
+      lastSnapshotRef.current = merged;              // keep the diff baseline current (no phantom history)
+    }));
+
+    // 2) Today's daily log (meals / calories / water / weight)
+    unsubs.push(subscribeForUser(uid, `caliq-log-${pid}-${todayKey}`, (value) => {
+      let parsed = {calories:0, water:0, weight:0, meals:[]};
+      if (value) { try { parsed = JSON.parse(value); } catch(e) {} }
+      setDailyLog(parsed);
+    }));
+
+    // 3) Edit history / activity feed
+    unsubs.push(subscribeForUser(uid, `caliq-history-${pid}`, (value) => {
+      let hist = [];
+      if (value) { try { hist = JSON.parse(value); } catch(e) {} }
+      historyRef.current = hist;
+      setHistory(hist);
+    }));
+
+    return () => unsubs.forEach((u) => { try { u(); } catch(e) {} });
+  }, [activeRemoteUid, activeId, todayKey]);
 
   // Load daily log when the active plan changes (own profile or a linked client)
   useEffect(() => {

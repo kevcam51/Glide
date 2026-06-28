@@ -1,8 +1,8 @@
 # Glide — AI Layer Handoff (start-here for a fresh session)
 
-_Last updated: end of Session 69. This is a quick-start digest; the authoritative,
+_Last updated: end of Session 70. This is a quick-start digest; the authoritative,
 blow-by-blow record is the **"Current state (built)" session log in `CLAUDE.md`
-(Sessions 60–69)**. Read this first, then CLAUDE.md for detail._
+(Sessions 60–70)**. Read this first, then CLAUDE.md for detail._
 
 ---
 
@@ -94,11 +94,18 @@ trainer only their own verified clients (enforced **server-side**, not by the mo
 
 ## Teed-up next items (nothing is blocking; pick what you like)
 
-1. **Stale-copy quick win (easy, ~free):** a trainer *already viewing* a client's plan won't
-   see a concurrent AI/client edit until they tap ↻ Refresh. Opening fresh is already current
-   (`openClientPlan` re-fetches). Fix = auto-refresh the trainer dashboard summaries and/or use
-   Firestore `onSnapshot` for live sync. Real-time listeners are a standard, cheap feature — no
-   meaningful cost.
+1. ~~**Stale-copy quick win**~~ **DONE — Session 70.** A trainer viewing a linked client's plan now
+   **live-syncs** via Firestore `onSnapshot`: the open plan's structure (`data` — weigh-ins, targets,
+   goal, AI-built workout program), today's log, and the activity feed update automatically when the
+   client or the AI edits concurrently — no ↻ Refresh needed. `subscribeForUser` in `clientData.js`;
+   the listener effect + a completed `reloadPlanLive` (now also reloads `data`) in `App.jsx`. Guards:
+   skips applying snapshots during the trainer's own debounced edit (`saveTimer.current`) and ignores
+   the trainer's own echoed write (`lastRemoteWriteRef`); advances the diff baseline so no phantom
+   history. Verified live (trainer viewing Casey: a concurrent log write → "0 → 450 logged" live; a
+   concurrent goal change 172→165 → recomputed live; no phantom history; no console errors).
+   _Possible follow-ups:_ live-sync the **client's own** ClientHome view (separate component; today it
+   uses its own loaders + the AI `onDataChanged`), and `onSnapshot` the trainer **dashboard summaries**
+   (TrainerDashboard/TrainerAnalytics still load once on mount).
 2. **AI calendar management (in-app)** — back-date logs, schedule workouts by weekday, review by
    date. Same tool pattern (overlaps the plan-builder). NOT external Acuity/Google sync (separate
    bigger project). _Kevin: do later when the time comes._

@@ -1445,6 +1445,29 @@ enabled (Blaze has no default spending cap).
   **Scope note:** v1 builds the WORKOUT program (the exciting core). Not yet: AI-set personal stats/activity onboarding
   (AI can't create user accounts — sensitive), a tappable program card (conversational confirm for now). Model
   `claude-sonnet-4-6`.
+- Session 70: **Live-sync — a trainer's view of a linked client's plan now updates in real time (non-Blaze, the
+  S69 "stale cached copy" caveat — fixed).** Previously a trainer *already viewing* a client's plan had to tap
+  **↻ Refresh** to see a concurrent client/AI edit — and Refresh only re-pulled the daily log + history, NOT the
+  plan structure (`data`), so AI-built workout programs / weigh-ins / target changes never appeared without
+  reopening. **Fix:** Firestore `onSnapshot` real-time listeners. New `subscribeForUser(uid, key, cb)` in
+  `src/clientData.js` (wraps `onSnapshot` on `users/{uid}/kv/{encodeURIComponent(key)}`, swallows errors, returns
+  unsubscribe). In `App.jsx`, a new effect (keyed `[activeRemoteUid, activeId, todayKey]`, runs ONLY when a trainer
+  views a remote client) subscribes to three docs and live-updates state: (1) the plan wrapper `caliq-{plan}` →
+  `data` (rebuilt via a new module-level `buildMergedData` helper — same name-migration + cardio/strength-default
+  merge as `openClientPlan`), (2) `caliq-log-{plan}-{today}` → `dailyLog`, (3) `caliq-history-{plan}` → `history`.
+  **Clobber guards** so the trainer's own edits aren't lost: the `data` listener skips applying a snapshot while a
+  local edit is mid-debounce (`saveTimer.current`, now nulled in autoSave's `finally`) and ignores the trainer's own
+  echoed write (new `lastRemoteWriteRef`, set in autoSave's remote branch); it also advances `lastSnapshotRef` so
+  the live update generates **no phantom history**. `reloadPlanLive` (the manual Refresh, still wired for the client
+  side / as a fallback) was completed to ALSO reload `data` (it previously didn't). **Scope:** trainer→client view
+  only — the explicit S69 pain point; the client's own ClientHome (separate component, own loaders + AI
+  `onDataChanged`) and the trainer dashboard *summaries* (load once on mount) are unchanged (possible follow-ups).
+  No new Firestore reads of note (3 listeners per open plan; real-time is standard/cheap — no meaningful cost, no
+  Blaze billing concern). **Verified live** (preview, signed in as trainer.uitest viewing Casey via the actual app):
+  a concurrent write to Casey's today-log via `setForUser` made the Daily Dashboard go **0 → 450 "logged so far"
+  with no Refresh click**; a concurrent `goalWeight` 172→165 change recomputed "21.0 lbs to go" **live**; deletion/
+  restore reflected live too; recent history showed **no phantom trainer entry**; **no console errors**;
+  `npm run build` passes. No `firestore.rules` change (uses the existing trainer↔client kv read access).
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

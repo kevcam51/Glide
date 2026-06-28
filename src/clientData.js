@@ -16,7 +16,7 @@
 
 import { db } from "./firebase.js";
 import {
-  doc, getDoc, setDoc, deleteDoc, collection, getDocs,
+  doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot,
 } from "firebase/firestore";
 
 const encodeKey = (key) => encodeURIComponent(key);
@@ -42,6 +42,20 @@ export async function deleteForUser(uid, key) {
   if (!uid) throw new Error("deleteForUser: missing uid");
   await deleteDoc(kvDoc(uid, key));
   return { key, deleted: true };
+}
+
+// Subscribe to one key in a specific user's namespace for real-time updates.
+// Calls cb(value | null) immediately with the current value and again on every
+// server-side change. Returns an unsubscribe function. Errors (e.g. a denied
+// read) are swallowed so a listener can never crash the app — it just goes
+// quiet, and the manual Refresh / next open still works.
+export function subscribeForUser(uid, key, cb) {
+  if (!uid) return () => {};
+  return onSnapshot(
+    kvDoc(uid, key),
+    (snap) => cb(snap.exists() ? snap.data().value : null),
+    () => {},
+  );
 }
 
 // List keys (optionally filtered by prefix) in a specific user's namespace.
