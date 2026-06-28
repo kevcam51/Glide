@@ -9948,6 +9948,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
   const [wtMsg, setWtMsg] = useState("");          // weight-log message
   const [requests, setRequests] = useState([]);    // trainer → client requests (Session 19)
   const [quickReq, setQuickReq] = useState(null);  // request being completed in the quick-action popup
+  const [showReminders, setShowReminders] = useState(true); // client can hide trainer to-do reminders (persisted)
   // Multiple plans (Session 21): the client can hold several plans with one
   // active. Each plan's data/log/history is keyed by its id (default "self").
   const [plans, setPlans] = useState([{ id: "self", name: "Main plan", createdAt: 0 }]);
@@ -9995,6 +9996,28 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
     } catch { setRequests([]); }
   };
   useEffect(() => { load(); }, []);
+
+  // Client display prefs (the client's own account). showTrainerReminders
+  // defaults ON; only an explicit false hides the trainer to-do reminders — so
+  // someone who just wants the chat / one feature isn't nagged by to-dos.
+  useEffect(() => {
+    (async () => {
+      try {
+        const pr = await window.storage.get("caliq-client-prefs");
+        const p = JSON.parse(pr.value || "{}");
+        if (p.showTrainerReminders === false) setShowReminders(false);
+      } catch { /* no prefs saved yet */ }
+    })();
+  }, []);
+  // Persist the reminder toggle. Merge so we don't wipe other client prefs later.
+  const saveShowReminders = async (v) => {
+    setShowReminders(v);
+    try {
+      let p = {};
+      try { const pr = await window.storage.get("caliq-client-prefs"); p = JSON.parse(pr.value || "{}"); } catch { /* none yet */ }
+      await window.storage.set("caliq-client-prefs", JSON.stringify({ ...p, showTrainerReminders: v }));
+    } catch { /* best-effort */ }
+  };
 
   // ── Live sync: the client's own home updates in real time ──
   // When the trainer (or the AI on the client's behalf) edits the client's
@@ -10296,32 +10319,53 @@ function ClientHome({ onOpenPlan, meUid, meName, role }) {
           </div>
         )}
 
-        {/* Trainer requests — actionable to-dos at the very top (Session 19). */}
-        {requests.filter((r) => r.status !== "done").length > 0 && (
-          <div className={`${cardCls} mb-4 border-primary`}
-            style={{ background: "color-mix(in srgb, var(--color-primary) 6%, var(--color-surface))" }}>
-            <div className="font-display text-base tracking-wide text-primary uppercase mb-0.5">📬 From your trainer</div>
-            <div className="text-muted text-sm mb-3">
-              {requests.filter((r) => r.status !== "done").length} thing{requests.filter((r) => r.status !== "done").length !== 1 ? "s" : ""} to do
-            </div>
-            <div className="flex flex-col gap-2">
-              {requests.filter((r) => r.status !== "done").map((r) => {
-                const tmpl = REQUEST_TEMPLATES.find((t) => t.type === r.type);
-                return (
-                  <div key={r.id} className="px-3 py-2.5 rounded-lg bg-surface2 border border-border">
-                    <div className="text-[.9rem] text-fg mb-2">
-                      {tmpl ? `${tmpl.icon} ` : "📝 "}{r.prompt}
+        {/* Trainer requests — actionable to-dos at the very top (Session 19).
+            The client can hide these (some users just want the chat / one feature
+            and don't want to-do nudges) — data still arrives, just not shown. */}
+        {(() => {
+          const openReqs = requests.filter((r) => r.status !== "done");
+          if (openReqs.length === 0) return null;
+          if (!showReminders) {
+            return (
+              <div className="mb-4 flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-surface2 border border-border">
+                <span className="text-muted text-xs">
+                  🔕 {openReqs.length} trainer reminder{openReqs.length !== 1 ? "s" : ""} hidden
+                </span>
+                <button onClick={() => saveShowReminders(true)}
+                  className="border-0 bg-transparent text-primary cursor-pointer text-xs font-bold whitespace-nowrap">Show</button>
+              </div>
+            );
+          }
+          return (
+            <div className={`${cardCls} mb-4 border-primary`}
+              style={{ background: "color-mix(in srgb, var(--color-primary) 6%, var(--color-surface))" }}>
+              <div className="flex justify-between items-start gap-2 mb-0.5">
+                <div className="font-display text-base tracking-wide text-primary uppercase">📬 From your trainer</div>
+                <button onClick={() => saveShowReminders(false)} title="Hide trainer reminders"
+                  className="border-0 bg-transparent text-muted cursor-pointer text-xs font-bold whitespace-nowrap">🔕 Hide</button>
+              </div>
+              <div className="text-muted text-sm mb-3">
+                {openReqs.length} thing{openReqs.length !== 1 ? "s" : ""} to do
+              </div>
+              <div className="flex flex-col gap-2">
+                {openReqs.map((r) => {
+                  const tmpl = REQUEST_TEMPLATES.find((t) => t.type === r.type);
+                  return (
+                    <div key={r.id} className="px-3 py-2.5 rounded-lg bg-surface2 border border-border">
+                      <div className="text-[.9rem] text-fg mb-2">
+                        {tmpl ? `${tmpl.icon} ` : "📝 "}{r.prompt}
+                      </div>
+                      <div className="flex gap-2 flex-wrap">
+                        <button onClick={() => setQuickReq(r)} className={primaryBtnCls}>Do it now →</button>
+                        <button onClick={() => markRequestDone(r.id)} className={ghostBtnCls}>✓ Mark done</button>
+                      </div>
                     </div>
-                    <div className="flex gap-2 flex-wrap">
-                      <button onClick={() => setQuickReq(r)} className={primaryBtnCls}>Do it now →</button>
-                      <button onClick={() => markRequestDone(r.id)} className={ghostBtnCls}>✓ Mark done</button>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {planData === undefined ? (
           <div className={cardCls}><div className="text-muted text-sm">Loading your plan…</div></div>

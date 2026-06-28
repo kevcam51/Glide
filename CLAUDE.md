@@ -775,8 +775,20 @@ enabled (Blaze has no default spending cap).
   Candidate home for the **Recent Activity** feed (Kevin: the activity list will get long; for
   now it's a compact tile showing the latest 3 with "View all" → scrollable; later it could move
   into the side menu and/or get its own full-page view).
-- **Notification center** — notify a trainer when a client joins or leaves (and similar events).
-  Deferred until Blaze/Cloud Functions: a client safely creating a notification on the trainer's
+- **Notification center / preferences (Kevin's vision, S71).** A dedicated place where a user sees the
+  kinds of nudges & reminders the app can send and controls them: a **master on/off** plus **per-type
+  toggles** (e.g. trainer to-dos, food-logging reminders, weigh-in reminders, AI coaching nudges, and
+  later trainer-side events like "a client logged"). **Why (Kevin):** Glide should be a place people can
+  use for *just one thing* — someone who only wants the AI chat for fitness advice shouldn't be nagged by
+  food-tracking reminders. Granular control lets each user keep the features/nudges they want and silence
+  the rest. **Status:** a lightweight first slice shipped in S71 — independent client and trainer toggles
+  for the trainer to-do reminders (`caliq-client-prefs.showTrainerReminders` / `caliq-coach-prefs.showRequests`),
+  the only notification surface today. **Build path:** as more notification types are added, consolidate
+  these prefs into one `notificationPrefs` object (per-type booleans + a master) surfaced in a Notifications
+  screen (good home: the side menu). Pure display-pref toggles are **non-Blaze**; actual *push/delivery*
+  notifications (and the trainer-side "client joined/logged" events below) need **Blaze/Cloud Functions**.
+- **Notification center (delivery side)** — notify a trainer when a client joins or leaves (and similar
+  events). Deferred until Blaze/Cloud Functions: a client safely creating a notification on the trainer's
   side needs server-side logic (client-side writes would require opening up the rules unsafely).
 - **In-app messaging** — direct messages between a trainer and their clients. Deferred until
   Blaze/Cloud Functions: a shared conversation between two users needs server-side writes (or
@@ -1494,12 +1506,20 @@ enabled (Blaze has no default spending cap).
   overwrote the whole doc with just `{attnDays}`) — so the two prefs don't clobber each other. (2) **Date/time
   stamps:** completed requests now show **"Completed {Mon D, h:mm AM/PM}"** (from `doneAt`) and open requests show
   **"Sent …"** (from `createdAt`), via a new module-level `fmtStamp(ts)` helper (`toLocaleString` month/day/time).
-  Trainer-side only (the client's own home to-do list is genuinely useful for the client, so it's unchanged — a
-  client-side toggle is an easy add later if wanted). Pure UI + the one pref field; no data-model/schema change, no
-  Blaze. **Verified live** (trainer.uitest): toggle Off hid the badge + lists, survived a reload (stored
-  `{attnDays:3, showRequests:false}` — attnDays preserved), toggling back On restored them; completed/open stamps
-  render ("Completed Jun 21, 3:39 PM", "Sent Jun 27, 4:51 PM"); no console errors; `npm run build` passes. No
-  `firestore.rules` change.
+  Pure UI + the one pref field; no data-model/schema change, no Blaze. **Verified live** (trainer.uitest): toggle Off
+  hid the badge + lists, survived a reload (stored `{attnDays:3, showRequests:false}` — attnDays preserved), toggling
+  back On restored them; completed/open stamps render ("Completed Jun 21, 3:39 PM", "Sent Jun 27, 4:51 PM"); no
+  console errors; `npm run build` passes. No `firestore.rules` change.
+  **(3) Client-side toggle (same session, Kevin's follow-up):** the CLIENT can now also hide the trainer to-do
+  reminders on their own home — the app should be usable for just one thing (e.g. only the AI chat for fitness
+  advice) without being nagged by to-do nudges. `ClientHome` gained a `showReminders` state persisted to the
+  client's own **`caliq-client-prefs`** doc as `showTrainerReminders` (default ON; merge-write so future client
+  prefs won't clobber). The "📬 From your trainer" card got a **🔕 Hide** control; when hidden it collapses to a
+  compact **"🔕 N trainer reminders hidden · Show"** line (data still arrives — requests aren't deleted, just not
+  shown — and there's always a path back to re-enable). **Verified live** (client.uitest / Casey): Hide collapsed
+  the card + stored `{showTrainerReminders:false}`, survived a reload, Show restored it; no console errors; build
+  passes. This is the lightweight first step toward the **Notification Center** roadmap item below (the only
+  notification surface today is the trainer to-do list, so one toggle covers the current need).
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a
