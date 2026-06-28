@@ -8409,6 +8409,33 @@ const planDataKey    = (id) => `caliq-${id}`;            // caliq-self, caliq-p1
 const planLogPrefix  = (id) => `caliq-log-${id}-`;       // + YYYY-MM-DD
 const planHistoryKey = (id) => `caliq-history-${id}`;
 
+// Live-refresh a trainer's client summary cards. Watches each connected client's
+// active-plan history doc — it changes on nearly every client action (meals,
+// weigh-ins, calorie/workout logs, and AI-logged entries) — and re-pulls the
+// summaries (debounced). Each subscription's initial snapshot is skipped so it
+// only fires on real changes, and the latest `reload` is always called via a ref
+// so a stale closure can't be captured. `clients` rows must carry `uid` +
+// `activePlanId`. Used by TrainerDashboard + TrainerAnalytics.
+function useClientLiveRefresh(clients, reload) {
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
+  const sig = (clients || []).map((c) => `${c.uid}:${c.activePlanId || ""}`).join("|");
+  useEffect(() => {
+    if (!clients || !clients.length) return;
+    let t = null;
+    const ping = () => { if (t) clearTimeout(t); t = setTimeout(() => reloadRef.current(), 1500); };
+    const unsubs = clients.map((c) => {
+      if (!c.activePlanId) return () => {};
+      let primed = false;
+      return subscribeForUser(c.uid, planHistoryKey(c.activePlanId), () => {
+        if (!primed) { primed = true; return; } // ignore the initial snapshot
+        ping();
+      });
+    });
+    return () => { if (t) clearTimeout(t); unsubs.forEach((u) => { try { u(); } catch { /* ignore */ } }); };
+  }, [sig]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
 // Normalize a manifest, always returning at least the default "self" plan and a
 // valid active id. Back-compat: clients with no manifest get one synthesized.
 function normalizePlans(m) {
@@ -8596,6 +8623,8 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     setClients(rows);
   };
   useEffect(() => { loadClients(); }, []);
+  // Live-refresh the cards when a client (or the AI) logs/edits (see the hook).
+  useClientLiveRefresh(clients, loadClients);
 
   // Link one of the trainer's local plans into a client's account (the local
   // copy is then removed by onLinked).
@@ -9281,12 +9310,14 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
         : (c.displayName || c.email || "Client");
       return { uid: c.uid, name: nm, hasPlan: !!data, cur, goal, start, lbsLost, onTrack,
         ratePerWeek: trend ? trend.ratePerWeek : null, wowDelta,
-        lastLogDate, daysSince, activeThisWeek, openReqs, last7 };
+        lastLogDate, daysSince, activeThisWeek, openReqs, last7, activePlanId: activeId };
     }));
     setClients(rows);
     setLoading(false);
   };
   useEffect(() => { load(); }, []);
+  // Live-refresh the coaching dashboard when a client (or the AI) logs/edits.
+  useClientLiveRefresh(clients, load);
 
   // Aggregates
   const total = clients.length;

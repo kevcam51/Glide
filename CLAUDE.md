@@ -1464,16 +1464,25 @@ enabled (Blaze has no default spending cap).
   log, and `caliq-requests` — so when the trainer/AI edits a client's plan, sends a to-do, or logs for them, the
   client's home updates live too (a new trainer request appears instantly). Echo-suppression there uses three
   `lastSelf*Write` refs (data/log/requests) set at each client write site — important because it stops an echo from
-  resetting the race-sensitive `planWrapRef` mid weight-log. **Still unchanged (possible follow-ups):** the trainer
-  dashboard *summary cards* (TrainerDashboard/TrainerAnalytics load once on mount). No new Firestore reads of note
+  resetting the race-sensitive `planWrapRef` mid weight-log. **The trainer dashboard summary cards are live too:**
+  a module-level `useClientLiveRefresh(clients, reload)` hook (used by both `TrainerDashboard` and `TrainerAnalytics`)
+  subscribes to each connected client's active-plan **history** doc (`caliq-history-{activePlanId}` — it changes on
+  nearly every client action: meals, weigh-ins, calorie/workout logs, AI-logged entries) and debounce-re-runs the
+  loader (1.5s), so the cards refresh when a client logs without a manual reload. Each subscription skips its initial
+  snapshot (no reload on subscribe) and calls the latest `reload` via a ref (no stale closure); keyed on the
+  `uid:activePlanId` signature so it only re-subscribes when the client set changes (no loop). TrainerAnalytics rows
+  gained `activePlanId` for the key. **Live-sync now covers every trainer/client surface** (open plan, client home,
+  both dashboards). No new Firestore reads of note
   (≤3 listeners per open plan; real-time is standard/cheap — no meaningful cost, no Blaze billing concern).
   **Verified live** (preview, via the actual app): (trainer viewing Casey) a concurrent today-log write → Daily
   Dashboard **0 → 450 "logged so far" with no Refresh**, a concurrent `goalWeight` 172→165 recomputed "21.0 lbs to
   go" **live**, deletion/restore reflected live, **no phantom trainer history**; (client Casey's own home) a
   concurrent `goalWeight` 172→160 **live**, a concurrent new request **2 → 3 to-dos live**, removals reflected; and
   the client's OWN calorie logging still writes + persists and is **not reverted** by the echo (900 cal logged via
-  the UI). **No console errors** either side; `npm run build` passes. No `firestore.rules` change (uses existing
-  owner + trainer↔client kv read access).
+  the UI); (trainer dashboards) a client weight change auto-refreshed the TrainerDashboard connected-client card
+  (**186 → 180 lbs**) and the Coaching Dashboard "lbs lost" (**16 → 12 → 10**) with no manual reload. **No console
+  errors** anywhere; `npm run build` passes. No `firestore.rules` change (uses existing owner + trainer↔client kv
+  read access).
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

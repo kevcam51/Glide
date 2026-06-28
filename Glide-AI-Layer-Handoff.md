@@ -107,9 +107,11 @@ trainer only their own verified clients (enforced **server-side**, not by the mo
    `lastSelf*Write` refs). Verified live both directions (trainer viewing Casey: log "0 → 450" live, goal
    172→165 live; client Casey: goal 172→160 live, requests 2 → 3 live, and her own calorie logging still
    persists and isn't reverted; no phantom history; no console errors).
-   _Remaining follow-up:_ `onSnapshot` the trainer **dashboard summary cards**
-   (TrainerDashboard/TrainerAnalytics still load once on mount — the open-plan view and both home screens
-   are now live).
+   **The trainer dashboard summary cards are now live too** (`useClientLiveRefresh` hook): TrainerDashboard
+   + TrainerAnalytics watch each connected client's active-plan history doc (changes on nearly every client
+   action) and debounce-re-pull the summaries — so a client logging updates the cards with no manual reload.
+   Verified live (TrainerDashboard card 186→180 lbs auto-refreshed; Coaching Dashboard "lbs lost" 16→12→10
+   auto-refreshed). **Live-sync is now complete across every trainer/client surface.**
 2. **AI calendar management (in-app)** — back-date logs, schedule workouts by weekday, review by
    date. Same tool pattern (overlaps the plan-builder). NOT external Acuity/Google sync (separate
    bigger project). _Kevin: do later when the time comes._
