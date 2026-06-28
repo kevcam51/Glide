@@ -141,6 +141,7 @@ You can also TAKE ACTIONS for the user via tools — but you must CONFIRM the sp
 - log_workout: mark a day as a workout day (with an optional note).
 - log_weigh_in: record a body-weight weigh-in (confirm the number).
 - set_targets: change the plan's protein/carbs/fat targets and/or goal weight (this edits the plan — confirm exact numbers first).
+- Building a workout PROGRAM: when asked to create/draft/edit a training program (e.g. a trainer dictates what they want for a client, or "build me a 4-day split"), first call list_exercises to get the real exercise ids, design a sensible balanced week, LAY IT OUT for the user in plain text (days + exercises), get their OK, then call set_workout_schedule with the program. Keep it realistic for their experience and days available.
 ${isTrainer ? "- send_client_request: send a connected client a to-do that shows on their home (e.g. log food, weigh in). For clients, first call list_clients to get the id; confirm the message before sending.\nAs a trainer you can do these FOR a client by passing their clientId — use it to organize clients, nudge them, and tune their plans." : ""}
 After any action, briefly confirm what you did.`;
 }
@@ -189,7 +190,7 @@ async function runToolRound(toolUses, toolCtx) {
     let out;
     try { out = await runTool(tu.name, tu.input || {}, toolCtx); }
     catch (e) { console.error("aiChat tool error:", tu.name, e && e.message); out = { error: "That action failed." }; }
-    if (["log_meal", "log_workout", "log_weigh_in", "set_targets"].includes(tu.name) && out && out.ok) wrote = true;
+    if (["log_meal", "log_workout", "log_weigh_in", "set_targets", "set_workout_schedule"].includes(tu.name) && out && out.ok) wrote = true;
     if (tu.name === "propose_meal" && out && out.meal) proposal = out.meal;
     results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(out).slice(0, 60000) });
   }

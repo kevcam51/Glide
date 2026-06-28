@@ -14,6 +14,9 @@
 // The model cannot override this by "asking nicely" — scoping happens server-side.
 
 const admin = require("firebase-admin");
+const { CARDIO, STRENGTH, CARDIO_IDS, STRENGTH_IDS } = require("./exercises");
+
+const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 // ── kv access (mirrors src/storage.js: users/{uid}/kv/{encodeURIComponent(key)},
 // each doc has fields { k, value } where value is a JSON string). ──────────────
@@ -245,6 +248,32 @@ function buildTools(role) {
         },
       },
     },
+    {
+      name: "list_exercises",
+      description:
+        "Get the app's exercise library (cardio + strength, grouped by movement pattern) so you can build a workout program "
+        + "using REAL exercise ids. Call this before set_workout_schedule. Use the exact ids returned.",
+      input_schema: { type: "object", properties: {} },
+    },
+    {
+      name: "set_workout_schedule",
+      description:
+        "Write a weekly workout PROGRAM into the plan (shows on the plan + calendar). Build it from list_exercises ids. "
+        + "Lay the program out for the user and get their OK before calling. "
+        + "Provide cardio and/or strength as objects keyed by full day name (Monday…Sunday); each day is an array of "
+        + "{ type: <exercise id>, duration: <minutes> }. Strength duration is usually 45; cardio 20–40. "
+        + "replace=true (default) sets the whole week (unlisted days become rest). "
+        + (isTrainer ? "Pass clientId to program a client's plan." : "Updates YOUR plan."),
+      input_schema: {
+        type: "object",
+        properties: {
+          cardio: { type: "object", description: "Per-day cardio, e.g. {\"Tuesday\":[{\"type\":\"incline_walk_8\",\"duration\":30}]}" },
+          strength: { type: "object", description: "Per-day strength, e.g. {\"Monday\":[{\"type\":\"bb_bench\",\"duration\":45},{\"type\":\"bb_row\",\"duration\":45}]}" },
+          replace: { type: "boolean", description: "Replace the whole week (unlisted days become rest). Default true." },
+          ...clientIdProp,
+        },
+      },
+    },
   ];
 
   if (isTrainer) {
@@ -288,6 +317,14 @@ async function resolveTargetUid(db, input, ctx) {
 async function runTool(name, input, ctx) {
   const db = admin.firestore();
   input = input || {};
+
+  if (name === "list_exercises") {
+    // Static catalog (no target needed). Strength grouped by movement pattern.
+    const byCat = {};
+    for (const e of STRENGTH) { (byCat[e.cat] = byCat[e.cat] || []).push({ id: e.id, label: e.label }); }
+    return { days: DAYS, cardio: CARDIO, strength: byCat,
+      note: "Use these EXACT ids in set_workout_schedule (type field). duration is in minutes." };
+  }
 
   if (name === "list_clients") {
     if (!ctx.isTrainer) return { error: "Only trainers can list clients." };
@@ -467,6 +504,49 @@ async function runTool(name, input, ctx) {
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
     await appendHistory(db, uid, planId, ctx, `updated ${changes.join(" and ")}`);
     return { ok: true, updated: { macroTargets: d.macroTargets || null, goalWeightLbs: d.goalWeight != null ? d.goalWeight : null } };
+  }
+
+  if (name === "set_workout_schedule") {
+    const replace = input.replace !== false; // default true
+    const { id: planId, wrap } = await loadPlanWrap(db, uid);
+    const d = wrap.data;
+    const dropped = [];
+    const clampDur = (v, def) => Math.max(5, Math.min(120, Math.round(Number(v) || def)));
+    const buildWeek = (provided, validSet, defDur, existing) => {
+      const result = replace ? {} : { ...(existing || {}) };
+      for (const day of DAYS) {
+        const arr = provided && Array.isArray(provided[day]) ? provided[day] : null;
+        if (arr) {
+          const sessions = [];
+          for (const s of arr) {
+            const type = s && s.type;
+            if (validSet.has(type)) sessions.push({ type, duration: clampDur(s.duration, defDur) });
+            else if (type) dropped.push(type);
+          }
+          result[day] = sessions;
+        } else if (replace) {
+          result[day] = []; // unlisted day within a replaced category → rest
+        }
+      }
+      return result;
+    };
+    const changed = [];
+    if (input.strength && typeof input.strength === "object") {
+      d.strength = buildWeek(input.strength, STRENGTH_IDS, 45, d.strength); changed.push("strength");
+    }
+    if (input.cardio && typeof input.cardio === "object") {
+      d.cardio = buildWeek(input.cardio, CARDIO_IDS, 30, d.cardio); changed.push("cardio");
+    }
+    if (changed.length === 0) return { error: "Provide cardio and/or strength as day-keyed objects." };
+    await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
+    await appendHistory(db, uid, planId, ctx, "updated the workout program");
+    const summarize = (sched) => DAYS.filter((day) => ((sched || {})[day] || []).length)
+      .map((day) => `${day} (${sched[day].length})`);
+    return {
+      ok: true, replaced: replace, updated: changed,
+      strengthDays: summarize(d.strength), cardioDays: summarize(d.cardio),
+      droppedInvalidIds: [...new Set(dropped)],
+    };
   }
 
   if (name === "send_client_request") {
