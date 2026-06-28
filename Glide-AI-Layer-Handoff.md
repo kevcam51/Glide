@@ -115,9 +115,13 @@ trainer only their own verified clients (enforced **server-side**, not by the mo
 2. **AI calendar management (in-app)** — back-date logs, schedule workouts by weekday, review by
    date. Same tool pattern (overlaps the plan-builder). NOT external Acuity/Google sync (separate
    bigger project). _Kevin: do later when the time comes._
-3. **Fuller AI-managed profiles** — conversational onboarding (fill stats/goals — NOT account
-   creation, which is sensitive), plan management (switch active plan, start a cut phase), and
-   eventually **proactive** coaching ("3 clients stalled, here's what I'd change").
+3. **Fuller AI-managed profiles** — **conversational onboarding DONE (Session 72):** `get_profile` +
+   `set_personal_info` tools let the AI fill a plan's core stats (gender/age/height/weight/activity/goal/
+   body-fat) by chat, so a new user completes their plan without the wizard (the AI asks only for the
+   fields `get_profile` reports missing, then reports the daily calorie target). **Still to do:** plan
+   management (switch active plan, start a cut/maintenance phase via a tool over the `caliq-plans`
+   manifest), and eventually **proactive** coaching ("3 clients stalled, here's what I'd change"). NOT
+   account creation (sensitive). Same pattern — one access-checked tool at a time.
 4. **Plan-builder v2 polish** — a tappable program card (like the meal card) instead of the
    conversational confirm; AI-set personal stats/activity as part of onboarding.
 

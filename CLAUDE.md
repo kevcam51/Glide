@@ -1520,6 +1520,32 @@ enabled (Blaze has no default spending cap).
   the card + stored `{showTrainerReminders:false}`, survived a reload, Show restored it; no console errors; build
   passes. This is the lightweight first step toward the **Notification Center** roadmap item below (the only
   notification surface today is the trainer to-do list, so one toggle covers the current need).
+- Session 72: **AI conversational onboarding — the AI can now fill in a plan's personal stats (fuller AI profiles,
+  increment 1). DEPLOYED & LIVE.** First slice of the roadmap's "fuller AI-managed profiles" (Kevin's S71 pick).
+  Until now the AI could set *targets* and build *workout programs* but NOT the core stats the calorie math needs, so
+  a plan stayed "incomplete" (no calorie target) until someone ran the wizard. Two new tools in `functions/aitools.js`
+  (both roles, same server-side access model as every other tool — a client edits only their own profile; a trainer
+  only a `resolveTargetUid`-verified client): **`get_profile`** (read — returns name/gender/age/height/weight/goal/
+  activity/body-fat + a `missing` list of the required fields for a calorie target + `complete` + the computed
+  `calorieTarget`) and **`set_personal_info`** (write — sets any of firstName/lastName, gender (male|female), age,
+  heightFeet+heightInches, weightLbs, activityLevel (sedentary|light|moderate|very|extra), goalWeightLbs, bodyFatPct,
+  goalBodyFatPct into the plan wrapper `data`, clamped to sane ranges, with an activity-feed history note; returns the
+  refreshed `profileSummary`). New `profileSummary(d)` helper mirrors the wizard's field names + the `nutritionTargets`
+  calc. `aichat.js`: `set_personal_info` added to the `wrote` refresh list (client dashboard reloads when the AI
+  completes a profile), and the system prompt gained an **onboarding** instruction — if the dashboard shows no calorie
+  target, call `get_profile` FIRST, ask only for the fields it lists as *missing* (never re-ask for info already set),
+  save via `set_personal_info`, then report the daily target. **Backend-only — no frontend change** (the existing
+  `onDataChanged`/`wrote` path already refreshes). Deployed `aiChat`+`aiChatStream` (needed a `firebase login --reauth
+  --no-localhost` first — token had expired). **Verified live end-to-end** (preview, signed in as client.uitest /
+  Casey, whose plan was missing gender/age/height): told the AI "female, 30, 5'6", weight 186, goal 172, moderately
+  active" → it called `set_personal_info` → **independently confirmed via the app's own read path**: data written
+  correctly and the Daily Dashboard now shows the **1,950 cal** target (matches Mifflin-St Jeor female × moderate −
+  500). Then reset the 3 fields and re-tested the prompt fix: the AI called `get_profile` first and asked **only** for
+  the missing gender/age/height ("I already have your weight 186, goal 172, activity moderate"), no longer re-asking
+  for known info. No console/function errors. So a brand-new user can complete their whole plan by chat — no wizard.
+  **NEXT increments of "fuller AI profiles":** plan MANAGEMENT (switch active plan, start a cut/maintenance phase via a
+  new tool over the `caliq-plans` manifest), then **proactive coaching** ("3 clients stalled this week, here's what I'd
+  change"). Same pattern: one access-checked tool at a time. Model `claude-sonnet-4-6`.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

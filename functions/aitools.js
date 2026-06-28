@@ -105,6 +105,39 @@ function nutritionTargets(d) {
   };
 }
 
+// Personal profile summary (the wizard's StepPersonal/Goal/Activity fields) +
+// which required pieces are missing for a calorie target. Used by get_profile
+// and returned after set_personal_info so the AI can guide onboarding.
+function profileSummary(d) {
+  d = d || {};
+  const num = (v) => (v === "" || v == null ? null : Number(v));
+  const required = {
+    gender: !!d.gender,
+    age: num(d.age) > 0,
+    height: num(d.heightFt) > 0,
+    weight: num(d.weightLbs) > 0,
+    activityLevel: !!d.activityLevel,
+  };
+  const missing = Object.keys(required).filter((k) => !required[k]);
+  const t = nutritionTargets(d);
+  return {
+    firstName: d.firstName || null,
+    lastName: d.lastName || null,
+    gender: d.gender || null,
+    age: num(d.age),
+    heightFeet: num(d.heightFt),
+    heightInches: num(d.heightIn),
+    weightLbs: num(d.weightLbs),
+    goalWeightLbs: num(d.goalWeight),
+    activityLevel: d.activityLevel || null,
+    bodyFatPct: num(d.bodyFat),
+    goalBodyFatPct: num(d.goalBodyFat),
+    missing,
+    complete: missing.length === 0,
+    calorieTarget: t.calorieTarget,
+  };
+}
+
 // ── date helpers ───────────────────────────────────────────────────────────
 function clampDateRange(startDate, endDate) {
   // Lexical compare works for zero-padded YYYY-MM-DD. Cap span at 31 days.
@@ -156,6 +189,42 @@ function buildTools(role) {
       input_schema: {
         type: "object",
         properties: { ...clientIdProp },
+      },
+    },
+    {
+      name: "get_profile",
+      description:
+        "Get the plan's personal profile (name, gender, age, height, current & goal weight, activity level, body-fat) "
+        + "and which required fields are still MISSING for a calorie target. Use this before onboarding someone to see "
+        + "what to ask for. " + (isTrainer ? TRAINER_NOTE : CLIENT_NOTE),
+      input_schema: { type: "object", properties: { ...clientIdProp } },
+    },
+    {
+      name: "set_personal_info",
+      description:
+        "Fill in or update the plan's personal profile — the core stats the app needs to compute a calorie target "
+        + "(gender, age, height, current weight, activity level) plus optional goal weight and body-fat. Use this for "
+        + "conversational onboarding: when the user gives you their stats, save them here so their plan is complete and "
+        + "the dashboard shows a target. You may set fields the user just provided directly; only confirm first if you'd "
+        + "OVERWRITE an existing value with a different one. "
+        + (isTrainer ? "Pass clientId to set up a client's profile." : "Updates YOUR profile."),
+      input_schema: {
+        type: "object",
+        properties: {
+          firstName: { type: "string", description: "First name" },
+          lastName: { type: "string", description: "Last name" },
+          gender: { type: "string", enum: ["male", "female"], description: "Biological sex (used for the BMR/calorie calculation)" },
+          age: { type: "number", description: "Age in years" },
+          heightFeet: { type: "number", description: "Height — feet part (US units), e.g. 5 for 5'10\"" },
+          heightInches: { type: "number", description: "Height — inches part (0–11), e.g. 10 for 5'10\". Convert from cm or total inches if the user gives those." },
+          weightLbs: { type: "number", description: "Current body weight, pounds" },
+          activityLevel: { type: "string", enum: ["sedentary", "light", "moderate", "very", "extra"],
+            description: "Everyday activity level (NOT workouts): sedentary=desk job/mostly sitting; light=some walking; moderate=on feet most of the day; very=physically demanding job; extra=intense labor all day" },
+          goalWeightLbs: { type: "number", description: "Goal body weight, pounds (optional)" },
+          bodyFatPct: { type: "number", description: "Current body-fat %, optional" },
+          goalBodyFatPct: { type: "number", description: "Goal body-fat %, optional" },
+          ...clientIdProp,
+        },
       },
     },
     {
@@ -374,6 +443,43 @@ async function runTool(name, input, ctx) {
         ? "Calorie target unavailable — the plan is missing gender/age/height."
         : "Calorie target is the baseline diet target (excludes scheduled-exercise calories).",
     };
+  }
+
+  if (name === "get_profile") {
+    const { data } = await activePlanData(db, uid);
+    return profileSummary(data);
+  }
+
+  if (name === "set_personal_info") {
+    const { id: planId, wrap } = await loadPlanWrap(db, uid);
+    const d = wrap.data;
+    const changes = [];
+    // clamp to sane ranges; round1 keeps one decimal (weights/percentages).
+    const clampNum = (v, lo, hi, round1) => {
+      const n = Number(v);
+      if (!isFinite(n)) return null;
+      const c = Math.max(lo, Math.min(hi, n));
+      return round1 ? Math.round(c * 10) / 10 : Math.round(c);
+    };
+    if (typeof input.firstName === "string" && input.firstName.trim()) {
+      d.firstName = input.firstName.trim().slice(0, 40); changes.push("name");
+    }
+    if (typeof input.lastName === "string" && input.lastName.trim()) {
+      d.lastName = input.lastName.trim().slice(0, 40); if (!changes.includes("name")) changes.push("name");
+    }
+    if (input.gender === "male" || input.gender === "female") { d.gender = input.gender; changes.push(`gender ${input.gender}`); }
+    if (input.age != null) { const a = clampNum(input.age, 13, 100); if (a) { d.age = a; changes.push(`age ${a}`); } }
+    if (input.heightFeet != null) { const ft = clampNum(input.heightFeet, 3, 8); if (ft) { d.heightFt = ft; if (!changes.includes("height")) changes.push("height"); } }
+    if (input.heightInches != null) { const inch = clampNum(input.heightInches, 0, 11); if (inch != null) { d.heightIn = inch; if (!changes.includes("height")) changes.push("height"); } }
+    if (input.weightLbs != null) { const w = clampNum(input.weightLbs, 50, 1000, true); if (w) { d.weightLbs = w; changes.push(`weight ${w} lbs`); } }
+    if (input.goalWeightLbs != null) { const g = clampNum(input.goalWeightLbs, 50, 1000, true); if (g) { d.goalWeight = g; changes.push(`goal weight ${g} lbs`); } }
+    if (input.activityLevel && ACTIVITY_MULT[input.activityLevel]) { d.activityLevel = input.activityLevel; changes.push(`activity ${input.activityLevel}`); }
+    if (input.bodyFatPct != null) { const b = clampNum(input.bodyFatPct, 2, 70, true); if (b) { d.bodyFat = b; changes.push("body fat"); } }
+    if (input.goalBodyFatPct != null) { const b = clampNum(input.goalBodyFatPct, 2, 70, true); if (b) { d.goalBodyFat = b; changes.push("goal body fat"); } }
+    if (changes.length === 0) return { error: "No valid profile fields were provided." };
+    await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
+    await appendHistory(db, uid, planId, ctx, `updated profile: ${changes.join(", ")}`);
+    return { ok: true, updated: changes, profile: profileSummary(d) };
   }
 
   if (name === "propose_meal") {
