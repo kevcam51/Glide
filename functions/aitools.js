@@ -187,9 +187,12 @@ function profileSummary(d) {
     heightInches: num(d.heightIn),
     weightLbs: num(d.weightLbs),
     goalWeightLbs: num(d.goalWeight),
+    goalRangeLowLbs: num(d.goalRangeLow),
+    goalRangeHighLbs: num(d.goalRangeHigh),
     activityLevel: d.activityLevel || null,
     bodyFatPct: num(d.bodyFat),
     goalBodyFatPct: num(d.goalBodyFat),
+    trainerNotes: d.trainerNotes || null,
     missing,
     complete: missing.length === 0,
     calorieTarget: t.calorieTarget,
@@ -307,8 +310,11 @@ function buildTools(role) {
           activityLevel: { type: "string", enum: ["sedentary", "light", "moderate", "very", "extra"],
             description: "Everyday activity level (NOT workouts): sedentary=desk job/mostly sitting; light=some walking; moderate=on feet most of the day; very=physically demanding job; extra=intense labor all day" },
           goalWeightLbs: { type: "number", description: "Goal body weight, pounds (optional)" },
+          goalRangeLowLbs: { type: "number", description: "Optional healthy weight-range LOW bound, pounds (a band instead of one exact goal)" },
+          goalRangeHighLbs: { type: "number", description: "Optional healthy weight-range HIGH bound, pounds (must be ≥ the low bound)" },
           bodyFatPct: { type: "number", description: "Current body-fat %, optional" },
           goalBodyFatPct: { type: "number", description: "Goal body-fat %, optional" },
+          trainerNotes: { type: "string", description: "Free-text coaching notes on the plan (mainly for trainers). Replaces the existing notes." },
           ...clientIdProp,
         },
       },
@@ -709,9 +715,16 @@ async function runTool(name, input, ctx) {
     if (input.heightInches != null) { const inch = clampNum(input.heightInches, 0, 11); if (inch != null) { d.heightIn = inch; if (!changes.includes("height")) changes.push("height"); } }
     if (input.weightLbs != null) { const w = clampNum(input.weightLbs, 50, 1000, true); if (w) { d.weightLbs = w; changes.push(`weight ${w} lbs`); } }
     if (input.goalWeightLbs != null) { const g = clampNum(input.goalWeightLbs, 50, 1000, true); if (g) { d.goalWeight = g; changes.push(`goal weight ${g} lbs`); } }
+    // Optional weight-range band (low–high). Accept either or both; keep low ≤ high.
+    if (input.goalRangeLowLbs != null) { const lo = clampNum(input.goalRangeLowLbs, 50, 1000, true); if (lo) { d.goalRangeLow = lo; if (!changes.includes("goal range")) changes.push("goal range"); } }
+    if (input.goalRangeHighLbs != null) { const hi = clampNum(input.goalRangeHighLbs, 50, 1000, true); if (hi) { d.goalRangeHigh = hi; if (!changes.includes("goal range")) changes.push("goal range"); } }
+    if (d.goalRangeLow && d.goalRangeHigh && Number(d.goalRangeLow) > Number(d.goalRangeHigh)) {
+      const t = d.goalRangeLow; d.goalRangeLow = d.goalRangeHigh; d.goalRangeHigh = t; // swap if reversed
+    }
     if (input.activityLevel && ACTIVITY_MULT[input.activityLevel]) { d.activityLevel = input.activityLevel; changes.push(`activity ${input.activityLevel}`); }
     if (input.bodyFatPct != null) { const b = clampNum(input.bodyFatPct, 2, 70, true); if (b) { d.bodyFat = b; changes.push("body fat"); } }
     if (input.goalBodyFatPct != null) { const b = clampNum(input.goalBodyFatPct, 2, 70, true); if (b) { d.goalBodyFat = b; changes.push("goal body fat"); } }
+    if (typeof input.trainerNotes === "string") { d.trainerNotes = input.trainerNotes.slice(0, 4000); changes.push("trainer notes"); }
     if (changes.length === 0) return { error: "No valid profile fields were provided." };
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
     await appendHistory(db, uid, planId, ctx, `updated profile: ${changes.join(", ")}`);

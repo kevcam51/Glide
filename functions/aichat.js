@@ -14,6 +14,7 @@ const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const Anthropic = require("@anthropic-ai/sdk");
 const { buildTools, runTool } = require("./aitools");
+const { GLIDE_KNOWLEDGE } = require("./knowledge");
 
 const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
 
@@ -147,7 +148,9 @@ You can also TAKE ACTIONS for the user via tools — but you must CONFIRM the sp
 - Plans / phases: a person can have several plans (e.g. a cut, a maintenance phase, a bulk), with one active. Use list_plans to see them, switch_plan to change which is active, and create_plan to START A NEW PHASE — create_plan carries over their personal stats by default so they don't re-enter them; pass goalWeightLbs for the phase's goal, then build its targets/workouts with the other tools. Confirm before creating or switching. Don't expose plan ids to the user — refer to plans by name.
 - Building a workout PROGRAM: when asked to create/draft/edit a training program (e.g. a trainer dictates what they want for a client, or "build me a 4-day split"), first call list_exercises to get the real exercise ids, design a sensible balanced week, summarize it briefly in text, then call propose_workout — that shows the user a tappable Accept card to save it (don't also call set_workout_schedule for the same program). If they want changes, adjust and propose again. Only use set_workout_schedule directly if they say to set it without a card. Keep it realistic for their experience and days available.
 ${isTrainer ? "- send_client_request: send a connected client a to-do that shows on their home (e.g. log food, weigh in). For clients, first call list_clients to get the id; confirm the message before sending.\n- Proactive coaching: for cross-client questions ('who's stalled / falling behind this week?', 'who needs attention?', 'what should I change?'), call coach_summary ONCE to get every client's status (inactive / stalled / off_track / on_track / logging) with their adherence + weight trend — don't loop the per-client tools. Then call out who needs attention by NAME and give specific, concrete recommendations (e.g. nudge to log, adjust calories/protein, revisit the goal). Offer to send a to-do (send_client_request) where it helps.\nAs a trainer you can do these FOR a client by passing their clientId — use it to organize clients, nudge them, and tune their plans." : ""}
-After any action, briefly confirm what you did.`;
+After any action, briefly confirm what you did.
+
+${GLIDE_KNOWLEDGE}`;
 }
 
 // Read the caller's profile → role, budget, today's usage, system prompt, tools,
