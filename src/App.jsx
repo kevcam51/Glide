@@ -10151,7 +10151,7 @@ function AIChatPanel({ role, onDataChanged }) {
                       className="flex-1 rounded-lg bg-primary px-3 py-2 text-[.88rem] font-bold text-primaryfg disabled:opacity-60">
                       {proposal.status === "saving" ? "Saving…" : "✓ Log it"}</button>
                     <button disabled={proposal.status === "saving"} onClick={() => setEditDraft({ ...proposal })}
-                      className="rounded-lg border border-border px-3 py-2 text-[.88rem] text-fg disabled:opacity-60">Edit</button>
+                      className="rounded-lg border border-primary bg-[rgba(8,220,224,.12)] px-3 py-2 text-[.88rem] font-semibold text-primary disabled:opacity-60">Edit</button>
                     <button disabled={proposal.status === "saving"} onClick={() => setProposal(null)} aria-label="Dismiss"
                       className="rounded-lg border border-border px-2.5 py-2 text-[.88rem] text-muted disabled:opacity-60">✕</button>
                   </div>
@@ -12350,8 +12350,12 @@ export default function App() {
       <button onClick={() => setMenuOpen(true)} aria-label="Open menu"
         style={{ position: "fixed", top: "calc(10px + env(safe-area-inset-top,0px))", left: 10, zIndex: 1390,
           width: 40, height: 40, borderRadius: 10, border: "1px solid var(--border,#2e2e4a)",
-          background: "var(--surface,#16162a)", color: "var(--text,#f2f2ff)", cursor: "pointer", fontSize: "1.3rem", lineHeight: 1 }}>
-        ≡
+          background: "var(--surface,#16162a)", color: "var(--text,#f2f2ff)", cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+          <line x1="4" y1="7" x2="20" y2="7" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="17" x2="20" y2="17" />
+        </svg>
       </button>
       <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} role={role} meName={meName} meEmail={meEmail}
         isTrainer={isTrainerHome} trial={meTrial}
