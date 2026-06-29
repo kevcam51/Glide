@@ -2317,6 +2317,45 @@ function calcStrengthBurn(met, weightLbs, minutes) {
   return Math.round(met * weightLbs * 0.453592 * (minutes / 60));
 }
 
+// ── Custom-exercise support ─────────────────────────────────────────────────
+// A plan can carry user-created exercises in data.customExercises (shape from
+// CustomExerciseCreator: { id:"custom_…", label, icon:"⭐", calPerMin, cat,
+// isCustom:true, type:"cardio"|"strength" }). These helpers fold them into the
+// catalog lookups + burn math so a custom id renders its label and computes burn
+// everywhere (wizard, Results, dashboards), not just where it was created.
+// Custom exercises burn by their user calPerMin estimate (met is 0 for them).
+function customOf(customExercises, type) {
+  return (Array.isArray(customExercises) ? customExercises : []).filter(e => e && e.type === type);
+}
+// Resolve a cardio/strength id to its definition (standard OR the plan's custom),
+// falling back to the catalog's rest/last entry for an unknown id.
+function findCardioEx(id, customExercises) {
+  return ALL_CARDIO.find(c => c.id === id)
+    || customOf(customExercises, "cardio").find(e => e.id === id)
+    || ALL_CARDIO[ALL_CARDIO.length - 1];
+}
+function findStrengthEx(id, customExercises) {
+  return [REST_ST, ...STRENGTH_EXERCISES].find(e => e.id === id)
+    || customOf(customExercises, "strength").find(e => e.id === id)
+    || REST_ST;
+}
+// Burn for any resolved exercise — custom uses calPerMin × minutes; standard uses MET.
+function exBurn(ex, weightLbs, minutes) {
+  if (!ex || !minutes) return 0;
+  if (ex.calPerMin) return Math.round(Number(ex.calPerMin) * minutes);
+  return Math.round((Number(ex.met) || 0) * weightLbs * 0.453592 * (minutes / 60));
+}
+// Dropdown <optgroup> of the plan's custom exercises of a type (or nothing).
+function CustomOptGroup({ customExercises, type }) {
+  const custom = customOf(customExercises, type);
+  if (!custom.length) return null;
+  return (
+    <optgroup label="⭐ Custom">
+      {custom.map((e) => <option key={e.id} value={e.id}>{e.icon || "⭐"} {e.label}</option>)}
+    </optgroup>
+  );
+}
+
 // ─── StepStrength ─────────────────────────────────────────────────────────────
 
 function StepStrength({ data, onChange, onBack, onNext }) {
@@ -2374,7 +2413,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
     setShowFill(false);
   };
 
-  const allExercises = [REST_ST, ...STRENGTH_EXERCISES];
+  const allExercises = [REST_ST, ...STRENGTH_EXERCISES, ...customOf(data.customExercises, "strength")];
   const getEx = id => allExercises.find(e=>e.id===id) || REST_ST;
 
   return (
@@ -2403,6 +2442,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
                     ))}
                   </optgroup>
                 ))}
+                <CustomOptGroup customExercises={data.customExercises} type="strength" />
               </select>
             </div>
             <div className="mb-4">
@@ -2495,7 +2535,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
           const isRest = sessions.length === 0;
           const totalBurned = sessions.reduce((s,sess)=>{
             const ex = getEx(sess.type);
-            return s + calcStrengthBurn(ex.met, Number(data.weightLbs), sess.duration);
+            return s + exBurn(ex, Number(data.weightLbs), sess.duration);
           }, 0);
           const isOpen = openDay === day;
           return (
@@ -2515,7 +2555,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
                 <div className={WZW.dayBody}>
                   {sessions.map((sess, idx) => {
                     const ex = getEx(sess.type);
-                    const burn = calcStrengthBurn(ex.met, Number(data.weightLbs), sess.duration);
+                    const burn = exBurn(ex, Number(data.weightLbs), sess.duration);
                     return (
                       <div key={idx} className="py-2.5" style={{borderBottom:idx<sessions.length-1?"1px solid var(--color-border)":"none"}}>
                         {sessions.length > 1 && (
@@ -2527,7 +2567,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
                         <div className="mb-4">
                           <label className={WZ.label}>Exercise <span className={WZ.hint}>type to search or browse below</span></label>
                           <SearchableSelect
-                            exercises={STRENGTH_EXERCISES}
+                            exercises={[...STRENGTH_EXERCISES, ...customOf(data.customExercises, "strength")]}
                             groups={STRENGTH_GROUPS}
                             value={sess.type}
                             onChange={val=>updSession(day,idx,"type",val)}
@@ -2541,6 +2581,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
                                 ))}
                               </optgroup>
                             ))}
+                            <CustomOptGroup customExercises={data.customExercises} type="strength" />
                           </select>
                         </div>
                         <div className="mb-4">
@@ -2638,6 +2679,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
                     {grp.options.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
                   </optgroup>
                 ))}
+                <CustomOptGroup customExercises={data.customExercises} type="cardio" />
               </select>
             </div>
             <div className="mb-4">
@@ -2679,8 +2721,8 @@ function StepCardio({ data, onChange, onBack, onNext }) {
           const sessions = Array.isArray(data.cardio[day]) ? data.cardio[day] : [];
           const isRest = sessions.length === 0;
           const totalBurned = sessions.reduce((s,sess)=>{
-            const co = ALL_CARDIO.find(c=>c.id===sess.type)||ALL_CARDIO[ALL_CARDIO.length-1];
-            return s + calcBurn(co.met, Number(data.weightLbs), sess.duration);
+            const co = findCardioEx(sess.type, data.customExercises);
+            return s + exBurn(co, Number(data.weightLbs), sess.duration);
           }, 0);
           const isOpen = openDay===day;
           return (
@@ -2689,7 +2731,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
                 <div className={WZW.dayChip}>{DAY_SHORT[i]}</div>
                 <div className={`text-[.88rem] ${isRest?"text-muted":"text-fg font-semibold"}`}>
                   {isRest ? "😴 Rest Day" : sessions.length === 1
-                    ? `${(ALL_CARDIO.find(c=>c.id===sessions[0].type)||{icon:"🏃"}).icon} ${(ALL_CARDIO.find(c=>c.id===sessions[0].type)||{label:"Cardio"}).label} · ${sessions[0].duration}m`
+                    ? `${(findCardioEx(sessions[0].type, data.customExercises)||{icon:"🏃"}).icon} ${(findCardioEx(sessions[0].type, data.customExercises)||{label:"Cardio"}).label} · ${sessions[0].duration}m`
                     : `${sessions.length} sessions`
                   }
                 </div>
@@ -2699,8 +2741,8 @@ function StepCardio({ data, onChange, onBack, onNext }) {
               {isOpen && (
                 <div className={WZW.dayBody}>
                   {sessions.map((sess, idx) => {
-                    const co = ALL_CARDIO.find(c=>c.id===sess.type)||ALL_CARDIO[ALL_CARDIO.length-1];
-                    const burn = calcBurn(co.met, Number(data.weightLbs), sess.duration);
+                    const co = findCardioEx(sess.type, data.customExercises);
+                    const burn = exBurn(co, Number(data.weightLbs), sess.duration);
                     return (
                       <div key={idx} className="py-2.5" style={{borderBottom:idx<sessions.length-1?"1px solid var(--color-border)":"none"}}>
                         {sessions.length > 1 && (
@@ -2712,7 +2754,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
                         <div className="mb-4">
                           <label className={WZ.label}>Exercise <span className={WZ.hint}>type to search or browse below</span></label>
                           <SearchableSelect
-                            exercises={ALL_CARDIO}
+                            exercises={[...ALL_CARDIO, ...customOf(data.customExercises, "cardio")]}
                             groups={CARDIO_GROUPS.map(g=>g.group)}
                             value={sess.type}
                             onChange={val=>updateWorkout(day,idx,"type",val)}
@@ -2724,6 +2766,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
                                 {grp.options.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
                               </optgroup>
                             ))}
+                            <CustomOptGroup customExercises={data.customExercises} type="cardio" />
                           </select>
                         </div>
                         {sess.type!=="rest" && (
@@ -2886,8 +2929,8 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
   const dayData = DAYS.map(day=>{
     const sessions = Array.isArray(cardio[day]) ? cardio[day] : [];
     const sessionData = sessions.filter(s=>s.type!=="rest").map(s=>{
-      const co = ALL_CARDIO.find(c=>c.id===s.type)||ALL_CARDIO[ALL_CARDIO.length-1];
-      return { co, duration:s.duration, burned:calcBurn(co.met, Number(weightLbs), s.duration), type:s.type };
+      const co = findCardioEx(s.type, data.customExercises);
+      return { co, duration:s.duration, burned:exBurn(co, Number(weightLbs), s.duration), type:s.type };
     });
     const burned = sessionData.reduce((s,d)=>s+d.burned, 0);
     return { day, sessions:sessionData, burned, type:sessions.length>0?sessions[0].type:"rest",
@@ -2901,12 +2944,12 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
   const hasGoal       = data.goalWeight && Number(data.goalWeight) < Number(data.weightLbs);
 
   // ── Strength training data ──
-  const allStrEx = [REST_ST, ...STRENGTH_EXERCISES];
+  const allStrEx = [REST_ST, ...STRENGTH_EXERCISES, ...customOf(data.customExercises, "strength")];
   const strengthDayData = DAYS.map(day=>{
     const sessions = Array.isArray((data.strength||{})[day]) ? data.strength[day] : [];
     const sessionData = sessions.map(s=>{
       const ex = allStrEx.find(e=>e.id===s.type) || REST_ST;
-      return { ex, duration:s.duration, burned:calcStrengthBurn(ex.met, Number(weightLbs), s.duration), type:s.type };
+      return { ex, duration:s.duration, burned:exBurn(ex, Number(weightLbs), s.duration), type:s.type };
     });
     const burned = sessionData.reduce((s,d)=>s+d.burned, 0);
     return { day, sessions:sessionData, burned, type:sessions.length>0?sessions[0].type:"rest_st",
@@ -3147,8 +3190,8 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
             const sessions = Array.isArray(data.cardio[day]) ? data.cardio[day] : [];
             const isRest = sessions.length === 0;
             const totalBurnDay = sessions.reduce((s,sess)=>{
-              const c = ALL_CARDIO.find(x=>x.id===sess.type)||ALL_CARDIO[ALL_CARDIO.length-1];
-              return s + calcBurn(c.met, Number(weightLbs), sess.duration);
+              const c = findCardioEx(sess.type, data.customExercises);
+              return s + exBurn(c, Number(weightLbs), sess.duration);
             },0);
             const isOpen = openResultDay === day;
             return (
@@ -3159,7 +3202,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                     {isRest
                       ? <span style={{color:"var(--muted)"}}>😴 Rest — tap to add cardio</span>
                       : sessions.length === 1
-                        ? <span>{(ALL_CARDIO.find(c=>c.id===sessions[0].type)||{icon:"🏃"}).icon} {(ALL_CARDIO.find(c=>c.id===sessions[0].type)||{label:"Cardio"}).label.split("–")[0].trim()} · {sessions[0].duration}m</span>
+                        ? <span>{(findCardioEx(sessions[0].type, data.customExercises)||{icon:"🏃"}).icon} {(findCardioEx(sessions[0].type, data.customExercises)||{label:"Cardio"}).label.split("–")[0].trim()} · {sessions[0].duration}m</span>
                         : <span>{sessions.length} sessions</span>
                     }
                   </div>
@@ -3169,8 +3212,8 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                 {isOpen && (
                   <div className="drc-edit-body">
                     {sessions.map((sess, idx)=>{
-                      const co = ALL_CARDIO.find(c=>c.id===sess.type)||ALL_CARDIO[ALL_CARDIO.length-1];
-                      const burn = calcBurn(co.met, Number(weightLbs), sess.duration);
+                      const co = findCardioEx(sess.type, data.customExercises);
+                      const burn = exBurn(co, Number(weightLbs), sess.duration);
                       return (
                         <div key={idx} style={{padding:"10px 0",borderBottom:idx<sessions.length-1?"1px solid var(--border)":"none"}}>
                           {sessions.length > 1 && (
@@ -3186,6 +3229,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                                   {grp.options.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
                                 </optgroup>
                               ))}
+                              <CustomOptGroup customExercises={data.customExercises} type="cardio" />
                             </select>
                           </div>
                           {sess.type!=="rest" && (
@@ -3300,8 +3344,8 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                 {isOpen && (
                   <div className="drc-edit-body">
                     {allSessions.map((sess,idx)=>{
-                      const co = ALL_CARDIO.find(c=>c.id===sess.type)||ALL_CARDIO[ALL_CARDIO.length-1];
-                      const burn = calcBurn(co.met, Number(weightLbs), sess.duration);
+                      const co = findCardioEx(sess.type, data.customExercises);
+                      const burn = exBurn(co, Number(weightLbs), sess.duration);
                       return (
                         <div key={idx} style={{padding:"10px 0",borderBottom:idx<allSessions.length-1?"1px solid var(--border)":"none"}}>
                           {allSessions.length>1 && <div style={{fontSize:".7rem",color:"var(--muted)",fontWeight:700,letterSpacing:"1px",textTransform:"uppercase",marginBottom:"6px"}}>Session {idx+1}</div>}
@@ -3313,6 +3357,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                                   {grp.options.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
                                 </optgroup>
                               ))}
+                              <CustomOptGroup customExercises={data.customExercises} type="cardio" />
                             </select>
                           </div>
                           {sess.type!=="rest" && (
@@ -3710,7 +3755,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
 
   const [openDay, setOpenDay] = useState(null);
   const [strExp, setStrExp] = useState("intermediate");
-  const allStrEx = [REST_ST, ...STRENGTH_EXERCISES];
+  const allStrEx = [REST_ST, ...STRENGTH_EXERCISES, ...customOf(data.customExercises, "strength")];
   const getEx = id => allStrEx.find(e=>e.id===id) || REST_ST;
   const expObj = STR_EXPERIENCE.find(e=>e.id===strExp);
 
@@ -3883,7 +3928,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
               <div className="drc-edit-body">
                 {allSessions.map((sess,idx)=>{
                   const ex = getEx(sess.type);
-                  const burn = calcStrengthBurn(ex.met, Number(weightLbs), sess.duration);
+                  const burn = exBurn(ex, Number(weightLbs), sess.duration);
                   const catColor = rawColor[ex.cat] || "var(--accent)";
                   return (
                     <div key={idx} style={{padding:"10px 0",borderBottom:idx<allSessions.length-1?"1px solid var(--border)":"none"}}>
@@ -7233,7 +7278,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
               {editingWorkout===`c${i}` && (
                 <div style={{padding:"10px 0 12px",borderBottom:"1px solid var(--border)",animation:"fadeUp .15s ease both"}}>
                   <SearchableSelect
-                    exercises={ALL_CARDIO}
+                    exercises={[...ALL_CARDIO, ...customOf(data.customExercises, "cardio")]}
                     groups={CARDIO_GROUPS.map(g=>g.group)}
                     value={w.type}
                     onChange={val=>onUpdateCardio(dayName,i,"type",val)}
@@ -7246,6 +7291,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                         {grp.options.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
                       </optgroup>
                     ))}
+                    <CustomOptGroup customExercises={data.customExercises} type="cardio" />
                   </select>
                   <select value={(todayCardio.workouts[i]||{}).duration||30} onChange={e=>onUpdateCardio(dayName,i,"duration",Number(e.target.value))}
                     style={{width:"100%",padding:"10px",borderRadius:"8px",border:"1.5px solid var(--border)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".84rem",marginTop:"6px"}}>
@@ -7285,7 +7331,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
               {editingWorkout===`s${i}` && (
                 <div style={{padding:"10px 0 12px",borderBottom:"1px solid var(--border)",animation:"fadeUp .15s ease both"}}>
                   <SearchableSelect
-                    exercises={STRENGTH_EXERCISES}
+                    exercises={[...STRENGTH_EXERCISES, ...customOf(data.customExercises, "strength")]}
                     groups={STRENGTH_GROUPS}
                     value={s.type}
                     onChange={val=>onUpdateStrength(dayName,i,"type",val)}
@@ -8545,16 +8591,16 @@ function computeClientCalories(d) {
   const bmr = calcBMR(d.gender, w, Number(d.heightFt), Number(d.heightIn), Number(d.age));
   if (!bmr || !isFinite(bmr)) return null;
   const tdee = Math.round(bmr * actObj.multiplier);
-  const allStrEx = [REST_ST, ...STRENGTH_EXERCISES];
+  const allStrEx = [REST_ST, ...STRENGTH_EXERCISES, ...customOf(d.customExercises, "strength")];
   let cardio = 0, strength = 0;
   DAYS.forEach((day) => {
     (Array.isArray((d.cardio || {})[day]) ? d.cardio[day] : []).forEach((s) => {
-      const co = ALL_CARDIO.find((c) => c.id === s.type) || ALL_CARDIO[ALL_CARDIO.length - 1];
-      cardio += calcBurn(co.met, w, s.duration);
+      const co = findCardioEx(s.type, d.customExercises);
+      cardio += exBurn(co, w, s.duration);
     });
     (Array.isArray((d.strength || {})[day]) ? d.strength[day] : []).forEach((s) => {
       const ex = allStrEx.find((e) => e.id === s.type) || REST_ST;
-      strength += calcStrengthBurn(ex.met, w, s.duration);
+      strength += exBurn(ex, w, s.duration);
     });
   });
   const target = Math.max(1200, Math.round(tdee - 500 + cardio / 7 + strength / 7));
@@ -12055,13 +12101,13 @@ export default function App() {
   const actObj = ACTIVITY_LEVELS.find(a=>a.id===data.activityLevel) || ACTIVITY_LEVELS[0];
   const bmr = calcBMR(data.gender, Number(data.weightLbs), Number(data.heightFt), Number(data.heightIn), Number(data.age));
   const computedTdee = Math.round(bmr * actObj.multiplier);
-  const allStrEx = [REST_ST, ...STRENGTH_EXERCISES];
+  const allStrEx = [REST_ST, ...STRENGTH_EXERCISES, ...customOf(data.customExercises, "strength")];
   const computedDayData = DAYS.map(day => {
     const raw = data.cardio[day];
     const sessions = Array.isArray(raw) ? raw : [];
     const wkData = sessions.map(w => {
-      const co = ALL_CARDIO.find(c=>c.id===w.type)||ALL_CARDIO[ALL_CARDIO.length-1];
-      return { co, duration:w.duration, burned:calcBurn(co.met, Number(data.weightLbs), w.duration), type:w.type };
+      const co = findCardioEx(w.type, data.customExercises);
+      return { co, duration:w.duration, burned:exBurn(co, Number(data.weightLbs), w.duration), type:w.type };
     });
     return { day, workouts:wkData, burned:wkData.reduce((s,w)=>s+w.burned,0) };
   });
@@ -12070,7 +12116,7 @@ export default function App() {
     const sessions = Array.isArray(raw) ? raw : [];
     const sData = sessions.map(w => {
       const ex = allStrEx.find(e=>e.id===w.type)||REST_ST;
-      return { ex, duration:w.duration, burned:calcStrengthBurn(ex.met, Number(data.weightLbs), w.duration), type:w.type };
+      return { ex, duration:w.duration, burned:exBurn(ex, Number(data.weightLbs), w.duration), type:w.type };
     });
     return { day, sessions:sData, burned:sData.reduce((s,w)=>s+w.burned,0) };
   });
