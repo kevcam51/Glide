@@ -1610,6 +1610,15 @@ enabled (Blaze has no default spending cap).
   the verified client); (client.uitest / Casey) "build me a 3-day full body program, show the card" → 3-day card → Save →
   her own plan strength became **Mon/Wed/Fri 6 each**. No console/function errors. **AI plan-builder is now card-confirmed
   like meals.** Model `claude-sonnet-4-6`.
+  **Also S75 — AI calendar management (handoff #2):** the date tools already existed (log_meal/propose_meal/log_workout/
+  log_weigh_in take a `date`; get_nutrition_log takes a range), so back-dating + review-by-date already worked
+  mechanically — added a system-prompt block telling the AI to resolve "yesterday / last Monday / last week" to a
+  YYYY-MM-DD and pass it (vs assuming today). Verified live (client.uitest): "log my 30-min strength workout for yesterday"
+  → AI resolved it to **2026-06-27**, confirmed, and the check-in landed on that date (`workedOut:true`), not today. NOT
+  external Acuity/Google sync; NOT one-off future scheduled events (those need a data-model + calendar-UI change).
+  **The AI roadmap is now fully worked through:** chat · data reads · meal logging (typed/photo/card) · workouts/weigh-ins/
+  targets/requests · workout-program builder (card-confirmed) · streaming · prompt caching · onboarding · plan management ·
+  proactive coaching · calendar/date-aware logging.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

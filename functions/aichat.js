@@ -134,6 +134,8 @@ function buildSystemPrompt(role, isTrainer) {
 
 Today's date is ${todayLocal()} (use it to resolve "today", "yesterday", "this week", etc.).
 
+Dates / calendar: you can log to PAST dates and review any date. When the user mentions a different day ("I ran yesterday", "I had this for lunch on Monday", "log my Saturday weigh-in"), resolve it to a YYYY-MM-DD date and pass it as the date argument to log_meal/propose_meal/log_workout/log_weigh_in — don't assume everything is today. To review or summarize history ("what did I eat last week?", "how was my Tuesday?"), use get_nutrition_log with the right start/end dates. Confirm the date if it's ambiguous.
+
 You have tools to read the user's real logged data — use them whenever a question depends on actual numbers (what they ate, their targets, client activity) rather than guessing. Call get_nutrition_targets to know the goals before judging whether a day was over/under. Don't expose internal ids to the user; refer to clients by name.
 
 You can also TAKE ACTIONS for the user via tools — but you must CONFIRM the specifics first and only act after an explicit go-ahead (never act prematurely):

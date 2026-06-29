@@ -112,9 +112,12 @@ trainer only their own verified clients (enforced **server-side**, not by the mo
    action) and debounce-re-pull the summaries — so a client logging updates the cards with no manual reload.
    Verified live (TrainerDashboard card 186→180 lbs auto-refreshed; Coaching Dashboard "lbs lost" 16→12→10
    auto-refreshed). **Live-sync is now complete across every trainer/client surface.**
-2. **AI calendar management (in-app)** — back-date logs, schedule workouts by weekday, review by
-   date. Same tool pattern (overlaps the plan-builder). NOT external Acuity/Google sync (separate
-   bigger project). _Kevin: do later when the time comes._
+2. **AI calendar management (in-app) — DONE (S75).** Mostly already supported: log_meal/propose_meal/
+   log_workout/log_weigh_in all take a `date`, and get_nutrition_log takes a date range — so back-dated
+   logging and review-by-date already worked. S75 added a system-prompt block telling the AI to resolve
+   "yesterday / last Monday / last week" to a YYYY-MM-DD and pass it (verified live: "log my workout for
+   yesterday" → a check-in landed on 2026-06-27, not today). NOT external Acuity/Google sync, and NOT
+   one-off future scheduled events (those need a data-model + calendar-UI change — a separate project).
 3. **Fuller AI-managed profiles — DONE (S72–74).** Onboarding (S72: `get_profile` + `set_personal_info`
    fill core stats by chat, no wizard), plan management (S73: `list_plans` + `create_plan` + `switch_plan`
    start/switch cut·maintenance·bulk phases, carrying stats over), and proactive coaching (S74:
