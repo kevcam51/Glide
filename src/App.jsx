@@ -3951,6 +3951,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
                               ))}
                             </optgroup>
                           ))}
+                          <CustomOptGroup customExercises={data.customExercises} type="strength" />
                         </select>
                       </div>
                       <div className="field" style={{marginBottom:0}}>
@@ -6801,7 +6802,7 @@ function WeightDayLogger({ date, existing, onSave }) {
 function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onRemoveMeal, onEditMeal, recentFoods, weekSummary, history, onRefresh, isRemote,
-  onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets }) {
+  onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onAddCustomExercise }) {
 
   const [showCalendar, setShowCalendar] = useState(false);
   const [editingWorkout, setEditingWorkout] = useState(null);
@@ -7346,6 +7347,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                         ))}
                       </optgroup>
                     ))}
+                    <CustomOptGroup customExercises={data.customExercises} type="strength" />
                   </select>
                   <select value={s.duration||60} onChange={e=>onUpdateStrength(dayName,i,"duration",Number(e.target.value))}
                     style={{width:"100%",padding:"10px",borderRadius:"8px",border:"1.5px solid var(--border)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".84rem",marginTop:"6px"}}>
@@ -7395,6 +7397,15 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           + Add Strength
         </button>
       </div>
+
+      {/* Create a custom exercise right here too (not just in Edit Workouts).
+          Once added it appears in the Add Cardio / Add Strength pickers above. */}
+      {onAddCustomExercise && (
+        <div style={{marginBottom:"16px"}}>
+          <CustomExerciseCreator exerciseType="strength" onAdd={onAddCustomExercise} />
+          <CustomExerciseCreator exerciseType="cardio" onAdd={onAddCustomExercise} />
+        </div>
+      )}
 
       {/* ── Progress & insights (display, not entry) ── */}
       <div className="sec-title">📈 Progress &amp; Insights</div>
@@ -12281,6 +12292,7 @@ export default function App() {
                 sessions[idx] = {...sessions[idx],[field]:val};
                 return {...p, strength:{...p.strength,[day]:sessions}};
               })}
+              onAddCustomExercise={(ex)=>setDataAndSave(p=>({...p, customExercises:[...(p.customExercises||[]), ex]}))}
             />
           )}
           {step===5 && !showDash && <>
