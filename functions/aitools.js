@@ -47,13 +47,24 @@ function buildWorkoutWeek(provided, validSet, defDur, existing, replace, dropped
   return result;
 }
 // Attach display labels to a built week for the confirmation card (skips rest days).
-function weekWithLabels(week) {
+// labelMap (optional) covers the plan's custom exercises on top of the catalog.
+function weekWithLabels(week, labelMap) {
   const r = {};
   for (const day of DAYS) {
     const arr = (week || {})[day] || [];
-    if (arr.length) r[day] = arr.map((s) => ({ type: s.type, label: EX_LABEL[s.type] || s.type, duration: s.duration }));
+    if (arr.length) r[day] = arr.map((s) => ({ type: s.type, label: (labelMap && labelMap[s.type]) || EX_LABEL[s.type] || s.type, duration: s.duration }));
   }
   return r;
+}
+// The plan's custom exercises, as id sets (by type) + an id→label map, so the AI
+// can build programs that include them (valid ids) and label them on the card.
+function customExerciseSets(data) {
+  const list = Array.isArray(data && data.customExercises) ? data.customExercises : [];
+  const strengthIds = new Set(list.filter((e) => e && e.type === "strength" && e.id).map((e) => e.id));
+  const cardioIds = new Set(list.filter((e) => e && e.type === "cardio" && e.id).map((e) => e.id));
+  const labels = {};
+  for (const e of list) if (e && e.id) labels[e.id] = e.label || e.id;
+  return { strengthIds, cardioIds, labels };
 }
 
 // ── kv access (mirrors src/storage.js: users/{uid}/kv/{encodeURIComponent(key)},
@@ -459,6 +470,25 @@ function buildTools(role) {
       input_schema: { type: "object", properties: {} },
     },
     {
+      name: "add_custom_exercise",
+      description:
+        "Create a CUSTOM exercise on the plan for a movement that's not in the standard library (e.g. Battle Ropes, "
+        + "Sled Push, TRX Row). Returns its id — then use that id in propose_workout/set_workout_schedule like any other "
+        + "exercise. Only use this when nothing in list_exercises fits; prefer standard exercises. Estimate calPerMin "
+        + "(calories burned per minute: walking ~4, jogging ~9, intense HIIT ~14). "
+        + (isTrainer ? "Pass clientId to add it to a client's plan." : "Adds to YOUR plan."),
+      input_schema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Exercise name, e.g. 'Sled Push'" },
+          type: { type: "string", enum: ["strength", "cardio"], description: "Whether it's strength or cardio" },
+          calPerMin: { type: "number", description: "Estimated calories burned per minute (1–30), used for its burn" },
+          ...clientIdProp,
+        },
+        required: ["name", "type", "calPerMin"],
+      },
+    },
+    {
       name: "propose_workout",
       description:
         "Show the user a tappable confirmation CARD for a weekly workout PROGRAM you've designed (from list_exercises ids). "
@@ -803,19 +833,22 @@ async function runTool(name, input, ctx) {
     // setWorkoutSchedule callable, which re-runs set_workout_schedule.
     const replace = input.replace !== false;
     const { data } = await activePlanData(db, uid); // for non-replace merge
+    const cx = customExerciseSets(data); // the plan's custom exercises are valid ids too
+    const strSet = new Set([...STRENGTH_IDS, ...cx.strengthIds]);
+    const carSet = new Set([...CARDIO_IDS, ...cx.cardioIds]);
     const dropped = [];
     const built = {};
     if (input.strength && typeof input.strength === "object") {
-      built.strength = buildWorkoutWeek(input.strength, STRENGTH_IDS, 45, data.strength, replace, dropped);
+      built.strength = buildWorkoutWeek(input.strength, strSet, 45, data.strength, replace, dropped);
     }
     if (input.cardio && typeof input.cardio === "object") {
-      built.cardio = buildWorkoutWeek(input.cardio, CARDIO_IDS, 30, data.cardio, replace, dropped);
+      built.cardio = buildWorkoutWeek(input.cardio, carSet, 30, data.cardio, replace, dropped);
     }
     if (!built.strength && !built.cardio) return { error: "Provide cardio and/or strength as day-keyed objects." };
     // What the card shows (labels) and what Accept will write (raw ids), kept in sync.
     const workout = { replace, droppedInvalidIds: [...new Set(dropped)], raw: { replace } };
-    if (built.strength) { workout.strength = weekWithLabels(built.strength); workout.raw.strength = built.strength; }
-    if (built.cardio) { workout.cardio = weekWithLabels(built.cardio); workout.raw.cardio = built.cardio; }
+    if (built.strength) { workout.strength = weekWithLabels(built.strength, cx.labels); workout.raw.strength = built.strength; }
+    if (built.cardio) { workout.cardio = weekWithLabels(built.cardio, cx.labels); workout.raw.cardio = built.cardio; }
     if (ctx.isTrainer && input.clientId) {
       const t = await resolveTargetUid(db, { clientId: input.clientId }, ctx);
       if (t && t.error) return t; // unauthorized client → tell the model
@@ -934,17 +967,41 @@ async function runTool(name, input, ctx) {
     return { ok: true, updated: { macroTargets: d.macroTargets || null, goalWeightLbs: d.goalWeight != null ? d.goalWeight : null } };
   }
 
+  if (name === "add_custom_exercise") {
+    const exType = input.type === "cardio" ? "cardio" : (input.type === "strength" ? "strength" : null);
+    if (!exType) return { error: "type must be 'strength' or 'cardio'." };
+    const label = String(input.name || "").trim().slice(0, 60);
+    if (!label) return { error: "Provide an exercise name." };
+    const calPerMin = Math.max(1, Math.min(30, Math.round((Number(input.calPerMin) || 0) * 10) / 10));
+    if (!calPerMin) return { error: "Provide a calPerMin estimate (1–30)." };
+    const { id: planId, wrap } = await loadPlanWrap(db, uid);
+    const d = wrap.data;
+    if (!Array.isArray(d.customExercises)) d.customExercises = [];
+    // Dedupe by lowercased label + type — reuse the existing id if already there.
+    const existing = d.customExercises.find((e) => e && e.type === exType && (e.label || "").toLowerCase() === label.toLowerCase());
+    if (existing) return { ok: true, exercise: { id: existing.id, label: existing.label, type: exType }, note: "Already exists — reusing it." };
+    const ex = { id: randId("custom_"), label, icon: "⭐", met: 0, calPerMin,
+      cat: exType === "cardio" ? "Custom Cardio" : "Custom Strength", note: "Custom exercise — AI-estimated", isCustom: true, type: exType };
+    d.customExercises.push(ex);
+    await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
+    await appendHistory(db, uid, planId, ctx, `added a custom exercise: ${label}`);
+    return { ok: true, exercise: { id: ex.id, label: ex.label, type: exType, calPerMin } };
+  }
+
   if (name === "set_workout_schedule") {
     const replace = input.replace !== false; // default true
     const { id: planId, wrap } = await loadPlanWrap(db, uid);
     const d = wrap.data;
+    const cx = customExerciseSets(d); // the plan's custom exercises are valid ids too
+    const strSet = new Set([...STRENGTH_IDS, ...cx.strengthIds]);
+    const carSet = new Set([...CARDIO_IDS, ...cx.cardioIds]);
     const dropped = [];
     const changed = [];
     if (input.strength && typeof input.strength === "object") {
-      d.strength = buildWorkoutWeek(input.strength, STRENGTH_IDS, 45, d.strength, replace, dropped); changed.push("strength");
+      d.strength = buildWorkoutWeek(input.strength, strSet, 45, d.strength, replace, dropped); changed.push("strength");
     }
     if (input.cardio && typeof input.cardio === "object") {
-      d.cardio = buildWorkoutWeek(input.cardio, CARDIO_IDS, 30, d.cardio, replace, dropped); changed.push("cardio");
+      d.cardio = buildWorkoutWeek(input.cardio, carSet, 30, d.cardio, replace, dropped); changed.push("cardio");
     }
     if (changed.length === 0) return { error: "Provide cardio and/or strength as day-keyed objects." };
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
