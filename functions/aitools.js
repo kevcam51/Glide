@@ -158,6 +158,34 @@ function profileSummary(d) {
   };
 }
 
+// Least-squares weight trend (lbs/week) from check-ins — mirrors src/App.jsx
+// weightTrend. Needs 2+ weigh-ins spread over ≥3 days. null otherwise.
+function weightTrend(checkIns) {
+  const pts = [...(checkIns || [])].filter((c) => c.weight && c.timestamp)
+    .sort((a, b) => a.timestamp - b.timestamp);
+  if (pts.length < 2) return null;
+  const t0 = pts[0].timestamp;
+  const spanDays = (pts[pts.length - 1].timestamp - t0) / 86400000;
+  if (spanDays < 3) return null;
+  const xs = pts.map((p) => (p.timestamp - t0) / 86400000);
+  const ys = pts.map((p) => p.weight);
+  const n = xs.length;
+  const sx = xs.reduce((a, b) => a + b, 0);
+  const sy = ys.reduce((a, b) => a + b, 0);
+  const sxx = xs.reduce((a, b) => a + b * b, 0);
+  const sxy = xs.reduce((a, _, i) => a + xs[i] * ys[i], 0);
+  const denom = n * sxx - sx * sx;
+  if (denom === 0) return null;
+  return { ratePerWeek: ((n * sxy - sx * sy) / denom) * 7, spanDays, n };
+}
+function etaWeeks(current, target, ratePerWeek) {
+  const remaining = target - current;
+  if (Math.abs(remaining) < 0.05) return 0;
+  if (!ratePerWeek) return null;
+  if ((remaining < 0) === (ratePerWeek < 0)) return remaining / ratePerWeek;
+  return null; // trending the wrong way
+}
+
 // ── date helpers ───────────────────────────────────────────────────────────
 function clampDateRange(startDate, endDate) {
   // Lexical compare works for zero-padded YYYY-MM-DD. Cap span at 31 days.
@@ -415,6 +443,22 @@ function buildTools(role) {
       input_schema: { type: "object", properties: {} },
     });
     tools.push({
+      name: "coach_summary",
+      description:
+        "Get a proactive coaching snapshot across ALL your clients in ONE call — for questions like 'who's stalled "
+        + "this week?', 'who needs attention?', or 'what should I change?'. For each client it returns: days logged in "
+        + "the window, days since last log, calorie & protein adherence (avg logged vs target), latest weigh-in, weight "
+        + "trend (lbs/week), whether they're on track to their goal, open requests, and a status (inactive / stalled / "
+        + "off_track / on_track / logging). Use this instead of calling the per-client tools one by one, then give "
+        + "specific recommendations.",
+      input_schema: {
+        type: "object",
+        properties: {
+          days: { type: "number", description: "Window for activity/adherence, in days (default 7, max 31)." },
+        },
+      },
+    });
+    tools.push({
       name: "send_client_request",
       description:
         "Send a connected client a short to-do that appears on their home screen (e.g. ask them to log food, weigh in, or record a workout). Confirm the message with the trainer before sending.",
@@ -488,6 +532,80 @@ async function runTool(name, input, ctx) {
     }
     out.sort((a, b) => (b.daysSinceLastLog ?? 1e9) - (a.daysSinceLastLog ?? 1e9));
     return { clients: out, count: out.length };
+  }
+
+  if (name === "coach_summary") {
+    if (!ctx.isTrainer) return { error: "Only trainers can use coach_summary." };
+    const win = Math.max(1, Math.min(31, Math.round(Number(input.days) || 7)));
+    const end = ctx.today; // YYYY-MM-DD (Eastern)
+    const endMs = new Date(end + "T00:00:00Z").getTime();
+    const start = new Date(endMs - (win - 1) * 86400000).toISOString().slice(0, 10);
+    const round1 = (v) => Math.round(v * 10) / 10;
+    const snap = await db.collection("users").where("assignedTrainerId", "==", ctx.callerUid).get();
+    const clients = [];
+    const counts = { inactive: 0, stalled: 0, off_track: 0, on_track: 0, logging: 0 };
+    const MAX = 60;
+    let truncated = false;
+    for (const docSnap of snap.docs) {
+      if (clients.length >= MAX) { truncated = true; break; }
+      const uidC = docSnap.id;
+      const p = docSnap.data();
+      const cname = p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Client";
+      const { id: planId, data } = await activePlanData(db, uidC);
+      const targets = nutritionTargets(data);
+      const prefix = `caliq-log-${planId}-`;
+      // adherence within the window
+      let daysLogged = 0, calSum = 0, calDays = 0, protSum = 0, protDays = 0;
+      try {
+        const logs = await db.collection(`users/${uidC}/kv`)
+          .where("k", ">=", prefix + start).where("k", "<=", prefix + end + "").get();
+        logs.forEach((l) => {
+          let lg = {}; try { lg = JSON.parse(l.data().value || "{}") || {}; } catch (e) { lg = {}; }
+          if ((Number(lg.calories) || 0) > 0) { daysLogged++; calSum += Number(lg.calories) || 0; calDays++; }
+          if ((Number(lg.protein) || 0) > 0) { protSum += Number(lg.protein); protDays++; }
+        });
+      } catch (e) { /* ignore */ }
+      // true latest log date (one cheap desc/limit-1 query) → days since
+      let lastLog = null;
+      try {
+        const ls = await db.collection(`users/${uidC}/kv`)
+          .where("k", ">=", prefix).where("k", "<=", prefix + "").orderBy("k", "desc").limit(1).get();
+        ls.forEach((l) => { lastLog = (l.data().k || "").slice(-10); });
+      } catch (e) { /* ignore */ }
+      const daysSince = lastLog
+        ? Math.round((endMs - new Date(lastLog + "T00:00:00Z").getTime()) / 86400000) : null;
+      // weight trend + on-track
+      const cur = Number(data.weightLbs) || null;
+      const goal = Number(data.goalWeight) || null;
+      const trend = weightTrend(data.checkIns);
+      const rate = trend ? round1(trend.ratePerWeek) : null;
+      const onTrack = (trend && cur && goal && goal !== cur) ? (etaWeeks(cur, goal, trend.ratePerWeek) != null) : null;
+      // open requests
+      let openReqs = 0;
+      try {
+        const reqs = await kvGetJSON(db, uidC, "caliq-requests");
+        if (Array.isArray(reqs)) openReqs = reqs.filter((r) => r && r.status !== "done").length;
+      } catch (e) { /* ignore */ }
+      let status;
+      if (daysLogged === 0) status = "inactive";
+      else if (onTrack === true) status = "on_track";
+      else if (rate != null && goal && Math.abs(rate) < 0.15) status = "stalled";
+      else if (onTrack === false) status = "off_track";
+      else status = "logging";
+      counts[status]++;
+      clients.push({
+        clientId: uidC, name: cname, status,
+        daysLoggedInWindow: daysLogged, lastLogDate: lastLog, daysSinceLastLog: daysSince,
+        avgCalories: calDays ? Math.round(calSum / calDays) : null, calorieTarget: targets.calorieTarget,
+        avgProtein: protDays ? Math.round(protSum / protDays) : null, proteinTarget: targets.proteinTarget,
+        currentWeightLbs: cur, goalWeightLbs: goal,
+        weightRatePerWeek: rate, onTrack, openRequests: openReqs,
+      });
+    }
+    // surface the most concerning first (inactive → off_track → stalled → others)
+    const rank = { inactive: 0, off_track: 1, stalled: 2, logging: 3, on_track: 4 };
+    clients.sort((a, b) => (rank[a.status] - rank[b.status]) || ((b.daysSinceLastLog ?? -1) - (a.daysSinceLastLog ?? -1)));
+    return { windowDays: win, range: { start, end }, clientCount: clients.length, counts, clients, truncated };
   }
 
   // Data tools — resolve & authorize the target user first.

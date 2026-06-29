@@ -1567,6 +1567,26 @@ enabled (Blaze has no default spending cap).
   **NEXT (fuller AI profiles, increment 3): proactive coaching** — e.g. a trainer asks "who's stalled / what should I
   change?" and the AI synthesizes across `list_clients` + each client's logs/trend (read tools already exist; this is
   mostly prompt + maybe a cross-client summary tool). Model `claude-sonnet-4-6`.
+- Session 74: **AI proactive coaching — cross-client `coach_summary` tool (fuller AI profiles, increment 3 — the arc is
+  COMPLETE). DEPLOYED & LIVE.** A trainer can now ask "who's stalled / who needs attention / what should I change?" and
+  the AI answers across ALL their clients in ONE tool call instead of looping the per-client tools (which would burn the
+  5-round tool cap + tokens for trainers with many clients). New **`coach_summary`** tool (trainers only) in
+  `functions/aitools.js`: loops the trainer's clients (`where assignedTrainerId == caller`, capped 60), and for each
+  builds a coaching snapshot — days logged in the window (default 7, max 31), true days-since-last-log (one
+  `orderBy("k","desc").limit(1)` query on the log prefix — default single-field index, no composite needed), calorie &
+  protein adherence (avg logged vs target via the ported `nutritionTargets`), latest weight + **weight trend lbs/week**
+  (ported `weightTrend` least-squares + `etaWeeks` on-track check, matching `src/App.jsx`), open-request count, and a
+  derived **status** (inactive / stalled / off_track / on_track / logging). Returns the clients **sorted most-concerning
+  first** + status `counts`. Same server-side access model (a trainer only ever sees their OWN clients — the query is
+  scoped to `assignedTrainerId == callerUid`). System prompt (`aichat.js`) gained a proactive-coaching instruction: for
+  cross-client questions call `coach_summary` once, then call out who needs attention BY NAME with concrete
+  recommendations and offer to `send_client_request`. **Backend-only — no frontend change.** Deployed
+  `aiChat`+`aiChatStream`. **Verified live** (preview, trainer.uitest): "which clients need attention this week + what
+  should I change?" → the AI called `coach_summary` and returned a named, data-driven readout on Casey (flagged the
+  calorie/protein gap, the aggressive −5.5 lb/wk rate from her real weigh-ins, 4 days logged, 2 pending requests) with
+  specific recommendations and an offer to send a nudge. Function logs clean (no tool/index/permission errors); no
+  console errors. **"Fuller AI profiles" is DONE:** onboarding (S72) + plan management (S73) + proactive coaching (S74).
+  Model `claude-sonnet-4-6`.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a
