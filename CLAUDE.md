@@ -1546,6 +1546,27 @@ enabled (Blaze has no default spending cap).
   **NEXT increments of "fuller AI profiles":** plan MANAGEMENT (switch active plan, start a cut/maintenance phase via a
   new tool over the `caliq-plans` manifest), then **proactive coaching** ("3 clients stalled this week, here's what I'd
   change"). Same pattern: one access-checked tool at a time. Model `claude-sonnet-4-6`.
+- Session 73: **AI plan management — list / switch / create plans & phases (fuller AI profiles, increment 2).
+  DEPLOYED & LIVE.** Builds on S72: the AI can now manage the multi-plan setup conversationally, so a user can start a
+  cut/maintenance/bulk phase by chat. Three new tools in `functions/aitools.js` (both roles, same `resolveTargetUid`
+  access model — a client manages only their own plans; a trainer only a verified client's): **`list_plans`** (read —
+  the `caliq-plans` manifest: each plan's id/name + which is active), **`create_plan`** (write — adds a new plan to the
+  manifest + creates its `caliq-{id}` wrapper; **carries over the person's personal stats by default** via the new
+  `PERSONAL_FIELDS` list so they don't re-enter gender/age/height/weight/activity; `goalWeightLbs` sets the phase goal;
+  `makeActive` default true; workouts/targets/logs start fresh), and **`switch_plan`** (write — points the manifest's
+  `active` at an existing planId). New manifest helpers `normalizeManifest`/`readManifest`/`writeManifest` mirror
+  `src/App.jsx` exactly (default "self" plan, valid active id) so the AI manages plans identically to the UI. `aichat.js`:
+  `create_plan`+`switch_plan` added to the `wrote` refresh list (dashboard reloads on the active-plan change), and the
+  system prompt gained a plan/phases instruction (list → switch → create-new-phase; carries stats; confirm before
+  create/switch; never expose plan ids — refer to plans by name). **Backend-only — no frontend change.** Deployed
+  `aiChat`+`aiChatStream`. **Verified live end-to-end** (preview, client.uitest / Casey): "start a cut phase called
+  Summer Cut, goal 165" → AI called `list_plans`+`get_profile`, **confirmed before creating**, then `create_plan` →
+  **independently confirmed via the app's read path**: a new "Summer Cut" plan became active with the stats carried over
+  (female/30/5'6"/186/moderate) + goalWeight 165 + a 1,950 cal target; then "switch back to my Main plan" → confirmed →
+  `switch_plan` set active back to "self". Test "Summer Cut" plan cleaned up afterward. No console/function errors.
+  **NEXT (fuller AI profiles, increment 3): proactive coaching** — e.g. a trainer asks "who's stalled / what should I
+  change?" and the AI synthesizes across `list_clients` + each client's logs/trend (read tools already exist; this is
+  mostly prompt + maybe a cross-client summary tool). Model `claude-sonnet-4-6`.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

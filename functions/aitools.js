@@ -57,6 +57,26 @@ async function loadPlanWrap(db, uid) {
 function checkInTimestamp(date) {
   return new Date(date + "T12:00:00").getTime();
 }
+
+// Plan manifest (caliq-plans = { active, plans:[{id,name,createdAt}] }) — mirrors
+// src/App.jsx normalizePlans/read/write so the AI manages plans exactly like the UI.
+function normalizeManifest(m) {
+  if (!m || !Array.isArray(m.plans) || m.plans.length === 0) {
+    m = { active: "self", plans: [{ id: "self", name: "Main plan", createdAt: 0 }] };
+  }
+  if (!m.plans.some((p) => p.id === m.active)) m.active = m.plans[0].id;
+  return m;
+}
+async function readManifest(db, uid) {
+  return normalizeManifest(await kvGetJSON(db, uid, "caliq-plans"));
+}
+async function writeManifest(db, uid, m) {
+  await kvSetJSON(db, uid, "caliq-plans", normalizeManifest(m));
+}
+// Personal stats carried over when starting a new phase (so the user/client
+// doesn't re-enter them). Phase-specific things (goal, targets, workouts,
+// check-ins, meals) start fresh.
+const PERSONAL_FIELDS = ["firstName", "lastName", "gender", "age", "heightFt", "heightIn", "weightLbs", "activityLevel"];
 // Append an activity-feed event to the plan's history (best-effort), same
 // shape as App.appendHistory so AI actions show in the Recent Activity feed.
 async function appendHistory(db, uid, planId, ctx, action) {
@@ -225,6 +245,48 @@ function buildTools(role) {
           goalBodyFatPct: { type: "number", description: "Goal body-fat %, optional" },
           ...clientIdProp,
         },
+      },
+    },
+    {
+      name: "list_plans",
+      description:
+        "List the plans on this account (id, name, and which is active). A person can have several plans — e.g. a cut "
+        + "phase, a maintenance phase, a bulk. The active plan drives the dashboard, logging, and targets. "
+        + (isTrainer ? TRAINER_NOTE : CLIENT_NOTE),
+      input_schema: { type: "object", properties: { ...clientIdProp } },
+    },
+    {
+      name: "create_plan",
+      description:
+        "Create a NEW plan — e.g. to start a cut, maintenance, or bulk phase. By default it carries over the person's "
+        + "personal stats (gender/age/height/weight/activity) so they don't re-enter them, and becomes the active plan. "
+        + "Pass goalWeightLbs to set the phase's goal. Workouts/targets/logs start fresh — build them after with the other "
+        + "tools. Confirm with the user before creating. " + (isTrainer ? "Pass clientId to create for a client." : "Creates on YOUR account."),
+      input_schema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Plan name, e.g. 'Summer cut' or 'Maintenance phase'" },
+          copyStats: { type: "boolean", description: "Carry over personal stats from the current active plan. Default true." },
+          makeActive: { type: "boolean", description: "Switch to the new plan immediately. Default true." },
+          goalWeightLbs: { type: "number", description: "Goal body weight for the new phase, pounds (optional)" },
+          ...clientIdProp,
+        },
+        required: ["name"],
+      },
+    },
+    {
+      name: "switch_plan",
+      description:
+        "Make a different EXISTING plan the active one (use a planId from list_plans). The active plan drives the "
+        + "dashboard, logging, and targets. Confirm which plan before switching. "
+        + (isTrainer ? "Pass clientId to switch a client's active plan." : "Switches YOUR active plan."),
+      input_schema: {
+        type: "object",
+        properties: {
+          planId: { type: "string", description: "The plan's id from list_plans." },
+          ...clientIdProp,
+        },
+        required: ["planId"],
       },
     },
     {
@@ -480,6 +542,51 @@ async function runTool(name, input, ctx) {
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
     await appendHistory(db, uid, planId, ctx, `updated profile: ${changes.join(", ")}`);
     return { ok: true, updated: changes, profile: profileSummary(d) };
+  }
+
+  if (name === "list_plans") {
+    const m = await readManifest(db, uid);
+    return {
+      activePlanId: m.active,
+      plans: m.plans.map((p) => ({ id: p.id, name: p.name, active: p.id === m.active })),
+      count: m.plans.length,
+    };
+  }
+
+  if (name === "create_plan") {
+    const nm = String(input.name || "").trim().slice(0, 60);
+    if (!nm) return { error: "Provide a name for the new plan." };
+    const copyStats = input.copyStats !== false; // default true
+    const makeActive = input.makeActive !== false; // default true
+    const m = await readManifest(db, uid);
+    const newId = randId("p");
+    const data = {};
+    if (copyStats) {
+      const cur = await activePlanData(db, uid); // copy from the CURRENT active plan
+      const s = cur.data || {};
+      for (const k of PERSONAL_FIELDS) if (s[k] != null && s[k] !== "") data[k] = s[k];
+    }
+    if (input.goalWeightLbs != null) {
+      const g = Math.round(Number(input.goalWeightLbs) * 10) / 10;
+      if (g > 0) data.goalWeight = g;
+    }
+    await kvSetJSON(db, uid, `caliq-${newId}`, { data, step: 0 });
+    m.plans.push({ id: newId, name: nm, createdAt: Date.now() });
+    if (makeActive) m.active = newId;
+    await writeManifest(db, uid, m);
+    await appendHistory(db, uid, newId, ctx, `created a new plan: "${nm}"`);
+    return { ok: true, planId: newId, name: nm, activePlanId: m.active, copiedStats: copyStats, profile: profileSummary(data) };
+  }
+
+  if (name === "switch_plan") {
+    const pid = String(input.planId || "").trim();
+    const m = await readManifest(db, uid);
+    const plan = m.plans.find((p) => p.id === pid);
+    if (!plan) return { error: "No plan with that id. Call list_plans for the valid ids." };
+    m.active = pid;
+    await writeManifest(db, uid, m);
+    await appendHistory(db, uid, pid, ctx, `switched the active plan to "${plan.name}"`);
+    return { ok: true, activePlanId: pid, name: plan.name };
   }
 
   if (name === "propose_meal") {
