@@ -71,8 +71,10 @@ trainer only their own verified clients (enforced **server-side**, not by the mo
 - **Function runtime SA** `350381584449-compute@developer.gserviceaccount.com` needs **Cloud
   Datastore User** (Firestore) — already granted. A `7 PERMISSION_DENIED` right after a fresh
   deploy is a transient cold-start service-agent race; it self-heals (re-test).
-- **Deploy:** `firebase deploy --only functions:aiChat,functions:aiChatStream,functions:logMeal --project calorieiq-29762`.
+- **Deploy:** `firebase deploy --only functions:aiChat,functions:aiChatStream,functions:logMeal,functions:setWorkoutSchedule --project calorieiq-29762`.
   Backend-only changes need NO Vercel rebuild; frontend changes (src/) auto-deploy on push to `main`.
+  **⚠️ `aitools.js` is shared by ALL FOUR functions** (aiChat, aiChatStream, logMeal, setWorkoutSchedule) — when you
+  change it, deploy all four, or an un-redeployed Accept callable (logMeal / setWorkoutSchedule) runs stale tool code (S78).
 - **Rules-test Java** at `~/.glide-jdk` (Temurin 21) — for `npm run test:rules` (see CLAUDE.md Key commands).
 
 ## Cost / budgets (reassured + decided)

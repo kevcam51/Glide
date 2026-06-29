@@ -1666,6 +1666,29 @@ enabled (Blaze has no default spending cap).
   so AI-writing it would be dead data; wiring custom exercises into the pickers + burn lookup (+ then the AI tool) is a
   separate small task (see roadmap). Frontend verified + pushed; backend (`aiChat`+`aiChatStream`) deployed. No console
   errors; `npm run build` passes. No `firestore.rules` change. Model `claude-sonnet-4-6`.
+- Session 78: **Custom exercises — wired end-to-end (frontend) + AI-creatable (the S77-scoped item). LIVE.** Closes the
+  "100% coverage" gap. **Step A (frontend, benefits everyone):** `data.customExercises` was written by the wizard's
+  `CustomExerciseCreator` but **read nowhere** (dead data). Now custom exercises work everywhere. New module-level
+  helpers in `src/App.jsx`: `customOf(list, type)`, `findCardioEx(id, custom)` / `findStrengthEx(id, custom)` (resolve a
+  custom OR standard id), `exBurn(ex, weightLbs, min)` (**custom burns by `calPerMin × minutes`; standard by MET** — note
+  custom exercises store `calPerMin` with `met:0`), and a `<CustomOptGroup>` dropdown component. Folded custom exercises
+  into EVERY exercise lookup + burn site (~20: wizard StepStrength/StepCardio, all Results tabs, DailyDashboard,
+  `computeClientCalories`, the App-level computed day data) by replacing the inline `ALL_CARDIO.find(...)||fallback` /
+  `[REST_ST,...STRENGTH_EXERCISES]` + `calcBurn/calcStrengthBurn(ex.met,…)` pattern with `findCardioEx`/`findStrengthEx`
+  (or `[…STRENGTH_EXERCISES, ...customOf(data.customExercises,"strength")]`) + `exBurn`. Added a "⭐ Custom" optgroup to
+  all schedule `<select>`s and merged custom into the `SearchableSelect` type-aheads. Verified live (Prospect Pat, 220
+  lbs): standard Bench 45m → **412 cal** (MET, regression OK); custom Sled Push 30m @10 cal/min → **exactly 300 cal**,
+  correct label, no console errors. **Step B (AI):** new **`add_custom_exercise`** tool (both roles, access-checked) in
+  `aitools.js` creates a custom exercise (AI estimates `calPerMin`, deduped by label+type) and returns its id;
+  `propose_workout`/`set_workout_schedule` now fold the plan's custom ids into the valid-id sets (via `customExerciseSets(data)`)
+  so they're not dropped, and into the card's label map (`weekWithLabels(week, labelMap)`) so the card shows the name.
+  Verified live (trainer→Casey): "add Battle Ropes ~12 cal/min, program it Monday 20m, show card" → `add_custom_exercise`
+  + `propose_workout` → card "Monday — Battle Ropes (~240 cal)" → Accept → Casey's Monday strength holds the custom id.
+  **⚠️ DEPLOY GOTCHA (hit + fixed):** `aitools.js` is shared by `aiChat`, `aiChatStream`, `logMeal`, AND `setWorkoutSchedule`
+  (the Accept callables). Deploying only `aiChat`/`aiChatStream` left `setWorkoutSchedule` on stale `aitools.js`, which
+  dropped the custom id on Accept (empty schedule, but "saved" shown). **When `aitools.js` changes, deploy ALL FOUR
+  functions.** Frontend + backend both pushed/deployed. `npm run build` passes. No `firestore.rules` change. Model
+  `claude-sonnet-4-6`.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a
@@ -1677,7 +1700,8 @@ enabled (Blaze has no default spending cap).
     change/extend anytime; we can also feed it Glide-specific knowledge (the spec's GI tables, coaching methodology).
     Model upgrades are a one-line change as Anthropic ships better models. Framed for Kevin S68 — keep this in mind
     when scoping future AI work. **The knowledge base now exists (`functions/knowledge.js`, S77) — keep growing it.**
-  - **Custom exercises — wire them end-to-end (S77 scoped, Kevin wants it).** Today `data.customExercises` is written
+  - ~~**Custom exercises — wire them end-to-end**~~ **DONE — Session 78** (frontend pickers/burn + AI `add_custom_exercise`).
+    _(Original scoping below, for reference.)_ Today `data.customExercises` is written
     by the wizard's `CustomExerciseCreator` (StepStrength/StepCardio) but **read nowhere**: the schedule `<select>`s
     list only `STRENGTH_EXERCISES`/`ALL_CARDIO`, and every burn calc uses `[REST_ST, ...STRENGTH_EXERCISES]` /
     `ALL_CARDIO` (no custom). Plan: (a) merge `data.customExercises` into the pickers (add a "Custom" optgroup) AND the
