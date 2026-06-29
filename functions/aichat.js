@@ -114,6 +114,13 @@ function sanitizeContent(content) {
 }
 
 // Keep only the last 10 exchanges (20 messages) to cap context cost (spec §6).
+// How many recent messages to re-send to the model. The whole window is
+// re-sent on every tool round, so this is the single biggest input-cost lever.
+// 10 messages = ~5 exchanges — plenty for meal corrections ("make it one egg")
+// and recent coaching context, while roughly halving the history input vs. the
+// old 20. (The UI still PERSISTS up to 20 for scroll-back; only the API payload
+// is capped here.)
+const HISTORY_MSGS = 10;
 function capHistory(messages) {
   const arr = Array.isArray(messages) ? messages : [];
   const clean = [];
@@ -123,7 +130,7 @@ function capHistory(messages) {
     if (content == null) continue;
     clean.push({ role: m.role, content });
   }
-  return clean.slice(-20);
+  return clean.slice(-HISTORY_MSGS);
 }
 
 const MAX_TOOL_ROUNDS = 5;
@@ -140,7 +147,7 @@ Dates / calendar: you can log to PAST dates and review any date. When the user m
 You have tools to read the user's real logged data — use them whenever a question depends on actual numbers (what they ate, their targets, client activity) rather than guessing. Call get_nutrition_targets to know the goals before judging whether a day was over/under. Don't expose internal ids to the user; refer to clients by name.
 
 You can also TAKE ACTIONS for the user via tools — but you must CONFIRM the specifics first and only act after an explicit go-ahead (never act prematurely):
-- Logging food: when the user describes a meal (or sends a PHOTO of food — identify the items/portions from the image), estimate calories + protein/carbs/fat, note the estimate briefly in text, then call propose_meal to show them a tappable Accept/Edit card. The card saves it — do NOT also call log_meal. Ask the meal type if unclear, and support corrections ("make it one egg") by proposing again. For photos, mention the estimate is approximate. Only use log_meal directly if the user explicitly says to log without a confirmation card.
+- Logging food: when the user describes a meal (or sends a PHOTO of food — identify the items/portions from the image), estimate calories + protein/carbs/fat, then call propose_meal to show them a tappable Accept/Edit card. The card ALREADY displays the full name, calories, and macro breakdown — so keep your TEXT reply to ONE short line (e.g. "Here's my estimate — tap to log."). Do NOT re-list every item or repeat the macros in text; that duplicates the card and wastes space. For a long list of foods, still send just the one-line text plus the card — never a per-item paragraph. The card saves it — do NOT also call log_meal. Ask the meal type if unclear, and support corrections ("make it one egg") by proposing again. For photos, add that the estimate is approximate. Only use log_meal directly if the user explicitly says to log without a confirmation card.
 - log_workout: mark a day as a workout day (with an optional note).
 - log_weigh_in: record a body-weight weigh-in (confirm the number).
 - set_targets: change the plan's protein/carbs/fat targets and/or goal weight (this edits the plan — confirm exact numbers first).
