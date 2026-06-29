@@ -1,0 +1,93 @@
+// Glide AI — voice transcription (speech-to-text for the AI chat).
+//
+// PROVIDER-AGNOSTIC: both OpenAI and Groq expose an OpenAI-compatible
+// /audio/transcriptions endpoint, so ONE code path serves both — only the URL,
+// model, and key differ. We start on OpenAI (available, pay-as-you-go); Groq is
+// wired as a best-effort fallback and can be promoted to PRIMARY (cheaper +
+// faster) by flipping VOICE_PRIMARY once Groq's paid tier reopens.
+//
+// Cost: Whisper-class transcription is ~$0.006/min — pennies. The transcribed
+// text then flows through the normal (budgeted) AI chat, so this endpoint just
+// needs auth + a size cap. Keys live in Secret Manager (never in the repo).
+
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
+
+const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
+const GROQ_API_KEY = defineSecret("GROQ_API_KEY");
+
+// PRIMARY is tried first; if it errors and FALLBACK is set, that's tried next.
+// Flip PRIMARY to "groq" when Groq's paid tier reopens (cheaper + faster).
+const VOICE_PRIMARY = "openai";
+const VOICE_FALLBACK = "groq"; // best-effort (Groq free tier works, rate-limited)
+
+function providerConfig(name) {
+  if (name === "groq") {
+    return { url: "https://api.groq.com/openai/v1/audio/transcriptions", model: "whisper-large-v3", key: () => GROQ_API_KEY.value() };
+  }
+  return { url: "https://api.openai.com/v1/audio/transcriptions", model: "whisper-1", key: () => OPENAI_API_KEY.value() };
+}
+
+// ~10MB of base64 ≈ 7.5MB of audio ≈ a few minutes of speech — plenty for a chat
+// message, and a guard against abuse / runaway cost.
+const MAX_AUDIO_B64 = 10 * 1024 * 1024;
+// Browser MediaRecorder produces webm/ogg (Chrome/Android) or mp4/m4a (Safari).
+const MIME_EXT = {
+  "audio/webm": "webm", "audio/ogg": "ogg",
+  "audio/mp4": "mp4", "audio/m4a": "m4a", "audio/x-m4a": "m4a",
+  "audio/mpeg": "mp3", "audio/mp3": "mp3",
+  "audio/wav": "wav", "audio/x-wav": "wav",
+};
+
+async function transcribeWith(provider, buffer, baseMime) {
+  const cfg = providerConfig(provider);
+  const ext = MIME_EXT[baseMime] || "webm";
+  const form = new FormData();
+  form.append("file", new Blob([buffer], { type: baseMime }), `audio.${ext}`);
+  form.append("model", cfg.model);
+  form.append("response_format", "json");
+  const resp = await fetch(cfg.url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${cfg.key()}` },
+    body: form,
+  });
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => "");
+    throw new Error(`${provider} ${resp.status}: ${t.slice(0, 200)}`);
+  }
+  const data = await resp.json();
+  return (data && typeof data.text === "string") ? data.text : "";
+}
+
+exports.transcribeAudio = onCall(
+  { secrets: [OPENAI_API_KEY, GROQ_API_KEY], region: "us-central1", maxInstances: 10 },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Please sign in to use voice.");
+
+    const b64 = request.data && request.data.audio;
+    const mimeType = (request.data && request.data.mimeType) || "audio/webm";
+    if (!b64 || typeof b64 !== "string") throw new HttpsError("invalid-argument", "No audio provided.");
+    if (b64.length > MAX_AUDIO_B64) throw new HttpsError("invalid-argument", "That recording is too long — keep it under ~3 minutes.");
+    const baseMime = mimeType.split(";")[0].trim();
+    if (!MIME_EXT[baseMime]) throw new HttpsError("invalid-argument", "Unsupported audio format.");
+
+    let buffer;
+    try { buffer = Buffer.from(b64, "base64"); } catch (e) { throw new HttpsError("invalid-argument", "Bad audio encoding."); }
+    if (!buffer.length) throw new HttpsError("invalid-argument", "Empty audio.");
+
+    const providers = [VOICE_PRIMARY, VOICE_FALLBACK].filter(Boolean);
+    let lastErr;
+    for (const p of providers) {
+      try {
+        const text = await transcribeWith(p, buffer, baseMime);
+        return { text: text.trim(), provider: p };
+      } catch (e) {
+        lastErr = e;
+        console.error("transcribeAudio provider failed:", p, e && e.message);
+      }
+    }
+    console.error("transcribeAudio all providers failed:", lastErr && lastErr.message);
+    throw new HttpsError("internal", "Couldn't transcribe the audio. Please try again.");
+  }
+);

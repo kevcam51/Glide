@@ -9605,6 +9605,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
 const callAiChat = httpsCallable(functions, "aiChat");
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
 const callSetWorkout = httpsCallable(functions, "setWorkoutSchedule"); // workout Accept-card direct write (Session 75)
+const callTranscribe = httpsCallable(functions, "transcribeAudio"); // voice → text (Whisper, Session 79)
 // Streaming endpoint (Session 66) — replies arrive word-by-word via SSE. We POST
 // with the Firebase ID token (EventSource can't set headers, so we fetch+stream).
 const AI_STREAM_URL = `https://us-central1-${import.meta.env.VITE_FIREBASE_PROJECT_ID}.cloudfunctions.net/aiChatStream`;
@@ -9696,6 +9697,16 @@ function imageBlockFromDataUrl(dataUrl) {
   const m = /^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/.exec(dataUrl || "");
   return m ? { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } } : null;
 }
+// Read a Blob (recorded audio) as a base64 string (no data: prefix) for the
+// transcribeAudio callable (Session 79 — voice input).
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onloadend = () => { const s = String(r.result || ""); resolve(s.slice(s.indexOf(",") + 1)); };
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
 
 function AIChatPanel({ role, onDataChanged }) {
   const [open, setOpen] = useState(false);
@@ -9708,8 +9719,13 @@ function AIChatPanel({ role, onDataChanged }) {
   const [proposal, setProposal] = useState(null); // pending meal card {…, status}
   const [editDraft, setEditDraft] = useState(null); // edit-mode fields
   const [workout, setWorkout] = useState(null); // pending workout-program card {…, status}
+  const [recording, setRecording] = useState(false);     // mic actively recording
+  const [transcribing, setTranscribing] = useState(false); // sending audio → text
   const scrollRef = useRef(null);
   const fileRef = useRef(null);
+  const recRef = useRef(null);    // MediaRecorder instance
+  const chunksRef = useRef([]);   // recorded audio chunks
+  const streamRef = useRef(null); // mic MediaStream (to stop tracks after)
   const loadedRef = useRef(false); // guards persistence until the saved thread loads
 
   // Conversation persistence (Session 77): the chat thread is saved to the user's
@@ -9781,6 +9797,56 @@ function AIChatPanel({ role, onDataChanged }) {
     try { setPendingImage(await downscaleImage(f)); }
     catch { setError("Couldn't read that photo. Try another."); }
   };
+
+  // Voice input (Session 79): record from the mic, transcribe via Whisper
+  // (transcribeAudio callable), and drop the text into the composer for the user
+  // to review and send. Stops the mic tracks after to release the device.
+  const startRecording = async () => {
+    setError("");
+    if (typeof navigator === "undefined" || !navigator.mediaDevices || typeof MediaRecorder === "undefined") {
+      setError("Voice input isn't supported on this browser."); return;
+    }
+    let mime = "";
+    for (const m of ["audio/webm", "audio/mp4", "audio/ogg"]) {
+      if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) { mime = m; break; }
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      chunksRef.current = [];
+      const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      recRef.current = rec;
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunksRef.current.push(e.data); };
+      rec.onstop = async () => {
+        if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+        const blob = new Blob(chunksRef.current, { type: rec.mimeType || mime || "audio/webm" });
+        chunksRef.current = [];
+        if (!blob.size) return;
+        setTranscribing(true);
+        try {
+          const b64 = await blobToBase64(blob);
+          const res = await callTranscribe({ audio: b64, mimeType: blob.type });
+          const text = (res.data && res.data.text) || "";
+          if (text) setDraft((d) => (d ? d.trim() + " " : "") + text);
+          else setError("Didn't catch that — try again.");
+        } catch (err) {
+          const code = (err && err.code) || "";
+          if (code.includes("unauthenticated")) setError("Please sign in again to use voice.");
+          else if (code.includes("invalid-argument")) setError("That recording couldn't be used — try a shorter clip.");
+          else setError("Couldn't transcribe — please try again.");
+        } finally { setTranscribing(false); }
+      };
+      rec.start();
+      setRecording(true);
+    } catch (err) {
+      setError("Microphone access was blocked. Enable it in your browser settings.");
+    }
+  };
+  const stopRecording = () => {
+    try { if (recRef.current && recRef.current.state !== "inactive") recRef.current.stop(); } catch (e) { /* ignore */ }
+    setRecording(false);
+  };
+  const toggleMic = () => { if (recording) stopRecording(); else startRecording(); };
 
   // Auto-scroll to the newest message whenever the thread or busy state changes.
   useEffect(() => {
@@ -10051,18 +10117,23 @@ function AIChatPanel({ role, onDataChanged }) {
             )}
             <div className="flex items-end gap-2">
               <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFile} />
-              <button onClick={pickImage} disabled={busy} aria-label="Add a photo" title="Photo of your meal"
+              <button onClick={pickImage} disabled={busy || recording || transcribing} aria-label="Add a photo" title="Photo of your meal"
                 className="rounded-xl border border-border bg-surface2 px-3 py-2.5 text-[1.05rem] text-fg cursor-pointer disabled:opacity-50">📷</button>
+              <button onClick={toggleMic} disabled={busy || transcribing}
+                aria-label={recording ? "Stop recording" : "Record a voice message"}
+                title={recording ? "Tap to stop" : "Speak to Glide"}
+                className={`rounded-xl border px-3 py-2.5 text-[1.05rem] cursor-pointer disabled:opacity-50 ${recording ? "border-danger bg-danger text-primaryfg animate-pulse" : "border-border bg-surface2 text-fg"}`}>
+                {transcribing ? "…" : recording ? "⏹" : "🎤"}</button>
               <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={1}
-                placeholder={pendingImage ? "Add a note (optional)…" : "Message Glide AI…"}
+                placeholder={recording ? "Listening… tap ⏹ to stop" : transcribing ? "Transcribing…" : pendingImage ? "Add a note (optional)…" : "Message Glide AI…"}
                 className="flex-1 resize-none box-border max-h-28 rounded-xl border border-border bg-surface2 px-3.5 py-2.5 text-[.9rem] text-fg outline-none placeholder:text-muted"
                 onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
-              <button onClick={send} disabled={busy || (!draft.trim() && !pendingImage)} aria-label="Send"
+              <button onClick={send} disabled={busy || recording || transcribing || (!draft.trim() && !pendingImage)} aria-label="Send"
                 className="rounded-xl border-none bg-primary px-3.5 py-2.5 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50 disabled:cursor-default">
                 {busy ? "…" : "Send"}
               </button>
             </div>
-            <div className="mt-1.5 text-[.66rem] text-muted">📷 Snap a meal to log it. AI estimates can be off — confirm important numbers.</div>
+            <div className="mt-1.5 text-[.66rem] text-muted">🎤 Speak or 📷 snap a meal. AI estimates can be off — confirm important numbers.</div>
           </div>
         </div>
       )}
