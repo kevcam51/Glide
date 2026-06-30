@@ -45,6 +45,7 @@ const GLYPHS = {
   bolt: (<path d="M13 2 4 14h6l-1 8 9-12h-6z" />),
   check: (<path d="M5 12.5 10 17.5 19.5 7" />),
   ruler: (<><rect x="2.5" y="8.5" width="19" height="7" rx="1.5" /><path d="M6.5 8.5v2.6" /><path d="M10 8.5v3.6" /><path d="M13.5 8.5v2.6" /><path d="M17 8.5v3.6" /></>),
+  moon: (<path d="M20 13.5A8 8 0 0 1 9.4 4 7 7 0 1 0 20 13.5z" />),
   run: (<><circle cx="14" cy="4.7" r="1.8" /><path d="M5 17.5l4.5 1 1-2" /><path d="M15.5 21v-4.5l-4-3 1.3-6.3" /><path d="M7.5 12.5V9l5.2-1 3 3 3 1" /></>),
 };
 

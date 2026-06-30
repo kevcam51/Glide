@@ -6930,7 +6930,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       {/* Streak */}
       <div className="dash-streak">
         <div>
-          <div className="dash-streak-num">🔥 {streak}</div>
+          <div className="dash-streak-num" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"7px"}}><Icon name="flame" size={24} color="var(--orange)" />{streak}</div>
           <div className="dash-streak-lbl">day streak</div>
         </div>
         {hasGoal && toLose > 0 && (
@@ -6960,22 +6960,22 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       {/* Quick stats — tappable */}
       <div className="dash-cta-grid">
         <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="target"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="target"?null:"target")}>
-          <div className="dash-cta-icon">🎯</div>
+          <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="target" size={23} color="var(--accent)" /></div>
           <div className="dash-cta-val">{target.toLocaleString()}</div>
           <div className="dash-cta-lbl">Today's Target</div>
         </div>
         <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="logged"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="logged"?null:"logged")}>
-          <div className="dash-cta-icon">🍽️</div>
+          <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="meal" size={23} color="var(--accent)" /></div>
           <div className="dash-cta-val">{logged.toLocaleString()}</div>
           <div className="dash-cta-lbl">Logged So Far</div>
         </div>
         <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="burn"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="burn"?null:"burn")}>
-          <div className="dash-cta-icon">🔥</div>
+          <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="flame" size={23} color="var(--orange)" /></div>
           <div className="dash-cta-val">{todayTotalBurn}</div>
           <div className="dash-cta-lbl">Workout Burn</div>
         </div>
         <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="water"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="water"?null:"water")}>
-          <div className="dash-cta-icon">💧</div>
+          <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="water" size={23} color="#4fc3f7" /></div>
           <div className="dash-cta-val">{dailyLog.water || 0}</div>
           <div className="dash-cta-lbl">oz Water</div>
         </div>
@@ -7133,7 +7133,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       {/* Quick log */}
       <div className="sec-title">Quick Log</div>
       <div className="dash-log-row" style={{cursor:"pointer",borderLeft:showMacros?"3px solid var(--accent)":"3px solid transparent",transition:"all .15s"}} onClick={()=>setShowMacros(v=>!v)}>
-        <span className="dash-log-icon">🍽️</span>
+        <span className="dash-log-icon" style={{display:"flex",alignItems:"center"}}><Icon name="meal" size={20} color="var(--accent)" /></span>
         <div className="dash-log-info">
           <div className="dash-log-title">Add Calories</div>
           <div className="dash-log-sub" style={{color:showMacros?"var(--accent)":"var(--muted)"}}>
@@ -7265,7 +7265,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} />
 
       <div className="dash-log-row">
-        <span className="dash-log-icon">💧</span>
+        <span className="dash-log-icon" style={{display:"flex",alignItems:"center"}}><Icon name="water" size={20} color="#4fc3f7" /></span>
         <div className="dash-log-info">
           <div className="dash-log-title">Water Intake</div>
           <div className="dash-log-sub">Target: ~{Math.round(Number(weightLbs)*0.5)} oz/day</div>
@@ -7277,7 +7277,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         <button style={logBtn} onClick={commitWater}>Log</button>
       </div>
       <div className="dash-log-row">
-        <span className="dash-log-icon">⚖️</span>
+        <span className="dash-log-icon" style={{display:"flex",alignItems:"center"}}><Icon name="scale" size={21} color="var(--muted)" /></span>
         <div className="dash-log-info">
           <div className="dash-log-title">Today's Weight</div>
           <div className="dash-log-sub">{hasGoal?`Goal: ${goalWeight} lbs`:"Track your trend"}</div>
@@ -7406,8 +7406,8 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           ))}
         </div>
       ) : (
-        <div className="dash-today-workout" style={{textAlign:"center",padding:"16px",color:"var(--muted)",fontSize:".84rem"}}>
-          😴 Rest day — no workouts scheduled
+        <div className="dash-today-workout" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"8px",padding:"16px",color:"var(--muted)",fontSize:".84rem"}}>
+          <Icon name="moon" size={16} />Rest day — no workouts scheduled
         </div>
       )}
       {/* Add workout to today */}
@@ -7484,7 +7484,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             <div style={{fontSize:".58rem",color:"var(--muted)",marginTop:"3px",lineHeight:1.3}}>Most recent weigh-in</div>
           </div>
           <div className="share-stat">
-            <div className="share-stat-val">🔥 {streak}</div>
+            <div className="share-stat-val" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"6px"}}><Icon name="flame" size={20} color="var(--orange)" />{streak}</div>
             <div className="share-stat-lbl">Day Streak</div>
             <div style={{fontSize:".58rem",color:"var(--muted)",marginTop:"3px",lineHeight:1.3}}>Consecutive check-ins</div>
           </div>
@@ -9268,11 +9268,12 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                       </div>
                     )}
                     {/* Weight → goal: larger and brighter so it's easy to read */}
-                    <div className="text-[.95rem] text-fg font-semibold">
-                      ⚖️ {p.weight ? `${p.weight} lbs` : "—"}{p.goal ? ` → ${p.goal} lbs` : ""}
+                    <div className="text-[.95rem] text-fg font-semibold flex items-center gap-1.5">
+                      <Icon name="scale" size={17} color="var(--muted)" />
+                      <span>{p.weight ? `${p.weight} lbs` : "—"}{p.goal ? ` → ${p.goal} lbs` : ""}
                       {toGo !== null && toGo > 0
                         ? ` · ${toGo} lbs to go`
-                        : (toGo !== null && toGo <= 0 ? " · 🎯 at goal" : "")}
+                        : (toGo !== null && toGo <= 0 ? " · at goal" : "")}</span>
                     </div>
                     {/* Progress + activity meta — only for real plans (sims aren't tracked) */}
                     {!sim && pct !== null && (
@@ -9285,8 +9286,8 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     )}
                     {!sim && (
                       <div className="flex flex-wrap gap-3.5 text-sm text-muted mt-2">
-                        <span>🔥 {det && det.target != null ? `${det.target.toLocaleString()} cal/day` : "—"}</span>
-                        <span>🕑 {ds === null ? "no logs yet" : ds === 0 ? "active today" : ds === 1 ? "1 day ago" : `${ds} days ago`}</span>
+                        <span className="inline-flex items-center gap-1.5"><Icon name="flame" size={15} />{det && det.target != null ? `${det.target.toLocaleString()} cal/day` : "—"}</span>
+                        <span className="inline-flex items-center gap-1.5"><Icon name="clock" size={15} />{ds === null ? "no logs yet" : ds === 0 ? "active today" : ds === 1 ? "1 day ago" : `${ds} days ago`}</span>
                       </div>
                     )}
                     {/* Actions: convert (sims) + delete (all) */}
