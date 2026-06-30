@@ -3082,7 +3082,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
       <div className="ibw-card">
         <div className="ibw-toggle" onClick={()=>setShowIBW(v=>!v)}>
           <div className="ibw-toggle-left">
-            <span className="ibw-toggle-title">📏 Ideal Body Weight</span>
+            <span className="ibw-toggle-title" style={{display:"inline-flex",alignItems:"center",gap:"7px"}}><Icon name="ruler" size={17} color="var(--accent)" />Ideal Body Weight</span>
             <span className="ibw-toggle-summary">BMI {bmi.toFixed(1)} · {ibwLowLbs}–{ibwHighLbs} lbs range</span>
           </div>
           <div className={`ibw-toggle-chevron${showIBW?" open":""}`}>▼</div>
@@ -12477,10 +12477,12 @@ export default function App() {
                 ))}
               </div>
             )}
-            <div className="text-[.72rem] text-muted tracking-wide uppercase text-center mb-2.5 font-medium">
+            <div className="text-[.72rem] text-muted tracking-wide uppercase text-center mb-2.5 font-medium flex items-center justify-center gap-1.5">
               {step < LBLS.length - 1
                 ? `Step ${step+1} of ${LBLS.length-1} — ${LBLS[step]}`
-                : showDash ? "📊 Daily Dashboard" : "✅ Your Personalized Plan"
+                : showDash
+                  ? <><Icon name="dashboard" size={13} />Daily Dashboard</>
+                  : <><Icon name="check" size={14} color="var(--green)" />Your Personalized Plan</>
               }
             </div>
             {step < LBLS.length - 1 && (
@@ -12538,7 +12540,7 @@ export default function App() {
           )}
           {step===5 && !showDash && <>
             <div style={{marginBottom:"12px"}}>
-              <button className="dash-nav-btn" style={{width:"100%"}} onClick={()=>setShowDash(true)}>📊 Back to Dashboard</button>
+              <button className="dash-nav-btn" style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:"7px"}} onClick={()=>setShowDash(true)}><Icon name="dashboard" size={16} color="var(--accent)" />Back to Dashboard</button>
             </div>
             <Results data={data} isSimulation={activeIsSim} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
             onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
