@@ -8966,15 +8966,15 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                       {c.hasPlan ? (
                         <>
                           <div className="text-[.95rem] text-fg font-semibold flex items-center gap-1.5">
-                            <Icon name="scale" size={15} color="var(--muted)" />
+                            <Icon name="scale" size={17} color="var(--muted)" />
                             <span>{c.weight ? `${c.weight} lbs` : "—"}{c.goal ? ` → ${c.goal} lbs` : ""}
                             {toGo !== null && toGo > 0
                               ? ` · ${toGo} lbs to go`
                               : (toGo !== null && toGo <= 0 ? " · at goal" : "")}</span>
                           </div>
                           <div className="flex flex-wrap gap-3.5 text-sm text-muted mt-2">
-                            <span className="inline-flex items-center gap-1"><Icon name="flame" size={13} />{c.target != null ? `${c.target.toLocaleString()} cal/day` : "—"}</span>
-                            <span className="inline-flex items-center gap-1"><Icon name="clock" size={13} />{ds === null ? "no logs yet" : ds === 0 ? "active today" : ds === 1 ? "1 day ago" : `${ds} days ago`}</span>
+                            <span className="inline-flex items-center gap-1.5"><Icon name="flame" size={15} />{c.target != null ? `${c.target.toLocaleString()} cal/day` : "—"}</span>
+                            <span className="inline-flex items-center gap-1.5"><Icon name="clock" size={15} />{ds === null ? "no logs yet" : ds === 0 ? "active today" : ds === 1 ? "1 day ago" : `${ds} days ago`}</span>
                           </div>
                           <div className="text-[.72rem] text-primary mt-2">Tap to open plan →</div>
                         </>
@@ -9032,13 +9032,13 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     ) : (
                       <div className="flex gap-2 mt-2.5 flex-wrap">
                         <button className={`${mPrimaryCls} inline-flex items-center gap-1.5`} onClick={() => { setComposingFor(composingFor === c.uid ? null : c.uid); setReqDraft(""); }}>
-                          <Icon name="invite" size={14} />Send request
+                          <Icon name="mail" size={16} />Send request
                         </button>
                         {c.hasPlan && (
                           <button className={mBtnCls} onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>Open plan</button>
                         )}
                         <button className={`${mBtnCls} inline-flex items-center gap-1.5`} onClick={() => setPlansForClient(plansForClient === c.uid ? null : c.uid)}>
-                          <Icon name="folder" size={14} color="var(--accent)" />Plans{(c.plans && c.plans.length > 1) ? ` (${c.plans.length})` : ""}
+                          <Icon name="folder" size={16} color="var(--accent)" />Plans{(c.plans && c.plans.length > 1) ? ` (${c.plans.length})` : ""}
                         </button>
                         <button className={mBtnCls} onClick={() => setLinkingFor(c.uid)}>
                           {c.hasPlan ? "Re-link a different plan" : "Link a profile"}
