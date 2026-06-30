@@ -6156,7 +6156,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
       border:"1px solid var(--border)", marginBottom:"6px" }}>
       <div onClick={() => setOpen((o) => !o)}
         style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", gap:"8px" }}>
-        <div className="sec-title" style={{ marginTop:0, marginBottom:0 }}>🍽️ Meals &amp; Food Today</div>
+        <div className="sec-title" style={{ marginTop:0, marginBottom:0, display:"flex", alignItems:"center", gap:"8px" }}><Icon name="meal" size={17} color="var(--accent)" />Meals &amp; Food Today</div>
         <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
           {list.length > 0 && (
             <span style={{ fontSize:".78rem", color:"var(--muted)", whiteSpace:"nowrap" }}>
@@ -6903,17 +6903,19 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       {isRemote && (
         <div style={{ padding:"8px 12px", borderRadius:"8px", marginBottom:"10px",
           background:"rgba(8,220,224,.08)", border:"1px solid var(--accent)",
-          color:"var(--accent)", fontSize:".78rem", fontWeight:600 }}>
-          🔗 Shared client plan — you're viewing {fullName(data) || "this client"}'s account. Your changes save to their login, and you both see the same activity.
+          color:"var(--accent)", fontSize:".78rem", fontWeight:600,
+          display:"flex", alignItems:"flex-start", gap:"8px" }}>
+          <Icon name="link" size={16} color="var(--accent)" style={{ marginTop:1 }} />
+          <span>Shared client plan — you're viewing {fullName(data) || "this client"}'s account. Your changes save to their login, and you both see the same activity.</span>
         </div>
       )}
       <div className="dash-date">{today.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
       <div className="dash-greeting">{firstName ? `Hey ${firstName}` : "Your Daily Plan"}</div>
       <button onClick={() => setShowCalendar(true)}
-        style={{ display:"block", margin:"0 auto 16px", padding:"9px 16px", fontSize:".82rem", fontWeight:700,
+        style={{ display:"flex", alignItems:"center", gap:"7px", margin:"0 auto 16px", padding:"9px 16px", fontSize:".82rem", fontWeight:700,
           borderRadius:"10px", cursor:"pointer", border:"1px solid var(--border)",
           background:"var(--s2)", color:"var(--text)" }}>
-        📅 Calendar
+        <Icon name="calendar" size={16} color="var(--accent)" />Calendar
       </button>
 
       {/* Streak */}
@@ -6975,7 +6977,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         <div className="card" style={{padding:"14px 16px",marginBottom:"14px",borderColor:"rgba(8,220,224,.2)",animation:"fadeUp .15s ease both"}}>
           {expandedStat === "target" && (
             <>
-              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"var(--accent)"}}>🎯 How Your Target Is Calculated</div>
+              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"var(--accent)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="target" size={16} color="var(--accent)" />How Your Target Is Calculated</div>
               <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
                 <span style={{color:"var(--muted)"}}>Base TDEE</span>
                 <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{tdee.toLocaleString()} cal</span>
@@ -6997,7 +6999,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           )}
           {expandedStat === "logged" && (
             <>
-              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"var(--accent)"}}>🍽️ Calories Logged Today</div>
+              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"var(--accent)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="meal" size={16} color="var(--accent)" />Calories Logged Today</div>
               <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
                 <span style={{color:"var(--muted)"}}>Logged</span>
                 <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{logged.toLocaleString()} cal</span>
@@ -7036,7 +7038,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           )}
           {expandedStat === "burn" && (
             <>
-              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"6px",color:"var(--orange)"}}>🔥 Workout Burn Breakdown</div>
+              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"6px",color:"var(--orange)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="flame" size={16} color="var(--orange)" />Workout Burn Breakdown</div>
               <div style={{fontSize:".7rem",color:"var(--muted)",marginBottom:"8px"}}>Tap any exercise to edit or remove it</div>
               {(todayCardio.workouts||[]).map((w,i) => (
                 <div key={`cb${i}`} style={{display:"flex",justifyContent:"space-between",padding:"8px 6px",borderBottom:"1px solid var(--border)",fontSize:".82rem",cursor:"pointer",borderRadius:"6px",background:editingWorkout===`c${i}`?"rgba(79,195,247,.06)":"transparent"}}
@@ -7077,7 +7079,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           )}
           {expandedStat === "water" && (
             <>
-              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"#4fc3f7"}}>💧 Hydration</div>
+              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"#4fc3f7",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="water" size={16} color="#4fc3f7" />Hydration</div>
               <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
                 <span style={{color:"var(--muted)"}}>Logged</span>
                 <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{dailyLog.water || 0} oz</span>

@@ -36,6 +36,7 @@ const GLYPHS = {
   folder: (<path d="M4 6h4l1.6 2H19a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" />),
   meal: (<><path d="M6 3v4a2.5 2.5 0 0 0 5 0V3" /><path d="M8.5 9v12" /><path d="M17 3c-1.7.5-3 2.8-3 6.2 0 1.8 1 2.6 3 2.6" /><path d="M17 11.8V21" /></>),
   clock: (<><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>),
+  link: (<><path d="M9.5 14.5 14.5 9.5" /><path d="M8.5 11 6.5 13a3.4 3.4 0 0 0 4.8 4.8l2-2" /><path d="M15.5 13l2-2a3.4 3.4 0 0 0-4.8-4.8l-2 2" /></>),
 };
 
 export function Icon({ name, size = 20, variant = "outline", color = "currentColor",
