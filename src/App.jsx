@@ -2977,6 +2977,13 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
 
   const strengthTabIdx = TABS.indexOf("🏋️ Strength");
   const summaryTabIdx = TABS.indexOf("📋 Summary");
+  // Tab strings double as keys (indexOf above), so the emoji stays in the data —
+  // we render a custom <Icon> + the emoji-stripped label at display time only.
+  const TAB_ICONS = {
+    "📊 No Cardio": "chart", "🔥 + Cardio": "flame", "🎯 Timeline": "clock",
+    "🥗 Nutrients": "leaf", "⚠️ Fat Gain": "alert", "💪 Muscle": "muscle",
+    "🏋️ Strength": "dumbbell", "📋 Summary": "clipboard",
+  };
 
   const colorsForCls = { "c-acc":"var(--accent)","c-grn":"var(--green)","c-yel":"var(--yellow)","c-red":"var(--red)" };
 
@@ -3008,11 +3015,11 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
       <div style={{display:"flex",gap:"4px",background:"var(--s2)",padding:"4px",borderRadius:"12px",border:"1px solid var(--border)",marginBottom:"16px"}}>
         <button style={{flex:1,padding:"10px",borderRadius:"9px",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:".82rem",fontWeight:600,transition:"all .2s",background:viewMode==="basic"?"var(--surface)":"transparent",color:viewMode==="basic"?"var(--text)":"var(--muted)",boxShadow:viewMode==="basic"?"0 2px 8px rgba(0,0,0,.3)":"none"}}
           onClick={()=>setViewMode("basic")}>
-          📊 Basic Calculator
+          <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}><Icon name="chart" size={15} />Basic Calculator</span>
         </button>
         <button style={{flex:1,padding:"10px",borderRadius:"9px",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:".82rem",fontWeight:600,transition:"all .2s",background:viewMode==="pro"?"var(--surface)":"transparent",color:viewMode==="pro"?"var(--accent)":"var(--muted)",boxShadow:viewMode==="pro"?"0 2px 8px rgba(0,0,0,.3)":"none"}}
           onClick={()=>setViewMode("pro")}>
-          ⚡ Pro Tracking
+          <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}><Icon name="bolt" size={15} />Pro Tracking</span>
         </button>
       </div>
 
@@ -3164,7 +3171,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
 
       <div className="rtabs">
         {TABS.map((t,i)=>(
-          <button key={i} className={`rtab${tab===i?" active":""}`} onClick={()=>setTab(i)}>{t}</button>
+          <button key={i} className={`rtab${tab===i?" active":""}`} onClick={()=>setTab(i)}><span style={{display:"inline-flex",alignItems:"center",gap:"5px"}}><Icon name={TAB_ICONS[t]} size={14} />{t.replace(/^\S+\s/,"")}</span></button>
         ))}
       </div>
 
