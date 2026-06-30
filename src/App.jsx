@@ -5,6 +5,7 @@ import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } 
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
+import { Icon } from "./icons.jsx";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
@@ -11409,7 +11410,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
         paddingTop: "calc(16px + env(safe-area-inset-top,0px))" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 4px 12px" }}>
           <div className="logo" style={{ fontSize: "1.4rem" }}>GLI<span>DE</span></div>
-          <button onClick={onClose} style={{ ...item, width: "auto", padding: "6px 10px", fontSize: "1.1rem" }}>✕</button>
+          <button onClick={onClose} style={{ ...item, width: "auto", padding: "6px 10px" }} aria-label="Close menu"><Icon name="close" size={18} color="var(--muted)" /></button>
         </div>
 
         {/* Identity + name edit */}
@@ -11436,7 +11437,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
                   {meEmail ? ` · ${meEmail}` : ""}
                 </div>
               </div>
-              <button onClick={() => setEditing(true)} title="Edit name" style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: "1rem", padding: 6 }}>✎</button>
+              <button onClick={() => setEditing(true)} title="Edit name" style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", padding: 6, display: "flex" }}><Icon name="edit" size={16} /></button>
             </div>
           )}
         </div>
@@ -11465,9 +11466,9 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
         )}
 
         {/* Navigation */}
-        <button style={item} onClick={() => go(onHome)}>🏠 <span>Home</span></button>
-        {isTrainer && <button style={item} onClick={() => go(onDashboard)}>📊 <span>Dashboard</span></button>}
-        {isTrainer && <button style={item} onClick={() => go(onClients)}>👥 <span>All clients</span></button>}
+        <button style={item} onClick={() => go(onHome)}><Icon name="home" size={19} color="var(--accent)" /> <span>Home</span></button>
+        {isTrainer && <button style={item} onClick={() => go(onDashboard)}><Icon name="dashboard" size={19} color="var(--accent)" /> <span>Dashboard</span></button>}
+        {isTrainer && <button style={item} onClick={() => go(onClients)}><Icon name="clients" size={19} color="var(--accent)" /> <span>All clients</span></button>}
 
         {/* Notification Center (Session 76) — master on/off + per-type toggles.
             One notification type today (trainer to-dos); more slot in as features
@@ -11497,7 +11498,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
           return (
             <>
               <button style={item} onClick={() => setShowNotif((v) => !v)}>
-                🔔 <span>Notifications</span>
+                <Icon name="bell" size={19} color="var(--accent)" /> <span>Notifications</span>
                 <span style={{ marginLeft: "auto", color: "var(--muted)" }}>{showNotif ? "▾" : "▸"}</span>
               </button>
               {showNotif && (
@@ -11532,7 +11533,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
         {isTrainer && (
           <>
             <button style={item} onClick={() => setShowInvite((v) => !v)}>
-              📨 <span>Invite clients</span>
+              <Icon name="invite" size={19} color="var(--accent)" /> <span>Invite clients</span>
               <span style={{ marginLeft: "auto", color: "var(--muted)" }}>{showInvite ? "▾" : "▸"}</span>
             </button>
             {showInvite && (
@@ -11553,7 +11554,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
         )}
 
         <div style={{ flex: 1 }} />
-        <button style={{ ...item, color: "#e5484d" }} onClick={() => signOut(auth)}>🚪 <span>Sign out</span></button>
+        <button style={{ ...item, color: "#e5484d" }} onClick={() => signOut(auth)}><Icon name="signout" size={19} /> <span>Sign out</span></button>
       </div>
     </>
   );
