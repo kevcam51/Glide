@@ -34,6 +34,7 @@
   --color-fg: #1a1d21;
   --color-muted: #6b7280;
   --color-primary: #4f46e5;
+  --color-primaryfill: #4338ca; /* softer fill for large buttons (two-tier) — pro theme overrides to cyan */
   --color-primaryfg: #ffffff;
   --color-accent: #10b981;
   --color-success: #10b981;

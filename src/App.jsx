@@ -195,6 +195,7 @@ const css = `
 
   /* Brand colors */
   --accent:#08dce0;
+  --accent-fill:#18afb3;
   --accent-dim:rgba(8,220,224,.12);
   --orange:#ff6b35;
   --green:#2fe0a8;
@@ -298,10 +299,10 @@ body{
   transition:all .35s ease;
 }
 .step-dot.active{
-  background:var(--accent);
+  background:var(--accent-fill);
   box-shadow:0 0 10px rgba(8,220,224,.5);
 }
-.step-dot.done{background:var(--accent);opacity:.3}
+.step-dot.done{background:var(--accent-fill);opacity:.3}
 
 /* ── Card — the main building block ── */
 .card{
@@ -451,7 +452,7 @@ body{
   -webkit-tap-highlight-color:transparent;
 }
 .btn-p{
-  background:var(--accent);color:#0b0b12;font-weight:700;
+  background:var(--accent-fill);color:#0b0b12;font-weight:700;
   box-shadow:0 4px 18px rgba(8,220,224,.3);
 }
 .btn-p:active{transform:scale(.97);box-shadow:none}
@@ -1352,7 +1353,7 @@ body{
 }
 .profiles-btn:hover{border-color:var(--accent);color:var(--accent)}
 .profiles-btn .pbtn-count{
-  background:var(--accent);color:#0b0b12;
+  background:var(--accent-fill);color:#0b0b12;
   font-size:.65rem;font-weight:700;padding:2px 7px;
   border-radius:10px;min-width:20px;text-align:center;
 }
@@ -1558,7 +1559,7 @@ body{
 .share-card-footer{font-size:.7rem;color:var(--muted);margin-top:12px}
 .share-btn{
   width:100%;min-height:46px;border-radius:10px;border:none;
-  background:var(--accent);color:#0b0b12;cursor:pointer;
+  background:var(--accent-fill);color:#0b0b12;cursor:pointer;
   font-family:'Sora',sans-serif;font-size:1.05rem;letter-spacing:2px;
   display:flex;align-items:center;justify-content:center;gap:8px;
   transition:all .15s;margin-top:12px;
@@ -1801,7 +1802,7 @@ const WZW = {
   dayBody: "px-3 pb-3 border-t border-border",
   warn: "text-[.82rem] text-warn bg-[rgba(251,191,36,.08)] border border-[rgba(251,191,36,.3)] rounded-lg px-3.5 py-3 my-2 leading-relaxed",
   clearDay: "w-full mt-2 py-2.5 rounded-lg border border-border bg-transparent text-muted text-sm font-semibold cursor-pointer",
-  primaryBtn: "min-h-[44px] rounded-lg bg-primary text-primaryfg font-bold text-sm px-4 cursor-pointer disabled:bg-surface2 disabled:text-muted disabled:cursor-not-allowed",
+  primaryBtn: "min-h-[44px] rounded-lg bg-primaryfill text-primaryfg font-bold text-sm px-4 cursor-pointer disabled:bg-surface2 disabled:text-muted disabled:cursor-not-allowed",
   ghostBtn: "min-h-[44px] rounded-lg border border-border bg-surface2 text-fg font-semibold text-sm px-4 cursor-pointer",
 };
 const wzFillDay = (sel) => `min-h-[40px] rounded-md border text-sm font-semibold cursor-pointer ${sel ? "border-primary bg-[rgba(8,220,224,.12)] text-primary" : "border-border bg-surface2 text-fg"}`;
@@ -1823,7 +1824,7 @@ function BottomNav({ onBack, onNext, nextLabel = "Next →", nextDisabled = fals
         </button>
       )}
       <button disabled={nextDisabled} onClick={onNext}
-        className="flex-1 px-5 min-h-[52px] rounded-xl border-none bg-primary text-primaryfg font-bold text-base cursor-pointer disabled:bg-surface2 disabled:text-muted disabled:cursor-not-allowed">
+        className="flex-1 px-5 min-h-[52px] rounded-xl border-none bg-primaryfill text-primaryfg font-bold text-base cursor-pointer disabled:bg-surface2 disabled:text-muted disabled:cursor-not-allowed">
         {nextLabel}
       </button>
     </div>,
@@ -6084,7 +6085,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
                   onKeyDown={(e) => e.key === "Enter" && runSearch()} />
                 <button onClick={runSearch} disabled={searching || searchQ.trim().length < 2}
                   style={{ padding:"8px 14px", fontSize:".8rem", fontWeight:700, borderRadius:"8px",
-                    border:"none", background:"var(--accent)", color:"#0b0b12", cursor:"pointer",
+                    border:"none", background:"var(--accent-fill)", color:"#0b0b12", cursor:"pointer",
                     opacity: (searching || searchQ.trim().length < 2) ? .5 : 1 }}>
                   {searching ? "…" : "Search"}
                 </button>
@@ -6150,7 +6151,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
       <div style={{ display:"flex", gap:"6px" }}>
         <button onClick={submit}
           style={{ padding:"8px 16px", fontSize:".82rem", fontWeight:700, borderRadius:"8px",
-            border:"none", background:"var(--accent)", color:"#0b0b12", cursor:"pointer" }}>
+            border:"none", background:"var(--accent-fill)", color:"#0b0b12", cursor:"pointer" }}>
           {editingId ? "Save changes" : "Add"}
         </button>
         <button onClick={closeForm}
@@ -6822,7 +6823,7 @@ function WeightDayLogger({ date, existing, onSave }) {
       <input value={draft} onChange={(e) => setDraft(e.target.value)} inputMode="decimal" placeholder="e.g. 182"
         onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
         style={{ flex: 1, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)", fontSize: ".95rem" }} />
-      <button onClick={commit} style={{ padding: "10px 16px", fontWeight: 700, borderRadius: 8, border: "none", background: "var(--accent)", color: "#0b0b12", cursor: "pointer" }}>
+      <button onClick={commit} style={{ padding: "10px 16px", fontWeight: 700, borderRadius: 8, border: "none", background: "var(--accent-fill)", color: "#0b0b12", cursor: "pointer" }}>
         {existing ? "Update" : "Log"}
       </button>
     </div>
@@ -6852,7 +6853,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const commitWeight = () => { const v = parseFloat(weightDraft); onLogUpdate("weight", isNaN(v) ? 0 : v); };
   const commitCal = () => { const v = parseInt(calDraft); if (v > 0) { onLogUpdate("calories", (dailyLog.calories||0) + v); setCalDraft(""); } };
   const logBtn = { padding:"7px 12px", fontSize:".8rem", fontWeight:700, borderRadius:"8px",
-    border:"none", background:"var(--accent)", color:"#0b0b12", cursor:"pointer", whiteSpace:"nowrap" };
+    border:"none", background:"var(--accent-fill)", color:"#0b0b12", cursor:"pointer", whiteSpace:"nowrap" };
 
   useEffect(() => {
     if (editingWorkout) {
@@ -7216,7 +7217,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                     onSetMacroTargets({ protein:Math.max(0,parseInt(mtDraft.protein)||0), carbs:Math.max(0,parseInt(mtDraft.carbs)||0), fat:Math.max(0,parseInt(mtDraft.fat)||0) });
                     setEditMacros(false);
                   }}
-                  style={{padding:"8px 14px",fontSize:".8rem",fontWeight:700,borderRadius:"7px",border:"none",background:"var(--accent)",color:"#0b0b12",cursor:"pointer"}}>Save targets</button>
+                  style={{padding:"8px 14px",fontSize:".8rem",fontWeight:700,borderRadius:"7px",border:"none",background:"var(--accent-fill)",color:"#0b0b12",cursor:"pointer"}}>Save targets</button>
                 {macrosCustom && (
                   <button onClick={()=>{ onSetMacroTargets(null); setEditMacros(false); }}
                     style={{padding:"8px 12px",fontSize:".8rem",borderRadius:"7px",border:"1px solid var(--border)",background:"transparent",color:"var(--muted)",cursor:"pointer"}}>Reset to auto</button>
@@ -8357,7 +8358,7 @@ function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
 
   // Tailwind classes (matches the Session-26 ClientHome brand theme it renders in).
   const fieldCls = "flex-1 min-w-0 rounded-lg border border-border bg-surface2 px-3 py-2.5 text-[.9rem] text-fg outline-none placeholder:text-muted";
-  const btnCls = "rounded-lg border-none bg-primary px-3.5 py-2.5 text-[.85rem] font-bold text-primaryfg cursor-pointer whitespace-nowrap disabled:opacity-55";
+  const btnCls = "rounded-lg border-none bg-primaryfill px-3.5 py-2.5 text-[.85rem] font-bold text-primaryfg cursor-pointer whitespace-nowrap disabled:opacity-55";
   const subCls = "text-[.85rem] text-muted leading-relaxed";
 
   return (
@@ -8564,7 +8565,7 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
   const run = async (fn) => { setBusy(true); const ok = await fn(); await finish(ok); };
 
   const inputCls = "w-full box-border rounded-lg border border-border bg-surface2 px-3.5 py-3 text-center text-[1.1rem] text-fg outline-none placeholder:text-muted";
-  const primaryCls = "flex-1 rounded-[9px] border-none bg-primary px-3.5 py-3 text-[.92rem] font-bold text-primaryfg cursor-pointer disabled:opacity-55 disabled:cursor-default";
+  const primaryCls = "flex-1 rounded-[9px] border-none bg-primaryfill px-3.5 py-3 text-[.92rem] font-bold text-primaryfg cursor-pointer disabled:opacity-55 disabled:cursor-default";
   const ghostCls = "rounded-[9px] border border-border bg-transparent px-3.5 py-3 text-[.88rem] font-semibold text-fg cursor-pointer";
 
   const meta = {
@@ -8908,7 +8909,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const sectionTitleCls = "font-display text-lg tracking-wider text-primary";
   const subCls = "text-sm text-muted";
   const mBtnCls = "px-2.5 py-2 rounded-md text-xs font-semibold border border-border bg-transparent text-fg cursor-pointer text-left whitespace-nowrap disabled:opacity-55";
-  const mPrimaryCls = "px-2.5 py-2 rounded-md text-xs font-bold border-none bg-primary text-primaryfg cursor-pointer whitespace-nowrap disabled:opacity-55";
+  const mPrimaryCls = "px-2.5 py-2 rounded-md text-xs font-bold border-none bg-primaryfill text-primaryfg cursor-pointer whitespace-nowrap disabled:opacity-55";
   const dangerBtnCls = "px-2.5 py-2 rounded-md text-xs font-bold border-none bg-danger text-white cursor-pointer whitespace-nowrap disabled:opacity-55";
   const dangerGhostCls = "px-2.5 py-2 rounded-md text-xs font-semibold border border-[rgba(248,113,113,.4)] bg-transparent text-danger cursor-pointer whitespace-nowrap disabled:opacity-55";
   const inputCls = "flex-1 min-w-0 box-border rounded-md border border-border bg-surface2 text-fg px-2.5 py-1.5 text-sm outline-none placeholder:text-muted";
@@ -8965,7 +8966,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         <span className="font-bold text-[.95rem]">{c.name}</span>
                         <span className="flex gap-2 items-center">
                           {reqsOn && openReqs.length > 0 && (
-                            <span className="text-[.68rem] font-bold text-primaryfg bg-primary rounded-[10px] px-2 py-0.5 inline-flex items-center gap-1">
+                            <span className="text-[.68rem] font-bold text-primaryfg bg-primaryfill rounded-[10px] px-2 py-0.5 inline-flex items-center gap-1">
                               <Icon name="inbox" size={11} />{openReqs.length} open
                             </span>
                           )}
@@ -9279,7 +9280,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     {!sim && pct !== null && (
                       <div className="mt-2 mb-0.5">
                         <div className="h-[7px] rounded overflow-hidden bg-surface">
-                          <div className="h-full rounded bg-primary" style={{ width: `${pct}%` }} />
+                          <div className="h-full rounded bg-primaryfill" style={{ width: `${pct}%` }} />
                         </div>
                         <div className="text-[.68rem] text-muted mt-1">{pct}% to goal</div>
                       </div>
@@ -9507,7 +9508,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
                 <span className="text-[.7rem] uppercase tracking-wide text-muted mr-0.5">Flag after</span>
                 {[2, 3, 5, 7].map((d) => (
                   <button key={d} onClick={() => saveAttn(d)}
-                    className={`px-2 py-1 rounded-md text-xs font-bold cursor-pointer border ${attnDays === d ? "border-primary text-primaryfg bg-primary" : "border-border text-muted bg-transparent"}`}>
+                    className={`px-2 py-1 rounded-md text-xs font-bold cursor-pointer border ${attnDays === d ? "border-primary text-primaryfg bg-primaryfill" : "border-border text-muted bg-transparent"}`}>
                     {d}d
                   </button>
                 ))}
@@ -10039,7 +10040,7 @@ function AIChatPanel({ role, onDataChanged }) {
     ? ["Which clients need attention?", "Tips to improve client adherence"]
     : ["I had 2 eggs and toast for breakfast", "How much protein should I eat?"];
 
-  const bubbleUser = "self-end max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-3.5 py-2.5 text-[.95rem] leading-relaxed text-primaryfg whitespace-pre-wrap break-words";
+  const bubbleUser = "self-end max-w-[85%] rounded-2xl rounded-br-sm bg-primaryfill px-3.5 py-2.5 text-[.95rem] leading-relaxed text-primaryfg whitespace-pre-wrap break-words";
   const bubbleAI = "self-start max-w-[90%] rounded-2xl rounded-bl-sm bg-surface2 px-3.5 py-2.5 text-[.95rem] leading-relaxed text-fg whitespace-pre-wrap break-words";
 
   return createPortal(
@@ -10047,7 +10048,7 @@ function AIChatPanel({ role, onDataChanged }) {
       {/* Floating launcher button */}
       {!open && (
         <button onClick={() => setOpen(true)} aria-label="Open AI assistant"
-          className="fixed z-[1000] flex items-center gap-2 rounded-full border-none bg-primary px-4 py-3 font-bold text-primaryfg shadow-lg cursor-pointer"
+          className="fixed z-[1000] flex items-center gap-2 rounded-full border-none bg-primaryfill px-4 py-3 font-bold text-primaryfg shadow-lg cursor-pointer"
           style={{ right: "calc(16px + env(safe-area-inset-right,0px))", bottom: "calc(18px + env(safe-area-inset-bottom,0px))" }}>
           <Icon name="sparkle" variant="solid" size={18} />
           <span className="text-[.9rem]">Ask Glide</span>
@@ -10146,7 +10147,7 @@ function AIChatPanel({ role, onDataChanged }) {
                   <div className="flex flex-wrap gap-1.5">
                     {["breakfast", "lunch", "dinner", "snack"].map(t => (
                       <button key={t} onClick={() => setEditDraft({ ...editDraft, mealType: t })}
-                        className={`rounded-full border px-2.5 py-1 text-[.74rem] ${editDraft.mealType === t ? "border-primary bg-primary text-primaryfg" : "border-border text-muted"}`}>
+                        className={`rounded-full border px-2.5 py-1 text-[.74rem] ${editDraft.mealType === t ? "border-primary bg-primaryfill text-primaryfg" : "border-border text-muted"}`}>
                         {t.replace(/^./, c => c.toUpperCase())}</button>
                     ))}
                   </div>
@@ -10160,7 +10161,7 @@ function AIChatPanel({ role, onDataChanged }) {
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={() => acceptMeal(editDraft)} className="flex-1 rounded-lg bg-primary px-3 py-2 text-[.85rem] font-bold text-primaryfg">Save &amp; log</button>
+                    <button onClick={() => acceptMeal(editDraft)} className="flex-1 rounded-lg bg-primaryfill px-3 py-2 text-[.85rem] font-bold text-primaryfg">Save &amp; log</button>
                     <button onClick={() => setEditDraft(null)} className="rounded-lg border border-border px-3 py-2 text-[.85rem] text-fg">Cancel</button>
                   </div>
                 </div>
@@ -10178,7 +10179,7 @@ function AIChatPanel({ role, onDataChanged }) {
                   </div>
                   <div className="flex gap-2">
                     <button disabled={proposal.status === "saving"} onClick={() => acceptMeal()}
-                      className="flex-1 rounded-lg bg-primary px-3 py-2 text-[.88rem] font-bold text-primaryfg disabled:opacity-60">
+                      className="flex-1 rounded-lg bg-primaryfill px-3 py-2 text-[.88rem] font-bold text-primaryfg disabled:opacity-60">
                       {proposal.status === "saving" ? "Saving…" : "✓ Log it"}</button>
                     <button disabled={proposal.status === "saving"} onClick={() => setEditDraft({ ...proposal })}
                       className="rounded-lg border border-primary bg-[rgba(8,220,224,.12)] px-3 py-2 text-[.88rem] font-semibold text-primary disabled:opacity-60">Edit</button>
@@ -10227,7 +10228,7 @@ function AIChatPanel({ role, onDataChanged }) {
                     )}
                     <div className="flex gap-2">
                       <button disabled={workout.status === "saving"} onClick={acceptWorkout}
-                        className="flex-1 rounded-lg bg-primary px-3 py-2 text-[.88rem] font-bold text-primaryfg disabled:opacity-60">
+                        className="flex-1 rounded-lg bg-primaryfill px-3 py-2 text-[.88rem] font-bold text-primaryfg disabled:opacity-60">
                         {workout.status === "saving" ? "Saving…" : "✓ Save program"}</button>
                       <button disabled={workout.status === "saving"} onClick={() => setWorkout(null)} aria-label="Dismiss"
                         className="rounded-lg border border-border px-2.5 py-2 text-[.88rem] text-muted disabled:opacity-60">✕</button>
@@ -10290,7 +10291,7 @@ function AIChatPanel({ role, onDataChanged }) {
                 className="flex-1 resize-none box-border min-h-[48px] rounded-xl border border-border bg-surface2 px-3.5 py-3 text-[.95rem] leading-relaxed text-fg outline-none placeholder:text-muted"
                 onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
               <button onClick={send} disabled={busy || recording || transcribing || (!draft.trim() && !pendingImage)} aria-label="Send"
-                className="rounded-xl border-none bg-primary px-3.5 py-2.5 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50 disabled:cursor-default">
+                className="rounded-xl border-none bg-primaryfill px-3.5 py-2.5 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50 disabled:cursor-default">
                 {busy ? "…" : "Send"}
               </button>
             </div>
@@ -10618,10 +10619,10 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   // Tailwind class strings (Session 26 redesign — brand theme via data-theme="pro").
   const cardCls = "bg-surface border border-border rounded-card p-5";
   const inputCls = "flex-1 min-w-0 bg-surface2 border border-border rounded-lg px-3 py-2.5 text-fg text-[.95rem] outline-none placeholder:text-muted";
-  const primaryBtnCls = "px-4 py-2.5 rounded-lg font-bold text-sm bg-primary text-primaryfg cursor-pointer whitespace-nowrap";
+  const primaryBtnCls = "px-4 py-2.5 rounded-lg font-bold text-sm bg-primaryfill text-primaryfg cursor-pointer whitespace-nowrap";
   const ghostBtnCls = "px-4 py-2.5 rounded-lg font-semibold text-sm bg-transparent text-fg border border-border cursor-pointer whitespace-nowrap";
   const miniBtnCls = "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-transparent text-fg border border-border cursor-pointer whitespace-nowrap";
-  const miniBtnActiveCls = "px-2.5 py-1.5 rounded-md text-xs font-bold bg-primary text-primaryfg border-0 cursor-pointer whitespace-nowrap";
+  const miniBtnActiveCls = "px-2.5 py-1.5 rounded-md text-xs font-bold bg-primaryfill text-primaryfg border-0 cursor-pointer whitespace-nowrap";
 
   return (
     <div data-theme="pro" className="page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
@@ -10663,7 +10664,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                           onKeyDown={(e) => { if (e.key === "Enter") { renamePlan(p.id, planNameDraft.trim()); setRenamingPlanId(null); } }}
                           className="flex-1 px-2 py-1 rounded border border-border bg-bg text-fg text-sm outline-none" />
                         <button onClick={() => { renamePlan(p.id, planNameDraft.trim()); setRenamingPlanId(null); }}
-                          className="border-0 bg-primary text-primaryfg font-bold rounded px-2.5 py-1 text-xs cursor-pointer">Save</button>
+                          className="border-0 bg-primaryfill text-primaryfg font-bold rounded px-2.5 py-1 text-xs cursor-pointer">Save</button>
                       </>
                     ) : (
                       <>
@@ -10832,7 +10833,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
               {g && start && start !== g && (
                 <div className="mt-4">
                   <div className="h-2.5 rounded-full bg-surface2 overflow-hidden">
-                    <div className="h-full bg-primary rounded-full" style={{ width: `${Math.max(2, Math.min(100, Math.round(((start - w) / (start - g)) * 100)))}%` }} />
+                    <div className="h-full bg-primaryfill rounded-full" style={{ width: `${Math.max(2, Math.min(100, Math.round(((start - w) / (start - g)) * 100)))}%` }} />
                   </div>
                   <div className="flex justify-between text-[11px] text-muted mt-1">
                     <span>Start {start}</span><span>Goal {g}</span>
@@ -11018,7 +11019,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
   const cardCls = "bg-surface border border-border rounded-card p-5 mb-3";
   const sectionTitleCls = "font-display text-lg tracking-wider text-primary mb-1";
   const subCls = "text-sm text-muted leading-relaxed";
-  const primaryBtnCls = "px-4 py-2.5 rounded-lg text-sm font-bold border-none bg-primary text-primaryfg cursor-pointer whitespace-nowrap disabled:opacity-55";
+  const primaryBtnCls = "px-4 py-2.5 rounded-lg text-sm font-bold border-none bg-primaryfill text-primaryfg cursor-pointer whitespace-nowrap disabled:opacity-55";
   const ghostBtnCls = "px-3 py-2 rounded-lg text-xs font-semibold border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap disabled:opacity-55";
   const inputCls = "flex-1 min-w-0 box-border rounded-lg border border-border bg-surface2 text-fg px-3 py-2 text-sm outline-none placeholder:text-muted";
 
@@ -11042,7 +11043,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
         onDragStart={e=>onDragStart(e,p.id)}
         onDragEnd={onDragEnd}
         onClick={()=>onSelect(p.id)}>
-        <div className="flex-none w-10 h-10 rounded-full bg-primary text-primaryfg font-bold text-sm flex items-center justify-center">
+        <div className="flex-none w-10 h-10 rounded-full bg-primaryfill text-primaryfg font-bold text-sm flex items-center justify-center">
           {(displayName||"?").slice(0,2).toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
@@ -11257,7 +11258,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
           {/* File export/import — secondary method */}
           <div className="text-[.72rem] text-muted tracking-wide uppercase font-bold mb-2 mt-1.5">Or use file export</div>
           <div className="flex gap-2 mb-2.5 flex-wrap">
-            <button className="flex-[1_1_140px] min-h-[42px] text-[.8rem] font-bold rounded-lg border-none bg-primary text-primaryfg cursor-pointer"
+            <button className="flex-[1_1_140px] min-h-[42px] text-[.8rem] font-bold rounded-lg border-none bg-primaryfill text-primaryfg cursor-pointer"
               onClick={async ()=>{
                 setExportMsg("Packaging...");
                 const ok = await onExport();
@@ -11437,7 +11438,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
                   style={{ flex: 1, minWidth: 0, padding: "8px 10px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: ".85rem" }} />
               </div>
               <div style={{ display: "flex", gap: 6 }}>
-                <button onClick={saveName} disabled={busy} style={{ padding: "7px 12px", borderRadius: 7, border: "none", background: "var(--accent)", color: "#0b0b12", fontWeight: 700, fontSize: ".8rem", cursor: "pointer" }}>{busy ? "…" : "Save"}</button>
+                <button onClick={saveName} disabled={busy} style={{ padding: "7px 12px", borderRadius: 7, border: "none", background: "var(--accent-fill)", color: "#0b0b12", fontWeight: 700, fontSize: ".8rem", cursor: "pointer" }}>{busy ? "…" : "Save"}</button>
                 <button onClick={() => setEditing(false)} style={{ padding: "7px 12px", borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--muted)", fontSize: ".8rem", cursor: "pointer" }}>Cancel</button>
               </div>
             </div>
@@ -11556,7 +11557,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
                   <code style={{ flex: 1, padding: "8px 10px", borderRadius: 7, background: "var(--s2)", border: "1px solid var(--border)",
                     fontFamily: "monospace", letterSpacing: "1px", fontSize: ".95rem" }}>{invite ? formatInviteCode(invite) : "…"}</code>
                   <button onClick={() => copy("code", formatInviteCode(invite))} disabled={!invite}
-                    style={{ padding: "8px 10px", borderRadius: 7, border: "none", background: "var(--accent)", color: "#0b0b12", fontWeight: 700, fontSize: ".76rem", cursor: "pointer" }}>{copied === "code" ? "✓" : "Copy"}</button>
+                    style={{ padding: "8px 10px", borderRadius: 7, border: "none", background: "var(--accent-fill)", color: "#0b0b12", fontWeight: 700, fontSize: ".76rem", cursor: "pointer" }}>{copied === "code" ? "✓" : "Copy"}</button>
                 </div>
                 <div style={{ fontSize: ".74rem", color: "var(--muted)" }}>Or send a one-click link — new clients auto-link to you.</div>
                 <button onClick={() => copy("link", shareLink)} disabled={!shareLink}
@@ -12455,7 +12456,7 @@ export default function App() {
         </div>
         <div className="max-w-[640px] mx-auto px-4">
           <div className="flex gap-2 items-center mb-3">
-            <button onClick={goBack} className="bg-primary text-primaryfg font-bold rounded-lg px-3 py-1.5 text-sm cursor-pointer whitespace-nowrap">
+            <button onClick={goBack} className="bg-primaryfill text-primaryfg font-bold rounded-lg px-3 py-1.5 text-sm cursor-pointer whitespace-nowrap">
               ← {(showDash && step===5) ? (role === ROLES.CLIENT ? "Home" : "Clients") : step <= 4 ? (navFrom === "results" ? "Results" : "Dashboard") : "Dashboard"}
             </button>
             <div className="text-muted text-sm truncate">📂 {fullName(data) || "New Client"}</div>
@@ -12489,7 +12490,7 @@ export default function App() {
             {step < LBLS.length - 1 && (
               <div className="flex gap-1.5 justify-center">
                 {LBLS.slice(0,-1).map((_,i)=>(
-                  <div key={i} className={`flex-1 max-w-[56px] h-1 rounded-full ${i===step?"bg-primary":i<step?"bg-primary opacity-30":"bg-border"}`}/>
+                  <div key={i} className={`flex-1 max-w-[56px] h-1 rounded-full ${i===step?"bg-primaryfill":i<step?"bg-primaryfill opacity-30":"bg-border"}`}/>
                 ))}
               </div>
             )}

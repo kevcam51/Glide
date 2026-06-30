@@ -81,7 +81,8 @@
   --color-border: #2e4241;      /* visible cyan-tinted hairline */
   --color-fg: #eafcfc;          /* near-white, faint cyan cast */
   --color-muted: #7e9a9a;       /* muted cyan-grey */
-  --color-primary: #08dce0;     /* Smooth Training cyan (sampled from the logo) */
+  --color-primary: #08dce0;     /* Smooth Training cyan — bright accent (text, icons, borders) */
+  --color-primaryfill: #18afb3; /* calmer cyan for large filled buttons (less glare than #08dce0) */
   --color-primaryfg: #04201f;   /* near-black text on cyan */
   --color-accent: #3bc9ff;      /* cool sky-blue, complements cyan without muddying green */
   --color-success: #2fe0a8;
