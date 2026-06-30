@@ -31,6 +31,8 @@ const GLYPHS = {
   scale: (<><path d="M5.5 7h13l1.3 11.5a1 1 0 0 1-1 1.1H5.2a1 1 0 0 1-1-1.1z" /><path d="M9 7a3 3 0 0 1 6 0" /></>),
   sparkle: (<path d="M12 3.5l1.7 5.8L19.5 11l-5.8 1.7L12 18.5l-1.7-5.8L4.5 11l5.8-1.7z" />),
   chart: (<><path d="M4 4v16h16" /><path d="m7 14 3.5-4 3 2.5L20 7" /></>),
+  alert: (<><path d="M12 4 2.5 20.5h19z" /><path d="M12 10.5v4" /><path d="M12 17.4v.01" /></>),
+  inbox: (<><path d="M3.5 13.5 6 6h12l2.5 7.5" /><path d="M3.5 13.5V18a1 1 0 0 0 1 1h15a1 1 0 0 0 1-1v-4.5" /><path d="M3.5 13.5h4l1.5 2.5h6l1.5-2.5h4" /></>),
 };
 
 export function Icon({ name, size = 20, variant = "outline", color = "currentColor",

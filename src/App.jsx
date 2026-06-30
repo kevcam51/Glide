@@ -9466,7 +9466,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
         <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
-        <div className="text-2xl font-extrabold tracking-tight mb-1">📊 Coaching Dashboard</div>
+        <div className="text-2xl font-extrabold tracking-tight mb-1 flex items-center gap-2"><Icon name="dashboard" size={22} color="var(--accent)" />Coaching Dashboard</div>
         <div className={`${subCls} mb-4`}>Your clients at a glance — who's active, who needs a nudge, and how they're progressing.</div>
 
         {loading ? (
@@ -9488,7 +9488,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
 
             {/* Needs attention */}
             <div className={cardCls}>
-              <div className={titleCls}>⚠️ Needs attention</div>
+              <div className={`${titleCls} flex items-center gap-2`}><Icon name="alert" size={19} color="var(--yellow,#fbbf24)" />Needs attention</div>
               <div className={`${subCls} mb-2`}>No logs in {attnDays}+ days — tap a name to open their plan, or 📤 Nudge to send a "log your food" reminder.</div>
               <div className="flex items-center gap-1.5 mb-3">
                 <span className="text-[.7rem] uppercase tracking-wide text-muted mr-0.5">Flag after</span>
@@ -9526,7 +9526,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
 
             {/* This week — roster-wide logging consistency + weight pulse */}
             <div className={cardCls}>
-              <div className={titleCls}>🗓️ This week</div>
+              <div className={`${titleCls} flex items-center gap-2`}><Icon name="calendar" size={19} color="var(--accent)" />This week</div>
               <div className={`${subCls} mb-2`}>Last 7 days at a glance — who's logging, and which way the scale moved.</div>
               <div className="flex flex-col gap-1.5">
                 {roster.map((c) => (
@@ -9548,7 +9548,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
 
             {/* Open requests across clients */}
             <div className={cardCls}>
-              <div className={titleCls}>📬 Open requests</div>
+              <div className={`${titleCls} flex items-center gap-2`}><Icon name="inbox" size={19} color="var(--accent)" />Open requests</div>
               <div className={`${subCls} mb-2`}>To-dos you've sent that clients haven't completed yet.</div>
               {openReqRows.length === 0 ? (
                 <div className="text-sm text-muted py-1">No open requests — all caught up.</div>
@@ -9566,7 +9566,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
 
             {/* Aggregate progress */}
             <div className={cardCls}>
-              <div className={titleCls}>📈 Progress</div>
+              <div className={`${titleCls} flex items-center gap-2`}><Icon name="chart" size={19} color="var(--accent)" />Progress</div>
               <div className="flex gap-2 mb-3">
                 <div className="flex-1 bg-surface2 border border-border rounded-lg py-3 text-center">
                   <div className="font-display text-2xl text-success">{totalLbsLost}</div>
