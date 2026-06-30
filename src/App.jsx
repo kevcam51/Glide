@@ -471,8 +471,8 @@ body{
   margin-bottom:20px;
 }
 .rtab{
-  min-height:42px;min-width:0;
-  padding:8px 12px;border-radius:10px;border:none;
+  min-height:50px;min-width:0;
+  padding:7px 8px;border-radius:10px;border:none;
   background:transparent;
   font-family:'DM Sans',sans-serif;font-size:.78rem;font-weight:600;
   color:var(--muted);cursor:pointer;transition:all .2s;
@@ -3013,13 +3013,13 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
 
       {/* ── Basic / Pro Toggle ── */}
       <div style={{display:"flex",gap:"4px",background:"var(--s2)",padding:"4px",borderRadius:"12px",border:"1px solid var(--border)",marginBottom:"16px"}}>
-        <button style={{flex:1,padding:"10px",borderRadius:"9px",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:".82rem",fontWeight:600,transition:"all .2s",background:viewMode==="basic"?"var(--surface)":"transparent",color:viewMode==="basic"?"var(--text)":"var(--muted)",boxShadow:viewMode==="basic"?"0 2px 8px rgba(0,0,0,.3)":"none"}}
+        <button style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",padding:"10px",borderRadius:"9px",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:".82rem",fontWeight:600,transition:"all .2s",background:viewMode==="basic"?"var(--surface)":"transparent",color:viewMode==="basic"?"var(--text)":"var(--muted)",boxShadow:viewMode==="basic"?"0 2px 8px rgba(0,0,0,.3)":"none"}}
           onClick={()=>setViewMode("basic")}>
-          <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}><Icon name="chart" size={15} />Basic Calculator</span>
+          <Icon name="chart" size={15} />Basic Calculator
         </button>
-        <button style={{flex:1,padding:"10px",borderRadius:"9px",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:".82rem",fontWeight:600,transition:"all .2s",background:viewMode==="pro"?"var(--surface)":"transparent",color:viewMode==="pro"?"var(--accent)":"var(--muted)",boxShadow:viewMode==="pro"?"0 2px 8px rgba(0,0,0,.3)":"none"}}
+        <button style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",padding:"10px",borderRadius:"9px",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:".82rem",fontWeight:600,transition:"all .2s",background:viewMode==="pro"?"var(--surface)":"transparent",color:viewMode==="pro"?"var(--accent)":"var(--muted)",boxShadow:viewMode==="pro"?"0 2px 8px rgba(0,0,0,.3)":"none"}}
           onClick={()=>setViewMode("pro")}>
-          <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}><Icon name="bolt" size={15} />Pro Tracking</span>
+          <Icon name="bolt" size={15} />Pro Tracking
         </button>
       </div>
 
@@ -3171,7 +3171,9 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
 
       <div className="rtabs">
         {TABS.map((t,i)=>(
-          <button key={i} className={`rtab${tab===i?" active":""}`} onClick={()=>setTab(i)}><span style={{display:"inline-flex",alignItems:"center",gap:"5px"}}><Icon name={TAB_ICONS[t]} size={14} />{t.replace(/^\S+\s/,"")}</span></button>
+          <button key={i} className={`rtab${tab===i?" active":""}`} onClick={()=>setTab(i)}
+            style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"3px",lineHeight:1.1}}>
+            <Icon name={TAB_ICONS[t]} size={16} />{t.replace(/^\S+\s/,"")}</button>
         ))}
       </div>
 
