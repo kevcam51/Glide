@@ -684,6 +684,19 @@ enabled (Blaze has no default spending cap).
 
 ## Roadmap (not yet built)
 
+- **"Glide works with your AI" — interop with Claude / ChatGPT / any AI (Kevin's idea, S80).** Brand thesis:
+  Glide should COLLABORATE with outside AI tools, not compete. Users keep their favorite AI but bring its
+  output home to Glide as their organized fitness hub. **Honest constraint:** those platforms don't expose a
+  user's chat history to third parties, so auto-sync isn't possible — the play is effortless *user-initiated*
+  transfer + being a tool their AI plugs into. Phased: (1) **Paste-to-import (do first, low effort, high
+  leverage)** — a "Paste from any AI" box where the user pastes a ChatGPT/Claude reply and **Glide's own AI
+  parses it into structured logs** via the EXISTING tools (`log_meal` etc.); works with every AI day-one since
+  they all output text. (2) **Two-way "Glide format"** — a small prompt users add to their AI's custom
+  instructions so it formats fitness data Glide-importable, plus a Glide→AI export (paste your week into Claude
+  for analysis). (3) **Glide as an MCP connector (flagship endgame)** — expose Glide as an MCP/connector so a
+  user's own Claude/ChatGPT can read/write their Glide data natively with permission; needs an OAuth'd hosted
+  endpoint (have Blaze/Cloud Functions). Genuine differentiator — nobody in fitness is doing this. Recommend
+  shipping #1 soon, #3 on the roadmap as the marquee "works with your AI" feature.
 - ~~**Trainer analytics dashboard (Kevin's idea, planned).**~~ **BUILT — Session 34** (`TrainerAnalytics`).
   The side-menu "📊 Dashboard" is now a real coaching command center (active this week, needs attention,
   open requests across clients, aggregate progress + on-track), distinct from the home and All-clients.
