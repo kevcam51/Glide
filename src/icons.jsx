@@ -27,7 +27,7 @@ const GLYPHS = {
   water: (<path d="M12 3.5c2.9 3.5 5.2 5.8 5.2 9a5.2 5.2 0 0 1-10.4 0C6.8 9.3 9.1 7 12 3.5z" />),
   target: (<><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4.5" /><circle cx="12" cy="12" r="1" /></>),
   calendar: (<><rect x="3.5" y="5" width="17" height="15" rx="2" /><path d="M3.5 9.5h17" /><path d="M8 3.5v3" /><path d="M16 3.5v3" /></>),
-  dumbbell: (<><path d="M8.5 12h7" /><path d="M6.5 9.5v5" /><path d="M9 8v8" /><path d="M15 8v8" /><path d="M17.5 9.5v5" /></>),
+  dumbbell: (<><path d="M7 12h10" /><path d="M7.5 6v12" /><path d="M16.5 6v12" /><path d="M5 8.5v7" /><path d="M19 8.5v7" /></>),
   scale: (<><rect x="3.75" y="4" width="16.5" height="16" rx="4.5" /><circle cx="12" cy="12.5" r="3.6" /><path d="M12 12.5 13.9 10.8" /><path d="M12 8.9v.8" /></>),
   mail: (<><rect x="3" y="5.5" width="18" height="13" rx="2.5" /><path d="m4 7.5 8 5.5 8-5.5" /></>),
   sparkle: (<path d="M12 4.5l1.7 5.8L19.5 12l-5.8 1.7L12 19.5l-1.7-5.8L4.5 12l5.8-1.7z" />),
