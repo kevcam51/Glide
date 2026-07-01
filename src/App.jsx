@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo } from "./profile.js";
+import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isProUser, aiFoodDbEnabled, setAiFoodDbEnabled } from "./profile.js";
 import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } from "./clientData.js";
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
@@ -9957,6 +9957,11 @@ function AIChatPanel({ role, onDataChanged }) {
   const [size, setSize] = useState("compact");           // "compact" corner card | "full" near-fullscreen
   const [pasteOpen, setPasteOpen] = useState(false);     // "Paste from AI" import box open
   const [pasteText, setPasteText] = useState("");        // pasted text from another AI
+  // "Precise food data" (Pro) — the AI pulls real database values for branded
+  // foods instead of estimating. Gated by entitlement; free users see it locked.
+  const [pro, setPro] = useState(false);                 // entitled to precise food data
+  const [foodDbOn, setFoodDbOn] = useState(true);        // pro user's toggle (default on)
+  const [showUpsell, setShowUpsell] = useState(false);   // upsell blurb (free users)
   const scrollRef = useRef(null);
   const fileRef = useRef(null);
   const taRef = useRef(null);     // composer textarea (auto-grows with content)
@@ -9974,6 +9979,18 @@ function AIChatPanel({ role, onDataChanged }) {
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = prev; };
   }, [open]);
+  // Load the caller's Pro entitlement + food-DB toggle when the chat opens.
+  useEffect(() => {
+    if (!open) return;
+    getProfile().then((p) => { setPro(isProUser(p)); setFoodDbOn(aiFoodDbEnabled(p)); }).catch(() => {});
+  }, [open]);
+  // Toggle the Pro user's food-DB preference (persists to their profile; the
+  // backend reads it on the next message). Free users get the upsell instead.
+  const toggleFoodDb = () => {
+    if (!pro) { setShowUpsell((v) => !v); return; }
+    const next = !foodDbOn; setFoodDbOn(next);
+    setAiFoodDbEnabled(next).catch(() => {});
+  };
   const loadedRef = useRef(false); // guards persistence until the saved thread loads
 
   // Conversation persistence (Session 77): the chat thread is saved to the user's
@@ -10326,6 +10343,29 @@ function AIChatPanel({ role, onDataChanged }) {
             <button onClick={() => setOpen(false)} aria-label="Close"
               className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-lg leading-none text-fg cursor-pointer hover:bg-surface2">✕</button>
             </div>
+          </div>
+
+          {/* Precise food data (Pro) toggle strip — locked for free users. */}
+          <div className="border-b border-border bg-surface">
+            <button onClick={toggleFoodDb}
+              className="w-full flex items-center gap-2 px-4 py-2 cursor-pointer bg-transparent border-0 text-left">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke={pro ? "var(--accent)" : "var(--muted)"} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.5" fill="currentColor"/></svg>
+              <span className="text-[.74rem] font-semibold" style={{ color: pro ? "var(--text)" : "var(--muted)" }}>Precise food data</span>
+              {!pro && <span className="text-[.6rem] font-bold uppercase tracking-[.5px] px-1.5 py-0.5 rounded" style={{ background:"rgba(8,220,224,.14)", color:"var(--accent)" }}>Pro</span>}
+              <span className="ml-auto inline-flex items-center gap-1">
+                {!pro && <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="var(--muted)" strokeWidth="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>}
+                {/* switch */}
+                <span className="relative inline-block" style={{ width:34, height:18, borderRadius:999,
+                  background: (pro && foodDbOn) ? "var(--accent)" : "var(--s3, #28383a)", opacity: pro ? 1 : .5, transition:"background .2s" }}>
+                  <span className="absolute top-[2px] rounded-full bg-white" style={{ width:14, height:14, left: (pro && foodDbOn) ? 18 : 2, transition:"left .2s" }} />
+                </span>
+              </span>
+            </button>
+            {showUpsell && (
+              <div className="px-4 pb-3 -mt-1 text-[.72rem] leading-relaxed" style={{ color:"var(--muted)" }}>
+                <span style={{ color:"var(--text)", fontWeight:600 }}>Upgrade to Pro</span> to log branded &amp; packaged foods with <span style={{ color:"var(--accent)" }}>exact label values</span> from our food database — instead of AI estimates. More accurate calories &amp; macros for anything with a brand or barcode.
+              </div>
+            )}
           </div>
 
           {/* Message thread */}

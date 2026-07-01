@@ -147,7 +147,7 @@ function capHistory(messages) {
 const MAX_TOOL_ROUNDS = 5;
 
 // Build the role-aware system prompt (shared by the callable + the stream fn).
-function buildSystemPrompt(role, isTrainer) {
+function buildSystemPrompt(role, isTrainer, foodDb) {
   const baseSystem = (role === "client") ? SYSTEM_CLIENT : SYSTEM_TRAINER;
   return `${baseSystem}
 
@@ -162,7 +162,7 @@ Proactive coaching: when the user asks for advice or feedback (not just a quick 
 You have tools to read the user's real logged data — use them whenever a question depends on actual numbers (what they ate, their targets, client activity) rather than guessing. Call get_nutrition_targets to know the goals before judging whether a day was over/under. Don't expose internal ids to the user; refer to clients by name.
 
 You can also TAKE ACTIONS for the user via tools — but you must CONFIRM the specifics first and only act after an explicit go-ahead (never act prematurely):
-- Logging food: when the user describes a meal (or sends a PHOTO of food — identify the items/portions from the image), estimate calories + protein/carbs/fat, then call propose_meal to show them a tappable Accept/Edit card. For PACKAGED or BRANDED items (a named bar/yogurt/cereal/protein powder/restaurant-ish product), FIRST call search_food to pull real label values from the food databases (USDA + Open Food Facts) and scale the per-100g result to the portion — that's far more accurate than guessing. For simple whole/home-cooked foods (an apple, grilled chicken, rice), just estimate. If search_food returns nothing useful, fall back to estimating. The card ALREADY displays the full name, calories, and macro breakdown — so keep your TEXT reply to ONE short line (e.g. "Here's my estimate — tap to log."). Do NOT re-list every item or repeat the macros in text; that duplicates the card and wastes space. For a long list of foods, still send just the one-line text plus the card — never a per-item paragraph. The card saves it — do NOT also call log_meal. Ask the meal type if unclear, and support corrections ("make it one egg") by proposing again. For photos, add that the estimate is approximate. Only use log_meal directly if the user explicitly says to log without a confirmation card.
+- Logging food: when the user describes a meal (or sends a PHOTO of food — identify the items/portions from the image), estimate calories + protein/carbs/fat, then call propose_meal to show them a tappable Accept/Edit card.${foodDb ? " For PACKAGED or BRANDED items (a named bar/yogurt/cereal/protein powder/restaurant-ish product), FIRST call search_food to pull real label values from the food databases (USDA + Open Food Facts) and scale the per-100g result to the portion — that's far more accurate than guessing. For simple whole/home-cooked foods (an apple, grilled chicken, rice), just estimate. If search_food returns nothing useful, fall back to estimating." : ""} The card ALREADY displays the full name, calories, and macro breakdown — so keep your TEXT reply to ONE short line (e.g. "Here's my estimate — tap to log."). Do NOT re-list every item or repeat the macros in text; that duplicates the card and wastes space. For a long list of foods, still send just the one-line text plus the card — never a per-item paragraph. The card saves it — do NOT also call log_meal. Ask the meal type if unclear, and support corrections ("make it one egg") by proposing again. For photos, add that the estimate is approximate. Only use log_meal directly if the user explicitly says to log without a confirmation card.
 - Paste-from-another-AI import: the user may paste a reply from ChatGPT / Claude / another AI that contains several meals (and sometimes workouts or weigh-ins). Extract EVERY loggable item, briefly summarize what you found as a short list, and ask them to confirm. Once they confirm, log them all: because a card shows only one meal at a time, for a multi-item import call log_meal once PER meal (with the right meal type, and the date if the paste states one), and log_workout / log_weigh_in for any of those. Use a single propose_meal card only when there's exactly one meal. If nothing loggable is in the paste, say so plainly.
 - log_workout: mark a day as a workout day (with an optional note).
 - log_weigh_in: record a body-weight weigh-in (confirm the number).
@@ -191,14 +191,21 @@ async function setupChat(uid) {
   const callerName = profile.displayName
     || [profile.firstName, profile.lastName].filter(Boolean).join(" ")
     || profile.email || (isTrainer ? "Coach" : "Client");
+  // "Precise food data" is a Pro feature: only entitled users (active
+  // subscription or a granted entitlement) with the toggle on get the
+  // search_food tool; everyone else gets AI estimates. Keep in sync with
+  // src/profile.js isProUser().
+  const isPro = profile.subscriptionStatus === "active"
+    || (profile.entitlements && profile.entitlements.foodAccuracy === true);
+  const foodDb = isPro && profile.aiFoodDbEnabled !== false;
   // Cache the stable prefix (tools render before system, so a cache_control
   // breakpoint on the system block caches tools + system together). This part is
   // identical across calls within a day, so repeat messages + tool rounds pay
   // ~10% for it instead of full price (Session 67). No effect on output quality.
-  const system = [{ type: "text", text: buildSystemPrompt(role, isTrainer), cache_control: { type: "ephemeral" } }];
+  const system = [{ type: "text", text: buildSystemPrompt(role, isTrainer, foodDb), cache_control: { type: "ephemeral" } }];
   return {
     role, isTrainer, budget, usageRef, used, system,
-    tools: buildTools(role),
+    tools: buildTools(role, { foodDb }),
     toolCtx: { callerUid: uid, role, isTrainer, today: todayLocal(), nowTime: nowTimeLocal(), callerName },
   };
 }

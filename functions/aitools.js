@@ -429,7 +429,7 @@ function clampDateRange(startDate, endDate) {
 const CLIENT_NOTE = "Returns YOUR own data.";
 const TRAINER_NOTE = "Pass clientId (from list_clients) to read a specific client; omit it for your own data.";
 
-function buildTools(role) {
+function buildTools(role, opts = {}) {
   const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
   const clientIdProp = isTrainer
     ? { clientId: { type: "string", description: "The client's id from list_clients. " + TRAINER_NOTE } }
@@ -769,6 +769,9 @@ function buildTools(role) {
       },
     });
   }
+  // search_food (real database values) is a Pro feature — only expose the tool
+  // when the caller is entitled + has it enabled. Otherwise the AI estimates.
+  if (!opts.foodDb) return tools.filter((t) => t.name !== "search_food");
   return tools;
 }
 

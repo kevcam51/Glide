@@ -87,6 +87,25 @@ export async function getProfile(uid = auth.currentUser && auth.currentUser.uid)
   return snap.exists() ? snap.data() : null;
 }
 
+// ─── Premium entitlements (pre-Stripe placeholder) ───────────────────────────
+// A user is "Pro" (paid) if their subscription is active OR they've been granted
+// a specific entitlement (e.g. by admin, or later a Stripe webhook). The AI
+// "precise food data" feature (real database values instead of estimates) is
+// gated on this. Keep this in sync with functions/aichat.js isProUser().
+export function isProUser(profile) {
+  if (!profile) return false;
+  return profile.subscriptionStatus === "active"
+    || (profile.entitlements && profile.entitlements.foodAccuracy === true);
+}
+// A Pro user's toggle for whether the AI uses the food database (default on).
+export function aiFoodDbEnabled(profile) {
+  return !!profile && profile.aiFoodDbEnabled !== false;
+}
+export async function setAiFoodDbEnabled(enabled, uid = auth.currentUser && auth.currentUser.uid) {
+  if (!uid) return;
+  await updateDoc(profileRef(uid), { aiFoodDbEnabled: !!enabled });
+}
+
 // True if the signed-in user has finished signup (has a profile).
 export async function hasProfile(uid = auth.currentUser && auth.currentUser.uid) {
   return (await getProfile(uid)) != null;
