@@ -7585,9 +7585,9 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
 
       {/* Navigation */}
       <div className="dash-nav">
-        <button className="dash-nav-btn" onClick={onOpenResults} style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"5px"}}><Icon name="chart" size={17} color="var(--accent)" />Full Plan</button>
-        <button className="dash-nav-btn" onClick={onOpenPlan} style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"5px"}}><Icon name="edit" size={17} color="var(--accent)" />Edit Info</button>
-        <button className="dash-nav-btn" onClick={onEditWorkouts} style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"5px"}}><Icon name="dumbbell" size={17} color="var(--accent)" />Edit Workouts</button>
+        <button className="dash-nav-btn" onClick={onOpenResults} style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"6px"}}><Icon name="chart" size={24} color="var(--accent)" />Full Plan</button>
+        <button className="dash-nav-btn" onClick={onOpenPlan} style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"6px"}}><Icon name="edit" size={24} color="var(--accent)" />Edit Info</button>
+        <button className="dash-nav-btn" onClick={onEditWorkouts} style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"6px"}}><Icon name="dumbbell" size={24} color="var(--accent)" />Edit Workouts</button>
       </div>
       <div style={{fontSize:".58rem",color:"var(--muted)",textAlign:"center",marginTop:"10px",fontStyle:"italic",lineHeight:1.5}}>⚠️ All values are estimates for educational purposes. Not medical advice. Consult a healthcare provider before making changes to diet or exercise.</div>
     </div>
