@@ -10127,11 +10127,11 @@ function AIChatPanel({ role, onDataChanged }) {
           {/* Header — symmetric 3 columns (icon | centered title | controls) so
               the title/subtitle sit in the middle of the bar. Sides are equal width. */}
           <div className="flex items-center border-b border-border bg-surface2 px-3 py-3">
-            <div className="flex w-[72px] shrink-0 items-center">
-              <Icon name="sparkle" variant="solid" size={18} color="var(--accent)" />
-            </div>
+            <div className="w-[72px] shrink-0" aria-hidden="true" />
             <div className="flex flex-1 min-w-0 flex-col items-center text-center leading-tight">
-              <span className="font-display text-sm uppercase tracking-wide text-primary">Glide AI</span>
+              <span className="flex items-center gap-1.5 font-display text-sm uppercase tracking-wide text-primary">
+                <Icon name="sparkle" variant="solid" size={16} color="var(--accent)" />Glide AI
+              </span>
               <span className="max-w-full truncate text-[.68rem] text-muted">Nutrition &amp; fitness assistant</span>
             </div>
             <div className="flex w-[72px] shrink-0 items-center justify-end gap-2">
