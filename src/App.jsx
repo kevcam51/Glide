@@ -91,6 +91,20 @@ const CARDIO_GROUPS = [
 ];
 
 const ALL_CARDIO = CARDIO_GROUPS.flatMap(g => g.options);
+// Map any exercise (cardio or strength) to one of our custom category icons
+// (see src/icons.jsx). Replaces the per-exercise emoji with a consistent,
+// on-brand glyph. kind: "cardio" | "strength".
+function exerciseCategory(ex, kind) {
+  if (!ex) return kind === "strength" ? "dumbbell" : "run";
+  const s = `${ex.id || ""} ${ex.label || ""}`.toLowerCase();
+  if (/\brest\b|rest day|rest_st/.test(s)) return "moon";
+  if (/yoga|stretch|mobility|pilates|foam roll|cooldown|cool down|warm ?up/.test(s)) return "yoga";
+  if (kind === "strength") return "dumbbell";
+  if (/swim|water/.test(s)) return "swim";
+  if (/cycl|spin|bike/.test(s)) return "bike";
+  if (/walk|incline|jog|\brun\b|running|sprint|treadmill|hik|ellipt|stair|climb|ladder|versa/.test(s)) return "run";
+  return "bolt"; // rowing, HIIT, boxing, sports, jump rope, dance, misc — energy
+}
 const DURATIONS  = [10,15,20,25,30,35,40,45,50,60,75,90];
 const DAYS       = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
 const DAY_SHORT  = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -7053,7 +7067,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
               {(todayCardio.workouts||[]).map((w,i) => (
                 <div key={`cb${i}`} style={{display:"flex",justifyContent:"space-between",padding:"8px 6px",borderBottom:"1px solid var(--border)",fontSize:".82rem",cursor:"pointer",borderRadius:"6px",background:editingWorkout===`c${i}`?"rgba(79,195,247,.06)":"transparent"}}
                   onClick={e=>{e.stopPropagation();setExpandedStat(null);setEditingWorkout(editingWorkout===`c${i}`?null:`c${i}`);}}>
-                  <span><span style={{fontSize:".65rem",color:"#4fc3f7",fontWeight:700,marginRight:"6px"}}>CARDIO</span>{w.co?.icon} {w.co?.label}</span>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:"5px"}}><span style={{fontSize:".65rem",color:"#4fc3f7",fontWeight:700}}>CARDIO</span><Icon name={exerciseCategory(w.co, "cardio")} size={14} color="var(--accent)" />{w.co?.label}</span>
                   <span style={{display:"flex",alignItems:"center",gap:"8px"}}>
                     <span style={{fontFamily:"'Sora',sans-serif",color:"var(--orange)"}}>{w.burned} cal</span>
                     <span style={{fontSize:".6rem",color:"var(--muted)"}}>✏️</span>
@@ -7063,7 +7077,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
               {(todayStrength.sessions||[]).map((s,i) => (
                 <div key={`sb${i}`} style={{display:"flex",justifyContent:"space-between",padding:"8px 6px",borderBottom:"1px solid var(--border)",fontSize:".82rem",cursor:"pointer",borderRadius:"6px",background:editingWorkout===`s${i}`?"rgba(255,107,157,.06)":"transparent"}}
                   onClick={e=>{e.stopPropagation();setExpandedStat(null);setEditingWorkout(editingWorkout===`s${i}`?null:`s${i}`);}}>
-                  <span><span style={{fontSize:".65rem",color:"#ff6b9d",fontWeight:700,marginRight:"6px"}}>STRENGTH</span>{s.ex?.icon} {s.ex?.label}</span>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:"5px"}}><span style={{fontSize:".65rem",color:"#ff6b9d",fontWeight:700}}>STRENGTH</span><Icon name={exerciseCategory(s.ex, "strength")} size={14} color="var(--accent)" />{s.ex?.label}</span>
                   <span style={{display:"flex",alignItems:"center",gap:"8px"}}>
                     <span style={{fontFamily:"'Sora',sans-serif",color:"var(--orange)"}}>{s.burned} cal</span>
                     <span style={{fontSize:".6rem",color:"var(--muted)"}}>✏️</span>
@@ -7301,7 +7315,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             <div key={`c${i}`} id={`workout-c${i}`}>
               <div style={{display:"flex",alignItems:"center",gap:"8px",padding:"12px 8px",marginBottom:"4px",borderRadius:"8px",border:editingWorkout===`c${i}`?"1.5px solid var(--accent)":"1.5px solid var(--border)",background:editingWorkout===`c${i}`?"rgba(8,220,224,.04)":"var(--s2)",cursor:"pointer",transition:"all .15s"}}
                 onClick={()=>setEditingWorkout(editingWorkout===`c${i}`?null:`c${i}`)}>
-                <span style={{fontSize:"1rem"}}>{w.co?.icon||"🏃"}</span>
+                <Icon name={exerciseCategory(w.co, "cardio")} size={18} color="var(--accent)" />
                 <div style={{flex:1}}>
                   <div style={{fontSize:".84rem",fontWeight:600}}>{w.co?.label||"Unknown Exercise"} <span style={{fontSize:".72rem",color:"var(--muted)"}}>· {(todayCardio.workouts[i]||{}).duration||30}m</span></div>
                   <div style={{fontSize:".65rem",color:"#4fc3f7",letterSpacing:".5px",textTransform:"uppercase",fontWeight:700}}>Cardio</div>
@@ -7354,7 +7368,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             <div key={`s${i}`} id={`workout-s${i}`}>
               <div style={{display:"flex",alignItems:"center",gap:"8px",padding:"12px 8px",marginBottom:"4px",borderRadius:"8px",border:editingWorkout===`s${i}`?"1.5px solid var(--accent)":"1.5px solid var(--border)",background:editingWorkout===`s${i}`?"rgba(8,220,224,.04)":"var(--s2)",cursor:"pointer",transition:"all .15s"}}
                 onClick={()=>setEditingWorkout(editingWorkout===`s${i}`?null:`s${i}`)}>
-                <span style={{fontSize:"1rem"}}>{s.ex?.icon||"🏋️"}</span>
+                <Icon name={exerciseCategory(s.ex, "strength")} size={18} color="var(--accent)" />
                 <div style={{flex:1}}>
                   <div style={{fontSize:".84rem",fontWeight:600}}>{s.ex?.label||"Unknown Exercise"} <span style={{fontSize:".72rem",color:"var(--muted)"}}>· {s.duration||60}m</span></div>
                   <div style={{fontSize:".65rem",color:"#ff6b9d",letterSpacing:".5px",textTransform:"uppercase",fontWeight:700}}>Strength · {s.ex?.cat||"Custom"}</div>
