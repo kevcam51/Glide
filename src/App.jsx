@@ -6420,6 +6420,23 @@ function ActivityFeed({ history, onRefresh }) {
 const ymdLocal = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
+// A Firestore Timestamp / Date / number / ISO string → local "YYYY-MM-DD" (or
+// null). Used to derive a client's start date from their profile's createdAt.
+const tsToYmd = (ts) => {
+  if (!ts) return null;
+  try {
+    let ms;
+    if (typeof ts.toMillis === "function") ms = ts.toMillis();
+    else if (typeof ts.toDate === "function") ms = ts.toDate().getTime();
+    else if (ts.seconds != null) ms = ts.seconds * 1000;
+    else if (typeof ts === "number") ms = ts;
+    else if (typeof ts === "string") ms = Date.parse(ts);
+    else return null;
+    if (!ms || isNaN(ms)) return null;
+    return ymdLocal(new Date(ms));
+  } catch { return null; }
+};
+
 // Local clock time as 24h "HH:MM" — stamped on a meal when it's logged, so the
 // AI (and the user) can later see when meals were eaten for time-of-day trends.
 const hhmmLocal = (d = new Date()) =>
@@ -6462,6 +6479,13 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   const protTarget = (data.macroTargets && data.macroTargets.protein != null)
     ? Number(data.macroTargets.protein)
     : (data.weightLbs ? Math.round(Number(data.weightLbs)) : null);
+
+  // Client start date (when they signed up / began). Days BEFORE this aren't
+  // tracked: we don't mark them missed / scheduled / adherence, because the
+  // client wasn't registered yet. Stored on the plan as data.startDate (local
+  // YYYY-MM-DD). Absent (e.g. a trainer's local template) → no gating.
+  const startKey = (data && data.startDate) || null;
+  const beforeStart = (k) => !!(startKey && k < startKey);
 
   useEffect(() => { (async () => setLoggedDays(await onListLoggedDays()))(); }, []);
   useEffect(() => { (async () => setDayLog(await onReadDay(sel)))(); }, [sel]);
@@ -6580,6 +6604,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   );
 
   const DayDots = ({ k }) => {
+    if (beforeStart(k)) return <div style={{ height: 6, marginTop: 2 }} />; // pre-start: no markers
     const d = dots(k);
     return (
       <div style={{ display: "flex", gap: 2, justifyContent: "center", height: 6, marginTop: 2 }}>
@@ -6614,8 +6639,10 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             if (!d) return <div key={i} />;
             const k = keyOf(cur.y, cur.m, d);
             const isToday = k === todayKey;
+            const pre = beforeStart(k);        // before the client started — untracked
+            const isStart = startKey && k === startKey;
             // Adherence tint: green if calories were at/under target, amber if over.
-            const cal = dayCals[k];
+            const cal = pre ? null : dayCals[k];
             const over = calTarget && cal != null && cal > 0 && cal > calTarget * 1.05;
             const onTrack = calTarget && cal != null && cal > 0 && !over;
             const bg = k === sel ? "rgba(8,220,224,.12)"
@@ -6624,13 +6651,13 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
               : "var(--surface)";
             return (
               <button key={i} onClick={() => { setSel(k); setView("day"); }}
-                title={cal != null && cal > 0 ? `${cal.toLocaleString()} cal${calTarget ? ` · target ${calTarget.toLocaleString()}` : ""}` : undefined}
-                style={{ aspectRatio: "1", borderRadius: 8, cursor: "pointer", padding: 2,
-                  border: isToday ? "1px solid var(--accent)" : "1px solid var(--border)",
+                title={pre ? "Before your start date" : isStart ? "Your start date" : (cal != null && cal > 0 ? `${cal.toLocaleString()} cal${calTarget ? ` · target ${calTarget.toLocaleString()}` : ""}` : undefined)}
+                style={{ aspectRatio: "1", borderRadius: 8, cursor: "pointer", padding: 2, opacity: pre ? 0.4 : 1,
+                  border: isStart ? "1px solid var(--green)" : isToday ? "1px solid var(--accent)" : "1px solid var(--border)",
                   background: bg, color: "var(--text)",
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                <span style={{ fontSize: ".8rem", fontWeight: isToday ? 800 : 500 }}>{d}</span>
-                <DayDots k={k} />
+                <span style={{ fontSize: ".8rem", fontWeight: (isToday || isStart) ? 800 : 500 }}>{d}</span>
+                {isStart ? <div style={{ display: "flex", justifyContent: "center", height: 6, marginTop: 2 }}><span style={{ width: 5, height: 5, borderRadius: 3, background: "var(--green)" }} /></div> : <DayDots k={k} />}
               </button>
             );
           })}
@@ -6656,22 +6683,25 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {days.map((k) => {
             const ci = ciByDate[k]; const isToday = k === todayKey;
-            const cal = dayCals[k];
+            const pre = beforeStart(k); const isStart = startKey && k === startKey;
+            const cal = pre ? null : dayCals[k];
             const over = calTarget && cal != null && cal > 0 && cal > calTarget * 1.05;
             const onTrack = calTarget && cal != null && cal > 0 && !over;
             // Left accent conveys calorie adherence (green at/under, amber over).
-            const accent = over ? "var(--yellow)" : onTrack ? "var(--green)" : null;
+            const accent = pre ? null : (over ? "var(--yellow)" : onTrack ? "var(--green)" : null);
             return (
               <button key={k} onClick={() => { setSel(k); setView("day"); }}
-                style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, cursor: "pointer",
-                  border: isToday ? "1px solid var(--accent)" : "1px solid var(--border)",
-                  borderLeft: accent ? `4px solid ${accent}` : (isToday ? "1px solid var(--accent)" : "1px solid var(--border)"),
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, cursor: "pointer", opacity: pre ? 0.5 : 1,
+                  border: isStart ? "1px solid var(--green)" : isToday ? "1px solid var(--accent)" : "1px solid var(--border)",
+                  borderLeft: accent ? `4px solid ${accent}` : (isStart ? "4px solid var(--green)" : isToday ? "1px solid var(--accent)" : "1px solid var(--border)"),
                   background: "var(--surface)", color: "var(--text)", textAlign: "left" }}>
                 <div style={{ width: 42 }}>
                   <div style={{ fontSize: ".66rem", color: "var(--muted)", textTransform: "uppercase" }}>{DAY_SHORT[mondayIdx(k)]}</div>
                   <div style={{ fontSize: "1.1rem", fontWeight: 800 }}>{parseKey(k).d}</div>
                 </div>
                 <div style={{ flex: 1, fontSize: ".78rem", color: "var(--muted)", display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  {pre ? <span>— before start</span> : <>
+                  {isStart && <span style={{ color: "var(--green)", fontWeight: 700 }}>🎯 start date</span>}
                   {cal != null && cal > 0 && <span style={{ color: over ? "var(--yellow)" : "var(--green)", fontWeight: 700 }}>{cal.toLocaleString()} cal</span>}
                   {dayProt[k] > 0 && <span style={{ color: protTarget && dayProt[k] >= protTarget ? "var(--green)" : "var(--muted)" }}>🍗 {dayProt[k]}g{protTarget ? `/${protTarget}` : ""}</span>}
                   {loggedDays.includes(k) && !(cal > 0) && <span style={{ color: "var(--green)" }}>🍽️ logged</span>}
@@ -6682,7 +6712,8 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                       ? <span style={{ color: "var(--red)" }}>✗ missed workout</span>
                       : <span>◦ {scheduledFor(k)} scheduled</span>
                   )}
-                  {!loggedDays.includes(k) && !(ci && (ci.weight || ci.workedOut)) && scheduledFor(k) === 0 && <span>—</span>}
+                  {!isStart && !loggedDays.includes(k) && !(ci && (ci.weight || ci.workedOut)) && scheduledFor(k) === 0 && <span>—</span>}
+                  </>}
                 </div>
               </button>
             );
@@ -6690,7 +6721,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
         </div>
         {/* Weekly calorie roll-up */}
         {(() => {
-          const logged = days.filter((k) => dayCals[k] != null && dayCals[k] > 0);
+          const logged = days.filter((k) => !beforeStart(k) && dayCals[k] != null && dayCals[k] > 0);
           if (logged.length === 0) return null;
           const totalCal = logged.reduce((s, k) => s + dayCals[k], 0);
           const avg = Math.round(totalCal / logged.length);
@@ -6709,7 +6740,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
         })()}
         {/* Weekly protein-adherence roll-up: avg logged protein vs target */}
         {(() => {
-          const logged = days.filter((k) => dayProt[k] > 0);
+          const logged = days.filter((k) => !beforeStart(k) && dayProt[k] > 0);
           if (logged.length === 0) return null;
           const avgProt = Math.round(logged.reduce((s, k) => s + dayProt[k], 0) / logged.length);
           const met = protTarget && avgProt >= protTarget;
@@ -6726,8 +6757,8 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
         })()}
         {/* Weekly workout-adherence roll-up: completed vs scheduled this week */}
         {(() => {
-          const scheduledDays = days.filter((k) => scheduledFor(k) > 0);
-          const doneDays = days.filter((k) => ciByDate[k] && ciByDate[k].workedOut);
+          const scheduledDays = days.filter((k) => !beforeStart(k) && scheduledFor(k) > 0);
+          const doneDays = days.filter((k) => !beforeStart(k) && ciByDate[k] && ciByDate[k].workedOut);
           if (scheduledDays.length === 0 && doneDays.length === 0) return null;
           const onPace = doneDays.length >= scheduledDays.length;
           return (
@@ -6749,6 +6780,8 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   // ── Day view (with back-dated logging) ──
   const dayView = () => {
     const ci = ciByDate[sel] || {};
+    const preStart = beforeStart(sel);
+    const isStart = startKey && sel === startKey;
     const dn = weekdayName(sel);
     const cardio = (data.cardio && data.cardio[dn]) || [];
     const strength = (data.strength && data.strength[dn]) || [];
@@ -6764,12 +6797,21 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
           <button style={navBtn} onClick={() => goStep(-1)}>‹</button>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontWeight: 800, fontSize: ".95rem" }}>{fmtLong(sel)}</div>
-            {sel === todayKey ? <div style={{ fontSize: ".7rem", color: "var(--accent)" }}>Today</div>
+            {isStart ? <div style={{ fontSize: ".7rem", color: "var(--green)", fontWeight: 700 }}>🎯 Your start date</div>
+              : preStart ? <div style={{ fontSize: ".7rem", color: "var(--muted)" }}>Before your start date</div>
+              : sel === todayKey ? <div style={{ fontSize: ".7rem", color: "var(--accent)" }}>Today</div>
               : sel < todayKey ? <div style={{ fontSize: ".7rem", color: "var(--muted)" }}>Back-dated entry</div>
               : <div style={{ fontSize: ".7rem", color: "var(--muted)" }}>Future date</div>}
           </div>
           <button style={navBtn} onClick={() => goStep(1)}>›</button>
         </div>
+
+        {preStart && (
+          <div style={{ padding: "10px 12px", borderRadius: 10, marginBottom: 12, background: "var(--s2)",
+            border: "1px solid var(--border)", color: "var(--muted)", fontSize: ".8rem" }}>
+            This is before your start date{startKey ? ` (${fmtShort(startKey)})` : ""} — days before you started aren't tracked, so nothing here counts as missed.
+          </div>
+        )}
 
         {/* Food */}
         <div style={card}>
@@ -10428,6 +10470,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   const [showChart, setShowChart] = useState(false); // progress chart popup open
   const [showCalendar, setShowCalendar] = useState(false); // full calendar (back-dating) overlay
   const [recentFoods, setRecentFoods] = useState([]); // recent foods for the calendar's quick re-add chips
+  const [signupYmd, setSignupYmd] = useState(null); // the client's signup date (profile.createdAt) → plan start date
   const [msg, setMsg] = useState("");              // calorie-log message
   const [wtMsg, setWtMsg] = useState("");          // weight-log message
   const [requests, setRequests] = useState([]);    // trainer → client requests (Session 19)
@@ -10489,6 +10532,19 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
     } catch { setRecentFoods([]); }
   };
   useEffect(() => { load(); }, []);
+
+  // The client's start date = when they signed up (profile.createdAt). Read it
+  // once so we can stamp it onto the plan (below) and gate the calendar.
+  useEffect(() => {
+    getProfile().then((p) => { const y = tsToYmd(p && p.createdAt); if (y) setSignupYmd(y); }).catch(() => {});
+  }, []);
+  // Stamp the signup date onto the active plan as data.startDate if it's missing,
+  // so the calendar (here AND the trainer's view of this client) treats days
+  // before the client joined as untracked. One-time per plan; echo-suppressed.
+  useEffect(() => {
+    if (!signupYmd || !planData || planData.startDate) return;
+    savePlanDataMutation((d) => { if (!d.startDate) d.startDate = signupYmd; });
+  }, [signupYmd, planData]);
 
   // ── Live sync: the client's own home updates in real time ──
   // When the trainer (or the AI on the client's behalf) edits the client's
