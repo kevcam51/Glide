@@ -18,6 +18,7 @@ const GLYPHS = {
   clients: (<><circle cx="9" cy="8" r="3.1" /><path d="M3.6 20a5.4 5.4 0 0 1 10.8 0" /><path d="M16 5.3a3 3 0 0 1 0 5.4" /><path d="M17.4 14.3A5.4 5.4 0 0 1 20.4 19.4" /></>),
   bell: (<><path d="M6 11a6 6 0 1 1 12 0v4l1.6 3H4.4L6 15z" /><path d="M10 20.5a2 2 0 0 0 4 0" /></>),
   bellOff: (<><path d="M6 11a6 6 0 1 1 12 0v4l1.6 3H4.4L6 15z" /><path d="M10 20.5a2 2 0 0 0 4 0" /><path d="M3.5 3.5 20.5 20.5" /></>),
+  search: (<><circle cx="10.5" cy="10.5" r="6.5" /><path d="m20 20-4.7-4.7" /></>),
   invite: (<><path d="M22 2 11 13" /><path d="M22 2 15 22 11 13 2 9z" /></>),
   signout: (<><path d="M14 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8" /><path d="M10 12h11" /><path d="m18 9 3 3-3 3" /></>),
   edit: (<><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /><path d="m14 7 3 3" /></>),

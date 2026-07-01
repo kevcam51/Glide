@@ -2851,7 +2851,7 @@ function SimulationSummary({ data, totalBurn }) {
   return (
     <div className="card" style={{ border: "1px solid rgba(181,123,255,.45)", background: "linear-gradient(180deg,rgba(181,123,255,.1),transparent)" }}>
       <div style={{ fontSize: ".7rem", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--purple)", textAlign: "center", marginBottom: 10 }}>
-        🧪 Simulated Results · what's possible
+        <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}><Icon name="flask" size={14} color="var(--purple)" />Simulated Results · what's possible</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
         <div style={stat}><div style={{ ...big, color: "var(--text)" }}>{current}</div><div style={lbl}>lbs today</div></div>
@@ -4790,7 +4790,7 @@ function SurplusTab({ tdee, totalBurn, avgBurnPerDay, activeDays, name }) {
 
       {/* Takeaway */}
       <div className="surplus-takeaway">
-        <div className="st-icon">💡</div>
+        <div className="st-icon" style={{display:"flex",alignItems:"center"}}><Icon name="bulb" size={22} color="var(--accent)" /></div>
         <div>
           <div className="st-title">The Bottom Line</div>
           <p className="st-body">
@@ -6089,7 +6089,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
           <button onClick={() => { const n = !searchOpen; setSearchOpen(n); if (!n) resetSearch(); }}
             style={{ border:"none", background:"transparent", color:"var(--accent)", cursor:"pointer",
               fontSize:".74rem", fontWeight:700, padding:"0", textAlign:"left" }}>
-            {searchOpen ? "✕ Close food search" : "🔍 Search food database"}
+            <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}><Icon name={searchOpen ? "close" : "search"} size={13} />{searchOpen ? "Close food search" : "Search food database"}</span>
           </button>
           {searchOpen && (
             <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"6px" }}>
@@ -8485,11 +8485,13 @@ function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
 //   { id, fromUid, fromName, type, prompt, status:"open"|"done", createdAt, doneAt }
 // The reverse direction (client → trainer) needs server-side writes (Blaze).
 const REQUEST_TEMPLATES = [
-  { type: "log_food",    icon: "🍽️", label: "Log today's food",  prompt: "Please log what you ate today." },
-  { type: "weigh_in",    icon: "⚖️", label: "Do a weigh-in",     prompt: "Please record today's weight." },
-  { type: "log_workout", icon: "🏋️", label: "Record a workout",  prompt: "Please record your workout for today." },
-  { type: "enter_info",  icon: "📝", label: "Enter your info",   prompt: "Please fill in your details and goals so we can build your plan." },
+  { type: "log_food",    icon: "🍽️", iconName: "meal",     label: "Log today's food",  prompt: "Please log what you ate today." },
+  { type: "weigh_in",    icon: "⚖️", iconName: "scale",    label: "Do a weigh-in",     prompt: "Please record today's weight." },
+  { type: "log_workout", icon: "🏋️", iconName: "dumbbell", label: "Record a workout",  prompt: "Please record your workout for today." },
+  { type: "enter_info",  icon: "📝", iconName: "edit",     label: "Enter your info",   prompt: "Please fill in your details and goals so we can build your plan." },
 ];
+// Resolve a request's custom icon name from its type (falls back to edit).
+const requestIconName = (type) => (REQUEST_TEMPLATES.find(t => t.type === type) || {}).iconName || "edit";
 const REQUEST_KEY = "caliq-requests";
 
 // Read / write a user's request list (trainer reads a client's via getForUser;
@@ -9084,9 +9086,9 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         </div>
                         <div className="flex flex-wrap gap-1.5 mb-2.5">
                           {REQUEST_TEMPLATES.map((t) => (
-                            <button key={t.type} className={mBtnCls} disabled={reqBusy}
+                            <button key={t.type} className={`${mBtnCls} inline-flex items-center gap-1.5`} disabled={reqBusy}
                               onClick={() => sendRequest(c.uid, t)}>
-                              {t.icon} {t.label}
+                              <Icon name={t.iconName} size={14} color="var(--accent)" />{t.label}
                             </button>
                           ))}
                         </div>
@@ -9544,7 +9546,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
                         onClick={(e) => { e.stopPropagation(); if (!nudged[c.uid] && nudgeBusy !== c.uid) sendNudge(c.uid); }}
                         disabled={nudgeBusy === c.uid || nudged[c.uid]}
                         className={`shrink-0 px-2.5 py-1.5 rounded-md text-xs font-bold cursor-pointer whitespace-nowrap border ${nudged[c.uid] ? "border-success text-success bg-transparent" : "border-primary text-primary bg-[rgba(8,220,224,.08)]"} disabled:cursor-default`}>
-                        {nudged[c.uid] ? "✓ Nudged" : nudgeBusy === c.uid ? "…" : "📤 Nudge"}
+                        {nudged[c.uid] ? "✓ Nudged" : nudgeBusy === c.uid ? "…" : <span style={{display:"inline-flex",alignItems:"center",gap:"5px"}}><Icon name="invite" size={12} />Nudge</span>}
                       </button>
                     </div>
                   ))}
@@ -10786,8 +10788,9 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                   const tmpl = REQUEST_TEMPLATES.find((t) => t.type === r.type);
                   return (
                     <div key={r.id} className="px-3 py-2.5 rounded-lg bg-surface2 border border-border">
-                      <div className="text-[.9rem] text-fg mb-2">
-                        {tmpl ? `${tmpl.icon} ` : "📝 "}{r.prompt}
+                      <div className="text-[.9rem] text-fg mb-2 flex items-start gap-2">
+                        <Icon name={requestIconName(r.type)} size={15} color="var(--accent)" style={{marginTop:2}} />
+                        <span>{r.prompt}</span>
                       </div>
                       <div className="flex gap-2 flex-wrap">
                         <button onClick={() => setQuickReq(r)} className={primaryBtnCls}>Do it now →</button>
@@ -10806,7 +10809,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
         ) : planData === null || !w ? (
           // No plan set up yet — friendly get-started prompt instead of empty cards.
           <div className={cardCls}>
-            <div className="font-display text-base tracking-wide text-primary uppercase mb-1">📋 Get started</div>
+            <div className="font-display text-base tracking-wide text-primary uppercase mb-1 flex items-center gap-2"><Icon name="clipboard" size={17} color="var(--accent)" />Get started</div>
             <div className="text-muted text-sm mb-4">
               You don't have a plan set up yet. Open it to enter your details and
               goals — or if your trainer linked one, it'll be waiting for you.
@@ -11137,7 +11140,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
         <div className={cardCls}>
-          <div className={sectionTitleCls}>📂 Client Profiles</div>
+          <div className={`${sectionTitleCls} flex items-center gap-2`}><Icon name="folder" size={18} color="var(--accent)" />Client Profiles</div>
           <div className={subCls}>
             {loading ? "Loading saved profiles..." : profiles.length > 0
               ? `${profiles.length} client${profiles.length!==1?"s":""} · ${folders.length} folder${folders.length!==1?"s":""}. Drag and drop clients between folders.`
@@ -11179,7 +11182,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
                 <button className={ghostBtnCls} onClick={()=>{setShowNewFolder(false);setNewFolderName("")}}>Cancel</button>
               </div>
             ) : (
-              <button className="w-full py-2.5 rounded-lg border border-dashed border-border bg-transparent text-fg text-sm font-semibold cursor-pointer" onClick={()=>setShowNewFolder(true)}>📁 + New Folder</button>
+              <button className="w-full py-2.5 rounded-lg border border-dashed border-border bg-transparent text-fg text-sm font-semibold cursor-pointer inline-flex items-center justify-center gap-2" onClick={()=>setShowNewFolder(true)}><Icon name="folder" size={15} color="var(--accent)" />+ New Folder</button>
             )}
           </div>
 
@@ -11195,7 +11198,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
                 onDragLeave={onFolderDragLeave}
                 onDrop={e=>onFolderDrop(e,folder.id)}>
                 <div className="flex items-center gap-2 px-3 py-2.5 cursor-pointer" onClick={()=>toggleFolder(folder.id)}>
-                  <span className="text-base">{isOpen?"📂":"📁"}</span>
+                  <span className="flex text-base"><Icon name="folder" size={16} color="var(--accent)" /></span>
                   {editingFolder===folder.id ? (
                     <input type="text" className={inputCls} value={editName}
                       onChange={e=>setEditName(e.target.value)}
@@ -12526,7 +12529,7 @@ export default function App() {
         <div className="container">
           {activeIsSim && (
             <div className="flex items-center gap-2 px-3.5 py-2.5 mb-3.5 rounded-[10px] bg-[rgba(181,123,255,.1)] border border-[rgba(181,123,255,.4)]">
-              <span className="text-[1.1rem]">🧪</span>
+              <Icon name="flask" size={18} color="#b57bff" />
               <span className="text-[.82rem] text-fg">
                 <strong>Simulation</strong> — a sandbox projection, not a real client plan.
               </span>
