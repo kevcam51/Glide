@@ -127,6 +127,50 @@ async function fetchLinkMeta(rawUrl) {
   }
 }
 
+// ── search_food: real nutrition from the food databases (USDA + Open Food Facts) ─
+// Lets the AI pull exact label values for PACKAGED/BRANDED items instead of
+// estimating. Both free; OFF needs no key, USDA uses DEMO_KEY unless USDA_API_KEY
+// is set. Returns matches with macros PER 100 g; the model scales to the portion.
+const tidyName = (s) => (s || "Food").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+async function searchFoodDb(query) {
+  const q = (query || "").toString().trim();
+  if (!q) return { error: "No food to search for." };
+  const key = process.env.USDA_API_KEY || "DEMO_KEY";
+  const usdaP = (async () => {
+    try {
+      const r = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${key}&query=${encodeURIComponent(q)}&pageSize=6`);
+      if (!r.ok) return [];
+      const j = await r.json();
+      return (j.foods || []).map((x) => {
+        const n = {};
+        (x.foodNutrients || []).forEach((z) => { if (z.nutrientName === "Energy" && z.unitName && z.unitName !== "KCAL") return; n[z.nutrientName] = z.value; });
+        return { name: tidyName(x.description), brand: x.brandOwner || x.brandName || "", source: "USDA",
+          per100g: { kcal: Math.round(n["Energy"] || 0), protein: Math.round(n["Protein"] || 0), carbs: Math.round(n["Carbohydrate, by difference"] || 0), fat: Math.round(n["Total lipid (fat)"] || 0) } };
+      }).filter((f) => f.per100g.kcal > 0);
+    } catch { return []; }
+  })();
+  const offP = (async () => {
+    try {
+      const r = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_simple=1&action=process&json=1&page_size=6&fields=product_name,brands,nutriments&search_terms=${encodeURIComponent(q)}`,
+        { headers: { "User-Agent": "GlideAI/1.0 (+https://calorieiq-jet.vercel.app)" } });
+      if (!r.ok) return [];
+      const j = await r.json();
+      return (j.products || []).map((p) => {
+        const nm = p.nutriments || {};
+        return { name: tidyName(p.product_name), brand: (p.brands || "").split(",")[0].trim(), source: "OpenFoodFacts",
+          per100g: { kcal: Math.round(nm["energy-kcal_100g"] || 0), protein: Math.round(nm.proteins_100g || 0), carbs: Math.round(nm.carbohydrates_100g || 0), fat: Math.round(nm.fat_100g || 0) } };
+      }).filter((f) => f.name && f.name !== "Food" && f.per100g.kcal > 0);
+    } catch { return []; }
+  })();
+  const [usda, off] = await Promise.all([usdaP, offP]);
+  const seen = new Set(); const out = [];
+  const push = (f) => { const k = (f.name + "|" + (f.brand || "")).toLowerCase(); if (seen.has(k)) return; seen.add(k); out.push(f); };
+  const max = Math.max(usda.length, off.length);
+  for (let i = 0; i < max; i++) { if (off[i]) push(off[i]); if (usda[i]) push(usda[i]); } // branded first
+  if (!out.length) return { results: [], note: "No database match — estimate the macros instead, or ask the user for the label values." };
+  return { results: out.slice(0, 8), note: "Macros are PER 100 g. Scale to the portion the user ate, then use propose_meal / log_meal." };
+}
+
 // Build one validated week ({day:[{type,duration}]}) from a provided day-keyed
 // object — drops unknown ids (collected in `dropped`). Shared by the
 // set_workout_schedule write and the propose_workout card. replace=true sets the
@@ -655,6 +699,20 @@ function buildTools(role) {
       },
     },
     {
+      name: "search_food",
+      description:
+        "Look up a food's REAL nutrition from the food databases (USDA + Open Food Facts). Use this for PACKAGED / BRANDED "
+        + "items (e.g. 'Quest cookies & cream bar', 'Chobani vanilla yogurt', a specific cereal or protein powder) to get "
+        + "accurate label values instead of guessing. Returns matches with calories + protein/carbs/fat PER 100 g — pick the "
+        + "best match and SCALE it to the portion the user ate, then use propose_meal / log_meal. For simple home-cooked or "
+        + "whole foods (an apple, grilled chicken) you can estimate directly without this.",
+      input_schema: {
+        type: "object",
+        properties: { query: { type: "string", description: "The food/product to search, e.g. 'Clif builder bar chocolate'" } },
+        required: ["query"],
+      },
+    },
+    {
       name: "fetch_link",
       description:
         "Read a web/video LINK the user shares (a YouTube/Instagram/TikTok workout or recipe, a blog, an article) and get "
@@ -742,6 +800,11 @@ async function runTool(name, input, ctx) {
   if (name === "fetch_link") {
     // Read a shared URL's text (no account target needed). All guards in the helper.
     return await fetchLinkMeta(input.url);
+  }
+
+  if (name === "search_food") {
+    // Food-database lookup (no account target needed).
+    return await searchFoodDb(input.query);
   }
 
   if (name === "list_clients") {

@@ -5897,36 +5897,60 @@ function TimelineTab({ data, tdee, totalBurn }) {
 // key is read-only food data, so exposing it in the browser bundle is low-risk;
 // it can be proxied through a Cloud Function once on Blaze. Returns normalized
 // per-100g foods: { name, kcal, p, c, f }.
-async function searchFoods(query) {
+const _tidyFood = (s) => (s || "Food").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+// USDA FoodData Central — strong on generic / whole foods. Free; DEMO_KEY unless
+// VITE_USDA_API_KEY (a free api.data.gov key) is set for higher limits.
+async function searchUSDA(query) {
   const key = (import.meta.env && import.meta.env.VITE_USDA_API_KEY) || "DEMO_KEY";
   const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${key}` +
     `&query=${encodeURIComponent(query)}&pageSize=8`;
-  let r;
-  try {
-    r = await fetch(url);
-  } catch {
-    // Network-level failure. On the shared DEMO_KEY this is usually a quota
-    // block (the rate-limit response has no CORS header, so it surfaces here).
-    throw new Error("Food search is temporarily unavailable — try again in a moment.");
-  }
-  if (!r.ok) {
-    throw new Error(r.status === 429
-      ? "Food search limit reached — try again in a bit (or add a free USDA API key)."
-      : "Food search is temporarily unavailable — try again in a moment.");
-  }
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(r.status === 429 ? "limit" : "fail");
   const j = await r.json();
-  const tidy = (s) => (s || "Food").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
   return (j.foods || []).map((x) => {
     const n = {};
     (x.foodNutrients || []).forEach((z) => {
-      // "Energy" appears in both KCAL and kJ — keep only the kcal value.
-      if (z.nutrientName === "Energy" && z.unitName && z.unitName !== "KCAL") return;
+      if (z.nutrientName === "Energy" && z.unitName && z.unitName !== "KCAL") return; // skip kJ
       n[z.nutrientName] = z.value;
     });
-    return { name: tidy(x.description), brand: x.brandOwner || x.brandName || "",
+    return { name: _tidyFood(x.description), brand: x.brandOwner || x.brandName || "",
       kcal: Math.round(n["Energy"] || 0), p: Math.round(n["Protein"] || 0),
-      c: Math.round(n["Carbohydrate, by difference"] || 0), f: Math.round(n["Total lipid (fat)"] || 0) };
+      c: Math.round(n["Carbohydrate, by difference"] || 0), f: Math.round(n["Total lipid (fat)"] || 0), source: "usda" };
   }).filter((f) => f.kcal > 0);
+}
+// Open Food Facts — free, no key, strong on BRANDED / packaged / international
+// foods + barcodes. CORS-enabled. Complements USDA. Per-100g nutriments.
+async function searchOFF(query) {
+  const url = "https://world.openfoodfacts.org/cgi/search.pl?search_simple=1&action=process&json=1&page_size=8" +
+    `&fields=product_name,brands,nutriments&search_terms=${encodeURIComponent(query)}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("fail");
+  const j = await r.json();
+  return (j.products || []).map((p) => {
+    const n = p.nutriments || {};
+    return { name: _tidyFood(p.product_name), brand: (p.brands || "").split(",")[0].trim(),
+      kcal: Math.round(n["energy-kcal_100g"] || 0), p: Math.round(n.proteins_100g || 0),
+      c: Math.round(n.carbohydrates_100g || 0), f: Math.round(n.fat_100g || 0), source: "off" };
+  }).filter((f) => f.name && f.name !== "Food" && f.kcal > 0);
+}
+// Combined food search: query USDA + Open Food Facts in parallel and interleave
+// (generic + branded), so we get both whole foods and packaged products. Returns
+// normalized per-100g foods { name, brand, kcal, p, c, f, source }.
+async function searchFoods(query) {
+  const [u, o] = await Promise.allSettled([searchUSDA(query), searchOFF(query)]);
+  const usda = u.status === "fulfilled" ? u.value : [];
+  const off = o.status === "fulfilled" ? o.value : [];
+  if (!usda.length && !off.length) {
+    const limited = u.status === "rejected" && u.reason && u.reason.message === "limit";
+    throw new Error(limited
+      ? "Food search limit reached — try again in a bit (or add a free USDA API key)."
+      : "Food search is temporarily unavailable — try again in a moment.");
+  }
+  const seen = new Set(); const out = [];
+  const push = (f) => { const k = (f.name + "|" + (f.brand || "")).toLowerCase(); if (seen.has(k)) return; seen.add(k); out.push(f); };
+  const max = Math.max(usda.length, off.length);
+  for (let i = 0; i < max; i++) { if (usda[i]) push(usda[i]); if (off[i]) push(off[i]); }
+  return out.slice(0, 12);
 }
 
 // Brand wordmark — "GLI" in brand cyan + "DE" in white, mirroring the old
@@ -6474,6 +6498,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   const [dayProt, setDayProt] = useState({});             // date -> logged protein g (week macro adherence)
   const [calQuick, setCalQuick] = useState("");           // quick calorie entry (type a number)
   const [calQuickType, setCalQuickType] = useState("");   // optional meal type for the typed amount
+  const [waterDraft, setWaterDraft] = useState("");       // water (oz) typed entry for the selected day
 
   // Daily calorie target — same formula the dashboard/Results use, for adherence tinting.
   const calTarget = (computeClientCalories(data) || {}).target || null;
@@ -6491,6 +6516,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
 
   useEffect(() => { (async () => setLoggedDays(await onListLoggedDays()))(); }, []);
   useEffect(() => { (async () => setDayLog(await onReadDay(sel)))(); }, [sel]);
+  useEffect(() => { setWaterDraft(dayLog && dayLog.water ? String(dayLog.water) : ""); }, [dayLog]);
   // Read calorie totals for a set of dates (only logged + not-yet-cached), merge
   // into dayCals. Used by both the month and week adherence views; cached so a
   // month/week isn't re-read on revisit.
@@ -6860,6 +6886,32 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             <MealLog meals={(dayLog && dayLog.meals) || []} onAddMeal={addMeal} onRemoveMeal={removeMeal} onEditMeal={editMeal} recentFoods={recentFoods} />
           </div>
         </div>
+
+        {/* Water */}
+        {(() => {
+          const water = dayLog ? (dayLog.water || 0) : 0;
+          const setWater = (v) => writeDay({ ...(dayLog || {}), water: Math.max(0, Math.round(v)) });
+          const commitWater = () => { const v = parseInt(waterDraft, 10); setWater(isNaN(v) ? 0 : v); };
+          return (
+            <div style={card}>
+              <div style={lbl}>💧 Water</div>
+              <div style={{ fontSize: "1.6rem", fontWeight: 800, fontFamily: "'Sora',sans-serif" }}>
+                {water}<span style={{ fontSize: ".9rem", color: "var(--muted)", fontWeight: 400 }}> oz</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                {[8, 16, 32].map((n) => <button key={n} style={quick} onClick={() => setWater(water + n)}>+{n}</button>)}
+                <button style={quick} onClick={() => setWater(0)}>Reset</button>
+              </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <input type="number" inputMode="numeric" placeholder="Set oz" value={waterDraft}
+                  onChange={(e) => setWaterDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") commitWater(); }}
+                  style={{ flex: 1, minWidth: 0, padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)", fontSize: ".9rem" }} />
+                <button onClick={commitWater} style={{ padding: "9px 16px", fontSize: ".82rem", fontWeight: 800, borderRadius: 8, cursor: "pointer", border: "none", background: "var(--accent)", color: "#0b0b12" }}>Set</button>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Weight */}
         <div style={card}>
