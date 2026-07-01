@@ -9767,6 +9767,8 @@ function AIChatPanel({ role, onDataChanged }) {
   const [transcribing, setTranscribing] = useState(false); // sending audio → text
   const [liveText, setLiveText] = useState("");          // interim words (browser speech) while recording
   const [size, setSize] = useState("compact");           // "compact" corner card | "full" near-fullscreen
+  const [pasteOpen, setPasteOpen] = useState(false);     // "Paste from AI" import box open
+  const [pasteText, setPasteText] = useState("");        // pasted text from another AI
   const scrollRef = useRef(null);
   const fileRef = useRef(null);
   const taRef = useRef(null);     // composer textarea (auto-grows with content)
@@ -9988,13 +9990,17 @@ function AIChatPanel({ role, onDataChanged }) {
   };
   useEffect(() => { autoGrowTextarea(); }, [draft, open]);
 
-  const send = async () => {
-    const text = draft.trim();
-    if ((!text && !pendingImage) || busy) return;
+  const send = async (overrideText) => {
+    // overrideText is a string only for programmatic sends (e.g. paste-from-AI
+    // import). When called as an onClick handler the arg is an event — ignore it.
+    const isOverride = typeof overrideText === "string";
+    const text = (isOverride ? overrideText : draft).trim();
+    const img = isOverride ? null : pendingImage;
+    if ((!text && !img) || busy) return;
     setError("");
-    const next = [...messages, { role: "user", content: text, image: pendingImage || undefined }];
+    const next = [...messages, { role: "user", content: text, image: img || undefined }];
     setMessages(next);
-    setDraft("");
+    if (!isOverride) setDraft("");
     setPendingImage(null);
     setProposal(null); // a new message supersedes any pending meal card
     setEditDraft(null);
@@ -10047,6 +10053,17 @@ function AIChatPanel({ role, onDataChanged }) {
       }
     }
     setBusy(false);
+  };
+
+  // Paste-from-AI import: the user pastes a reply from ChatGPT/Claude/etc, and
+  // Glide's own AI parses it into logs via the existing tools ("works with your
+  // AI" vision, phase 1). Reuses the whole chat pipeline via send().
+  const sendImport = () => {
+    const t = pasteText.trim();
+    if (!t || busy) return;
+    setPasteOpen(false);
+    setPasteText("");
+    send("I pasted this from another AI assistant (like ChatGPT or Claude). Pull out every meal, workout, and weigh-in you can find in it, then help me log them into Glide — briefly summarize what you found, and log after I confirm:\n\n" + t);
   };
 
   const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
@@ -10122,6 +10139,12 @@ function AIChatPanel({ role, onDataChanged }) {
                     </button>
                   ))}
                 </div>
+                {/* Paste-from-AI import (works-with-your-AI, phase 1) */}
+                <button onClick={() => setPasteOpen(true)}
+                  className="mt-1 flex items-center gap-2 rounded-lg border border-primary/60 bg-[rgba(8,220,224,.06)] px-3 py-2.5 text-[.85rem] font-semibold text-primary cursor-pointer">
+                  <Icon name="clipboard" size={16} color="var(--accent)" />Paste from another AI
+                </button>
+                <div className="-mt-1 text-[.72rem] text-muted">Use ChatGPT or Claude for your meals? Paste its reply and I'll log it into Glide.</div>
               </div>
             ) : (
               messages.map((m, i) => (
@@ -10299,6 +10322,9 @@ function AIChatPanel({ role, onDataChanged }) {
                     <line x1="8" y1="23" x2="16" y2="23" />
                   </svg>
                 )}</button>
+              <button onClick={() => setPasteOpen(true)} disabled={busy || recording || transcribing} aria-label="Paste from another AI" title="Paste from ChatGPT / Claude"
+                className="flex items-center justify-center rounded-xl border border-border bg-surface2 px-3 py-2.5 text-fg cursor-pointer disabled:opacity-50 hover:text-primary">
+                <Icon name="clipboard" size={20} /></button>
               <textarea ref={taRef} value={draft} onChange={e => setDraft(e.target.value)} rows={1}
                 placeholder={recording ? "Listening… tap ⏹ to stop" : transcribing ? "Transcribing…" : pendingImage ? "Add a note (optional)…" : "Message Glide AI…"}
                 style={{ fontFamily: "var(--font-sans)" }}
@@ -10311,6 +10337,27 @@ function AIChatPanel({ role, onDataChanged }) {
             </div>
             <div className="mt-1.5 text-[.66rem] text-muted">🎤 Speak or 📷 snap a meal. AI estimates can be off — confirm important numbers.</div>
           </div>
+          {/* Paste-from-AI import overlay (works-with-your-AI, phase 1) */}
+          {pasteOpen && (
+            <div className="absolute inset-0 z-10 flex flex-col bg-surface p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <Icon name="clipboard" size={18} color="var(--accent)" />
+                <span className="font-display text-sm uppercase tracking-wide text-primary">Paste from another AI</span>
+                <button onClick={() => { setPasteOpen(false); setPasteText(""); }} aria-label="Close" className="ml-auto flex border-0 bg-transparent text-muted cursor-pointer"><Icon name="close" size={16} color="var(--muted)" /></button>
+              </div>
+              <div className="mb-2 text-[.78rem] text-muted">Copy your ChatGPT / Claude reply (meals, workouts, or weigh-ins) and paste it below. I'll pull out what's loggable and confirm before saving.</div>
+              <textarea value={pasteText} onChange={e => setPasteText(e.target.value)} autoFocus
+                placeholder="Paste here… e.g. 'Breakfast: 3 eggs + oatmeal ~450 cal. Lunch: chicken salad ~500 cal…'"
+                style={{ fontFamily: "var(--font-sans)" }}
+                className="flex-1 resize-none rounded-xl border border-border bg-surface2 px-3.5 py-3 text-[.9rem] leading-relaxed text-fg outline-none placeholder:text-muted" />
+              <div className="mt-3 flex gap-2">
+                <button onClick={sendImport} disabled={!pasteText.trim() || busy}
+                  className="flex-1 rounded-xl border-none bg-primaryfill px-3.5 py-3 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50 disabled:cursor-default">Import &amp; log</button>
+                <button onClick={() => { setPasteOpen(false); setPasteText(""); }}
+                  className="rounded-xl border border-border bg-transparent px-4 py-3 text-[.9rem] font-semibold text-muted cursor-pointer">Cancel</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>,
