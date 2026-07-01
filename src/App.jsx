@@ -5,6 +5,7 @@ import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } 
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
+import QRCode from "qrcode";
 import { Icon } from "./icons.jsx";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
@@ -9660,6 +9661,7 @@ const callAiChat = httpsCallable(functions, "aiChat");
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
 const callSetWorkout = httpsCallable(functions, "setWorkoutSchedule"); // workout Accept-card direct write (Session 75)
 const callTranscribe = httpsCallable(functions, "transcribeAudio"); // voice → text (Whisper, Session 79)
+const callSendInvite = httpsCallable(functions, "sendInvite"); // email invites (Option C)
 // Streaming endpoint (Session 66) — replies arrive word-by-word via SSE. We POST
 // with the Firebase ID token (EventSource can't set headers, so we fetch+stream).
 const AI_STREAM_URL = `https://us-central1-${import.meta.env.VITE_FIREBASE_PROJECT_ID}.cloudfunctions.net/aiChatStream`;
@@ -11448,6 +11450,198 @@ function describePlanChanges(prev, next) {
   return out;
 }
 
+// ─── Invite Hub (Option C) ────────────────────────────────────────────────────
+// One place for a trainer to grow their roster: copy/share the personalized
+// invite link, show a QR for in-person signups, email invitations (via the
+// sendInvite Cloud Function), and see referral stats (clients joined + email
+// invites sent/pending). Rendered as a full-screen portal so it escapes the
+// side-menu drawer's transform. Email invites need RESEND_* secrets set (the
+// composer degrades gracefully with a clear message until then).
+function InviteHub({ open, onClose, meName }) {
+  const [code, setCode] = useState("");
+  const [qr, setQr] = useState("");
+  const [clients, setClients] = useState([]);
+  const [invites, setInvites] = useState([]);   // [{id,email,note,createdAt}] — trainer's own kv
+  const [emailInput, setEmailInput] = useState("");
+  const [note, setNote] = useState("");
+  const [sending, setSending] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [copied, setCopied] = useState("");
+  const [showQr, setShowQr] = useState(false);
+
+  const first = (meName || "").trim().split(/\s+/)[0] || "";
+  const shareLink = code
+    ? `${window.location.origin}/i/${code}${first ? `?n=${encodeURIComponent(first)}` : ""}`
+    : "";
+
+  const loadInvites = async () => {
+    try { const r = await window.storage.get("caliq-invites"); setInvites(JSON.parse((r && r.value) || "[]")); }
+    catch { setInvites([]); }
+  };
+  useEffect(() => {
+    if (!open) return;
+    setMsg("");
+    ensureInviteCode().then((c) => setCode(c || "")).catch(() => {});
+    getMyClients().then((cs) => setClients(cs || [])).catch(() => {});
+    loadInvites();
+  }, [open]);
+  useEffect(() => {
+    if (open && showQr && shareLink) {
+      QRCode.toDataURL(shareLink, { margin: 1, width: 260, color: { dark: "#06201f", light: "#ffffff" } })
+        .then(setQr).catch(() => setQr(""));
+    }
+  }, [open, showQr, shareLink]);
+
+  // Client-side conversion match: an invited email that now belongs to a
+  // connected client counts as "joined" (no server tracking needed).
+  const joinedEmails = new Set(clients.map((c) => (c.email || "").toLowerCase()).filter(Boolean));
+  const joinedCount = clients.length;
+  const convertedInvites = invites.filter((i) => joinedEmails.has((i.email || "").toLowerCase())).length;
+  const pendingInvites = invites.filter((i) => !joinedEmails.has((i.email || "").toLowerCase()));
+
+  const copy = async (which, text) => {
+    if (!text) return;
+    try { await navigator.clipboard.writeText(text); setCopied(which); setTimeout(() => setCopied(""), 1500); } catch { /* ignore */ }
+  };
+  const doShare = async () => {
+    if (!shareLink) return;
+    const text = `${first ? first + " " : "I "}invited you to Glide — your trainer + smart AI in one place. Join here:`;
+    if (navigator.share) {
+      try { await navigator.share({ title: "Join me on Glide", text, url: shareLink }); return; }
+      catch (e) { if (e && e.name === "AbortError") return; /* fall through to copy */ }
+    }
+    copy("share", shareLink);
+  };
+  const parseEmails = (s) => Array.from(new Set(
+    String(s).split(/[\s,;]+/).map((x) => x.trim().toLowerCase()).filter((x) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x))
+  ));
+  const sendEmail = async () => {
+    const emails = parseEmails(emailInput);
+    if (!emails.length) { setMsg("Enter at least one valid email address."); return; }
+    setSending(true); setMsg("");
+    try {
+      const res = await callSendInvite({ emails, note: note.trim() });
+      const results = (res && res.data && res.data.results) || [];
+      const okEmails = results.filter((r) => r.ok).map((r) => r.email);
+      const failed = results.filter((r) => !r.ok).length;
+      if (okEmails.length) {
+        const now = Date.now();
+        const recs = okEmails.map((e) => ({ id: `${now}-${e}`, email: e, note: note.trim(), createdAt: now }));
+        const next = [...recs, ...invites].slice(0, 200);
+        setInvites(next);
+        try { await window.storage.set("caliq-invites", JSON.stringify(next)); } catch { /* ignore */ }
+        setEmailInput(""); setNote("");
+      }
+      setMsg(okEmails.length
+        ? `Sent ${okEmails.length} invite${okEmails.length > 1 ? "s" : ""}.${failed ? ` ${failed} couldn't be sent.` : ""}`
+        : "Couldn't send — the email service returned an error.");
+    } catch (e) {
+      const c = e && e.code;
+      setMsg(
+        c === "functions/failed-precondition" ? "Email invites aren't set up yet — the admin needs to add the email key. (Sharing the link still works.)"
+        : c === "functions/permission-denied" ? "Only trainers can send invites."
+        : c === "functions/invalid-argument" ? "Add at least one valid email address."
+        : "Couldn't send the email invite right now — you can share the link instead."
+      );
+    } finally { setSending(false); }
+  };
+
+  if (!open) return null;
+
+  const card = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 16 };
+  const label = { fontSize: ".72rem", letterSpacing: "1px", textTransform: "uppercase", color: "var(--accent)", fontWeight: 700, marginBottom: 8 };
+  const fieldStyle = { width: "100%", boxSizing: "border-box", padding: "11px 12px", borderRadius: 9, background: "var(--s2)", border: "1px solid var(--border)", color: "var(--text)", fontSize: ".9rem", fontFamily: "inherit", outline: "none" };
+  const btnPrimary = { padding: "11px 14px", borderRadius: 9, border: "none", background: "var(--accent-fill)", color: "#04201f", fontWeight: 700, fontSize: ".85rem", cursor: "pointer" };
+  const btnGhost = { padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "transparent", color: "var(--text)", fontWeight: 600, fontSize: ".82rem", cursor: "pointer" };
+
+  return createPortal(
+    <div data-theme="pro" style={{ position: "fixed", inset: 0, zIndex: 1500, background: "var(--bg)", color: "var(--text)",
+      fontFamily: "var(--font-sans)", overflowY: "auto", padding: "calc(14px + env(safe-area-inset-top,0px)) 14px 32px" }}>
+      <div style={{ maxWidth: 560, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "2px 2px 4px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <Icon name="invite" size={22} color="var(--accent)" />
+            <span style={{ fontFamily: "var(--font-display)", fontSize: "1.25rem", fontWeight: 700 }}>Invite clients</span>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ ...btnGhost, padding: "6px 12px" }}>✕</button>
+        </div>
+
+        {/* Referral stats */}
+        <div style={{ ...card, display: "flex", gap: 10 }}>
+          {[
+            { n: joinedCount, l: "clients joined" },
+            { n: invites.length, l: "invites sent" },
+            { n: convertedInvites, l: "invites joined" },
+          ].map((s, i) => (
+            <div key={i} style={{ flex: 1, textAlign: "center" }}>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: "1.6rem", fontWeight: 700, color: "var(--accent)" }}>{s.n}</div>
+              <div style={{ fontSize: ".72rem", color: "var(--muted)" }}>{s.l}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Share the link */}
+        <div style={card}>
+          <div style={label}>Your invite link</div>
+          <div style={{ fontSize: ".78rem", color: "var(--muted)", marginBottom: 8 }}>New clients who open it are linked to you automatically — and it unfurls as a “{first || "you"} invited you to Glide” card.</div>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
+            <code style={{ flex: 1, padding: "9px 11px", borderRadius: 8, background: "var(--s2)", border: "1px solid var(--border)",
+              fontFamily: "monospace", fontSize: ".78rem", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shareLink || "…"}</code>
+            <button onClick={() => copy("link", shareLink)} disabled={!shareLink} style={{ ...btnGhost, whiteSpace: "nowrap" }}>{copied === "link" ? "✓" : "Copy"}</button>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={doShare} disabled={!shareLink} style={{ ...btnPrimary, flex: "1 1 140px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+              <Icon name="invite" size={15} color="#04201f" />{copied === "share" ? "Link copied" : "Share invite"}
+            </button>
+            <button onClick={() => setShowQr((v) => !v)} disabled={!shareLink} style={{ ...btnGhost, flex: "1 1 120px" }}>{showQr ? "Hide QR code" : "Show QR code"}</button>
+          </div>
+          {showQr && (
+            <div style={{ marginTop: 12, textAlign: "center" }}>
+              {qr
+                ? <img src={qr} alt="Invite QR code" width={200} height={200} style={{ borderRadius: 12, background: "#fff", padding: 8 }} />
+                : <div style={{ color: "var(--muted)", fontSize: ".8rem", padding: 20 }}>Generating…</div>}
+              <div style={{ fontSize: ".74rem", color: "var(--muted)", marginTop: 6 }}>Have someone scan this to sign up in person.</div>
+            </div>
+          )}
+          <div style={{ marginTop: 10, fontSize: ".76rem", color: "var(--muted)" }}>Prefer a code? Clients can enter <strong style={{ color: "var(--text)" }}>{code ? formatInviteCode(code) : "…"}</strong>. <button onClick={() => copy("code", code ? formatInviteCode(code) : "")} disabled={!code} style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontWeight: 600, padding: 0 }}>{copied === "code" ? "Copied ✓" : "Copy code"}</button></div>
+        </div>
+
+        {/* Email invite */}
+        <div style={card}>
+          <div style={label}>Email an invitation</div>
+          <input style={{ ...fieldStyle, marginBottom: 8 }} placeholder="client@email.com (comma-separate for several)"
+            value={emailInput} onChange={(e) => setEmailInput(e.target.value)} type="text" inputMode="email" autoCapitalize="none" autoCorrect="off" />
+          <textarea style={{ ...fieldStyle, marginBottom: 8, minHeight: 66, resize: "vertical" }} placeholder="Add a personal note (optional)…"
+            value={note} onChange={(e) => setNote(e.target.value)} />
+          <button onClick={sendEmail} disabled={sending || !emailInput.trim()} style={{ ...btnPrimary, width: "100%", opacity: sending || !emailInput.trim() ? 0.6 : 1 }}>
+            {sending ? "Sending…" : "Send invitation"}
+          </button>
+          {msg && <div style={{ marginTop: 8, fontSize: ".8rem", color: /Sent \d/.test(msg) ? "var(--green)" : "var(--muted)" }}>{msg}</div>}
+        </div>
+
+        {/* Pending email invites */}
+        {pendingInvites.length > 0 && (
+          <div style={card}>
+            <div style={label}>Pending email invites</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+              {pendingInvites.slice(0, 30).map((inv) => (
+                <div key={inv.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: ".84rem" }}>
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{inv.email}</span>
+                  <span style={{ fontSize: ".72rem", color: "var(--muted)" }}>{fmtStamp(inv.createdAt)}</span>
+                  <button onClick={() => { setEmailInput(inv.email); setNote(inv.note || ""); }} style={{ ...btnGhost, padding: "5px 10px", fontSize: ".74rem" }}>Resend</button>
+                </div>
+              ))}
+            </div>
+            <div style={{ marginTop: 8, fontSize: ".72rem", color: "var(--muted)" }}>“Joined” updates automatically once they sign up with the invited email.</div>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ─── Navigation side menu (Session 23) ───────────────────────────────────────
 // A hamburger (≡) opens a slide-out drawer with app navigation, inline name
 // editing, and sign-out. Rendered globally by App so it's on every screen.
@@ -11457,15 +11651,12 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
   const [busy, setBusy] = useState(false);
-  const [invite, setInvite] = useState("");      // trainer invite code
-  const [showInvite, setShowInvite] = useState(false);
   const [showNotif, setShowNotif] = useState(false); // Notification Center section (Session 76)
-  const [copied, setCopied] = useState("");       // "code" | "link" | ""
+  const [hubOpen, setHubOpen] = useState(false);     // Invite Hub modal (Option C)
   useEffect(() => {
     if (open) {
       const parts = (meName || "").trim().split(/\s+/);
       setFirst(parts[0] || ""); setLast(parts.slice(1).join(" ") || ""); setEditing(false);
-      if (isTrainer && !invite) { ensureInviteCode().then((c) => setInvite(c || "")).catch(() => {}); }
     }
   }, [open, meName]);
 
@@ -11476,13 +11667,6 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
     finally { setBusy(false); }
   };
   const go = (fn) => { onClose(); if (fn) fn(); };
-  // Personalized invite link: /i/CODE?n=FirstName. The /i/ landing (api/invite.js)
-  // serves a "{Name} invited you to Glide" share card, then redirects into the app.
-  const inviterFirst = (meName || "").trim().split(/\s+/)[0] || "";
-  const shareLink = invite
-    ? `${window.location.origin}/i/${invite}${inviterFirst ? `?n=${encodeURIComponent(inviterFirst)}` : ""}`
-    : "";
-  const copy = async (which, text) => { try { await navigator.clipboard.writeText(text); setCopied(which); setTimeout(() => setCopied(""), 1500); } catch { /* ignore */ } };
 
   const item = { display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left",
     padding: "13px 16px", borderRadius: 10, border: "none", background: "transparent", color: "var(--text)",
@@ -11620,33 +11804,18 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
           );
         })()}
 
-        {/* Invite clients (trainer) — moved here off the home screen */}
+        {/* Invite clients (trainer) — opens the full Invite Hub (share / QR / email / referrals) */}
         {isTrainer && (
-          <>
-            <button style={item} onClick={() => setShowInvite((v) => !v)}>
-              <Icon name="invite" size={19} color="var(--accent)" /> <span>Invite clients</span>
-              <span style={{ marginLeft: "auto", color: "var(--muted)" }}>{showInvite ? "▾" : "▸"}</span>
-            </button>
-            {showInvite && (
-              <div style={{ padding: "4px 16px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ fontSize: ".74rem", color: "var(--muted)" }}>Your invite code — clients enter it to link to you.</div>
-                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                  <code style={{ flex: 1, padding: "8px 10px", borderRadius: 7, background: "var(--s2)", border: "1px solid var(--border)",
-                    fontFamily: "monospace", letterSpacing: "1px", fontSize: ".95rem" }}>{invite ? formatInviteCode(invite) : "…"}</code>
-                  <button onClick={() => copy("code", formatInviteCode(invite))} disabled={!invite}
-                    style={{ padding: "8px 10px", borderRadius: 7, border: "none", background: "var(--accent-fill)", color: "#0b0b12", fontWeight: 700, fontSize: ".76rem", cursor: "pointer" }}>{copied === "code" ? "✓" : "Copy"}</button>
-                </div>
-                <div style={{ fontSize: ".74rem", color: "var(--muted)" }}>Or send a one-click link — new clients auto-link to you.</div>
-                <button onClick={() => copy("link", shareLink)} disabled={!shareLink}
-                  style={{ padding: "9px 12px", borderRadius: 7, border: "1px solid var(--border)", background: "transparent", color: "var(--text)", fontWeight: 600, fontSize: ".82rem", cursor: "pointer" }}>{copied === "link" ? "✓ Link copied" : "🔗 Copy invite link"}</button>
-              </div>
-            )}
-          </>
+          <button style={item} onClick={() => setHubOpen(true)}>
+            <Icon name="invite" size={19} color="var(--accent)" /> <span>Invite clients</span>
+            <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
+          </button>
         )}
 
         <div style={{ flex: 1 }} />
         <button style={{ ...item, color: "#e5484d" }} onClick={() => signOut(auth)}><Icon name="signout" size={19} /> <span>Sign out</span></button>
       </div>
+      {isTrainer && <InviteHub open={hubOpen} onClose={() => setHubOpen(false)} meName={meName} />}
     </>
   );
 }

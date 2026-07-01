@@ -1772,6 +1772,26 @@ enabled (Blaze has no default spending cap).
   `claude-sonnet-4-6`. **NEXT:** back to the plan — **Option C (in-app/email invites + referral)** → **calendar
   back-dating**. Video-ingest Phase 2 (oEmbed caption auto-fetch for IG/TikTok) / Phase 3 (transcript + vision,
   premium) remain optional per the doc.
+- Session 83: **Option C — Invites & referrals (Invite Hub). LIVE (email pending Kevin's key).** Built a
+  dedicated **`InviteHub`** modal (≡ menu → "Invite clients", full-screen `createPortal`, `data-theme="pro"`)
+  replacing the old inline invite expander. It has: (1) the personalized invite link (`/i/CODE?n=First` from
+  S81) + Copy; (2) **native Share** (Web Share API with copy fallback); (3) a **QR code** for in-person
+  signups (new `qrcode` dependency, rendered dark-on-white for scannability); (4) **email invitations**; and
+  (5) **referral stats** — clients joined / invites sent / invites joined. **Referral tracking uses NO new
+  infra:** email invites are recorded in the trainer's own `caliq-invites` kv (owner write), and an invite is
+  marked "joined" **client-side** by matching its email against connected clients' emails (`getMyClients`
+  returns full profiles incl. email) — so no Cloud Function trigger. **Email:** new **`sendInvite`** callable
+  (`functions/invites.js`, trainer-only, verifies role) sends a branded HTML email with the personalized link
+  via **Resend** (`RESEND_API_KEY` + `RESEND_FROM` secrets; ≤20 recipients, email-format validated). The
+  function only sends — the client records the invite locally. **⚠️ NOT deployed yet:** it binds secrets that
+  don't exist, so `firebase deploy --only functions:sendInvite` is blocked until Kevin: makes a Resend
+  account + key → `firebase functions:secrets:set RESEND_API_KEY` → verifies a sending domain →
+  `firebase functions:secrets:set RESEND_FROM` → deploys (full steps in `invites.js` header + the handoff
+  DO-FIRST). Until then the email composer degrades gracefully ("share the link instead"). **Verified live**
+  as trainer.uitest: Invite Hub renders on-brand, referral stats correct (1 client joined = Casey), personalized
+  link + QR generate, email path shows the friendly fallback; `npm run build` passes; no console errors. Frontend
+  pushed (Vercel auto-deploys); no other functions changed (`aitools.js` untouched this session). No
+  `firestore.rules` change. **NEXT:** calendar back-dating.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

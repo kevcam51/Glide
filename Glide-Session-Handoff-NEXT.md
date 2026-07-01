@@ -1,6 +1,6 @@
 # Glide — Next-Session Handoff (start here)
 
-_Updated end of **Session 81** (personalized "[Name] invited you" share card — Option B). Read this
+_Updated end of **Session 83** (Option C — Invite Hub: share / QR / email / referrals). Read this
 first, then `CLAUDE.md` (standing context) and `docs/AI-INTEROP-VISION.md` (the "works with your AI"
 plan). Everything below is pushed to `main` and live unless noted. Firebase project `calorieiq-29762`;
 prod URL `calorieiq-jet.vercel.app`._
@@ -9,19 +9,38 @@ prod URL `calorieiq-jet.vercel.app`._
 
 ## ⏭️ DO FIRST
 
+- **Turn ON email invites (Option C, S83) — the ONLY blocked piece.** The `sendInvite` Cloud Function
+  is written + committed but NOT deployed (it binds secrets that don't exist yet). Kevin, one-time:
+  (1) make a Resend account (resend.com) + API key; (2) `firebase functions:secrets:set RESEND_API_KEY`;
+  (3) verify a sending domain in Resend, then `firebase functions:secrets:set RESEND_FROM` (e.g.
+  `Glide <invites@yourdomain>`; for a quick test before domain verify, Resend's `onboarding@resend.dev`
+  only delivers to your own account email); (4) `firebase deploy --only functions:sendInvite`. Until
+  then the Invite Hub's email composer degrades gracefully ("share the link instead"); **share + QR +
+  referral stats already work live.** Full steps are in `functions/invites.js`'s header comment.
 - **Verify the S81 invite-card unfurl in prod (Vercel-function work — only confirmable live).** Copy a
-  trainer's invite link (≡ menu → Invite clients → Copy invite link → now `…/i/CODE?n=First`) and paste
-  it into https://www.opengraph.xyz (or Slack/iMessage): expect a "**[Name] invited you to Glide**"
-  card. Crawlers cache — cache-bust with a fresh `?n=`. The functions **fall back to the static
-  `/og.png`** on any render error, so worst case is the old generic card (never broken). If the image
-  500s, confirm `api/_fonts/` shipped + `@resvg/resvg-js` installed on Vercel.
-- **Next feature (Kevin's chosen order):** ~~Paste-from-AI import~~ → ~~Option B: personalized invite
-  card (DONE, S81)~~ → ~~Video/link ingest Phase 1 (DONE, S82 — `fetch_link` tool, deployed & live)~~ →
-  **Option C: in-app/email invites + referral** → **calendar back-dating**.
+  trainer's invite link (≡ menu → Invite clients → Copy) → now `…/i/CODE?n=First`; paste into
+  https://www.opengraph.xyz (or Slack/iMessage): expect a "**[Name] invited you to Glide**" card.
+  Crawlers cache — cache-bust with a fresh `?n=`. Falls back to static `/og.png` on any error.
+- **Next feature (Kevin's chosen order):** ~~Paste-from-AI import~~ → ~~Option B invite card (S81)~~ →
+  ~~Video/link ingest (S82)~~ → ~~Option C invites + referral (S83 — email deploy pending Kevin's key)~~
+  → **calendar back-dating** (next).
 - **Video/link ingest (S82, LIVE):** paste a URL in the AI chat → the AI reads its title/caption via
-  the `fetch_link` tool and turns it into program changes. IG/TikTok fetches often fail (they block
-  apps) → the AI asks for a pasted caption. Phase 2 (oEmbed auto-fetch) / Phase 3 (transcript + vision,
-  premium) are optional next steps in `docs/VIDEO-LINK-INGEST.md`.
+  the `fetch_link` tool and turns it into program changes. IG/TikTok fetches often fail → the AI asks
+  for a pasted caption. Phase 2/3 optional in `docs/VIDEO-LINK-INGEST.md`.
+
+## What shipped in Session 83 (Option C — invites + referral)
+
+- **Invite Hub** (new `InviteHub` modal, ≡ menu → Invite clients): one place with (1) the personalized
+  invite link + Copy, (2) **native Share** (Web Share API + copy fallback), (3) a **QR code** for
+  in-person signups (new `qrcode` dep), (4) **email invitations**, and (5) **referral stats** (clients
+  joined / invites sent / invites joined). Replaced the old inline invite expander in the side menu.
+- **Referral tracking, no new infra:** email invites are recorded in the trainer's own `caliq-invites`
+  kv; "joined" is matched **client-side** by comparing invited emails to connected clients' emails
+  (`getMyClients` returns profiles incl. email) — no Cloud Function trigger needed.
+- **Email invites:** new `sendInvite` callable (`functions/invites.js`, trainer-only) sends a branded
+  email with the personalized `/i/CODE?n=` link via **Resend**. **Needs Kevin's RESEND_* secrets +
+  deploy (see DO FIRST).** Verified live that the composer degrades gracefully until then; share/QR/
+  stats all verified live as trainer.uitest.
 
 ## What shipped in Session 81 (Option B — personalized invite share card)
 

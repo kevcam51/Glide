@@ -92,3 +92,4 @@ exports.aiChatStream = require("./aichat").aiChatStream;
 exports.logMeal = require("./aichat").logMeal; // direct write for the meal Accept card
 exports.setWorkoutSchedule = require("./aichat").setWorkoutSchedule; // workout Accept card
 exports.transcribeAudio = require("./transcribe").transcribeAudio; // voice → text (Whisper)
+exports.sendInvite = require("./invites").sendInvite; // email invites (Option C)
