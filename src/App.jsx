@@ -9789,6 +9789,15 @@ function AIChatPanel({ role, onDataChanged }) {
   const streamRef = useRef(null); // mic MediaStream (to stop tracks after)
   const waveRef = useRef(null);   // <canvas> for the live level meter
   const recognitionRef = useRef(null); // browser SpeechRecognition (live interim words)
+
+  // Lock the page behind the chat while it's open so swiping scrolls the CHAT,
+  // not the background (mobile fix). Restored on close/unmount.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [open]);
   const loadedRef = useRef(false); // guards persistence until the saved thread loads
 
   // Conversation persistence (Session 77): the chat thread is saved to the user's
@@ -10108,10 +10117,12 @@ function AIChatPanel({ role, onDataChanged }) {
             left: "10px", right: "10px",
             maxWidth: 900, margin: "0 auto",
           } : {
-            right: "calc(16px + env(safe-area-inset-right,0px))",
-            bottom: "calc(18px + env(safe-area-inset-bottom,0px))",
-            width: "min(460px, calc(100vw - 24px))",
-            height: "min(720px, calc(100vh - 32px))",
+            right: "calc(12px + env(safe-area-inset-right,0px))",
+            bottom: "calc(12px + env(safe-area-inset-bottom,0px))",
+            width: "min(440px, calc(100vw - 20px))",
+            // Deliberately a partial-height sheet (not near-full-screen), so it's
+            // clearly minimizable and the Expand button has an obvious purpose.
+            height: "min(620px, 68vh)",
           }}>
           {/* Header */}
           <div className="flex items-center gap-2 border-b border-border bg-surface2 px-4 py-3">
@@ -10123,7 +10134,7 @@ function AIChatPanel({ role, onDataChanged }) {
             <button onClick={() => setSize(size === "full" ? "compact" : "full")}
               aria-label={size === "full" ? "Shrink to corner" : "Expand to full screen"}
               title={size === "full" ? "Shrink" : "Expand"}
-              className="ml-auto rounded-md border-none bg-transparent px-2 py-1 text-muted cursor-pointer hover:text-primary">
+              className="ml-auto rounded-lg border border-border bg-surface px-2 py-1.5 text-primary cursor-pointer hover:bg-surface2">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]">
                 {size === "full"
                   ? <><path d="M9 3H5a2 2 0 0 0-2 2v4" /><path d="M15 3h4a2 2 0 0 1 2 2v4" /><path d="M9 21H5a2 2 0 0 1-2-2v-4" /><path d="M15 21h4a2 2 0 0 0 2-2v-4" /></>
@@ -10131,11 +10142,12 @@ function AIChatPanel({ role, onDataChanged }) {
               </svg>
             </button>
             <button onClick={() => setOpen(false)} aria-label="Close"
-              className="rounded-md border-none bg-transparent px-2 py-1 text-lg text-muted cursor-pointer hover:text-fg">✕</button>
+              className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-lg leading-none text-fg cursor-pointer hover:bg-surface2">✕</button>
           </div>
 
           {/* Message thread */}
-          <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2.5">
+          <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-3 flex flex-col gap-2.5"
+            style={{ WebkitOverflowScrolling: "touch" }}>
             {messages.length === 0 ? (
               <div className="flex flex-col gap-3 py-2">
                 <div className="text-[.85rem] text-muted">
@@ -10310,7 +10322,7 @@ function AIChatPanel({ role, onDataChanged }) {
                 </span>
               </div>
             )}
-            <div className="flex items-end gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFile} />
               <button onClick={pickImage} disabled={busy || recording || transcribing} aria-label="Add a photo" title="Photo of your meal"
                 className="flex items-center justify-center rounded-xl border border-border bg-surface2 px-3 py-2.5 text-fg cursor-pointer disabled:opacity-50 hover:text-primary">
@@ -10337,13 +10349,14 @@ function AIChatPanel({ role, onDataChanged }) {
               <button onClick={() => setPasteOpen(true)} disabled={busy || recording || transcribing} aria-label="Paste from another AI" title="Paste from ChatGPT / Claude"
                 className="flex items-center justify-center rounded-xl border border-border bg-surface2 px-3 py-2.5 text-fg cursor-pointer disabled:opacity-50 hover:text-primary">
                 <Icon name="clipboard" size={20} /></button>
+              {/* Full-width top row so the placeholder + typed text never get cramped/clipped on phones. */}
               <textarea ref={taRef} value={draft} onChange={e => setDraft(e.target.value)} rows={1}
-                placeholder={recording ? "Listening… tap ⏹ to stop" : transcribing ? "Transcribing…" : pendingImage ? "Add a note (optional)…" : "Message Glide AI — or paste a workout/recipe link…"}
+                placeholder={recording ? "Listening… tap ⏹ to stop" : transcribing ? "Transcribing…" : pendingImage ? "Add a note (optional)…" : "Message Glide AI…"}
                 style={{ fontFamily: "var(--font-sans)" }}
-                className="flex-1 resize-none box-border min-h-[48px] rounded-xl border border-border bg-surface2 px-3.5 py-3 text-[.95rem] leading-relaxed text-fg outline-none placeholder:text-muted"
+                className="order-first basis-full w-full resize-none box-border min-h-[46px] max-h-[140px] rounded-xl border border-border bg-surface2 px-3.5 py-3 text-[.95rem] leading-relaxed text-fg outline-none placeholder:text-muted"
                 onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
               <button onClick={send} disabled={busy || recording || transcribing || (!draft.trim() && !pendingImage)} aria-label="Send"
-                className="rounded-xl border-none bg-primaryfill px-3.5 py-2.5 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50 disabled:cursor-default">
+                className="ml-auto rounded-xl border-none bg-primaryfill px-6 py-2.5 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50 disabled:cursor-default">
                 {busy ? "…" : "Send"}
               </button>
             </div>
