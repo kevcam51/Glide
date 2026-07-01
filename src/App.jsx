@@ -10048,10 +10048,10 @@ function AIChatPanel({ role, onDataChanged }) {
       {/* Floating launcher button */}
       {!open && (
         <button onClick={() => setOpen(true)} aria-label="Open AI assistant"
-          className="fixed z-[1000] flex items-center gap-2 rounded-full border-none bg-primaryfill px-4 py-3 font-bold text-primaryfg shadow-lg cursor-pointer"
+          className="fixed z-[1000] flex items-center gap-1.5 rounded-full border-none bg-primaryfill px-3 py-2.5 font-bold text-primaryfg shadow-lg cursor-pointer"
           style={{ right: "calc(16px + env(safe-area-inset-right,0px))", bottom: "calc(18px + env(safe-area-inset-bottom,0px))" }}>
-          <Icon name="sparkle" variant="solid" size={18} />
-          <span className="text-[.9rem]">Ask Glide</span>
+          <Icon name="sparkle" variant="solid" size={16} />
+          <span className="text-[.82rem]">Ask Glide</span>
         </button>
       )}
 
