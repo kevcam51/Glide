@@ -6437,7 +6437,7 @@ const fmtClock = (t) => {
 // shows indicators (food logged / weigh-in / workout / scheduled workout) and
 // can be opened to log or back-date food, weight, and workouts. Date keys are
 // local YYYY-MM-DD (Session 45) so they match the user's own calendar day.
-function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn }) {
+function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods }) {
   const todayKey = ymdLocal();
   const keyOf = (y, m, d) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
   const parseKey = (k) => { const [y, m, d] = k.split("-").map(Number); return { y, m: m - 1, d }; };
@@ -6782,7 +6782,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             <button style={quick} onClick={() => addCal(-(dayLog?.calories || 0))}>Clear</button>
           </div>
           <div style={{ marginTop: 12 }}>
-            <MealLog meals={(dayLog && dayLog.meals) || []} onAddMeal={addMeal} onRemoveMeal={removeMeal} onEditMeal={editMeal} />
+            <MealLog meals={(dayLog && dayLog.meals) || []} onAddMeal={addMeal} onRemoveMeal={removeMeal} onEditMeal={editMeal} recentFoods={recentFoods} />
           </div>
         </div>
 
@@ -6919,7 +6919,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       <div className="dash">
         <CalendarView data={data} tdee={tdee} onClose={() => setShowCalendar(false)}
           onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
-          onSaveCheckIn={onSaveCheckIn} onDeleteCheckIn={onDeleteCheckIn} />
+          onSaveCheckIn={onSaveCheckIn} onDeleteCheckIn={onDeleteCheckIn} recentFoods={recentFoods} />
       </div>
     );
   }
@@ -10426,6 +10426,8 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   const [wtDraft, setWtDraft] = useState("");
   const [showWt, setShowWt] = useState(false);     // inline weight-log input open
   const [showChart, setShowChart] = useState(false); // progress chart popup open
+  const [showCalendar, setShowCalendar] = useState(false); // full calendar (back-dating) overlay
+  const [recentFoods, setRecentFoods] = useState([]); // recent foods for the calendar's quick re-add chips
   const [msg, setMsg] = useState("");              // calorie-log message
   const [wtMsg, setWtMsg] = useState("");          // weight-log message
   const [requests, setRequests] = useState([]);    // trainer → client requests (Session 19)
@@ -10481,6 +10483,10 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
       const r = await get(REQUEST_KEY);
       setRequests(r && r.value ? (JSON.parse(r.value) || []) : []);
     } catch { setRequests([]); }
+    try {
+      const r = await get(`caliq-foods-${active}`);
+      setRecentFoods(r && r.value ? (JSON.parse(r.value) || []) : []);
+    } catch { setRecentFoods([]); }
   };
   useEffect(() => { load(); }, []);
 
@@ -10668,6 +10674,47 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
     } catch { /* ignore */ }
   };
 
+  // ── Calendar (back-dating) callbacks — read/write any date's log for the active
+  // plan, on the client's own account (mirrors App's remote-aware versions). ──
+  const calReadDay = async (date) => {
+    try { const r = await get(planLogPrefix(activePlanId) + date); return r && r.value ? (JSON.parse(r.value) || {}) : {}; }
+    catch { return {}; }
+  };
+  const calWriteDay = async (date, obj) => {
+    try {
+      const s = JSON.stringify(obj);
+      if (date === todayKey) { lastSelfLogWrite.current = s; setLog(obj); } // keep today's live state + suppress echo
+      await window.storage.set(planLogPrefix(activePlanId) + date, s);
+    } catch { /* ignore */ }
+  };
+  const calListLoggedDays = async () => {
+    try { const r = await window.storage.list(planLogPrefix(activePlanId)); return (r.keys || []).map((k) => k.slice(-10)); }
+    catch { return []; }
+  };
+  // Apply a mutation to the active plan's data (checkIns etc.) from the calendar,
+  // keeping planWrapRef + state in sync and echo-suppressing our own write.
+  const savePlanDataMutation = async (mutate) => {
+    try {
+      const obj = planWrapRef.current ? JSON.parse(JSON.stringify(planWrapRef.current)) : { data: {}, step: 0 };
+      if (!obj.data) obj.data = {};
+      mutate(obj.data);
+      planWrapRef.current = obj;
+      setPlanData(obj.data);
+      const s = JSON.stringify(obj); lastSelfDataWrite.current = s;
+      await window.storage.set(planDataKey(activePlanId), s);
+    } catch { /* ignore */ }
+  };
+  const calSaveCheckIn = (checkin) => savePlanDataMutation((d) => {
+    const others = (d.checkIns || []).filter((c) => c.date !== checkin.date);
+    d.checkIns = [...others, checkin];
+  });
+  const calDeleteCheckIn = (ts) => savePlanDataMutation((d) => {
+    const checkIns = (d.checkIns || []).filter((c) => c.timestamp !== ts);
+    const remaining = checkIns.filter((c) => c.weight).sort((a, b) => a.timestamp - b.timestamp);
+    d.checkIns = checkIns;
+    if (remaining.length) d.weightLbs = remaining[remaining.length - 1].weight;
+  });
+
   const cal = planData ? computeClientCalories(planData) : null;
   const w = planData ? Number(planData.weightLbs) : 0;
   const g = planData ? Number(planData.goalWeight) : 0;
@@ -10729,10 +10776,18 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
           <div className="text-2xl font-extrabold tracking-tight">
             {firstName ? `Hi, ${firstName} 👋` : "Your dashboard"}
           </div>
-          <button onClick={() => load()} title="Reload the latest from your plan"
-            className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-muted cursor-pointer whitespace-nowrap">
-            ↻ Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            {planData && (
+              <button onClick={() => setShowCalendar(true)} title="Open the calendar to log or back-date any day"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
+                <Icon name="calendar" size={13} color="var(--accent)" />Calendar
+              </button>
+            )}
+            <button onClick={() => load()} title="Reload the latest from your plan"
+              className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-muted cursor-pointer whitespace-nowrap">
+              ↻ Refresh
+            </button>
+          </div>
         </div>
 
         {/* Plan switcher (Session 21) — pick the active plan, or make a new one. */}
@@ -11058,6 +11113,21 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
           onOpenPlan={onOpenPlan}
           onMarkDone={() => markRequestDone(quickReq.id)}
           onClose={() => setQuickReq(null)} />
+      )}
+
+      {/* Full calendar (back-dating) — log food/weight/workouts on any date.
+          Portaled to escape the page-transition transform trap; :root css vars
+          (already injected above) + data-theme="pro" give it the brand look. */}
+      {showCalendar && createPortal(
+        <div data-theme="pro" className="fixed inset-0 z-[1396] overflow-y-auto"
+          style={{ background: "var(--bg)", color: "var(--text)", fontFamily: "var(--font-sans)" }}>
+          <div style={{ maxWidth: 640, margin: "0 auto", padding: "calc(12px + env(safe-area-inset-top,0px)) 16px 96px" }}>
+            <CalendarView data={planData || {}} tdee={target} onClose={() => setShowCalendar(false)}
+              onReadDay={calReadDay} onWriteDay={calWriteDay} onListLoggedDays={calListLoggedDays}
+              onSaveCheckIn={calSaveCheckIn} onDeleteCheckIn={calDeleteCheckIn} recentFoods={recentFoods} />
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* AI assistant — floating button + collapsible chat (Session 61).
