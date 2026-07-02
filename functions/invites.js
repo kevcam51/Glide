@@ -66,6 +66,18 @@ function emailHtml({ trainerName, link, note }) {
 </body></html>`;
 }
 
+// Plain-text alternative — a multipart (text + html) email scores better with
+// spam filters than HTML-only.
+function emailText({ trainerName, link, note }) {
+  return `${trainerName} invited you to Glide.
+
+Glide is your trainer + smart AI in one place — to keep you aware, accountable, and on track.
+${note ? `\nA note from ${trainerName}:\n${note}\n` : ""}
+Join here: ${link}
+
+If you weren't expecting this, you can ignore this email.`;
+}
+
 exports.sendInvite = onCall(
   { secrets: [RESEND_API_KEY, RESEND_FROM], region: "us-central1", maxInstances: 10 },
   async (request) => {
@@ -96,7 +108,10 @@ exports.sendInvite = onCall(
     if (!key) throw new HttpsError("failed-precondition", "Email invites aren't set up yet.");
     const from = RESEND_FROM.value() || "Glide <onboarding@resend.dev>";
     const html = emailHtml({ trainerName, link, note });
+    const text = emailText({ trainerName, link, note });
     const subject = `${trainerName} invited you to Glide`;
+    // Replies go to the trainer, and a real reply-to improves deliverability.
+    const replyTo = EMAIL_RE.test(prof.email || "") ? prof.email : undefined;
 
     const results = [];
     for (const to of emails) {
@@ -104,7 +119,7 @@ exports.sendInvite = onCall(
         const res = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ from, to, subject, html }),
+          body: JSON.stringify({ from, to, subject, html, text, ...(replyTo ? { reply_to: replyTo } : {}) }),
         });
         const ok = res.ok;
         if (!ok) { const t = await res.text().catch(() => ""); console.error("sendInvite resend", res.status, t.slice(0, 200)); }
