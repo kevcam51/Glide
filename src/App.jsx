@@ -11788,6 +11788,7 @@ function InviteHub({ open, onClose, meName }) {
   const [msg, setMsg] = useState("");
   const [copied, setCopied] = useState("");
   const [showQr, setShowQr] = useState(false);
+  const [resendingId, setResendingId] = useState(""); // which past invite is being resent
 
   const first = (meName || "").trim().split(/\s+/)[0] || "";
   const shareLink = code
@@ -11864,6 +11865,17 @@ function InviteHub({ open, onClose, meName }) {
         : "Couldn't send the email invite right now — you can share the link instead."
       );
     } finally { setSending(false); }
+  };
+  // Resend a past invite in one click (directly send again — don't refill the form).
+  const resendInvite = async (inv) => {
+    setResendingId(inv.id); setMsg("");
+    try {
+      const res = await callSendInvite({ emails: [inv.email], note: inv.note || "" });
+      const ok = ((res && res.data && res.data.results) || []).some((r) => r.ok);
+      setMsg(ok ? `Resent invite to ${inv.email}.` : "Couldn't resend — the email service returned an error.");
+    } catch {
+      setMsg("Couldn't resend right now — you can share the link instead.");
+    } finally { setResendingId(""); }
   };
 
   if (!open) return null;
@@ -11949,7 +11961,7 @@ function InviteHub({ open, onClose, meName }) {
                 <div key={inv.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: ".84rem" }}>
                   <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{inv.email}</span>
                   <span style={{ fontSize: ".72rem", color: "var(--muted)" }}>{fmtStamp(inv.createdAt)}</span>
-                  <button onClick={() => { setEmailInput(inv.email); setNote(inv.note || ""); }} style={{ ...btnGhost, padding: "5px 10px", fontSize: ".74rem" }}>Resend</button>
+                  <button onClick={() => resendInvite(inv)} disabled={resendingId === inv.id} style={{ ...btnGhost, padding: "5px 10px", fontSize: ".74rem", opacity: resendingId === inv.id ? .6 : 1 }}>{resendingId === inv.id ? "…" : "Resend"}</button>
                 </div>
               ))}
             </div>
