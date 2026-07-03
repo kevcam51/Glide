@@ -5982,6 +5982,8 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const [searchErr, setSearchErr] = useState("");
   const [picked, setPicked] = useState(null); // chosen food's per-100g macros, for serving rescale
   const [grams, setGrams] = useState("100");
+  const [unit, setUnit] = useState("g");      // serving unit — g or ml (MyFitnessPal-style)
+  const [servingText, setServingText] = useState(""); // the product's labelled serving (e.g. "330 ml")
   const [scanOpen, setScanOpen] = useState(false); // live barcode scanner modal
   const [scanning, setScanning] = useState(false); // camera starting up
   const [scanErr, setScanErr] = useState("");
@@ -6006,7 +6008,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
     </span>
   );
 
-  const resetSearch = () => { setSearchOpen(false); setSearchQ(""); setResults([]); setSearching(false); setSearchErr(""); setPicked(null); setGrams("100"); };
+  const resetSearch = () => { setSearchOpen(false); setSearchQ(""); setResults([]); setSearching(false); setSearchErr(""); setPicked(null); setGrams("100"); setUnit("g"); setServingText(""); };
   const resetFields = () => { setName(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); resetSearch(); };
   // Run a USDA food search for the current query.
   const runSearch = async () => {
@@ -6025,10 +6027,13 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
     setCarbs(String(Math.round(food.c * factor) || ""));
     setFat(String(Math.round(food.f * factor) || ""));
   };
-  // Pick a search result: remember its per-100g macros, fill the form at 100g.
+  // Pick a food (search result or scanned product): remember its per-100g/ml
+  // macros; default to the product's single serving size when known, else 100.
   const pickFood = (food) => {
-    setPicked(food); setGrams("100"); setName(food.name);
-    applyServing(food, "100"); setShowMacros(true);
+    const u = food.unit === "ml" ? "ml" : "g";
+    const start = food.serving && food.serving > 0 ? String(food.serving) : "100";
+    setPicked(food); setUnit(u); setServingText(food.servingText || ""); setGrams(start); setName(food.name);
+    applyServing(food, start); setShowMacros(true);
   };
   // Adjust serving size after a pick — rescales the filled macros live.
   const setServing = (g) => { setGrams(g); if (picked) applyServing(picked, g); };
@@ -6038,14 +6043,17 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   // lookup is a single request. ──
   const lookupBarcode = async (code) => {
     try {
-      const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,brands,nutriments`);
+      const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_per`);
       const j = await r.json();
       if (j.status !== 1 || !j.product) { setSearchOpen(true); setScanErr(`No product found for barcode ${code}. Search by name or enter it manually.`); return; }
       const p = j.product; const nm = p.nutriments || {};
       const tidy = (s) => (s || "Food").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+      const unit = p.nutrition_data_per === "100ml" ? "ml" : "g";       // nutriments are per-100 of this
+      const serving = Math.round(Number(p.serving_quantity)) || null;    // the product's single serving
       const food = { name: tidy(p.product_name), brand: (p.brands || "").split(",")[0].trim(),
         kcal: Math.round(nm["energy-kcal_100g"] || 0), p: Math.round(nm.proteins_100g || 0),
-        c: Math.round(nm.carbohydrates_100g || 0), f: Math.round(nm.fat_100g || 0) };
+        c: Math.round(nm.carbohydrates_100g || 0), f: Math.round(nm.fat_100g || 0),
+        unit, serving, servingText: (p.serving_size || "").trim() };
       setSearchOpen(true);
       if (!food.kcal) { setName(food.name); setScanErr("Found the product, but it has no nutrition data — enter the numbers manually."); return; }
       setScanErr(""); pickFood(food);
@@ -6243,11 +6251,24 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
                 </div>
               )}
               {picked && (
-                <div style={{ display:"flex", alignItems:"center", gap:"8px", fontSize:".76rem", color:"var(--muted)" }}>
-                  <span>Serving:</span>
-                  <input style={{ ...inp, width:"72px", flex:"none", padding:"6px 8px" }} type="number" inputMode="numeric"
-                    value={grams} onChange={(e) => setServing(e.target.value)} />
-                  <span>g → fills below. Adjust then Add.</span>
+                <div style={{ display:"flex", flexDirection:"column", gap:"4px", fontSize:".76rem", color:"var(--muted)" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+                    <span>Serving:</span>
+                    <input style={{ ...inp, width:"72px", flex:"none", padding:"6px 8px" }} type="number" inputMode="numeric"
+                      value={grams} onChange={(e) => setServing(e.target.value)} />
+                    {/* g / ml unit toggle (MyFitnessPal-style) */}
+                    <span style={{ display:"inline-flex", border:"1px solid var(--border)", borderRadius:"7px", overflow:"hidden" }}>
+                      {["g","ml"].map((u) => (
+                        <button key={u} onClick={() => setUnit(u)}
+                          style={{ padding:"5px 10px", fontSize:".72rem", fontWeight:700, cursor:"pointer", border:"none",
+                            background: unit===u ? "var(--accent)" : "transparent", color: unit===u ? "#0b0b12" : "var(--muted)" }}>{u}</button>
+                      ))}
+                    </span>
+                    <span>→ fills below</span>
+                  </div>
+                  {servingText
+                    ? <span style={{ color:"var(--accent)" }}>1 serving = {servingText} · tap to use, or adjust</span>
+                    : <span>Adjust the amount, then Add.</span>}
                 </div>
               )}
             </div>
