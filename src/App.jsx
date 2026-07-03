@@ -10053,6 +10053,7 @@ function AIChatPanel({ role, onDataChanged }) {
   const fileRef = useRef(null);
   const taRef = useRef(null);     // composer textarea (auto-grows with content)
   const recRef = useRef(null);    // MediaRecorder instance
+  const maxRecTimerRef = useRef(null); // auto-stop timer (caps recording length)
   const chunksRef = useRef([]);   // recorded audio chunks
   const streamRef = useRef(null); // mic MediaStream (to stop tracks after)
   const waveRef = useRef(null);   // <canvas> for the live level meter
@@ -10219,6 +10220,8 @@ function AIChatPanel({ role, onDataChanged }) {
         } finally { setTranscribing(false); setLiveText(""); }
       };
       rec.start();
+      // Cap recording length (cost + UX — a spoken chat message should be short).
+      maxRecTimerRef.current = setTimeout(() => { stopRecording(); }, 60000);
       startLiveCaption();
       setRecording(true);
     } catch (err) {
@@ -10226,6 +10229,7 @@ function AIChatPanel({ role, onDataChanged }) {
     }
   };
   const stopRecording = () => {
+    if (maxRecTimerRef.current) { clearTimeout(maxRecTimerRef.current); maxRecTimerRef.current = null; }
     stopLiveCaption();
     try { if (recRef.current && recRef.current.state !== "inactive") recRef.current.stop(); } catch (e) { /* ignore */ }
     setRecording(false);
