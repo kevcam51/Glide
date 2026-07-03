@@ -12336,6 +12336,19 @@ export default function App() {
     })();
   }, []);
 
+  // Auto sign-out after inactivity — security hygiene, especially on shared or
+  // gym devices (an abandoned session logs itself out). Any real interaction
+  // resets the 30-minute idle timer.
+  useEffect(() => {
+    const IDLE_MS = 30 * 60 * 1000;
+    let timer;
+    const reset = () => { clearTimeout(timer); timer = setTimeout(() => { signOut(auth).catch(() => {}); }, IDLE_MS); };
+    const evs = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"];
+    evs.forEach((e) => window.addEventListener(e, reset, { passive: true }));
+    reset();
+    return () => { clearTimeout(timer); evs.forEach((e) => window.removeEventListener(e, reset)); };
+  }, []);
+
   const saveIndex = async (list) => {
     try { await window.storage.set(STORAGE_INDEX, JSON.stringify(list)); } catch(e) {}
   };
