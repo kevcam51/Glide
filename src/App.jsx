@@ -6548,6 +6548,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   const [calQuick, setCalQuick] = useState("");           // quick calorie entry (type a number)
   const [calQuickType, setCalQuickType] = useState("");   // optional meal type for the typed amount
   const [waterDraft, setWaterDraft] = useState("");       // water (oz) typed entry for the selected day
+  useBackClose(true, onClose);                            // phone Back closes the calendar
 
   // Daily calorie target — same formula the dashboard/Results use, for adherence tinting.
   const calTarget = (computeClientCalories(data) || {}).target || null;
@@ -8273,6 +8274,7 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
 // it read-only). `startWeight` lets the chart draw a "start → now" segment when
 // there's only one real weigh-in yet.
 function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, rangeHigh, startWeight, onDelete, onClose }) {
+  useBackClose(true, onClose);   // phone Back closes the modal
   // Self-contained brand theme (data-theme="pro") so it looks identical whether
   // it's opened from the pro-themed Client Dashboard or the old-styled Results.
   const w = Number(currentWeight) || 0;
@@ -8438,6 +8440,28 @@ function clearInviteFromUrl() {
     url.searchParams.delete("n");
     window.history.replaceState({}, "", url.toString());
   } catch { /* ignore */ }
+}
+
+// Make the phone/browser Back button (and Android back gesture) CLOSE an open
+// overlay instead of leaving the app. When `isOpen`, push a history entry; a
+// Back navigation pops it and calls onClose. Closing via the app's own button
+// unmounts this and the cleanup pops the entry we pushed (so Back isn't consumed
+// twice). Every full-screen overlay uses this, so Back = "go back one screen."
+function useBackClose(isOpen, onClose) {
+  const cbRef = useRef(onClose);
+  cbRef.current = onClose;
+  useEffect(() => {
+    if (!isOpen) return;
+    // Push one history entry per open so a Back navigation pops it and closes the
+    // overlay (instead of leaving the app). We intentionally do NOT history.back()
+    // on programmatic close — that races React StrictMode's remount. The only cost
+    // is a harmless stale entry after an X-close; Back still never exits the app
+    // unexpectedly.
+    try { window.history.pushState({ glideOverlay: true }, ""); } catch { /* ignore */ }
+    const onPop = () => { if (cbRef.current) cbRef.current(); };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [isOpen]);
 }
 
 function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
@@ -8754,6 +8778,7 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
   const [val, setVal] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  useBackClose(true, onClose);   // phone Back closes the modal
   const type = request.type;
   const isLoggable = type === "weigh_in" || type === "log_food" || type === "log_workout";
 
@@ -9979,6 +10004,7 @@ function AIChatPanel({ role, onDataChanged }) {
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = prev; };
   }, [open]);
+  useBackClose(open, () => setOpen(false));   // phone Back closes the chat
   // Load the caller's Pro entitlement + food-DB toggle when the chat opens.
   useEffect(() => {
     if (!open) return;
@@ -11789,6 +11815,7 @@ function InviteHub({ open, onClose, meName }) {
   const [copied, setCopied] = useState("");
   const [showQr, setShowQr] = useState(false);
   const [resendingId, setResendingId] = useState(""); // which past invite is being resent
+  useBackClose(open, onClose);                        // phone Back closes the invite hub
 
   const first = (meName || "").trim().split(/\s+/)[0] || "";
   const shareLink = code
@@ -11984,6 +12011,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
   const [last, setLast] = useState("");
   const [busy, setBusy] = useState(false);
   const [showNotif, setShowNotif] = useState(false); // Notification Center section (Session 76)
+  useBackClose(open, onClose);                        // phone Back closes the menu
   const [hubOpen, setHubOpen] = useState(false);     // Invite Hub modal (Option C)
   useEffect(() => {
     if (open) {
@@ -12014,7 +12042,11 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
         background: "var(--surface,#16162a)", borderRight: "1px solid var(--border)", boxShadow: "var(--shadow-md)",
         transform: open ? "translateX(0)" : "translateX(-100%)", transition: "transform .28s ease",
         display: "flex", flexDirection: "column", padding: "16px 12px",
-        paddingTop: "calc(16px + env(safe-area-inset-top,0px))" }}>
+        // Scrollable + generous bottom inset so Sign out is never hidden behind
+        // the mobile browser toolbar / home indicator.
+        overflowY: "auto", WebkitOverflowScrolling: "touch",
+        paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
+        paddingBottom: "calc(28px + env(safe-area-inset-bottom,0px))" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 4px 12px" }}>
           <div className="logo" style={{ fontSize: "1.4rem" }}>GLI<span>DE</span></div>
           <button onClick={onClose} style={{ ...item, width: "auto", padding: "6px 10px" }} aria-label="Close menu"><Icon name="close" size={18} color="var(--muted)" /></button>
@@ -12144,8 +12176,8 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
           </button>
         )}
 
-        <div style={{ flex: 1 }} />
-        <button style={{ ...item, color: "#e5484d" }} onClick={() => signOut(auth)}><Icon name="signout" size={19} /> <span>Sign out</span></button>
+        <div style={{ flex: 1, minHeight: 12 }} />
+        <button style={{ ...item, color: "#e5484d", border: "1px solid rgba(229,72,77,.4)", background: "rgba(229,72,77,.08)", justifyContent: "center", marginTop: 8 }} onClick={() => signOut(auth)}><Icon name="signout" size={19} /> <span>Sign out</span></button>
       </div>
       {isTrainer && <InviteHub open={hubOpen} onClose={() => setHubOpen(false)} meName={meName} />}
     </>
