@@ -8526,6 +8526,64 @@ function useBackClose(isOpen, onClose) {
   }, [isOpen]);
 }
 
+// ─── Install (PWA) prompt ────────────────────────────────────────────────────
+// A brief, dismissible banner telling users they can install Glide to their home
+// screen + why. On Android/Chrome it offers a one-tap Install (the captured
+// beforeinstallprompt); on iPhone it shows the Share → Add to Home Screen steps.
+// It hides itself once the app is installed (running standalone) or dismissed.
+function InstallPrompt() {
+  const [dismissed, setDismissed] = useState(() => { try { return localStorage.getItem("glide-install-dismissed") === "1"; } catch { return false; } });
+  const [deferred, setDeferred] = useState(null); // beforeinstallprompt event (Chrome/Android)
+  const [standalone, setStandalone] = useState(true); // assume installed until we check (avoids a flash)
+  useEffect(() => {
+    try { setStandalone(window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true); }
+    catch { setStandalone(false); }
+    const onBip = (e) => { e.preventDefault(); setDeferred(e); };
+    const onInstalled = () => setStandalone(true);
+    window.addEventListener("beforeinstallprompt", onBip);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => { window.removeEventListener("beforeinstallprompt", onBip); window.removeEventListener("appinstalled", onInstalled); };
+  }, []);
+
+  if (standalone || dismissed) return null;
+  const isIOS = typeof navigator !== "undefined" && /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+  // Only surface it where install is actually possible: iPhone (manual steps) or
+  // any browser that fired the install prompt. Otherwise stay out of the way.
+  if (!isIOS && !deferred) return null;
+
+  const dismiss = () => { setDismissed(true); try { localStorage.setItem("glide-install-dismissed", "1"); } catch { /* ignore */ } };
+  const install = async () => {
+    if (!deferred) return;
+    deferred.prompt();
+    try { await deferred.userChoice; } catch { /* ignore */ }
+    setDeferred(null); dismiss();
+  };
+
+  return createPortal(
+    <div data-theme="pro" style={{ position: "fixed", zIndex: 1380,
+      left: "10px", right: "10px", bottom: "calc(12px + env(safe-area-inset-bottom,0px))",
+      maxWidth: 460, margin: "0 auto", borderRadius: 14, padding: "12px 14px",
+      background: "var(--surface,#121b1e)", border: "1px solid var(--border)", boxShadow: "0 8px 30px rgba(0,0,0,.45)",
+      display: "flex", alignItems: "flex-start", gap: 10, fontFamily: "var(--font-sans)", color: "var(--text)" }}>
+      <span style={{ fontSize: "1.3rem", lineHeight: 1 }}>📲</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 800, fontSize: ".92rem", marginBottom: 2 }}>Install Glide</div>
+        <div style={{ fontSize: ".78rem", color: "var(--muted)", lineHeight: 1.45 }}>
+          Add it to your home screen for a faster, full-screen app — and your camera &amp; mic stay ready.
+          {isIOS && <> Tap the <strong style={{ color: "var(--text)" }}>Share</strong> button, then <strong style={{ color: "var(--text)" }}>“Add to Home Screen.”</strong></>}
+        </div>
+        {deferred && (
+          <button onClick={install} style={{ marginTop: 8, padding: "8px 16px", borderRadius: 8, border: "none",
+            background: "var(--accent)", color: "#0b0b12", fontWeight: 800, fontSize: ".82rem", cursor: "pointer" }}>Install</button>
+        )}
+      </div>
+      <button onClick={dismiss} aria-label="Dismiss" style={{ border: "none", background: "transparent", color: "var(--muted)",
+        fontSize: "1.1rem", cursor: "pointer", padding: "0 2px", lineHeight: 1 }}>✕</button>
+    </div>,
+    document.body
+  );
+}
+
 function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
   const [profile, setProfile] = useState(undefined); // undefined = loading
   const [code, setCode] = useState("");
@@ -13096,6 +13154,7 @@ export default function App() {
         onDashboard={() => { setHomeTab("analytics"); goToProfiles(); }}
         onClients={() => { setHomeTab("clients"); goToProfiles(); }}
         onNameSaved={(n) => setMeName(n)} />
+      <InstallPrompt />
     </>
   );
 
