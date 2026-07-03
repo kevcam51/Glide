@@ -10039,6 +10039,7 @@ function AIChatPanel({ role, onDataChanged }) {
   const [editDraft, setEditDraft] = useState(null); // edit-mode fields
   const [workout, setWorkout] = useState(null); // pending workout-program card {…, status}
   const [recording, setRecording] = useState(false);     // mic actively recording
+  const [recSecs, setRecSecs] = useState(0);             // seconds recorded (60s cap countdown)
   const [transcribing, setTranscribing] = useState(false); // sending audio → text
   const [liveText, setLiveText] = useState("");          // interim words (browser speech) while recording
   const [size, setSize] = useState("compact");           // "compact" corner card | "full" near-fullscreen
@@ -10054,6 +10055,7 @@ function AIChatPanel({ role, onDataChanged }) {
   const taRef = useRef(null);     // composer textarea (auto-grows with content)
   const recRef = useRef(null);    // MediaRecorder instance
   const maxRecTimerRef = useRef(null); // auto-stop timer (caps recording length)
+  const recTickRef = useRef(null); // 1s interval driving the countdown display
   const chunksRef = useRef([]);   // recorded audio chunks
   const streamRef = useRef(null); // mic MediaStream (to stop tracks after)
   const waveRef = useRef(null);   // <canvas> for the live level meter
@@ -10221,6 +10223,9 @@ function AIChatPanel({ role, onDataChanged }) {
       };
       rec.start();
       // Cap recording length (cost + UX — a spoken chat message should be short).
+      // Auto-stop at 60s, with a visible countdown so the limit is clear.
+      setRecSecs(0);
+      recTickRef.current = setInterval(() => setRecSecs((s) => s + 1), 1000);
       maxRecTimerRef.current = setTimeout(() => { stopRecording(); }, 60000);
       startLiveCaption();
       setRecording(true);
@@ -10230,6 +10235,7 @@ function AIChatPanel({ role, onDataChanged }) {
   };
   const stopRecording = () => {
     if (maxRecTimerRef.current) { clearTimeout(maxRecTimerRef.current); maxRecTimerRef.current = null; }
+    if (recTickRef.current) { clearInterval(recTickRef.current); recTickRef.current = null; }
     stopLiveCaption();
     try { if (recRef.current && recRef.current.state !== "inactive") recRef.current.stop(); } catch (e) { /* ignore */ }
     setRecording(false);
@@ -10635,6 +10641,11 @@ function AIChatPanel({ role, onDataChanged }) {
                 <span className="min-w-0 flex-1 truncate text-[.8rem] text-fg">
                   {liveText || (transcribing ? "Transcribing…" : "Listening… tap ⏹ when done")}
                 </span>
+                {recording && (
+                  <span className={`shrink-0 text-[.78rem] font-bold tabular-nums ${recSecs >= 50 ? "text-danger" : "text-muted"}`}>
+                    0:{String(Math.max(0, 60 - recSecs)).padStart(2, "0")}
+                  </span>
+                )}
               </div>
             )}
             <div className="flex flex-wrap items-center gap-2">
@@ -10647,7 +10658,7 @@ function AIChatPanel({ role, onDataChanged }) {
                 </svg></button>
               <button onClick={toggleMic} disabled={busy || transcribing}
                 aria-label={recording ? "Stop recording" : "Record a voice message"}
-                title={recording ? "Tap to stop" : "Speak to Glide"}
+                title={recording ? "Tap to stop" : "Speak to Glide (up to 60 sec)"}
                 className={`flex items-center justify-center rounded-xl border px-3 py-2.5 cursor-pointer disabled:opacity-50 ${recording ? "border-danger bg-danger text-white animate-pulse" : "border-border bg-surface2 text-fg hover:text-primary"}`}>
                 {transcribing ? (
                   <span className="text-[1.05rem] leading-none">…</span>
