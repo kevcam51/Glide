@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "gen:og": "node scripts/gen-og.mjs",
+    "gen:icons": "node scripts/gen-icons.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test:rules": "firebase emulators:exec --only firestore --project calorieiq-rules-test \"node firestore.rules.test.js\""

@@ -23,3 +23,11 @@ createRoot(document.getElementById('root')).render(
     )}
   </StrictMode>,
 )
+
+// Register the PWA service worker (prod only, so dev/preview isn't affected by
+// any caching). Enables home-screen install + a graceful offline shell.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {})
+  })
+}
