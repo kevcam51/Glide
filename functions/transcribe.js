@@ -17,13 +17,17 @@ const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
 const GROQ_API_KEY = defineSecret("GROQ_API_KEY");
 
 // PRIMARY is tried first; if it errors and FALLBACK is set, that's tried next.
-// Flip PRIMARY to "groq" when Groq's paid tier reopens (cheaper + faster).
-const VOICE_PRIMARY = "openai";
-const VOICE_FALLBACK = "groq"; // best-effort (Groq free tier works, rate-limited)
+// Groq is PRIMARY: it's much faster than OpenAI Whisper, and in practice the
+// OpenAI key wasn't billing (calls were failing → every request wasted a slow
+// failed OpenAI attempt before falling back to Groq). OpenAI stays as a
+// best-effort fallback in case Groq rate-limits.
+const VOICE_PRIMARY = "groq";
+const VOICE_FALLBACK = "openai";
 
 function providerConfig(name) {
   if (name === "groq") {
-    return { url: "https://api.groq.com/openai/v1/audio/transcriptions", model: "whisper-large-v3", key: () => GROQ_API_KEY.value() };
+    // whisper-large-v3-turbo: ~4× faster than large-v3, near-identical accuracy.
+    return { url: "https://api.groq.com/openai/v1/audio/transcriptions", model: "whisper-large-v3-turbo", key: () => GROQ_API_KEY.value() };
   }
   return { url: "https://api.openai.com/v1/audio/transcriptions", model: "whisper-1", key: () => OPENAI_API_KEY.value() };
 }
