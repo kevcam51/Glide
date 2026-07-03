@@ -5982,9 +5982,11 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const [searchErr, setSearchErr] = useState("");
   const [picked, setPicked] = useState(null); // chosen food's per-100g macros, for serving rescale
   const [grams, setGrams] = useState("100");
-  const [scanning, setScanning] = useState(false); // barcode scan in progress
+  const [scanOpen, setScanOpen] = useState(false); // live barcode scanner modal
+  const [scanning, setScanning] = useState(false); // camera starting up
   const [scanErr, setScanErr] = useState("");
-  const barcodeRef = useRef(null);            // hidden file input for barcode photo
+  const videoRef = useRef(null);              // <video> preview for live scanning
+  const scanCtlRef = useRef(null);            // zxing scanner controls (to stop)
 
   const list = meals || [];
   const loggedTotal = list.reduce((s, m) => s + (m.calories || 0), 0);
@@ -6030,9 +6032,10 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   };
   // Adjust serving size after a pick — rescales the filled macros live.
   const setServing = (g) => { setGrams(g); if (picked) applyServing(picked, g); };
-  // ── Barcode scanning: snap a product barcode → look it up in Open Food Facts
-  // → prefill the food. Uses the browser BarcodeDetector on a captured photo (no
-  // extra library); OFF is barcode-native so the lookup is a single request. ──
+  // ── Barcode scanning: LIVE camera (auto-detects as you aim) → look it up in
+  // Open Food Facts → prefill the food. Uses @zxing/browser (works on iOS Safari
+  // + Chrome, unlike the native BarcodeDetector); OFF is barcode-native so the
+  // lookup is a single request. ──
   const lookupBarcode = async (code) => {
     try {
       const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,brands,nutriments`);
@@ -6048,22 +6051,47 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
       setScanErr(""); pickFood(food);
     } catch { setSearchOpen(true); setScanErr("Barcode lookup failed — check your connection and try again."); }
   };
-  const onBarcodeFile = async (e) => {
-    const file = e.target.files && e.target.files[0]; e.target.value = "";
-    if (!file) return;
-    if (!("BarcodeDetector" in window)) { setSearchOpen(true); setScanErr("Barcode scanning isn't supported on this browser — try Chrome or iOS 17+, or search by name."); return; }
+  const openScan = () => { setScanErr(""); setScanOpen(true); };
+  const closeScan = () => { setScanOpen(false); };
+  // Run the live scanner while the modal is open; auto-detect → look up → close.
+  useEffect(() => {
+    if (!scanOpen) return;
+    let cancelled = false;
     setScanning(true); setScanErr("");
-    try {
-      const bitmap = await createImageBitmap(file);
-      const det = new window.BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39"] });
-      const codes = await det.detect(bitmap);
-      if (bitmap.close) bitmap.close();
-      if (!codes || !codes.length) { setSearchOpen(true); setScanErr("No barcode detected — try a clearer, closer photo, or search by name."); return; }
-      await lookupBarcode(codes[0].rawValue);
-    } catch { setSearchOpen(true); setScanErr("Couldn't read that barcode — try again, or search by name."); }
-    finally { setScanning(false); }
-  };
-  const scanBarcode = () => { setScanErr(""); if (barcodeRef.current) barcodeRef.current.click(); };
+    (async () => {
+      try {
+        const { BrowserMultiFormatReader } = await import("@zxing/browser");
+        const reader = new BrowserMultiFormatReader();
+        const controls = await reader.decodeFromConstraints(
+          { video: { facingMode: { ideal: "environment" } } },
+          videoRef.current,
+          (result, err, ctl) => {
+            if (result && !cancelled) {
+              cancelled = true;
+              try { ctl.stop(); } catch { /* ignore */ }
+              setScanOpen(false);
+              lookupBarcode(result.getText());
+            }
+          }
+        );
+        scanCtlRef.current = controls;
+        if (cancelled) { try { controls.stop(); } catch { /* ignore */ } }
+        setScanning(false);
+      } catch (e) {
+        if (cancelled) return;
+        setScanning(false); setScanOpen(false); setSearchOpen(true);
+        setScanErr(/permission|NotAllowed|denied/i.test(String(e && e.message))
+          ? "Camera access was blocked — allow the camera in your browser settings, or search by name."
+          : "Couldn't start the camera — search by name instead.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      try { scanCtlRef.current && scanCtlRef.current.stop(); } catch { /* ignore */ }
+      scanCtlRef.current = null;
+    };
+  }, [scanOpen]);
+  useBackClose(scanOpen, closeScan);   // phone Back closes the scanner camera
   const openForm = (key) => { resetFields(); setEditingId(null); setAddingTo(key); };
   const closeForm = () => { resetFields(); setEditingId(null); setAddingTo(null); };
   // Open the form pre-filled to fix an existing entry.
@@ -6154,17 +6182,30 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
                 fontSize:".74rem", fontWeight:700, padding:"0", textAlign:"left" }}>
               <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}><Icon name={searchOpen ? "close" : "search"} size={13} />{searchOpen ? "Close food search" : "Search food database"}</span>
             </button>
-            <button onClick={scanBarcode} disabled={scanning}
+            <button onClick={openScan}
               style={{ border:"none", background:"transparent", color:"var(--accent)", cursor:"pointer",
-                fontSize:".74rem", fontWeight:700, padding:"0", textAlign:"left", opacity: scanning ? .6 : 1 }}>
+                fontSize:".74rem", fontWeight:700, padding:"0", textAlign:"left" }}>
               <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}>
                 <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 5v14M7 5v14M11 5v14M15 5v14M19 5v14M22 5v14"/></svg>
-                {scanning ? "Scanning…" : "Scan barcode"}
+                Scan barcode
               </span>
             </button>
           </div>
-          <input ref={barcodeRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={onBarcodeFile} />
           {scanErr && <div style={{ fontSize:".74rem", color:"var(--red)", marginTop:"6px" }}>{scanErr}</div>}
+          {scanOpen && createPortal(
+            <div data-theme="pro" onClick={closeScan} style={{ position:"fixed", inset:0, zIndex:2000, background:"rgba(0,0,0,.92)",
+              display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, padding:20,
+              paddingTop:"calc(20px + env(safe-area-inset-top,0px))" }}>
+              <div style={{ color:"var(--text)", fontWeight:700, fontSize:"1.02rem" }}>Point at a barcode</div>
+              <div onClick={(e) => e.stopPropagation()} style={{ position:"relative", width:"min(90vw,420px)", aspectRatio:"1",
+                borderRadius:16, overflow:"hidden", background:"#000", border:"2px solid var(--accent)" }}>
+                <video ref={videoRef} playsInline muted autoPlay style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                <div style={{ position:"absolute", inset:"22%", border:"2px solid rgba(255,255,255,.75)", borderRadius:10, pointerEvents:"none" }} />
+              </div>
+              <div style={{ color:"var(--muted)", fontSize:".82rem" }}>{scanning ? "Starting camera…" : "Hold steady — it scans automatically"}</div>
+              <button onClick={closeScan} style={{ padding:"11px 26px", borderRadius:10, border:"1px solid var(--border)",
+                background:"var(--surface)", color:"var(--text)", fontWeight:700, fontSize:".9rem", cursor:"pointer" }}>Cancel</button>
+            </div>, document.body)}
           {searchOpen && (
             <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"6px" }}>
               <div style={{ display:"flex", gap:"6px" }}>
