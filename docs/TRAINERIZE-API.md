@@ -3,6 +3,16 @@
 _Kevin has a **Studio account** and pulled the full API reference (v03, ~290 pages). He wants this
 logged now and built later. This is the reference + the plan — nothing implemented yet._
 
+## ✅ CONFIRMED LIVE (Session 84) — auth + first response
+- **Auth WORKS:** `Authorization: Basic base64("<GroupID>:<APIToken>")`. GroupID is a **6-digit number**;
+  token ~21 chars. Stored as secrets `TRAINERIZE_GROUP_ID` + `TRAINERIZE_API_TOKEN` (Kevin's real values,
+  set S84). `functions/trainerize.js` already uses this exact format.
+- **`user/getClientList`** (body `{start,count}`) → `{ users:[...], total }`. Kevin's group has **13 clients**.
+  Each user: `id`(number), `firstName`, `lastName`, `email`, `type`, `status`, `role`, `profileName`,
+  `trainerID`, `latestSignedIn`, `profileIconUrl`, `profileIconVersion`, `trialStatus`.
+- **Next:** build the importer — per client `id`, call `user/getProfile`, `bodystats/get`, `goal/get`,
+  `dailyNutrition/get`, `program/get`, `healthData/getList` (calorieOut) → map into Glide (design below).
+
 ## Basics
 - **Base:** `https://api.trainerize.com/v03/…` — REST, JSON, all **POST**.
 - **Auth:** HTTP **Basic** (base64), per **Group API token**. Access is scoped by credential
