@@ -13,6 +13,28 @@ logged now and built later. This is the reference + the plan — nothing impleme
 - **Next:** build the importer — per client `id`, call `user/getProfile`, `bodystats/get`, `goal/get`,
   `dailyNutrition/get`, `program/get`, `healthData/getList` (calorieOut) → map into Glide (design below).
 
+## Import design (decided S84) — Option A + auto-sync + rate-limit reality
+- **Where clients land: Option A** — each Trainerize client becomes a **local profile in the trainer's
+  Glide account** (reuses existing local-profile storage; no new user accounts). Later the trainer invites
+  a client → they make a Glide login → it links. Dedupe by Trainerize `id` (store `trainerizeId` on the
+  profile) so re-imports UPDATE, not duplicate.
+- **v1 = roster + snapshot** (name, current weight, goal, body stats). v2 = history (check-ins, nutrition,
+  program). v3 = `calorieOut` wearable burn.
+- **Auto-add new clients:** a **scheduled Cloud Function** (daily) calls `getClientList`, diffs against
+  imported `trainerizeId`s, imports the new ones (+ a "Sync now" button). Trainerize has no new-client
+  webhook, so we poll — cheap (see rate math).
+- **Multi-tenant (later):** other independent trainers connect their OWN token (per-trainer **encrypted**
+  token store — NOT the single shared secret we use for Kevin now). **Sub-trainers under Kevin's ONE
+  Trainerize group**: each client carries a `trainerID` → route each to the right Glide sub-trainer by
+  `trainerID`; each sub-trainer can have their own Glide login and see their own imported clients.
+- **RATE LIMITS — no "running out" risk:** the limit is **1000 requests/MINUTE per token** (a throttle,
+  not a monthly cap). Import = ~6 calls/client → 13 clients ≈ 78 calls; even 200 clients ≈ 1,200 (spread
+  over ~2 min). A daily sync is a few hundred calls once/day = negligible. **CRITICAL:** Glide's daily
+  calorie targets, macros, logging, and AI are computed by **Glide from stored data — they NEVER call
+  Trainerize.** Trainerize is touched only during import/sync. So core features can't "stop working" from
+  API limits; even if Trainerize were fully down, Glide keeps running. (Firebase itself is Blaze
+  pay-as-you-go with no request cap.)
+
 ## Basics
 - **Base:** `https://api.trainerize.com/v03/…` — REST, JSON, all **POST**.
 - **Auth:** HTTP **Basic** (base64), per **Group API token**. Access is scoped by credential
