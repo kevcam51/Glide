@@ -1,77 +1,80 @@
 # Glide — Next-Session Handoff (start here)
 
-_Updated mid-**Session 84** (big session: calendar, food DB, AI food gating, barcode, email live,
-PWA, nav fixes). Read this first, then `CLAUDE.md` (standing context) + the `docs/` files noted below.
-Everything is pushed to `main` and live on Vercel unless noted. Firebase project `calorieiq-29762`;
-prod URL `calorieiq-jet.vercel.app`. Model `claude-sonnet-4-6`._
+_Updated end of **Session 84** (huge session). Read this first, then `CLAUDE.md` (standing context) and
+the `docs/` files noted below. Everything is pushed to `main` and live on Vercel unless noted. Firebase
+project `calorieiq-29762`; prod URL `calorieiq-jet.vercel.app`. AI model `claude-sonnet-4-6`._
 
 ---
 
-## ⏭️ DO NEXT — Trainerize importer (IN PROGRESS, just starting)
-Kevin wants this next. It migrates a trainer's clients **and** pulls their wearable **calories-burned**
-(`healthData.calorieOut`) for free — which is why we're NOT paying for Terra (see Decisions).
-- **Full API reference + plan: [docs/TRAINERIZE-API.md](docs/TRAINERIZE-API.md)** (endpoints, 1000/min
-  rate limit, multi-tenant BYO-token design, security).
-- **Build path:** a Cloud Function (`functions/trainerize.js`) with the **Group API token as a Secret**
-  (like RESEND/ANTHROPIC — Kevin sets `TRAINERIZE_TOKEN` via `firebase functions:secrets:set`, never in
-  chat/repo). Read-only importer: `getClientList` → per client `getProfile`/`bodystats`/`goal`/
-  `dailyNutrition`/`program`/`healthData.getList(calorieOut)` → map into Glide's schema
-  (`data`, `checkIns`, `caliq-log-{plan}-{date}.meals[]`, `data.cardio`/`strength`, a per-day burn).
-  Throttle < 1000/min, page per client, dedupe on re-import, label imported source.
-- **⚠️ DO FIRST with Kevin:** get the **Trainerize Studio Group API token**, confirm what it can read,
-  set it as a secret, THEN build + deploy + test with his real data. (Kevin has a Studio account.)
+## ⏭️ DO NEXT — Build the Trainerize importer (connection is LIVE & proven)
+The Trainerize connection **works** and the design is locked. This is the #1 next build.
+- **Confirmed live (S84):** auth = `Authorization: Basic base64("<GroupID>:<APIToken>")`. Kevin's real
+  secrets `TRAINERIZE_GROUP_ID` (6-digit) + `TRAINERIZE_API_TOKEN` are SET. `user/getClientList`
+  `{start,count}` → `{ users:[...], total }`; **Kevin's group has 13 clients**. Each user has
+  `id`(number), `firstName`, `lastName`, `email`, `type`, `status`, `role`, `profileName`, `trainerID`,
+  `latestSignedIn`, `trialStatus`. `functions/trainerize.js` (`trainerizeTest`) is deployed and returns
+  this. **Full endpoint map + confirmed details + design: [docs/TRAINERIZE-API.md](docs/TRAINERIZE-API.md).**
+- **DESIGN (decided with Kevin):**
+  - **Option A** — each Trainerize client becomes a **local profile in the trainer's Glide account**
+    (reuse existing local-profile storage; no new user accounts). Dedupe by storing `trainerizeId` on the
+    profile so re-imports UPDATE, not duplicate. Later: invite client → they make a Glide login → link.
+  - **v1 = roster + snapshot** (name, current weight, goal, body stats) → Kevin sees all 13 in Glide.
+    v2 = history (check-ins/`bodystats`, `dailyNutrition`, `program`). v3 = `healthData` `calorieOut`
+    (wearable burn → progress).
+  - **Auto-add:** a **scheduled daily Cloud Function** polls `getClientList`, imports new clients (+ a
+    "Sync now" button). **Multi-tenant later:** other trainers connect their OWN token (per-trainer
+    ENCRYPTED store, not the shared secret); sub-trainers routed by each client's `trainerID`.
+  - **Rate limits are a non-issue:** 1000 req/**minute** (throttle, not a cap). Import ≈ 6 calls/client
+    (13 ≈ 78). **Glide's daily targets/logging/AI never call Trainerize** — they run on Glide's own data,
+    so nothing "runs out" or breaks if Trainerize is slow/down. (Told Kevin this — it was his main worry.)
+- **BUILD STEPS (v1):** (1) investigate Glide's local-profile storage format (the profiles index + how
+  `caliq-{id}` data/plans are created — see `ProfileSelector`/`createProfile`/`selectProfile` in App.jsx);
+  (2) extend `functions/trainerize.js` with a `trainerizeImport` callable (trainer-only) that loops
+  `getClientList` → per client `getProfile`+`bodystats/get` → maps to Glide's plan `data` shape → writes
+  into the CALLER's kv as local profiles (via the Admin SDK, mirroring `src/storage.js`
+  `users/{uid}/kv/{encodeURIComponent(key)}` with a JSON-string `value`); (3) frontend "Import from
+  Trainerize" button (trainer screens) + progress/result UI; (4) deploy + test against the real 13
+  clients; (5) then v2/v3 + the scheduled sync. **Careful — it WRITES into Kevin's real account; test the
+  mapping first (can dry-run via direct curl like we verified getClientList).**
 
-## Also queued (Kevin's order): AI-edits-local-plans → biometric login
-- **AI editing local profiles + simulations** (not just connected clients) — extend the AI tools to
-  target a trainer's own local plans/sims so plans can be prepped by chat. Medium build.
-- **Biometric login (Face ID/Touch ID via passkeys/WebAuthn)** — last security item. Medium build.
-- **Auto sign-out on idle** — quick; do alongside biometrics.
+## Also queued (Kevin's order, after Trainerize): AI-edits-local-plans → biometrics
+- **AI editing local profiles + simulations** (not just connected clients) — extend the AI tools to target
+  a trainer's own local plans/sims so plans can be prepped by chat. Medium build, fully in our control.
+- **Biometric login (Face ID/Touch ID via WebAuthn/passkeys)** + **auto sign-out on idle** (quick). Last
+  security items.
 
-## Decisions locked this session (don't re-litigate)
-- **Terra: PAUSED — do NOT pay.** Quick Start is $399/mo; "Enterprise/custom" ≠ free (sales contract,
-  possible minimum). Even if free, an unused integration is a liability. **Use Trainerize's free
-  `calorieOut` for wearable data now**; revisit Terra only at real scale / for non-Trainerize clients.
-  The Glide-side wearable work (store "calories burned/day", an **override toggle** so a tracker workout
-  overrides a scheduled Glide one per-modality, show on progress) is **source-agnostic** — build once,
-  feed from Trainerize now.
-- **OpenAI transcription is NOT broken.** Whisper is billed **per second of audio, not tokens**, so
-  OpenAI's "tokens" always shows 0. Verified the key works (live test, HTTP 200). Current setup:
-  **Groq primary (fast) + OpenAI fallback (works, payable)** — exactly what we want.
-- **Name change: still open.** Full research in [docs/NAMING.md](docs/NAMING.md). Top clean+available
-  pick is **Slydra** ("SLY-druh", all domains free) but Kevin's lukewarm; one-syllable is exhausted.
-  Not decided — rename is a text-swap across the app (colors unchanged; Firebase id stays).
-- **AI "precise food data" (search_food, real DB values) is a Pro upsell** — server-gated by
-  entitlement (`subscriptionStatus:"active"` OR `entitlements.foodAccuracy:true`) + a chat toggle; free
-  users get AI estimates. Grant a test acct the entitlement to demo. (src/profile.js `isProUser`.)
+## Decisions locked (don't re-litigate)
+- **Terra: NOT used** — $399/mo, and Trainerize gives wearable `calorieOut` for free. Wearable Glide-side
+  work (store burn/day, an **override toggle** so a tracker workout overrides a scheduled Glide one
+  per-modality) is source-agnostic — build once, feed from Trainerize.
+- **Name change: OPEN.** Full research in [docs/NAMING.md](docs/NAMING.md); top clean+available = **Slydra**
+  ("SLY-druh"), but undecided. Rename = a text-swap across the app (colors unchanged; Firebase id stays).
+- **OpenAI transcription is fine** (Whisper billed per-second, not tokens → dashboard shows 0). Setup:
+  **Groq primary (fast) + OpenAI fallback**. Voice capped at 60s with a countdown.
+- **AI "precise food data" (search_food) = Pro upsell** — server-gated by `subscriptionStatus:"active"`
+  OR `entitlements.foodAccuracy:true` + a chat toggle; free users get AI estimates. (src/profile.js
+  `isProUser`.) Grant a test acct the entitlement to demo.
 
-## What shipped in Session 84 (all live)
-- **Calendar:** client **start date** (= signup) — days before it are neutral (never "missed"); Day view
-  now full dashboard parity — quick **add + reduce** calories, typed entry (+ meal type / "just
-  calories"), and **water** logging.
-- **Food DB:** USDA (Kevin's `VITE_USDA_API_KEY` live) **+ Open Food Facts** (free). **Barcode scanner**
-  = live camera via **@zxing/browser** (works iOS Safari + Chrome), **auto-fills the product's single
-  serving size** + a **g/ml** toggle.
-- **AI:** `search_food` tool (USDA+OFF) — **Pro-gated** (see Decisions) + chat toggle w/ upsell.
-- **Email invites LIVE:** Resend domain **`send.smoothtraining.com` verified** (SPF+DKIM+DMARC in
-  Squarespace), sender `invites@send.smoothtraining.com` (+ plain-text/reply-to for deliverability).
-  First sends may hit spam (new-domain reputation) → "Not spam" trains it.
-- **Nav/UX:** phone **Back button closes overlays** (calendar/menu/chat/hub/modals) instead of leaving
-  the app (`useBackClose` hook); **Sign out** is now a prominent, reachable bordered button.
-- **Voice:** **Groq** primary transcription (fast), 60s cap with a visible **countdown**.
-- **PWA:** installable home-screen app (`manifest.webmanifest`, `sw.js`, icons via `npm run gen:icons`,
-  apple meta). Dismissible **"Install Glide"** prompt (auto-hides once installed). Header now clears the
-  **notch/safe-area** so the title is fully visible in the installed app.
-- Docs added: `TRAINERIZE-API.md`, `SECURITY-TRUST.md` (shareable customer trust page), `NAMING.md`,
-  `VIDEO-LINK-INGEST.md` (Phase 1 shipped earlier).
+## Shipped in Session 84 (all live)
+Calendar **start date** (pre-join days neutral) + Day-view dashboard parity (add/**reduce**/typed calories +
+meal type + **water**). Food DB: USDA (Kevin's key live) **+ Open Food Facts**. **Barcode scanner** (live
+camera, @zxing/browser, iOS+Chrome) with **auto serving size + g/ml**. AI **search_food** (Pro-gated) +
+upsell toggle. **Email invites LIVE** (Resend, `send.smoothtraining.com` verified SPF/DKIM/DMARC, sender
+`invites@send.smoothtraining.com`). **Back button closes overlays**; **Sign out** prominent/reachable.
+**Groq** transcription. **PWA** (installable, manifest/sw/icons via `npm run gen:icons`, "Install Glide"
+prompt, **notch/safe-area** header fix, taller header so the menu button clears the underline). Docs:
+`TRAINERIZE-API.md`, `SECURITY-TRUST.md` (shareable), `NAMING.md`.
 
-## Gotchas (still true)
-- **A background process also commits/pushes here** — `git fetch` + check `origin/main..HEAD` before
-  assuming state; commit promptly. Memory `concurrent-git-commits`.
-- **Deploy ALL 4 AI functions when `functions/aitools.js` changes** (aiChat, aiChatStream, logMeal,
-  setWorkoutSchedule). Other fns: `sendInvite` (Resend), `transcribeAudio` (Groq/OpenAI), plus the AI set.
-- **Firebase token expires** → `firebase login --reauth --no-localhost`. Secrets: set via
-  `printf 'val' | firebase functions:secrets:set NAME --data-file=-` (avoids the masked prompt).
-- **`src/App.jsx` ≈ 13k lines**; `css` block is a JS template literal. `npm run build` before commit.
-  Push to `main` auto-deploys Vercel; **Cloud Functions need explicit `firebase deploy`** (not via push).
+## Gotchas
+- **Background process also commits/pushes here** — `git fetch` + check `origin/main..HEAD` first.
+- **Deploy ALL 4 AI fns when `functions/aitools.js` changes** (aiChat, aiChatStream, logMeal,
+  setWorkoutSchedule). Other fns: sendInvite, transcribeAudio, trainerizeTest.
+- **Firebase token expires** → `firebase login --reauth --no-localhost`. Set secrets via
+  `printf 'val' | firebase functions:secrets:set NAME --project calorieiq-29762 --data-file=-` (masked
+  prompt trips Kevin up). **Never `GID=` in zsh** (special var → "operation not permitted"); use another name.
+- To test a secret-backed API without a UI: `firebase functions:secrets:access NAME` into a curl (don't
+  print the secret) — how we proved Trainerize + OpenAI.
+- **`src/App.jsx` ≈ 13k lines**; `css` block is a JS template literal. `npm run build` before commit; push
+  `main` auto-deploys Vercel; **Cloud Functions need explicit `firebase deploy`** (NOT via push).
 - Test accounts: trainer `trainer.uitest@calorieiq-test.com` / client `client.uitest@…` (Casey),
-  `TestPass123`. Drive the preview signed-in for AI/callables.
+  `TestPass123`. Drive the preview signed-in for callables/AI.
