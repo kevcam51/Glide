@@ -94,3 +94,4 @@ exports.setWorkoutSchedule = require("./aichat").setWorkoutSchedule; // workout 
 exports.transcribeAudio = require("./transcribe").transcribeAudio; // voice → text (Whisper)
 exports.sendInvite = require("./invites").sendInvite; // email invites (Option C)
 exports.trainerizeTest = require("./trainerize").trainerizeTest; // Trainerize connection test (import step 1)
+exports.trainerizeImport = require("./trainerize").trainerizeImport; // Trainerize roster + snapshot importer (v1)

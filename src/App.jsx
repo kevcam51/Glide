@@ -8998,8 +8998,25 @@ function computeClientCalories(d) {
   return { tdee, target };
 }
 
-function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, meUid, meName, meRole, notifPrefs, onSetNotifPrefs }) {
+function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, meUid, meName, meRole, notifPrefs, onSetNotifPrefs }) {
   const [details, setDetails] = useState({}); // id -> { tdee, target }
+  // Trainerize import (v1): busy flag + last result/error line under the button.
+  const [tzBusy, setTzBusy] = useState(false);
+  const [tzMsg, setTzMsg] = useState(null); // { ok, text }
+  const runTrainerizeImport = async () => {
+    if (tzBusy || !onTrainerizeImport) return;
+    setTzBusy(true);
+    setTzMsg({ ok: true, text: "Importing from Trainerize… this can take ~30 seconds." });
+    try {
+      const r = await onTrainerizeImport();
+      setTzMsg({ ok: true, text: `✓ Imported ${r.total} client${r.total === 1 ? "" : "s"} (${r.created} new · ${r.updated} updated) — filed under the “Trainerize” folder in All clients.` });
+    } catch (e) {
+      const code = e && e.code ? String(e.code) : "";
+      setTzMsg({ ok: false, text: code.includes("permission-denied") ? "Only trainers can import from Trainerize."
+        : "Import failed — check the Trainerize connection and try again." });
+    }
+    setTzBusy(false);
+  };
   const [lastLog, setLastLog] = useState({}); // id -> "YYYY-MM-DD"
   const [sort, setSort] = useState("attention");
   const [clientSort, setClientSort] = useState("attention"); // sort for connected clients
@@ -9536,13 +9553,22 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
 
         <div className={cardCls}>
           <div className={`${sectionTitleCls} whitespace-nowrap flex items-center gap-2`}><Icon name="clipboard" size={18} color="var(--accent)" />Local Plans</div>
-          <div className="flex gap-1.5 mt-2">
+          <div className="flex gap-1.5 mt-2 flex-wrap">
             <button onClick={onNewPlan} className={mPrimaryCls}>+ Plan</button>
             <button onClick={onNewSimulation}
               className="flex items-center gap-1.5 px-2.5 py-2 rounded-md text-xs font-bold border border-[#b57bff] bg-transparent text-[#b57bff] cursor-pointer whitespace-nowrap">
               <Icon name="flask" size={14} color="#b57bff" />Simulation
             </button>
+            {onTrainerizeImport && (
+              <button onClick={runTrainerizeImport} disabled={tzBusy}
+                className={`flex items-center gap-1.5 px-2.5 py-2 rounded-md text-xs font-bold border border-primary bg-transparent text-primary whitespace-nowrap ${tzBusy ? "opacity-60 cursor-default" : "cursor-pointer"}`}>
+                <Icon name="link" size={14} color="var(--color-primary)" />{tzBusy ? "Importing…" : "Import from Trainerize"}
+              </button>
+            )}
           </div>
+          {tzMsg && (
+            <div className={`text-xs mt-1.5 ${tzMsg.ok ? "text-success" : "text-danger"}`}>{tzMsg.text}</div>
+          )}
           <div className={`${subCls} mt-1.5 mb-1.5`}>
             📄 Plans not connected to a client login — templates, backups, and 🧪 simulations (sandbox
             what-if projections). Connected clients are under “Your clients” above.
@@ -9984,6 +10010,7 @@ const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card dir
 const callSetWorkout = httpsCallable(functions, "setWorkoutSchedule"); // workout Accept-card direct write (Session 75)
 const callTranscribe = httpsCallable(functions, "transcribeAudio"); // voice → text (Whisper, Session 79)
 const callSendInvite = httpsCallable(functions, "sendInvite"); // email invites (Option C)
+const callTrainerizeImport = httpsCallable(functions, "trainerizeImport"); // Trainerize roster importer (v1)
 // Streaming endpoint (Session 66) — replies arrive word-by-word via SSE. We POST
 // with the Firebase ID token (EventSource can't set headers, so we fetch+stream).
 const AI_STREAM_URL = `https://us-central1-${import.meta.env.VITE_FIREBASE_PROJECT_ID}.cloudfunctions.net/aiChatStream`;
@@ -12666,6 +12693,22 @@ export default function App() {
     saveIndex(up);
   };
 
+  // Import the trainer's Trainerize roster as local profiles (server-side write
+  // via the trainerizeImport callable), then re-read the index + folders so the
+  // new/updated profiles appear without a reload. Returns the import summary.
+  const importFromTrainerize = async () => {
+    const res = await callTrainerizeImport({});
+    try {
+      const r = await window.storage.get(STORAGE_INDEX);
+      if (r && r.value) setProfiles(JSON.parse(r.value));
+    } catch(e) {}
+    try {
+      const f = await window.storage.get(STORAGE_FOLDERS);
+      if (f && f.value) setFolders(JSON.parse(f.value));
+    } catch(e) {}
+    return res.data;
+  };
+
   const goToProfiles = () => { setScreen("profiles"); setActiveId(null); setActiveRemoteUid(null); };
   const reset = () => { setStep(0); setData({...EMPTY_DATA}); autoSave({...EMPTY_DATA}, 0); };
   const update = (k,v) => setDataAndSave(p=>({...p,[k]:v}));
@@ -13185,6 +13228,7 @@ export default function App() {
         onNewSimulation={()=>createProfile(null,{isSimulation:true})}
         onConvertSimulation={convertSimulation}
         onDeletePlan={removeLocalProfileById}
+        onTrainerizeImport={importFromTrainerize}
         meUid={meUid} meName={meName} meRole={role}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
       /><AIChatPanel role={role} /></>;

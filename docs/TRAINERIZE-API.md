@@ -13,6 +13,36 @@ logged now and built later. This is the reference + the plan — nothing impleme
 - **Next:** build the importer — per client `id`, call `user/getProfile`, `bodystats/get`, `goal/get`,
   `dailyNutrition/get`, `program/get`, `healthData/getList` (calorieOut) → map into Glide (design below).
 
+## ✅ IMPORTER v1 BUILT & VERIFIED (Session 85) — confirmed request/response shapes
+The `trainerizeImport` callable (`functions/trainerize.js`) is DEPLOYED and verified end-to-end
+against the live roster. **Exact endpoint contracts discovered via curl (the doc PDF param names
+differ from obvious guesses — don't re-derive):**
+- **`user/getProfile`** takes **`{"usersid":[id,…], "unitBodystats":"inches"}`** — an ARRAY (batch,
+  one call for the whole roster) → `{usrProfile:[…]}` with `firstName`, `lastName`, `sex`
+  ("male"/"female"), `birthDate` ("YYYY-MM-DD"), `height` (TOTAL inches as a string when
+  unitBodystats=inches), `activeLevel` ("sedentary"/"lightlyActive"/"moderatelyActive"/
+  "veryActive"/"extremelyActive"), `email`, `trainerID`, `status`. A plain `{"userID":…}` body
+  404s ("Not found." = wrong params, NOT a missing user — the route exists).
+- **`bodystats/get`** takes **`{"userID":id, "date":"last", "unitBodystats":"inches",
+  "unitWeight":"lbs"}`** — `date:"last"` grabs the newest entry; omitting units → 406 "Unit weight
+  missing". → `{date, bodyMeasures:{bodyWeight, bodyFatPercent, bodyMassIndex, restingHeartRate},
+  from:"garmin"|"trainerize"|…}`. 412 = client has no body stats.
+- **`goal/getList`** takes `{"userID":id, "unitWeight":"lbs", "start":0, "count":10}` →
+  `{total, goals:[…]}`; goal types seen live: `weightGoal` (`{weightGoal:175.0, startWeight,
+  currentWeight}`) and `nutritionGoal` (`{caloricGoal, proteinGrams, carbsGrams, fatGrams}` — maps
+  to Glide `data.macroTargets`). Most clients have NO goals set — treat as optional.
+- **Mapping (implemented):** profile→`firstName/lastName/gender/age (from birthDate)/heightFt+In
+  (from total inches)/activityLevel (ACTIVITY_MAP)`; bodystat→`weightLbs/bodyFat` + ONE seeded
+  check-in (replace-by-date) + `startWeightLbs`; weightGoal→`goalWeight`; nutritionGoal→
+  `macroTargets`. Profile id is deterministic **`ctz{trainerizeId}`** + `trainerizeId` on the index
+  entry (re-import UPDATES, never duplicates — verified). Imports file under a "Trainerize" folder;
+  complete snapshots get `step:5` (dashboard-ready). Client email is stored on the index entry for
+  future account-linking.
+- **Trigger:** "Import from Trainerize" button on the trainer home (Local Plans card) → writes into
+  the CALLER's account. Roster was 10 active clients at build time (was 13 in S84 — roster shrank).
+- **Still v2/v3:** history (bodystats list, dailyNutrition, program), scheduled daily auto-sync,
+  wearable `calorieOut`, per-trainer tokens (multi-tenant).
+
 ## Import design (decided S84) — Option A + auto-sync + rate-limit reality
 - **Where clients land: Option A** — each Trainerize client becomes a **local profile in the trainer's
   Glide account** (reuses existing local-profile storage; no new user accounts). Later the trainer invites
