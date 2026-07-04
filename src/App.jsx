@@ -9268,7 +9268,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     <div data-theme="pro" className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
-      <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)" }}>
+      <div className="flex items-center justify-center min-h-[64px] px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)" }}>
         <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
@@ -9823,7 +9823,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
   return (
     <div data-theme="pro" className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
-      <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)" }}>
+      <div className="flex items-center justify-center min-h-[64px] px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)" }}>
         <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
@@ -11160,7 +11160,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
     <div data-theme="pro" className="page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
-      <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)" }}>
+      <div className="flex items-center justify-center min-h-[64px] px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)" }}>
         <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
@@ -11627,7 +11627,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
     <div data-theme="pro" className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
-      <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)" }}>
+      <div className="flex items-center justify-center min-h-[64px] px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)" }}>
         <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
