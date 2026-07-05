@@ -16,7 +16,7 @@
 
 import { db } from "./firebase.js";
 import {
-  doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot,
+  doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, query, where,
 } from "firebase/firestore";
 
 const encodeKey = (key) => encodeURIComponent(key);
@@ -59,9 +59,16 @@ export function subscribeForUser(uid, key, cb) {
 }
 
 // List keys (optionally filtered by prefix) in a specific user's namespace.
+// With a prefix this uses a range query on "k" so only matching docs are read
+// (and billed) — the trainer dashboards call this once PER CLIENT, so a full
+// collection scan here scaled reads with every client's entire log history.
 export async function listForUser(uid, prefix) {
   if (!uid) throw new Error("listForUser: missing uid");
-  const snap = await getDocs(kvCol(uid));
+  const snap = await getDocs(
+    prefix
+      ? query(kvCol(uid), where("k", ">=", prefix), where("k", "<=", prefix + "\uf8ff"))
+      : kvCol(uid)
+  );
   const keys = [];
   snap.forEach((d) => {
     const k = d.data().k;

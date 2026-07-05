@@ -49,6 +49,17 @@ function metaContent(html, key) {
   m = html.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]*(?:property|name)=["']${k}["']`, "i"));
   return m ? decodeEntities(m[1]).trim() : "";
 }
+// fetch with a hard timeout — an outbound API that hangs must not stall a chat
+// turn until the function's own timeout (dead spinner + wasted tokens).
+async function fetchWithTimeout(url, opts = {}, ms = 8000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 // Reject links that could point at internal/cloud-metadata hosts (SSRF).
 function isBlockedHost(host) {
   const h = (host || "").toLowerCase();
@@ -67,20 +78,34 @@ async function fetchLinkMeta(rawUrl) {
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
+  const headers = {
+    // A normal browser UA — most broadly accepted for articles/blogs/YouTube.
+    // (Social platforms block server fetches regardless, so we lean on the
+    // paste-the-caption fallback for those.)
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
+    "Accept-Language": "en",
+  };
   let res;
   try {
-    res = await fetch(u.toString(), {
-      redirect: "follow",
-      signal: controller.signal,
-      headers: {
-        // A normal browser UA — most broadly accepted for articles/blogs/YouTube.
-        // (Social platforms block server fetches regardless, so we lean on the
-        // paste-the-caption fallback for those.)
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
-        "Accept-Language": "en",
-      },
-    });
+    // Follow redirects MANUALLY, re-checking EVERY hop against the SSRF
+    // denylist — redirect:"follow" would let a public URL bounce the fetch
+    // to an internal/metadata address the initial check never saw.
+    let target = u;
+    for (let hop = 0; ; hop++) {
+      if ((target.protocol !== "http:" && target.protocol !== "https:") || isBlockedHost(target.hostname)) {
+        clearTimeout(timer);
+        return { error: "That link can't be fetched." };
+      }
+      res = await fetch(target.toString(), { redirect: "manual", signal: controller.signal, headers });
+      const loc = res.headers.get("location");
+      if (res.status >= 300 && res.status < 400 && loc) {
+        if (hop >= 3) { clearTimeout(timer); return { error: "That link redirects too many times.", hint: "Ask the user to paste the caption/description text." }; }
+        target = new URL(loc, target); // handles relative redirects
+        continue;
+      }
+      break;
+    }
   } catch (e) {
     clearTimeout(timer);
     return { error: "Couldn't open that link.", hint: "Ask the user to paste the caption or description text and work from that." };
@@ -138,7 +163,7 @@ async function searchFoodDb(query) {
   const key = process.env.USDA_API_KEY || "DEMO_KEY";
   const usdaP = (async () => {
     try {
-      const r = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${key}&query=${encodeURIComponent(q)}&pageSize=6`);
+      const r = await fetchWithTimeout(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${key}&query=${encodeURIComponent(q)}&pageSize=6`);
       if (!r.ok) return [];
       const j = await r.json();
       return (j.foods || []).map((x) => {
@@ -151,7 +176,7 @@ async function searchFoodDb(query) {
   })();
   const offP = (async () => {
     try {
-      const r = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_simple=1&action=process&json=1&page_size=6&fields=product_name,brands,nutriments&search_terms=${encodeURIComponent(q)}`,
+      const r = await fetchWithTimeout(`https://world.openfoodfacts.org/cgi/search.pl?search_simple=1&action=process&json=1&page_size=6&fields=product_name,brands,nutriments&search_terms=${encodeURIComponent(q)}`,
         { headers: { "User-Agent": "GlideAI/1.0 (+https://calorieiq-jet.vercel.app)" } });
       if (!r.ok) return [];
       const j = await r.json();
@@ -812,19 +837,23 @@ async function runTool(name, input, ctx) {
 
   if (name === "list_clients") {
     if (!ctx.isTrainer) return { error: "Only trainers can list clients." };
+    const MAX_LIST = 60; // same roster cap as coach_summary
     const snap = await db.collection("users")
-      .where("assignedTrainerId", "==", ctx.callerUid).get();
+      .where("assignedTrainerId", "==", ctx.callerUid).limit(MAX_LIST).get();
     const out = [];
     for (const doc of snap.docs) {
       const p = doc.data();
       const id = await activePlanId(db, doc.id);
-      // latest logged date for the client's active plan
+      // Latest logged date for the client's active plan — ONE doc via a
+      // descending limit(1) query (this used to download every daily-log doc
+      // the client ever wrote, per client, per call).
       const prefix = `caliq-log-${id}-`;
       let last = null;
       try {
         const logs = await db.collection(`users/${doc.id}/kv`)
-          .where("k", ">=", prefix).where("k", "<=", prefix + "").get();
-        logs.forEach((l) => { const k = l.data().k || ""; const dt = k.slice(-10); if (!last || dt > last) last = dt; });
+          .where("k", ">=", prefix).where("k", "<=", prefix + "")
+          .orderBy("k", "desc").limit(1).get();
+        logs.forEach((l) => { const k = l.data().k || ""; last = k.slice(-10); });
       } catch (e) { /* ignore */ }
       let daysSince = null;
       if (last) {
@@ -878,7 +907,7 @@ async function runTool(name, input, ctx) {
       let lastLog = null;
       try {
         const ls = await db.collection(`users/${uidC}/kv`)
-          .where("k", ">=", prefix).where("k", "<=", prefix + "").orderBy("k", "desc").limit(1).get();
+          .where("k", ">=", prefix).where("k", "<=", prefix + "\uf8ff").orderBy("k", "desc").limit(1).get();
         ls.forEach((l) => { lastLog = (l.data().k || "").slice(-10); });
       } catch (e) { /* ignore */ }
       const daysSince = lastLog

@@ -1792,6 +1792,62 @@ enabled (Blaze has no default spending cap).
   link + QR generate, email path shows the friendly fallback; `npm run build` passes; no console errors. Frontend
   pushed (Vercel auto-deploys); no other functions changed (`aitools.js` untouched this session). No
   `firestore.rules` change. **NEXT:** calendar back-dating.
+- Session 85: **Trainerize importer v1 (LIVE) + full optimization/security sweep (LIVE).**
+  (1) **Importer:** `trainerizeImport` callable (`functions/trainerize.js`) — pages `getClientList`, batch
+  `user/getProfile` (`usersid` ARRAY — non-obvious param), per-client `bodystats/get {date:"last"}` +
+  `goal/getList`; maps profile→`firstName/lastName/gender/age/heightFt+In/activityLevel`, last bodystat→
+  `weightLbs/bodyFat` + ONE seeded check-in + `startWeightLbs`, weightGoal→`goalWeight`, nutritionGoal→
+  `macroTargets`. Writes LOCAL PROFILES into the CALLER's kv (Option A): deterministic ids `ctz{trainerizeId}`
+  + `trainerizeId` on the index entry (re-import UPDATES — verified no dupes), filed under a "Trainerize"
+  folder, complete snapshots get step 5 (dashboard-ready), client email kept on the index entry for future
+  account-linking. Frontend: "Import from Trainerize" button on the trainer home Local Plans card; **visible
+  AND callable ONLY by the admin UID** — the shared group token would otherwise hand any self-signed-up
+  "trainer" Kevin's client PII (reviewer catch, fixed + redeployed same session). Verified live with the real
+  roster (**10 active clients** — the S84 "13" shrank on Trainerize's side) via the test trainer, then cleaned
+  up; Kevin imports by tapping the button in his own account. Confirmed endpoint contracts in
+  `docs/TRAINERIZE-API.md` — read that before v2. v2/v3 (history, scheduled auto-sync, calorieOut,
+  multi-tenant per-trainer tokens) still roadmap.
+  (2) **Sweep** (3 parallel review agents over App.jsx / functions / support files; every fix applied,
+  smoke-tested live, deployed):
+  • **Read-cost:** `storage.js list()` + `clientData.js listForUser()` now use `where("k",">=",prefix)` range
+  queries (they downloaded the ENTIRE kv collection — every daily log with full values — per call, per client,
+  per dashboard visit); AI `list_clients` uses `orderBy("k","desc").limit(1)` + a 60-client cap (was reading
+  every log doc per client); the in-plan streak loop reads days in parallel batches of 7 with a cache the
+  week-summary reuses (was up to ~365 serial round-trips per plan open); TrainerDashboard/TrainerAnalytics
+  per-client reads parallelized; the dashboard details effect keys on an `id:lastSaved` signature (a rename no
+  longer re-reads every plan); nudge no longer double-reloads. **⚠️ Gotcha:** keep the range upper bound as
+  the ESCAPE sequence `""` in source — a raw pasted char silently became an empty string once and made
+  `listForUser` return nothing (caught in the live smoke test, not the build).
+  • **Security:** `firestore.rules` — owner updates can no longer touch `subscriptionStatus`/`entitlements`/
+  `trialStartedAt`/`trialLengthDays` (they drive the AI budget tier + the Pro food gate = a self-serve upgrade
+  hole) and creates can't start "active"/with entitlements; `inviteCodes` split `allow get` (signed-in) vs
+  `allow list` (admin only — no harvesting every code→trainer mapping) + create restricted to
+  `hasOnly(['trainerUid','createdAt'])`. **61 emulator tests pass** (was 47; +14 attack cases). **Rules
+  PUBLISHED.** `fetch_link` follows redirects MANUALLY, re-checking the SSRF denylist on every hop (≤3 hops);
+  `sendInvite` capped **50 emails/day/trainer** (`users/{uid}/inviteUsage/{day}`).
+  • **Correctness:** new module hook `useTodayKey()` (used by App + ClientHome) — today's date key is STATE
+  that rolls over at midnight (1-min timer + visibilitychange) and the daily-log effect depends on it, fixing
+  a real corruption: a dashboard left open past midnight kept writing yesterday's running totals into the new
+  day's key. AuthGate now distinguishes "profile read FAILED" (retry screen) from "no profile" (a flaky read
+  used to route an EXISTING user into the RoleChooser, whose re-createProfile wiped their trainer link and
+  restarted their trial; `createProfile` is now also non-destructive when a profile exists). `joinTrainer`'s
+  legacy inviteCode users-query is try/caught (denied under the S59 scoped rules → typo'd codes crashed raw
+  instead of the friendly error). `logWrite` failures now surface via console (the fire-and-forget promise
+  rejection was fully swallowed — a failed save looked saved forever). aiChat/aiChatStream record token usage
+  in a `finally` (a mid-turn tool-round error used to leave all prior rounds unbilled) and the stream's
+  `setupChat` failure returns a clean JSON 500 (was an unhandled rejection); stream error frames now carry
+  `wrote`. Chat images are only honored on the FINAL message, max 2 (history images would re-bill vision
+  tokens every tool round). Hard timeouts on ALL outbound fetches (Trainerize 15s — errors now return non-ok
+  instead of killing the import mid-loop — USDA/OFF 8s, Whisper 30s, Resend 10s).
+  • **Misc:** PWA `sw.js` re-caches the offline shell on every successful navigation (the install-time copy
+  went stale after any deploy — its hashed asset URLs 404'd, so offline fallback was a white screen);
+  `themes.css` prod font import trimmed to **Sora only** (Bebas/Inter/Nunito/DM-Sans moved to
+  `showcase-fonts.css`, imported only by the dev Showcase — five families were render-blocking every prod
+  load); `qrcode` lazy-loaded via dynamic import (same pattern as the barcode scanner).
+  **Deferred (listed in the handoff):** kv read-modify-write transactions (log_meal / send_client_request /
+  optimistic app writes), AI budget transactional pre-reserve, assignedTrainerId consent validation, semantic
+  tool-result truncation, ProfileCard hoist (rename caret jump), per-uid live-refresh scoping. All 8 functions
+  redeployed; rules published; frontend pushed (Vercel).
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

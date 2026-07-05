@@ -20,8 +20,21 @@ self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
   // Navigations: network-first, fall back to the cached shell when offline.
+  // Refresh the cached shell on every successful navigation — the install-time
+  // copy goes stale after a deploy (its hashed asset URLs 404), so keeping it
+  // at most one page-load old is what makes the offline fallback actually boot.
   if (req.mode === "navigate") {
-    e.respondWith(fetch(req).catch(() => caches.match("/")));
+    e.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(SHELL).then((c) => c.put("/", copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => caches.match("/"))
+    );
   }
   // Everything else: default network (always fresh — no caching here).
 });

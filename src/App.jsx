@@ -5,7 +5,6 @@ import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } 
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
-import QRCode from "qrcode";
 import { Icon } from "./icons.jsx";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
@@ -6556,6 +6555,22 @@ function ActivityFeed({ history, onRefresh }) {
 const ymdLocal = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
+// Today's local date key as STATE that rolls over by itself — at midnight (1-min
+// timer) or when a backgrounded tab wakes on a later day. A plain `ymdLocal()`
+// per render never re-triggered the load effects at the boundary, so a dashboard
+// left open across midnight kept writing yesterday's running totals into the new
+// day's key. Everything keying "today" off this re-loads at the rollover.
+function useTodayKey() {
+  const [key, setKey] = useState(ymdLocal());
+  useEffect(() => {
+    const check = () => setKey((prev) => { const now = ymdLocal(); return now === prev ? prev : now; });
+    const t = setInterval(check, 60000);
+    document.addEventListener("visibilitychange", check);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", check); };
+  }, []);
+  return key;
+}
+
 // A Firestore Timestamp / Date / number / ISO string → local "YYYY-MM-DD" (or
 // null). Used to derive a client's start date from their profile's createdAt.
 const tsToYmd = (ts) => {
@@ -9012,7 +9027,8 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       setTzMsg({ ok: true, text: `✓ Imported ${r.total} client${r.total === 1 ? "" : "s"} (${r.created} new · ${r.updated} updated) — filed under the “Trainerize” folder in All clients.` });
     } catch (e) {
       const code = e && e.code ? String(e.code) : "";
-      setTzMsg({ ok: false, text: code.includes("permission-denied") ? "Only trainers can import from Trainerize."
+      setTzMsg({ ok: false, text: code.includes("permission-denied")
+        ? "The Trainerize connection is linked to the platform owner's account."
         : "Import failed — check the Trainerize connection and try again." });
     }
     setTzBusy(false);
@@ -9058,18 +9074,20 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       // A client may have several plans — show the ACTIVE one in the overview.
       const manifest = await readPlansManifest((k) => getForUser(c.uid, k));
       const activeId = manifest.active;
-      try {
-        const r = await getForUser(c.uid, planDataKey(activeId));
-        if (r && r.value) data = (JSON.parse(r.value) || {}).data || {};
-      } catch (e) { /* not linked / no plan yet */ }
-      try {
-        const res = await listForUser(c.uid, planLogPrefix(activeId));
-        (res.keys || []).forEach((k) => {
-          const d = k.slice(-10);
-          if (!lastLogDate || d > lastLogDate) lastLogDate = d;
-        });
-      } catch (e) { /* ignore */ }
-      const requests = await readRequestsFor(c.uid, getForUser);
+      // Plan / logs / requests don't depend on each other — fetch them together
+      // (they were three serial round-trips per client).
+      const [, , requests] = await Promise.all([
+        getForUser(c.uid, planDataKey(activeId)).then((r) => {
+          if (r && r.value) data = (JSON.parse(r.value) || {}).data || {};
+        }).catch(() => { /* not linked / no plan yet */ }),
+        listForUser(c.uid, planLogPrefix(activeId)).then((res) => {
+          (res.keys || []).forEach((k) => {
+            const d = k.slice(-10);
+            if (!lastLogDate || d > lastLogDate) lastLogDate = d;
+          });
+        }).catch(() => { /* ignore */ }),
+        readRequestsFor(c.uid, getForUser),
+      ]);
       const cal = data ? computeClientCalories(data) : null;
       const nm = data && (data.firstName || data.lastName)
         ? `${data.firstName || ""} ${data.lastName || ""}`.trim()
@@ -9192,7 +9210,14 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     await loadClients();
   };
 
+  // Only re-read when a plan's CONTENT could have changed (id/lastSaved), not on
+  // every index-array identity change — a rename/refile rebuilds the array and
+  // used to re-fetch every plan doc + the full log listing for nothing.
+  const detailsSigRef = useRef("");
   useEffect(() => {
+    const sig = profiles.map((p) => `${p.id}:${p.lastSaved || 0}`).join("|");
+    if (sig === detailsSigRef.current) return;
+    detailsSigRef.current = sig;
     let cancelled = false;
     (async () => {
       // Per-client calorie target (needs each client's full profile data).
@@ -9559,7 +9584,10 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
               className="flex items-center gap-1.5 px-2.5 py-2 rounded-md text-xs font-bold border border-[#b57bff] bg-transparent text-[#b57bff] cursor-pointer whitespace-nowrap">
               <Icon name="flask" size={14} color="#b57bff" />Simulation
             </button>
-            {onTrainerizeImport && (
+            {/* v1 runs on the platform owner's shared Trainerize token, so the
+                button only shows for that account (the backend enforces it too).
+                Multi-tenant per-trainer tokens lift this later. */}
+            {onTrainerizeImport && meUid === "G7QUZ8Kat1fgyoMjdGKz4DYoVHi1" && (
               <button onClick={runTrainerizeImport} disabled={tzBusy}
                 className={`flex items-center gap-1.5 px-2.5 py-2 rounded-md text-xs font-bold border border-primary bg-transparent text-primary whitespace-nowrap ${tzBusy ? "opacity-60 cursor-default" : "cursor-pointer"}`}>
                 <Icon name="link" size={14} color="var(--color-primary)" />{tzBusy ? "Importing…" : "Import from Trainerize"}
@@ -9744,7 +9772,8 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
         await setForUser(clientUid, "caliq-history-self", JSON.stringify([ev, ...hist].slice(0, 250)));
       } catch { /* history best-effort */ }
       setNudged((n) => ({ ...n, [clientUid]: true }));
-      await load();
+      // No explicit reload: the history write above pings useClientLiveRefresh,
+      // which reloads once — an awaited load() here made every nudge reload twice.
     } catch { /* ignore */ }
     finally { setNudgeBusy(null); }
   };
@@ -9755,13 +9784,19 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
     let cs = [];
     try { cs = await getMyClients(); } catch { /* ignore */ }
     const rows = await Promise.all((cs || []).map(async (c) => {
-      let data = null, dates = [];
+      let data = null, dates = [], requests = [];
       const m = await readPlansManifest((k) => getForUser(c.uid, k));
       const activeId = m.active;
-      try { const r = await getForUser(c.uid, planDataKey(activeId)); if (r && r.value) data = (JSON.parse(r.value) || {}).data || {}; } catch { /* not linked / no plan */ }
-      try { const res = await listForUser(c.uid, planLogPrefix(activeId)); dates = (res.keys || []).map((k) => k.slice(-10)); } catch { /* ignore */ }
-      let requests = [];
-      try { requests = await readRequestsFor(c.uid, getForUser); } catch { /* ignore */ }
+      // The three per-client reads are independent — fetch them together.
+      await Promise.all([
+        getForUser(c.uid, planDataKey(activeId)).then((r) => {
+          if (r && r.value) data = (JSON.parse(r.value) || {}).data || {};
+        }).catch(() => { /* not linked / no plan */ }),
+        listForUser(c.uid, planLogPrefix(activeId)).then((res) => {
+          dates = (res.keys || []).map((k) => k.slice(-10));
+        }).catch(() => { /* ignore */ }),
+        readRequestsFor(c.uid, getForUser).then((r) => { requests = r || []; }).catch(() => { /* ignore */ }),
+      ]);
       const openReqs = (requests || []).filter((r) => r.status !== "done");
       const checkIns = (data && data.checkIns) || [];
       const weighIns = checkIns.filter((x) => x.weight).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
@@ -10863,7 +10898,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   const lastSelfLogWrite = useRef(null);
   const lastSelfReqWrite = useRef(null);
 
-  const todayKey = ymdLocal();
+  const todayKey = useTodayKey(); // stateful: rolls over at midnight so the log key follows the day
   const logKey = planLogPrefix(activePlanId) + todayKey;
   const get = (k) => window.storage.get(k);
   const set = (k, v) => window.storage.set(k, v);
@@ -11998,7 +12033,10 @@ function InviteHub({ open, onClose, meName }) {
   }, [open]);
   useEffect(() => {
     if (open && showQr && shareLink) {
-      QRCode.toDataURL(shareLink, { margin: 1, width: 260, color: { dark: "#06201f", light: "#ffffff" } })
+      // Lazy-load the QR encoder — it's only needed here, two taps deep, so it
+      // stays out of the main bundle (same pattern as the barcode scanner).
+      import("qrcode")
+        .then((m) => (m.default || m).toDataURL(shareLink, { margin: 1, width: 260, color: { dark: "#06201f", light: "#ffffff" } }))
         .then(setQr).catch(() => setQr(""));
     }
   }, [open, showQr, shareLink]);
@@ -12887,7 +12925,7 @@ export default function App() {
   };
 
   // ── Daily log handler ──
-  const todayKey = ymdLocal();
+  const todayKey = useTodayKey(); // stateful: re-runs the log effects at midnight
   // Daily logs live with the plan: when a trainer is editing a LINKED client's
   // plan (activeRemoteUid set), the log reads/writes go to the CLIENT's account;
   // otherwise they use the signed-in user's own storage.
@@ -12898,10 +12936,13 @@ export default function App() {
     } catch (e) { return null; }
   };
   const logWrite = (key, value) => {
+    // Fire-and-forget by design (the UI updates optimistically), but a REJECTED
+    // write must not vanish silently — the try/catch alone only caught sync
+    // throws, so a failed save (offline, expired session) looked saved forever.
     try {
-      if (activeRemoteUid) setForUser(activeRemoteUid, key, value);
-      else window.storage.set(key, value);
-    } catch (e) {}
+      const p = activeRemoteUid ? setForUser(activeRemoteUid, key, value) : window.storage.set(key, value);
+      if (p && p.catch) p.catch((e) => console.error("Save failed for", key, e));
+    } catch (e) { console.error("Save failed for", key, e); }
   };
   // Remote-aware key listing (for the calendar's per-day indicators). Returns the
   // kv keys matching a prefix in whichever account the active plan lives in.
@@ -13108,15 +13149,28 @@ export default function App() {
       let parsed = {calories:0, water:0, weight:0, meals:[]};
       if (v) { try { parsed = JSON.parse(v); } catch(e) {} }
       setDailyLog(parsed);
-      // Simple streak: count consecutive days with logged calories
-      let s = 0;
-      for (let i = 0; i < 365; i++) {
-        const d = new Date(); d.setDate(d.getDate() - i);
-        const dk = ymdLocal(d);
-        const lv = await logRead(`caliq-log-${activeId}-${dk}`);
-        if (lv) { try { const p = JSON.parse(lv); if (p.calories > 0) { s++; continue; } } catch(e) {} }
-        if (i === 0) continue; // today might not have logs yet
-        break;
+      // Simple streak: count consecutive days with logged calories. Days are
+      // read in parallel batches of 7 (they were one awaited round-trip per
+      // day, so a long streak took seconds to load) and cached so the week
+      // summary below reuses the first 7 instead of re-reading them.
+      const dayVals = {};
+      const keyFor = (i) => { const d = new Date(); d.setDate(d.getDate() - i); return ymdLocal(d); };
+      const readDayCached = async (dk) => {
+        if (!(dk in dayVals)) dayVals[dk] = await logRead(`caliq-log-${activeId}-${dk}`);
+        return dayVals[dk];
+      };
+      let s = 0, ended = false;
+      for (let base = 0; base < 365 && !ended; base += 7) {
+        const batch = Array.from({ length: Math.min(7, 365 - base) }, (_, j) => keyFor(base + j));
+        const vals = await Promise.all(batch.map(readDayCached));
+        for (let j = 0; j < vals.length; j++) {
+          const i = base + j;
+          let logged = false;
+          if (vals[j]) { try { logged = (JSON.parse(vals[j]).calories || 0) > 0; } catch(e) {} }
+          if (logged) { s++; continue; }
+          if (i === 0) continue; // today might not have logs yet
+          ended = true; break;
+        }
       }
       setStreak(s);
       // Load this plan's edit history
@@ -13132,11 +13186,10 @@ export default function App() {
       recentFoodsRef.current = foods;
       setRecentFoods(foods);
       // Last-7-day nutrition summary (averaged over the days that were logged).
+      // Reuses the streak loop's cached reads — its first batch is these 7 days.
       let days = 0, cal = 0, p = 0, c = 0, f = 0;
       for (let i = 0; i < 7; i++) {
-        const d = new Date(); d.setDate(d.getDate() - i);
-        const dk = ymdLocal(d);
-        const lv = await logRead(`caliq-log-${activeId}-${dk}`);
+        const lv = await readDayCached(keyFor(i));
         if (!lv) continue;
         try {
           const pl = JSON.parse(lv);
@@ -13147,7 +13200,9 @@ export default function App() {
         ? { days, avgCal: Math.round(cal / days), avgP: Math.round(p / days), avgC: Math.round(c / days), avgF: Math.round(f / days) }
         : { days: 0, avgCal: 0, avgP: 0, avgC: 0, avgF: 0 });
     })();
-  }, [activeId, activeRemoteUid]);
+    // todayKey: re-load at the midnight rollover so yesterday's totals aren't
+    // carried into (and written onto) the new day's key.
+  }, [activeId, activeRemoteUid, todayKey]);
 
   // ── Compute values for dashboard (same formulas as Results) ──
   const actObj = ACTIVITY_LEVELS.find(a=>a.id===data.activityLevel) || ACTIVITY_LEVELS[0];

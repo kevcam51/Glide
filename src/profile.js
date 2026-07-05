@@ -37,6 +37,14 @@ export async function createProfile({ uid, email, role, displayName = "", firstN
   // displayName is the combined name; kept as its own field so everything that
   // shows a name keeps working.
   const dn = (displayName || `${first} ${last}`).trim();
+  // If a profile already exists, this is a re-run (e.g. the role chooser shown
+  // after a transient read failure) — return the existing doc UNTOUCHED instead
+  // of overwriting it, which would unlink the user's trainer and restart their
+  // trial clock.
+  try {
+    const existing = await getDoc(profileRef(uid));
+    if (existing.exists() && existing.data().role) return existing.data();
+  } catch (e) { /* can't read — proceed; worst case is the merge write below */ }
   const data = {
     uid,
     email: email || "",
@@ -191,10 +199,16 @@ export async function joinTrainer(input) {
       if (codeSnap.exists() && codeSnap.data().trainerUid) trainerUid = codeSnap.data().trainerUid;
     } catch (e) { /* fall through to legacy query */ }
     if (!trainerUid) {
-      const snap = await getDocs(
-        query(collection(db, "users"), where("inviteCode", "==", normalized))
-      );
-      if (!snap.empty) trainerUid = snap.docs[0].id;
+      // Legacy fallback for codes never mirrored into inviteCodes. Under the
+      // S59 scoped read rules this unconstrained query is usually DENIED and
+      // throws — guard it so a typo'd code gives the friendly "didn't match"
+      // error below instead of a raw permission crash.
+      try {
+        const snap = await getDocs(
+          query(collection(db, "users"), where("inviteCode", "==", normalized))
+        );
+        if (!snap.empty) trainerUid = snap.docs[0].id;
+      } catch (e) { /* denied — fall through to the friendly error */ }
     }
   }
 

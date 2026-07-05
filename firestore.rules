@@ -74,18 +74,27 @@ service cloud.firestore {
       );
 
       // CREATE: only your own uid; role must be client or head_trainer ONLY
-      // (never admin / sub_trainer); uid field must equal the doc id.
+      // (never admin / sub_trainer); uid field must equal the doc id. Billing
+      // can't be self-granted at signup: no entitlements, and subscription may
+      // only start as "trial" (Stripe/admin flips it to "active" later).
       allow create: if isSignedIn()
         && request.auth.uid == uid
         && request.resource.data.uid == uid
-        && request.resource.data.role in ['client', 'head_trainer'];
+        && request.resource.data.role in ['client', 'head_trainer']
+        && !request.resource.data.keys().hasAny(['entitlements'])
+        && request.resource.data.get('subscriptionStatus', 'trial') == 'trial';
 
       // UPDATE: admin anything; owner may update own profile but MUST NOT
-      // change role (blocks self-promotion); nobody else.
+      // change role (blocks self-promotion) and MUST NOT touch the billing /
+      // trial fields — the AI budget tier and the Pro food-data gate read
+      // subscriptionStatus/entitlements from this doc, so owner-writable
+      // billing fields were a self-serve Pro upgrade + infinite-trial hole.
       allow update: if isAdmin()
         || (
           request.auth.uid == uid
           && request.resource.data.role == resource.data.role
+          && !request.resource.data.diff(resource.data).affectedKeys()
+               .hasAny(['subscriptionStatus', 'entitlements', 'trialStartedAt', 'trialLengthDays'])
         );
 
       // DELETE: admin only.
@@ -105,10 +114,17 @@ service cloud.firestore {
     // A code can only be claimed by the trainer it points to, and once claimed
     // cannot be overwritten by anyone else (no code hijacking).
     match /inviteCodes/{code} {
-      allow read: if isSignedIn();
-      // create only when the doc doesn't exist yet, pointing at yourself
+      // GET by code is how a client resolves an invite — but collection-wide
+      // LIST would let any signed-in user harvest every code → trainer mapping
+      // (codes are semi-secret capability tokens). The app only ever does
+      // point-gets by doc id.
+      allow get: if isSignedIn();
+      allow list: if isAdmin();
+      // create only when the doc doesn't exist yet, pointing at yourself,
+      // with exactly the expected fields
       allow create: if isSignedIn()
-        && request.resource.data.trainerUid == request.auth.uid;
+        && request.resource.data.trainerUid == request.auth.uid
+        && request.resource.data.keys().hasOnly(['trainerUid', 'createdAt']);
       // update only by the trainer the code already points to (refresh), still self
       allow update: if isSignedIn()
         && resource.data.trainerUid == request.auth.uid

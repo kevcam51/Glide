@@ -1,13 +1,66 @@
 # Glide — Next-Session Handoff (start here)
 
-_Updated end of **Session 84** (huge session). Read this first, then `CLAUDE.md` (standing context) and
+_Updated end of **Session 85**. Read this first, then `CLAUDE.md` (standing context) and
 the `docs/` files noted below. Everything is pushed to `main` and live on Vercel unless noted. Firebase
 project `calorieiq-29762`; prod URL `calorieiq-jet.vercel.app`. AI model `claude-sonnet-4-6`._
 
 ---
 
-## ⏭️ DO NEXT — Build the Trainerize importer (connection is LIVE & proven)
-The Trainerize connection **works** and the design is locked. This is the #1 next build.
+## ✅ Session 85 shipped (all LIVE): Trainerize importer v1 + full optimization/security sweep
+1. **Trainerize importer v1 — DONE, deployed, verified with the real roster** (10 active clients at
+   import time, down from 13 in S84 — the Trainerize roster itself changed). `trainerizeImport`
+   callable + an "Import from Trainerize" button on the trainer home (Local Plans card, **visible +
+   callable ONLY for Kevin's admin account** — the shared group token must not be trainer-wide).
+   Confirmed endpoint contracts + mapping in `docs/TRAINERIZE-API.md` (read it before touching v2 —
+   the param names are non-obvious: `getProfile` takes a `usersid` ARRAY, `bodystats/get` needs
+   `date:"last"` + units). Kevin runs it by tapping the button in HIS account; re-runs update
+   (dedupe by `trainerizeId`, deterministic profile ids `ctz{id}`).
+2. **Optimization/security sweep** (3 parallel reviewers over App.jsx / functions / support files;
+   all fixes applied, tested, deployed — details in CLAUDE.md Session 85):
+   - **Firestore read-cost**: `storage.list()`/`listForUser()` now use range queries (were
+     full-collection downloads per call, per client); `list_clients` tool uses limit(1) desc;
+     streak reads batched 7-parallel + reused by the week summary; trainer loaders parallelized;
+     details effect deduped; nudge double-reload removed.
+   - **Security**: rules now block self-granting `subscriptionStatus`/`entitlements`/trial fields
+     (was a self-serve Pro/AI-budget upgrade hole); inviteCodes LIST is admin-only (no code
+     harvesting); Trainerize fns admin-gated; `fetch_link` SSRF re-validates every redirect hop;
+     `sendInvite` capped 50/day/trainer. **61 rules tests pass** (was 47) — rules PUBLISHED.
+   - **Correctness**: midnight-rollover fix (`useTodayKey` — a dashboard left open past midnight
+     no longer writes yesterday's totals into today); AuthGate no longer routes an existing user
+     into the RoleChooser on a flaky profile read (was silently unlinking trainer + restarting
+     trial; `createProfile` is now also non-destructive if a profile exists); `joinTrainer` legacy
+     query wrapped (was a raw permission crash on typo'd codes); AI token usage now recorded even
+     when a tool round fails (was unbilled) + stream errors return clean frames; images only
+     honored on the final chat message (cost hole); all outbound fetches have hard timeouts.
+   - **Misc**: PWA offline shell now refreshes per navigation (was frozen at install → white
+     screen offline); dev-showcase fonts no longer load in prod (only Sora); qrcode lazy-loaded.
+   - **⚠️ Gotcha for future edits**: the kv range queries use `prefix + ""` — keep it as the
+     ESCAPE SEQUENCE in source; a raw pasted char silently became an empty string once and made
+     `listForUser` return nothing (caught in live smoke test).
+
+## ⏭️ DO NEXT (Kevin's queue): AI-edits-local-plans → biometrics
+(unchanged from S84 — the importer is done)
+
+## Sweep leftovers (deliberately deferred, noted for later)
+- **kv read-modify-write races**: `log_meal` / `send_client_request` (functions) and the app's own
+  optimistic writes aren't transactional — concurrent same-doc writes can clobber (e.g. client taps
+  +250 cal the same second the AI logs a meal). Needs `db.runTransaction` on the two function paths
+  first. Real but rare; design it, don't rush it.
+- **AI budget pre-reserve**: budget check is check-then-act — N parallel requests can overshoot the
+  daily cap (scripted abuse only; caching keeps the cost small).
+- **assignedTrainerId consent**: a malicious user can still self-assign to any trainer uid directly
+  (spam/noise vector only — fold into a later rules pass; joinTrainer already validates client-side).
+- **Tool-result truncation**: 60KB mid-string `.slice()` on JSON tool results → lower + truncate
+  semantically when coach rosters grow.
+- **ProfileCard defined inside ProfileSelector render** — rename input caret jumps to end per
+  keystroke; hoist to module scope with props when next in that area.
+- **useClientLiveRefresh** still reloads ALL clients on any one client's action (cheap now that
+  list() is range-queried; scope per-uid if trainer rosters get big).
+- **Trainerize v2/v3**: history import (bodystats list, dailyNutrition, program), scheduled daily
+  auto-sync, `calorieOut` wearable burn, multi-tenant per-trainer encrypted tokens.
+
+## Previous DO-NEXT (done): Build the Trainerize importer (connection was LIVE & proven)
+The Trainerize connection **works** and the design is locked. ~~This is the #1 next build.~~ **BUILT — see above.**
 - **Confirmed live (S84):** auth = `Authorization: Basic base64("<GroupID>:<APIToken>")`. Kevin's real
   secrets `TRAINERIZE_GROUP_ID` (6-digit) + `TRAINERIZE_API_TOKEN` are SET. `user/getClientList`
   `{start,count}` → `{ users:[...], total }`; **Kevin's group has 13 clients**. Each user has

@@ -108,17 +108,19 @@ const MAX_IMG_B64 = 7 * 1024 * 1024;
 
 // Sanitize one message's content: a plain string, or an array of text/image
 // blocks (photo logging). Returns a safe content value, or null to drop it.
-function sanitizeContent(content) {
+function sanitizeContent(content, allowImages = false) {
   if (typeof content === "string") return content.slice(0, 8000);
   if (!Array.isArray(content)) return null;
   const blocks = [];
+  let images = 0;
   for (const b of content) {
     if (!b || typeof b !== "object") continue;
     if (b.type === "text" && typeof b.text === "string") {
       blocks.push({ type: "text", text: b.text.slice(0, 8000) });
-    } else if (b.type === "image" && b.source && b.source.type === "base64"
+    } else if (allowImages && images < 2 && b.type === "image" && b.source && b.source.type === "base64"
         && IMG_TYPES.has(b.source.media_type) && typeof b.source.data === "string"
         && b.source.data.length <= MAX_IMG_B64) {
+      images++;
       blocks.push({ type: "image", source: { type: "base64", media_type: b.source.media_type, data: b.source.data } });
     }
   }
@@ -135,9 +137,13 @@ const HISTORY_MSGS = 10;
 function capHistory(messages) {
   const arr = Array.isArray(messages) ? messages : [];
   const clean = [];
-  for (const m of arr) {
+  for (let i = 0; i < arr.length; i++) {
+    const m = arr[i];
     if (!m || (m.role !== "user" && m.role !== "assistant")) continue;
-    const content = sanitizeContent(m.content);
+    // Images are only honored on the FINAL message (the frontend only attaches
+    // one there anyway) and capped at 2 — history images would be re-billed as
+    // vision input on every tool round, a crafted-payload cost hole otherwise.
+    const content = sanitizeContent(m.content, i === arr.length - 1);
     if (content == null) continue;
     clean.push({ role: m.role, content });
   }
@@ -278,14 +284,21 @@ exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], region: "us-central1", m
   } catch (e) {
     console.error("aiChat Anthropic error:", e && e.message);
     throw new HttpsError("internal", "The AI assistant is temporarily unavailable. Please try again.");
+  } finally {
+    // Record spend even when a later tool round throws — tokens from the
+    // completed rounds were real (they used to go unbilled on any mid-turn
+    // error). Best-effort: a failed usage write must not fail a good reply.
+    const spent = agg.input + agg.output + agg.cacheWrite;
+    if (spent > 0) {
+      console.log("aiUsage", JSON.stringify({ fn: "aiChat", ...agg, spent }));
+      await usageRef.set({ tokens: admin.firestore.FieldValue.increment(spent),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
+        .catch((err) => console.error("aiUsage write failed:", err && err.message));
+    }
   }
 
   // Budget counts full-price tokens (cache reads bill at ~10%, so excluded).
   const spent = agg.input + agg.output + agg.cacheWrite;
-  console.log("aiUsage", JSON.stringify({ fn: "aiChat", ...agg, spent }));
-  await usageRef.set({ tokens: admin.firestore.FieldValue.increment(spent),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-
   const text = (resp.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
   const totalUsed = used + spent;
   return {
@@ -324,7 +337,16 @@ exports.aiChatStream = onRequest(
       return;
     }
 
-    const { budget, usageRef, used, system, tools, toolCtx } = await setupChat(uid);
+    // A transient Firestore failure here must surface as a clean JSON 500 (the
+    // frontend then falls back to the callable) — unwrapped, it was an
+    // unhandled rejection with no response at all.
+    let setup;
+    try { setup = await setupChat(uid); } catch (e) {
+      console.error("aiChatStream setup error:", e && e.message);
+      res.status(500).json({ error: "setup-failed" });
+      return;
+    }
+    const { budget, usageRef, used, system, tools, toolCtx } = setup;
 
     // SSE response headers.
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -344,6 +366,7 @@ exports.aiChatStream = onRequest(
     const convo = messages.slice();
     const agg = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
     let wrote = false;
+    let failed = false;
     try {
       let rounds = 0;
       // Stream each model turn; run tools between turns until it stops calling them.
@@ -367,16 +390,23 @@ exports.aiChatStream = onRequest(
       }
     } catch (e) {
       console.error("aiChatStream error:", e && e.message);
-      sse("error", { code: "internal", message: "The AI assistant is temporarily unavailable. Please try again." });
-      res.end();
-      return;
+      // Include `wrote` so a client can still refresh if a tool already saved
+      // something before the failure (e.g. a logged meal on a dropped stream).
+      failed = true;
+      try { sse("error", { code: "internal", wrote, message: "The AI assistant is temporarily unavailable. Please try again." }); } catch { /* socket gone */ }
+    } finally {
+      // Record spend even on failure/disconnect — completed rounds were real
+      // tokens (they used to go unbilled whenever a later round threw).
+      const spent = agg.input + agg.output + agg.cacheWrite;
+      if (spent > 0) {
+        console.log("aiUsage", JSON.stringify({ fn: "aiChatStream", ...agg, spent }));
+        await usageRef.set({ tokens: admin.firestore.FieldValue.increment(spent),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
+          .catch((err) => console.error("aiUsage write failed:", err && err.message));
+      }
     }
-
+    if (failed) { res.end(); return; }
     const spent = agg.input + agg.output + agg.cacheWrite;
-    console.log("aiUsage", JSON.stringify({ fn: "aiChatStream", ...agg, spent }));
-    await usageRef.set({ tokens: admin.firestore.FieldValue.increment(spent),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-
     const totalUsed = used + spent;
     sse("done", { wrote, usage: { used: totalUsed, budget, warn: totalUsed >= budget * 0.8, breakdown: agg } });
     res.end();

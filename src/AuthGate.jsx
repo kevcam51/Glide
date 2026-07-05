@@ -63,6 +63,11 @@ export default function AuthGate({ children }) {
   // profile-completion gate: every signed-in user must have a users/{uid} profile
   const [profileChecked, setProfileChecked] = useState(false);
   const [needsProfile, setNeedsProfile] = useState(false);
+  // a FAILED profile read (offline/flaky network) is NOT "has no profile" —
+  // routing an existing user into the role chooser could overwrite their
+  // profile (unlink trainer, restart trial). Show a retry screen instead.
+  const [checkFailed, setCheckFailed] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
   // set true the moment we create a profile this session, so the gate effect
   // doesn't race the write and re-prompt for a role we just chose
   const createdRef = useRef(false);
@@ -83,6 +88,7 @@ export default function AuthGate({ children }) {
       return;
     }
     setProfileChecked(false);
+    setCheckFailed(false);
     hasProfile(user.uid)
       .then((has) => {
         if (cancelled) return;
@@ -91,11 +97,11 @@ export default function AuthGate({ children }) {
       })
       .catch(() => {
         if (cancelled) return;
-        setNeedsProfile(true);
+        setCheckFailed(true);
         setProfileChecked(true);
       });
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user, retryTick]);
 
   // Force a one-time ID-token refresh on sign-in so any custom claims set
   // server-side (role + linkage — see functions/syncRoleClaims) are present in
@@ -110,6 +116,16 @@ export default function AuthGate({ children }) {
   if (user) {
     if (!profileChecked) {
       return <div style={S.center}>Loading…</div>;
+    }
+    if (checkFailed) {
+      return (
+        <div style={S.center}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ marginBottom: 12 }}>Couldn't load your account — check your connection.</div>
+            <button style={S.primary} onClick={() => setRetryTick((t) => t + 1)}>Retry</button>
+          </div>
+        </div>
+      );
     }
     if (needsProfile) {
       return <RoleChooser user={user} onDone={() => setNeedsProfile(false)} />;

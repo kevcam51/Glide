@@ -50,11 +50,16 @@ async function transcribeWith(provider, buffer, baseMime) {
   form.append("file", new Blob([buffer], { type: baseMime }), `audio.${ext}`);
   form.append("model", cfg.model);
   form.append("response_format", "json");
+  // 30s hard timeout (a ≤3-min clip normally transcribes in seconds) so a hung
+  // provider fails over to the fallback instead of stalling the whole call.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
   const resp = await fetch(cfg.url, {
     method: "POST",
     headers: { Authorization: `Bearer ${cfg.key()}` },
     body: form,
-  });
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer));
   if (!resp.ok) {
     const t = await resp.text().catch(() => "");
     throw new Error(`${provider} ${resp.status}: ${t.slice(0, 200)}`);

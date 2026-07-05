@@ -13,7 +13,11 @@
  * existing app keeps its own styling.
  * -------------------------------------------------------------------------- */
 
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&family=Nunito:wght@400;600;700;800&family=Sora:wght@400;500;600;700;800&display=swap');
+/* Only Sora — the live app's display font (the in-plan body font DM Sans is
+ * loaded by App.jsx's own stylesheet). The other showcase-theme families load
+ * from showcase-fonts.css, imported ONLY by the dev Showcase — five families
+ * were render-blocking every prod load for a dev-only screen. */
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
 
 /* 1) Clean / Minimal — light, airy, restrained indigo accent. */
 [data-theme="clean"] {

@@ -11,7 +11,7 @@
 import { auth, db } from "./firebase.js";
 import { onAuthStateChanged } from "firebase/auth";
 import {
-  doc, getDoc, setDoc, deleteDoc, collection, getDocs,
+  doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where,
 } from "firebase/firestore";
 
 // --- track the signed-in user ------------------------------------------------
@@ -63,7 +63,16 @@ const firestoreStorage = {
   async list(prefix) {
     await ready;
     const uid = requireUid();
-    const snap = await getDocs(kvCol(uid));
+    // With a prefix, use a range query on the stored "k" field so Firestore
+    // only reads (and bills) the matching docs — a full-collection scan here
+    // was the app's biggest read amplifier (every list() fetched every daily
+    // log with its full value). "" is the standard high-codepoint prefix
+    // upper bound. No prefix = the export path's deliberate full scan.
+    const snap = await getDocs(
+      prefix
+        ? query(kvCol(uid), where("k", ">=", prefix), where("k", "<=", prefix + "\uf8ff"))
+        : kvCol(uid)
+    );
     const keys = [];
     snap.forEach((d) => {
       const k = d.data().k;

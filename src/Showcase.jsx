@@ -10,6 +10,7 @@
 // Note: preflight (Tailwind's reset) is intentionally off app-wide, so elements
 // here are styled explicitly (no reliance on default button/heading resets).
 import { useState, useEffect } from "react";
+import "./showcase-fonts.css";
 
 const THEMES = [
   { id: "clean", label: "Clean / Minimal", blurb: "Light, airy, restrained" },

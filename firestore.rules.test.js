@@ -149,6 +149,22 @@ await check("cannot hijack another trainer's existing code", assertFails(setDoc(
 await check("signed-out cannot read a code", assertFails(getDoc(code(anon, "HEADCODE"))));
 await check("signed-out cannot claim a code", assertFails(setDoc(code(anon, "ANONCODE"), { trainerUid: "x", createdAt: 6 })));
 
+console.log("\nPROFILE — billing/trial lockdown (S85: these fields drive the AI budget tier + Pro gate):");
+await check("owner CANNOT self-upgrade subscriptionStatus", assertFails(updateDoc(prof(c1, C1), { subscriptionStatus: "active" })));
+await check("owner CANNOT self-grant entitlements", assertFails(updateDoc(prof(c1, C1), { entitlements: { foodAccuracy: true } })));
+await check("owner CANNOT restart their trial clock", assertFails(updateDoc(prof(c1, C1), { trialStartedAt: 12345 })));
+await check("owner CANNOT extend trialLengthDays", assertFails(updateDoc(prof(c1, C1), { trialLengthDays: 9999 })));
+await check("owner still updates normal fields (displayName)", assertSucceeds(updateDoc(prof(c1, C1), { displayName: "New Name" })));
+await check("admin can set subscriptionStatus", assertSucceeds(updateDoc(prof(admin, C1), { subscriptionStatus: "active" })));
+await check("signup create WITH normal trial fields allowed", assertSucceeds(setDoc(prof(ctx("new_c2"), "new_c2"), { uid: "new_c2", email: "n2@x.co", role: "client", assignedTrainerId: null, headTrainerId: null, subscriptionStatus: "trial", trialStartedAt: 1, trialLengthDays: 30 })));
+await check("signup create with subscriptionStatus=active DENIED", assertFails(setDoc(prof(ctx("evil5"), "evil5"), { uid: "evil5", email: "e5@x.co", role: "client", subscriptionStatus: "active" })));
+await check("signup create with entitlements DENIED", assertFails(setDoc(prof(ctx("evil6"), "evil6"), { uid: "evil6", email: "e6@x.co", role: "client", entitlements: { foodAccuracy: true } })));
+
+console.log("\nINVITE CODES — enumeration (S85: codes are capability tokens, no harvesting):");
+await check("non-admin CANNOT list all invite codes", assertFails(getDocs(collection(c1, "inviteCodes"))));
+await check("admin can list invite codes", assertSucceeds(getDocs(collection(admin, "inviteCodes"))));
+await check("create code with unexpected extra fields DENIED", assertFails(setDoc(code(head, "EXTRAF"), { trainerUid: H, createdAt: 9, evil: true })));
+
 console.log(`\n==== ${passed} passed, ${failed} failed ====`);
 if (failures.length) console.log("FAILED:", failures.join(" | "));
 await testEnv.cleanup();

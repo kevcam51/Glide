@@ -96,6 +96,18 @@ exports.sendInvite = onCall(
         .filter((e) => EMAIL_RE.test(e))
     )).slice(0, MAX_RECIPIENTS);
     if (!emails.length) throw new HttpsError("invalid-argument", "Add at least one valid email address.");
+
+    // Daily per-trainer send cap — anyone can self-signup as a "trainer", so an
+    // uncapped loop here was a free spam relay on Glide's Resend account (and
+    // the sending domain's reputation). 50/day is far above real coaching use.
+    const DAILY_CAP = 50;
+    const day = new Date().toISOString().slice(0, 10); // UTC day, same scheme as aiUsage
+    const capRef = db.doc(`users/${uid}/inviteUsage/${day}`);
+    const sentToday = ((await capRef.get()).data() || {}).sent || 0;
+    if (sentToday + emails.length > DAILY_CAP) {
+      throw new HttpsError("resource-exhausted",
+        "You've hit today's invite-email limit. It resets tomorrow — or share your invite link directly.");
+    }
     const note = String((request.data && request.data.note) || "").slice(0, 500);
 
     const code = prof.inviteCode;
@@ -116,11 +128,14 @@ exports.sendInvite = onCall(
     const results = [];
     for (const to of emails) {
       try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10000);
         const res = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
           body: JSON.stringify({ from, to, subject, html, text, ...(replyTo ? { reply_to: replyTo } : {}) }),
-        });
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
         const ok = res.ok;
         if (!ok) { const t = await res.text().catch(() => ""); console.error("sendInvite resend", res.status, t.slice(0, 200)); }
         results.push({ email: to, ok });
@@ -128,6 +143,12 @@ exports.sendInvite = onCall(
         console.error("sendInvite error", e && e.message);
         results.push({ email: to, ok: false });
       }
+    }
+    const sentOk = results.filter((r) => r.ok).length;
+    if (sentOk > 0) {
+      await capRef.set({ sent: admin.firestore.FieldValue.increment(sentOk),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
+        .catch((e) => console.error("inviteUsage write failed", e && e.message));
     }
     return { results, link };
   }

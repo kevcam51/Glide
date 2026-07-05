@@ -25,30 +25,47 @@ const TRAINERIZE_API_TOKEN = defineSecret("TRAINERIZE_API_TOKEN");
 const BASE = "https://api.trainerize.com/v03";
 
 // One authenticated POST to a Trainerize endpoint. Returns {ok,status,json}.
+// 15s hard timeout — one hung call must not eat the importer's whole window
+// (which would die mid-loop with the index write never happening).
 async function tz(path, body, auth) {
-  const res = await fetch(`${BASE}/${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${auth}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify(body || {}),
-  });
-  const text = await res.text();
-  let json;
-  try { json = JSON.parse(text); } catch { json = { raw: text.slice(0, 500) }; }
-  return { ok: res.ok, status: res.status, json };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
+  try {
+    const res = await fetch(`${BASE}/${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body || {}),
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    let json;
+    try { json = JSON.parse(text); } catch { json = { raw: text.slice(0, 500) }; }
+    return { ok: res.ok, status: res.status, json };
+  } catch (e) {
+    // Timeout / network failure → a non-ok result instead of a throw, so the
+    // import loop skips that client's field rather than dying mid-run.
+    return { ok: false, status: 0, json: { error: (e && e.name === "AbortError") ? "timeout" : String(e && e.message) } };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-// Verify the caller is a trainer/admin (only they may connect a Trainerize group).
-async function requireTrainer(uid) {
+// These functions authenticate with KEVIN's shared Trainerize group token
+// (Secret Manager) — so they must be callable ONLY by the platform owner.
+// Anyone can self-signup as a "trainer", so a role check is NOT enough: a
+// role-gated version would hand any stranger the real client roster (PII).
+// Multi-tenant (each trainer connects their OWN token, stored encrypted)
+// lifts this gate later — see docs/TRAINERIZE-API.md.
+const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
+async function requireAdmin(uid) {
   if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
-  const db = admin.firestore();
-  const profile = (await db.doc(`users/${uid}`).get()).data() || {};
-  const role = profile.role || "client";
-  if (!["head_trainer", "sub_trainer", "admin"].includes(role)) {
-    throw new HttpsError("permission-denied", "Only trainers can connect Trainerize.");
+  if (!ADMIN_UIDS.includes(uid)) {
+    throw new HttpsError("permission-denied",
+      "The Trainerize connection is linked to the platform owner's account.");
   }
 }
 
@@ -135,7 +152,7 @@ exports.trainerizeImport = onCall(
   { secrets: [TRAINERIZE_GROUP_ID, TRAINERIZE_API_TOKEN], cors: true, timeoutSeconds: 300 },
   async (request) => {
     const uid = request.auth && request.auth.uid;
-    await requireTrainer(uid);
+    await requireAdmin(uid);
     const auth = Buffer.from(`${TRAINERIZE_GROUP_ID.value()}:${TRAINERIZE_API_TOKEN.value()}`).toString("base64");
     const db = admin.firestore();
 
@@ -230,7 +247,7 @@ exports.trainerizeImport = onCall(
 exports.trainerizeTest = onCall(
   { secrets: [TRAINERIZE_GROUP_ID, TRAINERIZE_API_TOKEN], cors: true },
   async (request) => {
-    await requireTrainer(request.auth && request.auth.uid);
+    await requireAdmin(request.auth && request.auth.uid);
     const auth = Buffer.from(`${TRAINERIZE_GROUP_ID.value()}:${TRAINERIZE_API_TOKEN.value()}`).toString("base64");
 
     const r = await tz("user/getClientList", { start: 0, count: 100 }, auth);

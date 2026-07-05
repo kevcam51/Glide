@@ -1,0 +1,4 @@
+/* Dev-only Showcase fonts (/?showcase=1) — every family the four demo themes
+ * use. Imported ONLY by Showcase.jsx so the live app doesn't pay for them
+ * (Sora, the real app font, loads from themes.css). */
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&family=Nunito:wght@400;600;700;800&display=swap');
