@@ -4,16 +4,10 @@
 // invite link (/i/CODE?n=First — the same link that unfurls with a "{Name}
 // invited you to Glide" card). Sent via Resend (OpenAI-simple HTTP API).
 //
-// SETUP (Kevin, one-time — the function won't deploy until the secret exists):
-//   1. Create a Resend account (resend.com) and an API key.
-//   2. firebase functions:secrets:set RESEND_API_KEY   (paste the key)
-//   3. Verify a sending domain in Resend, then:
-//      firebase functions:secrets:set RESEND_FROM       (e.g. "Glide <invites@yourdomain.com>")
-//      — until a domain is verified you can test with "Glide <onboarding@resend.dev>",
-//        which Resend only delivers to your OWN account email.
-//   4. firebase deploy --only functions:sendInvite
-// The recipient list + conversion tracking are recorded CLIENT-side (the trainer's
-// own caliq-invites kv) — this function only sends the email.
+// SETUP: DONE (S84) — secrets RESEND_API_KEY + RESEND_FROM are set, domain
+// send.smoothtraining.com verified (SPF/DKIM/DMARC), sender
+// invites@send.smoothtraining.com. LIVE. Caps: 20 recipients/call (MAX_RECIPIENTS),
+// 50 emails/day/trainer (S85, users/{uid}/inviteUsage/{day}).
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");

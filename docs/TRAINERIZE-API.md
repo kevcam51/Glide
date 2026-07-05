@@ -7,7 +7,7 @@ logged now and built later. This is the reference + the plan — nothing impleme
 - **Auth WORKS:** `Authorization: Basic base64("<GroupID>:<APIToken>")`. GroupID is a **6-digit number**;
   token ~21 chars. Stored as secrets `TRAINERIZE_GROUP_ID` + `TRAINERIZE_API_TOKEN` (Kevin's real values,
   set S84). `functions/trainerize.js` already uses this exact format.
-- **`user/getClientList`** (body `{start,count}`) → `{ users:[...], total }`. Kevin's group has **13 clients**.
+- **`user/getClientList`** (body `{start,count}`) → `{ users:[...], total }`. Roster was 13 at discovery (S84), **10 active at import (S85)** — treat the count as dynamic.
   Each user: `id`(number), `firstName`, `lastName`, `email`, `type`, `status`, `role`, `profileName`,
   `trainerID`, `latestSignedIn`, `profileIconUrl`, `profileIconVersion`, `trialStatus`.
 - **Next:** build the importer — per client `id`, call `user/getProfile`, `bodystats/get`, `goal/get`,

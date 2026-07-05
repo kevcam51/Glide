@@ -12,8 +12,8 @@
 //   2. printf 'YOUR_GROUP_ID' | firebase functions:secrets:set TRAINERIZE_GROUP_ID --data-file=-
 //   3. printf 'YOUR_API_TOKEN' | firebase functions:secrets:set TRAINERIZE_API_TOKEN --data-file=-
 //   4. firebase deploy --only functions:trainerizeTest
-// This first function just TESTS the connection (lists clients) so we confirm auth
-// before building the full importer. Trainer/admin only. Read-only.
+// trainerizeTest just TESTS the connection (lists clients); trainerizeImport is the
+// v1 importer. Both are ADMIN-ONLY (shared group token — see requireAdmin below).
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
@@ -148,6 +148,13 @@ const STEP_LABELS = ["Personal", "Goal Weight", "Activity", "Cardio", "Strength"
 // the CALLER's Glide account (Option A — see docs/TRAINERIZE-API.md). Deduped
 // by trainerizeId (deterministic profile id "ctz{trainerizeId}"), so re-running
 // UPDATES instead of duplicating. v1 = roster + snapshot; history is v2.
+//
+// Request data:
+//   { mode: "list" }        → roster preview only, NO writes: each client's
+//                             name/email/status + whether they're already in
+//                             Glide (drives the pick-your-clients UI).
+//   { clientIds: [id, …] }  → import ONLY those Trainerize ids.
+//   {}                      → import the whole roster (original behavior).
 exports.trainerizeImport = onCall(
   { secrets: [TRAINERIZE_GROUP_ID, TRAINERIZE_API_TOKEN], cors: true, timeoutSeconds: 300 },
   async (request) => {
@@ -157,7 +164,7 @@ exports.trainerizeImport = onCall(
     const db = admin.firestore();
 
     // 1. Full roster (paged; Kevin's group is small but don't assume).
-    const roster = [];
+    let roster = [];
     let start = 0, total = Infinity;
     while (roster.length < total && start < 1000) {
       const r = await tz("user/getClientList", { start, count: 100 }, auth);
@@ -170,6 +177,28 @@ exports.trainerizeImport = onCall(
       if (!users.length) break;
       start += users.length;
     }
+
+    // Preview mode: return the roster (+ already-imported flags) and stop —
+    // no Trainerize detail calls, no writes. Powers the client picker.
+    if (request.data && request.data.mode === "list") {
+      const index = (await kvGetJSON(db, uid, "caliq-index")) || [];
+      const importedIds = new Set(index.filter((p) => p && p.trainerizeId).map((p) => p.trainerizeId));
+      return {
+        ok: true,
+        clients: roster.map((u) => ({
+          id: u.id,
+          name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email || `Client ${u.id}`,
+          email: u.email || "",
+          status: u.status || "",
+          imported: importedIds.has(u.id),
+        })),
+      };
+    }
+
+    // Selective import: keep only the requested Trainerize ids.
+    const wanted = Array.isArray(request.data && request.data.clientIds)
+      ? new Set(request.data.clientIds.map(Number).filter(Boolean)) : null;
+    if (wanted) roster = roster.filter((u) => wanted.has(Number(u.id)));
     if (!roster.length) return { ok: true, total: 0, created: 0, updated: 0, clients: [] };
 
     // 2. Batch profile fetch (one call for the whole roster).

@@ -17,7 +17,7 @@ unified platform that complements and eventually replaces these.
 
 ## Tech stack
 
-- **Vite + React (JSX).** Main UI is a single large component in `src/App.jsx` (~7,500 lines),
+- **Vite + React (JSX).** Main UI is a single large component in `src/App.jsx` (~13,500 lines),
   styled by its own injected `<style>` block + inline styles.
 - **Tailwind CSS v4** (`@tailwindcss/vite`) is installed for **new** components (preflight is
   intentionally OFF so existing screens are untouched). Design tokens live in `src/index.css`
@@ -36,7 +36,7 @@ unified platform that complements and eventually replaces these.
   emulator needs Java (Temurin JDK). A local JDK is installed at `~/.glide-jdk` (Temurin 21, no
   brew/sudo on this machine) — run with it via:
   `JAVA_HOME="$HOME/.glide-jdk/jdk-21.0.11+10/Contents/Home" PATH="$JAVA_HOME/bin:$PATH" npm run test:rules`
-  (29 tests currently pass).
+  (61 tests currently pass).
 
 ## Important files
 
@@ -95,23 +95,30 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
-> _Last updated: Session 41._
-> - **Brand redesign (Tailwind + "pro" theme): DONE.** Every screen is on-brand near-black + cyan
->   (`#08DCE0`). Client/Trainer dashboards, All-clients, the wizard, and the in-plan Results/Daily
->   Dashboard are all migrated (Tailwind for the rebuilt screens; the in-plan screens use the old
->   `:root` CSS vars which were retuned to brand values in S31, headings unified to Sora in S32).
-> - **Nutrition tier (free self-log): DONE (S36–40).** Per-food macros + daily totals, macro targets +
->   progress bars, **editable** macro targets (coach or client, `data.macroTargets`), one-tap re-add of
->   recent foods (`caliq-foods-{planId}`), and a weekly averages card ("This Week").
-> - **Trainer analytics dashboard: DONE (S34).** Side-menu 📊 Dashboard = `TrainerAnalytics` (needs-
->   attention, open requests, aggregate progress). `homeTab` is `"dashboard"|"analytics"|"clients"`.
-> - **Key gotcha:** the `.page-transition` wrapper keeps a CSS transform → it becomes the containing
->   block for `position:fixed`. Modals + `BottomNav` are rendered via `createPortal(…, document.body)`
->   to escape it (S27/S30). Any new fixed overlay must do the same.
-> - **Still NON-Blaze roadmap:** calendar enhancements, more trainer tools, deeper nutrition.
->   **Blaze-gated (not yet):** AI coaching/photo meal tracking, client→trainer messaging/requests,
->   notifications, Stripe. See the roadmap section below.
-> - **In progress now:** general calendar + trainer-tools improvements (Kevin gave open-ended latitude).
+> _Last updated: Session 85. `Glide-Session-Handoff-NEXT.md` is the primary entry point; this block
+> is the quick digest._
+> - **App = Glide** (rebranded from CalorieIQ, S53; name change still OPEN — see docs/NAMING.md).
+>   Brand near-black + cyan `#08DCE0`, Tailwind "pro" theme everywhere. PWA installable (S84).
+> - **Blaze is ENABLED (S56) and the whole AI layer is LIVE (S60–82):** streaming chat with role-based
+>   prompts + per-user daily token budgets + prompt caching; data-aware tools; meal logging by text /
+>   PHOTO (vision) / VOICE (Groq whisper primary, OpenAI fallback) / barcode scanner; Accept/Edit cards;
+>   workout-program builder; onboarding; plan management; proactive coaching; link ingest. Model
+>   `claude-sonnet-4-6`.
+> - **Also live:** food DB search (USDA + Open Food Facts), email invites via Resend
+>   (`invites@send.smoothtraining.com`), Invite Hub (QR/share/referrals), Trainerize importer v1
+>   (admin-only button on the trainer home), custom exercises end-to-end, live-sync (onSnapshot) on all
+>   trainer/client surfaces, Notification Center, 30-day trials (soft).
+> - **Security:** profile reads scoped (S59), billing/trial fields locked to admin (S85), invite codes
+>   un-harvestable (S85). **61 emulator rules tests** — run before ANY rules change and PUBLISH after.
+> - **Still NOT built:** Stripe billing (biggest gap — trials aren't enforced), client→trainer
+>   requests/messaging, push-notification delivery, custom claims in rules (deliberately skipped, S57).
+> - **Key gotchas:** `.page-transition` keeps a CSS transform → any fixed overlay must
+>   `createPortal(…, document.body)` (S27/S30). Local-date keys via `ymdLocal`/`useTodayKey` — never
+>   UTC "today" (S45/S85). kv range queries use the `""` ESCAPE (raw char breaks silently, S85).
+>   When `functions/aitools.js` changes deploy ALL FOUR AI fns. Firebase CLI token expires —
+>   `firebase login --reauth --no-localhost`.
+> - **Next up (Kevin's queue):** AI-edits-local-plans → biometric login + idle sign-out. Then
+>   Trainerize v2 (history/auto-sync) and Stripe.
 
 - Session 1: Vite project, app moved in, deployed to Vercel.
 - Session 2: Firebase Auth + Firestore; storage migrated from localStorage to Firestore;
@@ -475,21 +482,6 @@ enabled (Blaze has no default spending cap).
   (~88 refs) — color-only, no functionality/layout change, so the whole live app is now on-brand cyan.
   **Deferred (Option 3, later):** gradually rebuild real screens in Tailwind + the brand theme, screen by
   screen, only when already working in that area (never break working UI). No `firestore.rules` change.
-- Session 26: **Client Dashboard redesigned in Tailwind + brand theme (Option 3 begins).** First real
-  screen migrated to the new system per the brief. `ClientHome`'s render was rewritten with Tailwind
-  utilities wrapped in `data-theme="pro"` (brand near-black + cyan), keeping **all logic/handlers/state
-  identical** (weight log, plan switcher, trainer requests, quick-log, progress chart, time-to-goal,
-  modals) — purely a visual layer swap. Design improvements (Part 3): the **current weight is now the
-  hero** (Sora display, text-5xl), clear card hierarchy with cyan section headers, consistent 16px rhythm
-  (`flex flex-col gap-4` — note: `space-y-*` was unreliable here), lifted card surfaces so they pop off
-  the near-black bg, and the TODAY quick-log restructured (input full-width over the −Remove/+Add row) so
-  it doesn't overflow on phones. Local style-object consts (`field`/`logBtn`/`miniBtn`/…) became Tailwind
-  class-string consts (`cardCls`/`inputCls`/`primaryBtnCls`/`ghostBtnCls`/`miniBtnCls`). The brand **pro**
-  theme tokens were tuned for card contrast (`--color-bg #05080a`, `--color-surface #121b1e`, brighter
-  `--color-border`). The header is a min-h-[54px] brand bar that clears the fixed hamburger. **Not yet
-  migrated (later passes):** the modals (`WeightChartModal`/`QuickActionModal`) and `RolePanel` still use
-  the old styles (they render fine, just slightly different) — safe to do next. Verified: renders with
-  real data, interactions work (weight-log toggle etc.), no console errors. No `firestore.rules` change.
 - Session 26: **Client Dashboard redesigned in Tailwind + brand theme (Option 3 begins).** First real
   screen migrated to the new system per the brief. `ClientHome`'s render was rewritten with Tailwind
   utilities wrapped in `data-theme="pro"` (brand near-black + cyan), keeping **all logic/handlers/state
@@ -1783,11 +1775,7 @@ enabled (Blaze has no default spending cap).
   returns full profiles incl. email) — so no Cloud Function trigger. **Email:** new **`sendInvite`** callable
   (`functions/invites.js`, trainer-only, verifies role) sends a branded HTML email with the personalized link
   via **Resend** (`RESEND_API_KEY` + `RESEND_FROM` secrets; ≤20 recipients, email-format validated). The
-  function only sends — the client records the invite locally. **⚠️ NOT deployed yet:** it binds secrets that
-  don't exist, so `firebase deploy --only functions:sendInvite` is blocked until Kevin: makes a Resend
-  account + key → `firebase functions:secrets:set RESEND_API_KEY` → verifies a sending domain →
-  `firebase functions:secrets:set RESEND_FROM` → deploys (full steps in `invites.js` header + the handoff
-  DO-FIRST). Until then the email composer degrades gracefully ("share the link instead"). **Verified live**
+  function only sends — the client records the invite locally. **(Update S84: DEPLOYED & LIVE — Resend secrets set, `send.smoothtraining.com` verified SPF/DKIM/DMARC, sender `invites@send.smoothtraining.com`.)** **Verified live**
   as trainer.uitest: Invite Hub renders on-brand, referral stats correct (1 client joined = Casey), personalized
   link + QR generate, email path shows the friendly fallback; `npm run build` passes; no console errors. Frontend
   pushed (Vercel auto-deploys); no other functions changed (`aitools.js` untouched this session). No
@@ -1848,6 +1836,43 @@ enabled (Blaze has no default spending cap).
   optimistic app writes), AI budget transactional pre-reserve, assignedTrainerId consent validation, semantic
   tool-result truncation, ProfileCard hoist (rename caret jump), per-uid live-refresh scoping. All 8 functions
   redeployed; rules published; frontend pushed (Vercel).
+- Session 86: **Trainerize client PICKER + PWA safe-area fixes + round-2 sweep (math/data-integrity + mobile).**
+  Kevin ran the v1 import (all 10 worked), then asked for selective import, reported two installed-PWA bugs, and
+  requested a second sweep. (1) **Selective import:** `trainerizeImport` gained `{mode:"list"}` (roster preview +
+  already-imported flags, no writes) and `{clientIds:[…]}` (import only those); the trainer-home button now opens
+  a **picker** (checkboxes, All/New-only/None, "✓ in Glide" tags, Import-N-selected; guard message if the backend
+  hasn't deployed yet). (2) **PWA bugs (root cause found by review agent):** the in-plan header was the ONLY one of
+  five without `env(safe-area-inset-top)` padding (dropped in the S30 Tailwind rebuild) → title hid under the
+  iPhone status bar and the fixed hamburger overlapped the back row — fixed (+ min-h 64px to match the rest);
+  `.prof-save-badge` got the safe-area term; `html,body{background:#05080a}` kills the white overscroll flash.
+  (3) **Round-2 sweep (3 agents: domain math, newer features, docs-vs-reality) — fixes applied:**
+  • **AI ↔ app target agreement:** server `nutritionTargets` now adds scheduled-exercise burn via new
+  `weeklyPlanBurn` + a **MET map regenerated into functions/exercises.js** (185 ids, parity-checked: bench 45m
+  @220lbs = 412 cal both sides) — the AI/`coach_summary` used to run ~a-day's-burn lower than every app screen
+  and mis-score faithful clients as "over target". `set_targets` now pins ONLY explicitly-asked macros (used to
+  freeze all three at server-baseline numbers).
+  • **Weigh-in integrity:** AI `log_weigh_in` + ClientHome quick-log now MERGE into a same-day check-in (used to
+  wipe a same-day workout/notes/body-fat); the in-plan Daily Dashboard weight box now writes a REAL check-in +
+  updates `weightLbs`/`startWeightLbs` (was a dead end only the day-log saw — verified live: log 198.5 → check-in
+  created, current weight + target recompute); new `syncWeightFromCheckIns` helper makes check-in SAVES re-point
+  current weight like deletes already did (3 handlers).
+  • **Consistency:** calendar Day view judges food against the same deficit target as month/week (was raw TDEE —
+  same day looked "over" in month and "under" when opened); Summary + Nutrients tabs respect `data.macroTargets`
+  (used to show recomputed defaults); SharePlanCard target includes strength burn (was cardio-only); AICoach
+  trend filters+sorts weigh-ins (used to narrate "null lbs" after a workout-only check-in or back-dated edit).
+  • **AI chat robustness:** stream-failure fallback no longer re-sends once ANY event arrived (a mid-stream drop
+  after a tool write could log a meal TWICE); mic released on panel close/unmount/constructor failure (was left
+  hot); chat persistence won't clobber the saved thread after a failed load; meal-edit "Save & log" double-tap
+  guarded.
+  (4) **Docs audit applied (12 items):** RESUME-HERE rewritten (was frozen at S41), duplicate S26 entry removed,
+  S83 sendInvite "NOT deployed" corrected, voice = Groq primary (S84), 29→61 tests, ~7.5k→~13.5k lines,
+  trainerize/invites/transcribe headers fixed, `AGENTS.md` → pointer (was a stale S60 copy), 3 stale root
+  handoffs → `docs/archive/`.
+  **⚠️ NOT DEPLOYED at session end (Firebase CLI token expired; needs Kevin's `firebase login --reauth
+  --no-localhost`):** the four AI fns + trainerizeImport — see the handoff DO-FIRST. Frontend IS pushed/live.
+  **Deferred:** projection double-count (KEVIN DECISION — see handoff), maskable PWA icon, dead-CSS cleanup
+  (`.header`/`.steps-wrap`/`.prof-header-bar` blocks), plan-delete orphaning per-date log docs, linkPlan
+  re-link without backup, mixed check-in timestamp bases (harmless today).
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a
@@ -1870,7 +1895,7 @@ enabled (Blaze has no default spending cap).
     `set_workout_schedule`/`propose_workout` accept the plan's custom ids (load them into the valid-id set by type).
     Small but touches several burn-calc sites — do (a)/(b) first (makes custom exercises actually work for everyone),
     then (c) is the easy AI bolt-on. Non-Blaze.
-  - ~~**Voice input for the AI chat**~~ **DONE — Session 79** (`transcribeAudio`, Whisper; OpenAI primary, Groq-ready).
+  - ~~**Voice input for the AI chat**~~ **DONE — Session 79** (`transcribeAudio`, Whisper; S84 flipped to **Groq primary, OpenAI fallback**).
     _(Original scoping below.)_ Speak instead of type. Claude has no
     speech-to-text, so add a transcription step. **Path B chosen (Claude-app quality):** browser `MediaRecorder` →
     a new transcription Cloud Function → Whisper-class model → feed text into the existing chat. Cost is tiny

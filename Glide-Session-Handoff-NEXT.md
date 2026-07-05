@@ -1,10 +1,31 @@
 # Glide — Next-Session Handoff (start here)
 
-_Updated end of **Session 85**. Read this first, then `CLAUDE.md` (standing context) and
+_Updated **Session 86**. Read this first, then `CLAUDE.md` (standing context) and
 the `docs/` files noted below. Everything is pushed to `main` and live on Vercel unless noted. Firebase
 project `calorieiq-29762`; prod URL `calorieiq-jet.vercel.app`. AI model `claude-sonnet-4-6`._
 
 ---
+
+## 🔴 DO FIRST (S86 leftover): deploy the pending Cloud Functions
+The Firebase CLI token expired mid-S86 and Kevin hadn't re-authed by session end. Once
+`firebase login --reauth --no-localhost` (as kevin@smoothtraining.com) succeeds, deploy:
+`firebase deploy --only functions:aiChat,functions:aiChatStream,functions:logMeal,functions:setWorkoutSchedule,functions:trainerizeImport --force`
+That ships (already written + syntax-checked, NOT live): (1) the **Trainerize selective-import
+backend** (`{mode:"list"}` roster preview + `{clientIds:[…]}` filter — the frontend picker is live and
+shows "importer is mid-update" until this lands; note: pressing it against the OLD backend triggers a
+harmless full re-import); (2) **aitools.js round-2 fixes** — server calorie target now includes
+scheduled-exercise burn (`weeklyPlanBurn` + the new `MET` map in exercises.js) so the AI/coach_summary
+finally MATCH the app screens; `set_targets` pins only explicitly-provided macros; `log_weigh_in`
+merges into same-day check-ins instead of wiping workouts. Then verify: ask the AI "what's my calorie
+target?" for a client with a workout program → must equal their dashboard number; picker: select 2
+clients → import → only those 2.
+
+## ⏭️ THEN (Kevin's queue): AI-edits-local-plans → biometrics
+Also pending a KEVIN DECISION (flagged S86): the Results/Simulation **projection timelines
+double-count exercise** — the calorie target eats back the burn (diet+cardio deficit is still ~3,500
+cal/wk), but `weeksToGoal(toLose, 3500 + totalBurn)` promises a faster date a client following the
+plan-as-written structurally can't hit. Options: project at 3,500/wk ("cardio lets you eat more, not
+lose faster") or stop adding burn back into the target. Product/sales call — don't silently change.
 
 ## ✅ Session 85 shipped (all LIVE): Trainerize importer v1 + full optimization/security sweep
 1. **Trainerize importer v1 — DONE, deployed, verified with the real roster** (10 active clients at

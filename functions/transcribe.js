@@ -2,9 +2,9 @@
 //
 // PROVIDER-AGNOSTIC: both OpenAI and Groq expose an OpenAI-compatible
 // /audio/transcriptions endpoint, so ONE code path serves both — only the URL,
-// model, and key differ. We start on OpenAI (available, pay-as-you-go); Groq is
-// wired as a best-effort fallback and can be promoted to PRIMARY (cheaper +
-// faster) by flipping VOICE_PRIMARY once Groq's paid tier reopens.
+// model, and key differ. Groq (whisper-large-v3) is PRIMARY since S84 —
+// cheaper + faster; OpenAI Whisper is the automatic fallback. Flip via
+// VOICE_PRIMARY/VOICE_FALLBACK below.
 //
 // Cost: Whisper-class transcription is ~$0.006/min — pennies. The transcribed
 // text then flows through the normal (budgeted) AI chat, so this endpoint just

@@ -1626,7 +1626,7 @@ body{
 .prof-new-btn:hover{border-color:var(--accent);background:rgba(8,220,224,.06)}
 .prof-new-btn:active{transform:scale(.98)}
 .prof-save-badge{
-  position:fixed;top:12px;right:12px;
+  position:fixed;top:calc(12px + env(safe-area-inset-top,0px));right:12px;
   padding:6px 12px;border-radius:20px;
   background:rgba(79,255,176,.12);border:1px solid rgba(79,255,176,.3);
   color:var(--green);font-size:.7rem;font-weight:600;letter-spacing:.5px;
@@ -3524,6 +3524,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           tdee={tdee}
           totalBurn={totalBurn}
           name={name}
+          macroTargets={data.macroTargets}
           targets={targets}
           floor={floor}
           avgBurnPerDay={avgBurnPerDay}
@@ -3661,12 +3662,16 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
   const hasGoal = goalWeight && Number(goalWeight) < Number(weightLbs);
   const toLose = hasGoal ? Number(weightLbs) - Number(goalWeight) : null;
 
-  // Macros at 1 lb/wk deficit
+  // Macros at 1 lb/wk deficit — coach/client-set custom targets
+  // (data.macroTargets) take precedence over the estimates, matching the
+  // Daily Dashboard, so the plan summary never contradicts the tracker.
   const targetCals = floor(tdee - 500 + avgBurnPerDay + avgStrPerDay);
-  const proteinG = Math.round(Number(weightLbs) * 1.0);
-  const fatCal = Math.round(targetCals * 0.28);
-  const fatG = Math.round(fatCal / 9);
-  const carbG = Math.round(Math.max(0, targetCals - proteinG * 4 - fatCal) / 4);
+  const mtS = data.macroTargets || {};
+  const proteinG = mtS.protein != null ? Number(mtS.protein) : Math.round(Number(weightLbs) * 1.0);
+  const fatG = mtS.fat != null ? Number(mtS.fat) : Math.round(Math.round(targetCals * 0.28) / 9);
+  const fatCal = fatG * 9;
+  const carbG = mtS.carbs != null ? Number(mtS.carbs)
+    : Math.round(Math.max(0, targetCals - proteinG * 4 - fatCal) / 4);
   const waterOz = Math.round(Number(weightLbs) * 0.5);
 
   // Timeline at 1 lb/wk
@@ -4815,7 +4820,7 @@ function SurplusTab({ tdee, totalBurn, avgBurnPerDay, activeDays, name }) {
 // ─── Nutrients Tab ────────────────────────────────────────────────────────────
 
 function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, floor, avgBurnPerDay, avgStrPerDay = 0,
-  activeDays = 0, activeStrDays = 0, dayData = [], strengthDayData = [] }) {
+  activeDays = 0, activeStrDays = 0, dayData = [], strengthDayData = [], macroTargets }) {
   const [deficitChoice, setDeficitChoice] = useState(500);
   const [openMicro, setOpenMicro] = useState(null);
   const [openFoodCat, setOpenFoodCat] = useState(null);
@@ -4825,17 +4830,21 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
   const targetCals = floor(tdee - deficitChoice + avgTotalBurn);
 
   // ── Macro calculations ──
+  // Coach/client-set custom targets (data.macroTargets) take precedence over
+  // the estimates below, matching the Daily Dashboard (S86 — this tab used to
+  // show recomputed defaults even when custom targets were set).
+  const mtN = macroTargets || {};
   // Protein: 0.8g per lb bodyweight for maintenance, 1.0g for loss (muscle sparing)
   const proteinMultiplier = deficitChoice > 0 ? 1.0 : 0.8;
-  const proteinG  = Math.round(weightLbs * proteinMultiplier);
+  const proteinG  = mtN.protein != null ? Number(mtN.protein) : Math.round(weightLbs * proteinMultiplier);
   const proteinCal = proteinG * 4;
 
   // Fat: 25–30% of target cals (use 28%)
-  const fatCal = Math.round(targetCals * 0.28);
-  const fatG   = Math.round(fatCal / 9);
+  const fatG   = mtN.fat != null ? Number(mtN.fat) : Math.round(Math.round(targetCals * 0.28) / 9);
+  const fatCal = fatG * 9;
 
   // Carbs: remaining
-  const carbCal = Math.max(0, targetCals - proteinCal - fatCal);
+  const carbCal = mtN.carbs != null ? Number(mtN.carbs) * 4 : Math.max(0, targetCals - proteinCal - fatCal);
   const carbG   = Math.round(carbCal / 4);
 
   // Fibre: 14g per 1000 cal, min 21–38g by gender
@@ -6942,7 +6951,10 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
     const cardio = (data.cardio && data.cardio[dn]) || [];
     const strength = (data.strength && data.strength[dn]) || [];
     const cals = dayLog ? (dayLog.calories || 0) : 0;
-    const target = tdee ? Math.round(tdee) : null;
+    // Judge the day against the SAME deficit target the month tint + week
+    // roll-ups use — this used to show raw TDEE, so a day the month view
+    // tinted "over" looked comfortably under when tapped open.
+    const target = calTarget || (tdee ? Math.round(tdee) : null);
     const goStep = (n) => { const p = parseKey(sel); setSel(keyOf(p.y, p.m, p.d + n)); };
     // Quick typed calories: Add (tagged to a meal type if chosen → a meal entry,
     // else just the day's total) or Remove (reduce the day's total).
@@ -8121,7 +8133,10 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
   const { firstName, lastName, weightLbs, goalWeight, age, gender } = data;
   const hasGoal = goalWeight && Number(goalWeight) < Number(weightLbs);
   const toLose = hasGoal ? Number(weightLbs) - Number(goalWeight) : null;
-  const targetCals = Math.max(1200, tdee - 500 + Math.round(totalBurn / 7));
+  // Include BOTH cardio and strength burn — this used to add only cardio to
+  // the target while the "Weekly burn" line right below counted both, so a
+  // strength-only plan's shared card understated the target vs every screen.
+  const targetCals = Math.max(1200, tdee - 500 + Math.round((totalBurn + totalStrBurn) / 7));
 
   const handleShare = async () => {
     const text = `🏋️ ${fullName(data) || "My"} Glide Plan\n\n` +
@@ -8419,7 +8434,11 @@ function AICoach({ data, tdee, totalBurn, totalStrBurn, activeDays, activeStrDay
     setError(null);
     try {
       const checkIns = data.checkIns || [];
-      const recent = checkIns.slice(-14);
+      // Weigh-ins only, in TIME order — the raw array is append-ordered (a
+      // back-dated edit lands last) and contains weight-less workout check-ins,
+      // which used to make this narrate "null lbs" or a stale "most recent".
+      const recent = checkIns.filter(c => c && c.weight)
+        .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).slice(-14);
       const adherence = checkIns.length > 0 ? Math.round((checkIns.filter(c => c.hitTarget).length / checkIns.length) * 100) : null;
       const weightTrend = recent.length >= 2
         ? `Started at ${recent[0].weight} lbs, most recent ${recent[recent.length-1].weight} lbs (${(recent[0].weight - recent[recent.length-1].weight).toFixed(1)} lbs change over ${recent.length} check-ins)`
@@ -9015,21 +9034,57 @@ function computeClientCalories(d) {
 
 function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, meUid, meName, meRole, notifPrefs, onSetNotifPrefs }) {
   const [details, setDetails] = useState({}); // id -> { tdee, target }
-  // Trainerize import (v1): busy flag + last result/error line under the button.
+  // Trainerize import: the button opens a PICKER (roster preview, no writes)
+  // so Kevin chooses exactly which clients to bring in; already-imported ones
+  // show a tag and are unchecked by default (checking = refresh their data).
   const [tzBusy, setTzBusy] = useState(false);
   const [tzMsg, setTzMsg] = useState(null); // { ok, text }
-  const runTrainerizeImport = async () => {
+  const [tzPick, setTzPick] = useState(null); // null | {loading:true} | {clients:[…], sel:{id:bool}}
+  const tzErrText = (e) => {
+    const code = e && e.code ? String(e.code) : "";
+    return code.includes("permission-denied")
+      ? "The Trainerize connection is linked to the platform owner's account."
+      : "Trainerize didn't respond — check the connection and try again.";
+  };
+  const openTzPicker = async () => {
     if (tzBusy || !onTrainerizeImport) return;
-    setTzBusy(true);
-    setTzMsg({ ok: true, text: "Importing from Trainerize… this can take ~30 seconds." });
+    if (tzPick) { setTzPick(null); return; } // toggle closed
+    setTzMsg(null);
+    setTzPick({ loading: true });
     try {
-      const r = await onTrainerizeImport();
-      setTzMsg({ ok: true, text: `✓ Imported ${r.total} client${r.total === 1 ? "" : "s"} (${r.created} new · ${r.updated} updated) — filed under the “Trainerize” folder in All clients.` });
+      const r = await onTrainerizeImport({ mode: "list" });
+      // An old backend (without list mode) returns an import summary instead of
+      // a roster — don't render a broken picker during a deploy gap.
+      if (!Array.isArray(r.clients) || (r.clients[0] && r.clients[0].id == null)) {
+        setTzPick(null);
+        setTzMsg({ ok: false, text: "The importer is mid-update — try again in a couple of minutes." });
+        return;
+      }
+      const sel = {};
+      r.clients.forEach((c) => { sel[c.id] = !c.imported; }); // new clients pre-checked
+      setTzPick({ clients: r.clients, sel });
     } catch (e) {
-      const code = e && e.code ? String(e.code) : "";
-      setTzMsg({ ok: false, text: code.includes("permission-denied")
-        ? "The Trainerize connection is linked to the platform owner's account."
-        : "Import failed — check the Trainerize connection and try again." });
+      setTzPick(null);
+      setTzMsg({ ok: false, text: tzErrText(e) });
+    }
+  };
+  const tzSetAll = (on, onlyNew) => setTzPick((p) => {
+    if (!p || !p.clients) return p;
+    const sel = {};
+    p.clients.forEach((c) => { sel[c.id] = onlyNew ? (on && !c.imported) : on; });
+    return { ...p, sel };
+  });
+  const runTzImport = async () => {
+    const ids = tzPick && tzPick.clients ? tzPick.clients.filter((c) => tzPick.sel[c.id]).map((c) => c.id) : [];
+    if (!ids.length || tzBusy) return;
+    setTzBusy(true);
+    setTzMsg({ ok: true, text: `Importing ${ids.length} client${ids.length === 1 ? "" : "s"} from Trainerize…` });
+    try {
+      const r = await onTrainerizeImport({ clientIds: ids });
+      setTzMsg({ ok: true, text: `✓ Imported ${r.total} client${r.total === 1 ? "" : "s"} (${r.created} new · ${r.updated} updated) — filed under the “Trainerize” folder in All clients.` });
+      setTzPick(null);
+    } catch (e) {
+      setTzMsg({ ok: false, text: tzErrText(e) });
     }
     setTzBusy(false);
   };
@@ -9588,14 +9643,62 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                 button only shows for that account (the backend enforces it too).
                 Multi-tenant per-trainer tokens lift this later. */}
             {onTrainerizeImport && meUid === "G7QUZ8Kat1fgyoMjdGKz4DYoVHi1" && (
-              <button onClick={runTrainerizeImport} disabled={tzBusy}
+              <button onClick={openTzPicker} disabled={tzBusy}
                 className={`flex items-center gap-1.5 px-2.5 py-2 rounded-md text-xs font-bold border border-primary bg-transparent text-primary whitespace-nowrap ${tzBusy ? "opacity-60 cursor-default" : "cursor-pointer"}`}>
-                <Icon name="link" size={14} color="var(--color-primary)" />{tzBusy ? "Importing…" : "Import from Trainerize"}
+                <Icon name="link" size={14} color="var(--color-primary)" />{tzBusy ? "Importing…" : tzPick ? "Close Trainerize list" : "Import from Trainerize"}
               </button>
             )}
           </div>
           {tzMsg && (
             <div className={`text-xs mt-1.5 ${tzMsg.ok ? "text-success" : "text-danger"}`}>{tzMsg.text}</div>
+          )}
+          {tzPick && (
+            <div className="mt-2 p-3 rounded-[10px] bg-surface2 border border-border">
+              {tzPick.loading ? (
+                <div className="text-sm text-muted">Loading your Trainerize clients…</div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="text-xs font-bold tracking-wide text-muted">
+                      PICK CLIENTS TO IMPORT ({tzPick.clients.filter((c) => tzPick.sel[c.id]).length}/{tzPick.clients.length} selected)
+                    </div>
+                    <div className="flex gap-2 text-xs">
+                      <button onClick={() => tzSetAll(true)} className="text-primary bg-transparent border-0 cursor-pointer p-0">All</button>
+                      <button onClick={() => tzSetAll(true, true)} className="text-primary bg-transparent border-0 cursor-pointer p-0">New only</button>
+                      <button onClick={() => tzSetAll(false)} className="text-muted bg-transparent border-0 cursor-pointer p-0">None</button>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1 max-h-64 overflow-y-auto">
+                    {tzPick.clients.map((c) => (
+                      <label key={c.id} className="flex items-center gap-2.5 py-1.5 px-1 rounded cursor-pointer hover:bg-[rgba(8,220,224,.05)]">
+                        <input type="checkbox" checked={!!tzPick.sel[c.id]}
+                          onChange={(e) => setTzPick((p) => ({ ...p, sel: { ...p.sel, [c.id]: e.target.checked } }))}
+                          className="w-4 h-4 accent-[#08dce0]" />
+                        <span className="text-sm text-fg flex-1 min-w-0 truncate">{c.name}
+                          {c.email ? <span className="text-muted text-xs"> · {c.email}</span> : null}
+                        </span>
+                        {c.imported
+                          ? <span className="text-[10px] font-bold text-success whitespace-nowrap">✓ in Glide</span>
+                          : <span className="text-[10px] font-bold text-primary whitespace-nowrap">new</span>}
+                        {c.status && c.status !== "active" && (
+                          <span className="text-[10px] text-warn whitespace-nowrap">{c.status}</span>
+                        )}
+                      </label>
+                    ))}
+                    {!tzPick.clients.length && <div className="text-sm text-muted">No clients found in your Trainerize group.</div>}
+                  </div>
+                  <div className="flex gap-1.5 mt-2.5">
+                    <button onClick={runTzImport}
+                      disabled={tzBusy || !tzPick.clients.some((c) => tzPick.sel[c.id])}
+                      className={`${mPrimaryCls} ${(tzBusy || !tzPick.clients.some((c) => tzPick.sel[c.id])) ? "opacity-50 cursor-default" : ""}`}>
+                      {tzBusy ? "Importing…" : `Import ${tzPick.clients.filter((c) => tzPick.sel[c.id]).length} selected`}
+                    </button>
+                    <button onClick={() => setTzPick(null)} className={mBtnCls}>Cancel</button>
+                  </div>
+                  <div className={`${subCls} mt-1.5`}>Re-importing someone already in Glide refreshes their stats from Trainerize (no duplicates).</div>
+                </>
+              )}
+            </div>
           )}
           <div className={`${subCls} mt-1.5 mb-1.5`}>
             📄 Plans not connected to a client login — templates, backups, and 🧪 simulations (sandbox
@@ -10216,8 +10319,13 @@ function AIChatPanel({ role, onDataChanged }) {
         const r = await window.storage.get(CHAT_KEY);
         const saved = r && r.value ? JSON.parse(r.value) : [];
         if (Array.isArray(saved) && saved.length) setMessages(saved);
-      } catch { /* none saved yet */ }
-      loadedRef.current = true;
+        loadedRef.current = true;
+      } catch (e) {
+        // "Key not found" = genuinely no thread yet → saving is safe. Any OTHER
+        // failure (offline blip) must NOT enable saving, or the next exchange
+        // would overwrite the real saved thread with a 2-message one.
+        if (e && /not found/i.test(e.message || "")) loadedRef.current = true;
+      }
     })();
   }, []);
   // Save when an exchange settles (busy=false) — not mid-stream. Skip until loaded
@@ -10234,6 +10342,7 @@ function AIChatPanel({ role, onDataChanged }) {
   const acceptMeal = async (meal) => {
     const p = meal || proposal;
     if (!p) return;
+    if (proposal && proposal.status === "saving") return; // in-flight — a double-tap would log twice
     setProposal((prev) => ({ ...prev, ...p, status: "saving" }));
     try {
       const input = { name: p.name, mealType: p.mealType, calories: Number(p.calories) || 0,
@@ -10351,6 +10460,9 @@ function AIChatPanel({ role, onDataChanged }) {
       startLiveCaption();
       setRecording(true);
     } catch (err) {
+      // getUserMedia may have SUCCEEDED before a later step threw — release the
+      // mic or the OS recording indicator stays on with no way to stop it.
+      if (streamRef.current) { try { streamRef.current.getTracks().forEach((t) => t.stop()); } catch (e2) { /* ignore */ } streamRef.current = null; }
       setError("Microphone access was blocked. Enable it in your browser settings.");
     }
   };
@@ -10362,6 +10474,16 @@ function AIChatPanel({ role, onDataChanged }) {
     setRecording(false);
   };
   const toggleMic = () => { if (recording) stopRecording(); else startRecording(); };
+  // The recording UI lives inside the open panel — closing the panel (✕ or the
+  // back gesture) while recording would leave the mic hot with no visible stop
+  // button. Stop on close, and release everything on unmount.
+  useEffect(() => { if (!open && recording) stopRecording(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => {
+    if (maxRecTimerRef.current) clearTimeout(maxRecTimerRef.current);
+    if (recTickRef.current) clearInterval(recTickRef.current);
+    try { if (recRef.current && recRef.current.state !== "inactive") recRef.current.stop(); } catch (e) { /* ignore */ }
+    if (streamRef.current) { try { streamRef.current.getTracks().forEach((t) => t.stop()); } catch (e) { /* ignore */ } streamRef.current = null; }
+  }, []);
 
   // Live level meter (waveform) — draws the mic's audio level on a canvas while
   // recording, so you can see it's capturing your voice in real time. Set up when
@@ -10450,14 +10572,18 @@ function AIChatPanel({ role, onDataChanged }) {
       }
       return { role: m.role, content: m.content || (m.image ? "(I sent a photo of my meal.)" : "") };
     });
+    // Track stream progress OUTSIDE the try: once ANY event arrived, server-side
+    // tools may already have run (e.g. a meal write) — re-sending the identical
+    // conversation through the callable fallback could execute them TWICE.
+    let streamed = "";
+    let gotEvent = false;
     try {
       // Stream the reply (word-by-word). Fall back to the callable on failure.
-      let streamed = "";
       let done = null;
       await streamAiChat(apiMsgs, {
-        onDelta: (t) => { streamed += t; setMessages([...next, { role: "assistant", content: streamed }]); },
-        onProposal: (meal) => setProposal({ ...meal, status: "pending" }),
-        onWorkoutProposal: (w) => setWorkout({ ...w, status: "pending" }),
+        onDelta: (t) => { gotEvent = true; streamed += t; setMessages([...next, { role: "assistant", content: streamed }]); },
+        onProposal: (meal) => { gotEvent = true; setProposal({ ...meal, status: "pending" }); },
+        onWorkoutProposal: (w) => { gotEvent = true; setWorkout({ ...w, status: "pending" }); },
         onDone: (p) => { done = p; },
       });
       setMessages([...next, { role: "assistant", content: streamed || "(no response)" }]);
@@ -10467,6 +10593,12 @@ function AIChatPanel({ role, onDataChanged }) {
       const sc = (streamErr && streamErr.code) || "";
       if (sc.includes("resource-exhausted")) {
         setError("You've reached today's AI usage limit. It resets tomorrow.");
+      } else if (streamed || gotEvent) {
+        // The stream STARTED then broke — don't re-send (tools may have written).
+        // Keep whatever arrived, refresh in case a write landed, and say so.
+        setMessages([...next, { role: "assistant", content: streamed || "(connection dropped)" }]);
+        if (typeof onDataChanged === "function") onDataChanged();
+        setError("Connection dropped — the reply was cut off. Check before re-asking: anything you asked it to log may already be saved.");
       } else {
         // Streaming unavailable (network/CORS/server) → non-streaming callable.
         try {
@@ -10664,7 +10796,8 @@ function AIChatPanel({ role, onDataChanged }) {
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <button onClick={() => acceptMeal(editDraft)} className="flex-1 rounded-lg bg-primaryfill px-3 py-2 text-[.85rem] font-bold text-primaryfg">Save &amp; log</button>
+                    <button onClick={() => acceptMeal(editDraft)} disabled={proposal && proposal.status === "saving"}
+                      className="flex-1 rounded-lg bg-primaryfill px-3 py-2 text-[.85rem] font-bold text-primaryfg disabled:opacity-55">Save &amp; log</button>
                     <button onClick={() => setEditDraft(null)} className="rounded-lg border border-border px-3 py-2 text-[.85rem] text-fg">Cancel</button>
                   </div>
                 </div>
@@ -11068,13 +11201,19 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
       if (d.startWeightLbs == null || d.startWeightLbs === "") d.startWeightLbs = prev;
       d.weightLbs = v;
       // Record in check-in history — the app's weight-history source (feeds the
-      // progress chart + trainer view). One entry per day: replace today's
-      // weigh-in (and clear any same-day duplicates), matching the check-in editor.
+      // progress chart + trainer view). One entry per day: MERGE into today's
+      // existing check-in (a wholesale replace here used to wipe a same-day
+      // workout/notes/body-fat — e.g. "did my workout" at 9am, weigh-in at 8pm
+      // erased the workout dot), matching how markWorkoutToday merges.
       if (!Array.isArray(d.checkIns)) d.checkIns = [];
-      d.checkIns = d.checkIns.filter(c => c.date !== todayKey);
-      d.checkIns.push({ date: todayKey, timestamp: new Date(todayKey + "T12:00:00").getTime(),
+      const sameDay = d.checkIns.find(c => c && c.date === todayKey);
+      const merged = { date: todayKey, timestamp: new Date(todayKey + "T12:00:00").getTime(),
         weight: v, calories: null, hitTarget: null, workedOut: null, mood: null, notes: "",
-        bodyFat: null, loggedBy: "client", isFuturePlan: false });
+        bodyFat: null, loggedBy: "client", isFuturePlan: false,
+        ...(sameDay || {}), };
+      merged.weight = v; // the new weigh-in always wins
+      merged.timestamp = new Date(todayKey + "T12:00:00").getTime();
+      d.checkIns = [...d.checkIns.filter(c => c && c.date !== todayKey), merged];
       planWrapRef.current = obj;   // update memory FIRST so the next log is consistent
       setPlanData(d);
       { const _pw = JSON.stringify(obj); lastSelfDataWrite.current = _pw; await window.storage.set(planDataKey(activePlanId), _pw); }
@@ -11161,6 +11300,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   const calSaveCheckIn = (checkin) => savePlanDataMutation((d) => {
     const others = (d.checkIns || []).filter((c) => c.date !== checkin.date);
     d.checkIns = [...others, checkin];
+    syncWeightFromCheckIns(d, checkin);
   });
   const calDeleteCheckIn = (ts) => savePlanDataMutation((d) => {
     const checkIns = (d.checkIns || []).filter((c) => c.timestamp !== ts);
@@ -11950,6 +12090,23 @@ function buildMergedData(d) {
   return {...EMPTY_DATA, ...d, cardio:{...defaultCardio,...(d.cardio||{})}, strength:{...defaultStrength,...(d.strength||{})}};
 }
 
+// After saving a check-in, keep the plan's CURRENT weight in sync: if the saved
+// entry carries a weight and is now the newest weigh-in, data.weightLbs follows
+// it (and startWeightLbs seeds on the first one). Deleting a check-in already
+// re-pointed the weight — saves didn't, so a Results/calendar check-in weight
+// never updated the dashboards, "lbs to go", or the calorie target (S86 fix).
+function syncWeightFromCheckIns(next, checkin) {
+  if (!checkin || !checkin.weight) return next;
+  const weighIns = (next.checkIns || []).filter((c) => c && c.weight)
+    .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+  const latest = weighIns[weighIns.length - 1];
+  if (latest && latest.date === checkin.date) {
+    next.weightLbs = Number(checkin.weight);
+    if (next.startWeightLbs == null || next.startWeightLbs === "") next.startWeightLbs = Number(checkin.weight);
+  }
+  return next;
+}
+
 // ─── Edit history helpers (Session 10) ──────────────────────────────────────
 // Short "x ago" label for an event timestamp.
 function timeAgo(ts) {
@@ -12731,19 +12888,23 @@ export default function App() {
     saveIndex(up);
   };
 
-  // Import the trainer's Trainerize roster as local profiles (server-side write
-  // via the trainerizeImport callable), then re-read the index + folders so the
-  // new/updated profiles appear without a reload. Returns the import summary.
-  const importFromTrainerize = async () => {
-    const res = await callTrainerizeImport({});
-    try {
-      const r = await window.storage.get(STORAGE_INDEX);
-      if (r && r.value) setProfiles(JSON.parse(r.value));
-    } catch(e) {}
-    try {
-      const f = await window.storage.get(STORAGE_FOLDERS);
-      if (f && f.value) setFolders(JSON.parse(f.value));
-    } catch(e) {}
+  // Trainerize bridge (server-side via the trainerizeImport callable).
+  // payload {mode:"list"} = roster preview (no writes, no reload);
+  // payload {clientIds:[…]} = import just those; {} = import all.
+  // After a real import, re-read the index + folders so the new/updated
+  // profiles appear without a reload. Returns the callable's result.
+  const importFromTrainerize = async (payload) => {
+    const res = await callTrainerizeImport(payload || {});
+    if (!(payload && payload.mode === "list")) {
+      try {
+        const r = await window.storage.get(STORAGE_INDEX);
+        if (r && r.value) setProfiles(JSON.parse(r.value));
+      } catch(e) {}
+      try {
+        const f = await window.storage.get(STORAGE_FOLDERS);
+        if (f && f.value) setFolders(JSON.parse(f.value));
+      } catch(e) {}
+    }
     return res.data;
   };
 
@@ -12991,6 +13152,26 @@ export default function App() {
     const updated = {...dailyLog, [field]: value};
     setDailyLog(updated);
     persistLog(updated);
+    // A dashboard weigh-in is a REAL weigh-in: record it on today's check-in
+    // (merge — never wipe a same-day workout/notes) and update the plan's
+    // current weight. It used to live only in the day log, invisible to the
+    // progress chart, trends, trainer views, and the AI.
+    if (field === "weight" && value > 0) {
+      setDataAndSave((p) => {
+        const n = { ...p };
+        if (n.startWeightLbs == null || n.startWeightLbs === "") n.startWeightLbs = Number(n.weightLbs) || value;
+        n.weightLbs = value;
+        const cis = Array.isArray(n.checkIns) ? n.checkIns : [];
+        const ts = new Date(todayKey + "T12:00:00").getTime();
+        const entry = { date: todayKey, timestamp: ts, weight: value, calories: null,
+          hitTarget: null, workedOut: null, mood: null, notes: "", bodyFat: null,
+          loggedBy: role === ROLES.CLIENT ? "client" : "trainer", isFuturePlan: false,
+          ...(cis.find((c) => c && c.date === todayKey) || {}) };
+        entry.weight = value; entry.timestamp = ts;
+        n.checkIns = [...cis.filter((c) => c && c.date !== todayKey), entry];
+        return n;
+      });
+    }
     // Record meaningful logging actions in the history.
     if (field === "weight" && value > 0 && value !== prev) appendHistory([`logged weight: ${value} lbs`]);
     else if (field === "calories" && value > prev) appendHistory([`logged ${value - prev} cal`]);
@@ -13309,8 +13490,13 @@ export default function App() {
       <style>{css}</style>
       {saving && <div className="prof-save-badge">✓ Saved</div>}
       <div className="app" data-theme="pro">
-        {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
-        <div className="flex items-center justify-center min-h-[54px] px-14 border-b border-border mb-3">
+        {/* Slim brand header — min-height clears the fixed hamburger (App chrome).
+            The safe-area padding matches the other four screen headers: in the
+            installed PWA on a notched iPhone the content extends under the
+            status bar, so without it the logo hid behind the clock and the
+            fixed hamburger landed on the back-button row below. */}
+        <div className="flex items-center justify-center min-h-[64px] px-14 border-b border-border mb-3"
+          style={{ paddingTop: "env(safe-area-inset-top,0px)" }}>
           <BrandLogo />
         </div>
         <div className="max-w-[640px] mx-auto px-4">
@@ -13373,7 +13559,7 @@ export default function App() {
               onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
               onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
                 const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);
-                return {...p, checkIns:[...others, checkin]};
+                return syncWeightFromCheckIns({...p, checkIns:[...others, checkin]}, checkin);
               })}
               onDeleteCheckIn={(ts)=>setDataAndSave(p=>{
                 const checkIns = (p.checkIns||[]).filter(c => c.timestamp !== ts);
@@ -13407,7 +13593,7 @@ export default function App() {
             onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
               // One entry per date: replace any existing check-ins for this date.
               const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);
-              return {...p, checkIns:[...others, checkin]};
+              return syncWeightFromCheckIns({...p, checkIns:[...others, checkin]}, checkin);
             })}
             onDeleteCheckIn={(ts)=>setDataAndSave(p=>{
               const checkIns = (p.checkIns||[]).filter(c => c.timestamp !== ts);

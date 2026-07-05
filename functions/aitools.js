@@ -14,7 +14,7 @@
 // The model cannot override this by "asking nicely" — scoping happens server-side.
 
 const admin = require("firebase-admin");
-const { CARDIO, STRENGTH, CARDIO_IDS, STRENGTH_IDS } = require("./exercises");
+const { CARDIO, STRENGTH, CARDIO_IDS, STRENGTH_IDS, MET } = require("./exercises");
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -345,6 +345,30 @@ function calcBMR(gender, weightLbs, heightFt, heightIn, age) {
     ? 10 * kg + 6.25 * cm - 5 * age + 5
     : 10 * kg + 6.25 * cm - 5 * age - 161;
 }
+// Weekly calories burned by the plan's scheduled cardio + strength — the exact
+// mirror of App.jsx computeClientCalories' burn loop (per-session Math.round of
+// MET × kg × hours; custom exercises burn calPerMin × minutes). Kept in sync so
+// the AI's calorie target MATCHES every app screen — without this the AI told
+// clients a target ~the daily burn lower than their dashboard showed, and
+// coach_summary scored faithful clients as "over target".
+function weeklyPlanBurn(d) {
+  const w = Number(d.weightLbs) || 0;
+  const custom = {};
+  (Array.isArray(d.customExercises) ? d.customExercises : []).forEach((e) => { if (e && e.id) custom[e.id] = e; });
+  const burnOf = (s) => {
+    if (!s || !s.duration) return 0;
+    const ce = custom[s.type];
+    if (ce && ce.calPerMin) return Math.round(Number(ce.calPerMin) * s.duration);
+    return Math.round((MET[s.type] || 0) * w * 0.453592 * (s.duration / 60));
+  };
+  let total = 0;
+  for (const day of DAYS) {
+    (Array.isArray((d.cardio || {})[day]) ? d.cardio[day] : []).forEach((s) => { total += burnOf(s); });
+    (Array.isArray((d.strength || {})[day]) ? d.strength[day] : []).forEach((s) => { total += burnOf(s); });
+  }
+  return total;
+}
+
 function nutritionTargets(d) {
   const w = Number(d.weightLbs);
   let cal = null;
@@ -352,7 +376,7 @@ function nutritionTargets(d) {
     const bmr = calcBMR(d.gender, w, d.heightFt, d.heightIn, Number(d.age));
     if (bmr && isFinite(bmr)) {
       const tdee = Math.round(bmr * (ACTIVITY_MULT[d.activityLevel] || 1.2));
-      cal = Math.max(1200, Math.round(tdee - 500));
+      cal = Math.max(1200, Math.round(tdee - 500 + weeklyPlanBurn(d) / 7));
     }
   }
   const mt = d.macroTargets || {};
@@ -1182,9 +1206,16 @@ async function runTool(name, input, ctx) {
     const prev = Number(d.weightLbs) || v;
     if (d.startWeightLbs == null || d.startWeightLbs === "") d.startWeightLbs = prev;
     d.weightLbs = v;
-    d.checkIns = d.checkIns.filter((c) => c.date !== date);
-    d.checkIns.push({ date, timestamp: checkInTimestamp(date), weight: v, calories: null, hitTarget: null,
-      workedOut: null, mood: null, notes: "", bodyFat: null, loggedBy, isFuturePlan: false });
+    // MERGE into an existing same-date check-in — a wholesale replace here used
+    // to wipe a same-day workout/notes/body-fat (log_workout at 9am, weigh-in
+    // at 8pm erased the workout), mirroring the log_workout merge behavior.
+    const sameDay = d.checkIns.find((c) => c && c.date === date);
+    const entry = { date, timestamp: checkInTimestamp(date), weight: v, calories: null, hitTarget: null,
+      workedOut: null, mood: null, notes: "", bodyFat: null, loggedBy, isFuturePlan: false,
+      ...(sameDay || {}) };
+    entry.weight = v;
+    entry.timestamp = checkInTimestamp(date);
+    d.checkIns = [...d.checkIns.filter((c) => c && c.date !== date), entry];
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
     await appendHistory(db, uid, planId, ctx, `logged weight: ${v} lbs`);
     return { ok: true, date, weightLbs: v };
@@ -1195,15 +1226,16 @@ async function runTool(name, input, ctx) {
     const d = wrap.data;
     const changes = [];
     if (input.proteinTarget != null || input.carbsTarget != null || input.fatTarget != null) {
-      const base = nutritionTargets(d);
-      const cur = d.macroTargets || {};
-      const pick = (inv, curv, basev) => inv != null ? Math.max(0, Math.round(Number(inv)))
-        : (curv != null ? curv : (basev != null ? basev : 0));
-      const protein = pick(input.proteinTarget, cur.protein, base.proteinTarget);
-      const carbs = pick(input.carbsTarget, cur.carbs, base.carbsTarget);
-      const fat = pick(input.fatTarget, cur.fat, base.fatTarget);
-      d.macroTargets = { protein, carbs, fat };
-      changes.push(`macros to ${protein}g protein / ${carbs}g carbs / ${fat}g fat`);
+      // Pin ONLY the macros explicitly provided — the dashboard applies custom
+      // values per-field and keeps the rest auto (1g/lb protein, 28% fat,
+      // carbs = remainder). Back-filling all three here used to silently
+      // freeze macros nobody chose at server-baseline numbers.
+      const mt = { ...(d.macroTargets || {}) };
+      const put = (key, inv) => { if (inv != null) { mt[key] = Math.max(0, Math.round(Number(inv))); changes.push(`${key} target to ${mt[key]}g`); } };
+      put("protein", input.proteinTarget);
+      put("carbs", input.carbsTarget);
+      put("fat", input.fatTarget);
+      d.macroTargets = mt;
     }
     if (input.goalWeightLbs != null) {
       const g = Math.round(Number(input.goalWeightLbs) * 10) / 10;

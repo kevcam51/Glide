@@ -47,4 +47,9 @@
   --radius-card: 12px;
 }
 
+/* Near-black base (matches the pro theme --color-bg) so iOS rubber-band
+   overscroll and the pre-React first paint don't flash white behind the
+   dark app — very visible in the installed PWA under the translucent
+   status bar. */
+html, body { background: #05080a; }
 body { margin: 0; padding: 0; }
