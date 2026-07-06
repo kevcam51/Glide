@@ -96,3 +96,9 @@ exports.sendInvite = require("./invites").sendInvite; // email invites (Option C
 exports.trainerizeTest = require("./trainerize").trainerizeTest; // Trainerize connection test (import step 1)
 exports.trainerizeImport = require("./trainerize").trainerizeImport; // Trainerize roster + snapshot importer (v1)
 exports.trainerizeAutoSync = require("./trainerize").trainerizeAutoSync; // 30-min background sync of imported clients
+// Biometric login (Face ID / Touch ID passkeys — S87). Register while signed in;
+// sign in signed-out via custom token. See functions/webauthn.js.
+exports.passkeyRegisterOptions = require("./webauthn").passkeyRegisterOptions;
+exports.passkeyRegisterVerify = require("./webauthn").passkeyRegisterVerify;
+exports.passkeyLoginOptions = require("./webauthn").passkeyLoginOptions;
+exports.passkeyLoginVerify = require("./webauthn").passkeyLoginVerify;

@@ -5,6 +5,7 @@ import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } 
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
+import { startRegistration } from "@simplewebauthn/browser";
 import { Icon } from "./icons.jsx";
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
@@ -10250,6 +10251,11 @@ const callSetWorkout = httpsCallable(functions, "setWorkoutSchedule"); // workou
 const callTranscribe = httpsCallable(functions, "transcribeAudio"); // voice → text (Whisper, Session 79)
 const callSendInvite = httpsCallable(functions, "sendInvite"); // email invites (Option C)
 const callTrainerizeImport = httpsCallable(functions, "trainerizeImport"); // Trainerize roster importer (v1)
+const callPasskeyRegOptions = httpsCallable(functions, "passkeyRegisterOptions"); // Face ID setup (S87)
+const callPasskeyRegVerify = httpsCallable(functions, "passkeyRegisterVerify");
+// Set after a successful passkey setup/sign-in so the login screen can lead
+// with the Face ID button on this device.
+const PASSKEY_HINT = "glide-passkey";
 // Streaming endpoint (Session 66) — replies arrive word-by-word via SSE. We POST
 // with the Firebase ID token (EventSource can't set headers, so we fetch+stream).
 const AI_STREAM_URL = `https://us-central1-${import.meta.env.VITE_FIREBASE_PROJECT_ID}.cloudfunctions.net/aiChatStream`;
@@ -12472,6 +12478,30 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
   const [busy, setBusy] = useState(false);
   const [showNotif, setShowNotif] = useState(false); // Notification Center section (Session 76)
   useBackClose(open, onClose);                        // phone Back closes the menu
+  // Face ID / Touch ID passkey setup (S87). pkDone = a passkey was registered
+  // from this device (local hint — the credential itself lives server-side).
+  const [pkBusy, setPkBusy] = useState(false);
+  const [pkDone, setPkDone] = useState(() => { try { return localStorage.getItem(PASSKEY_HINT) === "1"; } catch { return false; } });
+  const [pkMsg, setPkMsg] = useState(null);
+  const setupPasskey = async () => {
+    if (pkBusy) return;
+    setPkBusy(true); setPkMsg(null);
+    try {
+      if (!window.PublicKeyCredential) throw new Error("unsupported");
+      const { data } = await callPasskeyRegOptions({ origin: window.location.origin });
+      const attResp = await startRegistration({ optionsJSON: data.options });
+      await callPasskeyRegVerify({ origin: window.location.origin, challengeId: data.challengeId, attResp });
+      try { localStorage.setItem(PASSKEY_HINT, "1"); } catch { /* private mode */ }
+      setPkDone(true);
+      setPkMsg({ ok: true, text: "Done — next time you're signed out, tap “Sign in with Face ID”." });
+    } catch (e) {
+      const m = String((e && (e.message || e.code)) || "");
+      setPkMsg({ ok: false, text: m.includes("unsupported") ? "This browser doesn't support Face ID sign-in."
+        : /NotAllowed|cancel/i.test(m) ? "Setup was cancelled."
+        : "Couldn't set up Face ID — try again." });
+    }
+    setPkBusy(false);
+  };
   const [hubOpen, setHubOpen] = useState(false);     // Invite Hub modal (Option C)
   useEffect(() => {
     if (open) {
@@ -12635,6 +12665,16 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
             <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
           </button>
         )}
+
+        {/* Face ID / Touch ID sign-in — registers a passkey for THIS device so
+            future sign-ins (e.g. after the 30-min idle sign-out) are one glance
+            instead of a password. */}
+        <button style={item} disabled={pkBusy} onClick={setupPasskey}>
+          <span style={{ fontSize: 19 }}>🔐</span>
+          <span>{pkBusy ? "Setting up…" : pkDone ? "Face ID enabled on this device" : "Set up Face ID / Touch ID"}</span>
+          {pkDone && <span style={{ marginLeft: "auto", color: "var(--green,#2fe0a8)" }}>✓</span>}
+        </button>
+        {pkMsg && <div style={{ fontSize: ".74rem", color: pkMsg.ok ? "var(--green,#2fe0a8)" : "#f87171", padding: "0 4px 4px" }}>{pkMsg.text}</div>}
 
         <div style={{ flex: 1, minHeight: 12 }} />
         <button style={{ ...item, color: "#e5484d", border: "1px solid rgba(229,72,77,.4)", background: "rgba(229,72,77,.08)", justifyContent: "center", marginTop: 8 }} onClick={() => signOut(auth)}><Icon name="signout" size={19} /> <span>Sign out</span></button>

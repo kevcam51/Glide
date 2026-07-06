@@ -84,16 +84,33 @@ by name via list_local_plans. **E2E-verified live** (trainer.uitest): "what loca
 have?" listed them with sim flags; "set Prospect Pat's goal weight to 185" → plan data 185, index
 185, dashboard card live-refreshed to "→ 185 lbs" with no reload; console clean.
 
+## ✅ S87b: Biometric login (Face ID / Touch ID passkeys) — DEPLOYED (device-test pending Kevin)
+Four new callables in **functions/webauthn.js** (`@simplewebauthn/server` v13): passkeyRegisterOptions/
+Verify (signed-in setup) + passkeyLoginOptions/Verify (signed-out login → **Firebase custom token** →
+`signInWithCustomToken`). Credentials in `webauthnCreds/{credId}` {uid, publicKey, counter, rpID};
+one-shot challenges in `webauthnChallenges` (5-min TTL) — both Admin-SDK-only (no client rules =
+denied). **Origin allowlist** `calorieiq-jet.vercel.app` + `localhost:5173`; rpID = hostname —
+⚠️ passkeys are DOMAIN-BOUND: a future custom domain means users re-register (add the new origin to
+ALLOWED_ORIGINS then). Discoverable credentials (residentKey required) → usernameless: the login
+button needs NO email typed. UI: SideMenu "🔐 Set up Face ID / Touch ID" (localStorage hint
+`glide-passkey` marks the device); AuthGate "🔐 Sign in with Face ID / Touch ID" (login mode only,
+highlighted once hinted; cancel = silent, no-passkey → friendly pointer to set it up). Verified in
+preview: options callable returns challenge/rpId/userVerification correctly, full click round-trip
+shows the graceful fallback (headless browser has no authenticator) — **the real Face ID prompt needs
+Kevin's phone/Mac**: sign in → menu → Set up Face ID → sign out → "Sign in with Face ID".
+**Also S87b:** Trainerize auto-sync turned OFF at Kevin's request (wrote `caliq-tz-autosync
+{enabled:false}` via Firestore REST with CLI creds) — he re-enables anytime via the trainer-home
+toggle. Idle sign-out reviewed: 30-min timer in App.jsx confirmed present (S84) — with passkeys the
+re-login is now one glance.
+
 ## ⏭️ NEXT SESSION (Kevin's queue, in order)
-1. **Biometric login (WebAuthn/passkeys) + idle sign-out review** (idle sign-out shipped S84/85 —
-   verify 30-min timer still right).
-2. **Trainerize v3 — wearables INTO Glide**: pull `healthData/getList` calorieOut
+1. **Trainerize v3 — wearables INTO Glide**: pull `healthData/getList` calorieOut
    ({restingEnergy, activeEnergy}) + steps per client per day in the SAME auto-sync (add to
    `runImport`), store per-day burn (suggest on the day log, e.g. `wearable:{active, resting,
    steps, source}`), display on Daily Dashboard + calendar + progress, and decide whether tracked
    burn adjusts that day's eat-back target (ties into deficitMode). Endpoint contracts confirmed in
    docs/TRAINERIZE-API.md + S86 handoff notes.
-3. Then: Trainerize workout/program history (v2 workouts), Stripe.
+2. Then: Trainerize workout/program history (v2 workouts), Stripe.
 
 ## ✅ Session 85 shipped (all LIVE): Trainerize importer v1 + full optimization/security sweep
 1. **Trainerize importer v1 — DONE, deployed, verified with the real roster** (10 active clients at

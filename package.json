@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",
+    "@simplewebauthn/browser": "^13.3.0",
     "@zxing/browser": "^0.2.0",
     "@zxing/library": "^0.22.0",
     "firebase": "^12.14.0",

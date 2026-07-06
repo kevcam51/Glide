@@ -1937,6 +1937,23 @@ enabled (Blaze has no default spending cap).
   185 + the dashboard card live-refreshed with no reload; no console errors. All four AI fns redeployed;
   frontend pushed. Also answered Kevin: Trainerize API calls are free (Studio plan; 1000/min is a
   throttle) — the only cost is Firebase compute/writes (~pennies, on the existing Google bill).
+- Session 87b: **Biometric login (Face ID/Touch ID passkeys) — DEPLOYED; + Trainerize auto-sync turned OFF
+  (Kevin's call, re-enable via the toggle).** Firebase Auth has no WebAuthn provider, so passkeys ride
+  **custom tokens**: new `functions/webauthn.js` (`@simplewebauthn/server` v13) — `passkeyRegisterOptions/
+  Verify` (signed-in setup) and `passkeyLoginOptions/Verify` (signed-out → verify assertion → `admin.auth()
+  .createCustomToken` → app `signInWithCustomToken`). Credentials `webauthnCreds/{credId}` {uid, publicKey
+  (base64url), counter, transports, rpID}; one-shot `webauthnChallenges` (5-min TTL, uid-matched) — both
+  collections have NO client rules → Admin-SDK only. **Origin allowlist** (`ALLOWED_ORIGINS`): prod +
+  localhost:5173; rpID = origin hostname. ⚠️ **Passkeys are domain-bound** — when a custom domain lands, add
+  it to ALLOWED_ORIGINS and users re-register there. Discoverable credentials (`residentKey:"required"`,
+  `userVerification:"required"`) = usernameless one-glance sign-in (pairs with the 30-min idle sign-out).
+  Frontend (`@simplewebauthn/browser`): SideMenu "🔐 Set up Face ID / Touch ID" row (register; localStorage
+  hint `glide-passkey`); AuthGate "🔐 Sign in with Face ID / Touch ID" (login mode, highlighted once hinted;
+  user-cancel silent; no-credential → friendly "set it up in the menu" pointer). **Verified in preview:**
+  options callable returns valid challenge/rpId, full button round-trip completes with the graceful fallback
+  (headless Chrome has no authenticator); menu row renders; build passes; console clean. **Real biometric
+  prompt = Kevin device-test** (like the S79 mic): sign in → ≡ → Set up Face ID → sign out → Face ID button.
+  Auto-sync off: wrote `caliq-tz-autosync {enabled:false}` to Kevin's kv via Firestore REST (CLI creds).
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

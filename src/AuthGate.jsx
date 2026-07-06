@@ -3,16 +3,27 @@
 // app only mounts when a user exists, storage.js can always assume a uid.
 
 import { useState, useEffect, useRef } from "react";
-import { auth, googleProvider } from "./firebase.js";
+import { auth, googleProvider, functions } from "./firebase.js";
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
+  signInWithCustomToken,
   signOut,
   sendPasswordResetEmail,
 } from "firebase/auth";
+import { httpsCallable } from "firebase/functions";
+import { startAuthentication } from "@simplewebauthn/browser";
 import { createProfile, hasProfile, ROLES } from "./profile.js";
+
+// Biometric sign-in (Face ID / Touch ID passkeys — S87). The server verifies
+// the passkey assertion and mints a Firebase custom token.
+const callPasskeyLoginOptions = httpsCallable(functions, "passkeyLoginOptions");
+const callPasskeyLoginVerify = httpsCallable(functions, "passkeyLoginVerify");
+// Local hint set after a passkey is registered/used on this device — leads the
+// login screen with the Face ID button (the button works without it too).
+const PASSKEY_HINT = "glide-passkey";
 
 export function useAuth() {
   const [user, setUser] = useState(undefined); // undefined = still loading
@@ -188,6 +199,27 @@ export default function AuthGate({ children }) {
     }
   };
 
+  // Face ID / Touch ID sign-in: passkey assertion → server verify → custom token.
+  const passkeySupported = typeof window !== "undefined" && !!window.PublicKeyCredential;
+  const passkeyHinted = (() => { try { return localStorage.getItem(PASSKEY_HINT) === "1"; } catch { return false; } })();
+  const passkey = async () => {
+    setError(""); setNotice(""); setBusy(true);
+    try {
+      const { data } = await callPasskeyLoginOptions({ origin: window.location.origin });
+      const asseResp = await startAuthentication({ optionsJSON: data.options });
+      const res = await callPasskeyLoginVerify({ origin: window.location.origin, challengeId: data.challengeId, asseResp });
+      await signInWithCustomToken(auth, res.data.token);
+      try { localStorage.setItem(PASSKEY_HINT, "1"); } catch { /* private mode */ }
+    } catch (e) {
+      const m = String((e && (e.message || e.code)) || "");
+      if (/NotAllowed|cancel|abort/i.test(m)) { /* user dismissed the prompt — no error */ }
+      else if (m.includes("not-found")) setError("No Face ID set up on this account yet — sign in with your password, then enable it in the menu (≡).");
+      else setError("Face ID sign-in didn't work — use your password instead.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div style={S.center}>
       <div style={S.card}>
@@ -242,6 +274,15 @@ export default function AuthGate({ children }) {
         <button style={S.google} onClick={google} disabled={busy}>
           Continue with Google
         </button>
+
+        {mode === "login" && passkeySupported && (
+          <button onClick={passkey} disabled={busy}
+            style={passkeyHinted
+              ? { ...S.primary, background: "#0e7490" }
+              : S.google}>
+            🔐 Sign in with Face ID / Touch ID
+          </button>
+        )}
 
         <div style={S.row}>
           {mode === "login" ? (
