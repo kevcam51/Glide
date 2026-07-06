@@ -10450,6 +10450,7 @@ function AIChatPanel({ role, onDataChanged }) {
         protein: Number(p.protein) || 0, carbs: Number(p.carbs) || 0, fat: Number(p.fat) || 0, date: p.date };
       if (p.time) input.time = p.time;
       if (p.clientId) input.clientId = p.clientId;
+      if (p.localPlanId) input.localPlanId = p.localPlanId; // trainer's own local plan file (S87)
       await callLogMeal(input);
       setEditDraft(null);
       setProposal((prev) => ({ ...prev, ...p, status: "logged" }));
@@ -12996,17 +12997,21 @@ export default function App() {
   // profiles appear without a reload. Returns the callable's result.
   const importFromTrainerize = async (payload) => {
     const res = await callTrainerizeImport(payload || {});
-    if (!(payload && payload.mode === "list")) {
-      try {
-        const r = await window.storage.get(STORAGE_INDEX);
-        if (r && r.value) setProfiles(JSON.parse(r.value));
-      } catch(e) {}
-      try {
-        const f = await window.storage.get(STORAGE_FOLDERS);
-        if (f && f.value) setFolders(JSON.parse(f.value));
-      } catch(e) {}
-    }
+    if (!(payload && payload.mode === "list")) await reloadProfilesIndex();
     return res.data;
+  };
+
+  // Re-read the local profiles index + folders (used after server-side writes —
+  // Trainerize imports, AI edits to local plans — so the cards update live).
+  const reloadProfilesIndex = async () => {
+    try {
+      const r = await window.storage.get(STORAGE_INDEX);
+      if (r && r.value) setProfiles(JSON.parse(r.value));
+    } catch(e) {}
+    try {
+      const f = await window.storage.get(STORAGE_FOLDERS);
+      if (f && f.value) setFolders(JSON.parse(f.value));
+    } catch(e) {}
   };
 
   const goToProfiles = () => { setScreen("profiles"); setActiveId(null); setActiveRemoteUid(null); };
@@ -13552,7 +13557,7 @@ export default function App() {
         onOpenClientPlan={openClientPlan}
         onGoClients={() => setHomeTab("clients")}
         meUid={meUid} meName={meName} meRole={role}
-      /><AIChatPanel role={role} /></>;
+      /><AIChatPanel role={role} onDataChanged={reloadProfilesIndex} /></>;
     }
     if (isTrainerHome && homeTab === "dashboard") {
       return <>{chrome}<TrainerDashboard
@@ -13568,7 +13573,7 @@ export default function App() {
         onTrainerizeImport={importFromTrainerize}
         meUid={meUid} meName={meName} meRole={role}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
-      /><AIChatPanel role={role} /></>;
+      /><AIChatPanel role={role} onDataChanged={reloadProfilesIndex} /></>;
     }
     return <>{chrome}<ProfileSelector
       profiles={profiles} folders={folders} loading={loading}
@@ -13582,7 +13587,7 @@ export default function App() {
       onOpenClientPlan={openClientPlan}
       onLinked={removeLocalProfileById} onCopyToLocal={copyClientToLocal}
       onRename={renameProfile}
-    /><AIChatPanel role={role} /></>;
+    /><AIChatPanel role={role} onDataChanged={reloadProfilesIndex} /></>;
   }
 
   return (

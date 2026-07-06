@@ -282,22 +282,45 @@ function normMealTime(raw, ctx) {
   return (ctx && ctx.nowTime) || "";
 }
 
-// ── plan resolution (mirrors the multi-plan manifest; default plan id "self"). ─
-async function activePlanId(db, uid) {
+// ── plan resolution (mirrors the multi-plan manifest; default plan id "self").
+// planOverride (S87): a validated LOCAL plan id from the caller's own caliq-index
+// — lets a trainer's tools target their own local plan files/simulations instead
+// of the manifest-active plan. Only ever set for uid === callerUid.
+async function activePlanId(db, uid, planOverride) {
+  if (planOverride) return planOverride;
   const m = await kvGetJSON(db, uid, "caliq-plans");
   return (m && m.active) || "self";
 }
-async function activePlanData(db, uid) {
-  const id = await activePlanId(db, uid);
+async function activePlanData(db, uid, planOverride) {
+  const id = await activePlanId(db, uid, planOverride);
   const wrap = await kvGetJSON(db, uid, `caliq-${id}`);
   return { id, data: (wrap && wrap.data) || {} };
 }
 // Full plan wrapper ({data, step}) for read-modify-write of plan fields.
-async function loadPlanWrap(db, uid) {
-  const id = await activePlanId(db, uid);
+async function loadPlanWrap(db, uid, planOverride) {
+  const id = await activePlanId(db, uid, planOverride);
   const wrap = (await kvGetJSON(db, uid, `caliq-${id}`)) || { data: {}, step: 0 };
   if (!wrap.data) wrap.data = {};
   return { id, wrap };
+}
+
+// After the AI writes to a LOCAL plan, keep the trainer-home card fresh: update
+// the caller's caliq-index entry the way the app's autoSave does (name, weight,
+// goal, lastSaved). Best-effort — a failed index touch never fails the tool.
+async function touchLocalIndex(db, uid, planId) {
+  try {
+    const index = (await kvGetJSON(db, uid, "caliq-index")) || [];
+    const entry = index.find((p) => p && p.id === planId);
+    if (!entry) return;
+    const wrap = await kvGetJSON(db, uid, `caliq-${planId}`);
+    const d = (wrap && wrap.data) || {};
+    const nm = [d.firstName, d.lastName].filter(Boolean).join(" ").trim();
+    if (nm) entry.name = nm;
+    entry.weight = d.weightLbs || "";
+    entry.goal = d.goalWeight || "";
+    entry.lastSaved = Date.now();
+    await kvSetJSON(db, uid, "caliq-index", index);
+  } catch (e) { console.error("touchLocalIndex failed:", e && e.message); }
 }
 function checkInTimestamp(date) {
   return new Date(date + "T12:00:00").getTime();
@@ -490,6 +513,9 @@ function buildTools(role, opts = {}) {
   const clientIdProp = isTrainer
     ? { clientId: { type: "string", description: "The client's id from list_clients. " + TRAINER_NOTE } }
     : {};
+  const localPlanProp = isTrainer
+    ? { localPlanId: { type: "string", description: "Target one of YOUR OWN local plan files or simulations (id from list_local_plans) instead of an account — for prepping plans, sims, and imported Trainerize profiles. Do not combine with clientId." } }
+    : {};
 
   const tools = [
     {
@@ -503,7 +529,7 @@ function buildTools(role, opts = {}) {
         properties: {
           startDate: { type: "string", description: "Start date, YYYY-MM-DD" },
           endDate: { type: "string", description: "End date, YYYY-MM-DD" },
-          ...clientIdProp,
+          ...clientIdProp, ...localPlanProp,
         },
         required: ["startDate", "endDate"],
       },
@@ -515,7 +541,7 @@ function buildTools(role, opts = {}) {
         + (isTrainer ? TRAINER_NOTE : CLIENT_NOTE),
       input_schema: {
         type: "object",
-        properties: { ...clientIdProp },
+        properties: { ...clientIdProp, ...localPlanProp },
       },
     },
     {
@@ -524,7 +550,7 @@ function buildTools(role, opts = {}) {
         "Get the plan's personal profile (name, gender, age, height, current & goal weight, activity level, body-fat) "
         + "and which required fields are still MISSING for a calorie target. Use this before onboarding someone to see "
         + "what to ask for. " + (isTrainer ? TRAINER_NOTE : CLIENT_NOTE),
-      input_schema: { type: "object", properties: { ...clientIdProp } },
+      input_schema: { type: "object", properties: { ...clientIdProp, ...localPlanProp } },
     },
     {
       name: "set_personal_info",
@@ -555,7 +581,7 @@ function buildTools(role, opts = {}) {
           trainerNotes: { type: "string", description: "Free-text coaching notes on the plan (mainly for trainers). Replaces the existing notes." },
           deficitMode: { type: "string", enum: ["eatback", "accelerate"],
             description: "Nutrition approach: 'eatback' (default — workout burn is added to the daily calorie target: easier diet, steady ~1 lb/wk) or 'accelerate' (target stays at TDEE−500: tighter diet, workouts speed up the goal date instead). Set when the user chooses sustainability vs speed." },
-          ...clientIdProp,
+          ...clientIdProp, ...localPlanProp,
         },
       },
     },
@@ -619,7 +645,7 @@ function buildTools(role, opts = {}) {
           fat: { type: "number", description: "Fat grams (0 if unknown)" },
           date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
           time: { type: "string", description: "Clock time the meal was eaten, e.g. '8:30am' or '19:45'. Set it when the user mentions when they ate; omit to use now." },
-          ...clientIdProp,
+          ...clientIdProp, ...localPlanProp,
         },
         required: ["name", "mealType", "calories"],
       },
@@ -642,7 +668,7 @@ function buildTools(role, opts = {}) {
           fat: { type: "number", description: "Fat grams (0 if unknown)" },
           date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
           time: { type: "string", description: "Clock time the meal was eaten, e.g. '8:30am' or '19:45'. Set it when the user mentions when they ate; omit to use now." },
-          ...clientIdProp,
+          ...clientIdProp, ...localPlanProp,
         },
         required: ["name", "mealType", "calories"],
       },
@@ -657,7 +683,7 @@ function buildTools(role, opts = {}) {
         properties: {
           note: { type: "string", description: "Optional note, e.g. 'Push day — felt strong'" },
           date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
-          ...clientIdProp,
+          ...clientIdProp, ...localPlanProp,
         },
       },
     },
@@ -671,7 +697,7 @@ function buildTools(role, opts = {}) {
         properties: {
           weightLbs: { type: "number", description: "Body weight in pounds" },
           date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
-          ...clientIdProp,
+          ...clientIdProp, ...localPlanProp,
         },
         required: ["weightLbs"],
       },
@@ -689,7 +715,7 @@ function buildTools(role, opts = {}) {
           carbsTarget: { type: "number", description: "Daily carb target, grams" },
           fatTarget: { type: "number", description: "Daily fat target, grams" },
           goalWeightLbs: { type: "number", description: "Goal body weight, pounds" },
-          ...clientIdProp,
+          ...clientIdProp, ...localPlanProp,
         },
       },
     },
@@ -714,7 +740,7 @@ function buildTools(role, opts = {}) {
           name: { type: "string", description: "Exercise name, e.g. 'Sled Push'" },
           type: { type: "string", enum: ["strength", "cardio"], description: "Whether it's strength or cardio" },
           calPerMin: { type: "number", description: "Estimated calories burned per minute (1–30), used for its burn" },
-          ...clientIdProp,
+          ...clientIdProp, ...localPlanProp,
         },
         required: ["name", "type", "calPerMin"],
       },
@@ -733,7 +759,7 @@ function buildTools(role, opts = {}) {
           cardio: { type: "object", description: "Per-day cardio, e.g. {\"Tuesday\":[{\"type\":\"incline_walk_8\",\"duration\":30}]}" },
           strength: { type: "object", description: "Per-day strength, e.g. {\"Monday\":[{\"type\":\"bb_bench\",\"duration\":45},{\"type\":\"bb_row\",\"duration\":45}]}" },
           replace: { type: "boolean", description: "Replace the whole week (unlisted days become rest). Default true." },
-          ...clientIdProp,
+          ...clientIdProp, ...localPlanProp,
         },
       },
     },
@@ -752,7 +778,7 @@ function buildTools(role, opts = {}) {
           cardio: { type: "object", description: "Per-day cardio, e.g. {\"Tuesday\":[{\"type\":\"incline_walk_8\",\"duration\":30}]}" },
           strength: { type: "object", description: "Per-day strength, e.g. {\"Monday\":[{\"type\":\"bb_bench\",\"duration\":45},{\"type\":\"bb_row\",\"duration\":45}]}" },
           replace: { type: "boolean", description: "Replace the whole week (unlisted days become rest). Default true." },
-          ...clientIdProp,
+          ...clientIdProp, ...localPlanProp,
         },
       },
     },
@@ -790,6 +816,15 @@ function buildTools(role, opts = {}) {
   ];
 
   if (isTrainer) {
+    tools.push({
+      name: "list_local_plans",
+      description:
+        "List the trainer's OWN local plan files and simulations (NOT connected client accounts — that's "
+        + "list_clients). Local plans include imported Trainerize clients, prep/template files, and sandbox "
+        + "simulations. Use the returned localPlanId with the other tools (via their localPlanId argument) to "
+        + "read or edit one of these files.",
+      input_schema: { type: "object", properties: {} },
+    });
     tools.push({
       name: "list_clients",
       description:
@@ -866,6 +901,24 @@ async function runTool(name, input, ctx) {
   if (name === "search_food") {
     // Food-database lookup (no account target needed).
     return await searchFoodDb(input.query);
+  }
+
+  if (name === "list_local_plans") {
+    if (!ctx.isTrainer) return { error: "Only trainers have local plan files." };
+    const index = (await kvGetJSON(db, ctx.callerUid, "caliq-index")) || [];
+    const days = (ts) => ts ? Math.floor((Date.now() - ts) / 86400000) : null;
+    return {
+      plans: index.filter((p) => p && p.id).map((p) => ({
+        localPlanId: p.id,
+        name: p.customName || p.name || "(unnamed)",
+        isSimulation: !!p.isSimulation,
+        importedFromTrainerize: !!p.trainerizeId,
+        weightLbs: p.weight || null,
+        goalWeightLbs: p.goal || null,
+        daysSinceSaved: days(p.lastSaved),
+      })),
+      note: "Pass localPlanId to the other tools to read/edit one of these files. They are the trainer's own working files — separate from connected client accounts (list_clients).",
+    };
   }
 
   if (name === "list_clients") {
@@ -983,8 +1036,24 @@ async function runTool(name, input, ctx) {
   const uid = await resolveTargetUid(db, input, ctx);
   if (uid && uid.error) return uid; // { error }
 
+  // Local-plan targeting (S87, trainers): localPlanId points a tool at one of
+  // the CALLER's OWN local plan files/simulations (from list_local_plans)
+  // instead of an account's manifest-active plan. Validated against the
+  // caller's own index, and only ever applied to uid === callerUid — so it
+  // can't widen access to anyone else's data.
+  let planOverride = null;
+  if (ctx.isTrainer && input.localPlanId != null && input.localPlanId !== "") {
+    if (input.clientId) return { error: "Use clientId OR localPlanId, not both." };
+    const wantedPid = String(input.localPlanId);
+    const localIndex = (await kvGetJSON(db, ctx.callerUid, "caliq-index")) || [];
+    if (!localIndex.some((p) => p && p.id === wantedPid)) {
+      return { error: "No local plan with that id — call list_local_plans to see the trainer's local files." };
+    }
+    planOverride = wantedPid;
+  }
+
   if (name === "get_nutrition_targets") {
-    const { data } = await activePlanData(db, uid);
+    const { data } = await activePlanData(db, uid, planOverride);
     const t = nutritionTargets(data);
     return {
       ...t,
@@ -997,12 +1066,12 @@ async function runTool(name, input, ctx) {
   }
 
   if (name === "get_profile") {
-    const { data } = await activePlanData(db, uid);
+    const { data } = await activePlanData(db, uid, planOverride);
     return profileSummary(data);
   }
 
   if (name === "set_personal_info") {
-    const { id: planId, wrap } = await loadPlanWrap(db, uid);
+    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
     const d = wrap.data;
     const changes = [];
     // clamp to sane ranges; round1 keeps one decimal (weights/percentages).
@@ -1040,6 +1109,7 @@ async function runTool(name, input, ctx) {
     if (changes.length === 0) return { error: "No valid profile fields were provided." };
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
     await appendHistory(db, uid, planId, ctx, `updated profile: ${changes.join(", ")}`);
+    if (planOverride) await touchLocalIndex(db, uid, planOverride);
     return { ok: true, updated: changes, profile: profileSummary(d) };
   }
 
@@ -1107,6 +1177,7 @@ async function runTool(name, input, ctx) {
       if (t && t.error) return t; // unauthorized client → tell the model
       meal.clientId = input.clientId;
     }
+    if (planOverride) meal.localPlanId = planOverride; // Accept card writes to the same local plan
     return { shown: true, meal };
   }
 
@@ -1115,7 +1186,7 @@ async function runTool(name, input, ctx) {
     // back so the client renders an Accept card. Accept saves via the
     // setWorkoutSchedule callable, which re-runs set_workout_schedule.
     const replace = input.replace !== false;
-    const { data } = await activePlanData(db, uid); // for non-replace merge
+    const { data } = await activePlanData(db, uid, planOverride); // for non-replace merge
     const cx = customExerciseSets(data); // the plan's custom exercises are valid ids too
     const strSet = new Set([...STRENGTH_IDS, ...cx.strengthIds]);
     const carSet = new Set([...CARDIO_IDS, ...cx.cardioIds]);
@@ -1138,6 +1209,7 @@ async function runTool(name, input, ctx) {
       workout.clientId = input.clientId;
       workout.raw.clientId = input.clientId;
     }
+    if (planOverride) { workout.localPlanId = planOverride; workout.raw.localPlanId = planOverride; }
     return { shown: true, workout };
   }
 
@@ -1155,7 +1227,7 @@ async function runTool(name, input, ctx) {
       fat: Math.max(0, Math.round(Number(input.fat) || 0)),
       time: normMealTime(input.time, ctx),
     };
-    const { id: planId } = await activePlanData(db, uid);
+    const { id: planId } = await activePlanData(db, uid, planOverride);
     const logKey = `caliq-log-${planId}-${date}`;
     const log = (await kvGetJSON(db, uid, logKey)) || {};
     const updated = {
@@ -1182,6 +1254,7 @@ async function runTool(name, input, ctx) {
       };
       await kvSetJSON(db, uid, histKey, [ev, ...(Array.isArray(hist) ? hist : [])].slice(0, 250));
     } catch (e) { /* history is best-effort */ }
+    if (planOverride) await touchLocalIndex(db, uid, planOverride);
     return {
       ok: true,
       logged: { date, mealType, ...meal },
@@ -1194,7 +1267,7 @@ async function runTool(name, input, ctx) {
     const date = re.test(input.date || "") ? input.date : ctx.today;
     const note = String(input.note || "").slice(0, 300);
     const loggedBy = (ctx.isTrainer && uid !== ctx.callerUid) ? "trainer" : "client";
-    const { id: planId, wrap } = await loadPlanWrap(db, uid);
+    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
     const d = wrap.data;
     if (!Array.isArray(d.checkIns)) d.checkIns = [];
     const ci = d.checkIns.find((c) => c.date === date);
@@ -1203,6 +1276,7 @@ async function runTool(name, input, ctx) {
       hitTarget: null, workedOut: true, mood: null, notes: note, bodyFat: null, loggedBy, isFuturePlan: false });
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
     await appendHistory(db, uid, planId, ctx, note ? `recorded a workout: "${note}"` : "recorded a workout");
+    if (planOverride) await touchLocalIndex(db, uid, planOverride);
     return { ok: true, date, note: note || null };
   }
 
@@ -1212,7 +1286,7 @@ async function runTool(name, input, ctx) {
     const re = /^\d{4}-\d{2}-\d{2}$/;
     const date = re.test(input.date || "") ? input.date : ctx.today;
     const loggedBy = (ctx.isTrainer && uid !== ctx.callerUid) ? "trainer" : "client";
-    const { id: planId, wrap } = await loadPlanWrap(db, uid);
+    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
     const d = wrap.data;
     if (!Array.isArray(d.checkIns)) d.checkIns = [];
     const prev = Number(d.weightLbs) || v;
@@ -1230,11 +1304,12 @@ async function runTool(name, input, ctx) {
     d.checkIns = [...d.checkIns.filter((c) => c && c.date !== date), entry];
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
     await appendHistory(db, uid, planId, ctx, `logged weight: ${v} lbs`);
+    if (planOverride) await touchLocalIndex(db, uid, planOverride);
     return { ok: true, date, weightLbs: v };
   }
 
   if (name === "set_targets") {
-    const { id: planId, wrap } = await loadPlanWrap(db, uid);
+    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
     const d = wrap.data;
     const changes = [];
     if (input.proteinTarget != null || input.carbsTarget != null || input.fatTarget != null) {
@@ -1256,6 +1331,7 @@ async function runTool(name, input, ctx) {
     if (changes.length === 0) return { error: "Provide at least one of protein/carbs/fat target or goal weight." };
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
     await appendHistory(db, uid, planId, ctx, `updated ${changes.join(" and ")}`);
+    if (planOverride) await touchLocalIndex(db, uid, planOverride);
     return { ok: true, updated: { macroTargets: d.macroTargets || null, goalWeightLbs: d.goalWeight != null ? d.goalWeight : null } };
   }
 
@@ -1266,7 +1342,7 @@ async function runTool(name, input, ctx) {
     if (!label) return { error: "Provide an exercise name." };
     const calPerMin = Math.max(1, Math.min(30, Math.round((Number(input.calPerMin) || 0) * 10) / 10));
     if (!calPerMin) return { error: "Provide a calPerMin estimate (1–30)." };
-    const { id: planId, wrap } = await loadPlanWrap(db, uid);
+    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
     const d = wrap.data;
     if (!Array.isArray(d.customExercises)) d.customExercises = [];
     // Dedupe by lowercased label + type — reuse the existing id if already there.
@@ -1277,12 +1353,13 @@ async function runTool(name, input, ctx) {
     d.customExercises.push(ex);
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
     await appendHistory(db, uid, planId, ctx, `added a custom exercise: ${label}`);
+    if (planOverride) await touchLocalIndex(db, uid, planOverride);
     return { ok: true, exercise: { id: ex.id, label: ex.label, type: exType, calPerMin } };
   }
 
   if (name === "set_workout_schedule") {
     const replace = input.replace !== false; // default true
-    const { id: planId, wrap } = await loadPlanWrap(db, uid);
+    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
     const d = wrap.data;
     const cx = customExerciseSets(d); // the plan's custom exercises are valid ids too
     const strSet = new Set([...STRENGTH_IDS, ...cx.strengthIds]);
@@ -1298,6 +1375,7 @@ async function runTool(name, input, ctx) {
     if (changed.length === 0) return { error: "Provide cardio and/or strength as day-keyed objects." };
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
     await appendHistory(db, uid, planId, ctx, "updated the workout program");
+    if (planOverride) await touchLocalIndex(db, uid, planOverride);
     const summarize = (sched) => DAYS.filter((day) => ((sched || {})[day] || []).length)
       .map((day) => `${day} (${sched[day].length})`);
     return {
@@ -1334,7 +1412,7 @@ async function runTool(name, input, ctx) {
   if (name === "get_nutrition_log") {
     const range = clampDateRange(input.startDate, input.endDate);
     if (!range) return { error: "Dates must be YYYY-MM-DD." };
-    const { id, data } = await activePlanData(db, uid);
+    const { id, data } = await activePlanData(db, uid, planOverride);
     const prefix = `caliq-log-${id}-`;
     // weigh-ins / workouts come from data.checkIns, indexed by date
     const ci = {};

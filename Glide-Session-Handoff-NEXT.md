@@ -68,20 +68,32 @@ the schedule keeps firing but no-ops, so resuming is instant). Cost answer given
 invocations/mo (free tier 2M), scheduler job free tier, Firestore writes ≈ $0.20–0.25/mo at 10
 clients — effectively free.
 
+## ✅ S87: AI-edits-local-plans — DEPLOYED & LIVE
+The AI can now read/edit the trainer's OWN local plan files and simulations (imported Trainerize
+clients, prep files, sims) by chat. **How:** new trainer-only tool **`list_local_plans`** (reads the
+caller's `caliq-index` → localPlanId/name/isSimulation/importedFromTrainerize) + an optional
+**`localPlanId`** param on all 12 plan-data tools (never combined with clientId; validated against
+the caller's own index — can only ever reach the caller's own kv). Central plumbing in aitools.js:
+`activePlanId/activePlanData/loadPlanWrap` take a `planOverride`; `touchLocalIndex` updates the
+index entry (name/weight/goal/lastSaved) after every local write so the dashboard cards stay right;
+proposals (meal/workout Accept cards) carry `localPlanId` through to the `logMeal`/
+`setWorkoutSchedule` callables; App passes `onDataChanged={reloadProfilesIndex}` to the trainer
+screens' AIChatPanel so the Local Plans cards refresh live. Manifest tools (list/create/switch_plan)
+deliberately DON'T take localPlanId. System prompt: trainer section tells it to resolve local files
+by name via list_local_plans. **E2E-verified live** (trainer.uitest): "what local plan files do I
+have?" listed them with sim flags; "set Prospect Pat's goal weight to 185" → plan data 185, index
+185, dashboard card live-refreshed to "→ 185 lbs" with no reload; console clean.
+
 ## ⏭️ NEXT SESSION (Kevin's queue, in order)
-1. **AI-edits-local-plans** — extend the AI tools to target the trainer's own local plans/sims
-   (currently they only reach the caller's own account or verified connected clients). Design note:
-   local profiles live in KEVIN's kv (`caliq-{id}` via the index) — a tool like `list_local_plans` +
-   a `planRef` targeting scheme; same confirm-before-write pattern.
-2. **Biometric login (WebAuthn/passkeys) + idle sign-out review** (idle sign-out shipped S84/85 —
+1. **Biometric login (WebAuthn/passkeys) + idle sign-out review** (idle sign-out shipped S84/85 —
    verify 30-min timer still right).
-3. **Trainerize v3 — wearables INTO Glide**: pull `healthData/getList` calorieOut
+2. **Trainerize v3 — wearables INTO Glide**: pull `healthData/getList` calorieOut
    ({restingEnergy, activeEnergy}) + steps per client per day in the SAME auto-sync (add to
    `runImport`), store per-day burn (suggest on the day log, e.g. `wearable:{active, resting,
    steps, source}`), display on Daily Dashboard + calendar + progress, and decide whether tracked
    burn adjusts that day's eat-back target (ties into deficitMode). Endpoint contracts confirmed in
    docs/TRAINERIZE-API.md + S86 handoff notes.
-4. Then: Trainerize workout/program history (v2 workouts), Stripe.
+3. Then: Trainerize workout/program history (v2 workouts), Stripe.
 
 ## ✅ Session 85 shipped (all LIVE): Trainerize importer v1 + full optimization/security sweep
 1. **Trainerize importer v1 — DONE, deployed, verified with the real roster** (10 active clients at

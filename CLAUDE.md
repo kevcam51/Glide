@@ -1919,6 +1919,24 @@ enabled (Blaze has no default spending cap).
   "🔄 Trainerize auto-sync: On/Off" → `caliq-tz-autosync {enabled}` in Kevin's kv, checked at the top of
   every scheduled run (missing/true = ON; explicit false = the run no-ops, resume is instant). Cost:
   ~1,500 invocations/mo vs a 2M free tier + ≈$0.20/mo Firestore writes — effectively free.
+- Session 87: **AI edits LOCAL plans/simulations by chat — DEPLOYED & LIVE.** The queue's next item.
+  New trainer-only tool **`list_local_plans`** (caller's `caliq-index` → localPlanId, name,
+  isSimulation, importedFromTrainerize, weight/goal, daysSinceSaved) + optional **`localPlanId`** on all
+  12 plan-data tools (get_profile/set_personal_info/get_nutrition_log/get_nutrition_targets/log_meal/
+  propose_meal/log_workout/log_weigh_in/set_targets/add_custom_exercise/propose_workout/
+  set_workout_schedule — NOT the manifest tools). **Security shape:** localPlanId is validated against
+  the CALLER's own index and only ever applied to uid === callerUid — it can't widen access; clientId
+  and localPlanId are mutually exclusive. Plumbing: `activePlanId/activePlanData/loadPlanWrap` gained a
+  `planOverride` arg resolved ONCE centrally in runTool; **`touchLocalIndex`** updates the index entry
+  (name/weight/goal/lastSaved) after every local-plan write so trainer-home cards stay correct;
+  meal/workout PROPOSALS echo `localPlanId` so the Accept-card callables write to the same file; App
+  passes `onDataChanged={reloadProfilesIndex}` (new helper, also reused by the Trainerize import) to the
+  trainer screens' AIChatPanel so Local Plans cards refresh live after AI writes. System prompt: trainer
+  section instructs list_local_plans + refer to files by NAME. **E2E-verified live** (trainer.uitest):
+  listing worked (names + sim flags); "set Prospect Pat's goal weight to 185" → plan data 185 + index
+  185 + the dashboard card live-refreshed with no reload; no console errors. All four AI fns redeployed;
+  frontend pushed. Also answered Kevin: Trainerize API calls are free (Studio plan; 1000/min is a
+  throttle) — the only cost is Firebase compute/writes (~pennies, on the existing Google bill).
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a
