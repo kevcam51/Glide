@@ -166,10 +166,27 @@ his passkey exists. New house icons: fingerprint, sync, pause, watch (emoji swap
 S86–88 features per Kevin's icon rule — NEW FEATURES MUST USE src/icons.jsx ICONS, NOT EMOJI).
 
 ## ⏭️ NEXT SESSION — start here
-Both S88-queued builds are DONE (see ✅ S89 above). **Next big build: STRIPE BILLING** — the biggest
-remaining gap (trials aren't enforced; see docs/BLAZE_ROADMAP.md's Stripe section + the open product
-decisions listed there). Before starting, confirm with Kevin: pricing tiers, who pays (client vs
-trainer vs both), and whether Stripe Connect revenue splits (CLAUDE.md roadmap) are v1 or later.
+**STRIPE BILLING v1 IS BUILT (S89b) but NOT DEPLOYED — finish the launch checklist:**
+Kevin's decisions are LOCKED (don't re-ask): both audiences pay, simple subscriptions (Connect splits
+later), trial expiry locks premium / basics stay free, flat monthly (placeholder $49 coach / $9.99
+client — confirm before LIVE mode). Code is committed: premium gate (profile.js `isPremium` +
+server `trialExpiredFor` in aichat.js/transcribe.js + AIChatPanel lock card), functions/billing.js
+(createCheckoutSession / createPortalSession / stripeWebhook), SideMenu Upgrade + Manage rows,
+`?billing=success` return polling. **Remaining, in order:**
+1. Kevin: `firebase login --reauth --no-localhost` (CLI token expired mid-S89).
+2. Kevin: Stripe TEST secret key → `printf 'sk_test_…' | firebase functions:secrets:set
+   STRIPE_SECRET_KEY --data-file=-` (setup steps in the functions/billing.js header).
+3. Deploy: `firebase deploy --only functions:aiChat,functions:aiChatStream,functions:transcribeAudio,functions:createCheckoutSession,functions:createPortalSession,functions:stripeWebhook`
+   (new callables need the public invoker — should bind clean per the S61 org-policy override).
+4. Stripe dashboard → add webhook endpoint
+   `https://us-central1-calorieiq-29762.cloudfunctions.net/stripeWebhook` with events
+   checkout.session.completed + customer.subscription.updated/deleted → set STRIPE_WEBHOOK_SECRET
+   → redeploy stripeWebhook.
+5. E2E in test mode: card 4242 4242 4242 4242 → subscriptionStatus flips "active", banner clears,
+   Manage-subscription row appears; simulate an EXPIRED trial (admin/privileged write of
+   trialStartedAt ~40 days ago on a test profile — owner writes are rules-blocked) → chat shows the
+   lock card, aiChat/stream/transcribe all reject, Upgrade → checkout → unlock loop works.
+6. LIVE mode when Kevin's ready: real prices confirmed, live key + live webhook secret swapped in.
 
 ### Also pending
 - **NEW STANDING STRATEGY DOC: `docs/ECOSYSTEM.md`** (S88 close) — Kevin's north star: Glide great

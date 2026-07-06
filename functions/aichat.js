@@ -185,6 +185,24 @@ ${GLIDE_KNOWLEDGE}`;
 
 // Read the caller's profile → role, budget, today's usage, system prompt, tools,
 // and the tool-execution context. Shared by both entry points.
+// Hard premium gate (Stripe v1, S89): the AI layer locks when a trial has
+// EXPIRED and no subscription is active. Accounts with no trialStartedAt
+// (created before trials existed, incl. admin/test accounts) are grandfathered.
+// Keep the semantics in sync with src/profile.js isPremium() and the copy in
+// functions/transcribe.js.
+function trialExpiredFor(profile) {
+  if (!profile) return false;
+  if (profile.subscriptionStatus === "active") return false;
+  if (profile.role === "admin") return false;
+  if (profile.entitlements && profile.entitlements.premium === true) return false;
+  const t = profile.trialStartedAt;
+  const startMs = t && typeof t.toMillis === "function" ? t.toMillis()
+    : typeof t === "number" ? t : null;
+  if (!startMs) return false; // pre-trial account — grandfathered
+  return Date.now() >= startMs + (profile.trialLengthDays || 30) * 86400000;
+}
+const TRIAL_EXPIRED_MSG = "Your free trial has ended — upgrade to keep using Glide AI. Your data and manual logging stay free.";
+
 async function setupChat(uid) {
   const db = admin.firestore();
   const profile = (await db.doc(`users/${uid}`).get()).data() || {};
@@ -211,6 +229,7 @@ async function setupChat(uid) {
   const system = [{ type: "text", text: buildSystemPrompt(role, isTrainer, foodDb), cache_control: { type: "ephemeral" } }];
   return {
     role, isTrainer, budget, usageRef, used, system,
+    trialExpired: trialExpiredFor(profile),
     tools: buildTools(role, { foodDb }),
     toolCtx: { callerUid: uid, role, isTrainer, today: todayLocal(), nowTime: nowTimeLocal(), callerName },
   };
@@ -252,7 +271,10 @@ exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], region: "us-central1", m
     throw new HttpsError("invalid-argument", "Send at least one user message.");
   }
 
-  const { budget, usageRef, used, system, tools, toolCtx } = await setupChat(uid);
+  const { budget, usageRef, used, system, tools, toolCtx, trialExpired } = await setupChat(uid);
+  if (trialExpired) {
+    throw new HttpsError("permission-denied", TRIAL_EXPIRED_MSG, { reason: "trial-expired" });
+  }
   if (used >= budget) {
     throw new HttpsError("resource-exhausted",
       "You've reached today's AI usage limit. It resets tomorrow.");
@@ -346,7 +368,7 @@ exports.aiChatStream = onRequest(
       res.status(500).json({ error: "setup-failed" });
       return;
     }
-    const { budget, usageRef, used, system, tools, toolCtx } = setup;
+    const { budget, usageRef, used, system, tools, toolCtx, trialExpired } = setup;
 
     // SSE response headers.
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -356,6 +378,11 @@ exports.aiChatStream = onRequest(
     if (res.flushHeaders) res.flushHeaders();
     const sse = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 
+    if (trialExpired) {
+      sse("error", { code: "trial-expired", message: TRIAL_EXPIRED_MSG });
+      res.end();
+      return;
+    }
     if (used >= budget) {
       sse("error", { code: "resource-exhausted", message: "You've reached today's AI usage limit. It resets tomorrow." });
       res.end();

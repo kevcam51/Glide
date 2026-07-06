@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isProUser, aiFoodDbEnabled, setAiFoodDbEnabled } from "./profile.js";
+import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isProUser, isPremium, aiFoodDbEnabled, setAiFoodDbEnabled } from "./profile.js";
 import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } from "./clientData.js";
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
@@ -10352,6 +10352,26 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
 // awaits the full reply. Rendered via createPortal so its fixed positioning
 // escapes the .page-transition transform trap (same fix as the other modals).
 const callAiChat = httpsCallable(functions, "aiChat");
+// Stripe billing (S89): checkout starts a subscription for the caller's role
+// (server picks the price — never trust the client); portal manages/cancels.
+const callCreateCheckout = httpsCallable(functions, "createCheckoutSession");
+const callCreatePortal = httpsCallable(functions, "createPortalSession");
+// Start Stripe Checkout and bounce the browser there. Returns false on failure
+// so callers can show their own error state.
+async function startCheckout() {
+  try {
+    const res = await callCreateCheckout({ origin: window.location.origin });
+    if (res.data && res.data.url) { window.location.href = res.data.url; return true; }
+  } catch (e) { console.error("checkout failed:", e && e.message); }
+  return false;
+}
+async function openBillingPortal() {
+  try {
+    const res = await callCreatePortal({ origin: window.location.origin });
+    if (res.data && res.data.url) { window.location.href = res.data.url; return true; }
+  } catch (e) { console.error("portal failed:", e && e.message); }
+  return false;
+}
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
 const callSetWorkout = httpsCallable(functions, "setWorkoutSchedule"); // workout Accept-card direct write (Session 75)
 const callTranscribe = httpsCallable(functions, "transcribeAudio"); // voice → text (Whisper, Session 79)
@@ -10464,7 +10484,7 @@ function blobToBase64(blob) {
   });
 }
 
-function AIChatPanel({ role, onDataChanged }) {
+function AIChatPanel({ role, onDataChanged, premium = true }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]); // {role:'user'|'assistant', content, image?}
   const [draft, setDraft] = useState("");
@@ -10482,6 +10502,7 @@ function AIChatPanel({ role, onDataChanged }) {
   const [size, setSize] = useState("compact");           // "compact" corner card | "full" near-fullscreen
   const [pasteOpen, setPasteOpen] = useState(false);     // "Paste from AI" import box open
   const [pasteText, setPasteText] = useState("");        // pasted text from another AI
+  const [upgrading, setUpgrading] = useState(false);     // Stripe checkout redirect in flight (trial-expired lock)
   // "Precise food data" (Pro) — the AI pulls real database values for branded
   // foods instead of estimating. Gated by entitlement; free users see it locked.
   const [pro, setPro] = useState(false);                 // entitled to precise food data
@@ -10765,6 +10786,7 @@ function AIChatPanel({ role, onDataChanged }) {
     const isOverride = typeof overrideText === "string";
     const text = (isOverride ? overrideText : draft).trim();
     const img = isOverride ? null : pendingImage;
+    if (!premium) return; // trial expired — the lock panel is showing; server enforces too
     if ((!text && !img) || busy) return;
     setError("");
     const next = [...messages, { role: "user", content: text, image: img || undefined }];
@@ -10805,7 +10827,9 @@ function AIChatPanel({ role, onDataChanged }) {
       if (done && done.wrote && typeof onDataChanged === "function") onDataChanged();
     } catch (streamErr) {
       const sc = (streamErr && streamErr.code) || "";
-      if (sc.includes("resource-exhausted")) {
+      if (sc.includes("trial-expired")) {
+        setError("Your free trial has ended — upgrade to keep using Glide AI.");
+      } else if (sc.includes("resource-exhausted")) {
         setError("You've reached today's AI usage limit. It resets tomorrow.");
       } else if (streamed || gotEvent) {
         // The stream STARTED then broke — don't re-send (tools may have written).
@@ -10825,7 +10849,8 @@ function AIChatPanel({ role, onDataChanged }) {
           if (res.data && res.data.wrote && typeof onDataChanged === "function") onDataChanged();
         } catch (e) {
           const code = (e && e.code) || "";
-          if (code.includes("resource-exhausted")) setError("You've reached today's AI usage limit. It resets tomorrow.");
+          if (code.includes("permission-denied") && ((e.details && e.details.reason === "trial-expired") || /trial/i.test(e.message || ""))) setError("Your free trial has ended — upgrade to keep using Glide AI.");
+          else if (code.includes("resource-exhausted")) setError("You've reached today's AI usage limit. It resets tomorrow.");
           else if (code.includes("unauthenticated")) setError("Please sign in again to use the assistant.");
           else setError("The assistant is temporarily unavailable. Please try again.");
         }
@@ -10909,6 +10934,28 @@ function AIChatPanel({ role, onDataChanged }) {
               className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-lg leading-none text-fg cursor-pointer hover:bg-surface2">✕</button>
             </div>
           </div>
+
+          {/* Trial-expired lock (Stripe v1): premium=false replaces the whole
+              chat body — server-side enforcement lives in aiChat/aiChatStream/
+              transcribeAudio, this is the friendly face of it. Basics (manual
+              logging, viewing data) stay free elsewhere in the app. */}
+          {!premium ? (
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-8 flex flex-col items-center justify-center gap-3 text-center">
+              <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round">
+                <rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+              </svg>
+              <div className="font-display text-[1.05rem] text-fg">Your free trial has ended</div>
+              <div className="max-w-[320px] text-[.84rem] leading-relaxed text-muted">
+                Glide AI — chat, photo &amp; voice logging, and coaching tools — is part of the paid plan.
+                <span className="text-fg font-semibold"> Your data and manual logging stay free.</span>
+              </div>
+              <button onClick={async () => { if (upgrading) return; setUpgrading(true); const ok = await startCheckout(); if (!ok) setUpgrading(false); }}
+                disabled={upgrading}
+                className="mt-1 rounded-xl border-none bg-primaryfill px-6 py-3 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-60">
+                {upgrading ? "Opening checkout…" : "Upgrade to keep Glide AI"}
+              </button>
+            </div>
+          ) : (<>
 
           {/* Precise food data (Pro) toggle strip — locked for free users. */}
           <div className="border-b border-border bg-surface">
@@ -11177,6 +11224,7 @@ function AIChatPanel({ role, onDataChanged }) {
               </div>
             </div>
           )}
+          </>)}
         </div>
       )}
     </div>,
@@ -11203,7 +11251,7 @@ const COACH_TIPS = [
   "Ask your AI coach to estimate a meal — just describe it or snap a photo.",
 ];
 
-function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPrefs }) {
+function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPrefs, premium = true }) {
   // The client's plan lives in their own account as "caliq-self"; today's log is
   // "caliq-log-self-{date}". The client is always on their own account (no remote
   // routing), so we read/write their own window.storage directly.
@@ -11940,7 +11988,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
 
       {/* AI assistant — floating button + collapsible chat (Session 61).
           onDataChanged reloads the plan/log when the AI logs a meal (Session 63). */}
-      <AIChatPanel role={role} onDataChanged={() => load(activePlanId)} />
+      <AIChatPanel role={role} premium={premium} onDataChanged={() => load(activePlanId)} />
     </div>
   );
 }
@@ -12577,12 +12625,14 @@ function InviteHub({ open, onClose, meName }) {
 // A hamburger (≡) opens a slide-out drawer with app navigation, inline name
 // editing, and sign-out. Rendered globally by App so it's on every screen.
 const ROLE_LABEL = { client: "Client", head_trainer: "Trainer", sub_trainer: "Trainer", admin: "Admin" };
-function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onNameSaved, idleSignOut, onSetIdleSignOut }) {
+function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onNameSaved, idleSignOut, onSetIdleSignOut }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
   const [busy, setBusy] = useState(false);
   const [showNotif, setShowNotif] = useState(false); // Notification Center section (Session 76)
+  const [upgradeBusy, setUpgradeBusy] = useState(false); // Stripe checkout/portal redirect in flight (S89)
+  const [upgradeErr, setUpgradeErr] = useState(false);
   useBackClose(open, onClose);                        // phone Back closes the menu
   // Face ID / Touch ID passkey setup (S87). pkDone = a passkey was registered
   // from this device (local hint — the credential itself lives server-side).
@@ -12685,7 +12735,8 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
           )}
         </div>
 
-        {/* Trial status — soft/informational (no hard lock until billing exists) */}
+        {/* Trial status + Upgrade (Stripe v1, S89): expiry now hard-locks the AI
+            layer (basics stay free), and the banner is the upgrade entry point. */}
         {trial && (
           <div style={{ padding: "10px 12px", borderRadius: 10, marginBottom: 12,
             background: trial.expired ? "rgba(248,113,113,.10)" : trial.daysLeft <= 5 ? "rgba(251,191,36,.10)" : "rgba(8,220,224,.08)",
@@ -12694,7 +12745,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
               <div style={{ fontSize: ".8rem", lineHeight: 1.4 }}>
                 <span style={{ fontWeight: 700, color: "var(--red)" }}>⚠️ Your trial has ended.</span>
                 <div style={{ color: "var(--muted)", marginTop: 2 }}>
-                  {isTrainer ? "Reach out to keep your coaching workspace active." : "Contact your trainer to keep your plan going."}
+                  Glide AI is paused — your data and manual logging stay free.
                 </div>
               </div>
             ) : (
@@ -12705,7 +12756,22 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
                 <div style={{ color: "var(--muted)", marginTop: 2 }}>{trial.lengthDays}-day free trial</div>
               </div>
             )}
+            <button onClick={async () => { setUpgradeBusy(true); const ok = await startCheckout(); if (!ok) { setUpgradeBusy(false); setUpgradeErr(true); } }}
+              disabled={upgradeBusy}
+              style={{ marginTop: 8, width: "100%", padding: "9px 12px", borderRadius: 8, border: "none",
+                background: "var(--accent-fill)", color: "#0b0b12", fontWeight: 800, fontSize: ".82rem",
+                cursor: "pointer", opacity: upgradeBusy ? .6 : 1 }}>
+              {upgradeBusy ? "Opening checkout…" : trial.expired ? "Upgrade to keep Glide AI" : "Upgrade now"}
+            </button>
+            {upgradeErr && <div style={{ marginTop: 6, fontSize: ".72rem", color: "var(--red)" }}>Couldn't open checkout — try again in a moment.</div>}
           </div>
+        )}
+        {/* Active subscription → manage/cancel via the Stripe customer portal. */}
+        {subActive && (
+          <button style={item} disabled={upgradeBusy}
+            onClick={async () => { setUpgradeBusy(true); const ok = await openBillingPortal(); if (!ok) { setUpgradeBusy(false); setUpgradeErr(true); } }}>
+            <Icon name="card" size={19} color="var(--accent)" /> <span>{upgradeBusy ? "Opening…" : "Manage subscription"}</span>
+          </button>
         )}
 
         {/* Navigation */}
@@ -12843,6 +12909,8 @@ export default function App() {
   const [meUid, setMeUid] = useState("");     // current user's uid
   const [meEmail, setMeEmail] = useState(""); // current user's email (for the menu)
   const [meTrial, setMeTrial] = useState(null); // trial countdown state (or null)
+  const [mePremium, setMePremium] = useState(true); // AI-layer access (locks on trial expiry)
+  const [meSubStatus, setMeSubStatus] = useState(null); // "trial" | "active" | "canceled" (drives Manage subscription)
   const [menuOpen, setMenuOpen] = useState(false); // side menu (Session 23)
   // Notification preferences (Session 76) — a master on/off + per-type toggles,
   // in one doc (caliq-notif-prefs), surfaced in the side-menu Notification Center
@@ -12915,6 +12983,8 @@ export default function App() {
           setMeUid(prof.uid || "");
           setMeEmail(prof.email || "");
           setMeTrial(trialInfo(prof));
+          setMePremium(isPremium(prof));
+          setMeSubStatus(prof.subscriptionStatus || null);
         }
       } catch(e) {}
       try {
@@ -12923,6 +12993,33 @@ export default function App() {
       } catch(e) { /* none saved yet → defaults (all on) */ }
       setLoading(false);
     })();
+  }, []);
+
+  // Returning from Stripe Checkout (?billing=success): the webhook flips
+  // profile.subscriptionStatus moments later — poll the profile briefly so the
+  // trial banner / premium gate update without a manual reload, and strip the
+  // param from the URL (matches the ?invite= cleanup pattern).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const b = params.get("billing");
+    if (!b) return;
+    params.delete("billing");
+    const qs = params.toString();
+    window.history.replaceState({}, "", window.location.pathname + (qs ? "?" + qs : ""));
+    if (b !== "success") return;
+    let tries = 0;
+    const timer = setInterval(async () => {
+      tries++;
+      try {
+        const prof = await getProfile();
+        if (prof && prof.subscriptionStatus === "active") {
+          setMeTrial(trialInfo(prof)); setMePremium(isPremium(prof)); setMeSubStatus("active");
+          clearInterval(timer);
+        }
+      } catch (e) {}
+      if (tries >= 10) clearInterval(timer); // give up after ~20s; next app load picks it up
+    }, 2000);
+    return () => clearInterval(timer);
   }, []);
 
   // Auto sign-out after inactivity — security hygiene, especially on shared or
@@ -13725,7 +13822,7 @@ export default function App() {
       </button>
       <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} role={role} meName={meName} meEmail={meEmail}
         idleSignOut={idleSignOut} onSetIdleSignOut={onSetIdleSignOut}
-        isTrainer={isTrainerHome} trial={meTrial}
+        isTrainer={isTrainerHome} trial={meTrial} subActive={meSubStatus === "active"}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
         onHome={() => { if (isTrainerHome) setHomeTab("dashboard"); goToProfiles(); }}
         onDashboard={() => { setHomeTab("analytics"); goToProfiles(); }}
@@ -13740,7 +13837,7 @@ export default function App() {
     // "caliq-self"), not a list of other people's profiles.
     if (role === ROLES.CLIENT) {
       return <>{chrome}<ClientHome onOpenPlan={() => selectProfile("self")}
-        meUid={meUid} meName={meName} role={role}
+        meUid={meUid} meName={meName} role={role} premium={mePremium}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs} /></>;
     }
     if (isTrainerHome && homeTab === "analytics") {
@@ -13748,7 +13845,7 @@ export default function App() {
         onOpenClientPlan={openClientPlan}
         onGoClients={() => setHomeTab("clients")}
         meUid={meUid} meName={meName} meRole={role}
-      /><AIChatPanel role={role} onDataChanged={reloadProfilesIndex} /></>;
+      /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
     }
     if (isTrainerHome && homeTab === "dashboard") {
       return <>{chrome}<TrainerDashboard
@@ -13764,7 +13861,7 @@ export default function App() {
         onTrainerizeImport={importFromTrainerize}
         meUid={meUid} meName={meName} meRole={role}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
-      /><AIChatPanel role={role} onDataChanged={reloadProfilesIndex} /></>;
+      /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
     }
     return <>{chrome}<ProfileSelector
       profiles={profiles} folders={folders} loading={loading}
@@ -13778,7 +13875,7 @@ export default function App() {
       onOpenClientPlan={openClientPlan}
       onLinked={removeLocalProfileById} onCopyToLocal={copyClientToLocal}
       onRename={renameProfile}
-    /><AIChatPanel role={role} onDataChanged={reloadProfilesIndex} /></>;
+    /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
   }
 
   return (
@@ -13929,7 +14026,7 @@ export default function App() {
           leaving the screen. NOTE: for a CLIENT this targets their own plan; a
           trainer viewing a client should name the client (or the open plan
           live-syncs the change via the S70 listeners). */}
-      {step === 5 && <AIChatPanel role={role} onDataChanged={reloadPlanLive} />}
+      {step === 5 && <AIChatPanel role={role} premium={mePremium} onDataChanged={reloadPlanLive} />}
     </>
   );
 }

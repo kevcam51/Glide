@@ -12,9 +12,27 @@
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
+const admin = require("firebase-admin");
 
 const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
 const GROQ_API_KEY = defineSecret("GROQ_API_KEY");
+
+// Hard premium gate (Stripe v1, S89) — voice is part of the AI layer, so it
+// locks with the trial like aiChat. Same semantics as aichat.js
+// trialExpiredFor() / src/profile.js isPremium(); no-trialStartedAt accounts
+// are grandfathered. Kept as a small local copy so this function stays
+// independently deployable (it doesn't share aitools.js).
+function trialExpiredFor(profile) {
+  if (!profile) return false;
+  if (profile.subscriptionStatus === "active") return false;
+  if (profile.role === "admin") return false;
+  if (profile.entitlements && profile.entitlements.premium === true) return false;
+  const t = profile.trialStartedAt;
+  const startMs = t && typeof t.toMillis === "function" ? t.toMillis()
+    : typeof t === "number" ? t : null;
+  if (!startMs) return false;
+  return Date.now() >= startMs + (profile.trialLengthDays || 30) * 86400000;
+}
 
 // PRIMARY is tried first; if it errors and FALLBACK is set, that's tried next.
 // Groq is PRIMARY: it's much faster than OpenAI Whisper, and in practice the
@@ -73,6 +91,11 @@ exports.transcribeAudio = onCall(
   async (request) => {
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Please sign in to use voice.");
+    const profile = (await admin.firestore().doc(`users/${uid}`).get()).data();
+    if (trialExpiredFor(profile)) {
+      throw new HttpsError("permission-denied",
+        "Your free trial has ended — upgrade to keep using Glide AI voice.", { reason: "trial-expired" });
+    }
 
     const b64 = request.data && request.data.audio;
     const mimeType = (request.data && request.data.mimeType) || "audio/webm";

@@ -60,6 +60,7 @@ const GLYPHS = {
   sync: (<><path d="M20 5v5h-5" /><path d="M4 19v-5h5" /><path d="M19.5 10a8 8 0 0 0-14-3.5" /><path d="M4.5 14a8 8 0 0 0 14 3.5" /></>),
   pause: (<><path d="M9 5.5v13" /><path d="M15 5.5v13" /></>),
   watch: (<><circle cx="12" cy="12" r="5.6" /><path d="M12 9.5V12l1.8 1.2" /><path d="M9 6.6 9.6 2.5h4.8L15 6.6" /><path d="M9 17.4 9.6 21.5h4.8L15 17.4" /></>),
+  card: (<><rect x="2.5" y="5.5" width="19" height="13" rx="2.2" /><path d="M2.5 10h19" /><path d="M6 14.5h4" /></>),
 };
 
 export function Icon({ name, size = 20, variant = "outline", color = "currentColor",

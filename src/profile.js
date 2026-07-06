@@ -105,6 +105,20 @@ export function isProUser(profile) {
   return profile.subscriptionStatus === "active"
     || (profile.entitlements && profile.entitlements.foodAccuracy === true);
 }
+
+// Premium access (Stripe v1, S89): the AI layer (chat, photo/voice logging,
+// coaching tools) is available while a subscription is active OR the trial is
+// still running. trialInfo() returns null for active subs, admins, and
+// pre-trial legacy accounts — all premium. Only an EXPIRED trial locks it;
+// basics (manual logging, viewing data) stay free either way. Keep in sync
+// with functions/aichat.js trialExpiredFor().
+export function isPremium(profile) {
+  if (!profile) return true; // profile still loading — never flash a lock
+  if (profile.entitlements && profile.entitlements.premium === true) return true;
+  const t = trialInfo(profile);
+  return !t || !t.expired;
+}
+
 // A Pro user's toggle for whether the AI uses the food database (default on).
 export function aiFoodDbEnabled(profile) {
   return !!profile && profile.aiFoodDbEnabled !== false;

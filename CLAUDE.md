@@ -2025,6 +2025,41 @@ enabled (Blaze has no default spending cap).
   segments; all imported test data deleted from the test account (118 log docs + profile + folder).
   Streaks/calendar dots/coach views now light up from Trainerize workouts. **NOTE:** auto-sync is still
   OFF by Kevin's toggle — workout days refresh on manual import until he re-enables it.
+- Session 89b (same session): **STRIPE BILLING v1 — built + UI-verified; DEPLOY BLOCKED on Kevin (reauth + Stripe key).**
+  Kevin's product decisions (locked, don't re-ask): **both audiences pay** (trainer plan + client premium),
+  **simple subscriptions** (Checkout + portal + webhook — Stripe Connect revenue splits are a LATER phase),
+  **trial expiry locks premium while basics stay free**, **flat monthly** pricing. Placeholder prices
+  (confirm before live mode): Glide Coach **$49/mo** (head/sub trainer), Glide Premium **$9.99/mo** (client).
+  (1) **Premium gate (testable now):** `isPremium(profile)` in src/profile.js — active sub OR
+  `entitlements.premium` OR trial still running; `trialInfo()` returns null for active/admin/**legacy
+  accounts with no trialStartedAt → grandfathered** (all existing accounts stay unlocked). Server-side
+  enforcement (the real gate): `trialExpiredFor()` in **functions/aichat.js** (callable throws
+  permission-denied `{reason:"trial-expired"}`; stream emits SSE `error {code:"trial-expired"}`) and a
+  synced copy in **functions/transcribe.js** (voice). Client: `mePremium` state → `premium` prop on all 5
+  AIChatPanel mounts (+ ClientHome pass-through); premium=false replaces the whole chat body with an
+  on-brand lock card (inline lock SVG, "Your data and manual logging stay free", **Upgrade → Checkout**
+  button) and send() is guarded; error mapping added for both stream + callable paths. UI-verified live
+  via a temp forced mock (lock card, banner, error fallback — reverted); grandfathered regression clean.
+  (2) **Stripe plumbing (functions/billing.js + index.js exports, `stripe` npm dep):**
+  `createCheckoutSession` (role-priced server-side — never trusts client input; get-or-creates
+  products/prices by lookup_key `glide_coach_monthly`/`glide_premium_monthly`, so NO manual dashboard
+  setup; origin allowlisted like webauthn), `createPortalSession` (manage/cancel via
+  `profile.stripeCustomerId`), `stripeWebhook` (onRequest, signature-verified; checkout.session.completed
+  → `subscriptionStatus:"active"` + stripeCustomerId/SubscriptionId; subscription.updated/deleted →
+  active|trialing|past_due keep "active", else "canceled"; uid via client_reference_id /
+  subscription.metadata.uid / customerId query). **The webhook is the ONLY subscriptionStatus writer**
+  (S85 rules block owner writes; Admin SDK bypasses). Frontend: SideMenu trial banner gained an
+  **Upgrade** button (+ "Manage subscription" row via new `meSubStatus` when active; new house `card`
+  icon in src/icons.jsx); `?billing=success` return path polls the profile ~20s so the gate/banner flip
+  without a reload; module helpers `startCheckout()`/`openBillingPortal()`.
+  **⛔ BLOCKED on Kevin, in order:** (a) `firebase login --reauth --no-localhost` (CLI token expired
+  mid-session — also blocks the server-side expiry E2E), (b) Stripe TEST secret key →
+  `printf 'sk_test_…' | firebase functions:secrets:set STRIPE_SECRET_KEY --data-file=-`, (c) deploy
+  `aiChat,aiChatStream,transcribeAudio,createCheckoutSession,createPortalSession,stripeWebhook`,
+  (d) add the webhook endpoint in the Stripe dashboard (URL + 3 events in functions/billing.js header)
+  → set `STRIPE_WEBHOOK_SECRET` → redeploy stripeWebhook, (e) E2E with Stripe test card 4242… →
+  verify subscriptionStatus flips + banner clears; simulate an expired trial (admin write) → verify the
+  lock + upgrade→unlock loop. Setup steps are documented in the functions/billing.js header.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

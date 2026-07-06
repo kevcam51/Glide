@@ -102,3 +102,8 @@ exports.passkeyRegisterOptions = require("./webauthn").passkeyRegisterOptions;
 exports.passkeyRegisterVerify = require("./webauthn").passkeyRegisterVerify;
 exports.passkeyLoginOptions = require("./webauthn").passkeyLoginOptions;
 exports.passkeyLoginVerify = require("./webauthn").passkeyLoginVerify;
+// Stripe billing v1 (S89) — simple subscriptions; webhook is the only writer
+// of profile.subscriptionStatus. See functions/billing.js for setup steps.
+exports.createCheckoutSession = require("./billing").createCheckoutSession;
+exports.createPortalSession = require("./billing").createPortalSession;
+exports.stripeWebhook = require("./billing").stripeWebhook;
