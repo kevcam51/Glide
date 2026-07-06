@@ -376,7 +376,11 @@ function nutritionTargets(d) {
     const bmr = calcBMR(d.gender, w, d.heightFt, d.heightIn, Number(d.age));
     if (bmr && isFinite(bmr)) {
       const tdee = Math.round(bmr * (ACTIVITY_MULT[d.activityLevel] || 1.2));
-      cal = Math.max(1200, Math.round(tdee - 500 + weeklyPlanBurn(d) / 7));
+      // Nutrition approach (matches App.jsx isEatback): "eatback" (default)
+      // adds workout burn to the eating target; "accelerate" keeps TDEE−500
+      // and lets the burn speed up the goal date instead.
+      const eatback = (d.deficitMode || "eatback") !== "accelerate";
+      cal = Math.max(1200, Math.round(tdee - 500 + (eatback ? weeklyPlanBurn(d) / 7 : 0)));
     }
   }
   const mt = d.macroTargets || {};
@@ -424,6 +428,9 @@ function profileSummary(d) {
     bodyFatPct: num(d.bodyFat),
     goalBodyFatPct: num(d.goalBodyFat),
     trainerNotes: d.trainerNotes || null,
+    // "eatback" = workout burn added to the daily target (easier diet);
+    // "accelerate" = tighter target, workouts speed up the goal date.
+    deficitMode: d.deficitMode === "accelerate" ? "accelerate" : "eatback",
     missing,
     complete: missing.length === 0,
     calorieTarget: t.calorieTarget,
@@ -546,6 +553,8 @@ function buildTools(role, opts = {}) {
           bodyFatPct: { type: "number", description: "Current body-fat %, optional" },
           goalBodyFatPct: { type: "number", description: "Goal body-fat %, optional" },
           trainerNotes: { type: "string", description: "Free-text coaching notes on the plan (mainly for trainers). Replaces the existing notes." },
+          deficitMode: { type: "string", enum: ["eatback", "accelerate"],
+            description: "Nutrition approach: 'eatback' (default — workout burn is added to the daily calorie target: easier diet, steady ~1 lb/wk) or 'accelerate' (target stays at TDEE−500: tighter diet, workouts speed up the goal date instead). Set when the user chooses sustainability vs speed." },
           ...clientIdProp,
         },
       },
@@ -1025,6 +1034,9 @@ async function runTool(name, input, ctx) {
     if (input.bodyFatPct != null) { const b = clampNum(input.bodyFatPct, 2, 70, true); if (b) { d.bodyFat = b; changes.push("body fat"); } }
     if (input.goalBodyFatPct != null) { const b = clampNum(input.goalBodyFatPct, 2, 70, true); if (b) { d.goalBodyFat = b; changes.push("goal body fat"); } }
     if (typeof input.trainerNotes === "string") { d.trainerNotes = input.trainerNotes.slice(0, 4000); changes.push("trainer notes"); }
+    if (input.deficitMode === "eatback" || input.deficitMode === "accelerate") {
+      d.deficitMode = input.deficitMode; changes.push(`nutrition approach: ${input.deficitMode === "eatback" ? "eat more (burn buys food)" : "faster results (burn buys speed)"}`);
+    }
     if (changes.length === 0) return { error: "No valid profile fields were provided." };
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
     await appendHistory(db, uid, planId, ctx, `updated profile: ${changes.join(", ")}`);

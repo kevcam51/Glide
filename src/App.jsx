@@ -2834,15 +2834,20 @@ function StepCardio({ data, onChange, onBack, onNext }) {
 // A sales/motivation-framed before→after card shown at the top of a SIMULATION's
 // Results. Reuses the same projection math as the Timeline tab (weeksToGoal /
 // friendlyTime) — diet alone, and diet + the plan's weekly cardio burn.
-function SimulationSummary({ data, totalBurn }) {
+function SimulationSummary({ data, totalBurn, totalStrBurn = 0 }) {
   const current = Number(data.weightLbs) || 0;
   const goal = Number(data.goalWeight) || 0;
   if (!current || !goal || current === goal) return null;
   const losing = goal < current;
   const diff = Math.round(Math.abs(current - goal) * 10) / 10;
-  const wksDiet = losing ? weeksToGoal(diff, 3500) : null;
-  const wksCardio = losing && totalBurn > 0 ? weeksToGoal(diff, 3500 + totalBurn) : null;
-  const bestWks = wksCardio || wksDiet;
+  // Two honest paths (S86): eat-back = steady ~1 lb/wk with a more generous
+  // food target; accelerate = the workout burn stacks onto the deficit for a
+  // faster date at a tighter target. The plan's chosen approach headlines.
+  const weeklyBurnAll = (totalBurn || 0) + (totalStrBurn || 0);
+  const wksEat = losing ? weeksToGoal(diff, 3500) : null;
+  const wksAcc = losing ? weeksToGoal(diff, 3500 + weeklyBurnAll) : null;
+  const eatback = isEatback(data);
+  const bestWks = eatback ? wksEat : wksAcc;
   const targetDate = bestWks
     ? new Date(Date.now() + bestWks * 7 * 86400000).toLocaleDateString(undefined, { month: "long", year: "numeric" })
     : null;
@@ -2866,9 +2871,13 @@ function SimulationSummary({ data, totalBurn }) {
       {targetDate && (
         <div style={{ textAlign: "center", marginTop: 4, fontSize: ".82rem", color: "var(--muted-light)" }}>
           On track to hit goal by <strong style={{ color: "var(--text)" }}>{targetDate}</strong>
-          {wksCardio && wksDiet && wksCardio < wksDiet
-            ? ` — ${friendlyTime(wksDiet - wksCardio)} faster with the cardio in this plan`
-            : ""}
+          {` — ${eatback ? "🍽️ Eat More" : "⚡ Faster Results"} approach`}
+        </div>
+      )}
+      {losing && weeklyBurnAll > 0 && wksEat && wksAcc && (
+        <div style={{ textAlign: "center", marginTop: 6, fontSize: ".74rem", color: "var(--muted-light)", lineHeight: 1.5 }}>
+          🍽️ Eat More: bigger food budget · ~{friendlyTime(wksEat)}
+          &nbsp;·&nbsp; ⚡ Faster: tighter budget · ~{friendlyTime(wksAcc)}
         </div>
       )}
       <div style={{ textAlign: "center", marginTop: 10, fontSize: ".72rem", color: "var(--muted)" }}>
@@ -2880,7 +2889,7 @@ function SimulationSummary({ data, totalBurn }) {
 
 // ─── Results ─────────────────────────────────────────────────────────────────
 
-function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes }) {
+function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode }) {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
   const [showEdit, setShowEdit] = useState(false);
@@ -3025,7 +3034,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
   return (
     <div className="fu">
 
-      {isSimulation && <SimulationSummary data={data} totalBurn={totalBurn} />}
+      {isSimulation && <SimulationSummary data={data} totalBurn={totalBurn} totalStrBurn={totalStrBurn} />}
 
       {/* ── Basic / Pro Toggle ── */}
       <div style={{display:"flex",gap:"4px",background:"var(--s2)",padding:"4px",borderRadius:"12px",border:"1px solid var(--border)",marginBottom:"16px"}}>
@@ -3525,6 +3534,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           totalBurn={totalBurn}
           name={name}
           macroTargets={data.macroTargets}
+          deficitMode={data.deficitMode}
           targets={targets}
           floor={floor}
           avgBurnPerDay={avgBurnPerDay}
@@ -3587,6 +3597,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
       {tab === summaryTabIdx && (
         <SummaryTab
           data={data}
+          onSetDeficitMode={onSetDeficitMode}
           bmr={bmr}
           tdee={tdee}
           actObj={actObj}
@@ -3656,7 +3667,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
 
 function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
   totalBurn, totalStrBurn, activeDays, activeStrDays, avgBurnPerDay, avgStrPerDay,
-  floor, targets, ibwLowLbs, ibwHighLbs, bmi }) {
+  floor, targets, ibwLowLbs, ibwHighLbs, bmi, onSetDeficitMode }) {
 
   const { firstName, lastName, gender, age, weightLbs, heightFt, heightIn, goalWeight } = data;
   const hasGoal = goalWeight && Number(goalWeight) < Number(weightLbs);
@@ -3665,7 +3676,11 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
   // Macros at 1 lb/wk deficit — coach/client-set custom targets
   // (data.macroTargets) take precedence over the estimates, matching the
   // Daily Dashboard, so the plan summary never contradicts the tracker.
-  const targetCals = floor(tdee - 500 + avgBurnPerDay + avgStrPerDay);
+  // Both nutrition approaches are computed so the chooser can show real numbers.
+  const eatback = isEatback(data);
+  const targetEat = floor(tdee - 500 + avgBurnPerDay + avgStrPerDay); // burn buys food
+  const targetAcc = floor(tdee - 500);                                 // burn buys speed
+  const targetCals = eatback ? targetEat : targetAcc;
   const mtS = data.macroTargets || {};
   const proteinG = mtS.protein != null ? Number(mtS.protein) : Math.round(Number(weightLbs) * 1.0);
   const fatG = mtS.fat != null ? Number(mtS.fat) : Math.round(Math.round(targetCals * 0.28) / 9);
@@ -3674,9 +3689,15 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
     : Math.round(Math.max(0, targetCals - proteinG * 4 - fatCal) / 4);
   const waterOz = Math.round(Number(weightLbs) * 0.5);
 
-  // Timeline at 1 lb/wk
-  const wksDiet = hasGoal ? weeksToGoal(toLose, 3500) : null;
-  const wksCardio = hasGoal && totalBurn > 0 ? weeksToGoal(toLose, 3500 + totalBurn) : null;
+  // Timelines, one per approach — honest math: eat-back keeps a steady 3,500
+  // cal/wk deficit (~1 lb/wk) no matter the training; accelerate stacks the
+  // full weekly burn on top of the diet deficit.
+  const weeklyBurnAll = (totalBurn || 0) + (totalStrBurn || 0);
+  const wksEat = hasGoal ? weeksToGoal(toLose, 3500) : null;
+  const wksAcc = hasGoal ? weeksToGoal(toLose, 3500 + weeklyBurnAll) : null;
+  const goalDate = (wks) => wks
+    ? new Date(Date.now() + wks * 7 * 86400000).toLocaleDateString(undefined, { month: "short", year: "numeric" })
+    : null;
 
   const Row = ({ label, value, color }) => (
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid var(--border)",fontSize:".85rem"}}>
@@ -3761,14 +3782,49 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
         <Row label="Water" value={`${waterOz} oz (~${(waterOz / 8).toFixed(1)} cups)`} color="#4fc3f7" />
       </div>
 
-      {/* Timeline */}
+      {/* Nutrition approach — how workout burn is spent: more food, or a
+          faster goal date. Both options shown with their real numbers; the
+          active one drives every target and projection in the app. */}
+      <div className="sec-title">Nutrition Approach</div>
+      <div className="card" style={{ padding: "14px 16px" }}>
+        <div style={{ fontSize: ".78rem", color: "var(--muted-light)", lineHeight: 1.5, marginBottom: 10 }}>
+          Your workouts burn ~{Math.round(weeklyBurnAll).toLocaleString()} cal/week. Choose how to spend it:
+        </div>
+        {[
+          { id: "eatback", icon: "🍽️", title: "Eat More", desc: "Workout burn is added to your daily calories — easier diet, steady ~1 lb/wk.",
+            line: `${targetEat.toLocaleString()} cal/day${hasGoal && wksEat ? ` · goal ${goalDate(wksEat)}` : ""}` },
+          { id: "accelerate", icon: "⚡", title: "Faster Results", desc: "Keep the tighter target — your workouts speed up the goal date instead.",
+            line: `${targetAcc.toLocaleString()} cal/day${hasGoal && wksAcc ? ` · goal ${goalDate(wksAcc)}` : ""}` },
+        ].map((opt) => {
+          const active = (eatback ? "eatback" : "accelerate") === opt.id;
+          return (
+            <button key={opt.id} onClick={() => onSetDeficitMode && onSetDeficitMode(opt.id)}
+              style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 8, padding: "12px 14px",
+                borderRadius: 10, cursor: onSetDeficitMode ? "pointer" : "default",
+                border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
+                background: active ? "rgba(8,220,224,.08)" : "var(--s2)", color: "var(--text)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <span style={{ fontWeight: 800, fontSize: ".9rem" }}>{opt.icon} {opt.title}</span>
+                {active && <span style={{ fontSize: ".68rem", fontWeight: 800, letterSpacing: ".5px", color: "var(--accent)" }}>✓ ACTIVE</span>}
+              </div>
+              <div style={{ fontSize: ".76rem", color: "var(--muted-light)", margin: "4px 0 6px", lineHeight: 1.45 }}>{opt.desc}</div>
+              <div style={{ fontFamily: "'Sora',sans-serif", fontSize: ".92rem", color: active ? "var(--accent)" : "var(--text-secondary)" }}>{opt.line}</div>
+            </button>
+          );
+        })}
+        <div style={{ fontSize: ".7rem", color: "var(--muted)", lineHeight: 1.45 }}>
+          Same science either way — a client picks by goal: sustainability vs speed.
+        </div>
+      </div>
+
+      {/* Timeline — both approaches, honestly labeled */}
       {hasGoal && (
         <>
-          <div className="sec-title">Estimated Timeline (1 lb/wk)</div>
+          <div className="sec-title">Estimated Timeline</div>
           <div className="card" style={{padding:"14px 16px"}}>
-            <Row label="Diet only" value={friendlyTime(wksDiet)} color="var(--yellow)" />
-            {wksCardio && <Row label="Diet + Cardio" value={friendlyTime(wksCardio)} color="var(--green)" />}
-            {wksCardio && wksDiet && <Row label="Time saved w/ cardio" value={friendlyTime(wksDiet - wksCardio)} color="var(--accent)" />}
+            <Row label={`🍽️ Eat More pace${eatback ? " (active)" : ""}`} value={friendlyTime(wksEat)} color={eatback ? "var(--green)" : "var(--muted-light)"} />
+            {weeklyBurnAll > 0 && <Row label={`⚡ Faster Results pace${!eatback ? " (active)" : ""}`} value={friendlyTime(wksAcc)} color={!eatback ? "var(--green)" : "var(--muted-light)"} />}
+            {weeklyBurnAll > 0 && wksEat && wksAcc && <Row label="Difference" value={friendlyTime(wksEat - wksAcc)} color="var(--accent)" />}
           </div>
         </>
       )}
@@ -4820,14 +4876,16 @@ function SurplusTab({ tdee, totalBurn, avgBurnPerDay, activeDays, name }) {
 // ─── Nutrients Tab ────────────────────────────────────────────────────────────
 
 function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, floor, avgBurnPerDay, avgStrPerDay = 0,
-  activeDays = 0, activeStrDays = 0, dayData = [], strengthDayData = [], macroTargets }) {
+  activeDays = 0, activeStrDays = 0, dayData = [], strengthDayData = [], macroTargets, deficitMode }) {
   const [deficitChoice, setDeficitChoice] = useState(500);
   const [openMicro, setOpenMicro] = useState(null);
   const [openFoodCat, setOpenFoodCat] = useState(null);
 
   // Calorie target for chosen deficit (with avg cardio + strength burn added)
   const avgTotalBurn = avgBurnPerDay + avgStrPerDay;
-  const targetCals = floor(tdee - deficitChoice + avgTotalBurn);
+  // Eat-back mode adds the average workout burn to the eating target;
+  // accelerate mode keeps the raw deficit (burn speeds the date instead).
+  const targetCals = floor(tdee - deficitChoice + (deficitMode !== "accelerate" ? avgTotalBurn : 0));
 
   // ── Macro calculations ──
   // Coach/client-set custom targets (data.macroTargets) take precedence over
@@ -7155,8 +7213,11 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const todayStrength = strengthDayData[dayIdx] || { burned: 0, sessions: [] };
   const todayTotalBurn = todayCardio.burned + todayStrength.burned;
 
-  // Calorie target (1 lb/wk deficit + burns)
-  const target = Math.max(1200, tdee - 500 + Math.round((todayCardio.burned + todayStrength.burned)));
+  // Calorie target (1 lb/wk deficit). Eat-back mode adds TODAY's scheduled
+  // burn on top (training days earn more food); accelerate mode holds the
+  // deficit so the burn speeds up the goal date instead. (Approach is chosen
+  // in Full Plan → Summary → Nutrition approach.)
+  const target = Math.max(1200, tdee - 500 + (isEatback(data) ? Math.round(todayCardio.burned + todayStrength.burned) : 0));
   const logged = dailyLog.calories || 0;
   const remaining = Math.max(0, target - logged);
   const pct = Math.min(100, Math.round((logged / target) * 100));
@@ -8136,7 +8197,8 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
   // Include BOTH cardio and strength burn — this used to add only cardio to
   // the target while the "Weekly burn" line right below counted both, so a
   // strength-only plan's shared card understated the target vs every screen.
-  const targetCals = Math.max(1200, tdee - 500 + Math.round((totalBurn + totalStrBurn) / 7));
+  // (Eat-back mode only; accelerate keeps the raw deficit.)
+  const targetCals = Math.max(1200, tdee - 500 + (isEatback(data) ? Math.round((totalBurn + totalStrBurn) / 7) : 0));
 
   const handleShare = async () => {
     const text = `🏋️ ${fullName(data) || "My"} Glide Plan\n\n` +
@@ -9008,6 +9070,15 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
 // Daily calorie target for a client, using the SAME formula as the Results
 // "Target calories" row (1 lb/wk deficit, avg exercise burn added, floored at
 // 1,200). Returns null if the profile is too incomplete to compute.
+// Nutrition approach (S86, Kevin's call — BOTH options exist, chosen per plan):
+//   "eatback" (default): scheduled-workout burn is added back into the daily
+//     calorie target — easier diet, steady ~1 lb/wk pace.
+//   "accelerate": the target stays at TDEE−500 — harder diet, and the workout
+//     burn SPEEDS UP the goal date instead of buying food.
+// Every target/projection surface routes through this so the two promises
+// ("eat more" vs "get there faster") can never both be claimed at once.
+const isEatback = (d) => ((d && d.deficitMode) || "eatback") !== "accelerate";
+
 function computeClientCalories(d) {
   if (!d) return null;
   const w = Number(d.weightLbs);
@@ -9028,7 +9099,7 @@ function computeClientCalories(d) {
       strength += exBurn(ex, w, s.duration);
     });
   });
-  const target = Math.max(1200, Math.round(tdee - 500 + cardio / 7 + strength / 7));
+  const target = Math.max(1200, Math.round(tdee - 500 + (isEatback(d) ? (cardio + strength) / 7 : 0)));
   return { tdee, target };
 }
 
@@ -9081,7 +9152,8 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     setTzMsg({ ok: true, text: `Importing ${ids.length} client${ids.length === 1 ? "" : "s"} from Trainerize…` });
     try {
       const r = await onTrainerizeImport({ clientIds: ids });
-      setTzMsg({ ok: true, text: `✓ Imported ${r.total} client${r.total === 1 ? "" : "s"} (${r.created} new · ${r.updated} updated) — filed under the “Trainerize” folder in All clients.` });
+      const meals = r.mealDaysTotal ? ` · ${r.mealDaysTotal} day${r.mealDaysTotal === 1 ? "" : "s"} of meals synced` : "";
+      setTzMsg({ ok: true, text: `✓ Imported ${r.total} client${r.total === 1 ? "" : "s"} (${r.created} new · ${r.updated} updated${meals}) — filed under the “Trainerize” folder in All clients.` });
       setTzPick(null);
     } catch (e) {
       setTzMsg({ ok: false, text: tzErrText(e) });
@@ -13590,6 +13662,7 @@ export default function App() {
               <button className="dash-nav-btn" style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:"7px"}} onClick={()=>setShowDash(true)}><Icon name="dashboard" size={16} color="var(--accent)" />Back to Dashboard</button>
             </div>
             <Results data={data} isSimulation={activeIsSim} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
+            onSetDeficitMode={(mode)=>setDataAndSave(p=>({...p, deficitMode: mode}))}
             onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
               // One entry per date: replace any existing check-ins for this date.
               const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);

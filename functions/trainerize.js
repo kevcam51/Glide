@@ -143,6 +143,77 @@ function mapSnapshot(profile, stats, goals) {
 // Wizard step labels (mirror App.jsx SL) — drives the plan-status badge.
 const STEP_LABELS = ["Personal", "Goal Weight", "Activity", "Cardio", "Strength", "Results"];
 
+// ── v2: nutrition history → Glide day logs ──────────────────────────────────
+// Trainerize-NATIVE days carry full meal detail (meal name + clock time + each
+// food with macros); MFP/Fitbit-synced days only carry day totals (those apps
+// don't share per-food data) → those become one "<Source> day total" entry.
+// Imported meals get stable ids "tz{nutritionId}-{i}" so a re-sync REPLACES
+// prior imports (never duplicates) while leaving Glide-logged meals untouched.
+const NUTRITION_DAYS = 365; // how far back a sync reaches (full year of history)
+const MEAL_TYPE_MAP = { breakfast: "breakfast", lunch: "lunch", dinner: "dinner", snacks: "snack", snack: "snack" };
+const r0 = (n) => Math.round(Number(n) || 0);
+
+// One Trainerize nutrition entry → Glide meal items.
+function glideMealsFromEntry(entry, detail) {
+  const out = [];
+  const meals = detail && Array.isArray(detail.meals) ? detail.meals : null;
+  if (meals && meals.length) {
+    let i = 0;
+    for (const meal of meals) {
+      const type = MEAL_TYPE_MAP[String(meal.name || "").toLowerCase()] || "";
+      const time = (String(meal.mealTime || "").match(/\b(\d{2}:\d{2})/) || [])[1] || "";
+      for (const f of Array.isArray(meal.foods) ? meal.foods : []) {
+        out.push({ id: `tz${entry.id}-${i++}`, name: String(f.name || "Food").slice(0, 80), type,
+          calories: r0(f.calories), protein: r0(f.proteins), carbs: r0(f.carbs), fat: r0(f.fat),
+          ...(time ? { time } : {}) });
+      }
+    }
+    if (out.length) return out;
+  }
+  // Summary-only day (MFP / Fitbit / empty detail): one day-total entry.
+  const src = entry.source === "mFP" ? "MyFitnessPal" : entry.source === "fitbit" ? "Fitbit" : "Trainerize";
+  out.push({ id: `tz${entry.id}-0`, name: `${src} day total`, type: "",
+    calories: r0(entry.calories), protein: r0(entry.proteinGrams), carbs: r0(entry.carbsGrams), fat: r0(entry.fatGrams) });
+  return out;
+}
+
+// Sync one client's recent Trainerize nutrition into the profile's day logs.
+// Additive like the app's own meal logging: totals adjust by the DELTA of
+// replaced tz-imported meals, so Glide-logged food on the same day survives.
+async function syncClientNutrition(db, uid, pid, tzUserId, auth) {
+  const startDate = new Date(Date.now() - NUTRITION_DAYS * 86400000).toISOString().slice(0, 10);
+  const endDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const list = await tz("dailyNutrition/getList",
+    { userID: tzUserId, startDate: `${startDate} 00:00:00`, endDate: `${endDate} 23:59:59` }, auth);
+  if (!list.ok) return 0;
+  const entries = (list.json && list.json.nutrition) || [];
+  let days = 0;
+  for (const entry of entries) {
+    if (!entry || !/^\d{4}-\d{2}-\d{2}$/.test(entry.date || "")) continue;
+    // Full meal detail only exists for Trainerize-native entries — one extra
+    // call each; MFP/Fitbit summaries already carry everything they'll give us.
+    let detail = null;
+    if (entry.source === "trainerize") {
+      const r = await tz("dailyNutrition/get", { id: entry.id, userID: tzUserId }, auth);
+      if (r.ok && r.json) detail = r.json.nutrition || null;
+    }
+    const newMeals = glideMealsFromEntry(entry, detail);
+    const logKey = `caliq-log-${pid}-${entry.date}`;
+    const log = (await kvGetJSON(db, uid, logKey)) || { calories: 0, water: 0, weight: 0, meals: [] };
+    if (!Array.isArray(log.meals)) log.meals = [];
+    const isTz = (m) => typeof (m && m.id) === "string" && m.id.startsWith("tz");
+    const oldTz = log.meals.filter(isTz);
+    const sum = (arr, k) => arr.reduce((s, m) => s + (Number(m[k]) || 0), 0);
+    log.meals = [...log.meals.filter((m) => !isTz(m)), ...newMeals];
+    for (const k of ["calories", "protein", "carbs", "fat"]) {
+      log[k] = Math.max(0, (Number(log[k]) || 0) - sum(oldTz, k) + sum(newMeals, k));
+    }
+    await kvSetJSON(db, uid, logKey, log);
+    days++;
+  }
+  return days;
+}
+
 // The importer: pulls the trainer's Trainerize roster + a per-client snapshot
 // (profile, last body stat, goals) and writes each client as a LOCAL PROFILE in
 // the CALLER's Glide account (Option A — see docs/TRAINERIZE-API.md). Deduped
@@ -263,10 +334,16 @@ exports.trainerizeImport = onCall(
       };
       if (existing) { Object.assign(existing, entry); updated++; }
       else { index.push(entry); created++; }
-      results.push({ name, weight: entry.weight, goal: entry.goal, status: u.status || "" });
+      // v2: pull the client's recent nutrition (Trainerize meals in full food
+      // detail; MFP/Fitbit as day totals) into the profile's day logs.
+      let mealDays = 0;
+      try { mealDays = await syncClientNutrition(db, uid, pid, u.id, auth); }
+      catch (e) { console.error("nutrition sync failed for", u.id, e && e.message); }
+      results.push({ name, weight: entry.weight, goal: entry.goal, status: u.status || "", mealDays });
     }
     await kvSetJSON(db, uid, "caliq-index", index);
-    return { ok: true, total: roster.length, created, updated, clients: results };
+    const mealDaysTotal = results.reduce((s, r) => s + (r.mealDays || 0), 0);
+    return { ok: true, total: roster.length, created, updated, mealDaysTotal, clients: results };
   }
 );
 

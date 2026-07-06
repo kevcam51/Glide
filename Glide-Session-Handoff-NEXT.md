@@ -25,12 +25,28 @@ existing group token — so Trainerize v3 (pull clients' daily burn/steps into G
 progress, per docs/TRAINERIZE-API.md) is fully unblocked and is the natural NEXT Trainerize build,
 alongside v2 (workout/program history via program/get + dailyWorkout/get).
 
-## ⏭️ THEN (Kevin's queue): AI-edits-local-plans → biometrics
-Also pending a KEVIN DECISION (flagged S86): the Results/Simulation **projection timelines
-double-count exercise** — the calorie target eats back the burn (diet+cardio deficit is still ~3,500
-cal/wk), but `weeksToGoal(toLose, 3500 + totalBurn)` promises a faster date a client following the
-plan-as-written structurally can't hit. Options: project at 3,500/wk ("cardio lets you eat more, not
-lose faster") or stop adding burn back into the target. Product/sales call — don't silently change.
+## ✅ S86c (same session): Trainerize MEAL SYNC + dual Nutrition Approach — LIVE
+1. **Meal sync (Trainerize v2 nutrition):** every import/re-import now also pulls the client's last
+   365 days of `dailyNutrition` into the profile's day logs (`caliq-log-{pid}-{date}`).
+   **Trainerize-native days = FULL detail** (meal name→type, clock time, every food with macros —
+   verified: "Avocados raw · snack · 17:56 · 240 cal"); **MFP/Fitbit days = one "<Source> day total"
+   entry** (those apps don't share per-food data — verified: "MyFitnessPal day total 540 cal").
+   Imported meals carry ids `tz{nutritionId}-{i}`; re-sync REPLACES them (verified idempotent) and
+   never touches Glide-logged meals; day totals adjust by delta. Detail calls only fire for
+   TZ-native entries (cheap). E2E-verified: 2 clients → 43 day logs.
+2. **Nutrition Approach (the S86 "projection double-count" decision — Kevin chose BOTH):** new plan
+   field `data.deficitMode`: **"eatback"** (default — burn added to the daily target, steady
+   ~1 lb/wk) vs **"accelerate"** (target stays TDEE−500, burn speeds the goal date). Module helper
+   `isEatback(d)`; wired through computeClientCalories, DailyDashboard per-day target, SummaryTab,
+   NutrientsTab, SharePlanCard, SimulationSummary, and server `nutritionTargets`; AI can set it via
+   `set_personal_info.deficitMode` and reads it in `get_profile`. **Chooser UI:** Full Plan →
+   Summary → "Nutrition Approach" card shows BOTH options with their real cal/day + goal date and a
+   ✓ ACTIVE marker; the timeline card shows both paces honestly; SimulationSummary headlines the
+   active mode and footnotes both. Verified live: 220-lb plan with 1,148 cal/wk of training —
+   Eat More 2,733/day → Jan 2027 vs Faster 2,569/day → Dec 2026; switching flips the share card,
+   timeline, and Daily Dashboard target (and persists on the plan).
+
+## ⏭️ THEN (Kevin's queue): AI-edits-local-plans → biometrics → Trainerize v3 (wearable calorieOut/steps into dashboards)
 
 ## ✅ Session 85 shipped (all LIVE): Trainerize importer v1 + full optimization/security sweep
 1. **Trainerize importer v1 — DONE, deployed, verified with the real roster** (10 active clients at

@@ -1875,9 +1875,34 @@ enabled (Blaze has no default spending cap).
   inset)`, centered in the band, 17px above the border. Remember for any new header/fixed element. Wearables
   CONFIRMED live: `healthData/getList` returns real Garmin daily calorieOut {restingEnergy, activeEnergy} +
   steps through the existing token → Trainerize v3 is unblocked.)**
-  **Deferred:** projection double-count (KEVIN DECISION — see handoff), maskable PWA icon, dead-CSS cleanup
-  (`.header`/`.steps-wrap`/`.prof-header-bar` blocks), plan-delete orphaning per-date log docs, linkPlan
-  re-link without backup, mixed check-in timestamp bases (harmless today).
+  **Deferred:** ~~projection double-count~~ (RESOLVED S86c — Kevin chose BOTH modes, see below), maskable PWA
+  icon, dead-CSS cleanup (`.header`/`.steps-wrap`/`.prof-header-bar` blocks), plan-delete orphaning per-date
+  log docs, linkPlan re-link without backup, mixed check-in timestamp bases (harmless today).
+- Session 86c (same session): **Trainerize MEAL SYNC + dual "Nutrition Approach" — DEPLOYED & LIVE.**
+  (1) **Meal sync (Trainerize v2 nutrition):** `syncClientNutrition` in `functions/trainerize.js` — every
+  import/re-import also pulls the client's last **365 days** of `dailyNutrition` into
+  `caliq-log-{pid}-{date}`. **Trainerize-native days = full meal detail** (meal name→Glide type via
+  MEAL_TYPE_MAP, clock time from `mealTime`, one Glide meal per food with macros); **MFP/Fitbit days = one
+  "<Source> day total" entry** (those apps don't share per-food data — this is an MFP policy, not a Glide
+  gap). Imported ids `tz{nutritionId}-{i}` → re-sync REPLACES prior imports (E2E-verified idempotent),
+  never touches Glide-logged meals, and day totals adjust by delta. `dailyNutrition/get` detail calls fire
+  ONLY for source==="trainerize" entries (getList summaries already carry MFP/Fitbit totals). Confirmed
+  endpoint contracts: `dailyNutrition/getList {userID, startDate/endDate "YYYY-MM-DD HH:MI:SS"}` →
+  `{nutrition:[{id, date, source: "mFP"|"fitbit"|"trainerize", calories, proteinGrams, carbsGrams,
+  fatGrams, …}]}`; `/get {id, userID}` → adds `meals:[{name, mealTime, foods:[{name, calories, proteins,
+  carbs, fat, amount, unit}]}]` + micronutrients. E2E: 2 clients → 43 day logs, verified against raw API.
+  (2) **Nutrition Approach — Kevin's call on the projection double-count: have BOTH.** New plan field
+  `data.deficitMode`: **"eatback"** (default; scheduled burn is ADDED to the daily calorie target — easier
+  diet, steady ~1 lb/wk) vs **"accelerate"** (target stays TDEE−500 — the burn speeds up the goal date
+  instead). Module helper `isEatback(d)` routes EVERY surface: `computeClientCalories`, the DailyDashboard
+  per-day target, SummaryTab, NutrientsTab, SharePlanCard, SimulationSummary, and server
+  `nutritionTargets` (aitools.js); the AI sets it via `set_personal_info.deficitMode` and `get_profile`
+  reports it. **Chooser:** Full Plan → Summary → "Nutrition Approach" card — both options with live
+  cal/day + goal date + ✓ ACTIVE, one tap to switch (persists via `onSetDeficitMode` → setDataAndSave);
+  the timeline card and SimulationSummary now show BOTH paces honestly labeled (the old "faster with
+  cardio" line that contradicted the eat-back target is gone). Verified live: 1,148 cal/wk plan —
+  Eat More 2,733/day → Jan 2027 vs Faster 2,569/day → Dec 2026; switching flips share card, timeline, and
+  dashboard target. All five functions redeployed (aitools shared); frontend pushed.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a
