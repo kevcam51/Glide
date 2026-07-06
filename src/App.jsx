@@ -12471,7 +12471,7 @@ function InviteHub({ open, onClose, meName }) {
 // A hamburger (≡) opens a slide-out drawer with app navigation, inline name
 // editing, and sign-out. Rendered globally by App so it's on every screen.
 const ROLE_LABEL = { client: "Client", head_trainer: "Trainer", sub_trainer: "Trainer", admin: "Admin" };
-function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onNameSaved }) {
+function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onNameSaved, idleSignOut, onSetIdleSignOut }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
@@ -12676,6 +12676,22 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
         </button>
         {pkMsg && <div style={{ fontSize: ".74rem", color: pkMsg.ok ? "var(--green,#2fe0a8)" : "#f87171", padding: "0 4px 4px" }}>{pkMsg.text}</div>}
 
+        {/* Idle auto sign-out — user choice (S88): security default ON, but on a
+            personal device someone can keep their session alive indefinitely. */}
+        <button style={item} onClick={() => onSetIdleSignOut && onSetIdleSignOut(!idleSignOut)}>
+          <span style={{ fontSize: 19 }}>⏱️</span>
+          <span>Auto sign-out when idle (30 min)</span>
+          <span style={{ marginLeft: "auto", fontWeight: 800, fontSize: ".78rem",
+            color: idleSignOut ? "var(--green,#2fe0a8)" : "var(--muted)" }}>
+            {idleSignOut ? "ON" : "OFF"}
+          </span>
+        </button>
+        {!idleSignOut && (
+          <div style={{ fontSize: ".72rem", color: "var(--muted)", padding: "0 4px 4px" }}>
+            You'll stay signed in on this account until you sign out yourself — best only on your personal device.
+          </div>
+        )}
+
         <div style={{ flex: 1, minHeight: 12 }} />
         <button style={{ ...item, color: "#e5484d", border: "1px solid rgba(229,72,77,.4)", background: "rgba(229,72,77,.08)", justifyContent: "center", marginTop: 8 }} onClick={() => signOut(auth)}><Icon name="signout" size={19} /> <span>Sign out</span></button>
       </div>
@@ -12797,8 +12813,28 @@ export default function App() {
 
   // Auto sign-out after inactivity — security hygiene, especially on shared or
   // gym devices (an abandoned session logs itself out). Any real interaction
-  // resets the 30-minute idle timer.
+  // resets the 30-minute idle timer. USER-TOGGLEABLE (S88, ≡ menu): default ON;
+  // stored in caliq-security-prefs {idleSignOut} — someone on a personal phone
+  // can turn it off, and with Face ID login the re-entry is one glance anyway.
+  const [idleSignOut, setIdleSignOut] = useState(true);
   useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get("caliq-security-prefs");
+        if (r && r.value) setIdleSignOut(JSON.parse(r.value).idleSignOut !== false);
+      } catch(e) { /* none saved → default ON */ }
+    })();
+  }, []);
+  const onSetIdleSignOut = async (on) => {
+    setIdleSignOut(on);
+    try {
+      let prev = {};
+      try { const r = await window.storage.get("caliq-security-prefs"); if (r && r.value) prev = JSON.parse(r.value) || {}; } catch(e) {}
+      await window.storage.set("caliq-security-prefs", JSON.stringify({ ...prev, idleSignOut: on }));
+    } catch(e) { setIdleSignOut(!on); }
+  };
+  useEffect(() => {
+    if (!idleSignOut) return; // toggled off — no timer armed
     const IDLE_MS = 30 * 60 * 1000;
     let timer;
     const reset = () => { clearTimeout(timer); timer = setTimeout(() => { signOut(auth).catch(() => {}); }, IDLE_MS); };
@@ -12806,7 +12842,7 @@ export default function App() {
     evs.forEach((e) => window.addEventListener(e, reset, { passive: true }));
     reset();
     return () => { clearTimeout(timer); evs.forEach((e) => window.removeEventListener(e, reset)); };
-  }, []);
+  }, [idleSignOut]);
 
   const saveIndex = async (list) => {
     try { await window.storage.set(STORAGE_INDEX, JSON.stringify(list)); } catch(e) {}
@@ -13574,6 +13610,7 @@ export default function App() {
         </svg>
       </button>
       <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} role={role} meName={meName} meEmail={meEmail}
+        idleSignOut={idleSignOut} onSetIdleSignOut={onSetIdleSignOut}
         isTrainer={isTrainerHome} trial={meTrial}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
         onHome={() => { if (isTrainerHome) setHomeTab("dashboard"); goToProfiles(); }}

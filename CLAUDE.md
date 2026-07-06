@@ -1954,6 +1954,18 @@ enabled (Blaze has no default spending cap).
   (headless Chrome has no authenticator); menu row renders; build passes; console clean. **Real biometric
   prompt = Kevin device-test** (like the S79 mic): sign in → ≡ → Set up Face ID → sign out → Face ID button.
   Auto-sync off: wrote `caliq-tz-autosync {enabled:false}` to Kevin's kv via Firestore REST (CLI creds).
+- Session 88: **Idle sign-out toggle + passkey platform-authenticator fix.** Kevin's laptop test feedback.
+  (1) The 30-min idle auto sign-out is now a USER CHOICE: ≡-menu row "⏱️ Auto sign-out when idle (30 min)
+  ON/OFF" — default ON, stored in `caliq-security-prefs {idleSignOut}` (merge-write), the App timer effect
+  keys on the state (`[idleSignOut]`) so toggling arms/disarms immediately; OFF shows a "best only on your
+  personal device" caption. Verified live: toggle flips + persists across reload, no console errors.
+  (2) Laptop biometrics offered a QR/security-key dialog instead of a fingerprint. Root causes: sign-in was
+  tried BEFORE any passkey existed on that device (no local credential → the browser offers the cross-device
+  flow — expected WebAuthn behavior, and the QR path actually works via a phone that has the passkey), AND
+  registration didn't pin the platform authenticator. Fix: `authenticatorAttachment: "platform"` in
+  passkeyRegisterOptions (redeployed) so SETUP uses the device's own Touch ID / Face ID / Windows Hello, plus
+  a first-time caption under the AuthGate button ("sign in with your password, then enable Face ID from the
+  menu (≡)"). Cost question answered: passkeys are free — device/browser native, no third-party service.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

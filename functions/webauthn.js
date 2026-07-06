@@ -71,7 +71,10 @@ exports.passkeyRegisterOptions = onCall({ region: "us-central1", maxInstances: 1
     userDisplayName: (user && user.displayName) || (user && user.email) || "Glide user",
     attestationType: "none",
     // Discoverable credential so sign-in needs NO username — just Face ID.
-    authenticatorSelection: { residentKey: "required", userVerification: "required" },
+    // authenticatorAttachment "platform" = the DEVICE'S OWN sensor (Face ID /
+    // Touch ID / Windows Hello) — without it browsers also offer QR-code /
+    // security-key flows at setup, which confused the first device test.
+    authenticatorSelection: { authenticatorAttachment: "platform", residentKey: "required", userVerification: "required" },
     excludeCredentials: existing.docs.map((d) => ({ id: d.id, transports: d.data().transports || undefined })),
   });
   const challengeId = await saveChallenge(db, options.challenge, uid);

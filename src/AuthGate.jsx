@@ -276,12 +276,20 @@ export default function AuthGate({ children }) {
         </button>
 
         {mode === "login" && passkeySupported && (
-          <button onClick={passkey} disabled={busy}
-            style={passkeyHinted
-              ? { ...S.primary, background: "#0e7490" }
-              : S.google}>
-            🔐 Sign in with Face ID / Touch ID
-          </button>
+          <>
+            <button onClick={passkey} disabled={busy}
+              style={passkeyHinted
+                ? { ...S.primary, background: "#0e7490" }
+                : S.google}>
+              🔐 Sign in with Face ID / Touch ID
+            </button>
+            {!passkeyHinted && (
+              <div style={{ fontSize: 12, color: "#6b7280", textAlign: "center", marginTop: -4 }}>
+                First time on this device? Sign in with your password, then enable
+                Face ID from the menu (≡) — after that this button is all you need.
+              </div>
+            )}
+          </>
         )}
 
         <div style={S.row}>

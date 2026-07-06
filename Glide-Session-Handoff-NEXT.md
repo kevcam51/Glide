@@ -100,8 +100,21 @@ shows the graceful fallback (headless browser has no authenticator) — **the re
 Kevin's phone/Mac**: sign in → menu → Set up Face ID → sign out → "Sign in with Face ID".
 **Also S87b:** Trainerize auto-sync turned OFF at Kevin's request (wrote `caliq-tz-autosync
 {enabled:false}` via Firestore REST with CLI creds) — he re-enables anytime via the trainer-home
-toggle. Idle sign-out reviewed: 30-min timer in App.jsx confirmed present (S84) — with passkeys the
-re-login is now one glance.
+toggle.
+
+## ✅ S88: idle sign-out is now a USER TOGGLE + passkey setup forces the built-in sensor
+Kevin's feedback after the laptop test: (1) the 30-min auto sign-out should be optional → new ≡-menu
+row "⏱️ Auto sign-out when idle (30 min): ON/OFF" (default ON; stored `caliq-security-prefs
+{idleSignOut}`; the App timer effect keys on it; OFF shows a personal-device warning; verified live —
+persists across reload). (2) His laptop offered a QR-code/security-key dialog instead of a
+fingerprint — two causes: he tapped SIGN IN before ever registering (browser had no local passkey →
+cross-device flow, which is normal WebAuthn), and registration didn't request the platform
+authenticator. Fixed: `authenticatorSelection.authenticatorAttachment: "platform"` on
+passkeyRegisterOptions (redeployed) = setup now uses the device's OWN Touch ID/Face ID/Windows
+Hello; plus a first-time caption under the login button ("sign in with your password, then enable
+Face ID from the menu"). Cost answered: passkeys are free (device+browser native; only the usual
+tiny function invocations). Kevin still needs to device-test: sign in → ≡ → Set up Face ID →
+sign out → Face ID button.
 
 ## ⏭️ NEXT SESSION (Kevin's queue, in order)
 1. **Trainerize v3 — wearables INTO Glide**: pull `healthData/getList` calorieOut
