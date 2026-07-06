@@ -1,8 +1,11 @@
 # Glide — Next-Session Handoff (start here)
 
-_Updated **Session 86**. Read this first, then `CLAUDE.md` (standing context) and
-the `docs/` files noted below. Everything is pushed to `main` and live on Vercel unless noted. Firebase
-project `calorieiq-29762`; prod URL `calorieiq-jet.vercel.app`. AI model `claude-sonnet-4-6`._
+_Updated end of **Session 88** (S86–88 were one long conversation: Trainerize importer/picker/meal+
+wearable sync/auto-sync+toggles, dual Nutrition Approach, AI-edits-local-plans, passkey login, idle
+toggle, two optimization sweeps, PWA header fixes). Read the "NEXT SESSION" section below first, then
+`CLAUDE.md`. Everything is pushed to `main` and live on Vercel; all functions deployed. Firebase
+project `calorieiq-29762`; prod URL `calorieiq-jet.vercel.app`. AI model `claude-sonnet-4-6`.
+**STANDING RULE (Kevin): new features use `src/icons.jsx` house icons — never emoji.**_
 
 ---
 
@@ -135,10 +138,47 @@ Account Token Creator** to the compute SA on itself (IAM, via owner creds). Inva
 his passkey exists. New house icons: fingerprint, sync, pause, watch (emoji swapped out of all
 S86–88 features per Kevin's icon rule — NEW FEATURES MUST USE src/icons.jsx ICONS, NOT EMOJI).
 
-## ⏭️ NEXT SESSION (Kevin's queue)
-1. Trainerize workout/program history import (v2 workouts: program/get, dailyWorkout/get).
-2. Stripe (billing — the biggest remaining gap; trials are still unenforced).
-3. Open product call: should wearable burn adjust the eat-back day target? (deficitMode tie-in.)
+## ⏭️ NEXT SESSION — start here (Kevin's decisions are MADE; build these two, in order)
+
+### 1. Wearable burn ADJUSTS the daily calorie target (Kevin said YES — with a toggle)
+Kevin's call (end of S88): tracked calories should impact the daily target and interact with the
+Eat More / Faster modes, controllable by the user OR their coach. Design guidance (thought through
+this session — follow unless something contradicts it in the code):
+- **New plan field `data.wearableAdjust`** (default **false** = today's behavior). It rides plan
+  `data`, so client, coach, and the AI (add it to `set_personal_info` + `get_profile` like
+  deficitMode) can all set it. **Toggle UI:** a third option row inside the existing "Nutrition
+  Approach" card (Full Plan → Summary) — label it plainly, e.g. "Use my tracker's real burn when
+  available" — house icons only (watch icon), NO emoji (Kevin's standing rule).
+- **Math (the double-count trap):** TDEE already = BMR × activity multiplier, so you must NOT add
+  wearable active energy on top of TDEE. The clean identity: Garmin gives resting + active = the
+  day's ACTUAL measured TDEE. So when ON and the day's log has `wearable` data:
+  • **eatback:** dayTarget = max(1200, (wearable.resting + wearable.active) − 500) — "eat back
+    what you actually burned," replacing BOTH the estimate and the scheduled-burn add-back.
+  • **accelerate:** recommend keeping the current formula (tdee − 500) — the mode's promise is
+    "don't eat the burn back," and active energy can't be split into deliberate-exercise vs NEAT.
+  • Day WITHOUT tracker data → current formulas. Sites to touch: DailyDashboard per-day target,
+    computeClientCalories (per-day variant? it's weekly-average — probably leave, or note the
+    dashboard diverges by design when live data exists), server `nutritionTargets` note, and the
+    macro auto-derivation (fat 28% of target follows automatically).
+- Remember `wearable` lives on `caliq-log-{plan}-{date}` as {active, resting, steps, source} and
+  only flows during import/auto-sync (auto-sync is currently OFF by Kevin's toggle).
+
+### 2. Trainerize WORKOUTS → Glide daily workouts (v2 workouts — Kevin confirmed)
+Kevin wants completed Trainerize workouts tracked under Glide's daily workouts. Build like the
+nutrition/health syncs (`syncClientWorkouts` in runImport): pull completed workouts per day →
+mark that date's check-in `workedOut: true` (+ the workout name in `notes`) via the SAME
+merge-into-same-date pattern as log_weigh_in (NEVER wholesale-replace a check-in — S86 lesson),
+so streaks/calendar dots/coach views light up. Endpoints to dry-run FIRST with curl (the param
+names are never guessable — see docs/TRAINERIZE-API.md for the method:
+`firebase functions:secrets:access` → Basic auth): `dailyWorkout/get`, `dailyCardio/get`,
+`workoutDef/get`, `program/getCalendarList`, `compliance/getUserCompliance`. The reference PDF
+lives at ~/Downloads/'Trainerize API Info.pdf' (pypdf venv in the scratchpad may be gone — re-make).
+Cap the backfill like HEALTH_DAYS_MAX. Then: Stripe (the biggest remaining gap).
+
+### Also pending
+- Kevin device-tests Face ID sign-in (his passkey IS registered; the IAM fix is live).
+- Trainerize auto-sync is OFF (Kevin's toggle) — wearables/meals refresh only on manual import
+  until he re-enables it.
 
 ## ✅ Session 85 shipped (all LIVE): Trainerize importer v1 + full optimization/security sweep
 1. **Trainerize importer v1 — DONE, deployed, verified with the real roster** (10 active clients at
