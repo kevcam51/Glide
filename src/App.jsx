@@ -9365,7 +9365,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     <div data-theme="pro" className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
-      <div className="flex items-center justify-center min-h-[64px] px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)" }}>
+      <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
         <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
@@ -9987,7 +9987,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
   return (
     <div data-theme="pro" className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
-      <div className="flex items-center justify-center min-h-[64px] px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)" }}>
+      <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
         <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
@@ -11362,7 +11362,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
     <div data-theme="pro" className="page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
-      <div className="flex items-center justify-center min-h-[64px] px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)" }}>
+      <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
         <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
@@ -11829,7 +11829,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
     <div data-theme="pro" className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
-      <div className="flex items-center justify-center min-h-[64px] px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)" }}>
+      <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
         <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
@@ -13418,7 +13418,7 @@ export default function App() {
   const chrome = (
     <>
       <button onClick={() => setMenuOpen(true)} aria-label="Open menu"
-        style={{ position: "fixed", top: "calc(10px + env(safe-area-inset-top,0px))", left: 10, zIndex: 1390,
+        style={{ position: "fixed", top: "calc(17px + env(safe-area-inset-top,0px))", left: 10, zIndex: 1390,
           width: 40, height: 40, borderRadius: 10, border: "1px solid var(--border,#2e2e4a)",
           background: "var(--surface,#16162a)", color: "var(--text,#f2f2ff)", cursor: "pointer",
           display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -13495,8 +13495,8 @@ export default function App() {
             installed PWA on a notched iPhone the content extends under the
             status bar, so without it the logo hid behind the clock and the
             fixed hamburger landed on the back-button row below. */}
-        <div className="flex items-center justify-center min-h-[64px] px-14 border-b border-border mb-3"
-          style={{ paddingTop: "env(safe-area-inset-top,0px)" }}>
+        <div className="flex items-center justify-center px-14 border-b border-border mb-3"
+          style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
           <BrandLogo />
         </div>
         <div className="max-w-[640px] mx-auto px-4">

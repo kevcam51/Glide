@@ -6,19 +6,24 @@ project `calorieiq-29762`; prod URL `calorieiq-jet.vercel.app`. AI model `claude
 
 ---
 
-## 🔴 DO FIRST (S86 leftover): deploy the pending Cloud Functions
-The Firebase CLI token expired mid-S86 and Kevin hadn't re-authed by session end. Once
-`firebase login --reauth --no-localhost` (as kevin@smoothtraining.com) succeeds, deploy:
-`firebase deploy --only functions:aiChat,functions:aiChatStream,functions:logMeal,functions:setWorkoutSchedule,functions:trainerizeImport --force`
-That ships (already written + syntax-checked, NOT live): (1) the **Trainerize selective-import
-backend** (`{mode:"list"}` roster preview + `{clientIds:[…]}` filter — the frontend picker is live and
-shows "importer is mid-update" until this lands; note: pressing it against the OLD backend triggers a
-harmless full re-import); (2) **aitools.js round-2 fixes** — server calorie target now includes
-scheduled-exercise burn (`weeklyPlanBurn` + the new `MET` map in exercises.js) so the AI/coach_summary
-finally MATCH the app screens; `set_targets` pins only explicitly-provided macros; `log_weigh_in`
-merges into same-day check-ins instead of wiping workouts. Then verify: ask the AI "what's my calorie
-target?" for a client with a workout program → must equal their dashboard number; picker: select 2
-clients → import → only those 2.
+## ✅ S86 follow-up (same session): everything DEPLOYED + picker E2E-verified
+Kevin re-authed → all five pending functions deployed (aiChat/aiChatStream/logMeal/
+setWorkoutSchedule/trainerizeImport). **Selective-import picker verified end-to-end** (via a
+temporary test-uid gate, reverted + redeployed admin-only after): list shows all 10 with emails,
+"Import 2 selected" wrote EXACTLY those 2, reopening showed them "✓ in Glide" with only the 8 new
+ones pre-checked. **Header/hamburger PWA bug round 2 (the real root cause):** the app's global
+`*{box-sizing:border-box}` means `min-h-[64px]` INCLUDES the safe-area padding — on a notched
+iPhone the header only grew to inset+logo, so the border line crossed the fixed hamburger and the
+button overlapped the back row. Fix: ALL FIVE headers now use explicit
+`minHeight: calc(74px + env(safe-area-inset-top,0px))` (guaranteed 74px band below the notch, line
+at inset+74) and the hamburger moved to `top: calc(17px + inset)` (vertically centered in the band,
+17px above the line). Remember this for ANY new fixed/header element: min-h classes + safe-area
+padding don't compose under border-box.
+**Wearables via Trainerize: CONFIRMED with real data.** `healthData/getList` returns Kevin's
+Garmin daily `calorieOut` (`{restingEnergy, activeEnergy}` per date) and `step` counts through the
+existing group token — so Trainerize v3 (pull clients' daily burn/steps into Glide dashboards +
+progress, per docs/TRAINERIZE-API.md) is fully unblocked and is the natural NEXT Trainerize build,
+alongside v2 (workout/program history via program/get + dailyWorkout/get).
 
 ## ⏭️ THEN (Kevin's queue): AI-edits-local-plans → biometrics
 Also pending a KEVIN DECISION (flagged S86): the Results/Simulation **projection timelines

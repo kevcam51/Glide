@@ -1868,8 +1868,13 @@ enabled (Blaze has no default spending cap).
   S83 sendInvite "NOT deployed" corrected, voice = Groq primary (S84), 29→61 tests, ~7.5k→~13.5k lines,
   trainerize/invites/transcribe headers fixed, `AGENTS.md` → pointer (was a stale S60 copy), 3 stale root
   handoffs → `docs/archive/`.
-  **⚠️ NOT DEPLOYED at session end (Firebase CLI token expired; needs Kevin's `firebase login --reauth
-  --no-localhost`):** the four AI fns + trainerizeImport — see the handoff DO-FIRST. Frontend IS pushed/live.
+  **(Same-session follow-up: Kevin re-authed → ALL five functions DEPLOYED; picker E2E-verified — select 2 →
+  exactly 2 imported, "✓ in Glide" tags on reopen. Header bug ROOT CAUSE round 2: global
+  `*{box-sizing:border-box}` makes `min-h` classes INCLUDE the safe-area padding — all five headers now use
+  explicit `minHeight: calc(74px + env(safe-area-inset-top,0px))` and the hamburger sits at `top: calc(17px +
+  inset)`, centered in the band, 17px above the border. Remember for any new header/fixed element. Wearables
+  CONFIRMED live: `healthData/getList` returns real Garmin daily calorieOut {restingEnergy, activeEnergy} +
+  steps through the existing token → Trainerize v3 is unblocked.)**
   **Deferred:** projection double-count (KEVIN DECISION — see handoff), maskable PWA icon, dead-CSS cleanup
   (`.header`/`.steps-wrap`/`.prof-header-bar` blocks), plan-delete orphaning per-date log docs, linkPlan
   re-link without backup, mixed check-in timestamp bases (harmless today).
