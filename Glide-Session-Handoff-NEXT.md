@@ -176,6 +176,10 @@ lives at ~/Downloads/'Trainerize API Info.pdf' (pypdf venv in the scratchpad may
 Cap the backfill like HEALTH_DAYS_MAX. Then: Stripe (the biggest remaining gap).
 
 ### Also pending
+- **NEW STANDING STRATEGY DOC: `docs/ECOSYSTEM.md`** (S88 close) — Kevin's north star: Glide great
+  standalone, thriving via integrations other platforms WANT their users to have; includes the
+  fitness-platform landscape (coach platforms, trackers, wearables) for future connectors. Kevin may
+  ask for a verified web-research report on it — offer the deep-research pass.
 - Kevin device-tests Face ID sign-in (his passkey IS registered; the IAM fix is live).
 - Trainerize auto-sync is OFF (Kevin's toggle) — wearables/meals refresh only on manual import
   until he re-enables it.
