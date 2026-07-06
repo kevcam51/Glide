@@ -454,6 +454,9 @@ function profileSummary(d) {
     // "eatback" = workout burn added to the daily target (easier diet);
     // "accelerate" = tighter target, workouts speed up the goal date.
     deficitMode: d.deficitMode === "accelerate" ? "accelerate" : "eatback",
+    // Tracker adjustment: when true (and eatback), a day with wearable data
+    // gets its target from the watch's measured burn instead of the estimate.
+    wearableAdjust: !!d.wearableAdjust,
     missing,
     complete: missing.length === 0,
     calorieTarget: t.calorieTarget,
@@ -581,6 +584,8 @@ function buildTools(role, opts = {}) {
           trainerNotes: { type: "string", description: "Free-text coaching notes on the plan (mainly for trainers). Replaces the existing notes." },
           deficitMode: { type: "string", enum: ["eatback", "accelerate"],
             description: "Nutrition approach: 'eatback' (default — workout burn is added to the daily calorie target: easier diet, steady ~1 lb/wk) or 'accelerate' (target stays at TDEE−500: tighter diet, workouts speed up the goal date instead). Set when the user chooses sustainability vs speed." },
+          wearableAdjust: { type: "boolean",
+            description: "Tracker adjustment (default false): when true AND the nutrition approach is 'eatback', a day whose log has wearable data (synced from the person's watch) gets its calorie target from the tracker's MEASURED burn (resting + active − 500) instead of the estimate. Days without tracker data keep the normal math; 'accelerate' ignores it. Set when the user asks for their watch/tracker/Garmin burn to drive their daily calories." },
           ...clientIdProp, ...localPlanProp,
         },
       },
@@ -1061,7 +1066,10 @@ async function runTool(name, input, ctx) {
       goalWeightLbs: data.goalWeight != null ? Number(data.goalWeight) : null,
       note: t.calorieTarget == null
         ? "Calorie target unavailable — the plan is missing gender/age/height."
-        : "Calorie target is the baseline diet target (excludes scheduled-exercise calories).",
+        : "Calorie target is the baseline diet target (excludes scheduled-exercise calories)."
+          + (data.wearableAdjust && (data.deficitMode || "eatback") !== "accelerate"
+            ? " Tracker adjustment is ON: on days the person's watch synced its measured burn, the app's day target is (measured resting+active − 500) instead of this baseline."
+            : ""),
     };
   }
 
@@ -1105,6 +1113,10 @@ async function runTool(name, input, ctx) {
     if (typeof input.trainerNotes === "string") { d.trainerNotes = input.trainerNotes.slice(0, 4000); changes.push("trainer notes"); }
     if (input.deficitMode === "eatback" || input.deficitMode === "accelerate") {
       d.deficitMode = input.deficitMode; changes.push(`nutrition approach: ${input.deficitMode === "eatback" ? "eat more (burn buys food)" : "faster results (burn buys speed)"}`);
+    }
+    if (typeof input.wearableAdjust === "boolean") {
+      d.wearableAdjust = input.wearableAdjust;
+      changes.push(`tracker adjustment ${input.wearableAdjust ? "on (measured burn drives eat-back day targets)" : "off"}`);
     }
     if (changes.length === 0) return { error: "No valid profile fields were provided." };
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);

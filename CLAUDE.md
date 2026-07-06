@@ -95,7 +95,7 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
-> _Last updated: Session 85. `Glide-Session-Handoff-NEXT.md` is the primary entry point; this block
+> _Last updated: Session 89. `Glide-Session-Handoff-NEXT.md` is the primary entry point; this block
 > is the quick digest._
 > - **App = Glide** (rebranded from CalorieIQ, S53; name change still OPEN — see docs/NAMING.md).
 >   Brand near-black + cyan `#08DCE0`, Tailwind "pro" theme everywhere. PWA installable (S84).
@@ -105,9 +105,11 @@ enabled (Blaze has no default spending cap).
 >   workout-program builder; onboarding; plan management; proactive coaching; link ingest. Model
 >   `claude-sonnet-4-6`.
 > - **Also live:** food DB search (USDA + Open Food Facts), email invites via Resend
->   (`invites@send.smoothtraining.com`), Invite Hub (QR/share/referrals), Trainerize importer v1
->   (admin-only button on the trainer home), custom exercises end-to-end, live-sync (onSnapshot) on all
->   trainer/client surfaces, Notification Center, 30-day trials (soft).
+>   (`invites@send.smoothtraining.com`), Invite Hub (QR/share/referrals), Trainerize sync (admin-only:
+>   selective importer + meals + wearables + completed WORKOUTS→check-ins, 30-min auto-sync behind
+>   Kevin's toggle — currently OFF), wearable-adjusted daily targets (opt-in `wearableAdjust`, S89),
+>   passkey login, custom exercises end-to-end, live-sync (onSnapshot) on all trainer/client surfaces,
+>   Notification Center, 30-day trials (soft).
 > - **Security:** profile reads scoped (S59), billing/trial fields locked to admin (S85), invite codes
 >   un-harvestable (S85). **61 emulator rules tests** — run before ANY rules change and PUBLISH after.
 > - **Still NOT built:** Stripe billing (biggest gap — trials aren't enforced), client→trainer
@@ -117,8 +119,8 @@ enabled (Blaze has no default spending cap).
 >   UTC "today" (S45/S85). kv range queries use the `""` ESCAPE (raw char breaks silently, S85).
 >   When `functions/aitools.js` changes deploy ALL FOUR AI fns. Firebase CLI token expires —
 >   `firebase login --reauth --no-localhost`.
-> - **Next up (Kevin's queue):** AI-edits-local-plans → biometric login + idle sign-out. Then
->   Trainerize v2 (history/auto-sync) and Stripe.
+> - **Next up (Kevin's queue):** **Stripe billing** (the biggest remaining gap). Kevin still owes a
+>   device-test of Face ID sign-in; Trainerize auto-sync re-enable is his call (trainer-home toggle).
 
 - Session 1: Vite project, app moved in, deployed to Vercel.
 - Session 2: Firebase Auth + Firestore; storage migrated from localStorage to Firestore;
@@ -1984,6 +1986,45 @@ enabled (Blaze has no default spending cap).
   target from real burn? ties into deficitMode). E2E-verified with Kevin's real Garmin (86 days synced; Jul 4
   = 703 active cal / 10,010 steps rendered in the Day view). Import result line reports "N days of tracker
   data". Also S88: idle sign-out user toggle (see S88 entry above).
+- Session 89: **Wearable-adjusted daily targets (Kevin's YES from S88) + Trainerize WORKOUT sync (v2) — both DEPLOYED & E2E-VERIFIED.**
+  (1) **Tracker burn now ADJUSTS the daily calorie target (opt-in).** New plan field `data.wearableAdjust`
+  (default false) + module helper `wearableTdee(d, log)` in App.jsx: when ON, the plan is in **eat-back**
+  mode, and a day's log has `wearable` data with `resting > 0`, that day's target becomes
+  **max(1200, (resting + active) − 500)** — the watch's measured burn IS the day's actual TDEE, so it
+  replaces BOTH the activity-multiplier estimate AND the scheduled-burn add-back (adding active energy on
+  top of estimated TDEE would double-count; the S88 design note, followed exactly). **Accelerate mode
+  ignores the tracker by promise** ("don't eat the burn back"); days without tracker data keep the normal
+  formulas everywhere. **Surfaces:** DailyDashboard today-target (the "How Your Target Is Calculated"
+  breakdown shows "Tracker measured burn − 500" instead of TDEE/workout rows when active, and the tracker
+  card notes "Today's target is based on your tracker's measured burn"), calendar **Day view** per-date
+  target (month/week aggregates stay on the estimate target — a tracker day diverging is by design, better
+  data), and macro auto-derivation follows automatically (fat 28% of the adjusted target). **Toggle UI:**
+  a third row in the Nutrition Approach card (Full Plan → Summary) — "Use my tracker's real burn", house
+  **watch** icon (no emoji), ON/OFF, plus a caption when ON+accelerate explaining it applies in Eat More.
+  Threaded `onSetWearableAdjust` App→Results→SummaryTab. **AI:** `set_personal_info` gained
+  `wearableAdjust` (boolean), `get_profile`/`profileSummary` report it, `get_nutrition_targets`'s note
+  explains tracker-adjusted day targets when ON. All four AI fns redeployed. **Verified live**
+  (trainer.uitest, Prospect Pat + injected Garmin-style resting 2100/active 900): OFF = 2,569 estimate;
+  ON → dashboard + Day view flip to **2,500** with notes, breakdown shows 3,000 − 500, persists across
+  reload, OFF regression clean; AI chat "turn on the tracker adjustment for Prospect Pat" →
+  `set_personal_info` wrote `wearableAdjust:true` (confirmed via the app's own read path). Test data
+  cleaned up after.
+  (2) **Trainerize completed workouts → Glide check-ins (`syncClientWorkouts`).** Dry-ran the contract
+  with curl (documented in docs/TRAINERIZE-API.md §S89): **`calendar/getList` `{userID, startDate,
+  endDate, unitDistance, unitWeight}`** returns the whole window in ONE call/client — items with `status`
+  "scheduled"|"tracked", types `workoutInterval`/`workoutRegular`/`workoutVideo` (title = workout name)
+  and `cardio` (time seconds / distance). Every tracked workout/cardio day marks the plan's same-date
+  check-in **`workedOut:true`** + names in notes as a replaceable `"Trainerize: A + B"` segment —
+  **merge-into-same-date, never wholesale-replace** (S86 lesson): hand-written notes/weights/moods
+  survive, re-syncs idempotent. Backfill capped 90 days (`WORKOUT_DAYS_MAX`). Lives in `runImport`, so
+  BOTH the manual picker import and the 30-min auto-sync carry it; import result line + auto-sync log
+  report workout days. **Also fixed:** the body-stat check-in seeding used replace-by-date — now merges in
+  place so a re-import can't wipe a workedOut flag. **E2E-verified** (temp test-uid gate like S85,
+  reverted + redeployed admin-only, denial re-verified): imported John Mason → **40 workedOut days** with
+  real names ("Trainerize: Back & Triceps + Burpee Mountain Climber"), re-run marked 0 new / no duplicate
+  segments; all imported test data deleted from the test account (118 log docs + profile + folder).
+  Streaks/calendar dots/coach views now light up from Trainerize workouts. **NOTE:** auto-sync is still
+  OFF by Kevin's toggle — workout days refresh on manual import until he re-enables it.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

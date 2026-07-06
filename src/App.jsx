@@ -2892,7 +2892,7 @@ function SimulationSummary({ data, totalBurn, totalStrBurn = 0 }) {
 
 // ─── Results ─────────────────────────────────────────────────────────────────
 
-function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode }) {
+function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust }) {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
   const [showEdit, setShowEdit] = useState(false);
@@ -3601,6 +3601,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
         <SummaryTab
           data={data}
           onSetDeficitMode={onSetDeficitMode}
+          onSetWearableAdjust={onSetWearableAdjust}
           bmr={bmr}
           tdee={tdee}
           actObj={actObj}
@@ -3670,7 +3671,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
 
 function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
   totalBurn, totalStrBurn, activeDays, activeStrDays, avgBurnPerDay, avgStrPerDay,
-  floor, targets, ibwLowLbs, ibwHighLbs, bmi, onSetDeficitMode }) {
+  floor, targets, ibwLowLbs, ibwHighLbs, bmi, onSetDeficitMode, onSetWearableAdjust }) {
 
   const { firstName, lastName, gender, age, weightLbs, heightFt, heightIn, goalWeight } = data;
   const hasGoal = goalWeight && Number(goalWeight) < Number(weightLbs);
@@ -3817,6 +3818,38 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
             </button>
           );
         })}
+        {/* Tracker adjustment (S89, opt-in): on days a connected watch reports
+            its measured burn (resting + active = the day's real TDEE), the Eat
+            More target is derived from it instead of the estimate. Applies in
+            eat-back mode only — Faster Results keeps the tight target by
+            promise. Set here, by the coach, or by the AI (wearableAdjust). */}
+        {(() => {
+          const wearOn = !!data.wearableAdjust;
+          return (
+            <div style={{ borderTop: "1px solid var(--border)", marginTop: 4, paddingTop: 10, marginBottom: 10 }}>
+              <button onClick={() => onSetWearableAdjust && onSetWearableAdjust(!wearOn)}
+                style={{ display: "flex", width: "100%", textAlign: "left", alignItems: "center", gap: 10, padding: "12px 14px",
+                  borderRadius: 10, cursor: onSetWearableAdjust ? "pointer" : "default",
+                  border: wearOn ? "1px solid var(--accent)" : "1px solid var(--border)",
+                  background: wearOn ? "rgba(8,220,224,.08)" : "var(--s2)", color: "var(--text)" }}>
+                <Icon name="watch" size={18} color="var(--accent)" />
+                <span style={{ flex: 1 }}>
+                  <span style={{ display: "block", fontWeight: 800, fontSize: ".88rem" }}>Use my tracker's real burn</span>
+                  <span style={{ display: "block", fontSize: ".74rem", color: "var(--muted-light)", lineHeight: 1.45, marginTop: 3 }}>
+                    On days your watch reports its measured burn, the Eat More target uses it instead of the estimate. Days without tracker data keep the normal math.
+                  </span>
+                </span>
+                <span style={{ fontSize: ".72rem", fontWeight: 800, letterSpacing: ".5px", whiteSpace: "nowrap",
+                  color: wearOn ? "var(--accent)" : "var(--muted)" }}>{wearOn ? "ON" : "OFF"}</span>
+              </button>
+              {wearOn && !eatback && (
+                <div style={{ fontSize: ".7rem", color: "var(--muted)", lineHeight: 1.45, marginTop: 6 }}>
+                  Faster Results keeps the tighter target by design — the tracker adjustment kicks in when Eat More is active.
+                </div>
+              )}
+            </div>
+          );
+        })()}
         <div style={{ fontSize: ".7rem", color: "var(--muted)", lineHeight: 1.45 }}>
           Same science either way — a client picks by goal: sustainability vs speed.
         </div>
@@ -7018,8 +7051,14 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
     const cals = dayLog ? (dayLog.calories || 0) : 0;
     // Judge the day against the SAME deficit target the month tint + week
     // roll-ups use — this used to show raw TDEE, so a day the month view
-    // tinted "over" looked comfortably under when tapped open.
-    const target = calTarget || (tdee ? Math.round(tdee) : null);
+    // tinted "over" looked comfortably under when tapped open. Exception:
+    // with the tracker adjustment ON, a day that has wearable data gets its
+    // real measured-burn target (better data than the estimate the month/week
+    // aggregates run on).
+    const dayTrackerTdee = wearableTdee(data, dayLog);
+    const target = dayTrackerTdee
+      ? Math.max(1200, dayTrackerTdee - 500)
+      : (calTarget || (tdee ? Math.round(tdee) : null));
     const goStep = (n) => { const p = parseKey(sel); setSel(keyOf(p.y, p.m, p.d + n)); };
     // Quick typed calories: Add (tagged to a meal type if chosen → a meal entry,
     // else just the day's total) or Remove (reduce the day's total).
@@ -7061,13 +7100,15 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
           <div style={{ fontSize: "1.6rem", fontWeight: 800, fontFamily: "'Sora',sans-serif" }}>
             {cals.toLocaleString()}{target ? <span style={{ fontSize: ".9rem", color: "var(--muted)", fontWeight: 400 }}> / {target.toLocaleString()} cal</span> : " cal"}
           </div>
-          {/* Wearable tracker for this date (Trainerize v3) — display-only. */}
+          {/* Wearable tracker for this date (Trainerize v3). With the tracker
+              adjustment ON it also sets this day's target above. */}
           {dayLog && dayLog.wearable && (dayLog.wearable.active || dayLog.wearable.steps) ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: ".78rem", color: "var(--muted-light)" }}>
+            <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 8, fontSize: ".78rem", color: "var(--muted-light)" }}>
               <Icon name="watch" size={14} color="var(--accent)" />
               <span>Tracker{dayLog.wearable.source ? ` (${dayLog.wearable.source})` : ""}:</span>
               {dayLog.wearable.active ? <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--text)" }}>{Number(dayLog.wearable.active).toLocaleString()} cal active</span> : null}
               {dayLog.wearable.steps ? <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--text)" }}>· {Number(dayLog.wearable.steps).toLocaleString()} steps</span> : null}
+              {dayTrackerTdee ? <span style={{ width: "100%", fontSize: ".7rem", fontWeight: 700, color: "var(--accent)" }}>This day's target is based on the tracker's measured burn</span> : null}
             </div>
           ) : null}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
@@ -7232,8 +7273,13 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   // Calorie target (1 lb/wk deficit). Eat-back mode adds TODAY's scheduled
   // burn on top (training days earn more food); accelerate mode holds the
   // deficit so the burn speeds up the goal date instead. (Approach is chosen
-  // in Full Plan → Summary → Nutrition approach.)
-  const target = Math.max(1200, tdee - 500 + (isEatback(data) ? Math.round(todayCardio.burned + todayStrength.burned) : 0));
+  // in Full Plan → Summary → Nutrition approach.) When the plan opts into the
+  // tracker adjustment and today's log has wearable data, the watch's measured
+  // burn replaces the whole estimate (see wearableTdee).
+  const trackerTdee = wearableTdee(data, dailyLog);
+  const target = trackerTdee
+    ? Math.max(1200, trackerTdee - 500)
+    : Math.max(1200, tdee - 500 + (isEatback(data) ? Math.round(todayCardio.burned + todayStrength.burned) : 0));
   const logged = dailyLog.calories || 0;
   const remaining = Math.max(0, target - logged);
   const pct = Math.min(100, Math.round((logged / target) * 100));
@@ -7342,13 +7388,16 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       </div>
 
       {/* Wearable tracker (Trainerize v3): today's real burn + steps from the
-          client's connected watch. Display-only — it never changes the target. */}
+          client's connected watch. With the tracker adjustment ON (Full Plan →
+          Summary → Nutrition Approach), today's target above is derived from
+          this measured burn; otherwise it's display-only. */}
       {dailyLog.wearable && (dailyLog.wearable.active || dailyLog.wearable.steps) ? (
-        <div className="card" style={{padding:"10px 14px",marginBottom:"14px",display:"flex",alignItems:"center",gap:"8px",fontSize:".82rem"}}>
+        <div className="card" style={{padding:"10px 14px",marginBottom:"14px",display:"flex",alignItems:"center",gap:"8px",fontSize:".82rem",flexWrap:"wrap"}}>
           <Icon name="watch" size={16} color="var(--accent)" />
           <span style={{color:"var(--muted)"}}>Tracker{dailyLog.wearable.source ? ` (${dailyLog.wearable.source})` : ""}:</span>
           {dailyLog.wearable.active ? <span style={{fontFamily:"'Sora',sans-serif"}}>{Number(dailyLog.wearable.active).toLocaleString()} cal active</span> : null}
           {dailyLog.wearable.steps ? <span style={{fontFamily:"'Sora',sans-serif"}}>· {Number(dailyLog.wearable.steps).toLocaleString()} steps</span> : null}
+          {trackerTdee ? <span style={{width:"100%",fontSize:".72rem",fontWeight:700,color:"var(--accent)"}}>Today's target is based on your tracker's measured burn</span> : null}
         </div>
       ) : null}
 
@@ -7358,18 +7407,27 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           {expandedStat === "target" && (
             <>
               <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"var(--accent)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="target" size={16} color="var(--accent)" />How Your Target Is Calculated</div>
-              <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                <span style={{color:"var(--muted)"}}>Base TDEE</span>
-                <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{tdee.toLocaleString()} cal</span>
-              </div>
+              {trackerTdee ? (
+                <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
+                  <span style={{color:"var(--muted)",display:"inline-flex",alignItems:"center",gap:"5px"}}><Icon name="watch" size={13} color="var(--accent)" />Tracker measured burn</span>
+                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{trackerTdee.toLocaleString()} cal</span>
+                </div>
+              ) : (
+                <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
+                  <span style={{color:"var(--muted)"}}>Base TDEE</span>
+                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{tdee.toLocaleString()} cal</span>
+                </div>
+              )}
               <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
                 <span style={{color:"var(--muted)"}}>Deficit (1 lb/wk)</span>
                 <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:"var(--red)"}}>−500 cal</span>
               </div>
-              <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                <span style={{color:"var(--muted)"}}>Today's workout burn</span>
-                <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:"var(--green)"}}>+{todayTotalBurn} cal</span>
-              </div>
+              {!trackerTdee && (
+                <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
+                  <span style={{color:"var(--muted)"}}>Today's workout burn</span>
+                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:"var(--green)"}}>+{todayTotalBurn} cal</span>
+                </div>
+              )}
               <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontSize:".88rem",fontWeight:700}}>
                 <span>Today's Target</span>
                 <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--accent)"}}>{target.toLocaleString()} cal</span>
@@ -9106,6 +9164,25 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
 // ("eat more" vs "get there faster") can never both be claimed at once.
 const isEatback = (d) => ((d && d.deficitMode) || "eatback") !== "accelerate";
 
+// Tracker-adjusted target (S89, Kevin's call — opt-in via data.wearableAdjust):
+// a watch's resting + active energy IS the day's actual measured TDEE, so on a
+// day whose log carries wearable data the eat-back target becomes
+// (measured TDEE − 500), replacing BOTH the activity-multiplier estimate and
+// the scheduled-burn add-back. (Never add active energy on top of the
+// estimated TDEE — the activity multiplier already assumes movement, so that
+// would double-count.) Accelerate mode ignores the tracker by promise ("don't
+// eat the burn back"), and days without tracker data use the normal formulas.
+// Needs resting > 0 — active cal alone isn't the full burn picture.
+const wearableTdee = (d, log) => {
+  if (!d || !d.wearableAdjust || !isEatback(d)) return null;
+  const w = log && log.wearable;
+  if (!w) return null;
+  const resting = Number(w.resting) || 0;
+  const active = Number(w.active) || 0;
+  if (resting <= 0) return null;
+  return Math.round(resting + active);
+};
+
 function computeClientCalories(d) {
   if (!d) return null;
   const w = Number(d.weightLbs);
@@ -9201,7 +9278,8 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       const r = await onTrainerizeImport({ clientIds: ids });
       const meals = r.mealDaysTotal ? ` · ${r.mealDaysTotal} day${r.mealDaysTotal === 1 ? "" : "s"} of meals` : "";
       const health = r.healthDaysTotal ? ` · ${r.healthDaysTotal} day${r.healthDaysTotal === 1 ? "" : "s"} of tracker data` : "";
-      setTzMsg({ ok: true, text: `✓ Imported ${r.total} client${r.total === 1 ? "" : "s"} (${r.created} new · ${r.updated} updated${meals}${health}) — filed under the “Trainerize” folder in All clients.` });
+      const workouts = r.workoutDaysTotal ? ` · ${r.workoutDaysTotal} workout day${r.workoutDaysTotal === 1 ? "" : "s"}` : "";
+      setTzMsg({ ok: true, text: `✓ Imported ${r.total} client${r.total === 1 ? "" : "s"} (${r.created} new · ${r.updated} updated${meals}${health}${workouts}) — filed under the “Trainerize” folder in All clients.` });
       setTzPick(null);
     } catch (e) {
       setTzMsg({ ok: false, text: tzErrText(e) });
@@ -13810,6 +13888,7 @@ export default function App() {
             </div>
             <Results data={data} isSimulation={activeIsSim} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
             onSetDeficitMode={(mode)=>setDataAndSave(p=>({...p, deficitMode: mode}))}
+            onSetWearableAdjust={(on)=>setDataAndSave(p=>({...p, wearableAdjust: !!on}))}
             onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
               // One entry per date: replace any existing check-ins for this date.
               const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);

@@ -43,6 +43,27 @@ differ from obvious guesses — don't re-derive):**
 - **Still v2/v3:** history (bodystats list, dailyNutrition, program), scheduled daily auto-sync,
   wearable `calorieOut`, per-trainer tokens (multi-tenant).
 
+## ✅ WORKOUT SYNC BUILT & VERIFIED (Session 89) — calendar/getList contract
+- **`calendar/getList`** takes **`{"userID":id, "startDate":"YYYY-MM-DD", "endDate":"YYYY-MM-DD",
+  "unitDistance":"miles", "unitWeight":"lbs"}`** → `{calendar:[{date:"YYYY-MM-DD", items:[…]}]}`.
+  ONE call per client covers the whole window — no per-workout detail calls needed.
+- **Item shape:** `{id, type, title, status, detail, fromProgram, createdBy, …}`.
+  `status` ∈ **"scheduled" | "tracked"** (tracked = completed). Types seen live:
+  **`workoutInterval` / `workoutRegular` / `workoutVideo`** (`title` = workout name,
+  `detail:{workoutID, rpe}`), **`cardio`** (`detail:{exerciseID, time` SECONDS`, distance` miles`}` —
+  Garmin auto-syncs show as title "General"/"Running"), **`bodyStat`** (tracked = a weigh-in with
+  `detail:{weight, fat}`), **`nutrition`** (day summary — we sync nutrition separately, skip it).
+- **Glide mapping (`syncClientWorkouts` in functions/trainerize.js):** every TRACKED workout/cardio
+  day → the plan's same-date check-in gets `workedOut:true` + names in `notes` as a
+  `"Trainerize: A + B +N more"` segment. **MERGE semantics:** find-or-create by date, never
+  wholesale-replace (weights/moods/hand-written notes survive); the Trainerize note segment is
+  replaced on re-sync (idempotent — verified: re-run marks 0, no duplicate segments). Backfill
+  capped `WORKOUT_DAYS_MAX = 90`. Runs on every import AND the 30-min auto-sync.
+- `program/getCalendarList` (the other calendar endpoint) is per-PROGRAM (`{id, startDay, endDay}`)
+  — not needed; `compliance/getUserCompliance` (`{userID, startDate, endDate}`) exists for adherence
+  %s later. `dailyWorkout/get` takes `{ids:[dailyworkoutIds]}` (from calendar items' `id`) if
+  per-exercise detail is ever wanted.
+
 ## Import design (decided S84) — Option A + auto-sync + rate-limit reality
 - **Where clients land: Option A** — each Trainerize client becomes a **local profile in the trainer's
   Glide account** (reuses existing local-profile storage; no new user accounts). Later the trainer invites

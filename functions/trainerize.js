@@ -216,6 +216,83 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
   return written;
 }
 
+// ── v2: completed workouts → Glide check-ins ────────────────────────────────
+// calendar/getList (one call per client, {userID, startDate, endDate}) returns
+// dated items with status "scheduled" | "tracked". Types seen live (S89):
+// workoutInterval / workoutRegular / workoutVideo ({workoutID, rpe} + the
+// workout name in title) and cardio ({exerciseID, time seconds, distance}).
+// Every TRACKED workout/cardio day gets its Glide check-in marked
+// workedOut:true with the workout names in notes — MERGED into any existing
+// same-date check-in (never wholesale-replaced, the S86 lesson), so weights /
+// body fat / moods survive. Notes stay idempotent across re-syncs: the
+// "Trainerize: …" segment is replaced, hand-written notes are kept.
+const WORKOUT_DAYS_MAX = 90; // cap the backfill like HEALTH_DAYS_MAX
+const WORKOUT_TYPES = new Set(["workoutInterval", "workoutRegular", "workoutVideo", "cardio"]);
+
+// One tracked calendar item → a short display name ("Total Body 1", "Running 33m").
+function workoutItemName(it) {
+  let name = String(it.title || "Workout").trim().slice(0, 60);
+  if (it.type === "cardio" && it.detail && Number(it.detail.time) > 0) {
+    name += ` ${Math.max(1, Math.round(Number(it.detail.time) / 60))}m`;
+  }
+  return name;
+}
+
+// Replace the Trainerize-owned segment of a check-in's notes, keep the rest.
+function mergeTzNote(existingNotes, tzNote) {
+  const kept = String(existingNotes || "").split(" · ")
+    .filter((s) => s && !s.startsWith("Trainerize: ")).join(" · ");
+  return kept ? `${kept} · ${tzNote}` : tzNote;
+}
+
+async function syncClientWorkouts(db, uid, pid, tzUserId, auth, days) {
+  const span = Math.min(days, WORKOUT_DAYS_MAX);
+  const startDate = new Date(Date.now() - span * 86400000).toISOString().slice(0, 10);
+  const endDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const r = await tz("calendar/getList",
+    { userID: tzUserId, startDate, endDate, unitDistance: "miles", unitWeight: "lbs" }, auth);
+  if (!r.ok) return 0;
+  // date → tracked workout names (cardio + strength/video/interval sessions)
+  const byDate = {};
+  for (const day of (r.json && r.json.calendar) || []) {
+    if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day.date || "")) continue;
+    for (const it of Array.isArray(day.items) ? day.items : []) {
+      if (!it || it.status !== "tracked" || !WORKOUT_TYPES.has(it.type)) continue;
+      (byDate[day.date] = byDate[day.date] || []).push(workoutItemName(it));
+    }
+  }
+  const dates = Object.keys(byDate);
+  if (!dates.length) return 0;
+
+  // Merge into the plan's check-ins in ONE wrapper read+write per client.
+  const wrapKey = `caliq-${pid}`;
+  const wrap = (await kvGetJSON(db, uid, wrapKey)) || { data: {}, step: 0 };
+  const d = wrap.data || (wrap.data = {});
+  const cis = Array.isArray(d.checkIns) ? d.checkIns : (d.checkIns = []);
+  let marked = 0;
+  for (const date of dates) {
+    const names = byDate[date];
+    const label = names.slice(0, 3).join(" + ") + (names.length > 3 ? ` +${names.length - 3} more` : "");
+    const tzNote = `Trainerize: ${label}`.slice(0, 200);
+    let ci = cis.find((c) => c && c.date === date);
+    if (!ci) {
+      ci = { date, timestamp: new Date(`${date}T12:00:00`).getTime(),
+        weight: null, calories: null, hitTarget: null, workedOut: false,
+        mood: null, notes: "", bodyFat: null, loggedBy: "trainer", isFuturePlan: false };
+      cis.push(ci);
+    }
+    const nextNotes = mergeTzNote(ci.notes, tzNote);
+    if (ci.workedOut === true && ci.notes === nextNotes) continue; // already in sync
+    ci.workedOut = true; // only ever set true — absence of items ≠ a missed day
+    ci.notes = nextNotes;
+    marked++;
+  }
+  if (!marked) return 0;
+  cis.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+  await kvSetJSON(db, uid, wrapKey, wrap);
+  return marked;
+}
+
 // Sync one client's recent Trainerize nutrition into the profile's day logs.
 // Additive like the app's own meal logging: totals adjust by the DELTA of
 // replaced tz-imported meals, so Glide-logged food on the same day survives.
@@ -326,16 +403,21 @@ async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTR
       const wrap = (await kvGetJSON(db, uid, `caliq-${pid}`)) || { data: {}, step: 0 };
       const d = { ...(wrap.data || {}), ...snap, trainerizeId: u.id };
       // Seed/refresh one check-in from the last Trainerize weigh-in so the
-      // progress chart + "last activity" have a starting point (replace-by-date,
-      // matching the app's one-weigh-in-per-date rule).
+      // progress chart + "last activity" have a starting point. MERGED into any
+      // existing same-date entry (one-weigh-in-per-date, but a workedOut flag
+      // or notes the workout sync wrote there must survive a re-import).
       if (snap.weightLbs && lastStatDate) {
-        const cis = Array.isArray(d.checkIns) ? d.checkIns.filter((c) => c && c.date !== lastStatDate) : [];
-        cis.push({
-          date: lastStatDate, timestamp: new Date(`${lastStatDate}T12:00:00`).getTime(),
-          weight: Number(snap.weightLbs), calories: null, hitTarget: null, workedOut: null,
-          mood: null, notes: "Imported from Trainerize", bodyFat: snap.bodyFat ? Number(snap.bodyFat) : null,
-          loggedBy: "trainer", isFuturePlan: false,
-        });
+        const cis = Array.isArray(d.checkIns) ? d.checkIns : [];
+        let ci = cis.find((c) => c && c.date === lastStatDate);
+        if (!ci) {
+          ci = { date: lastStatDate, timestamp: new Date(`${lastStatDate}T12:00:00`).getTime(),
+            weight: null, calories: null, hitTarget: null, workedOut: null,
+            mood: null, notes: "Imported from Trainerize", bodyFat: null,
+            loggedBy: "trainer", isFuturePlan: false };
+          cis.push(ci);
+        }
+        ci.weight = Number(snap.weightLbs);
+        if (snap.bodyFat) ci.bodyFat = Number(snap.bodyFat);
         cis.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
         d.checkIns = cis;
         if (d.startWeightLbs == null || d.startWeightLbs === "") d.startWeightLbs = Number(snap.weightLbs);
@@ -364,12 +446,19 @@ async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTR
       let healthDays = 0;
       try { healthDays = await syncClientHealth(db, uid, pid, u.id, auth, nutritionDays); }
       catch (e) { console.error("health sync failed for", u.id, e && e.message); }
-      results.push({ name, weight: entry.weight, goal: entry.goal, status: u.status || "", mealDays, healthDays });
+      // v2: completed Trainerize workouts → workedOut check-ins (streaks,
+      // calendar dots, coach views). Runs AFTER the wrapper write above so its
+      // own read-modify-write of caliq-{pid} sees the fresh snapshot.
+      let workoutDays = 0;
+      try { workoutDays = await syncClientWorkouts(db, uid, pid, u.id, auth, nutritionDays); }
+      catch (e) { console.error("workout sync failed for", u.id, e && e.message); }
+      results.push({ name, weight: entry.weight, goal: entry.goal, status: u.status || "", mealDays, healthDays, workoutDays });
     }
     await kvSetJSON(db, uid, "caliq-index", index);
     const mealDaysTotal = results.reduce((s, r) => s + (r.mealDays || 0), 0);
     const healthDaysTotal = results.reduce((s, r) => s + (r.healthDays || 0), 0);
-    return { ok: true, total: roster.length, created, updated, mealDaysTotal, healthDaysTotal, clients: results };
+    const workoutDaysTotal = results.reduce((s, r) => s + (r.workoutDays || 0), 0);
+    return { ok: true, total: roster.length, created, updated, mealDaysTotal, healthDaysTotal, workoutDaysTotal, clients: results };
 }
 
 exports.trainerizeImport = onCall(
@@ -425,7 +514,7 @@ exports.trainerizeAutoSync = onSchedule(
     const auth = Buffer.from(`${TRAINERIZE_GROUP_ID.value()}:${TRAINERIZE_API_TOKEN.value()}`).toString("base64");
     try {
       const r = await runImport(db, uid, auth, { clientIds: ids, nutritionDays: 14 });
-      console.log("trainerizeAutoSync", JSON.stringify({ synced: r.total, updated: r.updated, mealDays: r.mealDaysTotal }));
+      console.log("trainerizeAutoSync", JSON.stringify({ synced: r.total, updated: r.updated, mealDays: r.mealDaysTotal, workoutDays: r.workoutDaysTotal }));
     } catch (e) {
       console.error("trainerizeAutoSync failed:", e && e.message);
     }
