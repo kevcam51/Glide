@@ -9111,6 +9111,26 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const [tzBusy, setTzBusy] = useState(false);
   const [tzMsg, setTzMsg] = useState(null); // { ok, text }
   const [tzPick, setTzPick] = useState(null); // null | {loading:true} | {clients:[…], sel:{id:bool}}
+  // 30-min background auto-sync kill switch — stored in the trainer's own kv
+  // (caliq-tz-autosync {enabled}); the scheduled function checks it each run.
+  // Default ON; only an explicit false turns it off.
+  const tzIsOwner = meUid === "G7QUZ8Kat1fgyoMjdGKz4DYoVHi1";
+  const [tzAuto, setTzAuto] = useState(true);
+  useEffect(() => {
+    if (!tzIsOwner) return;
+    (async () => {
+      try {
+        const r = await window.storage.get("caliq-tz-autosync");
+        if (r && r.value) setTzAuto(JSON.parse(r.value).enabled !== false);
+      } catch { /* none saved yet → default ON */ }
+    })();
+  }, [tzIsOwner]);
+  const toggleTzAuto = async () => {
+    const next = !tzAuto;
+    setTzAuto(next);
+    try { await window.storage.set("caliq-tz-autosync", JSON.stringify({ enabled: next })); }
+    catch { setTzAuto(!next); }
+  };
   const tzErrText = (e) => {
     const code = e && e.code ? String(e.code) : "";
     return code.includes("permission-denied")
@@ -9714,13 +9734,22 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
             {/* v1 runs on the platform owner's shared Trainerize token, so the
                 button only shows for that account (the backend enforces it too).
                 Multi-tenant per-trainer tokens lift this later. */}
-            {onTrainerizeImport && meUid === "G7QUZ8Kat1fgyoMjdGKz4DYoVHi1" && (
+            {onTrainerizeImport && tzIsOwner && (
               <button onClick={openTzPicker} disabled={tzBusy}
                 className={`flex items-center gap-1.5 px-2.5 py-2 rounded-md text-xs font-bold border border-primary bg-transparent text-primary whitespace-nowrap ${tzBusy ? "opacity-60 cursor-default" : "cursor-pointer"}`}>
                 <Icon name="link" size={14} color="var(--color-primary)" />{tzBusy ? "Importing…" : tzPick ? "Close Trainerize list" : "Import from Trainerize"}
               </button>
             )}
           </div>
+          {onTrainerizeImport && tzIsOwner && (
+            <button onClick={toggleTzAuto}
+              className="mt-1.5 bg-transparent border-0 p-0 text-xs cursor-pointer text-left">
+              <span className={tzAuto ? "text-success" : "text-muted"}>
+                {tzAuto ? "🔄 Trainerize auto-sync: On" : "⏸ Trainerize auto-sync: Off"}
+              </span>
+              <span className="text-muted"> — every 30 min for imported clients · tap to {tzAuto ? "pause" : "resume"}</span>
+            </button>
+          )}
           {tzMsg && (
             <div className={`text-xs mt-1.5 ${tzMsg.ok ? "text-success" : "text-danger"}`}>{tzMsg.text}</div>
           )}

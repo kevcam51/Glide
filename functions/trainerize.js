@@ -372,6 +372,10 @@ exports.trainerizeAutoSync = onSchedule(
   async () => {
     const uid = ADMIN_UIDS[0]; // single-tenant v1: Kevin's account owns the token
     const db = admin.firestore();
+    // Kill switch: the trainer-home toggle writes caliq-tz-autosync {enabled}.
+    // Missing/anything-but-false = ON (default). Off = skip the whole run.
+    const pref = await kvGetJSON(db, uid, "caliq-tz-autosync");
+    if (pref && pref.enabled === false) { console.log("trainerizeAutoSync: disabled by toggle — skipped"); return; }
     const index = (await kvGetJSON(db, uid, "caliq-index")) || [];
     const ids = index.filter((p) => p && p.trainerizeId).map((p) => p.trainerizeId);
     if (!ids.length) return; // nothing imported yet — nothing to sync

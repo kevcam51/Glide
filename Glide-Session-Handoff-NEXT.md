@@ -60,7 +60,28 @@ Trainerize is the source of truth — a manual Glide edit to weight/goals gets o
 sync (same documented re-import semantics, now automatic). Verify on next session: `firebase
 functions:log --only trainerizeAutoSync` should show runs every 30 min with `{synced, mealDays}`.
 
-## ⏭️ THEN (Kevin's queue): AI-edits-local-plans → biometrics → Trainerize v3 (wearable calorieOut/steps into dashboards — will ride the same auto-sync)
+## ✅ S86e (session close): auto-sync TOGGLE + cost answer
+The trainer home (owner account only) now shows "🔄 Trainerize auto-sync: On/Off — every 30 min…
+tap to pause" under the import buttons. It writes `caliq-tz-autosync {enabled}` in Kevin's kv;
+`trainerizeAutoSync` checks it at the top of every run (missing/true = ON, explicit false = skip —
+the schedule keeps firing but no-ops, so resuming is instant). Cost answer given to Kevin: ~1,500
+invocations/mo (free tier 2M), scheduler job free tier, Firestore writes ≈ $0.20–0.25/mo at 10
+clients — effectively free.
+
+## ⏭️ NEXT SESSION (Kevin's queue, in order)
+1. **AI-edits-local-plans** — extend the AI tools to target the trainer's own local plans/sims
+   (currently they only reach the caller's own account or verified connected clients). Design note:
+   local profiles live in KEVIN's kv (`caliq-{id}` via the index) — a tool like `list_local_plans` +
+   a `planRef` targeting scheme; same confirm-before-write pattern.
+2. **Biometric login (WebAuthn/passkeys) + idle sign-out review** (idle sign-out shipped S84/85 —
+   verify 30-min timer still right).
+3. **Trainerize v3 — wearables INTO Glide**: pull `healthData/getList` calorieOut
+   ({restingEnergy, activeEnergy}) + steps per client per day in the SAME auto-sync (add to
+   `runImport`), store per-day burn (suggest on the day log, e.g. `wearable:{active, resting,
+   steps, source}`), display on Daily Dashboard + calendar + progress, and decide whether tracked
+   burn adjusts that day's eat-back target (ties into deficitMode). Endpoint contracts confirmed in
+   docs/TRAINERIZE-API.md + S86 handoff notes.
+4. Then: Trainerize workout/program history (v2 workouts), Stripe.
 
 ## ✅ Session 85 shipped (all LIVE): Trainerize importer v1 + full optimization/security sweep
 1. **Trainerize importer v1 — DONE, deployed, verified with the real roster** (10 active clients at

@@ -1915,7 +1915,10 @@ enabled (Blaze has no default spending cap).
   imported (ctz*) profiles now treat Trainerize as source of truth — manual Glide edits to
   weight/goals/stats are overwritten by the next sync. Single-tenant: the schedule targets ADMIN_UIDS[0]
   (Kevin); multi-tenant token store changes this later. Trainerize v3 (wearable calorieOut/steps) should
-  ride this same schedule.
+  ride this same schedule. **S86e (session close):** owner-only toggle on the trainer home —
+  "🔄 Trainerize auto-sync: On/Off" → `caliq-tz-autosync {enabled}` in Kevin's kv, checked at the top of
+  every scheduled run (missing/true = ON; explicit false = the run no-ops, resume is instant). Cost:
+  ~1,500 invocations/mo vs a 2M free tier + ≈$0.20/mo Firestore writes — effectively free.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a
