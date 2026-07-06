@@ -77,7 +77,7 @@ These Firebase config values are NOT secret (the apiKey only identifies the proj
 security is enforced by Firestore rules). But keep this file gitignored anyway.
 
 ```
-VITE_FIREBASE_API_KEY=AIzaSyDn6at-tFKg5qtb5kIQt37FMSA-Lh58d24
+VITE_FIREBASE_API_KEY=<your Firebase web API key — see .env.local / Vercel env vars>
 VITE_FIREBASE_AUTH_DOMAIN=calorieiq-29762.firebaseapp.com
 VITE_FIREBASE_PROJECT_ID=calorieiq-29762
 VITE_FIREBASE_STORAGE_BUCKET=calorieiq-29762.firebasestorage.app
