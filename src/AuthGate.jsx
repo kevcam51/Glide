@@ -16,6 +16,7 @@ import {
 import { httpsCallable } from "firebase/functions";
 import { startAuthentication } from "@simplewebauthn/browser";
 import { createProfile, hasProfile, ROLES } from "./profile.js";
+import { Icon } from "./icons.jsx";
 
 // Biometric sign-in (Face ID / Touch ID passkeys — S87). The server verifies
 // the passkey assertion and mints a Firebase custom token.
@@ -278,10 +279,11 @@ export default function AuthGate({ children }) {
         {mode === "login" && passkeySupported && (
           <>
             <button onClick={passkey} disabled={busy}
-              style={passkeyHinted
-                ? { ...S.primary, background: "#0e7490" }
-                : S.google}>
-              🔐 Sign in with Face ID / Touch ID
+              style={{
+                ...(passkeyHinted ? { ...S.primary, background: "#0e7490" } : S.google),
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              }}>
+              <Icon name="fingerprint" size={17} /> Sign in with Face ID / Touch ID
             </button>
             {!passkeyHinted && (
               <div style={{ fontSize: 12, color: "#6b7280", textAlign: "center", marginTop: -4 }}>

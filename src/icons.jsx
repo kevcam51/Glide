@@ -55,6 +55,10 @@ const GLYPHS = {
   bulb: (<><path d="M9.5 18h5" /><path d="M10 21h4" /><path d="M12 3a6 6 0 0 0-3.8 10.6c.7.6 1.1 1.3 1.2 2.4h5.2c.1-1.1.5-1.8 1.2-2.4A6 6 0 0 0 12 3z" /></>),
   flask: (<><path d="M9 3h6" /><path d="M10 3v5.5L5.4 17.4A1.6 1.6 0 0 0 6.8 20h10.4a1.6 1.6 0 0 0 1.4-2.6L14 8.5V3" /><path d="M7.7 14h8.6" /></>),
   file: (<><path d="M6 3h7l5 5v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" /><path d="M13 3v5h5" /></>),
+  // — Security / sync (S88) —
+  fingerprint: (<><path d="M7.5 20.2C6 18.4 5.2 16.2 5.2 13.4a6.8 6.8 0 0 1 13.6 0c0 1.4-.1 2.7-.4 3.9" /><path d="M12 9.4a4 4 0 0 1 4 4c0 2.6-.4 4.9-1.3 7" /><path d="M12 13.4c0 3-.7 5.5-2.1 7.6" /><path d="M8.6 4.6A9.4 9.4 0 0 1 21 11" /><path d="M3.3 9.7A9.4 9.4 0 0 1 5.7 6" /></>),
+  sync: (<><path d="M20 5v5h-5" /><path d="M4 19v-5h5" /><path d="M19.5 10a8 8 0 0 0-14-3.5" /><path d="M4.5 14a8 8 0 0 0 14 3.5" /></>),
+  pause: (<><path d="M9 5.5v13" /><path d="M15 5.5v13" /></>),
 };
 
 export function Icon({ name, size = 20, variant = "outline", color = "currentColor",

@@ -2872,13 +2872,15 @@ function SimulationSummary({ data, totalBurn, totalStrBurn = 0 }) {
       {targetDate && (
         <div style={{ textAlign: "center", marginTop: 4, fontSize: ".82rem", color: "var(--muted-light)" }}>
           On track to hit goal by <strong style={{ color: "var(--text)" }}>{targetDate}</strong>
-          {` — ${eatback ? "🍽️ Eat More" : "⚡ Faster Results"} approach`}
+          {` — ${eatback ? "Eat More" : "Faster Results"} approach`}
         </div>
       )}
       {losing && weeklyBurnAll > 0 && wksEat && wksAcc && (
-        <div style={{ textAlign: "center", marginTop: 6, fontSize: ".74rem", color: "var(--muted-light)", lineHeight: 1.5 }}>
-          🍽️ Eat More: bigger food budget · ~{friendlyTime(wksEat)}
-          &nbsp;·&nbsp; ⚡ Faster: tighter budget · ~{friendlyTime(wksAcc)}
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", flexWrap: "wrap", gap: 6,
+          marginTop: 6, fontSize: ".74rem", color: "var(--muted-light)", lineHeight: 1.5 }}>
+          <Icon name="meal" size={12} color="var(--accent)" /> Eat More: bigger food budget · ~{friendlyTime(wksEat)}
+          <span>·</span>
+          <Icon name="bolt" size={12} color="var(--accent)" /> Faster: tighter budget · ~{friendlyTime(wksAcc)}
         </div>
       )}
       <div style={{ textAlign: "center", marginTop: 10, fontSize: ".72rem", color: "var(--muted)" }}>
@@ -3792,9 +3794,9 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
           Your workouts burn ~{Math.round(weeklyBurnAll).toLocaleString()} cal/week. Choose how to spend it:
         </div>
         {[
-          { id: "eatback", icon: "🍽️", title: "Eat More", desc: "Workout burn is added to your daily calories — easier diet, steady ~1 lb/wk.",
+          { id: "eatback", iconName: "meal", title: "Eat More", desc: "Workout burn is added to your daily calories — easier diet, steady ~1 lb/wk.",
             line: `${targetEat.toLocaleString()} cal/day${hasGoal && wksEat ? ` · goal ${goalDate(wksEat)}` : ""}` },
-          { id: "accelerate", icon: "⚡", title: "Faster Results", desc: "Keep the tighter target — your workouts speed up the goal date instead.",
+          { id: "accelerate", iconName: "bolt", title: "Faster Results", desc: "Keep the tighter target — your workouts speed up the goal date instead.",
             line: `${targetAcc.toLocaleString()} cal/day${hasGoal && wksAcc ? ` · goal ${goalDate(wksAcc)}` : ""}` },
         ].map((opt) => {
           const active = (eatback ? "eatback" : "accelerate") === opt.id;
@@ -3805,7 +3807,9 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
                 border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
                 background: active ? "rgba(8,220,224,.08)" : "var(--s2)", color: "var(--text)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-                <span style={{ fontWeight: 800, fontSize: ".9rem" }}>{opt.icon} {opt.title}</span>
+                <span style={{ fontWeight: 800, fontSize: ".9rem", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <Icon name={opt.iconName} size={15} color="var(--accent)" />{opt.title}
+                </span>
                 {active && <span style={{ fontSize: ".68rem", fontWeight: 800, letterSpacing: ".5px", color: "var(--accent)" }}>✓ ACTIVE</span>}
               </div>
               <div style={{ fontSize: ".76rem", color: "var(--muted-light)", margin: "4px 0 6px", lineHeight: 1.45 }}>{opt.desc}</div>
@@ -3823,8 +3827,10 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
         <>
           <div className="sec-title">Estimated Timeline</div>
           <div className="card" style={{padding:"14px 16px"}}>
-            <Row label={`🍽️ Eat More pace${eatback ? " (active)" : ""}`} value={friendlyTime(wksEat)} color={eatback ? "var(--green)" : "var(--muted-light)"} />
-            {weeklyBurnAll > 0 && <Row label={`⚡ Faster Results pace${!eatback ? " (active)" : ""}`} value={friendlyTime(wksAcc)} color={!eatback ? "var(--green)" : "var(--muted-light)"} />}
+            <Row label={<span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name="meal" size={13} color="var(--accent)" />Eat More pace{eatback ? " (active)" : ""}</span>}
+              value={friendlyTime(wksEat)} color={eatback ? "var(--green)" : "var(--muted-light)"} />
+            {weeklyBurnAll > 0 && <Row label={<span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name="bolt" size={13} color="var(--accent)" />Faster Results pace{!eatback ? " (active)" : ""}</span>}
+              value={friendlyTime(wksAcc)} color={!eatback ? "var(--green)" : "var(--muted-light)"} />}
             {weeklyBurnAll > 0 && wksEat && wksAcc && <Row label="Difference" value={friendlyTime(wksEat - wksAcc)} color="var(--accent)" />}
           </div>
         </>
@@ -9744,9 +9750,10 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           </div>
           {onTrainerizeImport && tzIsOwner && (
             <button onClick={toggleTzAuto}
-              className="mt-1.5 bg-transparent border-0 p-0 text-xs cursor-pointer text-left">
+              className="mt-1.5 bg-transparent border-0 p-0 text-xs cursor-pointer text-left inline-flex items-center gap-1.5 flex-wrap">
+              <Icon name={tzAuto ? "sync" : "pause"} size={13} color={tzAuto ? "var(--color-success)" : "var(--color-muted)"} />
               <span className={tzAuto ? "text-success" : "text-muted"}>
-                {tzAuto ? "🔄 Trainerize auto-sync: On" : "⏸ Trainerize auto-sync: Off"}
+                Trainerize auto-sync: {tzAuto ? "On" : "Off"}
               </span>
               <span className="text-muted"> — every 30 min for imported clients · tap to {tzAuto ? "pause" : "resume"}</span>
             </button>
@@ -12495,10 +12502,18 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
       setPkDone(true);
       setPkMsg({ ok: true, text: "Done — next time you're signed out, tap “Sign in with Face ID”." });
     } catch (e) {
-      const m = String((e && (e.message || e.code)) || "");
-      setPkMsg({ ok: false, text: m.includes("unsupported") ? "This browser doesn't support Face ID sign-in."
-        : /NotAllowed|cancel/i.test(m) ? "Setup was cancelled."
-        : "Couldn't set up Face ID — try again." });
+      const m = String((e && (e.message || e.code)) || "") + " " + String((e && e.name) || "");
+      if (/InvalidState|already registered|excluded/i.test(m)) {
+        // The authenticator refused a DUPLICATE — a passkey already exists for
+        // this account on this device (e.g. an earlier setup that looked failed).
+        try { localStorage.setItem(PASSKEY_HINT, "1"); } catch { /* private mode */ }
+        setPkDone(true);
+        setPkMsg({ ok: true, text: "This device already has a passkey — you're all set. Use “Sign in with Face ID” on the login screen." });
+      } else {
+        setPkMsg({ ok: false, text: m.includes("unsupported") ? "This browser doesn't support Face ID sign-in."
+          : /NotAllowed|cancel/i.test(m) ? "Setup was cancelled."
+          : "Couldn't set up Face ID — try again." });
+      }
     }
     setPkBusy(false);
   };
@@ -12670,16 +12685,16 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, noti
             future sign-ins (e.g. after the 30-min idle sign-out) are one glance
             instead of a password. */}
         <button style={item} disabled={pkBusy} onClick={setupPasskey}>
-          <span style={{ fontSize: 19 }}>🔐</span>
+          <Icon name="fingerprint" size={19} color="var(--accent)" />
           <span>{pkBusy ? "Setting up…" : pkDone ? "Face ID enabled on this device" : "Set up Face ID / Touch ID"}</span>
-          {pkDone && <span style={{ marginLeft: "auto", color: "var(--green,#2fe0a8)" }}>✓</span>}
+          {pkDone && <Icon name="check" size={16} color="var(--green,#2fe0a8)" style={{ marginLeft: "auto" }} />}
         </button>
         {pkMsg && <div style={{ fontSize: ".74rem", color: pkMsg.ok ? "var(--green,#2fe0a8)" : "#f87171", padding: "0 4px 4px" }}>{pkMsg.text}</div>}
 
         {/* Idle auto sign-out — user choice (S88): security default ON, but on a
             personal device someone can keep their session alive indefinitely. */}
         <button style={item} onClick={() => onSetIdleSignOut && onSetIdleSignOut(!idleSignOut)}>
-          <span style={{ fontSize: 19 }}>⏱️</span>
+          <Icon name="clock" size={19} color="var(--accent)" />
           <span>Auto sign-out when idle (30 min)</span>
           <span style={{ marginLeft: "auto", fontWeight: 800, fontSize: ".78rem",
             color: idleSignOut ? "var(--green,#2fe0a8)" : "var(--muted)" }}>
