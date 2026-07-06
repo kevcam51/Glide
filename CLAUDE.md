@@ -1903,6 +1903,19 @@ enabled (Blaze has no default spending cap).
   cardio" line that contradicted the eat-back target is gone). Verified live: 1,148 cal/wk plan —
   Eat More 2,733/day → Jan 2027 vs Faster 2,569/day → Dec 2026; switching flips share card, timeline, and
   dashboard target. All five functions redeployed (aitools shared); frontend pushed.
+- Session 86d (same session): **Trainerize AUTO-SYNC — every 30 minutes, DEPLOYED & LIVE.** Kevin asked for
+  real-time transfer; **Trainerize has no webhooks** (poll-only platform), so the closest-possible:
+  **`trainerizeAutoSync`** (`onSchedule "every 30 minutes"`, first scheduled function in the project —
+  Cloud Scheduler auto-provisioned cleanly on deploy). Each run re-syncs every ALREADY-imported client
+  (`trainerizeId` on Kevin's index) — fresh weight/body-stats/goals + last 14 days of nutrition — so a
+  weigh-in, meal, or wearable-sourced body stat that lands in Trainerize appears in Glide within ~30 min,
+  hands-free. New Trainerize clients are NOT auto-added (selective picker stays the gate). Refactor:
+  shared `runImport(db, uid, auth, {clientIds, nutritionDays})` + `fetchRoster(auth)` back both the
+  callable (picker/manual = 365-day nutrition) and the schedule (14-day window). **Semantics note:**
+  imported (ctz*) profiles now treat Trainerize as source of truth — manual Glide edits to
+  weight/goals/stats are overwritten by the next sync. Single-tenant: the schedule targets ADMIN_UIDS[0]
+  (Kevin); multi-tenant token store changes this later. Trainerize v3 (wearable calorieOut/steps) should
+  ride this same schedule.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

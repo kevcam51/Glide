@@ -46,7 +46,21 @@ alongside v2 (workout/program history via program/get + dailyWorkout/get).
    Eat More 2,733/day → Jan 2027 vs Faster 2,569/day → Dec 2026; switching flips the share card,
    timeline, and Daily Dashboard target (and persists on the plan).
 
-## ⏭️ THEN (Kevin's queue): AI-edits-local-plans → biometrics → Trainerize v3 (wearable calorieOut/steps into dashboards)
+## ✅ S86d (same session): Trainerize AUTO-SYNC every 30 minutes — LIVE
+Kevin asked for real-time transfer. **Trainerize has NO webhooks** (nothing can push events to us —
+polling is the only mechanism, confirmed in their API reference), so the closest-possible was built:
+**`trainerizeAutoSync`** (`onSchedule "every 30 minutes"`, functions/trainerize.js) re-syncs every
+ALREADY-IMPORTED client (index entries with `trainerizeId`) in Kevin's account: fresh
+weight/body-stats/goals snapshot + the last **14 days** of nutrition. New Trainerize clients are NOT
+auto-added (respects the selective picker); the manual import button still does the full 365-day
+nutrition pull. Refactor: the per-client sync now lives in shared `runImport(db, uid, auth,
+{clientIds, nutritionDays})` + `fetchRoster(auth)` — used by both the callable and the schedule.
+~3-4 API calls/client/run ≈ nothing against the 1000/min cap. NOTE: for imported (ctz*) profiles
+Trainerize is the source of truth — a manual Glide edit to weight/goals gets overwritten by the next
+sync (same documented re-import semantics, now automatic). Verify on next session: `firebase
+functions:log --only trainerizeAutoSync` should show runs every 30 min with `{synced, mealDays}`.
+
+## ⏭️ THEN (Kevin's queue): AI-edits-local-plans → biometrics → Trainerize v3 (wearable calorieOut/steps into dashboards — will ride the same auto-sync)
 
 ## ✅ Session 85 shipped (all LIVE): Trainerize importer v1 + full optimization/security sweep
 1. **Trainerize importer v1 — DONE, deployed, verified with the real roster** (10 active clients at

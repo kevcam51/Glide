@@ -16,6 +16,7 @@
 // v1 importer. Both are ADMIN-ONLY (shared group token — see requireAdmin below).
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 
@@ -180,14 +181,14 @@ function glideMealsFromEntry(entry, detail) {
 // Sync one client's recent Trainerize nutrition into the profile's day logs.
 // Additive like the app's own meal logging: totals adjust by the DELTA of
 // replaced tz-imported meals, so Glide-logged food on the same day survives.
-async function syncClientNutrition(db, uid, pid, tzUserId, auth) {
-  const startDate = new Date(Date.now() - NUTRITION_DAYS * 86400000).toISOString().slice(0, 10);
+async function syncClientNutrition(db, uid, pid, tzUserId, auth, days = NUTRITION_DAYS) {
+  const startDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
   const endDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   const list = await tz("dailyNutrition/getList",
     { userID: tzUserId, startDate: `${startDate} 00:00:00`, endDate: `${endDate} 23:59:59` }, auth);
   if (!list.ok) return 0;
   const entries = (list.json && list.json.nutrition) || [];
-  let days = 0;
+  let written = 0;
   for (const entry of entries) {
     if (!entry || !/^\d{4}-\d{2}-\d{2}$/.test(entry.date || "")) continue;
     // Full meal detail only exists for Trainerize-native entries — one extra
@@ -209,9 +210,9 @@ async function syncClientNutrition(db, uid, pid, tzUserId, auth) {
       log[k] = Math.max(0, (Number(log[k]) || 0) - sum(oldTz, k) + sum(newMeals, k));
     }
     await kvSetJSON(db, uid, logKey, log);
-    days++;
+    written++;
   }
-  return days;
+  return written;
 }
 
 // The importer: pulls the trainer's Trainerize roster + a per-client snapshot
@@ -226,51 +227,33 @@ async function syncClientNutrition(db, uid, pid, tzUserId, auth) {
 //                             Glide (drives the pick-your-clients UI).
 //   { clientIds: [id, …] }  → import ONLY those Trainerize ids.
 //   {}                      → import the whole roster (original behavior).
-exports.trainerizeImport = onCall(
-  { secrets: [TRAINERIZE_GROUP_ID, TRAINERIZE_API_TOKEN], cors: true, timeoutSeconds: 300 },
-  async (request) => {
-    const uid = request.auth && request.auth.uid;
-    await requireAdmin(uid);
-    const auth = Buffer.from(`${TRAINERIZE_GROUP_ID.value()}:${TRAINERIZE_API_TOKEN.value()}`).toString("base64");
-    const db = admin.firestore();
-
-    // 1. Full roster (paged; Kevin's group is small but don't assume).
-    let roster = [];
-    let start = 0, total = Infinity;
-    while (roster.length < total && start < 1000) {
-      const r = await tz("user/getClientList", { start, count: 100 }, auth);
-      if (!r.ok) {
-        throw new HttpsError("internal", `Trainerize getClientList returned ${r.status}.`, { body: r.json });
-      }
-      const users = (r.json && r.json.users) || [];
-      total = Number(r.json && r.json.total) || users.length;
-      roster.push(...users.filter((u) => u && u.type === "client"));
-      if (!users.length) break;
-      start += users.length;
+// Fetch the full Trainerize roster (paged). Throws HttpsError on failure.
+async function fetchRoster(auth) {
+  const roster = [];
+  let start = 0, total = Infinity;
+  while (roster.length < total && start < 1000) {
+    const r = await tz("user/getClientList", { start, count: 100 }, auth);
+    if (!r.ok) {
+      throw new HttpsError("internal", `Trainerize getClientList returned ${r.status}.`, { body: r.json });
     }
+    const users = (r.json && r.json.users) || [];
+    total = Number(r.json && r.json.total) || users.length;
+    roster.push(...users.filter((u) => u && u.type === "client"));
+    if (!users.length) break;
+    start += users.length;
+  }
+  return roster;
+}
 
-    // Preview mode: return the roster (+ already-imported flags) and stop —
-    // no Trainerize detail calls, no writes. Powers the client picker.
-    if (request.data && request.data.mode === "list") {
-      const index = (await kvGetJSON(db, uid, "caliq-index")) || [];
-      const importedIds = new Set(index.filter((p) => p && p.trainerizeId).map((p) => p.trainerizeId));
-      return {
-        ok: true,
-        clients: roster.map((u) => ({
-          id: u.id,
-          name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email || `Client ${u.id}`,
-          email: u.email || "",
-          status: u.status || "",
-          imported: importedIds.has(u.id),
-        })),
-      };
-    }
-
-    // Selective import: keep only the requested Trainerize ids.
-    const wanted = Array.isArray(request.data && request.data.clientIds)
-      ? new Set(request.data.clientIds.map(Number).filter(Boolean)) : null;
-    if (wanted) roster = roster.filter((u) => wanted.has(Number(u.id)));
-    if (!roster.length) return { ok: true, total: 0, created: 0, updated: 0, clients: [] };
+// The shared sync engine: snapshot + nutrition for a set of Trainerize ids,
+// written into `uid`'s local profiles. Used by BOTH the manual import button
+// (clientIds from the picker, full 365-day nutrition) and the scheduled
+// auto-sync (already-imported ids only, short nutrition window).
+async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTRITION_DAYS } = {}) {
+  let roster = await fetchRoster(auth);
+  const wanted = Array.isArray(clientIds) ? new Set(clientIds.map(Number).filter(Boolean)) : null;
+  if (wanted) roster = roster.filter((u) => wanted.has(Number(u.id)));
+  if (!roster.length) return { ok: true, total: 0, created: 0, updated: 0, mealDaysTotal: 0, clients: [] };
 
     // 2. Batch profile fetch (one call for the whole roster).
     const profById = {};
@@ -337,13 +320,68 @@ exports.trainerizeImport = onCall(
       // v2: pull the client's recent nutrition (Trainerize meals in full food
       // detail; MFP/Fitbit as day totals) into the profile's day logs.
       let mealDays = 0;
-      try { mealDays = await syncClientNutrition(db, uid, pid, u.id, auth); }
+      try { mealDays = await syncClientNutrition(db, uid, pid, u.id, auth, nutritionDays); }
       catch (e) { console.error("nutrition sync failed for", u.id, e && e.message); }
       results.push({ name, weight: entry.weight, goal: entry.goal, status: u.status || "", mealDays });
     }
     await kvSetJSON(db, uid, "caliq-index", index);
     const mealDaysTotal = results.reduce((s, r) => s + (r.mealDays || 0), 0);
     return { ok: true, total: roster.length, created, updated, mealDaysTotal, clients: results };
+}
+
+exports.trainerizeImport = onCall(
+  { secrets: [TRAINERIZE_GROUP_ID, TRAINERIZE_API_TOKEN], cors: true, timeoutSeconds: 300 },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    await requireAdmin(uid);
+    const auth = Buffer.from(`${TRAINERIZE_GROUP_ID.value()}:${TRAINERIZE_API_TOKEN.value()}`).toString("base64");
+    const db = admin.firestore();
+
+    // Preview mode: roster + already-imported flags, NO writes (the picker).
+    if (request.data && request.data.mode === "list") {
+      const roster = await fetchRoster(auth);
+      const index = (await kvGetJSON(db, uid, "caliq-index")) || [];
+      const importedIds = new Set(index.filter((p) => p && p.trainerizeId).map((p) => p.trainerizeId));
+      return {
+        ok: true,
+        clients: roster.map((u) => ({
+          id: u.id,
+          name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email || `Client ${u.id}`,
+          email: u.email || "",
+          status: u.status || "",
+          imported: importedIds.has(u.id),
+        })),
+      };
+    }
+
+    const clientIds = Array.isArray(request.data && request.data.clientIds) ? request.data.clientIds : null;
+    return await runImport(db, uid, auth, { clientIds, nutritionDays: NUTRITION_DAYS });
+  }
+);
+
+// Scheduled auto-sync — the "near real time" bridge. Trainerize has NO webhooks
+// (nothing pushes events to us), so we POLL: every 30 minutes, re-sync every
+// client Kevin has ALREADY imported (new Trainerize clients still wait for him
+// to pick them in the importer — respects the selective-import choice). Each
+// run refreshes weight/body stats/goals + the last 14 days of nutrition, so a
+// meal or weigh-in that lands in Trainerize shows up in Glide within ~30 min.
+// Cost: ~3-4 API calls/client/run — a rounding error against the 1000/min cap.
+exports.trainerizeAutoSync = onSchedule(
+  { schedule: "every 30 minutes", secrets: [TRAINERIZE_GROUP_ID, TRAINERIZE_API_TOKEN],
+    timeoutSeconds: 300, region: "us-central1" },
+  async () => {
+    const uid = ADMIN_UIDS[0]; // single-tenant v1: Kevin's account owns the token
+    const db = admin.firestore();
+    const index = (await kvGetJSON(db, uid, "caliq-index")) || [];
+    const ids = index.filter((p) => p && p.trainerizeId).map((p) => p.trainerizeId);
+    if (!ids.length) return; // nothing imported yet — nothing to sync
+    const auth = Buffer.from(`${TRAINERIZE_GROUP_ID.value()}:${TRAINERIZE_API_TOKEN.value()}`).toString("base64");
+    try {
+      const r = await runImport(db, uid, auth, { clientIds: ids, nutritionDays: 14 });
+      console.log("trainerizeAutoSync", JSON.stringify({ synced: r.total, updated: r.updated, mealDays: r.mealDaysTotal }));
+    } catch (e) {
+      console.error("trainerizeAutoSync failed:", e && e.message);
+    }
   }
 );
 
