@@ -116,14 +116,29 @@ Face ID from the menu"). Cost answered: passkeys are free (device+browser native
 tiny function invocations). Kevin still needs to device-test: sign in → ≡ → Set up Face ID →
 sign out → Face ID button.
 
-## ⏭️ NEXT SESSION (Kevin's queue, in order)
-1. **Trainerize v3 — wearables INTO Glide**: pull `healthData/getList` calorieOut
-   ({restingEnergy, activeEnergy}) + steps per client per day in the SAME auto-sync (add to
-   `runImport`), store per-day burn (suggest on the day log, e.g. `wearable:{active, resting,
-   steps, source}`), display on Daily Dashboard + calendar + progress, and decide whether tracked
-   burn adjusts that day's eat-back target (ties into deficitMode). Endpoint contracts confirmed in
-   docs/TRAINERIZE-API.md + S86 handoff notes.
-2. Then: Trainerize workout/program history (v2 workouts), Stripe.
+## ✅ S88c: Trainerize v3 — WEARABLES INTO GLIDE (deployed + E2E-verified)
+`syncClientHealth` in functions/trainerize.js: every import (and the auto-sync, when re-enabled)
+pulls `healthData/getList` calorieOut ({restingEnergy, activeEnergy}) + step per client into the
+day logs as `wearable: {active, resting, steps, source}` (cap 90 days back — one doc/day).
+**Display (house `watch` icon, no emoji):** Daily Dashboard card "Tracker (garmin): N cal active ·
+N steps" when today has data; calendar Day view shows the same line per date. **Display-only — the
+tracked burn does NOT change the calorie target** (deliberate; whether it should adjust the
+eat-back target is an open product call tied to deficitMode). E2E-verified with Kevin's real
+Garmin: import → 86 days of tracker data → day log Jul 4 = {active:703, resting:2337, steps:10010,
+source:"garmin"} → calendar Day view renders "Tracker (garmin): 703 cal active · 10,010 steps".
+Import result line now reports "N days of tracker data". NOTE: today's tile only fills once
+Garmin→Trainerize has synced that day (lags a day for inactive users).
+**Passkey post-mortem (S88b, same session):** the laptop "setup failed" was actually a SUCCESS +
+a sign-in 500: `createCustomToken` needs `iam.serviceAccounts.signBlob` → granted **Service
+Account Token Creator** to the compute SA on itself (IAM, via owner creds). InvalidStateError
+(duplicate passkey) now reads as "already set up". Kevin should just tap "Sign in with Face ID" —
+his passkey exists. New house icons: fingerprint, sync, pause, watch (emoji swapped out of all
+S86–88 features per Kevin's icon rule — NEW FEATURES MUST USE src/icons.jsx ICONS, NOT EMOJI).
+
+## ⏭️ NEXT SESSION (Kevin's queue)
+1. Trainerize workout/program history import (v2 workouts: program/get, dailyWorkout/get).
+2. Stripe (billing — the biggest remaining gap; trials are still unenforced).
+3. Open product call: should wearable burn adjust the eat-back day target? (deficitMode tie-in.)
 
 ## ✅ Session 85 shipped (all LIVE): Trainerize importer v1 + full optimization/security sweep
 1. **Trainerize importer v1 — DONE, deployed, verified with the real roster** (10 active clients at

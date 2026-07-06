@@ -59,6 +59,7 @@ const GLYPHS = {
   fingerprint: (<><path d="M7.5 20.2C6 18.4 5.2 16.2 5.2 13.4a6.8 6.8 0 0 1 13.6 0c0 1.4-.1 2.7-.4 3.9" /><path d="M12 9.4a4 4 0 0 1 4 4c0 2.6-.4 4.9-1.3 7" /><path d="M12 13.4c0 3-.7 5.5-2.1 7.6" /><path d="M8.6 4.6A9.4 9.4 0 0 1 21 11" /><path d="M3.3 9.7A9.4 9.4 0 0 1 5.7 6" /></>),
   sync: (<><path d="M20 5v5h-5" /><path d="M4 19v-5h5" /><path d="M19.5 10a8 8 0 0 0-14-3.5" /><path d="M4.5 14a8 8 0 0 0 14 3.5" /></>),
   pause: (<><path d="M9 5.5v13" /><path d="M15 5.5v13" /></>),
+  watch: (<><circle cx="12" cy="12" r="5.6" /><path d="M12 9.5V12l1.8 1.2" /><path d="M9 6.6 9.6 2.5h4.8L15 6.6" /><path d="M9 17.4 9.6 21.5h4.8L15 17.4" /></>),
 };
 
 export function Icon({ name, size = 20, variant = "outline", color = "currentColor",

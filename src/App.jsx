@@ -7061,6 +7061,15 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
           <div style={{ fontSize: "1.6rem", fontWeight: 800, fontFamily: "'Sora',sans-serif" }}>
             {cals.toLocaleString()}{target ? <span style={{ fontSize: ".9rem", color: "var(--muted)", fontWeight: 400 }}> / {target.toLocaleString()} cal</span> : " cal"}
           </div>
+          {/* Wearable tracker for this date (Trainerize v3) — display-only. */}
+          {dayLog && dayLog.wearable && (dayLog.wearable.active || dayLog.wearable.steps) ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: ".78rem", color: "var(--muted-light)" }}>
+              <Icon name="watch" size={14} color="var(--accent)" />
+              <span>Tracker{dayLog.wearable.source ? ` (${dayLog.wearable.source})` : ""}:</span>
+              {dayLog.wearable.active ? <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--text)" }}>{Number(dayLog.wearable.active).toLocaleString()} cal active</span> : null}
+              {dayLog.wearable.steps ? <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--text)" }}>· {Number(dayLog.wearable.steps).toLocaleString()} steps</span> : null}
+            </div>
+          ) : null}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
             {[100, 250, 500].map((n) => <button key={"p" + n} style={quick} onClick={() => addCal(n)}>+{n}</button>)}
             {[100, 250, 500].map((n) => <button key={"m" + n} style={quick} onClick={() => addCal(-n)}>−{n}</button>)}
@@ -7331,6 +7340,17 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <div className="dash-cta-lbl">oz Water</div>
         </div>
       </div>
+
+      {/* Wearable tracker (Trainerize v3): today's real burn + steps from the
+          client's connected watch. Display-only — it never changes the target. */}
+      {dailyLog.wearable && (dailyLog.wearable.active || dailyLog.wearable.steps) ? (
+        <div className="card" style={{padding:"10px 14px",marginBottom:"14px",display:"flex",alignItems:"center",gap:"8px",fontSize:".82rem"}}>
+          <Icon name="watch" size={16} color="var(--accent)" />
+          <span style={{color:"var(--muted)"}}>Tracker{dailyLog.wearable.source ? ` (${dailyLog.wearable.source})` : ""}:</span>
+          {dailyLog.wearable.active ? <span style={{fontFamily:"'Sora',sans-serif"}}>{Number(dailyLog.wearable.active).toLocaleString()} cal active</span> : null}
+          {dailyLog.wearable.steps ? <span style={{fontFamily:"'Sora',sans-serif"}}>· {Number(dailyLog.wearable.steps).toLocaleString()} steps</span> : null}
+        </div>
+      ) : null}
 
       {/* Expanded stat detail */}
       {expandedStat && (
@@ -9179,8 +9199,9 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     setTzMsg({ ok: true, text: `Importing ${ids.length} client${ids.length === 1 ? "" : "s"} from Trainerize…` });
     try {
       const r = await onTrainerizeImport({ clientIds: ids });
-      const meals = r.mealDaysTotal ? ` · ${r.mealDaysTotal} day${r.mealDaysTotal === 1 ? "" : "s"} of meals synced` : "";
-      setTzMsg({ ok: true, text: `✓ Imported ${r.total} client${r.total === 1 ? "" : "s"} (${r.created} new · ${r.updated} updated${meals}) — filed under the “Trainerize” folder in All clients.` });
+      const meals = r.mealDaysTotal ? ` · ${r.mealDaysTotal} day${r.mealDaysTotal === 1 ? "" : "s"} of meals` : "";
+      const health = r.healthDaysTotal ? ` · ${r.healthDaysTotal} day${r.healthDaysTotal === 1 ? "" : "s"} of tracker data` : "";
+      setTzMsg({ ok: true, text: `✓ Imported ${r.total} client${r.total === 1 ? "" : "s"} (${r.created} new · ${r.updated} updated${meals}${health}) — filed under the “Trainerize” folder in All clients.` });
       setTzPick(null);
     } catch (e) {
       setTzMsg({ ok: false, text: tzErrText(e) });

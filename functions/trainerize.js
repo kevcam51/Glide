@@ -178,6 +178,44 @@ function glideMealsFromEntry(entry, detail) {
   return out;
 }
 
+// ── v3: wearable health data → Glide day logs ───────────────────────────────
+// Trainerize aggregates each client's connected wearable (Garmin/Apple/Fitbit):
+// daily calories burned ({restingEnergy, activeEnergy}) and steps. Stored on
+// the day log as `wearable: {active, resting, steps, source}` — display-only
+// for now (it does NOT change the calorie target; that's a later product call).
+const HEALTH_DAYS_MAX = 90; // wearables write one doc per day — cap the backfill
+async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
+  const span = Math.min(days, HEALTH_DAYS_MAX);
+  const startDate = new Date(Date.now() - span * 86400000).toISOString().slice(0, 10);
+  const endDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const byDate = {};
+  for (const type of ["calorieOut", "step"]) {
+    const r = await tz("healthData/getList", { userID: tzUserId, type, startDate, endDate }, auth);
+    if (!r.ok) continue;
+    for (const e of (r.json && r.json.healthData) || []) {
+      if (!e || !/^\d{4}-\d{2}-\d{2}$/.test(e.date || "")) continue;
+      const w = (byDate[e.date] = byDate[e.date] || {});
+      if (type === "calorieOut" && e.data) {
+        w.active = r0(e.data.activeEnergy);
+        w.resting = r0(e.data.restingEnergy);
+      } else if (type === "step" && e.data) {
+        w.steps = r0(e.data.steps);
+      }
+      if (e.source) w.source = e.source;
+    }
+  }
+  let written = 0;
+  for (const [date, w] of Object.entries(byDate)) {
+    if (!w.active && !w.steps) continue; // nothing meaningful that day
+    const logKey = `caliq-log-${pid}-${date}`;
+    const log = (await kvGetJSON(db, uid, logKey)) || { calories: 0, water: 0, weight: 0, meals: [] };
+    log.wearable = w;
+    await kvSetJSON(db, uid, logKey, log);
+    written++;
+  }
+  return written;
+}
+
 // Sync one client's recent Trainerize nutrition into the profile's day logs.
 // Additive like the app's own meal logging: totals adjust by the DELTA of
 // replaced tz-imported meals, so Glide-logged food on the same day survives.
@@ -322,11 +360,16 @@ async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTR
       let mealDays = 0;
       try { mealDays = await syncClientNutrition(db, uid, pid, u.id, auth, nutritionDays); }
       catch (e) { console.error("nutrition sync failed for", u.id, e && e.message); }
-      results.push({ name, weight: entry.weight, goal: entry.goal, status: u.status || "", mealDays });
+      // v3: wearable burn + steps (Garmin/Apple/Fitbit via Trainerize).
+      let healthDays = 0;
+      try { healthDays = await syncClientHealth(db, uid, pid, u.id, auth, nutritionDays); }
+      catch (e) { console.error("health sync failed for", u.id, e && e.message); }
+      results.push({ name, weight: entry.weight, goal: entry.goal, status: u.status || "", mealDays, healthDays });
     }
     await kvSetJSON(db, uid, "caliq-index", index);
     const mealDaysTotal = results.reduce((s, r) => s + (r.mealDays || 0), 0);
-    return { ok: true, total: roster.length, created, updated, mealDaysTotal, clients: results };
+    const healthDaysTotal = results.reduce((s, r) => s + (r.healthDays || 0), 0);
+    return { ok: true, total: roster.length, created, updated, mealDaysTotal, healthDaysTotal, clients: results };
 }
 
 exports.trainerizeImport = onCall(

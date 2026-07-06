@@ -1966,6 +1966,24 @@ enabled (Blaze has no default spending cap).
   passkeyRegisterOptions (redeployed) so SETUP uses the device's own Touch ID / Face ID / Windows Hello, plus
   a first-time caption under the AuthGate button ("sign in with your password, then enable Face ID from the
   menu (≡)"). Cost question answered: passkeys are free — device/browser native, no third-party service.
+- Session 88b/c: **Passkey sign-in root-caused & fixed + emoji→icons + Trainerize v3 WEARABLES — LIVE.**
+  (1) **Passkey forensics:** Kevin's laptop "setup failed" was a red herring — Cloud Run logs showed the
+  registration verify returned 200 and the credential WAS stored; the real failure was sign-in:
+  `createCustomToken` threw `iam.serviceAccounts.signBlob` denied. Fix: granted **Service Account Token
+  Creator** to `350381584449-compute@…` ON ITSELF (IAM via owner-cred REST — same class as the S56/S61
+  grants). Also: re-running setup hit InvalidStateError (duplicate passkey) and showed the generic error —
+  now treated as "already set up" (sets the device hint). `authenticatorAttachment:"platform"` added to
+  registration so setup uses the built-in sensor, + a first-time caption under the login button.
+  **Kevin's rule captured: NEW FEATURES MUST USE `src/icons.jsx` ICONS, NOT EMOJI** — added `fingerprint`,
+  `sync`, `pause`, `watch` glyphs and swapped all S86–88 feature emojis (Face ID rows/button, idle-sign-out
+  row, auto-sync toggle, Nutrition Approach cards/timeline/sim footnote).
+  (2) **Trainerize v3 wearables:** `syncClientHealth` (functions/trainerize.js) rides every import/auto-sync —
+  `healthData/getList` calorieOut + step → day-log `wearable:{active, resting, steps, source}` (90-day cap,
+  one doc/day; only days with data). Display: Daily Dashboard tracker card + calendar Day-view line (watch
+  icon). **Display-only — does NOT change the calorie target** (open product call: adjust the eat-back day
+  target from real burn? ties into deficitMode). E2E-verified with Kevin's real Garmin (86 days synced; Jul 4
+  = 703 active cal / 10,010 steps rendered in the Day view). Import result line reports "N days of tracker
+  data". Also S88: idle sign-out user toggle (see S88 entry above).
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a
