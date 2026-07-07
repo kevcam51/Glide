@@ -12624,6 +12624,50 @@ function InviteHub({ open, onClose, meName }) {
 // ─── Navigation side menu (Session 23) ───────────────────────────────────────
 // A hamburger (≡) opens a slide-out drawer with app navigation, inline name
 // editing, and sign-out. Rendered globally by App so it's on every screen.
+// Post-upgrade celebration (S89c, Kevin's ask): a one-time congratulations
+// overlay shown when the user lands back in Glide from a successful Stripe
+// checkout (?billing=success). Rendered through a portal so the
+// page-transition transform trap (S27) can't mis-anchor it.
+function UpgradeCongrats({ isTrainer, onClose }) {
+  return createPortal(
+    <div data-theme="pro" onClick={onClose}
+      style={{ position: "fixed", inset: 0, zIndex: 1500, display: "flex", alignItems: "center",
+        justifyContent: "center", background: "rgba(3,6,8,.74)", padding: 20,
+        fontFamily: "var(--font-sans)" }}>
+      <div onClick={(e) => e.stopPropagation()}
+        className="rounded-card border bg-surface text-fg"
+        style={{ maxWidth: 380, width: "100%", padding: "30px 24px", textAlign: "center",
+          borderColor: "var(--accent)", boxShadow: "0 0 70px rgba(8,220,224,.28)",
+          animation: "fadeUp .32s ease both" }}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+          <span style={{ width: 64, height: 64, borderRadius: 999, background: "rgba(8,220,224,.13)",
+            border: "1px solid rgba(8,220,224,.35)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon name="sparkle" variant="solid" size={30} color="var(--accent)" />
+          </span>
+        </div>
+        <div className="font-display" style={{ fontSize: "1.22rem", lineHeight: 1.3, marginBottom: 10 }}>
+          Welcome to {isTrainer ? "Glide Coach" : "Glide Premium"}
+        </div>
+        <div style={{ fontSize: ".86rem", color: "var(--muted-light)", lineHeight: 1.55, marginBottom: 6 }}>
+          {isTrainer
+            ? "Your coaching workspace is fully unlocked — Glide AI, client tools, and everything in between."
+            : "Glide AI is all yours — chat, photo & voice logging, and your coaching tools, whenever you need them."}
+        </div>
+        <div style={{ fontSize: ".78rem", color: "var(--muted)", lineHeight: 1.5, marginBottom: 20 }}>
+          Thank you for investing in yourself. Manage your plan anytime from the menu (≡).
+        </div>
+        <button onClick={onClose}
+          style={{ width: "100%", padding: "13px 16px", borderRadius: 12, border: "none",
+            background: "var(--accent-fill)", color: "#0b0b12", fontWeight: 800, fontSize: ".92rem",
+            cursor: "pointer" }}>
+          Let's go
+        </button>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 const ROLE_LABEL = { client: "Client", head_trainer: "Trainer", sub_trainer: "Trainer", admin: "Admin" };
 function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onNameSaved, idleSignOut, onSetIdleSignOut }) {
   const [editing, setEditing] = useState(false);
@@ -12911,6 +12955,7 @@ export default function App() {
   const [meTrial, setMeTrial] = useState(null); // trial countdown state (or null)
   const [mePremium, setMePremium] = useState(true); // AI-layer access (locks on trial expiry)
   const [meSubStatus, setMeSubStatus] = useState(null); // "trial" | "active" | "canceled" (drives Manage subscription)
+  const [upgradeCongrats, setUpgradeCongrats] = useState(false); // post-checkout celebration (S89c)
   const [menuOpen, setMenuOpen] = useState(false); // side menu (Session 23)
   // Notification preferences (Session 76) — a master on/off + per-type toggles,
   // in one doc (caliq-notif-prefs), surfaced in the side-menu Notification Center
@@ -13007,6 +13052,7 @@ export default function App() {
     const qs = params.toString();
     window.history.replaceState({}, "", window.location.pathname + (qs ? "?" + qs : ""));
     if (b !== "success") return;
+    setUpgradeCongrats(true); // celebrate right away — the poll below confirms behind it
     let tries = 0;
     const timer = setInterval(async () => {
       tries++;
@@ -13829,6 +13875,7 @@ export default function App() {
         onClients={() => { setHomeTab("clients"); goToProfiles(); }}
         onNameSaved={(n) => setMeName(n)} />
       <InstallPrompt />
+      {upgradeCongrats && <UpgradeCongrats isTrainer={role !== ROLES.CLIENT} onClose={() => setUpgradeCongrats(false)} />}
     </>
   );
 
