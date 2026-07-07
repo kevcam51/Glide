@@ -119,6 +119,38 @@ Optionally add a per-minute rate limit later for script protection.
 BUDGETS entry + a second Stripe price per role (lookup_key) + tier picker on the checkout —
 small build; the budget system already does the enforcement.
 
+## Annual pricing (S89c)
+
+Convention: consumer tiers get a deep discount (drives the impulse "might as well" upgrade —
+MFP sells $79.99/yr vs $19.99/mo, a 67% cut); coach/business tiers get "2 months free" (~17%).
+Annual also saves Stripe fees (one 2.9%+30¢ charge instead of 12 ≈ $3.30/yr saved per client sub)
+and annual subscribers churn dramatically less. Stripe build: one extra `interval: "year"` price
+per product — trivial.
+
+| Plan | Monthly | **Annual** | Effective/mo | Discount | Worst-case COGS/yr | Worst / realistic profit per annual sub |
+|---|---|---|---|---|---|---|
+| Client Premium | $14.99 | **$119.99** | $10.00 | 33% | ~$72 (capped tier) | ~$45 / **$85–100** |
+| Client Premium (if $9.99) | $9.99 | **$79.99** | $6.67 | 33% | ~$72 | ~breakeven / **$45–60** |
+| Client Unlimited | $29.99 | **$299.99** ("2 months free") | $25.00 | 17% | ~$312 ceiling (150k/day backstop) | ≈ breakeven at ceiling / **$140–240** |
+| Coach | $49 | **$490** ("2 months free") | $40.83 | 17% | ~$250 | ~$240 / **$400–430** |
+| Coach Unlimited | $79 | **$790** ("2 months free") | $65.83 | 17% | ~$410 (200k/day backstop) | ~$380 / **$600–700** |
+
+Notes: "worst case" = a user maxing their ceiling EVERY day for 365 days — theoretical; the
+realistic column is what to plan on. Unlimited annual deliberately keeps the shallow 17% discount
+because its cost ceiling is real; the fat consumer discount lives on Premium where margins are
+huge. Don't discount Unlimited deeper than ~17% without lowering its fair-use backstop.
+
+**What the revenue looks like — per 10 ANNUAL subscribers (cash collected up front):**
+| Tier | Revenue/yr | Realistic cost | Profit |
+|---|---|---|---|
+| 10× Premium ($119.99) | $1,200 | $240–480 | **~$720–960** |
+| 10× Unlimited ($299.99) | $3,000 | $600–1,800 | **~$1,200–2,400** |
+| 10× Coach ($490) | $4,900 | $600–1,000 | **~$3,900–4,300** |
+| 10× Coach Unlimited ($790) | $7,900 | $1,000–2,000 | **~$5,900–6,900** |
+
+**Illustrative year-1 (Smooth Training scale): 5 coaches annual + 35 Premium annual + 15
+Unlimited annual ≈ $11,150 ARR, ~$2–3k costs → ~$8–9k profit — collected up front.**
+
 ## Competitive anchors (knowledge as of early 2026 — verify with a research pass before launch)
 
 - MyFitnessPal Premium ≈ $19.99/mo ($79.99/yr) — no AI coach, no trainer.
