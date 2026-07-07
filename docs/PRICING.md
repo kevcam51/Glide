@@ -87,6 +87,38 @@ cap keep it structurally bounded. Expired trials cost $0 (AI gate, S89b).
    Sonnet tier for quality and monetize features, not downgrade.
 5. Voice: cap already 60s/recording; could count voice-minutes against the AI budget later.
 
+## "Unlimited AI" tier (Kevin's S89c idea — upcharge above Pro; caps NOT reduced per his call)
+
+Measured unit: **~1¢ per chat exchange** (~1.5k budget tokens each, warm cache); photo log ≈ 1.5–2¢.
+Current caps for scale: client 25k/day ≈ ~16 exchanges/day; trainer 60k ≈ ~40/day.
+
+**What an uncapped user costs per month (every day, all month):**
+| Usage pattern | Msgs/day | Cost/mo |
+|---|---|---|
+| Typical engaged user | 5–10 | $1.50–3 |
+| Heavy daily user | 25 | ~$11 |
+| Power user | 50 | ~$23 |
+| Obsessive human ceiling | 150 | ~$68 |
+| Literally-chatting-all-day human | 300 | ~$135 |
+| **Scripted abuse (true no-limit)** | ∞ | **unbounded — $100s+/day possible** |
+
+**Key design rule: "unlimited" must mean unlimited-for-humans, never unlimited-for-scripts.**
+Every industry "unlimited" plan carries a fair-use backstop. Recommended: an INVISIBLE backstop
+tier in BUDGETS (aichat.js) at **150k tokens/day (≈100 exchanges — no real human hits it in
+normal use)** → worst-case COGS ≈ **$26/mo**; realistic unlimited subscriber costs $5–15/mo.
+Optionally add a per-minute rate limit later for script protection.
+
+**Recommended prices:**
+- **Client Unlimited: $29.99/mo** (or an add-on: Premium + $15). Safe vs the $26 backstop
+  ceiling; 50–85% margin on realistic usage; clean ladder Trial → Premium $9.99–14.99 →
+  Unlimited $29.99.
+- **Coach Unlimited: $79/mo** (vs $49 base; backstop 200k/day → ceiling ~$34/mo, margin ≥ $45).
+  Pairs naturally with a bundled-client-seats story at this tier.
+
+**Implementation cost when Kevin says go:** one new `subscriptionTier`/entitlement value + a
+BUDGETS entry + a second Stripe price per role (lookup_key) + tier picker on the checkout —
+small build; the budget system already does the enforcement.
+
 ## Competitive anchors (knowledge as of early 2026 — verify with a research pass before launch)
 
 - MyFitnessPal Premium ≈ $19.99/mo ($79.99/yr) — no AI coach, no trainer.
