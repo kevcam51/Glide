@@ -485,3 +485,64 @@ exports.setWorkoutSchedule = onCall({ region: "us-central1", maxInstances: 10 },
   if (out && out.error) throw new HttpsError("failed-precondition", out.error);
   return out; // { ok, replaced, updated, strengthDays, cardioDays }
 });
+
+// AI food estimate for the MANUAL meal tracker (S89c, Kevin's ask): the user
+// types a food the library search doesn't have → one cheap direct model call
+// returns estimated calories + macros to pre-fill the form (the user tweaks,
+// then taps Add). No tools, no chat system prompt — a few hundred tokens per
+// call. Rides the SAME daily token budget + trial gate as the chat, so it
+// can't be farmed and it locks with the AI layer at trial expiry.
+exports.estimateFood = onCall(
+  { secrets: [ANTHROPIC_API_KEY], region: "us-central1", maxInstances: 10 },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
+    const desc = String((request.data && request.data.food) || "").trim().slice(0, 200);
+    if (!desc) throw new HttpsError("invalid-argument", "Describe the food first.");
+    const db = admin.firestore();
+    const profile = (await db.doc(`users/${uid}`).get()).data() || {};
+    if (trialExpiredFor(profile)) {
+      throw new HttpsError("permission-denied", TRIAL_EXPIRED_MSG, { reason: "trial-expired" });
+    }
+    const budget = BUDGETS[tierFor(profile)] || BUDGETS.client;
+    const usageRef = db.doc(`users/${uid}/aiUsage/${todayKey()}`);
+    const used = ((await usageRef.get()).data() || {}).tokens || 0;
+    if (used >= budget) {
+      throw new HttpsError("resource-exhausted", "You've reached today's AI usage limit. It resets tomorrow.");
+    }
+    const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+    let msg;
+    try {
+      msg = await client.messages.create({
+        model: MODEL, max_tokens: 250,
+        system: "You estimate nutrition for foods and meals. Reply with ONLY a JSON object, no prose: "
+          + '{"calories":int,"protein":int,"carbs":int,"fat":int,"assumed":"short serving you assumed"}. '
+          + "Macros in grams. If no quantity is given, assume ONE typical realistic serving and say what "
+          + "you assumed (e.g. \"1 medium bowl, ~350g\"). Use common US portions.",
+        messages: [{ role: "user", content: `Estimate: ${desc}` }],
+      });
+    } catch (e) {
+      console.error("estimateFood API error:", e && e.message);
+      throw new HttpsError("internal", "Couldn't estimate right now. Please try again.");
+    }
+    // Bill against the daily budget exactly like the chat (input+output+cacheWrite).
+    const u = msg.usage || {};
+    const spent = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0);
+    usageRef.set({ tokens: admin.firestore.FieldValue.increment(spent),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
+      .catch((e) => console.error("estimateFood usage write failed:", e && e.message));
+    const text = ((msg.content || []).find((b) => b.type === "text") || {}).text || "";
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    let out = null;
+    try { out = jsonMatch && JSON.parse(jsonMatch[0]); } catch { /* fall through to error below */ }
+    const n = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Math.round(Number(v))) : null);
+    if (!out || n(out.calories) == null) {
+      throw new HttpsError("internal", "Couldn't estimate that one — try rephrasing it.");
+    }
+    return {
+      calories: n(out.calories),
+      protein: n(out.protein) || 0, carbs: n(out.carbs) || 0, fat: n(out.fat) || 0,
+      assumed: String(out.assumed || "").slice(0, 120),
+    };
+  }
+);

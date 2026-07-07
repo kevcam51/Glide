@@ -6094,6 +6094,11 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const [scanOpen, setScanOpen] = useState(false); // live barcode scanner modal
   const [scanning, setScanning] = useState(false); // camera starting up
   const [scanErr, setScanErr] = useState("");
+  // AI estimate (S89c): for foods the library doesn't have — the AI fills
+  // calories + macros from the typed description; the user tweaks, then Adds.
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiNote, setAiNote] = useState("");
+  const [aiErr, setAiErr] = useState("");
   const videoRef = useRef(null);              // <video> preview for live scanning
   const scanCtlRef = useRef(null);            // zxing scanner controls (to stop)
 
@@ -6116,7 +6121,33 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   );
 
   const resetSearch = () => { setSearchOpen(false); setSearchQ(""); setResults([]); setSearching(false); setSearchErr(""); setPicked(null); setGrams("100"); setUnit("g"); setServingText(""); };
-  const resetFields = () => { setName(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); resetSearch(); };
+  const resetFields = () => { setName(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); resetSearch(); setAiBusy(false); setAiNote(""); setAiErr(""); };
+  // AI estimate: uses whatever the user typed (food name field, falling back
+  // to the search box), fills the form, and reports the serving it assumed.
+  // Budget + trial-expiry are enforced server-side (estimateFood callable).
+  const runAiEstimate = async () => {
+    const q = (name || searchQ).trim();
+    if (aiBusy) return;
+    if (!q) { setAiErr("Type the food first — e.g. \"chicken burrito\" or \"2 eggs and toast\"."); return; }
+    setAiBusy(true); setAiErr(""); setAiNote("");
+    try {
+      const r = await callEstimateFood({ food: q });
+      const d = r.data || {};
+      if (!name.trim()) setName(q);
+      setCals(d.calories != null ? String(d.calories) : "");
+      setProtein(d.protein != null ? String(d.protein) : "");
+      setCarbs(d.carbs != null ? String(d.carbs) : "");
+      setFat(d.fat != null ? String(d.fat) : "");
+      setShowMacros(true);
+      setAiNote(`AI estimate${d.assumed ? ` — assumed ${d.assumed}` : ""}. Tweak anything, then Add.`);
+    } catch (e) {
+      const code = (e && e.code) || "";
+      if (code.includes("permission-denied")) setAiErr("Your free trial has ended — upgrade to keep AI estimates.");
+      else if (code.includes("resource-exhausted")) setAiErr("You've reached today's AI limit. It resets tomorrow.");
+      else setAiErr("Couldn't estimate that — try rephrasing (e.g. \"2 eggs and toast\").");
+    }
+    setAiBusy(false);
+  };
   // Run a USDA food search for the current query.
   const runSearch = async () => {
     const q = searchQ.trim();
@@ -6305,6 +6336,13 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
                 Scan barcode
               </span>
             </button>
+            <button onClick={runAiEstimate} disabled={aiBusy}
+              style={{ border:"none", background:"transparent", color:"var(--accent)", cursor:"pointer",
+                fontSize:".74rem", fontWeight:700, padding:"0", textAlign:"left", opacity: aiBusy ? .6 : 1 }}>
+              <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}>
+                <Icon name="sparkle" variant="solid" size={13} />{aiBusy ? "Estimating…" : "AI estimate"}
+              </span>
+            </button>
           </div>
           {scanErr && <div style={{ fontSize:".74rem", color:"var(--red)", marginTop:"6px" }}>{scanErr}</div>}
           {scanOpen && createPortal(
@@ -6336,7 +6374,15 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
               </div>
               {searchErr && <div style={{ fontSize:".74rem", color:"var(--red)" }}>{searchErr}</div>}
               {!searching && !searchErr && results.length === 0 && searchQ.trim().length >= 2 && (
-                <div style={{ fontSize:".74rem", color:"var(--muted)" }}>No matches — try a simpler term, or enter it manually below.</div>
+                <div style={{ fontSize:".74rem", color:"var(--muted)", display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+                  <span>No matches — try a simpler term, or</span>
+                  <button onClick={runAiEstimate} disabled={aiBusy}
+                    style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"5px 10px", borderRadius:"999px",
+                      cursor:"pointer", border:"1px solid var(--accent)", background:"rgba(8,220,224,.08)",
+                      color:"var(--accent)", fontSize:".72rem", fontWeight:700, opacity: aiBusy ? .6 : 1 }}>
+                    <Icon name="sparkle" variant="solid" size={12} />{aiBusy ? "Estimating…" : "Let AI estimate it"}
+                  </button>
+                </div>
               )}
               {results.length > 0 && (
                 <div style={{ display:"flex", flexDirection:"column", gap:"4px", maxHeight:"168px", overflowY:"auto" }}>
@@ -6390,6 +6436,13 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
           placeholder="Calories" value={cals} onChange={(e) => setCals(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()} />
       </div>
+      {aiNote && (
+        <div style={{ fontSize:".74rem", color:"var(--accent)", display:"flex", alignItems:"flex-start", gap:"6px" }}>
+          <Icon name="sparkle" variant="solid" size={13} style={{ marginTop:1, flexShrink:0 }} />
+          <span>{aiNote}</span>
+        </div>
+      )}
+      {aiErr && <div style={{ fontSize:".74rem", color:"var(--red)" }}>{aiErr}</div>}
       <button onClick={() => setShowMacros((s) => !s)}
         style={{ border:"none", background:"transparent", color:"var(--muted)", cursor:"pointer",
           fontSize:".72rem", textDecoration:"underline", padding:"0", textAlign:"left" }}>
@@ -10373,6 +10426,7 @@ async function openBillingPortal() {
   return false;
 }
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
+const callEstimateFood = httpsCallable(functions, "estimateFood"); // AI macro estimate in the manual tracker (S89c)
 const callSetWorkout = httpsCallable(functions, "setWorkoutSchedule"); // workout Accept-card direct write (Session 75)
 const callTranscribe = httpsCallable(functions, "transcribeAudio"); // voice → text (Whisper, Session 79)
 const callSendInvite = httpsCallable(functions, "sendInvite"); // email invites (Option C)

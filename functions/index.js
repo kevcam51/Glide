@@ -102,6 +102,9 @@ exports.passkeyRegisterOptions = require("./webauthn").passkeyRegisterOptions;
 exports.passkeyRegisterVerify = require("./webauthn").passkeyRegisterVerify;
 exports.passkeyLoginOptions = require("./webauthn").passkeyLoginOptions;
 exports.passkeyLoginVerify = require("./webauthn").passkeyLoginVerify;
+// AI food estimate for the manual meal tracker (S89c) — cheap direct call,
+// same daily budget + trial gate as the chat. See functions/aichat.js.
+exports.estimateFood = require("./aichat").estimateFood;
 // Stripe billing v1 (S89) — simple subscriptions; webhook is the only writer
 // of profile.subscriptionStatus. See functions/billing.js for setup steps.
 exports.createCheckoutSession = require("./billing").createCheckoutSession;
