@@ -112,8 +112,12 @@ enabled (Blaze has no default spending cap).
 >   Notification Center, 30-day trials (soft).
 > - **Security:** profile reads scoped (S59), billing/trial fields locked to admin (S85), invite codes
 >   un-harvestable (S85). **61 emulator rules tests** — run before ANY rules change and PUBLISH after.
-> - **Still NOT built:** Stripe billing (biggest gap — trials aren't enforced), client→trainer
->   requests/messaging, push-notification delivery, custom claims in rules (deliberately skipped, S57).
+> - **Stripe billing v1 is LIVE in TEST MODE (S89b):** trials are now ENFORCED (expiry locks the AI
+>   layer; basics stay free; legacy accounts grandfathered), Checkout/portal/webhook deployed +
+>   E2E-verified. To charge real money: confirm prices ($49 coach / $9.99 client are placeholders) +
+>   swap live keys. Connect revenue splits = later phase.
+> - **Still NOT built:** client→trainer requests/messaging, push-notification delivery, Stripe Connect
+>   splits, custom claims in rules (deliberately skipped, S57).
 > - **Key gotchas:** `.page-transition` keeps a CSS transform → any fixed overlay must
 >   `createPortal(…, document.body)` (S27/S30). Local-date keys via `ymdLocal`/`useTodayKey` — never
 >   UTC "today" (S45/S85). kv range queries use the `""` ESCAPE (raw char breaks silently, S85).
@@ -2052,14 +2056,21 @@ enabled (Blaze has no default spending cap).
   **Upgrade** button (+ "Manage subscription" row via new `meSubStatus` when active; new house `card`
   icon in src/icons.jsx); `?billing=success` return path polls the profile ~20s so the gate/banner flip
   without a reload; module helpers `startCheckout()`/`openBillingPortal()`.
-  **⛔ BLOCKED on Kevin, in order:** (a) `firebase login --reauth --no-localhost` (CLI token expired
-  mid-session — also blocks the server-side expiry E2E), (b) Stripe TEST secret key →
-  `printf 'sk_test_…' | firebase functions:secrets:set STRIPE_SECRET_KEY --data-file=-`, (c) deploy
-  `aiChat,aiChatStream,transcribeAudio,createCheckoutSession,createPortalSession,stripeWebhook`,
-  (d) add the webhook endpoint in the Stripe dashboard (URL + 3 events in functions/billing.js header)
-  → set `STRIPE_WEBHOOK_SECRET` → redeploy stripeWebhook, (e) E2E with Stripe test card 4242… →
-  verify subscriptionStatus flips + banner clears; simulate an expired trial (admin write) → verify the
-  lock + upgrade→unlock loop. Setup steps are documented in the functions/billing.js header.
+  **✅ DEPLOYED + E2E-VERIFIED (same session, after Kevin re-authed + provided the TEST key):**
+  all six functions live; the **webhook endpoint was created programmatically via the Stripe API**
+  (`we_1TqL3O…`, signing secret captured straight into Secret Manager — no dashboard step needed).
+  Verified against prod: (1) **trial gate** — privileged write set trainer.uitest's trial to expired →
+  lock card + Upgrade button from real data, aiChat permission-denied/trial-expired, stream SSE
+  trial-expired frame, transcribeAudio denied; fields removed → unlocked, AI replied. (2) **checkout** —
+  createCheckoutSession returned a real checkout.stripe.com URL (role-priced; products auto-created by
+  lookup_key). (3) **webhook** — a SIGNED checkout.session.completed flipped the profile to
+  `active`+customer/subscription ids (app showed the Manage-subscription row, banner cleared), then a
+  REAL API-created $49 test subscription was canceled and **Stripe's own event delivery** flipped the
+  profile to `canceled` via subscription.metadata.uid. All test residue cleaned (Stripe customer
+  deleted, profile fields removed). **The hosted-checkout PAGE itself wasn't browser-tested** (preview
+  is pinned to localhost) — Kevin should tap Upgrade once on a test account in prod as the final UI
+  smoke. **Remaining for real money:** confirm final prices ($49/$9.99 are placeholders), then swap in
+  the LIVE key + a live-mode webhook (same one-command API creation) when Kevin says go.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

@@ -180,17 +180,22 @@ with public invokers); secrets `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` exi
 trainer.uitest → lock card + Upgrade button rendered from real data, aiChat callable
 permission-denied/trial-expired, stream SSE error trial-expired, transcribeAudio denied; fields
 removed → unlocked, AI replied. Test profile restored to grandfathered.
-**Remaining, in order:**
-1. Kevin: real Stripe TEST secret key → `printf 'sk_test_…' | firebase functions:secrets:set
-   STRIPE_SECRET_KEY --project calorieiq-29762 --data-file=-` → redeploy the 3 billing fns.
-2. Stripe dashboard → add webhook endpoint
-   `https://us-central1-calorieiq-29762.cloudfunctions.net/stripeWebhook` with events
-   checkout.session.completed + customer.subscription.updated/deleted → set STRIPE_WEBHOOK_SECRET
-   (real whsec_…) → redeploy stripeWebhook.
-3. E2E in test mode: card 4242 4242 4242 4242 → subscriptionStatus flips "active", banner clears,
-   Manage-subscription row appears; then the upgrade→unlock loop on an expired-trial test profile.
-4. LIVE mode when Kevin's ready: real prices confirmed ($49 coach / $9.99 client are placeholders),
-   live key + live webhook secret swapped in.
+**✅ ALL DONE (same session — Kevin provided the TEST key):** real key set; **webhook endpoint
+created programmatically via the Stripe API** (`we_1TqL3O…` — no dashboard step; signing secret
+captured straight into Secret Manager); 3 billing fns redeployed. **E2E-verified against prod:**
+checkout URL created (role-priced, products auto-created by lookup_key `glide_coach_monthly` /
+`glide_premium_monthly`); signed checkout.session.completed → profile `active` + Manage-subscription
+row in the app; a REAL API-created $49 test subscription canceled → **Stripe's own delivery** flipped
+the profile to `canceled` via metadata.uid. Trial gate separately E2E'd (lock card + all 3 endpoints
+deny + unlock loop). All test residue cleaned (Stripe customer deleted, profile fields removed).
+**Remaining (small):**
+1. Kevin taps **Upgrade** once on a test/expired account in prod — the only untested link is Stripe's
+   hosted checkout PAGE in a real browser (the preview can't leave localhost). Test card
+   4242 4242 4242 4242, any future expiry/CVC.
+2. **LIVE mode when Kevin's ready:** confirm real prices ($49 coach / $9.99 client are placeholders —
+   change PRICE_CENTS in functions/billing.js or create new lookup_key prices), set the LIVE
+   `sk_live_…` key + create the live-mode webhook (same one-command API call), redeploy the 3 fns.
+3. Later phase: Stripe Connect revenue splits (sub 75 / head 10 / platform 15) — deliberately not v1.
 
 ### Also pending
 - **NEW STANDING STRATEGY DOC: `docs/ECOSYSTEM.md`** (S88 close) — Kevin's north star: Glide great
