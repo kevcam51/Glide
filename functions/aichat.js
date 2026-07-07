@@ -21,11 +21,22 @@ const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
 const MODEL = "claude-sonnet-4-6";
 
 // Daily token budgets (input + output) by tier — from the spec's cost-controls.
-const BUDGETS = { trial: 10000, client: 25000, assisted: 40000, trainer: 60000 };
+// clientMax/trainerMax are the paid "Max" tiers (S89c): PUBLISHED high
+// allowances (~100 AI conversations/day) — honest fair-use ceilings, never
+// marketed as "unlimited" (Kevin's call; see docs/PRICING.md).
+const BUDGETS = { trial: 10000, client: 25000, assisted: 40000, trainer: 60000,
+  clientMax: 150000, trainerMax: 200000 };
 
 function tierFor(profile) {
   const role = (profile && profile.role) || "client";
-  if (role === "head_trainer" || role === "sub_trainer" || role === "admin") return "trainer";
+  // A paid Max plan (the Stripe webhook stamps subscriptionTier "max" /
+  // "coach_max") unlocks the high budget — only while the sub is active.
+  const isMax = profile && profile.subscriptionStatus === "active"
+    && /max/.test(String(profile.subscriptionTier || ""));
+  if (role === "head_trainer" || role === "sub_trainer" || role === "admin") {
+    return isMax ? "trainerMax" : "trainer";
+  }
+  if (isMax) return "clientMax";
   // client: trainer-assisted (linked) gets a higher budget than self-serve;
   // a still-in-trial / non-active subscription gets the trial budget.
   if (profile && profile.subscriptionStatus && profile.subscriptionStatus !== "active"

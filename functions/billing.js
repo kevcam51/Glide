@@ -4,12 +4,15 @@
 // Stripe Connect revenue splits (sub 75 / head 10 / platform 15) are a LATER
 // phase — this file deliberately doesn't touch them.
 //
-// PLACEHOLDER PRICES (test mode — Kevin confirms real numbers before live):
-//   head_trainer / sub_trainer → "Glide Coach"   $49/mo flat
-//   client                     → "Glide Premium" $9.99/mo
-// Products/prices are get-or-created BY LOOKUP KEY on first use, so no manual
-// Stripe-dashboard setup is needed; changing a price later = create a new
-// price with the same lookup_key (transfer_lookup_key) or edit PRICE_CENTS.
+// FINAL PRICES (Kevin's S89c decision — see docs/PRICING.md + the decision sheet):
+//   client  → Glide Premium $14.99/mo · $119.99/yr   |  Glide Max $29.99/mo · $299.99/yr
+//   trainer → Glide Coach   $49/mo    · $490/yr      |  Coach Max $79/mo    · $790/yr
+// "Max" = the honest high-allowance tier (published ~100 AI conversations/day,
+// enforced by the clientMax/trainerMax BUDGETS in aichat.js) — NEVER branded
+// "unlimited" (Kevin's liability/honesty call, S89c). Products/prices are
+// get-or-created BY LOOKUP KEY on first use; a changed amount mints a new
+// price and MOVES the lookup key (transfer_lookup_key) — which is how the
+// Premium $9.99 placeholder became $14.99 without dashboard surgery.
 //
 // SETUP (Kevin, one-time — functions won't deploy until the secrets exist):
 //   1. Stripe dashboard → Developers → API keys → copy the TEST secret key.
@@ -43,13 +46,21 @@ const ALLOWED_ORIGINS = [
 ];
 const safeOrigin = (o) => (ALLOWED_ORIGINS.includes(o) ? o : ALLOWED_ORIGINS[0]);
 
-// Role → plan. Trainers (head or sub) get the coach plan; clients get premium.
-const PLANS = {
-  trainer: { lookupKey: "glide_coach_monthly", name: "Glide Coach", cents: 4900 },
-  client: { lookupKey: "glide_premium_monthly", name: "Glide Premium", cents: 999 },
+// The catalog. `key` builds lookup keys (glide_{key}_monthly / _annual);
+// `tier` is what the webhook stores on profile.subscriptionTier (the *Max
+// budget in aichat.js keys off it). Amounts in cents.
+const CATALOG = {
+  premium:   { key: "premium",   tier: "premium",   name: "Glide Premium",   month: 1499, year: 11999 },
+  max:       { key: "max",       tier: "max",       name: "Glide Max",       month: 2999, year: 29999 },
+  coach:     { key: "coach",     tier: "coach",     name: "Glide Coach",     month: 4900, year: 49000 },
+  coach_max: { key: "coach_max", tier: "coach_max", name: "Glide Coach Max", month: 7900, year: 79000 },
 };
-const planFor = (role) =>
-  role === "head_trainer" || role === "sub_trainer" || role === "admin" ? PLANS.trainer : PLANS.client;
+// Role + wants-Max → plan. Trainers (head or sub) buy coach plans; clients premium.
+function planFor(role, wantMax) {
+  const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
+  if (isTrainer) return wantMax ? CATALOG.coach_max : CATALOG.coach;
+  return wantMax ? CATALOG.max : CATALOG.premium;
+}
 
 // Lazy Stripe client (the secret only exists at runtime).
 let stripeClient = null;
@@ -58,19 +69,42 @@ function stripe() {
   return stripeClient;
 }
 
-// Get-or-create the recurring price for a plan, by lookup key. Cached per
-// instance so repeat checkouts don't re-query Stripe.
+// Get-or-create the recurring price for a plan + interval, by lookup key.
+// Self-healing: if the price exists but the amount is stale (a price change in
+// CATALOG), a fresh price is minted and the lookup key transfers to it —
+// existing subscribers keep their old price; new checkouts get the new one.
+// Cached per instance so repeat checkouts don't re-query Stripe.
 const priceCache = {};
-async function ensurePrice(plan) {
-  if (priceCache[plan.lookupKey]) return priceCache[plan.lookupKey];
-  const found = await stripe().prices.list({ lookup_keys: [plan.lookupKey], active: true, limit: 1 });
-  if (found.data.length) return (priceCache[plan.lookupKey] = found.data[0].id);
-  const product = await stripe().products.create({ name: plan.name });
+const productOf = (price) => (typeof price.product === "string" ? price.product : price.product.id);
+async function ensurePrice(plan, interval) {
+  const lk = `glide_${plan.key}_${interval === "year" ? "annual" : "monthly"}`;
+  const cents = interval === "year" ? plan.year : plan.month;
+  if (priceCache[lk]) return priceCache[lk];
+  const found = await stripe().prices.list({ lookup_keys: [lk], active: true, limit: 1 });
+  if (found.data.length) {
+    const p = found.data[0];
+    if (p.unit_amount === cents && p.recurring && p.recurring.interval === interval) {
+      return (priceCache[lk] = p.id);
+    }
+    const np = await stripe().prices.create({
+      product: productOf(p), currency: "usd", unit_amount: cents,
+      recurring: { interval }, lookup_key: lk, transfer_lookup_key: true,
+    });
+    return (priceCache[lk] = np.id);
+  }
+  // No price for this interval yet — hang it on the sibling interval's product
+  // when one exists (one Stripe product per plan, two prices), else create the
+  // product now.
+  const sibLk = `glide_${plan.key}_${interval === "year" ? "monthly" : "annual"}`;
+  const sib = await stripe().prices.list({ lookup_keys: [sibLk], active: true, limit: 1 });
+  const productId = sib.data.length
+    ? productOf(sib.data[0])
+    : (await stripe().products.create({ name: plan.name })).id;
   const price = await stripe().prices.create({
-    product: product.id, currency: "usd", unit_amount: plan.cents,
-    recurring: { interval: "month" }, lookup_key: plan.lookupKey,
+    product: productId, currency: "usd", unit_amount: cents,
+    recurring: { interval }, lookup_key: lk,
   });
-  return (priceCache[plan.lookupKey] = price.id);
+  return (priceCache[lk] = price.id);
 }
 
 // ── Checkout: start a subscription for the signed-in user's role ────────────
@@ -84,10 +118,16 @@ exports.createCheckoutSession = onCall(
     if (profile.subscriptionStatus === "active") {
       throw new HttpsError("failed-precondition", "You already have an active subscription.");
     }
-    const plan = planFor(profile.role);
+    // The caller picks WHICH of their role's plans (base vs max) and the
+    // billing interval — never the price. Anything unexpected falls back to
+    // the base monthly plan.
+    const sel = (request.data && request.data.plan) || {};
+    const wantMax = sel.tier === "max";
+    const interval = sel.interval === "year" ? "year" : "month";
+    const plan = planFor(profile.role, wantMax);
     const origin = safeOrigin(String((request.data && request.data.origin) || ""));
     try {
-      const price = await ensurePrice(plan);
+      const price = await ensurePrice(plan, interval);
       const session = await stripe().checkout.sessions.create({
         mode: "subscription",
         line_items: [{ price, quantity: 1 }],
@@ -96,7 +136,10 @@ exports.createCheckoutSession = onCall(
         // one (webhook stores it on the profile).
         ...(profile.stripeCustomerId ? { customer: profile.stripeCustomerId }
           : profile.email ? { customer_email: profile.email } : {}),
-        subscription_data: { metadata: { uid } },
+        // tier rides BOTH the session and the subscription so every webhook
+        // event can stamp profile.subscriptionTier (drives the Max AI budget).
+        metadata: { uid, tier: plan.tier },
+        subscription_data: { metadata: { uid, tier: plan.tier } },
         allow_promotion_codes: true,
         success_url: `${origin}/?billing=success`,
         cancel_url: `${origin}/?billing=cancelled`,
@@ -163,10 +206,13 @@ exports.stripeWebhook = onRequest(
         if (uid) {
           await db.doc(`users/${uid}`).set({
             subscriptionStatus: "active",
+            // Which plan they bought (premium|max|coach|coach_max) — the *Max
+            // tiers unlock the high AI budgets in aichat.js tierFor().
+            subscriptionTier: (s.metadata && s.metadata.tier) || "premium",
             stripeCustomerId: s.customer || null,
             stripeSubscriptionId: s.subscription || null,
           }, { merge: true });
-          console.log("stripeWebhook: activated", uid);
+          console.log("stripeWebhook: activated", uid, (s.metadata && s.metadata.tier) || "");
         }
       } else if (event.type === "customer.subscription.updated"
         || event.type === "customer.subscription.deleted") {
@@ -178,9 +224,10 @@ exports.stripeWebhook = onRequest(
           // then shows the expired state and the premium gate locks.
           const keep = event.type !== "customer.subscription.deleted"
             && ["active", "trialing", "past_due"].includes(sub.status);
-          await db.doc(`users/${uid}`).set({
-            subscriptionStatus: keep ? "active" : "canceled",
-          }, { merge: true });
+          const update = { subscriptionStatus: keep ? "active" : "canceled" };
+          if (keep && sub.metadata && sub.metadata.tier) update.subscriptionTier = sub.metadata.tier;
+          if (!keep) update.subscriptionTier = admin.firestore.FieldValue.delete();
+          await db.doc(`users/${uid}`).set(update, { merge: true });
           console.log("stripeWebhook:", event.type, uid, "→", keep ? "active" : "canceled");
         } else {
           console.error("stripeWebhook: no uid for customer", sub.customer);

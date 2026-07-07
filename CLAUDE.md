@@ -123,12 +123,11 @@ enabled (Blaze has no default spending cap).
 >   UTC "today" (S45/S85). kv range queries use the `""` ESCAPE (raw char breaks silently, S85).
 >   When `functions/aitools.js` changes deploy ALL FOUR AI fns. Firebase CLI token expires —
 >   `firebase login --reauth --no-localhost`.
-> - **Next up (Kevin's queue): PRICING DECISION → Stripe LIVE mode.** Billing v1 is live in TEST
->   mode (S89b, E2E-verified incl. Kevin's own test purchase); the cost model + tier options are in
->   `docs/PRICING.md` and the decision-sheet artifact (link in the handoff). Kevin decides: Premium
->   $9.99 vs $14.99, ship the Max tiers now or later, bundled client seats — then implement final
->   prices + annual + swap live keys (~15 min). After that: push-notification delivery. Face ID is
->   device-tested ✓; Trainerize auto-sync is back ON (S89c).
+> - **Next up (Kevin's queue): Stripe LIVE-mode swap.** Pricing is DECIDED & BUILT (S89c): Premium
+>   $14.99/$119.99yr · Max $29.99/$299.99yr · Coach $49/$490yr · Coach Max $79/$790yr — all
+>   E2E-verified in test mode (CATALOG in billing.js, subscriptionTier→Max budgets, PlanPicker UI).
+>   Remaining: live key + live webhook + liability hygiene (see handoff + docs/PRICING.md). After
+>   that: push-notification delivery. Face ID device-tested ✓; auto-sync ON (S89c).
 
 - Session 1: Vite project, app moved in, deployed to Vercel.
 - Session 2: Firebase Auth + Firestore; storage migrated from localStorage to Firestore;

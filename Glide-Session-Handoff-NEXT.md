@@ -9,35 +9,30 @@ Firebase project `calorieiq-29762`; prod URL `calorieiq-jet.vercel.app`. AI mode
 
 ---
 
-## ⏭️ NEXT SESSION — start here: Kevin's PRICING DECISION → Stripe LIVE mode
+## ⏭️ NEXT SESSION — start here: go LIVE with Stripe (pricing is DECIDED & BUILT)
 
-The billing system is DONE in test mode (S89b — Kevin ran a real test purchase end-to-end). What
-remains is a PRODUCT decision, then ~15–30 min of implementation. **Everything Kevin needs to
-decide is in [docs/PRICING.md](docs/PRICING.md) and the decision-sheet artifact:**
-`https://claude.ai/code/artifact/2bc2c453-5e97-4740-8577-fdacd416816d` (redeploy to the SAME url
-by passing that `url` to the Artifact tool if it needs edits).
+**Kevin decided (Jul 7): "run with all of these" — the full recommended menu.** It is IMPLEMENTED
+and E2E-VERIFIED in test mode (8/8 checkout sessions audited via the Stripe API; webhook tier
+stamping verified; PlanPicker UI verified live):
+- **Glide Premium $14.99/mo · $119.99/yr (33% off)** — lookup_keys glide_premium_monthly (price
+  TRANSFERRED from the $9.99 placeholder) / glide_premium_annual
+- **Glide Max $29.99/mo · $299.99/yr** — clientMax budget 150k tokens/day (~100 conversations)
+- **Glide Coach $49/mo · $490/yr** | **Coach Max $79/mo · $790/yr** — trainerMax 200k/day
+- Implementation: `CATALOG` in functions/billing.js; checkout takes {plan:{tier:"base"|"max",
+  interval:"month"|"year"}} (price always server-side); webhook stamps `profile.subscriptionTier`
+  → aichat.js `tierFor()` unlocks the Max budgets; frontend `PlanPicker` (SideMenu banner + chat
+  lock card) sells tier+interval. Bundled client seats: direction affirmed, build with the first
+  outside trainer. **Max is NEVER "unlimited"** (Kevin's liability call — published allowance).
 
-**Kevin's open decisions (recommendations in parentheses — he was sleeping on it):**
-1. **Glide Premium price:** $9.99 (impulse zone, one theoretical break-even edge case) vs **$14.99
-   (rec — bulletproof profitable, still half of MFP ~$20)**. Kevin DECLINED trimming usage caps on
-   paid tiers ("the upgrade must feel worth it") — so price carries the ceiling.
-2. **Ship the Max tiers at launch?** Glide Max $29.99 / Coach Max $79 — published ~100
-   AI-conversations/day allowance (150k/200k token backstops). **Naming is DECIDED: "Max", never
-   "Unlimited"** — Kevin won't sell a capped thing as uncapped (liability + honesty; recorded in
-   PRICING.md). (Rec: launch without, add in month 1–2 from real usage data.)
-3. **Annual plans:** Premium $119.99 (33% off) / others "2 months free" ($299.99/$490/$790).
-   (Rec: yes from day one.)
-4. **Bundled client seats** on Coach Max ("$79 includes AI for up to 20 clients" — costs $2–4/seat).
-   (Rec: decide direction now, build when the first outside trainer signs up.)
-
-**When he decides, the implementation path:** final `PRICE_CENTS` in functions/billing.js + annual
-prices (new lookup_keys, e.g. `glide_premium_annual`) + a monthly/annual toggle at checkout + (if
-Max) a BUDGETS entry + tier on the profile; then LIVE mode = swap `STRIPE_SECRET_KEY` to the live
-key + create the live webhook via the API (same one-command flow as S89b) + Kevin taps Upgrade in
-prod as the final smoke. **Liability hygiene before real money:** allowance disclosed on the
-pricing page, fair-use clause in the ToS, no "unlimited" in marketing, attorney ToS pass (Kevin).
-**Offer first:** the competitor-pricing deep-research pass (verify the MFP/Trainerize anchors —
-docs/ECOSYSTEM.md queued it).
+**What remains for real money (the actual next-session work):**
+1. Kevin gets his LIVE Stripe key (dashboard, live mode, sk_live_…) →
+   `printf 'sk_live_…' | firebase functions:secrets:set STRIPE_SECRET_KEY --data-file=-`
+2. Create the LIVE webhook via the API (same one-command flow as S89b — the create response's
+   `secret` goes straight into STRIPE_WEBHOOK_SECRET) → redeploy the 3 billing fns.
+3. First real checkout smoke (Kevin, small real card or 100%-off promo code, then refund/cancel).
+4. **Liability hygiene (before/at launch):** allowances disclosed on the pricing page, fair-use
+   clause in the ToS, no "unlimited" anywhere in marketing, attorney pass on the ToS.
+5. Offer first: the competitor-pricing deep-research pass (verify MFP/Trainerize anchors).
 
 ### Also pending / loose ends
 - **Verify one auto-sync summary line:** auto-sync is back ON (S89c re-enabled it directly after

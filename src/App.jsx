@@ -10410,13 +10410,95 @@ const callAiChat = httpsCallable(functions, "aiChat");
 const callCreateCheckout = httpsCallable(functions, "createCheckoutSession");
 const callCreatePortal = httpsCallable(functions, "createPortalSession");
 // Start Stripe Checkout and bounce the browser there. Returns false on failure
-// so callers can show their own error state.
-async function startCheckout() {
+// so callers can show their own error state. `plan` = {tier:"base"|"max",
+// interval:"month"|"year"} — the server maps it to the caller's role and picks
+// the price (never trust the client with amounts).
+async function startCheckout(plan) {
   try {
-    const res = await callCreateCheckout({ origin: window.location.origin });
+    const res = await callCreateCheckout({ origin: window.location.origin, plan: plan || {} });
     if (res.data && res.data.url) { window.location.href = res.data.url; return true; }
   } catch (e) { console.error("checkout failed:", e && e.message); }
   return false;
+}
+
+// The S89c menu (display copy only — amounts are enforced server-side in
+// functions/billing.js CATALOG; keep the two in sync when prices change).
+const PLAN_MENU = {
+  client: [
+    { tier: "base", name: "Glide Premium", month: "$14.99", year: "$119.99", yearNote: "33% off",
+      blurb: "The AI coach: chat, photo & voice logging, AI meal estimates — a generous daily allowance." },
+    { tier: "max", name: "Glide Max", month: "$29.99", year: "$299.99", yearNote: "2 months free",
+      blurb: "Our biggest allowance — around 100 AI conversations a day. Ever hit the ceiling? Tell us and we'll raise it." },
+  ],
+  trainer: [
+    { tier: "base", name: "Glide Coach", month: "$49", year: "$490", yearNote: "2 months free",
+      blurb: "The full coaching workspace + AI assistant. Unlimited clients, flat price." },
+    { tier: "max", name: "Coach Max", month: "$79", year: "$790", yearNote: "2 months free",
+      blurb: "The biggest AI allowance, coach-sized — around 100 AI conversations a day." },
+  ],
+};
+
+// Plan picker (S89c): shown before Checkout so the user chooses base vs Max
+// and monthly vs annual. Portaled to <body> (page-transition transform trap).
+function PlanPicker({ role, onClose }) {
+  const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
+  const plans = PLAN_MENU[isTrainer ? "trainer" : "client"];
+  const [interval, setInterval_] = useState("month");
+  const [busyTier, setBusyTier] = useState(null);
+  const [err, setErr] = useState(false);
+  const choose = async (tier) => {
+    if (busyTier) return;
+    setBusyTier(tier); setErr(false);
+    const ok = await startCheckout({ tier, interval });
+    if (!ok) { setBusyTier(null); setErr(true); }
+  };
+  return createPortal(
+    <div data-theme="pro" onClick={onClose} style={{ position:"fixed", inset:0, zIndex:2400,
+      background:"rgba(0,0,0,.78)", display:"flex", alignItems:"center", justifyContent:"center",
+      padding:"20px", paddingTop:"calc(20px + env(safe-area-inset-top,0px))", overflowY:"auto" }}>
+      <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card"
+        style={{ width:"min(94vw,420px)", padding:"22px 20px", display:"flex", flexDirection:"column", gap:"14px" }}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="font-display font-bold text-fg" style={{ fontSize:"1.08rem" }}>Choose your plan</div>
+          <button onClick={onClose} aria-label="Close" className="text-muted"
+            style={{ border:"none", background:"transparent", cursor:"pointer", fontSize:"1.1rem", padding:"4px" }}>✕</button>
+        </div>
+        {/* Monthly / Annual toggle */}
+        <div className="flex rounded-[10px] border border-border overflow-hidden">
+          {[["month","Monthly"],["year","Annual"]].map(([v,l]) => (
+            <button key={v} onClick={() => setInterval_(v)}
+              className={interval === v ? "bg-primary text-primaryfg" : "bg-transparent text-muted"}
+              style={{ flex:1, padding:"9px 0", border:"none", cursor:"pointer", fontWeight:800, fontSize:".82rem" }}>
+              {l}{v === "year" ? " · save" : ""}
+            </button>
+          ))}
+        </div>
+        {plans.map((p) => (
+          <button key={p.tier} onClick={() => choose(p.tier)} disabled={!!busyTier}
+            className="text-left bg-surface2 border rounded-card"
+            style={{ padding:"14px 16px", cursor:"pointer", display:"flex", flexDirection:"column", gap:"4px",
+              borderColor: p.tier === "base" ? "var(--color-primary)" : "var(--color-border)",
+              opacity: busyTier && busyTier !== p.tier ? .5 : 1 }}>
+            <div className="flex items-baseline justify-between gap-2 flex-wrap">
+              <span className="font-display font-bold text-fg" style={{ fontSize:".95rem" }}>{p.name}</span>
+              <span className="font-display font-extrabold text-fg" style={{ fontSize:"1.15rem" }}>
+                {interval === "year" ? p.year : p.month}
+                <span className="text-muted" style={{ fontSize:".72rem", fontWeight:600 }}>/{interval === "year" ? "yr" : "mo"}</span>
+              </span>
+            </div>
+            {interval === "year" && <div className="text-primary" style={{ fontSize:".72rem", fontWeight:700 }}>{p.yearNote}</div>}
+            <div className="text-muted" style={{ fontSize:".78rem", lineHeight:1.45 }}>{p.blurb}</div>
+            <div className="text-primary" style={{ fontSize:".78rem", fontWeight:800, marginTop:"4px" }}>
+              {busyTier === p.tier ? "Opening checkout…" : "Choose →"}
+            </div>
+          </button>
+        ))}
+        {err && <div style={{ color:"var(--color-danger)", fontSize:".78rem" }}>Couldn't open checkout — please try again.</div>}
+        <div className="text-muted" style={{ fontSize:".68rem", lineHeight:1.5 }}>
+          Cancel anytime. Your data and manual logging stay free forever.
+        </div>
+      </div>
+    </div>, document.body);
 }
 async function openBillingPortal() {
   try {
@@ -10556,7 +10638,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const [size, setSize] = useState("compact");           // "compact" corner card | "full" near-fullscreen
   const [pasteOpen, setPasteOpen] = useState(false);     // "Paste from AI" import box open
   const [pasteText, setPasteText] = useState("");        // pasted text from another AI
-  const [upgrading, setUpgrading] = useState(false);     // Stripe checkout redirect in flight (trial-expired lock)
+  const [showPlans, setShowPlans] = useState(false);      // S89c plan picker (trial-expired lock → choose plan → Checkout)
   // "Precise food data" (Pro) — the AI pulls real database values for branded
   // foods instead of estimating. Gated by entitlement; free users see it locked.
   const [pro, setPro] = useState(false);                 // entitled to precise food data
@@ -11003,11 +11085,11 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 Glide AI — chat, photo &amp; voice logging, and coaching tools — is part of the paid plan.
                 <span className="text-fg font-semibold"> Your data and manual logging stay free.</span>
               </div>
-              <button onClick={async () => { if (upgrading) return; setUpgrading(true); const ok = await startCheckout(); if (!ok) setUpgrading(false); }}
-                disabled={upgrading}
+              <button onClick={() => setShowPlans(true)}
                 className="mt-1 rounded-xl border-none bg-primaryfill px-6 py-3 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-60">
-                {upgrading ? "Opening checkout…" : "Upgrade to keep Glide AI"}
+                Upgrade to keep Glide AI
               </button>
+              {showPlans && <PlanPicker role={role} onClose={() => setShowPlans(false)} />}
             </div>
           ) : (<>
 
@@ -12729,7 +12811,8 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
   const [last, setLast] = useState("");
   const [busy, setBusy] = useState(false);
   const [showNotif, setShowNotif] = useState(false); // Notification Center section (Session 76)
-  const [upgradeBusy, setUpgradeBusy] = useState(false); // Stripe checkout/portal redirect in flight (S89)
+  const [upgradeBusy, setUpgradeBusy] = useState(false); // Stripe portal redirect in flight (S89)
+  const [showPicker, setShowPicker] = useState(false);   // S89c plan picker (Upgrade → choose plan → Checkout)
   const [upgradeErr, setUpgradeErr] = useState(false);
   useBackClose(open, onClose);                        // phone Back closes the menu
   // Face ID / Touch ID passkey setup (S87). pkDone = a passkey was registered
@@ -12854,16 +12937,16 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                 <div style={{ color: "var(--muted)", marginTop: 2 }}>{trial.lengthDays}-day free trial</div>
               </div>
             )}
-            <button onClick={async () => { setUpgradeBusy(true); const ok = await startCheckout(); if (!ok) { setUpgradeBusy(false); setUpgradeErr(true); } }}
-              disabled={upgradeBusy}
+            <button onClick={() => setShowPicker(true)}
               style={{ marginTop: 8, width: "100%", padding: "9px 12px", borderRadius: 8, border: "none",
                 background: "var(--accent-fill)", color: "#0b0b12", fontWeight: 800, fontSize: ".82rem",
-                cursor: "pointer", opacity: upgradeBusy ? .6 : 1 }}>
-              {upgradeBusy ? "Opening checkout…" : trial.expired ? "Upgrade to keep Glide AI" : "Upgrade now"}
+                cursor: "pointer" }}>
+              {trial.expired ? "Upgrade to keep Glide AI" : "Upgrade now"}
             </button>
             {upgradeErr && <div style={{ marginTop: 6, fontSize: ".72rem", color: "var(--red)" }}>Couldn't open checkout — try again in a moment.</div>}
           </div>
         )}
+        {showPicker && <PlanPicker role={role} onClose={() => setShowPicker(false)} />}
         {/* Active subscription → manage/cancel via the Stripe customer portal. */}
         {subActive && (
           <button style={item} disabled={upgradeBusy}

@@ -1,10 +1,15 @@
 # Glide — Pricing & Unit-Cost Model (Session 89)
 
-_Kevin's working prices (S89): **Glide Coach $49/mo** (trainers, flat) · **Glide Premium
-$9.99/mo** (clients). Confirmed as "fair" pending the profitability check below. Update this doc
-when prices or the cost structure change. Stripe products are created by lookup_key
-(`glide_coach_monthly` / `glide_premium_monthly`) — changing a price = new price with
-`transfer_lookup_key`, or edit `PRICE_CENTS` in functions/billing.js before first live use._
+_**DECIDED & IMPLEMENTED (S89c — "run with all of these"):** the full recommended menu is live in
+test mode and E2E-verified (8/8 checkout sessions audited against Stripe):
+**Glide Premium $14.99/mo · $119.99/yr (33% off)** | **Glide Max $29.99/mo · $299.99/yr** |
+**Glide Coach $49/mo · $490/yr** | **Coach Max $79/mo · $790/yr** (annual = "2 months free").
+Implementation: `CATALOG` in functions/billing.js (lookup_keys `glide_{plan}_{monthly|annual}`;
+amount changes self-heal via `transfer_lookup_key`); webhook stamps `profile.subscriptionTier`
+(premium|max|coach|coach_max); Max budgets = `clientMax` 150k / `trainerMax` 200k tokens/day in
+aichat.js BUDGETS; the frontend `PlanPicker` (both upgrade entry points) sells tier + interval.
+**Remaining for real money:** live Stripe key swap + live webhook + liability hygiene below.
+Bundled client seats: direction affirmed, build when the first outside trainer signs up._
 
 ## The one structural guarantee
 

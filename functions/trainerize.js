@@ -510,7 +510,7 @@ exports.trainerizeAutoSync = onSchedule(
     if (pref && pref.enabled === false) { console.log("trainerizeAutoSync: disabled by toggle — skipped"); return; }
     const index = (await kvGetJSON(db, uid, "caliq-index")) || [];
     const ids = index.filter((p) => p && p.trainerizeId).map((p) => p.trainerizeId);
-    if (!ids.length) return; // nothing imported yet — nothing to sync
+    if (!ids.length) { console.log("trainerizeAutoSync: no imported Trainerize clients in the index — nothing to sync (run the import to restore)"); return; }
     const auth = Buffer.from(`${TRAINERIZE_GROUP_ID.value()}:${TRAINERIZE_API_TOKEN.value()}`).toString("base64");
     try {
       const r = await runImport(db, uid, auth, { clientIds: ids, nutritionDays: 14 });
