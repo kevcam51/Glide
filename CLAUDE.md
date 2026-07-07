@@ -123,8 +123,12 @@ enabled (Blaze has no default spending cap).
 >   UTC "today" (S45/S85). kv range queries use the `""` ESCAPE (raw char breaks silently, S85).
 >   When `functions/aitools.js` changes deploy ALL FOUR AI fns. Firebase CLI token expires —
 >   `firebase login --reauth --no-localhost`.
-> - **Next up (Kevin's queue):** **Stripe billing** (the biggest remaining gap). Kevin still owes a
->   device-test of Face ID sign-in; Trainerize auto-sync re-enable is his call (trainer-home toggle).
+> - **Next up (Kevin's queue): PRICING DECISION → Stripe LIVE mode.** Billing v1 is live in TEST
+>   mode (S89b, E2E-verified incl. Kevin's own test purchase); the cost model + tier options are in
+>   `docs/PRICING.md` and the decision-sheet artifact (link in the handoff). Kevin decides: Premium
+>   $9.99 vs $14.99, ship the Max tiers now or later, bundled client seats — then implement final
+>   prices + annual + swap live keys (~15 min). After that: push-notification delivery. Face ID is
+>   device-tested ✓; Trainerize auto-sync is back ON (S89c).
 
 - Session 1: Vite project, app moved in, deployed to Vercel.
 - Session 2: Firebase Auth + Firestore; storage migrated from localStorage to Firestore;
@@ -2071,6 +2075,29 @@ enabled (Blaze has no default spending cap).
   is pinned to localhost) — Kevin should tap Upgrade once on a test account in prod as the final UI
   smoke. **Remaining for real money:** confirm final prices ($49/$9.99 are placeholders), then swap in
   the LIVE key + a live-mode webhook (same one-command API creation) when Kevin says go.
+- Session 89c (same session): **AI food estimate in the meal tracker + pricing decision work + GitHub-key incident closed.**
+  (1) **`estimateFood` callable** (functions/aichat.js — direct model call, no tools/chat prompt, ~1¢;
+  same daily budget + trial gate as chat) + an **"AI estimate" button** (sparkle house icon) in
+  `MealLog`'s add-form: type any food the library doesn't have → calories + macros fill in with an
+  "assumed serving" note; also offered on empty search results. E2E-verified in prod ("chicken burrito
+  with rice and beans" → 850 cal / 42p/95c/28f, assumed 1 large burrito). Works everywhere MealLog
+  renders (dashboard + calendar Day view). Deployed + pushed (`bdbc045`).
+  (2) **Pricing (docs/PRICING.md + the decision-sheet artifact):** full unit-cost model on measured S67
+  data (~1¢/exchange; worst-case client $6/mo, trainer $13/mo; trials ≤$2); annual tiers + revenue
+  projections; **"Max" tier designed and NAMED — Kevin ruled out "Unlimited" branding** (won't sell a
+  capped thing as uncapped; published ~100-conversations/day allowance + raise-on-request promise +
+  liability hygiene list). **Kevin's open decisions:** Premium $9.99 vs $14.99 (rec: $14.99), ship Max
+  at launch vs later (rec: later), bundled client seats (rec: decide direction now, build with first
+  outside trainer); annual = yes (rec). **Kevin declined cap-trimming on paid tiers** — upgrades must
+  feel worth it.
+  (3) **GitHub secret-scanning alert resolved:** the flagged value was the public-by-design Firebase web
+  API key in an archived S2 handoff — redacted at HEAD, full 217-commit history audited (NO real secrets
+  ever committed), and Kevin **API-restricted the key** in Cloud Console to 6 APIs (Identity Toolkit,
+  Token Service, Firestore, Installations + Storage/FCM for the roadmap); sign-in/refresh/reads verified
+  after. History rewrite deliberately skipped (key is public in the served bundle anyway).
+  (4) Trainerize **auto-sync re-enabled** (Kevin's toggle tap hadn't saved; set `{enabled:true}`
+  directly) — scheduler confirmed firing every 30 min; Face ID device-test done; trial gate + Kevin's
+  own Stripe test purchase verified, all test residue cleaned.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

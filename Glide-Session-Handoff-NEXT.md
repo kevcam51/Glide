@@ -1,10 +1,63 @@
 # Glide — Next-Session Handoff (start here)
 
-_Updated end of **Session 89** (wearable-adjusted targets + Trainerize workout sync — both S88
-decisions built, deployed, E2E-verified). Read the "S89" + "NEXT SESSION" sections below first, then
-`CLAUDE.md`. All functions deployed. Firebase project `calorieiq-29762`; prod URL
-`calorieiq-jet.vercel.app`. AI model `claude-sonnet-4-6`.
+_Updated end of **Session 89 (a/b/c — one marathon)**: wearable-adjusted targets, Trainerize workout
+sync, STRIPE BILLING v1 live in test mode, trial enforcement, AI meal-tracker estimates, the full
+pricing/cost analysis, and the GitHub-key security incident closed. Read "⏭️ NEXT SESSION" below
+FIRST, then `CLAUDE.md` (S89/S89b/S89c entries). Everything is committed, pushed, and deployed.
+Firebase project `calorieiq-29762`; prod URL `calorieiq-jet.vercel.app`. AI model `claude-sonnet-4-6`.
 **STANDING RULE (Kevin): new features use `src/icons.jsx` house icons — never emoji.**_
+
+---
+
+## ⏭️ NEXT SESSION — start here: Kevin's PRICING DECISION → Stripe LIVE mode
+
+The billing system is DONE in test mode (S89b — Kevin ran a real test purchase end-to-end). What
+remains is a PRODUCT decision, then ~15–30 min of implementation. **Everything Kevin needs to
+decide is in [docs/PRICING.md](docs/PRICING.md) and the decision-sheet artifact:**
+`https://claude.ai/code/artifact/2bc2c453-5e97-4740-8577-fdacd416816d` (redeploy to the SAME url
+by passing that `url` to the Artifact tool if it needs edits).
+
+**Kevin's open decisions (recommendations in parentheses — he was sleeping on it):**
+1. **Glide Premium price:** $9.99 (impulse zone, one theoretical break-even edge case) vs **$14.99
+   (rec — bulletproof profitable, still half of MFP ~$20)**. Kevin DECLINED trimming usage caps on
+   paid tiers ("the upgrade must feel worth it") — so price carries the ceiling.
+2. **Ship the Max tiers at launch?** Glide Max $29.99 / Coach Max $79 — published ~100
+   AI-conversations/day allowance (150k/200k token backstops). **Naming is DECIDED: "Max", never
+   "Unlimited"** — Kevin won't sell a capped thing as uncapped (liability + honesty; recorded in
+   PRICING.md). (Rec: launch without, add in month 1–2 from real usage data.)
+3. **Annual plans:** Premium $119.99 (33% off) / others "2 months free" ($299.99/$490/$790).
+   (Rec: yes from day one.)
+4. **Bundled client seats** on Coach Max ("$79 includes AI for up to 20 clients" — costs $2–4/seat).
+   (Rec: decide direction now, build when the first outside trainer signs up.)
+
+**When he decides, the implementation path:** final `PRICE_CENTS` in functions/billing.js + annual
+prices (new lookup_keys, e.g. `glide_premium_annual`) + a monthly/annual toggle at checkout + (if
+Max) a BUDGETS entry + tier on the profile; then LIVE mode = swap `STRIPE_SECRET_KEY` to the live
+key + create the live webhook via the API (same one-command flow as S89b) + Kevin taps Upgrade in
+prod as the final smoke. **Liability hygiene before real money:** allowance disclosed on the
+pricing page, fair-use clause in the ToS, no "unlimited" in marketing, attorney ToS pass (Kevin).
+**Offer first:** the competitor-pricing deep-research pass (verify the MFP/Trainerize anchors —
+docs/ECOSYSTEM.md queued it).
+
+### Also pending / loose ends
+- **Verify one auto-sync summary line:** auto-sync is back ON (S89c re-enabled it directly after
+  Kevin's toggle tap didn't save) and the scheduler fires every 30 min (confirmed 18:58/19:28 runs
+  Jul 7) — but the `trainerizeAutoSync {synced, mealDays, workoutDays}` console line wasn't captured
+  yet: `firebase functions:log --only trainerizeAutoSync` next session.
+- **GitHub key incident is CLOSED** (redacted, history audited clean, key API-restricted to 6 APIs,
+  app verified working, alert dismissed). If Storage or push notifications ever 403 → re-check that
+  API on the key's restriction list in Cloud Console.
+- After billing goes live, the next big builds: **push-notification delivery** (FCM — Notification
+  Center exists, nothing sends), then client→trainer requests; name/custom-domain decision
+  (docs/NAMING.md) matters before scale because passkeys are domain-bound.
+
+## ✅ S89c (this conversation): meal-tracker AI estimates + pricing work + security
+- **`estimateFood`** callable + "AI estimate" button in `MealLog` — type any food the library
+  doesn't have → AI fills calories/macros with an "assumed serving" note (E2E: "chicken burrito
+  with rice and beans" → 850 cal / 42p/95c/28f). Budget + trial-gated like the chat, ~1¢/call.
+- **docs/PRICING.md** = the canonical cost/pricing model (measured ~1¢/exchange; worst cases
+  client $6 / trainer $13 / trial ≤$2 per month; annual tables; Max-tier design + backstops).
+- Trial gate + Kevin's own Stripe test purchase verified in prod; all test residue cleaned.
 
 ---
 
@@ -165,8 +218,10 @@ Account Token Creator** to the compute SA on itself (IAM, via owner creds). Inva
 his passkey exists. New house icons: fingerprint, sync, pause, watch (emoji swapped out of all
 S86–88 features per Kevin's icon rule — NEW FEATURES MUST USE src/icons.jsx ICONS, NOT EMOJI).
 
-## ⏭️ NEXT SESSION — start here
-**STRIPE BILLING v1 IS BUILT (S89b) but NOT DEPLOYED — finish the launch checklist:**
+## ✅ S89b (historical — superseded by the NEXT SESSION section at the top): Stripe billing v1
+**Everything below is DONE and verified; kept for the implementation details.** The Upgrade tap
+(item 1 at the bottom) was ALSO done — Kevin completed a real test purchase in his browser and the
+webhook flipped his test account to active. Only LIVE mode remains (needs the pricing decision).
 Kevin's decisions are LOCKED (don't re-ask): both audiences pay, simple subscriptions (Connect splits
 later), trial expiry locks premium / basics stay free, flat monthly (placeholder $49 coach / $9.99
 client — confirm before LIVE mode). Code is committed: premium gate (profile.js `isPremium` +
