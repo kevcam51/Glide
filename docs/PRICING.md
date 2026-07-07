@@ -87,7 +87,15 @@ cap keep it structurally bounded. Expired trials cost $0 (AI gate, S89b).
    Sonnet tier for quality and monetize features, not downgrade.
 5. Voice: cap already 60s/recording; could count voice-minutes against the AI budget later.
 
-## "Unlimited AI" tier (Kevin's S89c idea — upcharge above Pro; caps NOT reduced per his call)
+## "Max" tier — the honest high-allowance upcharge (S89c; renamed from "Unlimited" per Kevin)
+
+**Naming decision (Kevin, S89c): NO "unlimited" branding — he won't sell a capped thing as
+uncapped.** The tier is **Glide Max / Coach Max**: a PUBLISHED allowance (~100 AI conversations
+/day, ~6× Premium) plus a standing promise — "if you ever hit the ceiling, tell us and we'll
+raise it." Transparency is the brand play. **Liability hygiene before live mode:** allowance
+stated on the pricing page (not buried), fair-use clause in the ToS, never the bare word
+"unlimited" in marketing, and a one-hour attorney review of the ToS (subscriptions + health
+data).
 
 Measured unit: **~1¢ per chat exchange** (~1.5k budget tokens each, warm cache); photo log ≈ 1.5–2¢.
 Current caps for scale: client 25k/day ≈ ~16 exchanges/day; trainer 60k ≈ ~40/day.
@@ -102,17 +110,17 @@ Current caps for scale: client 25k/day ≈ ~16 exchanges/day; trainer 60k ≈ ~4
 | Literally-chatting-all-day human | 300 | ~$135 |
 | **Scripted abuse (true no-limit)** | ∞ | **unbounded — $100s+/day possible** |
 
-**Key design rule: "unlimited" must mean unlimited-for-humans, never unlimited-for-scripts.**
-Every industry "unlimited" plan carries a fair-use backstop. Recommended: an INVISIBLE backstop
+**Design rule: generous-for-humans, closed-to-scripts.** Recommended: a backstop
 tier in BUDGETS (aichat.js) at **150k tokens/day (≈100 exchanges — no real human hits it in
-normal use)** → worst-case COGS ≈ **$26/mo**; realistic unlimited subscriber costs $5–15/mo.
+normal use — and it's DISCLOSED, not hidden)** → worst-case COGS ≈ **$26/mo**; realistic Max
+subscriber costs $5–15/mo.
 Optionally add a per-minute rate limit later for script protection.
 
 **Recommended prices:**
-- **Client Unlimited: $29.99/mo** (or an add-on: Premium + $15). Safe vs the $26 backstop
+- **Glide Max (client): $29.99/mo** (or an add-on: Premium + $15). Safe vs the $26 backstop
   ceiling; 50–85% margin on realistic usage; clean ladder Trial → Premium $9.99–14.99 →
-  Unlimited $29.99.
-- **Coach Unlimited: $79/mo** (vs $49 base; backstop 200k/day → ceiling ~$34/mo, margin ≥ $45).
+  Max $29.99.
+- **Coach Max: $79/mo** (vs $49 base; backstop 200k/day → ceiling ~$34/mo, margin ≥ $45).
   Pairs naturally with a bundled-client-seats story at this tier.
 
 **Implementation cost when Kevin says go:** one new `subscriptionTier`/entitlement value + a
@@ -131,25 +139,25 @@ per product — trivial.
 |---|---|---|---|---|---|---|
 | Client Premium | $14.99 | **$119.99** | $10.00 | 33% | ~$72 (capped tier) | ~$45 / **$85–100** |
 | Client Premium (if $9.99) | $9.99 | **$79.99** | $6.67 | 33% | ~$72 | ~breakeven / **$45–60** |
-| Client Unlimited | $29.99 | **$299.99** ("2 months free") | $25.00 | 17% | ~$312 ceiling (150k/day backstop) | ≈ breakeven at ceiling / **$140–240** |
+| Glide Max (client) | $29.99 | **$299.99** ("2 months free") | $25.00 | 17% | ~$312 ceiling (150k/day backstop) | ≈ breakeven at ceiling / **$140–240** |
 | Coach | $49 | **$490** ("2 months free") | $40.83 | 17% | ~$250 | ~$240 / **$400–430** |
-| Coach Unlimited | $79 | **$790** ("2 months free") | $65.83 | 17% | ~$410 (200k/day backstop) | ~$380 / **$600–700** |
+| Coach Max | $79 | **$790** ("2 months free") | $65.83 | 17% | ~$410 (200k/day backstop) | ~$380 / **$600–700** |
 
 Notes: "worst case" = a user maxing their ceiling EVERY day for 365 days — theoretical; the
-realistic column is what to plan on. Unlimited annual deliberately keeps the shallow 17% discount
+realistic column is what to plan on. Max annual deliberately keeps the shallow 17% discount
 because its cost ceiling is real; the fat consumer discount lives on Premium where margins are
-huge. Don't discount Unlimited deeper than ~17% without lowering its fair-use backstop.
+huge. Don't discount Max deeper than ~17% without lowering its fair-use backstop.
 
 **What the revenue looks like — per 10 ANNUAL subscribers (cash collected up front):**
 | Tier | Revenue/yr | Realistic cost | Profit |
 |---|---|---|---|
 | 10× Premium ($119.99) | $1,200 | $240–480 | **~$720–960** |
-| 10× Unlimited ($299.99) | $3,000 | $600–1,800 | **~$1,200–2,400** |
+| 10× Glide Max ($299.99) | $3,000 | $600–1,800 | **~$1,200–2,400** |
 | 10× Coach ($490) | $4,900 | $600–1,000 | **~$3,900–4,300** |
-| 10× Coach Unlimited ($790) | $7,900 | $1,000–2,000 | **~$5,900–6,900** |
+| 10× Coach Max ($790) | $7,900 | $1,000–2,000 | **~$5,900–6,900** |
 
 **Illustrative year-1 (Smooth Training scale): 5 coaches annual + 35 Premium annual + 15
-Unlimited annual ≈ $11,150 ARR, ~$2–3k costs → ~$8–9k profit — collected up front.**
+Max annual ≈ $11,150 ARR, ~$2–3k costs → ~$8–9k profit — collected up front.**
 
 ## Competitive anchors (knowledge as of early 2026 — verify with a research pass before launch)
 
