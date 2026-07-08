@@ -18,7 +18,14 @@
    cleans orphaned day-log/history/foods docs. Still deferred: AI-budget pre-reserve,
    assignedTrainerId consent (needs a joinTrainer callable — design), ProfileCard caret jump.
 **NEXT: Stripe live-mode swap + custom-domain/name decision (Kevin's ordering).** Also pending
-Kevin: re-import chosen Trainerize clients (picker), admin-dashboard look, Android icon reinstall.
+Kevin: re-import chosen Trainerize clients (picker), admin-dashboard look, ~~Android icon~~ ✓ (confirmed good).
+**QUEUED AFTER STRIPE (Kevin's yes, Jul 8): the notification-FEED bell.** A bell icon in the
+header opening a chronological feed of everything since last look — new messages, completed
+to-dos, client requests, client joins/leaves, boost grants (admin) — tap-to-jump, per-type
+rows respect the existing notifPrefs, unseen-count badge on the bell. Design note: back it
+with a per-user kv doc (`caliq-notif-feed`, capped ~50, written by the same server paths that
+already send pushes — sendPushTo callers — so feed + push stay one source of truth) plus
+client-side writers for non-push events; live via the owner's kv onSnapshot like caliq-inbox.
 
 _Updated end of **Session 89 (a/b/c — one marathon)**: wearable-adjusted targets, Trainerize workout
 sync, STRIPE BILLING v1 live in test mode, trial enforcement, AI meal-tracker estimates, the full
