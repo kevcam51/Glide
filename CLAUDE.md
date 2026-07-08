@@ -2144,6 +2144,20 @@ enabled (Blaze has no default spending cap).
   RESOLVED:** scheduler fires fine; Kevin had deliberately deleted the 10 imported profiles (wants
   hand-picked clients only — which the S86 picker already provides; auto-sync never adds clients). His
   index has 2 manual plans, 0 trainerizeId → sync no-ops by design until he re-imports chosen clients.
+  (g) **IN-APP MESSAGING — BUILT, RULES PUBLISHED, LIVE (the roadmap's trainer↔client DM item):**
+  `threads/{trainerUid}_{clientUid}` + append-only `msgs` subcollection; rules = participants-only,
+  create requires a REAL link (`isTrainerOf` incl. head-of-sub chain), `from == auth.uid` (no
+  impersonation), metadata allowlist; **87/87 emulator tests** (+26 messaging attack cases).
+  `src/messaging.js` (ensureThread treats the rules-denied GET on a missing doc as "create" — prod-only
+  bug the emulator suite missed); `MessageThread` full-screen live DM; client header "Message" button +
+  trainer client-card "Message" buttons, both with live unread badges; "Message badges" notif type.
+  E2E-verified in prod BOTH directions incl. badge lifecycle. Deferred: media, deletion, groups, push.
+  (h) **Max ceiling boost + admin dashboard:** `requestBudgetBoost` (instant-approve at ≥80% of cap;
+  +50%/boost; Coach Max 2/day, client Max 1/day — margin-checked in PRICING.md; grants logged to
+  `aiUsage/meta`) + in-chat offer/approved cards; `adminOverview` callable + "Admin — all users" menu
+  screen (admin UID only): roster, sub/trial state, AI tokens today, ⚑ flag at 3+ boosts. "Glide
+  Ultra" tier scoped in PRICING.md (data-triggered launch). **Queue after S90: push-notification
+  delivery (FCM) → client→trainer requests → data-integrity hardening → then Stripe live + domain.**
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a
