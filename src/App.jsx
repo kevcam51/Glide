@@ -10885,6 +10885,15 @@ function PlanPicker({ role, onClose }) {
         ))}
         {err && <div style={{ color:"var(--color-danger)", fontSize:".78rem" }}>Couldn't open checkout — please try again.</div>}
         <FeatureMatrix isTrainer={isTrainer} />
+        {/* Enterprise lead-capture (S90): gyms/studios + corporate wellness are
+            custom-quote conversations — see docs/PRICING.md "Enterprise". */}
+        <a href="mailto:kevin@smoothtraining.com?subject=Glide%20Enterprise"
+          className="block rounded-card border border-border bg-surface2 px-4 py-3 text-center no-underline">
+          <span className="font-display text-[.82rem] font-bold text-fg">Gym, studio, or company?</span>
+          <span className="block text-[.72rem] text-muted" style={{ marginTop: "2px" }}>
+            Enterprise plans for teams &amp; employee wellness — <span className="text-primary font-bold">let's talk</span>
+          </span>
+        </a>
         <div className="text-muted" style={{ fontSize:".68rem", lineHeight:1.5 }}>
           Cancel anytime. Your data and manual logging stay free forever.
         </div>

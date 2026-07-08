@@ -44,6 +44,9 @@ const ALLOWED_ORIGINS = [
   "https://calorieiq-jet.vercel.app",
   "http://localhost:5173",
 ];
+// Billing-portal configuration id (bpc_…) from the live-setup script — enables
+// self-serve plan switching + cancel-at-period-end. Empty string = default config.
+const PORTAL_CONFIG_ID = "";
 const safeOrigin = (o) => (ALLOWED_ORIGINS.includes(o) ? o : ALLOWED_ORIGINS[0]);
 
 // The catalog. `key` builds lookup keys (glide_{key}_monthly / _annual);
@@ -167,6 +170,11 @@ exports.createPortalSession = onCall(
     try {
       const session = await stripe().billingPortal.sessions.create({
         customer: profile.stripeCustomerId, return_url: `${origin}/`,
+        // Kevin's fairness call (S90): explicit portal configuration with
+        // self-serve plan switching (upgrades prorated NOW, downgrades at
+        // period end) + cancel at period end. Created by the live-setup
+        // script; empty = Stripe's default config (pre-live behavior).
+        ...(PORTAL_CONFIG_ID ? { configuration: PORTAL_CONFIG_ID } : {}),
       });
       return { url: session.url };
     } catch (e) {
