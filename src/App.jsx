@@ -14208,6 +14208,19 @@ export default function App() {
     setProfiles(prev => { up = prev.filter(p => p.id !== localId); return up; });
     await saveIndex(up);
     try { await window.storage.delete(profileKey(localId)); } catch(e) {}
+    // S90 hardening (S86-deferred): also delete the plan's per-date logs,
+    // history, and recent-foods docs — deleting only the wrapper left them
+    // orphaned forever (invisible, but they accumulate reads/storage and would
+    // "haunt" a future plan that reused the id). Best-effort, in background.
+    try {
+      const orphans = await window.storage.list(`caliq-log-${localId}-`);
+      const keys = [
+        ...((orphans && orphans.keys) || []),
+        `caliq-history-${localId}`,
+        `caliq-foods-${localId}`,
+      ];
+      await Promise.all(keys.map((k) => window.storage.delete(k).catch(() => {})));
+    } catch(e) { /* best-effort cleanup */ }
   };
 
   // Snapshot a client's shared plan into a NEW local file (for a simulation,

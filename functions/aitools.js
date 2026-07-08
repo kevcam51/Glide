@@ -316,6 +316,23 @@ async function kvGetJSON(db, uid, key) {
 async function kvSetJSON(db, uid, key, obj) {
   await kvDocRef(db, uid, key).set({ k: key, value: JSON.stringify(obj) });
 }
+// Transactional read-modify-write for kv JSON docs (the S85-deferred
+// integrity hardening): append-style writes (meals, history, requests) used a
+// plain read→write, so two concurrent writers (AI + app, or two devices)
+// could silently drop each other's items. fn gets the parsed current value
+// (or null) and returns the replacement; Firestore retries on contention.
+async function kvTxnJSON(db, uid, key, fn) {
+  const ref = kvDocRef(db, uid, key);
+  let out;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    let cur = null;
+    try { cur = snap.exists ? JSON.parse(snap.data().value || "null") : null; } catch { cur = null; }
+    out = fn(cur);
+    tx.set(ref, { k: key, value: JSON.stringify(out) });
+  });
+  return out;
+}
 function randId(p) { return `${p}${Date.now()}${Math.floor(Math.random() * 1000)}`; }
 
 // Normalize a clock time the user/AI gives for when a meal was eaten into a
@@ -409,10 +426,10 @@ const PERSONAL_FIELDS = ["firstName", "lastName", "gender", "age", "heightFt", "
 async function appendHistory(db, uid, planId, ctx, action) {
   try {
     const key = `caliq-history-${planId}`;
-    const hist = (await kvGetJSON(db, uid, key)) || [];
     const ev = { id: randId("e"), uid: ctx.callerUid, role: ctx.role,
       name: ctx.callerName || "AI assistant", action, ts: Date.now() };
-    await kvSetJSON(db, uid, key, [ev, ...(Array.isArray(hist) ? hist : [])].slice(0, 250));
+    await kvTxnJSON(db, uid, key, (hist) =>
+      [ev, ...(Array.isArray(hist) ? hist : [])].slice(0, 250));
   } catch (e) { /* best-effort */ }
 }
 
@@ -1300,21 +1317,23 @@ async function runTool(name, input, ctx) {
     };
     const { id: planId } = await activePlanData(db, uid, planOverride);
     const logKey = `caliq-log-${planId}-${date}`;
-    const log = (await kvGetJSON(db, uid, logKey)) || {};
-    const updated = {
-      ...log,
-      meals: [...(Array.isArray(log.meals) ? log.meals : []), meal],
-      calories: (Number(log.calories) || 0) + meal.calories,
-      protein: (Number(log.protein) || 0) + meal.protein,
-      carbs: (Number(log.carbs) || 0) + meal.carbs,
-      fat: (Number(log.fat) || 0) + meal.fat,
-    };
-    await kvSetJSON(db, uid, logKey, updated);
+    // Transactional append (S90 hardening): the AI logging while the app (or a
+    // second device) writes the same day-log must not drop either side's meals.
+    const updated = await kvTxnJSON(db, uid, logKey, (log0) => {
+      const log = log0 || {};
+      return {
+        ...log,
+        meals: [...(Array.isArray(log.meals) ? log.meals : []), meal],
+        calories: (Number(log.calories) || 0) + meal.calories,
+        protein: (Number(log.protein) || 0) + meal.protein,
+        carbs: (Number(log.carbs) || 0) + meal.carbs,
+        fat: (Number(log.fat) || 0) + meal.fat,
+      };
+    });
     // Mirror the activity feed (same shape as App.appendHistory), so AI-logged
     // meals show up in the client's history just like manual ones.
     try {
       const histKey = `caliq-history-${planId}`;
-      const hist = (await kvGetJSON(db, uid, histKey)) || [];
       const ev = {
         id: randId("e"),
         uid: ctx.callerUid,
@@ -1323,7 +1342,8 @@ async function runTool(name, input, ctx) {
         action: `logged ${mealType || "a meal"} via AI: ${meal.name} (${meal.calories} cal)`,
         ts: Date.now(),
       };
-      await kvSetJSON(db, uid, histKey, [ev, ...(Array.isArray(hist) ? hist : [])].slice(0, 250));
+      await kvTxnJSON(db, uid, histKey, (hist) =>
+        [ev, ...(Array.isArray(hist) ? hist : [])].slice(0, 250));
     } catch (e) { /* history is best-effort */ }
     if (planOverride) await touchLocalIndex(db, uid, planOverride);
     return {
@@ -1467,15 +1487,17 @@ async function runTool(name, input, ctx) {
     if (!msg) return { error: "Provide the request message." };
     const type = ["log_food", "weigh_in", "log_workout", "enter_info", "custom"].includes(input.type) ? input.type : "custom";
     const now = Date.now();
-    const cur = (await kvGetJSON(db, clientId, "caliq-requests")) || [];
     const req = { id: randId("r"), fromUid: ctx.callerUid, fromName: ctx.callerName || "Your trainer",
       type, prompt: msg, status: "open", createdAt: now, doneAt: null };
-    await kvSetJSON(db, clientId, "caliq-requests", [req, ...(Array.isArray(cur) ? cur : [])].slice(0, 100));
+    // Transactional append (S90 hardening): concurrent request writers (AI +
+    // trainer UI) must not drop each other's items.
+    await kvTxnJSON(db, clientId, "caliq-requests", (cur) =>
+      [req, ...(Array.isArray(cur) ? cur : [])].slice(0, 100));
     try { // history note in the client's account (matches the app's sendRequest)
-      const hist = (await kvGetJSON(db, clientId, "caliq-history-self")) || [];
       const ev = { id: randId("e"), uid: ctx.callerUid, role: ctx.role,
         name: ctx.callerName || "Your trainer", action: `sent a request: "${msg}"`, ts: now };
-      await kvSetJSON(db, clientId, "caliq-history-self", [ev, ...(Array.isArray(hist) ? hist : [])].slice(0, 250));
+      await kvTxnJSON(db, clientId, "caliq-history-self", (hist) =>
+        [ev, ...(Array.isArray(hist) ? hist : [])].slice(0, 250));
     } catch (e) { /* best-effort */ }
     return { ok: true, sentTo: clientId, message: msg, type };
   }
