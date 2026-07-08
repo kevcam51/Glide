@@ -10593,29 +10593,21 @@ const PLAN_MENU = {
 // feature (no vaporware), and the AI daily allowance is published right in
 // the grid (Max-tier liability hygiene: disclosed, never "unlimited").
 // Values: true = check, false = dash, string = rendered as small text.
+// Row granularity is deliberate (Kevin's S90 ask — the ladder must LOOK like a
+// ladder): the free basics are condensed into a few summary rows, the paid AI
+// features are granular, and Max gets its own section — so check counts read
+// Free < Premium/Coach < Max without a single dishonest row.
 const PLAN_FEATURES = {
   client: [
-    { section: "Always free", rows: [
-      ["Manual food & calorie logging", true, true, true],
-      ["Macro tracking + custom targets", true, true, true],
-      ["Food database search (USDA + brands)", true, true, true],
-      ["Barcode scanner", true, true, true],
-      ["Weight tracking & progress charts", true, true, true],
-      ["Goal timeline & projections", true, true, true],
-      ["Simple & detailed plan views", true, true, true],
-      ["Full workout plan & schedule", true, true, true],
-      ["Custom exercises", true, true, true],
-      ["Calendar with back-dated logging", true, true, true],
-      ["Streaks & daily check-ins", true, true, true],
-      ["Water tracking", true, true, true],
-      ["Fitness-tracker stats on your dashboard", true, true, true],
-      ["Connect to your trainer + shared plan", true, true, true],
-      ["Trainer to-dos & reminders", true, true, true],
-      ["Notification center", true, true, true],
-      ["Install as an app (iPhone / Android)", true, true, true],
-      ["Face ID / Touch ID sign-in", true, true, true],
+    { section: "The basics — free forever", rows: [
+      ["Food, calorie & macro tracking", true, true, true],
+      ["Food database search + barcode scanner", true, true, true],
+      ["Weight, progress charts & goal timeline", true, true, true],
+      ["Workout plans + custom exercises", true, true, true],
+      ["Calendar, streaks, check-ins & water", true, true, true],
+      ["Trainer connection, app install & Face ID", true, true, true],
     ]},
-    { section: "AI coach", rows: [
+    { section: "AI coach — everything in Free, plus:", rows: [
       ["24/7 AI coach chat (knows YOUR data)", false, true, true],
       ["Log meals by chat — just describe them", false, true, true],
       ["Photo meal logging — snap your plate", false, true, true],
@@ -10624,26 +10616,27 @@ const PLAN_FEATURES = {
       ["AI builds your workout program", false, true, true],
       ["Turn TikTok / IG / YouTube links into workouts & meals", false, true, true],
       ["Import from ChatGPT / Claude", false, true, true],
-      ["Set up & manage your plan by conversation", false, true, true],
+      ["Set up your whole plan by conversation", false, true, true],
       ["Cut / bulk / maintenance phases by chat", false, true, true],
+      ["Past chats — save, revisit & continue", false, true, true],
       ["AI conversations per day", "—", "~15", "~100"],
+    ]},
+    { section: "Max — everything in Premium, plus:", rows: [
+      ["6× bigger daily AI allowance", false, false, true],
+      ["Around 100 AI conversations every day", false, false, true],
+      ["Enough for photo-logging every meal + all-day coaching", false, false, true],
       ["Hit the ceiling? Tell us — we raise it", false, false, true],
     ]},
   ],
   trainer: [
-    { section: "Always free", rows: [
-      ["Unlimited connected clients", true, true, true],
-      ["Client dashboards with live sync", true, true, true],
+    { section: "The basics — free forever", rows: [
+      ["Unlimited connected clients + live dashboards", true, true, true],
       ["Coaching analytics — who needs attention", true, true, true],
-      ["Send clients to-dos & nudges", true, true, true],
-      ["Shared plan editing (you + your client)", true, true, true],
-      ["Client activity feed & history", true, true, true],
+      ["To-dos, nudges & shared plan editing", true, true, true],
       ["Invite Hub — link, QR, email invites, referrals", true, true, true],
       ["Local plans, templates & sales simulations", true, true, true],
-      ["Full tracking suite for every client", true, true, true],
-      ["Install as an app + Face ID sign-in", true, true, true],
     ]},
-    { section: "AI coaching assistant", rows: [
+    { section: "AI assistant — everything in Free, plus:", rows: [
       ["24/7 AI assistant (knows your clients' data)", false, true, true],
       ["Whole-roster check: \"who's stalled this week?\"", false, true, true],
       ["Build client programs by chat", false, true, true],
@@ -10653,7 +10646,13 @@ const PLAN_FEATURES = {
       ["Turn TikTok / IG / YouTube links into programs", false, true, true],
       ["AI edits your local plans & simulations", false, true, true],
       ["Send client to-dos straight from chat", false, true, true],
+      ["Past chats — save, revisit & continue", false, true, true],
       ["AI conversations per day", "—", "~40", "~100"],
+    ]},
+    { section: "Coach Max — everything in Coach, plus:", rows: [
+      ["Our biggest AI allowance — built for all-day use", false, false, true],
+      ["Around 100 AI conversations every day", false, false, true],
+      ["Room to run AI across your whole roster daily", false, false, true],
       ["Hit the ceiling? Tell us — we raise it", false, false, true],
     ]},
   ],
