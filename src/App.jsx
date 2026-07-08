@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isProUser, isPremium, aiFoodDbEnabled, setAiFoodDbEnabled } from "./profile.js";
 import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } from "./clientData.js";
+import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads } from "./messaging.js";
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -9514,6 +9515,19 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // Notification Center and this inline toggle stay in sync (Session 76).
   const np = notifPrefs || { master: true, sentReminders: true };
   const reqsOn = np.master && np.sentReminders;
+  // In-app messaging (S90): which client's DM is open + live unread counts per
+  // client (one threads listener; badges gated by the messages notif pref).
+  const [msgFor, setMsgFor] = useState(null); // client object | null
+  const [msgUnread, setMsgUnread] = useState({}); // clientUid -> my unread count
+  const msgBadgesOn = np.master && np.messages !== false;
+  useEffect(() => {
+    if (!meUid) return;
+    return subscribeMyThreads(meUid, (ths) => {
+      const map = {};
+      ths.forEach((t) => { map[t.clientUid] = (t.unread && t.unread[meUid]) || 0; });
+      setMsgUnread(map);
+    });
+  }, [meUid]);
   const [convertSimFor, setConvertSimFor] = useState(null); // sim id awaiting convert confirm
   const [plansForClient, setPlansForClient] = useState(null);     // clientUid whose plans panel is open
   const [cpRenaming, setCpRenaming] = useState(null);             // {uid, planId} being renamed
@@ -9889,6 +9903,12 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         <button className={`${mPrimaryCls} inline-flex items-center gap-1.5`} onClick={() => { setComposingFor(composingFor === c.uid ? null : c.uid); setReqDraft(""); }}>
                           <Icon name="mail" size={16} />Send request
                         </button>
+                        <button className={`${mBtnCls} inline-flex items-center gap-1.5`} onClick={() => setMsgFor(c)}>
+                          <Icon name="inbox" size={16} color="var(--accent)" />Message
+                          {msgBadgesOn && (msgUnread[c.uid] || 0) > 0 && (
+                            <span className="rounded-full bg-primary px-1.5 text-[.66rem] font-bold text-primaryfg">{msgUnread[c.uid]}</span>
+                          )}
+                        </button>
                         {c.hasPlan && (
                           <button className={mBtnCls} onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>Open plan</button>
                         )}
@@ -10062,6 +10082,10 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           )}
           {tzMsg && (
             <div className={`text-xs mt-1.5 ${tzMsg.ok ? "text-success" : "text-danger"}`}>{tzMsg.text}</div>
+          )}
+          {msgFor && (
+            <MessageThread trainerUid={meUid} clientUid={msgFor.uid} meUid={meUid}
+              otherName={msgFor.name} onClose={() => setMsgFor(null)} />
           )}
           {tzPick && (
             <div className="mt-2 p-3 rounded-[10px] bg-surface2 border border-border">
@@ -11906,6 +11930,18 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   const np = notifPrefs || { master: true, trainerReminders: true };
   const remindersOn = np.master && np.trainerReminders;
   const [nudgeDismiss, setNudgeDismiss] = useState({}); // session-only dismiss per nudge key
+  // In-app messaging (S90): my trainer (for the Message button), the open DM,
+  // and my live unread count (badge gated by the messages notif pref).
+  const [trainerInfo, setTrainerInfo] = useState(null); // { uid, name } | null
+  const [showMsg, setShowMsg] = useState(false);
+  const [myUnread, setMyUnread] = useState(0);
+  const msgBadgeOn = np.master && np.messages !== false;
+  useEffect(() => {
+    if (!meUid) return;
+    return subscribeMyThreads(meUid, (ths) => {
+      setMyUnread(ths.reduce((s, t) => s + ((t.unread && t.unread[meUid]) || 0), 0));
+    });
+  }, [meUid]);
   // Multiple plans (Session 21): the client can hold several plans with one
   // active. Each plan's data/log/history is keyed by its id (default "self").
   const [plans, setPlans] = useState([{ id: "self", name: "Main plan", createdAt: 0 }]);
@@ -11961,7 +11997,16 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   // The client's start date = when they signed up (profile.createdAt). Read it
   // once so we can stamp it onto the plan (below) and gate the calendar.
   useEffect(() => {
-    getProfile().then((p) => { const y = tsToYmd(p && p.createdAt); if (y) setSignupYmd(y); }).catch(() => {});
+    getProfile().then((p) => {
+      const y = tsToYmd(p && p.createdAt); if (y) setSignupYmd(y);
+      // In-app messaging (S90): resolve my trainer for the Message button.
+      const tUid = p && p.assignedTrainerId;
+      if (tUid) {
+        getProfile(tUid)
+          .then((t) => setTrainerInfo({ uid: tUid, name: (t && (t.displayName || [t.firstName, t.lastName].filter(Boolean).join(" "))) || "Your trainer" }))
+          .catch(() => setTrainerInfo({ uid: tUid, name: "Your trainer" }));
+      } else setTrainerInfo(null);
+    }).catch(() => {});
   }, []);
   // Stamp the signup date onto the active plan as data.startDate if it's missing,
   // so the calendar (here AND the trainer's view of this client) treats days
@@ -12265,6 +12310,15 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
             {firstName ? `Hi, ${firstName} 👋` : "Your dashboard"}
           </div>
           <div className="flex items-center gap-2">
+            {trainerInfo && (
+              <button onClick={() => setShowMsg(true)} title="Message your trainer"
+                className="relative inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
+                <Icon name="inbox" size={13} color="var(--accent)" />Message
+                {msgBadgeOn && myUnread > 0 && (
+                  <span className="rounded-full bg-primary px-1.5 text-[.64rem] font-bold text-primaryfg">{myUnread}</span>
+                )}
+              </button>
+            )}
             {planData && (
               <button onClick={() => setShowCalendar(true)} title="Open the calendar to log or back-date any day"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
@@ -12277,6 +12331,11 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
             </button>
           </div>
         </div>
+
+        {showMsg && trainerInfo && (
+          <MessageThread trainerUid={trainerInfo.uid} clientUid={meUid} meUid={meUid}
+            otherName={trainerInfo.name} onClose={() => setShowMsg(false)} />
+        )}
 
         {/* Plan switcher (Session 21) — pick the active plan, or make a new one. */}
         {planData !== undefined && (planData || plans.length > 1) && (
@@ -13301,6 +13360,72 @@ function UpgradeCongrats({ isTrainer, onClose }) {
 }
 
 const ROLE_LABEL = { client: "Client", head_trainer: "Trainer", sub_trainer: "Trainer", admin: "Admin" };
+// ── In-app messaging thread view (S90, docs/MESSAGING-PLAN.md) ────────────────
+// Full-screen DM between a linked trainer and client. Live via onSnapshot;
+// marks own unread on open/receive. Portaled (page-transition transform trap).
+function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
+  const tid = threadIdFor(trainerUid, clientUid);
+  const otherUid = meUid === trainerUid ? clientUid : trainerUid;
+  const [msgs, setMsgs] = useState(null); // null = loading
+  const [draft, setDraft] = useState("");
+  const [err, setErr] = useState(false);
+  const endRef = useRef(null);
+  useEffect(() => {
+    let unsub = null, dead = false;
+    (async () => {
+      try { await ensureThread(trainerUid, clientUid, meUid); } catch { if (!dead) { setErr(true); setMsgs([]); } return; }
+      if (dead) return;
+      unsub = subscribeThread(tid, (m) => { setMsgs(m); markThreadRead(tid, meUid); });
+    })();
+    return () => { dead = true; if (unsub) unsub(); };
+  }, [tid]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (endRef.current) endRef.current.scrollIntoView({ block: "end" }); }, [msgs]);
+  const doSend = async () => {
+    const t = draft.trim();
+    if (!t) return;
+    setDraft("");
+    const ok = await sendMessage(tid, meUid, otherUid, t).catch(() => false);
+    if (!ok) setErr(true);
+  };
+  const timeOf = (ts) => { try { return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch { return ""; } };
+  return createPortal(
+    <div data-theme="pro" className="bg-bg text-fg" style={{ position: "fixed", inset: 0, zIndex: 2300, display: "flex", flexDirection: "column", fontFamily: "var(--font-sans)" }}>
+      <div className="flex items-center gap-2 border-b border-border bg-surface2 px-3" style={{ paddingTop: "calc(10px + env(safe-area-inset-top,0px))", paddingBottom: "10px" }}>
+        <Icon name="person" size={18} color="var(--accent)" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-display text-[.95rem] font-bold text-fg">{otherName || "Messages"}</div>
+          <div className="text-[.66rem] text-muted">Direct message</div>
+        </div>
+        <button onClick={onClose} aria-label="Close"
+          className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-lg leading-none text-fg cursor-pointer">✕</button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-3 py-3">
+        {msgs === null && <div className="py-6 text-center text-[.82rem] text-muted">Loading…</div>}
+        {msgs && msgs.length === 0 && !err && (
+          <div className="py-6 text-center text-[.82rem] text-muted">No messages yet — say hi 👋</div>
+        )}
+        {(msgs || []).map((m) => (
+          <div key={m.id} className={`mb-2 flex ${m.from === meUid ? "justify-end" : "justify-start"}`}>
+            <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 ${m.from === meUid ? "bg-primary text-primaryfg" : "bg-surface2 text-fg border border-border"}`}>
+              <div className="whitespace-pre-wrap break-words text-[.9rem] leading-relaxed">{m.text}</div>
+              <div className={`mt-0.5 text-[.6rem] ${m.from === meUid ? "text-primaryfg/60" : "text-muted"}`}>{timeOf(m.ts)}</div>
+            </div>
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+      {err && <div className="px-3 pb-1 text-[.76rem] text-danger">Couldn't send/load — check your connection and try again.</div>}
+      <div className="flex items-end gap-2 border-t border-border bg-surface2 px-3 pt-2" style={{ paddingBottom: "calc(10px + env(safe-area-inset-bottom,0px))" }}>
+        <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={1}
+          placeholder="Message…" style={{ fontFamily: "var(--font-sans)" }}
+          className="min-h-[42px] max-h-[120px] flex-1 resize-none rounded-xl border border-border bg-surface px-3 py-2.5 text-[.92rem] text-fg outline-none placeholder:text-muted"
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSend(); } }} />
+        <button onClick={doSend} disabled={!draft.trim()}
+          className="rounded-xl border-none bg-primaryfill px-5 py-2.5 text-[.88rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50">Send</button>
+      </div>
+    </div>, document.body);
+}
+
 // ── Admin dashboard (S90, Kevin's ask): every user at a glance ───────────────
 // Admin-only (server re-verifies by UID). Read-only: who's on the app, role,
 // subscription/trial state, today's AI usage, and boost-request flags — the
@@ -13556,9 +13681,13 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
           // Per-type rows are role-aware. Clients get the home nudge types;
           // trainers get the sent-to-do display toggle.
           const types = isTrainer
-            ? [{ key: "sentReminders", label: "Client to-do reminders", desc: "Sent to-dos shown on client cards" }]
+            ? [
+                { key: "sentReminders", label: "Client to-do reminders", desc: "Sent to-dos shown on client cards" },
+                { key: "messages", label: "Message badges", desc: "Unread-message badges on client cards" },
+              ]
             : [
                 { key: "trainerReminders", label: "Trainer to-do reminders", desc: "To-dos your trainer sends you" },
+                { key: "messages", label: "Message badges", desc: "Unread badge when your trainer messages you" },
                 { key: "foodReminders", label: "Food-logging reminders", desc: "Nudge when you haven't logged food" },
                 { key: "weighInReminders", label: "Weigh-in reminders", desc: "Nudge for a weekly weigh-in" },
                 { key: "coachingNudges", label: "AI coaching tips", desc: "Occasional tips from your AI coach" },
@@ -13689,7 +13818,7 @@ export default function App() {
   // card; sentReminders = the trainer's sent-to-do display; foodReminders /
   // weighInReminders / coachingNudges = client home nudge cards (Session 77).
   const [notifPrefs, setNotifPrefs] = useState({ master: true, trainerReminders: true, sentReminders: true,
-    foodReminders: true, weighInReminders: true, coachingNudges: true });
+    foodReminders: true, weighInReminders: true, coachingNudges: true, messages: true });
   // Merge a partial patch and persist. Components call with e.g. { master:false }.
   const onSetNotifPrefs = (patch) => {
     setNotifPrefs((prev) => {

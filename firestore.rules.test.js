@@ -165,6 +165,45 @@ await check("non-admin CANNOT list all invite codes", assertFails(getDocs(collec
 await check("admin can list invite codes", assertSucceeds(getDocs(collection(admin, "inviteCodes"))));
 await check("create code with unexpected extra fields DENIED", assertFails(setDoc(code(head, "EXTRAF"), { trainerUid: H, createdAt: 9, evil: true })));
 
+// ---- In-app messaging (S90, docs/MESSAGING-PLAN.md) -------------------------
+// threads/{trainerUid}_{clientUid}: participants-only access, create requires a
+// REAL trainer↔client link, msgs are append-only with no impersonation.
+const threadDoc = (db, t, c) => doc(db, "threads", `${t}_${c}`);
+const msgCol = (db, t, c) => collection(db, "threads", `${t}_${c}`, "msgs");
+const threadFields = (t, c) => ({ participants: [t, c], trainerUid: t, clientUid: c,
+  lastMsg: "", lastFrom: t, updatedAt: 1, unread: { [t]: 0, [c]: 0 } });
+const c2 = ctx(C2);
+
+console.log("\nMESSAGING — ALLOWED:");
+await check("trainer creates thread with own client", assertSucceeds(setDoc(threadDoc(head, H, C1), threadFields(H, C1))));
+await check("client creates thread with own trainer", assertSucceeds(setDoc(threadDoc(c2, S, C2), threadFields(S, C2))));
+await check("head creates thread with his SUB's client", assertSucceeds(setDoc(threadDoc(head, H, C2), threadFields(H, C2))));
+await check("participant (trainer) sends a message", assertSucceeds(setDoc(doc(msgCol(head, H, C1), "m1"), { from: H, text: "How was the workout?", ts: 1 })));
+await check("participant (client) sends a message", assertSucceeds(setDoc(doc(msgCol(c1, H, C1), "m2"), { from: C1, text: "Great!", ts: 2 })));
+await check("other participant reads the thread", assertSucceeds(getDoc(threadDoc(c1, H, C1))));
+await check("other participant reads messages", assertSucceeds(getDoc(doc(msgCol(c1, H, C1), "m1"))));
+await check("participant updates thread metadata (lastMsg/unread)", assertSucceeds(updateDoc(threadDoc(c1, H, C1), { lastMsg: "Great!", lastFrom: C1, updatedAt: 2, unread: { [H]: 1, [C1]: 0 } })));
+await check("participant lists own threads (array-contains query)", assertSucceeds(getDocs(query(collection(c1, "threads"), where("participants", "array-contains", C1)))));
+
+console.log("\nMESSAGING — DENIED (attack cases):");
+await check("unlinked trainer creates thread with a stranger's client", assertFails(setDoc(threadDoc(t2, T2, C1), threadFields(T2, C1))));
+await check("client creates thread with a trainer who is NOT theirs", assertFails(setDoc(threadDoc(c3, H, C3), threadFields(H, C3))));
+await check("creator not in participants (spoofed pair)", assertFails(setDoc(threadDoc(t2, H, C1), threadFields(H, C1))));
+await check("thread id not matching participants DENIED", assertFails(setDoc(doc(head, "threads", "whatever"), threadFields(H, C1))));
+await check("non-participant reads a thread", assertFails(getDoc(threadDoc(t2, H, C1))));
+await check("non-participant reads messages", assertFails(getDoc(doc(msgCol(t2, H, C1), "m1"))));
+await check("non-participant sends a message", assertFails(setDoc(doc(msgCol(t2, H, C1), "evil"), { from: T2, text: "spam", ts: 3 })));
+await check("forged from — participant sends as the OTHER person", assertFails(setDoc(doc(msgCol(head, H, C1), "forged"), { from: C1, text: "I quit", ts: 4 })));
+await check("participant tampers with participants list", assertFails(updateDoc(threadDoc(c1, H, C1), { participants: [C1, C3] })));
+await check("lastFrom outside participants DENIED", assertFails(updateDoc(threadDoc(c1, H, C1), { lastFrom: T2, updatedAt: 3 })));
+await check("oversized message text (2001 chars) DENIED", assertFails(setDoc(doc(msgCol(c1, H, C1), "big"), { from: C1, text: "x".repeat(2001), ts: 5 })));
+await check("message with extra fields DENIED", assertFails(setDoc(doc(msgCol(c1, H, C1), "extra"), { from: C1, text: "hi", ts: 6, evil: true })));
+await check("message EDIT denied (append-only)", assertFails(updateDoc(doc(msgCol(c1, H, C1), "m2"), { text: "edited" })));
+await check("message DELETE by participant denied", assertFails(deleteDoc(doc(msgCol(c1, H, C1), "m2"))));
+await check("signed-out reads a thread", assertFails(getDoc(threadDoc(anon, H, C1))));
+await check("signed-out sends a message", assertFails(setDoc(doc(msgCol(anon, H, C1), "anonm"), { from: H, text: "hi", ts: 7 })));
+await check("unconstrained threads list DENIED", assertFails(getDocs(collection(t2, "threads"))));
+
 console.log(`\n==== ${passed} passed, ${failed} failed ====`);
 if (failures.length) console.log("FAILED:", failures.join(" | "));
 await testEnv.cleanup();

@@ -107,6 +107,60 @@ service cloud.firestore {
       }
     }
 
+    // Is trainerUid actually the trainer over clientUid — either their direct
+    // trainer (assignedTrainerId) or the head above that trainer? Pair check
+    // independent of who the requester is (messaging: either side may create).
+    function isTrainerOf(trainerUid, clientUid) {
+      return assignedTrainerOf(clientUid) != null && (
+        assignedTrainerOf(clientUid) == trainerUid
+        || (profileExists(assignedTrainerOf(clientUid))
+            && profileData(assignedTrainerOf(clientUid)).get('headTrainerId', null) == trainerUid)
+      );
+    }
+
+    // ── In-app messaging (S90, docs/MESSAGING-PLAN.md) ────────────────────────
+    // One thread per linked trainer↔client pair; doc id = "{trainerUid}_{clientUid}"
+    // (deterministic — no lookup needed). Only the two participants can see it;
+    // creating one requires the pair to be REALLY linked. Messages are append-only
+    // (no edit/delete in v1 — keeps the rules tight; admin can delete to moderate).
+    // Note: the unread map is a UX convenience between two already-linked people —
+    // field-level unread math is deliberately not policed (worst case: a badge).
+    match /threads/{tid} {
+      allow read: if isSignedIn() && request.auth.uid in resource.data.participants;
+      allow create: if isSignedIn()
+        && request.auth.uid in request.resource.data.participants
+        && request.resource.data.keys().hasOnly(['participants', 'trainerUid', 'clientUid', 'lastMsg', 'lastFrom', 'updatedAt', 'unread'])
+        && request.resource.data.participants.size() == 2
+        && request.resource.data.participants[0] == request.resource.data.trainerUid
+        && request.resource.data.participants[1] == request.resource.data.clientUid
+        && tid == request.resource.data.trainerUid + '_' + request.resource.data.clientUid
+        && isTrainerOf(request.resource.data.trainerUid, request.resource.data.clientUid);
+      // participants/trainerUid/clientUid are immutable — only the message
+      // metadata may change, and lastFrom must be one of the two participants.
+      allow update: if isSignedIn()
+        && request.auth.uid in resource.data.participants
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['lastMsg', 'lastFrom', 'updatedAt', 'unread'])
+        && request.resource.data.get('lastFrom', '') in resource.data.participants;
+      allow delete: if isAdmin();
+
+      match /msgs/{mid} {
+        function threadData() {
+          return get(/databases/$(database)/documents/threads/$(tid)).data;
+        }
+        allow read: if isSignedIn() && request.auth.uid in threadData().participants;
+        allow create: if isSignedIn()
+          && request.auth.uid in threadData().participants
+          && request.resource.data.from == request.auth.uid
+          && request.resource.data.keys().hasOnly(['from', 'text', 'ts'])
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 2000;
+        allow update: if false; // append-only
+        allow delete: if isAdmin();
+      }
+    }
+
     // Friendly invite-code lookup: doc id = the CODE, data = { trainerUid }.
     // Lets a not-yet-linked client resolve a code to a trainer with a single
     // doc read instead of querying the whole users collection — which is what

@@ -1,4 +1,12 @@
-# In-app messaging (trainer ↔ client DMs) — build plan (S90; build next session)
+# In-app messaging (trainer ↔ client DMs) — ✅ BUILT & LIVE (S90)
+
+_Shipped same session: rules published (87/87 emulator tests incl. 26 messaging attack cases),
+`src/messaging.js`, `MessageThread` view, client "Message" button (header, unread badge),
+trainer "Message" button on every client card (per-client unread badge), "Message badges"
+notification type. E2E-verified in prod both directions: Casey → trainer (badge lit "1"),
+trainer read (badge cleared) + replied, live snapshots, no console errors. One prod-only bug
+found & fixed: rules deny GET on a nonexistent thread doc, so `ensureThread` treats a denied
+read as "create it". Deferred (per plan): media, deletion, groups, push delivery (FCM)._
 
 _Kevin greenlit starting messaging (Jul 8). This is the locked design so the build session starts
 at "write code", not "decide things". Rules-critical → follow the standing discipline: emulator
