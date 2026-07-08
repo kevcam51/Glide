@@ -70,11 +70,70 @@ function isBlockedHost(host) {
   if (/^\[?::1\]?$/.test(h) || h.startsWith("fd") || h.startsWith("fe80")) return true; // IPv6 loopback/private
   return false;
 }
+// ── Phase 2 (docs/VIDEO-LINK-INGEST.md): social caption auto-fetch ──────────────
+// TikTok/Instagram block normal server fetches of their pages, but the CAPTION
+// (where the workout/recipe lives) is reachable another way: TikTok has an open
+// oEmbed endpoint (no key; caption = title), and Instagram exposes a public
+// embed page (plus an official oEmbed if an IG_OEMBED_TOKEN Meta app token is
+// ever provisioned). Everything here is best-effort: any failure returns null
+// and fetchLinkMeta falls through to the normal fetch + paste-the-caption path.
+const stripTags = (s) => decodeEntities(String(s || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, " ")).replace(/[ \t]+/g, " ").replace(/\s*\n\s*/g, "\n").trim();
+async function fetchSocialCaption(u) {
+  const host = u.hostname.replace(/^www\./, "").toLowerCase();
+  const note = "This is the post's caption, auto-fetched. Extract any exercises, workouts, or foods from it and offer to add them with the normal tools. If it's thin or clearly incomplete, ask the user to paste the full caption.";
+  try {
+    if (host === "tiktok.com" || host.endsWith(".tiktok.com")) {
+      const r = await fetchWithTimeout(`https://www.tiktok.com/oembed?url=${encodeURIComponent(u.toString())}`, {}, 6000);
+      if (!r.ok) return null;
+      const j = await r.json().catch(() => null);
+      if (!j || !(j.title || "").trim()) return null;
+      return { url: u.toString(), siteName: "TikTok",
+        title: j.author_name ? `TikTok video by ${j.author_name}` : "TikTok video",
+        description: String(j.title).slice(0, 4000), note };
+    }
+    if (host === "instagram.com" || host.endsWith(".instagram.com") || host === "instagr.am") {
+      // Instagram serves the FULL caption in its link-preview meta tags (og:*)
+      // to preview crawlers — the same public surface Slack/WhatsApp unfurls
+      // read. A normal browser UA gets a JS shell with no caption; the
+      // facebookexternalhit UA gets the metadata. Posts/reels only.
+      const m = u.pathname.match(/^\/(?:[^/]+\/)?(?:p|reel|reels|tv)\/([A-Za-z0-9_-]{5,})/);
+      if (!m) return null;
+      const r = await fetchWithTimeout(`https://www.instagram.com/p/${m[1]}/`, {
+        headers: { "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)", "Accept-Language": "en" },
+      }, 6000);
+      if (!r.ok) return null;
+      const html = Buffer.from(await r.arrayBuffer()).subarray(0, 1024 * 1024).toString("utf8");
+      const og = metaContent(html, "og:description");
+      if (!og) return null;
+      // og:description shape: `N likes, M comments - username on DATE: "caption"`
+      // — strip the stats prefix and quotes to isolate the caption itself.
+      let caption = og, user = "";
+      const p = og.match(/^[\d.,KMB\s]*likes?,\s*[\d.,KMB\s]*comments?\s*-\s*([\w.\-]+)\s+on\s+[^:]+:\s*("?)([\s\S]*)\2$/);
+      if (p) { user = p[1]; caption = p[3]; }
+      else {
+        const q = og.match(/^([\w.\-]+)\s+on\s+[^:]+:\s*("?)([\s\S]*)\2$/);
+        if (q) { user = q[1]; caption = q[3]; }
+      }
+      caption = caption.replace(/^[“"]/, "").replace(/[”"]$/, "").trim();
+      if (!caption) return null;
+      return { url: u.toString(), siteName: "Instagram",
+        title: user ? `Instagram post by ${user}` : (metaContent(html, "og:title") || "Instagram post"),
+        description: caption.slice(0, 4000), note };
+    }
+  } catch { /* fall through to the normal fetch path */ }
+  return null;
+}
+
 async function fetchLinkMeta(rawUrl) {
   let u;
   try { u = new URL(String(rawUrl).trim()); } catch { return { error: "That doesn't look like a valid link." }; }
   if (u.protocol !== "http:" && u.protocol !== "https:") return { error: "Only http/https links are supported." };
   if (isBlockedHost(u.hostname)) return { error: "That link can't be fetched." };
+
+  // Social platforms: try the caption-specific endpoints first (Phase 2) —
+  // the normal page fetch below almost always 403s on IG/TikTok anyway.
+  const social = await fetchSocialCaption(u);
+  if (social) return social;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
@@ -808,8 +867,8 @@ function buildTools(role, opts = {}) {
         + "its text — title + description/caption — so you can turn it into program changes. Use this whenever the user "
         + "pastes a URL and wants you to use its content (e.g. 'add the exercises from this video', 'log this recipe'). "
         + "After reading it, extract the exercises/meals and offer to add them with the normal tools (propose_workout / "
-        + "add_custom_exercise / propose_meal). Note: for some platforms (especially Instagram/TikTok) the caption may not "
-        + "be fetchable — if this returns little or an error, ask the user to paste the caption/description text instead.",
+        + "add_custom_exercise / propose_meal). TikTok and Instagram captions are usually auto-fetched; if this still "
+        + "returns little or an error, ask the user to paste the caption/description text instead.",
       input_schema: {
         type: "object",
         properties: {
@@ -1464,4 +1523,4 @@ async function runTool(name, input, ctx) {
   return { error: "Unknown tool." };
 }
 
-module.exports = { buildTools, runTool, nutritionTargets };
+module.exports = { buildTools, runTool, nutritionTargets, fetchLinkMeta };

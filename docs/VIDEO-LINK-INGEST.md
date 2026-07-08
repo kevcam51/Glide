@@ -56,10 +56,17 @@ read the watch-page description directly); adding one later would let us pull fu
 Verified live: the AI read a real YouTube link end-to-end and summarized its actual content. Frontend:
 the chat placeholder + empty-state suggestions now hint "paste a workout/recipe link."
 
-**Phase 2 — oEmbed caption fetch for IG/TikTok.** Best-effort: `ingestLink` calls the platform oEmbed
-endpoint to auto-pull the caption so the user doesn't have to copy/paste. Degrades gracefully to "paste
-the caption" when the platform blocks it. Needs a Facebook app token for IG oEmbed. Medium effort, medium
-reliability — set expectations accordingly.
+**Phase 2 — caption auto-fetch for IG/TikTok. ✅ BUILT (Session 90; deployed with the next functions
+deploy).** `fetchSocialCaption` in `functions/aitools.js`, tried before the normal page fetch:
+**TikTok** via its open oEmbed endpoint (no key; the caption comes back as `title`) and **Instagram**
+via the post page's link-preview meta tags fetched with the `facebookexternalhit` crawler UA — the same
+public og:description surface Slack/WhatsApp unfurls read (a normal browser UA gets a JS shell; the
+crawler UA gets the full caption, which we strip of its "N likes, M comments — user on date:" prefix).
+No Meta app token needed after all (the original oEmbed-token plan was dropped — the embed/captioned
+page no longer server-renders captions, but the crawler-UA og path works better anyway). Posts + reels;
+profile/private/blocked links still degrade gracefully to "paste the caption". Verified in Node against
+real posts (TikTok workout video caption + IG world_record_egg caption, YouTube regression, SSRF guard).
+⚠️ One live-verify after deploy: confirm IG serves the og meta to GCP egress IPs like it does locally.
 
 **Phase 3 (premium, later) — actual video understanding.** Transcribe audio (we already have Whisper via
 `transcribeAudio`, S79) for talk-through videos, and/or sample frames to Claude vision for form cues.
