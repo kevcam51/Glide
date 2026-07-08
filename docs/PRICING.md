@@ -137,6 +137,16 @@ Optionally add a per-minute rate limit later for script protection.
 - **Coach Max: $79/mo** (vs $49 base; backstop 200k/day → ceiling ~$34/mo, margin ≥ $45).
   Pairs naturally with a bundled-client-seats story at this tier.
 
+**"Glide Ultra" — the tier above Max (scoped S90, DATA-TRIGGERED, not built):** Kevin asked
+whether Max should cost more or a higher tier should exist for heavy users. Decision shape:
+KEEP Max at $29.99 (the ceiling loss is theoretical; realistic margin 50–85%; whales are a
+flag-and-handle problem). Ship **Ultra ≈ $49.99/mo · 300k tokens/day (~200 conversations,
+2× Max) · 2 boosts/day** WHEN the admin dashboard's ⚑ boost flags show 2–3 users repeatedly
+boosting — that's proven demand from people already paying $29.99. Build is small (one BUDGETS
+entry + one Stripe price by lookup_key + a PlanPicker row + the upsell popup off the
+"already boosted today" message). Ceiling cost ~$51/mo = break-even at the absolute theoretical
+max; realistic $10–25. Name deliberately avoids "unlimited" and "Max+".
+
 **Implementation cost when Kevin says go:** one new `subscriptionTier`/entitlement value + a
 BUDGETS entry + a second Stripe price per role (lookup_key) + tier picker on the checkout —
 small build; the budget system already does the enforcement.
