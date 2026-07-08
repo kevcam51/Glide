@@ -571,6 +571,11 @@ exports.estimateFood = onCall(
 // (flagged for awareness, never auto-punished — Kevin's call). Only granted
 // when genuinely near the cap (≥80% spent) so boosts can't be stockpiled.
 const BOOST_FRACTION = 0.5;
+// Boosts per day by tier (Kevin, S90): Coach Max absorbs 2 boosts and stays
+// profitable at the absolute ceiling (~$68 worst-case vs $79); client Max
+// gets 1 (2 would put an every-day-maxer underwater vs $29.99). Chronic
+// hitters surface via the ⚑ flag → Kevin can raise a standing limit by hand.
+const BOOSTS_PER_DAY = { trainerMax: 2, clientMax: 1 };
 exports.requestBudgetBoost = onCall({ region: "us-central1", maxInstances: 10 }, async (request) => {
   const uid = request.auth && request.auth.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
@@ -583,10 +588,14 @@ exports.requestBudgetBoost = onCall({ region: "us-central1", maxInstances: 10 },
   const base = BUDGETS[tier] || BUDGETS.client;
   const ref = db.doc(`users/${uid}/aiUsage/${todayKey()}`);
   const usage = (await ref.get()).data() || {};
-  if (usage.boost) return { granted: false, reason: "already-boosted" };
-  if ((usage.tokens || 0) < base * 0.8) return { granted: false, reason: "not-near-limit" };
-  const boost = Math.round(base * BOOST_FRACTION);
-  await ref.set({ boost, boostAt: Date.now() }, { merge: true });
+  const boostsUsed = usage.boosts || (usage.boost ? 1 : 0);
+  const maxBoosts = BOOSTS_PER_DAY[tier] || 1;
+  if (boostsUsed >= maxBoosts) return { granted: false, reason: "already-boosted" };
+  // "Near the limit" is measured against the CURRENT effective cap (base +
+  // any prior boost), so a second boost can't be banked early.
+  if ((usage.tokens || 0) < (base + (usage.boost || 0)) * 0.8) return { granted: false, reason: "not-near-limit" };
+  const boost = (usage.boost || 0) + Math.round(base * BOOST_FRACTION);
+  await ref.set({ boost, boosts: boostsUsed + 1, boostAt: Date.now() }, { merge: true });
   await db.doc(`users/${uid}/aiUsage/meta`).set({
     boostCount: admin.firestore.FieldValue.increment(1),
     lastBoostAt: Date.now(),

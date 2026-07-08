@@ -105,6 +105,15 @@ data).
 Measured unit: **~1¢ per chat exchange** (~1.5k budget tokens each, warm cache); photo log ≈ 1.5–2¢.
 Current caps for scale: client 25k/day ≈ ~16 exchanges/day; trainer 60k ≈ ~40/day.
 
+**Ceiling-boost policy (S90, LIVE — `requestBudgetBoost`):** Max users at their daily cap can
+request more in-chat and are instantly approved: **+50% of base per boost; Coach Max gets 2
+boosts/day, client Max gets 1** (Kevin's call + the margin math: a Coach Max maxing 400k every
+day ≈ $68/mo vs $79 — still profitable; 2 boosts on client Max would put an every-day-maxer at
+~$51 vs $29.99 — underwater, hence 1). Guards: only granted at ≥80% of the current effective
+cap (no banking), boosts expire at the daily reset, and every grant is counted in
+`users/{uid}/aiUsage/meta` → the admin dashboard flags 3+ (⚑, visibility only). Chronic
+hitters = a conversation + a hand-raised standing limit, never an automatic cost leak.
+
 **What an uncapped user costs per month (every day, all month):**
 | Usage pattern | Msgs/day | Cost/mo |
 |---|---|---|
