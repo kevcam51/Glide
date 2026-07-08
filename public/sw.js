@@ -38,3 +38,27 @@ self.addEventListener("fetch", (e) => {
   }
   // Everything else: default network (always fresh — no caching here).
 });
+
+// ── Push delivery (S90) — Web Push payloads sent by functions/push.js ─────────
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { /* non-JSON payload */ }
+  e.waitUntil(self.registration.showNotification(d.title || "Glide", {
+    body: d.body || "",
+    icon: "/icon-192.png",
+    badge: "/icon-maskable-192.png",
+    tag: d.tag || "glide",
+    data: { url: d.url || "/" },
+  }));
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || "/";
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const c of list) { if ("focus" in c) return c.focus(); }
+      return self.clients.openWindow(url);
+    })
+  );
+});

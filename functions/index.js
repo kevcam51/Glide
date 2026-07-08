@@ -113,6 +113,11 @@ exports.stripeWebhook = require("./billing").stripeWebhook;
 // Max-tier same-day allowance boost (S90) — instant-approve, once/day, logged
 // to aiUsage/meta for the admin dashboard's flags. See functions/aichat.js.
 exports.requestBudgetBoost = require("./aichat").requestBudgetBoost;
+// Push-notification delivery (S90) — Web Push/VAPID; see functions/push.js.
+exports.savePushSub = require("./push").savePushSub;
+exports.removePushSub = require("./push").removePushSub;
+exports.onDmCreated = require("./push").onDmCreated;
+exports.onTrainerRequestWritten = require("./push").onTrainerRequestWritten;
 
 // ── adminOverview (S90, Kevin's ask): every user at a glance ────────────────
 // Admin-only. Server-side Admin SDK reads (no rules change needed): profile +

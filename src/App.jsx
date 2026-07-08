@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isProUser, isPremium, aiFoodDbEnabled, setAiFoodDbEnabled } from "./profile.js";
 import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } from "./clientData.js";
 import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads } from "./messaging.js";
+import { pushStatus, enablePush, disablePush } from "./push.js";
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -13518,6 +13519,26 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
   // Face ID / Touch ID passkey setup (S87). pkDone = a passkey was registered
   // from this device (local hint — the credential itself lives server-side).
   const [pkBusy, setPkBusy] = useState(false);
+  // Push delivery for THIS device (S90): "on" | "off" | "blocked" | "unsupported".
+  const [pushState, setPushState] = useState("off");
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushMsg, setPushMsg] = useState("");
+  useEffect(() => { if (open) pushStatus().then(setPushState).catch(() => {}); }, [open]);
+  const togglePush = async () => {
+    if (pushBusy) return;
+    setPushBusy(true); setPushMsg("");
+    try {
+      if (pushState === "on") { await disablePush(); setPushState("off"); setPushMsg("Push turned off for this device."); }
+      else { await enablePush(); setPushState("on"); setPushMsg("✓ This device will now get notifications."); }
+    } catch (e) {
+      const m = (e && e.message) || "";
+      if (m === "blocked") { setPushState("blocked"); setPushMsg("Notifications are blocked in your device settings."); }
+      else if (m === "dismissed") setPushMsg("No problem — tap again anytime to enable.");
+      else if (m === "unsupported") setPushState("unsupported");
+      else setPushMsg("Couldn't enable push — try again.");
+    }
+    setPushBusy(false);
+  };
   const [pkDone, setPkDone] = useState(() => { try { return localStorage.getItem(PASSKEY_HINT) === "1"; } catch { return false; } });
   const [pkMsg, setPkMsg] = useState(null);
   const setupPasskey = async () => {
@@ -13730,6 +13751,22 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                       </div>
                     );
                   })}
+                  {/* Push DELIVERY for this device (S90) — notifications that
+                      arrive even when Glide is closed. Per-device; the prompt
+                      must come from this tap (browser rule). */}
+                  <div style={row}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: ".88rem" }}>Push to this device</div>
+                      <div style={{ fontSize: ".7rem", color: "var(--muted)" }}>
+                        {pushState === "unsupported" ? "Not supported in this browser — on iPhone, install Glide to the home screen first"
+                          : pushState === "blocked" ? "Blocked — allow notifications for Glide in your device settings"
+                          : "Messages & to-dos arrive even when Glide is closed"}
+                      </div>
+                      {pushMsg && <div style={{ fontSize: ".7rem", color: "var(--accent)", marginTop: 2 }}>{pushMsg}</div>}
+                    </div>
+                    <Toggle on={pushState === "on"} disabled={pushState === "unsupported" || pushState === "blocked" || pushBusy}
+                      onClick={togglePush} />
+                  </div>
                 </div>
               )}
             </>
