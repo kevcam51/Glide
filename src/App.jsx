@@ -11393,10 +11393,11 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
             <div className="flex w-[72px] shrink-0 items-center">
               {premium && (
                 <button onClick={() => setHistoryOpen(true)} disabled={busy} aria-label="Past chats" title="Past chats"
-                  className="rounded-lg border border-border bg-surface px-2 py-1.5 text-primary cursor-pointer hover:bg-surface2 disabled:opacity-50">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]">
+                  className="flex items-center gap-1 rounded-lg border border-border bg-surface px-2 py-1.5 text-primary cursor-pointer hover:bg-surface2 disabled:opacity-50">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[16px] h-[16px] shrink-0">
                     <path d="M3 3v5h5" /><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" /><path d="M12 7v5l4 2" />
                   </svg>
+                  <span className="text-[.66rem] font-bold">Chats</span>
                 </button>
               )}
             </div>

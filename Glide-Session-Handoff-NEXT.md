@@ -30,8 +30,14 @@ stamping verified; PlanPicker UI verified live):
 2. Create the LIVE webhook via the API (same one-command flow as S89b — the create response's
    `secret` goes straight into STRIPE_WEBHOOK_SECRET) → redeploy the 3 billing fns.
 3. First real checkout smoke (Kevin, small real card or 100%-off promo code, then refund/cancel).
-4. **Liability hygiene (before/at launch):** allowances disclosed on the pricing page, fair-use
-   clause in the ToS, no "unlimited" anywhere in marketing, attorney pass on the ToS.
+4. **Liability hygiene (before/at launch):** ~~allowances disclosed on the pricing page~~ (DONE S90 —
+   published in the FeatureMatrix grid), fair-use clause in the ToS, no "unlimited" anywhere in
+   marketing, attorney pass on the ToS.
+5. **Stripe customer-portal configuration (Kevin's ask, S90): enable PLAN SWITCHING** so subscribers
+   can downgrade/upgrade between the 4 prices themselves (cancel already works in the default portal).
+   One API call per mode: create/update a portal configuration with
+   `features.subscription_update = { enabled: true, default_allowed_updates: ["price"], products: [the
+   2 role products with their monthly+annual prices] }` — do it in test AND live when swapping keys.
 5. ~~Offer first: the competitor-pricing deep-research pass~~ **DONE Jul 8** — all anchors
    verified from live vendor pages (see docs/PRICING.md "Competitive anchors — VERIFIED").
    Headline: MFP shipped a READ-ONLY AI "Nutrition Coach" in its $19.99 Premium (~Apr 2026) —
