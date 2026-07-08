@@ -164,11 +164,40 @@ huge. Don't discount Max deeper than ~17% without lowering its fair-use backstop
 **Illustrative year-1 (Smooth Training scale): 5 coaches annual + 35 Premium annual + 15
 Max annual ≈ $11,150 ARR, ~$2–3k costs → ~$8–9k profit — collected up front.**
 
-## Competitive anchors (knowledge as of early 2026 — verify with a research pass before launch)
+## Competitive anchors — VERIFIED July 8, 2026 (fetched from each vendor's live pricing page)
 
-- MyFitnessPal Premium ≈ $19.99/mo ($79.99/yr) — no AI coach, no trainer.
-- Trainerize (coach-side) ≈ $5–250/mo tiered by client count; Studio tiers ~$100+.
-- TrueCoach / Everfit coach plans ≈ $20–150/mo by roster size.
-- AI photo-calorie apps (Cal AI etc.) ≈ $3–10/mo — photo logging only, no coach platform.
-→ $49 coach flat and $9.99 client premium sit comfortably mid-market with a stronger feature set.
-docs/ECOSYSTEM.md queues a full verified pricing-research pass; run it before setting LIVE prices.
+**Client-side (vs Glide Premium $14.99 / Max $29.99):**
+- **MyFitnessPal:** Free / **Premium $19.99/mo · $79.99/yr** / Premium+ $24.99/mo · $99.99/yr
+  (Premium+ = Premium + Meal Planner). ⚠️ **MFP launched an AI "Nutrition Coach" (~April 2026)** —
+  included in Premium & Premium+, but it's **read-only**: it explicitly *cannot log food, cannot
+  edit goals, has no weight history*, is iOS-only/English/6 countries, nutrition-topics only.
+  This VALIDATES the AI-coach category at the $19.99 price point — and Glide's AI is a full tier
+  beyond it (logs meals by text/photo/voice/barcode, logs workouts & weigh-ins, edits targets,
+  builds programs, connects to a real trainer) at $5/mo less.
+- **Cal AI:** ~$9.99/mo or $29.99/yr (heavily A/B-tested paywall — $2.99/wk variants; family
+  $59.99/yr; price hidden until after onboarding). Photo scanning only; no coach, no platform.
+  Note their annual is aggressively cheap — the photo-only feature is commoditizing; Glide should
+  never lead marketing with "photo calorie scanning" alone.
+
+**Coach-side (vs Glide Coach $49 / Coach Max $79, unlimited clients):**
+- **ABC Trainerize:** Basic free (1 client) / Grow $9/mo (2) / **Pro from $23/mo at 5 clients,
+  price scales with roster to 200** / Studio Plus $248/mo/location / Enterprise custom. Add-ons
+  stack: Advanced Nutrition Coaching **+$20–45/mo**, Video +$10, Stripe payments +$10 — a
+  mid-size roster with nutrition easily runs $60–120/mo.
+- **TrueCoach:** Starter $26.34/mo (5 clients) / **Standard $57.99/mo (20)** / Pro $136.99/mo
+  (50) / custom above. Annual = 1–2 months free (same convention Glide uses).
+- **Everfit:** free (5 clients) / **Pro from $19/mo, scales 5→300+** / Studio from $105/mo.
+  Add-ons stack here too (meal plans +$39/mo, automation +$29/mo). Clients never pay Everfit —
+  coach-funded only (the opposite of Glide's two-sided model).
+
+**Read-through for Glide's decided menu:**
+- **Coach $49 flat with no per-client scaling is the standout anchor** — TrueCoach charges $58
+  for a 20-client cap and $137 at 50; Trainerize needs paid add-ons to match Glide's built-in
+  nutrition + AI. Message it as "unlimited clients, nutrition + AI included, no add-on stacking."
+- **Premium $14.99 undercuts MFP Premium by $5 with a strictly more capable AI** — MFP's own
+  Coach launch is free marketing for the category; the counter-position writes itself.
+- One honest gap: **MFP's annual ($79.99 ≈ $6.67/mo eff.) is cheaper than Glide's $119.99
+  (≈$10/mo eff.)** — fine at launch (different value class), but if annual conversion lags,
+  the first lever is a launch-window annual promo, not a list-price cut.
+- Verified sources: myfitnesspal.com pricing/blog + support center (Coach article), trainerize.com/pricing,
+  truecoach.co/pricing, everfit.io/pricing, Cal AI paywall roundups (dynamic pricing, no public page).

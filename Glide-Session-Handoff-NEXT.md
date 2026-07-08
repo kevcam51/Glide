@@ -32,7 +32,11 @@ stamping verified; PlanPicker UI verified live):
 3. First real checkout smoke (Kevin, small real card or 100%-off promo code, then refund/cancel).
 4. **Liability hygiene (before/at launch):** allowances disclosed on the pricing page, fair-use
    clause in the ToS, no "unlimited" anywhere in marketing, attorney pass on the ToS.
-5. Offer first: the competitor-pricing deep-research pass (verify MFP/Trainerize anchors).
+5. ~~Offer first: the competitor-pricing deep-research pass~~ **DONE Jul 8** — all anchors
+   verified from live vendor pages (see docs/PRICING.md "Competitive anchors — VERIFIED").
+   Headline: MFP shipped a READ-ONLY AI "Nutrition Coach" in its $19.99 Premium (~Apr 2026) —
+   validates the category; Glide's AI does strictly more at $14.99. Coach $49 flat beats
+   TrueCoach ($58/20 clients) and Trainerize (+$20–45 nutrition add-on). Pricing menu stands.
 
 ### Also pending / loose ends
 - **Verify one auto-sync summary line:** auto-sync is back ON (S89c re-enabled it directly after
