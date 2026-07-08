@@ -8983,6 +8983,25 @@ function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
   const [lastInput, setLastInput] = useState("");
   const [savingName, setSavingName] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  // Client → trainer request composer (S90)
+  const [reqOpen, setReqOpen] = useState(false);
+  const [reqType, setReqType] = useState("log");
+  const [reqText, setReqText] = useState("");
+  const [reqBusy, setReqBusy] = useState(false);
+  const [reqMsg, setReqMsg] = useState(null); // { ok, text } | null
+  const sendReq = async () => {
+    if (reqBusy || !reqText.trim()) return;
+    setReqBusy(true); setReqMsg(null);
+    try {
+      await callSendTrainerRequest({ type: reqType, prompt: reqText.trim() });
+      setReqMsg({ ok: true, text: "✓ Sent — your trainer will see it on their dashboard." });
+      setReqText("");
+    } catch (e) {
+      const m = (e && e.message) || "";
+      setReqMsg({ ok: false, text: /open requests/i.test(m) ? m : "Couldn't send — try again in a moment." });
+    }
+    setReqBusy(false);
+  };
 
   const load = async () => {
     let p = await getProfile();
@@ -9140,6 +9159,33 @@ function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
                   {trainerName || profile.assignedTrainerId}
                 </strong>
               </div>
+              {/* Client → trainer request (S90): lands in the trainer's inbox
+                  (server-side write) + pushes them if they've enabled it. */}
+              {reqOpen ? (
+                <div className="mt-2.5 rounded-xl border border-border bg-surface2 p-3">
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    {[["log", "Log something for me"], ["question", "Question"], ["plan", "Adjust my plan"], ["custom", "Other"]].map(([v, l]) => (
+                      <button key={v} onClick={() => setReqType(v)}
+                        className={`rounded-full border px-2.5 py-1 text-[.72rem] font-semibold cursor-pointer ${reqType === v ? "border-primary text-primary bg-[rgba(8,220,224,.08)]" : "border-border text-muted bg-transparent"}`}>{l}</button>
+                    ))}
+                  </div>
+                  <textarea value={reqText} onChange={(e) => setReqText(e.target.value)} rows={2} maxLength={300}
+                    placeholder="e.g. Can you log yesterday's dinner for me — chicken alfredo, restaurant portion"
+                    className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-[.84rem] text-fg outline-none placeholder:text-muted" />
+                  {reqMsg && <div className={`mt-1 text-[.74rem] ${reqMsg.ok ? "text-success" : "text-danger"}`}>{reqMsg.text}</div>}
+                  <div className="mt-2 flex gap-2">
+                    <button disabled={reqBusy || !reqText.trim()} onClick={sendReq}
+                      className="flex-1 rounded-lg border-none bg-primary px-3 py-2 text-[.82rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50">{reqBusy ? "Sending…" : "Send to trainer"}</button>
+                    <button disabled={reqBusy} onClick={() => { setReqOpen(false); setReqMsg(null); }}
+                      className="rounded-lg border border-border bg-transparent px-3 py-2 text-[.82rem] font-semibold text-muted cursor-pointer">Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => { setReqOpen(true); setReqMsg(null); }}
+                  className="mt-2.5 mr-2 rounded-lg border border-primary/50 bg-[rgba(8,220,224,.06)] px-3.5 py-2.5 text-[.85rem] font-bold text-primary cursor-pointer inline-flex items-center gap-1.5">
+                  <Icon name="mail" size={14} color="var(--accent)" />Ask your trainer
+                </button>
+              )}
               {confirmLeave ? (
                 <div className="mt-2.5">
                   <div className="mb-2 text-[.85rem] text-fg">
@@ -9516,6 +9562,23 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // Notification Center and this inline toggle stay in sync (Session 76).
   const np = notifPrefs || { master: true, sentReminders: true };
   const reqsOn = np.master && np.sentReminders;
+  // Client → trainer requests (S90): my inbox (kv caliq-inbox, written
+  // server-side by sendTrainerRequest), live via my own kv listener.
+  const [inbox, setInbox] = useState([]);
+  useEffect(() => {
+    if (!meUid) return;
+    return subscribeForUser(meUid, "caliq-inbox", (val) => {
+      try { const a = val ? JSON.parse(val) : []; setInbox(Array.isArray(a) ? a : []); } catch { setInbox([]); }
+    });
+  }, [meUid]);
+  const writeInbox = (next) => {
+    setInbox(next);
+    window.storage.set("caliq-inbox", JSON.stringify(next)).catch(() => {});
+  };
+  const inboxDone = (id) => writeInbox(inbox.map((r) => r.id === id ? { ...r, status: "done", doneAt: Date.now() } : r));
+  const inboxRemove = (id) => writeInbox(inbox.filter((r) => r.id !== id));
+  const openInbox = inbox.filter((r) => r && r.status === "open");
+
   // In-app messaging (S90): which client's DM is open + live unread counts per
   // client (one threads listener; badges gated by the messages notif pref).
   const [msgFor, setMsgFor] = useState(null); // client object | null
@@ -9787,6 +9850,36 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
         {clients.length > 0 && (
           <div className={cardCls}>
+            {/* Client → trainer requests inbox (S90) — shows only when there's
+                something in it; done/dismiss write my own kv (owner access). */}
+            {inbox.length > 0 && (
+              <div className="mb-4 rounded-card border border-[rgba(8,220,224,.35)] bg-[rgba(8,220,224,.04)] p-4">
+                <div className={`${sectionTitleCls} flex items-center gap-2`}>
+                  <Icon name="inbox" size={19} color="var(--accent)" />Client Requests
+                  {openInbox.length > 0 && <span className="rounded-full bg-primary px-2 text-[.7rem] font-bold text-primaryfg">{openInbox.length}</span>}
+                </div>
+                {openInbox.length === 0 && <div className={subCls}>All caught up ✓</div>}
+                {openInbox.map((r) => (
+                  <div key={r.id} className="mt-2 rounded-xl border border-border bg-surface2 p-3">
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[.84rem] font-bold text-fg">{r.fromName || "Client"}</span>
+                      <span className="text-[.66rem] text-muted">{fmtStamp(r.createdAt)}</span>
+                    </div>
+                    <div className="mt-1 text-[.84rem] leading-relaxed text-fg">{r.prompt}</div>
+                    <div className="mt-2 flex gap-2">
+                      <button className={mBtnCls} onClick={() => inboxDone(r.id)}>✓ Done</button>
+                      <button className={`${mBtnCls} text-muted`} onClick={() => inboxRemove(r.id)}>Dismiss</button>
+                    </div>
+                  </div>
+                ))}
+                {inbox.some((r) => r.status === "done") && (
+                  <button className="mt-2 border-0 bg-transparent p-0 text-[.72rem] text-muted underline cursor-pointer"
+                    onClick={() => writeInbox(inbox.filter((r) => r.status !== "done"))}>
+                    Clear {inbox.filter((r) => r.status === "done").length} completed
+                  </button>
+                )}
+              </div>
+            )}
             <div className={`${sectionTitleCls} flex items-center gap-2`}><Icon name="link" size={19} color="var(--accent)" />Your Connected Clients</div>
             <div className={`${subCls} mt-1 mb-2`}>
               Live data from each client's shared plan. Tap a card to open it.
@@ -10806,6 +10899,7 @@ async function openBillingPortal() {
   return false;
 }
 const callRequestBoost = httpsCallable(functions, "requestBudgetBoost"); // Max-tier same-day allowance boost (S90)
+const callSendTrainerRequest = httpsCallable(functions, "sendTrainerRequest"); // client → trainer inbox (S90)
 const callAdminOverview = httpsCallable(functions, "adminOverview"); // admin all-users dashboard (S90)
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
 const callEstimateFood = httpsCallable(functions, "estimateFood"); // AI macro estimate in the manual tracker (S89c)
@@ -13705,6 +13799,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
             ? [
                 { key: "sentReminders", label: "Client to-do reminders", desc: "Sent to-dos shown on client cards" },
                 { key: "messages", label: "Message badges", desc: "Unread-message badges on client cards" },
+                { key: "clientRequests", label: "Client requests", desc: "When a client asks you for something" },
               ]
             : [
                 { key: "trainerReminders", label: "Trainer to-do reminders", desc: "To-dos your trainer sends you" },
