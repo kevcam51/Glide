@@ -151,6 +151,28 @@ max; realistic $10–25. Name deliberately avoids "unlimited" and "Max+".
 BUDGETS entry + a second Stripe price per role (lookup_key) + tier picker on the checkout —
 small build; the budget system already does the enforcement.
 
+## Enterprise (scoped S90 — SELL ON PAPER, build on the first real prospect)
+
+Two segments, two models (Kevin's ask: gyms + corporate wellness):
+
+**Glide Studio (gyms/studios): $249/mo per location** ($2,490/yr, 2 months free) — 10 coach
+seats included (full Coach + AI), **+$19/mo per extra coach**, unlimited free-tier members,
+optional member-AI packs (~$6/member/mo in blocks of 50 vs $14.99 retail). Anchored directly at
+Trainerize Studio Plus ($248/mo/location, verified Jul 2026) with AI included. Margin: 10 coaches
+at realistic AI usage ≈ $50–150/mo COGS vs $249. The head→sub→client role tree already models a
+gym; themes.css was built for white-label.
+
+**Glide at Work (corporate wellness): $4 PEPM, $500/mo minimum** — every employee gets the app
+with AI (trimmed allowance ~10 convos/day). The hard AI caps make PEPM structurally safe:
+~20–35% typical activation → 1,000 employees = $4k/mo revenue vs ~$250–500 real AI cost.
+**Non-negotiables:** employer sees AGGREGATE ANONYMIZED stats only (never individual health
+data — legal + the #1 objection), and the human-trainer layer (Smooth Training coaches for
+employees who want one) is the differentiator nobody else offers at this price.
+
+**Build gates (don't pre-build):** org entity + seat admin, aggregate reporting, white-label
+theming pass, SSO later. Cheap now: an "Enterprise — let's talk" line on the pricing surface.
+Custom-quote above ~25 coaches / ~2,500 employees; offer 3-month department pilots.
+
 ## Annual pricing (S89c)
 
 Convention: consumer tiers get a deep discount (drives the impulse "might as well" upgrade —
