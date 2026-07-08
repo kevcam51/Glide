@@ -2128,7 +2128,22 @@ enabled (Blaze has no default spending cap).
   + auto-shown ONCE on first camera tap (localStorage `glide-photo-tips-seen`): good-vs-bad plate SVG
   diagram (spread apart vs piled up) + 5 tips (overhead angle, spread food, light, scale reference,
   mention invisible oils/dressings). Verified live: first-tap shows, Got-it proceeds to picker,
-  subsequent taps skip, ⓘ reopens.
+  subsequent taps skip, ⓘ reopens. (Tips later shortened to headline + tap-to-expand detail per Kevin.)
+  (c) **Pricing feature-comparison matrix** in `PlanPicker` (`PLAN_FEATURES`/`FeatureMatrix`, role-aware
+  Free|Premium|Max vs Free|Coach|Coach Max, ~30 real-feature rows, AI allowance published in-grid
+  ~15/~40/~100 + Max-only raise-on-request row + fair-use footer with **MANUAL LOGGING** emphasized and
+  a what-it-means ⓘ). (d) **"Plans & pricing" menu row — always visible** in SideMenu (`setShowPicker`)
+  — before this, pricing was unreachable for grandfathered/subscribed accounts. (e) **AI chat history
+  (Claude-style past-chats drawer):** index `caliq-ai-chats {active, chats:[{id,title,updatedAt}]}` +
+  one thread doc per chat (`caliq-ai-chat-{id}`; pre-S90 `caliq-ai-chat` adopted as the "legacy" convo
+  via key-mapping, no migration write). History button (left header slot, premium-gated) → left drawer:
+  + New chat, switch (loads thread), ✕ delete (falls back gracefully), titles auto-set from the first
+  user message, sorted by updatedAt, capped 30 chats × 20 msgs. **Zero AI-cost impact** (API payload cap
+  unchanged — only the active chat's tail is sent). E2E-verified: legacy migration, new chat + live
+  exchange, switch both ways, delete, full-reload persistence. (f) **Trainerize auto-sync mystery
+  RESOLVED:** scheduler fires fine; Kevin had deliberately deleted the 10 imported profiles (wants
+  hand-picked clients only — which the S86 picker already provides; auto-sync never adds clients). His
+  index has 2 manual plans, 0 trainerizeId → sync no-ops by design until he re-imports chosen clients.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

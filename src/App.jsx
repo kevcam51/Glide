@@ -10952,35 +10952,91 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   };
   const loadedRef = useRef(false); // guards persistence until the saved thread loads
 
-  // Conversation persistence (Session 77): the chat thread is saved to the user's
-  // own account so it's still there when they reopen the panel. Stored TEXT-ONLY
-  // (photos' base64 is stripped — kept small) and capped to the last 20 messages.
-  // No effect on AI cost: the API payload is capped the same either way.
-  const CHAT_KEY = "caliq-ai-chat";
+  // Multi-conversation persistence (S90; evolves S77's single thread): an index
+  // doc `caliq-ai-chats` {active, chats:[{id,title,updatedAt}]} plus one small
+  // thread doc per chat. The old single-thread key `caliq-ai-chat` is adopted
+  // as the "legacy" conversation (key-mapped — no migration write needed).
+  // Threads stay TEXT-ONLY and capped at 20 messages, and the API payload cap
+  // is unchanged — so past chats cost ZERO extra AI tokens; only the active
+  // chat's tail is ever sent.
+  const CHATS_INDEX_KEY = "caliq-ai-chats";
+  const threadKey = (id) => (id === "legacy" ? "caliq-ai-chat" : `caliq-ai-chat-${id}`);
+  const chatTitle = (msgs) => { const m = (msgs || []).find((x) => x.role === "user" && (x.content || "").trim()); return m ? m.content.trim().slice(0, 44) : "New chat"; };
+  const [convos, setConvos] = useState([]);         // [{id, title, updatedAt}]
+  const [activeChatId, setActiveChatId] = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const loadThread = async (id) => {
+    try { const r = await window.storage.get(threadKey(id)); const t = r && r.value ? JSON.parse(r.value) : []; return Array.isArray(t) ? t : []; } catch { return []; }
+  };
+  const writeIndex = (active, chats) => {
+    try { window.storage.set(CHATS_INDEX_KEY, JSON.stringify({ active, chats })); } catch { /* best-effort */ }
+  };
   useEffect(() => {
     (async () => {
       try {
-        const r = await window.storage.get(CHAT_KEY);
-        const saved = r && r.value ? JSON.parse(r.value) : [];
-        if (Array.isArray(saved) && saved.length) setMessages(saved);
+        let index = null;
+        try { const r = await window.storage.get(CHATS_INDEX_KEY); index = r && r.value ? JSON.parse(r.value) : null; }
+        catch (e) { if (!/not found/i.test((e && e.message) || "")) return; } // offline blip → keep saving disabled
+        if (index && Array.isArray(index.chats) && index.chats.length) {
+          const act = index.chats.some((c) => c.id === index.active) ? index.active : index.chats[0].id;
+          setConvos(index.chats); setActiveChatId(act);
+          const t = await loadThread(act); if (t.length) setMessages(t);
+          loadedRef.current = true; return;
+        }
+        // No index yet — adopt the pre-S90 single thread if one exists.
+        let legacy = [];
+        try { const r = await window.storage.get("caliq-ai-chat"); legacy = r && r.value ? JSON.parse(r.value) : []; }
+        catch (e) { if (!/not found/i.test((e && e.message) || "")) return; }
+        const hasLegacy = Array.isArray(legacy) && legacy.length > 0;
+        const first = { id: hasLegacy ? "legacy" : `c${Date.now()}`, title: chatTitle(legacy), updatedAt: Date.now() };
+        setConvos([first]); setActiveChatId(first.id);
+        if (hasLegacy) setMessages(legacy);
         loadedRef.current = true;
-      } catch (e) {
-        // "Key not found" = genuinely no thread yet → saving is safe. Any OTHER
-        // failure (offline blip) must NOT enable saving, or the next exchange
-        // would overwrite the real saved thread with a 2-message one.
-        if (e && /not found/i.test(e.message || "")) loadedRef.current = true;
-      }
+      } catch { /* leave saving disabled rather than risk clobbering */ }
     })();
   }, []);
   // Save when an exchange settles (busy=false) — not mid-stream. Skip until loaded
-  // so we never clobber the saved thread with the initial empty state.
+  // so we never clobber a saved thread with the initial empty state.
   useEffect(() => {
-    if (!loadedRef.current || busy) return;
+    if (!loadedRef.current || busy || !activeChatId || !messages.length) return;
     try {
       const slim = messages.slice(-20).map((m) => ({ role: m.role, content: m.content || "", hadImage: !!m.image }));
-      window.storage.set(CHAT_KEY, JSON.stringify(slim));
+      window.storage.set(threadKey(activeChatId), JSON.stringify(slim));
+      setConvos((prev) => {
+        const next = prev.map((c) => c.id === activeChatId
+          ? { ...c, title: !c.title || c.title === "New chat" ? chatTitle(slim) : c.title, updatedAt: Date.now() }
+          : c);
+        writeIndex(activeChatId, next);
+        return next;
+      });
     } catch { /* best-effort */ }
-  }, [busy, messages]);
+  }, [busy, messages, activeChatId]);
+  const resetThreadUi = () => { setProposal(null); setWorkout(null); setEditDraft(null); setError(""); };
+  const newChat = () => {
+    if (busy) return;
+    const id = `c${Date.now()}`;
+    const c = { id, title: "New chat", updatedAt: Date.now() };
+    setConvos((prev) => { const next = [c, ...prev].slice(0, 30); writeIndex(id, next); return next; });
+    setActiveChatId(id); setMessages([]); resetThreadUi(); setHistoryOpen(false);
+  };
+  const switchChat = async (id) => {
+    if (busy || id === activeChatId) { setHistoryOpen(false); return; }
+    const t = await loadThread(id);
+    setActiveChatId(id); setMessages(t); resetThreadUi(); setHistoryOpen(false);
+    setConvos((prev) => { writeIndex(id, prev); return prev; });
+  };
+  const deleteChat = async (id) => {
+    if (busy) return;
+    const next = convos.filter((c) => c.id !== id);
+    try { await window.storage.delete(threadKey(id)); } catch { /* best-effort */ }
+    let act = activeChatId;
+    if (id === activeChatId) {
+      if (next.length) { act = next[0].id; const t = await loadThread(act); setActiveChatId(act); setMessages(t); }
+      else { act = `c${Date.now()}`; next.push({ id: act, title: "New chat", updatedAt: Date.now() }); setActiveChatId(act); setMessages([]); }
+      resetThreadUi();
+    }
+    setConvos(next); writeIndex(act, next);
+  };
 
   // Accept a proposed meal → save it directly (no extra AI call) via logMeal.
   const acceptMeal = async (meal) => {
@@ -11334,7 +11390,16 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
           {/* Header — symmetric 3 columns (icon | centered title | controls) so
               the title/subtitle sit in the middle of the bar. Sides are equal width. */}
           <div className="flex items-center border-b border-border bg-surface2 px-3 py-3">
-            <div className="w-[72px] shrink-0" aria-hidden="true" />
+            <div className="flex w-[72px] shrink-0 items-center">
+              {premium && (
+                <button onClick={() => setHistoryOpen(true)} disabled={busy} aria-label="Past chats" title="Past chats"
+                  className="rounded-lg border border-border bg-surface px-2 py-1.5 text-primary cursor-pointer hover:bg-surface2 disabled:opacity-50">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]">
+                    <path d="M3 3v5h5" /><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" /><path d="M12 7v5l4 2" />
+                  </svg>
+                </button>
+              )}
+            </div>
             <div className="flex flex-1 min-w-0 flex-col items-center text-center leading-tight">
               <span className="flex items-center gap-1.5 font-display text-sm uppercase tracking-wide text-primary">
                 <Icon name="sparkle" variant="solid" size={16} color="var(--accent)" />Glide AI
@@ -11709,6 +11774,39 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 <button onClick={tipsClose}
                   className="rounded-xl border border-border bg-transparent px-4 py-3 text-[.9rem] font-semibold text-muted cursor-pointer">Close</button>
               </div>
+            </div>
+          )}
+          {/* Past-chats drawer (S90) — Claude-style left panel: switch, continue,
+              or delete previous conversations. Costs no AI tokens (see above). */}
+          {historyOpen && (
+            <div className="absolute inset-0 z-20 flex">
+              <div className="flex h-full w-[78%] max-w-[300px] flex-col border-r border-border bg-surface" style={{ animation: "fadeUp .18s ease both" }}>
+                <div className="flex items-center gap-2 border-b border-border px-3 py-3">
+                  <span className="font-display text-sm uppercase tracking-wide text-primary">Chats</span>
+                  <button onClick={() => setHistoryOpen(false)} aria-label="Close history"
+                    className="ml-auto flex border-0 bg-transparent text-muted cursor-pointer"><Icon name="close" size={15} color="var(--muted)" /></button>
+                </div>
+                <button onClick={newChat}
+                  className="mx-3 mt-3 flex items-center justify-center gap-1.5 rounded-xl border-none bg-primaryfill px-3 py-2.5 text-[.84rem] font-bold text-primaryfg cursor-pointer">
+                  <Icon name="plus" size={14} color="var(--color-primaryfg)" />New chat
+                </button>
+                <div className="mt-2 flex-1 overflow-y-auto px-3 pb-3">
+                  {[...convos].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).map((c) => (
+                    <div key={c.id} onClick={() => switchChat(c.id)}
+                      className={`mb-1.5 flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 ${c.id === activeChatId ? "border-primary bg-[rgba(8,220,224,.06)]" : "border-border bg-surface2"}`}>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[.82rem] font-semibold text-fg">{c.title || "New chat"}</div>
+                        <div className="text-[.66rem] text-muted">{timeAgo(c.updatedAt)}</div>
+                      </div>
+                      {convos.length > 1 && (
+                        <button onClick={(e) => { e.stopPropagation(); deleteChat(c.id); }} aria-label="Delete chat" title="Delete chat"
+                          className="shrink-0 border-0 bg-transparent text-muted cursor-pointer hover:text-danger"><Icon name="close" size={13} color="currentColor" /></button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex-1 bg-black/50" onClick={() => setHistoryOpen(false)} />
             </div>
           )}
           </>)}
@@ -13305,6 +13403,13 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
             <Icon name="card" size={19} color="var(--accent)" /> <span>{upgradeBusy ? "Opening…" : "Manage subscription"}</span>
           </button>
         )}
+
+        {/* Plans & pricing — always visible (S90, Kevin's ask): before this,
+            pricing was only reachable from a trial banner or the AI lock, so
+            grandfathered/subscribed accounts had NO way to see the plans. */}
+        <button style={item} onClick={() => setShowPicker(true)}>
+          <Icon name="card" size={19} color="var(--accent)" /> <span>Plans &amp; pricing</span>
+        </button>
 
         {/* Navigation */}
         <button style={item} onClick={() => go(onHome)}><Icon name="home" size={19} color="var(--accent)" /> <span>Home</span></button>
