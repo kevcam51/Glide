@@ -10588,6 +10588,114 @@ const PLAN_MENU = {
   ],
 };
 
+// Feature-comparison matrix (S90, Kevin's ask): the classic pricing grid —
+// Free vs paid tiers, checkmarks per feature. Every row is a REAL shipped
+// feature (no vaporware), and the AI daily allowance is published right in
+// the grid (Max-tier liability hygiene: disclosed, never "unlimited").
+// Values: true = check, false = dash, string = rendered as small text.
+const PLAN_FEATURES = {
+  client: [
+    { section: "Always free", rows: [
+      ["Manual food & calorie logging", true, true, true],
+      ["Macro tracking + custom targets", true, true, true],
+      ["Food database search (USDA + brands)", true, true, true],
+      ["Barcode scanner", true, true, true],
+      ["Weight tracking & progress charts", true, true, true],
+      ["Goal timeline & projections", true, true, true],
+      ["Simple & detailed plan views", true, true, true],
+      ["Full workout plan & schedule", true, true, true],
+      ["Custom exercises", true, true, true],
+      ["Calendar with back-dated logging", true, true, true],
+      ["Streaks & daily check-ins", true, true, true],
+      ["Water tracking", true, true, true],
+      ["Fitness-tracker stats on your dashboard", true, true, true],
+      ["Connect to your trainer + shared plan", true, true, true],
+      ["Trainer to-dos & reminders", true, true, true],
+      ["Notification center", true, true, true],
+      ["Install as an app (iPhone / Android)", true, true, true],
+      ["Face ID / Touch ID sign-in", true, true, true],
+    ]},
+    { section: "AI coach", rows: [
+      ["24/7 AI coach chat (knows YOUR data)", false, true, true],
+      ["Log meals by chat — just describe them", false, true, true],
+      ["Photo meal logging — snap your plate", false, true, true],
+      ["Voice logging — speak instead of type", false, true, true],
+      ["AI food estimates in the tracker", false, true, true],
+      ["AI builds your workout program", false, true, true],
+      ["Turn TikTok / IG / YouTube links into workouts & meals", false, true, true],
+      ["Import from ChatGPT / Claude", false, true, true],
+      ["Set up & manage your plan by conversation", false, true, true],
+      ["Cut / bulk / maintenance phases by chat", false, true, true],
+      ["AI conversations per day", "—", "~15", "~100"],
+      ["Hit the ceiling? Tell us — we raise it", false, false, true],
+    ]},
+  ],
+  trainer: [
+    { section: "Always free", rows: [
+      ["Unlimited connected clients", true, true, true],
+      ["Client dashboards with live sync", true, true, true],
+      ["Coaching analytics — who needs attention", true, true, true],
+      ["Send clients to-dos & nudges", true, true, true],
+      ["Shared plan editing (you + your client)", true, true, true],
+      ["Client activity feed & history", true, true, true],
+      ["Invite Hub — link, QR, email invites, referrals", true, true, true],
+      ["Local plans, templates & sales simulations", true, true, true],
+      ["Full tracking suite for every client", true, true, true],
+      ["Install as an app + Face ID sign-in", true, true, true],
+    ]},
+    { section: "AI coaching assistant", rows: [
+      ["24/7 AI assistant (knows your clients' data)", false, true, true],
+      ["Whole-roster check: \"who's stalled this week?\"", false, true, true],
+      ["Build client programs by chat", false, true, true],
+      ["Log meals / weigh-ins / workouts FOR clients", false, true, true],
+      ["Set targets & manage client plans by chat", false, true, true],
+      ["Photo & voice meal logging", false, true, true],
+      ["Turn TikTok / IG / YouTube links into programs", false, true, true],
+      ["AI edits your local plans & simulations", false, true, true],
+      ["Send client to-dos straight from chat", false, true, true],
+      ["AI conversations per day", "—", "~40", "~100"],
+      ["Hit the ceiling? Tell us — we raise it", false, false, true],
+    ]},
+  ],
+};
+
+function FeatureMatrix({ isTrainer }) {
+  const groups = PLAN_FEATURES[isTrainer ? "trainer" : "client"];
+  const tiers = ["Free", isTrainer ? "Coach" : "Premium", isTrainer ? "Coach Max" : "Max"];
+  const cell = (v, i) => (
+    <div key={i} className="flex items-center justify-center" style={{ width: "52px", flexShrink: 0 }}>
+      {v === true ? <Icon name="check" size={14} color="var(--color-primary)" />
+        : v === false ? <span className="text-muted" style={{ fontSize: ".72rem", opacity: .5 }}>—</span>
+        : <span className={i === 0 ? "text-muted" : "text-fg"} style={{ fontSize: ".68rem", fontWeight: 700 }}>{v}</span>}
+    </div>
+  );
+  return (
+    <div className="border border-border rounded-card overflow-hidden">
+      <div className="flex items-center bg-surface2" style={{ padding: "8px 10px" }}>
+        <div className="flex-1 font-display font-bold text-fg" style={{ fontSize: ".78rem" }}>Compare plans</div>
+        {tiers.map((t, i) => (
+          <div key={t} className={i === 0 ? "text-muted" : "text-primary"}
+            style={{ width: "52px", flexShrink: 0, textAlign: "center", fontSize: ".64rem", fontWeight: 800, lineHeight: 1.2 }}>{t}</div>
+        ))}
+      </div>
+      {groups.map((g) => (
+        <div key={g.section}>
+          <div className="text-muted bg-surface2/50" style={{ padding: "7px 10px 4px", fontSize: ".64rem", fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase" }}>{g.section}</div>
+          {g.rows.map(([label, ...vals]) => (
+            <div key={label} className="flex items-center border-t border-border/50" style={{ padding: "6px 10px" }}>
+              <div className="flex-1 text-fg" style={{ fontSize: ".74rem", lineHeight: 1.35, paddingRight: "6px" }}>{label}</div>
+              {vals.map(cell)}
+            </div>
+          ))}
+        </div>
+      ))}
+      <div className="text-muted border-t border-border" style={{ padding: "8px 10px", fontSize: ".64rem", lineHeight: 1.5 }}>
+        Daily AI allowances are published fair-use limits — never hidden caps. Your data and manual logging stay free forever.
+      </div>
+    </div>
+  );
+}
+
 // Plan picker (S89c): shown before Checkout so the user chooses base vs Max
 // and monthly vs annual. Portaled to <body> (page-transition transform trap).
 function PlanPicker({ role, onClose }) {
@@ -10607,7 +10715,7 @@ function PlanPicker({ role, onClose }) {
       background:"rgba(0,0,0,.78)", display:"flex", alignItems:"center", justifyContent:"center",
       padding:"20px", paddingTop:"calc(20px + env(safe-area-inset-top,0px))", overflowY:"auto" }}>
       <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card"
-        style={{ width:"min(94vw,420px)", padding:"22px 20px", display:"flex", flexDirection:"column", gap:"14px" }}>
+        style={{ width:"min(94vw,420px)", padding:"22px 20px", display:"flex", flexDirection:"column", gap:"14px", margin:"auto 0" }}>
         <div className="flex items-center justify-between gap-2">
           <div className="font-display font-bold text-fg" style={{ fontSize:"1.08rem" }}>Choose your plan</div>
           <button onClick={onClose} aria-label="Close" className="text-muted"
@@ -10644,6 +10752,7 @@ function PlanPicker({ role, onClose }) {
           </button>
         ))}
         {err && <div style={{ color:"var(--color-danger)", fontSize:".78rem" }}>Couldn't open checkout — please try again.</div>}
+        <FeatureMatrix isTrainer={isTrainer} />
         <div className="text-muted" style={{ fontSize:".68rem", lineHeight:1.5 }}>
           Cancel anytime. Your data and manual logging stay free forever.
         </div>
