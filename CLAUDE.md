@@ -2120,6 +2120,15 @@ enabled (Blaze has no default spending cap).
   follow-ups:** default NEW clients to Simple (first-open heuristic), a matching simple mode for the
   Daily Dashboard, and a trainer-side "set my client's default view". _(Same session, earlier:
   competitor-pricing anchors VERIFIED into docs/PRICING.md + growth model written to docs/GROWTH-MATH.md.)_
+  **Also S90:** (a) **Link-ingest Phase 2** — TikTok/Instagram captions now AUTO-FETCH in `fetch_link`
+  (TikTok open oEmbed; Instagram via the post page's link-preview og:description fetched with the
+  `facebookexternalhit` crawler UA — no Meta app token needed; falls back to paste). Node-tested vs real
+  posts; **deploy of all four AI fns PENDING Kevin's `firebase login --reauth --no-localhost`**, then
+  live-verify IG serves og meta to GCP IPs. (b) **Meal-photo tips** — ⓘ button next to the chat camera
+  + auto-shown ONCE on first camera tap (localStorage `glide-photo-tips-seen`): good-vs-bad plate SVG
+  diagram (spread apart vs piled up) + 5 tips (overhead angle, spread food, light, scale reference,
+  mention invisible oils/dressings). Verified live: first-tap shows, Got-it proceeds to picker,
+  subsequent taps skip, ⓘ reopens.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

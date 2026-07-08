@@ -10895,7 +10895,18 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     }
   };
 
-  const pickImage = () => { if (fileRef.current) fileRef.current.click(); };
+  // Meal-photo tips: auto-shown ONCE the first time someone reaches for the
+  // camera (then remembered per device), and always available via the ⓘ button.
+  // Better photos → measurably better AI macro estimates.
+  const [photoTips, setPhotoTips] = useState(false);
+  const photoTipsSeen = () => { try { return localStorage.getItem("glide-photo-tips-seen") === "1"; } catch { return true; } };
+  const markPhotoTipsSeen = () => { try { localStorage.setItem("glide-photo-tips-seen", "1"); } catch {} };
+  const pickImage = () => {
+    if (!photoTipsSeen()) { setPhotoTips(true); return; }
+    if (fileRef.current) fileRef.current.click();
+  };
+  const tipsGotIt = () => { markPhotoTipsSeen(); setPhotoTips(false); if (fileRef.current) fileRef.current.click(); };
+  const tipsClose = () => { markPhotoTipsSeen(); setPhotoTips(false); };
   const onFile = async (e) => {
     const f = e.target.files && e.target.files[0];
     e.target.value = ""; // allow re-picking the same file
@@ -11457,6 +11468,11 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                   <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
                   <circle cx="12" cy="13" r="4" />
                 </svg></button>
+              <button onClick={() => setPhotoTips(true)} disabled={busy || recording || transcribing} aria-label="How to photograph your meal" title="How to photograph your meal"
+                className="flex items-center justify-center rounded-xl border border-border bg-surface2 px-2 py-2.5 text-muted cursor-pointer disabled:opacity-50 hover:text-primary -ml-1">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[16px] h-[16px]">
+                  <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg></button>
               <button onClick={toggleMic} disabled={busy || transcribing}
                 aria-label={recording ? "Stop recording" : "Record a voice message"}
                 title={recording ? "Tap to stop" : "Speak to Glide (up to 60 sec)"}
@@ -11507,6 +11523,54 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                   className="flex-1 rounded-xl border-none bg-primaryfill px-3.5 py-3 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50 disabled:cursor-default">Import &amp; log</button>
                 <button onClick={() => { setPasteOpen(false); setPasteText(""); }}
                   className="rounded-xl border border-border bg-transparent px-4 py-3 text-[.9rem] font-semibold text-muted cursor-pointer">Cancel</button>
+              </div>
+            </div>
+          )}
+          {/* Meal-photo tips overlay — how to shoot for the most accurate AI estimate */}
+          {photoTips && (
+            <div className="absolute inset-0 z-10 flex flex-col overflow-y-auto bg-surface p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <svg viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" />
+                </svg>
+                <span className="font-display text-sm uppercase tracking-wide text-primary">Get an accurate photo reading</span>
+                <button onClick={tipsClose} aria-label="Close" className="ml-auto flex border-0 bg-transparent text-muted cursor-pointer"><Icon name="close" size={16} color="var(--muted)" /></button>
+              </div>
+              {/* Good vs bad plate diagram */}
+              <div className="mb-3 flex items-center justify-center gap-6 rounded-xl border border-border bg-surface2 py-3">
+                <div className="flex flex-col items-center gap-1">
+                  <svg viewBox="0 0 80 80" className="w-[76px] h-[76px]">
+                    <circle cx="40" cy="40" r="34" fill="none" stroke="var(--color-border)" strokeWidth="2" />
+                    <circle cx="40" cy="40" r="27" fill="none" stroke="var(--color-border)" strokeWidth="1" opacity=".5" />
+                    <ellipse cx="29" cy="31" rx="10" ry="8" fill="var(--color-success)" opacity=".75" />
+                    <ellipse cx="52" cy="33" rx="9" ry="7" fill="var(--color-warn)" opacity=".7" />
+                    <ellipse cx="40" cy="52" rx="11" ry="8" fill="var(--color-accent)" opacity=".6" />
+                  </svg>
+                  <span className="flex items-center gap-1 text-[.72rem] font-semibold text-success"><Icon name="check" size={12} color="var(--color-success)" />Spread apart</span>
+                </div>
+                <div className="flex flex-col items-center gap-1">
+                  <svg viewBox="0 0 80 80" className="w-[76px] h-[76px]">
+                    <circle cx="40" cy="40" r="34" fill="none" stroke="var(--color-border)" strokeWidth="2" />
+                    <circle cx="40" cy="40" r="27" fill="none" stroke="var(--color-border)" strokeWidth="1" opacity=".5" />
+                    <ellipse cx="40" cy="44" rx="14" ry="10" fill="var(--color-accent)" opacity=".6" />
+                    <ellipse cx="38" cy="38" rx="12" ry="9" fill="var(--color-warn)" opacity=".7" />
+                    <ellipse cx="42" cy="32" rx="10" ry="8" fill="var(--color-success)" opacity=".75" />
+                  </svg>
+                  <span className="flex items-center gap-1 text-[.72rem] font-semibold text-danger"><Icon name="close" size={12} color="var(--color-danger)" />Piled up</span>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2.5 text-[.84rem] leading-relaxed text-fg">
+                <div className="flex gap-2.5"><span className="mt-0.5 shrink-0 font-bold text-primary">1.</span><span><strong>Shoot from directly above</strong> so the whole plate is visible — angled shots hide food behind food.</span></div>
+                <div className="flex gap-2.5"><span className="mt-0.5 shrink-0 font-bold text-primary">2.</span><span><strong>Spread items apart</strong> — the AI can only count what it can see. Unstack piles and separate foods.</span></div>
+                <div className="flex gap-2.5"><span className="mt-0.5 shrink-0 font-bold text-primary">3.</span><span><strong>Use good light</strong> — no heavy shadows, no dim restaurant mood lighting if you can help it.</span></div>
+                <div className="flex gap-2.5"><span className="mt-0.5 shrink-0 font-bold text-primary">4.</span><span><strong>Keep the full plate in frame</strong> — a fork or your hand next to it helps the AI judge portion size.</span></div>
+                <div className="flex gap-2.5"><span className="mt-0.5 shrink-0 font-bold text-primary">5.</span><span><strong>Mention what's invisible</strong> in a note — cooking oil, butter, dressings, sugar in your drink. Those calories don't show up in pixels.</span></div>
+              </div>
+              <div className="mt-auto flex gap-2 pt-4">
+                <button onClick={tipsGotIt}
+                  className="flex-1 rounded-xl border-none bg-primaryfill px-3.5 py-3 text-[.9rem] font-bold text-primaryfg cursor-pointer">Got it — take my photo</button>
+                <button onClick={tipsClose}
+                  className="rounded-xl border border-border bg-transparent px-4 py-3 text-[.9rem] font-semibold text-muted cursor-pointer">Close</button>
               </div>
             </div>
           )}
