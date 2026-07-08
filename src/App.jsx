@@ -2892,9 +2892,134 @@ function SimulationSummary({ data, totalBurn, totalStrBurn = 0 }) {
 
 // ─── Results ─────────────────────────────────────────────────────────────────
 
+// Plain-English view of the Full Plan for people who don't know TDEE/BMR/macros.
+// Same numbers as the detailed tabs (target mirrors computeClientCalories), just
+// translated into everyday words. Toggled from Results; choice sticks per device.
+function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, workoutDaysCount, onShowDetailed }) {
+  const w = Number(data.weightLbs) || 0;
+  const ready = isFinite(tdee) && tdee > 0 && w > 0;
+  const weeklyBurn = totalBurn + totalStrBurn;
+  const eatback = isEatback(data);
+  const target = ready ? floor(Math.round(tdee - 500 + (eatback ? weeklyBurn / 7 : 0))) : null;
+  const protein = Math.round(Number(data.macroTargets?.protein) || w) || null;
+  const cups = w ? Math.round((w * 0.5) / 8) : null;
+  const goal = Number(data.goalWeight) || null;
+  const lbsToGo = hasGoal ? Math.round((w - goal) * 10) / 10 : null;
+  const weeklyDeficit = 3500 + (eatback ? 0 : weeklyBurn); // eat-back holds ~1 lb/wk; accelerate adds the burn
+  const rate = Math.round((weeklyDeficit / 3500) * 10) / 10;
+  const wks = hasGoal ? weeksToGoal(lbsToGo, weeklyDeficit) : null;
+  const etaDate = wks != null && wks > 0 && wks < 260 ? new Date(Date.now() + wks * 7 * 86400000) : null;
+  const etaLabel = etaDate ? etaDate.toLocaleDateString(undefined, { month: "long", year: "numeric" }) : null;
+
+  const cardS = { padding: "18px", marginBottom: "16px" };
+  const titleS = { fontFamily: "'Sora',sans-serif", fontSize: ".95rem", letterSpacing: "1.5px", color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" };
+  const proseS = { fontSize: ".86rem", color: "var(--text-secondary)", lineHeight: 1.65 };
+  const rowS = { display: "flex", alignItems: "flex-start", gap: "10px", padding: "9px 0", borderBottom: "1px solid var(--border)", fontSize: ".86rem", lineHeight: 1.5 };
+  const numS = { fontFamily: "'Sora',sans-serif", color: "var(--accent)", fontWeight: 700 };
+
+  if (!ready) return (
+    <div className="card" style={cardS}>
+      <div style={titleS}><Icon name="bulb" size={16} color="var(--accent)" />Almost there</div>
+      <div style={proseS}>Finish entering your info (tap "Edit My Info" below) and this page will explain your whole plan in plain English — how much to eat, and how long your goal will take.</div>
+    </div>
+  );
+
+  return (
+    <>
+      {/* The one number that matters */}
+      <div className="card" style={{ ...cardS, textAlign: "center" }}>
+        <div style={{ ...titleS, justifyContent: "center" }}><Icon name="flame" size={16} color="var(--accent)" />The One Number That Matters</div>
+        <div style={{ fontFamily: "'Sora',sans-serif", fontSize: "3rem", fontWeight: 700, color: "var(--accent)", lineHeight: 1.1 }}>{target.toLocaleString()}</div>
+        <div style={{ fontSize: ".9rem", color: "var(--text)", marginTop: "2px", fontWeight: 600 }}>calories a day</div>
+        <div style={{ ...proseS, marginTop: "10px" }}>Eat close to this number most days and the weight comes off. Everything else on this page just supports it.</div>
+      </div>
+
+      {/* Why this number */}
+      <div className="card" style={cardS}>
+        <div style={titleS}><Icon name="bulb" size={16} color="var(--accent)" />Why This Number</div>
+        <div style={proseS}>
+          Your body burns about <span style={numS}>{tdee.toLocaleString()}</span> calories a day just living, moving, and doing what you already do — based on your age, size, and activity.
+          Eating a bit less than you burn makes your body use stored fat to cover the difference. That's all weight loss is.
+          {weeklyBurn > 0 && eatback && <> Your workouts burn about <span style={numS}>{Math.round(weeklyBurn / 7).toLocaleString()}</span> extra calories a day on average, and your plan lets you eat those back — so you lose about 1 lb a week without starving.</>}
+          {weeklyBurn > 0 && !eatback && <> Your workouts burn about <span style={numS}>{Math.round(weeklyBurn / 7).toLocaleString()}</span> extra calories a day on average — your plan keeps eating the same, so the workouts speed up your results instead.</>}
+          {weeklyBurn === 0 && <> Eating about 500 below your burn each day adds up to roughly 1 lb of fat lost per week — steady and sustainable.</>}
+        </div>
+      </div>
+
+      {/* Goal timeline */}
+      {hasGoal && (
+        <div className="card" style={cardS}>
+          <div style={titleS}><Icon name="target" size={16} color="var(--accent)" />Your Goal</div>
+          <div style={{ fontFamily: "'Sora',sans-serif", fontSize: "1.5rem", fontWeight: 700, color: "var(--text)" }}>
+            {w} <span style={{ color: "var(--muted)", fontSize: "1rem" }}>→</span> {goal} lbs
+          </div>
+          <div style={{ ...proseS, marginTop: "8px" }}>
+            That's <span style={numS}>{lbsToGo}</span> lbs to go. Losing about <span style={numS}>{rate}</span> lb a week, you'd get there in about <span style={numS}>{friendlyTime(wks)}</span>{etaLabel && <> — around <span style={numS}>{etaLabel}</span></>}.
+          </div>
+          <div style={{ fontSize: ".76rem", color: "var(--muted)", marginTop: "8px", lineHeight: 1.5 }}>
+            Nobody is perfect every day — hit your number most days (say 8 out of 10) and this date is realistic. A rough week just moves the date, it doesn't break the plan.
+          </div>
+        </div>
+      )}
+
+      {/* Daily checklist */}
+      <div className="card" style={cardS}>
+        <div style={titleS}><Icon name="check" size={16} color="var(--accent)" />Your Daily Checklist</div>
+        <div style={rowS}>
+          <Icon name="flame" size={16} color="var(--accent)" />
+          <div>Eat close to <span style={numS}>{target.toLocaleString()}</span> calories. Log your food — people who log lose more, because guessing always underestimates.</div>
+        </div>
+        {protein && (
+          <div style={rowS}>
+            <Icon name="muscle" size={16} color="var(--accent)" />
+            <div>Get about <span style={numS}>{protein}g</span> of protein — roughly <span style={numS}>{Math.max(2, Math.round(protein / 25))}</span> palm-sized portions of chicken, fish, meat, eggs, or Greek yogurt across the day. Protein keeps you full and protects your muscle while you lose fat.</div>
+          </div>
+        )}
+        {cups && (
+          <div style={rowS}>
+            <Icon name="water" size={16} color="var(--accent)" />
+            <div>Drink about <span style={numS}>{cups}</span> cups of water.</div>
+          </div>
+        )}
+        <div style={rowS}>
+          <Icon name="dumbbell" size={16} color="var(--accent)" />
+          <div>{workoutDaysCount > 0
+            ? <>Show up on your <span style={numS}>{workoutDaysCount}</span> workout day{workoutDaysCount !== 1 ? "s" : ""} this week — they're already scheduled in your plan.</>
+            : <>Move most days — even a 20-minute walk counts. No workout schedule is set yet; ask your trainer or the AI coach to build one.</>}</div>
+        </div>
+        <div style={{ ...rowS, borderBottom: "none" }}>
+          <Icon name="scale" size={16} color="var(--accent)" />
+          <div>Weigh in about once a week, same time of day. Daily ups and downs are water, not fat — the weekly trend is what's real.</div>
+        </div>
+      </div>
+
+      {/* Jargon translator */}
+      <div className="card" style={cardS}>
+        <div style={titleS}><Icon name="file" size={16} color="var(--accent)" />The Fancy Words, Translated</div>
+        <div style={{ ...proseS, fontSize: ".8rem" }}>
+          If you peek at the detailed view, you'll see these: <strong style={{ color: "var(--text)" }}>TDEE</strong> = total calories your body burns in a day. <strong style={{ color: "var(--text)" }}>BMR</strong> = calories burned at complete rest, just being alive. <strong style={{ color: "var(--text)" }}>Deficit</strong> = eating less than you burn (the thing that causes weight loss). <strong style={{ color: "var(--text)" }}>Macros</strong> = protein, carbs, and fat — the three things food is made of.
+        </div>
+      </div>
+
+      <button onClick={onShowDetailed} style={{ width: "100%", padding: "13px", borderRadius: "12px", border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text-secondary)", fontFamily: "inherit", fontSize: ".84rem", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "7px", marginBottom: "4px" }}>
+        <Icon name="chart" size={15} />See the full detailed plan
+      </button>
+    </>
+  );
+}
+
 function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust }) {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
+  // Simple (plain-English) vs Detailed plan view — a display pref, remembered
+  // per device so a beginner keeps their simple view without a Firestore write.
+  const [simpleView, setSimpleViewRaw] = useState(() => {
+    try { return localStorage.getItem("glide-plan-view") === "simple"; } catch { return false; }
+  });
+  const setSimpleView = (v) => {
+    setSimpleViewRaw(v);
+    try { localStorage.setItem("glide-plan-view", v ? "simple" : "detailed"); } catch {}
+  };
   const [showEdit, setShowEdit] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [openResultDay, setOpenResultDay] = useState(null);
@@ -2992,6 +3117,11 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
   const totalStrBurn   = strengthDayData.reduce((s,d)=>s+d.burned, 0);
   const activeStrDays  = strengthDayData.filter(d=>d.burned>0).length;
   const avgStrPerDay   = Math.round(totalStrBurn/7);
+  // Distinct days with ANY workout (cardio or strength) — a day with both counts once
+  const workoutDaysCount = new Set([
+    ...dayData.filter(d=>d.burned>0).map(d=>d.day),
+    ...strengthDayData.filter(d=>d.burned>0).map(d=>d.day),
+  ]).size;
   const TABS = [
     "📊 No Cardio",
     "🔥 + Cardio",
@@ -3038,6 +3168,24 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
     <div className="fu">
 
       {isSimulation && <SimulationSummary data={data} totalBurn={totalBurn} totalStrBurn={totalStrBurn} />}
+
+      {/* ── Simple / Detailed view toggle ── */}
+      <div style={{display:"flex",gap:"4px",background:"var(--s2)",padding:"4px",borderRadius:"12px",border:"1px solid var(--border)",marginBottom:"16px"}}>
+        <button style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",padding:"10px",borderRadius:"9px",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:".82rem",fontWeight:600,transition:"all .2s",background:simpleView?"var(--surface)":"transparent",color:simpleView?"var(--accent)":"var(--muted)",boxShadow:simpleView?"0 2px 8px rgba(0,0,0,.3)":"none"}}
+          onClick={()=>setSimpleView(true)}>
+          <Icon name="leaf" size={15} />Simple
+        </button>
+        <button style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:"6px",padding:"10px",borderRadius:"9px",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:".82rem",fontWeight:600,transition:"all .2s",background:!simpleView?"var(--surface)":"transparent",color:!simpleView?"var(--text)":"var(--muted)",boxShadow:!simpleView?"0 2px 8px rgba(0,0,0,.3)":"none"}}
+          onClick={()=>setSimpleView(false)}>
+          <Icon name="chart" size={15} />Detailed
+        </button>
+      </div>
+
+      {simpleView ? (
+        <SimplePlanView data={data} tdee={tdee} floor={floor} hasGoal={hasGoal}
+          totalBurn={totalBurn} totalStrBurn={totalStrBurn}
+          workoutDaysCount={workoutDaysCount} onShowDetailed={()=>setSimpleView(false)} />
+      ) : (<>
 
       {/* ── Basic / Pro Toggle ── */}
       <div style={{display:"flex",gap:"4px",background:"var(--s2)",padding:"4px",borderRadius:"12px",border:"1px solid var(--border)",marginBottom:"16px"}}>
@@ -3620,6 +3768,8 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           bmi={bmi}
         />
       )}
+
+      </>)}
 
       {/* ─ Global Disclaimer ─ */}
       <div style={{marginTop:"20px",padding:"14px",background:"rgba(255,204,68,.04)",border:"1px solid rgba(255,204,68,.15)",borderRadius:"var(--radius-sm)",fontSize:".73rem",color:"var(--muted)",lineHeight:1.6}}>
@@ -7467,12 +7617,12 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 </div>
               ) : (
                 <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                  <span style={{color:"var(--muted)"}}>Base TDEE</span>
+                  <span style={{color:"var(--muted)"}}>Your body's daily burn (TDEE)</span>
                   <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{tdee.toLocaleString()} cal</span>
                 </div>
               )}
               <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                <span style={{color:"var(--muted)"}}>Deficit (1 lb/wk)</span>
+                <span style={{color:"var(--muted)"}}>Eat less to lose ~1 lb/week</span>
                 <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:"var(--red)"}}>−500 cal</span>
               </div>
               {!trackerTdee && (

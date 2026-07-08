@@ -2097,6 +2097,29 @@ enabled (Blaze has no default spending cap).
   (4) Trainerize **auto-sync re-enabled** (Kevin's toggle tap hadn't saved; set `{enabled:true}`
   directly) — scheduler confirmed firing every 30 min; Face ID device-test done; trial gate + Kevin's
   own Stripe test purchase verified, all test residue cleaned.
+- Session 90: **Simple (plain-English) view on the Full Plan + dashboard jargon relabels (Kevin's ask:
+  beginners find TDEE/BMR/deficit-speak confusing).** New module-level **`SimplePlanView`** component
+  (App.jsx, directly above `Results`): one plain-English screen — "The One Number That Matters" (the
+  daily calorie target, same formula as `computeClientCalories`: TDEE−500 + eat-back burn/7, 1200 floor),
+  "Why This Number" (prose explanation incl. eat-back vs accelerate wording), "Your Goal" (lbs to go +
+  friendlyTime ETA + a month/year date + an 80%-consistency honesty note), "Your Daily Checklist"
+  (calories / protein with palm-sized-portion equivalents, honors `data.macroTargets` / water cups /
+  scheduled workout days / weekly weigh-in), and "The Fancy Words, Translated" (TDEE/BMR/deficit/macros
+  glossary). Incomplete plans get a friendly "finish your info" card (guards NaN tdee). **Toggle:** a
+  Simple | Detailed pill at the top of `Results` (house icons leaf/chart, styled like the Basic/Pro
+  toggle); Simple REPLACES the IBW card + all 8 tabs + the Pro block; Detailed = everything unchanged.
+  Choice persists per device via localStorage `glide-plan-view` (**default = Detailed**, so existing
+  users see zero change; a display pref, no Firestore write, works for trainer AND client viewers).
+  `workoutDaysCount` = distinct days with any cardio/strength (a day with both counts once). Also
+  relabeled the Daily Dashboard "How Your Target Is Calculated" rows: "Base TDEE" → "Your body's daily
+  burn (TDEE)", "Deficit (1 lb/wk)" → "Eat less to lose ~1 lb/week". Verified live as client.uitest
+  (Casey): toggle renders, Simple shows 2,000 cal (2,450 TDEE − 500 + 50 eat-back avg), goal 186→172 ≈
+  "3 months 1 week — around October 2026", 200g protein = 8 palm portions, 12 cups water, 1 workout day;
+  "See the full detailed plan" button returns to Detailed; choice survives a full reload; new dashboard
+  labels render; no console errors; `npm run build` passes. No `firestore.rules` change. **Possible
+  follow-ups:** default NEW clients to Simple (first-open heuristic), a matching simple mode for the
+  Daily Dashboard, and a trainer-side "set my client's default view". _(Same session, earlier:
+  competitor-pricing anchors VERIFIED into docs/PRICING.md + growth model written to docs/GROWTH-MATH.md.)_
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a
