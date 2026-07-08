@@ -1,5 +1,25 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡ S90 LATE-SESSION AUTONOMOUS RUN (Kevin away): the whole "ready to build" backlog SHIPPED
+1. **In-app messaging** — LIVE (rules published, 87/87 tests; see docs/MESSAGING-PLAN.md header).
+2. **Push delivery (Web Push/VAPID)** — LIVE: `functions/push.js` (savePushSub/removePushSub +
+   onDmCreated + onTrainerRequestWritten triggers, notif-pref gated, 410-pruned), sw.js push +
+   notificationclick handlers, "Push to this device" toggle in the Notification Center.
+   VAPID private key = Secret Manager `VAPID_PRIVATE_KEY`; public key in src/push.js.
+   **⚠️ KEVIN DEVICE TEST**: ≡ → Notifications → "Push to this device" ON (on the installed PWA),
+   then have someone DM you / send a to-do with the app closed — headless E2E verified the whole
+   pipeline except the final device receipt. iPhone needs the home-screen install first.
+3. **Client→trainer requests** — LIVE: `sendTrainerRequest` callable (link-verified, transactional,
+   spam-capped) → trainer's kv `caliq-inbox`; "Ask your trainer" composer on the client role panel;
+   live "Client Requests" inbox card on the trainer home (Done/Dismiss/Clear); `clientRequests`
+   notif type + push. E2E: request appeared live on the trainer dashboard, full lifecycle.
+4. **Data-integrity hardening** — kvTxnJSON transactions on all append-style AI writes (meals,
+   history, requests; prod-verified: 2 concurrent logMeal calls both survived) + plan-delete now
+   cleans orphaned day-log/history/foods docs. Still deferred: AI-budget pre-reserve,
+   assignedTrainerId consent (needs a joinTrainer callable — design), ProfileCard caret jump.
+**NEXT: Stripe live-mode swap + custom-domain/name decision (Kevin's ordering).** Also pending
+Kevin: re-import chosen Trainerize clients (picker), admin-dashboard look, Android icon reinstall.
+
 _Updated end of **Session 89 (a/b/c — one marathon)**: wearable-adjusted targets, Trainerize workout
 sync, STRIPE BILLING v1 live in test mode, trial enforcement, AI meal-tracker estimates, the full
 pricing/cost analysis, and the GitHub-key security incident closed. Read "⏭️ NEXT SESSION" below
