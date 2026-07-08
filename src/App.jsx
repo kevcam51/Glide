@@ -10662,6 +10662,7 @@ const PLAN_FEATURES = {
 function FeatureMatrix({ isTrainer }) {
   const groups = PLAN_FEATURES[isTrainer ? "trainer" : "client"];
   const tiers = ["Free", isTrainer ? "Coach" : "Premium", isTrainer ? "Coach Max" : "Max"];
+  const [whatsManual, setWhatsManual] = useState(false); // ⓘ "what counts as manual logging"
   const cell = (v, i) => (
     <div key={i} className="flex items-center justify-center" style={{ width: "52px", flexShrink: 0 }}>
       {v === true ? <Icon name="check" size={14} color="var(--color-primary)" />
@@ -10690,7 +10691,21 @@ function FeatureMatrix({ isTrainer }) {
         </div>
       ))}
       <div className="text-muted border-t border-border" style={{ padding: "8px 10px", fontSize: ".64rem", lineHeight: 1.5 }}>
-        Daily AI allowances are published fair-use limits — never hidden caps. Your data and manual logging stay free forever.
+        Daily AI allowances are published fair-use limits — never hidden caps. Your data and{" "}
+        <strong className="text-fg" style={{ letterSpacing: ".03em" }}>MANUAL LOGGING</strong> stay free forever.
+        <button onClick={() => setWhatsManual(v => !v)} aria-label="What does manual logging mean?"
+          className="text-primary" style={{ border: "none", background: "transparent", cursor: "pointer", padding: "0 3px", verticalAlign: "-2px" }}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: "13px", height: "13px" }}>
+            <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+          </svg>
+        </button>
+        {whatsManual && (
+          <span className="block text-fg" style={{ marginTop: "6px", fontSize: ".66rem", lineHeight: 1.55 }}>
+            <strong>Manual logging</strong> = tracking things yourself in the app — food, calories, macros, weight, water,
+            check-ins, and workouts (everything in the "Always free" list above). It never requires a subscription. Only the
+            AI coach features are paid, and even if you cancel, you keep your account and every bit of your data.
+          </span>
+        )}
       </div>
     </div>
   );
@@ -11008,6 +11023,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   // camera (then remembered per device), and always available via the ⓘ button.
   // Better photos → measurably better AI macro estimates.
   const [photoTips, setPhotoTips] = useState(false);
+  const [openTip, setOpenTip] = useState(null); // which photo tip's read-more is expanded
   const photoTipsSeen = () => { try { return localStorage.getItem("glide-photo-tips-seen") === "1"; } catch { return true; } };
   const markPhotoTipsSeen = () => { try { localStorage.setItem("glide-photo-tips-seen", "1"); } catch {} };
   const pickImage = () => {
@@ -11668,12 +11684,24 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                   <span className="flex items-center gap-1 text-[.72rem] font-semibold text-danger"><Icon name="close" size={12} color="var(--color-danger)" />Piled up</span>
                 </div>
               </div>
-              <div className="flex flex-col gap-2.5 text-[.84rem] leading-relaxed text-fg">
-                <div className="flex gap-2.5"><span className="mt-0.5 shrink-0 font-bold text-primary">1.</span><span><strong>Shoot from directly above</strong> so the whole plate is visible — angled shots hide food behind food.</span></div>
-                <div className="flex gap-2.5"><span className="mt-0.5 shrink-0 font-bold text-primary">2.</span><span><strong>Spread items apart</strong> — the AI can only count what it can see. Unstack piles and separate foods.</span></div>
-                <div className="flex gap-2.5"><span className="mt-0.5 shrink-0 font-bold text-primary">3.</span><span><strong>Use good light</strong> — no heavy shadows, no dim restaurant mood lighting if you can help it.</span></div>
-                <div className="flex gap-2.5"><span className="mt-0.5 shrink-0 font-bold text-primary">4.</span><span><strong>Keep the full plate in frame</strong> — a fork or your hand next to it helps the AI judge portion size.</span></div>
-                <div className="flex gap-2.5"><span className="mt-0.5 shrink-0 font-bold text-primary">5.</span><span><strong>Mention what's invisible</strong> in a note — cooking oil, butter, dressings, sugar in your drink. Those calories don't show up in pixels.</span></div>
+              <div className="flex flex-col gap-1.5">
+                {[
+                  ["Shoot from directly above", "Angled shots hide food behind food — a straight-down photo shows the whole plate."],
+                  ["Spread food apart", "The AI can only count what it can see. Unstack piles and separate items before you shoot."],
+                  ["Use good light", "Heavy shadows and dim restaurant lighting hide detail and throw off the estimate."],
+                  ["Show the whole plate", "Keep everything in frame — a fork or your hand next to the plate helps the AI judge portion size."],
+                  ["Mention hidden calories", "Cooking oil, butter, dressings, sugar in drinks — those don't show up in pixels. Add them in a note with your photo."],
+                ].map(([h, d], i) => (
+                  <button key={h} onClick={() => setOpenTip(openTip === i ? null : i)}
+                    className="rounded-lg border border-border/60 bg-surface2/50 px-2.5 py-2 text-left cursor-pointer">
+                    <span className="flex items-center gap-2.5">
+                      <span className="shrink-0 font-bold text-primary text-[.84rem]">{i + 1}.</span>
+                      <span className="flex-1 font-semibold text-fg text-[.84rem]">{h}</span>
+                      <span className={`text-muted text-[.6rem] transition-transform ${openTip === i ? "rotate-180" : ""}`}>▼</span>
+                    </span>
+                    {openTip === i && <span className="mt-1 block pl-6 text-[.8rem] leading-relaxed text-muted">{d}</span>}
+                  </button>
+                ))}
               </div>
               <div className="mt-auto flex gap-2 pt-4">
                 <button onClick={tipsGotIt}
