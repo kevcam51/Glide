@@ -10780,6 +10780,8 @@ async function openBillingPortal() {
   } catch (e) { console.error("portal failed:", e && e.message); }
   return false;
 }
+const callRequestBoost = httpsCallable(functions, "requestBudgetBoost"); // Max-tier same-day allowance boost (S90)
+const callAdminOverview = httpsCallable(functions, "adminOverview"); // admin all-users dashboard (S90)
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
 const callEstimateFood = httpsCallable(functions, "estimateFood"); // AI macro estimate in the manual tracker (S89c)
 const callSetWorkout = httpsCallable(functions, "setWorkoutSchedule"); // workout Accept-card direct write (Session 75)
@@ -10940,8 +10942,25 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   // Load the caller's Pro entitlement + food-DB toggle when the chat opens.
   useEffect(() => {
     if (!open) return;
-    getProfile().then((p) => { setPro(isProUser(p)); setFoodDbOn(aiFoodDbEnabled(p)); }).catch(() => {});
+    getProfile().then((p) => {
+      setPro(isProUser(p)); setFoodDbOn(aiFoodDbEnabled(p));
+      // Max tier (or admin, for testing) can request a same-day allowance boost
+      // at the ceiling — the server re-verifies, this only shows the offer UI.
+      setCanBoost((p && p.subscriptionStatus === "active" && /max/.test(String(p.subscriptionTier || ""))) || (p && p.role === "admin"));
+    }).catch(() => {});
   }, [open]);
+  const [canBoost, setCanBoost] = useState(false);
+  const [boost, setBoost] = useState(null); // null | "offer" | "sending" | "granted" | "already"
+  const requestBoost = async () => {
+    setBoost("sending");
+    try {
+      const res = await callRequestBoost();
+      const d = (res && res.data) || {};
+      if (d.granted) { setBoost("granted"); setError(""); }
+      else if (d.reason === "already-boosted") setBoost("already");
+      else setBoost(null); // not eligible after all — the plain limit message stands
+    } catch { setBoost(null); }
+  };
   // Toggle the Pro user's food-DB preference (persists to their profile; the
   // backend reads it on the next message). Free users get the upsell instead.
   const toggleFoodDb = () => {
@@ -11010,7 +11029,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       });
     } catch { /* best-effort */ }
   }, [busy, messages, activeChatId]);
-  const resetThreadUi = () => { setProposal(null); setWorkout(null); setEditDraft(null); setError(""); };
+  const resetThreadUi = () => { setProposal(null); setWorkout(null); setEditDraft(null); setError(""); setBoost(null); };
   const newChat = () => {
     if (busy) return;
     const id = `c${Date.now()}`;
@@ -11266,6 +11285,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     if (!premium) return; // trial expired — the lock panel is showing; server enforces too
     if ((!text && !img) || busy) return;
     setError("");
+    setBoost((b) => (b === "granted" || b === "already" ? null : b)); // clear settled boost cards on the next send
     const next = [...messages, { role: "user", content: text, image: img || undefined }];
     setMessages(next);
     if (!isOverride) setDraft("");
@@ -11308,6 +11328,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
         setError("Your free trial has ended — upgrade to keep using Glide AI.");
       } else if (sc.includes("resource-exhausted")) {
         setError("You've reached today's AI usage limit. It resets tomorrow.");
+        if (canBoost) setBoost("offer");
       } else if (streamed || gotEvent) {
         // The stream STARTED then broke — don't re-send (tools may have written).
         // Keep whatever arrived, refresh in case a write landed, and say so.
@@ -11327,7 +11348,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
         } catch (e) {
           const code = (e && e.code) || "";
           if (code.includes("permission-denied") && ((e.details && e.details.reason === "trial-expired") || /trial/i.test(e.message || ""))) setError("Your free trial has ended — upgrade to keep using Glide AI.");
-          else if (code.includes("resource-exhausted")) setError("You've reached today's AI usage limit. It resets tomorrow.");
+          else if (code.includes("resource-exhausted")) { setError("You've reached today's AI usage limit. It resets tomorrow."); if (canBoost) setBoost("offer"); }
           else if (code.includes("unauthenticated")) setError("Please sign in again to use the assistant.");
           else setError("The assistant is temporarily unavailable. Please try again.");
         }
@@ -11505,6 +11526,32 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
             {busy && !(messages.length && messages[messages.length - 1].role === "assistant") &&
               <div className={bubbleAI + " text-muted"}>Thinking…</div>}
             {error && <div className="self-stretch rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-[.82rem] text-danger">{error}</div>}
+            {/* Max-tier ceiling boost (S90): the raise-on-request promise, honored
+                instantly in-app. Server re-verifies tier + near-limit + once/day. */}
+            {boost === "offer" && (
+              <div className="self-stretch rounded-lg border border-primary/50 bg-[rgba(8,220,224,.07)] px-3 py-2.5">
+                <div className="text-[.82rem] font-semibold text-fg">Want to keep going today?</div>
+                <div className="mt-0.5 text-[.76rem] leading-relaxed text-muted">As a Max member you can request more usage — we told you we'd raise it.</div>
+                <div className="mt-2 flex gap-2">
+                  <button onClick={requestBoost} className="flex-1 rounded-lg border-none bg-primaryfill px-3 py-2 text-[.8rem] font-bold text-primaryfg cursor-pointer">Request more usage</button>
+                  <button onClick={() => setBoost(null)} className="rounded-lg border border-border bg-transparent px-3 py-2 text-[.8rem] font-semibold text-muted cursor-pointer">Not now</button>
+                </div>
+              </div>
+            )}
+            {boost === "sending" && (
+              <div className="self-stretch rounded-lg border border-primary/50 bg-[rgba(8,220,224,.07)] px-3 py-2.5 text-[.82rem] text-fg">Sending request…</div>
+            )}
+            {boost === "granted" && (
+              <div className="self-stretch rounded-lg border border-success/50 bg-[rgba(47,224,168,.08)] px-3 py-2.5">
+                <div className="text-[.84rem] font-bold text-success">✓ You've been approved!</div>
+                <div className="mt-0.5 text-[.76rem] leading-relaxed text-muted">Your allowance has been raised for the rest of today — keep going.</div>
+              </div>
+            )}
+            {boost === "already" && (
+              <div className="self-stretch rounded-lg border border-border bg-surface2 px-3 py-2.5 text-[.78rem] leading-relaxed text-muted">
+                You've already been approved once today — your full allowance is back tomorrow. If you're hitting this often, reach out and we'll look at raising your everyday limit.
+              </div>
+            )}
             {warn && !error && (
               <div className="self-stretch rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[.78rem] text-warn">
                 You're nearing today's AI usage limit.
@@ -13254,7 +13301,85 @@ function UpgradeCongrats({ isTrainer, onClose }) {
 }
 
 const ROLE_LABEL = { client: "Client", head_trainer: "Trainer", sub_trainer: "Trainer", admin: "Admin" };
-function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onNameSaved, idleSignOut, onSetIdleSignOut }) {
+// ── Admin dashboard (S90, Kevin's ask): every user at a glance ───────────────
+// Admin-only (server re-verifies by UID). Read-only: who's on the app, role,
+// subscription/trial state, today's AI usage, and boost-request flags — the
+// "flag, don't punish" visibility for chronic ceiling-hitters.
+function AdminDashboard({ onClose }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    callAdminOverview().then((r) => setData(r.data)).catch(() => setErr(true));
+  }, []);
+  const users = data ? [...data.users].sort((a, b) => (b.aiTokensToday || 0) - (a.aiTokensToday || 0)) : [];
+  const now = Date.now();
+  const subLabel = (u) => {
+    if (u.subscriptionStatus === "active") return { txt: u.subscriptionTier ? `paid · ${u.subscriptionTier}` : "paid", cls: "text-success" };
+    if (u.subscriptionStatus === "canceled") return { txt: "canceled", cls: "text-danger" };
+    if (u.trialStartedAt) {
+      const end = u.trialStartedAt + (u.trialLengthDays || 30) * 86400000;
+      return end > now ? { txt: `trial · ${Math.ceil((end - now) / 86400000)}d left`, cls: "text-primary" } : { txt: "trial expired", cls: "text-warn" };
+    }
+    return { txt: "free (legacy)", cls: "text-muted" };
+  };
+  const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n || 0));
+  const tile = (label, val) => (
+    <div className="rounded-xl border border-border bg-surface2 px-3 py-2 text-center">
+      <div className="font-display text-[1.15rem] font-bold text-primary">{val}</div>
+      <div className="text-[.62rem] uppercase tracking-wide text-muted">{label}</div>
+    </div>
+  );
+  return createPortal(
+    <div data-theme="pro" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2400, background: "rgba(0,0,0,.8)", display: "flex", justifyContent: "center", padding: "16px", paddingTop: "calc(16px + env(safe-area-inset-top,0px))", overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card" style={{ width: "min(96vw,640px)", padding: "18px 16px", margin: "auto 0", display: "flex", flexDirection: "column", gap: "12px" }}>
+        <div className="flex items-center gap-2">
+          <Icon name="dashboard" size={18} color="var(--accent)" />
+          <div className="font-display font-bold text-fg" style={{ fontSize: "1.05rem" }}>Admin — all users</div>
+          <button onClick={onClose} aria-label="Close" className="ml-auto text-muted" style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: "1.1rem", padding: "4px" }}>✕</button>
+        </div>
+        {err && <div className="text-danger text-[.82rem]">Couldn't load (admin only). Try again.</div>}
+        {!data && !err && <div className="text-muted text-[.84rem]">Loading users…</div>}
+        {data && (
+          <>
+            <div className="grid grid-cols-3 gap-2">
+              {tile("Users", users.length)}
+              {tile("Trainers", users.filter((u) => u.role === "head_trainer" || u.role === "sub_trainer").length)}
+              {tile("Paid", users.filter((u) => u.subscriptionStatus === "active").length)}
+              {tile("On trial", users.filter((u) => u.trialStartedAt && u.trialStartedAt + (u.trialLengthDays || 30) * 86400000 > now && u.subscriptionStatus !== "active").length)}
+              {tile("AI active today", users.filter((u) => u.aiTokensToday > 0).length)}
+              {tile("Boosts (all-time)", users.reduce((s, u) => s + (u.boostCount || 0), 0))}
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {users.map((u) => {
+                const s = subLabel(u);
+                const flagged = (u.boostCount || 0) >= 3;
+                return (
+                  <div key={u.uid} className={`rounded-xl border px-3 py-2.5 ${flagged ? "border-warn bg-[rgba(251,191,36,.06)]" : "border-border bg-surface2"}`}>
+                    <div className="flex items-baseline gap-2">
+                      <span className="truncate text-[.86rem] font-semibold text-fg">{u.name || u.email || u.uid.slice(0, 8)}</span>
+                      <span className="text-[.66rem] uppercase tracking-wide text-muted">{u.role.replace("_", " ")}</span>
+                      <span className={`ml-auto shrink-0 text-[.7rem] font-bold ${s.cls}`}>{s.txt}</span>
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[.68rem] text-muted">
+                      {u.email && <span className="truncate">{u.email}</span>}
+                      <span>AI today: <span className="text-fg font-semibold">{k(u.aiTokensToday)}</span>{u.boostToday ? " (+boosted)" : ""}</span>
+                      {u.boostCount > 0 && <span className={flagged ? "text-warn font-bold" : ""}>{flagged ? "⚑ " : ""}boosts: {u.boostCount}</span>}
+                      {u.createdAt && <span>joined {new Date(u.createdAt).toLocaleDateString()}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="text-muted" style={{ fontSize: ".64rem", lineHeight: 1.5 }}>
+              ⚑ = 3+ allowance-boost requests (visibility only — nothing is auto-restricted). AI usage is today's tokens vs each tier's daily budget.
+            </div>
+          </>
+        )}
+      </div>
+    </div>, document.body);
+}
+
+function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onNameSaved, idleSignOut, onSetIdleSignOut, isAdminUid }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
@@ -13262,6 +13387,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
   const [showNotif, setShowNotif] = useState(false); // Notification Center section (Session 76)
   const [upgradeBusy, setUpgradeBusy] = useState(false); // Stripe portal redirect in flight (S89)
   const [showPicker, setShowPicker] = useState(false);   // S89c plan picker (Upgrade → choose plan → Checkout)
+  const [showAdmin, setShowAdmin] = useState(false);      // S90 admin all-users dashboard
   const [upgradeErr, setUpgradeErr] = useState(false);
   useBackClose(open, onClose);                        // phone Back closes the menu
   // Face ID / Touch ID passkey setup (S87). pkDone = a passkey was registered
@@ -13410,6 +13536,12 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
         <button style={item} onClick={() => setShowPicker(true)}>
           <Icon name="card" size={19} color="var(--accent)" /> <span>Plans &amp; pricing</span>
         </button>
+        {isAdminUid && (
+          <button style={item} onClick={() => setShowAdmin(true)}>
+            <Icon name="clients" size={19} color="var(--accent)" /> <span>Admin — all users</span>
+          </button>
+        )}
+        {showAdmin && <AdminDashboard onClose={() => setShowAdmin(false)} />}
 
         {/* Navigation */}
         <button style={item} onClick={() => go(onHome)}><Icon name="home" size={19} color="var(--accent)" /> <span>Home</span></button>
@@ -14466,7 +14598,8 @@ export default function App() {
         onHome={() => { if (isTrainerHome) setHomeTab("dashboard"); goToProfiles(); }}
         onDashboard={() => { setHomeTab("analytics"); goToProfiles(); }}
         onClients={() => { setHomeTab("clients"); goToProfiles(); }}
-        onNameSaved={(n) => setMeName(n)} />
+        onNameSaved={(n) => setMeName(n)}
+        isAdminUid={meUid === "G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"} />
       <InstallPrompt />
       {upgradeCongrats && <UpgradeCongrats isTrainer={role !== ROLES.CLIENT} onClose={() => setUpgradeCongrats(false)} />}
     </>

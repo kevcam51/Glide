@@ -110,3 +110,48 @@ exports.estimateFood = require("./aichat").estimateFood;
 exports.createCheckoutSession = require("./billing").createCheckoutSession;
 exports.createPortalSession = require("./billing").createPortalSession;
 exports.stripeWebhook = require("./billing").stripeWebhook;
+// Max-tier same-day allowance boost (S90) — instant-approve, once/day, logged
+// to aiUsage/meta for the admin dashboard's flags. See functions/aichat.js.
+exports.requestBudgetBoost = require("./aichat").requestBudgetBoost;
+
+// ── adminOverview (S90, Kevin's ask): every user at a glance ────────────────
+// Admin-only. Server-side Admin SDK reads (no rules change needed): profile +
+// subscription/trial state + today's AI usage + boost-request flags. Read-only.
+exports.adminOverview = onCall(async (request) => {
+  const callerUid = request.auth && request.auth.uid;
+  if (!callerUid || !ADMIN_UIDS.includes(callerUid)) {
+    throw new HttpsError("permission-denied", "Admin only.");
+  }
+  const db = admin.firestore();
+  // Same day key the AI budget uses (UTC — matches aichat.js todayKey).
+  const d = new Date();
+  const today = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  const snap = await db.collection("users").limit(500).get();
+  const toMs = (v) => (v && typeof v.toMillis === "function" ? v.toMillis() : (typeof v === "number" ? v : null));
+  const users = await Promise.all(snap.docs.map(async (doc) => {
+    const p = doc.data() || {};
+    const [u, m] = await Promise.all([
+      db.doc(`users/${doc.id}/aiUsage/${today}`).get(),
+      db.doc(`users/${doc.id}/aiUsage/meta`).get(),
+    ]);
+    const usage = u.data() || {};
+    const meta = m.data() || {};
+    return {
+      uid: doc.id,
+      name: p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || "",
+      email: p.email || "",
+      role: p.role || "client",
+      assignedTrainerId: p.assignedTrainerId || null,
+      subscriptionStatus: p.subscriptionStatus || null,
+      subscriptionTier: p.subscriptionTier || null,
+      trialStartedAt: toMs(p.trialStartedAt),
+      trialLengthDays: p.trialLengthDays || null,
+      createdAt: toMs(p.createdAt),
+      aiTokensToday: usage.tokens || 0,
+      boostToday: usage.boost || 0,
+      boostCount: meta.boostCount || 0,
+      lastBoostAt: meta.lastBoostAt || null,
+    };
+  }));
+  return { users, today };
+});

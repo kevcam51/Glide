@@ -220,9 +220,12 @@ async function setupChat(uid) {
   const role = profile.role || "client";
   const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
   const tier = tierFor(profile);
-  const budget = BUDGETS[tier] || BUDGETS.client;
   const usageRef = db.doc(`users/${uid}/aiUsage/${todayKey()}`);
-  const used = ((await usageRef.get()).data() || {}).tokens || 0;
+  const usageDoc = (await usageRef.get()).data() || {};
+  const used = usageDoc.tokens || 0;
+  // S90: an approved same-day boost (requestBudgetBoost) raises the cap. The
+  // boost lives on the DAY's usage doc, so it expires automatically at reset.
+  const budget = (BUDGETS[tier] || BUDGETS.client) + (usageDoc.boost || 0);
   const callerName = profile.displayName
     || [profile.firstName, profile.lastName].filter(Boolean).join(" ")
     || profile.email || (isTrainer ? "Coach" : "Client");
@@ -515,9 +518,10 @@ exports.estimateFood = onCall(
     if (trialExpiredFor(profile)) {
       throw new HttpsError("permission-denied", TRIAL_EXPIRED_MSG, { reason: "trial-expired" });
     }
-    const budget = BUDGETS[tierFor(profile)] || BUDGETS.client;
     const usageRef = db.doc(`users/${uid}/aiUsage/${todayKey()}`);
-    const used = ((await usageRef.get()).data() || {}).tokens || 0;
+    const usageDoc = (await usageRef.get()).data() || {};
+    const used = usageDoc.tokens || 0;
+    const budget = (BUDGETS[tierFor(profile)] || BUDGETS.client) + (usageDoc.boost || 0);
     if (used >= budget) {
       throw new HttpsError("resource-exhausted", "You've reached today's AI usage limit. It resets tomorrow.");
     }
@@ -557,3 +561,37 @@ exports.estimateFood = onCall(
     };
   }
 );
+
+// ── requestBudgetBoost (S90, Kevin's design) ────────────────────────────────
+// Max-tier users who hit the daily AI ceiling can request more usage from the
+// chat and get INSTANTLY approved: a +50% same-day boost, once per day. The
+// boost rides the day's aiUsage doc (expires automatically at the daily reset)
+// and every grant is recorded to users/{uid}/aiUsage/meta — boostCount /
+// boostDates feed the admin dashboard so chronic ceiling-hitters are VISIBLE
+// (flagged for awareness, never auto-punished — Kevin's call). Only granted
+// when genuinely near the cap (≥80% spent) so boosts can't be stockpiled.
+const BOOST_FRACTION = 0.5;
+exports.requestBudgetBoost = onCall({ region: "us-central1", maxInstances: 10 }, async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+  const db = admin.firestore();
+  const profile = (await db.doc(`users/${uid}`).get()).data() || {};
+  const tier = tierFor(profile);
+  const isMaxTier = tier === "clientMax" || tier === "trainerMax";
+  const isAdmin = profile.role === "admin"; // lets Kevin exercise the flow
+  if (!isMaxTier && !isAdmin) return { granted: false, reason: "not-max" };
+  const base = BUDGETS[tier] || BUDGETS.client;
+  const ref = db.doc(`users/${uid}/aiUsage/${todayKey()}`);
+  const usage = (await ref.get()).data() || {};
+  if (usage.boost) return { granted: false, reason: "already-boosted" };
+  if ((usage.tokens || 0) < base * 0.8) return { granted: false, reason: "not-near-limit" };
+  const boost = Math.round(base * BOOST_FRACTION);
+  await ref.set({ boost, boostAt: Date.now() }, { merge: true });
+  await db.doc(`users/${uid}/aiUsage/meta`).set({
+    boostCount: admin.firestore.FieldValue.increment(1),
+    lastBoostAt: Date.now(),
+    boostDates: admin.firestore.FieldValue.arrayUnion(todayKey()),
+  }, { merge: true });
+  console.log("budgetBoost granted", JSON.stringify({ uid, tier, boost }));
+  return { granted: true, boostTokens: boost };
+});
