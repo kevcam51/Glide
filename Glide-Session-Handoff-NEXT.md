@@ -36,7 +36,21 @@ Firebase project `calorieiq-29762`; prod URL `calorieiq-jet.vercel.app`. AI mode
 
 ---
 
-## ⏭️ NEXT SESSION — start here: go LIVE with Stripe (pricing is DECIDED & BUILT)
+## ✅ STRIPE IS LIVE (S90, Jul 8) — real money enabled
+Kevin activated his existing Smooth Training Stripe account (ex-TrueCoach; his own Standard
+account — TrueCoach access revoked, bank + descriptor checked). Live setup fully scripted:
+8 live prices by lookup_key, live webhook `we_1Tr5Vu…` (whsec piped straight to Secret
+Manager), **portal config `bpc_1Tr5VX…`** = cancel at period end + SELF-SERVE PLAN SWITCHING
+(upgrades prorated now, downgrades at renewal — Kevin's fairness call). 3 billing fns
+redeployed; VERIFIED: real `cs_live_` checkout URL generated. **Enterprise "let's talk"
+lead line live in PlanPicker.**
+**REMAINING (Kevin):** (1) one real-card smoke test — Upgrade on a test account, see the
+charge, cancel via Manage subscription (portal now shows plan-switch options too), refund
+from the Stripe dashboard; (2) liability: fair-use clause in ToS + attorney pass BEFORE
+marketing the paid tiers. NOTE: when the custom domain lands, add it to billing.js
+ALLOWED_ORIGINS (+ webauthn ALLOWED_ORIGINS + api/invite links + Stripe checkout return).
+
+## ⏭️ (superseded) NEXT SESSION — start here: go LIVE with Stripe (pricing is DECIDED & BUILT)
 
 **Kevin decided (Jul 7): "run with all of these" — the full recommended menu.** It is IMPLEMENTED
 and E2E-VERIFIED in test mode (8/8 checkout sessions audited via the Stripe API; webhook tier
