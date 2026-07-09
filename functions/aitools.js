@@ -789,6 +789,67 @@ function buildTools(role, opts = {}) {
       },
     },
     {
+      name: "log_check_in",
+      description:
+        "Record daily check-in details WITHOUT needing a weight: mood/energy (1–5), body-fat %, whether they hit their calorie target, and/or a note. Merges into the same date's check-in (never wipes other fields). Use when the user shares how they feel, a body-fat reading, or a daily note — e.g. 'felt great today', 'body fat came in at 18%', 'note: knee was sore'. For weight itself use log_weigh_in."
+        + (isTrainer ? " Pass clientId to record for a client." : ""),
+      input_schema: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
+          mood: { type: "number", description: "Energy/mood 1 (drained) to 5 (fired up)" },
+          bodyFatPct: { type: "number", description: "Body-fat % measured that day" },
+          hitCalorieTarget: { type: "boolean", description: "Did they hit their calorie target that day?" },
+          notes: { type: "string", description: "Free-text note for the day (replaces the day's existing note)" },
+          ...clientIdProp, ...localPlanProp,
+        },
+      },
+    },
+    {
+      name: "log_water",
+      description:
+        "Log water intake for a day. Accepts ounces (or convert cups: 1 cup = 8 oz). Default ADDS to the day's total; set mode='set' to overwrite it. E.g. 'log 3 cups of water' → 24 oz added."
+        + (isTrainer ? " Pass clientId to log for a client." : ""),
+      input_schema: {
+        type: "object",
+        properties: {
+          ounces: { type: "number", description: "Water in fluid ounces" },
+          mode: { type: "string", enum: ["add", "set"], description: "add (default) or set the day's total" },
+          date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
+          ...clientIdProp, ...localPlanProp,
+        },
+        required: ["ounces"],
+      },
+    },
+    {
+      name: "rename_plan",
+      description: "Rename one of the person's plans (use list_plans first to get planId)."
+        + (isTrainer ? " Pass clientId for a client's plan." : ""),
+      input_schema: {
+        type: "object",
+        properties: {
+          planId: { type: "string", description: "The plan id from list_plans" },
+          name: { type: "string", description: "The new plan name" },
+          ...clientIdProp,
+        },
+        required: ["planId", "name"],
+      },
+    },
+    {
+      name: "set_notification_prefs",
+      description:
+        "Turn the CALLER'S OWN notification types on/off (never a client's — prefs are personal). Types: master (everything), messages, trainerReminders (client: trainer to-dos), foodReminders, weighInReminders, coachingNudges, sentReminders (trainer: sent to-do display), clientRequests (trainer). E.g. 'stop the food reminders' → foodReminders: false. Only pass the keys the user asked to change.",
+      input_schema: {
+        type: "object",
+        properties: {
+          master: { type: "boolean" }, messages: { type: "boolean" },
+          trainerReminders: { type: "boolean" }, foodReminders: { type: "boolean" },
+          weighInReminders: { type: "boolean" }, coachingNudges: { type: "boolean" },
+          sentReminders: { type: "boolean" }, clientRequests: { type: "boolean" },
+        },
+      },
+    },
+    {
       name: "set_targets",
       description:
         "Update the plan's nutrition targets and/or goal weight. Set any of protein/carbs/fat target grams, or goal weight in pounds. "
@@ -1118,6 +1179,19 @@ async function runTool(name, input, ctx) {
     return { windowDays: win, range: { start, end }, clientCount: clients.length, counts, clients, truncated };
   }
 
+  if (name === "set_notification_prefs") {
+    // CALLER ONLY — notification prefs are personal; clientId is deliberately
+    // ignored (a trainer never silences a client's notifications).
+    const KEYS = ["master", "messages", "trainerReminders", "foodReminders",
+      "weighInReminders", "coachingNudges", "sentReminders", "clientRequests"];
+    const patch = {};
+    for (const k of KEYS) if (typeof input[k] === "boolean") patch[k] = input[k];
+    if (!Object.keys(patch).length) return { error: "Say which notification type to turn on or off." };
+    const updated = await kvTxnJSON(db, ctx.callerUid, "caliq-notif-prefs", (cur) =>
+      ({ ...(cur && typeof cur === "object" ? cur : {}), ...patch }));
+    return { ok: true, prefs: updated };
+  }
+
   // Data tools — resolve & authorize the target user first.
   const uid = await resolveTargetUid(db, input, ctx);
   if (uid && uid.error) return uid; // { error }
@@ -1253,6 +1327,72 @@ async function runTool(name, input, ctx) {
     await writeManifest(db, uid, m);
     await appendHistory(db, uid, pid, ctx, `switched the active plan to "${plan.name}"`);
     return { ok: true, activePlanId: pid, name: plan.name };
+  }
+
+  if (name === "rename_plan") {
+    const pid = String(input.planId || "").trim();
+    const newName = String(input.name || "").trim().slice(0, 60);
+    if (!newName) return { error: "Provide the new plan name." };
+    const m = await readManifest(db, uid);
+    const plan = m.plans.find((p) => p.id === pid);
+    if (!plan) return { error: "No plan with that id. Call list_plans for the valid ids." };
+    const oldName = plan.name;
+    m.plans = m.plans.map((p) => (p.id === pid ? { ...p, name: newName } : p));
+    await writeManifest(db, uid, m);
+    await appendHistory(db, uid, pid, ctx, `renamed the plan "${oldName}" to "${newName}"`);
+    return { ok: true, planId: pid, name: newName };
+  }
+
+  if (name === "log_check_in") {
+    // Merge non-weight check-in details (mood / body fat / hit-target / notes)
+    // into the date's entry — same merge-never-replace rule as log_weigh_in.
+    const re = /^\d{4}-\d{2}-\d{2}$/;
+    const date = re.test(input.date || "") ? input.date : ctx.today;
+    const mood = input.mood != null ? Math.max(1, Math.min(5, Math.round(Number(input.mood)))) : null;
+    const bf = input.bodyFatPct != null ? Math.max(1, Math.min(75, Math.round(Number(input.bodyFatPct) * 10) / 10)) : null;
+    const notes = input.notes != null ? String(input.notes).slice(0, 500) : null;
+    const hit = typeof input.hitCalorieTarget === "boolean" ? input.hitCalorieTarget : null;
+    if (mood == null && bf == null && notes == null && hit == null) {
+      return { error: "Provide at least one of: mood, bodyFatPct, hitCalorieTarget, notes." };
+    }
+    const loggedBy = (ctx.isTrainer && uid !== ctx.callerUid) ? "trainer" : "client";
+    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
+    const d = wrap.data;
+    if (!Array.isArray(d.checkIns)) d.checkIns = [];
+    const sameDay = d.checkIns.find((c) => c && c.date === date);
+    const entry = { date, timestamp: checkInTimestamp(date), weight: null, calories: null, hitTarget: null,
+      workedOut: null, mood: null, notes: "", bodyFat: null, loggedBy, isFuturePlan: false,
+      ...(sameDay || {}) };
+    if (mood != null) entry.mood = mood;
+    if (bf != null) { entry.bodyFat = bf; d.bodyFat = bf; }
+    if (notes != null) entry.notes = notes;
+    if (hit != null) entry.hitTarget = hit;
+    entry.timestamp = checkInTimestamp(date);
+    d.checkIns = [...d.checkIns.filter((c) => c && c.date !== date), entry];
+    await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
+    const bits = [mood != null && `mood ${mood}/5`, bf != null && `body fat ${bf}%`,
+      hit != null && (hit ? "hit calorie target" : "missed calorie target"), notes != null && "a note"].filter(Boolean);
+    await appendHistory(db, uid, planId, ctx, `checked in: ${bits.join(", ")} (${date})`);
+    if (planOverride) await touchLocalIndex(db, uid, planOverride);
+    return { ok: true, date, recorded: bits };
+  }
+
+  if (name === "log_water") {
+    const oz = Math.round(Number(input.ounces) || 0);
+    if (!oz || oz <= 0) return { error: "Provide the water amount in ounces (1 cup = 8 oz)." };
+    if (oz > 400) return { error: "That's more water than a person drinks in a day — double-check the amount." };
+    const re = /^\d{4}-\d{2}-\d{2}$/;
+    const date = re.test(input.date || "") ? input.date : ctx.today;
+    const { id: planId } = await activePlanData(db, uid, planOverride);
+    const logKey = `caliq-log-${planId}-${date}`;
+    const updated = await kvTxnJSON(db, uid, logKey, (log0) => {
+      const log = log0 || {};
+      const cur = Number(log.water) || 0;
+      return { ...log, water: input.mode === "set" ? oz : Math.min(400, cur + oz) };
+    });
+    await appendHistory(db, uid, planId, ctx, `logged water: ${input.mode === "set" ? oz : "+" + oz} oz (${date})`);
+    if (planOverride) await touchLocalIndex(db, uid, planOverride);
+    return { ok: true, date, waterOz: updated.water };
   }
 
   if (name === "propose_meal") {

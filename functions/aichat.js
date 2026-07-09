@@ -268,7 +268,7 @@ async function runToolRound(toolUses, toolCtx) {
     let out;
     try { out = await runTool(tu.name, tu.input || {}, toolCtx); }
     catch (e) { console.error("aiChat tool error:", tu.name, e && e.message); out = { error: "That action failed." }; }
-    if (["log_meal", "log_workout", "log_weigh_in", "set_targets", "set_workout_schedule", "set_personal_info", "create_plan", "switch_plan", "add_custom_exercise"].includes(tu.name) && out && out.ok) wrote = true;
+    if (["log_meal", "log_workout", "log_weigh_in", "log_check_in", "log_water", "set_targets", "set_workout_schedule", "set_personal_info", "create_plan", "switch_plan", "rename_plan", "set_notification_prefs", "add_custom_exercise"].includes(tu.name) && out && out.ok) wrote = true;
     if (tu.name === "propose_meal" && out && out.meal) proposal = out.meal;
     if (tu.name === "propose_workout" && out && out.workout) workoutProposal = out.workout;
     results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(out).slice(0, 60000) });
