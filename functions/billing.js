@@ -41,7 +41,8 @@ const STRIPE_WEBHOOK_SECRET = defineSecret("STRIPE_WEBHOOK_SECRET");
 // Where Checkout/Portal may send the user back to — same allowlist idea as
 // functions/webauthn.js ALLOWED_ORIGINS. Add the custom domain here when it lands.
 const ALLOWED_ORIGINS = [
-  "https://calorieiq-jet.vercel.app",
+  "https://glidna.com",
+  "https://calorieiq-jet.vercel.app", // legacy origin — keep during transition
   "http://localhost:5173",
 ];
 // Billing-portal configuration id (bpc_…) from the live-setup script — enables

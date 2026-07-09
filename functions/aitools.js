@@ -236,7 +236,7 @@ async function searchFoodDb(query) {
   const offP = (async () => {
     try {
       const r = await fetchWithTimeout(`https://world.openfoodfacts.org/cgi/search.pl?search_simple=1&action=process&json=1&page_size=6&fields=product_name,brands,nutriments&search_terms=${encodeURIComponent(q)}`,
-        { headers: { "User-Agent": "GlideAI/1.0 (+https://calorieiq-jet.vercel.app)" } });
+        { headers: { "User-Agent": "GlideAI/1.0 (+https://glidna.com)" } });
       if (!r.ok) return [];
       const j = await r.json();
       return (j.products || []).map((p) => {

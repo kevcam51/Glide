@@ -16,7 +16,7 @@ const admin = require("firebase-admin");
 const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
 const RESEND_FROM = defineSecret("RESEND_FROM");
 
-const APP_ORIGIN = "https://calorieiq-jet.vercel.app"; // update if a custom domain lands
+const APP_ORIGIN = "https://glidna.com"; // custom domain (S90)
 const MAX_RECIPIENTS = 20;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 

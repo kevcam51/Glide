@@ -26,7 +26,8 @@ const {
 
 // Origins allowed to run the ceremony; rpID is the origin's hostname.
 const ALLOWED_ORIGINS = [
-  "https://calorieiq-jet.vercel.app",
+  "https://glidna.com",
+  "https://calorieiq-jet.vercel.app", // legacy origin — passkeys are domain-bound; users re-register on glidna.com
   "http://localhost:5173", // local dev
 ];
 function rpFromOrigin(origin) {
