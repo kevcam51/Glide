@@ -46,7 +46,7 @@ const ALLOWED_ORIGINS = [
 ];
 // Billing-portal configuration id (bpc_…) from the live-setup script — enables
 // self-serve plan switching + cancel-at-period-end. Empty string = default config.
-const PORTAL_CONFIG_ID = "";
+const PORTAL_CONFIG_ID = "bpc_1Tr5VXPNvdBWM053fFHIYzYY"; // live-mode config (S90)
 const safeOrigin = (o) => (ALLOWED_ORIGINS.includes(o) ? o : ALLOWED_ORIGINS[0]);
 
 // The catalog. `key` builds lookup keys (glide_{key}_monthly / _annual);
