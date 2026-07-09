@@ -533,6 +533,9 @@ function profileSummary(d) {
     // Tracker adjustment: when true (and eatback), a day with wearable data
     // gets its target from the watch's measured burn instead of the estimate.
     wearableAdjust: !!d.wearableAdjust,
+    // Simple-view goal mode (S90b): reshapes the plain-English plan page —
+    // lose = deficit, build = surplus (+250 + workout refuel), health = maintenance.
+    fitnessGoal: ["lose", "build", "health"].includes(d.fitnessGoal) ? d.fitnessGoal : null,
     missing,
     complete: missing.length === 0,
     calorieTarget: t.calorieTarget,
@@ -662,6 +665,8 @@ function buildTools(role, opts = {}) {
             description: "Nutrition approach: 'eatback' (default — workout burn is added to the daily calorie target: easier diet, steady ~1 lb/wk) or 'accelerate' (target stays at TDEE−500: tighter diet, workouts speed up the goal date instead). Set when the user chooses sustainability vs speed." },
           wearableAdjust: { type: "boolean",
             description: "Tracker adjustment (default false): when true AND the nutrition approach is 'eatback', a day whose log has wearable data (synced from the person's watch) gets its calorie target from the tracker's MEASURED burn (resting + active − 500) instead of the estimate. Days without tracker data keep the normal math; 'accelerate' ignores it. Set when the user asks for their watch/tracker/Garmin burn to drive their daily calories." },
+          fitnessGoal: { type: "string", enum: ["lose", "build", "health"],
+            description: "The person's MAIN fitness goal — reshapes their Simple plan view: 'lose' (fat loss: deficit target), 'build' (muscle: surplus target ≈ maintenance + 250 + workout refuel), 'health' (stay healthy: maintenance target). Set when the user states their goal, e.g. 'I want to focus on building muscle now'." },
           ...clientIdProp, ...localPlanProp,
         },
       },
@@ -1189,6 +1194,10 @@ async function runTool(name, input, ctx) {
     if (typeof input.trainerNotes === "string") { d.trainerNotes = input.trainerNotes.slice(0, 4000); changes.push("trainer notes"); }
     if (input.deficitMode === "eatback" || input.deficitMode === "accelerate") {
       d.deficitMode = input.deficitMode; changes.push(`nutrition approach: ${input.deficitMode === "eatback" ? "eat more (burn buys food)" : "faster results (burn buys speed)"}`);
+    }
+    if (["lose", "build", "health"].includes(input.fitnessGoal)) {
+      d.fitnessGoal = input.fitnessGoal;
+      changes.push(`main fitness goal: ${input.fitnessGoal === "lose" ? "lose fat" : input.fitnessGoal === "build" ? "build muscle" : "stay healthy"}`);
     }
     if (typeof input.wearableAdjust === "boolean") {
       d.wearableAdjust = input.wearableAdjust;
