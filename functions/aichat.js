@@ -1,4 +1,4 @@
-// Glide AI chat — Stage 1 (text chat).
+// Glidna AI chat — Stage 1 (text chat).
 //
 // Implements the foundation of glide-ai-meal-logging-spec.md: an authenticated
 // callable that selects a role-based system prompt server-side, enforces a
@@ -14,7 +14,7 @@ const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const Anthropic = require("@anthropic-ai/sdk");
 const { buildTools, runTool } = require("./aitools");
-const { GLIDE_KNOWLEDGE } = require("./knowledge");
+const { GLIDNA_KNOWLEDGE } = require("./knowledge");
 
 const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
 
@@ -47,7 +47,7 @@ function tierFor(profile) {
 }
 
 // Role-based system prompts (topic-restricted to health & fitness), per the spec.
-const SYSTEM_CLIENT = `You are a nutrition and fitness assistant for Glide, a personal training platform.
+const SYSTEM_CLIENT = `You are a nutrition and fitness assistant for Glidna, a personal training platform.
 
 Your role is to:
 - Help clients log meals through natural conversation
@@ -67,7 +67,7 @@ Always be encouraging, clear, and concise. Avoid jargon unless the client has de
 
 Formatting: replies render in a narrow mobile chat. Keep them short. Use plain text with dashes for lists and **bold** for short labels. Do NOT use markdown tables, headings, or code blocks.`;
 
-const SYSTEM_TRAINER = `You are a fitness coaching assistant for Glide, a personal training platform.
+const SYSTEM_TRAINER = `You are a fitness coaching assistant for Glidna, a personal training platform.
 
 You assist trainers by:
 - Summarizing client meal logs and progress data
@@ -191,7 +191,7 @@ You can also TAKE ACTIONS for the user via tools — but you must CONFIRM the sp
 ${isTrainer ? "- send_client_request: send a connected client a to-do that shows on their home (e.g. log food, weigh in). For clients, first call list_clients to get the id; confirm the message before sending.\n- Proactive coaching: for cross-client questions ('who's stalled / falling behind this week?', 'who needs attention?', 'what should I change?'), call coach_summary ONCE to get every client's status (inactive / stalled / off_track / on_track / logging) with their adherence + weight trend — don't loop the per-client tools. Then call out who needs attention by NAME and give specific, concrete recommendations (e.g. nudge to log, adjust calories/protein, revisit the goal). Offer to send a to-do (send_client_request) where it helps.\nAs a trainer you can do these FOR a client by passing their clientId — use it to organize clients, nudge them, and tune their plans.\n- LOCAL PLAN FILES: trainers also keep local plan files — imported Trainerize clients, prep/template files, and sandbox simulations — separate from connected client accounts. When the trainer refers to one of these (a Trainerize-imported client, a simulation, 'my local plan for X', prepping a program before a client joins), call list_local_plans and pass the matching localPlanId to the other tools (never combine it with clientId). Refer to local plans by NAME, not id. All the same abilities work on them: read/edit stats, targets, meals, weigh-ins, workout programs." : ""}
 After any action, briefly confirm what you did.
 
-${GLIDE_KNOWLEDGE}`;
+${GLIDNA_KNOWLEDGE}`;
 }
 
 // Read the caller's profile → role, budget, today's usage, system prompt, tools,
@@ -212,7 +212,7 @@ function trialExpiredFor(profile) {
   if (!startMs) return false; // pre-trial account — grandfathered
   return Date.now() >= startMs + (profile.trialLengthDays || 30) * 86400000;
 }
-const TRIAL_EXPIRED_MSG = "Your free trial has ended — upgrade to keep using Glide AI. Your data and manual logging stay free.";
+const TRIAL_EXPIRED_MSG = "Your free trial has ended — upgrade to keep using Glidna AI. Your data and manual logging stay free.";
 
 async function setupChat(uid) {
   const db = admin.firestore();

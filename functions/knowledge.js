@@ -1,12 +1,12 @@
-// Glide AI — domain knowledge base (Session 77).
+// Glidna AI — domain knowledge base (Session 77).
 //
-// This is the home for Glide-specific coaching knowledge the AI should apply:
+// This is the home for Glidna-specific coaching knowledge the AI should apply:
 // glycemic-index context, Smooth Training methodology, food/nutrition reference
 // data, etc. It is appended to the AI's system prompt (inside the CACHED prefix,
 // so adding to it does NOT increase per-call cost — see aichat.js setupChat).
 //
 // ── HOW TO EXTEND (this is meant to grow over time) ─────────────────────────
-//   • Add a new section under GLIDE_KNOWLEDGE below (keep it concise — it's sent
+//   • Add a new section under GLIDNA_KNOWLEDGE below (keep it concise — it's sent
 //     on every call, so favor durable principles + reference tables over prose).
 //   • Keep it plain text with simple dashes/tables; the model reads it as context.
 //   • Client-facing vs trainer-facing nuance can live in the same text — the AI
@@ -16,7 +16,7 @@
 // Seeded from glide-ai-meal-logging-spec.md §2 (Nutritional Context). Expand as
 // the Smooth Training methodology is codified.
 
-const GLIDE_KNOWLEDGE = `GLIDE COACHING KNOWLEDGE (apply this context; don't recite it unprompted):
+const GLIDNA_KNOWLEDGE = `GLIDNA COACHING KNOWLEDGE (apply this context; don't recite it unprompted):
 
 Glycemic index & resistant starch — preparation changes a starchy carb's effective GI:
 - Freshly cooked, no fat: baseline (highest GI).
@@ -38,4 +38,4 @@ Coaching principles (Smooth Training defaults):
 - Sustainable deficit: a moderate calorie deficit (around 500/day) is the durable default; very aggressive deficits risk muscle loss and adherence problems.
 - Consistency over perfection: logging most days and hitting targets on average beats occasional perfect days.`;
 
-module.exports = { GLIDE_KNOWLEDGE };
+module.exports = { GLIDNA_KNOWLEDGE };

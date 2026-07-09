@@ -1,7 +1,7 @@
 // Personalized invite landing (Option B).
 // A trainer's share link is /i/CODE?n=FirstName  (rewritten here via vercel.json
 // to /api/invite?c=CODE&n=FirstName). This function returns a tiny HTML page whose
-// Open Graph / Twitter meta name the inviter ("Kevin invited you to Glide") so the
+// Open Graph / Twitter meta name the inviter ("Kevin invited you to Glidna") so the
 // link unfurls with a personalized card in Messages / WhatsApp / Slack, etc.
 //
 // Link-preview crawlers don't run JS, so they read the meta below. Real browsers
@@ -38,10 +38,10 @@ export default function handler(req, res) {
     ? `${origin}/?invite=${encodeURIComponent(code)}${name ? `&n=${encodeURIComponent(name)}` : ""}`
     : `${origin}/`;
 
-  const title = name ? `${name} invited you to Glide` : "You're invited to Glide";
+  const title = name ? `${name} invited you to Glidna` : "You're invited to Glidna";
   const desc = name
-    ? `${name} wants you on Glide — where your trainer and smart AI keep you aware, accountable, and on track. Tap to join.`
-    : "Join on Glide — where your trainer and smart AI keep you aware, accountable, and on track.";
+    ? `${name} wants you on Glidna — where your trainer and smart AI keep you aware, accountable, and on track. Tap to join.`
+    : "Join on Glidna — where your trainer and smart AI keep you aware, accountable, and on track.";
   const imageUrl = `${origin}/api/og${name ? `?n=${encodeURIComponent(name)}` : ""}`;
   const pageUrl = `${origin}/i/${encodeURIComponent(code)}${name ? `?n=${encodeURIComponent(name)}` : ""}`;
 
@@ -55,7 +55,7 @@ export default function handler(req, res) {
 <title>${et}</title>
 <meta name="description" content="${ed}" />
 <meta property="og:type" content="website" />
-<meta property="og:site_name" content="Glide" />
+<meta property="og:site_name" content="Glidna" />
 <meta property="og:title" content="${et}" />
 <meta property="og:description" content="${ed}" />
 <meta property="og:url" content="${ePage}" />
@@ -86,7 +86,7 @@ export default function handler(req, res) {
 <div class="wrap">
 <div class="brand"><b>GLI</b><span>DE</span></div>
 <div class="msg">${et}. Taking you there…</div>
-<a class="cta" href="${eApp}">Continue to Glide →</a>
+<a class="cta" href="${eApp}">Continue to Glidna →</a>
 </div>
 </body>
 </html>`;

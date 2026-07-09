@@ -1,8 +1,8 @@
-// Glide — email invites (Option C).
+// Glidna — email invites (Option C).
 //
 // A trainer sends a client an email invitation containing their personalized
 // invite link (/i/CODE?n=First — the same link that unfurls with a "{Name}
-// invited you to Glide" card). Sent via Resend (OpenAI-simple HTTP API).
+// invited you to Glidna" card). Sent via Resend (OpenAI-simple HTTP API).
 //
 // SETUP: DONE (S84) — secrets RESEND_API_KEY + RESEND_FROM are set, domain
 // send.smoothtraining.com verified (SPF/DKIM/DMARC), sender
@@ -43,18 +43,18 @@ function emailHtml({ trainerName, link, note }) {
           <div style="font-size:30px;font-weight:800;letter-spacing:2px"><span style="color:#08dce0">GLI</span><span style="color:#eafcfc">DE</span></div>
         </td></tr>
         <tr><td style="padding:12px 32px 4px;text-align:center">
-          <div style="color:#eafcfc;font-size:22px;font-weight:700;line-height:1.35">${esc(trainerName)} invited you to Glide</div>
+          <div style="color:#eafcfc;font-size:22px;font-weight:700;line-height:1.35">${esc(trainerName)} invited you to Glidna</div>
         </td></tr>
         <tr><td style="padding:8px 32px 16px;text-align:center">
           <div style="color:#9bb8b8;font-size:15px;line-height:1.55">Your trainer + smart AI in one place — to keep you aware, accountable, and on track. Tap below to join and you'll be linked automatically.</div>
         </td></tr>
         ${noteBlock}
         <tr><td style="padding:8px 32px 28px;text-align:center">
-          <a href="${esc(link)}" style="display:inline-block;background:#08dce0;color:#04201f;font-weight:700;font-size:16px;text-decoration:none;padding:14px 28px;border-radius:10px">Join on Glide →</a>
+          <a href="${esc(link)}" style="display:inline-block;background:#08dce0;color:#04201f;font-weight:700;font-size:16px;text-decoration:none;padding:14px 28px;border-radius:10px">Join on Glidna →</a>
           <div style="color:#5c7373;font-size:12px;margin-top:16px;word-break:break-all">Or paste this link: ${esc(link)}</div>
         </td></tr>
       </table>
-      <div style="color:#4a5c5c;font-size:11px;margin-top:16px">Sent via Glide · If you weren't expecting this, you can ignore it.</div>
+      <div style="color:#4a5c5c;font-size:11px;margin-top:16px">Sent via Glidna · If you weren't expecting this, you can ignore it.</div>
     </td></tr>
   </table>
 </body></html>`;
@@ -63,9 +63,9 @@ function emailHtml({ trainerName, link, note }) {
 // Plain-text alternative — a multipart (text + html) email scores better with
 // spam filters than HTML-only.
 function emailText({ trainerName, link, note }) {
-  return `${trainerName} invited you to Glide.
+  return `${trainerName} invited you to Glidna.
 
-Glide is your trainer + smart AI in one place — to keep you aware, accountable, and on track.
+Glidna is your trainer + smart AI in one place — to keep you aware, accountable, and on track.
 ${note ? `\nA note from ${trainerName}:\n${note}\n` : ""}
 Join here: ${link}
 
@@ -92,7 +92,7 @@ exports.sendInvite = onCall(
     if (!emails.length) throw new HttpsError("invalid-argument", "Add at least one valid email address.");
 
     // Daily per-trainer send cap — anyone can self-signup as a "trainer", so an
-    // uncapped loop here was a free spam relay on Glide's Resend account (and
+    // uncapped loop here was a free spam relay on Glidna's Resend account (and
     // the sending domain's reputation). 50/day is far above real coaching use.
     const DAILY_CAP = 50;
     const day = new Date().toISOString().slice(0, 10); // UTC day, same scheme as aiUsage
@@ -112,10 +112,10 @@ exports.sendInvite = onCall(
 
     const key = RESEND_API_KEY.value();
     if (!key) throw new HttpsError("failed-precondition", "Email invites aren't set up yet.");
-    const from = RESEND_FROM.value() || "Glide <onboarding@resend.dev>";
+    const from = RESEND_FROM.value() || "Glidna <onboarding@resend.dev>";
     const html = emailHtml({ trainerName, link, note });
     const text = emailText({ trainerName, link, note });
-    const subject = `${trainerName} invited you to Glide`;
+    const subject = `${trainerName} invited you to Glidna`;
     // Replies go to the trainer, and a real reply-to improves deliverability.
     const replyTo = EMAIL_RE.test(prof.email || "") ? prof.email : undefined;
 

@@ -1,4 +1,4 @@
-// Glide custom icon set — replaces emoji across the app with a cohesive,
+// Glidna custom icon set — replaces emoji across the app with a cohesive,
 // on-brand line-icon family (cyan #08DCE0 on near-black). One <Icon> component,
 // many named glyphs. Drawn on a 24×24 grid, 1.8 stroke, round caps/joins.
 //

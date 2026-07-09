@@ -1,4 +1,13 @@
-# Glide rebrand — name search (logged)
+# Glide rebrand — DECIDED: **Glidna** ✅ (S90, Jul 8 2026)
+
+_Kevin chose **Glidna** (slydra.com turned out to be in redemption-period limbo; glidna.com AND
+glidna.app were clean and were purchased via Vercel, ~$11.25/yr each). Rename sweep executed
+S90: every UI string, wordmark (two-tone **GLI**|DNA — the white half spells "DNA", a happy
+accident worth keeping), OG card, manifest, AI prompts, email invites, Stripe product display
+names. Domains live: glidna.com (canonical) + www/.app 308-redirects. The research below is
+kept for the record._
+
+## (original name search, for the record)
 
 _Kevin wants to rename "Glide" (too competitive / possible conflict later). Criteria: **simple,
 short, unique/unused, distinctive spelling** (he liked the Slyde/Vyde vibe), motion/smooth/glide feel,

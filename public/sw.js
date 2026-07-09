@@ -1,4 +1,4 @@
-// Minimal service worker — just enough to make Glide installable as a home-screen
+// Minimal service worker — just enough to make Glidna installable as a home-screen
 // app (PWA) and give a graceful offline shell. Deliberately does NOT cache JS/CSS,
 // so users always get the latest app on every load (no stale-version bugs); only
 // page navigations fall back to a cached shell when fully offline.
@@ -43,7 +43,7 @@ self.addEventListener("fetch", (e) => {
 self.addEventListener("push", (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch { /* non-JSON payload */ }
-  e.waitUntil(self.registration.showNotification(d.title || "Glide", {
+  e.waitUntil(self.registration.showNotification(d.title || "Glidna", {
     body: d.body || "",
     icon: "/icon-192.png",
     badge: "/icon-maskable-192.png",

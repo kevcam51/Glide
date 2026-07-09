@@ -1,5 +1,5 @@
 // Dynamic personalized Open Graph share card (Option B).
-// GET /api/og?n=Kevin  ->  a 1200x630 PNG that says "Kevin invited you to Glide".
+// GET /api/og?n=Kevin  ->  a 1200x630 PNG that says "Kevin invited you to Glidna".
 // Rendered on the fly with resvg + the Sora font so an invite link unfurls with a
 // card naming the inviter. If anything fails (font/render/import), we 302-redirect
 // to the static /og.png so the link still unfurls with the branded card — this
@@ -40,7 +40,7 @@ export default async function handler(req, res) {
   <circle cx="1085" cy="120" r="150" fill="none" stroke="#08dce0" stroke-opacity="0.15" stroke-width="2"/>
   <circle cx="120" cy="520" r="200" fill="none" stroke="#08dce0" stroke-opacity="0.08" stroke-width="2"/>
   <text x="600" y="150" text-anchor="middle" font-family="Sora" font-weight="700" font-size="30" letter-spacing="8" fill="#08dce0">${topLabel}</text>
-  <text x="600" y="300" text-anchor="middle" font-family="Sora" font-weight="700" font-size="140" letter-spacing="3"><tspan fill="#08dce0">GLI</tspan><tspan fill="#eafcfc">DE</tspan></text>
+  <text x="600" y="300" text-anchor="middle" font-family="Sora" font-weight="700" font-size="140" letter-spacing="3"><tspan fill="#08dce0">GLI</tspan><tspan fill="#eafcfc">DNA</tspan></text>
   <rect x="550" y="336" width="100" height="6" rx="3" fill="#08dce0"/>
   <text x="600" y="430" text-anchor="middle" font-family="Sora" font-weight="700" font-size="56" fill="#eafcfc">${headline}</text>
   <text x="600" y="500" text-anchor="middle" font-family="Sora" font-weight="400" font-size="34" fill="#9bb8b8">Your trainer + smart AI, one place to stay on track.</text>

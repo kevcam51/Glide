@@ -1784,7 +1784,7 @@ function CustomExerciseCreator({ exerciseType, onAdd }) {
             {saved ? "✓ Added!" : `Save Custom Exercise`}
           </button>
           <div className="text-[.6rem] text-muted mt-1.5 italic text-center">
-            ⭐ Custom exercises are marked with a star and labeled "User Estimate" to distinguish them from Glide's library. Calorie values are your estimates, not validated.
+            ⭐ Custom exercises are marked with a star and labeled "User Estimate" to distinguish them from Glidna's library. Calorie values are your estimates, not validated.
           </div>
         </div>
       )}
@@ -1876,7 +1876,7 @@ function StepPersonal({ data, onChange, onNext }) {
       <div className="flex items-start gap-3.5 p-4 mb-4 rounded-card border border-primary bg-[rgba(8,220,224,.06)]">
         <div className="text-[2.2rem] leading-none shrink-0 mt-0.5">👋</div>
         <div>
-          <div className="font-display text-xl tracking-wide text-primary mb-1">Welcome to Glide</div>
+          <div className="font-display text-xl tracking-wide text-primary mb-1">Welcome to Glidna</div>
           <div className="text-[.84rem] text-muted leading-relaxed">Answer a few quick questions and we'll build your personalized plan. Takes about 2 minutes.</div>
         </div>
       </div>
@@ -3668,7 +3668,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           {/* Disclaimer */}
           <div style={{marginTop:"16px",padding:"14px",background:"rgba(255,204,68,.04)",border:"1px solid rgba(255,204,68,.15)",borderRadius:"var(--radius-sm)",fontSize:".75rem",color:"var(--muted)",lineHeight:1.6}}>
             <strong style={{color:"var(--yellow)",display:"block",marginBottom:"4px"}}>⚠️ Important Disclaimer</strong>
-            All calorie targets, heart rate zones, macro calculations, body weight projections, muscle gain estimates, and timelines shown in Glide are <strong style={{color:"var(--text)"}}>estimates based on established formulas and published research</strong> — they are not exact measurements. Individual results vary based on genetics, metabolism, sleep, stress, hydration, medication, and other factors. Heart rate zones are calculated from a formula and may differ from your actual physiological thresholds. These tools are intended for <strong style={{color:"var(--text)"}}>educational and coaching purposes only</strong> and should not replace advice from a physician, registered dietitian, or certified healthcare provider. Always consult a medical professional before starting any new diet or exercise program.
+            All calorie targets, heart rate zones, macro calculations, body weight projections, muscle gain estimates, and timelines shown in Glidna are <strong style={{color:"var(--text)"}}>estimates based on established formulas and published research</strong> — they are not exact measurements. Individual results vary based on genetics, metabolism, sleep, stress, hydration, medication, and other factors. Heart rate zones are calculated from a formula and may differ from your actual physiological thresholds. These tools are intended for <strong style={{color:"var(--text)"}}>educational and coaching purposes only</strong> and should not replace advice from a physician, registered dietitian, or certified healthcare provider. Always consult a medical professional before starting any new diet or exercise program.
           </div>
           <p className="footnote">On cardio days you can eat more and still hit your deficit. Targets floored at 1,200 cal/day.</p>
         </div>
@@ -3775,7 +3775,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
 
       {/* ─ Global Disclaimer ─ */}
       <div style={{marginTop:"20px",padding:"14px",background:"rgba(255,204,68,.04)",border:"1px solid rgba(255,204,68,.15)",borderRadius:"var(--radius-sm)",fontSize:".73rem",color:"var(--muted)",lineHeight:1.6}}>
-        <strong style={{color:"var(--yellow)"}}>⚠️ Disclaimer:</strong> All numbers in Glide are <strong style={{color:"var(--text)"}}>estimates</strong> based on published formulas (Mifflin-St Jeor, Tanaka, Ainsworth MET Compendium). Individual results vary. These tools are for educational and coaching purposes — not medical advice. Consult a healthcare provider before starting any diet or exercise program.
+        <strong style={{color:"var(--yellow)"}}>⚠️ Disclaimer:</strong> All numbers in Glidna are <strong style={{color:"var(--text)"}}>estimates</strong> based on published formulas (Mifflin-St Jeor, Tanaka, Ainsworth MET Compendium). Individual results vary. These tools are for educational and coaching purposes — not medical advice. Consult a healthcare provider before starting any diet or exercise program.
       </div>
 
       {/* ─ Edit / Start Over bar ─ */}
@@ -4832,7 +4832,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
             <div style={{fontSize:".92rem",fontWeight:700,color:"var(--accent)",marginBottom:"8px"}}>What Our Formula Uses</div>
 
             <p style={{marginBottom:"12px"}}>
-              Glide uses the <strong style={{color:"var(--text)"}}>Aragon/Helms model</strong> — the most respected evidence-based muscle gain rate model in sports science. We adjust it for:
+              Glidna uses the <strong style={{color:"var(--text)"}}>Aragon/Helms model</strong> — the most respected evidence-based muscle gain rate model in sports science. We adjust it for:
             </p>
 
             <div style={{padding:"10px 14px",background:"var(--s2)",borderRadius:"8px",marginBottom:"12px",fontSize:".78rem",lineHeight:1.8}}>
@@ -4846,7 +4846,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
             <div style={{fontSize:".92rem",fontWeight:700,color:"var(--green)",marginBottom:"8px"}}>What This Means for You</div>
 
             <p style={{marginBottom:"12px"}}>
-              The muscle gain projections in Glide are <strong style={{color:"var(--text)"}}>population averages, not individual guarantees</strong>. Your actual results may be 30–50% higher or lower than projected depending on the factors listed above.
+              The muscle gain projections in Glidna are <strong style={{color:"var(--text)"}}>population averages, not individual guarantees</strong>. Your actual results may be 30–50% higher or lower than projected depending on the factors listed above.
             </p>
 
             <p style={{marginBottom:"12px"}}>
@@ -4854,7 +4854,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
             </p>
 
             <div style={{padding:"12px 14px",background:"rgba(255,204,68,.06)",borderRadius:"8px",border:"1px solid rgba(255,204,68,.2)",fontSize:".78rem",lineHeight:1.6}}>
-              <strong style={{color:"var(--yellow)"}}>⚠️ Not Medical or Professional Advice:</strong> All muscle gain projections, macro recommendations, supplement information, and training suggestions in Glide are for <strong style={{color:"var(--text)"}}>educational and coaching purposes only</strong>. They are not a substitute for guidance from a certified personal trainer, registered dietitian, or physician. Always consult a qualified professional before making significant changes to your training or nutrition program.
+              <strong style={{color:"var(--yellow)"}}>⚠️ Not Medical or Professional Advice:</strong> All muscle gain projections, macro recommendations, supplement information, and training suggestions in Glidna are for <strong style={{color:"var(--text)"}}>educational and coaching purposes only</strong>. They are not a substitute for guidance from a certified personal trainer, registered dietitian, or physician. Always consult a qualified professional before making significant changes to your training or nutrition program.
             </div>
           </div>
         )}
@@ -6142,7 +6142,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
 // ─── Profile Selector ─────────────────────────────────────────────────────────
 
 // ─── Daily Dashboard ──────────────────────────────────────────────────────────
-// The primary view after plan setup — transforms Glide from a calculator
+// The primary view after plan setup — transforms Glidna from a calculator
 // into a daily-use platform. This is what drives retention and daily engagement.
 
 // ─── Meal / food log (Session 9) ────────────────────────────────────────────
@@ -6217,7 +6217,7 @@ async function searchFoods(query) {
 // every screen's header bar.
 function BrandLogo() {
   return (
-    <span className="font-display text-2xl tracking-[2px] text-primary">GLI<span className="text-fg">DE</span></span>
+    <span className="font-display text-2xl tracking-[2px] text-primary">GLI<span className="text-fg">DNA</span></span>
   );
 }
 
@@ -8199,7 +8199,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           </div>
         )}
 
-        <div className="share-brand">GLIDE — Powered by Science</div>
+        <div className="share-brand">GLIDNA — Powered by Science</div>
       </div>
 
       {/* Navigation */}
@@ -8491,15 +8491,15 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
   const targetCals = Math.max(1200, tdee - 500 + (isEatback(data) ? Math.round((totalBurn + totalStrBurn) / 7) : 0));
 
   const handleShare = async () => {
-    const text = `🏋️ ${fullName(data) || "My"} Glide Plan\n\n` +
+    const text = `🏋️ ${fullName(data) || "My"} Glidna Plan\n\n` +
       `📊 Maintenance: ${tdee.toLocaleString()} cal/day\n` +
       `🎯 Target (1lb/wk): ${targetCals.toLocaleString()} cal/day\n` +
       `🔥 Weekly burn: ${(totalBurn + totalStrBurn).toLocaleString()} cal\n` +
       (hasGoal ? `⚖️ Goal: ${weightLbs} → ${goalWeight} lbs\n` : "") +
-      `\nBuilt with Glide`;
+      `\nBuilt with Glidna`;
     try {
       if (navigator.share) {
-        await navigator.share({ title: `${fullName(data) || "My"} Glide Plan`, text });
+        await navigator.share({ title: `${fullName(data) || "My"} Glidna Plan`, text });
       } else {
         await navigator.clipboard.writeText(text);
       }
@@ -8508,7 +8508,7 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
 
   return (
     <div className="share-card">
-      <div className="share-card-brand">GLIDE</div>
+      <div className="share-card-brand">GLIDNA</div>
       <div className="share-card-name">{fullName(data) || "Your"} Plan</div>
       <div className="share-card-stats">
         <div className="scs-item">
@@ -8914,7 +8914,7 @@ function useBackClose(isOpen, onClose) {
 }
 
 // ─── Install (PWA) prompt ────────────────────────────────────────────────────
-// A brief, dismissible banner telling users they can install Glide to their home
+// A brief, dismissible banner telling users they can install Glidna to their home
 // screen + why. On Android/Chrome it offers a one-tap Install (the captured
 // beforeinstallprompt); on iPhone it shows the Share → Add to Home Screen steps.
 // It hides itself once the app is installed (running standalone) or dismissed.
@@ -8954,7 +8954,7 @@ function InstallPrompt() {
       display: "flex", alignItems: "flex-start", gap: 10, fontFamily: "var(--font-sans)", color: "var(--text)" }}>
       <span style={{ fontSize: "1.3rem", lineHeight: 1 }}>📲</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 800, fontSize: ".92rem", marginBottom: 2 }}>Install Glide</div>
+        <div style={{ fontWeight: 800, fontSize: ".92rem", marginBottom: 2 }}>Install Glidna</div>
         <div style={{ fontSize: ".78rem", color: "var(--muted)", lineHeight: 1.45 }}>
           Add it to your home screen for a faster, full-screen app — and your camera &amp; mic stay ready.
           {isIOS && <> Tap the <strong style={{ color: "var(--text)" }}>Share</strong> button, then <strong style={{ color: "var(--text)" }}>“Add to Home Screen.”</strong></>}
@@ -10207,7 +10207,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                           {c.email ? <span className="text-muted text-xs"> · {c.email}</span> : null}
                         </span>
                         {c.imported
-                          ? <span className="text-[10px] font-bold text-success whitespace-nowrap">✓ in Glide</span>
+                          ? <span className="text-[10px] font-bold text-success whitespace-nowrap">✓ in Glidna</span>
                           : <span className="text-[10px] font-bold text-primary whitespace-nowrap">new</span>}
                         {c.status && c.status !== "active" && (
                           <span className="text-[10px] text-warn whitespace-nowrap">{c.status}</span>
@@ -10224,7 +10224,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     </button>
                     <button onClick={() => setTzPick(null)} className={mBtnCls}>Cancel</button>
                   </div>
-                  <div className={`${subCls} mt-1.5`}>Re-importing someone already in Glide refreshes their stats from Trainerize (no duplicates).</div>
+                  <div className={`${subCls} mt-1.5`}>Re-importing someone already in Glidna refreshes their stats from Trainerize (no duplicates).</div>
                 </>
               )}
             </div>
@@ -10693,13 +10693,13 @@ async function startCheckout(plan) {
 // functions/billing.js CATALOG; keep the two in sync when prices change).
 const PLAN_MENU = {
   client: [
-    { tier: "base", name: "Glide Premium", month: "$14.99", year: "$119.99", yearNote: "33% off",
+    { tier: "base", name: "Glidna Premium", month: "$14.99", year: "$119.99", yearNote: "33% off",
       blurb: "The AI coach: chat, photo & voice logging, AI meal estimates — a generous daily allowance." },
-    { tier: "max", name: "Glide Max", month: "$29.99", year: "$299.99", yearNote: "2 months free",
+    { tier: "max", name: "Glidna Max", month: "$29.99", year: "$299.99", yearNote: "2 months free",
       blurb: "Our biggest allowance — around 100 AI conversations a day. Ever hit the ceiling? Tell us and we'll raise it." },
   ],
   trainer: [
-    { tier: "base", name: "Glide Coach", month: "$49", year: "$490", yearNote: "2 months free",
+    { tier: "base", name: "Glidna Coach", month: "$49", year: "$490", yearNote: "2 months free",
       blurb: "The full coaching workspace + AI assistant. Unlimited clients, flat price." },
     { tier: "max", name: "Coach Max", month: "$79", year: "$790", yearNote: "2 months free",
       blurb: "The biggest AI allowance, coach-sized — around 100 AI conversations a day." },
@@ -10887,7 +10887,7 @@ function PlanPicker({ role, onClose }) {
         <FeatureMatrix isTrainer={isTrainer} />
         {/* Enterprise lead-capture (S90): gyms/studios + corporate wellness are
             custom-quote conversations — see docs/PRICING.md "Enterprise". */}
-        <a href="mailto:kevin@smoothtraining.com?subject=Glide%20Enterprise"
+        <a href="mailto:kevin@smoothtraining.com?subject=Glidna%20Enterprise"
           className="block rounded-card border border-border bg-surface2 px-4 py-3 text-center no-underline">
           <span className="font-display text-[.82rem] font-bold text-fg">Gym, studio, or company?</span>
           <span className="block text-[.72rem] text-muted" style={{ marginTop: "2px" }}>
@@ -10895,7 +10895,8 @@ function PlanPicker({ role, onClose }) {
           </span>
         </a>
         <div className="text-muted" style={{ fontSize:".68rem", lineHeight:1.5 }}>
-          Cancel anytime. Your data and manual logging stay free forever.
+          Cancel anytime. Your data and manual logging stay free forever. Subscriptions renew
+          automatically — see the <a href="/terms.html" target="_blank" rel="noopener" className="text-primary">Terms of Service</a>.
         </div>
       </div>
     </div>, document.body);
@@ -11453,7 +11454,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     } catch (streamErr) {
       const sc = (streamErr && streamErr.code) || "";
       if (sc.includes("trial-expired")) {
-        setError("Your free trial has ended — upgrade to keep using Glide AI.");
+        setError("Your free trial has ended — upgrade to keep using Glidna AI.");
       } else if (sc.includes("resource-exhausted")) {
         setError("You've reached today's AI usage limit. It resets tomorrow.");
         if (canBoost) setBoost("offer");
@@ -11475,7 +11476,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
           if (res.data && res.data.wrote && typeof onDataChanged === "function") onDataChanged();
         } catch (e) {
           const code = (e && e.code) || "";
-          if (code.includes("permission-denied") && ((e.details && e.details.reason === "trial-expired") || /trial/i.test(e.message || ""))) setError("Your free trial has ended — upgrade to keep using Glide AI.");
+          if (code.includes("permission-denied") && ((e.details && e.details.reason === "trial-expired") || /trial/i.test(e.message || ""))) setError("Your free trial has ended — upgrade to keep using Glidna AI.");
           else if (code.includes("resource-exhausted")) { setError("You've reached today's AI usage limit. It resets tomorrow."); if (canBoost) setBoost("offer"); }
           else if (code.includes("unauthenticated")) setError("Please sign in again to use the assistant.");
           else setError("The assistant is temporarily unavailable. Please try again.");
@@ -11486,14 +11487,14 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   };
 
   // Paste-from-AI import: the user pastes a reply from ChatGPT/Claude/etc, and
-  // Glide's own AI parses it into logs via the existing tools ("works with your
+  // Glidna's own AI parses it into logs via the existing tools ("works with your
   // AI" vision, phase 1). Reuses the whole chat pipeline via send().
   const sendImport = () => {
     const t = pasteText.trim();
     if (!t || busy) return;
     setPasteOpen(false);
     setPasteText("");
-    send("I pasted this from another AI assistant (like ChatGPT or Claude). Pull out every meal, workout, and weigh-in you can find in it, then help me log them into Glide — briefly summarize what you found, and log after I confirm:\n\n" + t);
+    send("I pasted this from another AI assistant (like ChatGPT or Claude). Pull out every meal, workout, and weigh-in you can find in it, then help me log them into Glidna — briefly summarize what you found, and log after I confirm:\n\n" + t);
   };
 
   const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
@@ -11512,7 +11513,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
           className="fixed z-[1000] flex items-center gap-1.5 rounded-full border-none bg-primaryfill px-3 py-2.5 font-bold text-primaryfg shadow-lg cursor-pointer"
           style={{ right: "calc(16px + env(safe-area-inset-right,0px))", bottom: "calc(18px + env(safe-area-inset-bottom,0px))" }}>
           <Icon name="sparkle" variant="solid" size={16} />
-          <span className="text-[.82rem]">Ask Glide</span>
+          <span className="text-[.82rem]">Ask Glidna</span>
         </button>
       )}
 
@@ -11551,7 +11552,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
             </div>
             <div className="flex flex-1 min-w-0 flex-col items-center text-center leading-tight">
               <span className="flex items-center gap-1.5 font-display text-sm uppercase tracking-wide text-primary">
-                <Icon name="sparkle" variant="solid" size={16} color="var(--accent)" />Glide AI
+                <Icon name="sparkle" variant="solid" size={16} color="var(--accent)" />Glidna AI
               </span>
               <span className="max-w-full truncate text-[.68rem] text-muted">Nutrition &amp; fitness assistant</span>
             </div>
@@ -11582,12 +11583,12 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               </svg>
               <div className="font-display text-[1.05rem] text-fg">Your free trial has ended</div>
               <div className="max-w-[320px] text-[.84rem] leading-relaxed text-muted">
-                Glide AI — chat, photo &amp; voice logging, and coaching tools — is part of the paid plan.
+                Glidna AI — chat, photo &amp; voice logging, and coaching tools — is part of the paid plan.
                 <span className="text-fg font-semibold"> Your data and manual logging stay free.</span>
               </div>
               <button onClick={() => setShowPlans(true)}
                 className="mt-1 rounded-xl border-none bg-primaryfill px-6 py-3 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-60">
-                Upgrade to keep Glide AI
+                Upgrade to keep Glidna AI
               </button>
               {showPlans && <PlanPicker role={role} onClose={() => setShowPlans(false)} />}
             </div>
@@ -11639,7 +11640,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                   className="mt-1 flex items-center gap-2 rounded-lg border border-primary/60 bg-[rgba(8,220,224,.06)] px-3 py-2.5 text-[.85rem] font-semibold text-primary cursor-pointer">
                   <Icon name="clipboard" size={16} color="var(--accent)" />Paste from another AI
                 </button>
-                <div className="-mt-1 text-[.72rem] text-muted">Use ChatGPT or Claude for your meals? Paste its reply and I'll log it into Glide.</div>
+                <div className="-mt-1 text-[.72rem] text-muted">Use ChatGPT or Claude for your meals? Paste its reply and I'll log it into Glidna.</div>
               </div>
             ) : (
               messages.map((m, i) => (
@@ -11840,7 +11841,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 </svg></button>
               <button onClick={toggleMic} disabled={busy || transcribing}
                 aria-label={recording ? "Stop recording" : "Record a voice message"}
-                title={recording ? "Tap to stop" : "Speak to Glide (up to 60 sec)"}
+                title={recording ? "Tap to stop" : "Speak to Glidna (up to 60 sec)"}
                 className={`flex items-center justify-center rounded-xl border px-3 py-2.5 cursor-pointer disabled:opacity-50 ${recording ? "border-danger bg-danger text-white animate-pulse" : "border-border bg-surface2 text-fg hover:text-primary"}`}>
                 {transcribing ? (
                   <span className="text-[1.05rem] leading-none">…</span>
@@ -11859,7 +11860,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 <Icon name="clipboard" size={20} /></button>
               {/* Full-width top row so the placeholder + typed text never get cramped/clipped on phones. */}
               <textarea ref={taRef} value={draft} onChange={e => setDraft(e.target.value)} rows={1}
-                placeholder={recording ? "Listening… tap ⏹ to stop" : transcribing ? "Transcribing…" : pendingImage ? "Add a note (optional)…" : "Message Glide AI…"}
+                placeholder={recording ? "Listening… tap ⏹ to stop" : transcribing ? "Transcribing…" : pendingImage ? "Add a note (optional)…" : "Message Glidna AI…"}
                 style={{ fontFamily: "var(--font-sans)" }}
                 className="order-first basis-full w-full resize-none box-border min-h-[46px] max-h-[140px] rounded-xl border border-border bg-surface2 px-3.5 py-3 text-[.95rem] leading-relaxed text-fg outline-none placeholder:text-muted"
                 onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
@@ -13018,7 +13019,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
             📱 <strong>Phone/iPad:</strong> Use Copy & Paste to move data between devices. <strong>Laptop:</strong> File export also works.
           </div>
           <div className="text-[.65rem] text-primary leading-snug mb-3 italic">
-            ℹ️ This section is only needed in the current version. Once Glide becomes a web app, your data syncs automatically across all devices — no exporting or importing needed.
+            ℹ️ This section is only needed in the current version. Once Glidna becomes a web app, your data syncs automatically across all devices — no exporting or importing needed.
           </div>
 
           {/* Clipboard — primary method for mobile */}
@@ -13048,7 +13049,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
             <div className="mb-2.5">
               <textarea
                 ref={pasteRef}
-                placeholder="Paste your Glide backup here..."
+                placeholder="Paste your Glidna backup here..."
                 value={pasteText}
                 onChange={e=>setPasteText(e.target.value)}
                 className="w-full min-h-[80px] p-3 rounded-lg border border-primary bg-surface2 text-fg font-mono text-[.75rem] resize-y outline-none"
@@ -13268,9 +13269,9 @@ function InviteHub({ open, onClose, meName }) {
   };
   const doShare = async () => {
     if (!shareLink) return;
-    const text = `${first ? first + " " : "I "}invited you to Glide — your trainer + smart AI in one place. Join here:`;
+    const text = `${first ? first + " " : "I "}invited you to Glidna — your trainer + smart AI in one place. Join here:`;
     if (navigator.share) {
-      try { await navigator.share({ title: "Join me on Glide", text, url: shareLink }); return; }
+      try { await navigator.share({ title: "Join me on Glidna", text, url: shareLink }); return; }
       catch (e) { if (e && e.name === "AbortError") return; /* fall through to copy */ }
     }
     copy("share", shareLink);
@@ -13358,7 +13359,7 @@ function InviteHub({ open, onClose, meName }) {
         {/* Share the link */}
         <div style={card}>
           <div style={label}>Your invite link</div>
-          <div style={{ fontSize: ".78rem", color: "var(--muted)", marginBottom: 8 }}>New clients who open it are linked to you automatically — and it unfurls as a “{first || "you"} invited you to Glide” card.</div>
+          <div style={{ fontSize: ".78rem", color: "var(--muted)", marginBottom: 8 }}>New clients who open it are linked to you automatically — and it unfurls as a “{first || "you"} invited you to Glidna” card.</div>
           <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
             <code style={{ flex: 1, padding: "9px 11px", borderRadius: 8, background: "var(--s2)", border: "1px solid var(--border)",
               fontFamily: "monospace", fontSize: ".78rem", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shareLink || "…"}</code>
@@ -13420,7 +13421,7 @@ function InviteHub({ open, onClose, meName }) {
 // A hamburger (≡) opens a slide-out drawer with app navigation, inline name
 // editing, and sign-out. Rendered globally by App so it's on every screen.
 // Post-upgrade celebration (S89c, Kevin's ask): a one-time congratulations
-// overlay shown when the user lands back in Glide from a successful Stripe
+// overlay shown when the user lands back in Glidna from a successful Stripe
 // checkout (?billing=success). Rendered through a portal so the
 // page-transition transform trap (S27) can't mis-anchor it.
 function UpgradeCongrats({ isTrainer, onClose }) {
@@ -13441,12 +13442,12 @@ function UpgradeCongrats({ isTrainer, onClose }) {
           </span>
         </div>
         <div className="font-display" style={{ fontSize: "1.22rem", lineHeight: 1.3, marginBottom: 10 }}>
-          Welcome to {isTrainer ? "Glide Coach" : "Glide Premium"}
+          Welcome to {isTrainer ? "Glidna Coach" : "Glidna Premium"}
         </div>
         <div style={{ fontSize: ".86rem", color: "var(--muted-light)", lineHeight: 1.55, marginBottom: 6 }}>
           {isTrainer
-            ? "Your coaching workspace is fully unlocked — Glide AI, client tools, and everything in between."
-            : "Glide AI is all yours — chat, photo & voice logging, and your coaching tools, whenever you need them."}
+            ? "Your coaching workspace is fully unlocked — Glidna AI, client tools, and everything in between."
+            : "Glidna AI is all yours — chat, photo & voice logging, and your coaching tools, whenever you need them."}
         </div>
         <div style={{ fontSize: ".78rem", color: "var(--muted)", lineHeight: 1.5, marginBottom: 20 }}>
           Thank you for investing in yourself. Manage your plan anytime from the menu (≡).
@@ -13707,7 +13708,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
         paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
         paddingBottom: "calc(28px + env(safe-area-inset-bottom,0px))" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 4px 12px" }}>
-          <div className="logo" style={{ fontSize: "1.4rem" }}>GLI<span>DE</span></div>
+          <div className="logo" style={{ fontSize: "1.4rem" }}>GLI<span>DNA</span></div>
           <button onClick={onClose} style={{ ...item, width: "auto", padding: "6px 10px" }} aria-label="Close menu"><Icon name="close" size={18} color="var(--muted)" /></button>
         </div>
 
@@ -13750,7 +13751,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
               <div style={{ fontSize: ".8rem", lineHeight: 1.4 }}>
                 <span style={{ fontWeight: 700, color: "var(--red)" }}>⚠️ Your trial has ended.</span>
                 <div style={{ color: "var(--muted)", marginTop: 2 }}>
-                  Glide AI is paused — your data and manual logging stay free.
+                  Glidna AI is paused — your data and manual logging stay free.
                 </div>
               </div>
             ) : (
@@ -13765,7 +13766,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
               style={{ marginTop: 8, width: "100%", padding: "9px 12px", borderRadius: 8, border: "none",
                 background: "var(--accent-fill)", color: "#0b0b12", fontWeight: 800, fontSize: ".82rem",
                 cursor: "pointer" }}>
-              {trial.expired ? "Upgrade to keep Glide AI" : "Upgrade now"}
+              {trial.expired ? "Upgrade to keep Glidna AI" : "Upgrade now"}
             </button>
             {upgradeErr && <div style={{ marginTop: 6, fontSize: ".72rem", color: "var(--red)" }}>Couldn't open checkout — try again in a moment.</div>}
           </div>
@@ -13856,15 +13857,15 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                     );
                   })}
                   {/* Push DELIVERY for this device (S90) — notifications that
-                      arrive even when Glide is closed. Per-device; the prompt
+                      arrive even when Glidna is closed. Per-device; the prompt
                       must come from this tap (browser rule). */}
                   <div style={row}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: ".88rem" }}>Push to this device</div>
                       <div style={{ fontSize: ".7rem", color: "var(--muted)" }}>
-                        {pushState === "unsupported" ? "Not supported in this browser — on iPhone, install Glide to the home screen first"
-                          : pushState === "blocked" ? "Blocked — allow notifications for Glide in your device settings"
-                          : "Messages & to-dos arrive even when Glide is closed"}
+                        {pushState === "unsupported" ? "Not supported in this browser — on iPhone, install Glidna to the home screen first"
+                          : pushState === "blocked" ? "Blocked — allow notifications for Glidna in your device settings"
+                          : "Messages & to-dos arrive even when Glidna is closed"}
                       </div>
                       {pushMsg && <div style={{ fontSize: ".7rem", color: "var(--accent)", marginTop: 2 }}>{pushMsg}</div>}
                     </div>
@@ -13913,6 +13914,10 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
 
         <div style={{ flex: 1, minHeight: 12 }} />
         <button style={{ ...item, color: "#e5484d", border: "1px solid rgba(229,72,77,.4)", background: "rgba(229,72,77,.08)", justifyContent: "center", marginTop: 8 }} onClick={() => signOut(auth)}><Icon name="signout" size={19} /> <span>Sign out</span></button>
+        <a href="/terms.html" target="_blank" rel="noopener"
+          style={{ display: "block", textAlign: "center", marginTop: 10, fontSize: ".68rem", color: "var(--muted)", textDecoration: "none" }}>
+          Terms of Service
+        </a>
       </div>
       {isTrainer && <InviteHub open={hubOpen} onClose={() => setHubOpen(false)} meName={meName} />}
     </>
@@ -14415,7 +14420,7 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Glide-Backup-${new Date().toISOString().slice(0,10)}.json`;
+      a.download = `Glidna-Backup-${new Date().toISOString().slice(0,10)}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -14471,7 +14476,7 @@ export default function App() {
         await saveFolders(newFolders);
       }
       return { ok: true, msg: `Imported ${imported} profile${imported!==1?"s":""}${newFolders.length > folders.length ? ` and ${newFolders.length - folders.length} folder(s)` : ""}` };
-    } catch(e) { return { ok: false, msg: "Failed to read file — make sure it's a Glide backup JSON" }; }
+    } catch(e) { return { ok: false, msg: "Failed to read file — make sure it's a Glidna backup JSON" }; }
   };
 
   // ── Clipboard backup: copy all data as text ──
@@ -14529,7 +14534,7 @@ export default function App() {
       await saveIndex(newProfiles);
       if (newFolders.length > folders.length) { setFolders(newFolders); await saveFolders(newFolders); }
       return { ok:true, msg:`Imported ${imported} profile${imported!==1?"s":""}` };
-    } catch(e) { return { ok:false, msg:"Invalid data — make sure you pasted a Glide backup" }; }
+    } catch(e) { return { ok:false, msg:"Invalid data — make sure you pasted a Glidna backup" }; }
   };
 
   // ── Daily log handler ──

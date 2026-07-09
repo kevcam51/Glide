@@ -1,6 +1,6 @@
 // Push-notification enable/disable for THIS device (S90). Pairs with
 // functions/push.js (delivery) and the push handlers in public/sw.js.
-// iOS note: web push requires iOS 16.4+ AND Glide installed to the home
+// iOS note: web push requires iOS 16.4+ AND Glidna installed to the home
 // screen; the permission prompt must come from a user tap (the Notification
 // Center row) — both are surfaced in the UI copy.
 import { functions } from "./firebase";

@@ -3,7 +3,7 @@
 // Raw Web Push (VAPID) rather than the FCM console flow: we own the keypair
 // (private half in Secret Manager as VAPID_PRIVATE_KEY; the public half is
 // public by design and lives here + in src/push.js), and it works on
-// Chrome/Android/desktop plus iOS 16.4+ when Glide is installed to the home
+// Chrome/Android/desktop plus iOS 16.4+ when Glidna is installed to the home
 // screen. Subscriptions live at users/{uid}/pushSubs/{hash} — written ONLY via
 // the callables below (Admin SDK), so no firestore.rules change is needed and
 // trainers can never read a client's push endpoints.
