@@ -1,5 +1,19 @@
 # Glide — Next-Session Handoff (start here)
 
+## ✅ CUSTOM DOMAIN LIVE: **glidna.com** (S90, Jul 8) — rename sweep is the NEXT SESSION
+Kevin chose **Glidna** (slydra.com turned out to be in redemption; glidna.com+.app were clean)
+and bought BOTH via Vercel (~$11.25/yr each, auto-DNS). DONE: domains attached to the project
+(www + glidna.app 308→apex), Firebase Auth authorizedDomains updated via API, ALLOWED_ORIGINS
+(billing + webauthn) lead with glidna.com (legacy vercel.app kept during transition),
+invite-email links + OG meta → glidna.com. VERIFIED: app serves on glidna.com, sign-in works,
+live checkout returns to glidna.com. **⚠️ Passkeys are domain-bound: Kevin re-registers
+Face ID on glidna.com (≡ → Set up Face ID), old-domain passkeys keep working there only.**
+**NEXT SESSION = the Glide → Glidna RENAME SWEEP** (same shape as S53's CalorieIQ→Glide):
+BrandLogo/wordmark (decide the two-tone split: GLID|NA or GLI|DNA), every UI string, AuthGate,
+page title, package.json, share-card + OG card text (`npm run gen:og`) + icons if lettering
+changes (G glyph still fits!), manifest name, docs. Then: notification-feed bell (queued),
+Kevin's real-card smoke test, ToS items.
+
 ## ⚡ S90 LATE-SESSION AUTONOMOUS RUN (Kevin away): the whole "ready to build" backlog SHIPPED
 1. **In-app messaging** — LIVE (rules published, 87/87 tests; see docs/MESSAGING-PLAN.md header).
 2. **Push delivery (Web Push/VAPID)** — LIVE: `functions/push.js` (savePushSub/removePushSub +
