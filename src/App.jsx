@@ -6918,6 +6918,7 @@ const fmtClock = (t) => {
 // can be opened to log or back-date food, weight, and workouts. Date keys are
 // local YYYY-MM-DD (Session 45) so they match the user's own calendar day.
 function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods }) {
+  useBodyScrollLock(true);
   const todayKey = ymdLocal();
   const keyOf = (y, m, d) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
   const parseKey = (k) => { const [y, m, d] = k.split("-").map(Number); return { y, m: m - 1, d }; };
@@ -8719,6 +8720,7 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
 // it read-only). `startWeight` lets the chart draw a "start → now" segment when
 // there's only one real weigh-in yet.
 function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, rangeHigh, startWeight, onDelete, onClose }) {
+  useBodyScrollLock(true);
   useBackClose(true, onClose);   // phone Back closes the modal
   // Self-contained brand theme (data-theme="pro") so it looks identical whether
   // it's opened from the pro-themed Client Dashboard or the old-styled Results.
@@ -8911,6 +8913,25 @@ function useBackClose(isOpen, onClose) {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, [isOpen]);
+}
+
+// Lock the page behind a full-screen overlay (S90, iOS fix): without this,
+// swipes inside an overlay chain through and scroll the BACKGROUND page —
+// most visible in the installed iPhone app (message thread, chat, menus).
+// position:fixed on <body> is the only approach iOS Safari reliably honors;
+// scroll position is stashed and restored on close.
+function useBodyScrollLock(active) {
+  useEffect(() => {
+    if (!active) return;
+    const y = window.scrollY;
+    const b = document.body.style;
+    const prev = { position: b.position, top: b.top, left: b.left, right: b.right, width: b.width };
+    b.position = "fixed"; b.top = `-${y}px`; b.left = "0"; b.right = "0"; b.width = "100%";
+    return () => {
+      b.position = prev.position; b.top = prev.top; b.left = prev.left; b.right = prev.right; b.width = prev.width;
+      window.scrollTo(0, y);
+    };
+  }, [active]);
 }
 
 // ─── Install (PWA) prompt ────────────────────────────────────────────────────
@@ -9328,6 +9349,7 @@ async function writePlansManifest(setFn, m) {
 // leaves the home screen. For types that need the full editor (enter info / a
 // custom ask) it offers an "Open my plan" jump instead. (Session 19)
 function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenPlan, onMarkDone, onClose }) {
+  useBodyScrollLock(true);
   const [val, setVal] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -10831,6 +10853,7 @@ function FeatureMatrix({ isTrainer }) {
 // Plan picker (S89c): shown before Checkout so the user chooses base vs Max
 // and monthly vs annual. Portaled to <body> (page-transition transform trap).
 function PlanPicker({ role, onClose }) {
+  useBodyScrollLock(true);
   const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
   const plans = PLAN_MENU[isTrainer ? "trainer" : "client"];
   const [interval, setInterval_] = useState("month");
@@ -11068,6 +11091,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     return () => { document.body.style.overflow = prev; };
   }, [open]);
   useBackClose(open, () => setOpen(false));   // phone Back closes the chat
+  useBodyScrollLock(open); // iOS: don't let swipes scroll the page behind the chat
   // Load the caller's Pro entitlement + food-DB toggle when the chat opens.
   useEffect(() => {
     if (!open) return;
@@ -13231,6 +13255,7 @@ function InviteHub({ open, onClose, meName }) {
   const [showQr, setShowQr] = useState(false);
   const [resendingId, setResendingId] = useState(""); // which past invite is being resent
   useBackClose(open, onClose);                        // phone Back closes the invite hub
+  useBodyScrollLock(open);
 
   const first = (meName || "").trim().split(/\s+/)[0] || "";
   const shareLink = code
@@ -13471,6 +13496,7 @@ const ROLE_LABEL = { client: "Client", head_trainer: "Trainer", sub_trainer: "Tr
 // Full-screen DM between a linked trainer and client. Live via onSnapshot;
 // marks own unread on open/receive. Portaled (page-transition transform trap).
 function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
+  useBodyScrollLock(true); // full-screen overlay — freeze the page behind it
   const tid = threadIdFor(trainerUid, clientUid);
   const otherUid = meUid === trainerUid ? clientUid : trainerUid;
   const [msgs, setMsgs] = useState(null); // null = loading
@@ -13538,6 +13564,7 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
 // subscription/trial state, today's AI usage, and boost-request flags — the
 // "flag, don't punish" visibility for chronic ceiling-hitters.
 function AdminDashboard({ onClose }) {
+  useBodyScrollLock(true);
   const [data, setData] = useState(null);
   const [err, setErr] = useState(false);
   useEffect(() => {
@@ -13622,6 +13649,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
   const [showAdmin, setShowAdmin] = useState(false);      // S90 admin all-users dashboard
   const [upgradeErr, setUpgradeErr] = useState(false);
   useBackClose(open, onClose);                        // phone Back closes the menu
+  useBodyScrollLock(open);
   // Face ID / Touch ID passkey setup (S87). pkDone = a passkey was registered
   // from this device (local hint — the credential itself lives server-side).
   const [pkBusy, setPkBusy] = useState(false);

@@ -53,3 +53,10 @@
    status bar. */
 html, body { background: #05080a; }
 body { margin: 0; padding: 0; }
+
+/* ── iOS / installed-app polish (S90) ─────────────────────────────────────────
+ * overscroll-behavior: stops the rubber-band bounce from chaining page scroll
+ * behind overlays and kills accidental pull-to-refresh in the standalone app.
+ * tap-highlight: removes the gray flash iOS paints on every button tap. */
+html, body { overscroll-behavior-y: none; }
+button, a, [role="button"] { -webkit-tap-highlight-color: transparent; }
