@@ -95,9 +95,15 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
-> _Last updated: Session 89. `Glide-Session-Handoff-NEXT.md` is the primary entry point; this block
-> is the quick digest._
-> - **App = Glide** (rebranded from CalorieIQ, S53; name change still OPEN — see docs/NAMING.md).
+> _Last updated: Session 90 (marathon). `Glide-Session-Handoff-NEXT.md` is the primary entry point;
+> this block is the quick digest._
+> - **App = GLIDNA** (S90: name DECIDED + full rename sweep; wordmark = GLI|DNA two-tone). Live on
+>   the custom domain **https://glidna.com** (+ www/.app 308-redirects; bought via Vercel, auto-DNS;
+>   passkeys re-register on the new domain). **STRIPE IS LIVE (real money)** — live prices/webhook/
+>   portal (self-serve plan switching + cancel at period end); Kevin's real-card smoke test pending.
+>   **Terms of Service at /terms.html** (fair-use clause; attorney pass pending). S90 also shipped:
+>   messaging (DMs), Web-Push delivery, client→trainer requests, txn hardening, Simple plan view,
+>   pricing grid + boosts + admin dashboard, chat history drawer, enterprise pricing scoped.
 >   Brand near-black + cyan `#08DCE0`, Tailwind "pro" theme everywhere. PWA installable (S84).
 > - **Blaze is ENABLED (S56) and the whole AI layer is LIVE (S60–82):** streaming chat with role-based
 >   prompts + per-user daily token budgets + prompt caching; data-aware tools; meal logging by text /
