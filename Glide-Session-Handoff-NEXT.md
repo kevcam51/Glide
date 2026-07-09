@@ -33,7 +33,14 @@ Kevin's real-card smoke test, ToS items.
    assignedTrainerId consent (needs a joinTrainer callable — design), ProfileCard caret jump.
 **NEXT: Stripe live-mode swap + custom-domain/name decision (Kevin's ordering).** Also pending
 Kevin: re-import chosen Trainerize clients (picker), admin-dashboard look, ~~Android icon~~ ✓ (confirmed good).
-**QUEUED AFTER STRIPE (Kevin's yes, Jul 8): the notification-FEED bell.** A bell icon in the
+**✅ DONE Jul 9 (S90b): the bell, the Privacy Policy, and the goal-aware Simple view** —
+bell = fixed header button (mirrors hamburger) + NotifFeed overlay + kv `caliq-notif-feed`
+written by push.js appendFeed (one source of truth with push; E2E: live badge → feed → clear).
+privacy.html linked from ToS §6 + SideMenu. Simple view: clients DEFAULT to Simple (trainers
+Detailed), `data.fitnessGoal` chooser (lose/build/health) reshapes target + copy, **1,200 hard
+floor** pivots advice to training-over-restriction. Follow-ups: teach the AI tools fitnessGoal
+(set_personal_info/get_profile), feed entries for non-push events (joins/leaves).
+~~QUEUED AFTER STRIPE (Kevin's yes, Jul 8): the notification-FEED bell.~~ A bell icon in the
 header opening a chronological feed of everything since last look — new messages, completed
 to-dos, client requests, client joins/leaves, boost grants (admin) — tap-to-jump, per-type
 rows respect the existing notifPrefs, unseen-count badge on the bell. Design note: back it
