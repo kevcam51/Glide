@@ -3,7 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- maximum-scale=1 stops iOS Safari's auto-zoom when focusing inputs under
+         16px (the message box, chat composer, etc.). Safari deliberately still
+         honors pinch-to-zoom despite it, so accessibility zoom is unaffected. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
     <title>Glidna</title>
     <meta name="description" content="Glidna — where skilled trainers and smart AI keep you aware, accountable, and on track. Powerful with a coach, capable on its own." />
     <!-- PWA: installable as a home-screen app (icons via npm run gen:icons). Also
