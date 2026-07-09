@@ -11,12 +11,17 @@ web/Stripe only, the Netflix/Spotify model — never Apple IAP by default.**_
   shell; native plugins add the rest. The app is already mobile-first (safe areas, S90 iOS
   polish: body scroll-lock, no input zoom, tap-highlight).
 
-## Billing strategy (the money part)
-- **Primary: web checkout on glidna.com (Stripe) → users sign into the app. Apple fee: $0.**
-  Fully allowed (multiplatform-services rule; Netflix/Spotify do exactly this).
-- **US bonus:** since the 2025 Epic v. Apple injunction, US apps may LINK OUT to external
-  purchase pages without commission — the in-app Upgrade button can open glidna.com checkout.
-- If conversion data ever justifies it: optional Apple IAP later at the same prices — Small
+## Billing strategy (the money part) — verified Jul 9 2026
+- **Primary (bulletproof): web checkout on glidna.com (Stripe) → users SIGN IN on the app,
+  which never sells or links to purchases. Apple fee: $0.** This is Apple's own published
+  "multiplatform services" rule (Netflix/Spotify model) — policy, not litigation; zero risk.
+- **Link-out is NO LONGER assumed free:** Dec 2025 Ninth Circuit ruling lets Apple charge a
+  "reasonable commission" on external-link purchases (amount TBD by the district court;
+  Apple's SCOTUS petition pending as of mid-2026) and restrict link prominence.
+  → RE-CHECK the state of Epic v. Apple at native-build time before adding any in-app
+  upgrade link. Until then: upgrade marketing happens OUTSIDE the app (web, email,
+  trial-expiry emails) — always allowed, Apple has no jurisdiction there.
+- If conversion data ever justifies it: optional Apple IAP at the same prices — Small
   Business Program = **15%** (not 30%) under $1M/yr, and margins hold even at 30%
   (Premium $14.99 −30% ≈ $10.50 vs $2–3.50 realistic AI COGS).
 
