@@ -12410,11 +12410,13 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
         <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
-        <div className="flex items-center justify-between mb-5">
-          <div className="text-2xl font-extrabold tracking-tight">
+        {/* flex-wrap: with the Message button this row overflows a phone screen —
+            the action buttons drop to their own line under the greeting instead. */}
+        <div className="flex flex-wrap items-center justify-between gap-y-2 mb-5">
+          <div className="text-2xl font-extrabold tracking-tight whitespace-nowrap">
             {firstName ? `Hi, ${firstName} 👋` : "Your dashboard"}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {trainerInfo && (
               <button onClick={() => setShowMsg(true)} title="Message your trainer"
                 className="relative inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
