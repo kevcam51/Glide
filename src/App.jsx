@@ -2897,19 +2897,36 @@ function SimulationSummary({ data, totalBurn, totalStrBurn = 0 }) {
 // Plain-English view of the Full Plan for people who don't know TDEE/BMR/macros.
 // Same numbers as the detailed tabs (target mirrors computeClientCalories), just
 // translated into everyday words. Toggled from Results; choice sticks per device.
-function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, workoutDaysCount, onShowDetailed }) {
+function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, workoutDaysCount, onSetFitnessGoal, onShowDetailed }) {
   const w = Number(data.weightLbs) || 0;
   const ready = isFinite(tdee) && tdee > 0 && w > 0;
   const weeklyBurn = totalBurn + totalStrBurn;
   const eatback = isEatback(data);
-  const target = ready ? floor(Math.round(tdee - 500 + (eatback ? weeklyBurn / 7 : 0))) : null;
+  const goal = Number(data.goalWeight) || null;
+  // Goal mode (S90b, Kevin's design): the client's stated goal reshapes the
+  // page. Unset → inferred from the weight goal (above current weight = build).
+  const goalMode = data.fitnessGoal || (goal && goal > w ? "build" : "lose");
+  const rawDeficit = ready ? Math.round(tdee - 500 + (eatback ? weeklyBurn / 7 : 0)) : 0;
+  // The 1,200 floor is a HARD honesty rule (Kevin's call): we never show a
+  // number below it — and when the deficit math lands under it, the page says
+  // so and pivots the advice to consistent training, not deeper restriction.
+  const floorHit = goalMode === "lose" && rawDeficit < 1200;
+  const target = !ready ? null
+    : goalMode === "build" ? Math.round(tdee + 250 + weeklyBurn / 7)   // lean surplus + fuel the training
+    : goalMode === "health" ? Math.round(tdee + weeklyBurn / 7)        // maintenance: eat what you burn
+    : floor(rawDeficit);
   const protein = Math.round(Number(data.macroTargets?.protein) || w) || null;
   const cups = w ? Math.round((w * 0.5) / 8) : null;
-  const goal = Number(data.goalWeight) || null;
   const lbsToGo = hasGoal ? Math.round((w - goal) * 10) / 10 : null;
-  const weeklyDeficit = 3500 + (eatback ? 0 : weeklyBurn); // eat-back holds ~1 lb/wk; accelerate adds the burn
+  const lbsToGain = goal && goal > w ? Math.round((goal - w) * 10) / 10 : null;
+  // ETA: with the floor active the REAL daily deficit is burn − 1200 intake.
+  const weeklyDeficit = floorHit
+    ? Math.max(0, Math.round(tdee + (eatback ? weeklyBurn / 7 : weeklyBurn / 7) - 1200)) * 7
+    : 3500 + (eatback ? 0 : weeklyBurn);
   const rate = Math.round((weeklyDeficit / 3500) * 10) / 10;
-  const wks = hasGoal ? weeksToGoal(lbsToGo, weeklyDeficit) : null;
+  const wks = goalMode === "lose" && hasGoal ? weeksToGoal(lbsToGo, weeklyDeficit)
+    : goalMode === "build" && lbsToGain ? lbsToGain / 0.5 // quality gain ≈ ½ lb/week
+    : null;
   const etaDate = wks != null && wks > 0 && wks < 260 ? new Date(Date.now() + wks * 7 * 86400000) : null;
   const etaLabel = etaDate ? etaDate.toLocaleDateString(undefined, { month: "long", year: "numeric" }) : null;
 
@@ -2928,28 +2945,61 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
 
   return (
     <>
+      {/* Goal chooser (S90b): the client tells us their goal; the page reshapes. */}
+      {onSetFitnessGoal && (
+        <div className="card" style={{ ...cardS, padding: "14px 18px" }}>
+          <div style={{ fontSize: ".7rem", letterSpacing: ".08em", color: "var(--muted)", textTransform: "uppercase", marginBottom: 8 }}>Your main goal</div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[["lose", "Lose fat"], ["build", "Build muscle"], ["health", "Stay healthy"]].map(([v, l]) => (
+              <button key={v} onClick={() => onSetFitnessGoal(v)}
+                style={{ flex: 1, padding: "9px 6px", borderRadius: 10, cursor: "pointer", fontFamily: "inherit", fontSize: ".78rem", fontWeight: 700, transition: "all .15s",
+                  border: goalMode === v ? "1.5px solid var(--accent)" : "1px solid var(--border)",
+                  background: goalMode === v ? "rgba(8,220,224,.08)" : "var(--s2)",
+                  color: goalMode === v ? "var(--accent)" : "var(--muted)" }}>{l}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* The one number that matters */}
       <div className="card" style={{ ...cardS, textAlign: "center" }}>
         <div style={{ ...titleS, justifyContent: "center" }}><Icon name="flame" size={16} color="var(--accent)" />The One Number That Matters</div>
         <div style={{ fontFamily: "'Sora',sans-serif", fontSize: "3rem", fontWeight: 700, color: "var(--accent)", lineHeight: 1.1 }}>{target.toLocaleString()}</div>
         <div style={{ fontSize: ".9rem", color: "var(--text)", marginTop: "2px", fontWeight: 600 }}>calories a day</div>
-        <div style={{ ...proseS, marginTop: "10px" }}>Eat close to this number most days and the weight comes off. Everything else on this page just supports it.</div>
-      </div>
-
-      {/* Why this number */}
-      <div className="card" style={cardS}>
-        <div style={titleS}><Icon name="bulb" size={16} color="var(--accent)" />Why This Number</div>
-        <div style={proseS}>
-          Your body burns about <span style={numS}>{tdee.toLocaleString()}</span> calories a day just living, moving, and doing what you already do — based on your age, size, and activity.
-          Eating a bit less than you burn makes your body use stored fat to cover the difference. That's all weight loss is.
-          {weeklyBurn > 0 && eatback && <> Your workouts burn about <span style={numS}>{Math.round(weeklyBurn / 7).toLocaleString()}</span> extra calories a day on average, and your plan lets you eat those back — so you lose about 1 lb a week without starving.</>}
-          {weeklyBurn > 0 && !eatback && <> Your workouts burn about <span style={numS}>{Math.round(weeklyBurn / 7).toLocaleString()}</span> extra calories a day on average — your plan keeps eating the same, so the workouts speed up your results instead.</>}
-          {weeklyBurn === 0 && <> Eating about 500 below your burn each day adds up to roughly 1 lb of fat lost per week — steady and sustainable.</>}
+        <div style={{ ...proseS, marginTop: "10px" }}>
+          {goalMode === "build" ? "Eat close to this number most days and your training has the fuel to build. Everything else on this page supports it."
+            : goalMode === "health" ? "Eat close to this number most days to hold steady and stay energized. Everything else on this page supports it."
+            : floorHit ? "This is a healthy minimum — not a race to eat less. For you, the results come from the workouts below."
+            : "Eat close to this number most days and the weight comes off. Everything else on this page just supports it."}
         </div>
       </div>
 
-      {/* Goal timeline */}
-      {hasGoal && (
+      {/* Why this number — one honest explanation per goal mode */}
+      <div className="card" style={cardS}>
+        <div style={titleS}><Icon name="bulb" size={16} color="var(--accent)" />Why This Number</div>
+        <div style={proseS}>
+          {goalMode === "build" ? (<>
+            Your body burns about <span style={numS}>{tdee.toLocaleString()}</span> calories a day. Muscle is built from <strong style={{ color: "var(--text)" }}>extra</strong> —
+            eating a bit above your burn (about 250 extra{weeklyBurn > 0 && <>, plus <span style={numS}>{Math.round(weeklyBurn / 7).toLocaleString()}</span> a day to refuel your workouts</>}) gives
+            your body the raw material, and your training tells it where to put it. Eating under this number is the most common reason building stalls — the workouts write the check, food cashes it.
+          </>) : goalMode === "health" ? (<>
+            Your body burns about <span style={numS}>{tdee.toLocaleString()}</span> calories a day{weeklyBurn > 0 && <>, plus about <span style={numS}>{Math.round(weeklyBurn / 7).toLocaleString()}</span> from your workouts</>}.
+            Eating right around what you burn keeps your weight steady and your energy up. Here the win isn't a number going down — it's showing up consistently: training, protein, sleep, water.
+          </>) : floorHit ? (<>
+            Your body burns about <span style={numS}>{tdee.toLocaleString()}</span> calories a day. The usual math would put your target <strong style={{ color: "var(--text)" }}>below 1,200 calories — too low to be healthy or sustainable</strong>, so we won't go there.
+            Your number stays at <span style={numS}>{(1200).toLocaleString()}</span>, and the real lever for you isn't eating less — it's <strong style={{ color: "var(--text)" }}>consistent, frequent workouts</strong>. Movement creates the deficit safely while you still eat enough to function, keep muscle, and stick with it.
+          </>) : (<>
+            Your body burns about <span style={numS}>{tdee.toLocaleString()}</span> calories a day just living, moving, and doing what you already do — based on your age, size, and activity.
+            Eating a bit less than you burn makes your body use stored fat to cover the difference. That's all weight loss is.
+            {weeklyBurn > 0 && eatback && <> Your workouts burn about <span style={numS}>{Math.round(weeklyBurn / 7).toLocaleString()}</span> extra calories a day on average, and your plan lets you eat those back — so you lose about 1 lb a week without starving.</>}
+            {weeklyBurn > 0 && !eatback && <> Your workouts burn about <span style={numS}>{Math.round(weeklyBurn / 7).toLocaleString()}</span> extra calories a day on average — your plan keeps eating the same, so the workouts speed up your results instead.</>}
+            {weeklyBurn === 0 && <> Eating about 500 below your burn each day adds up to roughly 1 lb of fat lost per week — steady and sustainable.</>}
+          </>)}
+        </div>
+      </div>
+
+      {/* Goal timeline — lose shows the deficit ETA; build shows a quality-gain pace */}
+      {goalMode === "lose" && hasGoal && (
         <div className="card" style={cardS}>
           <div style={titleS}><Icon name="target" size={16} color="var(--accent)" />Your Goal</div>
           <div style={{ fontFamily: "'Sora',sans-serif", fontSize: "1.5rem", fontWeight: 700, color: "var(--text)" }}>
@@ -2963,18 +3013,36 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
           </div>
         </div>
       )}
+      {goalMode === "build" && lbsToGain && (
+        <div className="card" style={cardS}>
+          <div style={titleS}><Icon name="target" size={16} color="var(--accent)" />Your Goal</div>
+          <div style={{ fontFamily: "'Sora',sans-serif", fontSize: "1.5rem", fontWeight: 700, color: "var(--text)" }}>
+            {w} <span style={{ color: "var(--muted)", fontSize: "1rem" }}>→</span> {goal} lbs
+          </div>
+          <div style={{ ...proseS, marginTop: "8px" }}>
+            That's <span style={numS}>{lbsToGain}</span> lbs to build. Quality muscle comes on at about <span style={numS}>¼–½ lb</span> a week — around <span style={numS}>{friendlyTime(wks)}</span>{etaLabel && <> (roughly <span style={numS}>{etaLabel}</span>)</>} of consistent training and eating.
+          </div>
+          <div style={{ fontSize: ".76rem", color: "var(--muted)", marginTop: "8px", lineHeight: 1.5 }}>
+            Faster than that is mostly fat, not muscle — steady wins here. The scale moving slowly UP while your lifts go up is exactly what progress looks like.
+          </div>
+        </div>
+      )}
 
       {/* Daily checklist */}
       <div className="card" style={cardS}>
         <div style={titleS}><Icon name="check" size={16} color="var(--accent)" />Your Daily Checklist</div>
         <div style={rowS}>
           <Icon name="flame" size={16} color="var(--accent)" />
-          <div>Eat close to <span style={numS}>{target.toLocaleString()}</span> calories. Log your food — people who log lose more, because guessing always underestimates.</div>
+          <div>{goalMode === "build"
+            ? <>Eat <strong>up to</strong> <span style={numS}>{target.toLocaleString()}</span> calories — under-eating is what stalls building. Log your food so you know you got there.</>
+            : floorHit
+            ? <>Eat close to <span style={numS}>{target.toLocaleString()}</span> calories — and <strong>not less</strong>. Going lower backfires: energy crashes, muscle loss, rebound. Log your food to stay honest in both directions.</>
+            : <>Eat close to <span style={numS}>{target.toLocaleString()}</span> calories. Log your food — people who log lose more, because guessing always underestimates.</>}</div>
         </div>
         {protein && (
           <div style={rowS}>
             <Icon name="muscle" size={16} color="var(--accent)" />
-            <div>Get about <span style={numS}>{protein}g</span> of protein — roughly <span style={numS}>{Math.max(2, Math.round(protein / 25))}</span> palm-sized portions of chicken, fish, meat, eggs, or Greek yogurt across the day. Protein keeps you full and protects your muscle while you lose fat.</div>
+            <div>Get about <span style={numS}>{protein}g</span> of protein — roughly <span style={numS}>{Math.max(2, Math.round(protein / 25))}</span> palm-sized portions of chicken, fish, meat, eggs, or Greek yogurt across the day. {goalMode === "build" ? "Protein is the raw material your training builds with." : "Protein keeps you full and protects your muscle."}</div>
           </div>
         )}
         {cups && (
@@ -2985,9 +3053,9 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
         )}
         <div style={rowS}>
           <Icon name="dumbbell" size={16} color="var(--accent)" />
-          <div>{workoutDaysCount > 0
-            ? <>Show up on your <span style={numS}>{workoutDaysCount}</span> workout day{workoutDaysCount !== 1 ? "s" : ""} this week — they're already scheduled in your plan.</>
-            : <>Move most days — even a 20-minute walk counts. No workout schedule is set yet; ask your trainer or the AI coach to build one.</>}</div>
+          <div>{floorHit && <strong style={{ color: "var(--accent)" }}>Your #1 lever: </strong>}{workoutDaysCount > 0
+            ? <>Show up on your <span style={numS}>{workoutDaysCount}</span> workout day{workoutDaysCount !== 1 ? "s" : ""} this week — they're already scheduled in your plan.{floorHit && <> Frequent, consistent movement is what drives your results — not eating less.</>}</>
+            : <>Move most days — even a 20-minute walk counts. No workout schedule is set yet; ask your trainer or the AI coach to build one.{floorHit && <> For you this is the most important line on the page.</>}</>}</div>
         </div>
         <div style={{ ...rowS, borderBottom: "none" }}>
           <Icon name="scale" size={16} color="var(--accent)" />
@@ -3010,13 +3078,18 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   );
 }
 
-function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust }) {
+function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, defaultView = "detailed" }) {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
   // Simple (plain-English) vs Detailed plan view — a display pref, remembered
-  // per device so a beginner keeps their simple view without a Firestore write.
+  // per device. First visit (no stored pref) follows the role default (S90b,
+  // Kevin's call): CLIENTS land on Simple, trainers on Detailed.
   const [simpleView, setSimpleViewRaw] = useState(() => {
-    try { return localStorage.getItem("glide-plan-view") === "simple"; } catch { return false; }
+    try {
+      const stored = localStorage.getItem("glide-plan-view");
+      if (stored) return stored === "simple";
+    } catch { /* fall through to role default */ }
+    return defaultView === "simple";
   });
   const setSimpleView = (v) => {
     setSimpleViewRaw(v);
@@ -3186,7 +3259,8 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
       {simpleView ? (
         <SimplePlanView data={data} tdee={tdee} floor={floor} hasGoal={hasGoal}
           totalBurn={totalBurn} totalStrBurn={totalStrBurn}
-          workoutDaysCount={workoutDaysCount} onShowDetailed={()=>setSimpleView(false)} />
+          workoutDaysCount={workoutDaysCount} onSetFitnessGoal={onSetFitnessGoal}
+          onShowDetailed={()=>setSimpleView(false)} />
       ) : (<>
 
       {/* ── Basic / Pro Toggle ── */}
@@ -13559,6 +13633,48 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
     </div>, document.body);
 }
 
+// ── Notification feed ("the bell", S90b — Kevin's ask) ───────────────────────
+// A chronological list of everything that happened since you last looked:
+// messages, trainer to-dos, client requests. Entries are written server-side
+// by the same code that sends pushes (functions/push.js appendFeed), so the
+// bell and the phone can never disagree. Unseen = newer than seenTs.
+function NotifFeed({ items, onClose }) {
+  useBodyScrollLock(true);
+  useBackClose(true, onClose);
+  const iconFor = (tag) => String(tag).startsWith("dm-") ? "inbox"
+    : tag === "trainer-todo" ? "mail" : tag === "client-request" ? "clients" : "bell";
+  return createPortal(
+    <div data-theme="pro" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2400,
+      background: "rgba(0,0,0,.78)", display: "flex", justifyContent: "center",
+      padding: "16px", paddingTop: "calc(16px + env(safe-area-inset-top,0px))", overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card"
+        style={{ width: "min(94vw,420px)", padding: "18px 16px", margin: "auto 0", maxHeight: "80vh",
+          display: "flex", flexDirection: "column", gap: "10px" }}>
+        <div className="flex items-center gap-2">
+          <Icon name="bell" size={18} color="var(--accent)" />
+          <div className="font-display font-bold text-fg" style={{ fontSize: "1.02rem" }}>Notifications</div>
+          <button onClick={onClose} aria-label="Close" className="ml-auto text-muted"
+            style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: "1.1rem", padding: "4px" }}>✕</button>
+        </div>
+        <div className="flex flex-col gap-1.5 overflow-y-auto">
+          {items.length === 0 && (
+            <div className="py-8 text-center text-[.84rem] text-muted">Nothing yet — messages, to-dos, and requests will show up here.</div>
+          )}
+          {items.map((n) => (
+            <div key={n.id} className="flex items-start gap-2.5 rounded-xl border border-border bg-surface2 px-3 py-2.5">
+              <span className="mt-0.5 shrink-0"><Icon name={iconFor(n.tag)} size={16} color="var(--accent)" /></span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[.84rem] font-semibold text-fg">{n.title}</div>
+                {n.body && <div className="truncate text-[.78rem] text-muted">{n.body}</div>}
+                <div className="mt-0.5 text-[.64rem] text-muted">{timeAgo(n.ts)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>, document.body);
+}
+
 // ── Admin dashboard (S90, Kevin's ask): every user at a glance ───────────────
 // Admin-only (server re-verifies by UID). Read-only: who's on the app, role,
 // subscription/trial state, today's AI usage, and boost-request flags — the
@@ -13944,10 +14060,10 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
 
         <div style={{ flex: 1, minHeight: 12 }} />
         <button style={{ ...item, color: "#e5484d", border: "1px solid rgba(229,72,77,.4)", background: "rgba(229,72,77,.08)", justifyContent: "center", marginTop: 8 }} onClick={() => signOut(auth)}><Icon name="signout" size={19} /> <span>Sign out</span></button>
-        <a href="/terms.html" target="_blank" rel="noopener"
-          style={{ display: "block", textAlign: "center", marginTop: 10, fontSize: ".68rem", color: "var(--muted)", textDecoration: "none" }}>
-          Terms of Service
-        </a>
+        <div style={{ display: "flex", justifyContent: "center", gap: 14, marginTop: 10 }}>
+          <a href="/terms.html" target="_blank" rel="noopener" style={{ fontSize: ".68rem", color: "var(--muted)", textDecoration: "none" }}>Terms of Service</a>
+          <a href="/privacy.html" target="_blank" rel="noopener" style={{ fontSize: ".68rem", color: "var(--muted)", textDecoration: "none" }}>Privacy Policy</a>
+        </div>
       </div>
       {isTrainer && <InviteHub open={hubOpen} onClose={() => setHubOpen(false)} meName={meName} />}
     </>
@@ -13987,6 +14103,26 @@ export default function App() {
   const [meSubStatus, setMeSubStatus] = useState(null); // "trial" | "active" | "canceled" (drives Manage subscription)
   const [upgradeCongrats, setUpgradeCongrats] = useState(false); // post-checkout celebration (S89c)
   const [menuOpen, setMenuOpen] = useState(false); // side menu (Session 23)
+  // Notification feed / the bell (S90b): live copy of my caliq-notif-feed doc
+  // (written server-side alongside every push). Opening the feed stamps seenTs.
+  const [notifFeed, setNotifFeed] = useState({ items: [], seenTs: 0 });
+  const [feedOpen, setFeedOpen] = useState(false);
+  useEffect(() => {
+    if (!meUid) return;
+    return subscribeForUser(meUid, "caliq-notif-feed", (val) => {
+      try {
+        const f = val ? JSON.parse(val) : {};
+        setNotifFeed({ items: Array.isArray(f.items) ? f.items : [], seenTs: f.seenTs || 0 });
+      } catch { /* keep last good state */ }
+    });
+  }, [meUid]);
+  const unseenNotifs = notifFeed.items.filter((n) => n.ts > (notifFeed.seenTs || 0)).length;
+  const openFeed = () => {
+    setFeedOpen(true);
+    if (unseenNotifs > 0) {
+      try { window.storage.set("caliq-notif-feed", JSON.stringify({ items: notifFeed.items, seenTs: Date.now() })).catch(() => {}); } catch { /* best-effort */ }
+    }
+  };
   // Notification preferences (Session 76) — a master on/off + per-type toggles,
   // in one doc (caliq-notif-prefs), surfaced in the side-menu Notification Center
   // AND the inline toggles (client home / trainer dashboard), so they stay in sync.
@@ -14909,6 +15045,22 @@ export default function App() {
           <line x1="4" y1="7" x2="20" y2="7" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="17" x2="20" y2="17" />
         </svg>
       </button>
+      {/* The bell (S90b) — mirrors the hamburger on the right; badge = unseen count */}
+      <button onClick={openFeed} aria-label="Notifications"
+        style={{ position: "fixed", top: "calc(17px + env(safe-area-inset-top,0px))", right: 10, zIndex: 1390,
+          width: 40, height: 40, borderRadius: 10, border: "1px solid var(--border,#2e2e4a)",
+          background: "var(--surface,#16162a)", color: "var(--text,#f2f2ff)", cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <Icon name="bell" size={19} color="currentColor" />
+        {unseenNotifs > 0 && (
+          <span style={{ position: "absolute", top: -5, right: -5, minWidth: 17, height: 17, padding: "0 4px",
+            borderRadius: 999, background: "var(--accent,#08dce0)", color: "#05080a",
+            fontSize: ".62rem", fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {unseenNotifs > 9 ? "9+" : unseenNotifs}
+          </span>
+        )}
+      </button>
+      {feedOpen && <NotifFeed items={notifFeed.items} onClose={() => setFeedOpen(false)} />}
       <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} role={role} meName={meName} meEmail={meEmail}
         idleSignOut={idleSignOut} onSetIdleSignOut={onSetIdleSignOut}
         isTrainer={isTrainerHome} trial={meTrial} subActive={meSubStatus === "active"}
@@ -15075,6 +15227,8 @@ export default function App() {
               <button className="dash-nav-btn" style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:"7px"}} onClick={()=>setShowDash(true)}><Icon name="dashboard" size={16} color="var(--accent)" />Back to Dashboard</button>
             </div>
             <Results data={data} isSimulation={activeIsSim} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
+            defaultView={role === ROLES.CLIENT ? "simple" : "detailed"}
+            onSetFitnessGoal={(g)=>setDataAndSave(p=>({...p, fitnessGoal: g}))}
             onSetDeficitMode={(mode)=>setDataAndSave(p=>({...p, deficitMode: mode}))}
             onSetWearableAdjust={(on)=>setDataAndSave(p=>({...p, wearableAdjust: !!on}))}
             onSaveCheckIn={(checkin)=>setDataAndSave(p=>{

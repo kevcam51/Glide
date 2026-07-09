@@ -63,7 +63,33 @@ async function notifPrefsOf(db, uid) {
 }
 const prefOn = (p, key) => p.master !== false && (!key || p[key] !== false);
 
+// Bell feed (S90b): every notification-worthy event ALSO lands in the user's
+// in-app feed doc (kv caliq-notif-feed {items[], seenTs}) — one source of
+// truth with push. Written unconditionally (the bell is history, not a nudge);
+// the push below still respects the user's Notification Center prefs.
+// Transactional append, capped 50, best-effort.
+async function appendFeed(db, uid, payload) {
+  const ref = db.doc(`users/${uid}/kv/caliq-notif-feed`);
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      let cur = {};
+      try { cur = snap.exists ? JSON.parse(snap.data().value || "{}") : {}; } catch { cur = {}; }
+      const items = Array.isArray(cur.items) ? cur.items : [];
+      items.unshift({
+        id: `n${Date.now()}${Math.floor(Math.random() * 1e4)}`,
+        tag: String(payload.tag || ""),
+        title: String(payload.title || "").slice(0, 80),
+        body: String(payload.body || "").slice(0, 140),
+        ts: Date.now(),
+      });
+      tx.set(ref, { k: "caliq-notif-feed", value: JSON.stringify({ ...cur, items: items.slice(0, 50) }) });
+    });
+  } catch (e) { /* feed is best-effort */ }
+}
+
 async function sendPushTo(db, uid, payload, prefKey) {
+  await appendFeed(db, uid, payload);
   const prefs = await notifPrefsOf(db, uid);
   if (!prefOn(prefs, prefKey)) return { skipped: "prefs" };
   const subs = await db.collection(`users/${uid}/pushSubs`).limit(10).get();
