@@ -47,6 +47,20 @@ custom title once set. AI-created notes: the AI passes a title or lets the same 
 - Add to the wrote-refresh list. Prompt line: "asked to remember/write something down → offer
   a note; notes with 'remind me to ask my trainer' stay private unless told otherwise."
 
+## AI recaps live here too (Kevin, Jul 9 — notes as the AI's memory shelf)
+- **Conversation recaps:** "save a recap of this conversation to my notes" → the AI summarizes
+  the CURRENT chat into a note (it already has the thread in context — zero extra reads).
+  Titled "Recap — {topic}" unless the user names it. Client-requested recaps default PRIVATE.
+- **Client-info snapshots (trainer):** "make me a snapshot note on Casey" → the AI runs its
+  existing reads (profile/logs/trends — the coach_summary data) and writes it as the trainer's
+  about-note for that client. Re-asking UPDATES the same note (find-by-title) rather than
+  piling up duplicates. Great pre-session prep: tap the client → Notes → current snapshot.
+- Notes get an optional `kind: "note" | "recap"` field → recaps show a sparkle badge in the list.
+- Prompt guidance: when a user asks the AI to "remember," "recap," "summarize," or "write this
+  down," offer/create a note. Weekly AUTO-recaps (unprompted) = v2, rides proactive coaching.
+- Reading PAST chat threads (beyond the current one) for summaries = v2 (needs a thread-read
+  tool over caliq-ai-chat-{id}; cheap, add when asked for).
+
 ## Build order (one session, messaging playbook)
 1. rules (privkv) + emulator attack tests → 2. src/privateStore.js + notes helpers (txn) →
 3. NotesPanel component → 4. client entry → 5. trainer entries (card + menu) → 6. AI tools ×3
