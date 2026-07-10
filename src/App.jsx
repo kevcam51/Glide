@@ -1357,6 +1357,13 @@ body{
 
 @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 @keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
+/* AI "typing" indicator — three dots bounce in sequence while the AI works (S91). */
+@keyframes glidnaTypingDot{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-4px);opacity:1}}
+.glidna-typing{display:inline-flex;gap:4px;align-items:center;padding:2px 0}
+.glidna-typing span{width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block;animation:glidnaTypingDot 1.2s infinite ease-in-out}
+.glidna-typing span:nth-child(2){animation-delay:.18s}
+.glidna-typing span:nth-child(3){animation-delay:.36s}
+@media (prefers-reduced-motion:reduce){.glidna-typing span{animation:pulse 1.2s infinite}}
 
 /* Page-level transition — replays whenever its keyed wrapper remounts on navigation. */
 .page-transition{animation:fadeUp .28s ease both}
@@ -11780,7 +11787,9 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               ))
             )}
             {busy && !(messages.length && messages[messages.length - 1].role === "assistant") &&
-              <div className={bubbleAI + " text-muted"}>Thinking…</div>}
+              <div className={bubbleAI} aria-label="Glidna is thinking" role="status">
+                <span className="glidna-typing"><span></span><span></span><span></span></span>
+              </div>}
             {error && <div className="self-stretch rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-[.82rem] text-danger">{error}</div>}
             {/* Max-tier ceiling boost (S90): the raise-on-request promise, honored
                 instantly in-app. Server re-verifies tier + near-limit + once/day. */}
