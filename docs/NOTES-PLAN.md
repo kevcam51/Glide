@@ -1,4 +1,12 @@
-# Notes (client + trainer + AI) — locked design (Kevin, Jul 9 2026; BUILD NEXT SESSION)
+# Notes (client + trainer + AI) — ✅ BUILT & LIVE (S91, Jul 9 2026)
+
+_Shipped in one pass per the plan below: privkv rules PUBLISHED (96/96 emulator tests incl. 9
+privkv attack cases), src/privateStore.js, NotesPanel (3 contexts), all entry points, AI
+list/create/update_note tools (all four AI fns deployed). E2E in prod: private+shared notes
+via UI with badges/auto-titles; trainer REST read of a client's privkv → 403 DENIED while
+shared notes remained visible; the AI appended to an existing shared note via list→update
+(no duplicate). Deferred (v2, unchanged): rich text/checklists, pinned, search, note→request
+conversion, auto weekly recaps, past-thread summaries._
 
 _Kevin's spec: a notes tab with notes as clickable buttons; auto-generated titles (or custom,
 like the Notes app); per-note visibility — PRIVATE to the client or SHARED with the trainer;
