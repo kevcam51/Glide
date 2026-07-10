@@ -243,7 +243,6 @@ html{
   -webkit-text-size-adjust:100%;
   font-size:16px;
   scroll-behavior:smooth;
-  overflow-y:auto;
   height:auto;
 }
 body{
@@ -253,8 +252,13 @@ body{
   font-weight:400;
   line-height:1.5;
   min-height:100vh;
-  overflow-y:auto;
-  overflow-x:hidden;
+  /* clip (NOT hidden): clips sideways overflow WITHOUT making body a scroll
+     container. html/body used to both carry overflow-y:auto, which made body a
+     scroller that never scrolls — every swipe only worked by CHAINING up to the
+     viewport, and the S90 overscroll-behavior rule (correctly) blocks chaining
+     → the whole app froze on Android. Defaults + clip = the viewport is the
+     one real scroller. Do not reintroduce overflow-y here. */
+  overflow-x:clip;
 }
 
 /* ── App shell ── */
