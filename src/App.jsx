@@ -11098,6 +11098,36 @@ async function streamAiChat(apiMsgs, { onDelta, onDone, onProposal, onWorkoutPro
   }
 }
 
+// Smooth "typewriter" for streamed AI replies (S91). Anthropic tokens arrive
+// in irregular network bursts; painting each burst as-is looks jumpy. This
+// buffers the full text and reveals it at a steady pace via requestAnimationFrame
+// so it reads like even typing, independent of when chunks land. CPS caps the
+// reveal speed (fast but smooth); MAX_LAG bounds how far behind we let it fall,
+// so the tail after the network finishes is always short (≤ MAX_LAG/CPS sec).
+function makeStreamSmoother(onFrame) {
+  let full = "", shown = 0, ended = false, raf = null, last = 0, resolved = false, resolveDone;
+  const done = new Promise((r) => (resolveDone = r));
+  const finish = () => { if (!resolved) { resolved = true; resolveDone(); } };
+  const CPS = 1000, MAX_LAG = 240;
+  const paint = (t) => {
+    if (!last) last = t;
+    const dt = Math.min(0.05, (t - last) / 1000); // clamp big gaps (tab was backgrounded)
+    last = t;
+    if (shown < full.length) {
+      if (full.length - shown > MAX_LAG) shown = full.length - MAX_LAG; // never lag too far
+      shown = Math.min(full.length, shown + Math.max(2, Math.round(CPS * dt)));
+      onFrame(full.slice(0, shown));
+    }
+    if (!ended || shown < full.length) raf = requestAnimationFrame(paint);
+    else { raf = null; finish(); }
+  };
+  return {
+    push(t) { full += t; if (raf == null && !ended) { last = 0; raf = requestAnimationFrame(paint); } },
+    end() { ended = true; if (raf == null) { onFrame(full); finish(); } return done; },
+    stop() { ended = true; if (raf != null) { cancelAnimationFrame(raf); raf = null; } finish(); },
+  };
+}
+
 // Lightweight markdown renderer for AI replies — handles **bold** and line
 // breaks so responses read cleanly in the narrow chat (full markdown/tables are
 // intentionally not parsed; the system prompt asks the model to keep formatting
@@ -11573,19 +11603,29 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     // conversation through the callable fallback could execute them TWICE.
     let streamed = "";
     let gotEvent = false;
+    // Reveal streamed text smoothly (steady typewriter) instead of painting each
+    // bursty network chunk as it lands. streamed still accumulates the full text
+    // for the fallback/error logic below.
+    const smoother = makeStreamSmoother((txt) => setMessages([...next, { role: "assistant", content: txt }]));
     try {
       // Stream the reply (word-by-word). Fall back to the callable on failure.
       let done = null;
       await streamAiChat(apiMsgs, {
-        onDelta: (t) => { gotEvent = true; streamed += t; setMessages([...next, { role: "assistant", content: streamed }]); },
+        onDelta: (t) => { gotEvent = true; streamed += t; smoother.push(t); },
         onProposal: (meal) => { gotEvent = true; setProposal({ ...meal, status: "pending" }); },
         onWorkoutProposal: (w) => { gotEvent = true; setWorkout({ ...w, status: "pending" }); },
         onDone: (p) => { done = p; },
       });
+      // Let the typewriter finish revealing — but NEVER block on a stalled rAF.
+      // requestAnimationFrame pauses when the tab is backgrounded (or headless),
+      // so race a timeout, then force-stop so a late frame can't revert the text.
+      await Promise.race([smoother.end(), new Promise((r) => setTimeout(r, 1500))]);
+      smoother.stop();
       setMessages([...next, { role: "assistant", content: streamed || "(no response)" }]);
       if (done && done.usage && done.usage.warn) setWarn(true);
       if (done && done.wrote && typeof onDataChanged === "function") onDataChanged();
     } catch (streamErr) {
+      smoother.stop(); // cancel the RAF loop; the branches below set the final text
       const sc = (streamErr && streamErr.code) || "";
       if (sc.includes("trial-expired")) {
         setError("Your free trial has ended — upgrade to keep using Glidna AI.");
