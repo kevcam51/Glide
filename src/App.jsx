@@ -6991,8 +6991,11 @@ const fmtClock = (t) => {
 // shows indicators (food logged / weigh-in / workout / scheduled workout) and
 // can be opened to log or back-date food, weight, and workouts. Date keys are
 // local YYYY-MM-DD (Session 45) so they match the user's own calendar day.
+// NOTE (S90b): no useBodyScrollLock here — on the in-plan Daily Dashboard the
+// calendar renders IN-FLOW (it *is* the page, which must scroll normally); a
+// lock here froze the whole page on Android. ClientHome's portal-overlay usage
+// locks from the caller instead (useBodyScrollLock(showCalendar) there).
 function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods }) {
-  useBodyScrollLock(true);
   const todayKey = ymdLocal();
   const keyOf = (y, m, d) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
   const parseKey = (k) => { const [y, m, d] = k.split("-").map(Number); return { y, m: m - 1, d }; };
@@ -8994,16 +8997,29 @@ function useBackClose(isOpen, onClose) {
 // most visible in the installed iPhone app (message thread, chat, menus).
 // position:fixed on <body> is the only approach iOS Safari reliably honors;
 // scroll position is stashed and restored on close.
+// REF-COUNTED (S90b fix): two stacked overlays (e.g. the bell over the chat)
+// releasing out of order used to restore each other's styles and leave the
+// body permanently frozen — the page then couldn't scroll at all. Only the
+// FIRST lock stashes the styles and only the LAST release restores them.
+let bodyLocks = 0;
+let bodyLockPrev = null;
+let bodyLockY = 0;
 function useBodyScrollLock(active) {
   useEffect(() => {
     if (!active) return;
-    const y = window.scrollY;
     const b = document.body.style;
-    const prev = { position: b.position, top: b.top, left: b.left, right: b.right, width: b.width };
-    b.position = "fixed"; b.top = `-${y}px`; b.left = "0"; b.right = "0"; b.width = "100%";
+    if (++bodyLocks === 1) {
+      bodyLockY = window.scrollY;
+      bodyLockPrev = { position: b.position, top: b.top, left: b.left, right: b.right, width: b.width };
+      b.position = "fixed"; b.top = `-${bodyLockY}px`; b.left = "0"; b.right = "0"; b.width = "100%";
+    }
     return () => {
-      b.position = prev.position; b.top = prev.top; b.left = prev.left; b.right = prev.right; b.width = prev.width;
-      window.scrollTo(0, y);
+      if (--bodyLocks === 0 && bodyLockPrev) {
+        b.position = bodyLockPrev.position; b.top = bodyLockPrev.top; b.left = bodyLockPrev.left;
+        b.right = bodyLockPrev.right; b.width = bodyLockPrev.width;
+        bodyLockPrev = null;
+        window.scrollTo(0, bodyLockY);
+      }
     };
   }, [active]);
 }
@@ -12121,6 +12137,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   const [showWt, setShowWt] = useState(false);     // inline weight-log input open
   const [showChart, setShowChart] = useState(false); // progress chart popup open
   const [showCalendar, setShowCalendar] = useState(false); // full calendar (back-dating) overlay
+  useBodyScrollLock(showCalendar); // ClientHome's calendar is a portal OVERLAY (scrolls internally) — lock the page behind it
   const [recentFoods, setRecentFoods] = useState([]); // recent foods for the calendar's quick re-add chips
   const [signupYmd, setSignupYmd] = useState(null); // the client's signup date (profile.createdAt) → plan start date
   const [msg, setMsg] = useState("");              // calorie-log message
