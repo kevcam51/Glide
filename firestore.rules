@@ -105,6 +105,17 @@ service cloud.firestore {
       match /kv/{docId} {
         allow read, write: if canAccessUserData(uid);
       }
+
+      // PRIVATE per-user storage (S91, notes): OWNER ONLY — deliberately NOT
+      // the kv trainer-chain access. A client's private notes are readable by
+      // nobody else: not their trainer, not the head, not another client, and
+      // not even the admin via the client SDK. (Cloud Functions use the Admin
+      // SDK which bypasses rules — the AI tools enforce caller==target for
+      // this store in code, so the AI can never surface private notes to a
+      // trainer either.)
+      match /privkv/{docId} {
+        allow read, write: if isSignedIn() && request.auth.uid == uid;
+      }
     }
 
     // Is trainerUid actually the trainer over clientUid — either their direct

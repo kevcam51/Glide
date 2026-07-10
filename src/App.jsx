@@ -4,6 +4,7 @@ import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatI
 import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } from "./clientData.js";
 import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads } from "./messaging.js";
 import { pushStatus, enablePush, disablePush } from "./push.js";
+import { privGet, privSet, privSubscribe } from "./privateStore.js";
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -9698,6 +9699,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // In-app messaging (S90): which client's DM is open + live unread counts per
   // client (one threads listener; badges gated by the messages notif pref).
   const [msgFor, setMsgFor] = useState(null); // client object | null
+  const [notesFor, setNotesFor] = useState(null); // client object | null — Notes panel (S91)
   const [msgUnread, setMsgUnread] = useState({}); // clientUid -> my unread count
   const msgBadgesOn = np.master && np.messages !== false;
   useEffect(() => {
@@ -10119,6 +10121,9 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                             <span className="rounded-full bg-primary px-1.5 text-[.66rem] font-bold text-primaryfg">{msgUnread[c.uid]}</span>
                           )}
                         </button>
+                        <button className={`${mBtnCls} inline-flex items-center gap-1.5`} onClick={() => setNotesFor(c)}>
+                          <Icon name="file" size={16} color="var(--accent)" />Notes
+                        </button>
                         {c.hasPlan && (
                           <button className={mBtnCls} onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>Open plan</button>
                         )}
@@ -10296,6 +10301,10 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           {msgFor && (
             <MessageThread trainerUid={meUid} clientUid={msgFor.uid} meUid={meUid}
               otherName={msgFor.name} onClose={() => setMsgFor(null)} />
+          )}
+          {notesFor && (
+            <NotesPanel mode="trainer-client" meUid={meUid} meName={meName}
+              clientUid={notesFor.uid} clientName={notesFor.name} onClose={() => setNotesFor(null)} />
           )}
           {tzPick && (
             <div className="mt-2 p-3 rounded-[10px] bg-surface2 border border-border">
@@ -12158,6 +12167,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   // and my live unread count (badge gated by the messages notif pref).
   const [trainerInfo, setTrainerInfo] = useState(null); // { uid, name } | null
   const [showMsg, setShowMsg] = useState(false);
+  const [showNotes, setShowNotes] = useState(false); // Notes panel (S91)
   const [myUnread, setMyUnread] = useState(0);
   const msgBadgeOn = np.master && np.messages !== false;
   useEffect(() => {
@@ -12536,6 +12546,10 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
             {firstName ? `Hi, ${firstName} 👋` : "Your dashboard"}
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => setShowNotes(true)} title="Your notes"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
+              <Icon name="file" size={13} color="var(--accent)" />Notes
+            </button>
             {trainerInfo && (
               <button onClick={() => setShowMsg(true)} title="Message your trainer"
                 className="relative inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
@@ -12561,6 +12575,9 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
         {showMsg && trainerInfo && (
           <MessageThread trainerUid={trainerInfo.uid} clientUid={meUid} meUid={meUid}
             otherName={trainerInfo.name} onClose={() => setShowMsg(false)} />
+        )}
+        {showNotes && (
+          <NotesPanel mode="client" meUid={meUid} meName={meName} onClose={() => setShowNotes(false)} />
         )}
 
         {/* Plan switcher (Session 21) — pick the active plan, or make a new one. */}
@@ -13654,6 +13671,218 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
     </div>, document.body);
 }
 
+// ── Notes (S91, docs/NOTES-PLAN.md) ──────────────────────────────────────────
+// One panel, three contexts:
+//   mode="client"          my notes: PRIVATE (privkv — rules: owner-only) + shared (my kv)
+//   mode="trainer-client"  notes about a client: my private about-notes (my kv,
+//                          aboutUid) + the client's SHARED notes (their kv)
+//   mode="trainer-self"    my general notes (my kv, no aboutUid)
+// Auto-title from the first line (Notes-app behavior); sparkle badge = AI recap.
+const NOTES_KEY = "caliq-notes";
+const parseNotes = (val) => { try { const a = val ? JSON.parse(val) : []; return Array.isArray(a) ? a : []; } catch { return []; } };
+const noteAutoTitle = (body) => (String(body || "").trim().split("\n")[0] || "Untitled").slice(0, 40);
+function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
+  useBodyScrollLock(true);
+  useBackClose(true, onClose);
+  const uid = meUid || (auth.currentUser && auth.currentUser.uid);
+  const [privNotes, setPrivNotes] = useState([]);   // client mode only (privkv)
+  const [ownKvNotes, setOwnKvNotes] = useState([]); // my kv caliq-notes
+  const [clientKvNotes, setClientKvNotes] = useState([]); // target client's kv (trainer-client)
+  const [editing, setEditing] = useState(null); // null | "new" | note object
+  const [dTitle, setDTitle] = useState("");
+  const [dBody, setDBody] = useState("");
+  const [dShared, setDShared] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  // Live sources per mode
+  useEffect(() => {
+    const unsubs = [];
+    if (mode === "client") {
+      unsubs.push(privSubscribe(NOTES_KEY, (v) => setPrivNotes(parseNotes(v))));
+      unsubs.push(subscribeForUser(uid, NOTES_KEY, (v) => setOwnKvNotes(parseNotes(v))));
+    } else {
+      unsubs.push(subscribeForUser(uid, NOTES_KEY, (v) => setOwnKvNotes(parseNotes(v))));
+      if (mode === "trainer-client" && clientUid) {
+        unsubs.push(subscribeForUser(clientUid, NOTES_KEY, (v) => setClientKvNotes(parseNotes(v))));
+      }
+    }
+    return () => unsubs.forEach((u) => u && u());
+  }, [mode, uid, clientUid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The merged, badged list for this context. _store tags where a note lives
+  // so edits/deletes write back to the right place.
+  const notes = (() => {
+    if (mode === "client") {
+      return [
+        ...privNotes.map((n) => ({ ...n, _store: "priv" })),
+        ...ownKvNotes.map((n) => ({ ...n, _store: "sharedOwn" })),
+      ].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    }
+    if (mode === "trainer-client") {
+      return [
+        ...ownKvNotes.filter((n) => n.aboutUid === clientUid).map((n) => ({ ...n, _store: "aboutClient" })),
+        ...clientKvNotes.map((n) => ({ ...n, _store: "clientShared" })),
+      ].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    }
+    return ownKvNotes.filter((n) => !n.aboutUid).map((n) => ({ ...n, _store: "self" }))
+      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  })();
+
+  // store readers/writers (read-modify-write; the AI side is transactional)
+  const readStore = async (store) => {
+    if (store === "priv") return parseNotes(await privGet(NOTES_KEY));
+    if (store === "clientShared") { const r = await getForUser(clientUid, NOTES_KEY); return parseNotes(r && r.value); }
+    const r = await window.storage.get(NOTES_KEY).catch(() => null); // own kv (sharedOwn/aboutClient/self)
+    return parseNotes(r && r.value);
+  };
+  const writeStore = async (store, arr) => {
+    const val = JSON.stringify(arr.slice(0, 100));
+    if (store === "priv") return privSet(NOTES_KEY, val);
+    if (store === "clientShared") return setForUser(clientUid, NOTES_KEY, val);
+    return window.storage.set(NOTES_KEY, val);
+  };
+  // Which store a NEW note goes to, given the shared toggle.
+  const storeForNew = () => {
+    if (mode === "client") return dShared ? "sharedOwn" : "priv";
+    if (mode === "trainer-client") return dShared ? "clientShared" : "aboutClient";
+    return "self";
+  };
+
+  const openNew = () => { setEditing("new"); setDTitle(""); setDBody(""); setDShared(false); setErr(""); };
+  const openNote = (n) => { setEditing(n); setDTitle(n.title || ""); setDBody(n.body || ""); setDShared(n._store === "sharedOwn" || n._store === "clientShared"); setErr(""); };
+
+  const saveNote = async () => {
+    const body = dBody.trim();
+    if (!body || busy) return;
+    setBusy(true); setErr("");
+    try {
+      const now = Date.now();
+      const title = dTitle.trim() || noteAutoTitle(body);
+      if (editing === "new") {
+        const store = storeForNew();
+        const note = { id: `nt${now}${Math.floor(Math.random() * 1e4)}`, title, body,
+          authorUid: uid, authorName: meName || "Me",
+          visibility: store === "priv" || store === "aboutClient" || store === "self" ? "private" : "shared",
+          ...(store === "aboutClient" ? { aboutUid: clientUid } : {}), kind: "note",
+          createdAt: now, updatedAt: now };
+        const arr = await readStore(store);
+        await writeStore(store, [note, ...arr]);
+      } else {
+        const wantStore = storeForNew();
+        const moved = wantStore !== editing._store && (mode === "client" || mode === "trainer-client");
+        if (moved) { // visibility flipped → move between stores
+          const from = await readStore(editing._store);
+          await writeStore(editing._store, from.filter((n) => n.id !== editing.id));
+          const { _store, ...clean } = editing;
+          const note = { ...clean, title, body, updatedAt: now,
+            visibility: wantStore === "priv" || wantStore === "aboutClient" ? "private" : "shared",
+            ...(wantStore === "aboutClient" ? { aboutUid: clientUid } : {}) };
+          if (wantStore !== "aboutClient") delete note.aboutUid;
+          const to = await readStore(wantStore);
+          await writeStore(wantStore, [note, ...to]);
+        } else {
+          const arr = await readStore(editing._store);
+          await writeStore(editing._store, arr.map((n) => n.id === editing.id ? { ...n, title, body, updatedAt: now } : n));
+        }
+      }
+      setEditing(null);
+    } catch (e) { setErr("Couldn't save — try again."); }
+    setBusy(false);
+  };
+  const deleteNote = async () => {
+    if (busy || editing === "new" || !editing) return;
+    setBusy(true);
+    try {
+      const arr = await readStore(editing._store);
+      await writeStore(editing._store, arr.filter((n) => n.id !== editing.id));
+      setEditing(null);
+    } catch (e) { setErr("Couldn't delete — try again."); }
+    setBusy(false);
+  };
+
+  const badge = (n) => {
+    if (n._store === "priv") return { icon: "fingerprint", label: "Private" };
+    if (n._store === "aboutClient") return { icon: "fingerprint", label: "Private to you" };
+    if (n._store === "self") return { icon: "file", label: "My note" };
+    return { icon: "clients", label: mode === "trainer-client" ? `Shared with ${clientName || "client"}` : "Shared with trainer" };
+  };
+  const heading = mode === "trainer-client" ? `Notes — ${clientName || "Client"}` : mode === "trainer-self" ? "My Notes" : "My Notes";
+  const shareLabel = mode === "trainer-client" ? `Visible to ${clientName || "the client"}` : "Visible to my trainer";
+
+  return createPortal(
+    <div data-theme="pro" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2350, background: "rgba(0,0,0,.78)",
+      display: "flex", justifyContent: "center", padding: "14px", paddingTop: "calc(14px + env(safe-area-inset-top,0px))", overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card"
+        style={{ width: "min(94vw,460px)", padding: "18px 16px", margin: "auto 0", maxHeight: "86vh", display: "flex", flexDirection: "column", gap: "10px" }}>
+        <div className="flex items-center gap-2">
+          <Icon name="file" size={18} color="var(--accent)" />
+          <div className="font-display font-bold text-fg" style={{ fontSize: "1.02rem" }}>{heading}</div>
+          <button onClick={onClose} aria-label="Close notes" className="ml-auto text-muted"
+            style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: "1.1rem", padding: "4px" }}>✕</button>
+        </div>
+
+        {editing === null ? (
+          <>
+            <button onClick={openNew}
+              className="flex items-center justify-center gap-1.5 rounded-xl border-none bg-primaryfill px-3 py-2.5 text-[.86rem] font-bold text-primaryfg cursor-pointer">
+              <Icon name="plus" size={14} color="var(--color-primaryfg)" />New note
+            </button>
+            <div className="flex flex-col gap-1.5 overflow-y-auto">
+              {notes.length === 0 && (
+                <div className="py-7 text-center text-[.82rem] text-muted">
+                  No notes yet. Jot to-dos, questions for {mode === "trainer-client" ? "sessions" : "your trainer"}, or ask the AI to save a recap here.
+                </div>
+              )}
+              {notes.map((n) => { const b = badge(n); return (
+                <button key={`${n._store}-${n.id}`} onClick={() => openNote(n)}
+                  className="rounded-xl border border-border bg-surface2 px-3 py-2.5 text-left cursor-pointer">
+                  <div className="flex items-center gap-1.5">
+                    {n.kind === "recap" && <Icon name="sparkle" size={13} color="var(--accent)" />}
+                    <span className="truncate text-[.88rem] font-semibold text-fg">{n.title || "Untitled"}</span>
+                  </div>
+                  <div className="mt-0.5 truncate text-[.74rem] text-muted">{(n.body || "").replace(/\n/g, " ").slice(0, 70)}</div>
+                  <div className="mt-1 flex items-center gap-1.5 text-[.64rem] text-muted">
+                    <Icon name={b.icon} size={11} color="var(--muted)" />{b.label}
+                    {n.authorUid && n.authorUid !== uid && <span>· by {n.authorName || "them"}</span>}
+                    <span className="ml-auto">{timeAgo(n.updatedAt || n.createdAt)}</span>
+                  </div>
+                </button>
+              ); })}
+            </div>
+          </>
+        ) : (
+          <div className="flex min-h-0 flex-col gap-2">
+            <input value={dTitle} onChange={(e) => setDTitle(e.target.value)} placeholder="Title (auto from first line if blank)"
+              className="rounded-lg border border-border bg-surface2 px-3 py-2 text-[.9rem] font-semibold text-fg outline-none placeholder:text-muted" />
+            <textarea value={dBody} onChange={(e) => setDBody(e.target.value)} rows={9} placeholder="Write anything…"
+              style={{ fontFamily: "var(--font-sans)" }}
+              className="min-h-[160px] flex-1 resize-none rounded-lg border border-border bg-surface2 px-3 py-2.5 text-[.88rem] leading-relaxed text-fg outline-none placeholder:text-muted" />
+            {mode !== "trainer-self" && (
+              <button onClick={() => setDShared((v) => !v)}
+                className="flex items-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-2 text-left text-[.8rem] cursor-pointer">
+                <Icon name={dShared ? "clients" : "fingerprint"} size={15} color="var(--accent)" />
+                <span className="flex-1 text-fg">{dShared ? shareLabel : "Private — only you can see this"}</span>
+                <span className="text-[.68rem] font-bold text-primary">change</span>
+              </button>
+            )}
+            {err && <div className="text-[.76rem] text-danger">{err}</div>}
+            <div className="flex gap-2">
+              <button onClick={saveNote} disabled={busy || !dBody.trim()}
+                className="flex-1 rounded-xl border-none bg-primaryfill px-3 py-2.5 text-[.86rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50">{busy ? "…" : "Save"}</button>
+              {editing !== "new" && (
+                <button onClick={deleteNote} disabled={busy}
+                  className="rounded-xl border border-danger/50 bg-transparent px-3 py-2.5 text-[.82rem] font-semibold text-danger cursor-pointer disabled:opacity-50">Delete</button>
+              )}
+              <button onClick={() => { setEditing(null); setErr(""); }} disabled={busy}
+                className="rounded-xl border border-border bg-transparent px-3 py-2.5 text-[.82rem] font-semibold text-muted cursor-pointer">Back</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>, document.body);
+}
+
 // ── Notification feed ("the bell", S90b — Kevin's ask) ───────────────────────
 // A chronological list of everything that happened since you last looked:
 // messages, trainer to-dos, client requests. Entries are written server-side
@@ -13784,6 +14013,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
   const [upgradeBusy, setUpgradeBusy] = useState(false); // Stripe portal redirect in flight (S89)
   const [showPicker, setShowPicker] = useState(false);   // S89c plan picker (Upgrade → choose plan → Checkout)
   const [showAdmin, setShowAdmin] = useState(false);      // S90 admin all-users dashboard
+  const [showMyNotes, setShowMyNotes] = useState(false);  // S91 trainer general notes
   const [upgradeErr, setUpgradeErr] = useState(false);
   useBackClose(open, onClose);                        // phone Back closes the menu
   useBodyScrollLock(open);
@@ -14052,6 +14282,14 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
             <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
           </button>
         )}
+        {/* My notes (trainer) — general notes; per-client notes live on the client cards (S91) */}
+        {isTrainer && (
+          <button style={item} onClick={() => setShowMyNotes(true)}>
+            <Icon name="file" size={19} color="var(--accent)" /> <span>My notes</span>
+            <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
+          </button>
+        )}
+        {showMyNotes && <NotesPanel mode="trainer-self" meName={meName} onClose={() => setShowMyNotes(false)} />}
 
         {/* Face ID / Touch ID sign-in — registers a passkey for THIS device so
             future sign-ins (e.g. after the 30-min idle sign-out) are one glance

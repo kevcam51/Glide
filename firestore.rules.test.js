@@ -204,6 +204,22 @@ await check("signed-out reads a thread", assertFails(getDoc(threadDoc(anon, H, C
 await check("signed-out sends a message", assertFails(setDoc(doc(msgCol(anon, H, C1), "anonm"), { from: H, text: "hi", ts: 7 })));
 await check("unconstrained threads list DENIED", assertFails(getDocs(collection(t2, "threads"))));
 
+// ---- Private storage (S91, notes): users/{uid}/privkv — OWNER ONLY ---------
+// The whole point: a client's private notes are invisible to the trainer chain
+// that CAN read their kv. Every kv-style access path must DENY here.
+const priv = (db, owner) => doc(db, "users", owner, "privkv", "caliq-notes");
+
+console.log("\nPRIVATE STORAGE (privkv) — owner only:");
+await check("owner writes own private notes", assertSucceeds(setDoc(priv(c1, C1), { k: "caliq-notes", value: "[]" })));
+await check("owner reads own private notes", assertSucceeds(getDoc(priv(c1, C1))));
+await check("DIRECT TRAINER cannot read client's private notes", assertFails(getDoc(priv(head, C1))));
+await check("HEAD (of sub's client) cannot read private notes", assertFails(getDoc(priv(head, C2))));
+await check("direct trainer cannot WRITE client's private notes", assertFails(setDoc(priv(head, C1), { k: "caliq-notes", value: "[]" })));
+await check("another client cannot read private notes", assertFails(getDoc(priv(c3, C1))));
+await check("ADMIN (client SDK) cannot read private notes", assertFails(getDoc(priv(admin, C1))));
+await check("signed-out cannot read private notes", assertFails(getDoc(priv(anon, C1))));
+await check("unconstrained privkv list denied", assertFails(getDocs(collection(head, "users", C1, "privkv"))));
+
 console.log(`\n==== ${passed} passed, ${failed} failed ====`);
 if (failures.length) console.log("FAILED:", failures.join(" | "));
 await testEnv.cleanup();

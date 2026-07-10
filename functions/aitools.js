@@ -333,6 +333,31 @@ async function kvTxnJSON(db, uid, key, fn) {
   });
   return out;
 }
+// privkv (S91, notes): the OWNER-ONLY store (rules deny even the trainer
+// chain). The Admin SDK bypasses rules, so the guarantee here is CODE-level:
+// these helpers are only ever called with uid === ctx.callerUid — the AI can
+// never surface a client's private notes to a trainer.
+function privDocRef(db, uid, key) {
+  return db.doc(`users/${uid}/privkv/${encodeURIComponent(key)}`);
+}
+async function privGetJSON(db, uid, key) {
+  try {
+    const snap = await privDocRef(db, uid, key).get();
+    return snap.exists ? JSON.parse(snap.data().value || "null") : null;
+  } catch (e) { return null; }
+}
+async function privTxnJSON(db, uid, key, fn) {
+  const ref = privDocRef(db, uid, key);
+  let out;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    let cur = null;
+    try { cur = snap.exists ? JSON.parse(snap.data().value || "null") : null; } catch { cur = null; }
+    out = fn(cur);
+    tx.set(ref, { k: key, value: JSON.stringify(out) });
+  });
+  return out;
+}
 function randId(p) { return `${p}${Date.now()}${Math.floor(Math.random() * 1000)}`; }
 
 // Normalize a clock time the user/AI gives for when a meal was eaten into a
@@ -944,6 +969,53 @@ function buildTools(role, opts = {}) {
       },
     },
     {
+      name: "list_notes",
+      description:
+        "List the user's saved NOTES (the Notes panel in the app): title, body, where each is stored, and ids for "
+        + "update_note. Call before updating so you edit the right note instead of duplicating (especially recaps — "
+        + "re-recapping should UPDATE the existing recap note). A trainer passing clientId sees the client's SHARED notes "
+        + "plus the trainer's own private notes about that client — a client's PRIVATE notes are never visible to anyone else.",
+      input_schema: { type: "object", properties: { ...clientIdProp } },
+    },
+    {
+      name: "create_note",
+      description:
+        "Save a NOTE to the user's Notes panel. Use when asked to 'write this down', 'remember this', 'make a note', or "
+        + "'save a recap' (kind='recap' — a summary of this conversation or a client snapshot). For a CLIENT the note is "
+        + "PRIVATE by default (shared=true makes it visible to their trainer — ask before sharing). For a TRAINER with "
+        + "clientId: private-to-the-trainer about that client by default; shared=true puts it in the client's notes where "
+        + "the client can see it. Title optional (auto-generated from the first line).",
+      input_schema: {
+        type: "object",
+        properties: {
+          body: { type: "string", description: "The note content (plain text; newlines ok)" },
+          title: { type: "string", description: "Optional title; defaults to the first line" },
+          shared: { type: "boolean", description: "true = visible to the other side (client↔trainer). Default false (private)." },
+          kind: { type: "string", enum: ["note", "recap"], description: "'recap' for conversation summaries / client snapshots (gets a recap badge)" },
+          ...clientIdProp,
+        },
+        required: ["body"],
+      },
+    },
+    {
+      name: "update_note",
+      description:
+        "Update an existing note by id (get ids from list_notes). Default is APPEND (appendBody adds to the end); "
+        + "pass body to REPLACE the content, title to retitle. Use for adding to running lists ('add eggs to my grocery "
+        + "note') and refreshing recap notes instead of creating duplicates.",
+      input_schema: {
+        type: "object",
+        properties: {
+          noteId: { type: "string", description: "The note's id from list_notes" },
+          appendBody: { type: "string", description: "Text to ADD to the end of the note" },
+          body: { type: "string", description: "REPLACE the whole body with this" },
+          title: { type: "string", description: "New title" },
+          ...clientIdProp,
+        },
+        required: ["noteId"],
+      },
+    },
+    {
       name: "fetch_link",
       description:
         "Read a web/video LINK the user shares (a YouTube/Instagram/TikTok workout or recipe, a blog, an article) and get "
@@ -1195,6 +1267,86 @@ async function runTool(name, input, ctx) {
   // Data tools — resolve & authorize the target user first.
   const uid = await resolveTargetUid(db, input, ctx);
   if (uid && uid.error) return uid; // { error }
+
+  // ── Notes tools (S91, docs/NOTES-PLAN.md) ─────────────────────────────────
+  // Privacy invariant enforced HERE, not by the model: the privkv (private)
+  // store is only ever touched when the target IS the caller. A trainer with
+  // clientId gets the client's SHARED notes + their own about-notes, period.
+  if (name === "list_notes" || name === "create_note" || name === "update_note") {
+    const isSelf = uid === ctx.callerUid;
+    const cap = (arr) => [...arr].slice(0, 100);
+    if (name === "list_notes") {
+      const shared = (await kvGetJSON(db, uid, "caliq-notes")) || [];
+      const priv = isSelf ? (await privGetJSON(db, ctx.callerUid, "caliq-notes")) || [] : [];
+      const about = !isSelf
+        ? ((await kvGetJSON(db, ctx.callerUid, "caliq-notes")) || []).filter((n) => n && n.aboutUid === uid)
+        : [];
+      const fmt = (n, where) => ({ id: n.id, title: n.title || "Untitled", body: String(n.body || "").slice(0, 1000),
+        storedAs: where, kind: n.kind || "note", author: n.authorName || null,
+        aboutClient: n.aboutUid ? true : undefined, updatedAt: n.updatedAt || n.createdAt || null });
+      const notes = [
+        ...priv.map((n) => fmt(n, "private")),
+        ...shared.map((n) => fmt(n, isSelf ? (ctx.isTrainer ? "my-notes" : "shared-with-trainer") : "shared-with-client")),
+        ...about.map((n) => fmt(n, "private-to-you-about-this-client")),
+      ].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 30);
+      return { count: notes.length, notes };
+    }
+    if (name === "create_note") {
+      const body = String(input.body || "").trim().slice(0, 4000);
+      if (!body) return { error: "Provide the note body." };
+      const now = Date.now();
+      const note = {
+        id: `nt${now}${Math.floor(Math.random() * 1e4)}`,
+        title: String(input.title || "").trim().slice(0, 60) || String(body.split("\n")[0]).slice(0, 40),
+        body, authorUid: ctx.callerUid, authorName: ctx.callerName || "AI",
+        visibility: "private", kind: input.kind === "recap" ? "recap" : "note",
+        createdAt: now, updatedAt: now,
+      };
+      let storedAs;
+      if (isSelf) {
+        if (!ctx.isTrainer && input.shared !== true) {
+          await privTxnJSON(db, ctx.callerUid, "caliq-notes", (arr) => cap([note, ...(Array.isArray(arr) ? arr : [])]));
+          storedAs = "private";
+        } else {
+          if (!ctx.isTrainer) note.visibility = "shared";
+          await kvTxnJSON(db, uid, "caliq-notes", (arr) => cap([note, ...(Array.isArray(arr) ? arr : [])]));
+          storedAs = ctx.isTrainer ? "my-notes" : "shared-with-trainer";
+        }
+      } else if (input.shared === true) {
+        note.visibility = "shared";
+        await kvTxnJSON(db, uid, "caliq-notes", (arr) => cap([note, ...(Array.isArray(arr) ? arr : [])]));
+        storedAs = "shared-with-client";
+      } else {
+        note.aboutUid = uid;
+        await kvTxnJSON(db, ctx.callerUid, "caliq-notes", (arr) => cap([note, ...(Array.isArray(arr) ? arr : [])]));
+        storedAs = "private-to-you-about-this-client";
+      }
+      return { ok: true, id: note.id, title: note.title, storedAs };
+    }
+    // update_note — find which accessible store holds the id, then transact it.
+    const nid = String(input.noteId || "");
+    if (!nid) return { error: "Provide the noteId (from list_notes)." };
+    const apply = (arr) => (Array.isArray(arr) ? arr : []).map((n) => n && n.id === nid ? {
+      ...n,
+      title: input.title != null ? String(input.title).trim().slice(0, 60) || n.title : n.title,
+      body: input.appendBody
+        ? (String(n.body || "") + "\n" + String(input.appendBody).trim()).slice(0, 4000)
+        : (input.body != null ? String(input.body).trim().slice(0, 4000) : n.body),
+      updatedAt: Date.now(),
+    } : n);
+    const stores = isSelf
+      ? [...(!ctx.isTrainer ? [["priv", ctx.callerUid]] : []), ["kv", uid]]
+      : [["kv", uid], ["kv", ctx.callerUid]]; // client's shared notes, then my about-notes
+    for (const [type, tuid] of stores) {
+      const arr = type === "priv" ? await privGetJSON(db, tuid, "caliq-notes") : await kvGetJSON(db, tuid, "caliq-notes");
+      if (Array.isArray(arr) && arr.some((n) => n && n.id === nid)) {
+        if (type === "priv") await privTxnJSON(db, tuid, "caliq-notes", apply);
+        else await kvTxnJSON(db, tuid, "caliq-notes", apply);
+        return { ok: true, id: nid };
+      }
+    }
+    return { error: "Note not found — call list_notes for current ids." };
+  }
 
   // Local-plan targeting (S87, trainers): localPlanId points a tool at one of
   // the CALLER's OWN local plan files/simulations (from list_local_plans)
