@@ -1,5 +1,16 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡ S91 (Jul 9): NOTES SHIPPED (see docs/NOTES-PLAN.md header) + Android scroll root-caused
+- **Notes LIVE**: privkv owner-only store (rules published, 96/96 tests), NotesPanel ×3
+  contexts, client/trainer entries, AI list/create/update_note (privacy invariant in code).
+  Prod-verified: trainer 403 on client privkv; AI appends, no dupes.
+- **Android scroll freeze root-caused** (S90b): html+body were BOTH scroll containers since
+  day 1; overscroll-behavior blocked the chain → body now overflow-x:clip only, html default.
+  useBodyScrollLock is ref-counted; the in-flow calendar no longer locks.
+- **Queue now:** Kevin's three (real-card smoke · attorney pass ToS+Privacy · Trainerize
+  re-import) → then native-app decision / small-fry (Simple Daily Dashboard, custom exercises
+  per-person, in-app account deletion). Product backlog is essentially CLEAR.
+
 ## ✅ CUSTOM DOMAIN LIVE: **glidna.com** (S90, Jul 8) — rename sweep is the NEXT SESSION
 Kevin chose **Glidna** (slydra.com turned out to be in redemption; glidna.com+.app were clean)
 and bought BOTH via Vercel (~$11.25/yr each, auto-DNS). DONE: domains attached to the project
