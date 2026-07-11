@@ -1658,8 +1658,9 @@ async function runTool(name, input, ctx) {
     entry.timestamp = checkInTimestamp(date);
     d.measurements = [...d.measurements.filter((e) => e && e.date !== date), entry];
     const metrics = measurementMetrics(d, entry);
-    // A computed body-fat % also updates the plan's bodyFat (like log_check_in).
-    if (metrics.bodyFatPct != null) d.bodyFat = metrics.bodyFatPct;
+    // A computed body-fat % also updates the plan's bodyFat (like log_check_in) —
+    // unless the user opted out of the estimate (measurements-only mode).
+    if (metrics.bodyFatPct != null && !d.hideBodyFat) d.bodyFat = metrics.bodyFatPct;
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
     const bits = Object.keys(vals).map((f) => `${f} ${vals[f]}"`);
     await appendHistory(db, uid, planId, ctx, `logged measurements: ${bits.join(", ")} (${date})`);

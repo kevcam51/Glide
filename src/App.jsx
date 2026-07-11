@@ -273,7 +273,9 @@ function mergeMeasurements(d, vals, dateKey, loggedBy) {
   entry.timestamp = new Date(dateKey + "T12:00:00").getTime();
   d.measurements = [...list.filter((e) => e && e.date !== dateKey), entry];
   const m = measurementMetrics(d, entry);
-  if (m.bodyFatPct != null) d.bodyFat = m.bodyFatPct;
+  // Only sync the plan's body-fat field when the user hasn't opted out of the
+  // estimate (some people track tape numbers only — don't touch bodyFat then).
+  if (m.bodyFatPct != null && !d.hideBodyFat) d.bodyFat = m.bodyFatPct;
   return entry;
 }
 
@@ -3178,7 +3180,7 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   );
 }
 
-function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, defaultView = "detailed" }) {
+function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, defaultView = "detailed" }) {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
   // Simple (plain-English) vs Detailed plan view — a display pref, remembered
@@ -3419,6 +3421,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           {showMeasureModal && (
             <MeasurementsModal data={data} onSave={onSaveMeasurements}
               onDelete={onDeleteMeasurement} onSetGoalWeight={onSetGoalWeight}
+              onToggleBodyFat={onToggleBodyFat}
               onClose={() => setShowMeasureModal(false)} />
           )}
           <AICoach data={data} tdee={tdee} totalBurn={totalBurn} totalStrBurn={totalStrBurn} activeDays={activeDays} activeStrDays={activeStrDays} />
@@ -8989,23 +8992,28 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
 // height, trend any metric, delete mistakes, and (when weight + a goal body-fat
 // % exist) get the lean-mass-derived goal weight. docs/METRICS-PLAN.md is the
 // formula reference. Shared by ClientHome and Results (like WeightChartModal).
-function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onClose }) {
+function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBodyFat, onClose }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);
   const d = data || {};
+  // Body-fat estimate is optional: some people just want to track tape numbers
+  // as a tool. `data.hideBodyFat` turns off all the % / lean-mass / goal math
+  // and makes this a plain measurement tracker. Default = show.
+  const showBF = !d.hideBodyFat;
   const entries = [...(d.measurements || [])].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
   const latest = entries.length ? entries[entries.length - 1] : null;
-  const metrics = latest ? measurementMetrics(d, latest) : null;
+  const metrics = showBF && latest ? measurementMetrics(d, latest) : null;
 
   const [drafts, setDrafts] = useState({});
   const [msg, setMsg] = useState("");
   const [metric, setMetric] = useState("waist");
 
-  // Which metrics have 2+ points to chart. "bodyFat" is the computed tape BF%.
+  // Which metrics have 2+ points to chart. "bodyFat" is the computed tape BF%
+  // (only offered when the body-fat estimate is turned on).
   const chartable = MEASUREMENT_FIELDS.filter((f) => entries.filter((e) => Number(e[f]) > 0).length >= 2);
-  const bfPoints = entries.map((e) => ({ date: e.date, timestamp: e.timestamp, weight: measurementMetrics(d, e).bodyFatPct }))
-    .filter((p) => p.weight != null);
-  if (bfPoints.length >= 2) chartable.push("bodyFat");
+  const bfPoints = showBF ? entries.map((e) => ({ date: e.date, timestamp: e.timestamp, weight: measurementMetrics(d, e).bodyFatPct }))
+    .filter((p) => p.weight != null) : [];
+  if (showBF && bfPoints.length >= 2) chartable.push("bodyFat");
   const activeMetric = chartable.includes(metric) ? metric : chartable[0] || null;
   const points = activeMetric === "bodyFat" ? bfPoints
     : activeMetric ? entries.filter((e) => Number(e[activeMetric]) > 0)
@@ -9039,13 +9047,24 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onClose })
       <div onClick={(e) => e.stopPropagation()}
         className="w-full max-w-[640px] max-h-[88vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
         <div className="mb-3 flex items-center justify-between">
-          <div className="text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="ruler" size={17} color="var(--accent)" />Body measurements</div>
+          <div className="text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="ruler" size={17} color="var(--accent)" />{showBF ? "Body measurements" : "Measurements"}</div>
           <button onClick={onClose}
             className="rounded-md border border-border bg-transparent px-2.5 py-1.5 text-xs font-semibold text-fg cursor-pointer whitespace-nowrap">✕ Close</button>
         </div>
 
-        {/* Latest body-composition readout */}
-        {metrics && (metrics.bodyFatPct != null || metrics.waistToHeight != null) ? (
+        {/* Optional: estimate body fat % from the tape numbers, or just track them. */}
+        {onToggleBodyFat && (
+          <div className="mb-3 flex items-center justify-between rounded-lg bg-surface2 px-3 py-2">
+            <span className="text-sm text-muted">Estimate body fat % from these measurements</span>
+            <button onClick={() => onToggleBodyFat(!showBF)}
+              className={`rounded-md px-2.5 py-1 text-xs font-bold cursor-pointer whitespace-nowrap ${showBF ? "bg-primaryfill text-primaryfg border-0" : "bg-transparent text-fg border border-border"}`}>
+              {showBF ? "On" : "Off"}
+            </button>
+          </div>
+        )}
+
+        {/* Latest body-composition readout (only when body-fat estimate is on) */}
+        {showBF && metrics && (metrics.bodyFatPct != null || metrics.waistToHeight != null) ? (
           <div className="mb-3 rounded-lg bg-surface2 p-3">
             <div className="flex flex-wrap gap-x-4 gap-y-1 items-baseline">
               {metrics.bodyFatPct != null && (
@@ -9075,11 +9094,15 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onClose })
             )}
             <div className="mt-1.5 text-[11px] text-muted">Tape body fat is an estimate (±2%) — the trend matters more than the exact number.</div>
           </div>
-        ) : (
+        ) : showBF ? (
           <div className="mb-3 rounded-lg bg-surface2 p-3 text-sm text-muted">
             Track progress without the scale: log tape measurements below and body fat % is computed automatically. Needs {needed}.
           </div>
-        )}
+        ) : !entries.length ? (
+          <div className="mb-3 rounded-lg bg-surface2 p-3 text-sm text-muted">
+            Log your measurements below and watch the inches trend over time — no scale, no body-fat math.
+          </div>
+        ) : null}
 
         {/* Trend chart with a metric picker */}
         {chartable.length > 0 && (
@@ -12805,6 +12828,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
     await savePlanDataMutation((d) => { d.goalWeight = lbs; });
     await appendHistory(`set goal weight to ${lbs} lbs (from lean mass)`);
   };
+  const toggleBodyFat = (show) => savePlanDataMutation((d) => { d.hideBodyFat = !show; });
   const calSaveCheckIn = (checkin) => savePlanDataMutation((d) => {
     const others = (d.checkIns || []).filter((c) => c.date !== checkin.date);
     d.checkIns = [...others, checkin];
@@ -13234,6 +13258,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
       {showMeasure && (
         <MeasurementsModal data={planData || {}} onSave={saveMeasurements}
           onDelete={deleteMeasurement} onSetGoalWeight={setGoalFromLeanMass}
+          onToggleBodyFat={toggleBodyFat}
           onClose={() => setShowMeasure(false)} />
       )}
 
@@ -15861,6 +15886,7 @@ export default function App() {
             onDeleteMeasurement={(ts)=>setDataAndSave(p=>({...p,
               measurements: (p.measurements||[]).filter(e => e && e.timestamp !== ts)}))}
             onSetGoalWeight={(lbs)=>setDataAndSave(p=>({...p, goalWeight: lbs}))}
+            onToggleBodyFat={(show)=>setDataAndSave(p=>({...p, hideBodyFat: !show}))}
             onUpdateCardio={(day,idx,field,val)=>setDataAndSave(p=>{
               if (field==="_replace") return {...p, cardio:{...p.cardio,[day]:val}};
               const sessions = Array.isArray(p.cardio[day]) ? [...p.cardio[day]] : [];
