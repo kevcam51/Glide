@@ -1,5 +1,27 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡ S91b (Jul 11): AI chat polish + an OPEN pricing decision to resume
+- **Smooth typewriter streaming SHIPPED** (`makeStreamSmoother` in App.jsx): streamed replies
+  reveal at a steady ~1000 cps via requestAnimationFrame instead of jumpy network bursts.
+  Robustness: rAF pauses on a backgrounded tab, so the wait races a 1500ms timeout + force-stop
+  so a stalled frame can never hang `busy` or revert text. Also shipped earlier same session:
+  animated typing dots (`.glidna-typing`, replaced static "Thinking…"). Both prod-verified.
+- **⚠️ OPEN DECISION — heavy-trainer AI capacity (Kevin has NOT chosen yet).** Kevin worried a
+  20-client trainer using AI daily could hit the 60k Coach cap (real: a roster-wide query is
+  ~4-6k tokens, so a heavy day ~70k > 60k). I modeled it: raising base Coach 60k→100k costs us
+  ≤$7/mo/heavy-trainer (worst case) and holds 65% margin; the efficiency fix (trim big tool
+  results — the S85-deferred "semantic tool-result truncation") makes rosters ~2-3x cheaper with
+  no quality loss if done "summary + detail-on-demand". My rec: do BOTH; heavy daily users are
+  Coach Max ($79/200k) buyers. **Kevin was still deciding when we paused — resume here: does he
+  want the budget bump, the efficiency fix, both, or leave as-is?** (options were laid out via
+  AskUserQuestion; his answer was "explain the tradeoffs first," which I did.)
+- **Claude-Pro pricing framing (offered, not yet done):** I explained why Glide Max stays $29.99
+  (not $20 "unlimited") — Anthropic itself throttles Pro by messages, never sells tokens; our
+  caching makes a message ~1¢ so ~100/day at $29.99 keeps 50-85% margin. **Offered to add this
+  framing to docs/PRICING.md as marketing/objection-handling ammo — Kevin didn't answer before
+  wrap. Ask if he wants it.** Model pricing CONFIRMED current via claude-api skill: Sonnet tier
+  = $3/M in, $15/M out (matches PRICING.md).
+
 ## ⚡ S91 (Jul 9): NOTES SHIPPED (see docs/NOTES-PLAN.md header) + Android scroll root-caused
 - **Notes LIVE**: privkv owner-only store (rules published, 96/96 tests), NotesPanel ×3
   contexts, client/trainer entries, AI list/create/update_note (privacy invariant in code).
