@@ -692,7 +692,7 @@ function buildTools(role, opts = {}) {
     ? { clientId: { type: "string", description: "The client's id from list_clients. " + TRAINER_NOTE } }
     : {};
   const localPlanProp = isTrainer
-    ? { localPlanId: { type: "string", description: "Target one of YOUR OWN local plan files or simulations (id from list_local_plans) instead of an account — for prepping plans, sims, and imported Trainerize profiles. Do not combine with clientId." } }
+    ? { localPlanId: { type: "string", description: "One of YOUR OWN local plan/sim files (id from list_local_plans), not a client account. Never with clientId." } }
     : {};
 
   const tools = [
@@ -733,36 +733,34 @@ function buildTools(role, opts = {}) {
     {
       name: "set_personal_info",
       description:
-        "Fill in or update the plan's personal profile — the core stats the app needs to compute a calorie target "
-        + "(gender, age, height, current weight, activity level) plus optional goal weight and body-fat. Use this for "
-        + "conversational onboarding: when the user gives you their stats, save them here so their plan is complete and "
-        + "the dashboard shows a target. You may set fields the user just provided directly; only confirm first if you'd "
-        + "OVERWRITE an existing value with a different one. "
-        + (isTrainer ? "Pass clientId to set up a client's profile." : "Updates YOUR profile."),
+        "Save/update the plan's profile stats — the core fields a calorie target needs (gender, age, height, weight, "
+        + "activity) plus optional goals. Use for conversational onboarding. Set fields the user just gave directly; "
+        + "confirm only before overwriting an existing value with a different one. "
+        + (isTrainer ? "Pass clientId for a client." : "Updates YOUR profile."),
       input_schema: {
         type: "object",
         properties: {
-          firstName: { type: "string", description: "First name" },
-          lastName: { type: "string", description: "Last name" },
-          gender: { type: "string", enum: ["male", "female"], description: "Biological sex (used for the BMR/calorie calculation)" },
-          age: { type: "number", description: "Age in years" },
-          heightFeet: { type: "number", description: "Height — feet part (US units), e.g. 5 for 5'10\"" },
-          heightInches: { type: "number", description: "Height — inches part (0–11), e.g. 10 for 5'10\". Convert from cm or total inches if the user gives those." },
-          weightLbs: { type: "number", description: "Current body weight, pounds" },
+          firstName: { type: "string" },
+          lastName: { type: "string" },
+          gender: { type: "string", enum: ["male", "female"], description: "Biological sex (for the BMR calc)" },
+          age: { type: "number", description: "Years" },
+          heightFeet: { type: "number", description: "Height feet part, e.g. 5" },
+          heightInches: { type: "number", description: "Height inches part 0–11 (convert from cm/total inches if given)" },
+          weightLbs: { type: "number", description: "Current weight, lbs" },
           activityLevel: { type: "string", enum: ["sedentary", "light", "moderate", "very", "extra"],
-            description: "Everyday activity level (NOT workouts): sedentary=desk job/mostly sitting; light=some walking; moderate=on feet most of the day; very=physically demanding job; extra=intense labor all day" },
-          goalWeightLbs: { type: "number", description: "Goal body weight, pounds (optional)" },
-          goalRangeLowLbs: { type: "number", description: "Optional healthy weight-range LOW bound, pounds (a band instead of one exact goal)" },
-          goalRangeHighLbs: { type: "number", description: "Optional healthy weight-range HIGH bound, pounds (must be ≥ the low bound)" },
-          bodyFatPct: { type: "number", description: "Current body-fat %, optional" },
-          goalBodyFatPct: { type: "number", description: "Goal body-fat %, optional" },
-          trainerNotes: { type: "string", description: "Free-text coaching notes on the plan (mainly for trainers). Replaces the existing notes." },
+            description: "Everyday activity, NOT workouts: sedentary=desk; light=some walking; moderate=on feet most of day; very=demanding job; extra=intense labor" },
+          goalWeightLbs: { type: "number", description: "Goal weight, lbs" },
+          goalRangeLowLbs: { type: "number", description: "Optional goal-range low bound, lbs" },
+          goalRangeHighLbs: { type: "number", description: "Optional goal-range high bound, lbs (≥ low)" },
+          bodyFatPct: { type: "number", description: "Current body-fat %" },
+          goalBodyFatPct: { type: "number", description: "Goal body-fat %" },
+          trainerNotes: { type: "string", description: "Coaching notes (replaces existing)" },
           deficitMode: { type: "string", enum: ["eatback", "accelerate"],
-            description: "Nutrition approach: 'eatback' (default — workout burn is added to the daily calorie target: easier diet, steady ~1 lb/wk) or 'accelerate' (target stays at TDEE−500: tighter diet, workouts speed up the goal date instead). Set when the user chooses sustainability vs speed." },
+            description: "'eatback' (default: workout burn added to target, steady ~1 lb/wk) or 'accelerate' (target stays TDEE−500, workouts speed the goal date). Set on a sustainability-vs-speed choice." },
           wearableAdjust: { type: "boolean",
-            description: "Tracker adjustment (default false): when true AND the nutrition approach is 'eatback', a day whose log has wearable data (synced from the person's watch) gets its calorie target from the tracker's MEASURED burn (resting + active − 500) instead of the estimate. Days without tracker data keep the normal math; 'accelerate' ignores it. Set when the user asks for their watch/tracker/Garmin burn to drive their daily calories." },
+            description: "Default false. True + eatback: days with synced watch data use the tracker's measured burn (resting+active−500) as the target instead of the estimate. Set when the user wants their watch/Garmin burn to drive daily calories." },
           fitnessGoal: { type: "string", enum: ["lose", "build", "health"],
-            description: "The person's MAIN fitness goal — reshapes their Simple plan view: 'lose' (fat loss: deficit target), 'build' (muscle: surplus target ≈ maintenance + 250 + workout refuel), 'health' (stay healthy: maintenance target). Set when the user states their goal, e.g. 'I want to focus on building muscle now'." },
+            description: "Main goal (reshapes the Simple view): 'lose' (deficit), 'build' (surplus ≈ maintenance+250), 'health' (maintenance). Set when the user states their goal." },
           ...clientIdProp, ...localPlanProp,
         },
       },
@@ -770,18 +768,18 @@ function buildTools(role, opts = {}) {
     {
       name: "list_plans",
       description:
-        "List the plans on this account (id, name, and which is active). A person can have several plans — e.g. a cut "
-        + "phase, a maintenance phase, a bulk. The active plan drives the dashboard, logging, and targets. "
+        "List the plans on this account (id, name, which is active). A person can have several — e.g. cut, maintenance, "
+        + "bulk phases. The active plan drives the dashboard, logging, and targets. "
         + (isTrainer ? TRAINER_NOTE : CLIENT_NOTE),
       input_schema: { type: "object", properties: { ...clientIdProp } },
     },
     {
       name: "create_plan",
       description:
-        "Create a NEW plan — e.g. to start a cut, maintenance, or bulk phase. By default it carries over the person's "
-        + "personal stats (gender/age/height/weight/activity) so they don't re-enter them, and becomes the active plan. "
-        + "Pass goalWeightLbs to set the phase's goal. Workouts/targets/logs start fresh — build them after with the other "
-        + "tools. Confirm with the user before creating. " + (isTrainer ? "Pass clientId to create for a client." : "Creates on YOUR account."),
+        "Create a NEW plan — e.g. a cut, maintenance, or bulk phase. By default carries over personal stats "
+        + "(gender/age/height/weight/activity) and becomes the active plan. Pass goalWeightLbs for the phase's goal. "
+        + "Workouts/targets/logs start fresh — build them after. Confirm before creating. "
+        + (isTrainer ? "Pass clientId to create for a client." : "Creates on YOUR account."),
       input_schema: {
         type: "object",
         properties: {
@@ -797,7 +795,7 @@ function buildTools(role, opts = {}) {
     {
       name: "switch_plan",
       description:
-        "Make a different EXISTING plan the active one (use a planId from list_plans). The active plan drives the "
+        "Make a different EXISTING plan active (planId from list_plans). The active plan drives the "
         + "dashboard, logging, and targets. Confirm which plan before switching. "
         + (isTrainer ? "Pass clientId to switch a client's active plan." : "Switches YOUR active plan."),
       input_schema: {
@@ -812,9 +810,8 @@ function buildTools(role, opts = {}) {
     {
       name: "propose_meal",
       description:
-        "Show the user a tappable confirmation CARD for a meal you've estimated (from their description or a photo). "
-        + "This is the PREFERRED way to log food: estimate the macros, then call propose_meal — the user taps Accept on "
-        + "the card to save it (or Edit to adjust). Do NOT also call log_meal for the same meal; the card saves it. "
+        "PREFERRED way to log food: estimate a meal's macros (from description or photo), then call propose_meal to "
+        + "show a tappable Accept/Edit confirmation CARD that saves it. Do NOT also call log_meal for the same meal. "
         + "Briefly note your estimate in text too. " + (isTrainer ? "Pass clientId to propose for a client." : ""),
       input_schema: {
         type: "object",
@@ -826,7 +823,7 @@ function buildTools(role, opts = {}) {
           carbs: { type: "number", description: "Carb grams (0 if unknown)" },
           fat: { type: "number", description: "Fat grams (0 if unknown)" },
           date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
-          time: { type: "string", description: "Clock time the meal was eaten, e.g. '8:30am' or '19:45'. Set it when the user mentions when they ate; omit to use now." },
+          time: { type: "string", description: "Clock time eaten, e.g. '8:30am' or '19:45'. Set when the user mentions when they ate; omit for now." },
           ...clientIdProp, ...localPlanProp,
         },
         required: ["name", "mealType", "calories"],
@@ -835,8 +832,8 @@ function buildTools(role, opts = {}) {
     {
       name: "log_meal",
       description:
-        "Save a meal to the food log DIRECTLY (no card). Prefer propose_meal instead — only use log_meal when the user "
-        + "explicitly says to log without confirming (e.g. 'just log it, no card'). It appears on the dashboard, calendar, "
+        "Save a meal to the food log DIRECTLY (no card). Prefer propose_meal — only use log_meal when the user "
+        + "explicitly says to log without confirming (e.g. 'just log it'). Appears on the dashboard, calendar, "
         + "and weekly totals. "
         + (isTrainer ? "Pass clientId (from list_clients) to log for a client; omit for yourself." : "Logs to YOUR own food log."),
       input_schema: {
@@ -849,7 +846,7 @@ function buildTools(role, opts = {}) {
           carbs: { type: "number", description: "Carb grams (0 if unknown)" },
           fat: { type: "number", description: "Fat grams (0 if unknown)" },
           date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
-          time: { type: "string", description: "Clock time the meal was eaten, e.g. '8:30am' or '19:45'. Set it when the user mentions when they ate; omit to use now." },
+          time: { type: "string", description: "Clock time eaten, e.g. '8:30am' or '19:45'. Set when the user mentions when they ate; omit for now." },
           ...clientIdProp, ...localPlanProp,
         },
         required: ["name", "mealType", "calories"],
@@ -858,8 +855,8 @@ function buildTools(role, opts = {}) {
     {
       name: "log_workout",
       description:
-        "Record that a workout was completed on a day (marks the day as a workout day; feeds the streak and calendar). Add a short note for what they did if mentioned. "
-        + "Confirm with the user first. " + (isTrainer ? "Pass clientId to record for a client." : "Records for YOU."),
+        "Mark a day as a completed workout day (feeds the streak and calendar). Add a short note if what they did is mentioned. "
+        + "Confirm first. " + (isTrainer ? "Pass clientId to record for a client." : "Records for YOU."),
       input_schema: {
         type: "object",
         properties: {
@@ -872,7 +869,7 @@ function buildTools(role, opts = {}) {
     {
       name: "log_weigh_in",
       description:
-        "Record a body-weight weigh-in. Updates current weight and the progress chart. Confirm the number with the user first. "
+        "Record a body-weight weigh-in (updates current weight + progress chart). Confirm the number first. "
         + (isTrainer ? "Pass clientId to record for a client." : "Records for YOU."),
       input_schema: {
         type: "object",
@@ -887,7 +884,7 @@ function buildTools(role, opts = {}) {
     {
       name: "log_check_in",
       description:
-        "Record daily check-in details WITHOUT needing a weight: mood/energy (1–5), body-fat %, whether they hit their calorie target, and/or a note. Merges into the same date's check-in (never wipes other fields). Use when the user shares how they feel, a body-fat reading, or a daily note — e.g. 'felt great today', 'body fat came in at 18%', 'note: knee was sore'. For weight itself use log_weigh_in."
+        "Record daily check-in details WITHOUT a weight: mood/energy (1–5), body-fat %, whether they hit their calorie target, and/or a note. Merges into the same date's check-in (never wipes other fields). Use when the user shares how they feel, a body-fat reading, or a daily note. For weight itself use log_weigh_in."
         + (isTrainer ? " Pass clientId to record for a client." : ""),
       input_schema: {
         type: "object",
@@ -905,8 +902,8 @@ function buildTools(role, opts = {}) {
       name: "log_measurements",
       description:
         "Record tape measurements (inches) for a date: waist, hips, neck, thigh, calf, forearm, wrist — any subset. Merges into the same date's entry (never wipes other fields). "
-        + "Body-fat % is auto-computed from whatever fields exist (Covert Bailey needs no scale/height; U.S. Navy needs waist+neck(+hips for women)). Great for scale-averse clients. "
-        + "Measure at the widest point (wrist: narrowest). Confirm the numbers with the user first. "
+        + "Body-fat % is auto-computed from whatever fields exist (Bailey needs no scale/height; U.S. Navy needs waist+neck(+hips for women)). "
+        + "Measure at the widest point (wrist: narrowest). Confirm the numbers first. "
         + (isTrainer ? "Pass clientId to record for a client." : "Records for YOU."),
       input_schema: {
         type: "object",
@@ -926,7 +923,7 @@ function buildTools(role, opts = {}) {
     {
       name: "get_measurements",
       description:
-        "Read recent tape measurements + computed body composition: Bailey & Navy body-fat %, waist-to-height ratio (>0.5 = elevated risk), lean mass, and the lean-mass-derived goal weight when a goal body-fat % is set. Use for 'how's my waist trending', 'what's my body fat', or non-scale progress questions."
+        "Read recent tape measurements + computed body composition: Bailey & Navy body-fat %, waist-to-height ratio (>0.5 = elevated risk), lean mass, and the lean-mass-derived goal weight when a goal body-fat % is set. Use for waist-trend, body-fat, or non-scale progress questions."
         + (isTrainer ? " Pass clientId for a client." : ""),
       input_schema: {
         type: "object",
@@ -939,7 +936,7 @@ function buildTools(role, opts = {}) {
     {
       name: "log_water",
       description:
-        "Log water intake for a day. Accepts ounces (or convert cups: 1 cup = 8 oz). Default ADDS to the day's total; set mode='set' to overwrite it. E.g. 'log 3 cups of water' → 24 oz added."
+        "Log water intake for a day in ounces (convert cups: 1 cup = 8 oz). Default ADDS to the day's total; mode='set' overwrites it. E.g. 'log 3 cups' → 24 oz added."
         + (isTrainer ? " Pass clientId to log for a client." : ""),
       input_schema: {
         type: "object",
@@ -954,7 +951,7 @@ function buildTools(role, opts = {}) {
     },
     {
       name: "rename_plan",
-      description: "Rename one of the person's plans (use list_plans first to get planId)."
+      description: "Rename a plan (get planId from list_plans first)."
         + (isTrainer ? " Pass clientId for a client's plan." : ""),
       input_schema: {
         type: "object",
@@ -969,7 +966,7 @@ function buildTools(role, opts = {}) {
     {
       name: "set_notification_prefs",
       description:
-        "Turn the CALLER'S OWN notification types on/off (never a client's — prefs are personal). Types: master (everything), messages, trainerReminders (client: trainer to-dos), foodReminders, weighInReminders, coachingNudges, sentReminders (trainer: sent to-do display), clientRequests (trainer). E.g. 'stop the food reminders' → foodReminders: false. Only pass the keys the user asked to change.",
+        "Turn the CALLER'S OWN notification types on/off (never a client's — prefs are personal). Types: master (everything), messages, trainerReminders (client: trainer to-dos), foodReminders, weighInReminders, coachingNudges, sentReminders (trainer: sent to-do display), clientRequests (trainer). Only pass the keys the user asked to change.",
       input_schema: {
         type: "object",
         properties: {
@@ -983,8 +980,8 @@ function buildTools(role, opts = {}) {
     {
       name: "set_targets",
       description:
-        "Update the plan's nutrition targets and/or goal weight. Set any of protein/carbs/fat target grams, or goal weight in pounds. "
-        + "This CHANGES the plan — always confirm the specific numbers with the user before calling. "
+        "Update the plan's nutrition targets and/or goal weight (protein/carbs/fat grams, or goal weight in pounds). "
+        + "Always confirm the specific numbers before calling. "
         + (isTrainer ? "Pass clientId to tune a client's plan." : "Updates YOUR plan."),
       input_schema: {
         type: "object",
@@ -1000,17 +997,16 @@ function buildTools(role, opts = {}) {
     {
       name: "list_exercises",
       description:
-        "Get the app's exercise library (cardio + strength, grouped by movement pattern) so you can build a workout program "
-        + "using REAL exercise ids. Call this before set_workout_schedule. Use the exact ids returned.",
+        "Get the app's exercise library (cardio + strength, grouped by movement pattern) to build a program with REAL ids. "
+        + "Call before set_workout_schedule; use the exact ids returned.",
       input_schema: { type: "object", properties: {} },
     },
     {
       name: "add_custom_exercise",
       description:
-        "Create a CUSTOM exercise on the plan for a movement that's not in the standard library (e.g. Battle Ropes, "
-        + "Sled Push, TRX Row). Returns its id — then use that id in propose_workout/set_workout_schedule like any other "
-        + "exercise. Only use this when nothing in list_exercises fits; prefer standard exercises. Estimate calPerMin "
-        + "(calories burned per minute: walking ~4, jogging ~9, intense HIIT ~14). "
+        "Create a CUSTOM exercise for a movement not in the standard library (e.g. Sled Push, Battle Ropes). Returns its "
+        + "id — use it in propose_workout/set_workout_schedule. Only use when nothing in list_exercises fits. "
+        + "Estimate calPerMin (calories/min: walking ~4, jogging ~9, intense HIIT ~14). "
         + (isTrainer ? "Pass clientId to add it to a client's plan." : "Adds to YOUR plan."),
       input_schema: {
         type: "object",
@@ -1026,11 +1022,10 @@ function buildTools(role, opts = {}) {
     {
       name: "propose_workout",
       description:
-        "Show the user a tappable confirmation CARD for a weekly workout PROGRAM you've designed (from list_exercises ids). "
-        + "This is the PREFERRED way to set a program: design it, then call propose_workout — the user taps Accept on the "
-        + "card to save it to their plan (or asks you in chat for changes). Do NOT also call set_workout_schedule for the "
-        + "same program; the card saves it. Briefly summarize the week in text too. Same shape as set_workout_schedule "
-        + "(cardio/strength day-keyed objects of { type: <id>, duration }). " + (isTrainer ? "Pass clientId to propose for a client." : ""),
+        "PREFERRED way to set a workout PROGRAM: design a weekly program from list_exercises ids, then call "
+        + "propose_workout to show a tappable Accept CARD that saves it. Do NOT also call set_workout_schedule for the "
+        + "same program. Briefly summarize the week in text too. Shape: cardio/strength day-keyed objects of "
+        + "{ type: <id>, duration }. " + (isTrainer ? "Pass clientId to propose for a client." : ""),
       input_schema: {
         type: "object",
         properties: {
@@ -1044,10 +1039,10 @@ function buildTools(role, opts = {}) {
     {
       name: "set_workout_schedule",
       description:
-        "Write a weekly workout PROGRAM into the plan DIRECTLY (no card). Prefer propose_workout instead — only use this "
-        + "when the user explicitly says to set it without a confirmation card. Build it from list_exercises ids. "
-        + "Provide cardio and/or strength as objects keyed by full day name (Monday…Sunday); each day is an array of "
-        + "{ type: <exercise id>, duration: <minutes> }. Strength duration is usually 45; cardio 20–40. "
+        "Write a weekly workout PROGRAM into the plan DIRECTLY (no card). Prefer propose_workout — only use this "
+        + "when the user explicitly says to skip the confirmation card. Build from list_exercises ids: cardio and/or "
+        + "strength as objects keyed by full day name (Monday…Sunday), each an array of "
+        + "{ type: <exercise id>, duration: <minutes> }. Strength duration usually 45; cardio 20–40. "
         + "replace=true (default) sets the whole week (unlisted days become rest). "
         + (isTrainer ? "Pass clientId to program a client's plan." : "Updates YOUR plan."),
       input_schema: {
@@ -1063,11 +1058,11 @@ function buildTools(role, opts = {}) {
     {
       name: "search_food",
       description:
-        "Look up a food's REAL nutrition from the food databases (USDA + Open Food Facts). Use this for PACKAGED / BRANDED "
-        + "items (e.g. 'Quest cookies & cream bar', 'Chobani vanilla yogurt', a specific cereal or protein powder) to get "
-        + "accurate label values instead of guessing. Returns matches with calories + protein/carbs/fat PER 100 g — pick the "
-        + "best match and SCALE it to the portion the user ate, then use propose_meal / log_meal. For simple home-cooked or "
-        + "whole foods (an apple, grilled chicken) you can estimate directly without this.",
+        "Look up a food's REAL nutrition from the databases (USDA + Open Food Facts). Use for PACKAGED / BRANDED "
+        + "items (e.g. 'Quest cookies & cream bar', a specific cereal or protein powder) for accurate label values "
+        + "instead of guessing. Returns matches with calories + protein/carbs/fat PER 100 g — pick the best match, "
+        + "SCALE to the portion eaten, then use propose_meal / log_meal. For simple whole foods (an apple, grilled "
+        + "chicken) estimate directly without this.",
       input_schema: {
         type: "object",
         properties: { query: { type: "string", description: "The food/product to search, e.g. 'Clif builder bar chocolate'" } },
@@ -1077,20 +1072,20 @@ function buildTools(role, opts = {}) {
     {
       name: "list_notes",
       description:
-        "List the user's saved NOTES (the Notes panel in the app): title, body, where each is stored, and ids for "
-        + "update_note. Call before updating so you edit the right note instead of duplicating (especially recaps — "
-        + "re-recapping should UPDATE the existing recap note). A trainer passing clientId sees the client's SHARED notes "
-        + "plus the trainer's own private notes about that client — a client's PRIVATE notes are never visible to anyone else.",
+        "List the user's saved NOTES (title, body, storage location, and ids for update_note). Call before updating "
+        + "so you edit the right note instead of duplicating (especially recaps — re-recapping should UPDATE the "
+        + "existing recap note). A trainer passing clientId sees the client's SHARED notes plus the trainer's own "
+        + "private notes about that client — a client's PRIVATE notes are never visible to anyone else.",
       input_schema: { type: "object", properties: { ...clientIdProp } },
     },
     {
       name: "create_note",
       description:
-        "Save a NOTE to the user's Notes panel. Use when asked to 'write this down', 'remember this', 'make a note', or "
-        + "'save a recap' (kind='recap' — a summary of this conversation or a client snapshot). For a CLIENT the note is "
-        + "PRIVATE by default (shared=true makes it visible to their trainer — ask before sharing). For a TRAINER with "
-        + "clientId: private-to-the-trainer about that client by default; shared=true puts it in the client's notes where "
-        + "the client can see it. Title optional (auto-generated from the first line).",
+        "Save a NOTE to the user's Notes panel. Use for 'write this down', 'remember this', 'save a recap' "
+        + "(kind='recap' — a conversation summary or client snapshot). For a CLIENT the note is PRIVATE by default "
+        + "(shared=true makes it visible to their trainer — ask before sharing). For a TRAINER with clientId: "
+        + "private-to-the-trainer by default; shared=true puts it in the client's notes where they can see it. "
+        + "Title optional (auto from first line).",
       input_schema: {
         type: "object",
         properties: {
@@ -1106,9 +1101,8 @@ function buildTools(role, opts = {}) {
     {
       name: "update_note",
       description:
-        "Update an existing note by id (get ids from list_notes). Default is APPEND (appendBody adds to the end); "
-        + "pass body to REPLACE the content, title to retitle. Use for adding to running lists ('add eggs to my grocery "
-        + "note') and refreshing recap notes instead of creating duplicates.",
+        "Update an existing note by id (from list_notes). Default APPENDS (appendBody adds to the end); pass body to "
+        + "REPLACE content, title to retitle. Use for running lists and refreshing recap notes instead of duplicating.",
       input_schema: {
         type: "object",
         properties: {
@@ -1124,12 +1118,11 @@ function buildTools(role, opts = {}) {
     {
       name: "fetch_link",
       description:
-        "Read a web/video LINK the user shares (a YouTube/Instagram/TikTok workout or recipe, a blog, an article) and get "
-        + "its text — title + description/caption — so you can turn it into program changes. Use this whenever the user "
-        + "pastes a URL and wants you to use its content (e.g. 'add the exercises from this video', 'log this recipe'). "
-        + "After reading it, extract the exercises/meals and offer to add them with the normal tools (propose_workout / "
-        + "add_custom_exercise / propose_meal). TikTok and Instagram captions are usually auto-fetched; if this still "
-        + "returns little or an error, ask the user to paste the caption/description text instead.",
+        "Read a web/video LINK the user shares (YouTube/Instagram/TikTok workout or recipe, blog, article) and get "
+        + "its text (title + description/caption). Use whenever the user pastes a URL and wants its content used. Then "
+        + "extract the exercises/meals and offer to add them with the normal tools (propose_workout / "
+        + "add_custom_exercise / propose_meal). If it returns little or errors (common for TikTok/Instagram), ask "
+        + "the user to paste the caption/description text instead.",
       input_schema: {
         type: "object",
         properties: {
@@ -1145,26 +1138,24 @@ function buildTools(role, opts = {}) {
       name: "list_local_plans",
       description:
         "List the trainer's OWN local plan files and simulations (NOT connected client accounts — that's "
-        + "list_clients). Local plans include imported Trainerize clients, prep/template files, and sandbox "
-        + "simulations. Use the returned localPlanId with the other tools (via their localPlanId argument) to "
-        + "read or edit one of these files.",
+        + "list_clients). Includes imported Trainerize clients, prep/template files, and sandbox sims. Use the "
+        + "returned localPlanId with the other tools to read/edit one of these files.",
       input_schema: { type: "object", properties: {} },
     });
     tools.push({
       name: "list_clients",
       description:
-        "List your connected clients. Returns each client's id, name, last log date, and days since they last logged. Use the returned id with the other tools.",
+        "List your connected clients (id, name, last log date, days since last logged). Use the returned id with the other tools.",
       input_schema: { type: "object", properties: {} },
     });
     tools.push({
       name: "coach_summary",
       description:
-        "Get a proactive coaching snapshot across ALL your clients in ONE call — for questions like 'who's stalled "
-        + "this week?', 'who needs attention?', or 'what should I change?'. For each client it returns: days logged in "
-        + "the window, days since last log, calorie & protein adherence (avg logged vs target), latest weigh-in, weight "
-        + "trend (lbs/week), whether they're on track to their goal, open requests, and a status (inactive / stalled / "
-        + "off_track / on_track / logging). Use this instead of calling the per-client tools one by one, then give "
-        + "specific recommendations.",
+        "Proactive coaching snapshot across ALL your clients in ONE call — for 'who's stalled?', 'who needs "
+        + "attention?', 'what should I change?'. Per client returns: days logged in the window, days since last log, "
+        + "calorie & protein adherence (avg vs target), latest weigh-in, weight trend (lbs/week), on-track status, "
+        + "open requests, and a status (inactive / stalled / off_track / on_track / logging). Use instead of the "
+        + "per-client tools one by one, then give specific recommendations.",
       input_schema: {
         type: "object",
         properties: {
@@ -1175,7 +1166,7 @@ function buildTools(role, opts = {}) {
     tools.push({
       name: "send_client_request",
       description:
-        "Send a connected client a short to-do that appears on their home screen (e.g. ask them to log food, weigh in, or record a workout). Confirm the message with the trainer before sending.",
+        "Send a connected client a short to-do that appears on their home screen (e.g. log food, weigh in, record a workout). Confirm the message before sending.",
       input_schema: {
         type: "object",
         properties: {
