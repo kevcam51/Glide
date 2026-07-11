@@ -567,6 +567,77 @@ function profileSummary(d) {
   };
 }
 
+// ---- Body measurements (tape) → body-fat estimates ----------------------
+// Formulas verified + documented in docs/METRICS-PLAN.md. All inches.
+// Covert Bailey (The Ultimate Fit or Fat): needs NO scale and NO height —
+// the metric for scale-averse clients. Age/gender variants auto-selected.
+function baileyBF(d, m) {
+  const age = Number(d.age) || 0;
+  const g = d.gender;
+  const n = (v) => (v > 0 ? Number(v) : null);
+  if (g === "male") {
+    const { waist, hips, forearm, wrist } = { waist: n(m.waist), hips: n(m.hips), forearm: n(m.forearm), wrist: n(m.wrist) };
+    if (!waist || !hips || !forearm || !wrist) return null;
+    const bf = waist + 0.5 * hips - (age > 30 ? 2.7 : 3) * forearm - wrist;
+    return bf > 1 && bf < 75 ? Math.round(bf * 10) / 10 : null;
+  }
+  if (g === "female") {
+    const { hips, thigh, calf, wrist } = { hips: n(m.hips), thigh: n(m.thigh), calf: n(m.calf), wrist: n(m.wrist) };
+    if (!hips || !thigh || !calf || !wrist) return null;
+    const bf = hips + (age > 30 ? 1 : 0.8) * thigh - 2 * calf - wrist;
+    return bf > 1 && bf < 75 ? Math.round(bf * 10) / 10 : null;
+  }
+  return null;
+}
+
+// U.S. Navy method (DoD standard; needs height but no scale) — the cross-check.
+function navyBF(d, m) {
+  const heightIn = (Number(d.heightFt) || 0) * 12 + (Number(d.heightIn) || 0);
+  if (!(heightIn > 0)) return null;
+  const n = (v) => (v > 0 ? Number(v) : null);
+  const log10 = (v) => Math.log(v) / Math.LN10;
+  let bf = null;
+  if (d.gender === "male") {
+    const waist = n(m.waist), neck = n(m.neck);
+    if (!waist || !neck || waist - neck <= 0) return null;
+    bf = 86.010 * log10(waist - neck) - 70.041 * log10(heightIn) + 36.76;
+  } else if (d.gender === "female") {
+    const waist = n(m.waist), hips = n(m.hips), neck = n(m.neck);
+    if (!waist || !hips || !neck || waist + hips - neck <= 0) return null;
+    bf = 163.205 * log10(waist + hips - neck) - 97.684 * log10(heightIn) - 78.387;
+  }
+  return bf != null && bf > 1 && bf < 75 ? Math.round(bf * 10) / 10 : null;
+}
+
+// Waist-to-height ratio: >0.5 = elevated health risk (scale-free health flag).
+function whtrOf(d, m) {
+  const heightIn = (Number(d.heightFt) || 0) * 12 + (Number(d.heightIn) || 0);
+  const waist = Number(m.waist) || 0;
+  if (!(heightIn > 0) || !(waist > 0)) return null;
+  return Math.round((waist / heightIn) * 100) / 100;
+}
+
+// One measurement entry → all derived metrics (null where inputs are missing).
+function measurementMetrics(d, m) {
+  const bailey = baileyBF(d, m);
+  const navy = navyBF(d, m);
+  const both = [bailey, navy].filter((v) => v != null);
+  const avg = both.length ? Math.round((both.reduce((a, b) => a + b, 0) / both.length) * 10) / 10 : null;
+  const whtr = whtrOf(d, m);
+  const weight = Number(d.weightLbs) || 0;
+  const bf = avg;
+  const leanMassLbs = weight > 0 && bf != null ? Math.round(weight * (1 - bf / 100)) : null;
+  // Bailey goal weight = lean mass ÷ (1 − target BF%): a physiologically
+  // derived goal instead of a guessed number (docs/METRICS-PLAN.md group 6).
+  const targetBf = Number(d.goalBodyFat) || null;
+  const goalWeightFromLeanMass = leanMassLbs && targetBf && targetBf > 1 && targetBf < 60
+    ? Math.round(leanMassLbs / (1 - targetBf / 100)) : null;
+  return { baileyBF: bailey, navyBF: navy, bodyFatPct: avg, waistToHeight: whtr,
+    leanMassLbs, goalWeightFromLeanMass };
+}
+
+const MEASUREMENT_FIELDS = ["waist", "hips", "neck", "thigh", "calf", "forearm", "wrist"];
+
 // Least-squares weight trend (lbs/week) from check-ins — mirrors src/App.jsx
 // weightTrend. Needs 2+ weigh-ins spread over ≥3 days. null otherwise.
 function weightTrend(checkIns) {
@@ -826,6 +897,41 @@ function buildTools(role, opts = {}) {
           bodyFatPct: { type: "number", description: "Body-fat % measured that day" },
           hitCalorieTarget: { type: "boolean", description: "Did they hit their calorie target that day?" },
           notes: { type: "string", description: "Free-text note for the day (replaces the day's existing note)" },
+          ...clientIdProp, ...localPlanProp,
+        },
+      },
+    },
+    {
+      name: "log_measurements",
+      description:
+        "Record tape measurements (inches) for a date: waist, hips, neck, thigh, calf, forearm, wrist — any subset. Merges into the same date's entry (never wipes other fields). "
+        + "Body-fat % is auto-computed from whatever fields exist (Covert Bailey needs no scale/height; U.S. Navy needs waist+neck(+hips for women)). Great for scale-averse clients. "
+        + "Measure at the widest point (wrist: narrowest). Confirm the numbers with the user first. "
+        + (isTrainer ? "Pass clientId to record for a client." : "Records for YOU."),
+      input_schema: {
+        type: "object",
+        properties: {
+          waist: { type: "number", description: "Waist at the navel, inches" },
+          hips: { type: "number", description: "Hips/buttocks at the widest point, inches" },
+          neck: { type: "number", description: "Neck, inches" },
+          thigh: { type: "number", description: "Thigh at the widest point, inches" },
+          calf: { type: "number", description: "Calf at the widest point, inches" },
+          forearm: { type: "number", description: "Forearm at the widest point, inches" },
+          wrist: { type: "number", description: "Wrist at the narrowest point, inches" },
+          date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
+          ...clientIdProp, ...localPlanProp,
+        },
+      },
+    },
+    {
+      name: "get_measurements",
+      description:
+        "Read recent tape measurements + computed body composition: Bailey & Navy body-fat %, waist-to-height ratio (>0.5 = elevated risk), lean mass, and the lean-mass-derived goal weight when a goal body-fat % is set. Use for 'how's my waist trending', 'what's my body fat', or non-scale progress questions."
+        + (isTrainer ? " Pass clientId for a client." : ""),
+      input_schema: {
+        type: "object",
+        properties: {
+          limit: { type: "number", description: "Max entries to return, newest first (default 8, max 30)" },
           ...clientIdProp, ...localPlanProp,
         },
       },
@@ -1527,6 +1633,76 @@ async function runTool(name, input, ctx) {
     await appendHistory(db, uid, planId, ctx, `checked in: ${bits.join(", ")} (${date})`);
     if (planOverride) await touchLocalIndex(db, uid, planOverride);
     return { ok: true, date, recorded: bits };
+  }
+
+  if (name === "log_measurements") {
+    const re = /^\d{4}-\d{2}-\d{2}$/;
+    const date = re.test(input.date || "") ? input.date : ctx.today;
+    // Sanity-clamp each provided field (inches); ignore junk values.
+    const vals = {};
+    for (const f of MEASUREMENT_FIELDS) {
+      if (input[f] == null) continue;
+      const v = Math.round(Number(input[f]) * 10) / 10;
+      if (v >= 3 && v <= 90) vals[f] = v;
+    }
+    if (!Object.keys(vals).length) {
+      return { error: "Provide at least one measurement in inches: " + MEASUREMENT_FIELDS.join(", ") + "." };
+    }
+    const loggedBy = (ctx.isTrainer && uid !== ctx.callerUid) ? "trainer" : "client";
+    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
+    const d = wrap.data;
+    if (!Array.isArray(d.measurements)) d.measurements = [];
+    const sameDay = d.measurements.find((e) => e && e.date === date);
+    // Merge into the same date's entry — never wipe fields (log_check_in rule).
+    const entry = { date, timestamp: checkInTimestamp(date), loggedBy, ...(sameDay || {}), ...vals };
+    entry.timestamp = checkInTimestamp(date);
+    d.measurements = [...d.measurements.filter((e) => e && e.date !== date), entry];
+    const metrics = measurementMetrics(d, entry);
+    // A computed body-fat % also updates the plan's bodyFat (like log_check_in).
+    if (metrics.bodyFatPct != null) d.bodyFat = metrics.bodyFatPct;
+    await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
+    const bits = Object.keys(vals).map((f) => `${f} ${vals[f]}"`);
+    await appendHistory(db, uid, planId, ctx, `logged measurements: ${bits.join(", ")} (${date})`);
+    if (planOverride) await touchLocalIndex(db, uid, planOverride);
+    return { ok: true, date, recorded: vals, ...metrics,
+      note: metrics.bodyFatPct == null
+        ? "Body fat needs more fields — Bailey: men waist+hips+forearm+wrist, women hips+thigh+calf+wrist; Navy: waist+neck (+hips for women) + height on the profile."
+        : undefined };
+  }
+
+  if (name === "get_measurements") {
+    const { data: d } = await activePlanData(db, uid, planOverride);
+    const list = Array.isArray(d.measurements) ? [...d.measurements] : [];
+    if (!list.length) {
+      return { entries: [], note: "No tape measurements logged yet. Log waist/hips/neck/thigh/calf/forearm/wrist (inches) with log_measurements." };
+    }
+    list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+    const limit = Math.max(1, Math.min(30, Math.round(Number(input.limit) || 8)));
+    const entries = list.slice(0, limit).map((e) => {
+      const m = measurementMetrics(d, e);
+      const out = { date: e.date };
+      for (const f of MEASUREMENT_FIELDS) if (e[f] != null) out[f] = e[f];
+      if (m.baileyBF != null) out.baileyBF = m.baileyBF;
+      if (m.navyBF != null) out.navyBF = m.navyBF;
+      if (m.bodyFatPct != null) out.bodyFatPct = m.bodyFatPct;
+      if (m.waistToHeight != null) out.waistToHeight = m.waistToHeight;
+      return out;
+    });
+    const latest = entries[0] || null;
+    const oldest = entries[entries.length - 1] || null;
+    const change = {};
+    if (latest && oldest && latest !== oldest) {
+      for (const f of [...MEASUREMENT_FIELDS, "bodyFatPct", "waistToHeight"]) {
+        if (latest[f] != null && oldest[f] != null) {
+          change[f] = Math.round((latest[f] - oldest[f]) * 100) / 100;
+        }
+      }
+    }
+    const cur = measurementMetrics(d, list[0] || {});
+    return { entries, changeOverWindow: Object.keys(change).length ? change : null,
+      leanMassLbs: cur.leanMassLbs, goalWeightFromLeanMass: cur.goalWeightFromLeanMass,
+      goalBodyFatPct: Number(d.goalBodyFat) || null,
+      note: "waistToHeight > 0.5 = elevated health risk; under 0.5 is the goal. Body-fat %s are tape ESTIMATES (±2%) — the trend matters more than the absolute number." };
   }
 
   if (name === "log_water") {

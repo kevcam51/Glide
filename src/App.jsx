@@ -189,6 +189,94 @@ function projectedLoss(weeks, weeklyDeficitCal) {
   return (weeklyDeficitCal / 3500) * weeks;
 }
 
+// ─── Body measurements (tape) → body-fat estimates ───────────────────────────
+// Formulas verified + documented in docs/METRICS-PLAN.md; the server mirrors
+// these in functions/aitools.js (keep in sync). All measurements in INCHES.
+const MEASUREMENT_FIELDS = ["waist", "hips", "neck", "thigh", "calf", "forearm", "wrist"];
+const MEASUREMENT_LABELS = { waist: "Waist", hips: "Hips", neck: "Neck",
+  thigh: "Thigh", calf: "Calf", forearm: "Forearm", wrist: "Wrist" };
+
+// Covert Bailey (The Ultimate Fit or Fat): body fat % from tape alone — no
+// scale, no height. Age/gender variants selected from the plan's own fields.
+function baileyBF(d, m) {
+  const age = Number(d.age) || 0;
+  const n = (v) => (Number(v) > 0 ? Number(v) : null);
+  if (d.gender === "male") {
+    const waist = n(m.waist), hips = n(m.hips), forearm = n(m.forearm), wrist = n(m.wrist);
+    if (!waist || !hips || !forearm || !wrist) return null;
+    const bf = waist + 0.5 * hips - (age > 30 ? 2.7 : 3) * forearm - wrist;
+    return bf > 1 && bf < 75 ? Math.round(bf * 10) / 10 : null;
+  }
+  if (d.gender === "female") {
+    const hips = n(m.hips), thigh = n(m.thigh), calf = n(m.calf), wrist = n(m.wrist);
+    if (!hips || !thigh || !calf || !wrist) return null;
+    const bf = hips + (age > 30 ? 1 : 0.8) * thigh - 2 * calf - wrist;
+    return bf > 1 && bf < 75 ? Math.round(bf * 10) / 10 : null;
+  }
+  return null;
+}
+
+// U.S. Navy method (DoD standard) — needs height (already on the plan), no scale.
+function navyBF(d, m) {
+  const heightIn = (Number(d.heightFt) || 0) * 12 + (Number(d.heightIn) || 0);
+  if (!(heightIn > 0)) return null;
+  const n = (v) => (Number(v) > 0 ? Number(v) : null);
+  const log10 = (v) => Math.log(v) / Math.LN10;
+  let bf = null;
+  if (d.gender === "male") {
+    const waist = n(m.waist), neck = n(m.neck);
+    if (!waist || !neck || waist - neck <= 0) return null;
+    bf = 86.010 * log10(waist - neck) - 70.041 * log10(heightIn) + 36.76;
+  } else if (d.gender === "female") {
+    const waist = n(m.waist), hips = n(m.hips), neck = n(m.neck);
+    if (!waist || !hips || !neck || waist + hips - neck <= 0) return null;
+    bf = 163.205 * log10(waist + hips - neck) - 97.684 * log10(heightIn) - 78.387;
+  }
+  return bf != null && bf > 1 && bf < 75 ? Math.round(bf * 10) / 10 : null;
+}
+
+// Waist-to-height ratio: >0.5 = elevated health risk. Scale-free health flag.
+function whtrOf(d, m) {
+  const heightIn = (Number(d.heightFt) || 0) * 12 + (Number(d.heightIn) || 0);
+  const waist = Number(m && m.waist) || 0;
+  if (!(heightIn > 0) || !(waist > 0)) return null;
+  return Math.round((waist / heightIn) * 100) / 100;
+}
+
+// One measurement entry → all derived metrics (nulls where inputs are missing).
+// bodyFatPct = average of whichever of Bailey/Navy computed (they cross-check
+// each other); goalWeightFromLeanMass = Bailey's lean mass ÷ (1 − target BF%).
+function measurementMetrics(d, m) {
+  const bailey = baileyBF(d, m);
+  const navy = navyBF(d, m);
+  const both = [bailey, navy].filter((v) => v != null);
+  const avg = both.length ? Math.round((both.reduce((a, b) => a + b, 0) / both.length) * 10) / 10 : null;
+  const whtr = whtrOf(d, m);
+  const weight = Number(d.weightLbs) || 0;
+  const leanMassLbs = weight > 0 && avg != null ? Math.round(weight * (1 - avg / 100)) : null;
+  const targetBf = Number(d.goalBodyFat) || null;
+  const goalWeightFromLeanMass = leanMassLbs && targetBf && targetBf > 1 && targetBf < 60
+    ? Math.round(leanMassLbs / (1 - targetBf / 100)) : null;
+  return { baileyBF: bailey, navyBF: navy, bodyFatPct: avg, waistToHeight: whtr,
+    leanMassLbs, goalWeightFromLeanMass };
+}
+
+// Merge tape values into the date's measurements entry (one entry per date —
+// same merge-never-replace rule as check-ins) and refresh d.bodyFat from tape.
+// Mutates d; both write paths (ClientHome savePlanDataMutation and the App's
+// setDataAndSave) call this so the merge logic lives once.
+function mergeMeasurements(d, vals, dateKey, loggedBy) {
+  const list = Array.isArray(d.measurements) ? d.measurements : [];
+  const sameDay = list.find((e) => e && e.date === dateKey);
+  const entry = { date: dateKey, timestamp: new Date(dateKey + "T12:00:00").getTime(),
+    loggedBy, ...(sameDay || {}), ...vals };
+  entry.timestamp = new Date(dateKey + "T12:00:00").getTime();
+  d.measurements = [...list.filter((e) => e && e.date !== dateKey), entry];
+  const m = measurementMetrics(d, entry);
+  if (m.bodyFatPct != null) d.bodyFat = m.bodyFatPct;
+  return entry;
+}
+
 // ─── CSS ──────────────────────────────────────────────────────────────────────
 
 const css = `
@@ -3090,7 +3178,7 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   );
 }
 
-function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, defaultView = "detailed" }) {
+function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, defaultView = "detailed" }) {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
   // Simple (plain-English) vs Detailed plan view — a display pref, remembered
@@ -3111,6 +3199,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
   const [showNotes, setShowNotes] = useState(false);
   const [openResultDay, setOpenResultDay] = useState(null);
   const [showWeightModal, setShowWeightModal] = useState(false); // Pro Tracking chart popup
+  const [showMeasureModal, setShowMeasureModal] = useState(false); // body-measurements popup
   const { gender, age, weightLbs, heightFt, heightIn, activityLevel, firstName, cardio } = data;
   // Fall back to the first activity level when a plan is incomplete (no activity
   // set yet) so Results never crashes on a half-built plan. Matches the guarded
@@ -3307,6 +3396,30 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
               currentWeight={data.weightLbs} rangeLow={data.goalRangeLow} rangeHigh={data.goalRangeHigh}
               startWeight={data.startWeightLbs}
               onDelete={onDeleteCheckIn} onClose={() => setShowWeightModal(false)} />
+          )}
+          {/* Body measurements — tape → body fat, no scale needed (S92) */}
+          {onSaveMeasurements && (
+            <div className="card" style={{ padding: "14px 16px", marginBottom: "16px", cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}
+              onClick={() => setShowMeasureModal(true)} title="Tape measurements — track progress without the scale">
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Icon name="ruler" size={18} color="var(--accent)" />
+                <div>
+                  <div style={{ fontFamily: "'Sora',sans-serif", fontSize: ".95rem", color: "var(--text)" }}>Body Measurements</div>
+                  <div style={{ fontSize: ".72rem", color: "var(--muted)" }}>
+                    {(data.measurements || []).length
+                      ? `${(data.measurements || []).length} ${(data.measurements || []).length === 1 ? "entry" : "entries"} · tape body fat, no scale needed`
+                      : "Track progress without the scale — tape → body fat %"}
+                  </div>
+                </div>
+              </div>
+              <span style={{ color: "var(--muted)", fontSize: "1rem" }}>›</span>
+            </div>
+          )}
+          {showMeasureModal && (
+            <MeasurementsModal data={data} onSave={onSaveMeasurements}
+              onDelete={onDeleteMeasurement} onSetGoalWeight={onSetGoalWeight}
+              onClose={() => setShowMeasureModal(false)} />
           )}
           <AICoach data={data} tdee={tdee} totalBurn={totalBurn} totalStrBurn={totalStrBurn} activeDays={activeDays} activeStrDays={activeStrDays} />
 
@@ -8629,7 +8742,11 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
 
 // ─── Progress Chart (from check-in history) ──────────────────────────────────
 
-function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerPoint, rangeLow, rangeHigh, surfaceless }) {
+function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerPoint, rangeLow, rangeHigh, surfaceless,
+  unit = "lbs", label = "Weight Trend", pointNoun = "weigh-in", hideAdherence = false }) {
+  // unit/label/pointNoun/hideAdherence generalize the chart for non-weight
+  // series (tape measurements / body-fat %) — pass points as {date, timestamp,
+  // weight: <value>}. Defaults keep the weight behavior identical.
   // surfaceless: drop the card background/border so the chart blends into a
   // parent surface (used inside the brand-themed WeightChartModal, where the
   // old purple .card background would clash with the near-black modal surface).
@@ -8685,11 +8802,11 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}}>
         <div>
           <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",letterSpacing:"2px",color:"var(--accent)",display:"flex",alignItems:"center",gap:"8px"}}><Icon name="chart" size={18} color="var(--accent)" />Progress</div>
-          <div style={{fontSize:".74rem",color:"var(--muted)"}}>{sorted.length} {sorted.length === 1 ? "weigh-in" : "weigh-ins"} · {checkIns.length} {checkIns.length === 1 ? "check-in" : "check-ins"}</div>
+          <div style={{fontSize:".74rem",color:"var(--muted)"}}>{sorted.length} {sorted.length === 1 ? pointNoun : pointNoun.endsWith("y") ? pointNoun.slice(0, -1) + "ies" : pointNoun + "s"}{pointNoun === "weigh-in" ? ` · ${checkIns.length} ${checkIns.length === 1 ? "check-in" : "check-ins"}` : ""}</div>
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.3rem",color:trendColor}}>
-            {diff > 0 ? `−${diff.toFixed(1)}` : diff < 0 ? `+${Math.abs(diff).toFixed(1)}` : "0"} lbs
+            {diff > 0 ? `−${diff.toFixed(1)}` : diff < 0 ? `+${Math.abs(diff).toFixed(1)}` : "0"} {unit}
           </div>
           <div style={{fontSize:".68rem",color:trendColor,textTransform:"uppercase",letterSpacing:"1px"}}>{trend}</div>
         </div>
@@ -8786,16 +8903,18 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
       <div style={{display:"flex",gap:"16px",marginTop:"10px",justifyContent:"center",flexWrap:"wrap"}}>
         <div style={{textAlign:"center"}}>
           <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.2rem",color:"var(--text)"}}>{startW} → {endW}</div>
-          <div style={{fontSize:".65rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>Weight Trend</div>
+          <div style={{fontSize:".65rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>{label}</div>
         </div>
+        {!hideAdherence && (
         <div style={{textAlign:"center"}}>
           <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.2rem",color: adherence >= 80 ? "var(--green)" : adherence >= 50 ? "var(--yellow)" : "var(--red)"}}>{adherence}%</div>
           <div style={{fontSize:".65rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>Adherence</div>
         </div>
+        )}
         {goal && (
           <div style={{textAlign:"center"}}>
             <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.2rem",color:"var(--accent)"}}>{Math.max(0, (endW - goal)).toFixed(1)}</div>
-            <div style={{fontSize:".65rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>lbs to goal</div>
+            <div style={{fontSize:".65rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>{unit} to goal</div>
           </div>
         )}
       </div>
@@ -8853,6 +8972,160 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
                     </span>
                   </span>
                   <button onClick={() => onDelete(c.timestamp)} title="Delete this weigh-in"
+                    className="cursor-pointer border-none bg-transparent px-1.5 py-0.5 text-base leading-none text-danger">✕</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// ─── Body measurements modal (tape → body fat, no scale needed) ──────────────
+// Log tape measurements (any subset), see Bailey/Navy body-fat % + waist-to-
+// height, trend any metric, delete mistakes, and (when weight + a goal body-fat
+// % exist) get the lean-mass-derived goal weight. docs/METRICS-PLAN.md is the
+// formula reference. Shared by ClientHome and Results (like WeightChartModal).
+function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onClose }) {
+  useBodyScrollLock(true);
+  useBackClose(true, onClose);
+  const d = data || {};
+  const entries = [...(d.measurements || [])].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+  const latest = entries.length ? entries[entries.length - 1] : null;
+  const metrics = latest ? measurementMetrics(d, latest) : null;
+
+  const [drafts, setDrafts] = useState({});
+  const [msg, setMsg] = useState("");
+  const [metric, setMetric] = useState("waist");
+
+  // Which metrics have 2+ points to chart. "bodyFat" is the computed tape BF%.
+  const chartable = MEASUREMENT_FIELDS.filter((f) => entries.filter((e) => Number(e[f]) > 0).length >= 2);
+  const bfPoints = entries.map((e) => ({ date: e.date, timestamp: e.timestamp, weight: measurementMetrics(d, e).bodyFatPct }))
+    .filter((p) => p.weight != null);
+  if (bfPoints.length >= 2) chartable.push("bodyFat");
+  const activeMetric = chartable.includes(metric) ? metric : chartable[0] || null;
+  const points = activeMetric === "bodyFat" ? bfPoints
+    : activeMetric ? entries.filter((e) => Number(e[activeMetric]) > 0)
+        .map((e) => ({ date: e.date, timestamp: e.timestamp, weight: Number(e[activeMetric]) })) : [];
+
+  // Which tape fields this person's body-fat formulas need (docs/METRICS-PLAN.md).
+  const needed = d.gender === "male" ? "waist, hips, forearm + wrist (Bailey) · waist + neck (Navy)"
+    : d.gender === "female" ? "hips, thigh, calf + wrist (Bailey) · waist, hips + neck (Navy)"
+    : "set gender on the profile to compute body fat %";
+
+  const save = () => {
+    const vals = {};
+    for (const f of MEASUREMENT_FIELDS) {
+      const v = Math.round(Number(drafts[f]) * 10) / 10;
+      if (drafts[f] !== undefined && drafts[f] !== "" && v >= 3 && v <= 90) vals[f] = v;
+    }
+    if (!Object.keys(vals).length) { setMsg("Enter at least one measurement (inches)."); return; }
+    onSave(vals);
+    setDrafts({}); setMsg("Saved today's measurements.");
+  };
+
+  const summarize = (e) => MEASUREMENT_FIELDS.filter((f) => e[f] != null)
+    .map((f) => `${MEASUREMENT_LABELS[f]} ${e[f]}"`).join(" · ");
+
+  const curGoal = Number(d.goalWeight) || null;
+  const suggested = metrics && metrics.goalWeightFromLeanMass;
+
+  return createPortal(
+    <div data-theme="pro" onClick={onClose} style={{ fontFamily: "var(--font-sans)" }}
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4">
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-[640px] max-h-[88vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="ruler" size={17} color="var(--accent)" />Body measurements</div>
+          <button onClick={onClose}
+            className="rounded-md border border-border bg-transparent px-2.5 py-1.5 text-xs font-semibold text-fg cursor-pointer whitespace-nowrap">✕ Close</button>
+        </div>
+
+        {/* Latest body-composition readout */}
+        {metrics && (metrics.bodyFatPct != null || metrics.waistToHeight != null) ? (
+          <div className="mb-3 rounded-lg bg-surface2 p-3">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 items-baseline">
+              {metrics.bodyFatPct != null && (
+                <div><span className="font-display text-2xl">{metrics.bodyFatPct}%</span>
+                  <span className="ml-1.5 text-xs text-muted">body fat (tape)</span></div>
+              )}
+              {metrics.waistToHeight != null && (
+                <div><span className={`font-display text-2xl ${metrics.waistToHeight > 0.5 ? "text-warn" : "text-success"}`}>{metrics.waistToHeight}</span>
+                  <span className="ml-1.5 text-xs text-muted">waist÷height {metrics.waistToHeight > 0.5 ? "(aim under 0.50)" : "· healthy zone"}</span></div>
+              )}
+              {metrics.leanMassLbs != null && (
+                <div><span className="font-display text-2xl">{metrics.leanMassLbs}</span>
+                  <span className="ml-1.5 text-xs text-muted">lbs lean mass</span></div>
+              )}
+            </div>
+            {metrics.baileyBF != null && metrics.navyBF != null && (
+              <div className="mt-1 text-[11px] text-muted">Bailey {metrics.baileyBF}% · Navy {metrics.navyBF}% (averaged)</div>
+            )}
+            {suggested && onSetGoalWeight && (
+              <div className="mt-2 flex items-center gap-2 flex-wrap text-sm">
+                <span className="text-muted">At {Number(d.goalBodyFat)}% body fat you'd weigh ~<b className="text-fg">{suggested} lbs</b></span>
+                {suggested !== curGoal && (
+                  <button onClick={() => { onSetGoalWeight(suggested); setMsg(`Goal weight set to ${suggested} lbs (from your lean mass).`); }}
+                    className="rounded-md border border-border bg-transparent px-2 py-1 text-xs font-semibold text-fg cursor-pointer">Use as goal weight</button>
+                )}
+              </div>
+            )}
+            <div className="mt-1.5 text-[11px] text-muted">Tape body fat is an estimate (±2%) — the trend matters more than the exact number.</div>
+          </div>
+        ) : (
+          <div className="mb-3 rounded-lg bg-surface2 p-3 text-sm text-muted">
+            Track progress without the scale: log tape measurements below and body fat % is computed automatically. Needs {needed}.
+          </div>
+        )}
+
+        {/* Trend chart with a metric picker */}
+        {chartable.length > 0 && (
+          <div className="mb-3">
+            <div className="mb-1.5 flex flex-wrap gap-1.5">
+              {chartable.map((f) => (
+                <button key={f} onClick={() => setMetric(f)}
+                  className={`rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer whitespace-nowrap ${activeMetric === f ? "bg-primaryfill text-primaryfg border-0" : "bg-transparent text-fg border border-border"}`}>
+                  {f === "bodyFat" ? "Body fat %" : MEASUREMENT_LABELS[f]}
+                </button>
+              ))}
+            </div>
+            <ProgressChart checkIns={points} showValues pxPerPoint={64} surfaceless hideAdherence
+              unit={activeMetric === "bodyFat" ? "%" : "in"} pointNoun="entry"
+              label={activeMetric === "bodyFat" ? "Body Fat Trend" : `${MEASUREMENT_LABELS[activeMetric]} Trend`} />
+          </div>
+        )}
+
+        {/* Log today's measurements (any subset) */}
+        <div className="mb-1.5 text-sm text-muted">Log today's measurements (inches — widest point; wrist at the narrowest)</div>
+        <div className="grid grid-cols-2 gap-2">
+          {MEASUREMENT_FIELDS.map((f) => (
+            <div key={f} className="flex items-center gap-2">
+              <span className="w-[64px] shrink-0 text-xs text-muted">{MEASUREMENT_LABELS[f]}</span>
+              <input type="number" inputMode="decimal" placeholder={latest && latest[f] != null ? `${latest[f]}` : "—"}
+                value={drafts[f] ?? ""} onChange={(e) => setDrafts((s) => ({ ...s, [f]: e.target.value }))}
+                className="w-full min-w-0 bg-surface2 border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted" />
+            </div>
+          ))}
+        </div>
+        <button onClick={save}
+          className="mt-2.5 w-full rounded-lg bg-primaryfill px-4 py-2.5 text-sm font-bold text-primaryfg cursor-pointer">Save measurements</button>
+        {msg ? <div className="mt-2 text-sm text-success">{msg}</div> : null}
+
+        {/* History list with delete */}
+        {onDelete && entries.length > 0 && (
+          <div className="mt-3.5">
+            <div className="mb-1.5 text-sm text-muted">Entries ({entries.length}) — tap ✕ to remove a mistake</div>
+            <div className="flex max-h-[180px] flex-col gap-1 overflow-y-auto">
+              {[...entries].reverse().map((e) => (
+                <div key={e.timestamp} className="flex items-center justify-between gap-2 rounded-lg bg-surface2 px-2.5 py-1.5">
+                  <span className="min-w-0 text-[.82rem]">
+                    <span className="text-muted">{new Date(e.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+                    <span className="ml-2 font-semibold">{summarize(e)}</span>
+                  </span>
+                  <button onClick={() => onDelete(e.timestamp)} title="Delete this entry"
                     className="cursor-pointer border-none bg-transparent px-1.5 py-0.5 text-base leading-none text-danger">✕</button>
                 </div>
               ))}
@@ -12198,6 +12471,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   const [wtDraft, setWtDraft] = useState("");
   const [showWt, setShowWt] = useState(false);     // inline weight-log input open
   const [showChart, setShowChart] = useState(false); // progress chart popup open
+  const [showMeasure, setShowMeasure] = useState(false); // body-measurements popup open
   const [showCalendar, setShowCalendar] = useState(false); // full calendar (back-dating) overlay
   useBodyScrollLock(showCalendar); // ClientHome's calendar is a portal OVERLAY (scrolls internally) — lock the page behind it
   const [recentFoods, setRecentFoods] = useState([]); // recent foods for the calendar's quick re-add chips
@@ -12519,6 +12793,18 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
       await window.storage.set(planDataKey(activePlanId), s);
     } catch { /* ignore */ }
   };
+  // Body measurements (tape) — merge into today's entry, echo-safe write path.
+  const saveMeasurements = async (vals) => {
+    await savePlanDataMutation((d) => { mergeMeasurements(d, vals, todayKey, "client"); });
+    await appendHistory(`logged measurements: ${Object.keys(vals).map((f) => `${f} ${vals[f]}"`).join(", ")}`);
+  };
+  const deleteMeasurement = (ts) => savePlanDataMutation((d) => {
+    d.measurements = (d.measurements || []).filter((e) => e && e.timestamp !== ts);
+  });
+  const setGoalFromLeanMass = async (lbs) => {
+    await savePlanDataMutation((d) => { d.goalWeight = lbs; });
+    await appendHistory(`set goal weight to ${lbs} lbs (from lean mass)`);
+  };
   const calSaveCheckIn = (checkin) => savePlanDataMutation((d) => {
     const others = (d.checkIns || []).filter((c) => c.date !== checkin.date);
     d.checkIns = [...others, checkin];
@@ -12788,6 +13074,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
               <div className="flex justify-between items-center gap-2 mb-1">
                 <div className="font-display text-base tracking-wide text-primary uppercase flex items-center gap-2"><Icon name="target" size={18} color="var(--accent)" />Weight &amp; goal</div>
                 <div className="flex gap-1.5">
+                  <button className={miniBtnCls} onClick={() => setShowMeasure(true)} title="Tape measurements — track progress without the scale"><span className="inline-flex items-center gap-1"><Icon name="ruler" size={13} />Measure</span></button>
                   <button className={miniBtnCls} onClick={() => setShowChart(true)} title="See your progress chart"><span className="inline-flex items-center gap-1"><Icon name="chart" size={13} />Progress</span></button>
                   <button className={showWt ? miniBtnActiveCls : miniBtnCls}
                     onClick={() => setShowWt(s => !s)} title="Log today's weight">
@@ -12941,6 +13228,13 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
         <WeightChartModal checkIns={(planData && planData.checkIns) || []} goalWeight={g} currentWeight={w}
           rangeLow={rLo} rangeHigh={rHi} startWeight={start}
           onDelete={deleteWeighIn} onClose={() => setShowChart(false)} />
+      )}
+
+      {/* Body measurements popup — tape → body fat, no scale needed (S92) */}
+      {showMeasure && (
+        <MeasurementsModal data={planData || {}} onSave={saveMeasurements}
+          onDelete={deleteMeasurement} onSetGoalWeight={setGoalFromLeanMass}
+          onClose={() => setShowMeasure(false)} />
       )}
 
       {/* Quick-action popup for completing a trainer request (Session 19). */}
@@ -13317,7 +13611,7 @@ const EMPTY_DATA = {
   firstName:"", lastName:"", gender:"", age:"", weightLbs:"", heightFt:"", heightIn:"",
   goalWeight:"", activityLevel:"", cardio:defaultCardio, strength:defaultStrength,
   checkIns:[], trainerNotes:"", bodyFat:"", goalBodyFat:"",
-  customExercises:[],
+  customExercises:[], measurements:[],
 };
 const STORAGE_INDEX = "caliq-index";
 const STORAGE_FOLDERS = "caliq-folders";
@@ -13393,6 +13687,7 @@ function describePlanChanges(prev, next) {
   if ((p.trainerNotes || "") !== (n.trainerNotes || "")) out.push("updated trainer notes");
   if (JSON.stringify(p.customExercises || []) !== JSON.stringify(n.customExercises || [])) out.push("edited custom exercises");
   if ((n.checkIns || []).length > (p.checkIns || []).length) out.push("added a check-in");
+  if (JSON.stringify(p.measurements || []) !== JSON.stringify(n.measurements || [])) out.push("updated tape measurements");
   return out;
 }
 
@@ -15555,6 +15850,17 @@ export default function App() {
               return next;
             })}
             onUpdateNotes={(text)=>setDataAndSave(p=>({...p, trainerNotes:text}))}
+            onSaveMeasurements={(vals)=>setDataAndSave(p=>{
+              // Tape measurements: merge into today's entry (one per date) and
+              // refresh bodyFat from the tape formulas. mergeMeasurements builds
+              // a NEW measurements array, so mutating the shallow copy is safe.
+              const next = {...p};
+              mergeMeasurements(next, vals, todayKey, activeRemoteUid ? "trainer" : "client");
+              return next;
+            })}
+            onDeleteMeasurement={(ts)=>setDataAndSave(p=>({...p,
+              measurements: (p.measurements||[]).filter(e => e && e.timestamp !== ts)}))}
+            onSetGoalWeight={(lbs)=>setDataAndSave(p=>({...p, goalWeight: lbs}))}
             onUpdateCardio={(day,idx,field,val)=>setDataAndSave(p=>{
               if (field==="_replace") return {...p, cardio:{...p.cardio,[day]:val}};
               const sessions = Array.isArray(p.cardio[day]) ? [...p.cardio[day]] : [];

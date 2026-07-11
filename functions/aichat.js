@@ -24,7 +24,7 @@ const MODEL = "claude-sonnet-4-6";
 // clientMax/trainerMax are the paid "Max" tiers (S89c): PUBLISHED high
 // allowances (~100 AI conversations/day) — honest fair-use ceilings, never
 // marketed as "unlimited" (Kevin's call; see docs/PRICING.md).
-const BUDGETS = { trial: 10000, client: 25000, assisted: 40000, trainer: 60000,
+const BUDGETS = { trial: 10000, client: 25000, assisted: 40000, trainer: 100000,
   clientMax: 150000, trainerMax: 200000 };
 
 function tierFor(profile) {
@@ -183,6 +183,7 @@ You can also TAKE ACTIONS for the user via tools — but you must CONFIRM the sp
 - Paste-from-another-AI import: the user may paste a reply from ChatGPT / Claude / another AI that contains several meals (and sometimes workouts or weigh-ins). Extract EVERY loggable item, briefly summarize what you found as a short list, and ask them to confirm. Once they confirm, log them all: because a card shows only one meal at a time, for a multi-item import call log_meal once PER meal (with the right meal type, and the date if the paste states one), and log_workout / log_weigh_in for any of those. Use a single propose_meal card only when there's exactly one meal. If nothing loggable is in the paste, say so plainly.
 - log_workout: mark a day as a workout day (with an optional note).
 - log_weigh_in: record a body-weight weigh-in (confirm the number).
+- Tape measurements / non-scale progress: some people prefer the tape measure to the scale — that's fully supported. When the user shares measurements ("waist is 34 inches", "measured my hips and thigh today"), confirm the numbers then call log_measurements (inches; any subset of waist/hips/neck/thigh/calf/forearm/wrist; merges into the same date). Body-fat % is computed automatically from tape (Covert Bailey — no scale needed; U.S. Navy as cross-check) plus waist-to-height ratio (goal: under 0.5). For "how's my waist / body fat trending?" call get_measurements. Frame tape body-fat numbers as estimates (±2%) and emphasize the TREND. Never pressure a scale-averse user to weigh; measurements + consistency are a complete way to track progress. To get their body-fat %, ask for the fields the tool notes as needed (men: waist, hips, forearm, wrist; women: hips, thigh, calf, wrist).
 - set_targets: change the plan's protein/carbs/fat targets and/or goal weight (this edits the plan — confirm exact numbers first).
 - Onboarding / personal info: if a plan is missing the basics (the dashboard shows no calorie target), offer to set it up by chat. ALWAYS call get_profile FIRST and only ask for the fields it lists as "missing" — never ask for info that's already set (don't re-ask for their weight or goal if get_profile already has them). The full set is gender, age, height, current weight, everyday activity level, and goal weight. As the user provides values, call set_personal_info to save them (you can save what they've given so far, then ask for what's still missing). Once the profile is complete, tell them their daily calorie target. Only confirm first if you'd overwrite an existing value with a different one.
 - Plans / phases: a person can have several plans (e.g. a cut, a maintenance phase, a bulk), with one active. Use list_plans to see them, switch_plan to change which is active, and create_plan to START A NEW PHASE — create_plan carries over their personal stats by default so they don't re-enter them; pass goalWeightLbs for the phase's goal, then build its targets/workouts with the other tools. Confirm before creating or switching. Don't expose plan ids to the user — refer to plans by name.
@@ -269,7 +270,7 @@ async function runToolRound(toolUses, toolCtx) {
     let out;
     try { out = await runTool(tu.name, tu.input || {}, toolCtx); }
     catch (e) { console.error("aiChat tool error:", tu.name, e && e.message); out = { error: "That action failed." }; }
-    if (["log_meal", "log_workout", "log_weigh_in", "log_check_in", "log_water", "set_targets", "set_workout_schedule", "set_personal_info", "create_plan", "switch_plan", "rename_plan", "set_notification_prefs", "add_custom_exercise"].includes(tu.name) && out && out.ok) wrote = true;
+    if (["log_meal", "log_workout", "log_weigh_in", "log_check_in", "log_measurements", "log_water", "set_targets", "set_workout_schedule", "set_personal_info", "create_plan", "switch_plan", "rename_plan", "set_notification_prefs", "add_custom_exercise"].includes(tu.name) && out && out.ok) wrote = true;
     if (tu.name === "propose_meal" && out && out.meal) proposal = out.meal;
     if (tu.name === "propose_workout" && out && out.workout) workoutProposal = out.workout;
     results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(out).slice(0, 60000) });
