@@ -1,4 +1,31 @@
-# Card-Upfront Auto-Converting Trial — spec (S92, not yet built)
+# Trial model — spec + what shipped (S92)
+
+## ✅ DECISION (Kevin, S92): REVERSE TRIAL + card option (not card-upfront-only)
+Concern with pure card-upfront: it walls the funnel (~60–75% fewer trial starts). Since Glide's
+basics are free forever, a reverse trial gives the best of both — max signups, nobody locked out.
+
+**What shipped this session (LIVE):**
+- The reverse-trial mechanic was already live (no-card signup → 30 days full AI → locks to the free
+  tier at expiry; basics stay free). The webhook already treats Stripe `trialing` as unlocked.
+- **Fairness added:** `createCheckoutSession` now sets `subscription_data.trial_end` to the user's
+  `trialStartedAt + trialLengthDays` when they're still inside the free trial — so upgrading EARLY
+  no longer wastes free days (no charge until the promised trial end; ≥48h-out guard). Past expiry →
+  no trial_end → billed now. Verified: a mid-trial `cs_live_` session was created with no error.
+- **Reverse-trial messaging:** SideMenu banner + chat lock card reframed — "Full AI access — free
+  for N more days · add a card anytime to keep your AI coach after — no charge until your free days
+  are up. Logging & data stay free either way." Expired: "Add a card to switch your AI back on."
+  Buttons: "Keep my AI coach" / "Turn my AI back on". House icons (sparkle/alert), no emoji.
+
+**Still to build (when greenlit):**
+- **End-of-trial reminder email** (~3 days out) via Resend — currently only the in-app banner nudges.
+- **Optional card-required path for self-serve** (the section below) if you later want to tighten
+  conversion; keep the reverse trial for trainer-invited clients. Build with an `onboardingPath` flag.
+- **ToS disclosure copy + attorney pass** (auto-renewal law) before marketing paid tiers.
+- Real-card smoke test (Kevin) — the only way to confirm the day-30 auto-charge end-to-end.
+
+---
+
+# Card-Upfront Auto-Converting Trial — spec (reference for the optional tighter path)
 
 Kevin's ask: move to the proven model where a user **picks a plan + enters a card before the trial
 starts**, gets full access for the trial, and is **auto-charged when the trial ends unless they

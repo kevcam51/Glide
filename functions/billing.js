@@ -130,6 +130,18 @@ exports.createCheckoutSession = onCall(
     const interval = sel.interval === "year" ? "year" : "month";
     const plan = planFor(profile.role, wantMax);
     const origin = safeOrigin(String((request.data && request.data.origin) || ""));
+    // Reverse trial (S92): if the user is still inside their free trial, don't
+    // charge until it ends — honor the promised free days even when they add a
+    // card early. Past expiry → no trial_end → billed now. Stripe needs
+    // trial_end ≥ ~48h out, so only set it when real time remains.
+    let trialEnd = null;
+    const t = profile.trialStartedAt;
+    const startMs = t && typeof t.toMillis === "function" ? t.toMillis()
+      : typeof t === "number" ? t : null;
+    if (startMs) {
+      const endMs = startMs + (profile.trialLengthDays || 30) * 86400000;
+      if (endMs - Date.now() > 2 * 86400000) trialEnd = Math.floor(endMs / 1000);
+    }
     try {
       const price = await ensurePrice(plan, interval);
       const session = await stripe().checkout.sessions.create({
@@ -143,7 +155,8 @@ exports.createCheckoutSession = onCall(
         // tier rides BOTH the session and the subscription so every webhook
         // event can stamp profile.subscriptionTier (drives the Max AI budget).
         metadata: { uid, tier: plan.tier },
-        subscription_data: { metadata: { uid, tier: plan.tier } },
+        subscription_data: { metadata: { uid, tier: plan.tier },
+          ...(trialEnd ? { trial_end: trialEnd } : {}) },
         allow_promotion_codes: true,
         success_url: `${origin}/?billing=success`,
         cancel_url: `${origin}/?billing=cancelled`,

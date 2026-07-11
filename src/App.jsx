@@ -12051,14 +12051,14 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round">
                 <rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
               </svg>
-              <div className="font-display text-[1.05rem] text-fg">Your free trial has ended</div>
+              <div className="font-display text-[1.05rem] text-fg">Your free AI trial ended</div>
               <div className="max-w-[320px] text-[.84rem] leading-relaxed text-muted">
-                Glidna AI — chat, photo &amp; voice logging, and coaching tools — is part of the paid plan.
-                <span className="text-fg font-semibold"> Your data and manual logging stay free.</span>
+                Add a card to keep your AI coach — chat, photo &amp; voice logging, and coaching tools.
+                <span className="text-fg font-semibold"> Your logging and data stay free either way.</span>
               </div>
               <button onClick={() => setShowPlans(true)}
                 className="mt-1 rounded-xl border-none bg-primaryfill px-6 py-3 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-60">
-                Upgrade to keep Glidna AI
+                Keep my AI coach
               </button>
               {showPlans && <PlanPicker role={role} onClose={() => setShowPlans(false)} />}
             </div>
@@ -14515,24 +14515,28 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
             border: `1px solid ${trial.expired ? "var(--red)" : trial.daysLeft <= 5 ? "var(--yellow)" : "var(--accent)"}` }}>
             {trial.expired ? (
               <div style={{ fontSize: ".8rem", lineHeight: 1.4 }}>
-                <span style={{ fontWeight: 700, color: "var(--red)" }}>⚠️ Your trial has ended.</span>
+                <span style={{ fontWeight: 700, color: "var(--red)", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <Icon name="alert" size={14} color="var(--red)" /> Your free AI trial ended
+                </span>
                 <div style={{ color: "var(--muted)", marginTop: 2 }}>
-                  Glidna AI is paused — your data and manual logging stay free.
+                  Add a card to switch your AI coach back on — your logging &amp; data stay free either way.
                 </div>
               </div>
             ) : (
               <div style={{ fontSize: ".8rem", lineHeight: 1.4 }}>
-                <span style={{ fontWeight: 700, color: trial.daysLeft <= 5 ? "var(--yellow)" : "var(--accent)" }}>
-                  ⏳ {trial.daysLeft} day{trial.daysLeft === 1 ? "" : "s"} left in your trial
+                <span style={{ fontWeight: 700, color: trial.daysLeft <= 5 ? "var(--yellow)" : "var(--accent)", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <Icon name="sparkle" size={14} color={trial.daysLeft <= 5 ? "var(--yellow)" : "var(--accent)"} /> Full AI access — free for {trial.daysLeft} more day{trial.daysLeft === 1 ? "" : "s"}
                 </span>
-                <div style={{ color: "var(--muted)", marginTop: 2 }}>{trial.lengthDays}-day free trial</div>
+                <div style={{ color: "var(--muted)", marginTop: 2 }}>
+                  Add a card anytime to keep your AI coach after — no charge until your {trial.lengthDays} free days are up. Logging &amp; data stay free either way.
+                </div>
               </div>
             )}
             <button onClick={() => setShowPicker(true)}
               style={{ marginTop: 8, width: "100%", padding: "9px 12px", borderRadius: 8, border: "none",
                 background: "var(--accent-fill)", color: "#0b0b12", fontWeight: 800, fontSize: ".82rem",
                 cursor: "pointer" }}>
-              {trial.expired ? "Upgrade to keep Glidna AI" : "Upgrade now"}
+              {trial.expired ? "Turn my AI back on" : "Keep my AI coach"}
             </button>
             {upgradeErr && <div style={{ marginTop: 6, fontSize: ".72rem", color: "var(--red)" }}>Couldn't open checkout — try again in a moment.</div>}
           </div>
