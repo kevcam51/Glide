@@ -26,6 +26,45 @@ A 3-message tool-heavy batch (≈6 API rounds, warm cache): input 3,988 · outpu
 (cache-read cost riding along included). Model `claude-sonnet-4-6` at $3/M input · $15/M output ·
 $0.30/M cache-read · $3.75/M cache-write (5-min TTL).
 
+## ⚠️ COLD-START CORRECTION (S92) — the S67 anchor above is the WARM case only
+
+The S67 "2.7¢ / ~4,730 budget" number was a **warm-cache** batch (messages within 5 min, so the
+big instruction+tools prefix rode along as a cheap cache-READ, excluded from budget). Real usage
+is mostly COLD: meals are logged hours apart, so each one re-writes the full prefix at full price.
+
+**Measured prefix size (S92 — client MEASURED from a live call, trainer calibrated to it):**
+- **Client prefix ≈ 8,912 tokens** = tool defs **5,941** + system prompt 2,971 (27 tools)
+- **Trainer prefix ≈ 12,300 tokens** = tool defs **8,950** + system prompt 3,380 (31 tools)
+- → **the TOOL DEFINITIONS are ~⅔–¾ of the prefix** — the #1 shrink target.
+
+A message is COLD if >5 min (Anthropic's cache TTL) since the last one. Meal-by-meal logging =
+every message cold. The 1-hour cache extension does NOT fix this (meals are >1 hr apart).
+
+**Corrected per-message economics:**
+
+| Message | Our $ cost | Budget tokens |
+|---|---|---|
+| COLD client chat / meal-log | ~4–5¢ | ~11,000 |
+| COLD trainer roster query (20+ clients) | ~8–10¢ | ~18,000 |
+| WARM (within cache window) | ~1.5¢ | ~2,500 |
+
+So a cold message is **3–4× a warm one** in both dollars and budget. Cold-adjusted personas:
+
+| Persona | Cold msgs/day | Budget/day | Our cost/mo | Right tier | Margin |
+|---|---|---|---|---|---|
+| Casual client (1–2 chat logs, rest manual) | 2–3 | ~30k | $2–4 | Premium $14.99 | ✅ strong |
+| Heavy client (logs every meal + Qs by chat) | 8–10 | ~100k | ~$13 | **Max $29.99** (blows Premium 25k) | ✅ ~55% |
+| Active trainer, 20–30 clients across the day | 12–15 | ~180k | ~$25–30 | **Coach Max $79** (blows Coach 100k) | ✅ ~65% |
+
+**Verdict:** the PRICES still hold (heaviest users cost $13–30 vs $30–79 tiers) because the per-tier
+CAP routes heavy users up the ladder where the margin is — the cap is the margin guarantee. But the
+caps are **mismatched to conversational reality**: trial 10k ≈ 1 cold message (broken); Premium 25k
+≈ 2 cold chats/day (too stingy for chat-logging → forces Max). **Biggest lever = shrink the prefix**
+(mostly the tool defs): 9k→~5.5k client / 12k→~8k trainer cuts EVERY cold message ~35–40%, ~doubling
+experience-per-cap on every tier and cutting heavy-user cost (~$13→~$8 client, ~$28→~$18 trainer).
+Quality-safe if we trim verbose wording only (not remove tools/rules) + test. See METRICS-PLAN-style
+task: prefix-shrink plan.
+
 ## Worst-case monthly cost per user (maxes the cap EVERY day, 30/30 days)
 
 | Cost line | Client Premium ($9.99) | Trainer Coach ($49) |
