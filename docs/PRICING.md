@@ -173,6 +173,40 @@ employees who want one) is the differentiator nobody else offers at this price.
 theming pass, SSO later. Cheap now: an "Enterprise — let's talk" line on the pricing surface.
 Custom-quote above ~25 coaches / ~2,500 employees; offer 3-month department pilots.
 
+**Worked examples — Glide Studio at $249/mo, 10 seats included, +$19/extra coach** (per-trainer
+effective cost; compared to buying that many standalone Coach $49 seats):
+
+| Gym size | Monthly | Per trainer | vs. individual Coach seats |
+|---|---|---|---|
+| 5 trainers  | $249 | $49.80 | $245 — basically the same, NO volume discount |
+| 10 trainers | $249 | $24.90 | $490 — half price |
+| 15 trainers | $344 | $22.93 | $735 — big discount |
+| 30 trainers | $629 | $20.97 | $1,470 — huge discount (past ~25 → custom quote/annual) |
+
+**Honest flaw to resolve before selling boutiques:** the 10-included base front-loads the price,
+so below ~10 trainers there's NO discount vs individual Coach subs — a 5-trainer studio pays
+$49.80/trainer either way; Studio's only value there is the admin/white-label/aggregate layer, not
+price. The model shines at 10+ coaches (~$21–25/trainer, ~half standalone). **Open decision — the
+shape** (depends on whether 5–8-trainer boutiques are a target segment):
+- **Keep current** ($249/10-included): great for 10+; tell small gyms to use individual Coach seats
+  + a light "team view." Simple story, but a 5-coach studio has no price reason to pick Studio.
+- **Clean per-seat** (~$29/coach, 5-coach min): 5→$145, 15→$435, 30→$870. Fair to small gyms,
+  linear, easy to explain; leaves money on the table at big gyms, loses the "one price/location"
+  anchor vs Trainerize.
+- **Hybrid** ($149 base / 5 included, +$19/extra): 5→$149 ($29.80/trainer), 15→$339, 30→$624.
+  Real discount for small gyms AND keeps the location anchor.
+
+**DECISION (Kevin, this session): go with the HYBRID shape for small boutique gyms** — $149 base
+covering 5 seats, +$19/extra coach. Reason: it gives 5–8-trainer studios a genuine per-trainer
+discount (~$30 vs the standalone $49) so they have a real reason to pick Studio, while still
+scaling cheaply for bigger gyms and keeping the clean "one price per location" anchor. Still
+sell-on-paper (no build until a real gym prospect); this just fixes the "small gyms get no
+discount" flaw in the original $249/10-included anchor.
+
+Note: the "location/coach-count" axis is DIFFERENT from the standalone per-CLIENT axis
+(TrueCoach/Trainerize scale a single trainer by their client count; Studio scales a gym by its
+coach count). See "Per-client pricing — considered & deferred" below for why standalone stays flat.
+
 ## Annual pricing (S89c)
 
 Convention: consumer tiers get a deep discount (drives the impulse "might as well" upgrade —
@@ -242,3 +276,27 @@ Max annual ≈ $11,150 ARR, ~$2–3k costs → ~$8–9k profit — collected up 
   the first lever is a launch-window annual promo, not a list-price cut.
 - Verified sources: myfitnesspal.com pricing/blog + support center (Coach article), trainerize.com/pricing,
   truecoach.co/pricing, everfit.io/pricing, Cal AI paywall roundups (dynamic pricing, no public page).
+
+## Per-client pricing (standalone Coach) — considered & DEFERRED, keep flat
+
+Every coach-side competitor (TrueCoach, Trainerize, Everfit) charges a single trainer MORE as
+their client count grows (bands: 5 / 20 / 50 / 200+). Question raised: should standalone Glide
+Coach do the same? **Decision: no — keep Coach $49 / Coach Max $79 FLAT with unlimited clients.**
+
+Why flat wins for us specifically:
+- **It's our sharpest differentiator.** "Unlimited clients, nutrition + AI included, no add-on
+  stacking" is the exact line that beats TrueCoach ($58 for a 20-client cap, $137 at 50) and
+  Trainerize (needs +$20–45 nutrition add-ons). Per-client bands would throw that away.
+- **Our marginal cost per extra client is ~nothing.** Unlike their infra, everything but AI runs
+  on our own data; AI is ~1¢/exchange and hard-capped per user per day. We don't NEED per-client
+  pricing to stay profitable — it'd be a pure revenue play.
+- **Zero paying trainers yet** → designing a client-count band matrix now is guessing at a
+  distribution we can't see.
+
+If we ever want more revenue from big solo trainers, scale the **AI budget** (Max already does
+this: 100k → 200k tokens/day), NOT client caps — a client cap directly contradicts our own
+marketing. **Revisit trigger:** real trainers signed up + evidence that big-roster (50+ client)
+solo trainers are (a) showing up and (b) worth a dedicated tier. Coach-count scaling for gyms is a
+separate axis and IS in scope — see Glide Studio above. (Budget note: base Coach raised 60k→100k
+tokens/day this session so a heavy ~20-client trainer doesn't hit the cap on a normal heavy day;
+worst-case cost ≤$7/mo/heavy-trainer, ~70% margin held.)
