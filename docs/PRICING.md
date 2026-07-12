@@ -79,6 +79,53 @@ heavy roster users from Coach ($49/100k) up to Coach Max ($79/200k) where the ma
 wall needed. Explicitly chose NOT to gate coach_summary to Max or strip client-mgmt from Coach (would
 gut the Coach tier's value). Revisit only if real usage shows the cap isn't doing the job.
 
+## Measured per-message economics + messages-per-tier (S92, LIVE prod data)
+
+Purpose: reference data for deciding later whether to raise tier limits. **Per-message cost is
+TIER-INDEPENDENT** — a message costs the same whether the account is trial, Premium, Coach, or Max;
+the tier only sets the daily cap. So message-count-per-tier = per-message cost ÷ the tier's budget.
+
+**Raw measured data points** (from `aiUsage` logs, aiChatStream, real prod calls; "spent" = the
+budget-counted tokens = input + output + cacheWrite, cache-reads excluded):
+- Trainer COLD, simple Q, 1 tool round: input 2290 · output 257 · cacheWrite 7698 → **spent 10,245**
+- Trainer COLD, larger first turn: cacheWrite 10,390 → **spent 12,746**
+- Trainer WARM, simple follow-up: **spent 1,075**
+- Trainer WARM, 2 tool rounds (data read): cacheRead 15,396 → **spent 2,335**
+- (Client per-message costs measured the same shape — cold ~9–11k, warm ~1–2.5k.)
+
+**Per-message cost by type (measured, use for planning):**
+
+| Message type | Budget tokens | Examples |
+|---|---|---|
+| COLD simple question (first of a session) | ~10,000–13,000 | "high-protein breakfast ideas?", "how do I structure a cut?" |
+| COLD data/roster query (big tool result) | ~13,000–18,000 | "which clients need attention?", "what did I eat this week?" (cold) |
+| WARM simple follow-up (≤5 min since last) | ~1,000 | "make it two burritos", quick clarifications |
+| WARM with tool call | ~2,300–2,500 | mid-conversation meal log / data read |
+
+**COLD vs WARM is the whole story** — a cold message costs ~10× a warm one because it re-pays the
+~7–8k instruction+tools prefix. Cold = messages spread apart (meal logged every few hours). Warm =
+staying in one active conversation. So "messages/day to hit the cap" is a RANGE by usage style:
+
+| Tier | Daily cap | Spread-out (cold) | Realistic mix (few sittings) | Rapid burst (warm) |
+|---|---|---|---|---|
+| Trial (client) | 50k | ~5 | ~12–18 | ~25–35 |
+| Premium (client) | 25k | ~2–3 | ~6–9 | ~12–18 |
+| Assisted (linked client) | 40k | ~4 | ~10–14 | ~20–28 |
+| **Client Max** | **150k** | **~13–14** | **~40–50** | **~100** |
+| Trial (trainer) = Coach base | 100k | ~7–9 | ~18–28 | ~40–50 |
+| Coach base | 100k | ~7–9 | ~18–28 | ~40–50 |
+| **Coach Max (trainer)** | **200k** | **~14–15** | **~50** | **~100** |
+
+(The Max "rapid burst ~100" matches the published "~100 AI conversations/day" allowance — that grid
+number is honest.) Client Max and Coach Max numbers are EXTRAPOLATED from the tier-independent
+per-message costs above (not re-run live — re-running yields identical per-message data at ~350k
+tokens of cost).
+
+**Planning note (Kevin, S92):** expectation is most users lean on the AI to manage their own account
+AND (trainers) their clients' accounts — i.e. usage skews toward the pricier cold data/roster queries,
+not cheap warm chatter. Watch real `aiUsage` totals over time; if a meaningful share of PAID users
+regularly hit their cap, that's the signal to raise limits (each +50k/day ≈ ≤$7/mo worst-case cost).
+
 ## Worst-case monthly cost per user (maxes the cap EVERY day, 30/30 days)
 
 | Cost line | Client Premium ($9.99) | Trainer Coach ($49) |
