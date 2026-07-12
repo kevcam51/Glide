@@ -1,6 +1,85 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡ S92 (Jul 12 — MARATHON): trials, tiers, Ultra, workflow engine, Pro retired, sessions spec
+_Everything below is committed + pushed (`origin/main` clean) + deployed. Firebase `calorieiq-29762`;
+domain **glidna.com**; model `claude-sonnet-4-6`. Read the relevant docs/*.md for depth._
+
+### AI budgets / trials (all LIVE)
+- **Trial budgets:** client **50k** (was 10k); **trainer 200k** (new `trainerTrial` tier — a trainer
+  works with clients day one, so they get the full Coach-Elite-level experience during the 30-day
+  trial and don't hit a wall). `tierFor` in aichat.js returns `trainerTrial` for a head/sub_trainer on
+  `subscriptionStatus:"trial"`; `trialExpiredFor` still locks the AI at trial end.
+- **Coach base 60k→100k**; **prefix shrink ~17–18%** (client 8.9k→7.4k, trainer 12.3k→10.2k — measured;
+  the rest is irreducible tool-name/param structure, so not the hoped 35%). Portion rigor + invisible-
+  calorie awareness are now DEFAULT in the prompt (cheap accuracy, everyone).
+- **BUDGETS (aichat.js):** trial 50k · client 25k · assisted 40k · trainer 100k · **trainerTrial 200k** ·
+  clientMax 150k · trainerMax 200k · clientUltra 250k · trainerUltra 400k.
+
+### Reverse trial + card option (LIVE) — Kevin chose this over card-upfront-only
+- No card to start → full AI 30 days → locks to free tier at expiry (basics always free). Fairness:
+  `createCheckoutSession` sets `subscription_data.trial_end` so upgrading EARLY doesn't waste free days.
+  Reverse-trial messaging on the SideMenu banner + chat lock ("Full AI free for N days · add a card
+  anytime"). **`trialReminders`** scheduled fn (daily) emails a nudge 1–3 days out + at expiry.
+  ToS §3 updated with the auto-renewal disclosure. **Still: Kevin's real-card smoke test + attorney pass.**
+
+### Tier rename + Ultra tier (LIVE) — display only, internal keys unchanged
+- **Max→Elite, Ultra→Apex** (Premium→Elite→Apex; Coach→Coach Elite→Coach Apex). billing.js CATALOG
+  names + App.jsx PlanPicker/FeatureMatrix/upsell/banner. Internal `tier`/BUDGETS keys stay (max/ultra).
+- **Ultra tier (data-triggered, NOT on the public page):** Coach Ultra 400k **$129/mo**, Client Ultra
+  250k **$49.99/mo**. Surfaced via the boost upsell: `requestBudgetBoost` returns `suggestUltra:true` on
+  a Max user's **3rd cumulative boost + every 3rd after** (`aiUsage/meta.boostCount`); AIChatPanel shows
+  a role-aware Ultra card → Checkout `{tier:"ultra"}`. Live-checkout page = part of the pending smoke test.
+
+### Pro "precise food data" RETIRED (data-driven) — see docs/AI-ACCURACY.md
+- Tested: the FREE estimate is ~98% accurate on branded/store-brand/restaurant foods; the food DB was
+  absent (Chipotle NOT in DB), crowd-sourced, or LESS accurate (Kirkland DB 184 vs estimate 190 vs
+  label 190), at 2–2.5× tokens. So `search_food` is retired (filtered out; tool def kept dead), the
+  "Precision tracking" toggle removed, **portion + invisible-calorie rigor now default for all**.
+  Barcode stays the exact path. **Do NOT build the restaurant-menu integration** (model already wins).
+
+### Body measurements (LIVE) — docs/METRICS-PLAN.md
+- Tape → body-fat (Covert Bailey + US Navy, no scale), waist-to-height, lean-mass, goal-weight-from-lean-
+  mass. `MeasurementsModal` in ClientHome + Results. **Optional "estimate body fat %" toggle** (`data.
+  hideBodyFat`) → plain measurement tracker when off. AI `log_measurements`/`get_measurements`.
+
+### Scheduled AI workflow engine — Phase 1 BACKEND deployed (UI = Phase 2 next)
+- `functions/workflows.js`: top-level `workflows` collection (**Admin-SDK-only, no rules change**).
+  Callables `saveWorkflow` (tier-gated: Elite 1 / Coach Elite 2 / Apex 3 / Coach Apex 5) / `listWorkflows`
+  / `toggleWorkflow` / `deleteWorkflow`; **`runDueWorkflows`** onSchedule hourly runs each due automation
+  via new `aichat.runAssistantTurn(uid,prompt)` (headless AI turn, metered against the daily budget),
+  delivers to the notif feed (`push.appendFeed`). Times UTC in Phase 1. **⚠️ Not E2E-tested — needs an
+  Elite+ account (can't grant entitlement from CLI). Phase 2 = the Automations UI + that verification.**
+
+### Session scheduling + auto-charge ("red line") — FULLY SPECCED, docs/SESSIONS-BILLING-PLAN.md
+- Kevin's Equinox feature: when a scheduled session's time passes, **pull from the client's package
+  first (decrement a credit, no charge); only if 0 credits, auto-charge their saved card**. Decisions:
+  **scheduling = Acuity-import first** (native later), **billing = BOTH packs + pay-per-session**,
+  **TRAINER-SET PRICING** (Shopify-for-trainers; Acuity appointment-type price flows through; Connect for
+  multi-tenant). **Acuity API VERIFIED** (Basic auth UserID:APIKey; GET /appointments w/ price/paid/
+  noShow; webhooks scheduled/rescheduled/canceled/changed). Settlement is transactional/idempotent
+  (`settled` flag). **NEXT: Kevin supplies his Acuity API key + User ID → live dry-run (like Trainerize).**
+
+### Pricing analysis (docs/PRICING.md — lots added)
+- Cold-start correction + measured per-message economics (cold ~10–18k budget tokens, warm ~1–2.5k;
+  **tier-independent**) + messages-per-tier grid for every tier incl. hypothetical 250–400k trainer caps
+  (250–300k safe @ $79; 350–400k needs a higher price / "Coach Ultra"). Enterprise Glide Studio worked
+  examples + **hybrid $149/5-seats decision for boutiques**. Per-client-bands **deferred, keep flat**.
+  Decision: **client-mgmt AI stays in Coach — rely on the cap** (heavy roster users route to Coach Elite).
+  Memory: `ai-token-usage-tracking` (track real aiUsage → raise limits when paid users regularly cap).
+
+### Gotchas reaffirmed this session
+- **Deploy ALL 4 AI fns when aitools.js changes** (aiChat/aiChatStream/logMeal/setWorkoutSchedule); the
+  system prompt lives in aichat.js (only aiChat/aiChatStream). New fns this session: trialReminders,
+  saveWorkflow/listWorkflows/toggleWorkflow/deleteWorkflow/runDueWorkflows.
+- Firebase-log flush lags several min (per-message aiUsage). Can't grant entitlements/Elite from CLI (no
+  gcloud; rules block owner writes) — so Ultra/workflow/Pro happy-paths need a real Elite+ test account.
+- **NEXT SESSION QUEUE:** (1) Kevin's Acuity API creds → dry-run → build sessions feature; (2) workflow
+  Phase 2 (Automations UI + E2E); (3) Kevin's standing items — real-card Stripe smoke, attorney pass
+  (ToS+Privacy), Trainerize re-import. Product/pricing is deeply worked; execution + real-money testing remain.
+
 ## ⚡ S91b (Jul 11): AI chat polish + an OPEN pricing decision to resume
+_(↑ The "OPEN DECISION" below is RESOLVED in S92: Coach base bumped 60k→100k; the efficiency/tool-result
+truncation fix was deferred per Kevin's quality concern; Claude-Pro framing added to docs/PRICING.md.)_
 - **Smooth typewriter streaming SHIPPED** (`makeStreamSmoother` in App.jsx): streamed replies
   reveal at a steady ~1000 cps via requestAnimationFrame instead of jumpy network bursts.
   Robustness: rAF pauses on a backgrounded tab, so the wait races a 1500ms timeout + force-stop
