@@ -126,6 +126,28 @@ AND (trainers) their clients' accounts — i.e. usage skews toward the pricier c
 not cheap warm chatter. Watch real `aiUsage` totals over time; if a meaningful share of PAID users
 regularly hit their cap, that's the signal to raise limits (each +50k/day ≈ ≤$7/mo worst-case cost).
 
+### Hypothetical HIGHER trainer caps (250k–400k) — extrapolated messages + cost (S92)
+
+Messages/day to cap (same tier-independent per-message costs: cold ~14k roster-heavy, realistic ~4k,
+warm ~2k) AND absolute worst-case monthly cost IF a trainer maxes the cap EVERY day (cost/budget-token
+measured: cold-fill ≈ $4.1/M, warm-fill ≈ $5.8/M — warm-fill is the pricier worst case). Margin vs the
+current **Coach Max $79/mo**:
+
+| Trainer cap | Cold msgs | Realistic | Warm burst | Worst-case $/mo (maxed daily) | Margin @ $79 |
+|---|---|---|---|---|---|
+| 200k (current) | ~14–15 | ~50 | ~100 | $25–35 | 56–68% |
+| 250k | ~18 | ~62 | ~125 | $31–44 | 44–61% |
+| 300k | ~21 | ~75 | ~150 | $37–53 | 33–53% |
+| 350k | ~25 | ~87 | ~175 | $43–61 | 23–46% |
+| 400k | ~28–29 | ~100 | ~200 | $49–70 | **11–38%** |
+
+**Read:** (1) In EXPECTATION, raising the cap is cheap — almost nobody maxes daily; the cap is a
+ceiling, not the bill. A typical active trainer spends $5–15/mo regardless of cap; a higher cap only
+costs more for the few who push into the new headroom. (2) But the WORST-CASE margin is the guardrail,
+and at **400k on the $79 price it thins to ~11–38%** (a heavy all-day warm user). So 250k–300k is
+comfortably safe at $79; **350k–400k ideally pairs with a higher price or a new "Coach Ultra" tier**
+rather than being given away on Coach Max. Same shape applies to Client Max (÷ its own price).
+
 ## Worst-case monthly cost per user (maxes the cap EVERY day, 30/30 days)
 
 | Cost line | Client Premium ($9.99) | Trainer Coach ($49) |
