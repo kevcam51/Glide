@@ -65,6 +65,20 @@ experience-per-cap on every tier and cutting heavy-user cost (~$13→~$8 client,
 Quality-safe if we trim verbose wording only (not remove tools/rules) + test. See METRICS-PLAN-style
 task: prefix-shrink plan.
 
+**✅ SHIPPED S92 (from the above):** (1) **Trial budget 10k→50k** — one cold message no longer
+maxes the trial; a reverse-trial user gets a genuinely full daily experience (worst-case trial cost
+still ≤~$4 over 30 days). (2) **Coach base 60k→100k** — a heavy ~20-client trainer clears a normal
+heavy day without hitting the cap. (3) **Prefix shrink** — client 8,912→~7,360 tok, trainer
+12,332→~10,150 tok (**~17–18%**, not the hoped 35%: most of the prefix is irreducible STRUCTURE —
+tool names/params/enums — and cutting further means removing abilities, which we won't do). Every
+cold message is ~18% cheaper on every tier. Quality-preserved (trimmed wording only, regression-safe).
+
+**✅ DECISION S92 — client-management AI stays in Coach; rely on the cap (Kevin).** Roster-wide
+client-management (coach_summary etc.) is the biggest token cost, but the per-tier CAP already routes
+heavy roster users from Coach ($49/100k) up to Coach Max ($79/200k) where the margin is — no feature
+wall needed. Explicitly chose NOT to gate coach_summary to Max or strip client-mgmt from Coach (would
+gut the Coach tier's value). Revisit only if real usage shows the cap isn't doing the job.
+
 ## Worst-case monthly cost per user (maxes the cap EVERY day, 30/30 days)
 
 | Cost line | Client Premium ($9.99) | Trainer Coach ($49) |
