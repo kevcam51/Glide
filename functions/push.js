@@ -108,6 +108,7 @@ async function sendPushTo(db, uid, payload, prefKey) {
   return { sent, pruned };
 }
 exports.sendPushTo = sendPushTo;
+exports.appendFeed = appendFeed; // feed-only delivery (no push/secret) — used by workflows (S92)
 
 // ── trigger: new direct message → notify the recipient ──────────────────────
 exports.onDmCreated = onDocumentCreated(

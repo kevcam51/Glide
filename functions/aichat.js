@@ -349,6 +349,50 @@ exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], region: "us-central1", m
   };
 });
 
+// ── runAssistantTurn: headless one-shot AI turn for scheduled workflows (S92) ──
+// Reuses the SAME setup/tools/budget/tool-loop as aiChat, but driven by a stored
+// prompt instead of a live user. Meters spend against the user's daily budget and
+// returns the reply text (or a `skipped` reason: budget / trial-expired / error).
+// Callers must bind the ANTHROPIC_API_KEY secret.
+async function runAssistantTurn(uid, userText) {
+  const { system, tools, toolCtx, budget, usageRef, used, trialExpired } = await setupChat(uid);
+  if (trialExpired) return { skipped: "trial-expired" };
+  if (used >= budget) return { skipped: "budget" };
+  const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+  const convo = [{ role: "user", content: userText }];
+  const agg = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+  let resp;
+  try {
+    resp = await client.messages.create({ model: MODEL, max_tokens: 1024, system, tools, messages: convo });
+    addUsage(agg, resp.usage);
+    let rounds = 0;
+    while (resp.stop_reason === "tool_use" && rounds < MAX_TOOL_ROUNDS) {
+      rounds++;
+      const toolUses = (resp.content || []).filter((b) => b.type === "tool_use");
+      const r = await runToolRound(toolUses, toolCtx);
+      convo.push({ role: "assistant", content: resp.content });
+      convo.push({ role: "user", content: r.results });
+      resp = await client.messages.create({ model: MODEL, max_tokens: 1024, system, tools, messages: convo });
+      addUsage(agg, resp.usage);
+    }
+  } catch (e) {
+    console.error("runAssistantTurn error:", e && e.message);
+    return { skipped: "error" };
+  } finally {
+    const spent = agg.input + agg.output + agg.cacheWrite;
+    if (spent > 0) {
+      console.log("aiUsage", JSON.stringify({ fn: "workflow", ...agg, spent }));
+      await usageRef.set({ tokens: admin.firestore.FieldValue.increment(spent),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
+    }
+  }
+  const text = (resp.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  return { reply: text, spent: agg.input + agg.output + agg.cacheWrite };
+}
+exports.runAssistantTurn = runAssistantTurn;
+exports.ANTHROPIC_API_KEY = ANTHROPIC_API_KEY;
+exports.tierFor = tierFor;
+
 // Streaming variant (Stage 4): same logic, but an HTTP endpoint that streams the
 // reply as Server-Sent Events so it appears word-by-word. Auth is verified from
 // the `Authorization: Bearer <idToken>` header (callables do this automatically;

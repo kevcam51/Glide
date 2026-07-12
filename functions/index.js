@@ -94,6 +94,13 @@ exports.setWorkoutSchedule = require("./aichat").setWorkoutSchedule; // workout 
 exports.transcribeAudio = require("./transcribe").transcribeAudio; // voice → text (Whisper)
 exports.sendInvite = require("./invites").sendInvite; // email invites (Option C)
 exports.trialReminders = require("./trialreminder").trialReminders; // daily reverse-trial reminder emails (S92)
+
+// Scheduled AI automations / workflows (S92, Phase 1 backend — UI is Phase 2)
+exports.saveWorkflow = require("./workflows").saveWorkflow;
+exports.listWorkflows = require("./workflows").listWorkflows;
+exports.toggleWorkflow = require("./workflows").toggleWorkflow;
+exports.deleteWorkflow = require("./workflows").deleteWorkflow;
+exports.runDueWorkflows = require("./workflows").runDueWorkflows; // hourly dispatcher
 exports.trainerizeTest = require("./trainerize").trainerizeTest; // Trainerize connection test (import step 1)
 exports.trainerizeImport = require("./trainerize").trainerizeImport; // Trainerize roster + snapshot importer (v1)
 exports.trainerizeAutoSync = require("./trainerize").trainerizeAutoSync; // 30-min background sync of imported clients
