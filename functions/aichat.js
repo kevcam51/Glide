@@ -170,7 +170,7 @@ function capHistory(messages) {
 const MAX_TOOL_ROUNDS = 5;
 
 // Build the role-aware system prompt (shared by the callable + the stream fn).
-function buildSystemPrompt(role, isTrainer, foodDb) {
+function buildSystemPrompt(role, isTrainer) {
   const baseSystem = (role === "client") ? SYSTEM_CLIENT : SYSTEM_TRAINER;
   return `${baseSystem}
 
@@ -183,7 +183,7 @@ Meal times: each meal carries the clock time eaten (a "time" field like "19:45")
 Read real data: use the read tools whenever a question depends on actual numbers rather than guessing; call get_nutrition_targets before judging a day over/under. For ADVICE/feedback (not a quick log or fact), first call get_nutrition_log for the recent week or two and tailor guidance to the real patterns (meal timing, day-of-week habits, adherence, weight trend) instead of generic tips — but don't over-fetch for simple logging. Don't expose internal ids; refer to clients by name.
 
 TAKING ACTIONS: you must CONFIRM the specifics and get an explicit go-ahead before any write — never act prematurely:
-- Logging food: from a description OR a PHOTO (identify items/portions from the image), estimate calories + P/C/F, then call propose_meal to show a tappable Accept/Edit card.${foodDb ? " PRECISION MODE is on: for PACKAGED/BRANDED items or CHAIN-RESTAURANT items (a named bar/yogurt/cereal/powder, or e.g. a Chipotle bowl / Starbucks drink), call search_food FIRST for verified values (results are USDA-first — prefer the USDA entry) and scale to the portion; for simple whole foods estimate. Be rigorous about PORTION — when it's ambiguous ('some rice', 'a bowl of pasta', a plate photo), briefly state the serving you're assuming (e.g. '~1 cup / 200g') or ask, so grams aren't a blind guess. Account for INVISIBLE calories — cooking oil, butter, dressings, sauces — and ask if a cooked dish likely has them. If search_food returns nothing useful, estimate." : ""} The card shows the name + calories + macros, so keep your text reply to ONE short line (e.g. "Here's my estimate — tap to log.") — don't re-list items or repeat macros, even for a long list. The card saves it — do NOT also call log_meal. Ask the meal type if unclear; support corrections ("make it one egg") by proposing again; note photo estimates are approximate. Use log_meal directly only if the user says to log without a card.
+- Logging food: from a description OR a PHOTO (identify items/portions from the image), estimate calories + P/C/F, then call propose_meal to show a tappable Accept/Edit card. Be rigorous about PORTION — when it's ambiguous ('some rice', 'a bowl of pasta', a plate photo), briefly state the serving you're assuming (e.g. '~1 cup / 200g') or ask, so grams aren't a blind guess. Account for INVISIBLE calories — cooking oil, butter, dressings, sauces — and ask if a cooked dish likely has them. The card shows the name + calories + macros, so keep your text reply to ONE short line (e.g. "Here's my estimate — tap to log.") — don't re-list items or repeat macros, even for a long list. The card saves it — do NOT also call log_meal. Ask the meal type if unclear; support corrections ("make it one egg") by proposing again; note photo estimates are approximate. Use log_meal directly only if the user says to log without a card.
 - Paste-from-another-AI: a pasted ChatGPT/Claude reply may contain several meals (and workouts/weigh-ins). Extract EVERY loggable item, summarize as a short list, and confirm. On confirm, log all: call log_meal once PER meal (right type + date if stated), plus log_workout/log_weigh_in — a single propose_meal card only when there's exactly one meal. If nothing's loggable, say so.
 - log_workout: mark a day as a workout day (optional note). log_weigh_in: record a weigh-in (confirm the number).
 - Tape measurements (non-scale progress): fully supported for people who prefer the tape to the scale. On shared measurements confirm the numbers then call log_measurements (inches; any subset of waist/hips/neck/thigh/calf/forearm/wrist; merges into the same date). Body-fat % + waist-to-height (goal under 0.5) compute automatically. For "how's my waist/body fat trending?" call get_measurements. Frame tape body-fat as an estimate (±2%), emphasize the TREND, and never pressure a scale-averse user to weigh. For body fat, ask for the needed fields (men: waist, hips, forearm, wrist; women: hips, thigh, calf, wrist).
@@ -234,22 +234,20 @@ async function setupChat(uid) {
   const callerName = profile.displayName
     || [profile.firstName, profile.lastName].filter(Boolean).join(" ")
     || profile.email || (isTrainer ? "Coach" : "Client");
-  // "Precise food data" is a Pro feature: only entitled users (active
-  // subscription or a granted entitlement) with the toggle on get the
-  // search_food tool; everyone else gets AI estimates. Keep in sync with
-  // src/profile.js isProUser().
-  const isPro = profile.subscriptionStatus === "active"
-    || (profile.entitlements && profile.entitlements.foodAccuracy === true);
-  const foodDb = isPro && profile.aiFoodDbEnabled !== false;
+  // (S92) The food-DB search_food tool was RETIRED — measured no accuracy gain
+  // over the AI's own estimate (~98% on branded foods) at 2–2.5× the tokens, and
+  // it missed restaurant/obscure items entirely. See docs/AI-ACCURACY.md. Portion
+  // rigor + invisible-calorie awareness (the parts that DO help) are now default
+  // for everyone; barcode scanning remains the exact-packaged-food path.
   // Cache the stable prefix (tools render before system, so a cache_control
   // breakpoint on the system block caches tools + system together). This part is
   // identical across calls within a day, so repeat messages + tool rounds pay
   // ~10% for it instead of full price (Session 67). No effect on output quality.
-  const system = [{ type: "text", text: buildSystemPrompt(role, isTrainer, foodDb), cache_control: { type: "ephemeral" } }];
+  const system = [{ type: "text", text: buildSystemPrompt(role, isTrainer), cache_control: { type: "ephemeral" } }];
   return {
     role, isTrainer, budget, usageRef, used, system,
     trialExpired: trialExpiredFor(profile),
-    tools: buildTools(role, { foodDb }),
+    tools: buildTools(role),
     toolCtx: { callerUid: uid, role, isTrainer, today: todayLocal(), nowTime: nowTimeLocal(), callerName },
   };
 }

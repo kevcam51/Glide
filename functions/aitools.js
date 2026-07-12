@@ -1180,10 +1180,10 @@ function buildTools(role, opts = {}) {
       },
     });
   }
-  // search_food (real database values) is a Pro feature — only expose the tool
-  // when the caller is entitled + has it enabled. Otherwise the AI estimates.
-  if (!opts.foodDb) return tools.filter((t) => t.name !== "search_food");
-  return tools;
+  // search_food RETIRED (S92) — measured no accuracy gain over the AI's own
+  // estimate at 2–2.5× the tokens (docs/AI-ACCURACY.md). Never exposed now; the
+  // tool def + runTool case are kept dead so re-enabling is a one-line change.
+  return tools.filter((t) => t.name !== "search_food");
 }
 
 // ── access resolution: returns a uid string, or { error } the model sees ─────
