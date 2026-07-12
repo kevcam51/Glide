@@ -51,6 +51,29 @@ Ranked by real-world impact:
 7. **Cooking-method & prep awareness** — oils/butter/dressing are invisible in photos; prompt for them
    (the meal-photo tips already nudge this — extend it).
 
+## ⚖️ VERDICT (S92 round 2): the food-DB (search_food) is NOT worth its token cost — retire it
+Kevin's question: does the extra precision actually change accuracy, or do users just burn usage for
+nothing? Tested the cases Pro is SUPPOSED to help (store-brand, obscure, restaurant):
+- **Store-brand (Kirkland Signature protein bar):** free estimate **190** vs label 190 = perfect. The
+  food DB returned **184** — *worse* than the estimate. The model knows even Costco store brands.
+- **Restaurant (Chipotle chicken bowl / Chipotle white rice):** **NOT FOUND** in the DB at all → Pro
+  falls back to estimate. Restaurant items simply aren't in USDA/OFF as composed meals.
+- Combined with round 1 (6 common brands ~98% accurate; Barebells not in DB): **across every category —
+  common, store-brand, obscure, restaurant — the free estimate is ~98% accurate and the DB is either
+  absent, crowd-sourced-and-drifting, or LESS accurate than the estimate**, at **2–2.5× the tokens**.
+
+**Recommendation (data-backed):**
+1. **Retire `search_food` as a routine behavior** — it's a pure token sink (2–2.5× cost, ≤0 accuracy
+   gain) and fails exactly where it should help (restaurants). Users would "run out faster for no
+   reason" (Kevin's exact concern — confirmed). Keep the code but stop routing to it (or hard-remove).
+2. **Barcode scanning IS the real exact-food feature** — a direct label lookup (scan → exact values),
+   ~no AI tokens, genuinely exact. Make THIS the packaged-food precision story, not the DB.
+3. **Real precision investment = PORTION** (grams — the #1 error source), which is prompt/UX, not a DB.
+4. **Do NOT build the restaurant-menu DB integration** — the model already estimates restaurants well
+   and the free DBs don't have them. (Reverses the earlier "build restaurant menus next" idea — saved.)
+5. **Reconsider the "Precision tracking" Pro toggle** — reframe around barcode + portion, or drop it.
+   (This partly reverses the S92 Pro-repositioning slice — the honest data changed the answer.)
+
 ## Pro repositioning — SHIPPED slice + token cost (S92)
 Pro is repositioned from "more accurate calories" (false — free estimate is ~98%) to **"Precision
 tracking"**: verified DB values (USDA-first), barcode (exact), restaurant/chain items, and portion help.
