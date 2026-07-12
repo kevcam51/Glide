@@ -25,17 +25,23 @@ const MODEL = "claude-sonnet-4-6";
 // allowances (~100 AI conversations/day) — honest fair-use ceilings, never
 // marketed as "unlimited" (Kevin's call; see docs/PRICING.md).
 const BUDGETS = { trial: 50000, client: 25000, assisted: 40000, trainer: 100000,
-  clientMax: 150000, trainerMax: 200000 };
+  clientMax: 150000, trainerMax: 200000,
+  // Ultra (S92): data-triggered heavy-user tiers, surfaced via the boost upsell.
+  clientUltra: 250000, trainerUltra: 400000 };
 
 function tierFor(profile) {
   const role = (profile && profile.role) || "client";
-  // A paid Max plan (the Stripe webhook stamps subscriptionTier "max" /
-  // "coach_max") unlocks the high budget — only while the sub is active.
-  const isMax = profile && profile.subscriptionStatus === "active"
-    && /max/.test(String(profile.subscriptionTier || ""));
+  // Paid high tiers (the Stripe webhook stamps subscriptionTier
+  // "max"/"coach_max"/"ultra"/"coach_ultra") unlock the big budgets — only
+  // while the sub is active. Ultra > Max.
+  const t = String((profile && profile.subscriptionTier) || "");
+  const active = profile && profile.subscriptionStatus === "active";
+  const isUltra = active && /ultra/.test(t);
+  const isMax = active && /max/.test(t);
   if (role === "head_trainer" || role === "sub_trainer" || role === "admin") {
-    return isMax ? "trainerMax" : "trainer";
+    return isUltra ? "trainerUltra" : isMax ? "trainerMax" : "trainer";
   }
+  if (isUltra) return "clientUltra";
   if (isMax) return "clientMax";
   // client: trainer-assisted (linked) gets a higher budget than self-serve;
   // a still-in-trial / non-active subscription gets the trial budget.
@@ -574,16 +580,18 @@ const BOOST_FRACTION = 0.5;
 // profitable at the absolute ceiling (~$68 worst-case vs $79); client Max
 // gets 1 (2 would put an every-day-maxer underwater vs $29.99). Chronic
 // hitters surface via the ⚑ flag → Kevin can raise a standing limit by hand.
-const BOOSTS_PER_DAY = { trainerMax: 2, clientMax: 1 };
+const BOOSTS_PER_DAY = { trainerMax: 2, clientMax: 1, trainerUltra: 2, clientUltra: 1 };
 exports.requestBudgetBoost = onCall({ region: "us-central1", maxInstances: 10 }, async (request) => {
   const uid = request.auth && request.auth.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
   const db = admin.firestore();
   const profile = (await db.doc(`users/${uid}`).get()).data() || {};
   const tier = tierFor(profile);
-  const isMaxTier = tier === "clientMax" || tier === "trainerMax";
+  const isBoostable = tier === "clientMax" || tier === "trainerMax"
+    || tier === "clientUltra" || tier === "trainerUltra";
+  const isMaxTier = tier === "clientMax" || tier === "trainerMax"; // Max, not yet Ultra
   const isAdmin = profile.role === "admin"; // lets Kevin exercise the flow
-  if (!isMaxTier && !isAdmin) return { granted: false, reason: "not-max" };
+  if (!isBoostable && !isAdmin) return { granted: false, reason: "not-max" };
   const base = BUDGETS[tier] || BUDGETS.client;
   const ref = db.doc(`users/${uid}/aiUsage/${todayKey()}`);
   const usage = (await ref.get()).data() || {};
@@ -595,11 +603,18 @@ exports.requestBudgetBoost = onCall({ region: "us-central1", maxInstances: 10 },
   if ((usage.tokens || 0) < (base + (usage.boost || 0)) * 0.8) return { granted: false, reason: "not-near-limit" };
   const boost = (usage.boost || 0) + Math.round(base * BOOST_FRACTION);
   await ref.set({ boost, boosts: boostsUsed + 1, boostAt: Date.now() }, { merge: true });
-  await db.doc(`users/${uid}/aiUsage/meta`).set({
+  // Cumulative boost counter (Kevin's Ultra-upsell trigger): a Max user who
+  // keeps needing boosts is a heavy user who belongs on Ultra — prompt them on
+  // the 3rd boost and every 3rd after (6th, 9th…). Ultra users don't get upsold.
+  const metaRef = db.doc(`users/${uid}/aiUsage/meta`);
+  const priorCount = ((await metaRef.get()).data() || {}).boostCount || 0;
+  const newCount = priorCount + 1;
+  await metaRef.set({
     boostCount: admin.firestore.FieldValue.increment(1),
     lastBoostAt: Date.now(),
     boostDates: admin.firestore.FieldValue.arrayUnion(todayKey()),
   }, { merge: true });
-  console.log("budgetBoost granted", JSON.stringify({ uid, tier, boost }));
-  return { granted: true, boostTokens: boost };
+  const suggestUltra = isMaxTier && newCount % 3 === 0;
+  console.log("budgetBoost granted", JSON.stringify({ uid, tier, boost, newCount, suggestUltra }));
+  return { granted: true, boostTokens: boost, boostCount: newCount, suggestUltra };
 });

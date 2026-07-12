@@ -11540,12 +11540,14 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   }, [open]);
   const [canBoost, setCanBoost] = useState(false);
   const [boost, setBoost] = useState(null); // null | "offer" | "sending" | "granted" | "already"
+  const [ultraOffer, setUltraOffer] = useState(false); // Max user who keeps boosting → suggest Ultra
+  const [ultraBusy, setUltraBusy] = useState(false);
   const requestBoost = async () => {
     setBoost("sending");
     try {
       const res = await callRequestBoost();
       const d = (res && res.data) || {};
-      if (d.granted) { setBoost("granted"); setError(""); }
+      if (d.granted) { setBoost("granted"); setError(""); if (d.suggestUltra) setUltraOffer(true); }
       else if (d.reason === "already-boosted") setBoost("already");
       else setBoost(null); // not eligible after all — the plain limit message stands
     } catch { setBoost(null); }
@@ -11875,6 +11877,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     if ((!text && !img) || busy) return;
     setError("");
     setBoost((b) => (b === "granted" || b === "already" ? null : b)); // clear settled boost cards on the next send
+    setUltraOffer(false); // clear any Ultra upsell on the next send
     const next = [...messages, { role: "user", content: text, image: img || undefined }];
     setMessages(next);
     if (!isOverride) setDraft("");
@@ -12150,7 +12153,27 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
             )}
             {boost === "already" && (
               <div className="self-stretch rounded-lg border border-border bg-surface2 px-3 py-2.5 text-[.78rem] leading-relaxed text-muted">
-                You've already been approved once today — your full allowance is back tomorrow. If you're hitting this often, reach out and we'll look at raising your everyday limit.
+                You've already been approved once today — your full allowance is back tomorrow. If you're hitting this often, {isTrainer ? "Coach Ultra" : "Ultra"} gives you a much bigger everyday allowance.
+              </div>
+            )}
+            {/* Ultra upsell (S92): a Max user who keeps needing boosts is a heavy
+                user — surface Ultra (data-triggered; it's not on the public page). */}
+            {ultraOffer && (
+              <div className="self-stretch rounded-xl border border-primary/60 bg-[rgba(8,220,224,.08)] px-3 py-3">
+                <div className="flex items-center gap-2">
+                  <Icon name="sparkle" size={16} color="var(--accent)" />
+                  <div className="text-[.86rem] font-extrabold text-fg">You're a power user — meet {isTrainer ? "Coach Ultra" : "Ultra"}</div>
+                </div>
+                <div className="mt-1 text-[.78rem] leading-relaxed text-muted">
+                  {isTrainer
+                    ? "You keep hitting your daily allowance. Coach Ultra gives you 400k tokens/day — enough to run your whole roster through the AI: manage more clients, review everyone's data, and let the AI do the heavy client-management work every day."
+                    : "You keep hitting your daily allowance. Ultra gives you 250k tokens/day — deep AI profile management, research across all your data, pulling in outside info, and logging by photo, voice & links without ever running low."}
+                </div>
+                <button disabled={ultraBusy}
+                  onClick={async () => { setUltraBusy(true); const ok = await startCheckout({ tier: "ultra", interval: "month" }); if (!ok) setUltraBusy(false); }}
+                  className="mt-2 w-full rounded-lg border-none bg-primaryfill px-4 py-2.5 text-[.82rem] font-bold text-primaryfg cursor-pointer disabled:opacity-60">
+                  {ultraBusy ? "Opening…" : `Upgrade to ${isTrainer ? "Coach Ultra — $129/mo" : "Ultra — $49.99/mo"}`}
+                </button>
               </div>
             )}
             {warn && !error && (

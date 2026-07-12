@@ -148,6 +148,40 @@ and at **400k on the $79 price it thins to ~11–38%** (a heavy all-day warm use
 comfortably safe at $79; **350k–400k ideally pairs with a higher price or a new "Coach Ultra" tier**
 rather than being given away on Coach Max. Same shape applies to Client Max (÷ its own price).
 
+## Ultra tier (S92 — BUILT & deployed, data-triggered)
+
+The heavy-user rung above Max, priced so a genuine power user is profitable at 400k/250k. **NOT on
+the public pricing page** — surfaced only to users who prove they're heavy (the boost-upsell below).
+
+| Tier | Allowance | Price | Worst-case cost/mo | Margin |
+|---|---|---|---|---|
+| **Coach Ultra** (trainer) | 400k/day | **$129/mo · $1,290/yr** | $49–70 | 46–62% |
+| **Ultra** (client) | 250k/day | **$49.99/mo · $499.99/yr** | $31–44 | 12–38% (see note) |
+
+Ladder: Coach $49 → Coach Max $79 → **Coach Ultra $129**; Premium $14.99 → Max $29.99 → **Ultra $49.99**.
+Client Ultra margin is thinner on the paranoid warm-fill worst case, but a heavy *client* is almost
+always meal-logging (cold ≈ 38% margin) and the tier is RARE by design — fine as an outlier valve.
+
+**Data-triggered upsell (Kevin's design, BUILT):** Max users can still `requestBudgetBoost` (+50% →
+Coach Max 200k boosts to 300k; client Max 150k→225k). Every boost increments a cumulative
+`aiUsage/meta.boostCount`. On the **3rd boost and every 3rd after (6, 9…)**, `requestBudgetBoost`
+returns `suggestUltra:true` and the chat shows an Ultra upsell card → Checkout `{tier:"ultra"}`. Ultra
+users can also boost (to ~600k/375k for a spike) but are never upsold further. Implemented:
+`BUDGETS.clientUltra/trainerUltra` + `tierFor` (`/ultra/` beats `/max/`) in aichat.js; `CATALOG`
+`ultra`/`coach_ultra` + `planFor(role, level)` in billing.js; webhook already stamps
+`subscriptionTier` → unlocks the budget; `AIChatPanel` Ultra card (role-aware copy).
+
+**Selling points (Kevin, use in the upsell + marketing):**
+- **Coach Ultra:** run your WHOLE roster through the AI every day — manage more clients, review
+  everyone's data, and let the AI do the heavy client-management work (this is where the priciest,
+  highest-value transactions live, so it's the natural pro upsell).
+- **Client Ultra:** deep AI profile management, research across all your own data, pulling in outside
+  info, and effortless logging by photo / voice / links — without ever running low.
+
+**Future rung:** if trainers need >400k, that's a 4th tier or a custom Studio/Enterprise quote (see
+Enterprise section) — not Ultra. Scheduled/autonomous AI tasks (weekly reports, proactive digests)
+are a strong future Ultra+ differentiator (see docs — feasible via Cloud Scheduler + a per-user AI job).
+
 ## Worst-case monthly cost per user (maxes the cap EVERY day, 30/30 days)
 
 | Cost line | Client Premium ($9.99) | Trainer Coach ($49) |

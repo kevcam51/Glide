@@ -54,16 +54,18 @@ const safeOrigin = (o) => (ALLOWED_ORIGINS.includes(o) ? o : ALLOWED_ORIGINS[0])
 // `tier` is what the webhook stores on profile.subscriptionTier (the *Max
 // budget in aichat.js keys off it). Amounts in cents.
 const CATALOG = {
-  premium:   { key: "premium",   tier: "premium",   name: "Glidna Premium",   month: 1499, year: 11999 },
-  max:       { key: "max",       tier: "max",       name: "Glidna Max",       month: 2999, year: 29999 },
-  coach:     { key: "coach",     tier: "coach",     name: "Glidna Coach",     month: 4900, year: 49000 },
-  coach_max: { key: "coach_max", tier: "coach_max", name: "Glidna Coach Max", month: 7900, year: 79000 },
+  premium:     { key: "premium",     tier: "premium",     name: "Glidna Premium",     month: 1499,  year: 11999 },
+  max:         { key: "max",         tier: "max",         name: "Glidna Max",         month: 2999,  year: 29999 },
+  ultra:       { key: "ultra",       tier: "ultra",       name: "Glidna Ultra",       month: 4999,  year: 49999 },
+  coach:       { key: "coach",       tier: "coach",       name: "Glidna Coach",       month: 4900,  year: 49000 },
+  coach_max:   { key: "coach_max",   tier: "coach_max",   name: "Glidna Coach Max",   month: 7900,  year: 79000 },
+  coach_ultra: { key: "coach_ultra", tier: "coach_ultra", name: "Glidna Coach Ultra", month: 12900, year: 129000 },
 };
-// Role + wants-Max → plan. Trainers (head or sub) buy coach plans; clients premium.
-function planFor(role, wantMax) {
+// Role + which level ("base"|"max"|"ultra") → plan. Trainers buy coach plans; clients premium.
+function planFor(role, level) {
   const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
-  if (isTrainer) return wantMax ? CATALOG.coach_max : CATALOG.coach;
-  return wantMax ? CATALOG.max : CATALOG.premium;
+  if (isTrainer) return level === "ultra" ? CATALOG.coach_ultra : level === "max" ? CATALOG.coach_max : CATALOG.coach;
+  return level === "ultra" ? CATALOG.ultra : level === "max" ? CATALOG.max : CATALOG.premium;
 }
 
 // Lazy Stripe client (the secret only exists at runtime).
@@ -126,9 +128,9 @@ exports.createCheckoutSession = onCall(
     // billing interval — never the price. Anything unexpected falls back to
     // the base monthly plan.
     const sel = (request.data && request.data.plan) || {};
-    const wantMax = sel.tier === "max";
+    const level = sel.tier === "ultra" ? "ultra" : sel.tier === "max" ? "max" : "base";
     const interval = sel.interval === "year" ? "year" : "month";
-    const plan = planFor(profile.role, wantMax);
+    const plan = planFor(profile.role, level);
     const origin = safeOrigin(String((request.data && request.data.origin) || ""));
     // Reverse trial (S92): if the user is still inside their free trial, don't
     // charge until it ends — honor the promised free days even when they add a
