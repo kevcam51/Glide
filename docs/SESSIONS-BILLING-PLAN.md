@@ -24,11 +24,23 @@ Glide's current calendar is nutrition/workout LOGGING, not trainer↔client APPO
 - Store credits on the client (`sessionCredits`) + a ledger of purchases/decrements.
 
 ### 3. The auto-charge trigger ("the red line")
-- A scheduled dispatcher (hourly/every-few-min) finds sessions whose `startAt` has passed and
-  `chargeState` is unsettled.
-- If the client has a credit → decrement it (no charge). If 0 credits → **charge their saved card
-  for one session** (Stripe off-session PaymentIntent), mark `charged`.
-- Respect a **late-cancel window** (e.g. cancel ≥24h before = no charge; no-show/late = charged).
+A scheduled dispatcher (hourly/every-few-min) finds sessions whose `startAt` has passed and are still
+`unsettled`, and **settles each one EXACTLY ONCE** in this strict priority order (Kevin's rule —
+package first, never charge extra when credits exist):
+
+1. **Already paid?** If the session is marked paid (Acuity `amountPaid`, or already settled by us) →
+   do nothing. Never double-bill.
+2. **Cancelled in time?** If cancelled before the late-cancel window → do nothing (no decrement, no charge).
+3. **Package credit available?** If the client has `sessionCredits > 0` → **DECREMENT ONE CREDIT**,
+   mark the session `settled: "package"`. **NO card charge.** ← this is the guarantee: a client with a
+   package session in the bank is pulled from the package and charged nothing extra.
+4. **Package empty (0 credits)?** → **charge the saved card for one session** (Stripe off-session
+   PaymentIntent at the trainer-set price), mark `settled: "charged"`.
+
+**Idempotency:** each session carries a `settled` flag written in the SAME transaction as the
+credit-decrement / charge, so a retry or overlapping dispatcher run can never double-decrement or
+double-charge. **Late-cancel/no-show policy:** cancel ≥ window (e.g. 24h) = free; no-show/late = still
+settles (credit or charge) per the trainer's policy.
 
 ## The key insight that de-risks payments
 Charging a CLIENT's card per session = money moving from the client to a trainer, with a platform
