@@ -48,7 +48,37 @@ PaymentIntents on saved cards** (client saves a card once, authorizes future cha
    single-tenant via Kevin's Stripe; the "red line charges them" behavior he described.
 4. **Multi-tenant** via Stripe Connect (revenue splits) — the roadmapped later phase.
 
-## Open product decisions (need Kevin)
+## ✅ DECISIONS (Kevin, S92)
+- **Billing model: BOTH** — prepaid packs AND pay-per-session. Client can buy a pack; when it runs
+  out (or if they never bought one), a scheduled session that passes auto-charges their saved card.
+- **Scheduling: Acuity-import FIRST** (recommended) — keep Acuity's mature booking; Glide reads the
+  sessions + layers credits/auto-charge. Native scheduling later (the unified-app goal); same billing
+  code reused. Booking quality is HIGHER starting on Acuity (years of polish) vs a v1 native scheduler.
+- **TRAINER-SET PRICING (core principle, Kevin):** trainers set their OWN session prices — Glide never
+  presets them. This IS the Shopify-for-trainers vision (trainers run their own businesses on Glide).
+  Synergy: an Acuity **appointment type already carries the trainer's price**, so import pulls each
+  trainer's own pricing through automatically. Reinforces **Stripe Connect** for multi-tenant (each
+  trainer's own connected account + prices + payouts; platform takes a cut). Single-tenant (Kevin) sets
+  his prices in Acuity/his Stripe — no Connect needed yet.
+
+## ✅ Acuity API — VERIFIED contract (S92, from developers.acuityscheduling.com)
+Same integration shape as Trainerize (Kevin provides credentials as secrets, then we dry-run live).
+- **Auth:** HTTP Basic — base64(`UserID:APIKey`) (Acuity → Integrations → API). Like Trainerize's Basic auth.
+- **GET `/api/v1/appointments`** — filters `minDate`/`maxDate`, `calendarID`, `appointmentTypeID`,
+  client `firstName/lastName/email/phone`, `canceled` (canceled excluded by default). `/appointments/:id`
+  for one.
+- **Fields we need are all present:** client (name/email/phone), `datetime`, `appointmentTypeID`,
+  `calendarID`, `price` (the trainer-set appointment-type price ✓), `paid`/`amountPaid` (so we only
+  auto-charge UNPAID sessions), `canceled`, and **`noShow`** (admin-marked — drives no-show billing).
+- **Webhooks** (real-time triggers): `appointment.scheduled`, `appointment.rescheduled`,
+  `appointment.canceled`, `appointment.changed` → POST (form-urlencoded) with action + appointment id +
+  calendar id, to an https endpoint. Lets Glide react the moment a session is booked/cancelled.
+- **`/appointments/:id/payments`** — Acuity's own payment records per appointment (reconciliation).
+- **Verdict:** fully supports scheduling import + the "red line" auto-charge (poll `minDate=now` for
+  passed unpaid sessions, or use webhooks) + trainer-set prices flowing through. Ready to build once
+  Kevin supplies his Acuity API key + User ID (as Secret Manager secrets, like TRAINERIZE_*).
+
+## Open product decisions (still need Kevin)
 - **Scheduling: build native, or import from Acuity to start?**
 - **Billing model: pay-per-session, prepaid packs, or both?** (Kevin leaned pay-per-session.)
 - **Late-cancel/no-show window** (24h? charge on no-show?).
