@@ -25,6 +25,11 @@ const MODEL = "claude-sonnet-4-6";
 // allowances (~100 AI conversations/day) — honest fair-use ceilings, never
 // marketed as "unlimited" (Kevin's call; see docs/PRICING.md).
 const BUDGETS = { trial: 50000, client: 25000, assisted: 40000, trainer: 100000,
+  // trainerTrial (S92): a trainer works with clients from day one, so their trial
+  // usage is heavy immediately (~180k/day for an active 20–30-client roster). Give
+  // the full Coach-Elite-level allowance during the trial so they never hit a wall
+  // and can fully experience client management before deciding to buy.
+  trainerTrial: 200000,
   clientMax: 150000, trainerMax: 200000,
   // Ultra (S92): data-triggered heavy-user tiers, surfaced via the boost upsell.
   clientUltra: 250000, trainerUltra: 400000 };
@@ -39,7 +44,12 @@ function tierFor(profile) {
   const isUltra = active && /ultra/.test(t);
   const isMax = active && /max/.test(t);
   if (role === "head_trainer" || role === "sub_trainer" || role === "admin") {
-    return isUltra ? "trainerUltra" : isMax ? "trainerMax" : "trainer";
+    if (isUltra) return "trainerUltra";
+    if (isMax) return "trainerMax";
+    // On trial → the fuller trainerTrial allowance (they manage clients from day
+    // one). trialExpiredFor() still locks the AI once the trial actually ends.
+    if (profile && profile.subscriptionStatus === "trial") return "trainerTrial";
+    return "trainer";
   }
   if (isUltra) return "clientUltra";
   if (isMax) return "clientMax";

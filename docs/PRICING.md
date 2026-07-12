@@ -112,7 +112,7 @@ staying in one active conversation. So "messages/day to hit the cap" is a RANGE 
 | Premium (client) | 25k | ~2–3 | ~6–9 | ~12–18 |
 | Assisted (linked client) | 40k | ~4 | ~10–14 | ~20–28 |
 | **Client Max** | **150k** | **~13–14** | **~40–50** | **~100** |
-| Trial (trainer) = Coach base | 100k | ~7–9 | ~18–28 | ~40–50 |
+| Trial (trainer) — trainerTrial (S92) | 200k | ~14–15 | ~50 | ~100 |
 | Coach base | 100k | ~7–9 | ~18–28 | ~40–50 |
 | **Coach Max (trainer)** | **200k** | **~14–15** | **~50** | **~100** |
 
