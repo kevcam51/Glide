@@ -5,8 +5,8 @@
 // phase — this file deliberately doesn't touch them.
 //
 // FINAL PRICES (Kevin's S89c decision — see docs/PRICING.md + the decision sheet):
-//   client  → Glidna Premium $14.99/mo · $119.99/yr   |  Glidna Max $29.99/mo · $299.99/yr
-//   trainer → Glidna Coach   $49/mo    · $490/yr      |  Coach Max $79/mo    · $790/yr
+//   client  → Glidna Premium $14.99/mo · $119.99/yr   |  Glidna Elite $29.99/mo · $299.99/yr
+//   trainer → Glidna Coach   $49/mo    · $490/yr      |  Coach Elite $79/mo    · $790/yr
 // "Max" = the honest high-allowance tier (published ~100 AI conversations/day,
 // enforced by the clientMax/trainerMax BUDGETS in aichat.js) — NEVER branded
 // "unlimited" (Kevin's liability/honesty call, S89c). Products/prices are
@@ -55,11 +55,11 @@ const safeOrigin = (o) => (ALLOWED_ORIGINS.includes(o) ? o : ALLOWED_ORIGINS[0])
 // budget in aichat.js keys off it). Amounts in cents.
 const CATALOG = {
   premium:     { key: "premium",     tier: "premium",     name: "Glidna Premium",     month: 1499,  year: 11999 },
-  max:         { key: "max",         tier: "max",         name: "Glidna Max",         month: 2999,  year: 29999 },
-  ultra:       { key: "ultra",       tier: "ultra",       name: "Glidna Ultra",       month: 4999,  year: 49999 },
+  max:         { key: "max",         tier: "max",         name: "Glidna Elite",         month: 2999,  year: 29999 },
+  ultra:       { key: "ultra",       tier: "ultra",       name: "Glidna Apex",       month: 4999,  year: 49999 },
   coach:       { key: "coach",       tier: "coach",       name: "Glidna Coach",       month: 4900,  year: 49000 },
-  coach_max:   { key: "coach_max",   tier: "coach_max",   name: "Glidna Coach Max",   month: 7900,  year: 79000 },
-  coach_ultra: { key: "coach_ultra", tier: "coach_ultra", name: "Glidna Coach Ultra", month: 12900, year: 129000 },
+  coach_max:   { key: "coach_max",   tier: "coach_max",   name: "Glidna Coach Elite",   month: 7900,  year: 79000 },
+  coach_ultra: { key: "coach_ultra", tier: "coach_ultra", name: "Glidna Coach Apex", month: 12900, year: 129000 },
 };
 // Role + which level ("base"|"max"|"ultra") → plan. Trainers buy coach plans; clients premium.
 function planFor(role, level) {

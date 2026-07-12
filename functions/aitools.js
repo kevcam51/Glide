@@ -250,7 +250,9 @@ async function searchFoodDb(query) {
   const seen = new Set(); const out = [];
   const push = (f) => { const k = (f.name + "|" + (f.brand || "")).toLowerCase(); if (seen.has(k)) return; seen.add(k); out.push(f); };
   const max = Math.max(usda.length, off.length);
-  for (let i = 0; i < max; i++) { if (off[i]) push(off[i]); if (usda[i]) push(usda[i]); } // branded first
+  // USDA-first (S92): USDA FoodData Central is authoritative/verified; Open Food
+  // Facts is crowd-sourced and drifts ±5% — so rank USDA ahead of OFF for precision.
+  for (let i = 0; i < max; i++) { if (usda[i]) push(usda[i]); if (off[i]) push(off[i]); }
   if (!out.length) return { results: [], note: "No database match — estimate the macros instead, or ask the user for the label values." };
   return { results: out.slice(0, 8), note: "Macros are PER 100 g. Scale to the portion the user ate, then use propose_meal / log_meal." };
 }

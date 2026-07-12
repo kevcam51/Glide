@@ -11123,13 +11123,13 @@ const PLAN_MENU = {
   client: [
     { tier: "base", name: "Glidna Premium", month: "$14.99", year: "$119.99", yearNote: "33% off",
       blurb: "The AI coach: chat, photo & voice logging, AI meal estimates — a generous daily allowance." },
-    { tier: "max", name: "Glidna Max", month: "$29.99", year: "$299.99", yearNote: "2 months free",
+    { tier: "max", name: "Glidna Elite", month: "$29.99", year: "$299.99", yearNote: "2 months free",
       blurb: "Our biggest allowance — around 100 AI conversations a day. Ever hit the ceiling? Tell us and we'll raise it." },
   ],
   trainer: [
     { tier: "base", name: "Glidna Coach", month: "$49", year: "$490", yearNote: "2 months free",
       blurb: "The full coaching workspace + AI assistant. Unlimited clients, flat price." },
-    { tier: "max", name: "Coach Max", month: "$79", year: "$790", yearNote: "2 months free",
+    { tier: "max", name: "Coach Elite", month: "$79", year: "$790", yearNote: "2 months free",
       blurb: "The biggest AI allowance, coach-sized — around 100 AI conversations a day." },
   ],
 };
@@ -11167,7 +11167,7 @@ const PLAN_FEATURES = {
       ["Past chats — save, revisit & continue", false, true, true],
       ["AI conversations per day", "—", "~15", "~100"],
     ]},
-    { section: "Max — everything in Premium, plus:", rows: [
+    { section: "Elite — everything in Premium, plus:", rows: [
       ["6× bigger daily AI allowance", false, false, true],
       ["Around 100 AI conversations every day", false, false, true],
       ["Enough for photo-logging every meal + all-day coaching", false, false, true],
@@ -11195,7 +11195,7 @@ const PLAN_FEATURES = {
       ["Past chats — save, revisit & continue", false, true, true],
       ["AI conversations per day", "—", "~40", "~100"],
     ]},
-    { section: "Coach Max — everything in Coach, plus:", rows: [
+    { section: "Coach Elite — everything in Coach, plus:", rows: [
       ["Our biggest AI allowance — built for all-day use", false, false, true],
       ["Around 100 AI conversations every day", false, false, true],
       ["Room to run AI across your whole roster daily", false, false, true],
@@ -11206,7 +11206,7 @@ const PLAN_FEATURES = {
 
 function FeatureMatrix({ isTrainer }) {
   const groups = PLAN_FEATURES[isTrainer ? "trainer" : "client"];
-  const tiers = ["Free", isTrainer ? "Coach" : "Premium", isTrainer ? "Coach Max" : "Max"];
+  const tiers = ["Free", isTrainer ? "Coach" : "Premium", isTrainer ? "Coach Elite" : "Elite"];
   const [whatsManual, setWhatsManual] = useState(false); // ⓘ "what counts as manual logging"
   const cell = (v, i) => (
     <div key={i} className="flex items-center justify-center" style={{ width: "52px", flexShrink: 0 }}>
@@ -12072,7 +12072,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
             <button onClick={toggleFoodDb}
               className="w-full flex items-center gap-2 px-4 py-2 cursor-pointer bg-transparent border-0 text-left">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke={pro ? "var(--accent)" : "var(--muted)"} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.5" fill="currentColor"/></svg>
-              <span className="text-[.74rem] font-semibold" style={{ color: pro ? "var(--text)" : "var(--muted)" }}>Precise food data</span>
+              <span className="text-[.74rem] font-semibold" style={{ color: pro ? "var(--text)" : "var(--muted)" }}>Precision tracking</span>
               {!pro && <span className="text-[.6rem] font-bold uppercase tracking-[.5px] px-1.5 py-0.5 rounded" style={{ background:"rgba(8,220,224,.14)", color:"var(--accent)" }}>Pro</span>}
               <span className="ml-auto inline-flex items-center gap-1">
                 {!pro && <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="var(--muted)" strokeWidth="2"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>}
@@ -12085,7 +12085,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
             </button>
             {showUpsell && (
               <div className="px-4 pb-3 -mt-1 text-[.72rem] leading-relaxed" style={{ color:"var(--muted)" }}>
-                <span style={{ color:"var(--text)", fontWeight:600 }}>Upgrade to Pro</span> to log branded &amp; packaged foods with <span style={{ color:"var(--accent)" }}>exact label values</span> from our food database — instead of AI estimates. More accurate calories &amp; macros for anything with a brand or barcode.
+                <span style={{ color:"var(--text)", fontWeight:600 }}>Upgrade to Pro</span> for <span style={{ color:"var(--accent)" }}>precision tracking</span>: exact values from verified databases (USDA-first), <span style={{ color:"var(--accent)" }}>barcode scan</span> for packaged foods, restaurant &amp; chain items, and smart portion help so grams aren't a guess. (Everyday estimates are already ~98% accurate on calories &amp; free — Pro is for when you want it exact.)
               </div>
             )}
           </div>
@@ -12153,7 +12153,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
             )}
             {boost === "already" && (
               <div className="self-stretch rounded-lg border border-border bg-surface2 px-3 py-2.5 text-[.78rem] leading-relaxed text-muted">
-                You've already been approved once today — your full allowance is back tomorrow. If you're hitting this often, {isTrainer ? "Coach Ultra" : "Ultra"} gives you a much bigger everyday allowance.
+                You've already been approved once today — your full allowance is back tomorrow. If you're hitting this often, {isTrainer ? "Coach Apex" : "Apex"} gives you a much bigger everyday allowance.
               </div>
             )}
             {/* Ultra upsell (S92): a Max user who keeps needing boosts is a heavy
@@ -12162,17 +12162,17 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               <div className="self-stretch rounded-xl border border-primary/60 bg-[rgba(8,220,224,.08)] px-3 py-3">
                 <div className="flex items-center gap-2">
                   <Icon name="sparkle" size={16} color="var(--accent)" />
-                  <div className="text-[.86rem] font-extrabold text-fg">You're a power user — meet {isTrainer ? "Coach Ultra" : "Ultra"}</div>
+                  <div className="text-[.86rem] font-extrabold text-fg">You're a power user — meet {isTrainer ? "Coach Apex" : "Apex"}</div>
                 </div>
                 <div className="mt-1 text-[.78rem] leading-relaxed text-muted">
                   {isTrainer
-                    ? "You keep hitting your daily allowance. Coach Ultra gives you 400k tokens/day — enough to run your whole roster through the AI: manage more clients, review everyone's data, and let the AI do the heavy client-management work every day."
-                    : "You keep hitting your daily allowance. Ultra gives you 250k tokens/day — deep AI profile management, research across all your data, pulling in outside info, and logging by photo, voice & links without ever running low."}
+                    ? "You keep hitting your daily allowance. Coach Apex gives you 400k tokens/day — enough to run your whole roster through the AI: manage more clients, review everyone's data, and let the AI do the heavy client-management work every day."
+                    : "You keep hitting your daily allowance. Apex gives you 250k tokens/day — deep AI profile management, research across all your data, pulling in outside info, and logging by photo, voice & links without ever running low."}
                 </div>
                 <button disabled={ultraBusy}
                   onClick={async () => { setUltraBusy(true); const ok = await startCheckout({ tier: "ultra", interval: "month" }); if (!ok) setUltraBusy(false); }}
                   className="mt-2 w-full rounded-lg border-none bg-primaryfill px-4 py-2.5 text-[.82rem] font-bold text-primaryfg cursor-pointer disabled:opacity-60">
-                  {ultraBusy ? "Opening…" : `Upgrade to ${isTrainer ? "Coach Ultra — $129/mo" : "Ultra — $49.99/mo"}`}
+                  {ultraBusy ? "Opening…" : `Upgrade to ${isTrainer ? "Coach Apex — $129/mo" : "Apex — $49.99/mo"}`}
                 </button>
               </div>
             )}

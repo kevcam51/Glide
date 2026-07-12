@@ -51,17 +51,58 @@ Ranked by real-world impact:
 7. **Cooking-method & prep awareness** — oils/butter/dressing are invisible in photos; prompt for them
    (the meal-photo tips already nudge this — extend it).
 
+## Pro repositioning — SHIPPED slice + token cost (S92)
+Pro is repositioned from "more accurate calories" (false — free estimate is ~98%) to **"Precision
+tracking"**: verified DB values (USDA-first), barcode (exact), restaurant/chain items, and portion help.
+Shipped this session: **USDA-first ranking** in `search_food` (was OFF-first — OFF drifts ±5%); Pro-mode
+prompt now enforces **portion rigor** (state/ask the assumed serving) and **invisible-calorie awareness**
+(oils/butter/dressings); toggle relabeled "Precision tracking" + honest upsell copy. **Still to build
+(next):** a dedicated **restaurant/chain-menu source** (USDA/OFF cover chains only partially), photo
+**reference-object scaling**, and **recipe multi-ingredient breakdown**.
+
+**Token cost of Precision mode (measured base + overhead):**
+- Non-Pro food log: **~2,300 warm / ~8,700 cold** (measured).
+- Pro/Precision food log adds: search_food tool in the prefix (**~200 tok on every message**) + a
+  DB search round when it looks a food up (**~1–3k**) + occasionally a portion-clarify round (~1–2k)
+  → a Pro food log ≈ **~4,000–6,000 tokens (~2–2.5× a non-Pro estimate)**.
+- Daily impact by tier (food logs before the cap): **Premium 25k ≈ 10 non-Pro → ~5 Pro** (Pro roughly
+  halves it — a reason Pro pairs with paid tiers); **Elite 150k ≈ 25–35 Pro logs**; **Coach 100k ≈
+  16–25 Pro logs**. So Precision costs real tokens — fine on Elite/Apex, tight on Premium (expected).
+
 ## Scheduled / autonomous AI tasks + user workflows (Kevin's big idea, S92)
-Feasible now (Glide already runs onSchedule fns). Vision: users build their OWN workflows that fire on a
-schedule (e.g. "every Sunday 6pm, summarize my week + suggest next week's targets"; trainer "every
-morning, brief me on who's off track"). Build path: a workflow = {trigger schedule, a saved prompt,
-delivery (feed/push/email)}; a dispatcher onSchedule fn runs due workflows through the existing AI+tools.
-**PRICING CONCERN (Kevin, real):** every scheduled run is a COLD message (~10–15k tokens) — no warm cache
-reuse across hours/days. So autonomous workflows are the *most expensive* usage pattern. Guardrails:
-- Meter scheduled runs against the user's daily budget (a heavy workflow user → naturally routed to Ultra).
-- Cap workflows-per-tier (e.g. Max: 1 scheduled workflow; Ultra: 3–5; a future "Ultra+/Autopilot" tier: more).
-- This is the natural **Ultra / Ultra+ differentiator** — the app working for you while you sleep.
-- Model the cost per workflow before launch: 1 daily cold run ≈ 10–15k/day ≈ 300–450k/mo ≈ $1.5–2.5/mo each.
+Feasible now (Glide already runs onSchedule fns: trainerizeAutoSync, trialReminders). Vision: users build
+their OWN automations that fire on a schedule.
+
+**Engine spec (dedicated build):**
+- Storage `caliq-workflows` per user = `[{id, name, schedule (preset: daily/weekly/cron), prompt,
+  delivery: feed|push|email, enabled, lastRunAt}]`.
+- A **dispatcher** `onSchedule` fn (hourly) scans enabled workflows, runs each due one through the
+  existing AI + tools (same runTool infra), meters `spent` against the user's `aiUsage.tokens`, and
+  delivers the result to the notification feed / push / email. Over budget → skip + notify.
+- UI: an "Automations" screen to create/edit/toggle (gated to Elite+). Examples: client "every Sunday
+  6pm summarize my week + set next week's targets"; trainer "every morning brief me on who's off track".
+
+**Token model (every run is a COLD message — no warm-cache reuse across hours/days):**
+- Client run ≈ 7.4k prefix + task/tools ~3–8k = **~10–15k tokens/run**; trainer (roster) run ≈ 10k
+  prefix + ~5–10k = **~15–25k/run**.
+- One DAILY workflow ≈ client 360k/mo (**~$1.8/mo**) · trainer 600k/mo (**~$3/mo**).
+- Metered from the daily budget, a daily workflow eats **~12–20k of the cap before the user even
+  chats** → too much for Premium/Coach base; comfortable on Elite+.
+
+**Tier gating (Kevin: higher tiers only; consider a 4th tier for overboard users):**
+| Tier | Daily budget | Scheduled workflows |
+|---|---|---|
+| Premium / Coach | 25k / 100k | none (too tight — one run halves/eats the cap) |
+| **Elite** (client 150k) | 150k | 1 daily workflow |
+| **Coach Elite** (200k) | 200k | 1–2 |
+| **Apex** (client 250k) | 250k | up to 3 |
+| **Coach Apex** (400k) | 400k | up to 5 |
+| **4th tier — "Autopilot"** (overboard users) | 600k+ | many + optionally a SEPARATE workflow allowance |
+
+The **4th "Autopilot" tier** is the home for users who want a fleet of background automations — price it
+above Apex (rough: client ~$79 / trainer ~$199) with a big budget; or give workflows their own metered
+allowance so heavy chat + heavy automation don't compete. This is the natural top-of-ladder differentiator
+— "the app works for you while you sleep." Model each workflow's monthly cost (above) before launch.
 
 ## Tier naming (Kevin: "Max/Ultra remind me of iPhone")
 Options to differentiate from Apple's Pro/Max/Ultra (internal tier KEYS stay the same — display only):
