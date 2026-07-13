@@ -510,7 +510,10 @@ function nutritionTargets(d) {
     }
   }
   const mt = d.macroTargets || {};
-  const protein = mt.protein != null ? Number(mt.protein) : (w ? Math.round(w) : null);
+  // Protein basis is a per-plan user choice (App.jsx proteinBasisOf): 1.0 g/lb
+  // (default) or 0.7 g/lb. Keep the AI's target in sync with the app.
+  const proteinPerLb = Number(d.proteinPerLb) === 0.7 ? 0.7 : 1.0;
+  const protein = mt.protein != null ? Number(mt.protein) : (w ? Math.round(w * proteinPerLb) : null);
   const fat = mt.fat != null ? Number(mt.fat) : (cal ? Math.round((cal * 0.28) / 9) : null);
   const carbs = mt.carbs != null ? Number(mt.carbs)
     : (cal != null && protein != null && fat != null

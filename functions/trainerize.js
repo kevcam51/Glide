@@ -135,7 +135,22 @@ function mapSnapshot(profile, stats, goals) {
     }
     if (g.type === "nutritionGoal" && !d.macroTargets) {
       const p = Math.round(Number(g.proteinGrams)), c = Math.round(Number(g.carbsGrams)), f = Math.round(Number(g.fatGrams));
-      if (p > 0 && c > 0 && f > 0) d.macroTargets = { protein: p, carbs: c, fat: f };
+      if (p > 0 && c > 0 && f > 0) {
+        // SANITY-CHECK the imported macro goal before trusting it. Some coach/app
+        // goals are stale or set against an old/heavier target and read absurdly
+        // high (e.g. 280g protein for a ~180 lb client). If it fails a plausibility
+        // check, DROP it so Glide's own bodyweight-based auto targets take over
+        // (accurate defaults) rather than showing a bad number — the trainer/client
+        // can still set custom targets in-app.
+        const lbs = Number(d.weightLbs) || 0;
+        const macroCals = p * 4 + c * 4 + f * 9;
+        const proteinPerLb = lbs > 0 ? p / lbs : 0;
+        const sane = p <= 400 && c <= 900 && f <= 300              // absolute ceilings
+          && macroCals >= 500 && macroCals <= 7000                 // plausible daily calories
+          && (lbs <= 0 || proteinPerLb <= 1.6);                    // protein not wildly high vs bodyweight
+        if (sane) d.macroTargets = { protein: p, carbs: c, fat: f };
+        else console.log("trainerize: dropped implausible imported macros", JSON.stringify({ p, c, f, lbs, proteinPerLb: Math.round(proteinPerLb * 100) / 100 }));
+      }
     }
   }
   return d;
