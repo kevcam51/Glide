@@ -8190,95 +8190,96 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             />
             <span className="dash-log-unit">g</span>
           </div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"8px",padding:"4px 8px",flexWrap:"wrap"}}>
-            <span style={{fontSize:".6rem",color:"var(--muted)",fontStyle:"italic"}}>
-              *{macrosCustom ? "Custom targets set by you" : "Estimates from bodyweight & calorie goal"}
-            </span>
-            {onSetMacroTargets && (
-              <button onClick={()=>{ setMtDraft({ protein:String(proteinTarget), carbs:String(carbsTarget), fat:String(fatTarget) }); setEditMacros(v=>!v); }}
-                style={{border:"none",background:"transparent",color:"var(--accent)",cursor:"pointer",fontSize:".72rem",fontWeight:600,padding:0,textDecoration:"underline"}}>
-                {editMacros ? "Close" : "✎ Edit targets"}
-              </button>
-            )}
-          </div>
-          {/* Protein basis — user choice for the AUTO target (custom targets override
-              it). 1 g/lb = higher-protein / muscle focus; 0.7 g/lb = moderate. */}
-          {!macrosCustom && onSetProteinBasis && Number(weightLbs) > 0 && (
-            <div style={{display:"flex",alignItems:"center",gap:"6px",padding:"0 8px 6px",flexWrap:"wrap"}}>
-              <span style={{fontSize:".68rem",color:"var(--muted)"}}>Protein target:</span>
-              {[[1.0,"1 g/lb"],[0.7,"0.7 g/lb"]].map(([v,l])=>(
-                <button key={v} onClick={()=>onSetProteinBasis(v)}
-                  style={{padding:"4px 10px",fontSize:".7rem",fontWeight:700,borderRadius:"999px",cursor:"pointer",
-                    border:"1px solid "+(proteinPerLb===v?"var(--accent)":"var(--border)"),
-                    background: proteinPerLb===v?"rgba(8,220,224,.12)":"transparent",
-                    color: proteinPerLb===v?"var(--accent)":"var(--muted)"}}>
-                  {l} · {Math.round(Number(weightLbs)*v)}g
-                </button>
-              ))}
-            </div>
-          )}
-          {editMacros && onSetMacroTargets && (
-            <div style={{padding:"10px 8px",display:"flex",flexDirection:"column",gap:"8px"}}>
-              <div style={{display:"flex",gap:"6px"}}>
-                {[["protein","Protein"],["carbs","Carbs"],["fat","Fat"]].map(([k,lbl])=>(
-                  <div key={k} style={{flex:1}}>
-                    <div style={{fontSize:".62rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:"3px"}}>{lbl} g</div>
-                    <input type="number" inputMode="numeric" value={mtDraft[k]}
-                      onChange={e=>setMtDraft(d=>({...d,[k]:e.target.value}))}
-                      style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:"7px",border:"1px solid var(--border)",background:"var(--s2)",color:"var(--text)",fontSize:".85rem"}} />
-                  </div>
-                ))}
-              </div>
-              <div style={{display:"flex",gap:"6px"}}>
-                <button onClick={()=>{
-                    onSetMacroTargets({ protein:Math.max(0,parseInt(mtDraft.protein)||0), carbs:Math.max(0,parseInt(mtDraft.carbs)||0), fat:Math.max(0,parseInt(mtDraft.fat)||0) });
-                    setEditMacros(false);
-                  }}
-                  style={{padding:"8px 14px",fontSize:".8rem",fontWeight:700,borderRadius:"7px",border:"none",background:"var(--accent-fill)",color:"#0b0b12",cursor:"pointer"}}>Save targets</button>
-                {macrosCustom && (
-                  <button onClick={()=>{ onSetMacroTargets(null); setEditMacros(false); }}
-                    style={{padding:"8px 12px",fontSize:".8rem",borderRadius:"7px",border:"1px solid var(--border)",background:"transparent",color:"var(--muted)",cursor:"pointer"}}>Reset to auto</button>
-                )}
-              </div>
-              <div style={{fontSize:".62rem",color:"var(--muted)",fontStyle:"italic"}}>
-                Saving locks these targets for this plan. "Reset to auto" returns to the
-                bodyweight/calorie-based estimates that adjust as the plan changes.
-              </div>
-            </div>
-          )}
         </div>
       )}
 
-      {/* Macro progress vs target — per-macro bars (logged / target) */}
-      {(dailyLog.protein > 0 || dailyLog.carbs > 0 || dailyLog.fat > 0) && (
-        <div style={{padding:"10px 14px",background:"var(--s2)",borderRadius:"8px",border:"1px solid var(--border)",marginBottom:"6px"}}>
-          {[
-            { icon:"🥩", label:"Protein", color:"#ff6b9d", val:dailyLog.protein||0, tgt:proteinTarget },
-            { icon:"🌾", label:"Carbs",   color:"#ffcc44", val:dailyLog.carbs||0,   tgt:carbsTarget },
-            { icon:"🥑", label:"Fat",     color:"#4fc3f7", val:dailyLog.fat||0,     tgt:fatTarget },
-          ].map((m) => {
-            const fill = m.tgt > 0 ? Math.min(100, Math.round((m.val / m.tgt) * 100)) : 0;
-            const over = m.tgt > 0 && m.val > m.tgt;
-            return (
-              <div key={m.label} style={{ marginBottom:"8px" }}>
-                <div style={{ display:"flex", justifyContent:"space-between", fontSize:".74rem", marginBottom:"3px" }}>
-                  <span style={{ color:m.color, fontWeight:600 }}>{m.icon} {m.label}</span>
-                  <span style={{ color: over ? "var(--orange)" : "var(--muted)" }}>
-                    {m.val}g <span style={{ opacity:.7 }}>/ {m.tgt}g</span>{over ? " ⚠️" : m.tgt>0 && fill>=100 ? " ✓" : ""}
-                  </span>
-                </div>
-                <div style={{ height:"7px", borderRadius:"4px", overflow:"hidden", background:"var(--border)" }}>
-                  <div style={{ width:`${fill}%`, height:"100%", borderRadius:"4px",
-                    background: over ? "var(--orange)" : m.color, transition:"width .3s ease" }} />
-                </div>
-              </div>
-            );
-          })}
-          <div style={{fontSize:".65rem",color:"var(--muted)",marginTop:"2px",textAlign:"center"}}>
-            {((dailyLog.protein||0)*4 + (dailyLog.carbs||0)*4 + (dailyLog.fat||0)*9).toLocaleString()} cal from macros · targets are estimates
-          </div>
+      {/* Macro Targets — ALWAYS visible (no need to expand Add Calories). Tap a
+          meter or "Edit targets" to edit; shows progress vs target once logged. */}
+      <div style={{padding:"12px 14px",background:"var(--s2)",borderRadius:"8px",border:"1px solid var(--border)",marginBottom:"6px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"10px",gap:"8px"}}>
+          <span style={{fontSize:".8rem",fontWeight:700,color:"var(--text)"}}>Macro Targets</span>
+          {onSetMacroTargets && (
+            <button onClick={()=>{ setMtDraft({ protein:String(proteinTarget), carbs:String(carbsTarget), fat:String(fatTarget) }); setEditMacros(v=>!v); }}
+              style={{border:"none",background:"transparent",color:"var(--accent)",cursor:"pointer",fontSize:".74rem",fontWeight:700,padding:0,textDecoration:"underline"}}>
+              {editMacros ? "Close" : "✎ Edit targets"}
+            </button>
+          )}
         </div>
-      )}
+        {[
+          { icon:"🥩", label:"Protein", color:"#ff6b9d", val:dailyLog.protein||0, tgt:proteinTarget },
+          { icon:"🌾", label:"Carbs",   color:"#ffcc44", val:dailyLog.carbs||0,   tgt:carbsTarget },
+          { icon:"🥑", label:"Fat",     color:"#4fc3f7", val:dailyLog.fat||0,     tgt:fatTarget },
+        ].map((m) => {
+          const fill = m.tgt > 0 ? Math.min(100, Math.round((m.val / m.tgt) * 100)) : 0;
+          const over = m.tgt > 0 && m.val > m.tgt;
+          const openEdit = onSetMacroTargets ? ()=>{ setMtDraft({ protein:String(proteinTarget), carbs:String(carbsTarget), fat:String(fatTarget) }); setEditMacros(true); } : undefined;
+          return (
+            <div key={m.label} onClick={openEdit} title={openEdit ? "Tap to edit targets" : undefined}
+              style={{ marginBottom:"8px", cursor: openEdit ? "pointer" : "default" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:".74rem", marginBottom:"3px" }}>
+                <span style={{ color:m.color, fontWeight:600 }}>{m.icon} {m.label}</span>
+                <span style={{ color: over ? "var(--orange)" : "var(--muted)" }}>
+                  {m.val}g <span style={{ opacity:.7 }}>/ {m.tgt}g</span>{over ? " ⚠️" : m.tgt>0 && fill>=100 ? " ✓" : ""}
+                </span>
+              </div>
+              <div style={{ height:"7px", borderRadius:"4px", overflow:"hidden", background:"var(--border)" }}>
+                <div style={{ width:`${fill}%`, height:"100%", borderRadius:"4px",
+                  background: over ? "var(--orange)" : m.color, transition:"width .3s ease" }} />
+              </div>
+            </div>
+          );
+        })}
+        <div style={{fontSize:".65rem",color:"var(--muted)",marginTop:"2px",textAlign:"center"}}>
+          {(dailyLog.protein > 0 || dailyLog.carbs > 0 || dailyLog.fat > 0)
+            ? `${((dailyLog.protein||0)*4 + (dailyLog.carbs||0)*4 + (dailyLog.fat||0)*9).toLocaleString()} cal from macros · `
+            : ""}
+          {macrosCustom ? "custom targets set by you" : "estimates from bodyweight & calorie goal"}
+        </div>
+        {/* Protein basis — user choice for the AUTO target (custom targets override it). */}
+        {!macrosCustom && onSetProteinBasis && Number(weightLbs) > 0 && (
+          <div style={{display:"flex",alignItems:"center",gap:"6px",padding:"8px 0 0",flexWrap:"wrap"}}>
+            <span style={{fontSize:".68rem",color:"var(--muted)"}}>Protein target:</span>
+            {[[1.0,"1 g/lb"],[0.7,"0.7 g/lb"]].map(([v,l])=>(
+              <button key={v} onClick={()=>onSetProteinBasis(v)}
+                style={{padding:"4px 10px",fontSize:".7rem",fontWeight:700,borderRadius:"999px",cursor:"pointer",
+                  border:"1px solid "+(proteinPerLb===v?"var(--accent)":"var(--border)"),
+                  background: proteinPerLb===v?"rgba(8,220,224,.12)":"transparent",
+                  color: proteinPerLb===v?"var(--accent)":"var(--muted)"}}>
+                {l} · {Math.round(Number(weightLbs)*v)}g
+              </button>
+            ))}
+          </div>
+        )}
+        {editMacros && onSetMacroTargets && (
+          <div style={{padding:"10px 0 2px",display:"flex",flexDirection:"column",gap:"8px"}}>
+            <div style={{display:"flex",gap:"6px"}}>
+              {[["protein","Protein"],["carbs","Carbs"],["fat","Fat"]].map(([k,lbl])=>(
+                <div key={k} style={{flex:1}}>
+                  <div style={{fontSize:".62rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:"3px"}}>{lbl} g</div>
+                  <input type="number" inputMode="numeric" value={mtDraft[k]}
+                    onChange={e=>setMtDraft(d=>({...d,[k]:e.target.value}))}
+                    style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:"7px",border:"1px solid var(--border)",background:"var(--surface)",color:"var(--text)",fontSize:".85rem"}} />
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:"6px"}}>
+              <button onClick={()=>{
+                  onSetMacroTargets({ protein:Math.max(0,parseInt(mtDraft.protein)||0), carbs:Math.max(0,parseInt(mtDraft.carbs)||0), fat:Math.max(0,parseInt(mtDraft.fat)||0) });
+                  setEditMacros(false);
+                }}
+                style={{padding:"8px 14px",fontSize:".8rem",fontWeight:700,borderRadius:"7px",border:"none",background:"var(--accent-fill)",color:"#0b0b12",cursor:"pointer"}}>Save targets</button>
+              {macrosCustom && (
+                <button onClick={()=>{ onSetMacroTargets(null); setEditMacros(false); }}
+                  style={{padding:"8px 12px",fontSize:".8rem",borderRadius:"7px",border:"1px solid var(--border)",background:"transparent",color:"var(--muted)",cursor:"pointer"}}>Reset to auto</button>
+              )}
+            </div>
+            <div style={{fontSize:".62rem",color:"var(--muted)",fontStyle:"italic"}}>
+              Saving locks these targets for this plan. "Reset to auto" returns to the
+              bodyweight/calorie-based estimates that adjust as the plan changes.
+            </div>
+          </div>
+        )}
+        </div>
 
       <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} />
 
