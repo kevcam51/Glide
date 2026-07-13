@@ -11348,6 +11348,11 @@ const callSendInvite = httpsCallable(functions, "sendInvite"); // email invites 
 const callTrainerizeImport = httpsCallable(functions, "trainerizeImport"); // Trainerize roster importer (v1)
 const callPasskeyRegOptions = httpsCallable(functions, "passkeyRegisterOptions"); // Face ID setup (S87)
 const callPasskeyRegVerify = httpsCallable(functions, "passkeyRegisterVerify");
+// Scheduled AI automations (S93, workflow Phase 2 UI). Backend = functions/workflows.js.
+const callListWorkflows = httpsCallable(functions, "listWorkflows");
+const callSaveWorkflow = httpsCallable(functions, "saveWorkflow");
+const callToggleWorkflow = httpsCallable(functions, "toggleWorkflow");
+const callDeleteWorkflow = httpsCallable(functions, "deleteWorkflow");
 // Set after a successful passkey setup/sign-in so the login screen can lead
 // with the Face ID button on this device.
 const PASSKEY_HINT = "glide-passkey";
@@ -13961,6 +13966,314 @@ function UpgradeCongrats({ isTrainer, onClose }) {
   );
 }
 
+// ── Scheduled AI automations (S93 — workflow Phase 2 UI) ─────────────────────
+// A paid user saves a prompt + a schedule; the hourly dispatcher
+// (functions/workflows.js) runs it headlessly through the same AI + tools as the
+// chat and drops the result into their notification feed. Tier-gated server-side
+// (Elite+/Apex; admin gets a high cap so Kevin can exercise the flow himself).
+//
+// TIME: the backend stores schedule.hour/weekday in UTC (Phase 1). The picker
+// here is in the user's LOCAL time — we convert on save and on display. Whole-hour
+// zones round-trip exactly; the offset is read at edit time, so a run far in the
+// future can be off by an hour across a DST boundary (acceptable v1).
+const WF_DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+function wfLocalToUtc(type, weekday, hour) {
+  const d = new Date();
+  d.setHours(hour, 0, 0, 0);
+  if (type === "weekly") d.setDate(d.getDate() + ((weekday - d.getDay() + 7) % 7));
+  return { hour: d.getUTCHours(), weekday: d.getUTCDay() };
+}
+function wfUtcToLocal(type, weekday, hour) {
+  const d = new Date();
+  d.setUTCHours(hour, 0, 0, 0);
+  if (type === "weekly") d.setUTCDate(d.getUTCDate() + ((weekday - d.getUTCDay() + 7) % 7));
+  return { hour: d.getHours(), weekday: d.getDay() };
+}
+function wf12h(h) { const ap = h < 12 ? "AM" : "PM"; const h12 = h % 12 === 0 ? 12 : h % 12; return `${h12}:00 ${ap}`; }
+function wfScheduleText(s) {
+  const l = wfUtcToLocal(s.type, s.weekday, s.hour);
+  return s.type === "weekly" ? `Every ${WF_DAYS[l.weekday]} at ${wf12h(l.hour)}` : `Every day at ${wf12h(l.hour)}`;
+}
+// Friendly text for the dispatcher's lastStatus (ok / why it was skipped).
+const WF_STATUS = { ok: "", budget: "Skipped — your AI budget for that day was used up.",
+  "trial-expired": "Skipped — your AI trial had ended.", error: "Last run hit an error — it'll try again next time." };
+
+function AutomationsPanel({ open, onClose, role }) {
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [items, setItems] = useState([]);
+  const [cap, setCap] = useState(0);
+  const [editing, setEditing] = useState(null); // null | { id?, name, prompt, type, weekday, hour(local), enabled }
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState("");
+  const [busyId, setBusyId] = useState("");      // toggle/delete in flight
+  const [confirmId, setConfirmId] = useState(""); // delete confirmation
+  const [showPicker, setShowPicker] = useState(false);
+  const [expanded, setExpanded] = useState("");   // which item's last result is expanded
+  useBackClose(open, onClose);
+  useBodyScrollLock(open);
+
+  const isTrainer = role === "head_trainer" || role === "sub_trainer";
+  const examples = isTrainer
+    ? [
+        "Which of my clients haven't logged food in the last 3 days? List them by name.",
+        "Summarize each client's weight trend this week and flag anyone who's stalled.",
+        "Give me one concrete coaching action for my least-active client.",
+      ]
+    : [
+        "Give me a high-protein meal idea for today that fits my calorie target.",
+        "How am I tracking toward my goal this week? Keep it to a short summary.",
+        "Remind me of my calorie and protein targets and how today's going so far.",
+      ];
+
+  const load = async () => {
+    setLoading(true); setErr("");
+    try {
+      const res = await callListWorkflows();
+      const d = (res && res.data) || {};
+      setItems(d.workflows || []);
+      setCap(d.cap || 0);
+    } catch (e) { setErr("Couldn't load your automations — try again in a moment."); }
+    setLoading(false);
+  };
+  useEffect(() => { if (open) { setEditing(null); setConfirmId(""); setExpanded(""); load(); } }, [open]);
+
+  const startNew = () => {
+    setSaveErr("");
+    setEditing({ name: "", prompt: "", type: "daily", weekday: 1, hour: 8, enabled: true });
+  };
+  const startEdit = (w) => {
+    setSaveErr("");
+    const l = wfUtcToLocal(w.schedule.type, w.schedule.weekday, w.schedule.hour);
+    setEditing({ id: w.id, name: w.name || "", prompt: w.prompt || "", type: w.schedule.type,
+      weekday: l.weekday, hour: l.hour, enabled: w.enabled !== false });
+  };
+  const save = async () => {
+    if (saving || !editing) return;
+    if (!editing.prompt.trim()) { setSaveErr("Tell the automation what to do."); return; }
+    setSaving(true); setSaveErr("");
+    try {
+      const schedule = { type: editing.type, ...wfLocalToUtc(editing.type, editing.weekday, editing.hour) };
+      await callSaveWorkflow({ id: editing.id, name: editing.name.trim() || "Automation",
+        prompt: editing.prompt.trim(), schedule, enabled: editing.enabled });
+      setEditing(null);
+      await load();
+    } catch (e) {
+      const m = (e && e.message) || "";
+      setSaveErr(/limit/i.test(m) ? m : /Elite|Apex|plan/i.test(m) ? m : "Couldn't save — try again.");
+    }
+    setSaving(false);
+  };
+  const toggle = async (w) => {
+    if (busyId) return;
+    setBusyId(w.id);
+    try {
+      await callToggleWorkflow({ id: w.id, enabled: !w.enabled });
+      setItems((prev) => prev.map((x) => (x.id === w.id ? { ...x, enabled: !w.enabled } : x)));
+    } catch { /* ignore */ }
+    setBusyId("");
+  };
+  const remove = async (id) => {
+    if (busyId) return;
+    setBusyId(id);
+    try { await callDeleteWorkflow({ id }); setItems((prev) => prev.filter((x) => x.id !== id)); }
+    catch { /* ignore */ }
+    setBusyId(""); setConfirmId("");
+  };
+
+  const card = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 16 };
+  const label = { fontSize: ".72rem", letterSpacing: "1px", textTransform: "uppercase", color: "var(--accent)", fontWeight: 700, marginBottom: 8 };
+  const btnPrimary = { padding: "11px 14px", borderRadius: 9, border: "none", background: "var(--accent-fill)", color: "#04201f", fontWeight: 700, fontSize: ".85rem", cursor: "pointer" };
+  const btnGhost = { padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "transparent", color: "var(--text)", fontWeight: 600, fontSize: ".82rem", cursor: "pointer" };
+  const inputCls = { width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: ".9rem", fontFamily: "inherit", boxSizing: "border-box" };
+  const Toggle = ({ on, disabled, onClick }) => (
+    <button onClick={onClick} disabled={disabled} aria-pressed={on}
+      style={{ width: 42, height: 24, borderRadius: 999, border: "none", flexShrink: 0,
+        cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1, transition: "background .2s",
+        background: on ? "var(--accent)" : "var(--s3,#28383a)", position: "relative" }}>
+      <span style={{ position: "absolute", top: 2, left: on ? 20 : 2, width: 20, height: 20, borderRadius: "50%",
+        background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,.3)", transition: "left .2s" }} />
+    </button>
+  );
+
+  if (!open) return null;
+  return createPortal(
+    <div data-theme="pro" style={{ position: "fixed", inset: 0, zIndex: 1500, background: "var(--bg)", color: "var(--text)",
+      fontFamily: "var(--font-sans)", overflowY: "auto", padding: "calc(14px + env(safe-area-inset-top,0px)) 14px 32px" }}>
+      <div style={{ maxWidth: 560, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Icon name="bolt" size={22} color="var(--accent)" />
+            <span style={{ fontFamily: "var(--font-display)", fontSize: "1.25rem", fontWeight: 700 }}>Automations</span>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ ...btnGhost, padding: "6px 12px" }}>✕</button>
+        </div>
+
+        {loading ? (
+          <div style={{ ...card, color: "var(--muted)", fontSize: ".85rem" }}>Loading your automations…</div>
+        ) : err ? (
+          <div style={{ ...card, color: "var(--red)", fontSize: ".85rem" }}>{err}
+            <div style={{ marginTop: 10 }}><button onClick={load} style={btnGhost}>Retry</button></div>
+          </div>
+        ) : cap <= 0 ? (
+          /* Upsell — automations are an Elite+/Apex feature. */
+          <div style={{ ...card, textAlign: "center" }}>
+            <Icon name="bolt" size={34} color="var(--accent)" />
+            <div style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem", fontWeight: 700, marginTop: 8 }}>Put your AI coach on autopilot</div>
+            <div style={{ fontSize: ".86rem", color: "var(--muted)", margin: "8px auto 0", maxWidth: 400, lineHeight: 1.5 }}>
+              Automations run your AI on a schedule — a daily or weekly check-in that uses your real data and lands in your notifications. {isTrainer ? "Wake up to a roster summary." : "Wake up to today's plan."}
+            </div>
+            <div style={{ fontSize: ".78rem", color: "var(--muted)", marginTop: 10 }}>Available on the Elite and Apex plans.</div>
+            <button onClick={() => setShowPicker(true)} style={{ ...btnPrimary, marginTop: 14, width: "100%", maxWidth: 300 }}>See plans</button>
+          </div>
+        ) : editing ? (
+          /* ── Editor ── */
+          <div style={{ ...card, display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: "1.05rem", fontWeight: 700 }}>{editing.id ? "Edit automation" : "New automation"}</div>
+
+            <div>
+              <div style={label}>Name</div>
+              <input value={editing.name} maxLength={60} placeholder={isTrainer ? "e.g. Monday roster check" : "e.g. Morning check-in"}
+                onChange={(e) => setEditing((p) => ({ ...p, name: e.target.value }))} style={inputCls} />
+            </div>
+
+            <div>
+              <div style={label}>What should it do?</div>
+              <textarea value={editing.prompt} maxLength={1000} rows={4}
+                placeholder="Describe the task in plain language, like you'd ask the AI chat."
+                onChange={(e) => setEditing((p) => ({ ...p, prompt: e.target.value }))}
+                style={{ ...inputCls, resize: "vertical", lineHeight: 1.45 }} />
+              <div style={{ fontSize: ".72rem", color: "var(--muted)", marginTop: 6 }}>{editing.prompt.length}/1000</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                {examples.map((ex, i) => (
+                  <button key={i} onClick={() => setEditing((p) => ({ ...p, prompt: ex }))}
+                    style={{ fontSize: ".72rem", padding: "6px 10px", borderRadius: 999, border: "1px dashed var(--border)",
+                      background: "transparent", color: "var(--accent)", cursor: "pointer", textAlign: "left", maxWidth: "100%" }}>
+                    {ex.length > 42 ? ex.slice(0, 42) + "…" : ex}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div style={label}>When</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <select value={editing.type} onChange={(e) => setEditing((p) => ({ ...p, type: e.target.value }))}
+                  style={{ ...inputCls, flex: "1 1 120px" }}>
+                  <option value="daily">Every day</option>
+                  <option value="weekly">Weekly</option>
+                </select>
+                {editing.type === "weekly" && (
+                  <select value={editing.weekday} onChange={(e) => setEditing((p) => ({ ...p, weekday: Number(e.target.value) }))}
+                    style={{ ...inputCls, flex: "1 1 120px" }}>
+                    {WF_DAYS.map((d, i) => <option key={i} value={i}>{d}</option>)}
+                  </select>
+                )}
+                <select value={editing.hour} onChange={(e) => setEditing((p) => ({ ...p, hour: Number(e.target.value) }))}
+                  style={{ ...inputCls, flex: "1 1 120px" }}>
+                  {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{wf12h(h)}</option>)}
+                </select>
+              </div>
+              <div style={{ fontSize: ".72rem", color: "var(--muted)", marginTop: 6 }}>Runs at that time in your timezone. Delivered to your notifications.</div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: ".9rem" }}>Active</div>
+                <div style={{ fontSize: ".72rem", color: "var(--muted)" }}>Turn off to pause without deleting.</div>
+              </div>
+              <Toggle on={editing.enabled} onClick={() => setEditing((p) => ({ ...p, enabled: !p.enabled }))} />
+            </div>
+
+            {saveErr && <div style={{ fontSize: ".8rem", color: "var(--red)" }}>{saveErr}</div>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={save} disabled={saving} style={{ ...btnPrimary, flex: 1 }}>{saving ? "Saving…" : "Save automation"}</button>
+              <button onClick={() => setEditing(null)} style={btnGhost}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          /* ── List ── */
+          <>
+            <div style={{ fontSize: ".85rem", color: "var(--muted)", lineHeight: 1.5 }}>
+              Automations run your AI coach on a schedule and deliver the result to your notifications — no need to open the chat. You have {items.length} of {cap} set up.
+            </div>
+
+            {items.map((w) => {
+              const statusNote = WF_STATUS[w.lastStatus] || "";
+              return (
+                <div key={w.id} style={{ ...card, opacity: w.enabled ? 1 : 0.72 }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: ".98rem" }}>{w.name || "Automation"}</div>
+                      <div style={{ fontSize: ".76rem", color: "var(--accent)", marginTop: 2, display: "flex", alignItems: "center", gap: 5 }}>
+                        <Icon name="clock" size={13} color="var(--accent)" /> {wfScheduleText(w.schedule)}
+                      </div>
+                    </div>
+                    <Toggle on={w.enabled} disabled={busyId === w.id} onClick={() => toggle(w)} />
+                  </div>
+                  <div style={{ fontSize: ".82rem", color: "var(--text-secondary)", marginTop: 8, lineHeight: 1.45 }}>{w.prompt}</div>
+
+                  {w.lastRunAt ? (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+                      <div style={{ fontSize: ".72rem", color: "var(--muted)" }}>Last run {timeAgo(w.lastRunAt)}</div>
+                      {statusNote && <div style={{ fontSize: ".76rem", color: "var(--yellow)", marginTop: 3 }}>{statusNote}</div>}
+                      {w.lastResult && (
+                        <div style={{ marginTop: 6 }}>
+                          <div style={{ fontSize: ".82rem", color: "var(--text)", lineHeight: 1.5,
+                            display: "-webkit-box", WebkitLineClamp: expanded === w.id ? "unset" : 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                            {w.lastResult}
+                          </div>
+                          {w.lastResult.length > 160 && (
+                            <button onClick={() => setExpanded((v) => (v === w.id ? "" : w.id))}
+                              style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontSize: ".76rem", fontWeight: 600, padding: "4px 0 0" }}>
+                              {expanded === w.id ? "Show less" : "Show more"}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)", fontSize: ".74rem", color: "var(--muted)" }}>
+                      {w.enabled ? "Hasn't run yet — you'll see the first result in your notifications." : "Paused."}
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <button onClick={() => startEdit(w)} style={{ ...btnGhost, padding: "8px 12px" }}>Edit</button>
+                    {confirmId === w.id ? (
+                      <>
+                        <button onClick={() => remove(w.id)} disabled={busyId === w.id}
+                          style={{ ...btnGhost, padding: "8px 12px", color: "#e5484d", borderColor: "rgba(229,72,77,.4)" }}>{busyId === w.id ? "…" : "Confirm delete"}</button>
+                        <button onClick={() => setConfirmId("")} style={{ ...btnGhost, padding: "8px 12px" }}>Cancel</button>
+                      </>
+                    ) : (
+                      <button onClick={() => setConfirmId(w.id)} style={{ ...btnGhost, padding: "8px 12px", color: "var(--muted)" }}>Delete</button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {items.length < cap ? (
+              <button onClick={startNew} style={{ ...btnPrimary, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                <Icon name="plus" size={17} color="#04201f" /> New automation
+              </button>
+            ) : (
+              <div style={{ fontSize: ".78rem", color: "var(--muted)", textAlign: "center", padding: "4px 0" }}>
+                You've used all {cap} automation{cap === 1 ? "" : "s"} on your plan.{" "}
+                <button onClick={() => setShowPicker(true)} style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontWeight: 600, padding: 0 }}>Upgrade for more</button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      {showPicker && <PlanPicker role={role} onClose={() => setShowPicker(false)} />}
+    </div>,
+    document.body
+  );
+}
+
 const ROLE_LABEL = { client: "Client", head_trainer: "Trainer", sub_trainer: "Trainer", admin: "Admin" };
 // ── In-app messaging thread view (S90, docs/MESSAGING-PLAN.md) ────────────────
 // Full-screen DM between a linked trainer and client. Live via onSnapshot;
@@ -14372,6 +14685,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
   const [showPicker, setShowPicker] = useState(false);   // S89c plan picker (Upgrade → choose plan → Checkout)
   const [showAdmin, setShowAdmin] = useState(false);      // S90 admin all-users dashboard
   const [showMyNotes, setShowMyNotes] = useState(false);  // S91 trainer general notes
+  const [showAuto, setShowAuto] = useState(false);        // S93 scheduled AI automations
   const [upgradeErr, setUpgradeErr] = useState(false);
   useBackClose(open, onClose);                        // phone Back closes the menu
   useBodyScrollLock(open);
@@ -14636,6 +14950,14 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
             </>
           );
         })()}
+
+        {/* Automations (S93) — scheduled AI runs. Visible to all; the panel shows
+            an upsell for free/trial tiers and the manager for Elite+/Apex/admin. */}
+        <button style={item} onClick={() => setShowAuto(true)}>
+          <Icon name="bolt" size={19} color="var(--accent)" /> <span>Automations</span>
+          <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
+        </button>
+        {showAuto && <AutomationsPanel open={showAuto} onClose={() => setShowAuto(false)} role={role} />}
 
         {/* Invite clients (trainer) — opens the full Invite Hub (share / QR / email / referrals) */}
         {isTrainer && (
