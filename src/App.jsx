@@ -6370,7 +6370,10 @@ async function searchUSDA(query) {
   // Survey/FNDDS) alongside Branded, and pull a wider page so the clean generic
   // entries ("Egg, whole, raw") are in the set to rank above branded oddities
   // ("Chocolate egg"). Ranking happens in searchFoods().
-  const types = encodeURIComponent("Foundation,SR Legacy,Survey (FNDDS),Branded");
+  // NB: "Survey (FNDDS)" makes the USDA endpoint 400 (its space+parens break the
+  // query even when encoded), so we request the generic whole-food datasets
+  // (Foundation, SR Legacy) + Branded — those are what we want ranked first anyway.
+  const types = encodeURIComponent("Foundation,SR Legacy,Branded");
   const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${key}` +
     `&query=${encodeURIComponent(query)}&dataType=${types}&pageSize=25`;
   const r = await fetch(url);
@@ -6855,11 +6858,11 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
                         border:"1px solid " + (picked && picked.name === f.name ? "var(--accent)" : "var(--border)"),
                         background: picked && picked.name === f.name ? "rgba(8,220,224,.08)" : "var(--s2)", color:"var(--text)" }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:"8px" }}>
-                        <span style={{ fontSize:".82rem", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0 }}>
-                          {f.name}
+                        <span style={{ display:"flex", alignItems:"center", gap:"6px", minWidth:0, flex:1 }}>
+                          <span style={{ fontSize:".82rem", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0 }}>{f.name}</span>
                           {f.source === "fatsecret" && (
-                            <span style={{ marginLeft:"6px", fontSize:".58rem", fontWeight:700, color:"var(--accent)",
-                              border:"1px solid var(--accent)", borderRadius:"4px", padding:"1px 5px", verticalAlign:"middle", whiteSpace:"nowrap" }}>FatSecret</span>
+                            <span style={{ flexShrink:0, fontSize:".56rem", fontWeight:700, color:"var(--accent)",
+                              border:"1px solid var(--accent)", borderRadius:"4px", padding:"1px 5px", whiteSpace:"nowrap" }}>FatSecret</span>
                           )}
                         </span>
                         <span style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:".84rem", color:"var(--accent)", whiteSpace:"nowrap" }}>
