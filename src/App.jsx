@@ -3890,6 +3890,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           name={name}
           macroTargets={data.macroTargets}
           deficitMode={data.deficitMode}
+          proteinPerLb={data.proteinPerLb}
           targets={targets}
           floor={floor}
           avgBurnPerDay={avgBurnPerDay}
@@ -4040,7 +4041,7 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
   const targetAcc = floor(tdee - 500);                                 // burn buys speed
   const targetCals = eatback ? targetEat : targetAcc;
   const mtS = data.macroTargets || {};
-  const proteinG = mtS.protein != null ? Number(mtS.protein) : Math.round(Number(weightLbs) * 1.0);
+  const proteinG = mtS.protein != null ? Number(mtS.protein) : Math.round(Number(weightLbs) * proteinBasisOf(data));
   const fatG = mtS.fat != null ? Number(mtS.fat) : Math.round(Math.round(targetCals * 0.28) / 9);
   const fatCal = fatG * 9;
   const carbG = mtS.carbs != null ? Number(mtS.carbs)
@@ -5270,7 +5271,7 @@ function SurplusTab({ tdee, totalBurn, avgBurnPerDay, activeDays, name }) {
 // ─── Nutrients Tab ────────────────────────────────────────────────────────────
 
 function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, floor, avgBurnPerDay, avgStrPerDay = 0,
-  activeDays = 0, activeStrDays = 0, dayData = [], strengthDayData = [], macroTargets, deficitMode }) {
+  activeDays = 0, activeStrDays = 0, dayData = [], strengthDayData = [], macroTargets, deficitMode, proteinPerLb }) {
   const [deficitChoice, setDeficitChoice] = useState(500);
   const [openMicro, setOpenMicro] = useState(null);
   const [openFoodCat, setOpenFoodCat] = useState(null);
@@ -5286,8 +5287,10 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
   // the estimates below, matching the Daily Dashboard (S86 — this tab used to
   // show recomputed defaults even when custom targets were set).
   const mtN = macroTargets || {};
-  // Protein: 0.8g per lb bodyweight for maintenance, 1.0g for loss (muscle sparing)
-  const proteinMultiplier = deficitChoice > 0 ? 1.0 : 0.8;
+  // Honor the plan's protein-basis choice (data.proteinPerLb) if set; otherwise the
+  // maintenance/loss default (0.8g maintenance, 1.0g loss for muscle sparing).
+  const proteinMultiplier = Number(proteinPerLb) === 0.7 || Number(proteinPerLb) === 1.0
+    ? Number(proteinPerLb) : (deficitChoice > 0 ? 1.0 : 0.8);
   const proteinG  = mtN.protein != null ? Number(mtN.protein) : Math.round(weightLbs * proteinMultiplier);
   const proteinCal = proteinG * 4;
 
@@ -6363,8 +6366,13 @@ const _tidyFood = (s) => (s || "Food").toLowerCase().replace(/\b\w/g, (c) => c.t
 // VITE_USDA_API_KEY (a free api.data.gov key) is set for higher limits.
 async function searchUSDA(query) {
   const key = (import.meta.env && import.meta.env.VITE_USDA_API_KEY) || "DEMO_KEY";
+  // Ask for the GENERIC / whole-food datasets first (Foundation, SR Legacy,
+  // Survey/FNDDS) alongside Branded, and pull a wider page so the clean generic
+  // entries ("Egg, whole, raw") are in the set to rank above branded oddities
+  // ("Chocolate egg"). Ranking happens in searchFoods().
+  const types = encodeURIComponent("Foundation,SR Legacy,Survey (FNDDS),Branded");
   const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${key}` +
-    `&query=${encodeURIComponent(query)}&pageSize=8`;
+    `&query=${encodeURIComponent(query)}&dataType=${types}&pageSize=25`;
   const r = await fetch(url);
   if (!r.ok) throw new Error(r.status === 429 ? "limit" : "fail");
   const j = await r.json();
@@ -6376,7 +6384,8 @@ async function searchUSDA(query) {
     });
     return { name: _tidyFood(x.description), brand: x.brandOwner || x.brandName || "",
       kcal: Math.round(n["Energy"] || 0), p: Math.round(n["Protein"] || 0),
-      c: Math.round(n["Carbohydrate, by difference"] || 0), f: Math.round(n["Total lipid (fat)"] || 0), source: "usda" };
+      c: Math.round(n["Carbohydrate, by difference"] || 0), f: Math.round(n["Total lipid (fat)"] || 0),
+      source: "usda", dataType: x.dataType || "" };
   }).filter((f) => f.kcal > 0);
 }
 // Open Food Facts — free, no key, strong on BRANDED / packaged / international
@@ -6397,6 +6406,26 @@ async function searchOFF(query) {
 // Combined food search: query USDA + Open Food Facts in parallel and interleave
 // (generic + branded), so we get both whole foods and packaged products. Returns
 // normalized per-100g foods { name, brand, kcal, p, c, f, source }.
+// Score a result for a query so the closest, most GENERIC food ranks first — this
+// is what makes typed search feel accurate. Exact/leading name matches win; USDA's
+// curated generic datasets (Foundation/SR Legacy/Survey) beat Branded + crowd-sourced
+// Open Food Facts; shorter names ("Egg") beat long branded ones ("Egg, chocolate…").
+function _foodScore(f, q) {
+  const name = (f.name || "").toLowerCase();
+  const esc = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let s = 0;
+  if (name === q) s += 100;
+  else if (name.startsWith(q)) s += 65;
+  else if (new RegExp(`\\b${esc}\\b`).test(name)) s += 45;
+  else if (name.includes(q)) s += 20;
+  const dt = f.dataType || "";
+  if (/Foundation|SR Legacy|Survey/i.test(dt)) s += 35;      // curated generic whole foods
+  else if (dt === "Branded") s += 5;
+  if (f.source === "off") s -= 6;                             // crowd-sourced, least reliable
+  if (f.brand) s -= 4;                                        // a plain generic beats a branded near-match
+  s -= Math.min(18, name.length / 6);                        // prefer concise / generic names
+  return s;
+}
 async function searchFoods(query) {
   const [u, o] = await Promise.allSettled([searchUSDA(query), searchOFF(query)]);
   const usda = u.status === "fulfilled" ? u.value : [];
@@ -6407,10 +6436,14 @@ async function searchFoods(query) {
       ? "Food search limit reached — try again in a bit (or add a free USDA API key)."
       : "Food search is temporarily unavailable — try again in a moment.");
   }
+  const q = query.toLowerCase().trim();
   const seen = new Set(); const out = [];
-  const push = (f) => { const k = (f.name + "|" + (f.brand || "")).toLowerCase(); if (seen.has(k)) return; seen.add(k); out.push(f); };
-  const max = Math.max(usda.length, off.length);
-  for (let i = 0; i < max; i++) { if (usda[i]) push(usda[i]); if (off[i]) push(off[i]); }
+  for (const f of [...usda, ...off]) {
+    const k = (f.name + "|" + (f.brand || "")).toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k); out.push(f);
+  }
+  out.sort((a, b) => _foodScore(b, q) - _foodScore(a, q));
   return out.slice(0, 12);
 }
 
@@ -7747,7 +7780,7 @@ function WeightDayLogger({ date, existing, onSave }) {
 function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onRemoveMeal, onEditMeal, recentFoods, weekSummary, history, onRefresh, isRemote,
-  onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onAddCustomExercise }) {
+  onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onAddCustomExercise }) {
 
   const [showCalendar, setShowCalendar] = useState(false);
   const [editingWorkout, setEditingWorkout] = useState(null);
@@ -7804,7 +7837,11 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   // calories, carbs fill the remaining calories. A coach or client can override
   // any/all of them per plan via data.macroTargets — those take precedence.
   const mt = data.macroTargets || null;
-  const autoProtein = Math.round(Number(weightLbs) * 1.0) || 0;
+  // Protein basis is a user choice (data.proteinPerLb): 1.0 g/lb (default, muscle-
+  // gain / higher-protein) or 0.7 g/lb (moderate, common in a deficit). Custom
+  // targets (data.macroTargets) still override everything.
+  const proteinPerLb = Number(data.proteinPerLb) === 0.7 ? 0.7 : 1.0;
+  const autoProtein = Math.round(Number(weightLbs) * proteinPerLb) || 0;
   const autoFat = Math.round(target * 0.28 / 9);
   const proteinTarget = mt && mt.protein != null ? mt.protein : autoProtein;
   const fatTarget = mt && mt.fat != null ? mt.fat : autoFat;
@@ -8145,6 +8182,22 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
               </button>
             )}
           </div>
+          {/* Protein basis — user choice for the AUTO target (custom targets override
+              it). 1 g/lb = higher-protein / muscle focus; 0.7 g/lb = moderate. */}
+          {!macrosCustom && onSetProteinBasis && Number(weightLbs) > 0 && (
+            <div style={{display:"flex",alignItems:"center",gap:"6px",padding:"0 8px 6px",flexWrap:"wrap"}}>
+              <span style={{fontSize:".68rem",color:"var(--muted)"}}>Protein target:</span>
+              {[[1.0,"1 g/lb"],[0.7,"0.7 g/lb"]].map(([v,l])=>(
+                <button key={v} onClick={()=>onSetProteinBasis(v)}
+                  style={{padding:"4px 10px",fontSize:".7rem",fontWeight:700,borderRadius:"999px",cursor:"pointer",
+                    border:"1px solid "+(proteinPerLb===v?"var(--accent)":"var(--border)"),
+                    background: proteinPerLb===v?"rgba(8,220,224,.12)":"transparent",
+                    color: proteinPerLb===v?"var(--accent)":"var(--muted)"}}>
+                  {l} · {Math.round(Number(weightLbs)*v)}g
+                </button>
+              ))}
+            </div>
+          )}
           {editMacros && onSetMacroTargets && (
             <div style={{padding:"10px 8px",display:"flex",flexDirection:"column",gap:"8px"}}>
               <div style={{display:"flex",gap:"6px"}}>
@@ -9940,6 +9993,9 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
 // Every target/projection surface routes through this so the two promises
 // ("eat more" vs "get there faster") can never both be claimed at once.
 const isEatback = (d) => ((d && d.deficitMode) || "eatback") !== "accelerate";
+// Protein target basis (g per lb bodyweight) — user choice, default 1.0. Used for
+// the AUTO protein target everywhere so the dashboard + Results agree.
+const proteinBasisOf = (d) => (Number(d && d.proteinPerLb) === 0.7 ? 0.7 : 1.0);
 
 // Tracker-adjusted target (S89, Kevin's call — opt-in via data.wearableAdjust):
 // a watch's resting + active energy IS the day's actual measured TDEE, so on a
@@ -16249,6 +16305,7 @@ export default function App() {
               onLogUpdate={onLogUpdate} dailyLog={dailyLog} streak={streak}
               onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} weekSummary={weekSummary} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
               onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; return n; })}
+              onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
               onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
                 const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);
