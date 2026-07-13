@@ -129,6 +129,10 @@ exports.onTrainerRequestWritten = require("./push").onTrainerRequestWritten;
 // Client → trainer requests (S90) — server-side write into the trainer's
 // inbox (a client can't touch trainer kv under the rules). functions/requests.js.
 exports.sendTrainerRequest = require("./requests").sendTrainerRequest;
+// FatSecret food-search proxy (S93) — adds a curated food library to typed
+// search, merged with USDA + Open Food Facts. See functions/foodsearch.js for
+// the (Kevin) FatSecret account + secret setup. No-op until the secrets are set.
+exports.foodSearch = require("./foodsearch").foodSearch;
 
 // ── adminOverview (S90, Kevin's ask): every user at a glance ────────────────
 // Admin-only. Server-side Admin SDK reads (no rules change needed): profile +

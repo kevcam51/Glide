@@ -6406,6 +6406,23 @@ async function searchOFF(query) {
 // Combined food search: query USDA + Open Food Facts in parallel and interleave
 // (generic + branded), so we get both whole foods and packaged products. Returns
 // normalized per-100g foods { name, brand, kcal, p, c, f, source }.
+// FatSecret — a large curated library (generic + branded + restaurant) proxied
+// through our Cloud Function (server-side OAuth; the secret never hits the browser).
+// Returns [] gracefully until the FatSecret secrets are configured, or if the
+// function isn't reachable. _fatSecretOff skips it for the rest of the session
+// after a hard failure so searches stay fast.
+let _fatSecretOff = false;
+async function searchFatSecret(query) {
+  if (_fatSecretOff) return [];
+  try {
+    const res = await callFoodSearch({ query });
+    return (res && res.data && res.data.foods) || [];
+  } catch (e) {
+    // "not-found" (not deployed) or transport error — stop trying this session.
+    if (e && (e.code === "functions/not-found" || e.code === "not-found")) _fatSecretOff = true;
+    return [];
+  }
+}
 // Score a result for a query so the closest, most GENERIC food ranks first — this
 // is what makes typed search feel accurate. Exact/leading name matches win; USDA's
 // curated generic datasets (Foundation/SR Legacy/Survey) beat Branded + crowd-sourced
@@ -6421,16 +6438,18 @@ function _foodScore(f, q) {
   const dt = f.dataType || "";
   if (/Foundation|SR Legacy|Survey/i.test(dt)) s += 35;      // curated generic whole foods
   else if (dt === "Branded") s += 5;
+  if (f.source === "fatsecret") s += 12;                     // curated library, better than raw branded/crowd
   if (f.source === "off") s -= 6;                             // crowd-sourced, least reliable
   if (f.brand) s -= 4;                                        // a plain generic beats a branded near-match
   s -= Math.min(18, name.length / 6);                        // prefer concise / generic names
   return s;
 }
 async function searchFoods(query) {
-  const [u, o] = await Promise.allSettled([searchUSDA(query), searchOFF(query)]);
+  const [u, o, fs] = await Promise.allSettled([searchUSDA(query), searchOFF(query), searchFatSecret(query)]);
   const usda = u.status === "fulfilled" ? u.value : [];
   const off = o.status === "fulfilled" ? o.value : [];
-  if (!usda.length && !off.length) {
+  const fatsecret = fs.status === "fulfilled" ? fs.value : [];
+  if (!usda.length && !off.length && !fatsecret.length) {
     const limited = u.status === "rejected" && u.reason && u.reason.message === "limit";
     throw new Error(limited
       ? "Food search limit reached — try again in a bit (or add a free USDA API key)."
@@ -6438,7 +6457,7 @@ async function searchFoods(query) {
   }
   const q = query.toLowerCase().trim();
   const seen = new Set(); const out = [];
-  for (const f of [...usda, ...off]) {
+  for (const f of [...usda, ...fatsecret, ...off]) {
     const k = (f.name + "|" + (f.brand || "")).toLowerCase();
     if (seen.has(k)) continue;
     seen.add(k); out.push(f);
@@ -11511,6 +11530,7 @@ const callTrainerizeImport = httpsCallable(functions, "trainerizeImport"); // Tr
 const callPasskeyRegOptions = httpsCallable(functions, "passkeyRegisterOptions"); // Face ID setup (S87)
 const callPasskeyRegVerify = httpsCallable(functions, "passkeyRegisterVerify");
 // Scheduled AI automations (S93, workflow Phase 2 UI). Backend = functions/workflows.js.
+const callFoodSearch = httpsCallable(functions, "foodSearch"); // FatSecret food-search proxy (S93)
 const callListWorkflows = httpsCallable(functions, "listWorkflows");
 const callSaveWorkflow = httpsCallable(functions, "saveWorkflow");
 const callToggleWorkflow = httpsCallable(functions, "toggleWorkflow");
