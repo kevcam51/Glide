@@ -6445,6 +6445,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const [grams, setGrams] = useState("100");
   const [unit, setUnit] = useState("g");      // serving unit — g or ml (MyFitnessPal-style)
   const [servingText, setServingText] = useState(""); // the product's labelled serving (e.g. "330 ml")
+  const [servingSel, setServingSel] = useState(null); // {grams,unit} of the chosen serving — saved with the food so re-logging reproduces it
   const [scanOpen, setScanOpen] = useState(false); // live barcode scanner modal
   const [scanning, setScanning] = useState(false); // camera starting up
   const [scanErr, setScanErr] = useState("");
@@ -6474,7 +6475,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
     </span>
   );
 
-  const resetSearch = () => { setSearchOpen(false); setSearchQ(""); setResults([]); setSearching(false); setSearchErr(""); setPicked(null); setGrams("100"); setUnit("g"); setServingText(""); };
+  const resetSearch = () => { setSearchOpen(false); setSearchQ(""); setResults([]); setSearching(false); setSearchErr(""); setPicked(null); setGrams("100"); setUnit("g"); setServingText(""); setServingSel(null); };
   const resetFields = () => { setName(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); resetSearch(); setAiBusy(false); setAiNote(""); setAiErr(""); };
   // AI estimate: uses whatever the user typed (food name field, falling back
   // to the search box), fills the form, and reports the serving it assumed.
@@ -6526,9 +6527,40 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
     const start = food.serving && food.serving > 0 ? String(food.serving) : "100";
     setPicked(food); setUnit(u); setServingText(food.servingText || ""); setGrams(start); setName(food.name);
     applyServing(food, start); setShowMacros(true);
+    setServingSel({ grams: parseFloat(start) || null, unit: u });
   };
   // Adjust serving size after a pick — rescales the filled macros live.
-  const setServing = (g) => { setGrams(g); if (picked) applyServing(picked, g); };
+  const setServing = (g) => { setGrams(g); if (picked) applyServing(picked, g); setServingSel({ grams: parseFloat(g) || null, unit }); };
+  // Plug in a previously-saved food (autocomplete / "log again") — restores its
+  // name, calories, macros AND the exact serving it was logged at, so the same
+  // meal is one tap. (Saved foods hold final macros, not per-100g, so there's no
+  // live rescale — change the amount by re-searching if needed.)
+  const applySaved = (f) => {
+    setName(f.name || "");
+    setCals(f.calories != null ? String(f.calories) : "");
+    setProtein(f.protein ? String(f.protein) : "");
+    setCarbs(f.carbs ? String(f.carbs) : "");
+    setFat(f.fat ? String(f.fat) : "");
+    setShowMacros(!!(f.protein || f.carbs || f.fat));
+    setPicked(null);
+    setServingSel(f.grams ? { grams: Number(f.grams), unit: f.unit || "g" } : null);
+    if (f.grams) { setGrams(String(f.grams)); if (f.unit) setUnit(f.unit); }
+  };
+  // Saved foods matching what's typed in the name field — startsWith first (best
+  // match), then substring. Powers the type-ahead + Enter-to-recall.
+  const nameMatches = (() => {
+    const q = name.trim().toLowerCase();
+    if (!q || editingId) return [];
+    const rf = recentFoods || [];
+    const starts = rf.filter((f) => (f.name || "").toLowerCase().startsWith(q));
+    const seen = new Set(starts.map((f) => (f.name || "").toLowerCase()));
+    const incl = rf.filter((f) => { const n = (f.name || "").toLowerCase(); return !seen.has(n) && n.includes(q); });
+    return [...starts, ...incl].slice(0, 6);
+  })();
+  // Show the type-ahead while typing a name that has saved matches and no
+  // calories yet (picking one fills calories → the list auto-hides).
+  const showSuggest = !editingId && !!name.trim() && !cals && nameMatches.length > 0
+    && !(nameMatches.length === 1 && nameMatches[0].name.toLowerCase() === name.trim().toLowerCase());
   // ── Barcode scanning: LIVE camera (auto-detects as you aim) → look it up in
   // Open Food Facts → prefill the food. Uses @zxing/browser (works on iOS Safari
   // + Chrome, unlike the native BarcodeDetector); OFF is barcode-native so the
@@ -6610,6 +6642,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
     if (!c || c <= 0) return; // calories are the one required field
     const payload = { name: name.trim(), type: addingTo === "other" ? "" : addingTo, calories: c,
       protein: parseInt(protein) || 0, carbs: parseInt(carbs) || 0, fat: parseInt(fat) || 0 };
+    if (servingSel && servingSel.grams > 0) { payload.grams = servingSel.grams; payload.unit = servingSel.unit || "g"; }
     if (editingId) onEditMeal(editingId, payload);
     else onAddMeal(payload);
     closeForm();
@@ -6621,34 +6654,47 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
     borderRadius:"8px", border:"1px solid var(--accent)", background:"rgba(8,220,224,.08)",
     color:"var(--accent)", cursor:"pointer" };
 
-  const mealRow = (m) => (
-    <div key={m.id} style={{ display:"flex", alignItems:"center", gap:"8px",
-      padding:"6px 8px", borderRadius:"6px", background:"rgba(255,255,255,.04)" }}>
-      <span style={{ flex:1, fontSize:".82rem" }}>
-        {m.name || <span style={{ color:"var(--muted)" }}>Quick entry</span>}
-        {(m.protein || m.carbs || m.fat) ? (
-          <span style={{ color:"var(--muted)", fontSize:".72rem" }}>
-            {"  "}({m.protein||0}p / {m.carbs||0}c / {m.fat||0}f)
-          </span>
-        ) : null}
-        {m.time ? (
-          <span style={{ color:"var(--muted)", fontSize:".72rem" }}>{"  · "}{fmtClock(m.time)}</span>
-        ) : null}
-      </span>
-      <span style={{ fontWeight:700, fontSize:".82rem" }}>{(m.calories||0).toLocaleString()} cal</span>
-      <button onClick={() => openEdit(m)} title="Edit"
-        style={{ border:"none", background:"transparent", color:"var(--muted)",
-          cursor:"pointer", fontSize:".9rem", lineHeight:1 }}>✎</button>
-      <button onClick={() => onRemoveMeal(m.id)} title="Remove"
-        style={{ border:"none", background:"transparent", color:"var(--muted)",
-          cursor:"pointer", fontSize:"1rem", lineHeight:1 }}>✕</button>
-    </div>
-  );
+  const mealRow = (m) => {
+    const hasMacros = m.protein || m.carbs || m.fat;
+    return (
+      <div key={m.id} style={{ display:"flex", alignItems:"center", gap:"10px",
+        padding:"8px 10px", borderRadius:"8px", background:"rgba(255,255,255,.04)" }}>
+        <div style={{ flex:1, minWidth:0 }}>
+          {/* Food name (+ optional clock) */}
+          <div style={{ fontSize:".86rem", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+            {m.name || <span style={{ color:"var(--muted)", fontWeight:400 }}>Quick entry</span>}
+            {m.time ? <span style={{ color:"var(--muted)", fontSize:".72rem", fontWeight:400 }}>{" · "}{fmtClock(m.time)}</span> : null}
+          </div>
+          {/* Macros spelled out + labeled, right under the name */}
+          {hasMacros && (
+            <div style={{ fontSize:".72rem", marginTop:2 }}>
+              <span style={{ color:"var(--accent)", fontWeight:700 }}>Protein {m.protein||0}g</span>
+              <span style={{ color:"var(--muted)" }}>{" · "}</span>
+              <span style={{ color:"var(--yellow)", fontWeight:700 }}>Carbs {m.carbs||0}g</span>
+              <span style={{ color:"var(--muted)" }}>{" · "}</span>
+              <span style={{ color:"var(--orange)", fontWeight:700 }}>Fat {m.fat||0}g</span>
+            </div>
+          )}
+        </div>
+        {/* Calories — big, bold, bright */}
+        <span style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"1.05rem", color:"var(--accent)", whiteSpace:"nowrap" }}>
+          {(m.calories||0).toLocaleString()}<span style={{ fontSize:".62rem", color:"var(--muted)", fontWeight:600 }}> cal</span>
+        </span>
+        <button onClick={() => openEdit(m)} title="Edit"
+          style={{ border:"none", background:"transparent", color:"var(--muted)",
+            cursor:"pointer", fontSize:".9rem", lineHeight:1 }}>✎</button>
+        <button onClick={() => onRemoveMeal(m.id)} title="Remove"
+          style={{ border:"none", background:"transparent", color:"var(--muted)",
+            cursor:"pointer", fontSize:"1rem", lineHeight:1 }}>✕</button>
+      </div>
+    );
+  };
 
   // One-tap re-add of a recently logged food into the meal type being added.
   const quickAddRecent = (f) => {
     onAddMeal({ name: f.name, type: addingTo === "other" ? "" : addingTo,
-      calories: f.calories || 0, protein: f.protein || 0, carbs: f.carbs || 0, fat: f.fat || 0 });
+      calories: f.calories || 0, protein: f.protein || 0, carbs: f.carbs || 0, fat: f.fat || 0,
+      ...(f.grams ? { grams: f.grams, unit: f.unit || "g" } : {}) });
     closeForm();
   };
 
@@ -6742,17 +6788,24 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
                 <div style={{ display:"flex", flexDirection:"column", gap:"4px", maxHeight:"168px", overflowY:"auto" }}>
                   {results.map((f, i) => (
                     <button key={i} onClick={() => pickFood(f)}
-                      style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px",
-                        padding:"7px 9px", borderRadius:"6px", cursor:"pointer", textAlign:"left",
+                      style={{ display:"flex", flexDirection:"column", gap:"3px",
+                        padding:"8px 10px", borderRadius:"6px", cursor:"pointer", textAlign:"left",
                         border:"1px solid " + (picked && picked.name === f.name ? "var(--accent)" : "var(--border)"),
                         background: picked && picked.name === f.name ? "rgba(8,220,224,.08)" : "var(--s2)", color:"var(--text)" }}>
-                      <span style={{ flex:1, fontSize:".78rem", minWidth:0 }}>
-                        <span style={{ display:"block", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{f.name}</span>
-                        {f.brand && <span style={{ color:"var(--muted)", fontSize:".68rem" }}>{f.brand}</span>}
-                      </span>
-                      <span style={{ fontSize:".7rem", color:"var(--muted)", whiteSpace:"nowrap", textAlign:"right" }}>
-                        {f.kcal} cal<br />{f.p}p/{f.c}c/{f.f}f <span style={{ opacity:.7 }}>/100g</span>
-                      </span>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:"8px" }}>
+                        <span style={{ fontSize:".82rem", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0 }}>{f.name}</span>
+                        <span style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:".84rem", color:"var(--accent)", whiteSpace:"nowrap" }}>
+                          {f.kcal}<span style={{ fontSize:".6rem", color:"var(--muted)", fontWeight:600 }}> cal</span>
+                        </span>
+                      </div>
+                      <div style={{ fontSize:".7rem" }}>
+                        <span style={{ color:"var(--accent)", fontWeight:700 }}>Protein {f.p}g</span>
+                        <span style={{ color:"var(--muted)" }}>{" · "}</span>
+                        <span style={{ color:"var(--yellow)", fontWeight:700 }}>Carbs {f.c}g</span>
+                        <span style={{ color:"var(--muted)" }}>{" · "}</span>
+                        <span style={{ color:"var(--orange)", fontWeight:700 }}>Fat {f.f}g</span>
+                        <span style={{ color:"var(--muted)" }}>{" · per 100g"}{f.brand ? ` · ${f.brand}` : ""}</span>
+                      </div>
                     </button>
                   ))}
                 </div>
@@ -6785,11 +6838,48 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
       <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
         <input autoFocus style={{ ...inp, flex:"2 1 140px" }} placeholder="Food (optional)"
           value={name} onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()} />
+          onKeyDown={(e) => {
+            if (e.key !== "Enter") return;
+            // Type a few letters + Enter → plug in your matching saved food (with
+            // its exact serving). Falls through to a normal add when there's no match.
+            if (showSuggest && nameMatches[0]) { e.preventDefault(); applySaved(nameMatches[0]); }
+            else submit();
+          }} />
         <input style={{ ...inp, flex:"1 1 90px" }} type="number" inputMode="numeric"
           placeholder="Calories" value={cals} onChange={(e) => setCals(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()} />
       </div>
+      {/* Type-ahead over your saved foods (MyFitnessPal-style): tap one to plug in
+          its name, calories, macros, and the exact serving you logged before. */}
+      {showSuggest && (
+        <div style={{ display:"flex", flexDirection:"column", gap:"3px", marginTop:"-2px",
+          maxHeight:"180px", overflowY:"auto", border:"1px solid var(--border)", borderRadius:"8px", padding:"4px", background:"var(--surface)" }}>
+          <div style={{ fontSize:".64rem", color:"var(--muted)", textTransform:"uppercase", letterSpacing:".5px", fontWeight:700, padding:"2px 4px" }}>Your saved foods · tap to use</div>
+          {nameMatches.map((f, i) => (
+            <button key={i} onMouseDown={(e) => e.preventDefault()} onClick={() => applySaved(f)}
+              style={{ display:"flex", flexDirection:"column", gap:"2px", padding:"6px 8px", borderRadius:"6px",
+                cursor:"pointer", textAlign:"left", border:"none", background:"transparent", color:"var(--text)" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:"8px" }}>
+                <span style={{ fontSize:".8rem", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0 }}>
+                  {f.name}{f.grams ? <span style={{ color:"var(--muted)", fontWeight:400 }}>{` · ${f.grams}${f.unit || "g"}`}</span> : null}
+                </span>
+                <span style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:".8rem", color:"var(--accent)", whiteSpace:"nowrap" }}>
+                  {(f.calories||0).toLocaleString()}<span style={{ fontSize:".58rem", color:"var(--muted)", fontWeight:600 }}> cal</span>
+                </span>
+              </div>
+              {(f.protein || f.carbs || f.fat) ? (
+                <div style={{ fontSize:".68rem" }}>
+                  <span style={{ color:"var(--accent)", fontWeight:700 }}>Protein {f.protein||0}g</span>
+                  <span style={{ color:"var(--muted)" }}>{" · "}</span>
+                  <span style={{ color:"var(--yellow)", fontWeight:700 }}>Carbs {f.carbs||0}g</span>
+                  <span style={{ color:"var(--muted)" }}>{" · "}</span>
+                  <span style={{ color:"var(--orange)", fontWeight:700 }}>Fat {f.fat||0}g</span>
+                </div>
+              ) : null}
+            </button>
+          ))}
+        </div>
+      )}
       {aiNote && (
         <div style={{ fontSize:".74rem", color:"var(--accent)", display:"flex", alignItems:"flex-start", gap:"6px" }}>
           <Icon name="sparkle" variant="solid" size={13} style={{ marginTop:1, flexShrink:0 }} />
@@ -6847,10 +6937,26 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
         </div>
       </div>
 
-      {/* When collapsed, still surface the day's macro totals at a glance. */}
-      {!open && hasMacros && (
-        <div style={{ marginTop:"6px" }}>
-          <MacroSummary small />
+      {/* When collapsed: an always-visible quick-add bar (Breakfast / Lunch /
+          Dinner / Snack) so the meal types are obvious and you can log one in a
+          single tap — no need to expand the section first. Plus the day's macro
+          totals at a glance. */}
+      {!open && (
+        <div style={{ marginTop:"8px" }}>
+          <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+            {TYPES.map((t) => {
+              const n = list.filter((m) => m.type === t).length;
+              return (
+                <button key={t} onClick={() => { setOpen(true); openForm(t); }}
+                  style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"7px 11px",
+                    borderRadius:"999px", border:"1px solid var(--accent)", background:"rgba(8,220,224,.08)",
+                    color:"var(--accent)", fontSize:".76rem", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>
+                  <Icon name="plus" size={12} color="var(--accent)" />{t}{n > 0 ? ` · ${n}` : ""}
+                </button>
+              );
+            })}
+          </div>
+          {hasMacros && <div style={{ marginTop:"8px" }}><MacroSummary small /></div>}
         </div>
       )}
 
@@ -15747,8 +15853,13 @@ export default function App() {
     const name = (m.name || "").trim();
     if (!name || !activeId) return;
     const key = name.toLowerCase();
-    const entry = { name, calories: m.calories||0, protein: m.protein||0, carbs: m.carbs||0, fat: m.fat||0 };
-    const next = [entry, ...recentFoodsRef.current.filter(f => (f.name||"").toLowerCase() !== key)].slice(0, 24);
+    // Remember the SERVING (grams + unit) too, so re-logging reproduces the exact
+    // past entry (MyFitnessPal-style "log again"). Deduped by name (latest serving
+    // + macros win), newest first, and kept as a LARGE history so foods saved long
+    // ago still autocomplete (~400 ≈ 50KB JSON, well under the 1MB doc limit).
+    const entry = { name, calories: m.calories||0, protein: m.protein||0, carbs: m.carbs||0, fat: m.fat||0,
+      grams: m.grams != null ? Number(m.grams) : null, unit: m.unit || null, ts: Date.now() };
+    const next = [entry, ...recentFoodsRef.current.filter(f => (f.name||"").toLowerCase() !== key)].slice(0, 400);
     recentFoodsRef.current = next;
     setRecentFoods(next);
     logWrite(`caliq-foods-${activeId}`, JSON.stringify(next));
@@ -15760,7 +15871,8 @@ export default function App() {
     const m = { id:`m${Date.now()}${Math.floor(Math.random()*1000)}`,
       name: meal.name||"", type: meal.type||"", calories: Number(meal.calories)||0,
       protein: Number(meal.protein)||0, carbs: Number(meal.carbs)||0, fat: Number(meal.fat)||0,
-      time: meal.time || hhmmLocal() };
+      time: meal.time || hhmmLocal(),
+      ...(meal.grams != null ? { grams: Number(meal.grams), unit: meal.unit || "g" } : {}) };
     upsertRecentFood(m);
     const updated = {
       ...dailyLog,
@@ -15803,7 +15915,8 @@ export default function App() {
     const upd = { ...old,
       name: fields.name || "", type: fields.type != null ? fields.type : old.type,
       calories: Number(fields.calories)||0, protein: Number(fields.protein)||0,
-      carbs: Number(fields.carbs)||0, fat: Number(fields.fat)||0 };
+      carbs: Number(fields.carbs)||0, fat: Number(fields.fat)||0,
+      ...(fields.grams != null ? { grams: Number(fields.grams), unit: fields.unit || "g" } : {}) };
     const newMeals = meals.slice(); newMeals[idx] = upd;
     upsertRecentFood(upd);
     const updated = {
