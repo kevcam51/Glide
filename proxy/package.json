@@ -1,0 +1,9 @@
+{
+  "name": "glidna-fatsecret-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tiny fixed-IP relay so Glidna's Cloud Function can reach FatSecret's IP-whitelisted API.",
+  "main": "server.js",
+  "engines": { "node": ">=18" },
+  "scripts": { "start": "node server.js" }
+}

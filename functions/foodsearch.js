@@ -1,57 +1,37 @@
-// Glidna — FatSecret food-search proxy (S93).
+// Glidna — FatSecret food-search proxy client (S93).
 //
-// FatSecret Platform API has a large, curated food library (generic + branded +
-// restaurant) that meaningfully improves typed food search vs. USDA + Open Food
-// Facts alone. It requires OAuth2 (a client id + secret) and is server-only, so
-// it must be proxied through this Cloud Function — the secret never touches the
-// browser. Results are MERGED with USDA/OFF client-side (see searchFoods in
-// src/App.jsx) and ranked together; this just adds to the library.
+// FatSecret's free tier only answers requests from WHITELISTED IPs, and Cloud
+// Functions have dynamic IPs — so we route through a tiny always-on proxy server
+// that has ONE fixed, whitelisted IP (see proxy/ + proxy/README.md). This Cloud
+// Function stays the authenticated entry point: it checks the Firebase user, calls
+// the proxy (shared-secret protected), parses FatSecret's response, and returns
+// normalized per-100g foods. The FatSecret credentials live ON the proxy, not here.
 //
-// SETUP (Kevin): create a free app at https://platform.fatsecret.com → get the
-// Client ID + Client Secret, then:
-//   printf 'ID'     | firebase functions:secrets:set FATSECRET_CLIENT_ID     --project calorieiq-29762 --data-file=-
-//   printf 'SECRET' | firebase functions:secrets:set FATSECRET_CLIENT_SECRET --project calorieiq-29762 --data-file=-
-//   firebase deploy --only functions:foodSearch --project calorieiq-29762
-// Until the secrets are set it returns { foods: [], configured: false } — a safe
+// Results are used as a FALLBACK by the app (searchFoods in src/App.jsx only calls
+// this when USDA + Open Food Facts come up short) to conserve API calls, and every
+// FatSecret result is tagged source:"fatsecret" so the UI can flag it.
+//
+// ACTIVATION (when ready — see proxy/README.md):
+//   1. Deploy the proxy VM, note its static IP, whitelist it in FatSecret.
+//   2. Set the two proxy secrets, then redeploy this function:
+//        printf 'https://PROXY_HOST' | firebase functions:secrets:set FATSECRET_PROXY_URL    --project calorieiq-29762 --data-file=-
+//        printf 'SHARED_SECRET'       | firebase functions:secrets:set FATSECRET_PROXY_SECRET --project calorieiq-29762 --data-file=-
+//        firebase deploy --only functions:foodSearch --project calorieiq-29762
+// Until the proxy URL is set it returns { foods: [], configured: false } — a safe
 // no-op (the app keeps using USDA + Open Food Facts).
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 
-const FATSECRET_CLIENT_ID = defineSecret("FATSECRET_CLIENT_ID");
-const FATSECRET_CLIENT_SECRET = defineSecret("FATSECRET_CLIENT_SECRET");
-
-// OAuth2 client-credentials token, cached in-memory across warm invocations
-// (valid ~24h; we refresh a minute early).
-let _token = null, _tokenExp = 0;
-async function getToken(id, secret) {
-  const now = Date.now();
-  if (_token && now < _tokenExp - 60000) return _token;
-  const basic = Buffer.from(`${id}:${secret}`).toString("base64");
-  const ctl = new AbortController();
-  const t = setTimeout(() => ctl.abort(), 10000);
-  try {
-    const r = await fetch("https://oauth.fatsecret.com/connect/token", {
-      method: "POST", signal: ctl.signal,
-      headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded" },
-      body: "grant_type=client_credentials&scope=basic",
-    });
-    if (!r.ok) throw new Error("fatsecret-auth-" + r.status);
-    const j = await r.json();
-    _token = j.access_token;
-    _tokenExp = now + (Number(j.expires_in) || 86400) * 1000;
-    return _token;
-  } finally { clearTimeout(t); }
-}
+const FATSECRET_PROXY_URL = defineSecret("FATSECRET_PROXY_URL");
+const FATSECRET_PROXY_SECRET = defineSecret("FATSECRET_PROXY_SECRET");
 
 const tidy = (s) => String(s || "").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 
 // FatSecret's search returns a text food_description, e.g.
 //   "Per 100g - Calories: 155kcal | Fat: 10.61g | Carbs: 1.12g | Protein: 12.58g"
-// Parse it and normalize to PER-100g (the app's picker assumes per-100g and lets
-// the user pick a serving). We can only normalize gram-based servings; non-gram
-// servings ("1 cup") are skipped here — a later enhancement can call foods.get
-// for structured servings.
+// Parse it and normalize to PER-100g (the app's picker assumes per-100g). Only
+// gram-based servings can be normalized; non-gram servings ("1 cup") are skipped.
 function parsePer100(desc) {
   const m = String(desc || "").match(
     /Per\s+(.+?)\s*-\s*Calories:\s*([\d.]+)\s*kcal\s*\|\s*Fat:\s*([\d.]+)\s*g\s*\|\s*Carbs:\s*([\d.]+)\s*g\s*\|\s*Protein:\s*([\d.]+)\s*g/i
@@ -68,31 +48,29 @@ function parsePer100(desc) {
 }
 
 exports.foodSearch = onCall(
-  { secrets: [FATSECRET_CLIENT_ID, FATSECRET_CLIENT_SECRET], region: "us-central1", maxInstances: 10 },
+  { secrets: [FATSECRET_PROXY_URL, FATSECRET_PROXY_SECRET], region: "us-central1", maxInstances: 10 },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Sign in first.");
-    const id = FATSECRET_CLIENT_ID.value(), secret = FATSECRET_CLIENT_SECRET.value();
-    if (!id || !secret || /placeholder/i.test(id) || /placeholder/i.test(secret)) {
+    const proxyUrl = FATSECRET_PROXY_URL.value(), proxySecret = FATSECRET_PROXY_SECRET.value();
+    if (!proxyUrl || !proxySecret || /placeholder/i.test(proxyUrl) || /placeholder/i.test(proxySecret)) {
       return { foods: [], configured: false };
     }
     const q = String((request.data && request.data.query) || "").trim().slice(0, 80);
     if (q.length < 2) return { foods: [] };
 
-    let token;
-    try { token = await getToken(id, secret); } catch (e) { console.error("foodSearch auth", e && e.message); return { foods: [], error: "auth" }; }
-
-    const url = "https://platform.fatsecret.com/rest/server.api?method=foods.search&format=json&max_results=20" +
-      `&search_expression=${encodeURIComponent(q)}`;
+    const url = `${proxyUrl.replace(/\/+$/, "")}/search?q=${encodeURIComponent(q)}`;
     let j;
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), 10000);
     try {
-      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: ctl.signal });
-      if (!r.ok) { console.error("foodSearch search http", r.status); return { foods: [], error: "search" }; }
+      const r = await fetch(url, { headers: { "x-proxy-secret": proxySecret }, signal: ctl.signal });
+      if (!r.ok) { console.error("foodSearch proxy http", r.status); return { foods: [], error: "proxy" }; }
       j = await r.json();
-    } catch (e) { console.error("foodSearch search", e && e.message); return { foods: [], error: "search" }; }
+    } catch (e) { console.error("foodSearch proxy", e && e.message); return { foods: [], error: "proxy" }; }
     finally { clearTimeout(t); }
 
+    // The proxy returns FatSecret's raw JSON; parse it here so the FatSecret
+    // response shape stays in our versioned code (the proxy is a dumb pipe).
     let arr = j && j.foods && j.foods.food;
     if (!arr) return { foods: [] };
     if (!Array.isArray(arr)) arr = [arr];

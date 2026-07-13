@@ -6445,17 +6445,27 @@ function _foodScore(f, q) {
   return s;
 }
 async function searchFoods(query) {
-  const [u, o, fs] = await Promise.allSettled([searchUSDA(query), searchOFF(query), searchFatSecret(query)]);
+  // Query our own free DBs first (USDA + Open Food Facts).
+  const [u, o] = await Promise.allSettled([searchUSDA(query), searchOFF(query)]);
   const usda = u.status === "fulfilled" ? u.value : [];
   const off = o.status === "fulfilled" ? o.value : [];
-  const fatsecret = fs.status === "fulfilled" ? fs.value : [];
+  const q = query.toLowerCase().trim();
+  const esc = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const own = [...usda, ...off];
+  // FALLBACK ONLY: hit FatSecret (a metered API) just when our own DB comes up
+  // short — few results, or none that actually match the query well. Common foods
+  // resolve from USDA/OFF and never touch FatSecret, conserving its quota.
+  const strong = own.some((f) => { const n = (f.name || "").toLowerCase(); return n === q || n.startsWith(q) || new RegExp(`\\b${esc}\\b`).test(n); });
+  let fatsecret = [];
+  if (own.length < 4 || !strong) {
+    fatsecret = await searchFatSecret(query);
+  }
   if (!usda.length && !off.length && !fatsecret.length) {
     const limited = u.status === "rejected" && u.reason && u.reason.message === "limit";
     throw new Error(limited
       ? "Food search limit reached — try again in a bit (or add a free USDA API key)."
       : "Food search is temporarily unavailable — try again in a moment.");
   }
-  const q = query.toLowerCase().trim();
   const seen = new Set(); const out = [];
   for (const f of [...usda, ...fatsecret, ...off]) {
     const k = (f.name + "|" + (f.brand || "")).toLowerCase();
@@ -6845,7 +6855,13 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
                         border:"1px solid " + (picked && picked.name === f.name ? "var(--accent)" : "var(--border)"),
                         background: picked && picked.name === f.name ? "rgba(8,220,224,.08)" : "var(--s2)", color:"var(--text)" }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:"8px" }}>
-                        <span style={{ fontSize:".82rem", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0 }}>{f.name}</span>
+                        <span style={{ fontSize:".82rem", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0 }}>
+                          {f.name}
+                          {f.source === "fatsecret" && (
+                            <span style={{ marginLeft:"6px", fontSize:".58rem", fontWeight:700, color:"var(--accent)",
+                              border:"1px solid var(--accent)", borderRadius:"4px", padding:"1px 5px", verticalAlign:"middle", whiteSpace:"nowrap" }}>FatSecret</span>
+                          )}
+                        </span>
                         <span style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:".84rem", color:"var(--accent)", whiteSpace:"nowrap" }}>
                           {f.kcal}<span style={{ fontSize:".6rem", color:"var(--muted)", fontWeight:600 }}> cal</span>
                         </span>
