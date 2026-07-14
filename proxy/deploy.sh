@@ -19,25 +19,32 @@ REGION=us-central1
 ZONE=us-central1-a
 NAME=fatsecret-proxy
 HERE="$(cd "$(dirname "$0")" && pwd)"
+export PATH="$HOME/.local/bin:$HOME/google-cloud-sdk/bin:$PATH"
 
-echo "==> 1/6  Google Cloud SDK"
-if ! command -v gcloud >/dev/null 2>&1; then
-  if [ -f "$HOME/google-cloud-sdk/bin/gcloud" ]; then
-    export PATH="$HOME/google-cloud-sdk/bin:$PATH"
-  else
-    echo "    installing into your home dir (no sudo)…"
-    curl -sSL https://sdk.cloud.google.com | bash -s -- --disable-prompts >/tmp/gcloud-install.log 2>&1
-    export PATH="$HOME/google-cloud-sdk/bin:$PATH"
-  fi
+echo "==> 1/6  Google Cloud SDK + a modern Python for it"
+# gcloud needs Python 3.10+. macOS ships 3.9, so use a no-sudo standalone Python
+# via uv (installs it if missing). CLOUDSDK_PYTHON tells gcloud which to use.
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh >/tmp/uv-install.log 2>&1
+  export PATH="$HOME/.local/bin:$PATH"
 fi
-gcloud --version | head -1
+uv python install 3.12 >/dev/null 2>&1 || true
+export CLOUDSDK_PYTHON="$(uv python find 3.12 2>/dev/null)"
+[ -x "$CLOUDSDK_PYTHON" ] || { echo "!! couldn't set up Python 3.12"; exit 1; }
 
-echo "==> 2/6  Sign in (approve in your browser if prompted)"
-if ! gcloud auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null | grep -q .; then
-  gcloud auth login
+GCLOUD="$HOME/google-cloud-sdk/bin/gcloud"
+if [ ! -x "$GCLOUD" ]; then
+  echo "    installing the SDK into your home dir (no sudo)…"
+  curl -sSL https://dl.google.com/dl/cloudsdk/channels/rapid/install_google_cloud_sdk.bash | bash >/tmp/gcloud-install.log 2>&1 || true
 fi
-gcloud config set project "$PROJECT" >/dev/null
-echo "    signed in as: $(gcloud auth list --filter=status:ACTIVE --format='value(account)')"
+"$GCLOUD" --version | head -1
+
+echo "==> 2/6  Sign in (a browser window will open — approve it)"
+if ! "$GCLOUD" auth list --filter=status:ACTIVE --format='value(account)' 2>/dev/null | grep -q .; then
+  "$GCLOUD" auth login
+fi
+"$GCLOUD" config set project "$PROJECT" >/dev/null
+echo "    signed in as: $("$GCLOUD" auth list --filter=status:ACTIVE --format='value(account)')"
 
 echo "==> 3/6  Pull FatSecret credentials from Firebase (nothing hardcoded)"
 CID=$(firebase functions:secrets:access FATSECRET_CLIENT_ID     --project "$PROJECT")
@@ -46,10 +53,10 @@ PSEC=$(firebase functions:secrets:access FATSECRET_PROXY_SECRET  --project "$PRO
 [ -n "$CID" ] && [ -n "$CSEC" ] && [ -n "$PSEC" ] || { echo "!! missing a secret — is the Firebase CLI signed in?"; exit 1; }
 
 echo "==> 4/6  Reserve a static IP + open port 8080"
-gcloud compute addresses create "$NAME-ip" --region="$REGION" 2>/dev/null \
+"$GCLOUD" compute addresses create "$NAME-ip" --region="$REGION" 2>/dev/null \
   && echo "    reserved" || echo "    (already reserved — reusing)"
-IP=$(gcloud compute addresses describe "$NAME-ip" --region="$REGION" --format='value(address)')
-gcloud compute firewall-rules create "$NAME-8080" \
+IP=$("$GCLOUD" compute addresses describe "$NAME-ip" --region="$REGION" --format='value(address)')
+"$GCLOUD" compute firewall-rules create "$NAME-8080" \
   --allow=tcp:8080 --target-tags="$NAME" --source-ranges=0.0.0.0/0 2>/dev/null \
   && echo "    firewall rule created" || echo "    (firewall rule already exists)"
 
@@ -61,6 +68,8 @@ STARTUP=$(cat <<STARTUP_EOF
 set -e
 apt-get update -y
 apt-get install -y nodejs
+# Debian may install the binary as 'nodejs' — ensure '/usr/bin/node' exists.
+command -v node >/dev/null 2>&1 || ln -sf "\$(command -v nodejs)" /usr/bin/node
 mkdir -p /opt/proxy
 echo "$SERVER_B64" | base64 -d > /opt/proxy/server.js
 cat > /opt/proxy/.env <<ENVEOF
@@ -86,10 +95,10 @@ STARTUP_EOF
 )
 
 echo "==> 6/6  Create the VM (always-free e2-micro)"
-if gcloud compute instances describe "$NAME" --zone="$ZONE" >/dev/null 2>&1; then
+if "$GCLOUD" compute instances describe "$NAME" --zone="$ZONE" >/dev/null 2>&1; then
   echo "    VM '$NAME' already exists — leaving it. (To recreate: delete it first, see README.)"
 else
-  gcloud compute instances create "$NAME" \
+  "$GCLOUD" compute instances create "$NAME" \
     --zone="$ZONE" --machine-type=e2-micro \
     --image-family=debian-12 --image-project=debian-cloud \
     --address="$NAME-ip" --tags="$NAME" \
