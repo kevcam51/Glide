@@ -6552,6 +6552,13 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const totF = list.reduce((s, m) => s + (m.fat || 0), 0);
   const hasMacros = totP > 0 || totC > 0 || totF > 0;
   const TYPES = ["Breakfast", "Lunch", "Dinner", "Snack"];
+  // Match a meal to a section case-insensitively — the AI's log_meal writes
+  // lowercase types ("breakfast") while the manual form writes "Breakfast". A meal
+  // that matches no known section (or has none) falls into "Other" so it's NEVER
+  // counted-but-invisible.
+  const TYPE_KEYS = TYPES.map((t) => t.toLowerCase());
+  const inSection = (m, t) => (m.type || "").toLowerCase() === t.toLowerCase();
+  const isOther = (m) => !TYPE_KEYS.includes((m.type || "").toLowerCase());
   // Compact protein/carbs/fat chips — colour-coded, shown when any are logged.
   const MacroSummary = ({ small }) => (
     <span style={{ display:"inline-flex", gap: small ? "8px" : "12px", flexWrap:"wrap",
@@ -7057,7 +7064,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
         <div style={{ marginTop:"8px" }}>
           <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
             {TYPES.map((t) => {
-              const n = list.filter((m) => m.type === t).length;
+              const n = list.filter((m) => inSection(m, t)).length;
               return (
                 <button key={t} onClick={() => { setOpen(true); openForm(t); }}
                   style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"7px 11px",
@@ -7075,7 +7082,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
       {open && (
       <div style={{ display:"flex", flexDirection:"column", gap:"10px", marginTop:"10px" }}>
         {TYPES.map((t) => {
-          const items = list.filter((m) => m.type === t);
+          const items = list.filter((m) => inSection(m, t));
           const subtotal = items.reduce((s, m) => s + (m.calories||0), 0);
           return (
             <div key={t}>
@@ -7101,9 +7108,9 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
             textTransform:"uppercase", letterSpacing:".5px", marginBottom:"4px" }}>
             Other / quick entries
           </div>
-          {list.filter((m) => !m.type).length > 0 && (
+          {list.filter(isOther).length > 0 && (
             <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>
-              {list.filter((m) => !m.type).map(mealRow)}
+              {list.filter(isOther).map(mealRow)}
             </div>
           )}
           {addingTo === "other" ? addForm() : (
