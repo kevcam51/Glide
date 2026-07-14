@@ -858,6 +858,37 @@ function buildTools(role, opts = {}) {
       },
     },
     {
+      name: "log_meals",
+      description:
+        "Log MULTIPLE foods/meals AT ONCE in ONE call — the PREFERRED way to log a list of foods (e.g. a whole breakfast of 8 items). Put EVERY item in the meals array; they all save together in one shot, no cards, no per-item taps. Use this instead of calling log_meal repeatedly. "
+        + (isTrainer ? "Pass clientId to log for a client; omit for yourself." : "Logs to YOUR own log."),
+      input_schema: {
+        type: "object",
+        properties: {
+          meals: {
+            type: "array",
+            description: "Every food/meal to log (each with its own estimate). All are saved together.",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string", description: "Short food/meal name" },
+                mealType: { type: "string", enum: ["breakfast", "lunch", "dinner", "snack"] },
+                calories: { type: "number" },
+                protein: { type: "number", description: "grams (0 if unknown)" },
+                carbs: { type: "number", description: "grams (0 if unknown)" },
+                fat: { type: "number", description: "grams (0 if unknown)" },
+                date: { type: "string", description: "YYYY-MM-DD; omit for today" },
+                time: { type: "string", description: "clock time eaten; omit for now" },
+              },
+              required: ["name", "mealType", "calories"],
+            },
+          },
+          ...clientIdProp, ...localPlanProp,
+        },
+        required: ["meals"],
+      },
+    },
+    {
       name: "remove_meal",
       description:
         "Remove a logged meal/food from the food log (undo a mis-logged item, or to CORRECT one: remove it then log_meal the fixed version). "
@@ -1841,6 +1872,51 @@ async function runTool(name, input, ctx) {
       logged: { date, mealType, ...meal },
       dayTotals: { calories: updated.calories, protein: updated.protein, carbs: updated.carbs, fat: updated.fat },
     };
+  }
+
+  if (name === "log_meals") {
+    const items = Array.isArray(input.meals) ? input.meals.slice(0, 30) : [];
+    if (!items.length) return { ok: false, error: "No meals to log." };
+    const re = /^\d{4}-\d{2}-\d{2}$/;
+    const { id: planId } = await activePlanData(db, uid, planOverride);
+    // Build meal objects and group by date (usually just today) so each day's log
+    // is one transactional write with all its meals.
+    const byDate = {};
+    for (const it of items) {
+      const date = re.test(it.date || "") ? it.date : ctx.today;
+      const mealType = ["breakfast", "lunch", "dinner", "snack"].includes(it.mealType) ? it.mealType : "";
+      const meal = { id: randId("m"), name: String(it.name || "").slice(0, 120), type: mealType,
+        calories: Math.max(0, Math.round(Number(it.calories) || 0)),
+        protein: Math.max(0, Math.round(Number(it.protein) || 0)),
+        carbs: Math.max(0, Math.round(Number(it.carbs) || 0)),
+        fat: Math.max(0, Math.round(Number(it.fat) || 0)),
+        time: normMealTime(it.time, ctx) };
+      (byDate[date] = byDate[date] || []).push(meal);
+    }
+    const logged = [];
+    for (const date of Object.keys(byDate)) {
+      const dayMeals = byDate[date];
+      const logKey = `caliq-log-${planId}-${date}`;
+      await kvTxnJSON(db, uid, logKey, (log0) => {
+        const log = log0 || {};
+        const add = dayMeals.reduce((a, m) => ({ c: a.c + m.calories, p: a.p + m.protein, cb: a.cb + m.carbs, f: a.f + m.fat }), { c: 0, p: 0, cb: 0, f: 0 });
+        return { ...log,
+          meals: [...(Array.isArray(log.meals) ? log.meals : []), ...dayMeals],
+          calories: (Number(log.calories) || 0) + add.c,
+          protein: (Number(log.protein) || 0) + add.p,
+          carbs: (Number(log.carbs) || 0) + add.cb,
+          fat: (Number(log.fat) || 0) + add.f };
+      });
+      dayMeals.forEach((m) => logged.push({ date, name: m.name, calories: m.calories, mealType: m.type }));
+      try {
+        const histKey = `caliq-history-${planId}`;
+        const ev = { id: randId("e"), uid: ctx.callerUid, role: ctx.role, name: ctx.callerName || "AI assistant",
+          action: `logged ${dayMeals.length} items via AI: ${dayMeals.map((m) => m.name).join(", ")}`.slice(0, 300), ts: Date.now() };
+        await kvTxnJSON(db, uid, histKey, (hist) => [ev, ...(Array.isArray(hist) ? hist : [])].slice(0, 250));
+      } catch (e) { /* best-effort */ }
+    }
+    if (planOverride) await touchLocalIndex(db, uid, planOverride);
+    return { ok: true, count: logged.length, logged };
   }
 
   if (name === "remove_meal") {
