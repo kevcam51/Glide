@@ -6432,19 +6432,31 @@ async function searchFatSecret(query) {
 // Open Food Facts; shorter names ("Egg") beat long branded ones ("Egg, chocolate…").
 function _foodScore(f, q) {
   const name = (f.name || "").toLowerCase();
+  const brand = (f.brand || "").toLowerCase();
+  const hay = (name + " " + brand).trim(); // match against the BRAND too
   const esc = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   let s = 0;
+  // Whole-query name match (strongest — a precise generic hit like "egg").
   if (name === q) s += 100;
   else if (name.startsWith(q)) s += 65;
   else if (new RegExp(`\\b${esc}\\b`).test(name)) s += 45;
   else if (name.includes(q)) s += 20;
+  // Per-word coverage over name + brand — lets a BRAND query ("ascent whey
+  // protein") reward a FatSecret item named "Native Fuel Whey Protein" whose
+  // brand is "Ascent", which a name-only match would miss entirely.
+  const words = q.split(/\s+/).filter((w) => w.length >= 2);
+  if (words.length) {
+    let hit = 0;
+    for (const w of words) { const we = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); if (new RegExp(`\\b${we}`).test(hay)) hit++; }
+    s += Math.round((hit / words.length) * 45);              // up to +45 for full word coverage
+    if (hit === words.length && words.length >= 2) s += 10;  // covering every word of a multi-word query
+  }
   const dt = f.dataType || "";
-  if (/Foundation|SR Legacy|Survey/i.test(dt)) s += 35;      // curated generic whole foods
-  else if (dt === "Branded") s += 5;
-  if (f.source === "fatsecret") s += 12;                     // curated library, better than raw branded/crowd
-  if (f.source === "off") s -= 6;                             // crowd-sourced, least reliable
-  if (f.brand) s -= 4;                                        // a plain generic beats a branded near-match
-  s -= Math.min(18, name.length / 6);                        // prefer concise / generic names
+  if (/Foundation|SR Legacy|Survey/i.test(dt)) s += 30;      // curated generic whole foods
+  else if (dt === "Branded") s += 4;
+  if (f.source === "fatsecret") s += 14;                     // curated branded/restaurant library
+  if (f.source === "off") s -= 6;                            // crowd-sourced, least reliable
+  s -= Math.min(14, name.length / 8);                        // slight nudge toward concise names
   return s;
 }
 async function searchFoods(query) {
