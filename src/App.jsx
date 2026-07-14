@@ -16075,6 +16075,7 @@ export default function App() {
       name: meal.name||"", type: meal.type||"", calories: Number(meal.calories)||0,
       protein: Number(meal.protein)||0, carbs: Number(meal.carbs)||0, fat: Number(meal.fat)||0,
       time: meal.time || hhmmLocal(),
+      ...(meal.brand ? { brand: meal.brand } : {}),
       ...(meal.grams != null ? { grams: Number(meal.grams), unit: meal.unit || "g" } : {}) };
     upsertRecentFood(m);
     const updated = {
@@ -16119,6 +16120,7 @@ export default function App() {
       name: fields.name || "", type: fields.type != null ? fields.type : old.type,
       calories: Number(fields.calories)||0, protein: Number(fields.protein)||0,
       carbs: Number(fields.carbs)||0, fat: Number(fields.fat)||0,
+      ...(fields.brand ? { brand: fields.brand } : {}), // a re-picked food's brand overrides
       ...(fields.grams != null ? { grams: Number(fields.grams), unit: fields.unit || "g" } : {}) };
     const newMeals = meals.slice(); newMeals[idx] = upd;
     upsertRecentFood(upd);
