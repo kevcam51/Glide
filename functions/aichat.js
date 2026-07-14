@@ -229,7 +229,7 @@ function trialExpiredFor(profile) {
 }
 const TRIAL_EXPIRED_MSG = "Your free trial has ended — upgrade to keep using Glidna AI. Your data and manual logging stay free.";
 
-async function setupChat(uid) {
+async function setupChat(uid, activeTarget) {
   const db = admin.firestore();
   const profile = (await db.doc(`users/${uid}`).get()).data() || {};
   const role = profile.role || "client";
@@ -254,6 +254,19 @@ async function setupChat(uid) {
   // identical across calls within a day, so repeat messages + tool rounds pay
   // ~10% for it instead of full price (Session 67). No effect on output quality.
   const system = [{ type: "text", text: buildSystemPrompt(role, isTrainer), cache_control: { type: "ephemeral" } }];
+  // Per-conversation "active subject" (S93): once the model resolves a client (or a
+  // trainer's local plan), the client app relays that id back each turn so we can
+  // remind the model to REUSE it instead of re-running list_clients/list_local_plans
+  // every message. Kept as a SEPARATE, uncached block so it never busts the cached
+  // prefix above. resolveTargetUid still validates the id on every tool call.
+  const at = activeTarget || {};
+  if (isTrainer && (at.clientId || at.localPlanId)) {
+    const which = at.clientId
+      ? `the CLIENT whose id is "${String(at.clientId).slice(0, 64)}" (pass it as clientId)`
+      : `YOUR OWN local plan/sim whose id is "${String(at.localPlanId).slice(0, 64)}" (pass it as localPlanId)`;
+    system.push({ type: "text", text:
+      `ACTIVE SUBJECT for THIS conversation: you are working with ${which}. Reuse this id directly for EVERY read, log, edit, and follow-up here — do NOT call list_clients or list_local_plans again to re-find them. Only look up a different subject if the user clearly names another person/plan or asks to switch; then that becomes the new active subject.` });
+  }
   return {
     role, isTrainer, budget, usageRef, used, system,
     trialExpired: trialExpiredFor(profile),
@@ -277,16 +290,20 @@ async function runToolRound(toolUses, toolCtx) {
   let wrote = false;
   let proposal = null; // a propose_meal call → relay the meal so the client shows a card
   let workoutProposal = null; // a propose_workout call → relay the program for a card
+  let activeTarget = null; // last client/plan the model actually addressed → remember it
   for (const tu of toolUses) {
     let out;
-    try { out = await runTool(tu.name, tu.input || {}, toolCtx); }
+    const inp = tu.input || {};
+    if (inp.clientId) activeTarget = { clientId: String(inp.clientId) };
+    else if (inp.localPlanId) activeTarget = { localPlanId: String(inp.localPlanId) };
+    try { out = await runTool(tu.name, inp, toolCtx); }
     catch (e) { console.error("aiChat tool error:", tu.name, e && e.message); out = { error: "That action failed." }; }
     if (["log_meal", "log_workout", "log_weigh_in", "log_check_in", "log_measurements", "log_water", "set_targets", "set_workout_schedule", "set_personal_info", "create_plan", "switch_plan", "rename_plan", "set_notification_prefs", "add_custom_exercise"].includes(tu.name) && out && out.ok) wrote = true;
     if (tu.name === "propose_meal" && out && out.meal) proposal = out.meal;
     if (tu.name === "propose_workout" && out && out.workout) workoutProposal = out.workout;
     results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(out).slice(0, 60000) });
   }
-  return { results, wrote, proposal, workoutProposal };
+  return { results, wrote, proposal, workoutProposal, activeTarget };
 }
 
 exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], region: "us-central1", maxInstances: 10 }, async (request) => {
@@ -298,7 +315,8 @@ exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], region: "us-central1", m
     throw new HttpsError("invalid-argument", "Send at least one user message.");
   }
 
-  const { budget, usageRef, used, system, tools, toolCtx, trialExpired } = await setupChat(uid);
+  const reqTarget = (request.data && request.data.activeTarget) || null;
+  const { budget, usageRef, used, system, tools, toolCtx, trialExpired } = await setupChat(uid, reqTarget);
   if (trialExpired) {
     throw new HttpsError("permission-denied", TRIAL_EXPIRED_MSG, { reason: "trial-expired" });
   }
@@ -313,6 +331,7 @@ exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], region: "us-central1", m
   let wrote = false; // a plan-changing write happened this turn → client should refresh
   let proposal = null; // a meal proposal to show as an Accept/Edit card
   let workoutProposal = null; // a workout-program proposal to show as an Accept card
+  let activeTarget = reqTarget; // stays sticky across turns unless the model addresses a new subject
   let resp;
   try {
     resp = await client.messages.create({ model: MODEL, max_tokens: 1024, system, tools, messages: convo });
@@ -325,6 +344,7 @@ exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], region: "us-central1", m
       if (r.wrote) wrote = true;
       if (r.proposal) proposal = r.proposal;
       if (r.workoutProposal) workoutProposal = r.workoutProposal;
+      if (r.activeTarget) activeTarget = r.activeTarget;
       convo.push({ role: "assistant", content: resp.content });
       convo.push({ role: "user", content: r.results });
       resp = await client.messages.create({ model: MODEL, max_tokens: 1024, system, tools, messages: convo });
@@ -355,6 +375,7 @@ exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], region: "us-central1", m
     wrote,
     proposal,
     workoutProposal,
+    activeTarget,
     usage: { used: totalUsed, budget, warn: totalUsed >= budget * 0.8, breakdown: agg },
   };
 });
@@ -433,8 +454,9 @@ exports.aiChatStream = onRequest(
     // A transient Firestore failure here must surface as a clean JSON 500 (the
     // frontend then falls back to the callable) — unwrapped, it was an
     // unhandled rejection with no response at all.
+    const reqTarget = (req.body && req.body.activeTarget) || null;
     let setup;
-    try { setup = await setupChat(uid); } catch (e) {
+    try { setup = await setupChat(uid, reqTarget); } catch (e) {
       console.error("aiChatStream setup error:", e && e.message);
       res.status(500).json({ error: "setup-failed" });
       return;
@@ -465,6 +487,7 @@ exports.aiChatStream = onRequest(
     const agg = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
     let wrote = false;
     let failed = false;
+    let activeTarget = reqTarget; // sticky across turns unless the model addresses a new subject
     try {
       let rounds = 0;
       // Stream each model turn; run tools between turns until it stops calling them.
@@ -478,6 +501,7 @@ exports.aiChatStream = onRequest(
           const toolUses = (msg.content || []).filter((b) => b.type === "tool_use");
           const r = await runToolRound(toolUses, toolCtx);
           if (r.wrote) wrote = true;
+          if (r.activeTarget) activeTarget = r.activeTarget;
           if (r.proposal) sse("proposal", r.proposal); // client shows an Accept/Edit card
           if (r.workoutProposal) sse("workoutProposal", r.workoutProposal); // program Accept card
           convo.push({ role: "assistant", content: msg.content });
@@ -506,7 +530,7 @@ exports.aiChatStream = onRequest(
     if (failed) { res.end(); return; }
     const spent = agg.input + agg.output + agg.cacheWrite;
     const totalUsed = used + spent;
-    sse("done", { wrote, usage: { used: totalUsed, budget, warn: totalUsed >= budget * 0.8, breakdown: agg } });
+    sse("done", { wrote, activeTarget, usage: { used: totalUsed, budget, warn: totalUsed >= budget * 0.8, breakdown: agg } });
     res.end();
   }
 );

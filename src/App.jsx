@@ -11614,14 +11614,14 @@ const AI_STREAM_URL = `https://us-central1-${import.meta.env.VITE_FIREBASE_PROJE
 // Stream the AI reply. Calls onDelta(text) as chunks arrive and onDone({wrote,
 // usage}) at the end. Throws { code, message } on failure so send() can fall
 // back to the non-streaming callable.
-async function streamAiChat(apiMsgs, { onDelta, onDone, onProposal, onWorkoutProposal }) {
+async function streamAiChat(apiMsgs, { onDelta, onDone, onProposal, onWorkoutProposal }, activeTarget) {
   const user = auth.currentUser;
   if (!user) throw { code: "unauthenticated" };
   const token = await user.getIdToken();
   const resp = await fetch(AI_STREAM_URL, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ messages: apiMsgs }),
+    body: JSON.stringify({ messages: apiMsgs, activeTarget: activeTarget || null }),
   });
   if (!resp.ok || !resp.body) throw { code: "http", status: resp.status };
   const reader = resp.body.getReader();
@@ -11749,6 +11749,10 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const [warn, setWarn] = useState(false); // ≥80% of daily budget used
   const [proposal, setProposal] = useState(null); // pending meal card {…, status}
   const [editDraft, setEditDraft] = useState(null); // edit-mode fields
+  // Per-conversation "active subject" (S93): {clientId} | {localPlanId} | null.
+  // Once the AI resolves a client/plan, we relay its id back each turn so it reuses
+  // it instead of re-running list_clients every message. Reset when the chat changes.
+  const activeTargetRef = useRef(null);
   const [workout, setWorkout] = useState(null); // pending workout-program card {…, status}
   const [recording, setRecording] = useState(false);     // mic actively recording
   const [recSecs, setRecSecs] = useState(0);             // seconds recorded (60s cap countdown)
@@ -11865,7 +11869,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       });
     } catch { /* best-effort */ }
   }, [busy, messages, activeChatId]);
-  const resetThreadUi = () => { setProposal(null); setWorkout(null); setEditDraft(null); setError(""); setBoost(null); };
+  const resetThreadUi = () => { setProposal(null); setWorkout(null); setEditDraft(null); setError(""); setBoost(null); activeTargetRef.current = null; };
   const newChat = () => {
     if (busy) return;
     const id = `c${Date.now()}`;
@@ -12159,7 +12163,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
         onProposal: (meal) => { gotEvent = true; setProposal({ ...meal, status: "pending" }); },
         onWorkoutProposal: (w) => { gotEvent = true; setWorkout({ ...w, status: "pending" }); },
         onDone: (p) => { done = p; },
-      });
+      }, activeTargetRef.current);
       // Let the typewriter finish revealing — but NEVER block on a stalled rAF.
       // requestAnimationFrame pauses when the tab is backgrounded (or headless),
       // so race a timeout, then force-stop so a late frame can't revert the text.
@@ -12167,6 +12171,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       smoother.stop();
       setMessages([...next, { role: "assistant", content: streamed || "(no response)" }]);
       if (done && done.usage && done.usage.warn) setWarn(true);
+      if (done && done.activeTarget) activeTargetRef.current = done.activeTarget;
       if (done && done.wrote && typeof onDataChanged === "function") onDataChanged();
     } catch (streamErr) {
       smoother.stop(); // cancel the RAF loop; the branches below set the final text
@@ -12185,9 +12190,10 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       } else {
         // Streaming unavailable (network/CORS/server) → non-streaming callable.
         try {
-          const res = await callAiChat({ messages: apiMsgs });
+          const res = await callAiChat({ messages: apiMsgs, activeTarget: activeTargetRef.current });
           const reply = (res.data && res.data.reply) || "";
           setMessages([...next, { role: "assistant", content: reply || "(no response)" }]);
+          if (res.data && res.data.activeTarget) activeTargetRef.current = res.data.activeTarget;
           if (res.data && res.data.usage && res.data.usage.warn) setWarn(true);
           if (res.data && res.data.proposal) setProposal({ ...res.data.proposal, status: "pending" });
           if (res.data && res.data.workoutProposal) setWorkout({ ...res.data.workoutProposal, status: "pending" });
