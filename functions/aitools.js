@@ -858,6 +858,22 @@ function buildTools(role, opts = {}) {
       },
     },
     {
+      name: "remove_meal",
+      description:
+        "Remove a logged meal/food from the food log (undo a mis-logged item, or to CORRECT one: remove it then log_meal the fixed version). "
+        + "Matches by name (most recent match on that date) and subtracts its calories/macros from the day's totals. "
+        + (isTrainer ? "Pass clientId to remove from a client's log; omit for yourself." : "Removes from YOUR own log."),
+      input_schema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "The logged food/meal name to remove (matches case-insensitively; the most recent match on the date is removed)" },
+          date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
+          ...clientIdProp, ...localPlanProp,
+        },
+        required: ["name"],
+      },
+    },
+    {
       name: "log_workout",
       description:
         "Mark a day as a completed workout day (feeds the streak and calendar). Add a short note if what they did is mentioned. "
@@ -1825,6 +1841,45 @@ async function runTool(name, input, ctx) {
       logged: { date, mealType, ...meal },
       dayTotals: { calories: updated.calories, protein: updated.protein, carbs: updated.carbs, fat: updated.fat },
     };
+  }
+
+  if (name === "remove_meal") {
+    const re = /^\d{4}-\d{2}-\d{2}$/;
+    const date = re.test(input.date || "") ? input.date : ctx.today;
+    const q = String(input.name || "").trim().toLowerCase();
+    if (!q) return { ok: false, error: "Tell me which food to remove." };
+    const { id: planId } = await activePlanData(db, uid, planOverride);
+    const logKey = `caliq-log-${planId}-${date}`;
+    let removed = null;
+    const updated = await kvTxnJSON(db, uid, logKey, (log0) => {
+      const log = log0 || {};
+      const meals = Array.isArray(log.meals) ? log.meals.slice() : [];
+      // Remove the MOST RECENT meal whose name matches (case-insensitive contains).
+      let idx = -1;
+      for (let i = meals.length - 1; i >= 0; i--) {
+        if ((meals[i].name || "").toLowerCase().includes(q)) { idx = i; break; }
+      }
+      if (idx === -1) return log; // no match → leave unchanged
+      removed = meals[idx];
+      meals.splice(idx, 1);
+      return {
+        ...log, meals,
+        calories: Math.max(0, (Number(log.calories) || 0) - (removed.calories || 0)),
+        protein: Math.max(0, (Number(log.protein) || 0) - (removed.protein || 0)),
+        carbs: Math.max(0, (Number(log.carbs) || 0) - (removed.carbs || 0)),
+        fat: Math.max(0, (Number(log.fat) || 0) - (removed.fat || 0)),
+      };
+    });
+    if (!removed) return { ok: false, error: `No logged food matching "${input.name}" found on ${date}.` };
+    try {
+      const histKey = `caliq-history-${planId}`;
+      const ev = { id: randId("e"), uid: ctx.callerUid, role: ctx.role, name: ctx.callerName || "AI assistant",
+        action: `removed via AI: ${removed.name} (${removed.calories || 0} cal)`, ts: Date.now() };
+      await kvTxnJSON(db, uid, histKey, (hist) => [ev, ...(Array.isArray(hist) ? hist : [])].slice(0, 250));
+    } catch (e) { /* best-effort */ }
+    if (planOverride) await touchLocalIndex(db, uid, planOverride);
+    return { ok: true, removed: { name: removed.name, calories: removed.calories || 0 }, date,
+      dayTotals: { calories: updated.calories, protein: updated.protein, carbs: updated.carbs, fat: updated.fat } };
   }
 
   if (name === "log_workout") {
