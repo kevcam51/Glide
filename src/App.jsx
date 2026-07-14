@@ -6610,16 +6610,25 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
     finally { setSearching(false); }
   };
   // Fill the form from a per-100g food scaled to a serving size (grams).
-  const applyServing = (food, g) => {
-    const factor = (parseFloat(g) || 0) / 100;
+  const applyServing = (food, amt) => {
+    // Per-serving foods (FatSecret "1 scoop"/"1 container") scale by NUMBER OF
+    // servings; per-100g foods (USDA/OFF) scale by grams/100.
+    const n = parseFloat(amt) || 0;
+    const factor = food.per === "serving" ? n : n / 100;
     setCals(String(Math.round(food.kcal * factor) || ""));
     setProtein(String(Math.round(food.p * factor) || ""));
     setCarbs(String(Math.round(food.c * factor) || ""));
     setFat(String(Math.round(food.f * factor) || ""));
   };
-  // Pick a food (search result or scanned product): remember its per-100g/ml
-  // macros; default to the product's single serving size when known, else 100.
+  // Pick a food (search result or scanned product): remember its per-100g/ml (or
+  // per-serving) macros; default to 1 serving, or the product's serving size / 100.
   const pickFood = (food) => {
+    if (food.per === "serving") {
+      setPicked(food); setUnit("serving"); setServingText(food.servingLabel || ""); setGrams("1"); setName(food.name);
+      applyServing(food, "1"); setShowMacros(true);
+      setServingSel({ grams: 1, unit: "serving" });
+      return;
+    }
     const u = food.unit === "ml" ? "ml" : "g";
     const start = food.serving && food.serving > 0 ? String(food.serving) : "100";
     setPicked(food); setUnit(u); setServingText(food.servingText || ""); setGrams(start); setName(food.name);
@@ -6908,13 +6917,23 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
                         <span style={{ color:"var(--yellow)", fontWeight:700 }}>Carbs {f.c}g</span>
                         <span style={{ color:"var(--muted)" }}>{" · "}</span>
                         <span style={{ color:"var(--orange)", fontWeight:700 }}>Fat {f.f}g</span>
-                        <span style={{ color:"var(--muted)" }}>{" · per 100g"}{f.brand ? ` · ${f.brand}` : ""}</span>
+                        <span style={{ color:"var(--muted)" }}>{f.per === "serving" ? ` · per ${f.servingLabel || "serving"}` : " · per 100g"}{f.brand ? ` · ${f.brand}` : ""}</span>
                       </div>
                     </button>
                   ))}
                 </div>
               )}
-              {picked && (
+              {picked && picked.per === "serving" ? (
+                <div style={{ display:"flex", flexDirection:"column", gap:"4px", fontSize:".76rem", color:"var(--muted)" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+                    <span>Servings:</span>
+                    <input style={{ ...inp, width:"72px", flex:"none", padding:"6px 8px" }} type="number" inputMode="decimal"
+                      value={grams} onChange={(e) => setServing(e.target.value)} />
+                    <span>→ fills below</span>
+                  </div>
+                  <span style={{ color:"var(--accent)" }}>1 serving = {picked.servingLabel || "serving"} ({picked.kcal} cal)</span>
+                </div>
+              ) : picked && (
                 <div style={{ display:"flex", flexDirection:"column", gap:"4px", fontSize:".76rem", color:"var(--muted)" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
                     <span>Serving:</span>

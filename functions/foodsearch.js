@@ -39,12 +39,19 @@ function parsePer100(desc) {
   if (!m) return null;
   const serving = m[1].trim();
   const kcal = parseFloat(m[2]), f = parseFloat(m[3]), c = parseFloat(m[4]), p = parseFloat(m[5]);
+  // Gram-based serving → normalize to per-100g (like USDA/OFF, so the grams picker
+  // scales it). Non-gram serving ("1 scoop", "1 container") → keep the macros AS the
+  // serving and tell the app it's per-serving so it offers a servings picker instead
+  // of grams. (Dropping these was silently hiding most branded/supplement results.)
   let grams = null;
   if (/^100\s*g$/i.test(serving)) grams = 100;
   else { const gm = serving.match(/^([\d.]+)\s*g$/i); if (gm) grams = parseFloat(gm[1]); }
-  if (!(grams > 0)) return null;
-  const k = 100 / grams;
-  return { kcal: Math.round(kcal * k), p: Math.round(p * k), c: Math.round(c * k), f: Math.round(f * k) };
+  if (grams > 0) {
+    const k = 100 / grams;
+    return { per: "100g", kcal: Math.round(kcal * k), p: Math.round(p * k), c: Math.round(c * k), f: Math.round(f * k) };
+  }
+  return { per: "serving", servingLabel: serving.slice(0, 40),
+    kcal: Math.round(kcal), p: Math.round(p), c: Math.round(c), f: Math.round(f) };
 }
 
 exports.foodSearch = onCall(
@@ -79,7 +86,8 @@ exports.foodSearch = onCall(
       const macros = parsePer100(f.food_description);
       if (!macros || !(macros.kcal > 0)) continue;
       out.push({ name: tidy(f.food_name), brand: f.brand_name ? tidy(f.brand_name) : "",
-        kcal: macros.kcal, p: macros.p, c: macros.c, f: macros.f, source: "fatsecret" });
+        kcal: macros.kcal, p: macros.p, c: macros.c, f: macros.f, source: "fatsecret",
+        per: macros.per, servingLabel: macros.servingLabel || "" });
     }
     return { foods: out };
   }
