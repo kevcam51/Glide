@@ -24,6 +24,9 @@ const MODEL = "claude-sonnet-4-6";
 // clientMax/trainerMax are the paid "Max" tiers (S89c): PUBLISHED high
 // allowances (~100 AI conversations/day) — honest fair-use ceilings, never
 // marketed as "unlimited" (Kevin's call; see docs/PRICING.md).
+// Admin UID (matches functions/index.js + firestore.rules) — gets an unlimited AI
+// budget so Kevin can test freely without running out of tokens.
+const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
 const BUDGETS = { trial: 50000, client: 25000, assisted: 40000, trainer: 100000,
   // trainerTrial (S92): a trainer works with clients from day one, so their trial
   // usage is heavy immediately (~180k/day for an active 20–30-client roster). Give
@@ -242,7 +245,10 @@ async function setupChat(uid, activeTarget) {
   const used = usageDoc.tokens || 0;
   // S90: an approved same-day boost (requestBudgetBoost) raises the cap. The
   // boost lives on the DAY's usage doc, so it expires automatically at reset.
-  const budget = (BUDGETS[tier] || BUDGETS.client) + (usageDoc.boost || 0);
+  // Admin (Kevin) gets an effectively-unlimited budget so testing never hits a wall.
+  const budget = ADMIN_UIDS.includes(uid)
+    ? 100000000
+    : (BUDGETS[tier] || BUDGETS.client) + (usageDoc.boost || 0);
   const callerName = profile.displayName
     || [profile.firstName, profile.lastName].filter(Boolean).join(" ")
     || profile.email || (isTrainer ? "Coach" : "Client");

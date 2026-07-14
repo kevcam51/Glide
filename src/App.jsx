@@ -6385,25 +6385,36 @@ async function searchUSDA(query) {
       if (z.nutrientName === "Energy" && z.unitName && z.unitName !== "KCAL") return; // skip kJ
       n[z.nutrientName] = z.value;
     });
+    // Realistic serving: branded USDA rows carry the label serving (servingSize +
+    // unit, plus a household text like "1 cup"). Default the picker to that instead
+    // of a flat 100 g so it matches the nutrition-facts panel.
+    const su = String(x.servingSizeUnit || "").toLowerCase();
+    const unit = /ml/.test(su) ? "ml" : "g";
+    const serving = Number(x.servingSize) > 0 ? Number(x.servingSize) : null;
+    const servingText = (x.householdServingFullText || "").trim() || (serving ? `${serving}${unit}` : "");
     return { name: _tidyFood(x.description), brand: x.brandOwner || x.brandName || "",
       kcal: Math.round(n["Energy"] || 0), p: Math.round(n["Protein"] || 0),
       c: Math.round(n["Carbohydrate, by difference"] || 0), f: Math.round(n["Total lipid (fat)"] || 0),
-      source: "usda", dataType: x.dataType || "" };
+      source: "usda", dataType: x.dataType || "", unit, serving, servingText };
   }).filter((f) => f.kcal > 0);
 }
 // Open Food Facts — free, no key, strong on BRANDED / packaged / international
 // foods + barcodes. CORS-enabled. Complements USDA. Per-100g nutriments.
 async function searchOFF(query) {
   const url = "https://world.openfoodfacts.org/cgi/search.pl?search_simple=1&action=process&json=1&page_size=8" +
-    `&fields=product_name,brands,nutriments&search_terms=${encodeURIComponent(query)}`;
+    `&fields=product_name,brands,nutriments,serving_size,serving_quantity&search_terms=${encodeURIComponent(query)}`;
   const r = await fetch(url);
   if (!r.ok) throw new Error("fail");
   const j = await r.json();
   return (j.products || []).map((p) => {
     const n = p.nutriments || {};
+    // Realistic serving from the product's own label (serving_quantity in grams,
+    // serving_size the human text like "30 g") → default the picker to that.
+    const serving = Number(p.serving_quantity) > 0 ? Number(p.serving_quantity) : null;
     return { name: _tidyFood(p.product_name), brand: (p.brands || "").split(",")[0].trim(),
       kcal: Math.round(n["energy-kcal_100g"] || 0), p: Math.round(n.proteins_100g || 0),
-      c: Math.round(n.carbohydrates_100g || 0), f: Math.round(n.fat_100g || 0), source: "off" };
+      c: Math.round(n.carbohydrates_100g || 0), f: Math.round(n.fat_100g || 0), source: "off",
+      unit: "g", serving, servingText: (p.serving_size || "").trim() };
   }).filter((f) => f.name && f.name !== "Food" && f.kcal > 0);
 }
 // Combined food search: query USDA + Open Food Facts in parallel and interleave
@@ -6502,6 +6513,7 @@ function BrandLogo() {
 
 function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const [name, setName] = useState("");
+  const [brand, setBrand] = useState(""); // brand of a picked food (e.g. "Kirkland Signature") — shown under the name
   const [cals, setCals] = useState("");
   const [showMacros, setShowMacros] = useState(false);
   const [protein, setProtein] = useState("");
@@ -6582,7 +6594,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   );
 
   const resetSearch = () => { setSearchOpen(false); setSearchQ(""); setResults([]); setSearching(false); setSearchErr(""); setPicked(null); setGrams("100"); setUnit("g"); setServingText(""); setServingSel(null); };
-  const resetFields = () => { setName(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); resetSearch(); setAiBusy(false); setAiNote(""); setAiErr(""); setAiBase(null); setAiQty(1); };
+  const resetFields = () => { setName(""); setBrand(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); resetSearch(); setAiBusy(false); setAiNote(""); setAiErr(""); setAiBase(null); setAiQty(1); };
   // AI estimate: uses whatever the user typed (food name field, falling back
   // to the search box), fills the form, and reports the serving it assumed.
   // Budget + trial-expiry are enforced server-side (estimateFood callable).
@@ -6635,6 +6647,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   // Pick a food (search result or scanned product): remember its per-100g/ml (or
   // per-serving) macros; default to 1 serving, or the product's serving size / 100.
   const pickFood = (food) => {
+    setBrand(food.brand || "");
     if (food.per === "serving") {
       setPicked(food); setUnit("serving"); setServingText(food.servingLabel || ""); setGrams("1"); setName(food.name);
       applyServing(food, "1"); setShowMacros(true);
@@ -6655,6 +6668,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   // live rescale — change the amount by re-searching if needed.)
   const applySaved = (f) => {
     setName(f.name || "");
+    setBrand(f.brand || "");
     setCals(f.calories != null ? String(f.calories) : "");
     setProtein(f.protein ? String(f.protein) : "");
     setCarbs(f.carbs ? String(f.carbs) : "");
@@ -6747,7 +6761,9 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const closeForm = () => { resetFields(); setEditingId(null); setAddingTo(null); };
   // Open the form pre-filled to fix an existing entry.
   const openEdit = (m) => {
+    resetSearch(); // clear any stale picked-food / search state; edit starts with search collapsed
     setName(m.name || "");
+    setBrand(m.brand || "");
     setCals(String(m.calories || ""));
     setProtein(m.protein ? String(m.protein) : "");
     setCarbs(m.carbs ? String(m.carbs) : "");
@@ -6761,6 +6777,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
     if (!c || c <= 0) return; // calories are the one required field
     const payload = { name: name.trim(), type: addingTo === "other" ? "" : addingTo, calories: c,
       protein: parseInt(protein) || 0, carbs: parseInt(carbs) || 0, fat: parseInt(fat) || 0 };
+    if (brand.trim()) payload.brand = brand.trim();
     if (servingSel && servingSel.grams > 0) { payload.grams = servingSel.grams; payload.unit = servingSel.unit || "g"; }
     if (editingId) onEditMeal(editingId, payload);
     else onAddMeal(payload);
@@ -6784,6 +6801,8 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
             {m.name || <span style={{ color:"var(--muted)", fontWeight:400 }}>Quick entry</span>}
             {m.time ? <span style={{ color:"var(--muted)", fontSize:".72rem", fontWeight:400 }}>{" · "}{fmtClock(m.time)}</span> : null}
           </div>
+          {/* Brand (e.g. Kirkland Signature) under the food name */}
+          {m.brand ? <div style={{ fontSize:".7rem", color:"var(--muted)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{m.brand}</div> : null}
           {/* Macros spelled out + labeled, right under the name */}
           {hasMacros && (
             <div style={{ fontSize:".72rem", marginTop:2 }}>
@@ -6812,6 +6831,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   // One-tap re-add of a recently logged food into the meal type being added.
   const quickAddRecent = (f) => {
     onAddMeal({ name: f.name, type: addingTo === "other" ? "" : addingTo,
+      ...(f.brand ? { brand: f.brand } : {}),
       calories: f.calories || 0, protein: f.protein || 0, carbs: f.carbs || 0, fat: f.fat || 0,
       ...(f.grams ? { grams: f.grams, unit: f.unit || "g" } : {}) });
     closeForm();
@@ -6838,8 +6858,9 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
           </div>
         </div>
       )}
-      {/* Food-database search — find a food and auto-fill calories + macros (only when adding new) */}
-      {!editingId && (
+      {/* Food-database search — find a food and auto-fill calories + macros. Also
+          available when EDITING, so you can replace a logged food from the library. */}
+      {(
         <div>
           <div style={{ display:"flex", alignItems:"center", gap:"16px", flexWrap:"wrap" }}>
             <button onClick={() => { const n = !searchOpen; setSearchOpen(n); if (!n) resetSearch(); }}
@@ -16039,7 +16060,7 @@ export default function App() {
     // past entry (MyFitnessPal-style "log again"). Deduped by name (latest serving
     // + macros win), newest first, and kept as a LARGE history so foods saved long
     // ago still autocomplete (~400 ≈ 50KB JSON, well under the 1MB doc limit).
-    const entry = { name, calories: m.calories||0, protein: m.protein||0, carbs: m.carbs||0, fat: m.fat||0,
+    const entry = { name, brand: m.brand || "", calories: m.calories||0, protein: m.protein||0, carbs: m.carbs||0, fat: m.fat||0,
       grams: m.grams != null ? Number(m.grams) : null, unit: m.unit || null, ts: Date.now() };
     const next = [entry, ...recentFoodsRef.current.filter(f => (f.name||"").toLowerCase() !== key)].slice(0, 400);
     recentFoodsRef.current = next;
