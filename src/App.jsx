@@ -6499,7 +6499,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   // "other", or null (none open).
   const [addingTo, setAddingTo] = useState(null);
   const [editingId, setEditingId] = useState(null); // set when editing an existing entry
-  const [open, setOpen] = useState(false); // the whole section is a collapsible dropdown
+  const [open, setOpen] = useState((meals || []).length > 0); // collapsible; starts open if the day already has meals
   // Food-database search (USDA) within the add-form.
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState("");
@@ -6519,11 +6519,33 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiNote, setAiNote] = useState("");
   const [aiErr, setAiErr] = useState("");
+  // After an AI estimate we keep the per-1-serving values so a servings stepper
+  // can rescale calories + macros without another AI call.
+  const [aiBase, setAiBase] = useState(null); // { calories, protein, carbs, fat, assumed }
+  const [aiQty, setAiQty] = useState(1);
+  const setAiServings = (q) => {
+    const n = Math.max(0.25, Math.round(q * 4) / 4); // quarter-serving steps, min 0.25
+    setAiQty(n);
+    if (aiBase) {
+      setCals(String(Math.round(aiBase.calories * n)));
+      setProtein(String(Math.round(aiBase.protein * n)));
+      setCarbs(String(Math.round(aiBase.carbs * n)));
+      setFat(String(Math.round(aiBase.fat * n)));
+    }
+  };
   const videoRef = useRef(null);              // <video> preview for live scanning
   const scanCtlRef = useRef(null);            // zxing scanner controls (to stop)
 
   const list = meals || [];
   const loggedTotal = list.reduce((s, m) => s + (m.calories || 0), 0);
+  // Auto-expand the section whenever a meal is added (manually, or by the AI /
+  // Ask Glidna) so the newly-logged food is visible instead of hidden behind the
+  // collapsed header — fixes "calories changed but I can't see the food."
+  const prevMealCount = useRef(list.length);
+  useEffect(() => {
+    if (list.length > prevMealCount.current) setOpen(true);
+    prevMealCount.current = list.length;
+  }, [list.length]);
   // Daily macro totals (each food can carry protein/carbs/fat grams).
   const totP = list.reduce((s, m) => s + (m.protein || 0), 0);
   const totC = list.reduce((s, m) => s + (m.carbs || 0), 0);
@@ -6541,7 +6563,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   );
 
   const resetSearch = () => { setSearchOpen(false); setSearchQ(""); setResults([]); setSearching(false); setSearchErr(""); setPicked(null); setGrams("100"); setUnit("g"); setServingText(""); setServingSel(null); };
-  const resetFields = () => { setName(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); resetSearch(); setAiBusy(false); setAiNote(""); setAiErr(""); };
+  const resetFields = () => { setName(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); resetSearch(); setAiBusy(false); setAiNote(""); setAiErr(""); setAiBase(null); setAiQty(1); };
   // AI estimate: uses whatever the user typed (food name field, falling back
   // to the search box), fills the form, and reports the serving it assumed.
   // Budget + trial-expiry are enforced server-side (estimateFood callable).
@@ -6559,7 +6581,10 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
       setCarbs(d.carbs != null ? String(d.carbs) : "");
       setFat(d.fat != null ? String(d.fat) : "");
       setShowMacros(true);
-      setAiNote(`AI estimate${d.assumed ? ` — assumed ${d.assumed}` : ""}. Tweak anything, then Add.`);
+      setAiBase({ calories: Number(d.calories) || 0, protein: Number(d.protein) || 0,
+        carbs: Number(d.carbs) || 0, fat: Number(d.fat) || 0, assumed: d.assumed || "" });
+      setAiQty(1);
+      setAiNote(`AI estimate${d.assumed ? ` for ${d.assumed}` : ""}. Set servings below, or tweak the numbers.`);
     } catch (e) {
       const code = (e && e.code) || "";
       if (code.includes("permission-denied")) setAiErr("Your free trial has ended — upgrade to keep AI estimates.");
@@ -6689,7 +6714,8 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
     };
   }, [scanOpen]);
   useBackClose(scanOpen, closeScan);   // phone Back closes the scanner camera
-  const openForm = (key) => { resetFields(); setEditingId(null); setAddingTo(key); };
+  // Search is the DEFAULT when adding food (the primary way to log) — open it up front.
+  const openForm = (key) => { resetFields(); setEditingId(null); setAddingTo(key); setSearchOpen(true); };
   const closeForm = () => { resetFields(); setEditingId(null); setAddingTo(null); };
   // Open the form pre-filled to fix an existing entry.
   const openEdit = (m) => {
@@ -6957,6 +6983,20 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
           <span>{aiNote}</span>
         </div>
       )}
+      {aiBase && (
+        <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap", padding:"6px 8px",
+          borderRadius:"8px", background:"rgba(8,220,224,.06)", border:"1px solid var(--border)" }}>
+          <span style={{ fontSize:".76rem", fontWeight:700, color:"var(--text)" }}>Servings{aiBase.assumed ? <span style={{ fontWeight:400, color:"var(--muted)" }}>{` (${aiBase.assumed} each)`}</span> : null}</span>
+          <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
+            <button onClick={() => setAiServings(aiQty - 0.5)} aria-label="Fewer servings"
+              style={{ width:"30px", height:"30px", borderRadius:"8px", border:"1px solid var(--border)", background:"var(--s2)", color:"var(--text)", fontSize:"1.1rem", fontWeight:700, cursor:"pointer", lineHeight:1 }}>−</button>
+            <span style={{ minWidth:"34px", textAlign:"center", fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"1rem", color:"var(--accent)" }}>{aiQty}</span>
+            <button onClick={() => setAiServings(aiQty + 0.5)} aria-label="More servings"
+              style={{ width:"30px", height:"30px", borderRadius:"8px", border:"1px solid var(--border)", background:"var(--s2)", color:"var(--text)", fontSize:"1.1rem", fontWeight:700, cursor:"pointer", lineHeight:1 }}>+</button>
+          </div>
+          <span style={{ fontSize:".72rem", color:"var(--muted)" }}>Tip: type the amount too — e.g. "2 scoops ascent protein"</span>
+        </div>
+      )}
       {aiErr && <div style={{ fontSize:".74rem", color:"var(--red)" }}>{aiErr}</div>}
       <button onClick={() => setShowMacros((s) => !s)}
         style={{ border:"none", background:"transparent", color:"var(--muted)", cursor:"pointer",
@@ -6965,12 +7005,13 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
       </button>
       {showMacros && (
         <div style={{ display:"flex", gap:"6px" }}>
-          <input style={{ ...inp, flex:1 }} type="number" inputMode="numeric" placeholder="Protein g"
-            value={protein} onChange={(e) => setProtein(e.target.value)} />
-          <input style={{ ...inp, flex:1 }} type="number" inputMode="numeric" placeholder="Carbs g"
-            value={carbs} onChange={(e) => setCarbs(e.target.value)} />
-          <input style={{ ...inp, flex:1 }} type="number" inputMode="numeric" placeholder="Fat g"
-            value={fat} onChange={(e) => setFat(e.target.value)} />
+          {[["Protein","var(--accent)",protein,setProtein],["Carbs","var(--yellow)",carbs,setCarbs],["Fat","var(--orange)",fat,setFat]].map(([lbl,color,val,setV])=>(
+            <div key={lbl} style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:".62rem", fontWeight:700, color, textTransform:"uppercase", letterSpacing:".5px", marginBottom:"3px" }}>{lbl} (g)</div>
+              <input style={{ ...inp, width:"100%", boxSizing:"border-box" }} type="number" inputMode="numeric" placeholder="0"
+                value={val} onChange={(e) => setV(e.target.value)} />
+            </div>
+          ))}
         </div>
       )}
       <div style={{ display:"flex", gap:"6px" }}>
@@ -7869,8 +7910,9 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
     ? Math.max(1200, trackerTdee - 500)
     : Math.max(1200, tdee - 500 + (isEatback(data) ? Math.round(todayCardio.burned + todayStrength.burned) : 0));
   const logged = dailyLog.calories || 0;
-  const remaining = Math.max(0, target - logged);
-  const pct = Math.min(100, Math.round((logged / target) * 100));
+  const remaining = target - logged;         // signed — negative once over target
+  const overCals = remaining < 0;
+  const pct = target > 0 ? Math.min(100, Math.round((logged / target) * 100)) : 0; // arc caps at full
   // Macro targets. Default (estimates): protein 1g/lb bodyweight, fat 28% of
   // calories, carbs fill the remaining calories. A coach or client can override
   // any/all of them per plan via data.macroTargets — those take precedence.
@@ -7890,7 +7932,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   // Ring SVG
   const ringR = 58, ringC = 2 * Math.PI * ringR;
   const ringOffset = ringC - (pct / 100) * ringC;
-  const ringColor = pct > 100 ? "var(--red)" : pct > 80 ? "var(--yellow)" : "var(--green)";
+  const ringColor = overCals ? "var(--red)" : pct > 80 ? "var(--yellow)" : "var(--green)";
 
   const hasGoal = goalWeight && Number(goalWeight) < Number(weightLbs);
   const toLose = hasGoal ? Number(weightLbs) - Number(goalWeight) : null;
@@ -7949,8 +7991,8 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
               strokeLinecap="round" style={{transition:"stroke-dashoffset .5s ease"}}/>
           </svg>
           <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-            <div style={{fontFamily:"'Sora',sans-serif",fontSize:"2.2rem",color:"var(--accent)",lineHeight:1}}>{remaining}</div>
-            <div style={{fontSize:".65rem",color:"var(--muted)",letterSpacing:".5px"}}>CAL REMAINING</div>
+            <div style={{fontFamily:"'Sora',sans-serif",fontSize:"2.2rem",color:overCals?"var(--red)":"var(--accent)",lineHeight:1}}>{remaining.toLocaleString()}</div>
+            <div style={{fontSize:".65rem",color:overCals?"var(--red)":"var(--muted)",letterSpacing:".5px"}}>{overCals?"CAL OVER":"CAL REMAINING"}</div>
           </div>
         </div>
       </div>
