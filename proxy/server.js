@@ -46,7 +46,13 @@ async function getToken() {
 
 async function searchFatSecret(q) {
   const token = await getToken();
-  const url = "https://platform.fatsecret.com/rest/server.api?method=foods.search&format=json&max_results=20" +
+  // foods.search.v3 returns each food with a full `servings.serving[]` array —
+  // real household servings ("1 cup", "1 breast") + micronutrients — instead of
+  // v1's flat "Per 100g" text summary. The Cloud Function (functions/foodsearch.js)
+  // parses this into a realistic default serving so the picker doesn't open at a
+  // flat 100 g. Falls back cleanly: if v3 ever errors, the function still handles
+  // the v1 shape. (Same base URL + basic scope as before.)
+  const url = "https://platform.fatsecret.com/rest/server.api?method=foods.search.v3&format=json&max_results=20" +
     `&search_expression=${encodeURIComponent(q)}`;
   const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!r.ok) throw new Error("fatsecret-search-" + r.status);
