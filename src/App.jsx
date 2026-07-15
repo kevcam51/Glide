@@ -6511,6 +6511,249 @@ function BrandLogo() {
   );
 }
 
+// ── Recent-food helpers (shared by MealLog + App) ───────────────────────────
+// Recent foods are remembered PER MEAL TYPE and PER FOOD IDENTITY so the "recent"
+// chips are relevant to what you're logging and never duplicate the same food at
+// different amounts (Kevin's S94 refinement).
+//
+// Canonical meal-type key: the manual form writes "Breakfast", the AI writes
+// lowercase "breakfast", quick entries have none — all normalize here. Anything
+// that isn't a known meal collapses to "other".
+const RECENT_MEAL_KEYS = ["breakfast", "lunch", "dinner", "snack"];
+const recentMealKey = (t) => {
+  const s = String(t || "").trim().toLowerCase();
+  return RECENT_MEAL_KEYS.includes(s) ? s : "other";
+};
+// Base food identity — strips a leading quantity ("3 eggs" → "eggs", "2 slices
+// whole wheat toast" → "whole wheat toast") and a trailing serving note in parens
+// ("Oatmeal (1 cup cooked)" → "Oatmeal"), so the same food logged at different
+// amounts collapses to ONE recent entry (the last amount wins) instead of piling
+// up "3 eggs" + "4 eggs". Descriptors that change the food (e.g. "scrambled") are
+// kept — only the amount is dropped.
+const baseFoodName = (name) => {
+  let s = String(name || "").trim();
+  if (!s) return s;
+  const noParen = s.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  if (noParen) s = noParen;
+  const NUM = "(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|half)";
+  const UNIT = "(?:slices?|cups?|oz|ounces?|g|grams?|kg|lbs?|tbsps?|tablespoons?|tsps?|teaspoons?|pieces?|scoops?|servings?|handfuls?|bowls?|glass(?:es)?|cans?|bottles?|packs?|bars?|sticks?|cloves?|strips?)";
+  const re = new RegExp("^(?:\\d+(?:[.,/]\\d+)?|" + NUM + ")\\s*(?:" + UNIT + "\\.?\\s+(?:of\\s+)?)?", "i");
+  const stripped = s.replace(re, "").trim();
+  if (stripped) s = stripped; // never strip down to empty
+  return s;
+};
+// Dedup key: base food name + meal type.
+const recentFoodKey = (name, type) => baseFoodName(name).toLowerCase() + "|" + recentMealKey(type);
+
+// ── Serving units for the food detail popup (S94) ───────────────────────────
+// Weight units convert EXACTLY. Volume units are generic approximations (a cup of
+// spinach ≠ a cup of rice — real per-food densities aren't in our food data), so
+// they're flagged `approx` and the popup always DEFAULTS to the food's exact
+// weight/serving unit (Kevin's call: offer the MyFitnessPal-style variety, but
+// lead with the number a trainer can trust).
+const FOOD_UNITS = [
+  { u: "g",    label: "g",     grams: 1,       approx: false },
+  { u: "oz",   label: "oz",    grams: 28.3495, approx: false },
+  { u: "lb",   label: "lb",    grams: 453.592, approx: false },
+  { u: "kg",   label: "kg",    grams: 1000,    approx: false },
+  { u: "ml",   label: "ml",    grams: 1,       approx: false },
+  { u: "cup",  label: "cup",   grams: 240,     approx: true  },
+  { u: "tbsp", label: "tbsp",  grams: 15,      approx: true  },
+  { u: "tsp",  label: "tsp",   grams: 5,       approx: true  },
+  { u: "floz", label: "fl oz", grams: 29.5735, approx: true  },
+];
+const FOOD_UNIT_MAP = Object.fromEntries(FOOD_UNITS.map((x) => [x.u, x]));
+// Amount in `unit` → grams (for weight-scalable foods). "serving" uses the food's
+// own serving weight. Never negative.
+const unitToGrams = (qty, unit, servingGrams) => {
+  const q = Math.max(0, parseFloat(qty) || 0);
+  if (unit === "serving") return q * (servingGrams || 0);
+  const def = FOOD_UNIT_MAP[unit];
+  return def ? q * def.grams : q; // unknown unit → treat the number as grams
+};
+
+// Normalize a picked search result / scanned product into the popup's basis.
+// per-100g/ml foods (USDA/OFF) scale by weight; per-serving foods (FatSecret)
+// scale by number of servings.
+const normalizePickedFood = (food) => {
+  if (food.per === "serving") {
+    return { name: food.name, brand: food.brand || "", mode: "serving",
+      per: { kcal: food.kcal || 0, p: food.p || 0, c: food.c || 0, f: food.f || 0 },
+      servingLabel: food.servingLabel || "serving", source: food.source || "" };
+  }
+  const baseUnit = food.unit === "ml" ? "ml" : "g";
+  return { name: food.name, brand: food.brand || "", mode: "weight",
+    per100: { kcal: food.kcal || 0, p: food.p || 0, c: food.c || 0, f: food.f || 0 },
+    baseUnit, servingGrams: (food.serving && food.serving > 0) ? food.serving : null,
+    servingText: food.servingText || "", source: food.source || "" };
+};
+// Re-derive a scalable basis from an already-logged meal so its serving can be
+// EDITED (not just its calories). Weight-unit meals rebuild a per-100 basis;
+// serving/manual meals rebuild a per-serving basis (so changing the amount
+// rescales calories + macros).
+const deriveBasisFromMeal = (m) => {
+  const cal = m.calories || 0, p = m.protein || 0, c = m.carbs || 0, f = m.fat || 0;
+  const amt = m.grams != null ? Number(m.grams) : null;
+  const unit = m.unit || null;
+  if (amt && amt > 0 && unit && unit !== "serving") {
+    const g = unitToGrams(amt, unit, null) || amt;
+    const s = g > 0 ? 100 / g : 0;
+    return { name: m.name || "", brand: m.brand || "", mode: "weight",
+      per100: { kcal: cal * s, p: p * s, c: c * s, f: f * s },
+      baseUnit: unit === "ml" ? "ml" : "g", servingGrams: null, servingText: "",
+      initialQty: amt, initialUnit: unit };
+  }
+  const qty = (amt && amt > 0 && unit === "serving") ? amt : 1;
+  return { name: m.name || "", brand: m.brand || "", mode: "serving",
+    per: { kcal: cal / qty, p: p / qty, c: c / qty, f: f / qty },
+    servingLabel: "serving", initialQty: qty };
+};
+
+// The food detail popup: pick a serving size (with MyFitnessPal-style unit
+// variety) and fine-tune calories/protein/carbs/fat, then Add or Save. Opened
+// when you tap a search result OR edit a logged food. Rendered through a portal
+// so it escapes the page-transition transform trap (S27/S30).
+function FoodServingModal({ food, editing, mealLabel, onConfirm, onClose }) {
+  const isServing = food.mode === "serving";
+  // Units offered in weight mode: exact weight first, then approx volume, plus
+  // the food's own serving when its weight is known.
+  const weightUnits = (() => {
+    const base = food.baseUnit === "ml" ? "ml" : "g";
+    const order = [base, ...["g", "oz", "lb", "kg", "cup", "tbsp", "tsp", "floz"].filter((u) => u !== base)];
+    const list = order.map((u) => FOOD_UNIT_MAP[u]).filter(Boolean);
+    return food.servingGrams ? [{ u: "serving", label: `serving${food.servingText ? ` (${food.servingText})` : ` (${Math.round(food.servingGrams)}g)`}`, grams: food.servingGrams, approx: false }, ...list] : list;
+  })();
+  // Default serving: honor an edited meal's own unit; else the food's serving if
+  // known; else the base weight unit at a sensible amount.
+  const [unit, setUnit] = useState(() => {
+    if (isServing) return "serving";
+    if (food.initialUnit) return food.initialUnit;
+    if (food.servingGrams) return "serving";
+    return food.baseUnit === "ml" ? "ml" : "g";
+  });
+  const [qty, setQty] = useState(() => {
+    if (food.initialQty != null) return String(food.initialQty);
+    if (isServing || food.servingGrams) return "1";
+    return "100"; // per-100 basis with no known serving → start at 100
+  });
+  // Compute calories + macros for the current qty/unit.
+  const computed = (() => {
+    const q = Math.max(0, parseFloat(qty) || 0);
+    if (isServing) {
+      return { calories: Math.round(food.per.kcal * q), protein: Math.round(food.per.p * q),
+        carbs: Math.round(food.per.c * q), fat: Math.round(food.per.f * q) };
+    }
+    const grams = unit === "serving" ? q * (food.servingGrams || 0) : unitToGrams(q, unit, null);
+    const factor = grams / 100;
+    return { calories: Math.round(food.per100.kcal * factor), protein: Math.round(food.per100.p * factor),
+      carbs: Math.round(food.per100.c * factor), fat: Math.round(food.per100.f * factor) };
+  })();
+  // Editable macro/cal values default to the computed ones; a manual edit sticks
+  // until the qty/unit changes (which recomputes). `override` holds manual edits.
+  const [override, setOverride] = useState(null); // {calories,protein,carbs,fat} or null
+  const vals = override || computed;
+  const changeServing = (nextQty, nextUnit) => {
+    setOverride(null); // recompute from the new serving
+    if (nextQty != null) setQty(String(nextQty).replace(/-/g, "")); // no negatives
+    if (nextUnit != null) setUnit(nextUnit);
+  };
+  const editField = (k, v) => setOverride({ ...vals, [k]: Math.max(0, parseInt(v) || 0) });
+  const approxUnit = !isServing && FOOD_UNIT_MAP[unit] && FOOD_UNIT_MAP[unit].approx;
+  const gramsNow = isServing ? null : (unit === "serving" ? (parseFloat(qty) || 0) * (food.servingGrams || 0) : unitToGrams(qty, unit, null));
+
+  const inp = { padding: "9px 11px", fontSize: ".9rem", borderRadius: "8px",
+    border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)", minWidth: 0 };
+
+  const save = () => {
+    if (!vals.calories || vals.calories <= 0) return;
+    const payload = { name: food.name || "", calories: vals.calories,
+      protein: vals.protein || 0, carbs: vals.carbs || 0, fat: vals.fat || 0,
+      grams: Math.max(0, parseFloat(qty) || 0), unit };
+    if (food.brand) payload.brand = food.brand;
+    onConfirm(payload);
+  };
+
+  return createPortal(
+    <div data-theme="pro" onClick={onClose}
+      style={{ position: "fixed", inset: 0, zIndex: 2200, background: "rgba(0,0,0,.7)",
+        display: "flex", alignItems: "flex-end", justifyContent: "center",
+        padding: "0", paddingTop: "env(safe-area-inset-top,0px)" }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ width: "min(520px, 100%)", maxHeight: "92vh", overflowY: "auto",
+          background: "var(--surface)", border: "1px solid var(--border)",
+          borderRadius: "16px 16px 0 0", padding: "18px",
+          paddingBottom: "calc(18px + env(safe-area-inset-bottom,0px))",
+          display: "flex", flexDirection: "column", gap: "14px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text)" }}>{food.name || "Food"}</div>
+            {food.brand ? <div style={{ fontSize: ".76rem", color: "var(--muted)" }}>{food.brand}</div> : null}
+            {mealLabel ? <div style={{ fontSize: ".72rem", color: "var(--accent)", fontWeight: 700, marginTop: "2px" }}>{mealLabel}</div> : null}
+          </div>
+          <button onClick={onClose} aria-label="Close"
+            style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: "1.2rem", lineHeight: 1, padding: "2px" }}>✕</button>
+        </div>
+
+        {/* Big calories readout */}
+        <div style={{ textAlign: "center", padding: "6px 0" }}>
+          <div style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: "2.4rem", color: "var(--accent)", lineHeight: 1 }}>{vals.calories || 0}</div>
+          <div style={{ fontSize: ".72rem", color: "var(--muted)", letterSpacing: ".5px", textTransform: "uppercase", fontWeight: 700 }}>calories</div>
+        </div>
+
+        {/* Serving size: quantity + unit */}
+        <div>
+          <div style={{ fontSize: ".68rem", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: "5px" }}>Serving size</div>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <input style={{ ...inp, flex: "1 1 90px" }} type="number" inputMode="decimal" min="0" step="0.25"
+              value={qty} onChange={(e) => changeServing(e.target.value, null)} />
+            {isServing ? (
+              <div style={{ ...inp, flex: "2 1 130px", display: "flex", alignItems: "center", color: "var(--muted)" }}>{food.servingLabel || "serving"}{parseFloat(qty) === 1 ? "" : "s"}</div>
+            ) : (
+              <select style={{ ...inp, flex: "2 1 130px", cursor: "pointer" }} value={unit} onChange={(e) => changeServing(null, e.target.value)}>
+                {weightUnits.map((x) => (
+                  <option key={x.u} value={x.u}>{x.label}{x.approx ? " (approx)" : ""}</option>
+                ))}
+              </select>
+            )}
+          </div>
+          <div style={{ fontSize: ".7rem", color: approxUnit ? "var(--orange)" : "var(--muted)", marginTop: "5px" }}>
+            {isServing
+              ? (food.servingLabel && food.servingLabel !== "serving" ? `1 serving = ${food.servingLabel}` : "Scales by number of servings.")
+              : approxUnit
+                ? `≈ ${Math.round(gramsNow)}g · volume units are approximate (weight is exact)`
+                : `= ${Math.round(gramsNow)}g`}
+          </div>
+        </div>
+
+        {/* Fine-tune macros */}
+        <div>
+          <div style={{ fontSize: ".68rem", fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: "5px" }}>
+            Calories &amp; macros {override ? <span style={{ color: "var(--accent)", fontWeight: 700 }}>· edited</span> : <span style={{ fontWeight: 400 }}>· tap to adjust</span>}
+          </div>
+          <div style={{ display: "flex", gap: "6px" }}>
+            {[["Calories", "var(--text)", "calories"], ["Protein", "var(--accent)", "protein"], ["Carbs", "var(--yellow)", "carbs"], ["Fat", "var(--orange)", "fat"]].map(([lbl, color, k]) => (
+              <div key={k} style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: ".6rem", fontWeight: 700, color, textTransform: "uppercase", letterSpacing: ".4px", marginBottom: "3px" }}>{lbl}{k === "calories" ? "" : " g"}</div>
+                <input style={{ ...inp, width: "100%", boxSizing: "border-box", padding: "8px 8px" }} type="number" inputMode="numeric" min="0"
+                  value={vals[k]} onChange={(e) => editField(k, e.target.value)} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: "8px", marginTop: "2px" }}>
+          <button onClick={save} disabled={!vals.calories || vals.calories <= 0}
+            style={{ flex: 1, padding: "12px", fontSize: ".92rem", fontWeight: 700, borderRadius: "10px",
+              border: "none", background: "var(--accent-fill)", color: "#0b0b12", cursor: "pointer",
+              opacity: (!vals.calories || vals.calories <= 0) ? .5 : 1 }}>{editing ? "Save changes" : "Add to log"}</button>
+          <button onClick={onClose}
+            style={{ padding: "12px 18px", fontSize: ".92rem", fontWeight: 700, borderRadius: "10px",
+              border: "1px solid var(--border)", background: "transparent", color: "var(--muted)", cursor: "pointer" }}>Cancel</button>
+        </div>
+      </div>
+    </div>, document.body);
+}
+
 function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const [name, setName] = useState("");
   const [brand, setBrand] = useState(""); // brand of a picked food (e.g. "Kirkland Signature") — shown under the name
@@ -6531,6 +6774,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState("");
   const [picked, setPicked] = useState(null); // chosen food's per-100g macros, for serving rescale
+  const [detailState, setDetailState] = useState(null); // {food, editingId, mealType} → FoodServingModal open
   const [grams, setGrams] = useState("100");
   const [unit, setUnit] = useState("g");      // serving unit — g or ml (MyFitnessPal-style)
   const [servingText, setServingText] = useState(""); // the product's labelled serving (e.g. "330 ml")
@@ -6559,6 +6803,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   };
   const videoRef = useRef(null);              // <video> preview for live scanning
   const scanCtlRef = useRef(null);            // zxing scanner controls (to stop)
+  const searchInputRef = useRef(null);        // food-search box — auto-focused when a meal form opens
 
   const list = meals || [];
   const loggedTotal = list.reduce((s, m) => s + (m.calories || 0), 0);
@@ -6570,6 +6815,13 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
     if (list.length > prevMealCount.current) setOpen(true);
     prevMealCount.current = list.length;
   }, [list.length]);
+  // When a meal's add-form opens, drop the cursor into the food-search box (search
+  // is the primary way to log). Small delay covers the open animation / mount.
+  useEffect(() => {
+    if (!addingTo || !searchOpen) return;
+    const t = setTimeout(() => { try { searchInputRef.current && searchInputRef.current.focus(); } catch (e) { /* ignore */ } }, 40);
+    return () => clearTimeout(t);
+  }, [addingTo, searchOpen]);
   // Daily macro totals (each food can carry protein/carbs/fat grams).
   const totP = list.reduce((s, m) => s + (m.protein || 0), 0);
   const totC = list.reduce((s, m) => s + (m.carbs || 0), 0);
@@ -6644,22 +6896,22 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
     setCarbs(String(Math.round(food.c * factor) || ""));
     setFat(String(Math.round(food.f * factor) || ""));
   };
-  // Pick a food (search result or scanned product): remember its per-100g/ml (or
-  // per-serving) macros; default to 1 serving, or the product's serving size / 100.
+  // Pick a food (search result or scanned product): open the serving popup so the
+  // user picks a serving size + fine-tunes macros, then Adds. (Replaces the old
+  // inline serving controls — one tap = one food, no multi-highlight.)
   const pickFood = (food) => {
-    setBrand(food.brand || "");
-    if (food.per === "serving") {
-      setPicked(food); setUnit("serving"); setServingText(food.servingLabel || ""); setGrams("1"); setName(food.name);
-      applyServing(food, "1"); setShowMacros(true);
-      setServingSel({ grams: 1, unit: "serving" });
-      return;
-    }
-    const u = food.unit === "ml" ? "ml" : "g";
-    const start = food.serving && food.serving > 0 ? String(food.serving) : "100";
-    setPicked(food); setUnit(u); setServingText(food.servingText || ""); setGrams(start); setName(food.name);
-    applyServing(food, start); setShowMacros(true);
-    setServingSel({ grams: parseFloat(start) || null, unit: u });
+    setDetailState({ food: normalizePickedFood(food), editingId: null, mealType: addingTo });
   };
+  // The serving popup confirmed — write the food (add or edit) and close.
+  const confirmDetail = (payload) => {
+    const d = detailState; if (!d) return;
+    const full = { ...payload, type: d.mealType === "other" ? "" : d.mealType };
+    if (d.editingId) onEditMeal(d.editingId, full); else onAddMeal(full);
+    setDetailState(null);
+    if (!d.editingId) closeForm();
+  };
+  // Edit a logged food's SERVING (not just its calories) via the same popup.
+  const openEditServing = (m) => setDetailState({ food: deriveBasisFromMeal(m), editingId: m.id, mealType: m.type || "other" });
   // Adjust serving size after a pick — rescales the filled macros live.
   const setServing = (g) => { setGrams(g); if (picked) applyServing(picked, g); setServingSel({ grams: parseFloat(g) || null, unit }); };
   // Plug in a previously-saved food (autocomplete / "log again") — restores its
@@ -6756,6 +7008,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
     };
   }, [scanOpen]);
   useBackClose(scanOpen, closeScan);   // phone Back closes the scanner camera
+  useBackClose(!!detailState, () => setDetailState(null)); // phone Back closes the serving popup
   // Search is the DEFAULT when adding food (the primary way to log) — open it up front.
   const openForm = (key) => { resetFields(); setEditingId(null); setAddingTo(key); setSearchOpen(true); };
   const closeForm = () => { resetFields(); setEditingId(null); setAddingTo(null); };
@@ -6818,7 +7071,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
         <span style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"1.05rem", color:"var(--accent)", whiteSpace:"nowrap" }}>
           {(m.calories||0).toLocaleString()}<span style={{ fontSize:".62rem", color:"var(--muted)", fontWeight:600 }}> cal</span>
         </span>
-        <button onClick={() => openEdit(m)} title="Edit"
+        <button onClick={() => openEditServing(m)} title="Edit serving & macros"
           style={{ border:"none", background:"transparent", color:"var(--muted)",
             cursor:"pointer", fontSize:".9rem", lineHeight:1 }}>✎</button>
         <button onClick={() => onRemoveMeal(m.id)} title="Remove"
@@ -6841,13 +7094,21 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const addForm = () => (
     <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"6px",
       padding:"8px", borderRadius:"8px", background:"rgba(255,255,255,.04)" }}>
-      {/* Recently logged foods — tap to re-add instantly (only when adding new) */}
-      {!editingId && (recentFoods || []).length > 0 && (
+      {/* Recently logged foods — tap to re-add instantly (only when adding new).
+          Scoped to the meal type being added: foods logged for Breakfast only
+          show under Breakfast, etc. Legacy entries (saved before per-meal
+          scoping, no `type`) show everywhere until they're re-logged. */}
+      {(() => {
+        const curKey = recentMealKey(addingTo === "other" ? "other" : addingTo);
+        const recentForMeal = (recentFoods || []).filter((f) =>
+          f.type == null ? true : recentMealKey(f.type) === curKey).slice(0, 8);
+        if (editingId || recentForMeal.length === 0) return null;
+        return (
         <div>
           <div style={{ fontSize:".68rem", color:"var(--muted)", marginBottom:"4px",
             textTransform:"uppercase", letterSpacing:".5px", fontWeight:700 }}>Recent — tap to add</div>
           <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-            {(recentFoods || []).slice(0, 8).map((f, i) => (
+            {recentForMeal.map((f, i) => (
               <button key={i} onClick={() => quickAddRecent(f)}
                 style={{ padding:"5px 9px", fontSize:".74rem", borderRadius:"999px", cursor:"pointer",
                   border:"1px solid var(--border)", background:"var(--s2)", color:"var(--text)",
@@ -6857,7 +7118,8 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
             ))}
           </div>
         </div>
-      )}
+        );
+      })()}
       {/* Food-database search — find a food and auto-fill calories + macros. Also
           available when EDITING, so you can replace a logged food from the library. */}
       {(
@@ -6902,7 +7164,9 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
           {searchOpen && (
             <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"6px" }}>
               <div style={{ display:"flex", gap:"6px" }}>
-                <input style={{ ...inp, flex:1 }} placeholder="Search foods (e.g. chicken breast)"
+                {/* Auto-focus so the cursor lands in Search the moment you tap
+                    "Add food to <meal>" (search is the primary way to log). */}
+                <input autoFocus ref={searchInputRef} style={{ ...inp, flex:1 }} placeholder="Search foods (e.g. chicken breast)"
                   value={searchQ} onChange={(e) => setSearchQ(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && runSearch()} />
                 <button onClick={runSearch} disabled={searching || searchQ.trim().length < 2}
@@ -6956,43 +7220,12 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
                   ))}
                 </div>
               )}
-              {picked && picked.per === "serving" ? (
-                <div style={{ display:"flex", flexDirection:"column", gap:"4px", fontSize:".76rem", color:"var(--muted)" }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
-                    <span>Servings:</span>
-                    <input style={{ ...inp, width:"72px", flex:"none", padding:"6px 8px" }} type="number" inputMode="decimal"
-                      value={grams} onChange={(e) => setServing(e.target.value)} />
-                    <span>→ fills below</span>
-                  </div>
-                  <span style={{ color:"var(--accent)" }}>1 serving = {picked.servingLabel || "serving"} ({picked.kcal} cal)</span>
-                </div>
-              ) : picked && (
-                <div style={{ display:"flex", flexDirection:"column", gap:"4px", fontSize:".76rem", color:"var(--muted)" }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
-                    <span>Serving:</span>
-                    <input style={{ ...inp, width:"72px", flex:"none", padding:"6px 8px" }} type="number" inputMode="numeric"
-                      value={grams} onChange={(e) => setServing(e.target.value)} />
-                    {/* g / ml unit toggle (MyFitnessPal-style) */}
-                    <span style={{ display:"inline-flex", border:"1px solid var(--border)", borderRadius:"7px", overflow:"hidden" }}>
-                      {["g","ml"].map((u) => (
-                        <button key={u} onClick={() => setUnit(u)}
-                          style={{ padding:"5px 10px", fontSize:".72rem", fontWeight:700, cursor:"pointer", border:"none",
-                            background: unit===u ? "var(--accent)" : "transparent", color: unit===u ? "#0b0b12" : "var(--muted)" }}>{u}</button>
-                      ))}
-                    </span>
-                    <span>→ fills below</span>
-                  </div>
-                  {servingText
-                    ? <span style={{ color:"var(--accent)" }}>1 serving = {servingText} · tap to use, or adjust</span>
-                    : <span>Adjust the amount, then Add.</span>}
-                </div>
-              )}
             </div>
           )}
         </div>
       )}
       <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-        <input autoFocus style={{ ...inp, flex:"2 1 140px" }} placeholder="Food (optional)"
+        <input style={{ ...inp, flex:"2 1 140px" }} placeholder="Food (optional)"
           value={name} onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
             if (e.key !== "Enter") return;
@@ -7182,6 +7415,11 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
           </div>
         )}
       </div>
+      )}
+      {detailState && (
+        <FoodServingModal food={detailState.food} editing={!!detailState.editingId}
+          mealLabel={detailState.mealType && detailState.mealType !== "other" ? detailState.mealType : null}
+          onConfirm={confirmDetail} onClose={() => setDetailState(null)} />
       )}
     </div>
   );
@@ -16198,19 +16436,30 @@ export default function App() {
     if (field === "calories" && value > 0) setStreak(s => Math.max(s, 1));
   };
 
-  // Remember a named food for one-tap re-add later. Deduped by name (latest
-  // cals/macros win), newest first, capped. Stored remote-aware with the plan.
+  // Remember a named food for one-tap re-add later. Scoped PER MEAL TYPE and
+  // deduped by FOOD IDENTITY (base name, ignoring the amount): logging "3 eggs"
+  // then "4 eggs" for breakfast keeps ONE "eggs" entry with the LAST amount, and
+  // it only shows under breakfast until the same food is logged for another meal.
+  // Stored remote-aware with the plan (so it's per-client, and a client's trainer
+  // sees the client's list when viewing their plan).
   const upsertRecentFood = (m) => {
-    const name = (m.name || "").trim();
-    if (!name || !activeId) return;
-    const key = name.toLowerCase();
-    // Remember the SERVING (grams + unit) too, so re-logging reproduces the exact
-    // past entry (MyFitnessPal-style "log again"). Deduped by name (latest serving
-    // + macros win), newest first, and kept as a LARGE history so foods saved long
-    // ago still autocomplete (~400 ≈ 50KB JSON, well under the 1MB doc limit).
-    const entry = { name, brand: m.brand || "", calories: m.calories||0, protein: m.protein||0, carbs: m.carbs||0, fat: m.fat||0,
+    const raw = (m.name || "").trim();
+    if (!raw || !activeId) return;
+    const base = baseFoodName(raw) || raw;      // food identity, e.g. "eggs"
+    const tkey = recentMealKey(m.type);         // "breakfast" | … | "other"
+    const key = base.toLowerCase() + "|" + tkey;
+    // Remember the SERVING (grams + unit) too, so re-logging reproduces the last
+    // amount (MyFitnessPal-style "log again"). Newest first, kept as a LARGE
+    // history so foods saved long ago still autocomplete (~400 ≈ 50KB JSON).
+    const entry = { name: base, type: tkey, brand: m.brand || "", calories: m.calories||0, protein: m.protein||0, carbs: m.carbs||0, fat: m.fat||0,
       grams: m.grams != null ? Number(m.grams) : null, unit: m.unit || null, ts: Date.now() };
-    const next = [entry, ...recentFoodsRef.current.filter(f => (f.name||"").toLowerCase() !== key)].slice(0, 400);
+    const next = [entry, ...recentFoodsRef.current.filter((f) => {
+      // Drop the previous entry for this SAME food + meal type (last amount wins).
+      if (recentFoodKey(f.name, f.type) === key) return false;
+      // Retire a legacy (typeless) entry for this same food — it's now meal-scoped.
+      if (f.type == null && baseFoodName(f.name || "").toLowerCase() === base.toLowerCase()) return false;
+      return true;
+    })].slice(0, 400);
     recentFoodsRef.current = next;
     setRecentFoods(next);
     logWrite(`caliq-foods-${activeId}`, JSON.stringify(next));
