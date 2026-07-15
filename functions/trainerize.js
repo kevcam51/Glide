@@ -379,6 +379,41 @@ async function fetchRoster(auth) {
 // written into `uid`'s local profiles. Used by BOTH the manual import button
 // (clientIds from the picker, full 365-day nutrition) and the scheduled
 // auto-sync (already-imported ids only, short nutrition window).
+// Write the profile snapshot into a plan wrapper + run the 3 data syncs (nutrition,
+// wearable/health, workouts) against that same plan. `target` is either Kevin's own
+// local ctz profile (targetUid=admin, planId=ctz{id}) OR a LINKED client's account
+// (targetUid=client, planId=their active plan) — see runImport's tz-links routing.
+async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDate, auth, days) {
+  const wrap = (await kvGetJSON(db, targetUid, `caliq-${planId}`)) || { data: {}, step: 0 };
+  const d = { ...(wrap.data || {}), ...snap, trainerizeId: u.id };
+  if (snap.weightLbs && lastStatDate) {
+    const cis = Array.isArray(d.checkIns) ? d.checkIns : [];
+    let ci = cis.find((c) => c && c.date === lastStatDate);
+    if (!ci) {
+      ci = { date: lastStatDate, timestamp: new Date(`${lastStatDate}T12:00:00`).getTime(),
+        weight: null, calories: null, hitTarget: null, workedOut: null,
+        mood: null, notes: "Imported from Trainerize", bodyFat: null, loggedBy: "trainer", isFuturePlan: false };
+      cis.push(ci);
+    }
+    ci.weight = Number(snap.weightLbs);
+    if (snap.bodyFat) ci.bodyFat = Number(snap.bodyFat);
+    cis.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    d.checkIns = cis;
+    if (d.startWeightLbs == null || d.startWeightLbs === "") d.startWeightLbs = Number(snap.weightLbs);
+  }
+  const complete = d.gender && d.age && d.heightFt && d.weightLbs && d.activityLevel;
+  const step = Math.max(wrap.step || 0, complete ? 5 : 0);
+  await kvSetJSON(db, targetUid, `caliq-${planId}`, { data: d, step });
+  let mealDays = 0, healthDays = 0, workoutDays = 0;
+  try { mealDays = await syncClientNutrition(db, targetUid, planId, u.id, auth, days); }
+  catch (e) { console.error("nutrition sync failed for", u.id, e && e.message); }
+  try { healthDays = await syncClientHealth(db, targetUid, planId, u.id, auth, days); }
+  catch (e) { console.error("health sync failed for", u.id, e && e.message); }
+  try { workoutDays = await syncClientWorkouts(db, targetUid, planId, u.id, auth, days); }
+  catch (e) { console.error("workout sync failed for", u.id, e && e.message); }
+  return { d, step, mealDays, healthDays, workoutDays };
+}
+
 async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTRITION_DAYS } = {}) {
   let roster = await fetchRoster(auth);
   const wanted = Array.isArray(clientIds) ? new Set(clientIds.map(Number).filter(Boolean)) : null;
@@ -393,6 +428,9 @@ async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTR
     // 3. Per client: last body stat + goals (sequential — ~2 calls/client, far
     //    under the 1000/min throttle), then map + write into the caller's kv.
     const index = (await kvGetJSON(db, uid, "caliq-index")) || [];
+    // trainerizeId → linked Glide client uid (set by linkPlan when Kevin links an
+    // imported profile to a real account). Linked clients sync into THEIR account.
+    const tzLinks = (await kvGetJSON(db, uid, "caliq-tz-links")) || {};
     const folders = (await kvGetJSON(db, uid, "caliq-folders")) || [];
     let folder = folders.find((f) => f && f.name === "Trainerize");
     if (!folder) {
@@ -410,64 +448,35 @@ async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTR
       const snap = mapSnapshot(profById[u.id] || u, bs.ok ? bs.json : null, gl.ok && gl.json ? gl.json.goals : []);
       const lastStatDate = snap._lastStatDate; delete snap._lastStatDate;
 
-      // Dedupe: an index entry already tagged with this trainerizeId, else the
-      // deterministic id (covers a wiped index re-import via Recover).
+      const name = [snap.firstName, snap.lastName].filter(Boolean).join(" ") || u.email || `Client ${u.id}`;
+
+      // LINKED to a real Glide account → sync straight into THAT client's account
+      // (their active plan), so their watch/meals/workouts flow to where they log
+      // in. No local profile / index entry for a linked client.
+      const linkedUid = tzLinks[u.id];
+      if (linkedUid) {
+        let clientPlanId = "self";
+        try { const mf = (await kvGetJSON(db, linkedUid, "caliq-plans")) || {}; if (mf.active) clientPlanId = mf.active; } catch (e) { /* default self */ }
+        const r = await applySnapshotAndSyncs(db, linkedUid, clientPlanId, u, snap, lastStatDate, auth, nutritionDays);
+        results.push({ name, weight: r.d.weightLbs || "", goal: r.d.goalWeight || "", status: u.status || "",
+          linked: true, mealDays: r.mealDays, healthDays: r.healthDays, workoutDays: r.workoutDays });
+        continue;
+      }
+
+      // LOCAL profile (default): dedupe by trainerizeId, else the deterministic id.
       const pid = (index.find((p) => p && p.trainerizeId === u.id) || {}).id || `ctz${u.id}`;
       const existing = index.find((p) => p && p.id === pid);
-
-      const wrap = (await kvGetJSON(db, uid, `caliq-${pid}`)) || { data: {}, step: 0 };
-      const d = { ...(wrap.data || {}), ...snap, trainerizeId: u.id };
-      // Seed/refresh one check-in from the last Trainerize weigh-in so the
-      // progress chart + "last activity" have a starting point. MERGED into any
-      // existing same-date entry (one-weigh-in-per-date, but a workedOut flag
-      // or notes the workout sync wrote there must survive a re-import).
-      if (snap.weightLbs && lastStatDate) {
-        const cis = Array.isArray(d.checkIns) ? d.checkIns : [];
-        let ci = cis.find((c) => c && c.date === lastStatDate);
-        if (!ci) {
-          ci = { date: lastStatDate, timestamp: new Date(`${lastStatDate}T12:00:00`).getTime(),
-            weight: null, calories: null, hitTarget: null, workedOut: null,
-            mood: null, notes: "Imported from Trainerize", bodyFat: null,
-            loggedBy: "trainer", isFuturePlan: false };
-          cis.push(ci);
-        }
-        ci.weight = Number(snap.weightLbs);
-        if (snap.bodyFat) ci.bodyFat = Number(snap.bodyFat);
-        cis.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-        d.checkIns = cis;
-        if (d.startWeightLbs == null || d.startWeightLbs === "") d.startWeightLbs = Number(snap.weightLbs);
-      }
-      // A complete snapshot can jump straight to the dashboard; never downgrade
-      // a step Kevin already advanced.
-      const complete = d.gender && d.age && d.heightFt && d.weightLbs && d.activityLevel;
-      const step = Math.max(wrap.step || 0, complete ? 5 : 0);
-      await kvSetJSON(db, uid, `caliq-${pid}`, { data: d, step });
-
-      const name = [d.firstName, d.lastName].filter(Boolean).join(" ") || u.email || `Client ${u.id}`;
+      const r = await applySnapshotAndSyncs(db, uid, pid, u, snap, lastStatDate, auth, nutritionDays);
       const entry = {
-        ...(existing || {}), id: pid, name, weight: d.weightLbs || "", goal: d.goalWeight || "",
-        lastSaved: Date.now(), stepLabel: STEP_LABELS[step] || "Personal",
+        ...(existing || {}), id: pid, name, weight: r.d.weightLbs || "", goal: r.d.goalWeight || "",
+        lastSaved: Date.now(), stepLabel: STEP_LABELS[r.step] || "Personal",
         folderId: existing ? existing.folderId : folder.id, isSimulation: false,
         trainerizeId: u.id, email: u.email || "",
       };
       if (existing) { Object.assign(existing, entry); updated++; }
       else { index.push(entry); created++; }
-      // v2: pull the client's recent nutrition (Trainerize meals in full food
-      // detail; MFP/Fitbit as day totals) into the profile's day logs.
-      let mealDays = 0;
-      try { mealDays = await syncClientNutrition(db, uid, pid, u.id, auth, nutritionDays); }
-      catch (e) { console.error("nutrition sync failed for", u.id, e && e.message); }
-      // v3: wearable burn + steps (Garmin/Apple/Fitbit via Trainerize).
-      let healthDays = 0;
-      try { healthDays = await syncClientHealth(db, uid, pid, u.id, auth, nutritionDays); }
-      catch (e) { console.error("health sync failed for", u.id, e && e.message); }
-      // v2: completed Trainerize workouts → workedOut check-ins (streaks,
-      // calendar dots, coach views). Runs AFTER the wrapper write above so its
-      // own read-modify-write of caliq-{pid} sees the fresh snapshot.
-      let workoutDays = 0;
-      try { workoutDays = await syncClientWorkouts(db, uid, pid, u.id, auth, nutritionDays); }
-      catch (e) { console.error("workout sync failed for", u.id, e && e.message); }
-      results.push({ name, weight: entry.weight, goal: entry.goal, status: u.status || "", mealDays, healthDays, workoutDays });
+      results.push({ name, weight: entry.weight, goal: entry.goal, status: u.status || "",
+        mealDays: r.mealDays, healthDays: r.healthDays, workoutDays: r.workoutDays });
     }
     await kvSetJSON(db, uid, "caliq-index", index);
     const mealDaysTotal = results.reduce((s, r) => s + (r.mealDays || 0), 0);
@@ -488,6 +497,7 @@ exports.trainerizeImport = onCall(
     if (request.data && request.data.mode === "list") {
       const roster = await fetchRoster(auth);
       const index = (await kvGetJSON(db, uid, "caliq-index")) || [];
+      const tzLinks = (await kvGetJSON(db, uid, "caliq-tz-links")) || {};
       const importedIds = new Set(index.filter((p) => p && p.trainerizeId).map((p) => p.trainerizeId));
       return {
         ok: true,
@@ -496,7 +506,10 @@ exports.trainerizeImport = onCall(
           name: [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email || `Client ${u.id}`,
           email: u.email || "",
           status: u.status || "",
-          imported: importedIds.has(u.id),
+          // Already in Glide as a local profile OR linked to a real account — either
+          // way it re-syncs; don't offer it as a fresh import (would duplicate).
+          imported: importedIds.has(u.id) || !!tzLinks[u.id],
+          linked: !!tzLinks[u.id],
         })),
       };
     }
