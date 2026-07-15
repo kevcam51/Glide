@@ -10367,21 +10367,41 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     try {
       let payload = JSON.stringify({ data: {}, step: 0 });
       try { const r = await window.storage.get(profileKey(localId)); if (r && r.value) payload = r.value; } catch {}
+      let tzId = null;
+      try { const pj = JSON.parse(payload); tzId = pj && pj.data && pj.data.trainerizeId; } catch {}
       const m = await readPlansManifest(clientGet(clientUid));
       await setForUser(clientUid, planDataKey(m.active), payload);
       // Migrate the imported day logs (meals, weigh-ins, and the WATCH/wearable data)
-      // + history into the client's active plan so nothing is left behind on the local
-      // profile — only where the client doesn't already have that date (never clobber
-      // their own logs).
+      // + history into the client's active plan. If the client already has a log for a
+      // date, MERGE the imported wearable + not-yet-present imported meals into it
+      // (never clobber the client's own data).
       try {
         const logs = await window.storage.list(`caliq-log-${localId}-`);
         for (const k of ((logs && logs.keys) || [])) {
           const date = k.slice(`caliq-log-${localId}-`.length);
           const destKey = `${planLogPrefix(m.active)}${date}`;
-          const cur = await getForUser(clientUid, destKey);
-          if (cur && cur.value) continue; // client already has this day — don't overwrite
           const v = await window.storage.get(k);
-          if (v && v.value) await setForUser(clientUid, destKey, v.value);
+          if (!(v && v.value)) continue;
+          const cur = await getForUser(clientUid, destKey);
+          if (!(cur && cur.value)) { await setForUser(clientUid, destKey, v.value); continue; }
+          // merge into the client's existing log
+          let src, dst;
+          try { src = JSON.parse(v.value); dst = JSON.parse(cur.value); } catch { continue; }
+          let changed = false;
+          if (src.wearable && !dst.wearable) { dst.wearable = src.wearable; changed = true; }
+          if (Array.isArray(src.meals) && src.meals.length) {
+            const have = new Set((dst.meals || []).map((x) => x && x.id));
+            const add = src.meals.filter((x) => x && x.id && !have.has(x.id));
+            if (add.length) {
+              dst.meals = [...(dst.meals || []), ...add];
+              dst.calories = (dst.calories || 0) + add.reduce((s, x) => s + (x.calories || 0), 0);
+              dst.protein = (dst.protein || 0) + add.reduce((s, x) => s + (x.protein || 0), 0);
+              dst.carbs = (dst.carbs || 0) + add.reduce((s, x) => s + (x.carbs || 0), 0);
+              dst.fat = (dst.fat || 0) + add.reduce((s, x) => s + (x.fat || 0), 0);
+              changed = true;
+            }
+          }
+          if (changed) await setForUser(clientUid, destKey, JSON.stringify(dst));
         }
         const destHist = planHistoryKey(m.active);
         const curHist = await getForUser(clientUid, destHist);
@@ -10393,17 +10413,19 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       // If this was a Trainerize-imported profile, record trainerizeId → clientUid so
       // the Trainerize sync writes FUTURE watch/meal/workout data into THIS client's
       // account (not a local profile). See functions/trainerize.js runImport.
-      try {
-        let tzId = null;
-        try { const pj = JSON.parse(payload); tzId = pj && pj.data && pj.data.trainerizeId; } catch {}
-        if (tzId) {
+      if (tzId) {
+        try {
           const lr = await window.storage.get("caliq-tz-links");
           const links = lr && lr.value ? (JSON.parse(lr.value) || {}) : {};
           links[tzId] = clientUid;
           await window.storage.set("caliq-tz-links", JSON.stringify(links));
-        }
-      } catch (e) { /* best-effort */ }
+        } catch (e) { /* best-effort */ }
+      }
       if (onLinked) await onLinked(localId);
+      // Kick a fresh server sync so the client's account immediately gets the latest
+      // watch/meal/workout data (now routed to them via the mapping above), instead of
+      // waiting for the 30-min auto-sync.
+      if (tzId) { try { await callTrainerizeImport({ clientIds: [tzId] }); } catch (e) { /* auto-sync will catch up */ } }
       setCMsg("Plan linked — it now lives in the client's account (logs + watch data moved too).");
       setLinkingFor(null); setPendingLink(null);
       await loadClients();
