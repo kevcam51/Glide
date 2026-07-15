@@ -8681,13 +8681,50 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const [waterDraft, setWaterDraft] = useState("");
   const [weightDraft, setWeightDraft] = useState("");
   const [calDraft, setCalDraft] = useState("");
-  useEffect(() => { setWaterDraft(dailyLog.water ? String(dailyLog.water) : ""); }, [dailyLog.water]);
-  useEffect(() => { setWeightDraft(dailyLog.weight ? String(dailyLog.weight) : ""); }, [dailyLog.weight]);
-  const commitWater = () => { const v = parseInt(waterDraft); onLogUpdate("water", isNaN(v) ? 0 : v); };
-  const commitWeight = () => { const v = parseFloat(weightDraft); onLogUpdate("weight", isNaN(v) ? 0 : v); };
-  const commitCal = () => { const v = parseInt(calDraft); if (v > 0) { onLogUpdate("calories", (dailyLog.calories||0) + v); setCalDraft(""); } };
+  // Log-confirmation feedback (Kevin): after a quick-log the input clears, the Log
+  // button greys to "Logged ✓" for a beat, and a toast confirms it — so you know
+  // it saved without scrolling up to check the number.
+  const [toast, setToast] = useState(null);      // { msg } shown briefly at the bottom
+  const [flashBtn, setFlashBtn] = useState(null); // "water" | "weight" | "cal" — button showing "Logged ✓"
+  const toastTimer = useRef(null); const flashTimer = useRef(null);
+  const lastCommit = useRef({ water: null, weight: null });
+  useEffect(() => () => { clearTimeout(toastTimer.current); clearTimeout(flashTimer.current); }, []);
+  const confirmLogged = (field, msg) => {
+    setToast({ msg });
+    clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(null), 2200);
+    setFlashBtn(field);
+    clearTimeout(flashTimer.current); flashTimer.current = setTimeout(() => setFlashBtn(null), 1100);
+  };
+  // Pre-fill the inputs with the day's value — but NOT right after a local commit
+  // (we just cleared them on purpose so the reset is visible).
+  useEffect(() => {
+    if (lastCommit.current.water != null && Number(dailyLog.water) === lastCommit.current.water) return;
+    setWaterDraft(dailyLog.water ? String(dailyLog.water) : "");
+  }, [dailyLog.water]);
+  useEffect(() => {
+    if (lastCommit.current.weight != null && Number(dailyLog.weight) === lastCommit.current.weight) return;
+    setWeightDraft(dailyLog.weight ? String(dailyLog.weight) : "");
+  }, [dailyLog.weight]);
+  const commitWater = () => {
+    const v = parseInt(waterDraft); if (isNaN(v) || v < 0) return;
+    lastCommit.current.water = v; onLogUpdate("water", v); setWaterDraft("");
+    confirmLogged("water", `Water logged — ${v} oz`);
+  };
+  const commitWeight = () => {
+    const v = parseFloat(weightDraft); if (isNaN(v) || v <= 0) return;
+    lastCommit.current.weight = v; onLogUpdate("weight", v); setWeightDraft("");
+    confirmLogged("weight", `Weight logged — ${v} lbs`);
+  };
+  const commitCal = () => { const v = parseInt(calDraft); if (v > 0) { onLogUpdate("calories", (dailyLog.calories||0) + v); setCalDraft(""); confirmLogged("cal", `Logged — ${v} cal`); } };
   const logBtn = { padding:"7px 12px", fontSize:".8rem", fontWeight:700, borderRadius:"8px",
     border:"none", background:"var(--accent-fill)", color:"#0b0b12", cursor:"pointer", whiteSpace:"nowrap" };
+  // A Log button that flips to a greyed "Logged ✓" for a moment after a save.
+  const loggedBtn = { padding:"7px 12px", fontSize:".8rem", fontWeight:700, borderRadius:"8px",
+    border:"none", background:"var(--s3)", color:"var(--green)", cursor:"default", whiteSpace:"nowrap" };
+  const LogBtn = ({ field, onClick }) => (
+    <button style={flashBtn === field ? loggedBtn : logBtn} disabled={flashBtn === field}
+      onClick={onClick}>{flashBtn === field ? "Logged ✓" : "Log"}</button>
+  );
 
   useEffect(() => {
     if (editingWorkout) {
@@ -9109,7 +9146,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           onKeyDown={e=>{ if(e.key==="Enter"){ e.stopPropagation(); commitCal(); }}}
         />
         <span className="dash-log-unit">cal</span>
-        <button style={logBtn} onClick={e=>{e.stopPropagation();commitCal();}}>Log</button>
+        <LogBtn field="cal" onClick={e=>{e.stopPropagation();commitCal();}} />
       </div>
 
       {showMacros && (
@@ -9312,7 +9349,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           value={waterDraft} onChange={e=>setWaterDraft(e.target.value)}
           onKeyDown={e=>{ if(e.key==="Enter") commitWater(); }}/>
         <span className="dash-log-unit">oz</span>
-        <button style={logBtn} onClick={commitWater}>Log</button>
+        <LogBtn field="water" onClick={commitWater} />
       </div>
       <div className="dash-log-row">
         <span className="dash-log-icon" style={{display:"flex",alignItems:"center"}}><Icon name="scale" size={21} color="var(--muted)" /></span>
@@ -9324,8 +9361,19 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           value={weightDraft} onChange={e=>setWeightDraft(e.target.value)}
           onKeyDown={e=>{ if(e.key==="Enter") commitWeight(); }}/>
         <span className="dash-log-unit">lbs</span>
-        <button style={logBtn} onClick={commitWeight}>Log</button>
+        <LogBtn field="weight" onClick={commitWeight} />
       </div>
+
+      {/* Log-confirmation toast — fixed at the bottom so it's visible no matter
+          where you've scrolled (Kevin: previously no confirmation that it saved). */}
+      {toast && createPortal(
+        <div data-theme="pro" style={{ position:"fixed", left:"50%", bottom:"calc(24px + env(safe-area-inset-bottom,0px))",
+          transform:"translateX(-50%)", zIndex:3000, display:"flex", alignItems:"center", gap:"8px",
+          background:"var(--surface)", border:"1px solid var(--green)", color:"var(--text)",
+          padding:"11px 16px", borderRadius:"999px", fontSize:".85rem", fontWeight:700,
+          boxShadow:"0 6px 24px rgba(0,0,0,.4)", animation:"fadeUp .18s ease both", maxWidth:"90vw" }}>
+          <Icon name="check" size={16} color="var(--green)" /><span>{toast.msg}</span>
+        </div>, document.body)}
 
       {/* Today's workout — editable */}
       <div className="sec-title">Today's Workout — {dayName}</div>
