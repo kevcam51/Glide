@@ -6362,6 +6362,79 @@ function TimelineTab({ data, tdee, totalBurn }) {
 // it can be proxied through a Cloud Function once on Blaze. Returns normalized
 // per-100g foods: { name, kcal, p, c, f }.
 const _tidyFood = (s) => (s || "Food").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+
+// ── Micronutrients (S94, MacroFactor-style) ─────────────────────────────────
+// The curated panel we capture from the food databases, in display order.
+// `rda` = general-adult daily reference (target to REACH); `limit: true` marks
+// values to stay UNDER (added sugar/sat fat/sodium/cholesterol). USDA reports
+// these exact units; OFF needs a couple of g→mg conversions at extraction.
+const MICRO_DEFS = [
+  { k: "fiber",      label: "Fiber",        unit: "g",   rda: 28 },
+  { k: "sugar",      label: "Sugar",        unit: "g",   rda: 50,   limit: true },
+  { k: "satFat",     label: "Saturated fat",unit: "g",   rda: 20,   limit: true },
+  { k: "transFat",   label: "Trans fat",    unit: "g",   rda: 2,    limit: true },
+  { k: "monoFat",    label: "Monounsat. fat", unit: "g" },
+  { k: "polyFat",    label: "Polyunsat. fat", unit: "g" },
+  { k: "cholesterol",label: "Cholesterol",  unit: "mg",  rda: 300,  limit: true },
+  { k: "sodium",     label: "Sodium",       unit: "mg",  rda: 2300, limit: true },
+  { k: "potassium",  label: "Potassium",    unit: "mg",  rda: 3400 },
+  { k: "calcium",    label: "Calcium",      unit: "mg",  rda: 1000 },
+  { k: "iron",       label: "Iron",         unit: "mg",  rda: 18 },
+  { k: "magnesium",  label: "Magnesium",    unit: "mg",  rda: 400 },
+  { k: "zinc",       label: "Zinc",         unit: "mg",  rda: 11 },
+  { k: "phosphorus", label: "Phosphorus",   unit: "mg",  rda: 700 },
+  { k: "selenium",   label: "Selenium",     unit: "µg",  rda: 55 },
+  { k: "copper",     label: "Copper",       unit: "mg",  rda: 0.9 },
+  { k: "manganese",  label: "Manganese",    unit: "mg",  rda: 2.3 },
+  { k: "vitA",       label: "Vitamin A",    unit: "µg",  rda: 900 },
+  { k: "vitC",       label: "Vitamin C",    unit: "mg",  rda: 90 },
+  { k: "vitD",       label: "Vitamin D",    unit: "µg",  rda: 20 },
+  { k: "vitE",       label: "Vitamin E",    unit: "mg",  rda: 15 },
+  { k: "vitK",       label: "Vitamin K",    unit: "µg",  rda: 120 },
+  { k: "b1",         label: "Thiamin (B1)", unit: "mg",  rda: 1.2 },
+  { k: "b2",         label: "Riboflavin (B2)", unit: "mg", rda: 1.3 },
+  { k: "b3",         label: "Niacin (B3)",  unit: "mg",  rda: 16 },
+  { k: "b6",         label: "Vitamin B6",   unit: "mg",  rda: 1.7 },
+  { k: "b12",        label: "Vitamin B12",  unit: "µg",  rda: 2.4 },
+  { k: "folate",     label: "Folate",       unit: "µg",  rda: 400 },
+  { k: "choline",    label: "Choline",      unit: "mg",  rda: 550 },
+  { k: "caffeine",   label: "Caffeine",     unit: "mg" },
+];
+const MICRO_MAP = Object.fromEntries(MICRO_DEFS.map((d) => [d.k, d]));
+// USDA nutrientName → our micro key (values arrive in the MICRO_DEFS units).
+const USDA_MICRO_NAMES = {
+  "Fiber, total dietary": "fiber", "Total Sugars": "sugar", "Sugars, total including NLEA": "sugar",
+  "Fatty acids, total saturated": "satFat", "Fatty acids, total trans": "transFat",
+  "Fatty acids, total monounsaturated": "monoFat", "Fatty acids, total polyunsaturated": "polyFat",
+  "Cholesterol": "cholesterol", "Sodium, Na": "sodium", "Potassium, K": "potassium",
+  "Calcium, Ca": "calcium", "Iron, Fe": "iron", "Magnesium, Mg": "magnesium", "Zinc, Zn": "zinc",
+  "Phosphorus, P": "phosphorus", "Selenium, Se": "selenium", "Copper, Cu": "copper", "Manganese, Mn": "manganese",
+  "Vitamin A, RAE": "vitA", "Vitamin C, total ascorbic acid": "vitC", "Vitamin D (D2 + D3)": "vitD",
+  "Vitamin E (alpha-tocopherol)": "vitE", "Vitamin K (phylloquinone)": "vitK",
+  "Thiamin": "b1", "Riboflavin": "b2", "Niacin": "b3", "Vitamin B-6": "b6", "Vitamin B-12": "b12",
+  "Folate, total": "folate", "Folate, DFE": "folate", "Choline, total": "choline", "Caffeine": "caffeine",
+};
+// Round a micro value for storage/display (2 sig-ish decimals, no float noise).
+const _mRound = (v) => (v >= 100 ? Math.round(v) : v >= 10 ? Math.round(v * 10) / 10 : Math.round(v * 100) / 100);
+// Scale a per-100g/per-serving micros object by a factor; drops zeros.
+const scaleMicros = (micros, factor) => {
+  if (!micros) return null;
+  const out = {};
+  for (const k of Object.keys(micros)) {
+    const v = (Number(micros[k]) || 0) * factor;
+    if (v > 0) out[k] = _mRound(v);
+  }
+  return Object.keys(out).length ? out : null;
+};
+// Sum micros across logged meals (for the daily summary).
+const sumMicros = (meals) => {
+  const out = {};
+  for (const m of meals || []) {
+    if (!m.micros) continue;
+    for (const k of Object.keys(m.micros)) out[k] = (out[k] || 0) + (Number(m.micros[k]) || 0);
+  }
+  return out;
+};
 // USDA FoodData Central — strong on generic / whole foods. Free; DEMO_KEY unless
 // VITE_USDA_API_KEY (a free api.data.gov key) is set for higher limits.
 async function searchUSDA(query) {
@@ -6381,9 +6454,14 @@ async function searchUSDA(query) {
   const j = await r.json();
   return (j.foods || []).map((x) => {
     const n = {};
+    const micros = {};
     (x.foodNutrients || []).forEach((z) => {
       if (z.nutrientName === "Energy" && z.unitName && z.unitName !== "KCAL") return; // skip kJ
       n[z.nutrientName] = z.value;
+      // Micronutrient panel (S94): USDA's search response already carries the
+      // full per-100g nutrient list — capture our curated set at no extra cost.
+      const mk = USDA_MICRO_NAMES[z.nutrientName];
+      if (mk && Number(z.value) > 0 && micros[mk] == null) micros[mk] = _mRound(Number(z.value));
     });
     // Realistic serving: branded USDA rows carry the label serving (servingSize +
     // unit, plus a household text like "1 cup"). Default the picker to that instead
@@ -6395,8 +6473,26 @@ async function searchUSDA(query) {
     return { name: _tidyFood(x.description), brand: x.brandOwner || x.brandName || "",
       kcal: Math.round(n["Energy"] || 0), p: Math.round(n["Protein"] || 0),
       c: Math.round(n["Carbohydrate, by difference"] || 0), f: Math.round(n["Total lipid (fat)"] || 0),
-      source: "usda", dataType: x.dataType || "", unit, serving, servingText };
+      source: "usda", dataType: x.dataType || "", unit, serving, servingText,
+      micros: Object.keys(micros).length ? micros : null };
   }).filter((f) => f.kcal > 0);
+}
+// Extract our micro panel from an OFF nutriments object. OFF stores label
+// values in GRAMS per 100g (sodium_100g is g, not mg), so minerals convert
+// g→mg here. Vitamins are skipped — OFF's vitamin units/coverage are too
+// inconsistent (crowd-sourced) to trust; USDA covers those.
+function _offMicros(n) {
+  const g = (key) => { const v = Number(n[key]); return v > 0 ? v : null; };
+  const mg = (key) => { const v = g(key); return v != null ? v * 1000 : null; };
+  const raw = {
+    fiber: g("fiber_100g"), sugar: g("sugars_100g"), satFat: g("saturated-fat_100g"),
+    transFat: g("trans-fat_100g"), monoFat: g("monounsaturated-fat_100g"), polyFat: g("polyunsaturated-fat_100g"),
+    cholesterol: mg("cholesterol_100g"), sodium: mg("sodium_100g"), potassium: mg("potassium_100g"),
+    calcium: mg("calcium_100g"), iron: mg("iron_100g"), magnesium: mg("magnesium_100g"), zinc: mg("zinc_100g"),
+  };
+  const out = {};
+  for (const k of Object.keys(raw)) if (raw[k] != null) out[k] = _mRound(raw[k]);
+  return Object.keys(out).length ? out : null;
 }
 // Open Food Facts — free, no key, strong on BRANDED / packaged / international
 // foods + barcodes. CORS-enabled. Complements USDA. Per-100g nutriments.
@@ -6414,7 +6510,7 @@ async function searchOFF(query) {
     return { name: _tidyFood(p.product_name), brand: (p.brands || "").split(",")[0].trim(),
       kcal: Math.round(n["energy-kcal_100g"] || 0), p: Math.round(n.proteins_100g || 0),
       c: Math.round(n.carbohydrates_100g || 0), f: Math.round(n.fat_100g || 0), source: "off",
-      unit: "g", serving, servingText: (p.serving_size || "").trim() };
+      unit: "g", serving, servingText: (p.serving_size || "").trim(), micros: _offMicros(n) };
   }).filter((f) => f.name && f.name !== "Food" && f.kcal > 0);
 }
 // Combined food search: query USDA + Open Food Facts in parallel and interleave
@@ -6470,13 +6566,36 @@ function _foodScore(f, q) {
   s -= Math.min(14, name.length / 8);                        // slight nudge toward concise names
   return s;
 }
-async function searchFoods(query) {
-  // Query our own free DBs first (USDA + Open Food Facts).
-  const [u, o] = await Promise.allSettled([searchUSDA(query), searchOFF(query)]);
+// Session cache: query → final ranked results, so re-typing a food you already
+// searched (or backspacing) renders instantly.
+const _foodSearchCache = new Map();
+// Combined food search — PROGRESSIVE (S94, "as fast as MyFitnessPal"): USDA is
+// usually back in a few hundred ms while OFF's legacy search endpoint routinely
+// takes 1–3s, and the old Promise.allSettled made the SLOWEST source gate the
+// whole list. Now `onPartial(results)` fires the moment the first source lands,
+// so the user sees ranked foods immediately; the final merged list (OFF +
+// FatSecret fallback) resolves afterward and replaces it.
+async function searchFoods(query, onPartial) {
+  const q = query.toLowerCase().trim();
+  const cached = _foodSearchCache.get(q);
+  if (cached) { if (onPartial) onPartial(cached); return cached; }
+  const esc = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rank = (list) => {
+    const seen = new Set(); const out = [];
+    for (const f of list) {
+      const k = (f.name + "|" + (f.brand || "")).toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k); out.push(f);
+    }
+    out.sort((a, b) => _foodScore(b, q) - _foodScore(a, q));
+    return out.slice(0, 12);
+  };
+  const uP = searchUSDA(query);
+  const oP = searchOFF(query);
+  if (onPartial) uP.then((usda) => { if (usda.length) onPartial(rank(usda)); }).catch(() => { /* final path reports */ });
+  const [u, o] = await Promise.allSettled([uP, oP]);
   const usda = u.status === "fulfilled" ? u.value : [];
   const off = o.status === "fulfilled" ? o.value : [];
-  const q = query.toLowerCase().trim();
-  const esc = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const own = [...usda, ...off];
   // FALLBACK ONLY: hit FatSecret (a metered API) just when our own DB comes up
   // short — few results, or none that actually match the query well. Common foods
@@ -6492,14 +6611,10 @@ async function searchFoods(query) {
       ? "Food search limit reached — try again in a bit (or add a free USDA API key)."
       : "Food search is temporarily unavailable — try again in a moment.");
   }
-  const seen = new Set(); const out = [];
-  for (const f of [...usda, ...fatsecret, ...off]) {
-    const k = (f.name + "|" + (f.brand || "")).toLowerCase();
-    if (seen.has(k)) continue;
-    seen.add(k); out.push(f);
-  }
-  out.sort((a, b) => _foodScore(b, q) - _foodScore(a, q));
-  return out.slice(0, 12);
+  const out = rank([...usda, ...fatsecret, ...off]);
+  _foodSearchCache.set(q, out);
+  if (_foodSearchCache.size > 80) _foodSearchCache.delete(_foodSearchCache.keys().next().value); // bound memory
+  return out;
 }
 
 // Brand wordmark — "GLI" in brand cyan + "DE" in white, mirroring the old
@@ -6579,11 +6694,13 @@ const normalizePickedFood = (food) => {
   if (food.per === "serving") {
     return { name: food.name, brand: food.brand || "", mode: "serving",
       per: { kcal: food.kcal || 0, p: food.p || 0, c: food.c || 0, f: food.f || 0 },
+      micros: food.micros || null, // per serving
       servingLabel: food.servingLabel || "serving", source: food.source || "" };
   }
   const baseUnit = food.unit === "ml" ? "ml" : "g";
   return { name: food.name, brand: food.brand || "", mode: "weight",
     per100: { kcal: food.kcal || 0, p: food.p || 0, c: food.c || 0, f: food.f || 0 },
+    micros: food.micros || null, // per 100g/ml
     baseUnit, servingGrams: (food.serving && food.serving > 0) ? food.serving : null,
     servingText: food.servingText || "", source: food.source || "" };
 };
@@ -6600,12 +6717,14 @@ const deriveBasisFromMeal = (m) => {
     const s = g > 0 ? 100 / g : 0;
     return { name: m.name || "", brand: m.brand || "", mode: "weight",
       per100: { kcal: cal * s, p: p * s, c: c * s, f: f * s },
+      micros: scaleMicros(m.micros, s), // stored per logged serving → back to per-100
       baseUnit: unit === "ml" ? "ml" : "g", servingGrams: null, servingText: "",
       initialQty: amt, initialUnit: unit };
   }
   const qty = (amt && amt > 0 && unit === "serving") ? amt : 1;
   return { name: m.name || "", brand: m.brand || "", mode: "serving",
     per: { kcal: cal / qty, p: p / qty, c: c / qty, f: f / qty },
+    micros: scaleMicros(m.micros, 1 / qty), // per one serving
     servingLabel: "serving", initialQty: qty };
 };
 
@@ -6636,18 +6755,21 @@ function FoodServingModal({ food, editing, mealLabel, onConfirm, onClose }) {
     if (isServing || food.servingGrams) return "1";
     return "100"; // per-100 basis with no known serving → start at 100
   });
-  // Compute calories + macros for the current qty/unit.
+  // Compute calories + macros (and the micro scale factor) for the current qty/unit.
   const computed = (() => {
     const q = Math.max(0, parseFloat(qty) || 0);
     if (isServing) {
       return { calories: Math.round(food.per.kcal * q), protein: Math.round(food.per.p * q),
-        carbs: Math.round(food.per.c * q), fat: Math.round(food.per.f * q) };
+        carbs: Math.round(food.per.c * q), fat: Math.round(food.per.f * q), factor: q };
     }
     const grams = unit === "serving" ? q * (food.servingGrams || 0) : unitToGrams(q, unit, null);
     const factor = grams / 100;
     return { calories: Math.round(food.per100.kcal * factor), protein: Math.round(food.per100.p * factor),
-      carbs: Math.round(food.per100.c * factor), fat: Math.round(food.per100.f * factor) };
+      carbs: Math.round(food.per100.c * factor), fat: Math.round(food.per100.f * factor), factor };
   })();
+  // Micronutrients at the current serving (S94, MacroFactor-style panel).
+  const servingMicros = scaleMicros(food.micros, computed.factor);
+  const [showMicroPanel, setShowMicroPanel] = useState(false);
   // Editable macro/cal values default to the computed ones; a manual edit sticks
   // until the qty/unit changes (which recomputes). `override` holds manual edits.
   const [override, setOverride] = useState(null); // {calories,protein,carbs,fat} or null
@@ -6670,6 +6792,7 @@ function FoodServingModal({ food, editing, mealLabel, onConfirm, onClose }) {
       protein: vals.protein || 0, carbs: vals.carbs || 0, fat: vals.fat || 0,
       grams: Math.max(0, parseFloat(qty) || 0), unit };
     if (food.brand) payload.brand = food.brand;
+    if (servingMicros) payload.micros = servingMicros; // micros at the logged serving
     onConfirm(payload);
   };
 
@@ -6741,6 +6864,31 @@ function FoodServingModal({ food, editing, mealLabel, onConfirm, onClose }) {
           </div>
         </div>
 
+        {/* Micronutrients (S94): everything the source database reports, scaled
+            to the chosen serving. Collapsed by default to keep the sheet tight. */}
+        {servingMicros && (
+          <div>
+            <button onClick={() => setShowMicroPanel((s) => !s)}
+              style={{ border: "none", background: "transparent", color: "var(--accent)", cursor: "pointer",
+                fontSize: ".76rem", fontWeight: 700, padding: 0, textDecoration: "underline" }}>
+              {showMicroPanel ? "Hide micronutrients" : `Micronutrients (${Object.keys(servingMicros).length}) ▸`}
+            </button>
+            {showMicroPanel && (
+              <div style={{ marginTop: "8px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 14px" }}>
+                {MICRO_DEFS.filter((d) => servingMicros[d.k] != null).map((d) => (
+                  <div key={d.k} style={{ display: "flex", justifyContent: "space-between", fontSize: ".74rem", padding: "2px 0", borderBottom: "1px solid var(--border)" }}>
+                    <span style={{ color: "var(--muted)" }}>{d.label}</span>
+                    <span style={{ color: "var(--text)", fontWeight: 600 }}>{servingMicros[d.k]}{d.unit}</span>
+                  </div>
+                ))}
+                <div style={{ gridColumn: "1 / -1", fontSize: ".64rem", color: "var(--muted)", fontStyle: "italic", marginTop: "2px" }}>
+                  From the food database — coverage varies by food; branded items usually report the label panel only.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div style={{ display: "flex", gap: "8px", marginTop: "2px" }}>
           <button onClick={save} disabled={!vals.calories || vals.calories <= 0}
             style={{ flex: 1, padding: "12px", fontSize: ".92rem", fontWeight: 700, borderRadius: "10px",
@@ -6775,6 +6923,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const [searchErr, setSearchErr] = useState("");
   const [picked, setPicked] = useState(null); // chosen food's per-100g macros, for serving rescale
   const [detailState, setDetailState] = useState(null); // {food, editingId, mealType} → FoodServingModal open
+  const [showDayMicros, setShowDayMicros] = useState(false); // daily micronutrient roll-up expanded
   const [grams, setGrams] = useState("100");
   const [unit, setUnit] = useState("g");      // serving unit — g or ml (MyFitnessPal-style)
   const [servingText, setServingText] = useState(""); // the product's labelled serving (e.g. "330 ml")
@@ -6876,15 +7025,34 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
     }
     setAiBusy(false);
   };
-  // Run a USDA food search for the current query.
-  const runSearch = async () => {
-    const q = searchQ.trim();
+  // Run a food search. Progressive: results render the moment the fastest
+  // source (usually USDA) lands, then upgrade to the full merged list. A
+  // sequence guard drops stale responses so fast typing can't show old results.
+  const searchSeqRef = useRef(0);
+  const runSearch = async (qArg) => {
+    const q = String(qArg != null ? qArg : searchQ).trim();
     if (q.length < 2) return;
-    setSearching(true); setSearchErr(""); setResults([]);
-    try { setResults(await searchFoods(q)); }
-    catch (e) { setSearchErr(e.message || "Search failed."); }
-    finally { setSearching(false); }
+    const seq = ++searchSeqRef.current;
+    setSearching(true); setSearchErr("");
+    try {
+      const final = await searchFoods(q, (partial) => {
+        if (searchSeqRef.current === seq) { setResults(partial); setSearching(false); }
+      });
+      if (searchSeqRef.current === seq) setResults(final);
+    } catch (e) {
+      if (searchSeqRef.current === seq) { setSearchErr(e.message || "Search failed."); setResults([]); }
+    } finally {
+      if (searchSeqRef.current === seq) setSearching(false);
+    }
   };
+  // Search AS YOU TYPE (MyFitnessPal-style): debounced 350ms once 3+ chars are
+  // in the box. Enter / the Search button still work for short queries.
+  useEffect(() => {
+    const q = searchQ.trim();
+    if (!searchOpen || q.length < 3) return;
+    const t = setTimeout(() => runSearch(q), 350);
+    return () => clearTimeout(t);
+  }, [searchQ, searchOpen]); // eslint-disable-line react-hooks/exhaustive-deps
   // Fill the form from a per-100g food scaled to a serving size (grams).
   const applyServing = (food, amt) => {
     // Per-serving foods (FatSecret "1 scoop"/"1 container") scale by NUMBER OF
@@ -6961,7 +7129,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
       const food = { name: tidy(p.product_name), brand: (p.brands || "").split(",")[0].trim(),
         kcal: Math.round(nm["energy-kcal_100g"] || 0), p: Math.round(nm.proteins_100g || 0),
         c: Math.round(nm.carbohydrates_100g || 0), f: Math.round(nm.fat_100g || 0),
-        unit, serving, servingText: (p.serving_size || "").trim() };
+        unit, serving, servingText: (p.serving_size || "").trim(), micros: _offMicros(nm) };
       setSearchOpen(true);
       if (!food.kcal) { setName(food.name); setScanErr("Found the product, but it has no nutrition data — enter the numbers manually."); return; }
       setScanErr(""); pickFood(food);
@@ -7086,7 +7254,8 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
     onAddMeal({ name: f.name, type: addingTo === "other" ? "" : addingTo,
       ...(f.brand ? { brand: f.brand } : {}),
       calories: f.calories || 0, protein: f.protein || 0, carbs: f.carbs || 0, fat: f.fat || 0,
-      ...(f.grams ? { grams: f.grams, unit: f.unit || "g" } : {}) });
+      ...(f.grams ? { grams: f.grams, unit: f.unit || "g" } : {}),
+      ...(f.micros ? { micros: f.micros } : {}) });
     closeForm();
   };
 
@@ -7414,6 +7583,43 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
             </span>
           </div>
         )}
+        {/* Daily MICRONUTRIENT roll-up (S94): sums the micros carried by foods
+            logged from the database/barcode; each row shows today vs the
+            general-adult reference (▲ reach it / ▼ stay under it). */}
+        {(() => {
+          const dayMicros = sumMicros(list);
+          const keys = MICRO_DEFS.filter((d) => dayMicros[d.k] > 0);
+          if (!keys.length) return null;
+          return (
+            <div style={{ borderTop:"1px solid var(--border)", paddingTop:"8px" }}>
+              <button onClick={() => setShowDayMicros((s) => !s)}
+                style={{ border:"none", background:"transparent", color:"var(--accent)", cursor:"pointer",
+                  fontSize:".74rem", fontWeight:700, padding:0, textDecoration:"underline" }}>
+                {showDayMicros ? "Hide micronutrients" : `Micronutrients today (${keys.length}) ▸`}
+              </button>
+              {showDayMicros && (
+                <div style={{ marginTop:"8px", display:"grid", gridTemplateColumns:"1fr 1fr", gap:"4px 14px" }}>
+                  {keys.map((d) => {
+                    const v = _mRound(dayMicros[d.k]);
+                    const overLimit = d.limit && d.rda && v > d.rda;
+                    const metTarget = !d.limit && d.rda && v >= d.rda;
+                    return (
+                      <div key={d.k} style={{ display:"flex", justifyContent:"space-between", fontSize:".72rem", padding:"2px 0", borderBottom:"1px solid var(--border)" }}>
+                        <span style={{ color:"var(--muted)" }}>{d.label}</span>
+                        <span style={{ color: overLimit ? "var(--orange)" : metTarget ? "var(--green)" : "var(--text)", fontWeight:600 }}>
+                          {v}{d.unit}{d.rda ? <span style={{ color:"var(--muted)", fontWeight:400 }}> / {d.limit ? "≤" : ""}{d.rda}{d.unit}</span> : null}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  <div style={{ gridColumn:"1 / -1", fontSize:".62rem", color:"var(--muted)", fontStyle:"italic", marginTop:"2px" }}>
+                    Counts foods logged from the database or barcode scan. References are general adult values — not medical advice.
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </div>
       )}
       {detailState && (
@@ -8155,7 +8361,7 @@ function WeightDayLogger({ date, existing, onSave }) {
 
 function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
-  onUpdateCardio, onUpdateStrength, onAddMeal, onRemoveMeal, onEditMeal, recentFoods, weekSummary, history, onRefresh, isRemote,
+  onUpdateCardio, onUpdateStrength, onAddMeal, onRemoveMeal, onEditMeal, recentFoods, weekSummary, recentWearable, history, onRefresh, isRemote,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onAddCustomExercise }) {
 
   const [showCalendar, setShowCalendar] = useState(false);
@@ -8351,19 +8557,30 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         </div>
       </div>
 
-      {/* Wearable tracker (Trainerize v3): today's real burn + steps from the
-          client's connected watch. With the tracker adjustment ON (Full Plan →
+      {/* Wearable tracker (Trainerize v3): real burn + steps from the client's
+          connected watch. Prefers TODAY's data; when today hasn't synced yet
+          (Garmin→Trainerize lags ~a day, so the card used to vanish at every
+          midnight rollover) it falls back to the latest day with data (≤3 back),
+          labeled with the day. With the tracker adjustment ON (Full Plan →
           Summary → Nutrition Approach), today's target above is derived from
-          this measured burn; otherwise it's display-only. */}
-      {dailyLog.wearable && (dailyLog.wearable.active || dailyLog.wearable.steps) ? (
-        <div className="card" style={{padding:"10px 14px",marginBottom:"14px",display:"flex",alignItems:"center",gap:"8px",fontSize:".82rem",flexWrap:"wrap"}}>
-          <Icon name="watch" size={16} color="var(--accent)" />
-          <span style={{color:"var(--muted)"}}>Tracker{dailyLog.wearable.source ? ` (${dailyLog.wearable.source})` : ""}:</span>
-          {dailyLog.wearable.active ? <span style={{fontFamily:"'Sora',sans-serif"}}>{Number(dailyLog.wearable.active).toLocaleString()} cal active</span> : null}
-          {dailyLog.wearable.steps ? <span style={{fontFamily:"'Sora',sans-serif"}}>· {Number(dailyLog.wearable.steps).toLocaleString()} steps</span> : null}
-          {trackerTdee ? <span style={{width:"100%",fontSize:".72rem",fontWeight:700,color:"var(--accent)"}}>Today's target is based on your tracker's measured burn</span> : null}
-        </div>
-      ) : null}
+          today's measured burn; otherwise it's display-only. */}
+      {(() => {
+        const todayW = dailyLog.wearable && (dailyLog.wearable.active || dailyLog.wearable.steps) ? dailyLog.wearable : null;
+        const fb = !todayW && recentWearable && recentWearable.daysAgo > 0 ? recentWearable : null;
+        const w = todayW || (fb && fb.wearable);
+        if (!w) return null;
+        const dayLabel = fb ? (fb.daysAgo === 1 ? "Yesterday" : `${fb.daysAgo} days ago`) : null;
+        return (
+          <div className="card" style={{padding:"10px 14px",marginBottom:"14px",display:"flex",alignItems:"center",gap:"8px",fontSize:".82rem",flexWrap:"wrap"}}>
+            <Icon name="watch" size={16} color="var(--accent)" />
+            <span style={{color:"var(--muted)"}}>Tracker{w.source ? ` (${w.source})` : ""}{dayLabel ? ` · ${dayLabel}` : ""}:</span>
+            {w.active ? <span style={{fontFamily:"'Sora',sans-serif"}}>{Number(w.active).toLocaleString()} cal active</span> : null}
+            {w.steps ? <span style={{fontFamily:"'Sora',sans-serif"}}>· {Number(w.steps).toLocaleString()} steps</span> : null}
+            {todayW && trackerTdee ? <span style={{width:"100%",fontSize:".72rem",fontWeight:700,color:"var(--accent)"}}>Today's target is based on your tracker's measured burn</span> : null}
+            {fb ? <span style={{width:"100%",fontSize:".7rem",color:"var(--muted)"}}>Today's watch data hasn't synced yet — it usually arrives within a day.</span> : null}
+          </div>
+        );
+      })()}
 
       {/* Expanded stat detail */}
       {expandedStat && (
@@ -15733,6 +15950,7 @@ export default function App() {
   const [recentFoods, setRecentFoods] = useState([]); // named foods for one-tap re-add
   const recentFoodsRef = useRef([]);          // mirror (avoids stale closures in handlers)
   const [weekSummary, setWeekSummary] = useState(null); // last-7-day nutrition averages
+  const [recentWearable, setRecentWearable] = useState(null); // latest day (≤3 back) with tracker data — {daysAgo, wearable}
   const [meName, setMeName] = useState("");   // current user's display name
   const [meUid, setMeUid] = useState("");     // current user's uid
   const [meEmail, setMeEmail] = useState(""); // current user's email (for the menu)
@@ -16452,7 +16670,8 @@ export default function App() {
     // amount (MyFitnessPal-style "log again"). Newest first, kept as a LARGE
     // history so foods saved long ago still autocomplete (~400 ≈ 50KB JSON).
     const entry = { name: base, type: tkey, brand: m.brand || "", calories: m.calories||0, protein: m.protein||0, carbs: m.carbs||0, fat: m.fat||0,
-      grams: m.grams != null ? Number(m.grams) : null, unit: m.unit || null, ts: Date.now() };
+      grams: m.grams != null ? Number(m.grams) : null, unit: m.unit || null,
+      ...(m.micros ? { micros: m.micros } : {}), ts: Date.now() };
     const next = [entry, ...recentFoodsRef.current.filter((f) => {
       // Drop the previous entry for this SAME food + meal type (last amount wins).
       if (recentFoodKey(f.name, f.type) === key) return false;
@@ -16473,7 +16692,8 @@ export default function App() {
       protein: Number(meal.protein)||0, carbs: Number(meal.carbs)||0, fat: Number(meal.fat)||0,
       time: meal.time || hhmmLocal(),
       ...(meal.brand ? { brand: meal.brand } : {}),
-      ...(meal.grams != null ? { grams: Number(meal.grams), unit: meal.unit || "g" } : {}) };
+      ...(meal.grams != null ? { grams: Number(meal.grams), unit: meal.unit || "g" } : {}),
+      ...(meal.micros ? { micros: meal.micros } : {}) };
     upsertRecentFood(m);
     const updated = {
       ...dailyLog,
@@ -16518,7 +16738,13 @@ export default function App() {
       calories: Number(fields.calories)||0, protein: Number(fields.protein)||0,
       carbs: Number(fields.carbs)||0, fat: Number(fields.fat)||0,
       ...(fields.brand ? { brand: fields.brand } : {}), // a re-picked food's brand overrides
-      ...(fields.grams != null ? { grams: Number(fields.grams), unit: fields.unit || "g" } : {}) };
+      ...(fields.grams != null ? { grams: Number(fields.grams), unit: fields.unit || "g" } : {}),
+      // micros follow the edit when provided (serving rescale); an edit without
+      // micros keeps the old ones only if the macros are unchanged — otherwise
+      // stale micros would misreport a materially different entry.
+      ...(fields.micros ? { micros: fields.micros }
+        : (old.micros && Number(fields.calories) === (old.calories || 0)) ? { micros: old.micros } : { micros: undefined }) };
+    if (upd.micros === undefined) delete upd.micros;
     const newMeals = meals.slice(); newMeals[idx] = upd;
     upsertRecentFood(upd);
     const updated = {
@@ -16656,6 +16882,21 @@ export default function App() {
       setWeekSummary(days > 0
         ? { days, avgCal: Math.round(cal / days), avgP: Math.round(p / days), avgC: Math.round(c / days), avgF: Math.round(f / days) }
         : { days: 0, avgCal: 0, avgP: 0, avgC: 0, avgF: 0 });
+      // Most recent day (within the last 3) that has WEARABLE data. The tracker
+      // card used to render only TODAY's wearable — but Garmin→Trainerize lags
+      // ~a day, so every midnight rollover made the card vanish until the next
+      // sync landed ("it disappears after a certain period of time"). Reuses
+      // the streak loop's cached reads (no extra Firestore round-trips).
+      let rw = null;
+      for (let i = 0; i <= 3 && !rw; i++) {
+        const lv = await readDayCached(keyFor(i));
+        if (!lv) continue;
+        try {
+          const pl = JSON.parse(lv);
+          if (pl.wearable && (pl.wearable.active || pl.wearable.steps)) rw = { daysAgo: i, wearable: pl.wearable };
+        } catch (e) { /* ignore */ }
+      }
+      setRecentWearable(rw);
     })();
     // todayKey: re-load at the midnight rollover so yesterday's totals aren't
     // carried into (and written onto) the new day's key.
@@ -16849,7 +17090,7 @@ export default function App() {
               onOpenPlan={()=>{setNavFrom("dashboard");setStepAndSave(0);}} onOpenResults={()=>{setNavFrom("dashboard");setShowDash(false);}}
               onEditWorkouts={()=>{setNavFrom("dashboard");setStepAndSave(3);}}
               onLogUpdate={onLogUpdate} dailyLog={dailyLog} streak={streak}
-              onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} weekSummary={weekSummary} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
+              onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
               onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; return n; })}
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
