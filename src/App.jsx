@@ -7926,7 +7926,9 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const [expandedSnap, setExpandedSnap] = useState(false);
   const [showMacros, setShowMacros] = useState(false);
   const [editMacros, setEditMacros] = useState(false); // macro-target editor open
-  const [mtDraft, setMtDraft] = useState({ protein:"", carbs:"", fat:"" });
+  const [mtDraft, setMtDraft] = useState({ protein:"", carbs:"", fat:"" });   // grams draft
+  const [mtMode, setMtMode] = useState("grams"); // "grams" | "pct" — how you enter targets
+  const [mtPct, setMtPct] = useState({ protein:"", carbs:"", fat:"" });       // percentage draft
   // Drafts so water/weight only save when you press Enter or tap Log — not on
   // every keystroke (which used to log "weight: 1 lbs" as you typed).
   const [waterDraft, setWaterDraft] = useState("");
@@ -7987,6 +7989,37 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const carbsTarget = mt && mt.carbs != null ? mt.carbs
     : Math.max(0, Math.round((target - proteinTarget * 4 - fatTarget * 9) / 4));
   const macrosCustom = !!mt;
+
+  // ── Macro % helpers (S94) ──────────────────────────────────────────────────
+  // A macro's share of the calorie target: grams → % (protein/carbs = 4 cal/g,
+  // fat = 9 cal/g). Used both to DISPLAY the current split as % and to convert a
+  // %-entered target back to grams. `target` is the daily calorie goal.
+  const gToPct = (g, calPerG) => (target > 0 ? Math.round((Number(g) * calPerG / target) * 100) : 0);
+  const pctToG = (p, calPerG) => (target > 0 ? Math.round((Number(p) / 100) * target / calPerG) : 0);
+  // Current effective split, as whole percentages (what the plan is targeting now).
+  const splitP = gToPct(proteinTarget, 4), splitC = gToPct(carbsTarget, 4), splitF = gToPct(fatTarget, 9);
+  // Three recommended splits the user can lead with (Kevin's call: offer all,
+  // lead with bodyweight). Each returns {protein,carbs,fat} percentages summing ~100.
+  const recPct = (kind) => {
+    if (kind === "balanced") return { protein: 30, carbs: 40, fat: 30 };
+    if (kind === "goal") {
+      // Cut / maintain / bulk from the goal direction (goalWeight vs current).
+      const gw = Number(goalWeight), cw = Number(weightLbs);
+      if (gw && cw && gw < cw - 0.5) return { protein: 40, carbs: 35, fat: 25 }; // cut: protein-forward
+      if (gw && cw && gw > cw + 0.5) return { protein: 30, carbs: 45, fat: 25 }; // bulk: carb-forward
+      return { protein: 30, carbs: 40, fat: 30 };                               // maintain
+    }
+    // "bodyweight" (default/lead): the app's existing auto targets, expressed as %.
+    return { protein: gToPct(autoProtein, 4), carbs: gToPct(
+      Math.max(0, Math.round((target - autoProtein * 4 - autoFat * 9) / 4)), 4), fat: gToPct(autoFat, 9) };
+  };
+  // Live gram preview of the % draft (for the conversion labels under the % inputs).
+  const pctDraftG = {
+    protein: pctToG(parseFloat(mtPct.protein) || 0, 4),
+    carbs: pctToG(parseFloat(mtPct.carbs) || 0, 4),
+    fat: pctToG(parseFloat(mtPct.fat) || 0, 9),
+  };
+  const pctSum = (parseFloat(mtPct.protein) || 0) + (parseFloat(mtPct.carbs) || 0) + (parseFloat(mtPct.fat) || 0);
 
   // Ring SVG
   const ringR = 58, ringC = 2 * Math.PI * ringR;
@@ -8319,7 +8352,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"10px",gap:"8px"}}>
           <span style={{fontSize:".8rem",fontWeight:700,color:"var(--text)"}}>Macro Targets</span>
           {onSetMacroTargets && (
-            <button onClick={()=>{ setMtDraft({ protein:String(proteinTarget), carbs:String(carbsTarget), fat:String(fatTarget) }); setEditMacros(v=>!v); }}
+            <button onClick={()=>{ setMtDraft({ protein:String(proteinTarget), carbs:String(carbsTarget), fat:String(fatTarget) }); setMtPct({ protein:String(splitP), carbs:String(splitC), fat:String(splitF) }); setEditMacros(v=>!v); }}
               style={{border:"none",background:"transparent",color:"var(--accent)",cursor:"pointer",fontSize:".74rem",fontWeight:700,padding:0,textDecoration:"underline"}}>
               {editMacros ? "Close" : "✎ Edit targets"}
             </button>
@@ -8332,7 +8365,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         ].map((m) => {
           const fill = m.tgt > 0 ? Math.min(100, Math.round((m.val / m.tgt) * 100)) : 0;
           const over = m.tgt > 0 && m.val > m.tgt;
-          const openEdit = onSetMacroTargets ? ()=>{ setMtDraft({ protein:String(proteinTarget), carbs:String(carbsTarget), fat:String(fatTarget) }); setEditMacros(true); } : undefined;
+          const openEdit = onSetMacroTargets ? ()=>{ setMtDraft({ protein:String(proteinTarget), carbs:String(carbsTarget), fat:String(fatTarget) }); setMtPct({ protein:String(splitP), carbs:String(splitC), fat:String(splitF) }); setEditMacros(true); } : undefined;
           return (
             <div key={m.label} onClick={openEdit} title={openEdit ? "Tap to edit targets" : undefined}
               style={{ marginBottom:"8px", cursor: openEdit ? "pointer" : "default" }}>
@@ -8355,6 +8388,12 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             : ""}
           {macrosCustom ? "custom targets set by you" : "estimates from bodyweight & calorie goal"}
         </div>
+        {/* Recommended/current split shown as % of calories (S94, part a). */}
+        {target > 0 && (proteinTarget || carbsTarget || fatTarget) > 0 && (
+          <div style={{fontSize:".65rem",color:"var(--muted)",marginTop:"3px",textAlign:"center"}}>
+            Split: <span style={{color:"#ff6b9d",fontWeight:700}}>{splitP}%</span> protein · <span style={{color:"#ffcc44",fontWeight:700}}>{splitC}%</span> carbs · <span style={{color:"#4fc3f7",fontWeight:700}}>{splitF}%</span> fat
+          </div>
+        )}
         {/* Protein basis — user choice for the AUTO target (custom targets override it). */}
         {!macrosCustom && onSetProteinBasis && Number(weightLbs) > 0 && (
           <div style={{display:"flex",alignItems:"center",gap:"6px",padding:"8px 0 0",flexWrap:"wrap"}}>
@@ -8372,19 +8411,72 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         )}
         {editMacros && onSetMacroTargets && (
           <div style={{padding:"10px 0 2px",display:"flex",flexDirection:"column",gap:"8px"}}>
-            <div style={{display:"flex",gap:"6px"}}>
-              {[["protein","Protein"],["carbs","Carbs"],["fat","Fat"]].map(([k,lbl])=>(
-                <div key={k} style={{flex:1}}>
-                  <div style={{fontSize:".62rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:"3px"}}>{lbl} g</div>
-                  <input type="number" inputMode="numeric" value={mtDraft[k]}
-                    onChange={e=>setMtDraft(d=>({...d,[k]:e.target.value}))}
-                    style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:"7px",border:"1px solid var(--border)",background:"var(--surface)",color:"var(--text)",fontSize:".85rem"}} />
-                </div>
+            {/* Grams ⇄ % mode toggle — convert the draft across when switching. */}
+            <div style={{display:"flex",gap:"4px",background:"var(--surface)",border:"1px solid var(--border)",borderRadius:"999px",padding:"3px",alignSelf:"flex-start"}}>
+              {[["grams","Grams"],["pct","Percent"]].map(([mode,lbl])=>(
+                <button key={mode} onClick={()=>{
+                    if(mode===mtMode) return;
+                    if(mode==="pct"){ // grams draft → %
+                      setMtPct({ protein:String(gToPct(parseFloat(mtDraft.protein)||0,4)), carbs:String(gToPct(parseFloat(mtDraft.carbs)||0,4)), fat:String(gToPct(parseFloat(mtDraft.fat)||0,9)) });
+                    } else { // % draft → grams
+                      setMtDraft({ protein:String(pctToG(parseFloat(mtPct.protein)||0,4)), carbs:String(pctToG(parseFloat(mtPct.carbs)||0,4)), fat:String(pctToG(parseFloat(mtPct.fat)||0,9)) });
+                    }
+                    setMtMode(mode);
+                  }}
+                  style={{padding:"4px 14px",fontSize:".72rem",fontWeight:700,borderRadius:"999px",cursor:"pointer",border:"none",
+                    background: mtMode===mode?"var(--accent-fill)":"transparent", color: mtMode===mode?"#0b0b12":"var(--muted)"}}>{lbl}</button>
               ))}
             </div>
+
+            {mtMode==="grams" ? (
+              <div style={{display:"flex",gap:"6px"}}>
+                {[["protein","Protein"],["carbs","Carbs"],["fat","Fat"]].map(([k,lbl])=>(
+                  <div key={k} style={{flex:1}}>
+                    <div style={{fontSize:".62rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:"3px"}}>{lbl} g</div>
+                    <input type="number" inputMode="numeric" value={mtDraft[k]}
+                      onChange={e=>setMtDraft(d=>({...d,[k]:e.target.value}))}
+                      style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:"7px",border:"1px solid var(--border)",background:"var(--surface)",color:"var(--text)",fontSize:".85rem"}} />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <>
+                {/* Recommended split presets (lead with bodyweight, then balanced + goal). */}
+                <div style={{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap"}}>
+                  <span style={{fontSize:".66rem",color:"var(--muted)"}}>Recommended:</span>
+                  {[["bodyweight","Bodyweight"],["balanced","Balanced"],["goal","Goal-based"]].map(([kind,lbl])=>(
+                    <button key={kind} onClick={()=>{ const r=recPct(kind); setMtPct({ protein:String(r.protein), carbs:String(r.carbs), fat:String(r.fat) }); }}
+                      style={{padding:"4px 10px",fontSize:".68rem",fontWeight:700,borderRadius:"999px",cursor:"pointer",border:"1px solid var(--border)",background:"transparent",color:"var(--accent)"}}>{lbl}</button>
+                  ))}
+                </div>
+                <div style={{display:"flex",gap:"6px"}}>
+                  {[["protein","Protein",4],["carbs","Carbs",4],["fat","Fat",9]].map(([k,lbl])=>(
+                    <div key={k} style={{flex:1}}>
+                      <div style={{fontSize:".62rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px",marginBottom:"3px"}}>{lbl} %</div>
+                      <input type="number" inputMode="numeric" value={mtPct[k]}
+                        onChange={e=>setMtPct(d=>({...d,[k]:e.target.value}))}
+                        style={{width:"100%",boxSizing:"border-box",padding:"8px 10px",borderRadius:"7px",border:"1px solid var(--border)",background:"var(--surface)",color:"var(--text)",fontSize:".85rem"}} />
+                      <div style={{fontSize:".6rem",color:"var(--muted)",marginTop:"3px",textAlign:"center"}}>= {pctDraftG[k]}g</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{fontSize:".64rem",color: Math.round(pctSum)===100?"var(--muted)":"var(--orange)",textAlign:"center"}}>
+                  Total: {Math.round(pctSum)}%{Math.round(pctSum)!==100 ? " · normalized to 100% on save" : ""}
+                </div>
+              </>
+            )}
+
             <div style={{display:"flex",gap:"6px"}}>
               <button onClick={()=>{
-                  onSetMacroTargets({ protein:Math.max(0,parseInt(mtDraft.protein)||0), carbs:Math.max(0,parseInt(mtDraft.carbs)||0), fat:Math.max(0,parseInt(mtDraft.fat)||0) });
+                  let t;
+                  if(mtMode==="pct"){
+                    let p=parseFloat(mtPct.protein)||0, c=parseFloat(mtPct.carbs)||0, f=parseFloat(mtPct.fat)||0;
+                    const s=p+c+f; if(s>0){ p=p/s*100; c=c/s*100; f=f/s*100; } // normalize to 100
+                    t={ protein:Math.max(0,pctToG(p,4)), carbs:Math.max(0,pctToG(c,4)), fat:Math.max(0,pctToG(f,9)) };
+                  } else {
+                    t={ protein:Math.max(0,parseInt(mtDraft.protein)||0), carbs:Math.max(0,parseInt(mtDraft.carbs)||0), fat:Math.max(0,parseInt(mtDraft.fat)||0) };
+                  }
+                  onSetMacroTargets(t);
                   setEditMacros(false);
                 }}
                 style={{padding:"8px 14px",fontSize:".8rem",fontWeight:700,borderRadius:"7px",border:"none",background:"var(--accent-fill)",color:"#0b0b12",cursor:"pointer"}}>Save targets</button>
@@ -8394,8 +8486,8 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
               )}
             </div>
             <div style={{fontSize:".62rem",color:"var(--muted)",fontStyle:"italic"}}>
-              Saving locks these targets for this plan. "Reset to auto" returns to the
-              bodyweight/calorie-based estimates that adjust as the plan changes.
+              Enter targets in grams or as a % of your {target}-cal goal (P/C = 4 cal/g, fat = 9 cal/g).
+              Saving locks them for this plan; "Reset to auto" returns to the bodyweight/calorie estimates.
             </div>
           </div>
         )}
