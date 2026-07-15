@@ -1,5 +1,79 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S93 (Jul 14 — MARATHON): food DB, FatSecret LIVE, AI fixes, Trainerize linked-client sync
+_Everything below is committed + pushed (`origin/main` clean at `d87cb4f`) + deployed. Firebase
+`calorieiq-29762`; domain **glidna.com**; model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`._
+
+### ⏭️ NEXT SESSION — two tasks Kevin queued (context ran out before starting them)
+1. **Make Ask Glidna feel like the Claude app (less "robotic/clunky").** The replies feel terse/stiff
+   because the system prompts hard-constrain them: `functions/aichat.js` SYSTEM_CLIENT (~L66) +
+   SYSTEM_TRAINER (~L86) + the shared appended block both end with *"Keep them short. Use plain text with
+   dashes… NO markdown tables/headings/code."* and I added a *"Voice & tone: talk like a calm human, minimal
+   exclamation points, no step-narration"* line (~L207). Also `max_tokens: 1024` on every `messages.create`/
+   `.stream` (aiChat, aiChatStream, runAssistantTurn) clips longer answers. **Levers:** loosen the formatting
+   rules (allow natural prose + light markdown), warm the tone guidance (conversational, not clipped), bump
+   max_tokens (e.g. 1500–2000). Keep sonnet (cost). Deploy aiChat + aiChatStream; test iteratively in the app
+   (streaming smoother `makeStreamSmoother` already gives Claude-like typing). Don't lose the good S93 wins
+   (it now actually CALLS log_meals for batches + doesn't over-narrate — keep those, just make prose warmer).
+2. **Macro targets by PERCENTAGE.** Kevin wants the macro card to (a) show a RECOMMENDED protein/carb/fat
+   *percentage* split from the person's stats (height/age/weight/gender — really goal+bodyweight; height/age/
+   gender feed the calorie target via BMR, so the "%" is a sensible default split he can lean on), and (b) let
+   the user set targets EITHER by manual grams (exists) OR by entering %s that convert to grams (% × calorie
+   target ÷ 4 for P/C, ÷ 9 for F). Today (App.jsx DailyDashboard macro card ~L8170): protein = `proteinBasisOf`
+   × weight (1.0/0.7 chips), fat = 28% cal, carbs = remainder; custom `data.macroTargets` (grams) overrides;
+   "✎ Edit targets" + "Reset to auto" already there. **Add a %-mode** to that card (a grams⇄% toggle):
+   show the current split as %s, let them edit %s (auto-normalize to 100, convert to grams against the calorie
+   target), store as `data.macroTargets` grams (or add `data.macroPct`). Keep it consistent across DailyDashboard
+   + Results SummaryTab (~L4043) + NutrientsTab (~L5291) via the shared helpers. Confirm with Kevin exactly what
+   "% based on height/age/weight/gender" should recommend (a fixed sensible split like 30P/40C/30F, or
+   goal-derived) — he may just want a good default shown + fully editable by % or grams.
+
+### What S93 shipped (all LIVE + verified)
+- **FatSecret food DB is LIVE** via a fixed-IP proxy: `proxy/` (tiny Node relay on a GCE e2-micro, static IP
+  `35.247.125.182`, whitelisted in FatSecret; ~$4/mo for the IP). `functions/foodsearch.js` = the `foodSearch`
+  callable (Firebase-auth'd) → proxy → FatSecret; **FALLBACK-ONLY** (searchFoods in App.jsx only calls it when
+  USDA/OFF come up short) + every FatSecret result FLAGGED. Secrets `FATSECRET_CLIENT_ID/SECRET/PROXY_URL/
+  PROXY_SECRET`. gcloud is now installed at `~/google-cloud-sdk` + authed as kevin@ (owner) — can drive GCE/
+  Firestore-REST directly. **Rotate FatSecret secret when convenient** (it's in this chat log; harmless — IP-gated).
+- **Food UX:** search ranking rewritten (generic whole-foods rank above branded oddities — "egg" no longer →
+  Mars chocolate egg; USDA pulls Foundation/SR Legacy + Branded, ranked by name+brand match); **realistic
+  serving sizes** (USDA servingSize/householdServingFullText + OFF serving_quantity + FatSecret per-serving
+  "1 scoop"/"1 container" with a Servings stepper instead of a flat 100g); **brand shown under the food name**
+  (e.g. "General Mills"); **search is the default** when adding food; **edit a logged food via library search**
+  (not just retype); **AI-estimate servings stepper**; macro input boxes now **labeled** Protein/Carbs/Fat.
+- **Protein basis = user choice** (1 g/lb vs 0.7 g/lb chips on the macro card; `data.proteinPerLb`; consistent
+  across dashboard + Results via `proteinBasisOf`). **Importer sanity-checks** an implausible Trainerize macro
+  goal (drops protein >1.6 g/lb etc. so a stale 280g goal doesn't show).
+- **Calorie ring goes NEGATIVE + RED** when over target ("-431 CAL OVER").
+- **AI-logged meals were invisible** (lowercase "breakfast" ≠ section "Breakfast") — sections now match
+  case-insensitively + "Other" is a true catch-all; meal list auto-opens when a meal is added.
+- **AI batch logging FIXED** (was narrating "logging all 8!" without calling the tool): the AI now actually
+  emits log_meal for every item in one turn (prompt: "the list IS the go-ahead; text ≠ action; MUST call the
+  tool"); MAX_TOOL_ROUNDS 5→10. New **`remove_meal`** tool (undo/correct by name). **AI remembers the active
+  client/plan per conversation** (setupChat injects a "reuse this id, don't re-list" block from a relayed
+  `activeTarget`; runToolRound captures it; frontend holds it in a ref, resets on new/switched chat) — verified
+  it stops re-running list_clients every message. **Admin (Kevin's UID) = unlimited AI budget** for testing.
+- **Passkeys** now allow `www.glidna.com` too (rpID = "glidna.com" for both apex+www) — retry Face ID if that
+  was the block.
+- **Trainerize linked-client sync (the big one):** a Trainerize client linked to a real Glide account now syncs
+  straight into THAT account (watch/wearable + meals + workouts), not a dead local profile. `functions/
+  trainerize.js`: `runImport` reads `caliq-tz-links` {trainerizeId: clientUid} and routes each client via a new
+  `applySnapshotAndSyncs` helper (linked → client's active plan; else → local ctz profile). App.jsx `linkPlan`
+  now (1) records the mapping **FIRST** (before any write, so a partial link self-heals via auto-sync),
+  (2) migrates/merges the imported day-logs incl. wearable into the client, (3) kicks an immediate
+  `trainerizeImport({clientIds:[tzId]})`. The picker marks linked clients as already-imported. **Verified live:
+  Kev Cam's 45 days of Garmin data now in the client account; tracker card shows.** ⚠️ Tracker card = TODAY's
+  wearable only (Garmin→Trainerize lags ~a day; use Calendar Day view for past days). Auto-sync is ON.
+
+### S93 gotchas
+- **Deploy ALL 4 AI fns when aitools.js changes** (aiChat/aiChatStream/logMeal/setWorkoutSchedule); prompt lives
+  in aichat.js (aiChat+aiChatStream only). Trainerize.js → trainerizeImport+trainerizeAutoSync. foodsearch → foodSearch.
+- **Vercel frontend deploy lags the functions deploy by ~1-2 min** — this bit Kevin twice (he re-linked before
+  the app finished deploying → old code ran). After pushing, poll `curl -s https://glidna.com/ | grep index-*.js`
+  until the bundle hash changes before telling him to act on a frontend change.
+- Verifying signed-in: the food-search MealLog UI is only on the in-plan Daily Dashboard (trainer → open a plan),
+  NOT ClientHome (simple quick-log). dev-verify launch config (port 5199 `--strictPort`) added/removed per test.
+
 ## ⚡⚡ S92 (Jul 12 — MARATHON): trials, tiers, Ultra, workflow engine, Pro retired, sessions spec
 _Everything below is committed + pushed (`origin/main` clean) + deployed. Firebase `calorieiq-29762`;
 domain **glidna.com**; model `claude-sonnet-4-6`. Read the relevant docs/*.md for depth._
