@@ -10369,6 +10369,17 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       try { const r = await window.storage.get(profileKey(localId)); if (r && r.value) payload = r.value; } catch {}
       let tzId = null;
       try { const pj = JSON.parse(payload); tzId = pj && pj.data && pj.data.trainerizeId; } catch {}
+      // Record the routing mapping FIRST (trainerizeId → clientUid), before any
+      // client writes — so even if a later step fails, the auto-sync knows to send
+      // this client's future watch/meal/workout data to their account and self-heals.
+      if (tzId) {
+        try {
+          const lr = await window.storage.get("caliq-tz-links");
+          const links = lr && lr.value ? (JSON.parse(lr.value) || {}) : {};
+          links[tzId] = clientUid;
+          await window.storage.set("caliq-tz-links", JSON.stringify(links));
+        } catch (e) { /* best-effort */ }
+      }
       const m = await readPlansManifest(clientGet(clientUid));
       await setForUser(clientUid, planDataKey(m.active), payload);
       // Migrate the imported day logs (meals, weigh-ins, and the WATCH/wearable data)
@@ -10410,17 +10421,6 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           if (h && h.value) await setForUser(clientUid, destHist, h.value);
         }
       } catch (e) { /* best-effort log/history migration */ }
-      // If this was a Trainerize-imported profile, record trainerizeId → clientUid so
-      // the Trainerize sync writes FUTURE watch/meal/workout data into THIS client's
-      // account (not a local profile). See functions/trainerize.js runImport.
-      if (tzId) {
-        try {
-          const lr = await window.storage.get("caliq-tz-links");
-          const links = lr && lr.value ? (JSON.parse(lr.value) || {}) : {};
-          links[tzId] = clientUid;
-          await window.storage.set("caliq-tz-links", JSON.stringify(links));
-        } catch (e) { /* best-effort */ }
-      }
       if (onLinked) await onLinked(localId);
       // Kick a fresh server sync so the client's account immediately gets the latest
       // watch/meal/workout data (now routed to them via the mapping above), instead of
