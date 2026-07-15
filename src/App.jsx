@@ -6368,37 +6368,48 @@ const _tidyFood = (s) => (s || "Food").toLowerCase().replace(/\b\w/g, (c) => c.t
 // `rda` = general-adult daily reference (target to REACH); `limit: true` marks
 // values to stay UNDER (added sugar/sat fat/sodium/cholesterol). USDA reports
 // these exact units; OFF needs a couple of g→mg conversions at extraction.
+// Nutrient FAMILIES (S94, MacroFactor-style) — each renders as a distinctly
+// coloured group of fill-to-target bars. `g` = group key, matched by MICRO_DEFS.
+const MICRO_GROUPS = [
+  { g: "fiberfat", label: "Fiber & Fats",           color: "#5b9cff" }, // blue
+  { g: "mineral",  label: "Minerals",               color: "#2fe0a8" }, // green
+  { g: "fatvit",   label: "Fat-soluble vitamins",   color: "#fbbf24" }, // amber (A, D, E, K)
+  { g: "bvit",     label: "B vitamins",             color: "#ff6b6b" }, // red
+  { g: "cvit",     label: "Vitamin C",              color: "#b57bff" }, // purple
+  { g: "other",    label: "Other",                  color: "#9bb8b8" }, // muted
+];
+const MICRO_GROUP_MAP = Object.fromEntries(MICRO_GROUPS.map((x) => [x.g, x]));
 const MICRO_DEFS = [
-  { k: "fiber",      label: "Fiber",        unit: "g",   rda: 28 },
-  { k: "sugar",      label: "Sugar",        unit: "g",   rda: 50,   limit: true },
-  { k: "satFat",     label: "Saturated fat",unit: "g",   rda: 20,   limit: true },
-  { k: "transFat",   label: "Trans fat",    unit: "g",   rda: 2,    limit: true },
-  { k: "monoFat",    label: "Monounsat. fat", unit: "g" },
-  { k: "polyFat",    label: "Polyunsat. fat", unit: "g" },
-  { k: "cholesterol",label: "Cholesterol",  unit: "mg",  rda: 300,  limit: true },
-  { k: "sodium",     label: "Sodium",       unit: "mg",  rda: 2300, limit: true },
-  { k: "potassium",  label: "Potassium",    unit: "mg",  rda: 3400 },
-  { k: "calcium",    label: "Calcium",      unit: "mg",  rda: 1000 },
-  { k: "iron",       label: "Iron",         unit: "mg",  rda: 18 },
-  { k: "magnesium",  label: "Magnesium",    unit: "mg",  rda: 400 },
-  { k: "zinc",       label: "Zinc",         unit: "mg",  rda: 11 },
-  { k: "phosphorus", label: "Phosphorus",   unit: "mg",  rda: 700 },
-  { k: "selenium",   label: "Selenium",     unit: "µg",  rda: 55 },
-  { k: "copper",     label: "Copper",       unit: "mg",  rda: 0.9 },
-  { k: "manganese",  label: "Manganese",    unit: "mg",  rda: 2.3 },
-  { k: "vitA",       label: "Vitamin A",    unit: "µg",  rda: 900 },
-  { k: "vitC",       label: "Vitamin C",    unit: "mg",  rda: 90 },
-  { k: "vitD",       label: "Vitamin D",    unit: "µg",  rda: 20 },
-  { k: "vitE",       label: "Vitamin E",    unit: "mg",  rda: 15 },
-  { k: "vitK",       label: "Vitamin K",    unit: "µg",  rda: 120 },
-  { k: "b1",         label: "Thiamin (B1)", unit: "mg",  rda: 1.2 },
-  { k: "b2",         label: "Riboflavin (B2)", unit: "mg", rda: 1.3 },
-  { k: "b3",         label: "Niacin (B3)",  unit: "mg",  rda: 16 },
-  { k: "b6",         label: "Vitamin B6",   unit: "mg",  rda: 1.7 },
-  { k: "b12",        label: "Vitamin B12",  unit: "µg",  rda: 2.4 },
-  { k: "folate",     label: "Folate",       unit: "µg",  rda: 400 },
-  { k: "choline",    label: "Choline",      unit: "mg",  rda: 550 },
-  { k: "caffeine",   label: "Caffeine",     unit: "mg" },
+  { k: "fiber",      label: "Fiber",        unit: "g",   rda: 28,   g: "fiberfat" },
+  { k: "sugar",      label: "Sugar",        unit: "g",   rda: 50,   limit: true, g: "fiberfat" },
+  { k: "satFat",     label: "Saturated fat",unit: "g",   rda: 20,   limit: true, g: "fiberfat" },
+  { k: "transFat",   label: "Trans fat",    unit: "g",   rda: 2,    limit: true, g: "fiberfat" },
+  { k: "monoFat",    label: "Monounsat. fat", unit: "g", g: "fiberfat" },
+  { k: "polyFat",    label: "Polyunsat. fat", unit: "g", g: "fiberfat" },
+  { k: "cholesterol",label: "Cholesterol",  unit: "mg",  rda: 300,  limit: true, g: "fiberfat" },
+  { k: "sodium",     label: "Sodium",       unit: "mg",  rda: 2300, limit: true, g: "mineral" },
+  { k: "potassium",  label: "Potassium",    unit: "mg",  rda: 3400, g: "mineral" },
+  { k: "calcium",    label: "Calcium",      unit: "mg",  rda: 1000, g: "mineral" },
+  { k: "iron",       label: "Iron",         unit: "mg",  rda: 18,   g: "mineral" },
+  { k: "magnesium",  label: "Magnesium",    unit: "mg",  rda: 400,  g: "mineral" },
+  { k: "zinc",       label: "Zinc",         unit: "mg",  rda: 11,   g: "mineral" },
+  { k: "phosphorus", label: "Phosphorus",   unit: "mg",  rda: 700,  g: "mineral" },
+  { k: "selenium",   label: "Selenium",     unit: "µg",  rda: 55,   g: "mineral" },
+  { k: "copper",     label: "Copper",       unit: "mg",  rda: 0.9,  g: "mineral" },
+  { k: "manganese",  label: "Manganese",    unit: "mg",  rda: 2.3,  g: "mineral" },
+  { k: "vitA",       label: "Vitamin A",    unit: "µg",  rda: 900,  g: "fatvit" },
+  { k: "vitC",       label: "Vitamin C",    unit: "mg",  rda: 90,   g: "cvit" },
+  { k: "vitD",       label: "Vitamin D",    unit: "µg",  rda: 20,   g: "fatvit" },
+  { k: "vitE",       label: "Vitamin E",    unit: "mg",  rda: 15,   g: "fatvit" },
+  { k: "vitK",       label: "Vitamin K",    unit: "µg",  rda: 120,  g: "fatvit" },
+  { k: "b1",         label: "Thiamin (B1)", unit: "mg",  rda: 1.2,  g: "bvit" },
+  { k: "b2",         label: "Riboflavin (B2)", unit: "mg", rda: 1.3, g: "bvit" },
+  { k: "b3",         label: "Niacin (B3)",  unit: "mg",  rda: 16,   g: "bvit" },
+  { k: "b6",         label: "Vitamin B6",   unit: "mg",  rda: 1.7,  g: "bvit" },
+  { k: "b12",        label: "Vitamin B12",  unit: "µg",  rda: 2.4,  g: "bvit" },
+  { k: "folate",     label: "Folate",       unit: "µg",  rda: 400,  g: "bvit" },
+  { k: "choline",    label: "Choline",      unit: "mg",  rda: 550,  g: "bvit" },
+  { k: "caffeine",   label: "Caffeine",     unit: "mg",  g: "other" },
 ];
 const MICRO_MAP = Object.fromEntries(MICRO_DEFS.map((d) => [d.k, d]));
 // USDA nutrientName → our micro key (values arrive in the MICRO_DEFS units).
@@ -6435,6 +6446,61 @@ const sumMicros = (meals) => {
   }
   return out;
 };
+
+// MacroFactor-style micronutrient bars (S94): every logged micro shown as a
+// fill-to-target bar, grouped by nutrient family and coloured by family
+// (B vitamins red, C purple, minerals green, fat-soluble vitamins amber, …).
+// `scale` divides the totals (e.g. days-in-a-week) for an averaged view.
+function MicroBars({ micros, scale = 1 }) {
+  const groups = MICRO_GROUPS.map((grp) => {
+    const rows = MICRO_DEFS.filter((d) => d.g === grp.g && (micros[d.k] || 0) > 0).map((d) => {
+      const v = _mRound((micros[d.k] || 0) / scale);
+      const pct = d.rda ? Math.min(100, Math.round((v / d.rda) * 100)) : null;
+      const over = d.limit && d.rda && v > d.rda;      // "stay under" nutrient exceeded
+      const met = !d.limit && d.rda && v >= d.rda;     // target reached
+      return { d, v, pct, over, met };
+    });
+    return { grp, rows };
+  }).filter((x) => x.rows.length);
+  if (!groups.length) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+      {groups.map(({ grp, rows }) => (
+        <div key={grp.g}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "6px" }}>
+            <span style={{ width: "9px", height: "9px", borderRadius: "3px", background: grp.color, flexShrink: 0 }} />
+            <span style={{ fontSize: ".68rem", fontWeight: 700, color: "var(--text)", textTransform: "uppercase", letterSpacing: ".5px" }}>{grp.label}</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "7px" }}>
+            {rows.map(({ d, v, pct, over, met }) => {
+              const fillColor = over ? "var(--red)" : grp.color;
+              return (
+                <div key={d.k}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: ".72rem", marginBottom: "2px" }}>
+                    <span style={{ color: "var(--text)" }}>{d.label}{d.limit ? <span style={{ color: "var(--muted)", fontWeight: 400 }}> · limit</span> : null}</span>
+                    <span style={{ color: over ? "var(--red)" : "var(--muted)", fontWeight: 600 }}>
+                      {v}{d.rda ? <span style={{ opacity: .7, fontWeight: 400 }}> / {d.rda}</span> : ""} {d.unit}
+                      {met ? <span style={{ color: grp.color }}> ✓</span> : over ? " ⚠️" : ""}
+                    </span>
+                  </div>
+                  {/* Track. Nutrients with no reference (mono/poly fat, caffeine)
+                      show a thin neutral bar — logged, but no target to fill. */}
+                  <div style={{ height: "6px", borderRadius: "4px", overflow: "hidden", background: "var(--border)" }}>
+                    {pct != null ? (
+                      <div style={{ width: `${pct}%`, height: "100%", borderRadius: "4px", background: fillColor, transition: "width .3s ease" }} />
+                    ) : (
+                      <div style={{ width: "100%", height: "100%", background: "var(--s3)", opacity: .6 }} />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 // USDA FoodData Central — strong on generic / whole foods. Free; DEMO_KEY unless
 // VITE_USDA_API_KEY (a free api.data.gov key) is set for higher limits.
 async function searchUSDA(query) {
@@ -6924,7 +6990,91 @@ function FoodServingModal({ food, editing, mealLabel, onConfirm, onClose }) {
     </div>, document.body);
 }
 
-function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
+// Copy a whole meal from a PREVIOUS day into the current day's same section
+// (MyFitnessPal-style — for foods you eat over and over). Lists the recent days
+// that logged something in this section; tap one to copy all its foods in.
+// Works wherever MealLog renders: today (dashboard) or any date (calendar Day
+// view), so you can also paste onto a FUTURE day.
+function CopyMealModal({ sectionLabel, targetType, matchMeal, dateKey, onReadDay, onListLoggedDays, onCopy, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const keys = ((await onListLoggedDays()) || []).filter((k) => k && k !== dateKey);
+        const cand = keys.sort().reverse().slice(0, 24); // newest-first, bounded reads
+        const logs = await Promise.all(cand.map((k) => onReadDay(k).then((log) => ({ k, log })).catch(() => null)));
+        const out = [];
+        for (const it of logs) {
+          if (!it || !it.log) continue;
+          const foods = (it.log.meals || []).filter(matchMeal);
+          if (foods.length) out.push({ date: it.k, foods, cals: foods.reduce((s, m) => s + (m.calories || 0), 0) });
+          if (out.length >= 14) break;
+        }
+        if (!cancelled) { setDays(out); setLoading(false); }
+      } catch (e) { if (!cancelled) { setDays([]); setLoading(false); } }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  useBackClose(true, onClose);
+  const fmtDay = (k) => {
+    const t = ymdLocal(); const yd = new Date(); yd.setDate(yd.getDate() - 1);
+    if (k === t) return "Today";
+    if (k === ymdLocal(yd)) return "Yesterday";
+    const [Y, M, D] = k.split("-").map(Number);
+    return new Date(Y, M - 1, D).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  };
+  const doCopy = (foods) => {
+    onCopy(foods.map((f) => ({ name: f.name || "", brand: f.brand || "", type: targetType,
+      calories: f.calories || 0, protein: f.protein || 0, carbs: f.carbs || 0, fat: f.fat || 0,
+      ...(f.grams != null ? { grams: f.grams, unit: f.unit || "g" } : {}),
+      ...(f.micros ? { micros: f.micros } : {}) })));
+    onClose();
+  };
+  return createPortal(
+    <div data-theme="pro" onClick={onClose}
+      style={{ position: "fixed", inset: 0, zIndex: 2200, background: "rgba(0,0,0,.7)",
+        display: "flex", alignItems: "flex-end", justifyContent: "center", paddingTop: "env(safe-area-inset-top,0px)" }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ width: "min(520px, 100%)", maxHeight: "88vh", overflowY: "auto",
+          background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "16px 16px 0 0",
+          padding: "18px", paddingBottom: "calc(18px + env(safe-area-inset-bottom,0px))",
+          display: "flex", flexDirection: "column", gap: "12px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
+          <div style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text)" }}>Copy a previous {sectionLabel}</div>
+          <button onClick={onClose} aria-label="Close" style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: "1.2rem", lineHeight: 1, padding: "2px" }}>✕</button>
+        </div>
+        {loading ? (
+          <div style={{ fontSize: ".82rem", color: "var(--muted)", padding: "10px 0" }}>Looking through your recent days…</div>
+        ) : days.length === 0 ? (
+          <div style={{ fontSize: ".82rem", color: "var(--muted)", padding: "10px 0" }}>No previous {sectionLabel.toLowerCase()} to copy yet — log one and it'll show up here.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+            {days.map(({ date, foods, cals }) => (
+              <button key={date} onClick={() => doCopy(foods)}
+                style={{ textAlign: "left", cursor: "pointer", border: "1px solid var(--border)",
+                  background: "var(--s2)", color: "var(--text)", borderRadius: "10px", padding: "10px 12px",
+                  display: "flex", flexDirection: "column", gap: "3px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "8px" }}>
+                  <span style={{ fontWeight: 700, fontSize: ".84rem" }}>{fmtDay(date)}</span>
+                  <span style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: ".82rem", color: "var(--accent)" }}>
+                    {cals.toLocaleString()}<span style={{ fontSize: ".6rem", color: "var(--muted)", fontWeight: 600 }}> cal</span>
+                  </span>
+                </div>
+                <div style={{ fontSize: ".74rem", color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {foods.map((f) => f.name || "item").join(", ")}
+                </div>
+                <div style={{ fontSize: ".68rem", color: "var(--accent)", fontWeight: 700 }}>Tap to copy {foods.length} item{foods.length !== 1 ? "s" : ""} →</div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>, document.body);
+}
+
+function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, onReadDay, onListLoggedDays, dateKey }) {
   const [name, setName] = useState("");
   const [brand, setBrand] = useState(""); // brand of a picked food (e.g. "Kirkland Signature") — shown under the name
   const [cals, setCals] = useState("");
@@ -6946,6 +7096,9 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const [picked, setPicked] = useState(null); // chosen food's per-100g macros, for serving rescale
   const [detailState, setDetailState] = useState(null); // {food, editingId, mealType} → FoodServingModal open
   const [pickingId, setPickingId] = useState(null); // FatSecret fsId whose detail fetch is in flight (row shows "…")
+  const [movingId, setMovingId] = useState(null); // logged item whose "move to another meal" picker is open
+  const [editRecents, setEditRecents] = useState(false); // "Edit" mode on the recent-food chips (shows delete ✕)
+  const [copySection, setCopySection] = useState(null); // {label, type, matchMeal} → CopyMealModal open
   const [showDayMicros, setShowDayMicros] = useState(false); // daily micronutrient roll-up expanded
   const [grams, setGrams] = useState("100");
   const [unit, setUnit] = useState("g");      // serving unit — g or ml (MyFitnessPal-style)
@@ -7255,12 +7408,27 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const addBtn = { marginTop:"4px", padding:"9px 12px", fontSize:".8rem", fontWeight:700,
     borderRadius:"8px", border:"1px solid var(--accent)", background:"rgba(8,220,224,.08)",
     color:"var(--accent)", cursor:"pointer" };
+  // "Copy a previous <meal>" is available only where MealLog got the date I/O.
+  const canCopy = !!(onReadDay && onListLoggedDays && onAddMeals);
+  const copyLink = { display:"inline-flex", alignItems:"center", gap:"5px", border:"none",
+    background:"transparent", color:"var(--muted)", cursor:"pointer", fontSize:".74rem",
+    fontWeight:700, padding:0, textDecoration:"underline" };
 
+  // Move a logged item to another meal section (Dinner → Lunch, etc.) — keeps all
+  // its macros/serving, just re-tags the meal type (empty string = Other/quick).
+  const SECTION_OPTS = [...TYPES.map((t) => [t, t]), ["Other", ""]];
+  const moveMeal = (m, targetType) => {
+    onEditMeal(m.id, { ...m, type: targetType });
+    setMovingId(null);
+  };
   const mealRow = (m) => {
     const hasMacros = m.protein || m.carbs || m.fat;
+    const curKey = (m.type || "").toLowerCase();
+    const moving = movingId === m.id;
     return (
-      <div key={m.id} style={{ display:"flex", alignItems:"center", gap:"10px",
+      <div key={m.id} style={{ display:"flex", flexDirection:"column", gap:"6px",
         padding:"8px 10px", borderRadius:"8px", background:"rgba(255,255,255,.04)" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
         <div style={{ flex:1, minWidth:0 }}>
           {/* Food name (+ optional clock) */}
           <div style={{ fontSize:".86rem", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
@@ -7284,12 +7452,32 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
         <span style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"1.05rem", color:"var(--accent)", whiteSpace:"nowrap" }}>
           {(m.calories||0).toLocaleString()}<span style={{ fontSize:".62rem", color:"var(--muted)", fontWeight:600 }}> cal</span>
         </span>
+        <button onClick={() => { setMovingId(moving ? null : m.id); }} title="Move to another meal"
+          style={{ border:"none", background:"transparent", color: moving ? "var(--accent)" : "var(--muted)",
+            cursor:"pointer", fontSize:"1rem", lineHeight:1, display:"flex", alignItems:"center" }}>
+          <Icon name="move" size={15} />
+        </button>
         <button onClick={() => openEditServing(m)} title="Edit serving & macros"
           style={{ border:"none", background:"transparent", color:"var(--muted)",
             cursor:"pointer", fontSize:".9rem", lineHeight:1 }}>✎</button>
         <button onClick={() => onRemoveMeal(m.id)} title="Remove"
           style={{ border:"none", background:"transparent", color:"var(--muted)",
             cursor:"pointer", fontSize:"1rem", lineHeight:1 }}>✕</button>
+      </div>
+      {/* Move-to-another-meal picker (tap-to-move — reliable on phones). */}
+      {moving && (
+        <div style={{ display:"flex", alignItems:"center", gap:"6px", flexWrap:"wrap", paddingTop:"2px" }}>
+          <span style={{ fontSize:".68rem", color:"var(--muted)", fontWeight:700 }}>Move to:</span>
+          {SECTION_OPTS.filter(([, v]) => v.toLowerCase() !== curKey).map(([label, v]) => (
+            <button key={label} onClick={() => moveMeal(m, v)}
+              style={{ padding:"4px 10px", fontSize:".72rem", fontWeight:700, borderRadius:"999px", cursor:"pointer",
+                border:"1px solid var(--accent)", background:"rgba(8,220,224,.08)", color:"var(--accent)" }}>{label}</button>
+          ))}
+          <button onClick={() => setMovingId(null)}
+            style={{ padding:"4px 8px", fontSize:".72rem", borderRadius:"999px", cursor:"pointer",
+              border:"1px solid var(--border)", background:"transparent", color:"var(--muted)" }}>Cancel</button>
+        </div>
+      )}
       </div>
     );
   };
@@ -7319,16 +7507,31 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
         if (editingId || recentForMeal.length === 0) return null;
         return (
         <div>
-          <div style={{ fontSize:".68rem", color:"var(--muted)", marginBottom:"4px",
-            textTransform:"uppercase", letterSpacing:".5px", fontWeight:700 }}>Recent — tap to add</div>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", marginBottom:"4px" }}>
+            <span style={{ fontSize:".68rem", color:"var(--muted)", textTransform:"uppercase", letterSpacing:".5px", fontWeight:700 }}>Recent — tap to add</span>
+            {onRemoveRecentFood && (
+              <button onClick={() => setEditRecents((v) => !v)}
+                style={{ border:"none", background:"transparent", color:editRecents?"var(--accent)":"var(--muted)", cursor:"pointer", fontSize:".68rem", fontWeight:700, padding:0, textDecoration:"underline" }}>
+                {editRecents ? "Done" : "Edit"}
+              </button>
+            )}
+          </div>
           <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
             {recentForMeal.map((f, i) => (
-              <button key={i} onClick={() => quickAddRecent(f)}
-                style={{ padding:"5px 9px", fontSize:".74rem", borderRadius:"999px", cursor:"pointer",
-                  border:"1px solid var(--border)", background:"var(--s2)", color:"var(--text)",
-                  whiteSpace:"nowrap", maxWidth:"100%", overflow:"hidden", textOverflow:"ellipsis" }}>
-                {f.name} <span style={{ color:"var(--muted)" }}>· {(f.calories||0)} cal</span>
-              </button>
+              <span key={i} style={{ display:"inline-flex", alignItems:"center", maxWidth:"100%",
+                borderRadius:"999px", border:"1px solid var(--border)", background:"var(--s2)", overflow:"hidden" }}>
+                <button onClick={() => editRecents ? null : quickAddRecent(f)} disabled={editRecents}
+                  style={{ padding:"5px 9px", fontSize:".74rem", cursor: editRecents?"default":"pointer",
+                    border:"none", background:"transparent", color:"var(--text)",
+                    whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", minWidth:0 }}>
+                  {f.name} <span style={{ color:"var(--muted)" }}>· {(f.calories||0)} cal</span>
+                </button>
+                {editRecents && (
+                  <button onClick={() => onRemoveRecentFood(f)} title="Remove from recents"
+                    style={{ border:"none", borderLeft:"1px solid var(--border)", background:"transparent",
+                      color:"var(--red)", cursor:"pointer", fontSize:".8rem", lineHeight:1, padding:"5px 8px", flexShrink:0 }}>✕</button>
+                )}
+              </span>
             ))}
           </div>
         </div>
@@ -7596,7 +7799,14 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
                 <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>{items.map(mealRow)}</div>
               )}
               {addingTo === t ? addForm() : (
-                <button style={addBtn} onClick={() => openForm(t)}>+ Add food to {t}</button>
+                <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
+                  <button style={addBtn} onClick={() => openForm(t)}>+ Add food to {t}</button>
+                  {canCopy && (
+                    <button onClick={() => setCopySection({ label: t, type: t, matchMeal: (m) => inSection(m, t) })} style={copyLink}>
+                      <Icon name="copy" size={12} /> Copy a previous {t}
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           );
@@ -7614,7 +7824,14 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
             </div>
           )}
           {addingTo === "other" ? addForm() : (
-            <button style={addBtn} onClick={() => openForm("other")}>+ Add a quick entry</button>
+            <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
+              <button style={addBtn} onClick={() => openForm("other")}>+ Add a quick entry</button>
+              {canCopy && (
+                <button onClick={() => setCopySection({ label: "Other", type: "", matchMeal: isOther })} style={copyLink}>
+                  <Icon name="copy" size={12} /> Copy from a previous day
+                </button>
+              )}
+            </div>
           )}
         </div>
 
@@ -7644,22 +7861,10 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
                 {showDayMicros ? "Hide micronutrients" : `Micronutrients today (${keys.length}) ▸`}
               </button>
               {showDayMicros && (
-                <div style={{ marginTop:"8px", display:"grid", gridTemplateColumns:"1fr 1fr", gap:"4px 14px" }}>
-                  {keys.map((d) => {
-                    const v = _mRound(dayMicros[d.k]);
-                    const overLimit = d.limit && d.rda && v > d.rda;
-                    const metTarget = !d.limit && d.rda && v >= d.rda;
-                    return (
-                      <div key={d.k} style={{ display:"flex", justifyContent:"space-between", fontSize:".72rem", padding:"2px 0", borderBottom:"1px solid var(--border)" }}>
-                        <span style={{ color:"var(--muted)" }}>{d.label}</span>
-                        <span style={{ color: overLimit ? "var(--orange)" : metTarget ? "var(--green)" : "var(--text)", fontWeight:600 }}>
-                          {v}{d.unit}{d.rda ? <span style={{ color:"var(--muted)", fontWeight:400 }}> / {d.limit ? "≤" : ""}{d.rda}{d.unit}</span> : null}
-                        </span>
-                      </div>
-                    );
-                  })}
-                  <div style={{ gridColumn:"1 / -1", fontSize:".62rem", color:"var(--muted)", fontStyle:"italic", marginTop:"2px" }}>
-                    Counts foods logged from the database or barcode scan. References are general adult values — not medical advice.
+                <div style={{ marginTop:"10px" }}>
+                  <MicroBars micros={dayMicros} />
+                  <div style={{ fontSize:".62rem", color:"var(--muted)", fontStyle:"italic", marginTop:"10px" }}>
+                    Counts foods logged from the database or barcode scan. Bars fill toward general adult reference values — not medical advice.
                   </div>
                 </div>
               )}
@@ -7672,6 +7877,12 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
         <FoodServingModal food={detailState.food} editing={!!detailState.editingId}
           mealLabel={detailState.mealType && detailState.mealType !== "other" ? detailState.mealType : null}
           onConfirm={confirmDetail} onClose={() => setDetailState(null)} />
+      )}
+      {copySection && (
+        <CopyMealModal sectionLabel={copySection.label} targetType={copySection.type}
+          matchMeal={copySection.matchMeal} dateKey={dateKey || ymdLocal()}
+          onReadDay={onReadDay} onListLoggedDays={onListLoggedDays}
+          onCopy={(foods) => onAddMeals(foods)} onClose={() => setCopySection(null)} />
       )}
     </div>
   );
@@ -8003,6 +8214,20 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
       carbs: Math.max(0, (d.carbs || 0) - old.carbs + nm.carbs),
       fat: Math.max(0, (d.fat || 0) - old.fat + nm.fat) });
   };
+  // Batch add (copy-a-previous-meal onto this calendar day) — preserves brand/
+  // serving/micros and writes the day once.
+  const addMeals = (mealsList) => {
+    const arr = (mealsList || []).map((meal, i) => ({
+      id: `m${Date.now()}${i}${Math.floor(Math.random() * 1000)}`, name: meal.name || "", type: meal.type || "",
+      calories: Number(meal.calories) || 0, protein: Number(meal.protein) || 0, carbs: Number(meal.carbs) || 0, fat: Number(meal.fat) || 0,
+      ...(meal.brand ? { brand: meal.brand } : {}),
+      ...(meal.grams != null ? { grams: Number(meal.grams), unit: meal.unit || "g" } : {}),
+      ...(meal.micros ? { micros: meal.micros } : {}) }));
+    if (!arr.length) return;
+    const d = dayLog || {}; const sum = (f) => arr.reduce((s, m) => s + (m[f] || 0), 0);
+    writeDay({ ...d, meals: [...(d.meals || []), ...arr], calories: (d.calories || 0) + sum("calories"),
+      protein: (d.protein || 0) + sum("protein"), carbs: (d.carbs || 0) + sum("carbs"), fat: (d.fat || 0) + sum("fat") });
+  };
 
   const navBtn = { padding: "6px 12px", fontSize: ".85rem", fontWeight: 700, borderRadius: 8, cursor: "pointer",
     border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)" };
@@ -8316,7 +8541,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             </div>
           </div>
           <div style={{ marginTop: 12 }}>
-            <MealLog meals={(dayLog && dayLog.meals) || []} onAddMeal={addMeal} onRemoveMeal={removeMeal} onEditMeal={editMeal} recentFoods={recentFoods} />
+            <MealLog meals={(dayLog && dayLog.meals) || []} onAddMeal={addMeal} onAddMeals={addMeals} onRemoveMeal={removeMeal} onEditMeal={editMeal} recentFoods={recentFoods} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={sel} />
           </div>
         </div>
 
@@ -8407,7 +8632,7 @@ function WeightDayLogger({ date, existing, onSave }) {
 
 function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
-  onUpdateCardio, onUpdateStrength, onAddMeal, onRemoveMeal, onEditMeal, recentFoods, weekSummary, recentWearable, history, onRefresh, isRemote,
+  onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, weekSummary, recentWearable, history, onRefresh, isRemote,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onAddCustomExercise }) {
 
   const [showCalendar, setShowCalendar] = useState(false);
@@ -8994,7 +9219,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         )}
         </div>
 
-      <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} />
+      <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={ymdLocal()} />
 
       <div className="dash-log-row">
         <span className="dash-log-icon" style={{display:"flex",alignItems:"center"}}><Icon name="water" size={20} color="#4fc3f7" /></span>
@@ -16729,6 +16954,17 @@ export default function App() {
     setRecentFoods(next);
     logWrite(`caliq-foods-${activeId}`, JSON.stringify(next));
   };
+  // Remove a saved "recent food" chip (the user doesn't want it suggested again).
+  // Matched by food identity + meal type so only THAT meal's chip is dropped, not
+  // the same food under other meals.
+  const onRemoveRecentFood = (food) => {
+    if (!activeId) return;
+    const key = recentFoodKey(food.name, food.type);
+    const next = recentFoodsRef.current.filter((f) => recentFoodKey(f.name, f.type) !== key);
+    recentFoodsRef.current = next;
+    setRecentFoods(next);
+    logWrite(`caliq-foods-${activeId}`, JSON.stringify(next));
+  };
 
   // Add a logged food/meal: appends to the day's meals and rolls its calories +
   // macros into the day's totals (Option A — meals add to the running total).
@@ -16753,6 +16989,36 @@ export default function App() {
     persistLog(updated);
     appendHistory([`added ${m.type || "a food"}${m.name ? `: ${m.name}` : ""} (${m.calories} cal)`]);
     if (m.calories > 0) setStreak(s => Math.max(s, 1));
+  };
+
+  // Batch-add several foods at once (copy-a-previous-meal, S94). One state update
+  // + one persist — calling onAddMeal in a loop would race on the stale dailyLog
+  // closure (only the last add would survive).
+  const onAddMeals = (list) => {
+    const arr = (list || []).map((meal, i) => ({
+      id:`m${Date.now()}${i}${Math.floor(Math.random()*1000)}`,
+      name: meal.name||"", type: meal.type||"", calories: Number(meal.calories)||0,
+      protein: Number(meal.protein)||0, carbs: Number(meal.carbs)||0, fat: Number(meal.fat)||0,
+      time: meal.time || hhmmLocal(),
+      ...(meal.brand ? { brand: meal.brand } : {}),
+      ...(meal.grams != null ? { grams: Number(meal.grams), unit: meal.unit || "g" } : {}),
+      ...(meal.micros ? { micros: meal.micros } : {}) }));
+    if (!arr.length) return;
+    arr.forEach(upsertRecentFood);
+    const add = (f) => arr.reduce((s, m) => s + (m[f]||0), 0);
+    const updated = {
+      ...dailyLog,
+      meals: [...(dailyLog.meals||[]), ...arr],
+      calories: (dailyLog.calories||0) + add("calories"),
+      protein: (dailyLog.protein||0) + add("protein"),
+      carbs: (dailyLog.carbs||0) + add("carbs"),
+      fat: (dailyLog.fat||0) + add("fat"),
+    };
+    setDailyLog(updated);
+    persistLog(updated);
+    const label = arr[0].type || "a meal";
+    appendHistory([`copied ${arr.length} food${arr.length!==1?"s":""} into ${label}`]);
+    if (add("calories") > 0) setStreak(s => Math.max(s, 1));
   };
 
   // Remove a logged food/meal and subtract its contribution from the totals.
@@ -17136,7 +17402,7 @@ export default function App() {
               onOpenPlan={()=>{setNavFrom("dashboard");setStepAndSave(0);}} onOpenResults={()=>{setNavFrom("dashboard");setShowDash(false);}}
               onEditWorkouts={()=>{setNavFrom("dashboard");setStepAndSave(3);}}
               onLogUpdate={onLogUpdate} dailyLog={dailyLog} streak={streak}
-              onAddMeal={onAddMeal} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
+              onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
               onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; return n; })}
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
