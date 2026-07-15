@@ -20,6 +20,13 @@ const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
 
 const MODEL = "claude-sonnet-4-6";
 
+// Output token ceiling for chat replies. Raised from 1024 → 1800 (S94) so the
+// assistant can give a complete, natural answer when the question deserves one
+// instead of clipping mid-thought — the terse/robotic feel came partly from
+// this cap plus the old hard "keep it short" prompt rules. Cost impact is small
+// (only replies that actually run long cost more output tokens; most stay short).
+const MAX_TOKENS = 1800;
+
 // Daily token budgets (input + output) by tier — from the spec's cost-controls.
 // clientMax/trainerMax are the paid "Max" tiers (S89c): PUBLISHED high
 // allowances (~100 AI conversations/day) — honest fair-use ceilings, never
@@ -82,9 +89,9 @@ You must NOT:
 If a user asks something outside your scope, respond:
 "I'm focused on helping you with nutrition and fitness. Try asking me about your meals, macros, or training."
 
-Always be encouraging, clear, and concise. Avoid jargon unless the client has demonstrated familiarity.
+Be encouraging and clear. Avoid jargon unless the client has demonstrated familiarity.
 
-Formatting: replies render in a narrow mobile chat. Keep them short. Use plain text with dashes for lists and **bold** for short labels. Do NOT use markdown tables, headings, or code blocks.`;
+Formatting: replies render in a narrow mobile chat, so write like a person texting — natural prose in short paragraphs. Match your length to the question: a quick log or fact gets a sentence or two; a real "how am I doing / what should I change" question deserves a genuine, complete answer (don't truncate a good explanation to save space). Light markdown is fine — **bold** for the occasional label, and a dash list only when you're truly listing things. Skip big markdown tables, heading syntax (#), and code blocks; they render badly here.`;
 
 const SYSTEM_TRAINER = `You are a fitness coaching assistant for Glidna, a personal training platform.
 
@@ -101,7 +108,7 @@ You must NOT:
 
 If asked something outside scope, redirect: "I can help you with client nutrition data, progress tracking, and fitness questions."
 
-Formatting: replies render in a narrow mobile chat. Keep them short. Use plain text with dashes for lists and **bold** for short labels. Do NOT use markdown tables, headings, or code blocks.`;
+Formatting: replies render in a narrow mobile chat, so write like a person texting — natural prose in short paragraphs. Match your length to the question: a quick lookup gets a sentence or two; a real coaching question (who's off track, what should I change) deserves a complete, useful answer — don't truncate real analysis to save space. Light markdown is fine — **bold** for the occasional label, and a dash list only when you're truly listing things. Skip big markdown tables, heading syntax (#), and code blocks; they render badly here.`;
 
 // UTC YYYY-MM-DD key for the per-user daily usage doc.
 function todayKey() {
@@ -209,7 +216,7 @@ TAKING ACTIONS: you must CONFIRM the specifics and get an explicit go-ahead befo
 ${isTrainer ? "- send_client_request: send a connected client a to-do (e.g. log food, weigh in); call list_clients first for the id, confirm before sending.\n- Proactive coaching: for cross-client questions ('who's stalled / needs attention / what should I change?'), call coach_summary ONCE (every client's status + adherence + weight trend — don't loop per-client tools), then call out who needs attention BY NAME with concrete recommendations and offer to send a to-do. You can do any action FOR a client via their clientId.\n- LOCAL PLAN FILES: trainers also keep local plan files (imported Trainerize clients, prep/template files, simulations) separate from client accounts. When the trainer refers to one, call list_local_plans and pass its localPlanId to the other tools (never with clientId); refer to them by NAME. All the same abilities work on them. IMPORTANT: if the trainer names a person you can't find via list_clients, ALSO check list_local_plans before assuming they aren't in Glide — most of a trainer's people are local/imported/sim files, and read+edit (stats, targets, workouts, meals, weigh-ins) works FULLY on them. Never tell a trainer to 'connect' a plan you can manage locally. Only send_client_request (to-dos) and messaging truly need a connected client account — those can't reach a local/sim file because there's no login on the other end; say so plainly if asked." : ""}
 After any action, briefly confirm what you did — but only AFTER the tool call actually succeeded. A write only happens when you call the tool; text alone never changes any data, so never claim you did something you didn't actually call a tool for.
 
-Voice & tone: talk like a normal, calm human texting — NOT hyped. Minimal exclamation points (usually none). Don't narrate your internal steps ("let me pull up the client list", "got the ID, logging now") — just quietly do the work and report the result. Skip filler and hype; be warm but plain.
+Voice & tone: talk like a warm, knowledgeable coach texting someone they actually like — relaxed and human, never robotic or clipped. Sound like a person, not a form: it's fine to react naturally ("nice, that's a solid day"), reason out loud a little when it helps, and give a real answer when the question calls for one. Warmth comes from the words, not punctuation — keep exclamation points rare (usually none) and skip corporate filler and hype. Don't narrate your internal steps ("let me pull up the client list", "got the ID, logging now") — just quietly do the work and report the result plainly.
 
 ${GLIDNA_KNOWLEDGE}`;
 }
@@ -342,7 +349,7 @@ exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], region: "us-central1", m
   let activeTarget = reqTarget; // stays sticky across turns unless the model addresses a new subject
   let resp;
   try {
-    resp = await client.messages.create({ model: MODEL, max_tokens: 1024, system, tools, messages: convo });
+    resp = await client.messages.create({ model: MODEL, max_tokens: MAX_TOKENS, system, tools, messages: convo });
     addUsage(agg, resp.usage);
     let rounds = 0;
     while (resp.stop_reason === "tool_use" && rounds < MAX_TOOL_ROUNDS) {
@@ -355,7 +362,7 @@ exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], region: "us-central1", m
       if (r.activeTarget) activeTarget = r.activeTarget;
       convo.push({ role: "assistant", content: resp.content });
       convo.push({ role: "user", content: r.results });
-      resp = await client.messages.create({ model: MODEL, max_tokens: 1024, system, tools, messages: convo });
+      resp = await client.messages.create({ model: MODEL, max_tokens: MAX_TOKENS, system, tools, messages: convo });
       addUsage(agg, resp.usage);
     }
   } catch (e) {
@@ -402,7 +409,7 @@ async function runAssistantTurn(uid, userText) {
   const agg = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
   let resp;
   try {
-    resp = await client.messages.create({ model: MODEL, max_tokens: 1024, system, tools, messages: convo });
+    resp = await client.messages.create({ model: MODEL, max_tokens: MAX_TOKENS, system, tools, messages: convo });
     addUsage(agg, resp.usage);
     let rounds = 0;
     while (resp.stop_reason === "tool_use" && rounds < MAX_TOOL_ROUNDS) {
@@ -411,7 +418,7 @@ async function runAssistantTurn(uid, userText) {
       const r = await runToolRound(toolUses, toolCtx);
       convo.push({ role: "assistant", content: resp.content });
       convo.push({ role: "user", content: r.results });
-      resp = await client.messages.create({ model: MODEL, max_tokens: 1024, system, tools, messages: convo });
+      resp = await client.messages.create({ model: MODEL, max_tokens: MAX_TOKENS, system, tools, messages: convo });
       addUsage(agg, resp.usage);
     }
   } catch (e) {
@@ -500,7 +507,7 @@ exports.aiChatStream = onRequest(
       let rounds = 0;
       // Stream each model turn; run tools between turns until it stops calling them.
       for (;;) {
-        const stream = client.messages.stream({ model: MODEL, max_tokens: 1024, system, tools, messages: convo });
+        const stream = client.messages.stream({ model: MODEL, max_tokens: MAX_TOKENS, system, tools, messages: convo });
         stream.on("text", (delta) => { if (delta) sse("delta", { text: delta }); });
         const msg = await stream.finalMessage();
         addUsage(agg, msg.usage);
