@@ -627,9 +627,12 @@ exports.estimateFood = onCall(
       msg = await client.messages.create({
         model: MODEL, max_tokens: 250,
         system: "You estimate nutrition for foods and meals. Reply with ONLY a JSON object, no prose: "
-          + '{"calories":int,"protein":int,"carbs":int,"fat":int,"assumed":"short serving you assumed"}. '
-          + "Macros in grams. If no quantity is given, assume ONE typical realistic serving and say what "
-          + "you assumed (e.g. \"1 medium bowl, ~350g\"). Use common US portions.",
+          + '{"calories":int,"protein":int,"carbs":int,"fat":int,"assumed":"short serving you assumed","grams":number,"unit":"g"|"ml"}. '
+          + "Macros in grams. `grams` = the weight (or volume for a drink) of the serving you assumed, and "
+          + "`unit` is \"g\" for solids or \"ml\" for liquids — this lets the user rescale by exact amount. "
+          + "If no quantity is given, assume ONE typical realistic serving and say what you assumed (e.g. "
+          + "\"1 medium bowl, ~350g\" with grams:350, unit:\"g\"; or \"1 cup, 240ml\" with grams:240, unit:\"ml\"). "
+          + "Use common US portions.",
         messages: [{ role: "user", content: `Estimate: ${desc}` }],
       });
     } catch (e) {
@@ -650,10 +653,13 @@ exports.estimateFood = onCall(
     if (!out || n(out.calories) == null) {
       throw new HttpsError("internal", "Couldn't estimate that one — try rephrasing it.");
     }
+    const g = Number(out.grams);
     return {
       calories: n(out.calories),
       protein: n(out.protein) || 0, carbs: n(out.carbs) || 0, fat: n(out.fat) || 0,
       assumed: String(out.assumed || "").slice(0, 120),
+      grams: Number.isFinite(g) && g > 0 ? Math.round(g) : null,
+      unit: out.unit === "ml" ? "ml" : "g",
     };
   }
 );

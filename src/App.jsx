@@ -6869,6 +6869,7 @@ function FoodServingModal({ food, editing, mealLabel, onConfirm, onClose }) {
   const editField = (k, v) => setOverride({ ...vals, [k]: Math.max(0, parseInt(v) || 0) });
   const approxUnit = !isServing && FOOD_UNIT_MAP[unit] && FOOD_UNIT_MAP[unit].approx;
   const gramsNow = isServing ? null : (unit === "serving" ? (parseFloat(qty) || 0) * (food.servingGrams || 0) : unitToGrams(qty, unit, null));
+  const baseAmtLabel = food.baseUnit === "ml" ? "ml" : "g"; // liquids read in ml, solids in g
 
   const inp = { padding: "9px 11px", fontSize: ".9rem", borderRadius: "8px",
     border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)", minWidth: 0 };
@@ -6931,8 +6932,8 @@ function FoodServingModal({ food, editing, mealLabel, onConfirm, onClose }) {
             {isServing
               ? (food.servingLabel && food.servingLabel !== "serving" ? `1 serving = ${food.servingLabel}` : "Scales by number of servings.")
               : approxUnit
-                ? `≈ ${Math.round(gramsNow)}g · volume units are approximate (weight is exact)`
-                : `= ${Math.round(gramsNow)}g`}
+                ? `≈ ${Math.round(gramsNow)}${baseAmtLabel} · volume units are approximate (${food.baseUnit === "ml" ? "volume" : "weight"} is exact)`
+                : `= ${Math.round(gramsNow)}${baseAmtLabel}`}
           </div>
         </div>
 
@@ -7183,16 +7184,20 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
     try {
       const r = await callEstimateFood({ food: q });
       const d = r.data || {};
-      if (!name.trim()) setName(q);
-      setCals(d.calories != null ? String(d.calories) : "");
-      setProtein(d.protein != null ? String(d.protein) : "");
-      setCarbs(d.carbs != null ? String(d.carbs) : "");
-      setFat(d.fat != null ? String(d.fat) : "");
-      setShowMacros(true);
-      setAiBase({ calories: Number(d.calories) || 0, protein: Number(d.protein) || 0,
-        carbs: Number(d.carbs) || 0, fat: Number(d.fat) || 0, assumed: d.assumed || "" });
-      setAiQty(1);
-      setAiNote(`AI estimate${d.assumed ? ` for ${d.assumed}` : ""}. Set servings below, or tweak the numbers.`);
+      const cal = Number(d.calories) || 0, p = Number(d.protein) || 0, c = Number(d.carbs) || 0, f = Number(d.fat) || 0;
+      const g = Number(d.grams) > 0 ? Number(d.grams) : null;
+      const unit = d.unit === "ml" ? "ml" : "g";
+      // Open the serving popup so the estimate gets the SAME flexible controls as a
+      // searched food — type an exact amount (g/ml), switch units, fine-tune macros
+      // — instead of a coarse ±0.5-servings stepper. When the AI gave the serving's
+      // weight we scale by weight; otherwise we scale by number of servings.
+      const basis = g
+        ? { name: q, brand: "", mode: "weight", per100: { kcal: cal * 100 / g, p: p * 100 / g, c: c * 100 / g, f: f * 100 / g },
+            micros: null, baseUnit: unit, servingGrams: g, servingText: d.assumed || `${g}${unit}`, source: "ai" }
+        : { name: q, brand: "", mode: "serving", per: { kcal: cal, p, c, f }, micros: null,
+            servingLabel: d.assumed || "serving", source: "ai" };
+      setResults([]); setSearchErr(""); // the search list is done — we're logging the estimate
+      setDetailState({ food: basis, editingId: null, mealType: addingTo });
     } catch (e) {
       const code = (e && e.code) || "";
       if (code.includes("permission-denied")) setAiErr("Your free trial has ended — upgrade to keep AI estimates.");
@@ -7584,7 +7589,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
                 {/* Auto-focus so the cursor lands in Search the moment you tap
                     "Add food to <meal>" (search is the primary way to log). */}
                 <input autoFocus ref={searchInputRef} style={{ ...inp, flex:1 }} placeholder="Search foods (e.g. chicken breast)"
-                  value={searchQ} onChange={(e) => setSearchQ(e.target.value)}
+                  value={searchQ} onChange={(e) => { const v = e.target.value; setSearchQ(v); if (!v.trim()) { setResults([]); setSearchErr(""); } }}
                   onKeyDown={(e) => e.key === "Enter" && runSearch()} />
                 <button onClick={runSearch} disabled={searching || searchQ.trim().length < 2}
                   style={{ padding:"8px 14px", fontSize:".8rem", fontWeight:700, borderRadius:"8px",
@@ -8633,7 +8638,7 @@ function WeightDayLogger({ date, existing, onSave }) {
 function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, weekSummary, recentWearable, history, onRefresh, isRemote,
-  onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onAddCustomExercise }) {
+  onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget, onAddCustomExercise }) {
 
   const [showCalendar, setShowCalendar] = useState(false);
   const [editingWorkout, setEditingWorkout] = useState(null);
@@ -8641,6 +8646,8 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const [expandedSnap, setExpandedSnap] = useState(false);
   const [showMacros, setShowMacros] = useState(false);
   const [editMacros, setEditMacros] = useState(false); // macro-target editor open
+  const [editTarget, setEditTarget] = useState(false); // manual calorie-target editor open
+  const [targetDraft, setTargetDraft] = useState("");  // manual calorie-target draft
   const [mtDraft, setMtDraft] = useState({ protein:"", carbs:"", fat:"" });   // grams draft
   const [mtMode, setMtMode] = useState("grams"); // "grams" | "pct" — how you enter targets
   const [mtPct, setMtPct] = useState({ protein:"", carbs:"", fat:"" });       // percentage draft
@@ -8682,9 +8689,13 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   // tracker adjustment and today's log has wearable data, the watch's measured
   // burn replaces the whole estimate (see wearableTdee).
   const trackerTdee = wearableTdee(data, dailyLog);
-  const target = trackerTdee
+  const computedTargetForNote = trackerTdee
     ? Math.max(1200, trackerTdee - 500)
     : Math.max(1200, tdee - 500 + (isEatback(data) ? Math.round(todayCardio.burned + todayStrength.burned) : 0));
+  // A manually-set target (data.calorieTarget) is the coach's/user's own number —
+  // it wins over the calculation AND the tracker adjustment (an explicit choice).
+  const manualTarget = Number(data.calorieTarget) > 0 ? Math.round(Number(data.calorieTarget)) : null;
+  const target = manualTarget != null ? manualTarget : computedTargetForNote;
   const logged = dailyLog.calories || 0;
   const remaining = target - logged;         // signed — negative once over target
   const overCals = remaining < 0;
@@ -8858,33 +8869,78 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         <div className="card" style={{padding:"14px 16px",marginBottom:"14px",borderColor:"rgba(8,220,224,.2)",animation:"fadeUp .15s ease both"}}>
           {expandedStat === "target" && (
             <>
-              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"var(--accent)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="target" size={16} color="var(--accent)" />How Your Target Is Calculated</div>
-              {trackerTdee ? (
-                <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                  <span style={{color:"var(--muted)",display:"inline-flex",alignItems:"center",gap:"5px"}}><Icon name="watch" size={13} color="var(--accent)" />Tracker measured burn</span>
-                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{trackerTdee.toLocaleString()} cal</span>
-                </div>
+              {manualTarget != null ? (
+                <>
+                  <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"var(--accent)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="target" size={16} color="var(--accent)" />Your Custom Target</div>
+                  <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontSize:".88rem",fontWeight:700}}>
+                    <span>Today's Target</span>
+                    <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--accent)"}}>{target.toLocaleString()} cal</span>
+                  </div>
+                  <div style={{fontSize:".72rem",color:"var(--muted)"}}>Set by you — this overrides the calculated target (calculated: {computedTargetForNote.toLocaleString()} cal).</div>
+                </>
               ) : (
-                <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                  <span style={{color:"var(--muted)"}}>Your body's daily burn (TDEE)</span>
-                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{tdee.toLocaleString()} cal</span>
+                <>
+                  <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"var(--accent)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="target" size={16} color="var(--accent)" />How Your Target Is Calculated</div>
+                  {trackerTdee ? (
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
+                      <span style={{color:"var(--muted)",display:"inline-flex",alignItems:"center",gap:"5px"}}><Icon name="watch" size={13} color="var(--accent)" />Tracker measured burn</span>
+                      <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{trackerTdee.toLocaleString()} cal</span>
+                    </div>
+                  ) : (
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
+                      <span style={{color:"var(--muted)"}}>Your body's daily burn (TDEE)</span>
+                      <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{tdee.toLocaleString()} cal</span>
+                    </div>
+                  )}
+                  <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
+                    <span style={{color:"var(--muted)"}}>Eat less to lose ~1 lb/week</span>
+                    <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:"var(--red)"}}>−500 cal</span>
+                  </div>
+                  {!trackerTdee && (
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
+                      <span style={{color:"var(--muted)"}}>Today's workout burn</span>
+                      <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:"var(--green)"}}>+{todayTotalBurn} cal</span>
+                    </div>
+                  )}
+                  <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontSize:".88rem",fontWeight:700}}>
+                    <span>Today's Target</span>
+                    <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--accent)"}}>{target.toLocaleString()} cal</span>
+                  </div>
+                </>
+              )}
+              {/* Set your own target (coach's knowledge, or a number the user prefers). */}
+              {onSetCalorieTarget && (
+                <div style={{marginTop:"8px",borderTop:"1px solid var(--border)",paddingTop:"8px"}}>
+                  {!editTarget ? (
+                    <button onClick={(e)=>{e.stopPropagation(); setTargetDraft(manualTarget!=null?String(manualTarget):String(target)); setEditTarget(true);}}
+                      style={{border:"none",background:"transparent",color:"var(--accent)",cursor:"pointer",fontSize:".76rem",fontWeight:700,padding:0,textDecoration:"underline"}}>
+                      ✎ Set your own target
+                    </button>
+                  ) : (
+                    <div onClick={(e)=>e.stopPropagation()} style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+                      <div style={{fontSize:".72rem",color:"var(--muted)"}}>Enter the daily calorie target you want to use. Your macros will adjust to it.</div>
+                      <div style={{display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap"}}>
+                        <input type="number" inputMode="numeric" autoFocus value={targetDraft} placeholder="e.g. 2000"
+                          onChange={(e)=>setTargetDraft(e.target.value)}
+                          onKeyDown={(e)=>{ if(e.key==="Enter"){ const v=parseInt(targetDraft); if(v>0){ onSetCalorieTarget(v); setEditTarget(false); } } }}
+                          style={{width:"120px",padding:"9px 11px",borderRadius:"8px",border:"1.5px solid var(--accent)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".9rem"}} />
+                        <span style={{fontSize:".78rem",color:"var(--muted)"}}>cal</span>
+                        <button onClick={()=>{ const v=parseInt(targetDraft); if(v>0){ onSetCalorieTarget(v); setEditTarget(false); } }}
+                          style={{padding:"9px 14px",fontSize:".82rem",fontWeight:700,borderRadius:"8px",border:"none",background:"var(--accent-fill)",color:"#0b0b12",cursor:"pointer"}}>Save target</button>
+                        {manualTarget != null && (
+                          <button onClick={()=>{ onSetCalorieTarget(null); setEditTarget(false); }}
+                            style={{padding:"9px 12px",fontSize:".82rem",borderRadius:"8px",border:"1px solid var(--border)",background:"transparent",color:"var(--muted)",cursor:"pointer"}}>Use calculated</button>
+                        )}
+                        <button onClick={()=>setEditTarget(false)}
+                          style={{padding:"9px 10px",fontSize:".82rem",borderRadius:"8px",border:"none",background:"transparent",color:"var(--muted)",cursor:"pointer"}}>Cancel</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
-              <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                <span style={{color:"var(--muted)"}}>Eat less to lose ~1 lb/week</span>
-                <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:"var(--red)"}}>−500 cal</span>
-              </div>
-              {!trackerTdee && (
-                <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                  <span style={{color:"var(--muted)"}}>Today's workout burn</span>
-                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:"var(--green)"}}>+{todayTotalBurn} cal</span>
-                </div>
+              {!editTarget && manualTarget == null && (
+                <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:"6px"}}>💡 Or tap "Edit Info" to adjust your weight, goal, or activity level.</div>
               )}
-              <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontSize:".88rem",fontWeight:700}}>
-                <span>Today's Target</span>
-                <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--accent)"}}>{target.toLocaleString()} cal</span>
-              </div>
-              <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:"6px"}}>💡 To change your target, tap "Edit Info" to adjust your weight, goal, or activity level, or "Edit Workouts" to change your exercise plan.</div>
             </>
           )}
           {expandedStat === "logged" && (
@@ -10994,7 +11050,10 @@ function computeClientCalories(d) {
       strength += exBurn(ex, w, s.duration);
     });
   });
-  const target = Math.max(1200, Math.round(tdee - 500 + (isEatback(d) ? (cardio + strength) / 7 : 0)));
+  const auto = Math.max(1200, Math.round(tdee - 500 + (isEatback(d) ? (cardio + strength) / 7 : 0)));
+  // A manually-set target (data.calorieTarget — the coach's/user's own number)
+  // overrides the calculation everywhere it's used.
+  const target = Number(d.calorieTarget) > 0 ? Math.round(Number(d.calorieTarget)) : auto;
   return { tdee, target };
 }
 
@@ -17405,6 +17464,7 @@ export default function App() {
               onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
               onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; return n; })}
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
+              onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
               onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
               onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
                 const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);
