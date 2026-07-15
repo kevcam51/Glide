@@ -24,15 +24,21 @@ const {
   generateAuthenticationOptions, verifyAuthenticationResponse,
 } = require("@simplewebauthn/server");
 
-// Origins allowed to run the ceremony; rpID is the origin's hostname.
+// Origins allowed to run the ceremony. rpID is a registrable domain the origin
+// belongs to — for both glidna.com AND www.glidna.com we use "glidna.com", so a
+// passkey registered on either subdomain works on the other (a WebAuthn rpID may
+// be the origin's host or a parent domain).
 const ALLOWED_ORIGINS = [
   "https://glidna.com",
+  "https://www.glidna.com", // apex + www both serve the app; share rpID glidna.com
   "https://calorieiq-jet.vercel.app", // legacy origin — passkeys are domain-bound; users re-register on glidna.com
   "http://localhost:5173", // local dev
 ];
 function rpFromOrigin(origin) {
   if (!ALLOWED_ORIGINS.includes(origin)) return null;
-  return { rpID: new URL(origin).hostname, origin };
+  const host = new URL(origin).hostname;
+  const rpID = /(^|\.)glidna\.com$/i.test(host) ? "glidna.com" : host;
+  return { rpID, origin };
 }
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
