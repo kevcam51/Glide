@@ -6541,10 +6541,19 @@ function _foodScore(f, q) {
   const name = (f.name || "").toLowerCase();
   const brand = (f.brand || "").toLowerCase();
   const hay = (name + " " + brand).trim(); // match against the BRAND too
+  // USDA generic foods are named "Pineapple, raw" / "Chicken, breast, raw" — the
+  // "head" before the first comma is the real food name. Matching the head lets a
+  // generic "Pineapple, raw" rank like an exact hit, so it beats a branded pastry
+  // literally named "Pineapple" (Kevin's S94 report).
+  const head = name.split(",")[0].trim();
   const esc = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const dt = f.dataType || "";
+  const isGeneric = /Foundation|SR Legacy|Survey/i.test(dt);
+  const isBranded = dt === "Branded" || f.source === "off" || (f.source === "fatsecret" && !!brand);
   let s = 0;
   // Whole-query name match (strongest — a precise generic hit like "egg").
   if (name === q) s += 100;
+  else if (head === q) s += 92;                              // "Pineapple, raw" ≈ exact "pineapple"
   else if (name.startsWith(q)) s += 65;
   else if (new RegExp(`\\b${esc}\\b`).test(name)) s += 45;
   else if (name.includes(q)) s += 20;
@@ -6558,11 +6567,14 @@ function _foodScore(f, q) {
     s += Math.round((hit / words.length) * 45);              // up to +45 for full word coverage
     if (hit === words.length && words.length >= 2) s += 10;  // covering every word of a multi-word query
   }
-  const dt = f.dataType || "";
-  if (/Foundation|SR Legacy|Survey/i.test(dt)) s += 30;      // curated generic whole foods
+  if (isGeneric) s += 48;                                    // curated generic whole foods (raised from 30)
   else if (dt === "Branded") s += 4;
-  if (f.source === "fatsecret") s += 14;                     // curated branded/restaurant library
-  if (f.source === "off") s -= 6;                            // crowd-sourced, least reliable
+  if (f.source === "fatsecret") s += 16;                     // curated branded/restaurant library
+  if (f.source === "off") s -= 8;                            // crowd-sourced, least reliable
+  // A SHORT generic query (1–2 words, e.g. "pineapple", "white rice") almost
+  // always means the whole food — demote branded products so a bakery's
+  // "Pineapple" pastry can't outrank "Pineapple, raw".
+  if (words.length <= 2 && isBranded && !isGeneric) s -= 30;
   s -= Math.min(14, name.length / 8);                        // slight nudge toward concise names
   return s;
 }
@@ -6799,14 +6811,15 @@ function FoodServingModal({ food, editing, mealLabel, onConfirm, onClose }) {
   return createPortal(
     <div data-theme="pro" onClick={onClose}
       style={{ position: "fixed", inset: 0, zIndex: 2200, background: "rgba(0,0,0,.7)",
-        display: "flex", alignItems: "flex-end", justifyContent: "center",
-        padding: "0", paddingTop: "env(safe-area-inset-top,0px)" }}>
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "16px", paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
+        paddingBottom: "calc(16px + env(safe-area-inset-bottom,0px))" }}>
       <div onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(520px, 100%)", maxHeight: "92vh", overflowY: "auto",
+        style={{ width: "min(480px, 100%)", maxHeight: "88vh", overflowY: "auto",
           background: "var(--surface)", border: "1px solid var(--border)",
-          borderRadius: "16px 16px 0 0", padding: "18px",
-          paddingBottom: "calc(18px + env(safe-area-inset-bottom,0px))",
-          display: "flex", flexDirection: "column", gap: "14px" }}>
+          borderRadius: "16px", padding: "18px",
+          display: "flex", flexDirection: "column", gap: "14px",
+          boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text)" }}>{food.name || "Food"}</div>
