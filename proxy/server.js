@@ -44,17 +44,24 @@ async function getToken() {
   return _token;
 }
 
+async function fsCall(method, q, token) {
+  const url = `https://platform.fatsecret.com/rest/server.api?method=${method}&format=json&max_results=20` +
+    `&search_expression=${encodeURIComponent(q)}`;
+  return fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+}
 async function searchFatSecret(q) {
   const token = await getToken();
   // foods.search.v3 returns each food with a full `servings.serving[]` array —
   // real household servings ("1 cup", "1 breast") + micronutrients — instead of
   // v1's flat "Per 100g" text summary. The Cloud Function (functions/foodsearch.js)
   // parses this into a realistic default serving so the picker doesn't open at a
-  // flat 100 g. Falls back cleanly: if v3 ever errors, the function still handles
-  // the v1 shape. (Same base URL + basic scope as before.)
-  const url = "https://platform.fatsecret.com/rest/server.api?method=foods.search.v3&format=json&max_results=20" +
-    `&search_expression=${encodeURIComponent(q)}`;
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  // flat 100 g. SAFETY NET: if v3 ever errors (tier/scope), fall back to the v1
+  // method so FatSecret search keeps working (the function handles both shapes).
+  let r = await fsCall("foods.search.v3", q, token);
+  if (!r.ok) {
+    console.error("fatsecret v3 http", r.status, "— falling back to v1");
+    r = await fsCall("foods.search", q, token);
+  }
   if (!r.ok) throw new Error("fatsecret-search-" + r.status);
   return r.json();
 }
