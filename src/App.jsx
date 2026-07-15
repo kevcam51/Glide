@@ -7087,7 +7087,11 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   // "other", or null (none open).
   const [addingTo, setAddingTo] = useState(null);
   const [editingId, setEditingId] = useState(null); // set when editing an existing entry
-  const [open, setOpen] = useState((meals || []).length > 0); // collapsible; starts open if the day already has meals
+  // View mode: null = collapsed (just the meal pills, cleanest), a section name
+  // ("Breakfast"/…/"other") = that ONE meal open on its own, or "all" = every
+  // section expanded together. Tapping a pill opens just that meal; tapping the
+  // "Meals & Food Today" header opens them all. Starts collapsed for a clean screen.
+  const [viewMode, setViewMode] = useState(null);
   // Food-database search (USDA) within the add-form.
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQ, setSearchQ] = useState("");
@@ -7138,7 +7142,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   // collapsed header — fixes "calories changed but I can't see the food."
   const prevMealCount = useRef(list.length);
   useEffect(() => {
-    if (list.length > prevMealCount.current) setOpen(true);
+    if (list.length > prevMealCount.current) setViewMode((v) => v === null ? "all" : v);
     prevMealCount.current = list.length;
   }, [list.length]);
   // When a meal's add-form opens, drop the cursor into the food-search box (search
@@ -7742,10 +7746,121 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
     </div>
   );
 
+  // One meal section (Breakfast/Lunch/Dinner/Snack) — its foods + add/copy row.
+  // Shared by the single-meal view and the "all" view.
+  const renderSection = (t) => {
+    const items = list.filter((m) => inSection(m, t));
+    const subtotal = items.reduce((s, m) => s + (m.calories || 0), 0);
+    return (
+      <div key={t}>
+        <div style={{ fontSize:".72rem", fontWeight:700, color:"var(--muted)",
+          textTransform:"uppercase", letterSpacing:".5px", marginBottom:"4px",
+          display:"flex", justifyContent:"space-between" }}>
+          <span>{t}</span>
+          {items.length > 0 && <span>{subtotal.toLocaleString()} cal</span>}
+        </div>
+        {items.length > 0 && (
+          <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>{items.map(mealRow)}</div>
+        )}
+        {addingTo === t ? addForm() : (
+          <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
+            <button style={addBtn} onClick={() => openForm(t)}>+ Add food to {t}</button>
+            {canCopy && (
+              <button onClick={() => setCopySection({ label: t, type: t, matchMeal: (m) => inSection(m, t) })} style={copyLink}>
+                <Icon name="copy" size={12} /> Copy a previous {t}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+  // "Other / quick entries" section.
+  const renderOther = () => (
+    <div>
+      <div style={{ fontSize:".72rem", fontWeight:700, color:"var(--muted)",
+        textTransform:"uppercase", letterSpacing:".5px", marginBottom:"4px" }}>Other / quick entries</div>
+      {list.filter(isOther).length > 0 && (
+        <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>{list.filter(isOther).map(mealRow)}</div>
+      )}
+      {addingTo === "other" ? addForm() : (
+        <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
+          <button style={addBtn} onClick={() => openForm("other")}>+ Add a quick entry</button>
+          {canCopy && (
+            <button onClick={() => setCopySection({ label: "Other", type: "", matchMeal: isOther })} style={copyLink}>
+              <Icon name="copy" size={12} /> Copy from a previous day
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+  // The day's total + macro chips + micronutrient roll-up (shown in "all" view).
+  const renderDayTotals = () => (
+    <>
+      {list.length > 0 && (
+        <div style={{ borderTop:"1px solid var(--border)", paddingTop:"8px",
+          display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
+          {hasMacros
+            ? <MacroSummary />
+            : <span style={{ fontSize:".72rem", color:"var(--muted)" }}>Tip: add macros when logging to track protein, carbs &amp; fat.</span>}
+          <span style={{ fontSize:".78rem", fontWeight:700, color:"var(--text)" }}>
+            {loggedTotal.toLocaleString()} cal · {list.length} item{list.length!==1?"s":""}
+          </span>
+        </div>
+      )}
+      {(() => {
+        const dayMicros = sumMicros(list);
+        const keys = MICRO_DEFS.filter((d) => dayMicros[d.k] > 0);
+        if (!keys.length) return null;
+        return (
+          <div style={{ borderTop:"1px solid var(--border)", paddingTop:"8px" }}>
+            <button onClick={() => setShowDayMicros((s) => !s)}
+              style={{ border:"none", background:"transparent", color:"var(--accent)", cursor:"pointer",
+                fontSize:".74rem", fontWeight:700, padding:0, textDecoration:"underline" }}>
+              {showDayMicros ? "Hide micronutrients" : `Micronutrients today (${keys.length}) ▸`}
+            </button>
+            {showDayMicros && (
+              <div style={{ marginTop:"10px" }}>
+                <MicroBars micros={dayMicros} />
+                <div style={{ fontSize:".62rem", color:"var(--muted)", fontStyle:"italic", marginTop:"10px" }}>
+                  Counts foods logged from the database or barcode scan. Bars fill toward general adult reference values — not medical advice.
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+    </>
+  );
+  // Meal-picker pills / tabs. In collapsed view they OPEN a single meal; in
+  // single-meal view they switch between meals (active one highlighted; tapping
+  // it again collapses). "Other" appears only when it has entries.
+  const pillSections = [...TYPES, ...(list.filter(isOther).length > 0 ? ["other"] : [])];
+  const pillLabel = (t) => (t === "other" ? "Other" : t);
+  const renderPills = () => (
+    <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+      {pillSections.map((t) => {
+        const n = list.filter((m) => t === "other" ? isOther(m) : inSection(m, t)).length;
+        const activeP = viewMode === t;
+        return (
+          <button key={t} onClick={() => setViewMode((v) => v === t ? null : t)}
+            style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"7px 12px",
+              borderRadius:"999px", border:"1px solid var(--accent)",
+              background: activeP ? "var(--accent)" : "rgba(8,220,224,.08)",
+              color: activeP ? "#0b0b12" : "var(--accent)", fontSize:".76rem", fontWeight:700,
+              cursor:"pointer", whiteSpace:"nowrap" }}>
+            {pillLabel(t)}{n > 0 ? ` · ${n}` : ""}
+          </button>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div style={{ padding:"12px 14px", background:"var(--s2)", borderRadius:"8px",
       border:"1px solid var(--border)", marginBottom:"6px" }}>
-      <div onClick={() => setOpen((o) => !o)}
+      <div onClick={() => setViewMode((v) => v === "all" ? null : "all")}
         style={{ display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer", gap:"8px" }}>
         <div className="sec-title" style={{ marginTop:0, marginBottom:0, display:"flex", alignItems:"center", gap:"8px" }}><Icon name="meal" size={17} color="var(--accent)" />Meals &amp; Food Today</div>
         <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
@@ -7754,129 +7869,39 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
               {loggedTotal.toLocaleString()} cal · {list.length} item{list.length!==1?"s":""}
             </span>
           )}
-          {/* Clear, button-like cue that this section is where you log food. */}
+          {/* Header control: open ALL meals (or close). */}
           <span style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"6px 11px",
             borderRadius:"999px", border:"1px solid var(--accent)",
-            background: open ? "transparent" : "rgba(8,220,224,.1)",
+            background: viewMode === "all" ? "transparent" : "rgba(8,220,224,.1)",
             color:"var(--accent)", fontSize:".76rem", fontWeight:700, whiteSpace:"nowrap" }}>
-            {open ? "▾ Close" : (list.length > 0 ? "＋ Add food" : "＋ Log food")}
+            {viewMode === "all" ? "▾ Close" : "View all"}
           </span>
         </div>
       </div>
 
-      {/* When collapsed: an always-visible quick-add bar (Breakfast / Lunch /
-          Dinner / Snack) so the meal types are obvious and you can log one in a
-          single tap — no need to expand the section first. Plus the day's macro
-          totals at a glance. */}
-      {!open && (
+      {/* Meal pills — tap one to open JUST that meal (its own view); tap the
+          header above to see them all together. Clean by default. */}
+      {viewMode !== "all" && (
         <div style={{ marginTop:"8px" }}>
-          <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-            {TYPES.map((t) => {
-              const n = list.filter((m) => inSection(m, t)).length;
-              return (
-                <button key={t} onClick={() => { setOpen(true); openForm(t); }}
-                  style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"7px 11px",
-                    borderRadius:"999px", border:"1px solid var(--accent)", background:"rgba(8,220,224,.08)",
-                    color:"var(--accent)", fontSize:".76rem", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>
-                  <Icon name="plus" size={12} color="var(--accent)" />{t}{n > 0 ? ` · ${n}` : ""}
-                </button>
-              );
-            })}
-          </div>
-          {hasMacros && <div style={{ marginTop:"8px" }}><MacroSummary small /></div>}
+          {renderPills()}
+          {viewMode === null && hasMacros && <div style={{ marginTop:"8px" }}><MacroSummary small /></div>}
         </div>
       )}
 
-      {open && (
-      <div style={{ display:"flex", flexDirection:"column", gap:"10px", marginTop:"10px" }}>
-        {TYPES.map((t) => {
-          const items = list.filter((m) => inSection(m, t));
-          const subtotal = items.reduce((s, m) => s + (m.calories||0), 0);
-          return (
-            <div key={t}>
-              <div style={{ fontSize:".72rem", fontWeight:700, color:"var(--muted)",
-                textTransform:"uppercase", letterSpacing:".5px", marginBottom:"4px",
-                display:"flex", justifyContent:"space-between" }}>
-                <span>{t}</span>
-                {items.length > 0 && <span>{subtotal.toLocaleString()} cal</span>}
-              </div>
-              {items.length > 0 && (
-                <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>{items.map(mealRow)}</div>
-              )}
-              {addingTo === t ? addForm() : (
-                <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
-                  <button style={addBtn} onClick={() => openForm(t)}>+ Add food to {t}</button>
-                  {canCopy && (
-                    <button onClick={() => setCopySection({ label: t, type: t, matchMeal: (m) => inSection(m, t) })} style={copyLink}>
-                      <Icon name="copy" size={12} /> Copy a previous {t}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-        {/* Quick / untyped entries */}
-        <div>
-          <div style={{ fontSize:".72rem", fontWeight:700, color:"var(--muted)",
-            textTransform:"uppercase", letterSpacing:".5px", marginBottom:"4px" }}>
-            Other / quick entries
-          </div>
-          {list.filter(isOther).length > 0 && (
-            <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>
-              {list.filter(isOther).map(mealRow)}
-            </div>
-          )}
-          {addingTo === "other" ? addForm() : (
-            <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
-              <button style={addBtn} onClick={() => openForm("other")}>+ Add a quick entry</button>
-              {canCopy && (
-                <button onClick={() => setCopySection({ label: "Other", type: "", matchMeal: isOther })} style={copyLink}>
-                  <Icon name="copy" size={12} /> Copy from a previous day
-                </button>
-              )}
-            </div>
-          )}
+      {/* Single meal open on its own. */}
+      {viewMode !== null && viewMode !== "all" && (
+        <div style={{ marginTop:"12px" }}>
+          {viewMode === "other" ? renderOther() : renderSection(viewMode)}
         </div>
+      )}
 
-        {list.length > 0 && (
-          <div style={{ borderTop:"1px solid var(--border)", paddingTop:"8px",
-            display:"flex", justifyContent:"space-between", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
-            {hasMacros
-              ? <MacroSummary />
-              : <span style={{ fontSize:".72rem", color:"var(--muted)" }}>Tip: add macros when logging to track protein, carbs &amp; fat.</span>}
-            <span style={{ fontSize:".78rem", fontWeight:700, color:"var(--text)" }}>
-              {loggedTotal.toLocaleString()} cal · {list.length} item{list.length!==1?"s":""}
-            </span>
-          </div>
-        )}
-        {/* Daily MICRONUTRIENT roll-up (S94): sums the micros carried by foods
-            logged from the database/barcode; each row shows today vs the
-            general-adult reference (▲ reach it / ▼ stay under it). */}
-        {(() => {
-          const dayMicros = sumMicros(list);
-          const keys = MICRO_DEFS.filter((d) => dayMicros[d.k] > 0);
-          if (!keys.length) return null;
-          return (
-            <div style={{ borderTop:"1px solid var(--border)", paddingTop:"8px" }}>
-              <button onClick={() => setShowDayMicros((s) => !s)}
-                style={{ border:"none", background:"transparent", color:"var(--accent)", cursor:"pointer",
-                  fontSize:".74rem", fontWeight:700, padding:0, textDecoration:"underline" }}>
-                {showDayMicros ? "Hide micronutrients" : `Micronutrients today (${keys.length}) ▸`}
-              </button>
-              {showDayMicros && (
-                <div style={{ marginTop:"10px" }}>
-                  <MicroBars micros={dayMicros} />
-                  <div style={{ fontSize:".62rem", color:"var(--muted)", fontStyle:"italic", marginTop:"10px" }}>
-                    Counts foods logged from the database or barcode scan. Bars fill toward general adult reference values — not medical advice.
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })()}
-      </div>
+      {/* All meals expanded together. */}
+      {viewMode === "all" && (
+        <div style={{ display:"flex", flexDirection:"column", gap:"10px", marginTop:"10px" }}>
+          {TYPES.map((t) => renderSection(t))}
+          {renderOther()}
+          {renderDayTotals()}
+        </div>
       )}
       {detailState && (
         <FoodServingModal food={detailState.food} editing={!!detailState.editingId}
@@ -12890,6 +12915,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     try {
       const input = { name: p.name, mealType: p.mealType, calories: Number(p.calories) || 0,
         protein: Number(p.protein) || 0, carbs: Number(p.carbs) || 0, fat: Number(p.fat) || 0, date: p.date };
+      if (p.micros && typeof p.micros === "object") input.micros = p.micros; // carry AI micro estimates through
       if (p.time) input.time = p.time;
       if (p.clientId) input.clientId = p.clientId;
       if (p.localPlanId) input.localPlanId = p.localPlanId; // trainer's own local plan file (S87)

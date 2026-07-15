@@ -18,6 +18,31 @@ const { CARDIO, STRENGTH, CARDIO_IDS, STRENGTH_IDS, MET } = require("./exercises
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
+// Micronutrients the AI can estimate + store on a logged meal. Keys/units MATCH
+// the frontend MICRO_DEFS (src/App.jsx) so AI-logged micros roll straight into
+// the daily micronutrient bars. (Kevin: AI-logged meals were saving macros but
+// ~0 micros — e.g. sodium showed near zero.)
+const MICRO_UNITS = { fiber: "g", sugar: "g", satFat: "g", transFat: "g", monoFat: "g", polyFat: "g",
+  cholesterol: "mg", sodium: "mg", potassium: "mg", calcium: "mg", iron: "mg", magnesium: "mg", zinc: "mg",
+  phosphorus: "mg", selenium: "µg", copper: "mg", manganese: "mg", vitA: "µg", vitC: "mg", vitD: "µg",
+  vitE: "mg", vitK: "µg", b1: "mg", b2: "mg", b3: "mg", b6: "mg", b12: "µg", folate: "µg", choline: "mg", caffeine: "mg" };
+const MICRO_KEYS = Object.keys(MICRO_UNITS);
+const MICRO_SCHEMA = {
+  type: "object",
+  description: "Estimated micronutrients for the WHOLE meal (totals, not per-100g). Fill in every one you can reasonably estimate — ALWAYS include sodium, potassium, fiber, sugar, saturated fat, cholesterol, calcium, and iron, plus notable vitamins/minerals for the foods involved. Each value is in the unit named in its property description (g / mg / µg).",
+  properties: Object.fromEntries(MICRO_KEYS.map((k) => [k, { type: "number", description: MICRO_UNITS[k] }])),
+};
+// Keep only known micro keys carrying a positive finite number.
+function sanitizeMicros(m) {
+  if (!m || typeof m !== "object") return null;
+  const out = {};
+  for (const k of MICRO_KEYS) {
+    const v = Number(m[k]);
+    if (Number.isFinite(v) && v > 0) out[k] = Math.round(v * 100) / 100;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 // id → display label (for rendering a proposed program on the confirmation card).
 const EX_LABEL = {};
 for (const e of CARDIO) EX_LABEL[e.id] = e.label;
@@ -827,6 +852,7 @@ function buildTools(role, opts = {}) {
           protein: { type: "number", description: "Protein grams (0 if unknown)" },
           carbs: { type: "number", description: "Carb grams (0 if unknown)" },
           fat: { type: "number", description: "Fat grams (0 if unknown)" },
+          micros: MICRO_SCHEMA,
           date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
           time: { type: "string", description: "Clock time eaten, e.g. '8:30am' or '19:45'. Set when the user mentions when they ate; omit for now." },
           ...clientIdProp, ...localPlanProp,
@@ -850,6 +876,7 @@ function buildTools(role, opts = {}) {
           protein: { type: "number", description: "Protein grams (0 if unknown)" },
           carbs: { type: "number", description: "Carb grams (0 if unknown)" },
           fat: { type: "number", description: "Fat grams (0 if unknown)" },
+          micros: MICRO_SCHEMA,
           date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
           time: { type: "string", description: "Clock time eaten, e.g. '8:30am' or '19:45'. Set when the user mentions when they ate; omit for now." },
           ...clientIdProp, ...localPlanProp,
@@ -877,6 +904,7 @@ function buildTools(role, opts = {}) {
                 protein: { type: "number", description: "grams (0 if unknown)" },
                 carbs: { type: "number", description: "grams (0 if unknown)" },
                 fat: { type: "number", description: "grams (0 if unknown)" },
+                micros: MICRO_SCHEMA,
                 date: { type: "string", description: "YYYY-MM-DD; omit for today" },
                 time: { type: "string", description: "clock time eaten; omit for now" },
               },
@@ -1781,6 +1809,8 @@ async function runTool(name, input, ctx) {
       date: re.test(input.date || "") ? input.date : ctx.today,
       time: normMealTime(input.time, ctx),
     };
+    const pMicros = sanitizeMicros(input.micros);
+    if (pMicros) meal.micros = pMicros; // carried through the Accept card → logMeal
     if (ctx.isTrainer && input.clientId) {
       const t = await resolveTargetUid(db, { clientId: input.clientId }, ctx);
       if (t && t.error) return t; // unauthorized client → tell the model
@@ -1836,6 +1866,8 @@ async function runTool(name, input, ctx) {
       fat: Math.max(0, Math.round(Number(input.fat) || 0)),
       time: normMealTime(input.time, ctx),
     };
+    const lmMicros = sanitizeMicros(input.micros);
+    if (lmMicros) meal.micros = lmMicros; // roll into the daily micronutrient bars
     const { id: planId } = await activePlanData(db, uid, planOverride);
     const logKey = `caliq-log-${planId}-${date}`;
     // Transactional append (S90 hardening): the AI logging while the app (or a
@@ -1891,6 +1923,8 @@ async function runTool(name, input, ctx) {
         carbs: Math.max(0, Math.round(Number(it.carbs) || 0)),
         fat: Math.max(0, Math.round(Number(it.fat) || 0)),
         time: normMealTime(it.time, ctx) };
+      const mMicros = sanitizeMicros(it.micros);
+      if (mMicros) meal.micros = mMicros; // roll into the daily micronutrient bars
       (byDate[date] = byDate[date] || []).push(meal);
     }
     const logged = [];
