@@ -6567,9 +6567,9 @@ function _foodScore(f, q) {
     s += Math.round((hit / words.length) * 45);              // up to +45 for full word coverage
     if (hit === words.length && words.length >= 2) s += 10;  // covering every word of a multi-word query
   }
-  if (isGeneric) s += 48;                                    // curated generic whole foods (raised from 30)
+  if (isGeneric) s += 48;                                    // curated generic whole foods
   else if (dt === "Branded") s += 4;
-  if (f.source === "fatsecret") s += 16;                     // curated branded/restaurant library
+  if (f.source === "fatsecret") s += 55;                     // PRIMARY library (Kevin's call, S94d) — best curated quality; ranks above USDA
   if (f.source === "off") s -= 8;                            // crowd-sourced, least reliable
   // A SHORT generic query (1–2 words, e.g. "pineapple", "white rice") almost
   // always means the whole food — demote branded products so a bakery's
@@ -6581,12 +6581,15 @@ function _foodScore(f, q) {
 // Session cache: query → final ranked results, so re-typing a food you already
 // searched (or backspacing) renders instantly.
 const _foodSearchCache = new Map();
-// Combined food search — PROGRESSIVE (S94, "as fast as MyFitnessPal"): USDA is
-// usually back in a few hundred ms while OFF's legacy search endpoint routinely
-// takes 1–3s, and the old Promise.allSettled made the SLOWEST source gate the
-// whole list. Now `onPartial(results)` fires the moment the first source lands,
-// so the user sees ranked foods immediately; the final merged list (OFF +
-// FatSecret fallback) resolves afterward and replaces it.
+// Combined food search — PROGRESSIVE (S94, "as fast as MyFitnessPal") +
+// FatSecret-PRIMARY (S94d, Kevin's call). PRIMARY sources = FatSecret (best
+// curated quality, ranks first) + USDA (whole foods), always queried in
+// parallel; `onPartial(results)` re-emits the ranked merge as EACH source
+// lands, so the user sees foods the instant the fastest one responds. Open
+// Food Facts (crowd-sourced, noisy) is now a FALLBACK, hit only when the
+// primary sources come up short — this both cuts junk results and is why the
+// pineapple pastry no longer surfaces. FatSecret's free tier is 5,000 calls/
+// day with no per-call overage, so primary use is effectively free at our scale.
 async function searchFoods(query, onPartial) {
   const q = query.toLowerCase().trim();
   const cached = _foodSearchCache.get(q);
@@ -6602,28 +6605,31 @@ async function searchFoods(query, onPartial) {
     out.sort((a, b) => _foodScore(b, q) - _foodScore(a, q));
     return out.slice(0, 12);
   };
-  const uP = searchUSDA(query);
-  const oP = searchOFF(query);
-  if (onPartial) uP.then((usda) => { if (usda.length) onPartial(rank(usda)); }).catch(() => { /* final path reports */ });
-  const [u, o] = await Promise.allSettled([uP, oP]);
-  const usda = u.status === "fulfilled" ? u.value : [];
-  const off = o.status === "fulfilled" ? o.value : [];
-  const own = [...usda, ...off];
-  // FALLBACK ONLY: hit FatSecret (a metered API) just when our own DB comes up
-  // short — few results, or none that actually match the query well. Common foods
-  // resolve from USDA/OFF and never touch FatSecret, conserving its quota.
-  const strong = own.some((f) => { const n = (f.name || "").toLowerCase(); return n === q || n.startsWith(q) || new RegExp(`\\b${esc}\\b`).test(n); });
-  let fatsecret = [];
-  if (own.length < 4 || !strong) {
-    fatsecret = await searchFatSecret(query);
+  // Accumulate results from each source as it resolves and re-emit the ranked
+  // merge, so nothing waits for the slowest source.
+  let acc = [];
+  const emit = (arr) => { if (arr && arr.length) { acc = acc.concat(arr); if (onPartial) onPartial(rank(acc)); } };
+  const fP = searchFatSecret(query).then((r) => { const a = r || []; emit(a); return a; }).catch(() => []);
+  const uP = searchUSDA(query).then((r) => { emit(r); return r; });
+  const [fRes, uRes] = await Promise.allSettled([fP, uP]);
+  const fatsecret = fRes.status === "fulfilled" ? fRes.value : [];
+  const usda = uRes.status === "fulfilled" ? uRes.value : [];
+  // FALLBACK: Open Food Facts, only when the primary sources come up short —
+  // few results, or none that actually match the query well.
+  const primary = [...fatsecret, ...usda];
+  const strong = primary.some((f) => { const n = (f.name || "").toLowerCase(); return n === q || n.split(",")[0].trim() === q || n.startsWith(q) || new RegExp(`\\b${esc}\\b`).test(n); });
+  let off = [];
+  if (primary.length < 5 || !strong) {
+    off = await searchOFF(query).catch(() => []);
+    emit(off);
   }
-  if (!usda.length && !off.length && !fatsecret.length) {
-    const limited = u.status === "rejected" && u.reason && u.reason.message === "limit";
+  if (!fatsecret.length && !usda.length && !off.length) {
+    const limited = uRes.status === "rejected" && uRes.reason && uRes.reason.message === "limit";
     throw new Error(limited
       ? "Food search limit reached — try again in a bit (or add a free USDA API key)."
       : "Food search is temporarily unavailable — try again in a moment.");
   }
-  const out = rank([...usda, ...fatsecret, ...off]);
+  const out = rank([...fatsecret, ...usda, ...off]);
   _foodSearchCache.set(q, out);
   if (_foodSearchCache.size > 80) _foodSearchCache.delete(_foodSearchCache.keys().next().value); // bound memory
   return out;
