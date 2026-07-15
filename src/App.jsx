@@ -6581,6 +6581,9 @@ function _foodScore(f, q) {
 // Session cache: query → final ranked results, so re-typing a food you already
 // searched (or backspacing) renders instantly.
 const _foodSearchCache = new Map();
+// Session cache: FatSecret food_id → detail (real servings + micros), so
+// re-tapping a food doesn't re-hit the API.
+const _fsDetailCache = new Map();
 // Combined food search — PROGRESSIVE (S94, "as fast as MyFitnessPal") +
 // FatSecret-PRIMARY (S94d, Kevin's call). PRIMARY sources = FatSecret (best
 // curated quality, ranks first) + USDA (whole foods), always queried in
@@ -6942,6 +6945,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   const [searchErr, setSearchErr] = useState("");
   const [picked, setPicked] = useState(null); // chosen food's per-100g macros, for serving rescale
   const [detailState, setDetailState] = useState(null); // {food, editingId, mealType} → FoodServingModal open
+  const [pickingId, setPickingId] = useState(null); // FatSecret fsId whose detail fetch is in flight (row shows "…")
   const [showDayMicros, setShowDayMicros] = useState(false); // daily micronutrient roll-up expanded
   const [grams, setGrams] = useState("100");
   const [unit, setUnit] = useState("g");      // serving unit — g or ml (MyFitnessPal-style)
@@ -7086,8 +7090,30 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
   // Pick a food (search result or scanned product): open the serving popup so the
   // user picks a serving size + fine-tunes macros, then Adds. (Replaces the old
   // inline serving controls — one tap = one food, no multi-highlight.)
-  const pickFood = (food) => {
-    setDetailState({ food: normalizePickedFood(food), editingId: null, mealType: addingTo });
+  // FatSecret results get a LAZY DETAIL FETCH (food.get.v4 via the proxy) first:
+  // the search summary only carries "per 100g", but the detail call returns the
+  // food's REAL household servings ("1 cup, cooked, diced") + micronutrients, so
+  // the popup opens at a realistic serving instead of a flat 100 g. Raced against
+  // a 2.5s timeout — on any failure the popup just opens with the summary basis.
+  const pickFood = async (food) => {
+    let f = food;
+    if (food.source === "fatsecret" && food.fsId) {
+      setPickingId(food.fsId);
+      try {
+        let detail = _fsDetailCache.get(food.fsId);
+        if (detail === undefined) {
+          const res = await Promise.race([
+            callFoodSearch({ foodId: food.fsId }),
+            new Promise((resolve) => setTimeout(() => resolve(null), 2500)),
+          ]);
+          detail = (res && res.data && res.data.food) || null;
+          if (res) _fsDetailCache.set(food.fsId, detail); // cache real answers, not timeouts
+        }
+        if (detail) f = { ...detail, name: detail.name || food.name, brand: detail.brand || food.brand };
+      } catch (e) { /* summary basis is a fine fallback */ }
+      setPickingId(null);
+    }
+    setDetailState({ food: normalizePickedFood(f), editingId: null, mealType: addingTo });
   };
   // The serving popup confirmed — write the food (add or edit) and close.
   const confirmDetail = (payload) => {
@@ -7379,11 +7405,12 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
               {results.length > 0 && (
                 <div style={{ display:"flex", flexDirection:"column", gap:"4px", maxHeight:"168px", overflowY:"auto" }}>
                   {results.map((f, i) => (
-                    <button key={i} onClick={() => pickFood(f)}
+                    <button key={i} onClick={() => pickFood(f)} disabled={!!pickingId}
                       style={{ display:"flex", flexDirection:"column", gap:"3px",
                         padding:"8px 10px", borderRadius:"6px", cursor:"pointer", textAlign:"left",
-                        border:"1px solid " + (picked && picked.name === f.name ? "var(--accent)" : "var(--border)"),
-                        background: picked && picked.name === f.name ? "rgba(8,220,224,.08)" : "var(--s2)", color:"var(--text)" }}>
+                        border:"1px solid " + (pickingId && pickingId === f.fsId ? "var(--accent)" : "var(--border)"),
+                        background: pickingId && pickingId === f.fsId ? "rgba(8,220,224,.08)" : "var(--s2)", color:"var(--text)",
+                        opacity: pickingId && pickingId !== f.fsId ? .55 : 1 }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:"8px" }}>
                         <span style={{ display:"flex", alignItems:"center", gap:"6px", minWidth:0, flex:1 }}>
                           <span style={{ fontSize:".82rem", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0 }}>{f.name}</span>
@@ -7393,7 +7420,7 @@ function MealLog({ meals, onAddMeal, onRemoveMeal, onEditMeal, recentFoods }) {
                           )}
                         </span>
                         <span style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:".84rem", color:"var(--accent)", whiteSpace:"nowrap" }}>
-                          {f.kcal}<span style={{ fontSize:".6rem", color:"var(--muted)", fontWeight:600 }}> cal</span>
+                          {pickingId && pickingId === f.fsId ? "…" : f.kcal}<span style={{ fontSize:".6rem", color:"var(--muted)", fontWeight:600 }}>{pickingId && pickingId === f.fsId ? "" : " cal"}</span>
                         </span>
                       </div>
                       <div style={{ fontSize:".7rem" }}>

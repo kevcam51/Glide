@@ -135,6 +135,29 @@ exports.foodSearch = onCall(
     if (!proxyUrl || !proxySecret || /placeholder/i.test(proxyUrl) || /placeholder/i.test(proxySecret)) {
       return { foods: [], configured: false };
     }
+    // DETAIL mode (S94e): { foodId } → food.get.v4 via the proxy — one food's
+    // REAL household servings + micros. Called lazily when the user taps a
+    // FatSecret search result, so the picker opens at "1 cup"/"1 breast"
+    // instead of a flat 100 g. (foods.search.v3 would return this inline but
+    // is premier-scope-gated; food.get is on our Basic tier — verified.)
+    const foodId = String((request.data && request.data.foodId) || "").trim();
+    if (foodId) {
+      if (!/^\d+$/.test(foodId)) throw new HttpsError("invalid-argument", "Bad food id.");
+      const durl = `${proxyUrl.replace(/\/+$/, "")}/food?id=${encodeURIComponent(foodId)}`;
+      const dctl = new AbortController();
+      const dt = setTimeout(() => dctl.abort(), 10000);
+      try {
+        const r = await fetch(durl, { headers: { "x-proxy-secret": proxySecret }, signal: dctl.signal });
+        if (!r.ok) { console.error("foodSearch detail http", r.status); return { food: null, error: "proxy" }; }
+        const dj = await r.json();
+        const f = dj && dj.food;
+        const parsed = f && parseV3Food(f);
+        if (!parsed) return { food: null };
+        return { food: { name: tidy(f.food_name), brand: f.brand_name ? tidy(f.brand_name) : "", source: "fatsecret", ...parsed } };
+      } catch (e) { console.error("foodSearch detail", e && e.message); return { food: null, error: "proxy" }; }
+      finally { clearTimeout(dt); }
+    }
+
     const q = String((request.data && request.data.query) || "").trim().slice(0, 80);
     if (q.length < 2) return { foods: [] };
 
@@ -166,7 +189,8 @@ exports.foodSearch = onCall(
         kcal: macros.kcal, p: macros.p, c: macros.c, f: macros.f, source: "fatsecret",
         per: macros.per, servingLabel: macros.servingLabel || "",
         unit: macros.unit || "g", serving: macros.serving || null,
-        servingText: macros.servingText || "", micros: macros.micros || null });
+        servingText: macros.servingText || "", micros: macros.micros || null,
+        fsId: String(f.food_id || "") }); // for the lazy food.get detail fetch on tap
     }
     return { foods: out };
   }

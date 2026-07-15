@@ -49,20 +49,44 @@ async function fsCall(method, q, token) {
     `&search_expression=${encodeURIComponent(q)}`;
   return fetch(url, { headers: { Authorization: `Bearer ${token}` } });
 }
+// v3 is PREMIER-scope-gated: on the Basic tier FatSecret answers HTTP 200 with
+// {"error":{"code":14,"message":"Missing scope: scope 'premier'"}} — so the
+// fallback must inspect the BODY, not just the status. Cached after the first
+// scope error so every search isn't a double round-trip.
+let _v3Blocked = false;
 async function searchFatSecret(q) {
   const token = await getToken();
   // foods.search.v3 returns each food with a full `servings.serving[]` array —
   // real household servings ("1 cup", "1 breast") + micronutrients — instead of
   // v1's flat "Per 100g" text summary. The Cloud Function (functions/foodsearch.js)
-  // parses this into a realistic default serving so the picker doesn't open at a
-  // flat 100 g. SAFETY NET: if v3 ever errors (tier/scope), fall back to the v1
-  // method so FatSecret search keeps working (the function handles both shapes).
-  let r = await fsCall("foods.search.v3", q, token);
-  if (!r.ok) {
-    console.error("fatsecret v3 http", r.status, "— falling back to v1");
-    r = await fsCall("foods.search", q, token);
+  // parses either shape. Falls back to v1 whenever v3 is unavailable (HTTP error
+  // OR an in-body error like the premier-scope gate).
+  if (!_v3Blocked) {
+    const r3 = await fsCall("foods.search.v3", q, token);
+    if (r3.ok) {
+      const j3 = await r3.json();
+      if (!j3.error) return j3;
+      console.error("fatsecret v3 error body:", JSON.stringify(j3.error), "— falling back to v1");
+      if (j3.error.code === 14) _v3Blocked = true; // premier-scope gate: stop retrying v3
+    } else {
+      console.error("fatsecret v3 http", r3.status, "— falling back to v1");
+    }
   }
+  const r = await fsCall("foods.search", q, token);
   if (!r.ok) throw new Error("fatsecret-search-" + r.status);
+  return r.json();
+}
+
+// food.get.v4 — full detail for ONE food: real household servings ("1 cup,
+// cooked, diced") + micronutrients. Available on the Basic tier (verified),
+// unlike foods.search.v3 (premier-gated). The app calls this lazily when the
+// user taps a FatSecret result, so search itself stays 1 call.
+async function getFatSecretFood(id) {
+  const token = await getToken();
+  const url = "https://platform.fatsecret.com/rest/server.api?method=food.get.v4&format=json" +
+    `&food_id=${encodeURIComponent(id)}`;
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!r.ok) throw new Error("fatsecret-get-" + r.status);
   return r.json();
 }
 
@@ -76,9 +100,14 @@ const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, `http://localhost:${PORT}`);
     if (u.pathname === "/health") return send(res, 200, { ok: true });
-    if (u.pathname !== "/search") return send(res, 404, { error: "not-found" });
+    if (u.pathname !== "/search" && u.pathname !== "/food") return send(res, 404, { error: "not-found" });
     // Shared-secret gate so only our Cloud Function can use our FatSecret quota.
     if (req.headers["x-proxy-secret"] !== PROXY_SECRET) return send(res, 403, { error: "forbidden" });
+    if (u.pathname === "/food") {
+      const id = (u.searchParams.get("id") || "").trim().slice(0, 24);
+      if (!/^\d+$/.test(id)) return send(res, 400, { error: "bad-id" });
+      return send(res, 200, await getFatSecretFood(id));
+    }
     const q = (u.searchParams.get("q") || "").trim().slice(0, 80);
     if (q.length < 2) return send(res, 200, { foods: {} });
     const data = await searchFatSecret(q);
