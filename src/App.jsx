@@ -7143,7 +7143,7 @@ function CopyMealModal({ sectionLabel, targetType, matchMeal, dateKey, onReadDay
     </div>, document.body);
 }
 
-function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, onReadDay, onListLoggedDays, dateKey }) {
+function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, onReadDay, onListLoggedDays, dateKey, hideMicros }) {
   const [name, setName] = useState("");
   const [brand, setBrand] = useState(""); // brand of a picked food (e.g. "Kirkland Signature") — shown under the name
   const [cals, setCals] = useState("");
@@ -7899,6 +7899,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
         </div>
       )}
       {(() => {
+        if (hideMicros) return null; // shown in the dashboard's Macros & Micros panel instead
         const dayMicros = sumMicros(list);
         const keys = MICRO_DEFS.filter((d) => dayMicros[d.k] > 0);
         if (!keys.length) return null;
@@ -8761,6 +8762,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const [expandedSnap, setExpandedSnap] = useState(false);
   const [showMacros, setShowMacros] = useState(false);
   const [editMacros, setEditMacros] = useState(false); // macro-target editor open
+  const [macroPanelOpen, setMacroPanelOpen] = useState(false); // Macros & Micros dropdown (collapsed by default)
   const [editTarget, setEditTarget] = useState(false); // manual calorie-target editor open
   const [targetDraft, setTargetDraft] = useState("");  // manual calorie-target draft
   const [showMeasure, setShowMeasure] = useState(false); // body measurements / body-fat modal
@@ -8834,6 +8836,14 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const todayCardio = dayData[dayIdx] || { burned: 0, workouts: [] };
   const todayStrength = strengthDayData[dayIdx] || { burned: 0, sessions: [] };
   const todayTotalBurn = todayCardio.burned + todayStrength.burned;
+  // Workout burn PREFERS the fitness tracker's measured active calories for today
+  // (real > estimated); falls back to the in-app scheduled-workout estimate when
+  // there's no tracker data for today (Kevin's call). Only today's reading is used
+  // here — a stale prior-day active burn would misreport today's effort.
+  const trackerActiveBurn = (dailyLog.wearable && Number(dailyLog.wearable.active) > 0)
+    ? Math.round(Number(dailyLog.wearable.active)) : null;
+  const burnShown = trackerActiveBurn != null ? trackerActiveBurn : todayTotalBurn;
+  const burnFromTracker = trackerActiveBurn != null;
 
   // Calorie target (1 lb/wk deficit). Eat-back mode adds TODAY's scheduled
   // burn on top (training days earn more food); accelerate mode holds the
@@ -8981,9 +8991,9 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <div className="dash-cta-lbl">Logged So Far</div>
         </div>
         <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="burn"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="burn"?null:"burn")}>
-          <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="flame" size={23} color="var(--orange)" /></div>
-          <div className="dash-cta-val">{todayTotalBurn}</div>
-          <div className="dash-cta-lbl">Workout Burn</div>
+          <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name={burnFromTracker?"watch":"flame"} size={23} color="var(--orange)" /></div>
+          <div className="dash-cta-val">{burnShown.toLocaleString()}</div>
+          <div className="dash-cta-lbl">Workout Burn{burnFromTracker?" · tracker":""}</div>
         </div>
         <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="water"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="water"?null:"water")}>
           <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="water" size={23} color="#4fc3f7" /></div>
@@ -9138,7 +9148,13 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           {expandedStat === "burn" && (
             <>
               <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"6px",color:"var(--orange)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="flame" size={16} color="var(--orange)" />Workout Burn Breakdown</div>
-              <div style={{fontSize:".7rem",color:"var(--muted)",marginBottom:"8px"}}>Tap any exercise to edit or remove it</div>
+              {burnFromTracker && (
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",marginBottom:"8px",borderRadius:"8px",background:"rgba(8,220,224,.06)",border:"1px solid var(--border)"}}>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:"6px",fontSize:".82rem",color:"var(--text)"}}><Icon name="watch" size={15} color="var(--accent)" />Tracker measured active burn{dailyLog.wearable&&dailyLog.wearable.source?` (${dailyLog.wearable.source})`:""}</span>
+                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--accent)"}}>{burnShown.toLocaleString()} cal</span>
+                </div>
+              )}
+              <div style={{fontSize:".7rem",color:"var(--muted)",marginBottom:"8px"}}>{burnFromTracker?"Your scheduled workouts (estimate — the tracker number above is used):":"Tap any exercise to edit or remove it"}</div>
               {(todayCardio.workouts||[]).map((w,i) => (
                 <div key={`cb${i}`} style={{display:"flex",justifyContent:"space-between",padding:"8px 6px",borderBottom:"1px solid var(--border)",fontSize:".82rem",cursor:"pointer",borderRadius:"6px",background:editingWorkout===`c${i}`?"rgba(79,195,247,.06)":"transparent"}}
                   onClick={e=>{e.stopPropagation();setExpandedStat(null);setEditingWorkout(editingWorkout===`c${i}`?null:`c${i}`);}}>
@@ -9159,11 +9175,13 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                   </span>
                 </div>
               ))}
-              {todayTotalBurn === 0 && <div style={{fontSize:".82rem",color:"var(--muted)",padding:"8px 0"}}>No workouts scheduled for today.</div>}
-              <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontSize:".88rem",fontWeight:700,borderBottom:"1px solid var(--border)"}}>
-                <span>Total</span>
-                <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--orange)"}}>{todayTotalBurn} cal</span>
-              </div>
+              {todayTotalBurn === 0 && <div style={{fontSize:".82rem",color:"var(--muted)",padding:"8px 0"}}>{burnFromTracker?"No scheduled workouts — the tracker's active burn is used.":"No workouts scheduled for today."}</div>}
+              {todayTotalBurn > 0 && (
+                <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontSize:".88rem",fontWeight:700,borderBottom:"1px solid var(--border)"}}>
+                  <span>{burnFromTracker?"Scheduled total (estimate)":"Total"}</span>
+                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--orange)"}}>{todayTotalBurn} cal</span>
+                </div>
+              )}
               <div style={{display:"flex",gap:"8px",marginTop:"10px"}}>
                 <button onClick={e=>{e.stopPropagation();const idx=(Array.isArray(data.cardio[dayName])?data.cardio[dayName]:[]).length;onUpdateCardio(dayName,idx,"type","outdoor_jog");setEditingWorkout(`c${idx}`);setExpandedStat(null);}}
                   style={{flex:1,padding:"10px",borderRadius:"8px",border:"1px solid rgba(79,195,247,.3)",background:"rgba(79,195,247,.06)",color:"#4fc3f7",cursor:"pointer",fontFamily:"inherit",fontSize:".8rem",fontWeight:600}}>
@@ -9281,18 +9299,30 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         </div>
       )}
 
-      {/* Macro Targets — ALWAYS visible (no need to expand Add Calories). Tap a
-          meter or "Edit targets" to edit; shows progress vs target once logged. */}
+      {/* Macros & Micros — a collapsible dropdown (Kevin): tap the header to open
+          macro targets + progress AND the day's micronutrient bars together. */}
       <div style={{padding:"12px 14px",background:"var(--s2)",borderRadius:"8px",border:"1px solid var(--border)",marginBottom:"6px"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"10px",gap:"8px"}}>
-          <span style={{fontSize:".8rem",fontWeight:700,color:"var(--text)"}}>Macro Targets</span>
-          {onSetMacroTargets && (
+        <div onClick={()=>setMacroPanelOpen(o=>!o)}
+          style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"8px",cursor:"pointer"}}>
+          <span style={{fontSize:".8rem",fontWeight:700,color:"var(--text)"}}>Macros &amp; Micros</span>
+          <span style={{display:"flex",alignItems:"center",gap:"8px",fontSize:".72rem",color:"var(--muted)",whiteSpace:"nowrap"}}>
+            {!macroPanelOpen && (
+              <span>
+                <span style={{color:"#ff6b9d",fontWeight:700}}>{dailyLog.protein||0}</span>/<span style={{color:"#ffcc44",fontWeight:700}}>{dailyLog.carbs||0}</span>/<span style={{color:"#4fc3f7",fontWeight:700}}>{dailyLog.fat||0}</span>g
+              </span>
+            )}
+            <span style={{color:"var(--accent)",fontWeight:700}}>{macroPanelOpen ? "▾" : "▸"}</span>
+          </span>
+        </div>
+        {macroPanelOpen && (<div style={{marginTop:"10px"}}>
+        {onSetMacroTargets && (
+          <div style={{display:"flex",justifyContent:"flex-end",marginBottom:"8px"}}>
             <button onClick={()=>{ setMtDraft({ protein:String(proteinTarget), carbs:String(carbsTarget), fat:String(fatTarget) }); setMtPct({ protein:String(splitP), carbs:String(splitC), fat:String(splitF) }); setEditMacros(v=>!v); }}
               style={{border:"none",background:"transparent",color:"var(--accent)",cursor:"pointer",fontSize:".74rem",fontWeight:700,padding:0,textDecoration:"underline"}}>
               {editMacros ? "Close" : "✎ Edit targets"}
             </button>
-          )}
-        </div>
+          </div>
+        )}
         {[
           { icon:"🥩", label:"Protein", color:"#ff6b9d", val:dailyLog.protein||0, tgt:proteinTarget },
           { icon:"🌾", label:"Carbs",   color:"#ffcc44", val:dailyLog.carbs||0,   tgt:carbsTarget },
@@ -9426,9 +9456,30 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             </div>
           </div>
         )}
+        {/* Micronutrients — the day's micros from logged foods, in the same panel. */}
+        {(() => {
+          const dayMicros = sumMicros(dailyLog.meals || []);
+          const anyMicros = MICRO_DEFS.some((d) => dayMicros[d.k] > 0);
+          return (
+            <div style={{marginTop:"14px",borderTop:"1px solid var(--border)",paddingTop:"12px"}}>
+              <div style={{fontSize:".8rem",fontWeight:700,color:"var(--text)",marginBottom:"10px"}}>Micronutrients today</div>
+              {anyMicros ? (
+                <>
+                  <MicroBars micros={dayMicros} />
+                  <div style={{fontSize:".62rem",color:"var(--muted)",fontStyle:"italic",marginTop:"10px"}}>
+                    From foods logged via the database, barcode, or AI. Bars fill toward general adult reference values — not medical advice.
+                  </div>
+                </>
+              ) : (
+                <div style={{fontSize:".74rem",color:"var(--muted)"}}>Log foods from the database, a barcode, or Ask Glidna and their vitamins &amp; minerals show here.</div>
+              )}
+            </div>
+          );
+        })()}
+        </div>)}
         </div>
 
-      <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={ymdLocal()} />
+      <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={ymdLocal()} hideMicros />
 
       <div className="dash-log-row">
         <span className="dash-log-icon" style={{display:"flex",alignItems:"center"}}><Icon name="water" size={20} color="#4fc3f7" /></span>
