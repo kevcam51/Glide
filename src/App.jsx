@@ -8769,8 +8769,10 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, weekSummary, recentWearable, history, onRefresh, isRemote,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
-  onSaveMeasurements, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise }) {
+  onSaveMeasurements, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise,
+  onTrackerSync }) {
 
+  const [tzSync, setTzSync] = useState(null); // null | "busy" | { ok, text }
   const [showCalendar, setShowCalendar] = useState(false);
   const [editingWorkout, setEditingWorkout] = useState(null);
   const [expandedStat, setExpandedStat] = useState(null);
@@ -9028,16 +9030,38 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         const todayW = dailyLog.wearable && (dailyLog.wearable.active || dailyLog.wearable.steps) ? dailyLog.wearable : null;
         const fb = !todayW && recentWearable && recentWearable.daysAgo > 0 ? recentWearable : null;
         const w = todayW || (fb && fb.wearable);
-        if (!w) return null;
+        // With a sync button available the card also renders EMPTY — otherwise
+        // there'd be nowhere to tap when the tracker has never synced, which is
+        // exactly when you most want to pull.
+        if (!w && !onTrackerSync) return null;
         const dayLabel = fb ? (fb.daysAgo === 1 ? "Yesterday" : `${fb.daysAgo} days ago`) : null;
+        const syncNow = async () => {
+          if (tzSync === "busy" || !onTrackerSync) return;
+          setTzSync("busy");
+          try { setTzSync(await onTrackerSync()); }
+          catch (e) { setTzSync({ ok: false, text: "Couldn't reach Trainerize — try again in a moment." }); }
+        };
         return (
           <div className="card" style={{padding:"10px 14px",marginBottom:"14px",display:"flex",alignItems:"center",gap:"8px",fontSize:".82rem",flexWrap:"wrap"}}>
             <Icon name="watch" size={16} color="var(--accent)" />
-            <span style={{color:"var(--muted)"}}>Tracker{w.source ? ` (${w.source})` : ""}{dayLabel ? ` · ${dayLabel}` : ""}:</span>
-            {w.active ? <span style={{fontFamily:"'Sora',sans-serif"}}>{Number(w.active).toLocaleString()} cal active</span> : null}
-            {w.steps ? <span style={{fontFamily:"'Sora',sans-serif"}}>· {Number(w.steps).toLocaleString()} steps</span> : null}
+            <span style={{color:"var(--muted)"}}>Tracker{w && w.source ? ` (${w.source})` : ""}{dayLabel ? ` · ${dayLabel}` : ""}:</span>
+            {w && w.active ? <span style={{fontFamily:"'Sora',sans-serif"}}>{Number(w.active).toLocaleString()} cal active</span> : null}
+            {w && w.steps ? <span style={{fontFamily:"'Sora',sans-serif"}}>· {Number(w.steps).toLocaleString()} steps</span> : null}
+            {!w ? <span style={{color:"var(--muted)"}}>no watch data yet</span> : null}
+            {onTrackerSync && (
+              <button onClick={syncNow} disabled={tzSync === "busy"} title="Pull the latest data from Trainerize"
+                style={{marginLeft:"auto",background:"none",border:"none",padding:"2px 0",display:"inline-flex",alignItems:"center",gap:"5px",
+                  fontSize:".74rem",fontWeight:700,fontFamily:"inherit",color:tzSync==="busy"?"var(--muted)":"var(--accent)",
+                  cursor:tzSync==="busy"?"default":"pointer"}}>
+                <Icon name="sync" size={13} color={tzSync==="busy"?"var(--muted)":"var(--accent)"} />
+                {tzSync === "busy" ? "Syncing…" : "Sync now"}
+              </button>
+            )}
             {todayW && trackerTdee ? <span style={{width:"100%",fontSize:".72rem",fontWeight:700,color:"var(--accent)"}}>Today's target is based on your tracker's measured burn</span> : null}
-            {fb ? <span style={{width:"100%",fontSize:".7rem",color:"var(--muted)"}}>Today's watch data hasn't synced yet — it usually arrives within a day.</span> : null}
+            {fb && tzSync !== "busy" && !tzSync ? <span style={{width:"100%",fontSize:".7rem",color:"var(--muted)"}}>Today's watch data hasn't synced yet — it usually arrives within a day.</span> : null}
+            {tzSync && tzSync !== "busy" && tzSync.text ? (
+              <span style={{width:"100%",fontSize:".7rem",color:tzSync.ok?"var(--green)":"var(--yellow)"}}>{tzSync.text}</span>
+            ) : null}
           </div>
         );
       })()}
@@ -9167,6 +9191,18 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",marginBottom:"8px",borderRadius:"8px",background:"rgba(8,220,224,.06)",border:"1px solid var(--border)"}}>
                   <span style={{display:"inline-flex",alignItems:"center",gap:"6px",fontSize:".82rem",color:"var(--text)"}}><Icon name="watch" size={15} color="var(--accent)" />Tracker measured active burn{dailyLog.wearable&&dailyLog.wearable.source?` (${dailyLog.wearable.source})`:""}</span>
                   <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--accent)"}}>{burnShown.toLocaleString()} cal</span>
+                </div>
+              )}
+              {/* Today's watch data lags (Garmin→Trainerize is usually hours). The
+                  tile above stays today-only so it never misreports today's effort —
+                  but show the last real reading here for reference. */}
+              {!burnFromTracker && recentWearable && recentWearable.wearable && recentWearable.wearable.active > 0 && (
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",marginBottom:"8px",borderRadius:"8px",background:"var(--s2)",border:"1px solid var(--border)"}}>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:"6px",fontSize:".82rem",color:"var(--muted)"}}>
+                    <Icon name="watch" size={15} color="var(--muted)" />
+                    Tracker · {recentWearable.daysAgo === 1 ? "yesterday" : `${recentWearable.daysAgo} days ago`} (today hasn't synced)
+                  </span>
+                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:"var(--muted)"}}>{Number(recentWearable.wearable.active).toLocaleString()} cal</span>
                 </div>
               )}
               <div style={{fontSize:".7rem",color:"var(--muted)",marginBottom:"8px"}}>{burnFromTracker?"Your scheduled workouts (estimate — the tracker number above is used):":"Tap any exercise to edit or remove it"}</div>
@@ -11432,18 +11468,40 @@ function computeClientCalories(d) {
   return { tdee, target };
 }
 
+// The platform owner (Kevin). Trainerize v1 runs on his single shared API token,
+// so only his account can pull; the callables enforce it server-side too
+// (requireAdmin / ADMIN_UIDS in functions/). Mirrors firestore.rules isAdmin().
+const OWNER_UID = "G7QUZ8Kat1fgyoMjdGKz4DYoVHi1";
+
+// Friendly one-liner for a manual "sync now" result. Deliberately reports when
+// nothing NEW arrived: Glide can only pull what Trainerize already has, and a
+// watch that hasn't pushed today's data yet is the common case — saying "synced"
+// with no numbers would read as a failure.
+function tzSyncSummary(r) {
+  if (!r) return "Synced.";
+  const bits = [];
+  if (r.mealDaysTotal) bits.push(`${r.mealDaysTotal} day${r.mealDaysTotal === 1 ? "" : "s"} of meals`);
+  if (r.healthDaysTotal) bits.push(`${r.healthDaysTotal} day${r.healthDaysTotal === 1 ? "" : "s"} of tracker data`);
+  if (r.workoutDaysTotal) bits.push(`${r.workoutDaysTotal} workout day${r.workoutDaysTotal === 1 ? "" : "s"}`);
+  const who = `${r.total || 0} client${r.total === 1 ? "" : "s"}`;
+  return bits.length
+    ? `✓ Synced ${who} — ${bits.join(" · ")}.`
+    : `✓ Checked ${who} — nothing new in Trainerize yet. Watch data usually lands a few hours after your workout.`;
+}
+
 function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, meUid, meName, meRole, notifPrefs, onSetNotifPrefs }) {
   const [details, setDetails] = useState({}); // id -> { tdee, target }
   // Trainerize import: the button opens a PICKER (roster preview, no writes)
   // so Kevin chooses exactly which clients to bring in; already-imported ones
   // show a tag and are unchecked by default (checking = refresh their data).
   const [tzBusy, setTzBusy] = useState(false);
+  const [tzSyncing, setTzSyncing] = useState(false); // manual "sync now" in flight
   const [tzMsg, setTzMsg] = useState(null); // { ok, text }
   const [tzPick, setTzPick] = useState(null); // null | {loading:true} | {clients:[…], sel:{id:bool}}
   // 30-min background auto-sync kill switch — stored in the trainer's own kv
   // (caliq-tz-autosync {enabled}); the scheduled function checks it each run.
   // Default ON; only an explicit false turns it off.
-  const tzIsOwner = meUid === "G7QUZ8Kat1fgyoMjdGKz4DYoVHi1";
+  const tzIsOwner = meUid === OWNER_UID;
   const [tzAuto, setTzAuto] = useState(true);
   useEffect(() => {
     if (!tzIsOwner) return;
@@ -11465,6 +11523,18 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     return code.includes("permission-denied")
       ? "The Trainerize connection is linked to the platform owner's account."
       : "Trainerize didn't respond — check the connection and try again.";
+  };
+  // Manual "sync now" — same targets/window as the 30-min tick, without waiting.
+  const syncTzNow = async () => {
+    if (tzSyncing || !onTrainerizeImport) return;
+    setTzSyncing(true); setTzMsg(null);
+    try {
+      const r = await onTrainerizeImport({ mode: "sync" });
+      setTzMsg(r && r.nothingToSync
+        ? { ok: false, text: "No imported or linked Trainerize clients yet — run the import first." }
+        : { ok: true, text: tzSyncSummary(r) });
+    } catch (e) { setTzMsg({ ok: false, text: tzErrText(e) }); }
+    setTzSyncing(false);
   };
   const openTzPicker = async () => {
     if (tzBusy || !onTrainerizeImport) return;
@@ -12199,14 +12269,22 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
             )}
           </div>
           {onTrainerizeImport && tzIsOwner && (
-            <button onClick={toggleTzAuto}
-              className="mt-1.5 bg-transparent border-0 p-0 text-xs cursor-pointer text-left inline-flex items-center gap-1.5 flex-wrap">
-              <Icon name={tzAuto ? "sync" : "pause"} size={13} color={tzAuto ? "var(--color-success)" : "var(--color-muted)"} />
-              <span className={tzAuto ? "text-success" : "text-muted"}>
-                Trainerize auto-sync: {tzAuto ? "On" : "Off"}
-              </span>
-              <span className="text-muted"> — every 30 min for imported clients · tap to {tzAuto ? "pause" : "resume"}</span>
-            </button>
+            <div className="mt-1.5 flex flex-col gap-1.5 items-start">
+              <button onClick={toggleTzAuto}
+                className="bg-transparent border-0 p-0 text-xs cursor-pointer text-left inline-flex items-center gap-1.5 flex-wrap">
+                <Icon name={tzAuto ? "sync" : "pause"} size={13} color={tzAuto ? "var(--color-success)" : "var(--color-muted)"} />
+                <span className={tzAuto ? "text-success" : "text-muted"}>
+                  Trainerize auto-sync: {tzAuto ? "On" : "Off"}
+                </span>
+                <span className="text-muted"> — every 30 min for imported & linked clients · tap to {tzAuto ? "pause" : "resume"}</span>
+              </button>
+              {/* Manual refresh — pulls the same data as the 30-min tick, on demand. */}
+              <button onClick={syncTzNow} disabled={tzSyncing}
+                className={`bg-transparent border-0 p-0 text-xs font-bold text-left inline-flex items-center gap-1.5 ${tzSyncing ? "opacity-60 cursor-default text-muted" : "cursor-pointer text-primary"}`}>
+                <Icon name="sync" size={13} color={tzSyncing ? "var(--color-muted)" : "var(--color-primary)"} />
+                {tzSyncing ? "Syncing from Trainerize…" : "Sync from Trainerize now"}
+              </button>
+            </div>
           )}
           {tzMsg && (
             <div className={`text-xs mt-1.5 ${tzMsg.ok ? "text-success" : "text-danger"}`}>{tzMsg.text}</div>
@@ -17075,6 +17153,21 @@ export default function App() {
     return res.data;
   };
 
+  // v1 runs on the platform owner's shared Trainerize token, so only that account
+  // can pull (the callable enforces it too — requireAdmin).
+  const isOwnerUid = meUid === OWNER_UID;
+
+  // "Sync now" from the Daily Dashboard tracker card: pull from Trainerize, then
+  // re-read the plan so today's log (and its wearable block) reflects whatever
+  // arrived — without this the numbers wouldn't move until the next reload.
+  const syncTrackerNow = async () => {
+    const r = await importFromTrainerize({ mode: "sync" });
+    await reloadPlanLive();
+    return r && r.nothingToSync
+      ? { ok: false, text: "No imported or linked Trainerize clients yet." }
+      : { ok: true, text: tzSyncSummary(r) };
+  };
+
   // Re-read the local profiles index + folders (used after server-side writes —
   // Trainerize imports, AI edits to local plans — so the cards update live).
   const reloadProfilesIndex = async () => {
@@ -17715,7 +17808,7 @@ export default function App() {
         onDashboard={() => { setHomeTab("analytics"); goToProfiles(); }}
         onClients={() => { setHomeTab("clients"); goToProfiles(); }}
         onNameSaved={(n) => setMeName(n)}
-        isAdminUid={meUid === "G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"} />
+        isAdminUid={meUid === OWNER_UID} />
       <InstallPrompt />
       {upgradeCongrats && <UpgradeCongrats isTrainer={role !== ROLES.CLIENT} onClose={() => setUpgradeCongrats(false)} />}
     </>
@@ -17845,6 +17938,7 @@ export default function App() {
               onDeleteMeasurement={(ts)=>setDataAndSave(p=>({...p, measurements:(p.measurements||[]).filter(e=>e && e.timestamp!==ts)}))}
               onToggleBodyFat={(show)=>setDataAndSave(p=>({...p, hideBodyFat: !show}))}
               onSetGoalWeight={(lbs)=>setDataAndSave(p=>({...p, goalWeight: lbs}))}
+              onTrackerSync={isOwnerUid ? syncTrackerNow : null}
               onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
               onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
                 const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);

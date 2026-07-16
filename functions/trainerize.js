@@ -414,6 +414,24 @@ async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDat
   return { d, step, mealDays, healthDays, workoutDays };
 }
 
+// Every Trainerize client we should keep in sync = imported LOCAL profiles
+// (index.trainerizeId) UNION clients LINKED to a real Glide account
+// (caliq-tz-links). The link flow deliberately deletes the local profile once its
+// plan moves into the client's account (see runImport: "No local profile / index
+// entry for a linked client"), so an index-only list silently dropped every
+// linked client — auto-sync went quiet for exactly the people whose watch data
+// matters most, and their tracker froze at whatever the one-shot sync at link
+// time fetched. Shared by the scheduled auto-sync and the manual "sync now" so
+// the two can never disagree about who's in scope.
+async function syncTargetIds(db, uid) {
+  const index = (await kvGetJSON(db, uid, "caliq-index")) || [];
+  const tzLinks = (await kvGetJSON(db, uid, "caliq-tz-links")) || {};
+  return [...new Set([
+    ...index.filter((p) => p && p.trainerizeId).map((p) => Number(p.trainerizeId)),
+    ...Object.keys(tzLinks).map(Number),
+  ].filter(Boolean))];
+}
+
 async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTRITION_DAYS } = {}) {
   let roster = await fetchRoster(auth);
   const wanted = Array.isArray(clientIds) ? new Set(clientIds.map(Number).filter(Boolean)) : null;
@@ -514,6 +532,17 @@ exports.trainerizeImport = onCall(
       };
     }
 
+    // Manual "sync now" (the refresh buttons): same targets + window as the 30-min
+    // auto-sync, on demand — for when you don't want to wait for the next tick.
+    // NOTE this can only pull what Trainerize already has; a watch that hasn't
+    // pushed today's data to Trainerize yet still won't show up here.
+    if (request.data && request.data.mode === "sync") {
+      const ids = await syncTargetIds(db, uid);
+      if (!ids.length) return { ok: true, total: 0, synced: 0, clients: [], nothingToSync: true };
+      const r = await runImport(db, uid, auth, { clientIds: ids, nutritionDays: 14 });
+      return { ...r, synced: r.total };
+    }
+
     const clientIds = Array.isArray(request.data && request.data.clientIds) ? request.data.clientIds : null;
     return await runImport(db, uid, auth, { clientIds, nutritionDays: NUTRITION_DAYS });
   }
@@ -536,9 +565,8 @@ exports.trainerizeAutoSync = onSchedule(
     // Missing/anything-but-false = ON (default). Off = skip the whole run.
     const pref = await kvGetJSON(db, uid, "caliq-tz-autosync");
     if (pref && pref.enabled === false) { console.log("trainerizeAutoSync: disabled by toggle — skipped"); return; }
-    const index = (await kvGetJSON(db, uid, "caliq-index")) || [];
-    const ids = index.filter((p) => p && p.trainerizeId).map((p) => p.trainerizeId);
-    if (!ids.length) { console.log("trainerizeAutoSync: no imported Trainerize clients in the index — nothing to sync (run the import to restore)"); return; }
+    const ids = await syncTargetIds(db, uid);
+    if (!ids.length) { console.log("trainerizeAutoSync: no imported or linked Trainerize clients — nothing to sync (run the import to restore)"); return; }
     const auth = Buffer.from(`${TRAINERIZE_GROUP_ID.value()}:${TRAINERIZE_API_TOKEN.value()}`).toString("base64");
     try {
       const r = await runImport(db, uid, auth, { clientIds: ids, nutritionDays: 14 });
