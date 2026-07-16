@@ -7225,14 +7225,9 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
 
   const list = meals || [];
   const loggedTotal = list.reduce((s, m) => s + (m.calories || 0), 0);
-  // Auto-expand the section whenever a meal is added (manually, or by the AI /
-  // Ask Glidna) so the newly-logged food is visible instead of hidden behind the
-  // collapsed header — fixes "calories changed but I can't see the food."
-  const prevMealCount = useRef(list.length);
-  useEffect(() => {
-    if (list.length > prevMealCount.current) setViewMode((v) => v === null ? "all" : v);
-    prevMealCount.current = list.length;
-  }, [list.length]);
+  // The section stays COLLAPSED on load and only opens when the user taps the
+  // header or a meal pill (Kevin) — no auto-expanding when the day's meals load in
+  // or when a meal is added. The calorie ring/totals still update either way.
   // When a meal's add-form opens, drop the cursor into the food-search box (search
   // is the primary way to log). Small delay covers the open animation / mount.
   useEffect(() => {
