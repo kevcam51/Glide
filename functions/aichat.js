@@ -34,6 +34,12 @@ const MAX_TOKENS = 1800;
 // Admin UID (matches functions/index.js + firestore.rules) — gets an unlimited AI
 // budget so Kevin can test freely without running out of tokens.
 const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
+// Admin is identified by UID, never by a profile-doc role: createProfile only
+// ever writes "client"/"head_trainer", and index.js mirrors the admin role into
+// the custom CLAIM only — so `profile.role === "admin"` is never true for a real
+// doc. Anything gating on admin must go through here (matches firestore.rules
+// isAdmin()), which is also why it can't be self-assigned.
+function isAdminUid(uid) { return ADMIN_UIDS.includes(uid); }
 const BUDGETS = { trial: 50000, client: 25000, assisted: 40000, trainer: 100000,
   // trainerTrial (S92): a trainer works with clients from day one, so their trial
   // usage is heavy immediately (~180k/day for an active 20–30-client roster). Give
@@ -438,6 +444,7 @@ async function runAssistantTurn(uid, userText) {
 exports.runAssistantTurn = runAssistantTurn;
 exports.ANTHROPIC_API_KEY = ANTHROPIC_API_KEY;
 exports.tierFor = tierFor;
+exports.isAdminUid = isAdminUid;
 
 // Streaming variant (Stage 4): same logic, but an HTTP endpoint that streams the
 // reply as Server-Sent Events so it appears word-by-word. Auth is verified from
@@ -687,7 +694,7 @@ exports.requestBudgetBoost = onCall({ region: "us-central1", maxInstances: 10 },
   const isBoostable = tier === "clientMax" || tier === "trainerMax"
     || tier === "clientUltra" || tier === "trainerUltra";
   const isMaxTier = tier === "clientMax" || tier === "trainerMax"; // Max, not yet Ultra
-  const isAdmin = profile.role === "admin"; // lets Kevin exercise the flow
+  const isAdmin = isAdminUid(uid); // lets Kevin exercise the flow
   if (!isBoostable && !isAdmin) return { granted: false, reason: "not-max" };
   const base = BUDGETS[tier] || BUDGETS.client;
   const ref = db.doc(`users/${uid}/aiUsage/${todayKey()}`);

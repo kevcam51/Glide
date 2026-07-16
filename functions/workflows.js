@@ -1,4 +1,4 @@
-// Glidna — scheduled AI automations / workflows (S92, Phase 1 backend).
+// Glidna — scheduled AI automations / workflows (backend; S92, E2E-verified S95).
 //
 // A user (Elite+/Apex) saves an automation: a saved prompt + a schedule. An
 // hourly dispatcher runs each due one through the SAME AI + tools as the chat
@@ -11,33 +11,50 @@
 // dispatcher queries via the Admin SDK). Same pattern as webauthnCreds — so NO
 // firestore.rules change is needed.
 //
-// Phase 2 (next): the "Automations" UI. Times are UTC in Phase 1 (the picker +
-// timezone handling land with the UI).
+// The "Automations" UI (App.jsx AutomationsPanel) shipped in S93. Schedules are
+// stored in UTC; the picker converts to/from the user's local time.
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
-const { runAssistantTurn, ANTHROPIC_API_KEY, tierFor } = require("./aichat");
+const { runAssistantTurn, ANTHROPIC_API_KEY, tierFor, isAdminUid } = require("./aichat");
 const { appendFeed } = require("./push");
 
 // Workflows allowed per tier (Kevin S92): higher tiers only — each run is the
 // priciest usage pattern (a cold message), so it's gated to Elite+/Apex.
 // Keys are aichat.js tier names (clientMax=Elite, clientUltra=Apex, etc.).
 const WORKFLOW_CAP = { clientMax: 1, clientUltra: 3, trainerMax: 2, trainerUltra: 5 };
-function capFor(profile) {
-  if (profile && profile.role === "admin") return 20; // Kevin can exercise the flow
+// Admin is by UID (see aichat.isAdminUid) — a profile doc never carries
+// role:"admin", so the old `profile.role === "admin"` check here was dead and
+// left the admin account at cap 0, unable to open Automations at all.
+function capFor(uid, profile) {
+  if (isAdminUid(uid)) return 20; // Kevin can exercise the flow
   return WORKFLOW_CAP[tierFor(profile)] || 0;
 }
 const DISABLED_AT = 4102444800000; // year 2100 — parks disabled workflows out of the due query
 
-// Next run as a UTC timestamp (Phase 1: hour is UTC; local-time picker is Phase 2).
+// Hour 0 is a REAL hour (midnight UTC), so it can't go through `|| 8` — that
+// silently rewrote it to 08:00. It bites whenever a user's local pick maps onto
+// midnight UTC (e.g. 8pm US/Eastern), which fired their automation at 4am.
+// null/"" coerce to 0 via Number(), so they're screened out first — otherwise a
+// genuinely absent hour would mean midnight rather than the 8am default.
+function schedNum(v, min, max, dflt) {
+  if (v === null || v === undefined || v === "") return dflt;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.trunc(n))) : dflt;
+}
+function schedHour(v) { return schedNum(v, 0, 23, 8); }
+function schedWeekday(v) { return schedNum(v, 0, 6, 0); }
+
+// Next run as a UTC timestamp. The stored hour/weekday are UTC; the picker in
+// App.jsx converts to/from the user's local time.
 function computeNextRun(schedule, fromMs) {
-  const hour = Math.min(23, Math.max(0, Number(schedule && schedule.hour) || 8));
+  const hour = schedHour(schedule && schedule.hour);
   const next = new Date(fromMs);
   next.setUTCMinutes(0, 0, 0);
   next.setUTCHours(hour);
   if (schedule && schedule.type === "weekly") {
-    const dow = Math.min(6, Math.max(0, Number(schedule.weekday) || 0));
+    const dow = schedWeekday(schedule.weekday);
     next.setUTCDate(next.getUTCDate() + ((dow - next.getUTCDay() + 7) % 7));
     if (next.getTime() <= fromMs) next.setUTCDate(next.getUTCDate() + 7);
   } else if (next.getTime() <= fromMs) {
@@ -48,8 +65,8 @@ function computeNextRun(schedule, fromMs) {
 function normalizeSchedule(s) {
   return {
     type: s && s.type === "weekly" ? "weekly" : "daily",
-    hour: Math.min(23, Math.max(0, Number(s && s.hour) || 8)),
-    weekday: Math.min(6, Math.max(0, Number(s && s.weekday) || 0)),
+    hour: schedHour(s && s.hour),
+    weekday: schedWeekday(s && s.weekday),
   };
 }
 
@@ -59,7 +76,7 @@ exports.saveWorkflow = onCall({ region: "us-central1", maxInstances: 10 }, async
   if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
   const db = admin.firestore();
   const profile = (await db.doc(`users/${uid}`).get()).data() || {};
-  const cap = capFor(profile);
+  const cap = capFor(uid, profile);
   if (cap <= 0) throw new HttpsError("failed-precondition", "Automations are available on Elite and Apex plans.");
 
   const d = request.data || {};
@@ -98,7 +115,7 @@ exports.listWorkflows = onCall({ region: "us-central1", maxInstances: 10 }, asyn
     return { id: doc.id, name: w.name, prompt: w.prompt, schedule: w.schedule, enabled: w.enabled,
       lastRunAt: w.lastRunAt || null, lastResult: w.lastResult || "", lastStatus: w.lastStatus || "", nextRunAt: w.nextRunAt };
   }).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  return { workflows: items, cap: capFor(profile) };
+  return { workflows: items, cap: capFor(uid, profile) };
 });
 
 // ── Toggle enable/disable ───────────────────────────────────────────────────
