@@ -203,6 +203,26 @@ const CALIPER_ALL = ["calChest", "calAbdomen", "calThigh", "calTriceps", "calSup
 const CALIPER_LABELS = { calChest: "Chest", calAbdomen: "Abdomen", calThigh: "Thigh",
   calTriceps: "Triceps", calSuprailiac: "Suprailiac" };
 const caliperFieldsFor = (d) => (d.gender === "female" ? CALIPER_FIELDS_F : CALIPER_FIELDS_M);
+// Where to pinch each caliper site (the standard JP3 landmarks). The female
+// sites (triceps / suprailiac / thigh) are all non-sensitive spots.
+const CALIPER_SITE_HELP = {
+  calChest: "Diagonal fold halfway between the front of the armpit and the nipple.",
+  calAbdomen: "Vertical fold about 1 in (2 cm) to the side of the belly button.",
+  calThigh: "Vertical fold on the FRONT of the thigh, midway between the hip crease and the top of the kneecap.",
+  calTriceps: "Vertical fold on the BACK of the upper arm, halfway between shoulder and elbow, arm relaxed.",
+  calSuprailiac: "Diagonal fold just above the hip bone, at the front of the side of the waist.",
+};
+const CALIPER_TECHNIQUE = "Pinch skin + fat (not muscle), set the caliper ~1 cm from your fingers, and read after 1–2 seconds. Always the RIGHT side of the body; take 2–3 reads and average.";
+// Where to run the tape for each site.
+const TAPE_SITE_HELP = {
+  waist: "Around the belly button, relaxed — don't suck in.",
+  hips: "The widest point around the buttocks.",
+  neck: "Just below the Adam's apple; slope the tape slightly down at the front.",
+  thigh: "The widest point of the upper thigh.",
+  calf: "The widest point of the calf.",
+  forearm: "The widest point below the elbow.",
+  wrist: "The narrowest point, just below the wrist bone.",
+};
 
 // Jackson-Pollock 3-site skinfold → body density → Siri body-fat %. Needs age +
 // gender (both on the plan). Skinfolds in millimetres.
@@ -10419,17 +10439,29 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   const [drafts, setDrafts] = useState({});
   const [msg, setMsg] = useState("");
   const [metric, setMetric] = useState("waist");
+  const [helpCal, setHelpCal] = useState(false); // "where to measure" (calipers) open
+  const [helpTape, setHelpTape] = useState(false); // "where to measure" (tape) open
 
-  // Which metrics have 2+ points to chart. "bodyFat" is the computed tape BF%
-  // (only offered when the body-fat estimate is turned on).
-  const chartable = MEASUREMENT_FIELDS.filter((f) => entries.filter((e) => Number(e[f]) > 0).length >= 2);
+  // LIVE preview — compute body fat from what's typed RIGHT NOW (drafts only), so
+  // the person sees the % the moment they finish entering a method. We do the math.
+  const liveEntry = {};
+  for (const f of [...MEASUREMENT_FIELDS, ...CALIPER_ALL]) { const v = parseFloat(drafts[f]); if (v > 0) liveEntry[f] = v; }
+  if (parseFloat(drafts.bodyFatManual) > 0) liveEntry.bodyFatManual = parseFloat(drafts.bodyFatManual);
+  const live = showBF ? measurementMetrics(d, liveEntry) : null;
+
+  // Which metrics have 2+ points to chart — EVERY tracked number (tape + each
+  // caliper site + the computed body-fat %), so the trend graph can follow any
+  // of them over time.
+  const chartable = [...MEASUREMENT_FIELDS, ...CALIPER_ALL].filter((f) => entries.filter((e) => Number(e[f]) > 0).length >= 2);
   const bfPoints = showBF ? entries.map((e) => ({ date: e.date, timestamp: e.timestamp, weight: measurementMetrics(d, e).bodyFatPct }))
     .filter((p) => p.weight != null) : [];
-  if (showBF && bfPoints.length >= 2) chartable.push("bodyFat");
+  if (showBF && bfPoints.length >= 2) chartable.unshift("bodyFat");
   const activeMetric = chartable.includes(metric) ? metric : chartable[0] || null;
   const points = activeMetric === "bodyFat" ? bfPoints
     : activeMetric ? entries.filter((e) => Number(e[activeMetric]) > 0)
         .map((e) => ({ date: e.date, timestamp: e.timestamp, weight: Number(e[activeMetric]) })) : [];
+  const chartLabel = (f) => (f === "bodyFat" ? "Body fat %" : CALIPER_LABELS[f] || MEASUREMENT_LABELS[f]);
+  const chartUnit = (f) => (f === "bodyFat" ? "%" : CALIPER_ALL.includes(f) ? "mm" : "in");
 
   // Which tape fields this person's body-fat formulas need (docs/METRICS-PLAN.md).
   const needed = d.gender === "male" ? "waist, hips, forearm + wrist (Bailey) · waist + neck (Navy)"
@@ -10540,13 +10572,13 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
               {chartable.map((f) => (
                 <button key={f} onClick={() => setMetric(f)}
                   className={`rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer whitespace-nowrap ${activeMetric === f ? "bg-primaryfill text-primaryfg border-0" : "bg-transparent text-fg border border-border"}`}>
-                  {f === "bodyFat" ? "Body fat %" : MEASUREMENT_LABELS[f]}
+                  {chartLabel(f)}
                 </button>
               ))}
             </div>
             <ProgressChart checkIns={points} showValues pxPerPoint={64} surfaceless hideAdherence
-              unit={activeMetric === "bodyFat" ? "%" : "in"} pointNoun="entry"
-              label={activeMetric === "bodyFat" ? "Body Fat Trend" : `${MEASUREMENT_LABELS[activeMetric]} Trend`} />
+              unit={activeMetric ? chartUnit(activeMetric) : ""} pointNoun="entry"
+              label={activeMetric ? `${chartLabel(activeMetric)} Trend` : "Trend"} />
           </div>
         )}
 
@@ -10582,7 +10614,21 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
             </div>
             {d.gender === "male" || d.gender === "female" ? (
               <>
-                <div className="mb-1.5 text-xs text-muted">Or skinfold calipers (mm) — Jackson-Pollock 3-site</div>
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <span className="text-xs text-muted">Or skinfold calipers (mm) — Jackson-Pollock 3-site</span>
+                  <button onClick={() => setHelpCal((v) => !v)}
+                    className="text-[11px] font-bold text-primary underline cursor-pointer border-0 bg-transparent p-0">
+                    {helpCal ? "Hide" : "Where to measure?"}
+                  </button>
+                </div>
+                {helpCal && (
+                  <div className="mb-2 rounded-lg bg-surface p-2.5 text-[11px] text-muted flex flex-col gap-1">
+                    {caliperFieldsFor(d).map((f) => (
+                      <div key={f}><b className="text-fg">{CALIPER_LABELS[f]}:</b> {CALIPER_SITE_HELP[f]}</div>
+                    ))}
+                    <div className="mt-1 italic">{CALIPER_TECHNIQUE}</div>
+                  </div>
+                )}
                 <div className="grid grid-cols-3 gap-2">
                   {caliperFieldsFor(d).map((f) => (
                     <div key={f}>
@@ -10597,11 +10643,32 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
             ) : (
               <div className="text-xs text-muted">Set gender on the profile to use calipers or the tape estimate.</div>
             )}
+            {/* Live "we do the math" preview — computed from what's typed now. */}
+            {live && (live.caliperBF != null || live.manualBF != null) && (
+              <div className="mt-2 rounded-lg bg-primaryfill/10 px-3 py-2 text-sm flex items-center gap-2 flex-wrap" style={{ background: "rgba(8,220,224,.08)" }}>
+                <span className="font-display text-lg text-primary">{live.caliperBF != null ? live.caliperBF : live.manualBF}%</span>
+                <span className="text-xs text-muted">estimated body fat {live.caliperBF != null ? "from your calipers" : "from your scale"} — saves when you tap Save</span>
+              </div>
+            )}
           </div>
         )}
 
         {/* Tape measurements (inches) */}
-        <div className="mb-1.5 text-sm text-muted">Tape measurements (inches — widest point; wrist at the narrowest)</div>
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <span className="text-sm text-muted">Tape measurements (inches)</span>
+          <button onClick={() => setHelpTape((v) => !v)}
+            className="text-[11px] font-bold text-primary underline cursor-pointer border-0 bg-transparent p-0">
+            {helpTape ? "Hide" : "Where to measure?"}
+          </button>
+        </div>
+        {helpTape && (
+          <div className="mb-2 rounded-lg bg-surface2 p-2.5 text-[11px] text-muted flex flex-col gap-1">
+            {MEASUREMENT_FIELDS.map((f) => (
+              <div key={f}><b className="text-fg">{MEASUREMENT_LABELS[f]}:</b> {TAPE_SITE_HELP[f]}</div>
+            ))}
+            <div className="mt-1 italic">Keep the tape snug and level, not squeezing. Body fat % is figured for you from these.</div>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-2">
           {MEASUREMENT_FIELDS.map((f) => (
             <div key={f} className="flex items-center gap-2">
@@ -10612,6 +10679,13 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
             </div>
           ))}
         </div>
+        {/* Live tape body-fat preview (Bailey/Navy computed as you type). */}
+        {live && live.tapeBF != null && (
+          <div className="mt-2 rounded-lg px-3 py-2 text-sm flex items-center gap-2 flex-wrap" style={{ background: "rgba(8,220,224,.08)" }}>
+            <span className="font-display text-lg text-primary">{live.tapeBF}%</span>
+            <span className="text-xs text-muted">estimated body fat from your tape measurements{live.baileyBF != null && live.navyBF != null ? ` (Bailey ${live.baileyBF}% · Navy ${live.navyBF}%)` : ""} — saves when you tap Save</span>
+          </div>
+        )}
         <button onClick={save}
           className="mt-2.5 w-full rounded-lg bg-primaryfill px-4 py-2.5 text-sm font-bold text-primaryfg cursor-pointer">Save</button>
         {msg ? <div className="mt-2 text-sm text-success">{msg}</div> : null}
