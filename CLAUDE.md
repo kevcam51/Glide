@@ -95,8 +95,9 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
-> _Last updated: Session 90 (marathon). `Glide-Session-Handoff-NEXT.md` is the primary entry point;
-> this block is the quick digest._
+> _Last updated: Session 94 (Jul 15, marathon — food-logging UX overhaul, body-fat/measurements hub,
+> AI meal micros, FatSecret-primary + realistic servings). **Read `Glide-Session-Handoff-NEXT.md` first**
+> (its S94 + S93 blocks are the current state); this digest below is older (through S90)._
 > - **App = GLIDNA** (S90: name DECIDED + full rename sweep; wordmark = GLI|DNA two-tone). Live on
 >   the custom domain **https://glidna.com** (+ www/.app 308-redirects; bought via Vercel, auto-DNS;
 >   passkeys re-register on the new domain). **STRIPE IS LIVE (real money)** — live prices/webhook/

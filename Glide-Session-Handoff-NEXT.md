@@ -1,5 +1,90 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S94 (Jul 15 — MARATHON): food-logging UX overhaul, body-fat/measurements hub, AI micros
+_Everything below is committed + pushed (`origin/main` clean at `caa5ac5`) + deployed. Firebase
+`calorieiq-29762`; domain **glidna.com**; model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`.
+Long session — a LOT shipped. Every item below is LIVE + verified in-app on the test trainer
+(`trainer.uitest` → Casey's shared plan)._
+
+### ✅ What S94 shipped (all committed `e19d34c`…`caa5ac5`, deployed)
+- **Ask Glidna warmer** (`e19d34c`): loosened both system prompts' formatting rules (natural prose,
+  match length to the question, light markdown OK), warmed the tone, `MAX_TOKENS` 1024→1800. Deployed
+  aiChat + aiChatStream. Kevin approved the tone; said don't constrain further.
+- **Macro targets by % ** (`cc387bc`): grams⇄% toggle + recommended splits (bodyweight/balanced/goal),
+  stored as `data.macroTargets` grams. In DailyDashboard.
+- **Food-logging overhaul** (`b63280b`, `3e52905`): new **`FoodServingModal`** bottom-sheet — tap a search
+  result → pick serving (units: serving/g/oz/lb/kg exact + cup/tbsp/tsp/floz "approx", DEFAULTS to exact) →
+  fine-tune cal/macros → Add. Editing a logged food (✎) reopens it with the serving restored (rescales).
+  Search box **auto-focuses**; **no negative servings**; multi-highlight bug gone. **Recent foods scoped
+  per-meal + deduped by base name** (last amount wins; per-client; trainer sees them; deletable via "Edit").
+  **AI estimate** (`estimateFood`, now returns `grams`+`unit`) opens the SAME serving popup (type exact ml/g,
+  switch units). **Editable "Today's Target"** — tap it → "Set your own target" (`data.calorieTarget`,
+  overrides calc + tracker everywhere via `computeClientCalories`).
+- **FatSecret is PRIMARY** (`e5d47a6`…`a3f10d4`): searchFoods queries FatSecret + USDA in parallel, FatSecret
+  ranks first (`_foodScore` fatsecret +55), OFF is now fallback. **Realistic servings**: FatSecret `v3`
+  search is **premier-scope-gated** (returns error as HTTP-200) — so we use **`food.get.v4`** (Basic-tier ✓)
+  lazily on tap for its real household servings + micros. **USDA generic foods** (`dde6370`): search has no
+  portions, so a lazy **`fetchUsdaPortion(fdcId)`** hits USDA's detail endpoint (`/fdc/v1/food/{id}`, CORS-ok)
+  for `foodPortions` → opens at "1 cup"/"1 slice" not 100 g. Both raced vs 2.5s timeout, session-cached,
+  graceful 100 g fallback.
+- **Meal-log batch** (`fcb80e1`): **move a logged item between meals** (tap the ⇄ icon → pick section);
+  **copy a previous day's meal** ("Copy a previous <meal>" → sheet of recent days → tap to copy in; new
+  `onAddMeals` batch handler); **MacroFactor-style micro BARS** (grouped by family, color-coded: B-vits red,
+  C purple, minerals green, fat-vits amber, fiber/fats blue); deletable recent chips. New icons move/copy.
+- **AI meals now log MICRONUTRIENTS** (`2cfb573`): `micros` object on propose_meal/log_meal/log_meals schemas
+  (keys/units mirror frontend `MICRO_DEFS`) + `sanitizeMicros` + prompt says ALWAYS estimate them. Verified:
+  AI-logged salted chips → daily bars showed Sodium 149 mg (was ~0). **Per-meal section view**: meal log is
+  `viewMode` null|section|"all" — pill opens ONE meal, header opens all. Now **collapsed on load** (`caa5ac5`,
+  removed the auto-expand).
+- **Log-confirmation feedback** (`d3e4a48`): water/weight/cal quick-logs clear the input, grey the button to
+  "Logged ✓" ~1.1s, and pop a bottom toast (portal). `lastCommit` ref stops the draft-sync re-populating.
+- **Body-fat & measurements HUB** (`520a101`, `b05000b`): opens from **"Today's Weight"** (+ a "Body fat % &
+  measurements" link) on the dashboard, now wired into DailyDashboard too. Adds: **manual scale/scanner BF %
+  box** (`bodyFatManual`), **JP3 skinfold calipers** (`caliperBF`; male chest/abdomen/thigh, female
+  triceps/suprailiac/thigh — non-sensitive), **weight logger in the modal**. Effective BF = **scale > caliper
+  > tape** (Bailey/Navy). **"Where to measure?"** guidance per site + technique; **LIVE auto-calc** as you type
+  (drafts-only `measurementMetrics` preview); **every individual number** (each caliper site + tape site + BF%)
+  is a chartable metric in the side-scrolling `ProgressChart`, saved per date.
+- **Workout Burn defaults to tracker** (`bc7b584`): tile shows `dailyLog.wearable.active` (⌚ + "· tracker")
+  when today's tracker synced, else the scheduled-workout estimate. Target math unchanged (still `wearableAdjust`).
+- **Macros & Micros dropdown** (`bc7b584`): the "Macro Targets" card is now a collapsible dropdown holding the
+  macro bars + edit AND the day's micro bars; the meal-log micro roll-up is hidden on the dashboard
+  (`hideMicros` prop) but kept in the calendar Day view.
+
+### S94 gotchas (IMPORTANT — don't re-learn these)
+- **`foods.search.v3` needs PREMIER scope** — Basic tier gets `{"error":{"code":14,...}}` as **HTTP 200**, so
+  status-code checks miss it. Use **`food.get.v4`** for FatSecret detail (Basic ✓). Proxy (`proxy/server.js`)
+  falls back v3→v1 by inspecting the BODY; has a **`/food?id=`** endpoint now.
+- **The FatSecret proxy VM is `fatsecret-proxy` in ZONE `us-west1-a`** (NOT us-central1-a — the deploy.sh
+  default is stale). Static IP `35.247.125.182`. To update: `gcloud compute scp proxy/server.js
+  fatsecret-proxy:/tmp/server.js --zone us-west1-a` then ssh `sudo cp … && sudo systemctl restart
+  fatsecret-proxy`. **gcloud token expired mid-session → Kevin ran `gcloud auth login --no-launch-browser`**
+  (the browser-callback flow fails; code-paste works). gcloud lives at `~/google-cloud-sdk`, `CLOUDSDK_PYTHON=$(uv python find 3.12)`.
+- **`VITE_USDA_API_KEY` is ALREADY set in Vercel (Preview+Production, ~14d old)** — prod uses the real key.
+  It's marked **"Sensitive"**, so Vercel WON'T let it be added to the **Development** env (that's expected, not
+  a bug). Local `npm run dev` therefore falls back to **DEMO_KEY** (30/hr/IP shared — I hit its limit while
+  testing; USDA 429s drop CORS headers → "Failed to fetch" locally). To test USDA locally, drop the key in
+  `.env.local`. Live app is unaffected.
+- **Deploy ALL 4 AI fns when `functions/aitools.js` changes** (aiChat, aiChatStream, logMeal, setWorkoutSchedule);
+  the system prompt lives in `aichat.js` (aiChat + aiChatStream only). `estimateFood` is separate. `foodSearch`
+  is separate. Backtick chars inside the `aichat.js` prompt template literal break it (bit me once).
+- **Vercel frontend deploy lags ~30s** — poll `curl -s https://glidna.com/ | grep -o 'index-[A-Za-z0-9_-]*\.js'`
+  until the bundle hash changes before telling Kevin to act.
+
+### Test-account residue (test data — clearable)
+- Casey (`client.uitest`) has: a real **weigh-in 183 lbs** (S94k weight-logger test), 2 tape-measurement
+  entries (Jul 9/11 from S92), water 40 oz today. Harmless test data.
+
+### ⏭️ NEXT (Kevin's standing queue — unchanged from S93, none started in S94)
+- **Stripe LIVE-mode swap** (prices decided/built in test mode; needs live key + live webhook + attorney pass).
+- **Acuity session scheduling + auto-charge** (fully specced in `docs/SESSIONS-BILLING-PLAN.md`; needs Kevin's
+  Acuity API key + User ID → live dry-run like Trainerize).
+- **Workflow Phase 2** (Automations UI + E2E; backend deployed S92).
+- **Push-notification delivery (FCM)**, **client→trainer requests**.
+- Small: default NEW clients to Simple view; per-client default view; grow `functions/knowledge.js`.
+
+---
+
 ## ⚡⚡⚡ S93 (Jul 14 — MARATHON): food DB, FatSecret LIVE, AI fixes, Trainerize linked-client sync
 _Everything below is committed + pushed (`origin/main` clean at `d87cb4f`) + deployed. Firebase
 `calorieiq-29762`; domain **glidna.com**; model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`._
