@@ -6539,7 +6539,7 @@ async function searchUSDA(query) {
     return { name: _tidyFood(x.description), brand: x.brandOwner || x.brandName || "",
       kcal: Math.round(n["Energy"] || 0), p: Math.round(n["Protein"] || 0),
       c: Math.round(n["Carbohydrate, by difference"] || 0), f: Math.round(n["Total lipid (fat)"] || 0),
-      source: "usda", dataType: x.dataType || "", unit, serving, servingText,
+      source: "usda", dataType: x.dataType || "", unit, serving, servingText, fdcId: x.fdcId || null,
       micros: Object.keys(micros).length ? micros : null };
   }).filter((f) => f.kcal > 0);
 }
@@ -6650,6 +6650,38 @@ const _foodSearchCache = new Map();
 // Session cache: FatSecret food_id → detail (real servings + micros), so
 // re-tapping a food doesn't re-hit the API.
 const _fsDetailCache = new Map();
+// Session cache: USDA fdcId → { grams, text } household portion (or null when the
+// food has none), so re-tapping doesn't re-hit the API.
+const _usdaPortionCache = new Map();
+// Lazy USDA detail fetch (S94j): the search response has no portions for
+// generic/whole foods (they open at a flat 100 g), but the DETAIL endpoint
+// carries `foodPortions` with real household servings ("1 cup, diced" → 165 g).
+// CORS-enabled, so the browser calls it directly (like FatSecret's food.get).
+// Returns the most sensible household portion, or null if none is usable.
+async function fetchUsdaPortion(fdcId) {
+  const key = (import.meta.env && import.meta.env.VITE_USDA_API_KEY) || "DEMO_KEY";
+  const r = await fetch(`https://api.nal.usda.gov/fdc/v1/food/${encodeURIComponent(fdcId)}?api_key=${key}`);
+  if (!r.ok) return null;
+  const d = await r.json();
+  const fp = Array.isArray(d.foodPortions) ? d.foodPortions : [];
+  const cand = [];
+  for (const p of fp) {
+    const g = Number(p.gramWeight);
+    if (!(g > 0) || g > 1500) continue; // skip missing / implausible (e.g. "1 lb")
+    const mu = (p.measureUnit && p.measureUnit.name) || "";
+    const desc = (p.portionDescription || "").trim()
+      || [p.amount, mu && mu !== "undetermined" ? mu : "", (p.modifier || "").trim()].filter(Boolean).join(" ").trim()
+      || `${Math.round(g)} g`;
+    // Prefer real household measures over a bare "quantity not specified".
+    const household = /cup|tbsp|tablespoon|tsp|teaspoon|piece|slice|small|medium|large|oz|ounce|breast|fillet|bar|scoop|container|can|bottle|egg|fruit|serving/i.test(desc);
+    cand.push({ grams: Math.round(g), text: desc, household });
+  }
+  if (!cand.length) return null;
+  // A household-named portion in a sensible range wins; else the smallest portion.
+  const pref = cand.filter((c) => c.household && c.grams >= 10 && c.grams <= 600);
+  const pick = (pref.length ? pref : cand).sort((a, b) => a.grams - b.grams)[0];
+  return { grams: pick.grams, text: pick.text };
+}
 // Combined food search — PROGRESSIVE (S94, "as fast as MyFitnessPal") +
 // FatSecret-PRIMARY (S94d, Kevin's call). PRIMARY sources = FatSecret (best
 // curated quality, ranks first) + USDA (whole foods), always queried in
@@ -7274,9 +7306,27 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
         if (detail) f = { ...detail, name: detail.name || food.name, brand: detail.brand || food.brand };
       } catch (e) { /* summary basis is a fine fallback */ }
       setPickingId(null);
+    } else if (food.source === "usda" && food.fdcId && !(Number(food.serving) > 0)) {
+      // Generic/whole USDA food has no serving in search → fetch its household
+      // portion from the detail endpoint so the popup opens at "1 cup" etc.
+      setPickingId("u" + food.fdcId);
+      try {
+        let portion = _usdaPortionCache.get(food.fdcId);
+        if (portion === undefined) {
+          portion = await Promise.race([
+            fetchUsdaPortion(food.fdcId).catch(() => null),
+            new Promise((resolve) => setTimeout(() => resolve(undefined), 2500)),
+          ]);
+          if (portion !== undefined) _usdaPortionCache.set(food.fdcId, portion); // cache real answers, not timeouts
+        }
+        if (portion && portion.grams > 0) f = { ...food, serving: portion.grams, servingText: portion.text };
+      } catch (e) { /* 100 g fallback is fine */ }
+      setPickingId(null);
     }
     setDetailState({ food: normalizePickedFood(f), editingId: null, mealType: addingTo });
   };
+  // Stable per-result key for the "…" loading indicator (FatSecret or USDA).
+  const pickKeyOf = (f) => (f.fsId ? f.fsId : (f.source === "usda" && f.fdcId && !(Number(f.serving) > 0) ? "u" + f.fdcId : null));
   // The serving popup confirmed — write the food (add or edit) and close.
   const confirmDetail = (payload) => {
     const d = detailState; if (!d) return;
@@ -7616,13 +7666,15 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
               )}
               {results.length > 0 && (
                 <div style={{ display:"flex", flexDirection:"column", gap:"4px", maxHeight:"168px", overflowY:"auto" }}>
-                  {results.map((f, i) => (
+                  {results.map((f, i) => {
+                    const pk = pickKeyOf(f); const loadingRow = pickingId && pk && pickingId === pk;
+                    return (
                     <button key={i} onClick={() => pickFood(f)} disabled={!!pickingId}
                       style={{ display:"flex", flexDirection:"column", gap:"3px",
                         padding:"8px 10px", borderRadius:"6px", cursor:"pointer", textAlign:"left",
-                        border:"1px solid " + (pickingId && pickingId === f.fsId ? "var(--accent)" : "var(--border)"),
-                        background: pickingId && pickingId === f.fsId ? "rgba(8,220,224,.08)" : "var(--s2)", color:"var(--text)",
-                        opacity: pickingId && pickingId !== f.fsId ? .55 : 1 }}>
+                        border:"1px solid " + (loadingRow ? "var(--accent)" : "var(--border)"),
+                        background: loadingRow ? "rgba(8,220,224,.08)" : "var(--s2)", color:"var(--text)",
+                        opacity: pickingId && !loadingRow ? .55 : 1 }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:"8px" }}>
                         <span style={{ display:"flex", alignItems:"center", gap:"6px", minWidth:0, flex:1 }}>
                           <span style={{ fontSize:".82rem", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", minWidth:0 }}>{f.name}</span>
@@ -7632,7 +7684,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
                           )}
                         </span>
                         <span style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:".84rem", color:"var(--accent)", whiteSpace:"nowrap" }}>
-                          {pickingId && pickingId === f.fsId ? "…" : f.kcal}<span style={{ fontSize:".6rem", color:"var(--muted)", fontWeight:600 }}>{pickingId && pickingId === f.fsId ? "" : " cal"}</span>
+                          {loadingRow ? "…" : f.kcal}<span style={{ fontSize:".6rem", color:"var(--muted)", fontWeight:600 }}>{loadingRow ? "" : " cal"}</span>
                         </span>
                       </div>
                       <div style={{ fontSize:".7rem" }}>
@@ -7644,7 +7696,8 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
                         <span style={{ color:"var(--muted)" }}>{f.per === "serving" ? ` · per ${f.servingLabel || "serving"}` : " · per 100g"}{f.brand ? ` · ${f.brand}` : ""}</span>
                       </div>
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
