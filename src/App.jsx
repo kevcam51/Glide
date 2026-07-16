@@ -195,6 +195,36 @@ function projectedLoss(weeks, weeklyDeficitCal) {
 const MEASUREMENT_FIELDS = ["waist", "hips", "neck", "thigh", "calf", "forearm", "wrist"];
 const MEASUREMENT_LABELS = { waist: "Waist", hips: "Hips", neck: "Neck",
   thigh: "Thigh", calf: "Calf", forearm: "Forearm", wrist: "Wrist" };
+// Skinfold CALIPER sites (mm) for the Jackson-Pollock 3-site method — chest/
+// abdomen/thigh for men, triceps/suprailiac/thigh for women (thigh shared).
+const CALIPER_FIELDS_M = ["calChest", "calAbdomen", "calThigh"];
+const CALIPER_FIELDS_F = ["calTriceps", "calSuprailiac", "calThigh"];
+const CALIPER_ALL = ["calChest", "calAbdomen", "calThigh", "calTriceps", "calSuprailiac"];
+const CALIPER_LABELS = { calChest: "Chest", calAbdomen: "Abdomen", calThigh: "Thigh",
+  calTriceps: "Triceps", calSuprailiac: "Suprailiac" };
+const caliperFieldsFor = (d) => (d.gender === "female" ? CALIPER_FIELDS_F : CALIPER_FIELDS_M);
+
+// Jackson-Pollock 3-site skinfold → body density → Siri body-fat %. Needs age +
+// gender (both on the plan). Skinfolds in millimetres.
+function caliperBF(d, m) {
+  const age = Number(d.age) || 0;
+  const n = (v) => (Number(v) > 0 ? Number(v) : null);
+  let sum = null, bd = null;
+  if (d.gender === "male") {
+    const a = n(m.calChest), b = n(m.calAbdomen), c = n(m.calThigh);
+    if (!a || !b || !c) return null;
+    sum = a + b + c;
+    bd = 1.10938 - 0.0008267 * sum + 0.0000016 * sum * sum - 0.0002574 * age;
+  } else if (d.gender === "female") {
+    const a = n(m.calTriceps), b = n(m.calSuprailiac), c = n(m.calThigh);
+    if (!a || !b || !c) return null;
+    sum = a + b + c;
+    bd = 1.0994921 - 0.0009929 * sum + 0.0000023 * sum * sum - 0.0001392 * age;
+  } else return null;
+  if (!(bd > 0)) return null;
+  const bf = 495 / bd - 450; // Siri
+  return bf > 1 && bf < 75 ? Math.round(bf * 10) / 10 : null;
+}
 
 // Covert Bailey (The Ultimate Fit or Fat): body fat % from tape alone — no
 // scale, no height. Age/gender variants selected from the plan's own fields.
@@ -249,16 +279,22 @@ function whtrOf(d, m) {
 function measurementMetrics(d, m) {
   const bailey = baileyBF(d, m);
   const navy = navyBF(d, m);
+  const caliper = caliperBF(d, m);
+  const manual = Number(m.bodyFatManual) > 0 ? Math.round(Number(m.bodyFatManual) * 10) / 10 : null;
   const both = [bailey, navy].filter((v) => v != null);
-  const avg = both.length ? Math.round((both.reduce((a, b) => a + b, 0) / both.length) * 10) / 10 : null;
+  const tapeAvg = both.length ? Math.round((both.reduce((a, b) => a + b, 0) / both.length) * 10) / 10 : null;
+  // Effective body fat: prefer the most direct source the user gave —
+  // a scale/scanner reading, then calipers, then the tape estimate.
+  const avg = manual != null ? manual : caliper != null ? caliper : tapeAvg;
+  const bodyFatSource = manual != null ? "scale" : caliper != null ? "caliper" : tapeAvg != null ? "tape" : null;
   const whtr = whtrOf(d, m);
   const weight = Number(d.weightLbs) || 0;
   const leanMassLbs = weight > 0 && avg != null ? Math.round(weight * (1 - avg / 100)) : null;
   const targetBf = Number(d.goalBodyFat) || null;
   const goalWeightFromLeanMass = leanMassLbs && targetBf && targetBf > 1 && targetBf < 60
     ? Math.round(leanMassLbs / (1 - targetBf / 100)) : null;
-  return { baileyBF: bailey, navyBF: navy, bodyFatPct: avg, waistToHeight: whtr,
-    leanMassLbs, goalWeightFromLeanMass };
+  return { baileyBF: bailey, navyBF: navy, caliperBF: caliper, manualBF: manual, tapeBF: tapeAvg,
+    bodyFatPct: avg, bodyFatSource, waistToHeight: whtr, leanMassLbs, goalWeightFromLeanMass };
 }
 
 // Merge tape values into the date's measurements entry (one entry per date —
@@ -8716,7 +8752,8 @@ function WeightDayLogger({ date, existing, onSave }) {
 function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, weekSummary, recentWearable, history, onRefresh, isRemote,
-  onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget, onAddCustomExercise }) {
+  onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
+  onSaveMeasurements, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise }) {
 
   const [showCalendar, setShowCalendar] = useState(false);
   const [editingWorkout, setEditingWorkout] = useState(null);
@@ -8726,6 +8763,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const [editMacros, setEditMacros] = useState(false); // macro-target editor open
   const [editTarget, setEditTarget] = useState(false); // manual calorie-target editor open
   const [targetDraft, setTargetDraft] = useState("");  // manual calorie-target draft
+  const [showMeasure, setShowMeasure] = useState(false); // body measurements / body-fat modal
   const [mtDraft, setMtDraft] = useState({ protein:"", carbs:"", fat:"" });   // grams draft
   const [mtMode, setMtMode] = useState("grams"); // "grams" | "pct" — how you enter targets
   const [mtPct, setMtPct] = useState({ protein:"", carbs:"", fat:"" });       // percentage draft
@@ -9406,8 +9444,10 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       </div>
       <div className="dash-log-row">
         <span className="dash-log-icon" style={{display:"flex",alignItems:"center"}}><Icon name="scale" size={21} color="var(--muted)" /></span>
-        <div className="dash-log-info">
-          <div className="dash-log-title">Today's Weight</div>
+        <div className="dash-log-info" style={{cursor: onSaveMeasurements ? "pointer" : "default"}}
+          onClick={onSaveMeasurements ? ()=>setShowMeasure(true) : undefined}
+          title={onSaveMeasurements ? "Open weight, body fat & measurements" : undefined}>
+          <div className="dash-log-title">Today's Weight{onSaveMeasurements ? <span style={{color:"var(--accent)",fontWeight:600}}> ›</span> : null}</div>
           <div className="dash-log-sub">{hasGoal?`Goal: ${goalWeight} lbs`:"Track your trend"}</div>
         </div>
         <input className="dash-log-input" type="number" inputMode="decimal" step="0.1"
@@ -9416,6 +9456,20 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         <span className="dash-log-unit">lbs</span>
         <LogBtn field="weight" onClick={commitWeight} />
       </div>
+      {/* Body fat & measurements — the hub (scale %, calipers, tape, weight). */}
+      {onSaveMeasurements && (
+        <button onClick={()=>setShowMeasure(true)}
+          style={{ display:"flex", alignItems:"center", gap:"7px", marginTop:"-4px", marginBottom:"6px",
+            border:"none", background:"transparent", color:"var(--accent)", cursor:"pointer",
+            fontSize:".76rem", fontWeight:700, padding:"2px 0" }}>
+          <Icon name="ruler" size={14} color="var(--accent)" />Body fat % & measurements
+        </button>
+      )}
+      {showMeasure && onSaveMeasurements && (
+        <MeasurementsModal data={data} onSave={onSaveMeasurements} onDelete={onDeleteMeasurement}
+          onSetGoalWeight={onSetGoalWeight} onToggleBodyFat={onToggleBodyFat}
+          onLogWeight={(v)=>onLogUpdate("weight", v)} onClose={()=>setShowMeasure(false)} />
+      )}
 
       {/* Log-confirmation toast — fixed at the bottom so it's visible no matter
           where you've scrolled (Kevin: previously no confirmation that it saved). */}
@@ -10291,10 +10345,18 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
 // height, trend any metric, delete mistakes, and (when weight + a goal body-fat
 // % exist) get the lean-mass-derived goal weight. docs/METRICS-PLAN.md is the
 // formula reference. Shared by ClientHome and Results (like WeightChartModal).
-function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBodyFat, onClose }) {
+function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBodyFat, onLogWeight, onClose }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);
   const d = data || {};
+  const [weightDraft, setWeightDraft] = useState("");
+  const [weightMsg, setWeightMsg] = useState("");
+  const logWeight = () => {
+    const v = Math.round(Number(weightDraft) * 10) / 10;
+    if (!(v > 0)) return;
+    onLogWeight(v); setWeightDraft(""); setWeightMsg(`Logged ${v} lbs`);
+    setTimeout(() => setWeightMsg(""), 2200);
+  };
   // Body-fat estimate is optional: some people just want to track tape numbers
   // as a tool. `data.hideBodyFat` turns off all the % / lean-mass / goal math
   // and makes this a plain measurement tracker. Default = show.
@@ -10329,13 +10391,25 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
       const v = Math.round(Number(drafts[f]) * 10) / 10;
       if (drafts[f] !== undefined && drafts[f] !== "" && v >= 3 && v <= 90) vals[f] = v;
     }
-    if (!Object.keys(vals).length) { setMsg("Enter at least one measurement (inches)."); return; }
+    for (const f of caliperFieldsFor(d)) { // skinfolds in mm
+      const v = Math.round(Number(drafts[f]) * 10) / 10;
+      if (drafts[f] !== undefined && drafts[f] !== "" && v >= 2 && v <= 100) vals[f] = v;
+    }
+    const bf = Math.round(Number(drafts.bodyFatManual) * 10) / 10; // scale/scanner %
+    if (drafts.bodyFatManual !== undefined && drafts.bodyFatManual !== "" && bf >= 3 && bf <= 70) vals.bodyFatManual = bf;
+    if (!Object.keys(vals).length) { setMsg("Enter a body-fat %, a caliper reading, or a tape measurement."); return; }
     onSave(vals);
-    setDrafts({}); setMsg("Saved today's measurements.");
+    setDrafts({}); setMsg("Saved.");
   };
 
-  const summarize = (e) => MEASUREMENT_FIELDS.filter((f) => e[f] != null)
-    .map((f) => `${MEASUREMENT_LABELS[f]} ${e[f]}"`).join(" · ");
+  const summarize = (e) => {
+    const parts = [];
+    const bf = showBF ? measurementMetrics(d, e).bodyFatPct : null;
+    if (bf != null) parts.push(`${bf}% BF`);
+    CALIPER_ALL.filter((f) => e[f] != null).forEach((f) => parts.push(`${CALIPER_LABELS[f]} ${e[f]}mm`));
+    MEASUREMENT_FIELDS.filter((f) => e[f] != null).forEach((f) => parts.push(`${MEASUREMENT_LABELS[f]} ${e[f]}"`));
+    return parts.join(" · ") || "—";
+  };
 
   const curGoal = Number(d.goalWeight) || null;
   const suggested = metrics && metrics.goalWeightFromLeanMass;
@@ -10368,7 +10442,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
             <div className="flex flex-wrap gap-x-4 gap-y-1 items-baseline">
               {metrics.bodyFatPct != null && (
                 <div><span className="font-display text-2xl">{metrics.bodyFatPct}%</span>
-                  <span className="ml-1.5 text-xs text-muted">body fat (tape)</span></div>
+                  <span className="ml-1.5 text-xs text-muted">body fat{metrics.bodyFatSource ? ` (${metrics.bodyFatSource === "scale" ? "your scale" : metrics.bodyFatSource})` : ""}</span></div>
               )}
               {metrics.waistToHeight != null && (
                 <div><span className={`font-display text-2xl ${metrics.waistToHeight > 0.5 ? "text-warn" : "text-success"}`}>{metrics.waistToHeight}</span>
@@ -10379,9 +10453,14 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                   <span className="ml-1.5 text-xs text-muted">lbs lean mass</span></div>
               )}
             </div>
-            {metrics.baileyBF != null && metrics.navyBF != null && (
-              <div className="mt-1 text-[11px] text-muted">Bailey {metrics.baileyBF}% · Navy {metrics.navyBF}% (averaged)</div>
-            )}
+            {(() => {
+              const parts = [];
+              if (metrics.manualBF != null) parts.push(`Scale ${metrics.manualBF}%`);
+              if (metrics.caliperBF != null) parts.push(`Calipers ${metrics.caliperBF}%`);
+              if (metrics.baileyBF != null) parts.push(`Bailey ${metrics.baileyBF}%`);
+              if (metrics.navyBF != null) parts.push(`Navy ${metrics.navyBF}%`);
+              return parts.length > 1 ? <div className="mt-1 text-[11px] text-muted">{parts.join(" · ")}</div> : null;
+            })()}
             {suggested && onSetGoalWeight && (
               <div className="mt-2 flex items-center gap-2 flex-wrap text-sm">
                 <span className="text-muted">At {Number(d.goalBodyFat)}% body fat you'd weigh ~<b className="text-fg">{suggested} lbs</b></span>
@@ -10420,8 +10499,58 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
           </div>
         )}
 
-        {/* Log today's measurements (any subset) */}
-        <div className="mb-1.5 text-sm text-muted">Log today's measurements (inches — widest point; wrist at the narrowest)</div>
+        {/* Weight — log a weigh-in right here (feeds the weight chart + current weight). */}
+        {onLogWeight && (
+          <div className="mb-3 rounded-lg bg-surface2 p-3">
+            <div className="mb-1.5 text-sm font-semibold text-fg">Weight</div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <input type="number" inputMode="decimal" step="0.1" placeholder={d.weightLbs ? `${d.weightLbs}` : "lbs"}
+                value={weightDraft} onChange={(e) => setWeightDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") logWeight(); }}
+                className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted" />
+              <span className="text-xs text-muted">lbs</span>
+              <button onClick={logWeight}
+                className="rounded-lg bg-primaryfill px-4 py-2 text-sm font-bold text-primaryfg cursor-pointer">Log weight</button>
+              {weightMsg ? <span className="text-sm text-success">✓ {weightMsg}</span> : null}
+            </div>
+          </div>
+        )}
+
+        {/* Body fat % — direct scale/scanner reading + skinfold calipers (only
+            when the body-fat estimate is on; a scale reading beats calipers beats
+            the tape estimate). */}
+        {showBF && (
+          <div className="mb-3 rounded-lg bg-surface2 p-3">
+            <div className="mb-1.5 text-sm font-semibold text-fg">Body fat %</div>
+            <div className="mb-2 flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-muted">From your scale / scanner</span>
+              <input type="number" inputMode="decimal" step="0.1" placeholder={latest && latest.bodyFatManual != null ? `${latest.bodyFatManual}` : "e.g. 18.5"}
+                value={drafts.bodyFatManual ?? ""} onChange={(e) => setDrafts((s) => ({ ...s, bodyFatManual: e.target.value }))}
+                className="w-[90px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted" />
+              <span className="text-xs text-muted">%</span>
+            </div>
+            {d.gender === "male" || d.gender === "female" ? (
+              <>
+                <div className="mb-1.5 text-xs text-muted">Or skinfold calipers (mm) — Jackson-Pollock 3-site</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {caliperFieldsFor(d).map((f) => (
+                    <div key={f}>
+                      <div className="mb-1 text-[11px] text-muted">{CALIPER_LABELS[f]}</div>
+                      <input type="number" inputMode="decimal" placeholder={latest && latest[f] != null ? `${latest[f]}` : "mm"}
+                        value={drafts[f] ?? ""} onChange={(e) => setDrafts((s) => ({ ...s, [f]: e.target.value }))}
+                        className="w-full min-w-0 bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted" />
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="text-xs text-muted">Set gender on the profile to use calipers or the tape estimate.</div>
+            )}
+          </div>
+        )}
+
+        {/* Tape measurements (inches) */}
+        <div className="mb-1.5 text-sm text-muted">Tape measurements (inches — widest point; wrist at the narrowest)</div>
         <div className="grid grid-cols-2 gap-2">
           {MEASUREMENT_FIELDS.map((f) => (
             <div key={f} className="flex items-center gap-2">
@@ -10433,7 +10562,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
           ))}
         </div>
         <button onClick={save}
-          className="mt-2.5 w-full rounded-lg bg-primaryfill px-4 py-2.5 text-sm font-bold text-primaryfg cursor-pointer">Save measurements</button>
+          className="mt-2.5 w-full rounded-lg bg-primaryfill px-4 py-2.5 text-sm font-bold text-primaryfg cursor-pointer">Save</button>
         {msg ? <div className="mt-2 text-sm text-success">{msg}</div> : null}
 
         {/* History list with delete */}
@@ -14621,7 +14750,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
       {showMeasure && (
         <MeasurementsModal data={planData || {}} onSave={saveMeasurements}
           onDelete={deleteMeasurement} onSetGoalWeight={setGoalFromLeanMass}
-          onToggleBodyFat={toggleBodyFat}
+          onToggleBodyFat={toggleBodyFat} onLogWeight={(v)=>logWeight(v)}
           onClose={() => setShowMeasure(false)} />
       )}
 
@@ -17592,6 +17721,10 @@ export default function App() {
               onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; return n; })}
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
+              onSaveMeasurements={(vals)=>setDataAndSave(p=>{ const next={...p}; mergeMeasurements(next, vals, todayKey, activeRemoteUid ? "trainer" : "client"); return next; })}
+              onDeleteMeasurement={(ts)=>setDataAndSave(p=>({...p, measurements:(p.measurements||[]).filter(e=>e && e.timestamp!==ts)}))}
+              onToggleBodyFat={(show)=>setDataAndSave(p=>({...p, hideBodyFat: !show}))}
+              onSetGoalWeight={(lbs)=>setDataAndSave(p=>({...p, goalWeight: lbs}))}
               onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
               onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
                 const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);
