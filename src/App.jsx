@@ -100,14 +100,26 @@ const ALL_CARDIO = CARDIO_GROUPS.flatMap(g => g.options);
 // on-brand glyph. kind: "cardio" | "strength".
 function exerciseCategory(ex, kind) {
   if (!ex) return kind === "strength" ? "dumbbell" : "run";
+  // Custom exercises can carry a user-picked icon (S97b) — it always wins.
+  if (ex.iconName) return ex.iconName;
   const s = `${ex.id || ""} ${ex.label || ""}`.toLowerCase();
   if (/\brest\b|rest day|rest_st/.test(s)) return "moon";
   if (/yoga|stretch|mobility|pilates|foam roll|cooldown|cool down|warm ?up/.test(s)) return "yoga";
   if (kind === "strength") return "dumbbell";
+  // Apple/Garmin-style category pictograms (S97b): one glyph per activity family.
   if (/swim|water/.test(s)) return "swim";
   if (/cycl|spin|bike/.test(s)) return "bike";
-  if (/walk|incline|jog|\brun\b|running|sprint|treadmill|hik|ellipt|stair|climb|ladder|versa/.test(s)) return "run";
-  return "bolt"; // rowing, HIIT, boxing, sports, jump rope, dance, misc — energy
+  if (/row|erg|ski/.test(s)) return "row";
+  if (/stair|climb|ladder|versa/.test(s)) return "stairs";
+  if (/box|kick|martial|wrestl|grappl|mma|karate|judo/.test(s)) return "boxing";
+  if (/jump.?rope/.test(s)) return "jumprope";
+  if (/hik|mountain/.test(s)) return "mountain";
+  if (/basketball|bball|soccer|tennis|pickle|volley|football/.test(s)) return "ball";
+  if (/danc|zumba|skat|rollerblad/.test(s)) return "dance";
+  if (/\bwalk\b|walking|walk_|_walk/.test(s)) return "walk";
+  if (/jog|\brun\b|running|sprint|treadmill|ellipt/.test(s)) return "run";
+  if (/hiit/.test(s)) return "flame";
+  return "bolt"; // misc — energy
 }
 const DURATIONS  = [10,15,20,25,30,35,40,45,50,60,75,90];
 const DAYS       = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
@@ -1922,65 +1934,18 @@ const advanceOnEnter = (e) => {
 
 // ─── Searchable Exercise Picker ───────────────────────────────────────────────
 
-function SearchableSelect({ exercises, groups, value, onChange, placeholder }) {
-  const [search, setSearch] = useState("");
-  const [showResults, setShowResults] = useState(false);
-  const inputRef = useRef(null);
-
-  const query = search.toLowerCase().trim();
-  const filtered = query.length >= 2
-    ? exercises.filter(e =>
-        e.label.toLowerCase().includes(query) ||
-        (e.cat && e.cat.toLowerCase().includes(query)) ||
-        (e.note && e.note.toLowerCase().includes(query)) ||
-        (e.icon && e.icon.includes(query))
-      ).slice(0, 12)
-    : [];
-
-  const current = exercises.find(e => e.id === value);
-
-  return (
-    <div className="relative">
-      <input
-        ref={inputRef}
-        type="text"
-        placeholder={placeholder || "Search exercises..."}
-        value={search}
-        onChange={e => { setSearch(e.target.value); setShowResults(true); }}
-        onFocus={() => setShowResults(true)}
-        onBlur={() => setTimeout(() => setShowResults(false), 200)}
-        className={`${WZ.input} mb-1.5`}
-      />
-      {showResults && filtered.length > 0 && (
-        <div className="absolute top-full left-0 right-0 z-20 max-h-[240px] overflow-y-auto rounded-lg border border-primary bg-surface shadow-lg">
-          {filtered.map(ex => (
-            <div key={ex.id}
-              onMouseDown={e => { e.preventDefault(); onChange(ex.id); setSearch(""); setShowResults(false); }}
-              className={`flex items-center gap-2 px-3.5 py-2.5 cursor-pointer border-b border-border ${ex.id === value ? "bg-[rgba(8,220,224,.06)]" : "bg-transparent"}`}
-            >
-              <span className="text-base">{ex.icon}</span>
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-[.84rem] text-fg">{ex.label}</div>
-                <div className="text-[.7rem] text-muted">{ex.cat||""}{ex.note ? ` · ${ex.note}` : ""}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      {query.length >= 2 && filtered.length === 0 && showResults && (
-        <div className="text-[.78rem] text-muted py-1.5">No matches — try a different term</div>
-      )}
-    </div>
-  );
-}
-
 // ─── Custom Exercise Creator ──────────────────────────────────────────────────
+
+// Icons a user can pick for a custom exercise (S97b, Kevin) — the activity
+// pictogram family. Stored as iconName; exerciseCategory() honors it everywhere.
+const CUSTOM_EX_ICONS = ["dumbbell","muscle","run","walk","bike","swim","row","stairs","boxing","jumprope","mountain","ball","dance","yoga","bolt","flame"];
 
 function CustomExerciseCreator({ exerciseType, onAdd }) {
   const [show, setShow] = useState(false);
   const [name, setName] = useState("");
   const [calPerMin, setCalPerMin] = useState("");
   const [category, setCategory] = useState(exerciseType === "cardio" ? "Custom Cardio" : "Custom Strength");
+  const [iconName, setIconName] = useState(exerciseType === "cardio" ? "bolt" : "dumbbell");
   const [saved, setSaved] = useState(false);
 
   const canSave = name.trim() && calPerMin && Number(calPerMin) > 0;
@@ -1990,6 +1955,7 @@ function CustomExerciseCreator({ exerciseType, onAdd }) {
       id: `custom_${Date.now()}`,
       label: name.trim(),
       icon: "⭐",
+      iconName,
       met: 0,
       calPerMin: Number(calPerMin),
       cat: category,
@@ -2009,7 +1975,7 @@ function CustomExerciseCreator({ exerciseType, onAdd }) {
       <button
         className={`w-full text-left px-3.5 py-3 rounded-lg border border-[rgba(181,123,255,.3)] bg-[rgba(181,123,255,.05)] text-[#b57bff] text-sm font-semibold cursor-pointer ${show ? "mb-2" : ""}`}
         onClick={()=>setShow(v=>!v)}>
-        ⭐ Create Custom {exerciseType === "cardio" ? "Cardio" : "Strength"} Exercise {show?"▲":"▼"}
+        <span className="inline-flex items-center gap-2"><Icon name="star" size={15} color="#b57bff" />Create Custom {exerciseType === "cardio" ? "Cardio" : "Strength"} Exercise {show?"▲":"▼"}</span>
       </button>
       {show && (
         <div className="fu rounded-lg border border-[rgba(181,123,255,.25)] bg-bg p-3.5">
@@ -2019,20 +1985,31 @@ function CustomExerciseCreator({ exerciseType, onAdd }) {
               onChange={e=>setName(e.target.value)} className={WZ.input} />
           </div>
           <div className="mb-4">
+            <label className={WZ.label}>Icon <span className={WZ.hint}>shows next to your exercise everywhere</span></label>
+            <div className="grid grid-cols-8 gap-1.5">
+              {CUSTOM_EX_ICONS.map((n) => (
+                <button key={n} type="button" onClick={()=>setIconName(n)} title={n}
+                  className={`flex items-center justify-center min-h-[40px] rounded-md border cursor-pointer ${iconName===n ? "border-[#b57bff] bg-[rgba(181,123,255,.12)]" : "border-border bg-surface2"}`}>
+                  <Icon name={n} size={18} color={iconName===n ? "#b57bff" : "var(--color-muted,#7e9a9a)"} />
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mb-4">
             <label className={WZ.label}>Estimated Calories Burned Per Minute <span className={WZ.hint}>your best estimate</span></label>
             <input type="text" inputMode="decimal" placeholder="e.g. 8" value={calPerMin}
               onChange={e=>setCalPerMin(e.target.value.replace(/[^0-9.]/g,""))} className={WZ.input} />
             <div className="text-[.7rem] text-muted mt-1 leading-snug">
-              💡 Reference: walking ≈ 4 cal/min, jogging ≈ 9 cal/min, intense HIIT ≈ 14 cal/min. If unsure, estimate conservatively.
+              Reference: walking ≈ 4 cal/min, jogging ≈ 9 cal/min, intense HIIT ≈ 14 cal/min. If unsure, estimate conservatively.
             </div>
           </div>
           <button
             className="w-full min-h-[42px] rounded-lg border-none bg-[#b57bff] text-[#0b0b12] font-bold text-[.9rem] cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
             disabled={!canSave||saved} onClick={handleSave}>
-            {saved ? "✓ Added!" : `Save Custom Exercise`}
+            {saved ? "Added!" : `Save Custom Exercise`}
           </button>
           <div className="text-[.6rem] text-muted mt-1.5 italic text-center">
-            ⭐ Custom exercises are marked with a star and labeled "User Estimate" to distinguish them from Glidna's library. Calorie values are your estimates, not validated.
+            Custom exercises are labeled "User Estimate" to distinguish them from Glidna's library. Calorie values are your estimates, not validated.
           </div>
         </div>
       )}
@@ -2618,14 +2595,81 @@ function exBurn(ex, weightLbs, minutes) {
   if (ex.calPerMin) return Math.round(Number(ex.calPerMin) * minutes);
   return Math.round((Number(ex.met) || 0) * weightLbs * 0.453592 * (minutes / 60));
 }
-// Dropdown <optgroup> of the plan's custom exercises of a type (or nothing).
-function CustomOptGroup({ customExercises, type }) {
-  const custom = customOf(customExercises, type);
-  if (!custom.length) return null;
+// ─── ExercisePicker (S97b) ───────────────────────────────────────────────────
+// Replaces the native exercise <select>s (where SVG icons can't render) with a
+// tap-to-open BottomSheet: search + grouped rows, each with its real Glidna
+// category icon (Apple/Garmin-style pictograms). One control instead of the old
+// SearchableSelect + <select> pair. kind: "cardio" | "strength".
+function ExercisePicker({ kind, value, onChange, customExercises }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const custom = customOf(customExercises, kind);
+  const current = kind === "cardio" ? findCardioEx(value, customExercises) : findStrengthEx(value, customExercises);
+  const groups = (() => {
+    const g = kind === "cardio"
+      ? CARDIO_GROUPS.map((gr) => [gr.group.replace(/^[^A-Za-z]+/, ""), gr.options])
+      : [["Rest", [REST_ST]], ...STRENGTH_GROUPS.map((cat) => [cat, STRENGTH_EXERCISES.filter((e) => e.cat === cat)])];
+    if (custom.length) g.push(["Your Custom Exercises", custom]);
+    return g.filter(([, arr]) => arr.length);
+  })();
+  const query = q.trim().toLowerCase();
+  const match = (e) => !query || e.label.toLowerCase().includes(query)
+    || (e.cat && e.cat.toLowerCase().includes(query)) || (e.note && e.note.toLowerCase().includes(query));
+  const pick = (id) => { onChange(id); setOpen(false); setQ(""); };
   return (
-    <optgroup label="⭐ Custom">
-      {custom.map((e) => <option key={e.id} value={e.id}>{e.icon || "⭐"} {e.label}</option>)}
-    </optgroup>
+    <>
+      <button type="button" onClick={() => setOpen(true)}
+        style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "10px 12px",
+          borderRadius: 9, border: "1px solid var(--border)", background: "var(--s2, var(--surface))",
+          color: "var(--text)", cursor: "pointer", fontFamily: "inherit", fontSize: ".86rem", textAlign: "left" }}>
+        <Icon name={exerciseCategory(current, kind)} size={17} color="var(--accent)" />
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {(current && current.label) || "Choose exercise"}
+        </span>
+        <span style={{ color: "var(--muted)", fontSize: ".68rem" }}>▾</span>
+      </button>
+      <BottomSheet open={open} onClose={() => { setOpen(false); setQ(""); }}
+        title={kind === "cardio" ? "Choose cardio" : "Choose exercise"} icon={kind === "cardio" ? "run" : "dumbbell"}>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search exercises…" autoFocus={false}
+          style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 9,
+            border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)",
+            fontSize: ".9rem", fontFamily: "inherit", marginBottom: 12 }} />
+        {groups.map(([label, arr]) => {
+          const shown = arr.filter(match);
+          if (!shown.length) return null;
+          return (
+            <div key={label} style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: ".68rem", color: "var(--muted)",
+                textTransform: "uppercase", letterSpacing: ".5px", fontWeight: 700, marginBottom: 5 }}>
+                <Icon name={exerciseCategory(shown[0], kind)} size={13} color="var(--muted)" />{label}
+              </div>
+              {shown.map((ex) => {
+                const active = ex.id === value;
+                return (
+                  <button key={ex.id} type="button" onClick={() => pick(ex.id)}
+                    style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 10px",
+                      borderRadius: 9, border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+                      background: active ? "rgba(8,220,224,.1)" : "transparent", color: "var(--text)", marginBottom: 2 }}>
+                    <Icon name={exerciseCategory(ex, kind)} size={18} color={active ? "var(--accent)" : "var(--muted)"} />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: "block", fontSize: ".86rem", fontWeight: active ? 700 : 600,
+                        color: active ? "var(--accent)" : "var(--text)" }}>{ex.label}</span>
+                      {ex.isCustom && <span style={{ display: "block", fontSize: ".66rem", color: "var(--muted)" }}>Custom · {ex.calPerMin} cal/min</span>}
+                    </span>
+                    {active && <Icon name="check" size={15} color="var(--accent)" />}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+        {query && groups.every(([, arr]) => arr.filter(match).length === 0) && (
+          <div style={{ padding: "18px 10px", textAlign: "center", color: "var(--muted)", fontSize: ".84rem" }}>
+            No matches — try a different term.
+          </div>
+        )}
+      </BottomSheet>
+    </>
   );
 }
 
@@ -2692,7 +2736,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
   return (
     <div className="fu text-fg">
       <div className={WZ.card}>
-        <div className={WZ.title}>💪 Strength Training Plan</div>
+        <div className={WZ.title}>Strength Training Plan</div>
         <div className={WZ.sub}>
           Assign strength workouts to each day. You can add multiple sessions per day.
           Calorie burn is estimated using MET values from the
@@ -2701,22 +2745,13 @@ function StepStrength({ data, onChange, onBack, onNext }) {
 
         {/* Quick Fill */}
         <button className={WZW.toggle} onClick={()=>setShowFill(v=>!v)}>
-          ⚡ Quick Fill — Apply one exercise to multiple days {showFill?"▲":"▼"}
+          <span className="inline-flex items-center gap-2"><Icon name="bolt" size={15} color="currentColor" />Quick Fill — Apply one exercise to multiple days {showFill?"▲":"▼"}</span>
         </button>
         {showFill && (
           <div className={WZW.panel}>
             <div className="mb-4">
               <label className={WZ.label}>Exercise</label>
-              <select className={WZW.select} value={fillType} onChange={e=>setFillType(e.target.value)}>
-                {STRENGTH_GROUPS.map(cat=>(
-                  <optgroup key={cat} label={cat}>
-                    {STRENGTH_EXERCISES.filter(e=>e.cat===cat).map(e=>(
-                      <option key={e.id} value={e.id}>{e.icon} {e.label}</option>
-                    ))}
-                  </optgroup>
-                ))}
-                <CustomOptGroup customExercises={data.customExercises} type="strength" />
-              </select>
+              <ExercisePicker kind="strength" value={fillType} onChange={setFillType} customExercises={data.customExercises} />
             </div>
             <div className="mb-4">
               <label className={WZ.label}>Duration</label>
@@ -2754,7 +2789,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
 
         {/* Movement Pattern Combos */}
         <button className="w-full text-left px-3.5 py-3 rounded-lg border border-[rgba(47,224,168,.3)] bg-[rgba(47,224,168,.05)] text-success text-sm font-semibold cursor-pointer mb-2.5" onClick={()=>setShowCombos(v=>!v)}>
-          🔀 Movement Combos — Pair patterns for a training day {showCombos?"▲":"▼"}
+          <span className="inline-flex items-center gap-2"><Icon name="move" size={15} color="currentColor" />Movement Combos — Pair patterns for a training day {showCombos?"▲":"▼"}</span>
         </button>
         {showCombos && (
           <div className={WZW.panel}>
@@ -2816,8 +2851,8 @@ function StepStrength({ data, onChange, onBack, onNext }) {
               <div className={WZW.dayHeader} onClick={()=>setOpenDay(isOpen?null:day)}>
                 <div className={WZW.dayChip}>{DAY_SHORT[i]}</div>
                 <div className={`text-[.88rem] ${isRest?"text-muted":"text-fg font-semibold"}`}>
-                  {isRest ? "😴 Rest Day" : sessions.length === 1
-                    ? `${getEx(sessions[0].type).icon} ${getEx(sessions[0].type).label} · ${sessions[0].duration}m`
+                  {isRest ? <><Icon name="moon" size={14} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />Rest Day</> : sessions.length === 1
+                    ? <><Icon name={exerciseCategory(getEx(sessions[0].type), "strength")} size={15} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />{getEx(sessions[0].type).label} · {sessions[0].duration}m</>
                     : `${sessions.length} sessions`
                   }
                 </div>
@@ -2838,24 +2873,8 @@ function StepStrength({ data, onChange, onBack, onNext }) {
                           </div>
                         )}
                         <div className="mb-4">
-                          <label className={WZ.label}>Exercise <span className={WZ.hint}>type to search or browse below</span></label>
-                          <SearchableSelect
-                            exercises={[...STRENGTH_EXERCISES, ...customOf(data.customExercises, "strength")]}
-                            groups={STRENGTH_GROUPS}
-                            value={sess.type}
-                            onChange={val=>updSession(day,idx,"type",val)}
-                            placeholder="Search exercises... (e.g. squat, curl, press)"
-                          />
-                          <select className={WZW.select} value={sess.type} onChange={e=>updSession(day,idx,"type",e.target.value)}>
-                            {STRENGTH_GROUPS.map(cat=>(
-                              <optgroup key={cat} label={cat}>
-                                {STRENGTH_EXERCISES.filter(e=>e.cat===cat).map(e=>(
-                                  <option key={e.id} value={e.id}>{e.icon} {e.label}</option>
-                                ))}
-                              </optgroup>
-                            ))}
-                            <CustomOptGroup customExercises={data.customExercises} type="strength" />
-                          </select>
+                          <label className={WZ.label}>Exercise</label>
+                          <ExercisePicker kind="strength" value={sess.type} onChange={val=>updSession(day,idx,"type",val)} customExercises={data.customExercises} />
                         </div>
                         <div className="mb-4">
                           <label className={WZ.label}>Duration</label>
@@ -2863,7 +2882,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
                             {ST_DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
                           </select>
                         </div>
-                        {ex.note && <div className="text-[.75rem] text-muted py-1">🎯 Muscles: {ex.note}</div>}
+                        {ex.note && <div className="text-[.75rem] text-muted py-1">Muscles: {ex.note}</div>}
                         {burn > 0 && <div className="text-[.78rem] text-warn font-semibold">~{burn} cal</div>}
                       </div>
                     );
@@ -2886,9 +2905,9 @@ function StepStrength({ data, onChange, onBack, onNext }) {
       <CustomExerciseCreator exerciseType="strength" onAdd={(ex)=>onChange("customExercises",[...(data.customExercises||[]),ex])} />
 
       {DAYS.every(day => getSessions(day).length === 0) && (
-        <div className={WZW.warn}>💡 All 7 days are set to rest — no worries! Your results will still work. Adding even 1–2 strength days will unlock muscle gain projections and EPOC afterburn data.</div>
+        <div className={WZW.warn}>All 7 days are set to rest — no worries! Your results will still work. Adding even 1–2 strength days will unlock muscle gain projections and EPOC afterburn data.</div>
       )}
-      <div className="text-[.6rem] text-muted text-center my-2 italic">⚠️ Calorie burn estimates use MET values — actual burn varies by intensity, form, and individual metabolism.</div>
+      <div className="text-[.6rem] text-muted text-center my-2 italic">Calorie burn estimates use MET values — actual burn varies by intensity, form, and individual metabolism.</div>
       <BottomNav onBack={onBack} onNext={onNext} nextLabel="See Results →"/>
     </div>
   );
@@ -2939,21 +2958,14 @@ function StepCardio({ data, onChange, onBack, onNext }) {
 
         {/* ── Quick Fill ── */}
         <button className={WZW.toggle} onClick={()=>setShowFill(v=>!v)}>
-          ⚡ Quick Fill — Apply one exercise to multiple days {showFill?"▲":"▼"}
+          <span className="inline-flex items-center gap-2"><Icon name="bolt" size={15} color="currentColor" />Quick Fill — Apply one exercise to multiple days {showFill?"▲":"▼"}</span>
         </button>
 
         {showFill && (
           <div className={WZW.panel}>
             <div className="mb-4">
               <label className={WZ.label}>Exercise to apply</label>
-              <select className={WZW.select} value={fillType} onChange={e=>setFillType(e.target.value)}>
-                {CARDIO_GROUPS.filter(g=>g.group!=="😴 Rest").map(grp=>(
-                  <optgroup key={grp.group} label={grp.group}>
-                    {grp.options.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
-                  </optgroup>
-                ))}
-                <CustomOptGroup customExercises={data.customExercises} type="cardio" />
-              </select>
+              <ExercisePicker kind="cardio" value={fillType} onChange={setFillType} customExercises={data.customExercises} />
             </div>
             <div className="mb-4">
               <label className={WZ.label}>Duration</label>
@@ -3003,8 +3015,8 @@ function StepCardio({ data, onChange, onBack, onNext }) {
               <div className={WZW.dayHeader} onClick={()=>setOpenDay(isOpen?null:day)}>
                 <div className={WZW.dayChip}>{DAY_SHORT[i]}</div>
                 <div className={`text-[.88rem] ${isRest?"text-muted":"text-fg font-semibold"}`}>
-                  {isRest ? "😴 Rest Day" : sessions.length === 1
-                    ? `${(findCardioEx(sessions[0].type, data.customExercises)||{icon:"🏃"}).icon} ${(findCardioEx(sessions[0].type, data.customExercises)||{label:"Cardio"}).label} · ${sessions[0].duration}m`
+                  {isRest ? <><Icon name="moon" size={14} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />Rest Day</> : sessions.length === 1
+                    ? <><Icon name={exerciseCategory(findCardioEx(sessions[0].type, data.customExercises), "cardio")} size={15} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />{(findCardioEx(sessions[0].type, data.customExercises)||{label:"Cardio"}).label} · {sessions[0].duration}m</>
                     : `${sessions.length} sessions`
                   }
                 </div>
@@ -3025,22 +3037,8 @@ function StepCardio({ data, onChange, onBack, onNext }) {
                           </div>
                         )}
                         <div className="mb-4">
-                          <label className={WZ.label}>Exercise <span className={WZ.hint}>type to search or browse below</span></label>
-                          <SearchableSelect
-                            exercises={[...ALL_CARDIO, ...customOf(data.customExercises, "cardio")]}
-                            groups={CARDIO_GROUPS.map(g=>g.group)}
-                            value={sess.type}
-                            onChange={val=>updateWorkout(day,idx,"type",val)}
-                            placeholder="Search cardio... (e.g. treadmill, bike, swim)"
-                          />
-                          <select className={WZW.select} value={sess.type} onChange={e=>updateWorkout(day,idx,"type",e.target.value)}>
-                            {CARDIO_GROUPS.map(grp=>(
-                              <optgroup key={grp.group} label={grp.group}>
-                                {grp.options.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
-                              </optgroup>
-                            ))}
-                            <CustomOptGroup customExercises={data.customExercises} type="cardio" />
-                          </select>
+                          <label className={WZ.label}>Exercise</label>
+                          <ExercisePicker kind="cardio" value={sess.type} onChange={val=>updateWorkout(day,idx,"type",val)} customExercises={data.customExercises} />
                         </div>
                         {sess.type!=="rest" && (
                           <div className="mb-4">
@@ -3073,9 +3071,9 @@ function StepCardio({ data, onChange, onBack, onNext }) {
       <CustomExerciseCreator exerciseType="cardio" onAdd={(ex)=>onChange("customExercises",[...(data.customExercises||[]),ex])} />
 
       {DAYS.every(day => !Array.isArray(data.cardio[day]) || data.cardio[day].length === 0) && (
-        <div className={WZW.warn}>💡 All 7 days are set to rest — that's totally fine! Your results will still calculate based on diet alone. But if you'd like to add even one cardio session, it'll speed things up.</div>
+        <div className={WZW.warn}>All 7 days are set to rest — that's totally fine! Your results will still calculate based on diet alone. But if you'd like to add even one cardio session, it'll speed things up.</div>
       )}
-      <div className="text-[.6rem] text-muted text-center my-2 italic">⚠️ Cardio calorie estimates are approximations — actual burn depends on effort, body composition, and conditions.</div>
+      <div className="text-[.6rem] text-muted text-center my-2 italic">Cardio calorie estimates are approximations — actual burn depends on effort, body composition, and conditions.</div>
       <BottomNav onBack={onBack} onNext={onNext} nextLabel="Next — Strength →"/>
     </div>
   );
@@ -3766,9 +3764,9 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                   <div className="drc-day">{day.slice(0,3)}</div>
                   <div className="drc-cardio">
                     {isRest
-                      ? <span style={{color:"var(--muted)"}}>😴 Rest — tap to add cardio</span>
+                      ? <span style={{color:"var(--muted)"}}><Icon name="moon" size={14} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />Rest — tap to add cardio</span>
                       : sessions.length === 1
-                        ? <span>{(findCardioEx(sessions[0].type, data.customExercises)||{icon:"🏃"}).icon} {(findCardioEx(sessions[0].type, data.customExercises)||{label:"Cardio"}).label.split("–")[0].trim()} · {sessions[0].duration}m</span>
+                        ? <span><Icon name={exerciseCategory(findCardioEx(sessions[0].type, data.customExercises), "cardio")} size={15} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />{(findCardioEx(sessions[0].type, data.customExercises)||{label:"Cardio"}).label.split("–")[0].trim()} · {sessions[0].duration}m</span>
                         : <span>{sessions.length} sessions</span>
                     }
                   </div>
@@ -3789,14 +3787,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                           )}
                           <div className="field">
                             <label>Exercise</label>
-                            <select value={sess.type} onChange={e=>onUpdateCardio(day,idx,"type",e.target.value)}>
-                              {CARDIO_GROUPS.map(grp=>(
-                                <optgroup key={grp.group} label={grp.group}>
-                                  {grp.options.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
-                                </optgroup>
-                              ))}
-                              <CustomOptGroup customExercises={data.customExercises} type="cardio" />
-                            </select>
+                            <ExercisePicker kind="cardio" value={sess.type} onChange={val=>onUpdateCardio(day,idx,"type",val)} customExercises={data.customExercises} />
                           </div>
                           {sess.type!=="rest" && (
                             <div className="field" style={{marginBottom:0}}>
@@ -3917,14 +3908,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                           {allSessions.length>1 && <div style={{fontSize:".7rem",color:"var(--muted)",fontWeight:700,letterSpacing:"1px",textTransform:"uppercase",marginBottom:"6px"}}>Session {idx+1}</div>}
                           <div className="field">
                             <label>Exercise</label>
-                            <select value={sess.type} onChange={e=>onUpdateCardio(day,idx,"type",e.target.value)}>
-                              {CARDIO_GROUPS.map(grp=>(
-                                <optgroup key={grp.group} label={grp.group}>
-                                  {grp.options.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
-                                </optgroup>
-                              ))}
-                              <CustomOptGroup customExercises={data.customExercises} type="cardio" />
-                            </select>
+                            <ExercisePicker kind="cardio" value={sess.type} onChange={val=>onUpdateCardio(day,idx,"type",val)} customExercises={data.customExercises} />
                           </div>
                           {sess.type!=="rest" && (
                             <div className="field" style={{marginBottom:0}}>
@@ -4165,13 +4149,13 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           <div className="edit-panel-grid">
             {[
               { step:0, icon:"👤", label:"Personal Info",    sub:`${fullName(data)||"Name"} · ${data.weightLbs} lbs` },
-              { step:1, icon:"🎯", label:"Goal Weight",      sub:data.goalWeight ? `Goal: ${data.goalWeight} lbs` : "Not set" },
-              { step:2, icon:"🏃", label:"Activity Level",   sub:ACTIVITY_LEVELS.find(a=>a.id===data.activityLevel)?.label||"" },
-              { step:3, icon:"🔥", label:"Cardio Plan",      sub:`${DAYS.filter(d=>Array.isArray(data.cardio[d])&&data.cardio[d].length>0).length} active days/week` },
-              { step:4, icon:"💪", label:"Strength Plan",    sub:`${DAYS.filter(d=>Array.isArray(data.strength?.[d])&&data.strength[d].length>0).length} training days/week` },
+              { step:1, icon:"target", label:"Goal Weight",      sub:data.goalWeight ? `Goal: ${data.goalWeight} lbs` : "Not set" },
+              { step:2, icon:"run", label:"Activity Level",   sub:ACTIVITY_LEVELS.find(a=>a.id===data.activityLevel)?.label||"" },
+              { step:3, icon:"flame", label:"Cardio Plan",      sub:`${DAYS.filter(d=>Array.isArray(data.cardio[d])&&data.cardio[d].length>0).length} active days/week` },
+              { step:4, icon:"muscle", label:"Strength Plan",    sub:`${DAYS.filter(d=>Array.isArray(data.strength?.[d])&&data.strength[d].length>0).length} training days/week` },
             ].map(item=>(
               <button key={item.step} className="edit-jump-btn" onClick={()=>{ setShowEdit(false); onEdit(item.step); }}>
-                <span className="ejb-icon">{item.icon}</span>
+                <span className="ejb-icon"><Icon name={item.icon} size={20} color="var(--accent)" /></span>
                 <div>
                   <div className="ejb-label">{item.label}</div>
                   <div className="ejb-sub">{item.sub}</div>
@@ -4573,9 +4557,9 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
               <div className="drc-day">{day.slice(0,3)}</div>
               <div className="drc-cardio">
                 {isRest
-                  ? <span style={{color:"var(--muted)"}}>😴 Rest — tap to add training</span>
+                  ? <span style={{color:"var(--muted)"}}><Icon name="moon" size={14} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />Rest — tap to add training</span>
                   : allSessions.length === 1
-                    ? <span>{getEx(allSessions[0].type).icon} {getEx(allSessions[0].type).label} · {allSessions[0].duration}m</span>
+                    ? <span><Icon name={exerciseCategory(getEx(allSessions[0].type), "strength")} size={15} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />{getEx(allSessions[0].type).label} · {allSessions[0].duration}m</span>
                     : <span>{allSessions.length} sessions</span>
                 }
               </div>
@@ -4601,16 +4585,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
                       )}
                       <div className="field">
                         <label>Exercise</label>
-                        <select value={sess.type} onChange={e=>onUpdateStrength(day,idx,"type",e.target.value)}>
-                          {STRENGTH_GROUPS.map(cat=>(
-                            <optgroup key={cat} label={cat}>
-                              {STRENGTH_EXERCISES.filter(e=>e.cat===cat).map(e=>(
-                                <option key={e.id} value={e.id}>{e.icon} {e.label}</option>
-                              ))}
-                            </optgroup>
-                          ))}
-                          <CustomOptGroup customExercises={data.customExercises} type="strength" />
-                        </select>
+                        <ExercisePicker kind="strength" value={sess.type} onChange={val=>onUpdateStrength(day,idx,"type",val)} customExercises={data.customExercises} />
                       </div>
                       <div className="field" style={{marginBottom:0}}>
                         <label>Duration</label>
@@ -10168,22 +10143,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
               </div>
               {editingWorkout===`c${i}` && (
                 <div style={{padding:"10px 0 12px",borderBottom:"1px solid var(--border)",animation:"fadeUp .15s ease both"}}>
-                  <SearchableSelect
-                    exercises={[...ALL_CARDIO, ...customOf(data.customExercises, "cardio")]}
-                    groups={CARDIO_GROUPS.map(g=>g.group)}
-                    value={w.type}
-                    onChange={val=>onUpdateCardio(dayName,i,"type",val)}
-                    placeholder="Search cardio exercises..."
-                  />
-                  <select value={w.type} onChange={e=>onUpdateCardio(dayName,i,"type",e.target.value)}
-                    style={{width:"100%",padding:"10px",borderRadius:"8px",border:"1.5px solid var(--border)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".84rem",marginTop:"6px"}}>
-                    {CARDIO_GROUPS.map(grp=>(
-                      <optgroup key={grp.group} label={grp.group}>
-                        {grp.options.map(c=><option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
-                      </optgroup>
-                    ))}
-                    <CustomOptGroup customExercises={data.customExercises} type="cardio" />
-                  </select>
+                  <ExercisePicker kind="cardio" value={w.type} onChange={val=>onUpdateCardio(dayName,i,"type",val)} customExercises={data.customExercises} />
                   <select value={(todayCardio.workouts[i]||{}).duration||30} onChange={e=>onUpdateCardio(dayName,i,"duration",Number(e.target.value))}
                     style={{width:"100%",padding:"10px",borderRadius:"8px",border:"1.5px solid var(--border)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".84rem",marginTop:"6px"}}>
                     {DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
@@ -10221,24 +10181,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
               </div>
               {editingWorkout===`s${i}` && (
                 <div style={{padding:"10px 0 12px",borderBottom:"1px solid var(--border)",animation:"fadeUp .15s ease both"}}>
-                  <SearchableSelect
-                    exercises={[...STRENGTH_EXERCISES, ...customOf(data.customExercises, "strength")]}
-                    groups={STRENGTH_GROUPS}
-                    value={s.type}
-                    onChange={val=>onUpdateStrength(dayName,i,"type",val)}
-                    placeholder="Search strength exercises..."
-                  />
-                  <select value={s.type} onChange={e=>onUpdateStrength(dayName,i,"type",e.target.value)}
-                    style={{width:"100%",padding:"10px",borderRadius:"8px",border:"1.5px solid var(--border)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".84rem",marginTop:"6px"}}>
-                    {STRENGTH_GROUPS.map(cat=>(
-                      <optgroup key={cat} label={cat}>
-                        {STRENGTH_EXERCISES.filter(e=>e.cat===cat).map(e=>(
-                          <option key={e.id} value={e.id}>{e.icon} {e.label}</option>
-                        ))}
-                      </optgroup>
-                    ))}
-                    <CustomOptGroup customExercises={data.customExercises} type="strength" />
-                  </select>
+                  <ExercisePicker kind="strength" value={s.type} onChange={val=>onUpdateStrength(dayName,i,"type",val)} customExercises={data.customExercises} />
                   <select value={s.duration||60} onChange={e=>onUpdateStrength(dayName,i,"duration",Number(e.target.value))}
                     style={{width:"100%",padding:"10px",borderRadius:"8px",border:"1.5px solid var(--border)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".84rem",marginTop:"6px"}}>
                     {ST_DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}

@@ -71,6 +71,15 @@ const GLYPHS = {
   // — S95: the food library (page icon, save-for-good star, delete) —
   book: (<><path d="M4 4.6A1.6 1.6 0 0 1 5.6 3H18a1 1 0 0 1 1 1v13H5.6A1.6 1.6 0 0 0 4 18.6z" /><path d="M4 18.6A1.6 1.6 0 0 1 5.6 17H19v4H5.6A1.6 1.6 0 0 1 4 19.4z" /><path d="M8 7.5h7" /><path d="M8 11h5" /></>),
   star: (<path d="m12 3.6 2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8L3.5 9.8l5.9-.9z" />),
+  // — S97b: activity pictograms (Apple/Garmin-style category glyphs) —
+  walk: (<><circle cx="13" cy="4.4" r="1.8" /><path d="M12.6 6.6 11.4 12" /><path d="M11.4 12l1.9 4-.6 5" /><path d="M11.4 12 9.4 15.8l-2.4 3.4" /><path d="M12.2 8.4 15.4 10.6" /><path d="M12.2 8.4 9 10" /></>),
+  stairs: (<path d="M3.5 20h4.6v-4.5h4.4V11h4.4V6.5h4.6" />),
+  row: (<><circle cx="8.6" cy="6.6" r="1.8" /><path d="M9.4 8.4l3.1 4 4.8-.5" /><path d="M12.5 12.4l-1.7 4.1-3.8 1" /><path d="M4 20.5h16.5" /><path d="M10.2 10.2l7.3-1.3" /></>),
+  boxing: (<><path d="M7 12.2V8.7A3.7 3.7 0 0 1 10.7 5h2.6A3.7 3.7 0 0 1 17 8.7v3.5a5.8 5.8 0 0 1-3 5.1V19.5h-4V17.3a5.8 5.8 0 0 1-3-5.1z" /><path d="M7 9.2H5.3a1.4 1.4 0 0 0 0 2.8H7" /></>),
+  ball: (<><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17" /><path d="M6.2 6.2a12.5 12.5 0 0 1 0 11.6" /><path d="M17.8 6.2a12.5 12.5 0 0 0 0 11.6" /></>),
+  jumprope: (<><path d="M6 10.5v2a6 6 0 0 0 12 0v-2" /><rect x="4.4" y="3.5" width="3.2" height="7" rx="1.4" /><rect x="16.4" y="3.5" width="3.2" height="7" rx="1.4" /></>),
+  mountain: (<path d="M3 19.5 9.7 7.5l3.6 6 2.4-3.6L21 19.5z" />),
+  dance: (<><circle cx="12" cy="4.2" r="1.8" /><path d="M12 6.4v5.8" /><path d="M12 8 8.4 5.2" /><path d="M12 8l3.6-2.8" /><path d="M12 12.2 9.2 16.4l-1.6 4" /><path d="M12 12.2l2.4 4 3.2 3.2" /></>),
   trash: (<><path d="M4.5 6.5h15" /><path d="M9.5 6.5V4.8A1.3 1.3 0 0 1 10.8 3.5h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7" /><path d="M6.5 6.5 7.4 19a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4l.9-12.5" /><path d="M10.5 10v6.5" /><path d="M13.5 10v6.5" /></>),
 };
 
