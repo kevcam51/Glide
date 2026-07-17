@@ -14268,14 +14268,22 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
 
   return createPortal(
     <div style={{ fontFamily: "var(--font-sans)" }}>
-      {/* Floating launcher button */}
+      {/* Floating launcher button. Wrapped in a single fixed, full-viewport,
+          pointer-events:none layer with the button positioned ABSOLUTE inside it
+          — on iOS/iPadOS a lone `position:fixed` FAB drifts while scrolling
+          because <body> carries `overflow-x:clip` (the S90b Android fix), which
+          Safari mishandles for fixed children of body. One fixed layer pins
+          reliably, and an absolute child of a non-moving parent can't drift. */}
       {!open && (
-        <button onClick={() => setOpen(true)} aria-label="Open AI assistant"
-          className="fixed z-[1000] flex items-center gap-1.5 rounded-full border-none bg-primaryfill px-3 py-2.5 font-bold text-primaryfg shadow-lg cursor-pointer"
-          style={{ right: "calc(16px + env(safe-area-inset-right,0px))", bottom: "calc(18px + env(safe-area-inset-bottom,0px))" }}>
-          <Icon name="sparkle" variant="solid" size={16} />
-          <span className="text-[.82rem]">Ask Glidna</span>
-        </button>
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, pointerEvents: "none" }}>
+          <button onClick={() => setOpen(true)} aria-label="Open AI assistant"
+            className="flex items-center gap-1.5 rounded-full border-none bg-primaryfill px-3 py-2.5 font-bold text-primaryfg shadow-lg cursor-pointer"
+            style={{ position: "absolute", pointerEvents: "auto",
+              right: "calc(16px + env(safe-area-inset-right,0px))", bottom: "calc(18px + env(safe-area-inset-bottom,0px))" }}>
+            <Icon name="sparkle" variant="solid" size={16} />
+            <span className="text-[.82rem]">Ask Glidna</span>
+          </button>
+        </div>
       )}
 
       {/* Chat panel — "compact" is a bigger bottom-right card; "full" nearly
