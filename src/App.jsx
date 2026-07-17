@@ -6835,6 +6835,24 @@ const baseFoodName = (name) => {
 // Dedup key: base food name + meal type.
 const recentFoodKey = (name, type) => baseFoodName(name).toLowerCase() + "|" + recentMealKey(type);
 
+// ── Saved food library (S95) ────────────────────────────────────────────────
+// Foods the user DELIBERATELY keeps, as opposed to `caliq-foods-{planId}` which
+// just remembers whatever was logged lately and rolls over. Stored on the
+// SIGNED-IN user's OWN account (Kevin's call): a personal library should follow
+// you across plans/phases, whereas recents stay per-plan so a trainer opening a
+// client's plan still sees the CLIENT's recent foods, not their own.
+// Identity is the SAME as recents (base name + meal type) so a food can never
+// exist twice at two different servings — re-logging updates the amount in place.
+const SAVED_FOODS_KEY = "caliq-foods-saved";
+// "3 servings" / "200 g" — the remembered amount, for the library rows.
+const servingLabelOf = (f) => {
+  const q = f && f.grams != null ? Number(f.grams) : null;
+  if (!q || q <= 0) return "";
+  const n = +q.toFixed(2);
+  const u = f.unit || "g";
+  return u === "serving" ? `${n} serving${n === 1 ? "" : "s"}` : `${n} ${u}`;
+};
+
 // ── Serving units for the food detail popup (S94) ───────────────────────────
 // Weight units convert EXACTLY. Volume units are generic approximations (a cup of
 // spinach ≠ a cup of rice — real per-food densities aren't in our food data), so
@@ -7163,7 +7181,192 @@ function CopyMealModal({ sectionLabel, targetType, matchMeal, dateKey, onReadDay
     </div>, document.body);
 }
 
-function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, onReadDay, onListLoggedDays, dateKey, hideMicros }) {
+// ── Food library (S95) ──────────────────────────────────────────────────────
+// One page over BOTH food stores, replacing the row of chips that used to pile
+// up under the add-form:
+//   • Saved — foods you deliberately keep (SAVED_FOODS_KEY, per person, forever)
+//   • Previously logged — what you've logged lately (caliq-foods-{plan}, rolls over)
+// A saved food is REMOVED from Previously logged: it's been promoted, and listing
+// it in both places is exactly the duplication this page exists to end.
+// Rows mirror a logged meal row (macros spelled out, big calories) so a remembered
+// food looks like the thing it becomes.
+// Opened from a meal's "Previously logged" button (mealType set → that meal only,
+// tap adds straight to it) or from the header (mealType null → everything grouped
+// by meal, tap adds to the food's own meal).
+const LIB_DISPLAY_CAP = 30; // per meal type — Kevin: recents shouldn't pile up
+function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleSave, onRemoveRecent, onRemoveSaved, onClose }) {
+  const [tab, setTab] = useState("recent");
+  const [q, setQ] = useState("");
+  const [flash, setFlash] = useState("");   // "added: <name>" confirmation
+  const [confirmDel, setConfirmDel] = useState(""); // key pending delete confirm
+  useBackClose(open, onClose);
+  useBodyScrollLock(open);
+  useEffect(() => { if (open) { setQ(""); setFlash(""); setConfirmDel(""); setTab((savedFoods || []).length ? "saved" : "recent"); } }, [open]);
+
+  const savedKeys = new Set((savedFoods || []).map((f) => recentFoodKey(f.name, f.type)));
+  // Legacy recents (logged before per-meal scoping) carry no type and show under
+  // EVERY meal, so they can't be matched by key alone — a legacy "eggs" is
+  // "already saved" if eggs is saved under any meal at all. Without this it'd sit
+  // in both tabs at once.
+  const savedBases = new Set((savedFoods || []).map((f) => baseFoodName(f.name || "").toLowerCase()));
+  const isSaved = (f) => (f.type == null
+    ? savedBases.has(baseFoodName(f.name || "").toLowerCase())
+    : savedKeys.has(recentFoodKey(f.name, f.type)));
+  const match = (f) => {
+    const s = q.trim().toLowerCase();
+    if (!s) return true;
+    return (f.name || "").toLowerCase().includes(s) || (f.brand || "").toLowerCase().includes(s);
+  };
+  const inScope = (f) => (mealType == null ? true
+    : (f.type == null ? true : recentMealKey(f.type) === recentMealKey(mealType)));
+  // Star a legacy/typeless food while viewing one meal and it should land under
+  // THAT meal — normalizing to "other" filed it somewhere you couldn't see from
+  // where you saved it, which reads as "the food vanished".
+  const effType = (f) => (f.type != null ? f.type : (mealType != null ? mealType : "other"));
+
+  // Recents minus anything already saved (no cross-tab duplicates).
+  const recents = (recentFoods || []).filter((f) => f && f.name && !isSaved(f) && inScope(f) && match(f));
+  const saved = (savedFoods || []).filter((f) => f && f.name && inScope(f) && match(f));
+  const list = tab === "saved" ? saved : recents;
+
+  // Group by meal type when browsing everything; a single flat group when the
+  // page was opened from one meal's add-form.
+  const groups = (() => {
+    if (mealType != null) return [[null, list.slice(0, LIB_DISPLAY_CAP)]];
+    const byKey = new Map(RECENT_MEAL_KEYS.map((k) => [k, []]));
+    list.forEach((f) => {
+      const k = recentMealKey(f.type);
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(f);
+    });
+    return [...byKey.entries()]
+      .map(([k, arr]) => [k, arr.slice(0, LIB_DISPLAY_CAP)])
+      .filter(([, arr]) => arr.length);
+  })();
+
+  const add = (f) => {
+    onAdd(f);
+    setFlash(f.name);
+    setTimeout(() => setFlash((v) => (v === f.name ? "" : v)), 1400);
+  };
+
+  if (!open) return null;
+  const iconBtn = { border: "none", background: "transparent", cursor: "pointer",
+    padding: "10px", display: "flex", alignItems: "center", borderRadius: 8, flexShrink: 0 };
+
+  const row = (f) => {
+    const key = recentFoodKey(f.name, f.type) + (f.savedAt ? "|s" : "|r");
+    const inSavedTab = tab === "saved"; // this row came from the library, not recents
+    const serving = servingLabelOf(f);
+    // NB boolean, not the number — `{0 && <div/>}` renders a literal "0" in JSX,
+    // which is exactly what a macro-less food used to show.
+    const hasMacros = !!(f.protein || f.carbs || f.fat);
+    return (
+      <div key={key} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 2px 4px 8px",
+        borderRadius: 10, background: "rgba(255,255,255,.04)", marginBottom: 6 }}>
+        {/* Tap the row = log it now with its remembered serving. */}
+        <button onClick={() => add(f)} title={`Add ${f.name}`}
+          style={{ flex: 1, minWidth: 0, textAlign: "left", border: "none", background: "transparent",
+            color: "var(--text)", cursor: "pointer", padding: "8px 4px 8px 0", fontFamily: "inherit" }}>
+          <div style={{ fontSize: ".86rem", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
+          {(f.brand || serving) && (
+            <div style={{ fontSize: ".7rem", color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {[f.brand, serving].filter(Boolean).join(" · ")}
+            </div>
+          )}
+          {hasMacros && (
+            <div style={{ fontSize: ".72rem", marginTop: 2 }}>
+              <span style={{ color: "var(--accent)", fontWeight: 700 }}>Protein {f.protein || 0}g</span>
+              <span style={{ color: "var(--muted)" }}>{" · "}</span>
+              <span style={{ color: "var(--yellow)", fontWeight: 700 }}>Carbs {f.carbs || 0}g</span>
+              <span style={{ color: "var(--muted)" }}>{" · "}</span>
+              <span style={{ color: "var(--orange)", fontWeight: 700 }}>Fat {f.fat || 0}g</span>
+            </div>
+          )}
+        </button>
+        <span style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: "1rem", color: "var(--accent)", whiteSpace: "nowrap", padding: "0 2px" }}>
+          {(f.calories || 0).toLocaleString()}<span style={{ fontSize: ".6rem", color: "var(--muted)", fontWeight: 600 }}> cal</span>
+        </span>
+        <button onClick={() => onToggleSave({ ...f, type: effType(f) })} title={inSavedTab ? "Remove from your library" : "Save to your library"} style={iconBtn}>
+          <Icon name="star" size={17} color={inSavedTab ? "var(--yellow)" : "var(--muted)"} variant={inSavedTab ? "solid" : "outline"} />
+        </button>
+        {confirmDel === key ? (
+          <button onClick={() => { (inSavedTab ? onRemoveSaved : onRemoveRecent)(f); setConfirmDel(""); }}
+            style={{ ...iconBtn, padding: "10px 12px", color: "var(--red)", fontSize: ".72rem", fontWeight: 700 }}>Delete?</button>
+        ) : (
+          <button onClick={() => setConfirmDel(key)} title="Delete" style={iconBtn}>
+            <Icon name="trash" size={16} color="var(--muted)" />
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  return createPortal(
+    <div data-theme="pro" style={{ position: "fixed", inset: 0, zIndex: 1600, background: "var(--bg)", color: "var(--text)",
+      fontFamily: "var(--font-sans)", overflowY: "auto", padding: "calc(14px + env(safe-area-inset-top,0px)) 14px 32px" }}>
+      <div style={{ maxWidth: 560, margin: "0 auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+            <Icon name="book" size={20} color="var(--accent)" />
+            <span style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem", fontWeight: 700 }}>Food library</span>
+            {mealType != null && <span style={{ fontSize: ".76rem", color: "var(--muted)", whiteSpace: "nowrap" }}>· {mealType || "Other"}</span>}
+          </div>
+          <button onClick={onClose} aria-label="Close"
+            style={{ border: "1px solid var(--border)", background: "transparent", color: "var(--text)",
+              borderRadius: 9, padding: "8px 13px", cursor: "pointer", fontSize: ".85rem", fontFamily: "inherit" }}>✕</button>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+          {[["saved", `Saved${saved.length ? ` (${saved.length})` : ""}`], ["recent", `Previously logged${recents.length ? ` (${recents.length})` : ""}`]].map(([k, label]) => (
+            <button key={k} onClick={() => { setTab(k); setConfirmDel(""); }}
+              style={{ flex: 1, padding: "9px 8px", borderRadius: 9, cursor: "pointer", fontFamily: "inherit",
+                fontSize: ".78rem", fontWeight: 700,
+                border: `1px solid ${tab === k ? "var(--accent)" : "var(--border)"}`,
+                background: tab === k ? "rgba(8,220,224,.1)" : "transparent",
+                color: tab === k ? "var(--accent)" : "var(--muted)" }}>{label}</button>
+          ))}
+        </div>
+
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your foods…"
+          style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)",
+            background: "var(--surface)", color: "var(--text)", fontSize: ".9rem", fontFamily: "inherit",
+            boxSizing: "border-box", marginBottom: 12 }} />
+
+        {flash && (
+          <div style={{ fontSize: ".78rem", color: "var(--green)", fontWeight: 700, marginBottom: 8 }}>✓ Added {flash}</div>
+        )}
+
+        {groups.length === 0 ? (
+          <div style={{ padding: "26px 14px", textAlign: "center", color: "var(--muted)", fontSize: ".84rem", lineHeight: 1.5 }}>
+            {q.trim() ? "Nothing matches that."
+              : tab === "saved"
+                ? "No saved foods yet. Tap the ☆ on anything you log often and it'll live here — across every plan."
+                : "Nothing logged yet. Foods you log will show up here for one-tap re-adding."}
+          </div>
+        ) : groups.map(([k, arr]) => (
+          <div key={k || "flat"} style={{ marginBottom: 14 }}>
+            {k && (
+              <div style={{ fontSize: ".68rem", color: "var(--muted)", textTransform: "uppercase",
+                letterSpacing: ".5px", fontWeight: 700, marginBottom: 5 }}>{k === "other" ? "Other" : k}</div>
+            )}
+            {arr.map(row)}
+          </div>
+        ))}
+
+        <div style={{ fontSize: ".7rem", color: "var(--muted)", lineHeight: 1.5, marginTop: 4 }}>
+          Tap a food to log it with its last serving. {tab === "recent"
+            ? `Recent foods roll over as you log new ones — tap ☆ to keep one for good.`
+            : `Saved foods stay in your library across every plan.`}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, savedFoods, onToggleSaveFood, onRemoveSavedFood, onReadDay, onListLoggedDays, dateKey, hideMicros }) {
   const [name, setName] = useState("");
   const [brand, setBrand] = useState(""); // brand of a picked food (e.g. "Kirkland Signature") — shown under the name
   const [cals, setCals] = useState("");
@@ -7190,7 +7393,10 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   const [detailState, setDetailState] = useState(null); // {food, editingId, mealType} → FoodServingModal open
   const [pickingId, setPickingId] = useState(null); // FatSecret fsId whose detail fetch is in flight (row shows "…")
   const [movingId, setMovingId] = useState(null); // logged item whose "move to another meal" picker is open
-  const [editRecents, setEditRecents] = useState(false); // "Edit" mode on the recent-food chips (shows delete ✕)
+  // Food library (S95): null = closed; { mealType } opens it — mealType null
+  // browses everything grouped by meal, a string scopes it to that one meal.
+  const [lib, setLib] = useState(null);
+  const [confirmDelId, setConfirmDelId] = useState(null); // logged item pending delete confirmation
   const [copySection, setCopySection] = useState(null); // {label, type, matchMeal} → CopyMealModal open
   const [showDayMicros, setShowDayMicros] = useState(false); // daily micronutrient roll-up expanded
   const [grams, setGrams] = useState("100");
@@ -7532,14 +7738,23 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
     setMovingId(null);
   };
   const mealRow = (m) => {
-    const hasMacros = m.protein || m.carbs || m.fat;
+    // Boolean, not the number: a quick-entry with no macros made `{0 && …}`
+    // render a stray "0" next to the food name (pre-existing; surfaced by S95).
+    const hasMacros = !!(m.protein || m.carbs || m.fat);
     const curKey = (m.type || "").toLowerCase();
     const moving = movingId === m.id;
     return (
       <div key={m.id} style={{ display:"flex", flexDirection:"column", gap:"6px",
         padding:"8px 10px", borderRadius:"8px", background:"rgba(255,255,255,.04)" }}>
-      <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
-        <div style={{ flex:1, minWidth:0 }}>
+      {/* S95 touch targets: the whole row is the edit button (Kevin: "place them in
+          the food when the client clicks the item directly — that should take them
+          to the edit screen"), and move/delete are real ~40px targets instead of
+          15px icons crammed against the calorie number. Delete asks once, since a
+          mis-tap here silently loses a logged food. */}
+      <div style={{ display:"flex", alignItems:"center", gap:"2px" }}>
+        <button onClick={() => openEditServing(m)} title="Edit serving & macros"
+          style={{ flex:1, minWidth:0, textAlign:"left", border:"none", background:"transparent",
+            color:"var(--text)", cursor:"pointer", padding:"9px 4px 9px 0", fontFamily:"inherit" }}>
           {/* Food name (+ optional clock) */}
           <div style={{ fontSize:".86rem", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
             {m.name || <span style={{ color:"var(--muted)", fontWeight:400 }}>Quick entry</span>}
@@ -7557,34 +7772,40 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
               <span style={{ color:"var(--orange)", fontWeight:700 }}>Fat {m.fat||0}g</span>
             </div>
           )}
-        </div>
+        </button>
         {/* Calories — big, bold, bright */}
-        <span style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"1.05rem", color:"var(--accent)", whiteSpace:"nowrap" }}>
+        <span style={{ fontFamily:"'Sora',sans-serif", fontWeight:800, fontSize:"1.05rem", color:"var(--accent)", whiteSpace:"nowrap", padding:"0 2px" }}>
           {(m.calories||0).toLocaleString()}<span style={{ fontSize:".62rem", color:"var(--muted)", fontWeight:600 }}> cal</span>
         </span>
-        <button onClick={() => { setMovingId(moving ? null : m.id); }} title="Move to another meal"
+        <button onClick={() => { setMovingId(moving ? null : m.id); setConfirmDelId(null); }} title="Move to another meal"
           style={{ border:"none", background:"transparent", color: moving ? "var(--accent)" : "var(--muted)",
-            cursor:"pointer", fontSize:"1rem", lineHeight:1, display:"flex", alignItems:"center" }}>
-          <Icon name="move" size={15} />
+            cursor:"pointer", padding:"11px", display:"flex", alignItems:"center", borderRadius:"8px", flexShrink:0 }}>
+          <Icon name="move" size={17} />
         </button>
-        <button onClick={() => openEditServing(m)} title="Edit serving & macros"
-          style={{ border:"none", background:"transparent", color:"var(--muted)",
-            cursor:"pointer", fontSize:".9rem", lineHeight:1 }}>✎</button>
-        <button onClick={() => onRemoveMeal(m.id)} title="Remove"
-          style={{ border:"none", background:"transparent", color:"var(--muted)",
-            cursor:"pointer", fontSize:"1rem", lineHeight:1 }}>✕</button>
+        {confirmDelId === m.id ? (
+          <button onClick={() => { onRemoveMeal(m.id); setConfirmDelId(null); }} title="Confirm delete"
+            style={{ border:"none", background:"transparent", color:"var(--red)", cursor:"pointer",
+              padding:"11px 10px", fontSize:".72rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}>Delete?</button>
+        ) : (
+          <button onClick={() => { setConfirmDelId(m.id); setMovingId(null); }} title="Remove"
+            style={{ border:"none", background:"transparent", color:"var(--muted)", cursor:"pointer",
+              padding:"11px", display:"flex", alignItems:"center", borderRadius:"8px", flexShrink:0 }}>
+            <Icon name="trash" size={16} />
+          </button>
+        )}
       </div>
-      {/* Move-to-another-meal picker (tap-to-move — reliable on phones). */}
+      {/* Move-to-another-meal picker (tap-to-move — reliable on phones, where
+          drag-and-drop between sections isn't). S95: full-size tap targets. */}
       {moving && (
-        <div style={{ display:"flex", alignItems:"center", gap:"6px", flexWrap:"wrap", paddingTop:"2px" }}>
-          <span style={{ fontSize:".68rem", color:"var(--muted)", fontWeight:700 }}>Move to:</span>
+        <div style={{ display:"flex", alignItems:"center", gap:"6px", flexWrap:"wrap", paddingTop:"6px" }}>
+          <span style={{ fontSize:".68rem", color:"var(--muted)", fontWeight:700, width:"100%" }}>Move to:</span>
           {SECTION_OPTS.filter(([, v]) => v.toLowerCase() !== curKey).map(([label, v]) => (
             <button key={label} onClick={() => moveMeal(m, v)}
-              style={{ padding:"4px 10px", fontSize:".72rem", fontWeight:700, borderRadius:"999px", cursor:"pointer",
-                border:"1px solid var(--accent)", background:"rgba(8,220,224,.08)", color:"var(--accent)" }}>{label}</button>
+              style={{ padding:"10px 14px", fontSize:".78rem", fontWeight:700, borderRadius:"999px", cursor:"pointer",
+                fontFamily:"inherit", border:"1px solid var(--accent)", background:"rgba(8,220,224,.08)", color:"var(--accent)" }}>{label}</button>
           ))}
           <button onClick={() => setMovingId(null)}
-            style={{ padding:"4px 8px", fontSize:".72rem", borderRadius:"999px", cursor:"pointer",
+            style={{ padding:"10px 12px", fontSize:".78rem", borderRadius:"999px", cursor:"pointer", fontFamily:"inherit",
               border:"1px solid var(--border)", background:"transparent", color:"var(--muted)" }}>Cancel</button>
         </div>
       )}
@@ -7593,58 +7814,40 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   };
 
   // One-tap re-add of a recently logged food into the meal type being added.
-  const quickAddRecent = (f) => {
-    onAddMeal({ name: f.name, type: addingTo === "other" ? "" : addingTo,
+  // Re-log a remembered food with its last serving (one tap, MyFitnessPal-style
+  // "log again"). `type` targets a meal explicitly — the library passes the meal
+  // it was opened for, so the food lands where you expect regardless of which
+  // meal it was originally saved under.
+  const quickAddRecent = (f, type) => {
+    onAddMeal({ name: f.name, type: type !== undefined ? type : (addingTo === "other" ? "" : addingTo),
       ...(f.brand ? { brand: f.brand } : {}),
       calories: f.calories || 0, protein: f.protein || 0, carbs: f.carbs || 0, fat: f.fat || 0,
       ...(f.grams ? { grams: f.grams, unit: f.unit || "g" } : {}),
       ...(f.micros ? { micros: f.micros } : {}) });
-    closeForm();
   };
 
   // The inline add-form, shown under whichever meal you tapped "+ Add" on.
   const addForm = () => (
     <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"6px",
       padding:"8px", borderRadius:"8px", background:"rgba(255,255,255,.04)" }}>
-      {/* Recently logged foods — tap to re-add instantly (only when adding new).
-          Scoped to the meal type being added: foods logged for Breakfast only
-          show under Breakfast, etc. Legacy entries (saved before per-meal
-          scoping, no `type`) show everywhere until they're re-logged. */}
+      {/* Your foods — opens the library (S95). This used to be an inline row of
+          chips that grew unbounded and buried the form; one button keeps the
+          add-form short, and the library is a better place to browse/manage. */}
       {(() => {
         const curKey = recentMealKey(addingTo === "other" ? "other" : addingTo);
-        const recentForMeal = (recentFoods || []).filter((f) =>
-          f.type == null ? true : recentMealKey(f.type) === curKey).slice(0, 8);
-        if (editingId || recentForMeal.length === 0) return null;
+        const inScope = (f) => f && f.name && (f.type == null || recentMealKey(f.type) === curKey);
+        const n = (recentFoods || []).filter(inScope).length + (savedFoods || []).filter(inScope).length;
+        if (editingId || n === 0) return null;
         return (
-        <div>
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"8px", marginBottom:"4px" }}>
-            <span style={{ fontSize:".68rem", color:"var(--muted)", textTransform:"uppercase", letterSpacing:".5px", fontWeight:700 }}>Recent — tap to add</span>
-            {onRemoveRecentFood && (
-              <button onClick={() => setEditRecents((v) => !v)}
-                style={{ border:"none", background:"transparent", color:editRecents?"var(--accent)":"var(--muted)", cursor:"pointer", fontSize:".68rem", fontWeight:700, padding:0, textDecoration:"underline" }}>
-                {editRecents ? "Done" : "Edit"}
-              </button>
-            )}
-          </div>
-          <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
-            {recentForMeal.map((f, i) => (
-              <span key={i} style={{ display:"inline-flex", alignItems:"center", maxWidth:"100%",
-                borderRadius:"999px", border:"1px solid var(--border)", background:"var(--s2)", overflow:"hidden" }}>
-                <button onClick={() => editRecents ? null : quickAddRecent(f)} disabled={editRecents}
-                  style={{ padding:"5px 9px", fontSize:".74rem", cursor: editRecents?"default":"pointer",
-                    border:"none", background:"transparent", color:"var(--text)",
-                    whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", minWidth:0 }}>
-                  {f.name} <span style={{ color:"var(--muted)" }}>· {(f.calories||0)} cal</span>
-                </button>
-                {editRecents && (
-                  <button onClick={() => onRemoveRecentFood(f)} title="Remove from recents"
-                    style={{ border:"none", borderLeft:"1px solid var(--border)", background:"transparent",
-                      color:"var(--red)", cursor:"pointer", fontSize:".8rem", lineHeight:1, padding:"5px 8px", flexShrink:0 }}>✕</button>
-                )}
-              </span>
-            ))}
-          </div>
-        </div>
+          <button onClick={() => setLib({ mealType: addingTo === "other" ? "" : addingTo })}
+            style={{ display:"flex", alignItems:"center", gap:"7px", width:"100%", padding:"10px 11px",
+              borderRadius:"9px", border:"1px solid var(--border)", background:"var(--s2)",
+              color:"var(--text)", cursor:"pointer", fontSize:".78rem", fontWeight:700, fontFamily:"inherit" }}>
+            <Icon name="book" size={15} color="var(--accent)" />
+            Previously logged &amp; saved
+            <span style={{ color:"var(--muted)", fontWeight:600 }}>· {n}</span>
+            <span style={{ marginLeft:"auto", color:"var(--muted)" }}>›</span>
+          </button>
         );
       })()}
       {/* Food-database search — find a food and auto-fill calories + macros. Also
@@ -7974,6 +8177,15 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
               {loggedTotal.toLocaleString()} cal · {list.length} item{list.length!==1?"s":""}
             </span>
           )}
+          {/* Browse the whole library (every meal, grouped) — the add-form's
+              button opens it scoped to one meal instead. stopPropagation: the
+              header row itself toggles "View all". */}
+          <button onClick={(e) => { e.stopPropagation(); setLib({ mealType: null }); }} title="Your food library"
+            style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"6px 10px", borderRadius:"999px",
+              border:"1px solid var(--border)", background:"transparent", color:"var(--muted)",
+              fontSize:".74rem", fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+            <Icon name="book" size={13} color="var(--accent)" /> Library
+          </button>
           {/* Header control: open ALL meals (or close). */}
           <span style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"6px 11px",
             borderRadius:"999px", border:"1px solid var(--accent)",
@@ -8018,6 +8230,19 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
           matchMeal={copySection.matchMeal} dateKey={dateKey || ymdLocal()}
           onReadDay={onReadDay} onListLoggedDays={onListLoggedDays}
           onCopy={(foods) => onAddMeals(foods)} onClose={() => setCopySection(null)} />
+      )}
+      {/* The library stays open after each add so you can log several in a row;
+          closing it finishes the add-form too (you're done with this meal). */}
+      {lib && (
+        <FoodLibrary open mealType={lib.mealType} recentFoods={recentFoods} savedFoods={savedFoods}
+          /* Browsing everything: a food logs to the meal it's filed under. The
+             recents store keys are lowercase; logged meals carry the display
+             label ("Breakfast"), so map back rather than lean on the
+             case-insensitive section match (S93). */
+          onAdd={(f) => quickAddRecent(f, lib.mealType != null ? lib.mealType
+            : (TYPES.find((t) => t.toLowerCase() === recentMealKey(f.type)) || ""))}
+          onToggleSave={onToggleSaveFood} onRemoveRecent={onRemoveRecentFood} onRemoveSaved={onRemoveSavedFood}
+          onClose={() => { setLib(null); closeForm(); }} />
       )}
     </div>
   );
@@ -8236,7 +8461,7 @@ const fmtClock = (t) => {
 // calendar renders IN-FLOW (it *is* the page, which must scroll normally); a
 // lock here froze the whole page on Android. ClientHome's portal-overlay usage
 // locks from the caller instead (useBodyScrollLock(showCalendar) there).
-function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods }) {
+function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods, savedFoods, onToggleSaveFood, onRemoveSavedFood }) {
   const todayKey = ymdLocal();
   const keyOf = (y, m, d) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
   const parseKey = (k) => { const [y, m, d] = k.split("-").map(Number); return { y, m: m - 1, d }; };
@@ -8676,7 +8901,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             </div>
           </div>
           <div style={{ marginTop: 12 }}>
-            <MealLog meals={(dayLog && dayLog.meals) || []} onAddMeal={addMeal} onAddMeals={addMeals} onRemoveMeal={removeMeal} onEditMeal={editMeal} recentFoods={recentFoods} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={sel} />
+            <MealLog meals={(dayLog && dayLog.meals) || []} onAddMeal={addMeal} onAddMeals={addMeals} onRemoveMeal={removeMeal} onEditMeal={editMeal} recentFoods={recentFoods} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={sel} />
           </div>
         </div>
 
@@ -8767,7 +8992,8 @@ function WeightDayLogger({ date, existing, onSave }) {
 
 function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
-  onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, weekSummary, recentWearable, history, onRefresh, isRemote,
+  onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood,
+  savedFoods, onToggleSaveFood, onRemoveSavedFood, weekSummary, recentWearable, history, onRefresh, isRemote,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
   onSaveMeasurements, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise,
   onTrackerSync }) {
@@ -8941,7 +9167,8 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       <div className="dash">
         <CalendarView data={data} tdee={tdee} onClose={() => setShowCalendar(false)}
           onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
-          onSaveCheckIn={onSaveCheckIn} onDeleteCheckIn={onDeleteCheckIn} recentFoods={recentFoods} />
+          onSaveCheckIn={onSaveCheckIn} onDeleteCheckIn={onDeleteCheckIn} recentFoods={recentFoods}
+          savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood} />
       </div>
     );
   }
@@ -9530,7 +9757,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         </div>)}
         </div>
 
-      <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={ymdLocal()} hideMicros />
+      <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={ymdLocal()} hideMicros />
 
       <div className="dash-log-row">
         <span className="dash-log-icon" style={{display:"flex",alignItems:"center"}}><Icon name="water" size={20} color="#4fc3f7" /></span>
@@ -16733,6 +16960,11 @@ export default function App() {
   const lastSnapshotRef = useRef(null);       // last data we diffed plan-edits against
   const [recentFoods, setRecentFoods] = useState([]); // named foods for one-tap re-add
   const recentFoodsRef = useRef([]);          // mirror (avoids stale closures in handlers)
+  // Purposefully-saved food library (S95). Unlike recentFoods this is NOT
+  // plan-scoped and NOT remote-aware: it's read/written on the SIGNED-IN user's
+  // own account (window.storage), so it follows a person across plans/phases.
+  const [savedFoods, setSavedFoods] = useState([]);
+  const savedFoodsRef = useRef([]);
   const [weekSummary, setWeekSummary] = useState(null); // last-7-day nutrition averages
   const [recentWearable, setRecentWearable] = useState(null); // latest day (≤3 back) with tracker data — {daysAgo, wearable}
   const [meName, setMeName] = useState("");   // current user's display name
@@ -17481,7 +17713,46 @@ export default function App() {
     recentFoodsRef.current = next;
     setRecentFoods(next);
     logWrite(`caliq-foods-${activeId}`, JSON.stringify(next));
+    // Keep the SAVED copy's amount in step (Kevin's eggs rule: log 2 eggs, then 3
+    // → still ONE "eggs", now remembering 3). Without this the library would keep
+    // re-adding the stale serving you saved months ago.
+    const si = savedFoodsRef.current.findIndex((f) => recentFoodKey(f.name, f.type) === key);
+    if (si >= 0) {
+      const upd = [...savedFoodsRef.current];
+      upd[si] = { ...upd[si], brand: entry.brand || upd[si].brand, calories: entry.calories,
+        protein: entry.protein, carbs: entry.carbs, fat: entry.fat,
+        grams: entry.grams, unit: entry.unit,
+        ...(entry.micros ? { micros: entry.micros } : {}) };
+      writeSaved(upd);
+    }
   };
+  // ── Saved food library (S95) ──────────────────────────────────────────────
+  // Writes go to the SIGNED-IN user's own account, so a trainer starring a food
+  // while logging for a client saves it to the TRAINER's library, not the
+  // client's — the library is personal.
+  const writeSaved = (next) => {
+    savedFoodsRef.current = next;
+    setSavedFoods(next);
+    try { window.storage.set(SAVED_FOODS_KEY, JSON.stringify(next)); } catch (e) {}
+  };
+  // Star/unstar. Same identity as recents (base name + meal type), so a food can
+  // never end up in the library twice at two different servings.
+  const onToggleSaveFood = (food) => {
+    const key = recentFoodKey(food.name, food.type);
+    const has = savedFoodsRef.current.some((f) => recentFoodKey(f.name, f.type) === key);
+    if (has) { writeSaved(savedFoodsRef.current.filter((f) => recentFoodKey(f.name, f.type) !== key)); return; }
+    const entry = { name: baseFoodName(food.name) || food.name, type: recentMealKey(food.type),
+      brand: food.brand || "", calories: food.calories || 0, protein: food.protein || 0,
+      carbs: food.carbs || 0, fat: food.fat || 0,
+      grams: food.grams != null ? Number(food.grams) : null, unit: food.unit || null,
+      ...(food.micros ? { micros: food.micros } : {}), savedAt: Date.now() };
+    writeSaved([entry, ...savedFoodsRef.current].slice(0, 500));
+  };
+  const onRemoveSavedFood = (food) => {
+    const key = recentFoodKey(food.name, food.type);
+    writeSaved(savedFoodsRef.current.filter((f) => recentFoodKey(f.name, f.type) !== key));
+  };
+
   // Remove a saved "recent food" chip (the user doesn't want it suggested again).
   // Matched by food identity + meal type so only THAT meal's chip is dropped, not
   // the same food under other meals.
@@ -17708,6 +17979,14 @@ export default function App() {
       if (fv) { try { foods = JSON.parse(fv) || []; } catch(e) {} }
       recentFoodsRef.current = foods;
       setRecentFoods(foods);
+      // Saved library — read from the USER's own account (not the plan, not the
+      // client's), so it's the same library whichever plan is open.
+      try {
+        const sv = await window.storage.get(SAVED_FOODS_KEY);
+        const sf = sv && sv.value ? (JSON.parse(sv.value) || []) : [];
+        savedFoodsRef.current = sf;
+        setSavedFoods(sf);
+      } catch (e) { /* library is a nicety — never block the dashboard on it */ }
       // Last-7-day nutrition summary (averaged over the days that were logged).
       // Reuses the streak loop's cached reads — its first batch is these 7 days.
       let days = 0, cal = 0, p = 0, c = 0, f = 0;
@@ -17939,6 +18218,7 @@ export default function App() {
               onToggleBodyFat={(show)=>setDataAndSave(p=>({...p, hideBodyFat: !show}))}
               onSetGoalWeight={(lbs)=>setDataAndSave(p=>({...p, goalWeight: lbs}))}
               onTrackerSync={isOwnerUid ? syncTrackerNow : null}
+              savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood}
               onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
               onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
                 const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);

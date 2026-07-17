@@ -64,6 +64,10 @@ const GLYPHS = {
   // — S94: move a logged item between meals (up/down swap arrows) & copy —
   move: (<><path d="M8 4.5 5 7.5 8 10.5" /><path d="M5 7.5h9" /><path d="M16 13.5l3 3-3 3" /><path d="M19 16.5h-9" /></>),
   copy: (<><rect x="8.5" y="8.5" width="11" height="11" rx="2" /><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5" /></>),
+  // — S95: the food library (page icon, save-for-good star, delete) —
+  book: (<><path d="M4 4.6A1.6 1.6 0 0 1 5.6 3H18a1 1 0 0 1 1 1v13H5.6A1.6 1.6 0 0 0 4 18.6z" /><path d="M4 18.6A1.6 1.6 0 0 1 5.6 17H19v4H5.6A1.6 1.6 0 0 1 4 19.4z" /><path d="M8 7.5h7" /><path d="M8 11h5" /></>),
+  star: (<path d="m12 3.6 2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8L3.5 9.8l5.9-.9z" />),
+  trash: (<><path d="M4.5 6.5h15" /><path d="M9.5 6.5V4.8A1.3 1.3 0 0 1 10.8 3.5h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7" /><path d="M6.5 6.5 7.4 19a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4l.9-12.5" /><path d="M10.5 10v6.5" /><path d="M13.5 10v6.5" /></>),
 };
 
 export function Icon({ name, size = 20, variant = "outline", color = "currentColor",
