@@ -2834,7 +2834,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
                         {sessions.length > 1 && (
                           <div className="flex justify-between items-center mb-2">
                             <span className="text-[.72rem] text-muted font-bold tracking-wide uppercase">Session {idx+1}</span>
-                            <button className="bg-transparent border-none text-danger cursor-pointer text-[.78rem] px-1.5" onClick={()=>removeSession(day,idx)}>✕ Remove</button>
+                            <button className="bg-transparent border-none text-danger cursor-pointer text-[.78rem] px-1.5" onClick={()=>removeSession(day,idx)}>Remove</button>
                           </div>
                         )}
                         <div className="mb-4">
@@ -3021,7 +3021,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
                         {sessions.length > 1 && (
                           <div className="flex justify-between items-center mb-2">
                             <span className="text-[.72rem] text-muted font-bold tracking-wide uppercase">Session {idx+1}</span>
-                            <button className="bg-transparent border-none text-danger cursor-pointer text-[.78rem] px-1.5" onClick={()=>removeWorkout(day,idx)}>✕ Remove</button>
+                            <button className="bg-transparent border-none text-danger cursor-pointer text-[.78rem] px-1.5" onClick={()=>removeWorkout(day,idx)}>Remove</button>
                           </div>
                         )}
                         <div className="mb-4">
@@ -4596,7 +4596,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
                           <button style={{background:"none",border:"none",color:"var(--red)",cursor:"pointer",fontSize:".78rem",fontFamily:"inherit",padding:"2px 6px"}} onClick={()=>{
                             const updated = allSessions.filter((_,i)=>i!==idx);
                             onUpdateStrength(day,null,"_replace",updated);
-                          }}>✕ Remove</button>
+                          }}>Remove</button>
                         </div>
                       )}
                       <div className="field">
@@ -7332,7 +7332,7 @@ function CopyMealModal({ sectionLabel, targetType, matchMeal, dateKey, onReadDay
           display: "flex", flexDirection: "column", gap: "12px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px" }}>
           <div style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text)" }}>Copy a previous {sectionLabel}</div>
-          <button onClick={onClose} aria-label="Close" style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: "1.2rem", lineHeight: 1, padding: "2px" }}>✕</button>
+          <button onClick={onClose} aria-label="Back" style={{ display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
         </div>
         {loading ? (
           <div style={{ fontSize: ".82rem", color: "var(--muted)", padding: "10px 0" }}>Looking through your recent days…</div>
@@ -8737,9 +8737,7 @@ function ActivityFeed({ history, onRefresh }) {
               display:"flex", flexDirection:"column", gap:"10px" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div className="sec-title" style={{ margin:0, display:"flex", alignItems:"center", gap:"8px" }}><Icon name="clock" size={17} color="var(--accent)" />All Activity ({list.length})</div>
-              <button onClick={() => setShowFull(false)}
-                style={{ border:"none", background:"transparent", color:"var(--muted)",
-                  cursor:"pointer", fontSize:"1.2rem", lineHeight:1 }}>✕</button>
+              <button onClick={() => setShowFull(false)} aria-label="Back" style={{ display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
             </div>
             <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
               placeholder="Search by name, action, date, or '3 days ago', '2 weeks', 'last month'…"
@@ -9092,15 +9090,15 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                 </div>
                 <div style={{ flex: 1, fontSize: ".78rem", color: "var(--muted)", display: "flex", flexWrap: "wrap", gap: 10 }}>
                   {pre ? <span>— before start</span> : <>
-                  {isStart && <span style={{ color: "var(--green)", fontWeight: 700 }}>🎯 start date</span>}
+                  {isStart && <span style={{ color: "var(--green)", fontWeight: 700 }}><Icon name="target" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />start date</span>}
                   {cal != null && cal > 0 && <span style={{ color: over ? "var(--yellow)" : "var(--green)", fontWeight: 700 }}>{cal.toLocaleString()} cal</span>}
-                  {dayProt[k] > 0 && <span style={{ color: protTarget && dayProt[k] >= protTarget ? "var(--green)" : "var(--muted)" }}>🍗 {dayProt[k]}g{protTarget ? `/${protTarget}` : ""}</span>}
-                  {loggedDays.includes(k) && !(cal > 0) && <span style={{ color: "var(--green)" }}>🍽️ logged</span>}
-                  {ci && ci.weight && <span style={{ color: "var(--blue)" }}>⚖️ {ci.weight}</span>}
-                  {ci && ci.workedOut && <span style={{ color: "var(--orange)" }}>🏋️ done</span>}
+                  {dayProt[k] > 0 && <span style={{ color: protTarget && dayProt[k] >= protTarget ? "var(--green)" : "var(--muted)" }}><Icon name="meal" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{dayProt[k]}g{protTarget ? `/${protTarget}` : ""}</span>}
+                  {loggedDays.includes(k) && !(cal > 0) && <span style={{ color: "var(--green)" }}><Icon name="meal" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />logged</span>}
+                  {ci && ci.weight && <span style={{ color: "var(--blue)" }}><Icon name="scale" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{ci.weight}</span>}
+                  {ci && ci.workedOut && <span style={{ color: "var(--orange)" }}><Icon name="dumbbell" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />done</span>}
                   {scheduledFor(k) > 0 && !(ci && ci.workedOut) && (
                     k < todayKey
-                      ? <span style={{ color: "var(--red)" }}>✗ missed workout</span>
+                      ? <span style={{ color: "var(--red)" }}><Icon name="close" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />missed workout</span>
                       : <span>◦ {scheduledFor(k)} scheduled</span>
                   )}
                   {!isStart && !loggedDays.includes(k) && !(ci && (ci.weight || ci.workedOut)) && scheduledFor(k) === 0 && <span>—</span>}
@@ -9138,7 +9136,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
           return (
             <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "var(--s2)", border: "1px solid var(--border)",
               display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-              <span style={{ fontSize: ".74rem", color: "var(--muted)" }}>🍗 Protein</span>
+              <span style={{ fontSize: ".74rem", color: "var(--muted)" }}><Icon name="meal" size={12} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Protein</span>
               <span style={{ fontSize: ".82rem", fontWeight: 700 }}>
                 avg <span style={{ color: met ? "var(--green)" : "var(--accent)" }}>{avgProt}g</span>
                 {protTarget ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>/day · target {protTarget}g</span> : <span style={{ color: "var(--muted)", fontWeight: 400 }}>/day</span>}
@@ -9155,7 +9153,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
           return (
             <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "var(--s2)", border: "1px solid var(--border)",
               display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-              <span style={{ fontSize: ".74rem", color: "var(--muted)" }}>🏋️ Workouts</span>
+              <span style={{ fontSize: ".74rem", color: "var(--muted)" }}><Icon name="dumbbell" size={12} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Workouts</span>
               <span style={{ fontSize: ".82rem", fontWeight: 700 }}>
                 {scheduledDays.length > 0
                   ? <><span style={{ color: onPace ? "var(--green)" : "var(--yellow)" }}>{doneDays.length}</span><span style={{ color: "var(--muted)", fontWeight: 400 }}> / {scheduledDays.length} scheduled done</span></>
@@ -9206,7 +9204,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
           <button style={navBtn} onClick={() => goStep(-1)}>‹</button>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontWeight: 800, fontSize: ".95rem" }}>{fmtLong(sel)}</div>
-            {isStart ? <div style={{ fontSize: ".7rem", color: "var(--green)", fontWeight: 700 }}>🎯 Your start date</div>
+            {isStart ? <div style={{ fontSize: ".7rem", color: "var(--green)", fontWeight: 700 }}><Icon name="target" size={12} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Your start date</div>
               : preStart ? <div style={{ fontSize: ".7rem", color: "var(--muted)" }}>Before your start date</div>
               : sel === todayKey ? <div style={{ fontSize: ".7rem", color: "var(--accent)" }}>Today</div>
               : sel < todayKey ? <div style={{ fontSize: ".7rem", color: "var(--muted)" }}>Back-dated entry</div>
@@ -9224,7 +9222,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
 
         {/* Food */}
         <div style={card}>
-          <div style={lbl}>🍽️ Food</div>
+          <div style={lbl}><Icon name="meal" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Food</div>
           <div style={{ fontSize: "1.6rem", fontWeight: 800, fontFamily: "'Sora',sans-serif" }}>
             {cals.toLocaleString()}{target ? <span style={{ fontSize: ".9rem", color: "var(--muted)", fontWeight: 400 }}> / {target.toLocaleString()} cal</span> : " cal"}
           </div>
@@ -9277,7 +9275,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
           const commitWater = () => { const v = parseInt(waterDraft, 10); setWater(isNaN(v) ? 0 : v); };
           return (
             <div style={card}>
-              <div style={lbl}>💧 Water</div>
+              <div style={lbl}><Icon name="water" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Water</div>
               <div style={{ fontSize: "1.6rem", fontWeight: 800, fontFamily: "'Sora',sans-serif" }}>
                 {water}<span style={{ fontSize: ".9rem", color: "var(--muted)", fontWeight: 400 }}> oz</span>
               </div>
@@ -9298,7 +9296,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
 
         {/* Weight */}
         <div style={card}>
-          <div style={lbl}>⚖️ Weight</div>
+          <div style={lbl}><Icon name="scale" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Weight</div>
           <WeightDayLogger date={sel} existing={ci.weight} onSave={(w) => {
             onSaveCheckIn({ date: sel, timestamp: new Date(sel + "T12:00:00Z").getTime(), weight: w,
               calories: null, hitTarget: null, workedOut: ci.workedOut ?? null, mood: ci.mood ?? null,
@@ -9308,7 +9306,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
 
         {/* Workout */}
         <div style={card}>
-          <div style={lbl}>🏋️ Workout</div>
+          <div style={lbl}><Icon name="dumbbell" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Workout</div>
           {(cardio.length + strength.length) > 0 ? (
             <div style={{ fontSize: ".82rem", color: "var(--text-secondary)", marginBottom: 10 }}>
               Scheduled for {dn}: {[...cardio.map((x) => x.type || "cardio"), ...strength.map((x) => x.type || "strength")].join(", ")}
@@ -9425,7 +9423,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
     border:"none", background:"var(--s3)", color:"var(--green)", cursor:"default", whiteSpace:"nowrap" };
   const LogBtn = ({ field, onClick }) => (
     <button style={flashBtn === field ? loggedBtn : logBtn} disabled={flashBtn === field}
-      onClick={onClick}>{flashBtn === field ? "Logged ✓" : "Log"}</button>
+      onClick={onClick}>{flashBtn === field ? "Logged" : "Log"}</button>
   );
 
   useEffect(() => {
@@ -11049,7 +11047,7 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
         {onDelete && weighIns.length > 0 && (
           <div className="mt-3.5">
             <div className="mb-1.5 text-sm text-muted">
-              Weigh-ins ({weighIns.length}) — tap ✕ to remove a mistake
+              Weigh-ins ({weighIns.length}) — tap the trash icon to remove a mistake
             </div>
             <div className="flex max-h-[180px] flex-col gap-1 overflow-y-auto">
               {[...weighIns].reverse().map((c) => (
@@ -11062,7 +11060,7 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
                     </span>
                   </span>
                   <button onClick={() => onDelete(c.timestamp)} title="Delete this weigh-in"
-                    className="cursor-pointer border-none bg-transparent px-1.5 py-0.5 text-base leading-none text-danger">✕</button>
+                    className="cursor-pointer border-none bg-transparent px-1.5 py-0.5 text-base leading-none text-danger"><Icon name="close" size={15} color="currentColor" /></button>
                 </div>
               ))}
             </div>
@@ -11356,7 +11354,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         {/* History list with delete */}
         {onDelete && entries.length > 0 && (
           <div className="mt-3.5">
-            <div className="mb-1.5 text-sm text-muted">Entries ({entries.length}) — tap ✕ to remove a mistake</div>
+            <div className="mb-1.5 text-sm text-muted">Entries ({entries.length}) — tap the trash icon to remove a mistake</div>
             <div className="flex max-h-[180px] flex-col gap-1 overflow-y-auto">
               {[...entries].reverse().map((e) => (
                 <div key={e.timestamp} className="flex items-center justify-between gap-2 rounded-lg bg-surface2 px-2.5 py-1.5">
@@ -11365,7 +11363,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                     <span className="ml-2 font-semibold">{summarize(e)}</span>
                   </span>
                   <button onClick={() => onDelete(e.timestamp)} title="Delete this entry"
-                    className="cursor-pointer border-none bg-transparent px-1.5 py-0.5 text-base leading-none text-danger">✕</button>
+                    className="cursor-pointer border-none bg-transparent px-1.5 py-0.5 text-base leading-none text-danger"><Icon name="close" size={15} color="currentColor" /></button>
                 </div>
               ))}
             </div>
@@ -11600,7 +11598,7 @@ function InstallPrompt() {
         )}
       </div>
       <button onClick={dismiss} aria-label="Dismiss" style={{ border: "none", background: "transparent", color: "var(--muted)",
-        fontSize: "1.1rem", cursor: "pointer", padding: "0 2px", lineHeight: 1 }}>✕</button>
+        fontSize: "1.1rem", cursor: "pointer", padding: "0 2px", lineHeight: 1 }}><Icon name="close" size={15} color="currentColor" /></button>
     </div>,
     document.body
   );
@@ -12829,7 +12827,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                                       className="border-none bg-transparent text-muted cursor-pointer text-[.85rem]">✎</button>
                                     {p.id !== "self" && (c.plans || []).length > 1 && (
                                       <button onClick={() => setCpDelFor({ uid: c.uid, planId: p.id })} title="Delete"
-                                        className="border-none bg-transparent text-danger cursor-pointer text-[.85rem]">✕</button>
+                                        className="border-none bg-transparent text-danger cursor-pointer text-[.85rem]"><Icon name="close" size={15} color="currentColor" /></button>
                                     )}
                                   </>
                                 )}
@@ -12852,7 +12850,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                               {r.createdAt ? <span className="block text-[.66rem] opacity-70 mt-0.5">Sent {fmtStamp(r.createdAt)}</span> : null}
                             </span>
                             <button onClick={() => cancelRequest(c.uid, r.id)} disabled={reqBusy} title="Cancel this request"
-                              className="bg-transparent border-none text-muted cursor-pointer text-[.9rem]">✕</button>
+                              className="bg-transparent border-none text-muted cursor-pointer text-[.9rem]"><Icon name="close" size={15} color="currentColor" /></button>
                           </div>
                         ))}
                         {doneReqs.length > 0 && (
@@ -12867,7 +12865,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                                   {r.doneAt ? <span className="block text-[.66rem] opacity-70 mt-0.5">Completed {fmtStamp(r.doneAt)}</span> : null}
                                 </span>
                                 <button onClick={() => cancelRequest(c.uid, r.id)} disabled={reqBusy} title="Remove"
-                                  className="bg-transparent border-none text-muted cursor-pointer text-[.9rem]">✕</button>
+                                  className="bg-transparent border-none text-muted cursor-pointer text-[.9rem]"><Icon name="close" size={15} color="currentColor" /></button>
                               </div>
                             ))}
                           </>
@@ -13033,7 +13031,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                           className={inputCls} />
                         <button onClick={() => { onRename && onRename(p.id, renameDraft); setRenamingId(null); }}
                           className={mPrimaryCls}>Save</button>
-                        <button onClick={() => setRenamingId(null)} className={mBtnCls}>✕</button>
+                        <button onClick={() => setRenamingId(null)} className={mBtnCls}><Icon name="close" size={15} color="currentColor" /></button>
                       </div>
                     ) : (
                       <div className="flex justify-between items-center mb-2">
@@ -13599,8 +13597,7 @@ function PlanPicker({ role, onClose }) {
         style={{ width:"min(94vw,420px)", padding:"22px 20px", display:"flex", flexDirection:"column", gap:"14px", margin:"auto 0" }}>
         <div className="flex items-center justify-between gap-2">
           <div className="font-display font-bold text-fg" style={{ fontSize:"1.08rem" }}>Choose your plan</div>
-          <button onClick={onClose} aria-label="Close" className="text-muted"
-            style={{ border:"none", background:"transparent", cursor:"pointer", fontSize:"1.1rem", padding:"4px" }}>✕</button>
+          <button onClick={onClose} aria-label="Back" className="flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
         {/* Monthly / Annual toggle */}
         <div className="flex rounded-[10px] border border-border overflow-hidden">
@@ -14387,8 +14384,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                   : <><path d="M3 9V5a2 2 0 0 1 2-2h4" /><path d="M21 9V5a2 2 0 0 0-2-2h-4" /><path d="M3 15v4a2 2 0 0 0 2 2h4" /><path d="M21 15v4a2 2 0 0 1-2 2h-4" /></>}
               </svg>
             </button>
-            <button onClick={() => setOpen(false)} aria-label="Close"
-              className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-lg leading-none text-fg cursor-pointer hover:bg-surface2">✕</button>
+            <button onClick={() => setOpen(false)} aria-label="Back" className="flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
             </div>
           </div>
 
@@ -14514,7 +14510,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 <div className="flex items-center gap-2 text-[.88rem]">
                   <span className="font-bold text-success">✓ Logged</span>
                   <span className="text-muted truncate">{proposal.name} · {proposal.calories} cal</span>
-                  <button onClick={() => setProposal(null)} aria-label="Dismiss" className="ml-auto px-2 text-muted hover:text-fg">✕</button>
+                  <button onClick={() => setProposal(null)} aria-label="Dismiss" className="ml-auto px-2 text-muted hover:text-fg"><Icon name="close" size={15} color="currentColor" /></button>
                 </div>
               ) : editDraft ? (
                 <div className="flex flex-col gap-2">
@@ -14563,7 +14559,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                     <button disabled={proposal.status === "saving"} onClick={() => setEditDraft({ ...proposal })}
                       className="rounded-lg border border-primary bg-[rgba(8,220,224,.12)] px-3 py-2 text-[.88rem] font-semibold text-primary disabled:opacity-60">Edit</button>
                     <button disabled={proposal.status === "saving"} onClick={() => setProposal(null)} aria-label="Dismiss"
-                      className="rounded-lg border border-border px-2.5 py-2 text-[.88rem] text-muted disabled:opacity-60">✕</button>
+                      className="rounded-lg border border-border px-2.5 py-2 text-[.88rem] text-muted disabled:opacity-60"><Icon name="close" size={15} color="currentColor" /></button>
                   </div>
                 </div>
               )}
@@ -14584,7 +14580,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                   <div className="flex items-center gap-2 text-[.88rem]">
                     <span className="font-bold text-success">✓ Program saved</span>
                     <span className="text-muted truncate">{totalDays} training {totalDays === 1 ? "day" : "days"}/week</span>
-                    <button onClick={() => setWorkout(null)} aria-label="Dismiss" className="ml-auto px-2 text-muted hover:text-fg">✕</button>
+                    <button onClick={() => setWorkout(null)} aria-label="Dismiss" className="ml-auto px-2 text-muted hover:text-fg"><Icon name="close" size={15} color="currentColor" /></button>
                   </div>
                 ) : (
                   <div className="flex flex-col gap-2">
@@ -14610,7 +14606,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                         className="flex-1 rounded-lg bg-primaryfill px-3 py-2 text-[.88rem] font-bold text-primaryfg disabled:opacity-60">
                         {workout.status === "saving" ? "Saving…" : "✓ Save program"}</button>
                       <button disabled={workout.status === "saving"} onClick={() => setWorkout(null)} aria-label="Dismiss"
-                        className="rounded-lg border border-border px-2.5 py-2 text-[.88rem] text-muted disabled:opacity-60">✕</button>
+                        className="rounded-lg border border-border px-2.5 py-2 text-[.88rem] text-muted disabled:opacity-60"><Icon name="close" size={15} color="currentColor" /></button>
                     </div>
                     <div className="text-[.68rem] text-muted">Want changes? Just tell me in the chat.</div>
                   </div>
@@ -14626,7 +14622,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 <img src={pendingImage} alt="meal to send" className="h-14 w-14 rounded-lg object-cover" />
                 <span className="text-[.78rem] text-muted">Photo attached — add a note or just send.</span>
                 <button onClick={() => setPendingImage(null)} aria-label="Remove photo"
-                  className="ml-auto rounded-md border-none bg-transparent px-2 py-1 text-muted cursor-pointer hover:text-fg">✕</button>
+                  className="ml-auto rounded-md border-none bg-transparent px-2 py-1 text-muted cursor-pointer hover:text-fg"><Icon name="close" size={15} color="currentColor" /></button>
               </div>
             )}
             {/* Live recording feedback: a waveform (reacts to your voice) + live
@@ -15320,7 +15316,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                           className="border-0 bg-transparent text-muted cursor-pointer text-sm">✎</button>
                         {p.id !== "self" && plans.length > 1 && (
                           <button onClick={() => deletePlan(p.id)} title="Delete plan"
-                            className="border-0 bg-transparent text-danger cursor-pointer text-sm">✕</button>
+                            className="border-0 bg-transparent text-danger cursor-pointer text-sm"><Icon name="close" size={15} color="currentColor" /></button>
                         )}
                       </>
                     )}
@@ -15434,7 +15430,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                         <button onClick={n.cta.onClick} className={`${miniBtnCls} shrink-0`}>{n.cta.label}</button>
                       )}
                       <button onClick={() => setNudgeDismiss((d) => ({ ...d, [n.key]: true }))} aria-label="Dismiss"
-                        className="shrink-0 border-0 bg-transparent text-muted cursor-pointer text-sm px-1">✕</button>
+                        className="shrink-0 border-0 bg-transparent text-muted cursor-pointer text-sm px-1"><Icon name="close" size={15} color="currentColor" /></button>
                     </div>
                   ))}
                 </div>
@@ -15731,7 +15727,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
             ? "flex-none cursor-pointer rounded-md border border-[rgba(248,113,113,.3)] bg-[rgba(248,113,113,.15)] text-danger text-[.68rem] font-bold px-2 py-0.5"
             : "flex-none border-none bg-transparent text-muted cursor-pointer text-[.95rem] px-1"}
           onClick={e=>{e.stopPropagation();onDelete(p.id,p.name)}}
-          title="Delete">{confirmDeleteId===p.id?"Confirm?":"✕"}</button>
+          title="Delete">{confirmDeleteId===p.id?"Confirm?":"×"}</button>
       </div>
     );
   };
@@ -16194,7 +16190,7 @@ function InviteHub({ open, onClose, meName }) {
             <Icon name="invite" size={22} color="var(--accent)" />
             <span style={{ fontFamily: "var(--font-display)", fontSize: "1.25rem", fontWeight: 700 }}>Invite clients</span>
           </div>
-          <button onClick={onClose} aria-label="Close" style={{ ...btnGhost, padding: "6px 12px" }}>✕</button>
+          <button onClick={onClose} aria-label="Back" style={{ display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
         </div>
 
         {/* Referral stats */}
@@ -16460,7 +16456,7 @@ function AutomationsPanel({ open, onClose, role }) {
             <Icon name="bolt" size={22} color="var(--accent)" />
             <span style={{ fontFamily: "var(--font-display)", fontSize: "1.25rem", fontWeight: 700 }}>Automations</span>
           </div>
-          <button onClick={onClose} aria-label="Close" style={{ ...btnGhost, padding: "6px 12px" }}>✕</button>
+          <button onClick={onClose} aria-label="Back" style={{ display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
         </div>
 
         {loading ? (
@@ -16665,8 +16661,7 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
           <div className="truncate font-display text-[.95rem] font-bold text-fg">{otherName || "Messages"}</div>
           <div className="text-[.66rem] text-muted">Direct message</div>
         </div>
-        <button onClick={onClose} aria-label="Close"
-          className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-lg leading-none text-fg cursor-pointer">✕</button>
+        <button onClick={onClose} aria-label="Back" className="flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
       </div>
       <div className="flex-1 overflow-y-auto px-3 py-3">
         {msgs === null && <div className="py-6 text-center text-[.82rem] text-muted">Loading…</div>}
@@ -16842,8 +16837,7 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
         <div className="flex items-center gap-2">
           <Icon name="file" size={18} color="var(--accent)" />
           <div className="font-display font-bold text-fg" style={{ fontSize: "1.02rem" }}>{heading}</div>
-          <button onClick={onClose} aria-label="Close notes" className="ml-auto text-muted"
-            style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: "1.1rem", padding: "4px" }}>✕</button>
+          <button onClick={onClose} aria-label="Back" className="flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
 
         {editing === null ? (
@@ -16927,8 +16921,7 @@ function NotifFeed({ items, onClose }) {
         <div className="flex items-center gap-2">
           <Icon name="bell" size={18} color="var(--accent)" />
           <div className="font-display font-bold text-fg" style={{ fontSize: "1.02rem" }}>Notifications</div>
-          <button onClick={onClose} aria-label="Close" className="ml-auto text-muted"
-            style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: "1.1rem", padding: "4px" }}>✕</button>
+          <button onClick={onClose} aria-label="Back" className="flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
         <div className="flex flex-col gap-1.5 overflow-y-auto">
           {items.length === 0 && (
@@ -16984,7 +16977,7 @@ function AdminDashboard({ onClose }) {
         <div className="flex items-center gap-2">
           <Icon name="dashboard" size={18} color="var(--accent)" />
           <div className="font-display font-bold text-fg" style={{ fontSize: "1.05rem" }}>Admin — all users</div>
-          <button onClick={onClose} aria-label="Close" className="ml-auto text-muted" style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: "1.1rem", padding: "4px" }}>✕</button>
+          <button onClick={onClose} aria-label="Back" className="flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
         {err && <div className="text-danger text-[.82rem]">Couldn't load (admin only). Try again.</div>}
         {!data && !err && <div className="text-muted text-[.84rem]">Loading users…</div>}
