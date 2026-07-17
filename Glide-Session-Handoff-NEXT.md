@@ -26,6 +26,33 @@ client.uitest (Casey)._
 - **Emoji sweep** in the dashboard/food surfaces (macro rows/bars → colored dots; workout Confirmed/
   Remove, target edit/tip, library Added/star cleaned).
 
+### ⏭️ S97b — two BIG emoji jobs Kevin DECIDED but they weren't built yet (do next, fresh context)
+Kevin answered both via AskUserQuestion (S97, end):
+1. **Rebuild the exercise pickers as CUSTOM icon-capable lists** (he chose this over strip-to-text or
+   keep-emoji). ~250 emoji live in native `<select><option>`/optgroup labels (CARDIO_GROUPS +
+   STRENGTH_EXERCISES data, `icon:"🏃"` etc.) where SVG can't render. The job: replace the native
+   `<select>`s in StepCardio, StepStrength, the DailyDashboard workout editor, and the calendar day-view
+   with a custom dropdown/list that renders real `<Icon>`s. **Needs an exercise→Icon MAPPING** (icons.jsx
+   has run/bike/swim/yoga/dumbbell/muscle/flame/water/moon… — map each exercise or each optgroup/category
+   to one). A `SearchableSelect` (custom, icon-capable) ALREADY exists — likely extend/reuse it as the
+   picker everywhere and drop the parallel native `<select>`. Big: touches every workout picker + a data
+   mapping. Do it in its own session.
+2. **Check-in mood/buttons → our icons: DONE** (`31dc4ed`) — Yes/No→check/close, worked-out/rest→
+   muscle/moon, mood faces→a 1–5 Low→High scale (mood was already an index, no data change).
+
+### ⏭️ Remaining decorative emoji (convertible chrome — mechanical, do alongside #1)
+Share card (🏋️📊🎯🔥⚖️📤📈), wizard/onboarding (⭐ custom-exercise, 💡 tips, ⚠️ warnings, 👋 wave,
+🔒 lock, ♂♀ gender, 📌 past/future), AICoach (🤖🔄), push (📲), role chips (🧑‍🏫 Trainer / 🙋 Client),
+request templates (they carry BOTH `icon:"🍽️"` AND `iconName:"meal"` — just render `iconName`), streak
+🔥, "✓ Saved!/Sent" flashes. All convertible to `<Icon>`/text (unlike the native-select ones). ~30 spots.
+
+### ✅ S97 sweep DONE (this session, committed `592c163`+`31dc4ed`)
+- **Back arrows on ALL major overlays** (Copy-prev-meal, All-Activity, AI chat panel, Invite Hub,
+  Automations, Plan picker, Notes, Notif feed, Admin + the daily-workflow ones from S97). Inline
+  dismiss/remove `✕` → house close icon (14 spots). Only 2 `✕` left, both in comments.
+- **Daily-visible emoji → icons**: calendar month/week cells + day-view/roll-up labels, LogBtn, check-in.
+  Verified live: calendar week view = back arrow + inline icons, no emoji, no console errors.
+
 ### ⏭️ S97 REMAINING (Kevin's batch — NOT done, do next)
 - **iPad "Ask Glidna" button scrolls** — could NOT reproduce in Chromium (it's correctly
   `position:fixed` portaled to body and holds on scroll). iOS-Safari-specific. **NEED FROM KEVIN:**
