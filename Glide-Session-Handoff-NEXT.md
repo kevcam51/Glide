@@ -1,10 +1,58 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S96 (Jul 17): dashboard restructure DONE + push delivery COMPLETED + per-client default view
+_All pushed (`origin/main` @ `def17ea`) + deployed (Vercel bundle flipped, verified) + all 7 touched
+Cloud Functions deployed clean. Firebase `calorieiq-29762`; model `claude-sonnet-4-6`._
+
+### ✅ What S96 shipped (all verified live)
+- **Dashboard restructure (the S95 START-HERE, second half) — DONE** (`dd0dbee`). Kevin confirmed
+  full-collapse via AskUserQuestion. The Daily Dashboard is now just the tile grid + Progress &
+  Insights: **Logged So Far** panel = Quick Add + presets + "Add macros manually" toggle (the old
+  macro rows) + the Macros & Micros dropdown + `<MealLog>`; **Workout Burn** panel = the full
+  workout editor + Add Cardio/Strength + custom-exercise creator; **oz Water** panel = the only
+  water entry; NEW full-width **Today's Weight** tile (`gridColumn:"1 / -1"`) shows current weight
+  → opens `MeasurementsModal`. Quick Log + standalone Today's Workout sections DELETED. JSX moved,
+  state untouched. Done via a deterministic Python script over exact line ranges (backup in
+  scratchpad), NOT hand edits — verified all 5 tiles live (+250 quick-add wrote through, reset to
+  0 after; Casey's account clean).
+- **Push delivery completed** (`e5d10ce`) — Kevin's "FCM" queue item, read as coverage (the S90
+  Web Push/VAPID transport already works; real FCM SDK is only needed for a future NATIVE app).
+  New scheduled fns in `functions/push.js`: **`foodReminderPush`** (daily **3pm ET**; nothing
+  logged today → push) + **`weighInReminderPush`** (Mondays **9am ET**; 7+ days since a weigh-in
+  → push). Both: client-role only (mirrors the S77 ClientHome cards), enumerate via
+  `collectionGroup("pushSubs")` so only push-enabled users cost reads, prefs checked BEFORE
+  `sendPushTo` (a turned-off type never spams the bell feed). **Automations now PUSH** (were
+  feed-only): `runDueWorkflows` → `sendPushTo(..., "automations")`; new "Automation results" row
+  in the Notification Center (both roles). push.js exports `VAPID_PRIVATE_KEY` for other fns'
+  `secrets` lists. Deployed: foodReminderPush + weighInReminderPush (created, scheduler
+  auto-provisioned, confirmed `scheduled` in functions:list) + runDueWorkflows + savePushSub +
+  removePushSub + onDmCreated + onTrainerRequestWritten.
+  **⚠️ NOT yet observed firing:** first real cron runs are 3pm ET (food) / Monday 9am ET
+  (weigh-in) — check `npx firebase-tools functions:log --only foodReminderPush` after (log lag
+  minutes-to-hours). gcloud creds are EXPIRED (couldn't force-run the scheduler job; firebase CLI
+  creds were fine). Kevin's device receipt of a push is still the S90 pending test.
+- **Per-client default plan view** (`def17ea`) — queue small item. `data.planViewDefault`
+  ('simple'|'detailed'); trainer viewing a REMOTE client's Full Plan gets a "Client's default
+  view" chip row under the Simple|Detailed pill (`onSetPlanViewDefault` passed only when
+  `activeRemoteUid`). Precedence: client's own localStorage choice > trainer-set default > role
+  default (clients Simple). Verified: set Detailed → survived full reload via the app's own read
+  path → restored to Simple.
+
+### ⏭️ Kevin's queue (what's left — the autonomous items are DONE)
+- **Stripe LIVE-mode swap** — BLOCKED ON KEVIN: real-card smoke test + attorney pass (ToS/Privacy).
+- **Acuity sessions + auto-charge** — BLOCKED ON KEVIN: his Acuity API key + User ID
+  (`docs/SESSIONS-BILLING-PLAN.md`).
+- Small: grow `functions/knowledge.js` (content — get Kevin's direction); swipe-left-to-delete on
+  food rows (deliberately SKIPPED in S95, don't build unasked).
+- Verify the reminder crons fired (above) + Kevin device-tests a real push receipt.
+
+---
+
 ## ⚡⚡⚡ S95 (Jul 16-17): automations fixed, Trainerize sync fixed, food library, light/dark, pace picker
 _All pushed (`origin/main` @ `96f3ed5`) + deployed + live on glidna.com. Firebase `calorieiq-29762`;
 model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`._
 
-### ⏭️ START HERE — the dashboard restructure Kevin asked for (HALF DONE)
+### ~~⏭️ START HERE — the dashboard restructure Kevin asked for~~ ✅ DONE IN S96 (see above)
 Kevin's ask, in his words: make "Today's Target" and "Logged So Far" more editable, and collapse the
 Quick Log section into the tiles. **DONE: the pace picker + the ring's deficit line (`96f3ed5`).
 NOT DONE: the layout moves.** I ran out of context; nothing is half-edited (working tree clean) —
