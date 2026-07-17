@@ -26,7 +26,24 @@ client.uitest (Casey)._
 - **Emoji sweep** in the dashboard/food surfaces (macro rows/bars → colored dots; workout Confirmed/
   Remove, target edit/tip, library Added/star cleaned).
 
-### ⏭️ S97b — two BIG emoji jobs Kevin DECIDED but they weren't built yet (do next, fresh context)
+### ✅ S97b — BOTH big emoji jobs DONE (`48b3ba3` pickers, `012b5bf` full sweep) — the app is emoji-free
+- **ExercisePicker** replaced ALL 9 native exercise `<select>`s (wizard quick-fills + day cards, Results
+  cardio ×2 + strength, dashboard editor ×2): trigger button (icon+label) → BottomSheet with search +
+  grouped rows + real icons. Dead SearchableSelect + CustomOptGroup deleted. 8 NEW activity pictograms
+  (walk stairs row boxing ball jumprope mountain dance — Apple/Garmin category style, visually iterated).
+  `exerciseCategory()` maps every catalog family + honors `ex.iconName` first.
+- **Custom exercises: user-picked icons** (Kevin's future-proofing ask) — 16-icon chooser grid in
+  CustomExerciseCreator, stored as `iconName`, renders everywhere via exerciseCategory. E2E: "Sled Push"
+  + mountain icon → picker shows it under YOUR CUSTOM EXERCISES with the mountain glyph.
+  ⚠️ Backend `add_custom_exercise` (aitools.js) does NOT yet accept iconName — small follow-up if the AI
+  should set icons (falls back to category regex → fine today).
+- **Full emoji sweep**: rendered UI is 100% house icons / colored dots / plain text. Kept: plain-text
+  clipboard share strings, typographic ♂♀✓⚑, unused data fields (emoji:/icon: keys — never rendered;
+  TABS strings still carry emoji as IDENTITY KEYS with icons rendered via TAB_ICONS — do NOT strip them).
+  Verified: all 8 Results tabs + dashboard + wizard + client home = zero rendered emoji.
+- Test residue: Casey's plan gained custom exercise "Sled Push" (10 cal/min, mountain) — harmless demo.
+
+### ⏭️ (superseded — kept for reference) two BIG emoji jobs Kevin DECIDED
 Kevin answered both via AskUserQuestion (S97, end):
 1. **Rebuild the exercise pickers as CUSTOM icon-capable lists** (he chose this over strip-to-text or
    keep-emoji). ~250 emoji live in native `<select><option>`/optgroup labels (CARDIO_GROUPS +
