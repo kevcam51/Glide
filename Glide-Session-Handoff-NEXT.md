@@ -1,5 +1,47 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S97 (Jul 17): tile bottom sheets + food-library tabs + default-target + back arrows + MEALS
+_All pushed (`origin/main` @ `3293afa`) + deployed. Firebase `calorieiq-29762`; model `claude-sonnet-4-6`.
+Kevin gave a big UX batch; built in 2 commits (`99d385d` UX, `3293afa` Meals) — all verified live on
+client.uitest (Casey)._
+
+### ✅ What S97 shipped
+- **Tile editors are now BOTTOM SHEETS** (new reusable `BottomSheet`, module-level) — slide up IN FRONT
+  of the user, dim the rest, dedicated **back arrow top-right** (Kevin's placement). Fixes the "panel
+  expanded below the fold, I got lost" complaint. All 4 tiles (`STAT_SHEET_META` maps title/icon).
+- **"Use Glidna's default target (N cal)" button** in the Today's Target sheet whenever a custom target
+  is set (was buried in the edit flow). Verified reset 1,750 → 1,929.
+- **Food library = two INDEPENDENT lists** — saving a food no longer removes it from Previously logged
+  (dropped the `!isSaved` filter). Added **meal-type filter tabs** (All/Breakfast/Lunch/Dinner/Snack) to
+  both Saved and Previously-logged.
+- **MEALS feature** (`3293afa`) — a meal = a named combo of foods. New per-user store `caliq-meals-saved`
+  (`SAVED_MEALS_KEY` + `mealSignature` dedup). **Star next to each meal section** (B/L/D/S) in MealLog
+  saves that whole meal. Food library gained a **Foods | Meals** switch; in Meals: Saved | Previously-
+  logged (DERIVED from last ~14 logged days, grouped by section, de-duped, hides already-saved) + the
+  meal-type filter. **Tap a meal → batch-logs all its foods** (`onLogMeal`→`onAddMeals`). Props threaded
+  App→DailyDashboard→MealLog→FoodLibrary. Verified: star saved "Breakfast · Greek Yogurt Bowl" → Meal
+  library Saved(1); Previously-logged(4) derived; tapping a Lunch meal logged 320→840.
+- **Back arrow (top-right)** on the daily-workflow overlays: FoodLibrary, FoodServingModal,
+  WeightChartModal, MeasurementsModal, CalendarView, + the sheet. New `back` icon in `src/icons.jsx`.
+- **Emoji sweep** in the dashboard/food surfaces (macro rows/bars → colored dots; workout Confirmed/
+  Remove, target edit/tip, library Added/star cleaned).
+
+### ⏭️ S97 REMAINING (Kevin's batch — NOT done, do next)
+- **iPad "Ask Glidna" button scrolls** — could NOT reproduce in Chromium (it's correctly
+  `position:fixed` portaled to body and holds on scroll). iOS-Safari-specific. **NEED FROM KEVIN:**
+  Safari or installed PWA? Does it scroll away completely or drift+snap-back? (Likely the iOS
+  momentum-scroll fixed-detach quirk.)
+- **Full back-arrow + emoji sweep on SECONDARY screens** — invite hub, messaging, admin dashboard, the
+  AI chat panel, calendar-CELL emojis (🍽️🍗⚖️🏋️🎯💧 in CalendarView month/week, ~L8930+), DailyCheckIn
+  (client-home) emojis (🍽️💧⚖️🏋️), LogBtn "Logged ✓". ~25 `✕` close buttons remain across the app
+  (grep `>✕<|✕ Close`). Mechanical but broad — do carefully.
+- **Meals polish**: not wired into the CalendarView day-view MealLog (CalendarView doesn't receive the
+  meal props); no rename-a-saved-meal; the "Copy a previous meal" modal still uses a `✕` (not back arrow).
+- **Test residue** (client.uitest / Casey, throwaway acct): today (Jul 17) has 2 logged meals (~840 cal) +
+  1 saved meal "Breakfast" — consistent valid data, clearable.
+
+---
+
 ## ⚡⚡⚡ S96 (Jul 17): dashboard restructure DONE + push delivery COMPLETED + per-client default view
 _All pushed (`origin/main` @ `def17ea`) + deployed (Vercel bundle flipped, verified) + all 7 touched
 Cloud Functions deployed clean. Firebase `calorieiq-29762`; model `claude-sonnet-4-6`._
