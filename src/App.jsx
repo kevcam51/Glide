@@ -3324,7 +3324,7 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   );
 }
 
-function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, defaultView = "detailed" }) {
+function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, defaultView = "detailed", onSetPlanViewDefault }) {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
   // Simple (plain-English) vs Detailed plan view — a display pref, remembered
@@ -3502,6 +3502,31 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           <Icon name="chart" size={15} />Detailed
         </button>
       </div>
+
+      {/* Per-client default view (S96, Kevin's queue) — a TRAINER viewing a
+          linked client's plan sets what the CLIENT lands on first. Stored on
+          the plan (data.planViewDefault) so it rides the shared save; the
+          client's own toggle choice (their device's localStorage) still wins
+          once they've picked — this only governs first opens. The pill above
+          stays the trainer's OWN view of this screen. */}
+      {onSetPlanViewDefault && (
+        <div style={{display:"flex",alignItems:"center",gap:"6px",margin:"-8px 0 16px",flexWrap:"wrap"}}>
+          <span style={{fontSize:".7rem",color:"var(--muted)"}}>Client's default view:</span>
+          {[["simple","Simple"],["detailed","Detailed"]].map(([v,l])=>{
+            const active = (data.planViewDefault || "simple") === v;
+            return (
+              <button key={v} onClick={()=>onSetPlanViewDefault(v)}
+                title="What this client lands on first — until they pick their own view"
+                style={{padding:"4px 12px",fontSize:".7rem",fontWeight:700,borderRadius:"999px",cursor:"pointer",
+                  border:"1px solid "+(active?"var(--accent)":"var(--border)"),
+                  background:active?"rgba(8,220,224,.12)":"transparent",
+                  color:active?"var(--accent)":"var(--muted)"}}>
+                {l}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {simpleView ? (
         <SimplePlanView data={data} tdee={tdee} floor={floor} hasGoal={hasGoal}
@@ -18441,7 +18466,8 @@ export default function App() {
               <button className="dash-nav-btn" style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:"7px"}} onClick={()=>setShowDash(true)}><Icon name="dashboard" size={16} color="var(--accent)" />Back to Dashboard</button>
             </div>
             <Results data={data} isSimulation={activeIsSim} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
-            defaultView={role === ROLES.CLIENT ? "simple" : "detailed"}
+            defaultView={role === ROLES.CLIENT ? (data.planViewDefault || "simple") : "detailed"}
+            onSetPlanViewDefault={activeRemoteUid ? (v)=>setDataAndSave(p=>({...p, planViewDefault: v})) : undefined}
             onSetFitnessGoal={(g)=>setDataAndSave(p=>({...p, fitnessGoal: g}))}
             onSetDeficitMode={(mode)=>setDataAndSave(p=>({...p, deficitMode: mode}))}
             onSetWearableAdjust={(on)=>setDataAndSave(p=>({...p, wearableAdjust: !!on}))}
