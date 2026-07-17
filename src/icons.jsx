@@ -77,7 +77,11 @@ const GLYPHS = {
   // Rowing: no line-icon read clearly at 18px, so we use the 🚣 emoji for now
   // (Kevin — temporary until a custom rowing glyph is generated). Rendered via an
   // SVG <text> so it flows through the same <Icon> component + sizing everywhere.
-  row: (<text x="12" y="12" fontSize="19" textAnchor="middle" dominantBaseline="central">🚣</text>),
+  // Rowing — a rower with an oar. Sourced from Google Material Symbols "rowing"
+  // (Apache-2.0), a filled glyph on Material's 0 -960 960 960 grid; transformed
+  // to our 24×24 box and always filled (see ALWAYS_FILL). No stroke line-icon
+  // read as rowing at 18px, so this filled figure is the clearest fit.
+  row: (<path transform="translate(0,24) scale(0.025)" d="M720 0 600-120v-60L316-464q-9 2-18 3t-18 1v-88q50 2 102-21.5t84-58.5l56-62q13-15 30.5-22.5T590-720q38 0 64 26t26 64v230q0 26-9.5 47.5T644-314L500-456v-92q-20 17-43 31t-49 25l252 252h60l120 120L720 0ZM220-140l-60-60 180-180 100 100h-80L220-140Zm380-620q-33 0-56.5-23.5T520-840q0-33 23.5-56.5T600-920q33 0 56.5 23.5T680-840q0 33-23.5 56.5T600-760Z" />),
   boxing: (<><path d="M8 6.5a4.5 4.5 0 0 1 9 0V12a4.5 4.5 0 0 1-4.5 4.5H10A4.5 4.5 0 0 1 8 12z" /><path d="M8 9.5H5.8a1.7 1.7 0 0 0 0 3.4H8" /><path d="M9.5 16.5v2.5a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-2.5" /></>),
   ball: (<><circle cx="12" cy="12" r="9" /><path d="M12 3v18" /><path d="M3 12h18" /><path d="M5.4 5.4C10 9 10 15 5.4 18.6" /><path d="M18.6 5.4C14 9 14 15 18.6 18.6" /></>),
   jumprope: (<><path d="M6 10.5v2a6 6 0 0 0 12 0v-2" /><rect x="4.4" y="3.5" width="3.2" height="7" rx="1.4" /><rect x="16.4" y="3.5" width="3.2" height="7" rx="1.4" /></>),
@@ -88,11 +92,15 @@ const GLYPHS = {
   trash: (<><path d="M4.5 6.5h15" /><path d="M9.5 6.5V4.8A1.3 1.3 0 0 1 10.8 3.5h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7" /><path d="M6.5 6.5 7.4 19a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4l.9-12.5" /><path d="M10.5 10v6.5" /><path d="M13.5 10v6.5" /></>),
 };
 
+// Glyphs that are pre-filled silhouettes (not stroke line-art) — always rendered
+// filled regardless of variant, so they don't turn into a messy contour outline.
+const ALWAYS_FILL = new Set(["row"]);
+
 export function Icon({ name, size = 20, variant = "outline", color = "currentColor",
   strokeWidth = 1.8, title, className, style }) {
   const g = GLYPHS[name];
   if (!g) return null;
-  const solid = variant === "solid";
+  const solid = variant === "solid" || ALWAYS_FILL.has(name);
   const fill = solid ? color : (variant === "duotone" ? "rgba(8,220,224,.18)" : "none");
   const stroke = solid ? "none" : color;
   return (
