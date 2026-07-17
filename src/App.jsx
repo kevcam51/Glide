@@ -6959,6 +6959,13 @@ const recentFoodKey = (name, type) => baseFoodName(name).toLowerCase() + "|" + r
 // Identity is the SAME as recents (base name + meal type) so a food can never
 // exist twice at two different servings — re-logging updates the amount in place.
 const SAVED_FOODS_KEY = "caliq-foods-saved";
+// Saved MEALS (S97) — a whole meal = a named combo of foods (e.g. "Breakfast" =
+// eggs + toast + coffee). Starred from a meal section; per person, across plans.
+const SAVED_MEALS_KEY = "caliq-meals-saved";
+// Signature for dedup: meal type + its sorted food base-names (so re-starring the
+// same breakfast doesn't pile up duplicates).
+const mealSignature = (type, items) =>
+  recentMealKey(type) + "|" + (items || []).map((i) => baseFoodName(i.name || "").toLowerCase()).filter(Boolean).sort().join(",");
 // "3 servings" / "200 g" — the remembered amount, for the library rows.
 const servingLabelOf = (f) => {
   const q = f && f.grams != null ? Number(f.grams) : null;
@@ -7371,7 +7378,10 @@ function CopyMealModal({ sectionLabel, targetType, matchMeal, dateKey, onReadDay
 // tap adds straight to it) or from the header (mealType null → the meal-type tabs
 // let you filter, tap adds to the food's own meal).
 const LIB_DISPLAY_CAP = 30; // per meal type — Kevin: recents shouldn't pile up
-function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleSave, onRemoveRecent, onRemoveSaved, onClose }) {
+function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleSave, onRemoveRecent, onRemoveSaved,
+  savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onReadDay, onListLoggedDays, initialMode = "foods", onClose }) {
+  // Foods vs Meals (S97): a Meal is a whole saved/previous combo of foods.
+  const [mode, setMode] = useState(initialMode);
   const [tab, setTab] = useState("recent");
   // Meal-type filter (S97): All / Breakfast / Lunch / Dinner / Snack. When the
   // page was opened FROM a specific meal (mealType set) it's pre-scoped there.
@@ -7381,7 +7391,40 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
   const [confirmDel, setConfirmDel] = useState(""); // key pending delete confirm
   useBackClose(open, onClose);
   useBodyScrollLock(open);
-  useEffect(() => { if (open) { setQ(""); setFlash(""); setConfirmDel(""); setMealFilter("all"); setTab((savedFoods || []).length ? "saved" : "recent"); } }, [open]);
+  const [prevMeals, setPrevMeals] = useState([]); // previously-logged full meals (derived)
+  useEffect(() => { if (open) { setMode(initialMode); setQ(""); setFlash(""); setConfirmDel(""); setMealFilter("all"); setTab((savedFoods || []).length ? "saved" : "recent"); } }, [open]);
+  // Derive "previously logged meals" from the last ~14 logged days: each day's
+  // foods grouped by meal section = one meal you can re-log or star. Only when
+  // the Meals tab is actually open (async reads shouldn't run otherwise).
+  useEffect(() => {
+    if (!open || mode !== "meals" || !onListLoggedDays || !onReadDay) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const days = (await onListLoggedDays()).sort().reverse().slice(0, 14);
+        const out = [];
+        for (const d of days) {
+          const log = await onReadDay(d);
+          const meals = (log && Array.isArray(log.meals)) ? log.meals : [];
+          const byType = new Map();
+          meals.forEach((m) => {
+            const k = recentMealKey(m.type);
+            if (!byType.has(k)) byType.set(k, []);
+            byType.get(k).push(m);
+          });
+          byType.forEach((items, k) => {
+            if (items.length < 1) return;
+            const totals = items.reduce((s, i) => ({ calories: s.calories + (Number(i.calories) || 0) }), { calories: 0 });
+            out.push({ id: `pm-${d}-${k}`, date: d, type: k, name: k.charAt(0).toUpperCase() + k.slice(1),
+              items, calories: totals.calories });
+          });
+        }
+        if (!cancelled) setPrevMeals(out);
+      } catch (e) { if (!cancelled) setPrevMeals([]); }
+    })();
+    return () => { cancelled = true; };
+  }, [open, mode, onListLoggedDays, onReadDay]);
+
 
   const savedKeys = new Set((savedFoods || []).map((f) => recentFoodKey(f.name, f.type)));
   // Legacy recents (logged before per-meal scoping) carry no type and show under
@@ -7428,6 +7471,28 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
       .map(([k, arr]) => [k, arr.slice(0, LIB_DISPLAY_CAP)])
       .filter(([, arr]) => arr.length);
   })();
+
+  // ── Meals mode (S97): saved meals + previously-logged meals ─────────────────
+  const mealTypeScope = (m) => (mealFilter === "all" ? true : recentMealKey(m.type) === mealFilter);
+  const mealMatch = (m) => {
+    const s = q.trim().toLowerCase();
+    if (!s) return true;
+    return (m.name || "").toLowerCase().includes(s) || (m.items || []).some((i) => (i.name || "").toLowerCase().includes(s));
+  };
+  const savedMealSigs = new Set((savedMeals || []).map((m) => mealSignature(m.type, m.items)));
+  const savedMealsList = (savedMeals || []).filter((m) => mealTypeScope(m) && mealMatch(m));
+  // Previously-logged meals: hide any that are already saved (no cross-tab dupes),
+  // and de-dupe repeats of the same combo (keep the most recent).
+  const prevMealsList = (() => {
+    const seen = new Set();
+    return (prevMeals || []).filter((m) => {
+      const sig = mealSignature(m.type, m.items);
+      if (savedMealSigs.has(sig) || seen.has(sig)) return false;
+      seen.add(sig);
+      return mealTypeScope(m) && mealMatch(m);
+    }).slice(0, LIB_DISPLAY_CAP);
+  })();
+  const mealList = tab === "saved" ? savedMealsList : prevMealsList;
 
   const add = (f) => {
     onAdd(f);
@@ -7487,6 +7552,44 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
     );
   };
 
+  // A whole-meal row (S97): tap logs every item; star saves/unsaves; saved meals
+  // can be deleted. Shows the meal name + its foods.
+  const mealRow = (m) => {
+    const isSavedMeal = savedMealSigs.has(mealSignature(m.type, m.items));
+    const names = (m.items || []).map((i) => i.name).filter(Boolean);
+    const shown = names.slice(0, 4).join(", ") + (names.length > 4 ? ` +${names.length - 4}` : "");
+    return (
+      <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 2px 4px 8px",
+        borderRadius: 10, background: "var(--tint-md)", marginBottom: 6 }}>
+        <button onClick={() => { onLogMeal && onLogMeal(m); setFlash(m.name); setTimeout(() => setFlash((v) => (v === m.name ? "" : v)), 1400); }}
+          title={`Log ${m.name}`}
+          style={{ flex: 1, minWidth: 0, textAlign: "left", border: "none", background: "transparent",
+            color: "var(--text)", cursor: "pointer", padding: "8px 4px 8px 0", fontFamily: "inherit" }}>
+          <div style={{ fontSize: ".88rem", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {m.name} <span style={{ fontSize: ".7rem", color: "var(--muted)", fontWeight: 600 }}>· {(m.items || []).length} item{(m.items || []).length !== 1 ? "s" : ""}</span>
+          </div>
+          <div style={{ fontSize: ".72rem", color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shown}</div>
+        </button>
+        <span style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: "1rem", color: "var(--accent)", whiteSpace: "nowrap", padding: "0 2px" }}>
+          {(m.calories || 0).toLocaleString()}<span style={{ fontSize: ".6rem", color: "var(--muted)", fontWeight: 600 }}> cal</span>
+        </span>
+        <button onClick={() => onToggleSaveMeal && onToggleSaveMeal(m)} title={isSavedMeal ? "Remove saved meal" : "Save this meal"} style={iconBtn}>
+          <Icon name="star" size={17} color={isSavedMeal ? "var(--yellow)" : "var(--muted)"} variant={isSavedMeal ? "solid" : "outline"} />
+        </button>
+        {tab === "saved" ? (
+          confirmDel === m.id ? (
+            <button onClick={() => { onRemoveSavedMeal && onRemoveSavedMeal(m.id); setConfirmDel(""); }}
+              style={{ ...iconBtn, padding: "10px 12px", color: "var(--red)", fontSize: ".72rem", fontWeight: 700 }}>Delete?</button>
+          ) : (
+            <button onClick={() => setConfirmDel(m.id)} title="Delete" style={iconBtn}>
+              <Icon name="trash" size={16} color="var(--muted)" />
+            </button>
+          )
+        ) : <span style={{ width: 8 }} />}
+      </div>
+    );
+  };
+
   return createPortal(
     <div style={{ position: "fixed", inset: 0, zIndex: 1600, background: "var(--bg)", color: "var(--text)",
       fontFamily: "var(--font-sans)", overflowY: "auto", padding: "calc(14px + env(safe-area-inset-top,0px)) 14px 32px" }}>
@@ -7494,8 +7597,8 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
             <Icon name="book" size={20} color="var(--accent)" />
-            <span style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem", fontWeight: 700 }}>Food library</span>
-            {mealType != null && <span style={{ fontSize: ".76rem", color: "var(--muted)", whiteSpace: "nowrap" }}>· {mealType || "Other"}</span>}
+            <span style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem", fontWeight: 700 }}>{mode === "meals" ? "Meal library" : "Food library"}</span>
+            {mode !== "meals" && mealType != null && <span style={{ fontSize: ".76rem", color: "var(--muted)", whiteSpace: "nowrap" }}>· {mealType || "Other"}</span>}
           </div>
           {/* Back arrow, top-right (S97, Kevin) — consistent way back on every page. */}
           <button onClick={onClose} aria-label="Back"
@@ -7506,9 +7609,26 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
           </button>
         </div>
 
+        {/* Foods vs Meals (S97) — Meals = whole saved/previous combos of foods. */}
+        {onToggleSaveMeal && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            {[["foods", "Foods"], ["meals", "Meals"]].map(([k, label]) => (
+              <button key={k} onClick={() => { setMode(k); setConfirmDel(""); setTab("saved"); }}
+                style={{ flex: 1, padding: "10px 8px", borderRadius: 10, cursor: "pointer", fontFamily: "inherit",
+                  fontSize: ".84rem", fontWeight: 800,
+                  border: `1.5px solid ${mode === k ? "var(--accent)" : "var(--border)"}`,
+                  background: mode === k ? "rgba(8,220,224,.12)" : "transparent",
+                  color: mode === k ? "var(--accent)" : "var(--muted)" }}>{label}</button>
+            ))}
+          </div>
+        )}
+
         {/* List selector: Saved | Previously logged (two independent lists). */}
         <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-          {[["saved", `Saved${saved.length ? ` (${saved.length})` : ""}`], ["recent", `Previously logged${recents.length ? ` (${recents.length})` : ""}`]].map(([k, label]) => (
+          {(mode === "meals"
+            ? [["saved", `Saved${savedMealsList.length ? ` (${savedMealsList.length})` : ""}`], ["recent", `Previously logged${prevMealsList.length ? ` (${prevMealsList.length})` : ""}`]]
+            : [["saved", `Saved${saved.length ? ` (${saved.length})` : ""}`], ["recent", `Previously logged${recents.length ? ` (${recents.length})` : ""}`]]
+          ).map(([k, label]) => (
             <button key={k} onClick={() => { setTab(k); setConfirmDel(""); }}
               style={{ flex: 1, padding: "9px 8px", borderRadius: 9, cursor: "pointer", fontFamily: "inherit",
                 fontSize: ".78rem", fontWeight: 700,
@@ -7518,9 +7638,9 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
           ))}
         </div>
 
-        {/* Meal-type filter (S97) — only in the general library; a meal-scoped
-            open is already narrowed to its meal. */}
-        {mealType == null && (
+        {/* Meal-type filter (S97) — in the general food library and always in
+            Meals mode; a meal-scoped food open is already narrowed to its meal. */}
+        {(mealType == null || mode === "meals") && (
           <div style={{ display: "flex", gap: 5, marginBottom: 10, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
             {[["all", "All"], ["breakfast", "Breakfast"], ["lunch", "Lunch"], ["dinner", "Dinner"], ["snack", "Snack"]].map(([k, label]) => (
               <button key={k} onClick={() => { setMealFilter(k); setConfirmDel(""); }}
@@ -7533,7 +7653,7 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
           </div>
         )}
 
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your foods…"
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={mode === "meals" ? "Search your meals…" : "Search your foods…"}
           style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)",
             background: "var(--surface)", color: "var(--text)", fontSize: ".9rem", fontFamily: "inherit",
             boxSizing: "border-box", marginBottom: 12 }} />
@@ -7542,35 +7662,54 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
           <div style={{ fontSize: ".78rem", color: "var(--green)", fontWeight: 700, marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}><Icon name="check" size={14} color="var(--green)" />Added {flash}</div>
         )}
 
-        {groups.length === 0 ? (
-          <div style={{ padding: "26px 14px", textAlign: "center", color: "var(--muted)", fontSize: ".84rem", lineHeight: 1.5 }}>
-            {q.trim() ? "Nothing matches that."
-              : tab === "saved"
-                ? "No saved foods yet. Tap the star on anything you log often and it'll live here — across every plan."
-                : "Nothing logged yet. Foods you log will show up here for one-tap re-adding."}
-          </div>
-        ) : groups.map(([k, arr]) => (
-          <div key={k || "flat"} style={{ marginBottom: 14 }}>
-            {k && (
-              <div style={{ fontSize: ".68rem", color: "var(--muted)", textTransform: "uppercase",
-                letterSpacing: ".5px", fontWeight: 700, marginBottom: 5 }}>{k === "other" ? "Other" : k}</div>
-            )}
-            {arr.map(row)}
-          </div>
-        ))}
-
-        <div style={{ fontSize: ".7rem", color: "var(--muted)", lineHeight: 1.5, marginTop: 4 }}>
-          Tap a food to log it with its last serving. {tab === "recent"
-            ? `Recent foods roll over as you log new ones — tap the star to keep one for good.`
-            : `Saved foods stay in your library across every plan.`}
-        </div>
+        {mode === "meals" ? (
+          <>
+            {mealList.length === 0 ? (
+              <div style={{ padding: "26px 14px", textAlign: "center", color: "var(--muted)", fontSize: ".84rem", lineHeight: 1.5 }}>
+                {q.trim() ? "Nothing matches that."
+                  : tab === "saved"
+                    ? "No saved meals yet. On the dashboard, tap the star next to Breakfast / Lunch / Dinner / Snack to save that whole meal here."
+                    : "No logged meals yet. Full meals you log will show here so you can re-log them in one tap."}
+              </div>
+            ) : mealList.map(mealRow)}
+            <div style={{ fontSize: ".7rem", color: "var(--muted)", lineHeight: 1.5, marginTop: 4 }}>
+              Tap a meal to log all its foods at once. {tab === "recent"
+                ? "Tap the star to keep a meal for good."
+                : "Saved meals stay in your library across every plan."}
+            </div>
+          </>
+        ) : (
+          <>
+            {groups.length === 0 ? (
+              <div style={{ padding: "26px 14px", textAlign: "center", color: "var(--muted)", fontSize: ".84rem", lineHeight: 1.5 }}>
+                {q.trim() ? "Nothing matches that."
+                  : tab === "saved"
+                    ? "No saved foods yet. Tap the star on anything you log often and it'll live here — across every plan."
+                    : "Nothing logged yet. Foods you log will show up here for one-tap re-adding."}
+              </div>
+            ) : groups.map(([k, arr]) => (
+              <div key={k || "flat"} style={{ marginBottom: 14 }}>
+                {k && (
+                  <div style={{ fontSize: ".68rem", color: "var(--muted)", textTransform: "uppercase",
+                    letterSpacing: ".5px", fontWeight: 700, marginBottom: 5 }}>{k === "other" ? "Other" : k}</div>
+                )}
+                {arr.map(row)}
+              </div>
+            ))}
+            <div style={{ fontSize: ".7rem", color: "var(--muted)", lineHeight: 1.5, marginTop: 4 }}>
+              Tap a food to log it with its last serving. {tab === "recent"
+                ? `Recent foods roll over as you log new ones — tap the star to keep one for good.`
+                : `Saved foods stay in your library across every plan.`}
+            </div>
+          </>
+        )}
       </div>
     </div>,
     document.body
   );
 }
 
-function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, savedFoods, onToggleSaveFood, onRemoveSavedFood, onReadDay, onListLoggedDays, dateKey, hideMicros }) {
+function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, savedFoods, onToggleSaveFood, onRemoveSavedFood, savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onReadDay, onListLoggedDays, dateKey, hideMicros }) {
   const [name, setName] = useState("");
   const [brand, setBrand] = useState(""); // brand of a picked food (e.g. "Kirkland Signature") — shown under the name
   const [cals, setCals] = useState("");
@@ -8262,12 +8401,26 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   const renderSection = (t) => {
     const items = list.filter((m) => inSection(m, t));
     const subtotal = items.reduce((s, m) => s + (m.calories || 0), 0);
+    // Star to SAVE this whole meal (S97, Kevin) — the section's current foods
+    // become a reusable saved meal. Filled once saved.
+    const mealSaved = onToggleSaveMeal && items.length > 0
+      && (savedMeals || []).some((sm) => mealSignature(sm.type, sm.items) === mealSignature(t, items));
     return (
       <div key={t}>
         <div style={{ fontSize:".72rem", fontWeight:700, color:"var(--muted)",
           textTransform:"uppercase", letterSpacing:".5px", marginBottom:"4px",
-          display:"flex", justifyContent:"space-between" }}>
-          <span>{t}</span>
+          display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <span style={{ display:"inline-flex", alignItems:"center", gap:"6px" }}>
+            {t}
+            {onToggleSaveMeal && items.length > 0 && (
+              <button onClick={() => onToggleSaveMeal({ type: t, items, name: t })}
+                title={mealSaved ? "Saved meal — tap to unsave" : "Save this whole meal"}
+                style={{ display:"inline-flex", alignItems:"center", border:"none", background:"transparent",
+                  cursor:"pointer", padding:"2px" }}>
+                <Icon name="star" size={15} color={mealSaved ? "var(--yellow)" : "var(--muted)"} variant={mealSaved ? "solid" : "outline"} />
+              </button>
+            )}
+          </span>
           {items.length > 0 && <span>{subtotal.toLocaleString()} cal</span>}
         </div>
         {items.length > 0 && (
@@ -8446,6 +8599,9 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
           onAdd={(f) => quickAddRecent(f, lib.mealType != null ? lib.mealType
             : (TYPES.find((t) => t.toLowerCase() === recentMealKey(f.type)) || ""))}
           onToggleSave={onToggleSaveFood} onRemoveRecent={onRemoveRecentFood} onRemoveSaved={onRemoveSavedFood}
+          savedMeals={savedMeals} onToggleSaveMeal={onToggleSaveMeal} onRemoveSavedMeal={onRemoveSavedMeal}
+          onLogMeal={(m) => { onLogMeal && onLogMeal(m); }}
+          onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} initialMode={lib.mode || "foods"}
           onClose={() => { setLib(null); closeForm(); }} />
       )}
     </div>
@@ -9203,6 +9359,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood,
   savedFoods, onToggleSaveFood, onRemoveSavedFood, weekSummary, recentWearable, history, onRefresh, isRemote,
+  savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
   onSaveMeasurements, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise,
   onTrackerSync, onSetWeeklyRate, onSetDeficitMode }) {
@@ -9972,7 +10129,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         })()}
         </div>)}
         </div>
-      <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={ymdLocal()} hideMicros />
+      <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood} savedMeals={savedMeals} onToggleSaveMeal={onToggleSaveMeal} onRemoveSavedMeal={onRemoveSavedMeal} onLogMeal={onLogMeal} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={ymdLocal()} hideMicros />
             </>
           )}
           {expandedStat === "burn" && (
@@ -17262,6 +17419,9 @@ export default function App() {
   // own account (window.storage), so it follows a person across plans/phases.
   const [savedFoods, setSavedFoods] = useState([]);
   const savedFoodsRef = useRef([]);
+  // Saved MEALS (S97) — same personal, cross-plan store as saved foods.
+  const [savedMeals, setSavedMeals] = useState([]);
+  const savedMealsRef = useRef([]);
   const [weekSummary, setWeekSummary] = useState(null); // last-7-day nutrition averages
   const [recentWearable, setRecentWearable] = useState(null); // latest day (≤3 back) with tracker data — {daysAgo, wearable}
   const [meName, setMeName] = useState("");   // current user's display name
@@ -18074,6 +18234,39 @@ export default function App() {
     writeSaved(savedFoodsRef.current.filter((f) => recentFoodKey(f.name, f.type) !== key));
   };
 
+  // ── Saved MEALS (S97) ──────────────────────────────────────────────────────
+  // A meal = a named combo of foods. Starred from a meal section; logged as one
+  // tap (batch-adds every item to today via onAddMeals). Personal, cross-plan.
+  const writeSavedMeals = (next) => {
+    savedMealsRef.current = next;
+    setSavedMeals(next);
+    try { window.storage.set(SAVED_MEALS_KEY, JSON.stringify(next)); } catch (e) { /* best-effort */ }
+  };
+  const normalizeMealItems = (items) => (items || []).map((i) => ({
+    name: i.name || "", brand: i.brand || "",
+    calories: Number(i.calories) || 0, protein: Number(i.protein) || 0,
+    carbs: Number(i.carbs) || 0, fat: Number(i.fat) || 0,
+    ...(i.grams != null ? { grams: Number(i.grams), unit: i.unit || "g" } : {}),
+    ...(i.micros ? { micros: i.micros } : {}),
+  }));
+  // Save (or, if already saved by signature, remove) a whole meal — the star toggle.
+  const onToggleSaveMeal = (meal) => {
+    const type = recentMealKey(meal.type);
+    const items = normalizeMealItems(meal.items);
+    if (!items.length) return;
+    const sig = mealSignature(type, items);
+    const existing = savedMealsRef.current.find((m) => mealSignature(m.type, m.items) === sig);
+    if (existing) { writeSavedMeals(savedMealsRef.current.filter((m) => m.id !== existing.id)); return; }
+    const totals = items.reduce((s, i) => ({ calories: s.calories + i.calories, protein: s.protein + i.protein,
+      carbs: s.carbs + i.carbs, fat: s.fat + i.fat }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+    const entry = { id: `sm${Date.now()}${Math.floor(Math.random() * 1000)}`,
+      name: meal.name || (type.charAt(0).toUpperCase() + type.slice(1)), type, items, ...totals, savedAt: Date.now() };
+    writeSavedMeals([entry, ...savedMealsRef.current].slice(0, 200));
+  };
+  const onRemoveSavedMeal = (id) => writeSavedMeals(savedMealsRef.current.filter((m) => m.id !== id));
+  // Log an entire saved/previous meal in one tap: every item, tagged to its meal type.
+  const onLogMeal = (meal) => onAddMeals((meal.items || []).map((i) => ({ ...i, type: meal.type })));
+
   // Remove a saved "recent food" chip (the user doesn't want it suggested again).
   // Matched by food identity + meal type so only THAT meal's chip is dropped, not
   // the same food under other meals.
@@ -18307,6 +18500,10 @@ export default function App() {
         const sf = sv && sv.value ? (JSON.parse(sv.value) || []) : [];
         savedFoodsRef.current = sf;
         setSavedFoods(sf);
+        const svm = await window.storage.get(SAVED_MEALS_KEY);
+        const sm = svm && svm.value ? (JSON.parse(svm.value) || []) : [];
+        savedMealsRef.current = sm;
+        setSavedMeals(sm);
       } catch (e) { /* library is a nicety — never block the dashboard on it */ }
       // Last-7-day nutrition summary (averaged over the days that were logged).
       // Reuses the streak loop's cached reads — its first batch is these 7 days.
@@ -18543,6 +18740,7 @@ export default function App() {
               onSetWeeklyRate={(r)=>setDataAndSave(p=>({...p, weeklyRate: r}))}
               onSetDeficitMode={(m)=>setDataAndSave(p=>({...p, deficitMode: m}))}
               savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood}
+              savedMeals={savedMeals} onToggleSaveMeal={onToggleSaveMeal} onRemoveSavedMeal={onRemoveSavedMeal} onLogMeal={onLogMeal}
               onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
               onSaveCheckIn={(checkin)=>setDataAndSave(p=>{
                 const others = (p.checkIns||[]).filter(c => c.date !== checkin.date);
