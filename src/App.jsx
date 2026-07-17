@@ -380,9 +380,69 @@ const css = `
   --radius-sm:10px;
   --radius-lg:18px;
 
+  /* Subtle surface tints (S95) — a thin film over whatever is beneath: row
+     zebra-striping, :active press feedback, card lifts, chart gridlines. On the
+     dark theme that film is WHITE; on light it must be BLACK, or it's white on
+     white and simply disappears. Hardcoding rgba(255,255,255,…) is what made
+     these vanish, so use these tokens for any new tint. */
+  --tint-xs:rgba(255,255,255,.015);
+  --tint-sm:rgba(255,255,255,.03);
+  --tint-md:rgba(255,255,255,.04);
+  --tint-lg:rgba(255,255,255,.07);
+
   /* Shadows */
   --shadow-sm:0 2px 8px rgba(0,0,0,.35);
   --shadow-md:0 4px 16px rgba(0,0,0,.5);
+}
+
+/* ── Light theme (S95) ──────────────────────────────────────────────────────
+   The :root block above is the DARK look and stays the default, so nothing
+   changes for anyone who doesn't opt in. These overrides mirror
+   themes.css [data-theme="light"] for the OLD var system (which drives the
+   in-plan screens + every inline style), the same way :root mirrors
+   [data-theme="pro"].
+
+   Same specificity as :root (0,1,0), so this MUST stay after it — source order
+   is what makes it win when the attribute is present.
+
+   Colors are re-tuned, not inverted: --accent, --green etc. are picked to glow
+   on near-black and are too pale on white, so each drops to a legible weight.
+   --accent-fill keeps the bright brand cyan because it's only ever a fill under
+   near-black text. */
+:root[data-theme="light"]{
+  --bg:#f4f7f8;
+  --surface:#ffffff;
+  --s2:#eaf0f1;
+  --s3:#dde6e8;
+  --border:#d6e0e2;
+  --border-light:#c2d0d3;
+
+  --accent:#0a8f93;        /* text/icons/borders — darkened for contrast on white */
+  --accent-fill:#08dce0;   /* filled buttons keep the bright brand cyan */
+  --accent-dim:rgba(10,143,147,.10);
+  --orange:#c2410c;
+  --green:#0f9d6e;
+  --yellow:#b45309;
+  --red:#dc2626;
+  --purple:#7c3aed;
+  --blue:#0284c7;
+
+  --text:#0d1418;
+  --text-secondary:#33474d;
+  --muted:#5c7175;
+  --muted-light:#41575c;
+
+  /* The film flips to black — see the --tint-* note on :root. Slightly stronger
+     than the dark theme's alphas: a black film on white needs a touch more
+     weight to read as the same depth. */
+  --tint-xs:rgba(13,20,24,.022);
+  --tint-sm:rgba(13,20,24,.04);
+  --tint-md:rgba(13,20,24,.05);
+  --tint-lg:rgba(13,20,24,.10);
+
+  /* Dark-theme shadows are near-opaque black — far too heavy on white. */
+  --shadow-sm:0 2px 8px rgba(13,20,24,.08);
+  --shadow-md:0 4px 16px rgba(13,20,24,.14);
 }
 
 /* ── Base ── */
@@ -713,7 +773,7 @@ body{
   cursor:pointer;-webkit-tap-highlight-color:transparent;
   transition:background .15s;
 }
-.drc-header:active{background:rgba(255,255,255,.02)}
+.drc-header:active{background:var(--tint-sm)}
 .drc-day{font-weight:700;font-size:.95rem;min-width:34px;flex-shrink:0;color:var(--text-secondary)}
 .drc-cardio{font-size:.82rem;color:var(--muted);flex:1;line-height:1.4}
 .drc-burn{font-family:'Sora',sans-serif;font-size:.95rem;color:var(--orange);letter-spacing:.5px;flex-shrink:0}
@@ -861,7 +921,7 @@ body{
   padding:16px 18px;cursor:pointer;-webkit-tap-highlight-color:transparent;
   transition:background .15s;
 }
-.ibw-toggle:active{background:rgba(255,255,255,.02)}
+.ibw-toggle:active{background:var(--tint-sm)}
 .ibw-toggle-left{display:flex;align-items:center;gap:10px;flex:1;min-width:0}
 .ibw-toggle-title{font-family:'Sora',sans-serif;font-size:1.2rem;letter-spacing:2px;color:var(--accent);white-space:nowrap}
 .ibw-toggle-summary{font-size:.76rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1043,7 +1103,7 @@ body{
   display:grid;grid-template-columns:1fr repeat(3,1fr);
   padding:10px 14px;border-top:1px solid var(--border);font-size:.83rem;
 }
-.cpt-row:nth-child(even){background:rgba(255,255,255,.015)}
+.cpt-row:nth-child(even){background:var(--tint-xs)}
 .cpt-period{color:var(--muted-light);font-weight:600}
 .cpt-val{font-family:'Sora',sans-serif;font-size:1rem;letter-spacing:.5px;text-align:center}
 
@@ -1089,7 +1149,7 @@ body{
   cursor:pointer;min-height:58px;-webkit-tap-highlight-color:transparent;
   transition:background .15s;
 }
-.day-card-header:active{background:rgba(255,255,255,.025)}
+.day-card-header:active{background:var(--tint-sm)}
 .day-chip{
   font-family:'Sora',sans-serif;font-size:.85rem;
   letter-spacing:1px;color:var(--muted);width:36px;flex-shrink:0;
@@ -1206,7 +1266,7 @@ body{
   display:flex;align-items:center;gap:11px;padding:13px 15px;
   cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s;
 }
-.micro-header:active{background:rgba(255,255,255,.025)}
+.micro-header:active{background:var(--tint-sm)}
 .micro-emoji{font-size:1.35rem;flex-shrink:0;line-height:1}
 .micro-name-wrap{flex:1}
 .micro-name{font-weight:600;font-size:.9rem}
@@ -1261,7 +1321,7 @@ body{
 .st-net-surplus{font-size:.58rem;color:var(--accent);margin-top:2px}
 .st-data-row{display:grid;grid-template-columns:90px repeat(7,1fr);border-bottom:1px solid var(--border)}
 .st-data-row:last-child{border-bottom:none}
-.st-data-row:nth-child(even){background:rgba(255,255,255,.012)}
+.st-data-row:nth-child(even){background:var(--tint-xs)}
 .st-row-label{padding:10px 8px;border-right:1px solid var(--border);display:flex;flex-direction:column;justify-content:center}
 .st-lbs{font-family:'Sora',sans-serif;font-size:1.1rem;letter-spacing:.5px;color:var(--text)}
 .st-fat-label{font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
@@ -1615,7 +1675,7 @@ body{
   cursor:pointer;-webkit-tap-highlight-color:transparent;
   transition:background .15s;
 }
-.folder-header:active{background:rgba(255,255,255,.03)}
+.folder-header:active{background:var(--tint-sm)}
 .folder-icon{font-size:1.2rem;flex-shrink:0}
 .folder-name{flex:1;font-weight:700;font-size:.9rem}
 .folder-count{
@@ -1989,9 +2049,9 @@ function BottomNav({ onBack, onNext, nextLabel = "Next →", nextDisabled = fals
   // document.body so it anchors to the viewport — the wizard steps live inside
   // the .page-transition wrapper, which keeps a CSS transform that would
   // otherwise become the containing block for this position:fixed bar (the same
-  // trap fixed for the modals). data-theme="pro" keeps it self-themed.
+  // trap fixed for the modals). keeps it self-themed.
   return createPortal(
-    <div data-theme="pro" style={{ paddingBottom: "calc(14px + env(safe-area-inset-bottom,0px))" }}
+    <div style={{ paddingBottom: "calc(14px + env(safe-area-inset-bottom,0px))" }}
       className="fixed bottom-0 left-0 right-0 z-30 flex gap-2.5 px-4 py-3.5 border-t border-border bg-bg/95 backdrop-blur-xl">
       {showBack && (
         <button onClick={onBack}
@@ -2029,7 +2089,7 @@ function StepPersonal({ data, onChange, onNext }) {
   };
 
   return (
-    <div data-theme="pro" className="fu text-fg">
+    <div className="fu text-fg">
       {/* Welcome banner */}
       <div className="flex items-start gap-3.5 p-4 mb-4 rounded-card border border-primary bg-[rgba(8,220,224,.06)]">
         <div className="text-[2.2rem] leading-none shrink-0 mt-0.5">👋</div>
@@ -2127,7 +2187,7 @@ function StepGoalWeight({ data, onChange, onBack, onNext }) {
   const valid   = toLose !== null;
 
   return (
-    <div data-theme="pro" className="fu text-fg">
+    <div className="fu text-fg">
       <div className={WZ.card}>
         <div className={WZ.title}>Your Goal Weight</div>
         <div className={WZ.sub}>
@@ -2284,7 +2344,7 @@ function StepActivity({ data, onChange, onBack, onNext }) {
     extra: "Extremely hard physical labor for most of the day — the kind of work where you're exhausted by the end of every shift. Examples: roofer, heavy farmer, lumberjack, commercial fisherman, mining. Very few people are truly in this category. Multiplier: 1.9× BMR.",
   };
   return (
-    <div data-theme="pro" className="fu text-fg" onClick={()=>activeInfo && setActiveInfo(null)}>
+    <div className="fu text-fg" onClick={()=>activeInfo && setActiveInfo(null)}>
       <div className={WZ.card}>
         <div className={WZ.title}>Daily Activity Level</div>
         <div className={WZ.sub}>
@@ -2600,7 +2660,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
   const getEx = id => allExercises.find(e=>e.id===id) || REST_ST;
 
   return (
-    <div data-theme="pro" className="fu text-fg">
+    <div className="fu text-fg">
       <div className={WZ.card}>
         <div className={WZ.title}>💪 Strength Training Plan</div>
         <div className={WZ.sub}>
@@ -2842,7 +2902,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
   const fillCardioObj = ALL_CARDIO.find(c=>c.id===fillType)||ALL_CARDIO[0];
 
   return (
-    <div data-theme="pro" className="fu text-fg">
+    <div className="fu text-fg">
       <div className={WZ.card}>
         <div className={WZ.title}>Weekly Cardio Plan</div>
         <div className={WZ.sub}>Tap a day to set your cardio. Calories estimated from your weight in real time.</div>
@@ -5918,13 +5978,13 @@ function WeightChart({ current, goal, paces, totalBurn, maxWeeks, compliance=1, 
       </defs>
 
       {/* Chart bg */}
-      <rect x={PAD.left} y={PAD.top} width={chartW} height={chartH} fill="rgba(255,255,255,.013)" rx="5"/>
+      <rect x={PAD.left} y={PAD.top} width={chartW} height={chartH} style={{ fill: "var(--tint-xs)" }} rx="5"/>
 
       {/* Y grid — just 4 clean horizontal lines, no vertical clutter */}
       {yLabels.map(({wt,y},i)=>(
         <g key={i}>
           <line x1={PAD.left} y1={PAD.top+y} x2={PAD.left+chartW} y2={PAD.top+y}
-            stroke={i===0?"rgba(8,220,224,.25)":"rgba(255,255,255,.07)"} strokeWidth="1"/>
+            style={{ stroke: i===0 ? "rgba(8,220,224,.25)" : "var(--tint-lg)" }} strokeWidth="1"/>
           {/* BRIGHT, large Y labels */}
           <text x={PAD.left-14} y={PAD.top+y+5} textAnchor="end"
             fill="#ffffff" fontSize="13.5" fontWeight="700" fontFamily="DM Sans,sans-serif"
@@ -6991,7 +7051,7 @@ function FoodServingModal({ food, editing, mealLabel, onConfirm, onClose }) {
   };
 
   return createPortal(
-    <div data-theme="pro" onClick={onClose}
+    <div onClick={onClose}
       style={{ position: "fixed", inset: 0, zIndex: 2200, background: "rgba(0,0,0,.7)",
         display: "flex", alignItems: "center", justifyContent: "center",
         padding: "16px", paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
@@ -7140,7 +7200,7 @@ function CopyMealModal({ sectionLabel, targetType, matchMeal, dateKey, onReadDay
     onClose();
   };
   return createPortal(
-    <div data-theme="pro" onClick={onClose}
+    <div onClick={onClose}
       style={{ position: "fixed", inset: 0, zIndex: 2200, background: "rgba(0,0,0,.7)",
         display: "flex", alignItems: "flex-end", justifyContent: "center", paddingTop: "env(safe-area-inset-top,0px)" }}>
       <div onClick={(e) => e.stopPropagation()}
@@ -7263,7 +7323,7 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
     const hasMacros = !!(f.protein || f.carbs || f.fat);
     return (
       <div key={key} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 2px 4px 8px",
-        borderRadius: 10, background: "rgba(255,255,255,.04)", marginBottom: 6 }}>
+        borderRadius: 10, background: "var(--tint-md)", marginBottom: 6 }}>
         {/* Tap the row = log it now with its remembered serving. */}
         <button onClick={() => add(f)} title={`Add ${f.name}`}
           style={{ flex: 1, minWidth: 0, textAlign: "left", border: "none", background: "transparent",
@@ -7303,7 +7363,7 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
   };
 
   return createPortal(
-    <div data-theme="pro" style={{ position: "fixed", inset: 0, zIndex: 1600, background: "var(--bg)", color: "var(--text)",
+    <div style={{ position: "fixed", inset: 0, zIndex: 1600, background: "var(--bg)", color: "var(--text)",
       fontFamily: "var(--font-sans)", overflowY: "auto", padding: "calc(14px + env(safe-area-inset-top,0px)) 14px 32px" }}>
       <div style={{ maxWidth: 560, margin: "0 auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -7745,7 +7805,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
     const moving = movingId === m.id;
     return (
       <div key={m.id} style={{ display:"flex", flexDirection:"column", gap:"6px",
-        padding:"8px 10px", borderRadius:"8px", background:"rgba(255,255,255,.04)" }}>
+        padding:"8px 10px", borderRadius:"8px", background:"var(--tint-md)" }}>
       {/* S95 touch targets: the whole row is the edit button (Kevin: "place them in
           the food when the client clicks the item directly — that should take them
           to the edit screen"), and move/delete are real ~40px targets instead of
@@ -7829,7 +7889,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   // The inline add-form, shown under whichever meal you tapped "+ Add" on.
   const addForm = () => (
     <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"6px",
-      padding:"8px", borderRadius:"8px", background:"rgba(255,255,255,.04)" }}>
+      padding:"8px", borderRadius:"8px", background:"var(--tint-md)" }}>
       {/* Your foods — opens the library (S95). This used to be an inline row of
           chips that grew unbounded and buried the form; one button keeps the
           add-form short, and the library is a better place to browse/manage. */}
@@ -7878,7 +7938,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
           </div>
           {scanErr && <div style={{ fontSize:".74rem", color:"var(--red)", marginTop:"6px" }}>{scanErr}</div>}
           {scanOpen && createPortal(
-            <div data-theme="pro" onClick={closeScan} style={{ position:"fixed", inset:0, zIndex:2000, background:"rgba(0,0,0,.92)",
+            <div onClick={closeScan} style={{ position:"fixed", inset:0, zIndex:2000, background:"rgba(0,0,0,.92)",
               display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, padding:20,
               paddingTop:"calc(20px + env(safe-area-inset-top,0px))" }}>
               <div style={{ color:"var(--text)", fontWeight:700, fontSize:"1.02rem" }}>Point at a barcode</div>
@@ -9803,7 +9863,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       {/* Log-confirmation toast — fixed at the bottom so it's visible no matter
           where you've scrolled (Kevin: previously no confirmation that it saved). */}
       {toast && createPortal(
-        <div data-theme="pro" style={{ position:"fixed", left:"50%", bottom:"calc(24px + env(safe-area-inset-bottom,0px))",
+        <div style={{ position:"fixed", left:"50%", bottom:"calc(24px + env(safe-area-inset-bottom,0px))",
           transform:"translateX(-50%)", zIndex:3000, display:"flex", alignItems:"center", gap:"8px",
           background:"var(--surface)", border:"1px solid var(--green)", color:"var(--text)",
           padding:"11px 16px", borderRadius:"999px", fontSize:".85rem", fontWeight:700,
@@ -10507,7 +10567,7 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
           const wt = Math.round(yMax - (yRange * i / 4));
           return (
             <g key={i}>
-              <line x1={PAD.left} y1={y} x2={PAD.left + chartW} y2={y} stroke="rgba(255,255,255,.06)" strokeWidth="1" />
+              <line x1={PAD.left} y1={y} x2={PAD.left + chartW} y2={y} style={{ stroke: "var(--tint-lg)" }} strokeWidth="1" />
               <text x={PAD.left - 10} y={y + 4} textAnchor="end" fill="#a8a8cc" fontSize="11" fontFamily="DM Sans,sans-serif">{wt}</text>
             </g>
           );
@@ -10615,8 +10675,8 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
 function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, rangeHigh, startWeight, onDelete, onClose }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);   // phone Back closes the modal
-  // Self-contained brand theme (data-theme="pro") so it looks identical whether
-  // it's opened from the pro-themed Client Dashboard or the old-styled Results.
+  // Theme comes from <html> (S95), so this looks identical wherever it's opened
+  // from — it used to carry its own data-theme="pro" for that.
   const w = Number(currentWeight) || 0;
   const start = Number(startWeight) || 0;
   const weighIns = [...(checkIns || [])].filter(c => c.weight).sort((a, b) => a.timestamp - b.timestamp);
@@ -10630,7 +10690,7 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
   // not to a transformed ancestor (the .page-transition wrapper keeps a CSS
   // transform, which would otherwise become the containing block for fixed).
   return createPortal(
-    <div data-theme="pro" onClick={onClose} style={{ fontFamily: "var(--font-sans)" }}
+    <div onClick={onClose} style={{ fontFamily: "var(--font-sans)" }}
       className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4">
       <div onClick={e => e.stopPropagation()}
         className="w-full max-w-[640px] max-h-[88vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
@@ -10756,7 +10816,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   const suggested = metrics && metrics.goalWeightFromLeanMass;
 
   return createPortal(
-    <div data-theme="pro" onClick={onClose} style={{ fontFamily: "var(--font-sans)" }}
+    <div onClick={onClose} style={{ fontFamily: "var(--font-sans)" }}
       className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4">
       <div onClick={(e) => e.stopPropagation()}
         className="w-full max-w-[640px] max-h-[88vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
@@ -11177,7 +11237,7 @@ function InstallPrompt() {
   };
 
   return createPortal(
-    <div data-theme="pro" style={{ position: "fixed", zIndex: 1380,
+    <div style={{ position: "fixed", zIndex: 1380,
       left: "10px", right: "10px", bottom: "calc(12px + env(safe-area-inset-bottom,0px))",
       maxWidth: 460, margin: "0 auto", borderRadius: 14, padding: "12px 14px",
       background: "var(--surface,#121b1e)", border: "1px solid var(--border)", boxShadow: "0 8px 30px rgba(0,0,0,.45)",
@@ -11585,7 +11645,7 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
   }[type];
 
   return createPortal(
-    <div data-theme="pro" onClick={onClose} style={{ fontFamily: "var(--font-sans)" }}
+    <div onClick={onClose} style={{ fontFamily: "var(--font-sans)" }}
       className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4">
       <div onClick={(e) => e.stopPropagation()}
         className="w-full max-w-[440px] rounded-card border border-border bg-surface p-[18px] text-fg">
@@ -12155,7 +12215,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const complete = realPlans.filter((p) => p.stepLabel === "Results").length;
   const activeWeek = realPlans.filter((p) => Date.now() - lastActiveTs(p) < 7 * 86400000).length;
 
-  // Tailwind class strings (Session 28 redesign — brand theme via data-theme="pro").
+  // Tailwind class strings (Session 28 redesign — brand theme via).
   const cardCls = "bg-surface border border-border rounded-card p-5 mb-4";
   const sectionTitleCls = "font-display text-lg tracking-wider text-primary";
   const subCls = "text-sm text-muted";
@@ -12169,7 +12229,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const purpleChip = (active) => `px-2.5 py-1.5 text-xs rounded-md cursor-pointer border ${active ? "border-[#b57bff] bg-[rgba(181,123,255,.12)] text-fg" : "border-border bg-transparent text-fg"}`;
 
   return (
-    <div data-theme="pro" className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
+    <div className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
       <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
@@ -12857,7 +12917,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
   );
 
   return (
-    <div data-theme="pro" className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
+    <div className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
       <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
         <BrandLogo />
@@ -13187,7 +13247,7 @@ function PlanPicker({ role, onClose }) {
     if (!ok) { setBusyTier(null); setErr(true); }
   };
   return createPortal(
-    <div data-theme="pro" onClick={onClose} style={{ position:"fixed", inset:0, zIndex:2400,
+    <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:2400,
       background:"rgba(0,0,0,.78)", display:"flex", alignItems:"center", justifyContent:"center",
       padding:"20px", paddingTop:"calc(20px + env(safe-area-inset-top,0px))", overflowY:"auto" }}>
       <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card"
@@ -13272,6 +13332,31 @@ const callDeleteWorkflow = httpsCallable(functions, "deleteWorkflow");
 // Set after a successful passkey setup/sign-in so the login screen can lead
 // with the Face ID button on this device.
 const PASSKEY_HINT = "glide-passkey";
+
+// ── Appearance / theme (S95) ────────────────────────────────────────────────
+// "dark" | "light" | "system". Stored per DEVICE in localStorage, not per
+// account: the theme must be known before the first paint (see the inline script
+// in index.html) and before anyone is signed in, which rules out a Firestore
+// read. It also lets your phone be dark while your laptop is light — usually
+// what people want from a theme.
+// Default "dark" = the app's look since day one, so an existing user's app never
+// changes appearance until they choose it.
+const THEME_KEY = "glidna-theme";
+const THEME_DARK_BG = "#060809", THEME_LIGHT_BG = "#f4f7f8"; // PWA status-bar colour
+const readThemePref = () => {
+  try { return localStorage.getItem(THEME_KEY) || "dark"; } catch (e) { return "dark"; }
+};
+const systemPrefersDark = () =>
+  !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+// Resolve a preference to a real theme and paint it. Mirrors the inline script
+// in index.html — keep the two in step.
+const applyTheme = (pref) => {
+  const dark = pref === "dark" || (pref === "system" && systemPrefersDark());
+  document.documentElement.setAttribute("data-theme", dark ? "pro" : "light");
+  const m = document.querySelector('meta[name="theme-color"]');
+  if (m) m.setAttribute("content", dark ? THEME_DARK_BG : THEME_LIGHT_BG);
+  return dark;
+};
 // Streaming endpoint (Session 66) — replies arrive word-by-word via SSE. We POST
 // with the Firebase ID token (EventSource can't set headers, so we fetch+stream).
 const AI_STREAM_URL = `https://us-central1-${import.meta.env.VITE_FIREBASE_PROJECT_ID}.cloudfunctions.net/aiChatStream`;
@@ -13896,7 +13981,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const bubbleAI = "self-start max-w-[90%] rounded-2xl rounded-bl-sm bg-surface2 px-3.5 py-2.5 text-[.95rem] leading-relaxed text-fg whitespace-pre-wrap break-words";
 
   return createPortal(
-    <div data-theme="pro" style={{ fontFamily: "var(--font-sans)" }}>
+    <div style={{ fontFamily: "var(--font-sans)" }}>
       {/* Floating launcher button */}
       {!open && (
         <button onClick={() => setOpen(true)} aria-label="Open AI assistant"
@@ -14799,7 +14884,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   const remaining = target != null ? target - consumed : null;
   const firstName = (planData && planData.firstName) || (meName ? meName.split(" ")[0] : "");
 
-  // Tailwind class strings (Session 26 redesign — brand theme via data-theme="pro").
+  // Tailwind class strings (Session 26 redesign — brand theme via).
   const cardCls = "bg-surface border border-border rounded-card p-5";
   const inputCls = "flex-1 min-w-0 bg-surface2 border border-border rounded-lg px-3 py-2.5 text-fg text-[.95rem] outline-none placeholder:text-muted";
   const primaryBtnCls = "px-4 py-2.5 rounded-lg font-bold text-sm bg-primaryfill text-primaryfg cursor-pointer whitespace-nowrap";
@@ -14808,7 +14893,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   const miniBtnActiveCls = "px-2.5 py-1.5 rounded-md text-xs font-bold bg-primaryfill text-primaryfg border-0 cursor-pointer whitespace-nowrap";
 
   return (
-    <div data-theme="pro" className="page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
+    <div className="page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
       <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
@@ -15192,9 +15277,9 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
 
       {/* Full calendar (back-dating) — log food/weight/workouts on any date.
           Portaled to escape the page-transition transform trap; :root css vars
-          (already injected above) + data-theme="pro" give it the brand look. */}
+          (already injected above) + give it the brand look. */}
       {showCalendar && createPortal(
-        <div data-theme="pro" className="fixed inset-0 z-[1396] overflow-y-auto"
+        <div className="fixed inset-0 z-[1396] overflow-y-auto"
           style={{ background: "var(--bg)", color: "var(--text)", fontFamily: "var(--font-sans)" }}>
           <div style={{ maxWidth: 640, margin: "0 auto", padding: "calc(12px + env(safe-area-inset-top,0px)) 16px 96px" }}>
             <CalendarView data={planData || {}} tdee={target} onClose={() => setShowCalendar(false)}
@@ -15254,7 +15339,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
     if (dragId) { onMoveProfile(dragId, folderId); setDragId(null); setDragOverFolder(null); }
   };
 
-  // Tailwind class strings (Session 29 redesign — brand theme via data-theme="pro").
+  // Tailwind class strings (Session 29 redesign — brand theme via).
   const cardCls = "bg-surface border border-border rounded-card p-5 mb-3";
   const sectionTitleCls = "font-display text-lg tracking-wider text-primary mb-1";
   const subCls = "text-sm text-muted leading-relaxed";
@@ -15307,7 +15392,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
   };
 
   return (
-    <div data-theme="pro" className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
+    <div className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
       <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
@@ -15755,7 +15840,7 @@ function InviteHub({ open, onClose, meName }) {
   const btnGhost = { padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "transparent", color: "var(--text)", fontWeight: 600, fontSize: ".82rem", cursor: "pointer" };
 
   return createPortal(
-    <div data-theme="pro" style={{ position: "fixed", inset: 0, zIndex: 1500, background: "var(--bg)", color: "var(--text)",
+    <div style={{ position: "fixed", inset: 0, zIndex: 1500, background: "var(--bg)", color: "var(--text)",
       fontFamily: "var(--font-sans)", overflowY: "auto", padding: "calc(14px + env(safe-area-inset-top,0px)) 14px 32px" }}>
       <div style={{ maxWidth: 560, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
         {/* Header */}
@@ -15851,7 +15936,7 @@ function InviteHub({ open, onClose, meName }) {
 // page-transition transform trap (S27) can't mis-anchor it.
 function UpgradeCongrats({ isTrainer, onClose }) {
   return createPortal(
-    <div data-theme="pro" onClick={onClose}
+    <div onClick={onClose}
       style={{ position: "fixed", inset: 0, zIndex: 1500, display: "flex", alignItems: "center",
         justifyContent: "center", background: "rgba(3,6,8,.74)", padding: 20,
         fontFamily: "var(--font-sans)" }}>
@@ -16021,7 +16106,7 @@ function AutomationsPanel({ open, onClose, role }) {
 
   if (!open) return null;
   return createPortal(
-    <div data-theme="pro" style={{ position: "fixed", inset: 0, zIndex: 1500, background: "var(--bg)", color: "var(--text)",
+    <div style={{ position: "fixed", inset: 0, zIndex: 1500, background: "var(--bg)", color: "var(--text)",
       fontFamily: "var(--font-sans)", overflowY: "auto", padding: "calc(14px + env(safe-area-inset-top,0px)) 14px 32px" }}>
       <div style={{ maxWidth: 560, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
         {/* Header */}
@@ -16228,7 +16313,7 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
   };
   const timeOf = (ts) => { try { return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch { return ""; } };
   return createPortal(
-    <div data-theme="pro" className="bg-bg text-fg" style={{ position: "fixed", inset: 0, zIndex: 2300, display: "flex", flexDirection: "column", fontFamily: "var(--font-sans)" }}>
+    <div className="bg-bg text-fg" style={{ position: "fixed", inset: 0, zIndex: 2300, display: "flex", flexDirection: "column", fontFamily: "var(--font-sans)" }}>
       <div className="flex items-center gap-2 border-b border-border bg-surface2 px-3" style={{ paddingTop: "calc(10px + env(safe-area-inset-top,0px))", paddingBottom: "10px" }}>
         <Icon name="person" size={18} color="var(--accent)" />
         <div className="min-w-0 flex-1">
@@ -16405,7 +16490,7 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
   const shareLabel = mode === "trainer-client" ? `Visible to ${clientName || "the client"}` : "Visible to my trainer";
 
   return createPortal(
-    <div data-theme="pro" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2350, background: "rgba(0,0,0,.78)",
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2350, background: "rgba(0,0,0,.78)",
       display: "flex", justifyContent: "center", padding: "14px", paddingTop: "calc(14px + env(safe-area-inset-top,0px))", overflowY: "auto" }}>
       <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card"
         style={{ width: "min(94vw,460px)", padding: "18px 16px", margin: "auto 0", maxHeight: "86vh", display: "flex", flexDirection: "column", gap: "10px" }}>
@@ -16488,7 +16573,7 @@ function NotifFeed({ items, onClose }) {
   const iconFor = (tag) => String(tag).startsWith("dm-") ? "inbox"
     : tag === "trainer-todo" ? "mail" : tag === "client-request" ? "clients" : "bell";
   return createPortal(
-    <div data-theme="pro" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2400,
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2400,
       background: "rgba(0,0,0,.78)", display: "flex", justifyContent: "center",
       padding: "16px", paddingTop: "calc(16px + env(safe-area-inset-top,0px))", overflowY: "auto" }}>
       <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card"
@@ -16549,7 +16634,7 @@ function AdminDashboard({ onClose }) {
     </div>
   );
   return createPortal(
-    <div data-theme="pro" onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2400, background: "rgba(0,0,0,.8)", display: "flex", justifyContent: "center", padding: "16px", paddingTop: "calc(16px + env(safe-area-inset-top,0px))", overflowY: "auto" }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2400, background: "rgba(0,0,0,.8)", display: "flex", justifyContent: "center", padding: "16px", paddingTop: "calc(16px + env(safe-area-inset-top,0px))", overflowY: "auto" }}>
       <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card" style={{ width: "min(96vw,640px)", padding: "18px 16px", margin: "auto 0", display: "flex", flexDirection: "column", gap: "12px" }}>
         <div className="flex items-center gap-2">
           <Icon name="dashboard" size={18} color="var(--accent)" />
@@ -16598,7 +16683,7 @@ function AdminDashboard({ onClose }) {
     </div>, document.body);
 }
 
-function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onNameSaved, idleSignOut, onSetIdleSignOut, isAdminUid }) {
+function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onNameSaved, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
@@ -16898,6 +16983,28 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
         )}
         {showMyNotes && <NotesPanel mode="trainer-self" meName={meName} onClose={() => setShowMyNotes(false)} />}
 
+        {/* Appearance (S95) — Light / Dark / Match device, per device. */}
+        <div style={{ ...item, cursor: "default", flexWrap: "wrap", gap: 8 }}>
+          <Icon name={themePref === "light" ? "sun" : themePref === "dark" ? "moon" : "phone"} size={19} color="var(--accent)" />
+          <span>Appearance</span>
+          <div style={{ display: "flex", gap: 5, marginLeft: "auto" }}>
+            {[["light", "Light"], ["dark", "Dark"], ["system", "Auto"]].map(([v, label]) => (
+              <button key={v} onClick={() => onSetTheme(v)}
+                title={v === "system" ? "Follow your device's light/dark setting" : `Always ${label.toLowerCase()}`}
+                style={{ padding: "7px 11px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
+                  fontSize: ".72rem", fontWeight: 700,
+                  border: `1px solid ${themePref === v ? "var(--accent)" : "var(--border)"}`,
+                  background: themePref === v ? "var(--accent-dim,rgba(8,220,224,.12))" : "transparent",
+                  color: themePref === v ? "var(--accent)" : "var(--muted)" }}>{label}</button>
+            ))}
+          </div>
+        </div>
+        {themePref === "system" && (
+          <div style={{ fontSize: ".72rem", color: "var(--muted)", padding: "0 4px 4px" }}>
+            Following your device — it'll switch automatically when your phone does.
+          </div>
+        )}
+
         {/* Face ID / Touch ID sign-in — registers a passkey for THIS device so
             future sign-ins (e.g. after the 30-min idle sign-out) are one glance
             instead of a password. */}
@@ -16971,6 +17078,9 @@ export default function App() {
   const [meUid, setMeUid] = useState("");     // current user's uid
   const [meEmail, setMeEmail] = useState(""); // current user's email (for the menu)
   const [meTrial, setMeTrial] = useState(null); // trial countdown state (or null)
+  // Appearance (S95): the inline script in index.html already painted the theme
+  // before first paint; this just mirrors the stored pref so the menu can show it.
+  const [themePref, setThemePref] = useState(readThemePref);
   const [mePremium, setMePremium] = useState(true); // AI-layer access (locks on trial expiry)
   const [meSubStatus, setMeSubStatus] = useState(null); // "trial" | "active" | "canceled" (drives Manage subscription)
   const [upgradeCongrats, setUpgradeCongrats] = useState(false); // post-checkout celebration (S89c)
@@ -17384,6 +17494,27 @@ export default function App() {
     if (!(payload && payload.mode === "list")) await reloadProfilesIndex();
     return res.data;
   };
+
+  // Appearance (S95): persist the choice and repaint immediately.
+  const setTheme = (pref) => {
+    setThemePref(pref);
+    try { localStorage.setItem(THEME_KEY, pref); } catch (e) { /* private mode — still applies for this session */ }
+    applyTheme(pref);
+  };
+  // On "Auto", follow the device live — flipping the phone to dark at sunset
+  // should flip the app then and there, not on the next reload.
+  useEffect(() => {
+    if (themePref !== "system" || !window.matchMedia) return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => applyTheme("system");
+    // Safari <14 only has the deprecated addListener.
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", onChange);
+      else if (mq.removeListener) mq.removeListener(onChange);
+    };
+  }, [themePref]);
 
   // v1 runs on the platform owner's shared Trainerize token, so only that account
   // can pull (the callable enforces it too — requireAdmin).
@@ -18082,6 +18213,7 @@ export default function App() {
       <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} role={role} meName={meName} meEmail={meEmail}
         idleSignOut={idleSignOut} onSetIdleSignOut={onSetIdleSignOut}
         isTrainer={isTrainerHome} trial={meTrial} subActive={meSubStatus === "active"}
+        themePref={themePref} onSetTheme={setTheme}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
         onHome={() => { if (isTrainerHome) setHomeTab("dashboard"); goToProfiles(); }}
         onDashboard={() => { setHomeTab("analytics"); goToProfiles(); }}
@@ -18144,7 +18276,7 @@ export default function App() {
       {chrome}
       <style>{css}</style>
       {saving && <div className="prof-save-badge">✓ Saved</div>}
-      <div className="app" data-theme="pro">
+      <div className="app">
         {/* Slim brand header — min-height clears the fixed hamburger (App chrome).
             The safe-area padding matches the other four screen headers: in the
             installed PWA on a notched iPhone the content extends under the

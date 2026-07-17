@@ -13,6 +13,27 @@
          helps mic/camera permissions persist on iOS when installed. -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#060809" />
+    <!-- Appearance (S95). Must run BEFORE first paint, which is why it's inline
+         and dependency-free rather than in React: the app would otherwise boot
+         dark and visibly flash to light on the first render. Sits AFTER the
+         theme-color meta above so it can retag it (the PWA status-bar colour).
+         Default "dark" = the app's look since day one, so nobody's appearance
+         changes until they pick a theme themselves. Mirrored by applyTheme() in
+         App.jsx — keep the two in step. -->
+    <script>
+      (function () {
+        try {
+          var pref = localStorage.getItem("glidna-theme") || "dark";
+          var dark = pref === "dark" || (pref === "system" && window.matchMedia
+            && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.setAttribute("data-theme", dark ? "pro" : "light");
+          var m = document.querySelector('meta[name="theme-color"]');
+          if (m) m.setAttribute("content", dark ? "#060809" : "#f4f7f8");
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "pro"); // private mode / storage blocked
+        }
+      })();
+    </script>
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />

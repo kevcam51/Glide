@@ -76,6 +76,37 @@
   --font-display: 'Nunito', system-ui, sans-serif;
 }
 
+/* 5) Light (S95) — the SAME brand in daylight: white surfaces, near-black text,
+ *    Smooth Training cyan. This is "pro" inverted, and it ships as a real user
+ *    setting (≡ → Appearance), unlike clean/bold/warm which exist only for the
+ *    dev Showcase.
+ *
+ *    ⚠️ The brand cyan #08dce0 is a ~1.9:1 contrast on white — illegible as text.
+ *    So the token splits by JOB, which is why both exist:
+ *      --color-primary      → text/icons/borders  → DARKENED cyan (#0a8f93, ~4.5:1)
+ *      --color-primaryfill  → large filled buttons → the bright brand cyan, with
+ *                             near-black --color-primaryfg on top
+ *    Semantic colors are darkened for the same reason (#2fe0a8 green etc. is
+ *    tuned to glow on near-black and washes out on white). */
+[data-theme="light"] {
+  --color-bg: #f4f7f8;
+  --color-surface: #ffffff;
+  --color-surface2: #eaf0f1;
+  --color-border: #d6e0e2;
+  --color-fg: #0d1418;
+  --color-muted: #5c7175;
+  --color-primary: #0a8f93;     /* darkened cyan — legible on white */
+  --color-primaryfill: #08dce0; /* the bright brand cyan reads great as a FILL */
+  --color-primaryfg: #04201f;   /* near-black on cyan */
+  --color-accent: #0284c7;
+  --color-success: #0f9d6e;
+  --color-warn: #b45309;
+  --color-danger: #dc2626;
+  --radius-card: 10px;
+  --font-sans: 'Sora', system-ui, sans-serif;
+  --font-display: 'Sora', system-ui, sans-serif;
+}
+
 /* 4) Dark / Pro — Smooth Training brand: near-black surfaces + the logo's bright
  *    cyan (#08DCE0) as primary. Sharp, premium, data-forward. */
 [data-theme="pro"] {

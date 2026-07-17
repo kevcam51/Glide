@@ -64,6 +64,9 @@ const GLYPHS = {
   // — S94: move a logged item between meals (up/down swap arrows) & copy —
   move: (<><path d="M8 4.5 5 7.5 8 10.5" /><path d="M5 7.5h9" /><path d="M16 13.5l3 3-3 3" /><path d="M19 16.5h-9" /></>),
   copy: (<><rect x="8.5" y="8.5" width="11" height="11" rx="2" /><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5" /></>),
+  // — S95: appearance / theme (moon already exists for dark) —
+  sun: (<><circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.4" /><path d="M12 19.1v2.4" /><path d="M4.2 4.2l1.7 1.7" /><path d="M18.1 18.1l1.7 1.7" /><path d="M2.5 12h2.4" /><path d="M19.1 12h2.4" /><path d="M4.2 19.8l1.7-1.7" /><path d="M18.1 5.9l1.7-1.7" /></>),
+  phone: (<><rect x="6.5" y="2.5" width="11" height="19" rx="2.4" /><path d="M10.5 5.5h3" /><path d="M11 18.5h2" /></>),
   // — S95: the food library (page icon, save-for-good star, delete) —
   book: (<><path d="M4 4.6A1.6 1.6 0 0 1 5.6 3H18a1 1 0 0 1 1 1v13H5.6A1.6 1.6 0 0 0 4 18.6z" /><path d="M4 18.6A1.6 1.6 0 0 1 5.6 17H19v4H5.6A1.6 1.6 0 0 1 4 19.4z" /><path d="M8 7.5h7" /><path d="M8 11h5" /></>),
   star: (<path d="m12 3.6 2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8L3.5 9.8l5.9-.9z" />),

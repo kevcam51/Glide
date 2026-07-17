@@ -47,11 +47,13 @@
   --radius-card: 12px;
 }
 
-/* Near-black base (matches the pro theme --color-bg) so iOS rubber-band
-   overscroll and the pre-React first paint don't flash white behind the
-   dark app — very visible in the installed PWA under the translucent
-   status bar. */
-html, body { background: #05080a; }
+/* Base behind the app, so iOS rubber-band overscroll and the pre-React first
+   paint match the app instead of flashing — very visible in the installed PWA
+   under the translucent status bar. Follows the theme (S95): hardcoding
+   near-black here painted a dark band around the light theme. The inline script
+   in index.html sets data-theme before first paint, so this resolves correctly
+   from the very first frame. */
+html, body { background: var(--color-bg); }
 body { margin: 0; padding: 0; }
 
 /* ── iOS / installed-app polish (S90) ─────────────────────────────────────────
