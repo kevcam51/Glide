@@ -1590,6 +1590,8 @@ body{
 .share-brand{font-size:.65rem;color:var(--muted);margin-top:10px;letter-spacing:1px}
 
 @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes sheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
 /* AI "typing" indicator — three dots bounce in sequence while the AI works (S91). */
 @keyframes glidnaTypingDot{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-4px);opacity:1}}
@@ -7034,6 +7036,62 @@ const deriveBasisFromMeal = (m) => {
     servingLabel: "serving", initialQty: qty };
 };
 
+// Reusable bottom-sheet overlay (S97, Kevin): tapping a dashboard tile used to
+// expand a panel INLINE far below the fold (past the tracker card), so people
+// lost track of where the screen went. A sheet slides up IN FRONT of the user
+// regardless of scroll, dims the rest, and carries a dedicated back arrow at the
+// top-RIGHT (Kevin's placement) for an obvious, consistent way back. Portaled to
+// body so it escapes the page-transition transform trap (S27/S30); back-button
+// + body-scroll-lock via the shared hooks. `icon` is an <Icon> name.
+function BottomSheet({ open, onClose, title, icon, children }) {
+  useBackClose(open, onClose);
+  useBodyScrollLock(open);
+  if (!open) return null;
+  return createPortal(
+    <div onClick={onClose}
+      style={{ position: "fixed", inset: 0, zIndex: 1600, display: "flex", flexDirection: "column",
+        justifyContent: "flex-end", background: "rgba(0,0,0,.55)", animation: "fadeIn .18s ease both",
+        fontFamily: "var(--font-sans)" }}>
+      <div onClick={(e) => e.stopPropagation()} data-sheet
+        style={{ background: "var(--bg)", color: "var(--text)", borderTopLeftRadius: 20, borderTopRightRadius: 20,
+          borderTop: "1px solid var(--border)", boxShadow: "0 -10px 40px rgba(0,0,0,.4)",
+          maxHeight: "88vh", display: "flex", flexDirection: "column", animation: "sheetUp .26s cubic-bezier(.25,.9,.3,1) both" }}>
+        {/* Grab handle + header: title left, back arrow top-right (Kevin). */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 8 }}>
+          <div style={{ width: 38, height: 4, borderRadius: 999, background: "var(--border)", marginBottom: 6 }} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
+          padding: "4px 14px 12px", borderBottom: "1px solid var(--border)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+            {icon && <Icon name={icon} size={20} color="var(--accent)" />}
+            <span style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", fontWeight: 700,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+          </div>
+          <button onClick={onClose} aria-label="Back"
+            style={{ display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)",
+              background: "var(--surface)", color: "var(--text)", borderRadius: 999, padding: "7px 13px 7px 10px",
+              cursor: "pointer", fontSize: ".82rem", fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>
+            <Icon name="back" size={17} color="var(--accent)" />Back
+          </button>
+        </div>
+        <div style={{ overflowY: "auto", WebkitOverflowScrolling: "touch",
+          padding: "14px 16px calc(20px + env(safe-area-inset-bottom,0px))" }}>
+          {children}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// Title + icon for each dashboard tile's bottom sheet.
+const STAT_SHEET_META = {
+  target: ["Today's Target", "target"],
+  logged: ["Food & Calories", "meal"],
+  burn:   ["Workout Burn", "flame"],
+  water:  ["Water", "water"],
+};
+
 // The food detail popup: pick a serving size (with MyFitnessPal-style unit
 // variety) and fine-tune calories/protein/carbs/fat, then Add or Save. Opened
 // when you tap a search result OR edit a logged food. Rendered through a portal
@@ -7121,8 +7179,12 @@ function FoodServingModal({ food, editing, mealLabel, onConfirm, onClose }) {
             {food.brand ? <div style={{ fontSize: ".76rem", color: "var(--muted)" }}>{food.brand}</div> : null}
             {mealLabel ? <div style={{ fontSize: ".72rem", color: "var(--accent)", fontWeight: 700, marginTop: "2px" }}>{mealLabel}</div> : null}
           </div>
-          <button onClick={onClose} aria-label="Close"
-            style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: "1.2rem", lineHeight: 1, padding: "2px" }}>✕</button>
+          <button onClick={onClose} aria-label="Back"
+            style={{ display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)",
+              color: "var(--text)", borderRadius: 999, padding: "6px 12px 6px 9px", cursor: "pointer",
+              fontSize: ".8rem", fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>
+            <Icon name="back" size={16} color="var(--accent)" />Back
+          </button>
         </div>
 
         {/* Big calories readout */}
@@ -7299,22 +7361,27 @@ function CopyMealModal({ sectionLabel, targetType, matchMeal, dateKey, onReadDay
 // up under the add-form:
 //   • Saved — foods you deliberately keep (SAVED_FOODS_KEY, per person, forever)
 //   • Previously logged — what you've logged lately (caliq-foods-{plan}, rolls over)
-// A saved food is REMOVED from Previously logged: it's been promoted, and listing
-// it in both places is exactly the duplication this page exists to end.
+// These are TWO INDEPENDENT lists (S97, Kevin): saving a food does NOT remove it
+// from Previously logged — a saved food keeps showing there until it naturally
+// rolls off the recents cap. Each list has meal-type filter tabs (All / Breakfast
+// / Lunch / Dinner / Snack) so you're not scrolling past every meal to find one.
 // Rows mirror a logged meal row (macros spelled out, big calories) so a remembered
 // food looks like the thing it becomes.
 // Opened from a meal's "Previously logged" button (mealType set → that meal only,
-// tap adds straight to it) or from the header (mealType null → everything grouped
-// by meal, tap adds to the food's own meal).
+// tap adds straight to it) or from the header (mealType null → the meal-type tabs
+// let you filter, tap adds to the food's own meal).
 const LIB_DISPLAY_CAP = 30; // per meal type — Kevin: recents shouldn't pile up
 function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleSave, onRemoveRecent, onRemoveSaved, onClose }) {
   const [tab, setTab] = useState("recent");
+  // Meal-type filter (S97): All / Breakfast / Lunch / Dinner / Snack. When the
+  // page was opened FROM a specific meal (mealType set) it's pre-scoped there.
+  const [mealFilter, setMealFilter] = useState("all");
   const [q, setQ] = useState("");
   const [flash, setFlash] = useState("");   // "added: <name>" confirmation
   const [confirmDel, setConfirmDel] = useState(""); // key pending delete confirm
   useBackClose(open, onClose);
   useBodyScrollLock(open);
-  useEffect(() => { if (open) { setQ(""); setFlash(""); setConfirmDel(""); setTab((savedFoods || []).length ? "saved" : "recent"); } }, [open]);
+  useEffect(() => { if (open) { setQ(""); setFlash(""); setConfirmDel(""); setMealFilter("all"); setTab((savedFoods || []).length ? "saved" : "recent"); } }, [open]);
 
   const savedKeys = new Set((savedFoods || []).map((f) => recentFoodKey(f.name, f.type)));
   // Legacy recents (logged before per-meal scoping) carry no type and show under
@@ -7337,15 +7404,20 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
   // where you saved it, which reads as "the food vanished".
   const effType = (f) => (f.type != null ? f.type : (mealType != null ? mealType : "other"));
 
-  // Recents minus anything already saved (no cross-tab duplicates).
-  const recents = (recentFoods || []).filter((f) => f && f.name && !isSaved(f) && inScope(f) && match(f));
-  const saved = (savedFoods || []).filter((f) => f && f.name && inScope(f) && match(f));
+  // Meal-type filter tab (S97). "all" shows everything; a specific meal narrows to
+  // it. Typeless legacy foods match every filter so they never hide.
+  const mealScope = (f) => (mealFilter === "all" ? true : (f.type == null ? true : recentMealKey(f.type) === mealFilter));
+  // Saved and recents are now INDEPENDENT (S97) — a saved food ALSO stays in
+  // Previously logged until it rolls off the cap (no `!isSaved` exclusion).
+  const recents = (recentFoods || []).filter((f) => f && f.name && inScope(f) && mealScope(f) && match(f));
+  const saved = (savedFoods || []).filter((f) => f && f.name && inScope(f) && mealScope(f) && match(f));
   const list = tab === "saved" ? saved : recents;
 
-  // Group by meal type when browsing everything; a single flat group when the
-  // page was opened from one meal's add-form.
+  // Flat list when scoped to one meal (opened from a meal, OR a meal-filter tab is
+  // active); grouped by meal only in the "All" view of the general library.
+  const scopedToOneMeal = mealType != null || mealFilter !== "all";
   const groups = (() => {
-    if (mealType != null) return [[null, list.slice(0, LIB_DISPLAY_CAP)]];
+    if (scopedToOneMeal) return [[null, list.slice(0, LIB_DISPLAY_CAP)]];
     const byKey = new Map(RECENT_MEAL_KEYS.map((k) => [k, []]));
     list.forEach((f) => {
       const k = recentMealKey(f.type);
@@ -7425,13 +7497,17 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
             <span style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem", fontWeight: 700 }}>Food library</span>
             {mealType != null && <span style={{ fontSize: ".76rem", color: "var(--muted)", whiteSpace: "nowrap" }}>· {mealType || "Other"}</span>}
           </div>
-          <button onClick={onClose} aria-label="Close"
-            style={{ border: "1px solid var(--border)", background: "transparent", color: "var(--text)",
-              borderRadius: 9, padding: "8px 13px", cursor: "pointer", fontSize: ".85rem", fontFamily: "inherit" }}>✕</button>
+          {/* Back arrow, top-right (S97, Kevin) — consistent way back on every page. */}
+          <button onClick={onClose} aria-label="Back"
+            style={{ display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)",
+              background: "var(--surface)", color: "var(--text)", borderRadius: 999, padding: "7px 13px 7px 10px",
+              cursor: "pointer", fontSize: ".82rem", fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>
+            <Icon name="back" size={17} color="var(--accent)" />Back
+          </button>
         </div>
 
-        {/* Tabs */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        {/* List selector: Saved | Previously logged (two independent lists). */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
           {[["saved", `Saved${saved.length ? ` (${saved.length})` : ""}`], ["recent", `Previously logged${recents.length ? ` (${recents.length})` : ""}`]].map(([k, label]) => (
             <button key={k} onClick={() => { setTab(k); setConfirmDel(""); }}
               style={{ flex: 1, padding: "9px 8px", borderRadius: 9, cursor: "pointer", fontFamily: "inherit",
@@ -7442,20 +7518,35 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
           ))}
         </div>
 
+        {/* Meal-type filter (S97) — only in the general library; a meal-scoped
+            open is already narrowed to its meal. */}
+        {mealType == null && (
+          <div style={{ display: "flex", gap: 5, marginBottom: 10, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+            {[["all", "All"], ["breakfast", "Breakfast"], ["lunch", "Lunch"], ["dinner", "Dinner"], ["snack", "Snack"]].map(([k, label]) => (
+              <button key={k} onClick={() => { setMealFilter(k); setConfirmDel(""); }}
+                style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
+                  fontSize: ".74rem", fontWeight: 700,
+                  border: `1px solid ${mealFilter === k ? "var(--accent)" : "var(--border)"}`,
+                  background: mealFilter === k ? "rgba(8,220,224,.1)" : "transparent",
+                  color: mealFilter === k ? "var(--accent)" : "var(--muted)" }}>{label}</button>
+            ))}
+          </div>
+        )}
+
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your foods…"
           style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)",
             background: "var(--surface)", color: "var(--text)", fontSize: ".9rem", fontFamily: "inherit",
             boxSizing: "border-box", marginBottom: 12 }} />
 
         {flash && (
-          <div style={{ fontSize: ".78rem", color: "var(--green)", fontWeight: 700, marginBottom: 8 }}>✓ Added {flash}</div>
+          <div style={{ fontSize: ".78rem", color: "var(--green)", fontWeight: 700, marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}><Icon name="check" size={14} color="var(--green)" />Added {flash}</div>
         )}
 
         {groups.length === 0 ? (
           <div style={{ padding: "26px 14px", textAlign: "center", color: "var(--muted)", fontSize: ".84rem", lineHeight: 1.5 }}>
             {q.trim() ? "Nothing matches that."
               : tab === "saved"
-                ? "No saved foods yet. Tap the ☆ on anything you log often and it'll live here — across every plan."
+                ? "No saved foods yet. Tap the star on anything you log often and it'll live here — across every plan."
                 : "Nothing logged yet. Foods you log will show up here for one-tap re-adding."}
           </div>
         ) : groups.map(([k, arr]) => (
@@ -7470,7 +7561,7 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
 
         <div style={{ fontSize: ".7rem", color: "var(--muted)", lineHeight: 1.5, marginTop: 4 }}>
           Tap a food to log it with its last serving. {tab === "recent"
-            ? `Recent foods roll over as you log new ones — tap ☆ to keep one for good.`
+            ? `Recent foods roll over as you log new ones — tap the star to keep one for good.`
             : `Saved foods stay in your library across every plan.`}
         </div>
       </div>
@@ -8712,7 +8803,12 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
     <>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <div style={{ fontSize: "1.15rem", fontWeight: 800, display:"flex", alignItems:"center", gap:"8px" }}><Icon name="calendar" size={19} color="var(--accent)" />Calendar</div>
-        <button style={navBtn} onClick={onClose}>✕ Close</button>
+        <button onClick={onClose} aria-label="Back"
+          style={{ display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)",
+            color: "var(--text)", borderRadius: 999, padding: "7px 13px 7px 10px", cursor: "pointer",
+            fontSize: ".82rem", fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>
+          <Icon name="back" size={16} color="var(--accent)" />Back
+        </button>
       </div>
       <div style={{ display: "flex", gap: 4, background: "var(--s2)", padding: 4, borderRadius: 10, marginBottom: 14 }}>
         {["month", "week", "day"].map((v) => (
@@ -9452,9 +9548,11 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         );
       })()}
 
-      {/* Expanded stat detail */}
-      {expandedStat && (
-        <div className="card" style={{padding:"14px 16px",marginBottom:"14px",borderColor:"rgba(8,220,224,.2)",animation:"fadeUp .15s ease both"}}>
+      {/* Expanded stat detail — a bottom sheet (S97, Kevin) so it opens IN FRONT
+          of the user regardless of scroll, not inline below the tracker card. */}
+      <BottomSheet open={!!expandedStat} onClose={()=>setExpandedStat(null)}
+        title={(STAT_SHEET_META[expandedStat]||[])[0]} icon={(STAT_SHEET_META[expandedStat]||[])[1]}>
+        <div>
           {expandedStat === "target" && (
             <>
               {manualTarget != null ? (
@@ -9465,6 +9563,16 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                     <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--accent)"}}>{target.toLocaleString()} cal</span>
                   </div>
                   <div style={{fontSize:".72rem",color:"var(--muted)"}}>Set by you — this overrides the calculated target (calculated: {computedTargetForNote.toLocaleString()} cal).</div>
+                  {/* One-tap return to Glidna's calculated target (S97, Kevin) —
+                      previously buried inside the edit flow's "Use calculated". */}
+                  {onSetCalorieTarget && (
+                    <button onClick={()=>{ onSetCalorieTarget(null); setEditTarget(false); }}
+                      style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"7px",width:"100%",marginTop:"12px",
+                        padding:"11px 12px",borderRadius:"9px",cursor:"pointer",fontFamily:"inherit",fontSize:".84rem",fontWeight:700,
+                        border:"1px solid var(--accent)",background:"rgba(8,220,224,.1)",color:"var(--accent)"}}>
+                      <Icon name="target" size={16} color="var(--accent)" />Use Glidna's default target ({computedTargetForNote.toLocaleString()} cal)
+                    </button>
+                  )}
                 </>
               ) : (
                 <>
@@ -9566,8 +9674,8 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 <div style={{marginTop:"8px",borderTop:"1px solid var(--border)",paddingTop:"8px"}}>
                   {!editTarget ? (
                     <button onClick={(e)=>{e.stopPropagation(); setTargetDraft(manualTarget!=null?String(manualTarget):String(target)); setEditTarget(true);}}
-                      style={{border:"none",background:"transparent",color:"var(--accent)",cursor:"pointer",fontSize:".76rem",fontWeight:700,padding:0,textDecoration:"underline"}}>
-                      ✎ Set your own target
+                      style={{display:"inline-flex",alignItems:"center",gap:5,border:"none",background:"transparent",color:"var(--accent)",cursor:"pointer",fontSize:".76rem",fontWeight:700,padding:0,textDecoration:"underline"}}>
+                      <Icon name="edit" size={13} color="var(--accent)" />Set your own target
                     </button>
                   ) : (
                     <div onClick={(e)=>e.stopPropagation()} style={{display:"flex",flexDirection:"column",gap:"8px"}}>
@@ -9592,7 +9700,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 </div>
               )}
               {!editTarget && manualTarget == null && (
-                <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:"6px"}}>💡 Or tap "Edit Info" to adjust your weight, goal, or activity level.</div>
+                <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:"6px",display:"flex",alignItems:"center",gap:6}}><Icon name="bulb" size={13} color="var(--muted)" />Or tap "Edit Info" to adjust your weight, goal, or activity level.</div>
               )}
             </>
           )}
@@ -9645,7 +9753,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       {showMacros && (
         <div style={{animation:"fadeUp .15s ease both"}}>
           <div className="dash-log-row">
-            <span className="dash-log-icon">🥩</span>
+            <span className="dash-log-icon" style={{display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{width:12,height:12,borderRadius:"50%",background:"#ff6b9d"}} /></span>
             <div className="dash-log-info">
               <div className="dash-log-title" style={{color:"#ff6b9d"}}>Protein</div>
               <div className="dash-log-sub">Target: ~{proteinTarget}g*</div>
@@ -9657,7 +9765,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             <span className="dash-log-unit">g</span>
           </div>
           <div className="dash-log-row">
-            <span className="dash-log-icon">🌾</span>
+            <span className="dash-log-icon" style={{display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{width:12,height:12,borderRadius:"50%",background:"#ffcc44"}} /></span>
             <div className="dash-log-info">
               <div className="dash-log-title" style={{color:"#ffcc44"}}>Carbs</div>
               <div className="dash-log-sub">Target: ~{carbsTarget}g*</div>
@@ -9669,7 +9777,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             <span className="dash-log-unit">g</span>
           </div>
           <div className="dash-log-row">
-            <span className="dash-log-icon">🥑</span>
+            <span className="dash-log-icon" style={{display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{width:12,height:12,borderRadius:"50%",background:"#4fc3f7"}} /></span>
             <div className="dash-log-info">
               <div className="dash-log-title" style={{color:"#4fc3f7"}}>Fat</div>
               <div className="dash-log-sub">Target: ~{fatTarget}g*</div>
@@ -9702,14 +9810,14 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <div style={{display:"flex",justifyContent:"flex-end",marginBottom:"8px"}}>
             <button onClick={()=>{ setMtDraft({ protein:String(proteinTarget), carbs:String(carbsTarget), fat:String(fatTarget) }); setMtPct({ protein:String(splitP), carbs:String(splitC), fat:String(splitF) }); setEditMacros(v=>!v); }}
               style={{border:"none",background:"transparent",color:"var(--accent)",cursor:"pointer",fontSize:".74rem",fontWeight:700,padding:0,textDecoration:"underline"}}>
-              {editMacros ? "Close" : "✎ Edit targets"}
+              {editMacros ? "Close" : "Edit targets"}
             </button>
           </div>
         )}
         {[
-          { icon:"🥩", label:"Protein", color:"#ff6b9d", val:dailyLog.protein||0, tgt:proteinTarget },
-          { icon:"🌾", label:"Carbs",   color:"#ffcc44", val:dailyLog.carbs||0,   tgt:carbsTarget },
-          { icon:"🥑", label:"Fat",     color:"#4fc3f7", val:dailyLog.fat||0,     tgt:fatTarget },
+          { label:"Protein", color:"#ff6b9d", val:dailyLog.protein||0, tgt:proteinTarget },
+          { label:"Carbs",   color:"#ffcc44", val:dailyLog.carbs||0,   tgt:carbsTarget },
+          { label:"Fat",     color:"#4fc3f7", val:dailyLog.fat||0,     tgt:fatTarget },
         ].map((m) => {
           const fill = m.tgt > 0 ? Math.min(100, Math.round((m.val / m.tgt) * 100)) : 0;
           const over = m.tgt > 0 && m.val > m.tgt;
@@ -9718,9 +9826,12 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             <div key={m.label} onClick={openEdit} title={openEdit ? "Tap to edit targets" : undefined}
               style={{ marginBottom:"8px", cursor: openEdit ? "pointer" : "default" }}>
               <div style={{ display:"flex", justifyContent:"space-between", fontSize:".74rem", marginBottom:"3px" }}>
-                <span style={{ color:m.color, fontWeight:600 }}>{m.icon} {m.label}</span>
-                <span style={{ color: over ? "var(--orange)" : "var(--muted)" }}>
-                  {m.val}g <span style={{ opacity:.7 }}>/ {m.tgt}g</span>{over ? " ⚠️" : m.tgt>0 && fill>=100 ? " ✓" : ""}
+                <span style={{ color:m.color, fontWeight:600, display:"inline-flex", alignItems:"center", gap:6 }}>
+                  <span style={{width:10,height:10,borderRadius:"50%",background:m.color}} />{m.label}
+                </span>
+                <span style={{ color: over ? "var(--orange)" : "var(--muted)", display:"inline-flex", alignItems:"center", gap:4 }}>
+                  {m.val}g <span style={{ opacity:.7 }}>/ {m.tgt}g</span>
+                  {over ? <Icon name="alert" size={12} color="var(--orange)" /> : m.tgt>0 && fill>=100 ? <Icon name="check" size={12} color="var(--green)" /> : null}
                 </span>
               </div>
               <div style={{ height:"7px", borderRadius:"4px", overflow:"hidden", background:"var(--border)" }}>
@@ -9925,7 +10036,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                   <div style={{display:"flex",gap:"8px",marginTop:"8px"}}>
                     <button style={{flex:1,padding:"10px",borderRadius:"8px",border:"none",background:"var(--green)",color:"#0b0b12",fontFamily:"'Sora',sans-serif",fontSize:".95rem",letterSpacing:"2px",cursor:"pointer"}}
                       onClick={()=>setEditingWorkout(null)}>
-                      ✓ Confirmed
+                      Confirmed
                     </button>
                     <button style={{padding:"10px 16px",borderRadius:"8px",border:"1.5px solid var(--red)",background:"rgba(255,79,107,.06)",color:"var(--red)",fontFamily:"'Sora',sans-serif",fontSize:".95rem",letterSpacing:"1px",cursor:"pointer"}}
                       onClick={()=>{
@@ -9934,7 +10045,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                         onUpdateCardio(dayName, 0, "_replace", sessions);
                         setEditingWorkout(null);
                       }}>
-                      🗑️ Remove
+                      Remove
                     </button>
                   </div>
                 </div>
@@ -9980,7 +10091,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                   <div style={{display:"flex",gap:"8px",marginTop:"8px"}}>
                     <button style={{flex:1,padding:"10px",borderRadius:"8px",border:"none",background:"var(--green)",color:"#0b0b12",fontFamily:"'Sora',sans-serif",fontSize:".95rem",letterSpacing:"2px",cursor:"pointer"}}
                       onClick={()=>setEditingWorkout(null)}>
-                      ✓ Confirmed
+                      Confirmed
                     </button>
                     <button style={{padding:"10px 16px",borderRadius:"8px",border:"1.5px solid var(--red)",background:"rgba(255,79,107,.06)",color:"var(--red)",fontFamily:"'Sora',sans-serif",fontSize:".95rem",letterSpacing:"1px",cursor:"pointer"}}
                       onClick={()=>{
@@ -9989,7 +10100,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                         onUpdateStrength(dayName, 0, "_replace", sessions);
                         setEditingWorkout(null);
                       }}>
-                      🗑️ Remove
+                      Remove
                     </button>
                   </div>
                 </div>
@@ -10078,7 +10189,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             </>
           )}
         </div>
-      )}
+      </BottomSheet>
 
       {showMeasure && onSaveMeasurements && (
         <MeasurementsModal data={data} onSave={onSaveMeasurements} onDelete={onDeleteMeasurement}
@@ -10773,8 +10884,8 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
         className="w-full max-w-[640px] max-h-[88vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
         <div className="mb-3 flex items-center justify-between">
           <div className="text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="chart" size={17} color="var(--accent)" />Weight progress</div>
-          <button onClick={onClose}
-            className="rounded-md border border-border bg-transparent px-2.5 py-1.5 text-xs font-semibold text-fg cursor-pointer whitespace-nowrap">✕ Close</button>
+          <button onClick={onClose} aria-label="Back"
+            className="flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
         <ProgressChart checkIns={chartCheckIns} goalWeight={goalWeight} currentWeight={w} showValues pxPerPoint={64}
           rangeLow={rangeLow} rangeHigh={rangeHigh} surfaceless />
@@ -10899,8 +11010,8 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         className="w-full max-w-[640px] max-h-[88vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
         <div className="mb-3 flex items-center justify-between">
           <div className="text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="ruler" size={17} color="var(--accent)" />{showBF ? "Body measurements" : "Measurements"}</div>
-          <button onClick={onClose}
-            className="rounded-md border border-border bg-transparent px-2.5 py-1.5 text-xs font-semibold text-fg cursor-pointer whitespace-nowrap">✕ Close</button>
+          <button onClick={onClose} aria-label="Back"
+            className="flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
 
         {/* Optional: estimate body fat % from the tape numbers, or just track them. */}

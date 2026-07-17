@@ -23,6 +23,7 @@ const GLYPHS = {
   signout: (<><path d="M14 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8" /><path d="M10 12h11" /><path d="m18 9 3 3-3 3" /></>),
   edit: (<><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z" /><path d="m14 7 3 3" /></>),
   close: (<><path d="M6 6l12 12" /><path d="M18 6 6 18" /></>),
+  back: (<><path d="M20 12H4" /><path d="m10 6-6 6 6 6" /></>),
   plus: (<><path d="M12 5v14" /><path d="M5 12h14" /></>),
   // — Fitness / data —
   flame: (<path d="M12 2.5c3.2 4 5.3 6.3 5.3 10.2a5.3 5.3 0 0 1-10.6 0C6.7 9.9 8.6 8 8.6 5.9c0 2 1.2 3.2 2.2 3.6C11 6.2 11.1 4.3 12 2.5z" />),
