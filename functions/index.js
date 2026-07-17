@@ -126,6 +126,9 @@ exports.savePushSub = require("./push").savePushSub;
 exports.removePushSub = require("./push").removePushSub;
 exports.onDmCreated = require("./push").onDmCreated;
 exports.onTrainerRequestWritten = require("./push").onTrainerRequestWritten;
+// Scheduled reminder pushes (S96) — the S77 in-app nudges, delivered for real.
+exports.foodReminderPush = require("./push").foodReminderPush;
+exports.weighInReminderPush = require("./push").weighInReminderPush;
 // Client → trainer requests (S90) — server-side write into the trainer's
 // inbox (a client can't touch trainer kv under the rules). functions/requests.js.
 exports.sendTrainerRequest = require("./requests").sendTrainerRequest;

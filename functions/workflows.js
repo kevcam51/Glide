@@ -18,7 +18,7 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const { runAssistantTurn, ANTHROPIC_API_KEY, tierFor, isAdminUid } = require("./aichat");
-const { appendFeed } = require("./push");
+const { sendPushTo, VAPID_PRIVATE_KEY } = require("./push");
 
 // Workflows allowed per tier (Kevin S92): higher tiers only — each run is the
 // priciest usage pattern (a cold message), so it's gated to Elite+/Apex.
@@ -146,7 +146,7 @@ exports.deleteWorkflow = onCall({ region: "us-central1", maxInstances: 10 }, asy
 
 // ── Hourly dispatcher: run every due automation ─────────────────────────────
 exports.runDueWorkflows = onSchedule(
-  { schedule: "every 60 minutes", secrets: [ANTHROPIC_API_KEY], timeoutSeconds: 540, region: "us-central1" },
+  { schedule: "every 60 minutes", secrets: [ANTHROPIC_API_KEY, VAPID_PRIVATE_KEY], timeoutSeconds: 540, region: "us-central1" },
   async () => {
     const db = admin.firestore();
     const now = Date.now();
@@ -166,8 +166,11 @@ exports.runDueWorkflows = onSchedule(
       if (res && res.reply) {
         ran++;
         await doc.ref.set({ lastRunAt: now, lastResult: String(res.reply).slice(0, 4000), lastStatus: "ok", nextRunAt: next }, { merge: true }).catch(() => {});
-        await appendFeed(db, w.uid, { tag: "workflow", title: `Automation: ${w.name}`.slice(0, 80),
-          body: String(res.reply).replace(/\s+/g, " ").slice(0, 140) }).catch(() => {});
+        // S96: real push (was feed-only) — arrives with the app closed, gated
+        // by the new "automations" Notification Center type; feed still written
+        // inside sendPushTo, so the bell keeps its one source of truth.
+        await sendPushTo(db, w.uid, { tag: "workflow", title: `Automation: ${w.name}`.slice(0, 80),
+          body: String(res.reply).replace(/\s+/g, " ").slice(0, 140), url: "/" }, "automations").catch(() => {});
       } else {
         // budget / trial-expired / error — reschedule, note why, don't spam the feed.
         skipped++;

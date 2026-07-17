@@ -15,6 +15,7 @@
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const webpush = require("web-push");
@@ -109,6 +110,7 @@ async function sendPushTo(db, uid, payload, prefKey) {
 }
 exports.sendPushTo = sendPushTo;
 exports.appendFeed = appendFeed; // feed-only delivery (no push/secret) — used by workflows (S92)
+exports.VAPID_PRIVATE_KEY = VAPID_PRIVATE_KEY; // so other fns (workflows) can list it in `secrets`
 
 // ── trigger: new direct message → notify the recipient ──────────────────────
 exports.onDmCreated = onDocumentCreated(
@@ -157,4 +159,91 @@ exports.onTrainerRequestWritten = onDocumentWritten(
         tag: "trainer-todo", url: "/" },
       "trainerReminders");
     console.log("onTrainerRequestWritten push", JSON.stringify({ uid, fresh: fresh.length, ...r }));
+  });
+
+// ── scheduled reminder pushes (S96) ─────────────────────────────────────────
+// The S77 food/weigh-in nudges were in-app cards only — visible ONLY with the
+// app open, which defeats a reminder. These deliver the same nudges as real
+// pushes when the app is closed. Only users who turned on "Push to this
+// device" are even considered (enumerated via their pushSubs — nobody else
+// pays a read), prefs are checked BEFORE sendPushTo so a turned-off type never
+// spams the bell feed, and both are client-role-only (mirroring the in-app
+// cards, which render only on ClientHome). Times are America/New_York — same
+// canonical tz as the AI's "today" (S62) and the local-date log keys (S45).
+
+async function kvJSON(db, uid, key) {
+  try {
+    const d = (await db.doc(`users/${uid}/kv/${encodeURIComponent(key)}`).get()).data();
+    return d && d.value ? JSON.parse(d.value) : null;
+  } catch { return null; }
+}
+const ymdET = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+
+// Every uid with at least one push subscription (deduped).
+async function pushCapableUids(db) {
+  const subs = await db.collectionGroup("pushSubs").limit(2000).get();
+  const uids = new Set();
+  subs.docs.forEach((d) => { const u = d.ref.parent.parent; if (u) uids.add(u.id); });
+  return [...uids];
+}
+
+// Shared walk: for each push-capable CLIENT with the pref on, decide() reads
+// their data and returns a payload (or null to skip). Returns counts for logs.
+async function runReminderPass(db, prefKey, decide) {
+  const uids = await pushCapableUids(db);
+  let sent = 0, skipped = 0;
+  for (const uid of uids) {
+    try {
+      const prefs = await notifPrefsOf(db, uid);
+      if (!prefOn(prefs, prefKey)) { skipped++; continue; }
+      const prof = (await db.doc(`users/${uid}`).get()).data() || {};
+      if (prof.role !== "client") { skipped++; continue; }
+      const manifest = await kvJSON(db, uid, "caliq-plans");
+      const plan = (manifest && manifest.active) || "self";
+      const payload = await decide(uid, plan);
+      if (!payload) { skipped++; continue; }
+      await sendPushTo(db, uid, payload, prefKey);
+      sent++;
+    } catch (e) { skipped++; }
+  }
+  return { candidates: uids.length, sent, skipped };
+}
+
+// Daily 3pm ET: nothing logged today → nudge. Max once/day by construction.
+exports.foodReminderPush = onSchedule(
+  { schedule: "0 15 * * *", timeZone: "America/New_York", region: "us-central1",
+    secrets: [VAPID_PRIVATE_KEY], timeoutSeconds: 300, maxInstances: 1 },
+  async () => {
+    const db = admin.firestore();
+    const today = ymdET();
+    const r = await runReminderPass(db, "foodReminders", async (uid, plan) => {
+      const log = await kvJSON(db, uid, `caliq-log-${plan}-${today}`);
+      const logged = log && ((Number(log.calories) || 0) > 0 || (Array.isArray(log.meals) && log.meals.length > 0));
+      if (logged) return null;
+      return { title: "Log today's food", tag: "food-reminder", url: "/",
+        body: "Nothing logged yet today — a quick add keeps your streak alive." };
+    });
+    console.log("foodReminderPush", JSON.stringify(r));
+  });
+
+// Mondays 9am ET: no weigh-in in the last 7 days (or ever) → nudge.
+exports.weighInReminderPush = onSchedule(
+  { schedule: "0 9 * * 1", timeZone: "America/New_York", region: "us-central1",
+    secrets: [VAPID_PRIVATE_KEY], timeoutSeconds: 300, maxInstances: 1 },
+  async () => {
+    const db = admin.firestore();
+    const r = await runReminderPass(db, "weighInReminders", async (uid, plan) => {
+      const wrap = await kvJSON(db, uid, `caliq-${plan}`);
+      const checkIns = (wrap && wrap.data && Array.isArray(wrap.data.checkIns)) ? wrap.data.checkIns : [];
+      const weighTs = checkIns
+        .filter((c) => c && Number(c.weight) > 0 && c.date)
+        .map((c) => new Date(c.date + "T12:00:00").getTime())
+        .filter((t) => Number.isFinite(t));
+      const latest = weighTs.length ? Math.max(...weighTs) : null;
+      if (latest && Date.now() - latest < 7 * 86400e3) return null;
+      return { title: "Time for a weigh-in", tag: "weighin-reminder", url: "/",
+        body: latest ? "It's been a week since your last weigh-in — hop on the scale." :
+          "Log your first weigh-in to start tracking your trend." };
+    });
+    console.log("weighInReminderPush", JSON.stringify(r));
   });

@@ -16943,13 +16943,15 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                 { key: "sentReminders", label: "Client to-do reminders", desc: "Sent to-dos shown on client cards" },
                 { key: "messages", label: "Message badges", desc: "Unread-message badges on client cards" },
                 { key: "clientRequests", label: "Client requests", desc: "When a client asks you for something" },
+                { key: "automations", label: "Automation results", desc: "When a scheduled automation finishes" },
               ]
             : [
                 { key: "trainerReminders", label: "Trainer to-do reminders", desc: "To-dos your trainer sends you" },
                 { key: "messages", label: "Message badges", desc: "Unread badge when your trainer messages you" },
-                { key: "foodReminders", label: "Food-logging reminders", desc: "Nudge when you haven't logged food" },
-                { key: "weighInReminders", label: "Weigh-in reminders", desc: "Nudge for a weekly weigh-in" },
+                { key: "foodReminders", label: "Food-logging reminders", desc: "Nudge when you haven't logged food — in-app, and push if enabled below" },
+                { key: "weighInReminders", label: "Weigh-in reminders", desc: "Nudge for a weekly weigh-in — in-app, and push if enabled below" },
                 { key: "coachingNudges", label: "AI coaching tips", desc: "Occasional tips from your AI coach" },
+                { key: "automations", label: "Automation results", desc: "When a scheduled automation finishes" },
               ];
           const Toggle = ({ on, disabled, onClick }) => (
             <button onClick={onClick} disabled={disabled} aria-pressed={on}
@@ -17164,7 +17166,7 @@ export default function App() {
   // card; sentReminders = the trainer's sent-to-do display; foodReminders /
   // weighInReminders / coachingNudges = client home nudge cards (Session 77).
   const [notifPrefs, setNotifPrefs] = useState({ master: true, trainerReminders: true, sentReminders: true,
-    foodReminders: true, weighInReminders: true, coachingNudges: true, messages: true });
+    foodReminders: true, weighInReminders: true, coachingNudges: true, messages: true, automations: true });
   // Merge a partial patch and persist. Components call with e.g. { master:false }.
   const onSetNotifPrefs = (patch) => {
     setNotifPrefs((prev) => {
