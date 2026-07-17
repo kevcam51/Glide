@@ -14,11 +14,11 @@ import { Icon } from "./icons.jsx";
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
 const ACTIVITY_LEVELS = [
-  { id:"sedentary", label:"Sedentary",         emoji:"🪑", desc:"Desk/office job, mostly sitting all day, drive everywhere",                multiplier:1.2   },
-  { id:"light",     label:"Lightly Active",    emoji:"🚶", desc:"Some walking during the day, light on-your-feet tasks, occasional errands", multiplier:1.375 },
-  { id:"moderate",  label:"Moderately Active", emoji:"🏃", desc:"On your feet most of the day — retail, teaching, nursing, warehouse work",  multiplier:1.55  },
-  { id:"very",      label:"Very Active",       emoji:"⚡", desc:"Physically demanding job — construction, landscaping, manual labor",         multiplier:1.725 },
-  { id:"extra",     label:"Extremely Active",  emoji:"🔥", desc:"Intense physical labor all day — roofing, farming, moving heavy loads",      multiplier:1.9   },
+  { id:"sedentary", label:"Sedentary",         iconName:"person", desc:"Desk/office job, mostly sitting all day, drive everywhere",                multiplier:1.2   },
+  { id:"light",     label:"Lightly Active",    iconName:"walk", desc:"Some walking during the day, light on-your-feet tasks, occasional errands", multiplier:1.375 },
+  { id:"moderate",  label:"Moderately Active", iconName:"run", desc:"On your feet most of the day — retail, teaching, nursing, warehouse work",  multiplier:1.55  },
+  { id:"very",      label:"Very Active",       iconName:"bolt", desc:"Physically demanding job — construction, landscaping, manual labor",         multiplier:1.725 },
+  { id:"extra",     label:"Extremely Active",  iconName:"flame", desc:"Intense physical labor all day — roofing, farming, moving heavy loads",      multiplier:1.9   },
 ];
 
 const CARDIO_GROUPS = [
@@ -801,7 +801,7 @@ body{
 }
 .day-result-card.editable{cursor:pointer}
 .day-result-card.editable .drc-header::after{
-  content:'✏️';font-size:.68rem;flex-shrink:0;opacity:.3;transition:opacity .15s;
+  content:'\\270E';font-size:.68rem;flex-shrink:0;opacity:.3;transition:opacity .15s;
 }
 .day-result-card.drc-open{
   border-color:var(--accent);
@@ -2099,7 +2099,7 @@ function StepPersonal({ data, onChange, onNext }) {
     <div className="fu text-fg">
       {/* Welcome banner */}
       <div className="flex items-start gap-3.5 p-4 mb-4 rounded-card border border-primary bg-[rgba(8,220,224,.06)]">
-        <div className="text-[2.2rem] leading-none shrink-0 mt-0.5">👋</div>
+        <div className="shrink-0 mt-0.5"><Icon name="sparkle" size={30} color="var(--color-primary,#08DCE0)" /></div>
         <div>
           <div className="font-display text-xl tracking-wide text-primary mb-1">Welcome to Glidna</div>
           <div className="text-[.84rem] text-muted leading-relaxed">Answer a few quick questions and we'll build your personalized plan. Takes about 2 minutes.</div>
@@ -2177,8 +2177,8 @@ function StepPersonal({ data, onChange, onNext }) {
         </div>
 
         {/* Privacy note */}
-        <div className="text-[.7rem] text-muted text-center mt-4 pt-3.5 border-t border-border leading-snug">🔒 Your information is used only to calculate your results — nothing is stored or shared.</div>
-        <div className="text-[.6rem] text-muted text-center mt-1.5 italic">⚠️ All calculations are estimates based on published formulas — not medical advice.</div>
+        <div className="text-[.7rem] text-muted text-center mt-4 pt-3.5 border-t border-border leading-snug">Your information is used only to calculate your results — nothing is stored or shared.</div>
+        <div className="text-[.6rem] text-muted text-center mt-1.5 italic">All calculations are estimates based on published formulas — not medical advice.</div>
       </div>
       <BottomNav showBack={false} onNext={onNext} nextLabel="Continue →" nextDisabled={!valid}/>
     </div>
@@ -2237,7 +2237,7 @@ function StepGoalWeight({ data, onChange, onBack, onNext }) {
           </div>
         )}
         {goal > 0 && goal >= current && (
-          <div className={WZ.err}>⚠️ Goal must be less than your current weight ({current} lbs).</div>
+          <div className={WZ.err}>Goal must be less than your current weight ({current} lbs).</div>
         )}
 
         {/* Goal weight range (optional band the client aims to stay within) */}
@@ -2255,7 +2255,7 @@ function StepGoalWeight({ data, onChange, onBack, onNext }) {
           </div>
           {(() => {
             const lo = Number(data.goalRangeLow), hi = Number(data.goalRangeHigh);
-            if (lo > 0 && hi > 0 && lo >= hi) return <div className={WZ.err}>⚠️ The low end should be below the high end.</div>;
+            if (lo > 0 && hi > 0 && lo >= hi) return <div className={WZ.err}>The low end should be below the high end.</div>;
             if (lo > 0 && hi > 0) return <div className="text-[.72rem] text-muted mt-1">You'll aim to stay between {lo} and {hi} lbs.</div>;
             return null;
           })()}
@@ -2293,12 +2293,12 @@ function StepGoalWeight({ data, onChange, onBack, onNext }) {
                     </div>
                   )}
                   {tooLow && (
-                    <div className={WZ.err}>⚠️ {goalBf}% is below the {isMale?"athletic (6%)":"athletic (14%)"} threshold for {isMale?"men":"women"}. Going below {minBf}% BF can be harmful — competition-level leanness is not sustainable long-term.</div>
+                    <div className={WZ.err}>{goalBf}% is below the {isMale?"athletic (6%)":"athletic (14%)"} threshold for {isMale?"men":"women"}. Going below {minBf}% BF can be harmful — competition-level leanness is not sustainable long-term.</div>
                   )}
                   {bfToLose > 0 && (
                     <div className="text-[.62rem] text-muted mt-1 italic">*BF% timeline estimates 0.5–1% loss per month with consistent deficit and resistance training. Actual results vary significantly.</div>
                   )}
-                  {goalBf >= startBf && <div className={WZ.err}>⚠️ Goal BF% should be lower than your current {startBf}%.</div>}
+                  {goalBf >= startBf && <div className={WZ.err}>Goal BF% should be lower than your current {startBf}%.</div>}
                 </>
               );
             })()}
@@ -2319,20 +2319,20 @@ function StepGoalWeight({ data, onChange, onBack, onNext }) {
 
             return <>
               {isHealthy ? (
-                <span>✅ <strong style={{color:"var(--green)"}}>You're currently in a healthy weight range</strong> (BMI {currentBmi.toFixed(1)}). The healthy range for your height is {minHealthyLbs}–{maxHealthyLbs} lbs. If you still want to cut, a modest 5–10% reduction ({Math.round(current*0.95)}–{Math.round(current*0.90)} lbs) is a reasonable target.</span>
+                <span><strong style={{color:"var(--green)"}}>You're currently in a healthy weight range</strong> (BMI {currentBmi.toFixed(1)}). The healthy range for your height is {minHealthyLbs}–{maxHealthyLbs} lbs. If you still want to cut, a modest 5–10% reduction ({Math.round(current*0.95)}–{Math.round(current*0.90)} lbs) is a reasonable target.</span>
               ) : (
-                <span>💡 Not sure? A healthy starting goal is <strong style={{color:"var(--accent)"}}>10–15% below your current weight: {fifteen}–{ten} lbs</strong>. The healthy BMI range for your height is {minHealthyLbs}–{maxHealthyLbs} lbs.</span>
+                <span>Not sure? A healthy starting goal is <strong style={{color:"var(--accent)"}}>10–15% below your current weight: {fifteen}–{ten} lbs</strong>. The healthy BMI range for your height is {minHealthyLbs}–{maxHealthyLbs} lbs.</span>
               )}
               {goalTooLow && (
-                <span style={{display:"block",marginTop:"6px",color:"var(--red)"}}>⚠️ Your goal of {goal} lbs (BMI {goalBmi.toFixed(1)}) would be below the healthy range. Going under {minHealthyLbs} lbs could be harmful — consider a higher target.</span>
+                <span style={{display:"block",marginTop:"6px",color:"var(--red)"}}>Your goal of {goal} lbs (BMI {goalBmi.toFixed(1)}) would be below the healthy range. Going under {minHealthyLbs} lbs could be harmful — consider a higher target.</span>
               )}
               {minHealthyLbs > 0 && !goalTooLow && (
-                <span style={{display:"block",marginTop:"4px",fontSize:".72rem",color:"var(--muted)"}}>ℹ️ Below {minHealthyLbs} lbs would be underweight for your height.</span>
+                <span style={{display:"block",marginTop:"4px",fontSize:".72rem",color:"var(--muted)"}}>Below {minHealthyLbs} lbs would be underweight for your height.</span>
               )}
             </>;
           })()}
         </div>
-        <div className="text-[.6rem] text-muted text-center mt-2 italic">⚠️ Weight loss timelines are estimates. Consult a healthcare provider before starting any weight loss program.</div>
+        <div className="text-[.6rem] text-muted text-center mt-2 italic">Weight loss timelines are estimates. Consult a healthcare provider before starting any weight loss program.</div>
       </div>
       <BottomNav onBack={onBack} onNext={onNext} nextLabel="Continue →" nextDisabled={!valid}/>
     </div>
@@ -2358,7 +2358,7 @@ function StepActivity({ data, onChange, onBack, onNext }) {
           This measures your <strong className="text-fg">non-exercise movement</strong> — your job, daily routine, and how much you're on your feet. <strong className="text-fg">Do NOT include planned workouts</strong> — those are tracked separately in the next steps.
         </div>
         <div className={`${WZ.tip} mt-0 mb-4`}>
-          📊 <strong>How this works:</strong> Your body burns a baseline number of calories just existing (BMR). This step estimates how much your daily lifestyle adds on top of that — sitting at a desk all day burns far fewer calories than being on your feet in a warehouse. Your planned cardio and strength training are calculated separately in the next steps and added to this baseline, so you get an accurate total without double-counting.
+          <strong>How this works:</strong> Your body burns a baseline number of calories just existing (BMR). This step estimates how much your daily lifestyle adds on top of that — sitting at a desk all day burns far fewer calories than being on your feet in a warehouse. Your planned cardio and strength training are calculated separately in the next steps and added to this baseline, so you get an accurate total without double-counting.
         </div>
         {ACTIVITY_LEVELS.map(a=>{
           const active = data.activityLevel===a.id;
@@ -2366,7 +2366,7 @@ function StepActivity({ data, onChange, onBack, onNext }) {
           <div key={a.id} className="mb-2.5">
             <div className="flex items-center gap-1">
               <button className={`${wzAbtn(active)} flex-1`} onClick={()=>{onChange("activityLevel",a.id);setActiveInfo(null);}}>
-                <span className="text-2xl leading-none shrink-0">{a.emoji}</span>
+                <Icon name={a.iconName} size={26} color="var(--color-primary,#08DCE0)" className="shrink-0" />
                 <div><div className={`font-bold text-[.97rem] ${active?"text-primary":"text-fg"}`}>{a.label}</div><div className="text-[.76rem] text-muted leading-snug">{a.desc}</div></div>
                 {active && <span className="ml-auto shrink-0 w-7 h-7 rounded-full bg-[rgba(8,220,224,.15)] text-primary flex items-center justify-center text-lg">✓</span>}
               </button>
@@ -2381,8 +2381,8 @@ function StepActivity({ data, onChange, onBack, onNext }) {
           </div>
           );
         })}
-        <div className={WZ.tip}>💡 When in doubt, choose one level lower — most people overestimate how active they are day-to-day.</div>
-        <div className="text-[.6rem] text-muted text-center mt-2 italic">⚠️ Activity multipliers are general estimates — actual energy expenditure varies by individual.</div>
+        <div className={WZ.tip}>When in doubt, choose one level lower — most people overestimate how active they are day-to-day.</div>
+        <div className="text-[.6rem] text-muted text-center mt-2 italic">Activity multipliers are general estimates — actual energy expenditure varies by individual.</div>
       </div>
       <BottomNav onBack={onBack} onNext={onNext} nextLabel="Continue →" nextDisabled={!data.activityLevel}/>
     </div>
@@ -3447,7 +3447,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
   const TABS = [
     "📊 No Cardio",
     "🔥 + Cardio",
-    ...(hasGoal ? ["🎯 Timeline"] : []),
+    ...(hasGoal ? ["Timeline"] : []),
     "🥗 Nutrients",
     "⚠️ Fat Gain",
     "💪 Muscle",
@@ -3598,7 +3598,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           {/* ── Trainer Notes ── */}
           <div className="card" style={{padding:"16px",marginBottom:"16px"}}>
             <div style={{display:"flex",alignItems:"center",gap:"10px",marginBottom: showNotes?"12px":"0",cursor:"pointer"}} onClick={()=>setShowNotes(v=>!v)}>
-              <span style={{fontSize:"1.2rem"}}>📝</span>
+              <Icon name="edit" size={18} color="var(--accent)" />
               <div style={{flex:1}}>
                 <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",letterSpacing:"2px",color:"var(--text-secondary)"}}>Trainer Notes</div>
                 <div style={{fontSize:".72rem",color:"var(--muted)"}}>{data.trainerNotes ? `${data.trainerNotes.length} chars · last updated` : "No notes yet — tap to add"}</div>
@@ -3619,7 +3619,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                   }}
                 />
                 <div style={{fontSize:".7rem",color:"var(--muted)",marginTop:"6px"}}>
-                  💡 Notes save automatically. Use this for session recaps, form cues, dietary preferences, injuries, or anything you want to remember before the next session.
+                  Notes save automatically. Use this for session recaps, form cues, dietary preferences, injuries, or anything you want to remember before the next session.
                 </div>
               </div>
             )}
@@ -3705,10 +3705,10 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
         {goalLbs && (
           <div className={`ibw-goal-note ${goalInRange ? "ibw-goal-good" : "ibw-goal-check"}`}>
             {goalInRange
-              ? `✅ Your goal weight of ${goalLbs} lbs (BMI ${goalBmi.toFixed(1)}) falls within the healthy range.`
+              ? `Your goal weight of ${goalLbs} lbs (BMI ${goalBmi.toFixed(1)}) falls within the healthy range.`
               : goalBmi < 18.5
-                ? `⚠️ Your goal weight of ${goalLbs} lbs (BMI ${goalBmi.toFixed(1)}) would be below the healthy range. Consider aiming for ${ibwLowLbs}+ lbs.`
-                : `ℹ️ Your goal weight of ${goalLbs} lbs (BMI ${goalBmi.toFixed(1)}) is above the healthy range. The range for your height is ${ibwLowLbs}–${ibwHighLbs} lbs.`
+                ? `Your goal weight of ${goalLbs} lbs (BMI ${goalBmi.toFixed(1)}) would be below the healthy range. Consider aiming for ${ibwLowLbs}+ lbs.`
+                : `Your goal weight of ${goalLbs} lbs (BMI ${goalBmi.toFixed(1)}) is above the healthy range. The range for your height is ${ibwLowLbs}–${ibwHighLbs} lbs.`
             }
           </div>
         )}
@@ -3749,7 +3749,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           </div>
 
           <div className="sec-title">Daily Breakdown</div>
-          <p style={{fontSize:".75rem",color:"var(--muted)",marginBottom:"10px"}}>💡 Tap any day to add or change cardio — results update instantly.</p>
+          <p style={{fontSize:".75rem",color:"var(--muted)",marginBottom:"10px"}}>Tap any day to add or change cardio — results update instantly.</p>
           {DAYS.map((day,di)=>{
             const sessions = Array.isArray(data.cardio[day]) ? data.cardio[day] : [];
             const isRest = sessions.length === 0;
@@ -3799,10 +3799,10 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                           )}
                           {burn>0 && (
                             <div className="drc-edit-live">
-                              <span>🔥</span>
+                              <span style={{display:"inline-flex",alignItems:"center"}}><Icon name="flame" size={15} color="var(--orange)" /></span>
                               <div>
                                 <span className="burn-num">+{burn} cal</span>
-                                <span style={{color:"var(--muted)",fontSize:".76rem",marginLeft:"6px"}}>burned this session — flip to the <strong style={{color:"var(--accent)"}}>🔥 + Cardio</strong> tab to see your updated targets.</span>
+                                <span style={{color:"var(--muted)",fontSize:".76rem",marginLeft:"6px"}}>burned this session — flip to the <strong style={{color:"var(--accent)"}}>+ Cardio</strong> tab to see your updated targets.</span>
                               </div>
                             </div>
                           )}
@@ -3820,7 +3820,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           })}
 
           <div className="explainer-box">
-            <div className="exp-title">💡 What do these numbers mean?</div>
+            <div className="exp-title">What do these numbers mean?</div>
             <p className="exp-body">
               Your body needs <strong style={{color:"var(--accent)"}}>{tdee.toLocaleString()} calories per day</strong> just to stay at your current weight — that's your maintenance level. If you eat <em>less</em> than that, your body starts burning stored fat to make up the difference.
             </p>
@@ -3835,9 +3835,9 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                 </div>
               ))}
             </div>
-            <p className="exp-tip">📌 <strong>Think of it this way:</strong> your daily calorie target is your budget. Spend under it, and your body cashes in fat as the difference.</p>
+            <p className="exp-tip"><strong>Think of it this way:</strong> your daily calorie target is your budget. Spend under it, and your body cashes in fat as the difference.</p>
           </div>
-          <p className="footnote">Targets below 1,200 cal/day are floored at 1,200 for safety. Based on Mifflin-St Jeor equation. ⚠️ All calorie targets are estimates — individual needs vary. Not a substitute for professional dietary guidance.</p>
+          <p className="footnote">Targets below 1,200 cal/day are floored at 1,200 for safety. Based on Mifflin-St Jeor equation. All calorie targets are estimates — individual needs vary. Not a substitute for professional dietary guidance.</p>
         </div>
       )}
 
@@ -3851,7 +3851,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           </div>
 
           <div className="csumm">
-            <div className="cs-icon">🔥</div>
+            <div className="cs-icon" style={{display:"flex",alignItems:"center"}}><Icon name="flame" size={22} color="var(--orange)" /></div>
             <div>
               <div className="cs-title">Weekly Cardio</div>
               <div className="cs-body">
@@ -3879,7 +3879,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           </div>
 
           <div className="sec-title">Day-by-Day Targets</div>
-          <p style={{fontSize:".75rem",color:"var(--muted)",marginBottom:"10px"}}>💡 Tap any day to change the exercise or duration — calories update instantly.</p>
+          <p style={{fontSize:".75rem",color:"var(--muted)",marginBottom:"10px"}}>Tap any day to change the exercise or duration — calories update instantly.</p>
           {dayData.map(({day,sessions:daySessions,burned})=>{
             const allSessions = Array.isArray(data.cardio[day]) ? data.cardio[day] : [];
             const isRest = allSessions.length === 0;
@@ -3889,9 +3889,9 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                 <div className="drc-header drc-clickable" onClick={()=>setOpenResultDay(isOpen?null:day)}>
                   <div className="drc-day">{day.slice(0,3)}</div>
                   <div className="drc-cardio">
-                    {isRest ? "😴 Rest — tap to add cardio"
+                    {isRest ? "Rest — tap to add cardio"
                       : allSessions.length === 1
-                        ? `${(daySessions[0]||{}).co?.icon||"🏃"} ${((daySessions[0]||{}).co?.label||"Cardio").split("–")[0].trim().split("(")[0].trim()} ${allSessions[0].duration}m`
+                        ? `${((daySessions[0]||{}).co?.label||"Cardio").split("–")[0].trim().split("(")[0].trim()} ${allSessions[0].duration}m`
                         : `${allSessions.length} sessions`
                     }
                   </div>
@@ -3920,7 +3920,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                           )}
                           {burn>0 && (
                             <div className="drc-edit-live">
-                              <span>🔥</span>
+                              <span style={{display:"inline-flex",alignItems:"center"}}><Icon name="flame" size={15} color="var(--orange)" /></span>
                               <div><span className="burn-num">+{burn} cal</span><span style={{color:"var(--muted)",fontSize:".76rem",marginLeft:"6px"}}>burned — targets below updated automatically.</span></div>
                             </div>
                           )}
@@ -3946,13 +3946,13 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
           })}
 
           <div className="explainer-box">
-            <div className="exp-title">💡 How does cardio change things?</div>
+            <div className="exp-title">How does cardio change things?</div>
             <p className="exp-body">
               Your maintenance is still <strong style={{color:"var(--accent)"}}>{tdee.toLocaleString()} cal/day</strong>. But on days you do cardio, you burn extra calories — which means you can <em>eat more that day</em> and still stay in a deficit. Think of cardio as buying yourself extra food room.
             </p>
             {activeDays>0 && (
               <div className="exp-callout">
-                🔥 Your {activeDays} cardio days burn ~<strong style={{color:"var(--orange)"}}>{totalBurn.toLocaleString()} extra calories</strong> this week. That's roughly <strong>{cardioFatLbs} lbs of additional fat</strong> burned from exercise alone — on top of whatever your diet is doing.
+                Your {activeDays} cardio days burn ~<strong style={{color:"var(--orange)"}}>{totalBurn.toLocaleString()} extra calories</strong> this week. That's roughly <strong>{cardioFatLbs} lbs of additional fat</strong> burned from exercise alone — on top of whatever your diet is doing.
               </div>
             )}
             <div className="exp-rows">
@@ -3969,10 +3969,10 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                 );
               })}
             </div>
-            <p className="exp-tip">📌 <strong>The big idea:</strong> cardio doesn't change your goal — it just gives you more flexibility. More movement = more food, same result.</p>
+            <p className="exp-tip"><strong>The big idea:</strong> cardio doesn't change your goal — it just gives you more flexibility. More movement = more food, same result.</p>
           </div>
           {/* Heart Rate Zones */}
-          <div className="sec-title">❤️ Heart Rate Training Zones</div>
+          <div className="sec-title">Heart Rate Training Zones</div>
           <p style={{fontSize:".78rem",color:"var(--muted)",marginBottom:"12px",lineHeight:1.5}}>
             Based on {name||"your"} age ({age}). Uses the Tanaka formula: HRmax = 208 − (0.7 × age), which is more accurate than the classic 220 − age formula for most populations.
           </p>
@@ -4016,7 +4016,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                   );
                 })}
                 <div style={{fontSize:".76rem",color:"var(--muted)",lineHeight:1.5,marginTop:"8px",padding:"10px 12px",background:"rgba(8,220,224,.03)",borderRadius:"8px",borderLeft:"3px solid var(--accent)"}}>
-                  💡 <strong style={{color:"var(--text)"}}>Fat Burn vs. Total Burn:</strong> Zone 2 burns the highest <em>percentage</em> of calories from fat (~60–70%). But higher zones burn more <em>total</em> calories per minute. For fat loss, Zone 2 for longer sessions (45–60 min) or Zone 4–5 intervals (HIIT) are both effective — pick what you'll stick with consistently.
+                  <strong style={{color:"var(--text)"}}>Fat Burn vs. Total Burn:</strong> Zone 2 burns the highest <em>percentage</em> of calories from fat (~60–70%). But higher zones burn more <em>total</em> calories per minute. For fat loss, Zone 2 for longer sessions (45–60 min) or Zone 4–5 intervals (HIIT) are both effective — pick what you'll stick with consistently.
                 </div>
               </>
             );
@@ -4024,7 +4024,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
 
           {/* Disclaimer */}
           <div style={{marginTop:"16px",padding:"14px",background:"rgba(255,204,68,.04)",border:"1px solid rgba(255,204,68,.15)",borderRadius:"var(--radius-sm)",fontSize:".75rem",color:"var(--muted)",lineHeight:1.6}}>
-            <strong style={{color:"var(--yellow)",display:"block",marginBottom:"4px"}}>⚠️ Important Disclaimer</strong>
+            <strong style={{color:"var(--yellow)",display:"block",marginBottom:"4px"}}>Important Disclaimer</strong>
             All calorie targets, heart rate zones, macro calculations, body weight projections, muscle gain estimates, and timelines shown in Glidna are <strong style={{color:"var(--text)"}}>estimates based on established formulas and published research</strong> — they are not exact measurements. Individual results vary based on genetics, metabolism, sleep, stress, hydration, medication, and other factors. Heart rate zones are calculated from a formula and may differ from your actual physiological thresholds. These tools are intended for <strong style={{color:"var(--text)"}}>educational and coaching purposes only</strong> and should not replace advice from a physician, registered dietitian, or certified healthcare provider. Always consult a medical professional before starting any new diet or exercise program.
           </div>
           <p className="footnote">On cardio days you can eat more and still hit your deficit. Targets floored at 1,200 cal/day.</p>
@@ -4133,13 +4133,13 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
 
       {/* ─ Global Disclaimer ─ */}
       <div style={{marginTop:"20px",padding:"14px",background:"rgba(255,204,68,.04)",border:"1px solid rgba(255,204,68,.15)",borderRadius:"var(--radius-sm)",fontSize:".73rem",color:"var(--muted)",lineHeight:1.6}}>
-        <strong style={{color:"var(--yellow)"}}>⚠️ Disclaimer:</strong> All numbers in Glidna are <strong style={{color:"var(--text)"}}>estimates</strong> based on published formulas (Mifflin-St Jeor, Tanaka, Ainsworth MET Compendium). Individual results vary. These tools are for educational and coaching purposes — not medical advice. Consult a healthcare provider before starting any diet or exercise program.
+        <strong style={{color:"var(--yellow)"}}>Disclaimer:</strong> All numbers in Glidna are <strong style={{color:"var(--text)"}}>estimates</strong> based on published formulas (Mifflin-St Jeor, Tanaka, Ainsworth MET Compendium). Individual results vary. These tools are for educational and coaching purposes — not medical advice. Consult a healthcare provider before starting any diet or exercise program.
       </div>
 
       {/* ─ Edit / Start Over bar ─ */}
       <div className="edit-bar">
         <button className="edit-bar-btn" onClick={()=>setShowEdit(v=>!v)}>
-          ✏️ Edit My Info {showEdit ? "▲" : "▼"}
+          <Icon name="edit" size={16} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:6}} />Edit My Info {showEdit ? "▲" : "▼"}
         </button>
         <button className="edit-bar-reset" onClick={onReset}>↺ Start Over</button>
       </div>
@@ -4224,7 +4224,7 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
     <div className="fu">
       <div className="hero" style={{marginBottom:"18px"}}>
         <div className="hero-lbl">{fullName(data) ? `${fullName(data)}'s` : "Your"} Complete Plan Summary</div>
-        <div className="hero-val" style={{fontSize:"2.6rem"}}>📋</div>
+        <div className="hero-val" style={{fontSize:"2.6rem"}}></div>
         <div className="hero-unit">Everything at a glance</div>
       </div>
 
@@ -4271,9 +4271,9 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
           const cardioSessions = cd.sessions || [];
           const strSessions = sd.sessions || [];
           const cardioLabel = cardioSessions.length === 0 ? "Rest"
-            : cardioSessions.map(s => `${s.co?.icon||"🏃"} ${(s.co?.label||"").split("–")[0].trim().split("(")[0].trim()} ${s.duration}m`).join(" + ");
+            : cardioSessions.map(s => `${(s.co?.label||"").split("–")[0].trim().split("(")[0].trim()} ${s.duration}m`).join(" + ");
           const strLabel = strSessions.length === 0 ? ""
-            : strSessions.map(s => `${s.ex?.icon||"🏋️"} ${(s.ex?.label||"").split("–")[0].trim()} ${s.duration}m`).join(" + ");
+            : strSessions.map(s => `${(s.ex?.label||"").split("–")[0].trim()} ${s.duration}m`).join(" + ");
           return (
             <div key={day} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<6?"1px solid var(--border)":"none",gap:"8px"}}>
               <span style={{fontWeight:700,fontSize:".85rem",color:"var(--text-secondary)",minWidth:"32px"}}>{DAY_SHORT[i]}</span>
@@ -4434,7 +4434,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
     <div className="fu">
       {/* Hero summary */}
       <div className="str-hero">
-        <div className="str-hero-icon">🏋️</div>
+        <div className="str-hero-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="dumbbell" size={30} color="var(--accent)" /></div>
         <div>
           <div className="str-hero-title">Strength Training Results</div>
           <div className="str-hero-sub">
@@ -4450,7 +4450,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
 
       {/* Science callout */}
       <div className="surplus-science" style={{marginBottom:"14px"}}>
-        <div className="ss-label">📚 Evidence Base</div>
+        <div className="ss-label">Evidence Base</div>
         <p>
           Calorie burn uses MET values from <strong>Ainsworth et al. (2011)</strong> Compendium of Physical Activities.
           Muscle gain projections are based on <strong>Schoenfeld BJ (2017)</strong> meta-analysis in the
@@ -4500,7 +4500,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
           {/* Compound vs isolation breakdown */}
           {compoundDays > 0 && (
             <div className="str-compound-note">
-              <strong>💡 {compoundDays} compound day{compoundDays!==1?"s":""} scheduled</strong> — compound lifts (squat, deadlift, bench, row) recruit more muscle mass per rep, burn more calories, and produce greater hormonal response than isolation work. <em>Research shows compound movements are 30–50% more metabolically costly than isolation exercises.</em>
+              <strong>{compoundDays} compound day{compoundDays!==1?"s":""} scheduled</strong> — compound lifts (squat, deadlift, bench, row) recruit more muscle mass per rep, burn more calories, and produce greater hormonal response than isolation work. <em>Research shows compound movements are 30–50% more metabolically costly than isolation exercises.</em>
             </div>
           )}
 
@@ -4545,7 +4545,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
       {/* Day-by-day editable cards */}
       <div className="sec-title">Day-by-Day Breakdown</div>
       <p style={{fontSize:".75rem",color:"var(--muted)",marginBottom:"10px"}}>
-        💡 Tap any day to change the exercise or duration — calories update instantly.
+        Tap any day to change the exercise or duration — calories update instantly.
       </p>
       {strengthDayData.map(({day, sessions:daySessions, burned})=>{
         const allSessions = Array.isArray((data.strength||{})[day]) ? data.strength[day] : [];
@@ -4593,10 +4593,10 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
                           {ST_DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
                         </select>
                       </div>
-                      {ex.note && <div style={{fontSize:".74rem",color:"var(--muted)",marginTop:"6px",padding:"6px 8px",background:"var(--s2)",borderRadius:"8px"}}>🎯 {ex.note}</div>}
+                      {ex.note && <div style={{fontSize:".74rem",color:"var(--muted)",marginTop:"6px",padding:"6px 8px",background:"var(--s2)",borderRadius:"8px"}}>{ex.note}</div>}
                       {burn>0 && (
                         <div className="drc-edit-live">
-                          <span>🏋️</span>
+                          <span style={{display:"inline-flex",alignItems:"center"}}><Icon name="dumbbell" size={15} color="var(--accent)" /></span>
                           <div><span className="burn-num">+{burn} cal</span><span style={{color:"var(--muted)",fontSize:".76rem",marginLeft:"6px"}}>session · +~{Math.round(burn*0.15)} EPOC</span></div>
                         </div>
                       )}
@@ -4626,7 +4626,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
       {/* Combined total with cardio */}
       {totalCardio > 0 && activeStrDays > 0 && (
         <div className="csumm" style={{borderColor:"rgba(8,220,224,.2)",background:"rgba(8,220,224,.03)"}}>
-          <div className="cs-icon">⚡</div>
+          <div className="cs-icon" style={{display:"flex",alignItems:"center"}}><Icon name="bolt" size={22} color="var(--accent)" /></div>
           <div>
             <div className="cs-title">Combined Weekly Burn</div>
             <div className="cs-body">
@@ -4780,7 +4780,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
 
       {/* Header */}
       <div className="muscle-hero">
-        <div className="muscle-hero-icon">💪</div>
+        <div className="muscle-hero-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="muscle" size={30} color="var(--accent)" /></div>
         <div>
           <div className="muscle-hero-title">Lean Muscle Building Plan</div>
           <div className="muscle-hero-sub">
@@ -4792,7 +4792,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
 
       {/* Science note */}
       <div className="surplus-science">
-        <div className="ss-label">📚 Scientific Basis</div>
+        <div className="ss-label">Scientific Basis</div>
         <p>
           Based on <strong>Helms et al. (2014)</strong>, <strong>Barakat et al. (2020)</strong>, and
           <strong> Morton et al. (2018)</strong>. A lean bulk surplus of <strong>200–500 cal/day</strong> above
@@ -4842,21 +4842,21 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
       <div className="sec-title">Your Training Profile</div>
       {hasStrength ? (
         <div className="str-hero" style={{borderColor:"rgba(79,255,176,.18)",background:"rgba(79,255,176,.04)"}}>
-          <div className="str-hero-icon">🏋️</div>
+          <div className="str-hero-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="dumbbell" size={30} color="var(--accent)" /></div>
           <div>
             <div className="str-hero-title" style={{color:"var(--green)"}}>
               {activeStrDays} Training Day{activeStrDays!==1?"s":""}/Week — {compoundPct}% Compound
             </div>
             <div className="str-hero-sub">
               Your Step 5 workout plan drives these projections. Tap any tile below for a plain-language explanation of what it means and how to improve it.
-              {compoundPct < 50 && <><br/><span style={{color:"var(--yellow)"}}>💡 Adding more compound lifts (push/pull movements) would increase your quality score and projected gains.</span></>}
-              {activeStrDays < 3 && <><br/><span style={{color:"var(--yellow)"}}>💡 Training {activeStrDays < 2 ? "at least 2–3" : "3–4"} days/week would significantly improve your frequency score.</span></>}
+              {compoundPct < 50 && <><br/><span style={{color:"var(--yellow)"}}>Adding more compound lifts (push/pull movements) would increase your quality score and projected gains.</span></>}
+              {activeStrDays < 3 && <><br/><span style={{color:"var(--yellow)"}}>Training {activeStrDays < 2 ? "at least 2–3" : "3–4"} days/week would significantly improve your frequency score.</span></>}
             </div>
           </div>
         </div>
       ) : (
         <div className="str-hero" style={{borderColor:"rgba(255,204,68,.18)",background:"rgba(255,204,68,.04)"}}>
-          <div className="str-hero-icon">⚠️</div>
+          <div className="str-hero-icon"></div>
           <div>
             <div className="str-hero-title" style={{color:"var(--yellow)"}}>No Strength Training Set</div>
             <div className="str-hero-sub">
@@ -4869,19 +4869,19 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
       <div className="str-stat-grid" style={{marginBottom:"4px"}}>
         <div className="str-stat" style={{cursor:"pointer",borderColor:muscleInfo==="freq"?"var(--accent)":"var(--border)"}} onClick={()=>setMuscleInfo(muscleInfo==="freq"?null:"freq")}>
           <div className="str-stat-val" style={{color: freqFactor >= 0.9 ? "var(--green)" : freqFactor >= 0.5 ? "var(--yellow)" : "var(--red)"}}>{(freqFactor*100).toFixed(0)}%</div>
-          <div className="str-stat-lbl">Frequency ℹ️</div>
+          <div className="str-stat-lbl">Frequency </div>
         </div>
         <div className="str-stat" style={{cursor:"pointer",borderColor:muscleInfo==="quality"?"var(--accent)":"var(--border)"}} onClick={()=>setMuscleInfo(muscleInfo==="quality"?null:"quality")}>
           <div className="str-stat-val" style={{color: qualityFactor >= 0.85 ? "var(--green)" : qualityFactor >= 0.6 ? "var(--yellow)" : "var(--red)"}}>{(qualityFactor*100).toFixed(0)}%</div>
-          <div className="str-stat-lbl">Quality ℹ️</div>
+          <div className="str-stat-lbl">Quality </div>
         </div>
         <div className="str-stat" style={{cursor:"pointer",borderColor:muscleInfo==="gain"?"var(--accent)":"var(--border)"}} onClick={()=>setMuscleInfo(muscleInfo==="gain"?null:"gain")}>
           <div className="str-stat-val c-grn">{gainLow}–{gainHigh}</div>
-          <div className="str-stat-lbl">lbs/mo ℹ️</div>
+          <div className="str-stat-lbl">lbs/mo </div>
         </div>
         <div className="str-stat" style={{cursor:"pointer",borderColor:muscleInfo==="burn"?"var(--accent)":"var(--border)"}} onClick={()=>setMuscleInfo(muscleInfo==="burn"?null:"burn")}>
           <div className="str-stat-val c-org">{totalStrBurn.toLocaleString()}</div>
-          <div className="str-stat-lbl">cal/wk ℹ️</div>
+          <div className="str-stat-lbl">cal/wk </div>
         </div>
       </div>
 
@@ -4890,7 +4890,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
         <div style={{padding:"14px 16px",background:"rgba(8,220,224,.04)",border:"1.5px solid rgba(8,220,224,.18)",borderRadius:"var(--radius-sm)",marginBottom:"14px",fontSize:".82rem",color:"var(--text-secondary)",lineHeight:1.7,animation:"fadeUp .15s ease both"}}
           onClick={()=>setMuscleInfo(null)}>
           {muscleInfo === "freq" && (<>
-            <strong style={{color:"var(--accent)",display:"block",marginBottom:"6px"}}>📅 Frequency Factor — How Often You Train</strong>
+            <strong style={{color:"var(--accent)",display:"block",marginBottom:"6px"}}>Frequency Factor — How Often You Train</strong>
             <p style={{marginBottom:"8px"}}>This measures how many days per week you do strength training. More training days means more opportunities for your muscles to be stimulated and grow.</p>
             <p style={{marginBottom:"8px"}}>Research (Schoenfeld 2017) shows a clear relationship: training a muscle group 2× per week produces roughly twice the growth as 1× per week. But there are diminishing returns — going from 5 to 6 days doesn't help as much as going from 2 to 3.</p>
             <div style={{padding:"8px 12px",background:"var(--s2)",borderRadius:"6px",fontSize:".78rem",marginBottom:"6px"}}>
@@ -4901,7 +4901,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
           </>)}
 
           {muscleInfo === "quality" && (<>
-            <strong style={{color:"var(--accent)",display:"block",marginBottom:"6px"}}>🎯 Quality Factor — What Exercises You're Doing</strong>
+            <strong style={{color:"var(--accent)",display:"block",marginBottom:"6px"}}>Quality Factor — What Exercises You're Doing</strong>
             <p style={{marginBottom:"8px"}}>Not all exercises build muscle equally. <strong>Compound movements</strong> (like squats, bench press, rows, deadlifts) work multiple large muscle groups at once and produce the strongest growth signal. <strong>Isolation exercises</strong> (like bicep curls, leg extensions, lateral raises) target one muscle and produce less total-body growth stimulus.</p>
             <p style={{marginBottom:"8px"}}>This score looks at the ratio of compound to isolation exercises in your plan. A plan that's 80% compound movements scores higher than one that's 80% isolation.</p>
             <div style={{padding:"8px 12px",background:"var(--s2)",borderRadius:"6px",fontSize:".78rem",marginBottom:"6px"}}>
@@ -4913,24 +4913,24 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
           </>)}
 
           {muscleInfo === "gain" && (<>
-            <strong style={{color:"var(--accent)",display:"block",marginBottom:"6px"}}>💪 Estimated Muscle Gain Per Month</strong>
+            <strong style={{color:"var(--accent)",display:"block",marginBottom:"6px"}}>Estimated Muscle Gain Per Month</strong>
             <p style={{marginBottom:"8px"}}>This is how much muscle you could realistically gain each month, based on your experience level, training frequency, exercise quality, and gender. It uses the <strong>Aragon/Helms model</strong> — the most respected evidence-based estimate in sports science.</p>
             <p style={{marginBottom:"8px"}}>The range shown ({gainLow}–{gainHigh} lbs/mo) is already adjusted for your specific plan. The more consistently you train with progressive overload (gradually increasing weight), eat adequate protein (~1g per lb bodyweight), and sleep well, the closer you'll be to the upper end.</p>
             <div style={{padding:"8px 12px",background:"var(--s2)",borderRadius:"6px",fontSize:".78rem",marginBottom:"6px"}}>
               <strong>How it's calculated:</strong> Base rate ({baseGainLow}–{baseGainHigh} lbs/mo for {experience} {gender==="female"?"women":"men"}) × Frequency ({(freqFactor*100).toFixed(0)}%) × Quality ({(qualityFactor*100).toFixed(0)}%){gender==="female"?" × Gender (55%)":""} = <strong>{gainLow}–{gainHigh} lbs/mo</strong>
             </div>
-            <div style={{fontSize:".72rem",color:"var(--yellow)",marginBottom:"6px"}}>⚠️ This is an estimate — actual muscle gain varies ±30-50% based on genetics, sleep, stress, and other factors no formula can measure.</div>
+            <div style={{fontSize:".72rem",color:"var(--yellow)",marginBottom:"6px"}}>This is an estimate — actual muscle gain varies ±30-50% based on genetics, sleep, stress, and other factors no formula can measure.</div>
             <div style={{fontSize:".7rem",color:"var(--muted)",fontStyle:"italic"}}>Tap anywhere to close</div>
           </>)}
 
           {muscleInfo === "burn" && (<>
-            <strong style={{color:"var(--accent)",display:"block",marginBottom:"6px"}}>🔥 Weekly Calorie Burn From Strength Training</strong>
+            <strong style={{color:"var(--accent)",display:"block",marginBottom:"6px"}}>Weekly Calorie Burn From Strength Training</strong>
             <p style={{marginBottom:"8px"}}>This is the estimated total calories you burn from all your strength training sessions combined in one week. It's calculated using MET values (a standard measure of exercise intensity) multiplied by your body weight and session duration.</p>
             <p style={{marginBottom:"8px"}}>This number is added to your daily calorie targets on training days — so on days you lift, you can eat slightly more and still hit your goals.</p>
             <div style={{padding:"8px 12px",background:"var(--s2)",borderRadius:"6px",fontSize:".78rem",marginBottom:"6px"}}>
               <strong>Your burn: {totalStrBurn.toLocaleString()} cal/week</strong> from {activeStrDays} training day{activeStrDays!==1?"s":""}. That's roughly <strong>{Math.round(totalStrBurn/Math.max(1,activeStrDays))} cal per session</strong>.
             </div>
-            <div style={{fontSize:".72rem",color:"var(--yellow)",marginBottom:"6px"}}>⚠️ Strength training calorie burn is harder to estimate than cardio because rest periods, intensity, and tempo vary widely. These are approximate.</div>
+            <div style={{fontSize:".72rem",color:"var(--yellow)",marginBottom:"6px"}}>Strength training calorie burn is harder to estimate than cardio because rest periods, intensity, and tempo vary widely. These are approximate.</div>
             <div style={{fontSize:".7rem",color:"var(--muted)",fontStyle:"italic"}}>Tap anywhere to close</div>
           </>)}
         </div>
@@ -4964,7 +4964,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
       {/* Body recomp note for beginners */}
       {canRecomp && (
         <div className="recomp-note">
-          <strong>🔄 Body Recomposition Possible</strong><br/>
+          <strong>Body Recomposition Possible</strong><br/>
           As a beginner, your body can simultaneously build muscle AND lose fat — even at or near maintenance calories.
           This "newbie gains" window typically lasts 6–12 months. Prioritize protein (0.8g/lb) and progressive overload in the gym.
         </div>
@@ -4995,7 +4995,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
             note:`Daily minimum for gut health and satiety. High protein diets can cause constipation without adequate fibre.` },
         ].map(m => (
           <div key={m.name} className={`macro-card macro-${m.cls} muscle-macro-card`}>
-            <div className="mc-emoji">{m.emoji}</div>
+            <div className="mc-emoji"><span style={{display:"inline-block",width:13,height:13,borderRadius:999,background:({protein:"#ff6b9d",carbs:"var(--yellow)",fat:"var(--orange)",fibre:"var(--green)"})[m.cls]||"var(--accent)"}} /></div>
             <div className="mc-name">{m.name}</div>
             <div className="mc-grams">{m.g}<span>g</span></div>
             {m.cal && <div className="mc-cals">{m.cal} kcal</div>}
@@ -5053,7 +5053,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
                 {tier.items.map(s=>(
                   <div key={s.name} className="supp-card">
                     <div className="sc2-header">
-                      <span className="sc2-emoji">{s.emoji}</span>
+                      <span className="sc2-emoji" style={{display:"flex",alignItems:"center"}}><span style={{display:"inline-block",width:12,height:12,borderRadius:999,background:"var(--accent)"}} /></span>
                       <div>
                         <div className="sc2-name">{s.name}</div>
                       </div>
@@ -5149,7 +5149,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
           display:"flex",alignItems:"center",justifyContent:"space-between",
           transition:"all .15s",
         }}>
-          <span>⚠️ DISCLAIMER — Muscle Gain Estimates</span>
+          <span>DISCLAIMER — Muscle Gain Estimates</span>
           <span style={{fontSize:".85rem",fontFamily:"DM Sans,sans-serif",fontWeight:600,padding:"4px 10px",borderRadius:"6px",background:showMuscleDisclaimer?"rgba(255,204,68,.15)":"rgba(255,204,68,.08)",border:"1px solid rgba(255,204,68,.3)"}}>
             {showMuscleDisclaimer ? "Hide ▲" : "Read This ▼"}
           </span>
@@ -5203,7 +5203,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
             </p>
 
             <div style={{padding:"12px 14px",background:"rgba(255,204,68,.06)",borderRadius:"8px",border:"1px solid rgba(255,204,68,.2)",fontSize:".78rem",lineHeight:1.6}}>
-              <strong style={{color:"var(--yellow)"}}>⚠️ Not Medical or Professional Advice:</strong> All muscle gain projections, macro recommendations, supplement information, and training suggestions in Glidna are for <strong style={{color:"var(--text)"}}>educational and coaching purposes only</strong>. They are not a substitute for guidance from a certified personal trainer, registered dietitian, or physician. Always consult a qualified professional before making significant changes to your training or nutrition program.
+              <strong style={{color:"var(--yellow)"}}>Not Medical or Professional Advice:</strong> All muscle gain projections, macro recommendations, supplement information, and training suggestions in Glidna are for <strong style={{color:"var(--text)"}}>educational and coaching purposes only</strong>. They are not a substitute for guidance from a certified personal trainer, registered dietitian, or physician. Always consult a qualified professional before making significant changes to your training or nutrition program.
             </div>
           </div>
         )}
@@ -5267,7 +5267,7 @@ function SurplusTab({ tdee, totalBurn, avgBurnPerDay, activeDays, name }) {
     <div className="fu">
       {/* Header */}
       <div className="surplus-hero">
-        <div className="surplus-hero-icon">⚠️</div>
+        <div className="surplus-hero-icon"></div>
         <div>
           <div className="surplus-hero-title">Calorie Surplus = Unwanted Fat Gain</div>
           <div className="surplus-hero-sub">
@@ -5278,9 +5278,9 @@ function SurplusTab({ tdee, totalBurn, avgBurnPerDay, activeDays, name }) {
 
       {/* Science note */}
       <div className="surplus-science">
-        <div className="ss-label">📚 What This Is — and Why It Matters</div>
+        <div className="ss-label">What This Is — and Why It Matters</div>
         <p>
-          Unlike the <strong>💪 Muscle tab</strong> which shows a <em>planned</em> surplus for muscle building,
+          Unlike the <strong>Muscle tab</strong> which shows a <em>planned</em> surplus for muscle building,
           this tab shows what happens when someone <strong>unintentionally overeats</strong> — eating more than their
           body burns without a structured training plan to direct those extra calories toward muscle.
           In that scenario, virtually all excess calories are stored as body fat.
@@ -5366,7 +5366,7 @@ function SurplusTab({ tdee, totalBurn, avgBurnPerDay, activeDays, name }) {
             <div key={s} className={`surplus-card${isOffset?" surplus-card-offset":""}`}>
               <div className="sc-surplus">{surplusLabel(s)}<span className="sc-surplus-unit">/day</span></div>
               {isOffset ? (
-                <div className="sc-offset">✅ Your cardio fully offsets this surplus</div>
+                <div className="sc-offset">Your cardio fully offsets this surplus</div>
               ) : (
                 <>
                   <div className="sc-row">
@@ -5478,19 +5478,19 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
       why:"Supports bone density, immune function, testosterone, and muscle recovery. 40–70% of adults are deficient — especially indoor trainers.",
       foods:["Salmon (3oz = 570 IU)","Egg yolks","Fortified milk","Tuna","Sardines","Beef liver","Mushrooms (UV-exposed)"],
       tip:"Best obtained through sunlight or supplementation. Pair with Vitamin K2 for optimal absorption.",
-      personalNote: liftsHeavy ? "🏋️ Critical for strength athletes — supports testosterone and muscle repair." : over40 ? "⚠️ Absorption decreases with age — supplementation recommended." : null },
+      personalNote: liftsHeavy ? "Critical for strength athletes — supports testosterone and muscle repair." : over40 ? "Absorption decreases with age — supplementation recommended." : null },
     { id:"vitc", name:"Vitamin C", emoji:"🍊", amount:isMale?90:75, unit:"mg", category:"Vitamin",
       relevance: score([true, doesHighImpact, liftsHeavy, isHeavyCardio]),
       why:"Essential for collagen synthesis (connective tissue repair), immune support, and iron absorption from plant foods.",
       foods:["Red bell pepper (1 cup = 190mg)","Kiwi","Broccoli","Strawberries","Oranges","Guava","Brussels sprouts","Pineapple"],
       tip:"Spread intake throughout the day — the body excretes excess within hours.",
-      personalNote: doesHighImpact ? "🦵 High-impact training increases collagen turnover — extra C supports joint repair." : null },
+      personalNote: doesHighImpact ? "High-impact training increases collagen turnover — extra C supports joint repair." : null },
     { id:"vitb12", name:"Vitamin B12", emoji:"🩸", amount:2.4, unit:"mcg", category:"Vitamin",
       relevance: score([true, doesEndurance, over50]),
       why:"Critical for red blood cell production, nerve function, and energy metabolism. Deficiency causes fatigue.",
       foods:["Beef (3oz = 2.4mcg)","Salmon","Dairy products","Eggs","Fortified cereals","Nutritional yeast","Clams (3oz = 84mcg)"],
       tip:"If plant-based, supplementation is strongly recommended.",
-      personalNote: doesEndurance ? "🏃 Endurance athletes need optimal B12 for oxygen-carrying capacity." : null },
+      personalNote: doesEndurance ? "Endurance athletes need optimal B12 for oxygen-carrying capacity." : null },
     { id:"vita", name:"Vitamin A", emoji:"🥕", amount:isMale?900:700, unit:"mcg RAE", category:"Vitamin",
       relevance: score([true, isCutting]),
       why:"Supports immune health, vision, and skin integrity. Plays a role in protein synthesis and cell growth.",
@@ -5502,73 +5502,73 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
       why:"Antioxidant that protects cells from exercise-induced oxidative stress. Supports immune function and skin health.",
       foods:["Sunflower seeds (1oz = 7.4mg)","Almonds (1oz = 7.3mg)","Spinach","Avocado","Wheat germ oil","Peanut butter","Hazelnuts"],
       tip:"Best from food sources. Supplementation above 400 IU/day not recommended.",
-      personalNote: isHeavyCardio ? "🔥 Intense training generates free radicals — vitamin E helps neutralize oxidative damage." : null },
+      personalNote: isHeavyCardio ? "Intense training generates free radicals — vitamin E helps neutralize oxidative damage." : null },
     { id:"vitk", name:"Vitamin K", emoji:"🥬", amount:isMale?120:90, unit:"mcg", category:"Vitamin",
       relevance: score([liftsHeavy, over40, doesHighImpact]),
       why:"Essential for blood clotting and directing calcium into bones (not arteries). K2 is especially important for bone density.",
       foods:["Kale (1 cup = 547mcg)","Spinach","Broccoli","Brussels sprouts","Natto (K2)","Fermented foods","Green peas"],
       tip:"K1 from greens, K2 from fermented foods. If supplementing D3, always pair with K2.",
-      personalNote: liftsHeavy ? "🦴 Heavy lifting demands strong bones — K2 ensures calcium goes where it's needed." : null },
+      personalNote: liftsHeavy ? "Heavy lifting demands strong bones — K2 ensures calcium goes where it's needed." : null },
     { id:"vitb6", name:"Vitamin B6", emoji:"🫘", amount:over50?1.7:1.3, unit:"mg", category:"Vitamin",
       relevance: score([true, liftsHeavy, isCutting]),
       why:"Key role in protein metabolism and amino acid synthesis — directly tied to muscle building. Also supports neurotransmitter production.",
       foods:["Chicken breast (3oz = 0.5mg)","Salmon","Tuna","Chickpeas (1 cup = 1.1mg)","Potatoes","Banana","Turkey"],
       tip:"High-protein diets increase B6 requirements. Most people get enough through meat and legumes.",
-      personalNote: isCutting ? "📉 Higher protein during a cut means higher B6 demand — ensure adequate intake." : null },
+      personalNote: isCutting ? "Higher protein during a cut means higher B6 demand — ensure adequate intake." : null },
     { id:"folate", name:"Folate (B9)", emoji:"🥦", amount:400, unit:"mcg DFE", category:"Vitamin",
       relevance: score([!isMale, doesEndurance]),
       why:"Essential for DNA synthesis and red blood cell formation. Critical for cell division during recovery and adaptation.",
       foods:["Lentils (1 cup = 358mcg)","Black beans","Spinach","Asparagus","Avocado","Fortified cereals","Edamame","Beets"],
       tip:"Especially important for women of reproductive age. Folate-rich foods also tend to be fiber-rich.",
-      personalNote: !isMale ? "♀ Women need consistent folate for cell health and blood formation." : null },
+      personalNote: !isMale ? "Women need consistent folate for cell health and blood formation." : null },
     { id:"calcium", name:"Calcium", emoji:"🦴", amount:(over50&&!isMale)||over70?1200:1000, unit:"mg", category:"Mineral",
       relevance: score([true, liftsHeavy, doesHighImpact, over40, !isMale]),
       why:"Builds and maintains bone density, supports muscle contraction and nerve signaling. Muscles use calcium with every rep.",
       foods:["Greek yogurt (1 cup = 415mg)","Milk","Mozzarella","Canned sardines","Fortified plant milk","Tofu (calcium-set)","Kale","Broccoli"],
       tip:"Absorbs best in doses under 500mg. Spread across meals.",
-      personalNote: doesHighImpact ? "🏃 High-impact activities stress bones — adequate calcium prevents stress fractures." : liftsHeavy ? "🏋️ Heavy lifting builds bone when calcium is adequate — without it, bone density suffers." : null },
+      personalNote: doesHighImpact ? "High-impact activities stress bones — adequate calcium prevents stress fractures." : liftsHeavy ? "Heavy lifting builds bone when calcium is adequate — without it, bone density suffers." : null },
     { id:"iron", name:"Iron", emoji:"💪", amount:(!isMale&&!over50)?18:8, unit:"mg", category:"Mineral",
       relevance: score([true, doesEndurance, !isMale, isHeavyCardio]),
       why:"Carries oxygen to working muscles. Low iron = fatigue, poor performance, and slower recovery.",
       foods:["Beef (3oz = 2.1mg)","Lentils (1 cup = 6.6mg)","Spinach","Tofu","Fortified cereals","Pumpkin seeds","Dark chocolate","Chickpeas"],
       tip:"Pair plant-based iron with Vitamin C for 300% better absorption. Avoid coffee/tea within 1 hour of iron-rich meals.",
-      personalNote: doesEndurance ? "🏃 Endurance training increases iron loss through sweat and foot-strike hemolysis — monitor levels." : (!isMale&&!over50) ? "♀ Women of reproductive age need 2x more iron than men." : null },
+      personalNote: doesEndurance ? "Endurance training increases iron loss through sweat and foot-strike hemolysis — monitor levels." : (!isMale&&!over50) ? "Women of reproductive age need 2x more iron than men." : null },
     { id:"magnesium", name:"Magnesium", emoji:"⚡", amount:isMale?(over50?420:400):(over50?320:310), unit:"mg", category:"Mineral",
       relevance: score([true, liftsHeavy, isHeavySweater, trainsDays>=4]),
       why:"Involved in 300+ enzyme reactions including protein synthesis, muscle function, blood sugar control, and energy production. Depleted through sweat.",
       foods:["Pumpkin seeds (1oz = 156mg)","Almonds","Dark chocolate","Spinach","Black beans","Quinoa","Cashews","Avocado"],
       tip:"Magnesium glycinate or citrate supplements are well-absorbed. Take at night — supports sleep quality.",
-      personalNote: isHeavySweater ? "💦 Heavy sweating depletes magnesium fast — active clients often need supplementation." : liftsHeavy ? "🏋️ Magnesium supports muscle contractions and recovery — critical for heavy lifters." : null },
+      personalNote: isHeavySweater ? "Heavy sweating depletes magnesium fast — active clients often need supplementation." : liftsHeavy ? "Magnesium supports muscle contractions and recovery — critical for heavy lifters." : null },
     { id:"potassium", name:"Potassium", emoji:"🍌", amount:isMale?3400:2600, unit:"mg", category:"Mineral",
       relevance: score([true, isHeavySweater, isHeavyCardio]),
       why:"Regulates fluid balance, muscle contractions, and nerve signals. Prevents cramping and supports heart health.",
       foods:["Baked potato (926mg)","Avocado (485mg)","Banana (422mg)","Spinach","Salmon","Sweet potato","Coconut water","White beans"],
       tip:"Most people get less than 50% of daily needs. Focus on whole foods — fruits, vegetables, legumes.",
-      personalNote: isHeavySweater ? "💦 Lost heavily through sweat — replenish with potassium-rich foods and electrolytes during intense sessions." : null },
+      personalNote: isHeavySweater ? "Lost heavily through sweat — replenish with potassium-rich foods and electrolytes during intense sessions." : null },
     { id:"sodium", name:"Sodium", emoji:"🧂", amount:2300, unit:"mg", category:"Mineral",
       relevance: score([isHeavySweater, isHeavyCardio, doesEndurance]),
       why:"Essential for fluid balance and muscle function. Active people lose significant sodium through sweat.",
       foods:["Any salted food","Cottage cheese","Pickles","Soup","Sports drinks","Olives","Salted nuts"],
       tip:"If you train hard and sweat heavily, you may need MORE sodium, not less. Add a pinch of salt to pre-workout water.",
-      personalNote: isHeavySweater ? "💦 Heavy sweaters can lose 1–2g sodium per hour — replace during and after training." : null },
+      personalNote: isHeavySweater ? "Heavy sweaters can lose 1–2g sodium per hour — replace during and after training." : null },
     { id:"zinc", name:"Zinc", emoji:"🔬", amount:isMale?11:8, unit:"mg", category:"Mineral",
       relevance: score([true, liftsHeavy, isMale, isHeavySweater]),
       why:"Critical for testosterone, immune function, protein synthesis, and wound healing. Lost through sweat.",
       foods:["Oysters (3oz = 74mg)","Beef","Pumpkin seeds","Chickpeas","Cashews","Turkey","Lentils","Crab"],
       tip:"Zinc competes with copper — don't mega-dose. Food sources are generally sufficient.",
-      personalNote: (isMale && liftsHeavy) ? "🏋️♂️ Zinc directly supports testosterone production — essential for male lifters." : null },
+      personalNote: (isMale && liftsHeavy) ? "♂️ Zinc directly supports testosterone production — essential for male lifters." : null },
     { id:"selenium", name:"Selenium", emoji:"🇧🇷", amount:55, unit:"mcg", category:"Mineral",
       relevance: score([isHeavyCardio, doesEndurance, over40]),
       why:"Powerful antioxidant that protects against exercise-induced oxidative stress. Supports thyroid function and immune health.",
       foods:["Brazil nuts (1 nut = 68–91mcg)","Tuna","Sardines","Turkey","Chicken","Eggs","Cottage cheese","Brown rice"],
       tip:"Just 1–2 Brazil nuts per day covers your entire selenium need. Don't over-supplement — toxicity is possible.",
-      personalNote: isHeavyCardio ? "🔥 Intense exercise creates oxidative stress — selenium helps your antioxidant defense." : null },
+      personalNote: isHeavyCardio ? "Intense exercise creates oxidative stress — selenium helps your antioxidant defense." : null },
     { id:"chromium", name:"Chromium", emoji:"🩸", amount:isMale?35:25, unit:"mcg", category:"Mineral",
       relevance: score([isCutting, trainsDays>=3]),
       why:"Enhances insulin sensitivity and helps regulate blood sugar. May support body composition during calorie restriction.",
       foods:["Broccoli (1 cup = 22mcg)","Grape juice","Turkey breast","Green beans","Potatoes","Beef","Whole grains"],
       tip:"Most useful during a cut when blood sugar management matters. Deficiency is rare but can affect insulin response.",
-      personalNote: isCutting ? "📉 Chromium may help manage cravings and blood sugar swings during a deficit." : null },
+      personalNote: isCutting ? "Chromium may help manage cravings and blood sugar swings during a deficit." : null },
     { id:"copper", name:"Copper", emoji:"🔶", amount:0.9, unit:"mg", category:"Mineral",
       relevance: score([liftsHeavy, doesEndurance]),
       why:"Supports iron metabolism, connective tissue formation, and energy production. Works with iron for red blood cell formation.",
@@ -5580,61 +5580,61 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
       why:"Essential for thyroid function — your thyroid controls metabolic rate. Deficiency slows metabolism, undermining fat loss.",
       foods:["Seaweed/kelp","Cod (3oz = 99mcg)","Iodized salt","Greek yogurt","Milk","Shrimp","Eggs","Tuna"],
       tip:"If you use non-iodized salt (sea salt, pink salt), ensure iodine from other sources.",
-      personalNote: isCutting ? "📉 Thyroid function is critical during a cut — iodine ensures your metabolism stays active." : null },
+      personalNote: isCutting ? "Thyroid function is critical during a cut — iodine ensures your metabolism stays active." : null },
     { id:"omega3", name:"Omega-3 (EPA/DHA)", emoji:"🐟", amount:isMale?1600:1100, unit:"mg ALA", category:"Fat",
       relevance: score([true, liftsHeavy, doesHighImpact, isHeavyCardio, over40]),
       why:"Reduces inflammation, supports joint health, brain function, and cardiovascular health. EPA/DHA from fish are most bioavailable.",
       foods:["Salmon (3oz = 1800mg EPA+DHA)","Walnuts","Flaxseed","Chia seeds","Mackerel","Sardines","Herring","Algae oil (vegan)"],
       tip:"Aim for 2+ servings of fatty fish per week. Algae-based omega-3 covers EPA/DHA for vegans.",
-      personalNote: doesHighImpact ? "🦵 High-impact training causes joint inflammation — omega-3s are your anti-inflammatory defense." : liftsHeavy ? "🏋️ Reduces exercise-induced inflammation and supports muscle protein synthesis." : null },
+      personalNote: doesHighImpact ? "High-impact training causes joint inflammation — omega-3s are your anti-inflammatory defense." : liftsHeavy ? "Reduces exercise-induced inflammation and supports muscle protein synthesis." : null },
     { id:"vitb1", name:"Vitamin B1 (Thiamine)", emoji:"⚡", amount:isMale?1.2:1.1, unit:"mg", category:"Vitamin",
       relevance: score([doesEndurance, isHeavyCardio, isCutting]),
       why:"Converts carbohydrates into ATP for energy. Demand increases with exercise intensity and carb intake. Deficiency causes fatigue and poor performance.",
       foods:["Pork (3oz = 0.8mg)","Black beans (1/2 cup = 0.4mg)","Sunflower seeds","Fortified cereals","Lentils","Brown rice","Green peas"],
       tip:"Athletes with high carb diets have elevated B1 needs. Alcohol depletes thiamine rapidly.",
-      personalNote: doesEndurance ? "🏃 Endurance training burns through glycogen fast — thiamine helps your body convert carbs to fuel." : null },
+      personalNote: doesEndurance ? "Endurance training burns through glycogen fast — thiamine helps your body convert carbs to fuel." : null },
     { id:"vitb2", name:"Vitamin B2 (Riboflavin)", emoji:"💛", amount:isMale?1.3:1.1, unit:"mg", category:"Vitamin",
       relevance: score([isHeavyCardio, liftsHeavy, isCutting]),
       why:"Essential for energy production, red blood cell formation, and cellular repair after exercise. Demand rises with activity level.",
       foods:["Beef liver (3oz = 2.9mg)","Eggs (1 = 0.5mg)","Almonds","Spinach","Fortified cereals","Milk","Mushrooms","Yogurt"],
       tip:"Riboflavin is water-soluble — regular intake matters more than mega-dosing.",
-      personalNote: isHeavyCardio ? "🔥 High cardio volume increases riboflavin turnover — a common overlooked deficiency." : null },
+      personalNote: isHeavyCardio ? "High cardio volume increases riboflavin turnover — a common overlooked deficiency." : null },
     { id:"vitb3", name:"Vitamin B3 (Niacin)", emoji:"🔋", amount:isMale?16:14, unit:"mg NE", category:"Vitamin",
       relevance: score([doesEndurance, isHeavyCardio]),
       why:"Critical for converting food into usable energy (NAD+/NADH). Supports skin health and nervous system function. Exercise increases niacin demand.",
       foods:["Chicken breast (3oz = 10mg)","Tuna (3oz = 8.6mg)","Turkey","Peanuts","Mushrooms","Green peas","Beef"],
       tip:"Easy to get from protein-rich foods. Supplementation rarely needed unless diet is very restricted.",
-      personalNote: doesEndurance ? "🏃 Endurance exercise demands higher NAD+ turnover — protein-rich diets usually cover this." : null },
+      personalNote: doesEndurance ? "Endurance exercise demands higher NAD+ turnover — protein-rich diets usually cover this." : null },
     { id:"vitb5", name:"Vitamin B5 (Pantothenic Acid)", emoji:"🧪", amount:5, unit:"mg", category:"Vitamin",
       relevance: score([liftsHeavy, isCutting]),
       why:"Key role in hormone synthesis (including testosterone and cortisol), fat metabolism, and coenzyme A production for energy.",
       foods:["Chicken breast (3oz = 1.3mg)","Beef liver","Avocado (1/2 = 1mg)","Mushrooms","Sunflower seeds","Sweet potato","Lentils","Eggs"],
       tip:"Widely available in foods — deficiency is rare. Supplementation unnecessary for most people.",
-      personalNote: liftsHeavy ? "🏋️ Supports testosterone and cortisol regulation — both critical for training adaptation." : null },
+      personalNote: liftsHeavy ? "Supports testosterone and cortisol regulation — both critical for training adaptation." : null },
     { id:"biotin", name:"Biotin (Vitamin B7)", emoji:"💅", amount:30, unit:"mcg", category:"Vitamin",
       relevance: score([isCutting]),
       why:"Supports hair, skin, and nail health. Also helps metabolize fats, carbs, and protein. Deficiency can cause hair thinning — common concern during calorie deficits.",
       foods:["Eggs (1 = 10mcg)","Almonds","Sweet potato","Spinach","Broccoli","Cheese","Oats","Salmon"],
       tip:"Raw egg whites contain avidin which blocks biotin absorption — cook your eggs.",
-      personalNote: isCutting ? "📉 Calorie deficits can stress hair and nails — ensure adequate biotin intake during a cut." : null },
+      personalNote: isCutting ? "Calorie deficits can stress hair and nails — ensure adequate biotin intake during a cut." : null },
     { id:"phosphorus", name:"Phosphorus", emoji:"🦷", amount:700, unit:"mg", category:"Mineral",
       relevance: score([liftsHeavy, activeStrDays>=3]),
       why:"Second most abundant mineral in the body. Essential for bone strength, ATP production (muscle energy), and protein synthesis. Works alongside calcium.",
       foods:["Chicken (3oz = 190mg)","Salmon (3oz = 280mg)","Yogurt (1 cup = 245mg)","Lentils","Cheese","Pumpkin seeds","Beef","Eggs"],
       tip:"Most protein-rich diets provide plenty. Excessive phosphorus from processed foods can actually leach calcium from bones.",
-      personalNote: liftsHeavy ? "🏋️ ATP (muscle energy) requires phosphorus — heavy training increases demand." : null },
+      personalNote: liftsHeavy ? "ATP (muscle energy) requires phosphorus — heavy training increases demand." : null },
     { id:"manganese", name:"Manganese", emoji:"🦴", amount:isMale?2.3:1.8, unit:"mg", category:"Mineral",
       relevance: score([liftsHeavy, doesHighImpact]),
       why:"Supports bone formation, connective tissue repair, and acts as an antioxidant enzyme cofactor. Important for joint and bone health under training stress.",
       foods:["Pineapple (1 cup = 1.5mg)","Pecans (1oz = 1.3mg)","Oatmeal","Brown rice","Spinach","Sweet potato","Black beans","Hazelnuts"],
       tip:"Most people get enough from whole grains and nuts. Supplementation rarely needed.",
-      personalNote: doesHighImpact ? "🦵 Impact training stresses bones and joints — manganese supports repair and strengthening." : null },
+      personalNote: doesHighImpact ? "Impact training stresses bones and joints — manganese supports repair and strengthening." : null },
     { id:"coq10", name:"CoQ10 (Coenzyme Q10)", emoji:"❤️", amount:100, unit:"mg (supplemental)", category:"Mineral",
       relevance: score([over40, doesEndurance, isHeavyCardio]),
       why:"Powers mitochondrial energy production in every cell. Natural production declines after 40. Supports heart health, reduces exercise-induced oxidative stress, and may improve training output.",
       foods:["Beef heart","Pork","Chicken","Trout","Sardines","Broccoli","Cauliflower","Soybeans","Peanuts"],
       tip:"Hard to get meaningful doses from food alone — supplementation (ubiquinol form) is more effective, especially over 40.",
-      personalNote: over40 ? "⚠️ Your body produces less CoQ10 after 40 — supplementation supports energy and heart health." : doesEndurance ? "🏃 Improves mitochondrial efficiency for endurance performance." : null },
+      personalNote: over40 ? "Your body produces less CoQ10 after 40 — supplementation supports energy and heart health." : doesEndurance ? "Improves mitochondrial efficiency for endurance performance." : null },
   ].sort((a,b) => b.relevance - a.relevance);
 
   const categories = ["Vitamin", "Mineral", "Fat"];
@@ -5684,7 +5684,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
             why:"Supports digestion, blood sugar regulation, and satiety. Scaled to calorie intake — aim for this daily minimum." },
         ].map(m=>(
           <div key={m.name} className={`macro-card macro-${m.cls}`}>
-            <div className="mc-emoji">{m.emoji}</div>
+            <div className="mc-emoji"><span style={{display:"inline-block",width:13,height:13,borderRadius:999,background:({protein:"#ff6b9d",carbs:"var(--yellow)",fat:"var(--orange)",fibre:"var(--green)"})[m.cls]||"var(--accent)"}} /></div>
             <div className="mc-name">{m.name}</div>
             <div className="mc-grams">{m.g}<span>g</span></div>
             {m.cal && <div className="mc-cals">{m.cal} kcal</div>}
@@ -5696,7 +5696,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
 
       {/* Hydration */}
       <div className="nutr-hydration">
-        <span className="nutr-hydration-icon">💧</span>
+        <span className="nutr-hydration-icon" style={{display:"flex",alignItems:"center"}}><Icon name="water" size={20} color="#4fc3f7" /></span>
         <div>
           <div className="nutr-hydration-title">Daily Water Target</div>
           <div className="nutr-hydration-val">{(weightLbs * 0.5 / 8).toFixed(1)} cups &nbsp;·&nbsp; ~{Math.round(weightLbs * 0.5)} oz &nbsp;·&nbsp; ~{(weightLbs * 0.5 * 29.574 / 1000).toFixed(1)}L</div>
@@ -5710,7 +5710,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
         Tap a category to see top food picks with approximate macros per serving. Build meals from these to hit your {targetCals.toLocaleString()} cal target.
       </p>
       {[
-        { id:"protein", label:"🥩 Protein Sources", color:"#ff6b9d", target:`${proteinG}g/day`, foods:[
+        { id:"protein", label:"Protein Sources", color:"#ff6b9d", target:`${proteinG}g/day`, foods:[
           { name:"Chicken Breast (4oz)", cals:130, p:26, c:0, f:2 },
           { name:"Chicken Thigh, skinless (4oz)", cals:170, p:22, c:0, f:9 },
           { name:"Ground Turkey 93% (4oz)", cals:150, p:22, c:0, f:7 },
@@ -5747,7 +5747,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
           { name:"Smoked Salmon / Lox (3oz)", cals:100, p:16, c:0, f:4 },
           { name:"Bone Broth (1 cup)", cals:40, p:9, c:1, f:0 },
         ]},
-        { id:"carbs", label:"🌾 Carb Sources", color:"#ffcc44", target:`${carbG}g/day`, foods:[
+        { id:"carbs", label:"Carb Sources", color:"#ffcc44", target:`${carbG}g/day`, foods:[
           { name:"White Rice, cooked (1 cup)", cals:200, p:4, c:45, f:0 },
           { name:"Brown Rice, cooked (1 cup)", cals:215, p:5, c:45, f:2 },
           { name:"Jasmine Rice, cooked (1 cup)", cals:210, p:4, c:46, f:0 },
@@ -5785,7 +5785,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
           { name:"Ezekiel Bread (2 slices)", cals:160, p:8, c:30, f:1 },
           { name:"Plantain, cooked (1 medium)", cals:220, p:2, c:58, f:0 },
         ]},
-        { id:"fats", label:"🥑 Healthy Fat Sources", color:"#4fc3f7", target:`${fatG}g/day`, foods:[
+        { id:"fats", label:"Healthy Fat Sources", color:"#4fc3f7", target:`${fatG}g/day`, foods:[
           { name:"Avocado (1/2 medium)", cals:120, p:1, c:6, f:11 },
           { name:"Almonds (1oz / 23 nuts)", cals:165, p:6, c:6, f:14 },
           { name:"Walnuts (1oz / 14 halves)", cals:185, p:4, c:4, f:18 },
@@ -5846,7 +5846,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
                 </div>
               ))}
               <div style={{marginTop:"10px",fontSize:".75rem",color:"var(--muted)",lineHeight:1.5,padding:"8px 10px",background:"rgba(8,220,224,.04)",borderRadius:"8px",borderLeft:"3px solid "+cat.color}}>
-                💡 {cat.id==="protein"
+                {cat.id==="protein"
                   ? `Aim for 25–40g protein per meal across 3–5 meals to maximize muscle protein synthesis. Spread evenly — don't back-load all ${proteinG}g into dinner.`
                   : cat.id==="carbs"
                   ? `Prioritize carbs around your workouts — before for energy, after for glycogen replenishment. Complex carbs (rice, oats, potato) for sustained energy; fruit for quick fuel.`
@@ -5870,7 +5870,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
           {micros.filter(m=>m.category===cat).map(m => (
             <div key={m.id} className={`micro-row${openMicro===m.id?" micro-open":""}`}>
               <div className="micro-header" onClick={()=>setOpenMicro(openMicro===m.id?null:m.id)}>
-                <span className="micro-emoji">{m.emoji}</span>
+                <span className="micro-emoji" style={{display:"flex",alignItems:"center"}}><span style={{display:"inline-block",width:12,height:12,borderRadius:999,background:({Vitamin:"var(--yellow)",Mineral:"var(--green)",Fat:"var(--blue)"})[m.category]||"var(--accent)"}} /></span>
                 <div className="micro-name-wrap">
                   <div className="micro-name">{m.name}</div>
                   <div className="micro-amount">{m.amount} {m.unit} / day</div>
@@ -5884,7 +5884,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
                   <div className="micro-foods">
                     {m.foods.map((f,i)=><div key={i} className="micro-food-chip">{f}</div>)}
                   </div>
-                  <div className="micro-tip">💡 {m.tip}</div>
+                  <div className="micro-tip">{m.tip}</div>
                   {m.personalNote && (
                     <div style={{marginTop:"8px",padding:"9px 11px",background:"rgba(8,220,224,.06)",border:"1px solid rgba(8,220,224,.15)",borderRadius:"var(--radius-sm)",fontSize:".77rem",color:"var(--accent)",lineHeight:1.55}}>
                       {m.personalNote}
@@ -6109,7 +6109,7 @@ function WeightChart({ current, goal, paces, totalBurn, maxWeeks, compliance=1, 
             })}
             <rect x={bx} y={PAD.top+6} width={boxW} height={boxH} rx="9" fill="#1c1c2e" stroke="#3a3a55" strokeWidth="1.5"/>
             <text x={bx+13} y={PAD.top+20} fill="#f0f0f8" fontSize="11.5" fontWeight="700" fontFamily="DM Sans,sans-serif">
-              📅 {hoverInfo.timeLbl}
+              {hoverInfo.timeLbl}
             </text>
             {hoverInfo.lines.map(({pace,scenario,wt,lost},i)=>(
               <g key={`tt-${scenario.key}-${pace.id}`}>
@@ -6195,7 +6195,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
   return (
     <div className="fu">
       <div className="goal-banner">
-        <div className="gb-icon">🎯</div>
+        <div className="gb-icon"></div>
         <div>
           <div className="gb-title">
             {fullName(data)||"Client"}: <span style={{color:"var(--accent)"}}>{current} → {goal} lbs</span>
@@ -6211,7 +6211,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
       <div className="sec-title">Weight Loss Projection</div>
 
       <div className="field-tip" style={{marginTop:0,marginBottom:"14px"}}>
-        💡 Use the arrows or swipe to see how different compliance levels (100% → 20%) affect your timeline. Tap a pace below the chart to highlight it.
+        Use the arrows or swipe to see how different compliance levels (100% → 20%) affect your timeline. Tap a pace below the chart to highlight it.
       </div>
 
       {/* Scenario dot navigation */}
@@ -6314,7 +6314,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
 
         {comp < 1 && (
           <div style={{marginTop:"10px",padding:"8px 10px",background:"rgba(255,107,53,.07)",border:"1px solid rgba(255,107,53,.18)",borderRadius:"8px",fontSize:".75rem",color:"var(--muted)",lineHeight:1.5}}>
-            ⚠️ At <strong style={{color:scenario.color}}>{Math.round(comp*100)}% compliance</strong>, effective weekly loss is reduced proportionally. Off-plan days are modeled at maintenance.
+            At <strong style={{color:scenario.color}}>{Math.round(comp*100)}% compliance</strong>, effective weekly loss is reduced proportionally. Off-plan days are modeled at maintenance.
           </div>
         )}
         <p style={{fontSize:".68rem",color:"var(--muted)",marginTop:"8px",lineHeight:1.5,fontStyle:"italic"}}>
@@ -6360,7 +6360,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
           return twoWkRows.map(({ wk, lbl, vals, cardioVal, allAtGoal }) => (
             <div key={wk} className={`cpt-row${allAtGoal?" cpt-row-goal":""}`}>
               <div className="cpt-period">
-                {allAtGoal && <span className="cpt-star">🎯 </span>}
+                {allAtGoal && <span className="cpt-star"></span>}
                 {lbl}
                 {wk % 4 === 0 && !allAtGoal && <span className="cpt-month-tick"></span>}
               </div>
@@ -6389,7 +6389,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
       <div className="sec-title">Time to Reach {goal} lbs</div>
 
       <div className="gtt-block">
-        <div className="gtt-block-header diet-header">🥗 Diet Only</div>
+        <div className="gtt-block-header diet-header">Diet Only</div>
         {paces.map(p=>(
           <div key={p.id} className="gtt-block-row">
             <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
@@ -6406,7 +6406,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
 
       {hasCardio && (
         <div className="gtt-block" style={{marginTop:"10px"}}>
-          <div className="gtt-block-header cardio-header">🔥 Diet + Cardio</div>
+          <div className="gtt-block-header cardio-header" style={{display:"flex",alignItems:"center",gap:6}}><Icon name="flame" size={15} color="currentColor" />Diet + Cardio</div>
           {paces.map(p=>{
             const wksDiet   = wksNeeded(p, defDiet,   comp);
             const wksCardio = wksNeeded(p, defCardio, comp);
@@ -6420,7 +6420,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
                 </div>
                 <div style={{textAlign:"right"}}>
                   <div className={p.textCls} style={{fontWeight:700,fontSize:"1rem"}}>{formatWeeks(wksCardio)}</div>
-                  {savedLbl && <div style={{fontSize:".72rem",color:"var(--accent)",marginTop:"2px"}}>⚡ {savedLbl} faster</div>}
+                  {savedLbl && <div style={{fontSize:".72rem",color:"var(--accent)",marginTop:"2px"}}>{savedLbl} faster</div>}
                   {comp < 1 && <div style={{fontSize:".68rem",color:scenario.color}}>at {Math.round(comp*100)}% compliance</div>}
                 </div>
               </div>
@@ -6438,7 +6438,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
         return (
           <div className={`ms-card${isGoalCard?" ms-card-goal":""}`} key={ms.label}>
             <div className="ms-card-header">
-              {isGoalCard ? "🎉 Goal Reached!" : ms.label}
+              {isGoalCard ? "Goal Reached!" : ms.label}
               {isGoalCard && <span style={{fontSize:".75rem",fontWeight:400,color:"var(--muted)",marginLeft:"8px"}}>({ms.label})</span>}
             </div>
             {paces.map((p,i)=>{
@@ -6626,7 +6626,7 @@ function MicroBars({ micros, scale = 1 }) {
                     <span style={{ color: "var(--text)" }}>{d.label}{d.limit ? <span style={{ color: "var(--muted)", fontWeight: 400 }}> · limit</span> : null}</span>
                     <span style={{ color: over ? "var(--red)" : "var(--muted)", fontWeight: 600 }}>
                       {v}{d.rda ? <span style={{ opacity: .7, fontWeight: 400 }}> / {d.rda}</span> : ""} {d.unit}
-                      {met ? <span style={{ color: grp.color }}> ✓</span> : over ? " ⚠️" : ""}
+                      {met ? <span style={{ color: grp.color }}> ✓</span> : over ? " " : ""}
                     </span>
                   </div>
                   {/* Track. Nutrients with no reference (mono/poly fat, caffeine)
@@ -10429,7 +10429,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 </div>
               );
             })()}
-            <div style={{fontSize:".72rem",color:"var(--muted)",textAlign:"center"}}>📸 Screenshot this card to share your progress</div>
+            <div style={{fontSize:".72rem",color:"var(--muted)",textAlign:"center"}}>Screenshot this card to share your progress</div>
           </div>
         )}
 
@@ -10442,7 +10442,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         <button className="dash-nav-btn" onClick={onOpenPlan} style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"6px"}}><Icon name="edit" size={24} color="var(--accent)" />Edit Info</button>
         <button className="dash-nav-btn" onClick={onEditWorkouts} style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"6px"}}><Icon name="dumbbell" size={24} color="var(--accent)" />Edit Workouts</button>
       </div>
-      <div style={{fontSize:".58rem",color:"var(--muted)",textAlign:"center",marginTop:"10px",fontStyle:"italic",lineHeight:1.5}}>⚠️ All values are estimates for educational purposes. Not medical advice. Consult a healthcare provider before making changes to diet or exercise.</div>
+      <div style={{fontSize:".58rem",color:"var(--muted)",textAlign:"center",marginTop:"10px",fontStyle:"italic",lineHeight:1.5}}>All values are estimates for educational purposes. Not medical advice. Consult a healthcare provider before making changes to diet or exercise.</div>
     </div>
   );
 }
@@ -10587,12 +10587,12 @@ function DailyCheckIn({ data, onSaveCheckIn }) {
 
       {/* Date picker — calendar with logged dates highlighted */}
       <div className="checkin-field" style={{marginBottom:"12px"}}>
-        <label>Date {isPast && "📌 past entry"} {isFuture && "📌 future plan"}</label>
+        <label>Date {isPast && "· past entry"} {isFuture && "· future plan"}</label>
         <CheckInCalendar checkIns={data.checkIns} selected={checkDate} onSelect={setCheckDate} />
       </div>
       {existingForDate && (
         <div style={{fontSize:".78rem",color:"var(--green)",marginBottom:"10px",padding:"8px 10px",background:"rgba(79,255,176,.06)",borderRadius:"8px",border:"1px solid rgba(79,255,176,.15)"}}>
-          ✏️ Editing your existing entry for {checkDate}. Saving updates it (one entry per date).
+          Editing your existing entry for {checkDate}. Saving updates it (one entry per date).
         </div>
       )}
 
@@ -10678,20 +10678,20 @@ function StreakBadges({ checkIns }) {
   const adherencePct = totalCheckIns > 0 ? Math.round((hitDays / totalCheckIns) * 100) : 0;
 
   const BADGES = [
-    { id: "first", label: "First Check-In", emoji: "⭐", earned: totalCheckIns >= 1 },
-    { id: "week", label: "7-Day Streak", emoji: "🔥", earned: streak >= 7 },
-    { id: "month", label: "30-Day Streak", emoji: "💎", earned: streak >= 30 },
-    { id: "ten", label: "10 Check-Ins", emoji: "📊", earned: totalCheckIns >= 10 },
-    { id: "fifty", label: "50 Check-Ins", emoji: "🏆", earned: totalCheckIns >= 50 },
-    { id: "adherence", label: "80%+ Adherence", emoji: "🎯", earned: totalCheckIns >= 7 && adherencePct >= 80 },
-    { id: "perfect", label: "Perfect Week", emoji: "💯", earned: streak >= 7 && adherencePct === 100 },
+    { id: "first", label: "First Check-In", iconName: "star", earned: totalCheckIns >= 1 },
+    { id: "week", label: "7-Day Streak", iconName: "flame", earned: streak >= 7 },
+    { id: "month", label: "30-Day Streak", iconName: "sparkle", earned: streak >= 30 },
+    { id: "ten", label: "10 Check-Ins", iconName: "chart", earned: totalCheckIns >= 10 },
+    { id: "fifty", label: "50 Check-Ins", iconName: "target", earned: totalCheckIns >= 50 },
+    { id: "adherence", label: "80%+ Adherence", iconName: "check", earned: totalCheckIns >= 7 && adherencePct >= 80 },
+    { id: "perfect", label: "Perfect Week", iconName: "bolt", earned: streak >= 7 && adherencePct === 100 },
   ];
 
   return (
     <>
       {(streak > 0 || totalCheckIns > 0) && (
         <div className="streak-bar">
-          <span className="streak-fire">🔥</span>
+          <span className="streak-fire" style={{display:"flex",alignItems:"center"}}><Icon name="flame" size={22} color="var(--orange)" /></span>
           <div>
             <div className="streak-num">{streak}</div>
             <div className="streak-lbl">day streak</div>
@@ -10705,7 +10705,7 @@ function StreakBadges({ checkIns }) {
       {BADGES.some(b => b.earned) && (
         <div className="badge-row">
           {BADGES.filter(b => b.earned).map(b => (
-            <div key={b.id} className="badge earned">{b.emoji} {b.label}</div>
+            <div key={b.id} className="badge earned"><Icon name={b.iconName} size={14} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />{b.label}</div>
           ))}
         </div>
       )}
@@ -10727,8 +10727,8 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
 
   const handleShare = async () => {
     const text = `🏋️ ${fullName(data) || "My"} Glidna Plan\n\n` +
-      `📊 Maintenance: ${tdee.toLocaleString()} cal/day\n` +
-      `🎯 Target (1lb/wk): ${targetCals.toLocaleString()} cal/day\n` +
+      `Maintenance: ${tdee.toLocaleString()} cal/day\n` +
+      `Target (1lb/wk): ${targetCals.toLocaleString()} cal/day\n` +
       `🔥 Weekly burn: ${(totalBurn + totalStrBurn).toLocaleString()} cal\n` +
       (hasGoal ? `⚖️ Goal: ${weightLbs} → ${goalWeight} lbs\n` : "") +
       `\nBuilt with Glidna`;
@@ -10761,12 +10761,12 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
       </div>
       {hasGoal && (
         <div style={{fontSize:".85rem",color:"var(--muted)",marginBottom:"8px"}}>
-          ⚖️ {weightLbs} → {goalWeight} lbs · {toLose} lbs to go
+          {weightLbs} → {goalWeight} lbs · {toLose} lbs to go
         </div>
       )}
       <div className="share-card-footer">Screenshot this card or tap share below</div>
       <button className="share-btn" onClick={handleShare}>
-        📤 Share This Plan
+        Share This Plan
       </button>
     </div>
   );
@@ -10788,7 +10788,7 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
   const sorted = [...(checkIns || [])].filter(c => c.weight).sort((a, b) => a.timestamp - b.timestamp);
   if (sorted.length < 2) return (
     <div className="card" style={{padding:"16px",textAlign:"center",color:"var(--muted)",fontSize:".84rem",lineHeight:1.6,...cardStyle}}>
-      📈 Progress chart appears after 2+ check-ins with weight logged. Keep checking in daily!
+      Progress chart appears after 2+ check-ins with weight logged. Keep checking in daily!
     </div>
   );
 
@@ -11376,7 +11376,7 @@ CLIENT PROFILE:
   return (
     <div className="card" style={{padding:"16px",marginBottom:"16px",borderColor: insights ? "rgba(181,123,255,.25)" : "var(--border)",background: insights ? "rgba(181,123,255,.03)" : "var(--surface)"}}>
       <div style={{display:"flex",alignItems:"center",gap:"10px",marginBottom: insights ? "14px" : "0"}}>
-        <span style={{fontSize:"1.4rem"}}>🤖</span>
+        <span style={{display:"flex",alignItems:"center"}}><Icon name="sparkle" size={20} color="var(--accent)" /></span>
         <div style={{flex:1}}>
           <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",letterSpacing:"2px",color:"#b57bff"}}>AI Coaching Insights</div>
           <div style={{fontSize:".73rem",color:"var(--muted)"}}>Powered by Claude — analyzes {data.firstName || "your client"}'s complete profile</div>
@@ -11399,7 +11399,7 @@ CLIENT PROFILE:
 
           <button style={{background:"none",border:"none",color:"var(--muted)",cursor:"pointer",fontFamily:"inherit",fontSize:".73rem",textDecoration:"underline",padding:"8px 0",marginTop:"10px"}}
             onClick={()=>{setInsights(null);generateInsights();}}>
-            🔄 Regenerate insights
+            ↻ Regenerate insights
           </button>
         </div>
       )}
@@ -11529,7 +11529,7 @@ function InstallPrompt() {
       maxWidth: 460, margin: "0 auto", borderRadius: 14, padding: "12px 14px",
       background: "var(--surface,#121b1e)", border: "1px solid var(--border)", boxShadow: "0 8px 30px rgba(0,0,0,.45)",
       display: "flex", alignItems: "flex-start", gap: 10, fontFamily: "var(--font-sans)", color: "var(--text)" }}>
-      <span style={{ fontSize: "1.3rem", lineHeight: 1 }}>📲</span>
+      <Icon name="phone" size={20} color="var(--accent)" />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 800, fontSize: ".92rem", marginBottom: 2 }}>Install Glidna</div>
         <div style={{ fontSize: ".78rem", color: "var(--muted)", lineHeight: 1.45 }}>
@@ -11690,7 +11690,7 @@ function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
   return (
     <div className="bg-surface border border-border rounded-card p-5 text-fg">
       <div className="mb-3 text-[.95rem] font-extrabold">
-        {isTrainer ? "🧑‍🏫 Trainer" : "🙋 Client"}
+        {isTrainer ? "Trainer" : "Client"}
         <span className="ml-2 text-[.8rem] font-normal text-muted">
           {profile.email}
         </span>
@@ -11723,7 +11723,7 @@ function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
 
       {isTrainer ? (
         <div className={subCls}>
-          📨 Invite codes &amp; links now live in the <strong className="text-fg">≡ menu → Invite clients</strong>.
+          Invite codes &amp; links now live in the <strong className="text-fg">≡ menu → Invite clients</strong>.
           Your connected clients (link / open / manage) are on the Dashboard.
         </div>
       ) : (
@@ -11824,10 +11824,10 @@ function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
 //   { id, fromUid, fromName, type, prompt, status:"open"|"done", createdAt, doneAt }
 // The reverse direction (client → trainer) needs server-side writes (Blaze).
 const REQUEST_TEMPLATES = [
-  { type: "log_food",    icon: "🍽️", iconName: "meal",     label: "Log today's food",  prompt: "Please log what you ate today." },
-  { type: "weigh_in",    icon: "⚖️", iconName: "scale",    label: "Do a weigh-in",     prompt: "Please record today's weight." },
-  { type: "log_workout", icon: "🏋️", iconName: "dumbbell", label: "Record a workout",  prompt: "Please record your workout for today." },
-  { type: "enter_info",  icon: "📝", iconName: "edit",     label: "Enter your info",   prompt: "Please fill in your details and goals so we can build your plan." },
+  { type: "log_food",    iconName: "meal",     label: "Log today's food",  prompt: "Please log what you ate today." },
+  { type: "weigh_in",    iconName: "scale",    label: "Do a weigh-in",     prompt: "Please record today's weight." },
+  { type: "log_workout", iconName: "dumbbell", label: "Record a workout",  prompt: "Please record your workout for today." },
+  { type: "enter_info",  iconName: "edit",     label: "Enter your info",   prompt: "Please fill in your details and goals so we can build your plan." },
 ];
 // Resolve a request's custom icon name from its type (falls back to edit).
 const requestIconName = (type) => (REQUEST_TEMPLATES.find(t => t.type === type) || {}).iconName || "edit";
@@ -11926,9 +11926,9 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
   const ghostCls = "rounded-[9px] border border-border bg-transparent px-3.5 py-3 text-[.88rem] font-semibold text-fg cursor-pointer";
 
   const meta = {
-    weigh_in:    { icon: "⚖️", title: "Log today's weight", label: "Today's weight (lbs)", ph: "e.g. 182", cta: "Log weight",  numeric: true,  fn: () => onWeighIn(val) },
-    log_food:    { icon: "🍽️", title: "Log today's food",   label: "Calories eaten today",  ph: "e.g. 650", cta: "Add calories", numeric: true,  fn: () => onLogFood(val) },
-    log_workout: { icon: "🏋️", title: "Record your workout", label: "Add a note (optional)", ph: "e.g. Push day — felt strong", cta: "Mark workout done", numeric: false, fn: () => onLogWorkout(val) },
+    weigh_in:    { iconName: "scale", title: "Log today's weight", label: "Today's weight (lbs)", ph: "e.g. 182", cta: "Log weight",  numeric: true,  fn: () => onWeighIn(val) },
+    log_food:    { iconName: "meal", title: "Log today's food",   label: "Calories eaten today",  ph: "e.g. 650", cta: "Add calories", numeric: true,  fn: () => onLogFood(val) },
+    log_workout: { iconName: "dumbbell", title: "Record your workout", label: "Add a note (optional)", ph: "e.g. Push day — felt strong", cta: "Mark workout done", numeric: false, fn: () => onLogWorkout(val) },
   }[type];
 
   return createPortal(
@@ -11938,12 +11938,12 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
         className="w-full max-w-[440px] rounded-card border border-border bg-surface p-[18px] text-fg">
         {done ? (
           <div className="py-[18px] text-center">
-            <div className="text-[2.2rem]">✅</div>
+            <div className="flex justify-center"><Icon name="check" size={40} color="var(--green,#2fe0a8)" /></div>
             <div className="mt-1.5 text-[1.05rem] font-extrabold">Done!</div>
           </div>
         ) : isLoggable ? (
           <>
-            <div className="mb-1 text-[1.05rem] font-extrabold">{meta.icon} {meta.title}</div>
+            <div className="mb-1 text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name={meta.iconName} size={18} color="var(--accent)" />{meta.title}</div>
             <div className="mb-3.5 text-[.82rem] text-muted">{request.prompt}</div>
             <label className="text-[.72rem] uppercase tracking-[.5px] text-muted">{meta.label}</label>
             <input autoFocus type={meta.numeric ? "number" : "text"} inputMode={meta.numeric ? "decimal" : "text"}
@@ -11960,7 +11960,7 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
         ) : (
           // enter_info / custom — needs the full editor, so offer a jump there.
           <>
-            <div className="mb-1 text-[1.05rem] font-extrabold">📝 {request.prompt}</div>
+            <div className="mb-1 text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="edit" size={17} color="var(--accent)" />{request.prompt}</div>
             <div className="mb-4 text-[.82rem] text-muted">
               Open your plan to take care of this, then come back.
             </div>
@@ -12920,7 +12920,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
             </div>
           )}
           <div className={`${subCls} mt-1.5 mb-1.5`}>
-            📄 Plans not connected to a client login — templates, backups, and 🧪 simulations (sandbox
+            Plans not connected to a client login — templates, backups, and simulations (sandbox
             what-if projections). Connected clients are under “Your clients” above.
           </div>
           <div className={subCls}>
@@ -12932,7 +12932,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
             <>
               {/* Filter: all / plans / simulations */}
               <div className="flex gap-1.5 mt-3 mb-1.5">
-                {[["all", `All (${profiles.length})`], ["plans", `Plans (${realPlans.length})`], ["sims", `🧪 Sims (${sims.length})`]].map(([k, lbl]) => (
+                {[["all", `All (${profiles.length})`], ["plans", `Plans (${realPlans.length})`], ["sims", `Sims (${sims.length})`]].map(([k, lbl]) => (
                   <button key={k} onClick={() => setPlanFilter(k)} className={purpleChip(planFilter === k)}>
                     {lbl}
                   </button>
@@ -12951,7 +12951,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
 
           {loading ? null : profiles.length === 0 ? (
             <div className="text-muted text-[.85rem] py-2">
-              No local plans yet — tap “+ Plan” to make one, or “+ 🧪 Simulation” for a what-if projection.
+              No local plans yet — tap “+ Plan” to make one, or “+ Simulation” for a what-if projection.
             </div>
           ) : filteredLocal.length === 0 ? (
             <div className="text-muted text-[.85rem] py-2">Nothing in this filter.</div>
@@ -13233,7 +13233,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
             {/* Needs attention */}
             <div className={cardCls}>
               <div className={`${titleCls} flex items-center gap-2`}><Icon name="alert" size={19} color="var(--yellow,#fbbf24)" />Needs attention</div>
-              <div className={`${subCls} mb-2`}>No logs in {attnDays}+ days — tap a name to open their plan, or 📤 Nudge to send a "log your food" reminder.</div>
+              <div className={`${subCls} mb-2`}>No logs in {attnDays}+ days — tap a name to open their plan, or Nudge to send a "log your food" reminder.</div>
               <div className="flex items-center gap-1.5 mb-3">
                 <span className="text-[.7rem] uppercase tracking-wide text-muted mr-0.5">Flag after</span>
                 {[2, 3, 5, 7].map((d) => (
@@ -13244,7 +13244,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
                 ))}
               </div>
               {needsAttention.length === 0 ? (
-                <div className="text-sm text-success py-1">🎉 Everyone's logged recently. Nice coaching.</div>
+                <div className="text-sm text-success py-1">Everyone's logged recently. Nice coaching.</div>
               ) : (
                 <div className="flex flex-col gap-1.5">
                   {needsAttention.map((c) => (
@@ -13252,7 +13252,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
                       <span className="flex-1 min-w-0 cursor-pointer" onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>
                         <span className="font-semibold text-[.9rem] truncate block">{c.name}</span>
                         <span className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[.74rem] text-warn whitespace-nowrap">🕑 {lastActiveLabel(c)}</span>
+                          <span className="text-[.74rem] text-warn whitespace-nowrap inline-flex items-center gap-1"><Icon name="clock" size={12} color="currentColor" />{lastActiveLabel(c)}</span>
                           <Last7 days={c.last7} />
                         </span>
                       </span>
@@ -13345,7 +13345,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
             </div>
 
             <button onClick={onGoClients} className="w-full py-3 rounded-lg border border-border bg-transparent text-fg text-sm font-semibold cursor-pointer">
-              👥 Manage all clients & plans
+              Manage all clients & plans
             </button>
           </>
         )}
@@ -14533,11 +14533,11 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                       <span className="text-[.8rem] text-muted">{totalDays} {totalDays === 1 ? "day" : "days"}/week</span>
                     </div>
                     <div className="max-h-44 overflow-y-auto flex flex-col gap-1.5">
-                      {[...strDays.map((x) => ({ ...x, kind: "💪" })), ...cardDays.map((x) => ({ ...x, kind: "🏃" }))]
+                      {[...strDays.map((x) => ({ ...x, kind: "muscle" })), ...cardDays.map((x) => ({ ...x, kind: "run" }))]
                         .sort((a, b) => DAYS.indexOf(a.day) - DAYS.indexOf(b.day))
                         .map((row, i) => (
                           <div key={i} className="text-[.8rem]">
-                            <span className="font-semibold text-fg">{row.kind} {row.day}</span>
+                            <span className="font-semibold text-fg inline-flex items-center gap-1.5"><Icon name={row.kind} size={13} color="var(--accent)" />{row.day}</span>
                             <span className="text-muted"> — {row.items.map((s) => s.label).join(", ")}</span>
                           </div>
                         ))}
@@ -14628,7 +14628,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 {busy ? "…" : "Send"}
               </button>
             </div>
-            <div className="mt-1.5 text-[.66rem] text-muted">🎤 Speak or 📷 snap a meal. AI estimates can be off — confirm important numbers.</div>
+            <div className="mt-1.5 text-[.66rem] text-muted">Speak or snap a meal. AI estimates can be off — confirm important numbers.</div>
           </div>
           {/* Paste-from-AI import overlay (works-with-your-AI, phase 1) */}
           {pasteOpen && (
@@ -15189,7 +15189,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
             the action buttons drop to their own line under the greeting instead. */}
         <div className="flex flex-wrap items-center justify-between gap-y-2 mb-5">
           <div className="text-2xl font-extrabold tracking-tight whitespace-nowrap">
-            {firstName ? `Hi, ${firstName} 👋` : "Your dashboard"}
+            {firstName ? `Hi, ${firstName} ` : "Your dashboard"}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={() => setShowNotes(true)} title="Your notes"
@@ -15431,7 +15431,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                   <span className="text-muted">Healthy range: {rLo}–{rHi} lbs</span>
                   {" · "}
                   <span className={`font-semibold ${inRange ? "text-success" : "text-warn"}`}>
-                    {inRange ? "✅ in range" : w < rLo ? `${rangeGap} below` : `${rangeGap} above`}
+                    {inRange ? "in range" : w < rLo ? `${rangeGap} below` : `${rangeGap} above`}
                   </span>
                 </div>
               )}
@@ -15472,7 +15472,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                       Not trending toward your goal yet — adjust and keep logging.
                     </div>
                   ) : goalEtaWks === 0 ? (
-                    <div className="mt-1.5 text-sm text-success font-bold">🎉 You're at your goal weight!</div>
+                    <div className="mt-1.5 text-sm text-success font-bold">You're at your goal weight!</div>
                   ) : (
                     <div className="mt-1.5 text-[.88rem]">
                       Reach <strong>{g} lbs</strong> by{" "}
@@ -15788,7 +15788,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
               onDragLeave={onFolderDragLeave}
               onDrop={e=>onFolderDrop(e,null)}>
               <div className="flex items-center gap-2 px-3 py-2.5 cursor-pointer" onClick={()=>toggleFolder("unfiled")}>
-                <span className="text-base">📋</span>
+                <span className="text-base"></span>
                 <span className="flex-1 font-semibold text-[.92rem] text-muted">Unfiled</span>
                 <span className="text-[.7rem] font-bold text-muted bg-surface2 rounded-full px-2 py-0.5">{unfiled.length}</span>
                 <span className={`text-muted text-xs transition-transform ${openFolders["unfiled"]!==false?"rotate-0":"-rotate-90"}`}>▼</span>
@@ -15807,12 +15807,12 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
 
         {/* Export / Import / Recovery */}
         <div className={cardCls}>
-          <div className="text-[.82rem] font-bold text-fg mb-1">📦 Data Management</div>
+          <div className="text-[.82rem] font-bold text-fg mb-1 flex items-center gap-2"><Icon name="folder" size={15} color="var(--accent)" />Data Management</div>
           <div className="text-[.73rem] text-muted mb-3 leading-relaxed">
-            📱 <strong>Phone/iPad:</strong> Use Copy & Paste to move data between devices. <strong>Laptop:</strong> File export also works.
+            <strong>Phone/iPad:</strong> Use Copy & Paste to move data between devices. <strong>Laptop:</strong> File export also works.
           </div>
           <div className="text-[.65rem] text-primary leading-snug mb-3 italic">
-            ℹ️ This section is only needed in the current version. Once Glidna becomes a web app, your data syncs automatically across all devices — no exporting or importing needed.
+            This section is only needed in the current version. Once Glidna becomes a web app, your data syncs automatically across all devices — no exporting or importing needed.
           </div>
 
           {/* Clipboard — primary method for mobile */}
@@ -15822,21 +15822,21 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
                 setClipMsg("Copying...");
                 const result = await onClipCopy();
                 if (result === true) {
-                  setClipMsg("✅ Copied to clipboard! Paste on your other device.");
+                  setClipMsg("Copied to clipboard! Paste on your other device.");
                 } else {
-                  setClipMsg("⚠️ Clipboard blocked — use File Export below instead.");
+                  setClipMsg("Clipboard blocked — use File Export below instead.");
                 }
                 setTimeout(()=>setClipMsg(null), 6000);
               }}>
-              📋 Copy All to Clipboard
+              Copy All to Clipboard
             </button>
             <button className="flex-[1_1_140px] min-h-[44px] text-[.82rem] font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer"
               onClick={()=>{setShowPasteBox(v=>!v); setPasteText("");}}>
-              📋 Paste to Restore
+              Paste to Restore
             </button>
           </div>
 
-          {clipMsg && <div className={`text-sm mb-2 text-center leading-snug ${clipMsg.startsWith("✅")?"text-success":clipMsg.startsWith("⚠️")?"text-warn":"text-muted"}`}>{clipMsg}</div>}
+          {clipMsg && <div className={`text-sm mb-2 text-center leading-snug ${clipMsg.startsWith("")?"text-success":clipMsg.startsWith("")?"text-warn":"text-muted"}`}>{clipMsg}</div>}
 
           {showPasteBox && (
             <div className="mb-2.5">
@@ -15853,7 +15853,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
                   onClick={async ()=>{
                     setClipMsg("Importing...");
                     const result = await onClipPaste(pasteText);
-                    setClipMsg(result.ok ? `✅ ${result.msg}` : `❌ ${result.msg}`);
+                    setClipMsg(result.ok ? `${result.msg}` : `❌ ${result.msg}`);
                     if(result.ok){ setPasteText(""); setShowPasteBox(false); }
                     setTimeout(()=>setClipMsg(null), 5000);
                   }}>
@@ -15871,14 +15871,14 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
               onClick={async ()=>{
                 setExportMsg("Packaging...");
                 const ok = await onExport();
-                setExportMsg(ok ? "✅ Download started!" : "❌ Export failed");
+                setExportMsg(ok ? "Download started!" : "❌ Export failed");
                 setTimeout(()=>setExportMsg(null), 4000);
               }}>
-              📤 Export All Clients
+              Export All Clients
             </button>
             <button className="flex-[1_1_140px] min-h-[42px] text-[.8rem] font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer"
               onClick={()=>importInputRef.current?.click()}>
-              📥 Import From File
+              Import From File
             </button>
             <input ref={importInputRef} type="file" accept=".json" style={{display:"none"}}
               onChange={async (e)=>{
@@ -15886,16 +15886,16 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
                 if (!file) return;
                 setExportMsg("Importing...");
                 const result = await onImport(file);
-                setExportMsg(result.ok ? `✅ ${result.msg}` : `❌ ${result.msg}`);
+                setExportMsg(result.ok ? `${result.msg}` : `❌ ${result.msg}`);
                 e.target.value = "";
                 setTimeout(()=>setExportMsg(null), 5000);
               }}/>
           </div>
 
-          {exportMsg && <div className={`text-sm mb-2 text-center ${exportMsg.startsWith("✅")?"text-success":exportMsg.startsWith("❌")?"text-danger":"text-muted"}`}>{exportMsg}</div>}
+          {exportMsg && <div className={`text-sm mb-2 text-center ${exportMsg.startsWith("")?"text-success":exportMsg.startsWith("❌")?"text-danger":"text-muted"}`}>{exportMsg}</div>}
 
           <div className="text-[.73rem] text-muted leading-relaxed mb-2.5">
-            💡 <strong>Export</strong> downloads a JSON backup of all your clients, folders, and data. <strong>Import</strong> loads a backup file and merges it with your current profiles — no data is overwritten.
+            <strong>Export</strong> downloads a JSON backup of all your clients, folders, and data. <strong>Import</strong> loads a backup file and merges it with your current profiles — no data is overwritten.
           </div>
 
           {recoverMsg && <div className="text-sm text-success mb-2 text-center">{recoverMsg}</div>}
@@ -15903,14 +15903,14 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
             onClick={async ()=>{
               setRecoverMsg("Scanning storage...");
               const count = await onRecover();
-              setRecoverMsg(count > 0 ? `✅ Recovered ${count} profile${count!==1?"s":""}!` : "No lost profiles found in storage.");
+              setRecoverMsg(count > 0 ? `Recovered ${count} profile${count!==1?"s":""}!` : "No lost profiles found in storage.");
               setTimeout(()=>setRecoverMsg(null), 5000);
             }}>
-            🔍 Recover lost profiles from storage
+            Recover lost profiles from storage
           </button>
         </div>
 
-        <div className="text-center text-xs text-muted py-3">🔒 All data is stored locally on your device — nothing is sent to a server.</div>
+        <div className="text-center text-xs text-muted py-3">All data is stored locally on your device — nothing is sent to a server.</div>
       </div>
     </div>
   );
@@ -16610,7 +16610,7 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
       <div className="flex-1 overflow-y-auto px-3 py-3">
         {msgs === null && <div className="py-6 text-center text-[.82rem] text-muted">Loading…</div>}
         {msgs && msgs.length === 0 && !err && (
-          <div className="py-6 text-center text-[.82rem] text-muted">No messages yet — say hi 👋</div>
+          <div className="py-6 text-center text-[.82rem] text-muted">No messages yet — say hi </div>
         )}
         {(msgs || []).map((m) => (
           <div key={m.id} className={`mb-2 flex ${m.from === meUid ? "justify-end" : "justify-start"}`}>
@@ -18615,7 +18615,7 @@ export default function App() {
             <button onClick={goBack} className="bg-primaryfill text-primaryfg font-bold rounded-lg px-3 py-1.5 text-sm cursor-pointer whitespace-nowrap">
               ← {(showDash && step===5) ? (role === ROLES.CLIENT ? "Home" : "Clients") : step <= 4 ? (navFrom === "results" ? "Results" : "Dashboard") : "Dashboard"}
             </button>
-            <div className="text-muted text-sm truncate">📂 {fullName(data) || "New Client"}</div>
+            <div className="text-muted text-sm truncate flex items-center gap-1.5"><Icon name="folder" size={14} color="var(--color-muted,#7e9a9a)" />{fullName(data) || "New Client"}</div>
           </div>
         </div>
         <div className="container">
