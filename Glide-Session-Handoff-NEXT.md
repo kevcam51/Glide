@@ -1,5 +1,102 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S95 (Jul 16-17): automations fixed, Trainerize sync fixed, food library, light/dark, pace picker
+_All pushed (`origin/main` @ `96f3ed5`) + deployed + live on glidna.com. Firebase `calorieiq-29762`;
+model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`._
+
+### ⏭️ START HERE — the dashboard restructure Kevin asked for (HALF DONE)
+Kevin's ask, in his words: make "Today's Target" and "Logged So Far" more editable, and collapse the
+Quick Log section into the tiles. **DONE: the pace picker + the ring's deficit line (`96f3ed5`).
+NOT DONE: the layout moves.** I ran out of context; nothing is half-edited (working tree clean) —
+the moves below simply haven't been started.
+
+Remaining, all inside `DailyDashboard` (App.jsx ~L9300–9700), driven by the existing
+`expandedStat` tile-panel pattern (tiles ~L9328, panels ~L9399):
+1. **"Logged So Far" panel** (`expandedStat === "logged"`, ~L9566) — move IN: the "Add Calories" row
+   + its macro rows (currently the Quick Log section ~L9660), the **Macros & Micros** dropdown, and
+   **`<MealLog>`** (~L9533 in the sec-title flow). The panel ALREADY has a "Quick Add" calories input
+   (~L9582) — reconcile, don't duplicate.
+2. **"oz Water" tile panel** — move the water row out of Quick Log into it; the tile becomes the only
+   place water is entered.
+3. **NEW big "Today's Weight" tile** under Workout Burn + oz Water — same target as the Quick Log
+   weight row: opens `MeasurementsModal` (weight + body fat + measurements). NOTE the dash-cta-grid is
+   `1fr 1fr`; a full-width tile needs `gridColumn:"1 / -1"`.
+4. **"Workout Burn" panel** — move "Today's Workout" into it (tracker line already renders there).
+5. **DELETE the Quick Log section** once 1–4 are moved (`<div className="sec-title">Quick Log</div>`
+   ~L9660). Kevin's framing: "see if it looks cleaner using just the clickable tiles".
+Watch: `calDraft`/`commitCal`/`LogBtn`/`showMacros`/`weightDraft` live in DailyDashboard state and are
+shared by the rows being moved — move the JSX, not the state. **`.page-transition` transform trap
+still applies to any new fixed overlay (portal it).**
+
+### ✅ What S95 shipped (all verified live, in order)
+- **Automations (workflow Phase 2) — the UI already existed since S93; the BLOCKER was gating** (`0949640`).
+  `capFor` checked `profile.role === "admin"`, which is NEVER true (createProfile only writes
+  client/head_trainer; admin lives in a custom CLAIM) → Kevin saw the "upgrade to Elite" upsell on his
+  own app. Now UID-based via new exported `aichat.isAdminUid()`. Same dead check fixed in
+  `requestBudgetBoost`. **Also fixed: hour-0 scheduling** — `Number(hour) || 8` treated midnight UTC as
+  missing, so an 8:00 PM ET automation fired at 4:00 AM. E2E-verified: created via UI at 8PM → stored
+  hour 0 → dispatcher force-run → real tool-backed AI answer → notification feed → rescheduled to 8PM.
+- **Trainerize auto-sync was a NO-OP on Kevin's account** (`139f7f7`) — logged "no imported Trainerize
+  clients in the index" every 30 min for as long as logs go back. It built its client list ONLY from
+  local profiles with `index.trainerizeId`, but LINKING a client deletes the local profile
+  (`linkPlan`→`removeLocalProfileById`), so linking silently removed them from sync forever;
+  `caliq-tz-links` (S93) was never consulted. Fixed via shared `syncTargetIds()` = imported ∪ linked.
+  Added **manual "Sync now"** (`trainerizeImport {mode:"sync"}`, 14d window) on BOTH the dashboard
+  tracker card and trainer home, owner-gated. **Kevin confirmed: "yes the sync works."**
+  Workout Burn tile stays TODAY-only (never misreport today's effort); its expanded breakdown now shows
+  the last real reading labeled "yesterday (today hasn't synced)".
+- **Food library** (`4636e28`) — new `FoodLibrary` page (Meals header "Library" + per-meal "Previously
+  logged & saved"; the chip pile-up is gone). Saved = **`caliq-foods-saved` on the USER's account**
+  (follows them across plans); recents stay **plan-scoped** (`caliq-foods-{planId}`) so a trainer sees
+  the CLIENT's recents. One identity (base name + meal type) → no duplicates at two servings; re-logging
+  updates the amount in place, in the saved copy too. Tap = log with last serving. Rows show macros.
+  Whole logged row is now the edit target; move/delete are ~40px. Kept tap-to-move over drag-and-drop
+  (Kevin's call — DnD needs hand-rolled pointer dragging on touch).
+- **Light/dark/auto theme** (`7f26fce`) — ≡ → Appearance. **Default dark**, so nobody's app changes.
+  Per-device localStorage (`glidna-theme`) because it must resolve before first paint + before sign-in.
+  Both token systems flip together: `themes.css [data-theme="light"]` (Tailwind `--color-*`) AND
+  `App.jsx :root[data-theme="light"]` (old `--bg/--text/--accent`, which drive in-plan + inline styles).
+  34 hardcoded `data-theme="pro"` wrappers removed → everything inherits from `<html>`.
+- **Selectable weekly pace** (`96f3ed5`) — `data.weeklyRate` 0/0.5/1/2 lb/wk → 0/250/500/1000 cal/day.
+  Replaced a hardcoded −500 in **8 places + the server**. Unset = 1 lb/wk = today's behavior.
+  Ring shows "CAL REMAINING" + "−N deficit" (vs MAINTENANCE, hidden until something's logged).
+  "Count workout burn" writes the EXISTING `data.deficitMode` (one setting, two places).
+
+### S95 gotchas (don't re-learn)
+- **`Number(null) === 0` bit us TWICE** (automation hour, weekly rate). Where **0 is a legitimate
+  value**, `Number(x) || default` is a trap — and `null` is what this codebase passes for "reset to
+  auto" (`onSetMacroTargets`). Screen `null`/`undefined`/`""` BEFORE trusting a 0.
+- **`{0 && <div/>}` renders a literal "0" in JSX.** `hasMacros = a || b || c` is the NUMBER 0 for a
+  macro-less food. Bit the food library; the same latent bug existed in the meal row.
+- **Icon returns null for unknown names** → a typo'd glyph renders an invisible button, no error.
+  Check `src/icons.jsx` before using a name. (Added S95: book, star, trash, sun, phone.)
+- **const TDZ blanks the whole screen**: `todayDeficit` read `logged` above its declaration → white
+  page, build passed. Only driving the app catches this class.
+- **Firebase + gcloud creds expire constantly** — `npx firebase-tools login --reauth --no-localhost`
+  (code-paste; the localhost callback fails). `firebase functions:log` lags MINUTES-to-hours; verify via
+  the app's own read path (or the doc) instead of waiting on logs.
+- Deploy ALL 4 AI fns when `aitools.js` changes (aiChat/aiChatStream/logMeal/setWorkoutSchedule).
+- **AuthGate (login) has its own hardcoded light palette** and never used tokens → stays light in both
+  themes. Pre-existing; would need its own pass.
+- Vercel lags ~20-30s: poll `curl -s https://glidna.com/ | grep -o 'index-[A-Za-z0-9_-]*\.js'` until the
+  hash changes before telling Kevin to act. The FIRST poll can hit a stale CDN edge — re-check before
+  concluding something didn't ship.
+
+### Test residue / notes
+- `trainer.uitest` lost **1 local plan + 1 simulation** to a bad delete-test selector of mine (portal
+  ordering grabbed the first "Delete" on the page — a plan card's). Test account only, unrecoverable.
+- Casey's plan weeklyRate was set to 2 lb/wk during testing and **restored to 1**.
+- Theme verified on prod: no stored pref → `data-theme="pro"`, identical to before.
+
+### ⏭️ Kevin's queue after the restructure
+- **FCM push delivery** (he said "next we will do FMC" = FCM) — Notification Center + Web Push exist (S90).
+- Stripe LIVE-mode swap (real-card smoke + attorney pass on ToS/Privacy).
+- Acuity session scheduling + auto-charge (`docs/SESSIONS-BILLING-PLAN.md`; needs his API key + User ID).
+- Small: default NEW clients to Simple view; per-client default view; grow `functions/knowledge.js`;
+  swipe-left-to-delete on food rows (deliberately skipped in S95).
+
+---
+
 ## ⚡⚡⚡ S94 (Jul 15 — MARATHON): food-logging UX overhaul, body-fat/measurements hub, AI micros
 _Everything below is committed + pushed (`origin/main` clean at `caa5ac5`) + deployed. Firebase
 `calorieiq-29762`; domain **glidna.com**; model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`.
