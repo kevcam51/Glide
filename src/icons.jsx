@@ -74,14 +74,17 @@ const GLYPHS = {
   // — S97b: activity pictograms (Apple/Garmin-style category glyphs) —
   walk: (<><circle cx="13" cy="4.4" r="1.8" /><path d="M12.6 6.6 11.4 12" /><path d="M11.4 12l1.9 4-.6 5" /><path d="M11.4 12 9.4 15.8l-2.4 3.4" /><path d="M12.2 8.4 15.4 10.6" /><path d="M12.2 8.4 9 10" /></>),
   stairs: (<path d="M4 20h4v-4h4v-4h4v-4h4" />),
-  // Crossed oars — the classic rowing symbol (a rower silhouette reads as random lines at 18px).
-  row: (<><path d="M3.5 20.5 13 11" /><ellipse cx="15.5" cy="8.5" rx="1.6" ry="3.4" transform="rotate(45 15.5 8.5)" /><path d="M6.5 20.5 16 11" /><ellipse cx="18.5" cy="8.5" rx="1.6" ry="3.4" transform="rotate(45 18.5 8.5)" /></>),
+  // Rowing: no line-icon read clearly at 18px, so we use the 🚣 emoji for now
+  // (Kevin — temporary until a custom rowing glyph is generated). Rendered via an
+  // SVG <text> so it flows through the same <Icon> component + sizing everywhere.
+  row: (<text x="12" y="12" fontSize="19" textAnchor="middle" dominantBaseline="central">🚣</text>),
   boxing: (<><path d="M8 6.5a4.5 4.5 0 0 1 9 0V12a4.5 4.5 0 0 1-4.5 4.5H10A4.5 4.5 0 0 1 8 12z" /><path d="M8 9.5H5.8a1.7 1.7 0 0 0 0 3.4H8" /><path d="M9.5 16.5v2.5a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-2.5" /></>),
   ball: (<><circle cx="12" cy="12" r="9" /><path d="M12 3v18" /><path d="M3 12h18" /><path d="M5.4 5.4C10 9 10 15 5.4 18.6" /><path d="M18.6 5.4C14 9 14 15 18.6 18.6" /></>),
   jumprope: (<><path d="M6 10.5v2a6 6 0 0 0 12 0v-2" /><rect x="4.4" y="3.5" width="3.2" height="7" rx="1.4" /><rect x="16.4" y="3.5" width="3.2" height="7" rx="1.4" /></>),
   mountain: (<path d="M3 19.5 9.7 7.5l3.6 6 2.4-3.6L21 19.5z" />),
-  // Arms up-and-wide, legs down-and-wide star pose (dance + rollerblading).
-  dance: (<><circle cx="12" cy="4.3" r="2" /><path d="M12 6.3v7" /><path d="M12 8 5.5 4.8" /><path d="M12 8 18.5 4.8" /><path d="M12 13.3 6.5 20.5" /><path d="M12 13.3 17.5 20.5" /></>),
+  // Arms up-and-wide, legs down-and-wide star pose (dance + rollerblading),
+  // with a short neck between head and shoulders (Kevin).
+  dance: (<><circle cx="12" cy="3.5" r="1.8" /><path d="M12 5.3v1.4" /><path d="M12 6.7v7" /><path d="M12 8 5.5 4.9" /><path d="M12 8 18.5 4.9" /><path d="M12 13.7 6.5 20.5" /><path d="M12 13.7 17.5 20.5" /></>),
   trash: (<><path d="M4.5 6.5h15" /><path d="M9.5 6.5V4.8A1.3 1.3 0 0 1 10.8 3.5h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7" /><path d="M6.5 6.5 7.4 19a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4l.9-12.5" /><path d="M10.5 10v6.5" /><path d="M13.5 10v6.5" /></>),
 };
 
