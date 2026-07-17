@@ -27,10 +27,18 @@ Cloud Functions deployed clean. Firebase `calorieiq-29762`; model `claude-sonnet
   `secrets` lists. Deployed: foodReminderPush + weighInReminderPush (created, scheduler
   auto-provisioned, confirmed `scheduled` in functions:list) + runDueWorkflows + savePushSub +
   removePushSub + onDmCreated + onTrainerRequestWritten.
-  **⚠️ NOT yet observed firing:** first real cron runs are 3pm ET (food) / Monday 9am ET
-  (weigh-in) — check `npx firebase-tools functions:log --only foodReminderPush` after (log lag
-  minutes-to-hours). gcloud creds are EXPIRED (couldn't force-run the scheduler job; firebase CLI
-  creds were fine). Kevin's device receipt of a push is still the S90 pending test.
+  **✅ Both crons VERIFIED firing** (force-ran both scheduler jobs via gcloud after Kevin reauthed):
+  `foodReminderPush {"candidates":1,"sent":0,"skipped":1}` + `weighInReminderPush
+  {"candidates":1,"sent":0,"skipped":1}`. So the pipeline works: cron fires → `pushCapableUids`
+  found the 1 real subscription (Kevin's device from the S90 test) → the client-role gate correctly
+  SKIPPED it (Kevin = head_trainer). The ONLY unproven leaf is the final
+  `webpush.sendNotification` to a device, which needs a **push-subscribed CLIENT** as a candidate =
+  the standing S90 device test (install PWA on a client acct → "Push to this device" ON → force-run
+  or wait for 3pm ET → expect `sent:1` + a real notification).
+  Force-run cmd: `gcloud scheduler jobs run firebase-schedule-foodReminderPush-us-central1
+  --project calorieiq-29762 --location us-central1` (gcloud needs periodic interactive reauth:
+  `gcloud auth login --no-launch-browser`). Logs: `gcloud logging read '...service_name=
+  "foodreminderpush"' --freshness=10m` (firebase functions:log lags more).
 - **Per-client default plan view** (`def17ea`) — queue small item. `data.planViewDefault`
   ('simple'|'detailed'); trainer viewing a REMOTE client's Full Plan gets a "Client's default
   view" chip row under the Simple|Detailed pill (`onSetPlanViewDefault` passed only when
