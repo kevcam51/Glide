@@ -131,6 +131,34 @@ function weeksToGoal(totalLbs, weeklyDeficitCal) {
   return totalLbs / (weeklyDeficitCal / 3500);
 }
 
+// ── Weekly rate (S95) ───────────────────────────────────────────────────────
+// How fast the plan intends to lose: 0 (maintain) / 0.5 / 1 / 2 lb per week.
+// A pound of fat ≈ 3500 cal, so the daily deficit is rate × 3500 / 7 → 0 / 250 /
+// 500 / 1000. Until now 1 lb/wk (−500) was hardcoded in six target calculations,
+// the projections, and the server's AI copy; this is the single source both sides
+// read, so the app and the AI can't quote different targets (the S86 bug).
+// Anything unset/invalid falls back to 1, which is exactly today's behavior — so
+// every existing plan keeps its current number.
+const RATE_OPTS = [0, 0.5, 1, 2];
+const RATE_LABEL = { 0: "Maintenance", 0.5: "Lose ½ lb/week", 1: "Lose 1 lb/week", 2: "Lose 2 lb/week" };
+const RATE_SHORT = { 0: "Maintain", 0.5: "½ lb/wk", 1: "1 lb/wk", 2: "2 lb/wk" };
+// NOTE 0 is a REAL value here (maintenance), so the usual `Number(x) || 1` is a
+// trap: Number(null) and Number("") are both 0, which would silently park a plan
+// at maintenance — and null is exactly what this app passes to mean "reset to
+// auto" (see onSetMacroTargets). Screen the empties BEFORE trusting a 0.
+const weeklyRateOf = (d) => {
+  const raw = d && d.weeklyRate;
+  if (raw === null || raw === undefined || raw === "") return 1;
+  const r = Number(raw);
+  return RATE_OPTS.includes(r) ? r : 1; // NaN / 5 / -1 → the safe default
+};
+const dailyDeficitOf = (d) => Math.round((weeklyRateOf(d) * 3500) / 7);
+// The plan's intended weekly deficit in calories — what the projections divide by.
+// In accelerate mode the workout burn is ON TOP (it speeds the goal date rather
+// than buying food), which is exactly what `isEatback` decides.
+const weeklyDeficitOf = (d, weeklyBurn = 0) =>
+  weeklyRateOf(d) * 3500 + (isEatback(d) ? 0 : (weeklyBurn || 0));
+
 // Clean time label: whole weeks under 8 weeks, then "X months" or "X months Y weeks"
 function friendlyTime(wks) {
   if (wks == null) return "—";
@@ -3065,8 +3093,8 @@ function SimulationSummary({ data, totalBurn, totalStrBurn = 0 }) {
   // food target; accelerate = the workout burn stacks onto the deficit for a
   // faster date at a tighter target. The plan's chosen approach headlines.
   const weeklyBurnAll = (totalBurn || 0) + (totalStrBurn || 0);
-  const wksEat = losing ? weeksToGoal(diff, 3500) : null;
-  const wksAcc = losing ? weeksToGoal(diff, 3500 + weeklyBurnAll) : null;
+  const wksEat = losing ? weeksToGoal(diff, weeklyRateOf(data) * 3500) : null;
+  const wksAcc = losing ? weeksToGoal(diff, weeklyRateOf(data) * 3500 + weeklyBurnAll) : null;
   const eatback = isEatback(data);
   const bestWks = eatback ? wksEat : wksAcc;
   const targetDate = bestWks
@@ -3124,7 +3152,7 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   // Goal mode (S90b, Kevin's design): the client's stated goal reshapes the
   // page. Unset → inferred from the weight goal (above current weight = build).
   const goalMode = data.fitnessGoal || (goal && goal > w ? "build" : "lose");
-  const rawDeficit = ready ? Math.round(tdee - 500 + (eatback ? weeklyBurn / 7 : 0)) : 0;
+  const rawDeficit = ready ? Math.round(tdee - dailyDeficitOf(data) + (eatback ? weeklyBurn / 7 : 0)) : 0;
   // The 1,200 floor is a HARD honesty rule (Kevin's call): we never show a
   // number below it — and when the deficit math lands under it, the page says
   // so and pivots the advice to consistent training, not deeper restriction.
@@ -3140,7 +3168,7 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   // ETA: with the floor active the REAL daily deficit is burn − 1200 intake.
   const weeklyDeficit = floorHit
     ? Math.max(0, Math.round(tdee + (eatback ? weeklyBurn / 7 : weeklyBurn / 7) - 1200)) * 7
-    : 3500 + (eatback ? 0 : weeklyBurn);
+    : weeklyDeficitOf(data, weeklyBurn);
   const rate = Math.round((weeklyDeficit / 3500) * 10) / 10;
   const wks = goalMode === "lose" && hasGoal ? weeksToGoal(lbsToGo, weeklyDeficit)
     : goalMode === "build" && lbsToGain ? lbsToGain / 0.5 // quality gain ≈ ½ lb/week
@@ -4153,8 +4181,8 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
   // Daily Dashboard, so the plan summary never contradicts the tracker.
   // Both nutrition approaches are computed so the chooser can show real numbers.
   const eatback = isEatback(data);
-  const targetEat = floor(tdee - 500 + avgBurnPerDay + avgStrPerDay); // burn buys food
-  const targetAcc = floor(tdee - 500);                                 // burn buys speed
+  const targetEat = floor(tdee - dailyDeficitOf(data) + avgBurnPerDay + avgStrPerDay); // burn buys food
+  const targetAcc = floor(tdee - dailyDeficitOf(data));                                // burn buys speed
   const targetCals = eatback ? targetEat : targetAcc;
   const mtS = data.macroTargets || {};
   const proteinG = mtS.protein != null ? Number(mtS.protein) : Math.round(Number(weightLbs) * proteinBasisOf(data));
@@ -8880,7 +8908,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
     // aggregates run on).
     const dayTrackerTdee = wearableTdee(data, dayLog);
     const target = dayTrackerTdee
-      ? Math.max(1200, dayTrackerTdee - 500)
+      ? Math.max(1200, dayTrackerTdee - dailyDeficitOf(data))
       : (calTarget || (tdee ? Math.round(tdee) : null));
     const goStep = (n) => { const p = parseKey(sel); setSel(keyOf(p.y, p.m, p.d + n)); };
     // Quick typed calories: Add (tagged to a meal type if chosen → a meal entry,
@@ -9056,7 +9084,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   savedFoods, onToggleSaveFood, onRemoveSavedFood, weekSummary, recentWearable, history, onRefresh, isRemote,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
   onSaveMeasurements, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise,
-  onTrackerSync }) {
+  onTrackerSync, onSetWeeklyRate, onSetDeficitMode }) {
 
   const [tzSync, setTzSync] = useState(null); // null | "busy" | { ok, text }
   const [showCalendar, setShowCalendar] = useState(false);
@@ -9156,14 +9184,38 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   // burn replaces the whole estimate (see wearableTdee).
   const trackerTdee = wearableTdee(data, dailyLog);
   const computedTargetForNote = trackerTdee
-    ? Math.max(1200, trackerTdee - 500)
-    : Math.max(1200, tdee - 500 + (isEatback(data) ? Math.round(todayCardio.burned + todayStrength.burned) : 0));
+    ? Math.max(1200, trackerTdee - dailyDeficitOf(data))
+    : Math.max(1200, tdee - dailyDeficitOf(data) + (isEatback(data) ? Math.round(todayCardio.burned + todayStrength.burned) : 0));
+  // Pace (S95): the plan's chosen weekly rate + what each option would actually
+  // let you eat today, so the picker shows outcomes rather than jargon. Mirrors
+  // computedTargetForNote exactly — raw* is pre-floor, so we can tell the user
+  // when a pace is being clamped by the 1,200 rule instead of silently flooring.
+  const planRate = weeklyRateOf(data);
+  const eatbackOn = isEatback(data);
+  const rawTargetForRate = (r) => {
+    const def = Math.round((r * 3500) / 7);
+    return trackerTdee
+      ? trackerTdee - def
+      : tdee - def + (eatbackOn ? Math.round(todayCardio.burned + todayStrength.burned) : 0);
+  };
+  const targetForRate = (r) => Math.max(1200, rawTargetForRate(r));
+
   // A manually-set target (data.calorieTarget) is the coach's/user's own number —
   // it wins over the calculation AND the tracker adjustment (an explicit choice).
   const manualTarget = Number(data.calorieTarget) > 0 ? Math.round(Number(data.calorieTarget)) : null;
   const target = manualTarget != null ? manualTarget : computedTargetForNote;
   const logged = dailyLog.calories || 0;
   const remaining = target - logged;         // signed — negative once over target
+
+  // Today's real deficit (S95): how far under MAINTENANCE you are right now —
+  // maintenance being the watch's measured burn when we have it, else TDEE plus
+  // whatever you actually burned training. Deliberately independent of the pace
+  // and of eat-back/accelerate: those pick a TARGET, this reports what the body is
+  // actually doing, which is what moves the scale.
+  // Must stay below `logged` — these are consts, so reading it above its
+  // declaration is a TDZ throw that blanks the whole dashboard.
+  const maintenanceToday = trackerTdee || (tdee + todayTotalBurn);
+  const todayDeficit = Math.max(0, Math.round(maintenanceToday - logged));
   const overCals = remaining < 0;
   const pct = target > 0 ? Math.min(100, Math.round((logged / target) * 100)) : 0; // arc caps at full
   // Macro targets. Default (estimates): protein 1g/lb bodyweight, fat 28% of
@@ -9278,6 +9330,20 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
             <div style={{fontFamily:"'Sora',sans-serif",fontSize:"2.2rem",color:overCals?"var(--red)":"var(--accent)",lineHeight:1}}>{remaining.toLocaleString()}</div>
             <div style={{fontSize:".65rem",color:overCals?"var(--red)":"var(--muted)",letterSpacing:".5px"}}>{overCals?"CAL OVER":"CAL REMAINING"}</div>
+            {/* Deficit underneath (S95, Kevin): "remaining" answers "can I eat?",
+                deficit answers "am I actually losing?" — the second is the one
+                that moves the scale, so show both. Measured against MAINTENANCE
+                (TDEE + today's burn, or the watch's measured burn), NOT the
+                target, so it stays true no matter the pace or approach chosen.
+                Only once something is LOGGED: before that it just reports your
+                whole maintenance burn (−2,429 at 5am), which reads like you're
+                crushing it when you simply haven't eaten yet. Also hidden at or
+                above maintenance — a surplus isn't a "deficit". */}
+            {logged > 0 && todayDeficit > 0 && (
+              <div style={{fontSize:".62rem",color:"var(--green)",fontWeight:700,letterSpacing:".3px",marginTop:"3px"}}>
+                −{todayDeficit.toLocaleString()} deficit
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -9382,13 +9448,19 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                     </div>
                   )}
                   <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                    <span style={{color:"var(--muted)"}}>Eat less to lose ~1 lb/week</span>
-                    <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:"var(--red)"}}>−500 cal</span>
+                    <span style={{color:"var(--muted)"}}>{planRate === 0 ? "Maintenance — no deficit" : `Eat less to lose ~${RATE_SHORT[planRate]}`}</span>
+                    <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:planRate===0?"var(--muted)":"var(--red)"}}>
+                      {planRate === 0 ? "−0 cal" : `−${dailyDeficitOf(data)} cal`}
+                    </span>
                   </div>
+                  {/* Calories from exercise (Kevin) — only meaningful when the burn
+                      actually moves the target, i.e. eat-back and no tracker override. */}
                   {!trackerTdee && (
                     <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                      <span style={{color:"var(--muted)"}}>Today's workout burn</span>
-                      <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:"var(--green)"}}>+{todayTotalBurn} cal</span>
+                      <span style={{color:"var(--muted)"}}>Calories from exercise{eatbackOn ? "" : " (not added)"}</span>
+                      <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:eatbackOn?"var(--green)":"var(--muted)"}}>
+                        {eatbackOn ? `+${todayTotalBurn}` : `+0`} cal
+                      </span>
                     </div>
                   )}
                   <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontSize:".88rem",fontWeight:700}}>
@@ -9397,6 +9469,65 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                   </div>
                 </>
               )}
+              {/* Pace picker (S95, Kevin) — the deficit was a hardcoded 1 lb/week
+                  everywhere; now the client or their coach picks it, and every
+                  screen + the AI read the same weeklyRate. Each row shows the REAL
+                  number you'd eat, so it's a choice between outcomes, not jargon.
+                  Hidden while a manual target is set — that number wins anyway, so
+                  offering a pace would imply an effect it can't have. */}
+              {onSetWeeklyRate && manualTarget == null && (
+                <div style={{marginTop:"10px",borderTop:"1px solid var(--border)",paddingTop:"10px"}}>
+                  <div style={{fontSize:".72rem",color:"var(--muted)",fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",marginBottom:"7px"}}>Your pace</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
+                    {RATE_OPTS.map((r) => {
+                      const active = planRate === r;
+                      const cals = targetForRate(r);
+                      const floored = cals <= 1200 && rawTargetForRate(r) < 1200;
+                      return (
+                        <button key={r} onClick={(e)=>{e.stopPropagation(); onSetWeeklyRate(r);}}
+                          style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"10px",width:"100%",
+                            padding:"11px 12px",borderRadius:"9px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",
+                            border:`1.5px solid ${active?"var(--accent)":"var(--border)"}`,
+                            background:active?"var(--accent-dim,rgba(8,220,224,.12))":"transparent"}}>
+                          <span style={{display:"flex",alignItems:"center",gap:"7px",minWidth:0}}>
+                            {active && <Icon name="check" size={14} color="var(--accent)" />}
+                            <span style={{fontSize:".84rem",fontWeight:active?700:600,color:active?"var(--accent)":"var(--text)"}}>{RATE_LABEL[r]}</span>
+                          </span>
+                          <span style={{display:"flex",alignItems:"baseline",gap:"4px",flexShrink:0}}>
+                            <span style={{fontFamily:"'Sora',sans-serif",fontWeight:800,fontSize:"1rem",color:active?"var(--accent)":"var(--text)"}}>{cals.toLocaleString()}</span>
+                            <span style={{fontSize:".64rem",color:"var(--muted)",fontWeight:600}}>cal{floored?" · floor":""}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {/* The 1,200 floor is a standing honesty rule (S90b) — say so rather
+                      than showing a pace that silently can't happen. */}
+                  {rawTargetForRate(planRate) < 1200 && (
+                    <div style={{fontSize:".72rem",color:"var(--yellow)",marginTop:"7px",lineHeight:1.45}}>
+                      This pace would put you under 1,200 cal, so the target holds at the 1,200 floor — you'd lose slower than {RATE_SHORT[planRate]}. Training more beats eating less here.
+                    </div>
+                  )}
+                  {/* Same field as Full Plan → Summary → Nutrition Approach (Kevin's
+                      call: one setting, two places), so flipping it either way agrees. */}
+                  {onSetDeficitMode && !trackerTdee && (
+                    <button onClick={(e)=>{e.stopPropagation(); onSetDeficitMode(eatbackOn ? "accelerate" : "eatback");}}
+                      style={{display:"flex",alignItems:"center",gap:"8px",width:"100%",marginTop:"9px",padding:"9px 10px",
+                        borderRadius:"8px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",
+                        border:"1px solid var(--border)",background:"transparent"}}>
+                      <Icon name="flame" size={15} color={eatbackOn?"var(--green)":"var(--muted)"} />
+                      <span style={{minWidth:0,flex:1}}>
+                        <span style={{display:"block",fontSize:".8rem",fontWeight:700,color:"var(--text)"}}>Count workout burn</span>
+                        <span style={{display:"block",fontSize:".7rem",color:"var(--muted)"}}>
+                          {eatbackOn ? "Exercise adds to today's target — train more, eat more" : "Exercise deepens your deficit — reach the goal sooner"}
+                        </span>
+                      </span>
+                      <span style={{fontWeight:800,fontSize:".74rem",color:eatbackOn?"var(--green)":"var(--muted)"}}>{eatbackOn?"ON":"OFF"}</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Set your own target (coach's knowledge, or a number the user prefers). */}
               {onSetCalorieTarget && (
                 <div style={{marginTop:"8px",borderTop:"1px solid var(--border)",paddingTop:"8px"}}>
@@ -10436,7 +10567,7 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
   // the target while the "Weekly burn" line right below counted both, so a
   // strength-only plan's shared card understated the target vs every screen.
   // (Eat-back mode only; accelerate keeps the raw deficit.)
-  const targetCals = Math.max(1200, tdee - 500 + (isEatback(data) ? Math.round((totalBurn + totalStrBurn) / 7) : 0));
+  const targetCals = Math.max(1200, tdee - dailyDeficitOf(data) + (isEatback(data) ? Math.round((totalBurn + totalStrBurn) / 7) : 0));
 
   const handleShare = async () => {
     const text = `🏋️ ${fullName(data) || "My"} Glidna Plan\n\n` +
@@ -11748,7 +11879,7 @@ function computeClientCalories(d) {
       strength += exBurn(ex, w, s.duration);
     });
   });
-  const auto = Math.max(1200, Math.round(tdee - 500 + (isEatback(d) ? (cardio + strength) / 7 : 0)));
+  const auto = Math.max(1200, Math.round(tdee - dailyDeficitOf(d) + (isEatback(d) ? (cardio + strength) / 7 : 0)));
   // A manually-set target (data.calorieTarget — the coach's/user's own number)
   // overrides the calculation everywhere it's used.
   const target = Number(d.calorieTarget) > 0 ? Math.round(Number(d.calorieTarget)) : auto;
@@ -18350,6 +18481,8 @@ export default function App() {
               onToggleBodyFat={(show)=>setDataAndSave(p=>({...p, hideBodyFat: !show}))}
               onSetGoalWeight={(lbs)=>setDataAndSave(p=>({...p, goalWeight: lbs}))}
               onTrackerSync={isOwnerUid ? syncTrackerNow : null}
+              onSetWeeklyRate={(r)=>setDataAndSave(p=>({...p, weeklyRate: r}))}
+              onSetDeficitMode={(m)=>setDataAndSave(p=>({...p, deficitMode: m}))}
               savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood}
               onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
               onSaveCheckIn={(checkin)=>setDataAndSave(p=>{

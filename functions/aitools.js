@@ -502,6 +502,26 @@ function calcBMR(gender, weightLbs, heightFt, heightIn, age) {
 // the AI's calorie target MATCHES every app screen — without this the AI told
 // clients a target ~the daily burn lower than their dashboard showed, and
 // coach_summary scored faithful clients as "over target".
+// Weekly fat-loss rate → daily calorie deficit. MIRRORS App.jsx weeklyRateOf /
+// dailyDeficitOf (0 / 0.5 / 1 / 2 lb per week → 0 / 250 / 500 / 1000 cal/day;
+// 1 lb of fat ≈ 3500 cal). Unset/invalid = 1 lb/wk, which is what every plan
+// implicitly ran on before the rate was selectable, so old plans don't shift.
+// Keep in step with the app — a mismatch means the AI states a target the user
+// never sees.
+// NOTE 0 is a REAL value (maintenance), so `Number(x) || 1` is a trap here:
+// Number(null) and Number("") are both 0 and would silently mean maintenance.
+// Screen the empties before trusting a 0. Mirrors App.jsx weeklyRateOf.
+const RATE_OPTS = [0, 0.5, 1, 2];
+function weeklyRate(d) {
+  const raw = d && d.weeklyRate;
+  if (raw === null || raw === undefined || raw === "") return 1;
+  const r = Number(raw);
+  return RATE_OPTS.includes(r) ? r : 1;
+}
+function dailyDeficit(d) {
+  return Math.round((weeklyRate(d) * 3500) / 7);
+}
+
 function weeklyPlanBurn(d) {
   const w = Number(d.weightLbs) || 0;
   const custom = {};
@@ -528,10 +548,14 @@ function nutritionTargets(d) {
     if (bmr && isFinite(bmr)) {
       const tdee = Math.round(bmr * (ACTIVITY_MULT[d.activityLevel] || 1.2));
       // Nutrition approach (matches App.jsx isEatback): "eatback" (default)
-      // adds workout burn to the eating target; "accelerate" keeps TDEE−500
+      // adds workout burn to the eating target; "accelerate" keeps the deficit
       // and lets the burn speed up the goal date instead.
       const eatback = (d.deficitMode || "eatback") !== "accelerate";
-      cal = Math.max(1200, Math.round(tdee - 500 + (eatback ? weeklyPlanBurn(d) / 7 : 0)));
+      // Weekly rate (matches App.jsx weeklyRateOf/dailyDeficitOf): 0/0.5/1/2
+      // lb per week → 0/250/500/1000 cal/day. Unset = 1 lb/wk, the long-standing
+      // default. This MUST track the app: if the server assumes a different
+      // deficit, the AI quotes a target no screen shows and mis-scores adherence.
+      cal = Math.max(1200, Math.round(tdee - dailyDeficit(d) + (eatback ? weeklyPlanBurn(d) / 7 : 0)));
     }
   }
   const mt = d.macroTargets || {};
