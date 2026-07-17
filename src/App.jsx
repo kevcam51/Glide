@@ -9370,6 +9370,14 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <div className="dash-cta-val">{dailyLog.water || 0}</div>
           <div className="dash-cta-lbl">oz Water</div>
         </div>
+        {/* Today's Weight — full-width tile (moved from Quick Log); opens the
+            body-fat & measurements hub (weight, body fat %, tape). */}
+        <div className="dash-cta" style={{gridColumn:"1 / -1",cursor:onSaveMeasurements?"pointer":"default",borderColor:"var(--border)"}}
+          onClick={onSaveMeasurements?()=>setShowMeasure(true):undefined}>
+          <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="scale" size={23} color="var(--muted)" /></div>
+          <div className="dash-cta-val">{weightLbs?Number(weightLbs).toFixed(1):"—"}<span style={{fontSize:".5em",color:"var(--muted)",marginLeft:"3px"}}>lbs</span></div>
+          <div className="dash-cta-lbl">Today's Weight{onSaveMeasurements?" ›":""}</div>
+        </div>
       </div>
 
       {/* Wearable tracker (Trainerize v3): real burn + steps from the client's
@@ -9600,133 +9608,15 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                   </button>
                 </div>
               </div>
-            </>
-          )}
-          {expandedStat === "burn" && (
-            <>
-              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"6px",color:"var(--orange)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="flame" size={16} color="var(--orange)" />Workout Burn Breakdown</div>
-              {burnFromTracker && (
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",marginBottom:"8px",borderRadius:"8px",background:"rgba(8,220,224,.06)",border:"1px solid var(--border)"}}>
-                  <span style={{display:"inline-flex",alignItems:"center",gap:"6px",fontSize:".82rem",color:"var(--text)"}}><Icon name="watch" size={15} color="var(--accent)" />Tracker measured active burn{dailyLog.wearable&&dailyLog.wearable.source?` (${dailyLog.wearable.source})`:""}</span>
-                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--accent)"}}>{burnShown.toLocaleString()} cal</span>
-                </div>
-              )}
-              {/* Today's watch data lags (Garmin→Trainerize is usually hours). The
-                  tile above stays today-only so it never misreports today's effort —
-                  but show the last real reading here for reference. */}
-              {!burnFromTracker && recentWearable && recentWearable.wearable && recentWearable.wearable.active > 0 && (
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",marginBottom:"8px",borderRadius:"8px",background:"var(--s2)",border:"1px solid var(--border)"}}>
-                  <span style={{display:"inline-flex",alignItems:"center",gap:"6px",fontSize:".82rem",color:"var(--muted)"}}>
-                    <Icon name="watch" size={15} color="var(--muted)" />
-                    Tracker · {recentWearable.daysAgo === 1 ? "yesterday" : `${recentWearable.daysAgo} days ago`} (today hasn't synced)
-                  </span>
-                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:"var(--muted)"}}>{Number(recentWearable.wearable.active).toLocaleString()} cal</span>
-                </div>
-              )}
-              <div style={{fontSize:".7rem",color:"var(--muted)",marginBottom:"8px"}}>{burnFromTracker?"Your scheduled workouts (estimate — the tracker number above is used):":"Tap any exercise to edit or remove it"}</div>
-              {(todayCardio.workouts||[]).map((w,i) => (
-                <div key={`cb${i}`} style={{display:"flex",justifyContent:"space-between",padding:"8px 6px",borderBottom:"1px solid var(--border)",fontSize:".82rem",cursor:"pointer",borderRadius:"6px",background:editingWorkout===`c${i}`?"rgba(79,195,247,.06)":"transparent"}}
-                  onClick={e=>{e.stopPropagation();setExpandedStat(null);setEditingWorkout(editingWorkout===`c${i}`?null:`c${i}`);}}>
-                  <span style={{display:"inline-flex",alignItems:"center",gap:"5px"}}><span style={{fontSize:".65rem",color:"#4fc3f7",fontWeight:700}}>CARDIO</span><Icon name={exerciseCategory(w.co, "cardio")} size={14} color="var(--accent)" />{w.co?.label}</span>
-                  <span style={{display:"flex",alignItems:"center",gap:"8px"}}>
-                    <span style={{fontFamily:"'Sora',sans-serif",color:"var(--orange)"}}>{w.burned} cal</span>
-                    <span style={{fontSize:".6rem",color:"var(--muted)"}}>✏️</span>
-                  </span>
-                </div>
-              ))}
-              {(todayStrength.sessions||[]).map((s,i) => (
-                <div key={`sb${i}`} style={{display:"flex",justifyContent:"space-between",padding:"8px 6px",borderBottom:"1px solid var(--border)",fontSize:".82rem",cursor:"pointer",borderRadius:"6px",background:editingWorkout===`s${i}`?"rgba(255,107,157,.06)":"transparent"}}
-                  onClick={e=>{e.stopPropagation();setExpandedStat(null);setEditingWorkout(editingWorkout===`s${i}`?null:`s${i}`);}}>
-                  <span style={{display:"inline-flex",alignItems:"center",gap:"5px"}}><span style={{fontSize:".65rem",color:"#ff6b9d",fontWeight:700}}>STRENGTH</span><Icon name={exerciseCategory(s.ex, "strength")} size={14} color="var(--accent)" />{s.ex?.label}</span>
-                  <span style={{display:"flex",alignItems:"center",gap:"8px"}}>
-                    <span style={{fontFamily:"'Sora',sans-serif",color:"var(--orange)"}}>{s.burned} cal</span>
-                    <span style={{fontSize:".6rem",color:"var(--muted)"}}>✏️</span>
-                  </span>
-                </div>
-              ))}
-              {todayTotalBurn === 0 && <div style={{fontSize:".82rem",color:"var(--muted)",padding:"8px 0"}}>{burnFromTracker?"No scheduled workouts — the tracker's active burn is used.":"No workouts scheduled for today."}</div>}
-              {todayTotalBurn > 0 && (
-                <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontSize:".88rem",fontWeight:700,borderBottom:"1px solid var(--border)"}}>
-                  <span>{burnFromTracker?"Scheduled total (estimate)":"Total"}</span>
-                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--orange)"}}>{todayTotalBurn} cal</span>
-                </div>
-              )}
-              <div style={{display:"flex",gap:"8px",marginTop:"10px"}}>
-                <button onClick={e=>{e.stopPropagation();const idx=(Array.isArray(data.cardio[dayName])?data.cardio[dayName]:[]).length;onUpdateCardio(dayName,idx,"type","outdoor_jog");setEditingWorkout(`c${idx}`);setExpandedStat(null);}}
-                  style={{flex:1,padding:"10px",borderRadius:"8px",border:"1px solid rgba(79,195,247,.3)",background:"rgba(79,195,247,.06)",color:"#4fc3f7",cursor:"pointer",fontFamily:"inherit",fontSize:".8rem",fontWeight:600}}>
-                  + Add Cardio
-                </button>
-                <button onClick={e=>{e.stopPropagation();const idx=(Array.isArray(data.strength[dayName])?data.strength[dayName]:[]).length;onUpdateStrength(dayName,idx,"type","bb_squat");setEditingWorkout(`s${idx}`);setExpandedStat(null);}}
-                  style={{flex:1,padding:"10px",borderRadius:"8px",border:"1px solid rgba(255,107,157,.3)",background:"rgba(255,107,157,.06)",color:"#ff6b9d",cursor:"pointer",fontFamily:"inherit",fontSize:".8rem",fontWeight:600}}>
-                  + Add Strength
+              {/* Add macros manually (moved from Quick Log) */}
+              <div style={{marginTop:"12px"}}>
+                <button onClick={()=>setShowMacros(v=>!v)}
+                  style={{display:"flex",alignItems:"center",gap:"8px",width:"100%",padding:"10px 12px",borderRadius:"8px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",border:"1px solid var(--border)",background:showMacros?"rgba(8,220,224,.06)":"transparent"}}>
+                  <Icon name="meal" size={15} color="var(--accent)" />
+                  <span style={{flex:1,fontSize:".82rem",fontWeight:700,color:"var(--text)"}}>Add macros manually</span>
+                  <span style={{fontSize:".72rem",color:"var(--accent)",fontWeight:700}}>{showMacros?"▲":"▼"}</span>
                 </button>
               </div>
-            </>
-          )}
-          {expandedStat === "water" && (
-            <>
-              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"#4fc3f7",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="water" size={16} color="#4fc3f7" />Hydration</div>
-              <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                <span style={{color:"var(--muted)"}}>Logged</span>
-                <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{dailyLog.water || 0} oz</span>
-              </div>
-              <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                <span style={{color:"var(--muted)"}}>Daily target</span>
-                <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{Math.round(Number(weightLbs)*0.5)} oz</span>
-              </div>
-              <div style={{height:"8px",borderRadius:"4px",background:"var(--border)",overflow:"hidden",marginTop:"8px"}}>
-                <div style={{height:"100%",borderRadius:"4px",background:"#4fc3f7",width:`${Math.min(100,((dailyLog.water||0)/(Number(weightLbs)*0.5))*100)}%`,transition:"width .3s"}}></div>
-              </div>
-              <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:"4px",textAlign:"center"}}>{Math.round(((dailyLog.water||0)/(Number(weightLbs)*0.5))*100)}% of daily goal</div>
-              <div style={{marginTop:"10px"}}>
-                <div style={{fontSize:".72rem",color:"var(--muted)",fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",marginBottom:"6px"}}>Quick Add</div>
-                <div style={{display:"flex",gap:"8px",alignItems:"center",marginBottom:"8px"}}>
-                  <input type="number" inputMode="numeric" placeholder="Set water oz" value={waterDraft} onClick={e=>e.stopPropagation()}
-                    onChange={e=>{e.stopPropagation();setWaterDraft(e.target.value);}}
-                    onKeyDown={e=>{ if(e.key==="Enter"){ e.stopPropagation(); commitWater(); } }}
-                    style={{flex:1,padding:"10px 12px",borderRadius:"8px",border:"1.5px solid #4fc3f7",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".88rem"}} />
-                  <span style={{fontSize:".78rem",color:"var(--muted)"}}>oz</span>
-                  <button onClick={e=>{e.stopPropagation();commitWater();}} style={logBtn}>Log</button>
-                </div>
-                <div style={{display:"flex",gap:"8px"}}>
-                  {[8,16,32].map(v=>(
-                    <button key={v} onClick={e=>{e.stopPropagation();onLogUpdate("water",(dailyLog.water||0)+v);}}
-                      style={{flex:1,padding:"8px",borderRadius:"8px",border:"1px solid var(--border)",background:"var(--s2)",color:"#4fc3f7",cursor:"pointer",fontFamily:"inherit",fontSize:".8rem",fontWeight:600}}>
-                      +{v}oz
-                    </button>
-                  ))}
-                  <button onClick={e=>{e.stopPropagation();onLogUpdate("water",0);}}
-                    style={{padding:"8px 12px",borderRadius:"8px",border:"1px solid var(--red)",background:"rgba(255,79,107,.06)",color:"var(--red)",cursor:"pointer",fontFamily:"inherit",fontSize:".75rem",fontWeight:600}}>
-                    Reset
-                  </button>
-                </div>
-                <div style={{fontSize:".65rem",color:"var(--muted)",marginTop:"6px",textAlign:"center"}}>8oz = 1 cup · 16oz = 1 bottle · 32oz = 1 large bottle</div>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Quick log */}
-      <div className="sec-title">Quick Log</div>
-      <div className="dash-log-row" style={{cursor:"pointer",borderLeft:showMacros?"3px solid var(--accent)":"3px solid transparent",transition:"all .15s"}} onClick={()=>setShowMacros(v=>!v)}>
-        <span className="dash-log-icon" style={{display:"flex",alignItems:"center"}}><Icon name="meal" size={20} color="var(--accent)" /></span>
-        <div className="dash-log-info">
-          <div className="dash-log-title">Add Calories</div>
-          <div className="dash-log-sub" style={{color:showMacros?"var(--accent)":"var(--muted)"}}>
-            {showMacros ? "▲ Macros expanded — tap to collapse" : "▼ Tap here to add macros (Protein / Carbs / Fat)"}
-          </div>
-        </div>
-        <input className="dash-log-input" type="number" inputMode="numeric" placeholder="0"
-          value={calDraft}
-          onClick={e=>e.stopPropagation()}
-          onChange={e=>setCalDraft(e.target.value)}
-          onKeyDown={e=>{ if(e.key==="Enter"){ e.stopPropagation(); commitCal(); }}}
-        />
-        <span className="dash-log-unit">cal</span>
-        <LogBtn field="cal" onClick={e=>{e.stopPropagation();commitCal();}} />
-      </div>
-
       {showMacros && (
         <div style={{animation:"fadeUp .15s ease both"}}>
           <div className="dash-log-row">
@@ -9767,7 +9657,6 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           </div>
         </div>
       )}
-
       {/* Macros & Micros — a collapsible dropdown (Kevin): tap the header to open
           macro targets + progress AND the day's micronutrient bars together. */}
       <div style={{padding:"12px 14px",background:"var(--s2)",borderRadius:"8px",border:"1px solid var(--border)",marginBottom:"6px"}}>
@@ -9947,66 +9836,31 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         })()}
         </div>)}
         </div>
-
       <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={ymdLocal()} hideMicros />
-
-      <div className="dash-log-row">
-        <span className="dash-log-icon" style={{display:"flex",alignItems:"center"}}><Icon name="water" size={20} color="#4fc3f7" /></span>
-        <div className="dash-log-info">
-          <div className="dash-log-title">Water Intake</div>
-          <div className="dash-log-sub">Target: ~{Math.round(Number(weightLbs)*0.5)} oz/day</div>
-        </div>
-        <input className="dash-log-input" type="number" inputMode="numeric"
-          value={waterDraft} onChange={e=>setWaterDraft(e.target.value)}
-          onKeyDown={e=>{ if(e.key==="Enter") commitWater(); }}/>
-        <span className="dash-log-unit">oz</span>
-        <LogBtn field="water" onClick={commitWater} />
-      </div>
-      <div className="dash-log-row">
-        <span className="dash-log-icon" style={{display:"flex",alignItems:"center"}}><Icon name="scale" size={21} color="var(--muted)" /></span>
-        <div className="dash-log-info" style={{cursor: onSaveMeasurements ? "pointer" : "default"}}
-          onClick={onSaveMeasurements ? ()=>setShowMeasure(true) : undefined}
-          title={onSaveMeasurements ? "Open weight, body fat & measurements" : undefined}>
-          <div className="dash-log-title">Today's Weight{onSaveMeasurements ? <span style={{color:"var(--accent)",fontWeight:600}}> ›</span> : null}</div>
-          <div className="dash-log-sub">{hasGoal?`Goal: ${goalWeight} lbs`:"Track your trend"}</div>
-        </div>
-        <input className="dash-log-input" type="number" inputMode="decimal" step="0.1"
-          value={weightDraft} onChange={e=>setWeightDraft(e.target.value)}
-          onKeyDown={e=>{ if(e.key==="Enter") commitWeight(); }}/>
-        <span className="dash-log-unit">lbs</span>
-        <LogBtn field="weight" onClick={commitWeight} />
-      </div>
-      {/* Body fat & measurements — the hub (scale %, calipers, tape, weight). */}
-      {onSaveMeasurements && (
-        <button onClick={()=>setShowMeasure(true)}
-          style={{ display:"flex", alignItems:"center", gap:"7px", marginTop:"-4px", marginBottom:"6px",
-            border:"none", background:"transparent", color:"var(--accent)", cursor:"pointer",
-            fontSize:".76rem", fontWeight:700, padding:"2px 0" }}>
-          <Icon name="ruler" size={14} color="var(--accent)" />Body fat % & measurements
-        </button>
-      )}
-      {showMeasure && onSaveMeasurements && (
-        <MeasurementsModal data={data} onSave={onSaveMeasurements} onDelete={onDeleteMeasurement}
-          onSetGoalWeight={onSetGoalWeight} onToggleBodyFat={onToggleBodyFat}
-          onLogWeight={(v)=>onLogUpdate("weight", v)} onClose={()=>setShowMeasure(false)} />
-      )}
-
-      {/* Log-confirmation toast — fixed at the bottom so it's visible no matter
-          where you've scrolled (Kevin: previously no confirmation that it saved). */}
-      {toast && createPortal(
-        <div style={{ position:"fixed", left:"50%", bottom:"calc(24px + env(safe-area-inset-bottom,0px))",
-          transform:"translateX(-50%)", zIndex:3000, display:"flex", alignItems:"center", gap:"8px",
-          background:"var(--surface)", border:"1px solid var(--green)", color:"var(--text)",
-          padding:"11px 16px", borderRadius:"999px", fontSize:".85rem", fontWeight:700,
-          boxShadow:"0 6px 24px rgba(0,0,0,.4)", animation:"fadeUp .18s ease both", maxWidth:"90vw" }}>
-          <Icon name="check" size={16} color="var(--green)" /><span>{toast.msg}</span>
-        </div>, document.body)}
-
-      {/* Today's workout — editable */}
-      <div className="sec-title">Today's Workout — {dayName}</div>
-      {((todayCardio.workouts||[]).length > 0 || (todayStrength.sessions||[]).length > 0) && (
-        <div style={{fontSize:".7rem",color:"var(--muted)",marginBottom:"8px"}}>Tap any workout to edit or remove it</div>
-      )}
+            </>
+          )}
+          {expandedStat === "burn" && (
+            <>
+              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"6px",color:"var(--orange)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="flame" size={16} color="var(--orange)" />Workout Burn Breakdown</div>
+              {burnFromTracker && (
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",marginBottom:"8px",borderRadius:"8px",background:"rgba(8,220,224,.06)",border:"1px solid var(--border)"}}>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:"6px",fontSize:".82rem",color:"var(--text)"}}><Icon name="watch" size={15} color="var(--accent)" />Tracker measured active burn{dailyLog.wearable&&dailyLog.wearable.source?` (${dailyLog.wearable.source})`:""}</span>
+                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--accent)"}}>{burnShown.toLocaleString()} cal</span>
+                </div>
+              )}
+              {/* Today's watch data lags (Garmin→Trainerize is usually hours). The
+                  tile above stays today-only so it never misreports today's effort —
+                  but show the last real reading here for reference. */}
+              {!burnFromTracker && recentWearable && recentWearable.wearable && recentWearable.wearable.active > 0 && (
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",marginBottom:"8px",borderRadius:"8px",background:"var(--s2)",border:"1px solid var(--border)"}}>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:"6px",fontSize:".82rem",color:"var(--muted)"}}>
+                    <Icon name="watch" size={15} color="var(--muted)" />
+                    Tracker · {recentWearable.daysAgo === 1 ? "yesterday" : `${recentWearable.daysAgo} days ago`} (today hasn't synced)
+                  </span>
+                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:"var(--muted)"}}>{Number(recentWearable.wearable.active).toLocaleString()} cal</span>
+                </div>
+              )}
+              <div style={{fontSize:".7rem",color:"var(--muted)",marginBottom:"8px"}}>{burnFromTracker?"Your scheduled workouts (estimate — the tracker number above is used):":"Tap any exercise to edit or remove it"}</div>
       {((todayCardio.workouts||[]).length > 0 || (todayStrength.sessions||[]).length > 0) ? (
         <div className="dash-today-workout">
           {(todayCardio.workouts||[]).map((w,i)=>(
@@ -10123,7 +9977,12 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <Icon name="moon" size={16} />Rest day — no workouts scheduled
         </div>
       )}
-      {/* Add workout to today */}
+              {todayTotalBurn > 0 && (
+                <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontSize:".88rem",fontWeight:700,borderBottom:"1px solid var(--border)"}}>
+                  <span>{burnFromTracker?"Scheduled total (estimate)":"Total"}</span>
+                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--orange)"}}>{todayTotalBurn} cal</span>
+                </div>
+              )}
       <div style={{display:"flex",gap:"8px",marginBottom:"16px"}}>
         <button className="quick-fill-toggle" style={{flex:1,marginBottom:0,borderStyle:"solid",fontSize:".8rem",padding:"10px 14px",borderColor:"rgba(79,195,247,.25)",color:"#4fc3f7",background:"rgba(79,195,247,.03)"}}
           onClick={()=>{
@@ -10142,7 +10001,6 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           + Add Strength
         </button>
       </div>
-
       {/* Create a custom exercise right here too (not just in Edit Workouts).
           Once added it appears in the Add Cardio / Add Strength pickers above. */}
       {onAddCustomExercise && (
@@ -10151,6 +10009,69 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <CustomExerciseCreator exerciseType="cardio" onAdd={onAddCustomExercise} />
         </div>
       )}
+            </>
+          )}
+          {expandedStat === "water" && (
+            <>
+              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"#4fc3f7",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="water" size={16} color="#4fc3f7" />Hydration</div>
+              <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
+                <span style={{color:"var(--muted)"}}>Logged</span>
+                <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{dailyLog.water || 0} oz</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
+                <span style={{color:"var(--muted)"}}>Daily target</span>
+                <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{Math.round(Number(weightLbs)*0.5)} oz</span>
+              </div>
+              <div style={{height:"8px",borderRadius:"4px",background:"var(--border)",overflow:"hidden",marginTop:"8px"}}>
+                <div style={{height:"100%",borderRadius:"4px",background:"#4fc3f7",width:`${Math.min(100,((dailyLog.water||0)/(Number(weightLbs)*0.5))*100)}%`,transition:"width .3s"}}></div>
+              </div>
+              <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:"4px",textAlign:"center"}}>{Math.round(((dailyLog.water||0)/(Number(weightLbs)*0.5))*100)}% of daily goal</div>
+              <div style={{marginTop:"10px"}}>
+                <div style={{fontSize:".72rem",color:"var(--muted)",fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",marginBottom:"6px"}}>Quick Add</div>
+                <div style={{display:"flex",gap:"8px",alignItems:"center",marginBottom:"8px"}}>
+                  <input type="number" inputMode="numeric" placeholder="Set water oz" value={waterDraft} onClick={e=>e.stopPropagation()}
+                    onChange={e=>{e.stopPropagation();setWaterDraft(e.target.value);}}
+                    onKeyDown={e=>{ if(e.key==="Enter"){ e.stopPropagation(); commitWater(); } }}
+                    style={{flex:1,padding:"10px 12px",borderRadius:"8px",border:"1.5px solid #4fc3f7",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".88rem"}} />
+                  <span style={{fontSize:".78rem",color:"var(--muted)"}}>oz</span>
+                  <button onClick={e=>{e.stopPropagation();commitWater();}} style={logBtn}>Log</button>
+                </div>
+                <div style={{display:"flex",gap:"8px"}}>
+                  {[8,16,32].map(v=>(
+                    <button key={v} onClick={e=>{e.stopPropagation();onLogUpdate("water",(dailyLog.water||0)+v);}}
+                      style={{flex:1,padding:"8px",borderRadius:"8px",border:"1px solid var(--border)",background:"var(--s2)",color:"#4fc3f7",cursor:"pointer",fontFamily:"inherit",fontSize:".8rem",fontWeight:600}}>
+                      +{v}oz
+                    </button>
+                  ))}
+                  <button onClick={e=>{e.stopPropagation();onLogUpdate("water",0);}}
+                    style={{padding:"8px 12px",borderRadius:"8px",border:"1px solid var(--red)",background:"rgba(255,79,107,.06)",color:"var(--red)",cursor:"pointer",fontFamily:"inherit",fontSize:".75rem",fontWeight:600}}>
+                    Reset
+                  </button>
+                </div>
+                <div style={{fontSize:".65rem",color:"var(--muted)",marginTop:"6px",textAlign:"center"}}>8oz = 1 cup · 16oz = 1 bottle · 32oz = 1 large bottle</div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {showMeasure && onSaveMeasurements && (
+        <MeasurementsModal data={data} onSave={onSaveMeasurements} onDelete={onDeleteMeasurement}
+          onSetGoalWeight={onSetGoalWeight} onToggleBodyFat={onToggleBodyFat}
+          onLogWeight={(v)=>onLogUpdate("weight", v)} onClose={()=>setShowMeasure(false)} />
+      )}
+
+      {/* Log-confirmation toast — fixed at the bottom so it's visible no matter
+          where you've scrolled (Kevin: previously no confirmation that it saved). */}
+      {toast && createPortal(
+        <div style={{ position:"fixed", left:"50%", bottom:"calc(24px + env(safe-area-inset-bottom,0px))",
+          transform:"translateX(-50%)", zIndex:3000, display:"flex", alignItems:"center", gap:"8px",
+          background:"var(--surface)", border:"1px solid var(--green)", color:"var(--text)",
+          padding:"11px 16px", borderRadius:"999px", fontSize:".85rem", fontWeight:700,
+          boxShadow:"0 6px 24px rgba(0,0,0,.4)", animation:"fadeUp .18s ease both", maxWidth:"90vw" }}>
+          <Icon name="check" size={16} color="var(--green)" /><span>{toast.msg}</span>
+        </div>, document.body)}
+
 
       {/* ── Progress & insights (display, not entry) ── */}
       <div className="sec-title" style={{ display:"flex", alignItems:"center", gap:"8px" }}><Icon name="chart" size={17} color="var(--accent)" />Progress &amp; Insights</div>
