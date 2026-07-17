@@ -10669,26 +10669,27 @@ function DailyCheckIn({ data, onSaveCheckIn }) {
       <div className="checkin-field" style={{marginBottom:"12px"}}>
         <label>Did you hit your calorie target?</label>
         <div style={{display:"flex",gap:"8px"}}>
-          <button className={`mood-btn${hitTarget===true?" active":""}`} onClick={()=>setHitTarget(true)} style={{flex:1,fontSize:".84rem"}}>✅ Yes</button>
-          <button className={`mood-btn${hitTarget===false?" active":""}`} onClick={()=>setHitTarget(false)} style={{flex:1,fontSize:".84rem"}}>❌ No</button>
+          <button className={`mood-btn${hitTarget===true?" active":""}`} onClick={()=>setHitTarget(true)} style={{flex:1,fontSize:".84rem",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}><Icon name="check" size={15} color="currentColor" />Yes</button>
+          <button className={`mood-btn${hitTarget===false?" active":""}`} onClick={()=>setHitTarget(false)} style={{flex:1,fontSize:".84rem",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}><Icon name="close" size={15} color="currentColor" />No</button>
         </div>
       </div>
 
       <div className="checkin-field" style={{marginBottom:"12px"}}>
         <label>Did you work out today?</label>
         <div style={{display:"flex",gap:"8px"}}>
-          <button className={`mood-btn${workedOut===true?" active":""}`} onClick={()=>setWorkedOut(true)} style={{flex:1,fontSize:".84rem"}}>💪 Yes</button>
-          <button className={`mood-btn${workedOut===false?" active":""}`} onClick={()=>setWorkedOut(false)} style={{flex:1,fontSize:".84rem"}}>😴 Rest Day</button>
+          <button className={`mood-btn${workedOut===true?" active":""}`} onClick={()=>setWorkedOut(true)} style={{flex:1,fontSize:".84rem",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}><Icon name="muscle" size={15} color="currentColor" />Yes</button>
+          <button className={`mood-btn${workedOut===false?" active":""}`} onClick={()=>setWorkedOut(false)} style={{flex:1,fontSize:".84rem",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}><Icon name="moon" size={15} color="currentColor" />Rest Day</button>
         </div>
       </div>
 
       <div className="checkin-field" style={{marginBottom:"12px"}}>
         <label>Energy / Mood</label>
         <div className="checkin-mood">
-          {["😫","😐","🙂","😊","🔥"].map((m,i) => (
-            <button key={i} className={`mood-btn${mood===i?" active":""}`} onClick={()=>setMood(i)}>{m}</button>
+          {[1,2,3,4,5].map((n,i) => (
+            <button key={i} className={`mood-btn${mood===i?" active":""}`} onClick={()=>setMood(i)} style={{fontWeight:800,fontSize:"1rem"}}>{n}</button>
           ))}
         </div>
+        <div style={{fontSize:".64rem",color:"var(--muted)",marginTop:4,display:"flex",justifyContent:"space-between"}}><span>Low</span><span>High</span></div>
       </div>
 
       <div className="checkin-grid">
