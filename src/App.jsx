@@ -10749,9 +10749,12 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
   const targetCals = Math.max(1200, tdee - dailyDeficitOf(data) + (isEatback(data) ? Math.round((totalBurn + totalStrBurn) / 7) : 0));
 
   const handleShare = async () => {
+    // Emoji stay HERE on purpose (Kevin's call): this string is shared out to
+    // iMessage/WhatsApp/email as PLAIN TEXT, where our SVG icons can't travel.
+    // The no-emoji rule governs the app UI, which is fully icon-based.
     const text = `🏋️ ${fullName(data) || "My"} Glidna Plan\n\n` +
-      `Maintenance: ${tdee.toLocaleString()} cal/day\n` +
-      `Target (1lb/wk): ${targetCals.toLocaleString()} cal/day\n` +
+      `📊 Maintenance: ${tdee.toLocaleString()} cal/day\n` +
+      `🎯 Target (1lb/wk): ${targetCals.toLocaleString()} cal/day\n` +
       `🔥 Weekly burn: ${(totalBurn + totalStrBurn).toLocaleString()} cal\n` +
       (hasGoal ? `⚖️ Goal: ${weightLbs} → ${goalWeight} lbs\n` : "") +
       `\nBuilt with Glidna`;
