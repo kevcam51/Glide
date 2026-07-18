@@ -10,8 +10,16 @@ https://github.com/phosphor-icons/core · © Phosphor Icons
 
 Used for the exercise-category glyphs: `walk`, `run`, `bike`, `swim`, `hike`,
 `yoga`, `dumbbell` (barbell), `boxing`, `stairs`, `basketball`, `soccer`,
-`tennis`, `volleyball`, `football`, `pingpong`. Path data transformed from
-Phosphor's 256×256 grid into our 24×24 viewBox.
+`tennis`, `volleyball`, `football`, `pingpong`, `carry` (suitcase-simple).
+Path data transformed from Phosphor's 256×256 grid into our 24×24 viewBox.
+
+## game-icons.net — CC BY 3.0
+https://game-icons.net · "Weight lifting up" icon by **Delapouite**
+(https://delapouite.com), licensed CC BY 3.0
+(https://creativecommons.org/licenses/by/3.0/)
+
+Used for the `liftup` (overhead-press / vertical-push) glyph. Path data
+transformed from the 512×512 grid into our 24×24 viewBox; background removed.
 
 ## Material Symbols — Apache License 2.0
 https://github.com/google/material-design-icons · © Google

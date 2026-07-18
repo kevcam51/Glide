@@ -105,7 +105,17 @@ function exerciseCategory(ex, kind) {
   const s = `${ex.id || ""} ${ex.label || ""}`.toLowerCase();
   if (/\brest\b|rest day|rest_st/.test(s)) return "moon";
   if (/yoga|stretch|mobility|pilates|foam roll|cooldown|cool down|warm ?up/.test(s)) return "yoga";
-  if (kind === "strength") return "dumbbell";
+  if (kind === "strength") {
+    // Per-movement-pattern icons (S97g, "cheap 60%" — Kevin's pick): the easy,
+    // clearly-readable differentiations; barbell stays the default for the rest.
+    const c = (ex.cat || "").toLowerCase();
+    if (/accessory/.test(c)) return "muscle";
+    if (/carry/.test(c)) return "carry";
+    if (/total body/.test(c)) return "bolt";
+    if (/vertical push/.test(c)) return "liftup";
+    if (/vertical pull/.test(c)) return "pullup";
+    return "dumbbell";
+  }
   // Per-activity glyphs (S97b→S97f: standardized on Phosphor MIT icons).
   if (/swim|water/.test(s)) return "swim";
   if (/cycl|spin|bike/.test(s)) return "bike";
@@ -1943,7 +1953,7 @@ const advanceOnEnter = (e) => {
 
 // Icons a user can pick for a custom exercise (S97b, Kevin) — the activity
 // pictogram family. Stored as iconName; exerciseCategory() honors it everywhere.
-const CUSTOM_EX_ICONS = ["dumbbell","muscle","run","walk","bike","swim","row","stairs","boxing","jumprope","hike","basketball","soccer","tennis","volleyball","football","pingpong","dance","yoga","bolt","flame","water"];
+const CUSTOM_EX_ICONS = ["dumbbell","muscle","liftup","pullup","carry","run","walk","bike","swim","row","stairs","boxing","jumprope","hike","basketball","soccer","tennis","volleyball","football","pingpong","dance","yoga","bolt","flame","water"];
 
 function CustomExerciseCreator({ exerciseType, onAdd }) {
   const [show, setShow] = useState(false);
@@ -2430,7 +2440,6 @@ const STRENGTH_EXERCISES = [
   { id:"inverted_row",   label:"Inverted Row (Bodyweight)",   icon:"🤸", met:4.0, cat:"Horizontal Pull", note:"Upper back, biceps, core — bodyweight pull" },
   { id:"face_pull",      label:"Face Pull / Rear Delt Fly",   icon:"🎯", met:3.5, cat:"Horizontal Pull", note:"Rear delts, rotator cuff, posture" },
   { id:"bb_curl",        label:"Barbell Curl",                icon:"💪", met:3.5, cat:"Horizontal Pull", note:"Biceps — heavy bilateral loading" },
-  { id:"db_curl",        label:"Dumbbell Curl",               icon:"💪", met:3.5, cat:"Horizontal Pull", note:"Biceps — unilateral, supination control" },
   { id:"hammer_curl",    label:"Hammer Curl",                 icon:"💪", met:3.5, cat:"Horizontal Pull", note:"Brachialis, brachioradialis, biceps" },
   // ── VERTICAL PUSH ──
   { id:"bb_ohp",         label:"Barbell Overhead Press",      icon:"🙌", met:5.5, cat:"Vertical Push", note:"Shoulders, triceps, core stability" },
