@@ -14,12 +14,14 @@ Used for the exercise-category glyphs: `walk`, `run`, `bike`, `swim`, `hike`,
 Path data transformed from Phosphor's 256×256 grid into our 24×24 viewBox.
 
 ## game-icons.net — CC BY 3.0
-https://game-icons.net · "Weight lifting up" icon by **Delapouite**
-(https://delapouite.com), licensed CC BY 3.0
-(https://creativecommons.org/licenses/by/3.0/)
+https://game-icons.net · Icons by **Delapouite** (https://delapouite.com),
+licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/)
 
-Used for the `liftup` (overhead-press / vertical-push) glyph. Path data
-transformed from the 512×512 grid into our 24×24 viewBox; background removed.
+- "Weight lifting up" → the `liftup` (overhead-press / vertical-push) glyph
+- "Biceps" → the `muscle` (flexed-arm) glyph
+
+Path data transformed from the 512×512 grid into our 24×24 viewBox;
+backgrounds removed.
 
 ## Material Symbols — Apache License 2.0
 https://github.com/google/material-design-icons · © Google
