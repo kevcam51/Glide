@@ -11510,7 +11510,21 @@ function useBodyScrollLock(active) {
         b.position = bodyLockPrev.position; b.top = bodyLockPrev.top; b.left = bodyLockPrev.left;
         b.right = bodyLockPrev.right; b.width = bodyLockPrev.width;
         bodyLockPrev = null;
+        // Restoring the scroll needs BOTH of these or the page visibly jumps
+        // (S97n, Kevin: "the screen jumps down every time I close a tile"):
+        // 1) While body was position:fixed the document COLLAPSED to one
+        //    viewport (e.g. 2108px -> 812px). Scrolling before the browser
+        //    reflows clamps the target to the collapsed max (~0), so the page
+        //    lands at the top. Reading offsetHeight forces a synchronous
+        //    layout so the full height is back before we scroll.
+        void document.documentElement.offsetHeight;
+        // 2) html{scroll-behavior:smooth} would ANIMATE the restore, which is
+        //    the "slide" you see. Force it instant just for this jump.
+        const html = document.documentElement;
+        const prevBehavior = html.style.scrollBehavior;
+        html.style.scrollBehavior = "auto";
         window.scrollTo(0, bodyLockY);
+        html.style.scrollBehavior = prevBehavior;
       }
     };
   }, [active]);
