@@ -126,7 +126,8 @@ function exerciseCategory(ex, kind) {
   if (/cycl|spin|bike/.test(s)) return "bike";
   if (/row|erg|ski/.test(s)) return "row";
   if (/stair|climb|ladder|versa/.test(s)) return "stairs";
-  if (/box|kick|martial|wrestl|grappl|mma|karate|judo/.test(s)) return "boxing";
+  if (/kick|martial|wrestl|grappl|mma|karate|judo/.test(s)) return "kick";
+  if (/box/.test(s)) return "boxing";
   if (/jump.?rope/.test(s)) return "jumprope";
   if (/hik|mountain/.test(s)) return "hike";
   if (/basketball|bball/.test(s)) return "basketball";
@@ -135,7 +136,8 @@ function exerciseCategory(ex, kind) {
   if (/volley/.test(s)) return "volleyball";
   if (/football|flag/.test(s)) return "football";
   if (/ping|table.?tennis/.test(s)) return "pingpong";
-  if (/danc|zumba|skat|rollerblad/.test(s)) return "dance";
+  if (/skat|rollerblad/.test(s)) return "skate";
+  if (/danc|zumba/.test(s)) return "dance";
   if (/\bwalk\b|walking|walk_|_walk/.test(s)) return "walk";
   if (/jog|\brun\b|running|sprint|treadmill|ellipt/.test(s)) return "run";
   if (/hiit/.test(s)) return "flame";
@@ -1958,7 +1960,7 @@ const advanceOnEnter = (e) => {
 
 // Icons a user can pick for a custom exercise (S97b, Kevin) — the activity
 // pictogram family. Stored as iconName; exerciseCategory() honors it everywhere.
-const CUSTOM_EX_ICONS = ["dumbbell","muscle","liftup","liftdown","pullup","pullrow","core","legs","carry","run","walk","bike","swim","row","stairs","boxing","jumprope","hike","basketball","soccer","tennis","volleyball","football","pingpong","dance","yoga","bolt","flame","water"];
+const CUSTOM_EX_ICONS = ["dumbbell","muscle","liftup","liftdown","pullup","pullrow","core","legs","carry","run","walk","bike","swim","row","stairs","boxing","kick","jumprope","hike","basketball","soccer","tennis","volleyball","football","pingpong","dance","skate","yoga","bolt","flame","water"];
 
 function CustomExerciseCreator({ exerciseType, onAdd }) {
   const [show, setShow] = useState(false);

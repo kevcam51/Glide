@@ -24,6 +24,8 @@ licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/)
 - "Muscular torso" → the `core` (abs) glyph
 - "Pull" → the `pullrow` (rows / horizontal-pull) glyph
 - "Female legs" → the `legs` (lower-body accessory) glyph
+- "High kick" → the `kick` (martial arts / kickboxing) glyph
+- "Roller skate" → the `skate` (rollerblading / skating) glyph
 
 Path data transformed from the 512×512 grid into our 24×24 viewBox;
 backgrounds removed.
