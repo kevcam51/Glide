@@ -106,14 +106,19 @@ function exerciseCategory(ex, kind) {
   if (/\brest\b|rest day|rest_st/.test(s)) return "moon";
   if (/yoga|stretch|mobility|pilates|foam roll|cooldown|cool down|warm ?up/.test(s)) return "yoga";
   if (kind === "strength") {
-    // Per-movement-pattern icons (S97g, "cheap 60%" — Kevin's pick): the easy,
-    // clearly-readable differentiations; barbell stays the default for the rest.
+    // Per-movement-pattern icons (S97g + S97i full set): every pattern reads at
+    // a glance. Horizontal/Lower Push keep the barbell — bench + squats ARE the
+    // classic barbell lifts, so it's semantic there, not a fallback.
     const c = (ex.cat || "").toLowerCase();
-    if (/accessory/.test(c)) return "muscle";
+    if (/upper accessory/.test(c)) return "muscle";
+    if (/lower accessory/.test(c)) return "legs";
     if (/carry/.test(c)) return "carry";
     if (/total body/.test(c)) return "bolt";
+    if (/core/.test(c)) return "core";
     if (/vertical push/.test(c)) return "liftup";
     if (/vertical pull/.test(c)) return "pullup";
+    if (/horizontal pull/.test(c)) return "pullrow";
+    if (/lower pull/.test(c)) return "liftdown";
     return "dumbbell";
   }
   // Per-activity glyphs (S97b→S97f: standardized on Phosphor MIT icons).
@@ -1953,7 +1958,7 @@ const advanceOnEnter = (e) => {
 
 // Icons a user can pick for a custom exercise (S97b, Kevin) — the activity
 // pictogram family. Stored as iconName; exerciseCategory() honors it everywhere.
-const CUSTOM_EX_ICONS = ["dumbbell","muscle","liftup","pullup","carry","run","walk","bike","swim","row","stairs","boxing","jumprope","hike","basketball","soccer","tennis","volleyball","football","pingpong","dance","yoga","bolt","flame","water"];
+const CUSTOM_EX_ICONS = ["dumbbell","muscle","liftup","liftdown","pullup","pullrow","core","legs","carry","run","walk","bike","swim","row","stairs","boxing","jumprope","hike","basketball","soccer","tennis","volleyball","football","pingpong","dance","yoga","bolt","flame","water"];
 
 function CustomExerciseCreator({ exerciseType, onAdd }) {
   const [show, setShow] = useState(false);

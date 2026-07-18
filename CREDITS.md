@@ -19,6 +19,10 @@ licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/)
 
 - "Weight lifting up" → the `liftup` (overhead-press / vertical-push) glyph
 - "Biceps" → the `muscle` (flexed-arm) glyph
+- "Weight lifting down" → the `liftdown` (deadlift / lower-pull) glyph
+- "Muscular torso" → the `core` (abs) glyph
+- "Pull" → the `pullrow` (rows / horizontal-pull) glyph
+- "Female legs" → the `legs` (lower-body accessory) glyph
 
 Path data transformed from the 512×512 grid into our 24×24 viewBox;
 backgrounds removed.
