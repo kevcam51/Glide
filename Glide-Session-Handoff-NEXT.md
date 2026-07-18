@@ -1,5 +1,53 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S97g–m (Jul 18): the ICON SYSTEM + the emoji rule, settled
+_Pushed through `7438683`. The emoji question Kevin kept reopening is now CLOSED —
+read this before touching any icon._
+
+### 📌 THE RULE (Kevin, final)
+- **App UI = 100% our own icons, ZERO emoji.** Verified: 0 emoji left in the UI.
+- **Outgoing text we SEND (share card, marketing copy) = emoji are FINE and intended.**
+  That string lands in iMessage/WhatsApp/email as PLAIN TEXT where SVG can't travel.
+  `handleShare` carries a comment saying exactly this — don't "fix" it.
+- `Showcase.jsx` still has emoji: dev-only style page (`/?showcase=1`), never user-facing.
+
+### 🎨 HOW TO ADD/FIX AN ICON (the hard-won lesson)
+**Geometric/abstract things** (stairs, barbell, chart, target, clipboard, leaf, alert)
+→ hand-draw as OUTLINE line art. They read fine at 18px.
+**Organic/detailed things** (a flexed arm, a person rowing, a rower, a kicker)
+→ NEVER hand-draw as line art; it turns to mush at 18px. Pull a **FILLED silhouette**
+from a permissive set and render it filled. This is why 3 hand-drawn muscle attempts
+failed and Delapouite's "Biceps" looked professional instantly.
+
+**Sources (all commercial-safe, credited in `CREDITS.md` — keep it updated):**
+- **game-icons.net** (CC BY 3.0 — attribution required) — 4,000+ silhouettes, best for
+  figures. Raw: `raw.githubusercontent.com/game-icons/icons/master/<author>/<name>.svg`.
+  Their grid is 512×512 → strip the `M0 0h512…` background path, keep the figure path,
+  and wrap with `transform="scale(0.046875)"` (24/512).
+- **Tabler** (MIT), **Phosphor** (MIT), **Lucide** (ISC), **Material Symbols** (Apache-2.0
+  — Material is on a `0 -960 960 960` grid → `transform="translate(0,24) scale(0.025)"`).
+- AVOID Flaticon/Iconscout (paid / attribution-gated). NOT legal advice, but these
+  licenses explicitly permit commercial use with notice retained.
+
+**Filled glyphs must be listed in the ALWAYS-FILL set in `src/icons.jsx`** or the Icon
+component strokes their silhouette contour and they look like noise.
+`Icon` returns **null** for an unknown name → a typo renders an invisible button, no error.
+
+### ✅ Shipped S97g–m
+- Every strength movement pattern has its own figure: vertical push (Strong man),
+  vertical pull (hand-built FILLED pull-up — no free set has one), horizontal pull
+  (Pull), lower pull (Weight-lifting-down), core (Muscular torso), lower accessory
+  (Female legs), upper accessory (Biceps), carry, total-body. Horizontal/Lower Push
+  keep the barbell ON PURPOSE (bench + squat ARE barbell lifts — semantic, not fallback).
+- Cardio: stairs (solid staircase), jump rope, high kick (martial arts/kickboxing),
+  roller skate (rollerblading), rowing (Material, filled).
+- **Platform emoji sweep 70 → 3** (the 3 = share text). Back arrows on every overlay.
+- **2 real bugs found+fixed by the sweep:** Timeline tab rendered NO icon (TAB_ICONS key
+  `"🎯 Timeline"` never matched the plain `"Timeline"` tab — label IS the key now); and
+  export/import FAILURES rendered green-as-success (`msg.startsWith("")` is always true
+  — both status messages now use structured `{tone,text}` state).
+
+
 ## ⚡⚡⚡ S97 (Jul 17): tile bottom sheets + food-library tabs + default-target + back arrows + MEALS
 _All pushed (`origin/main` @ `3293afa`) + deployed. Firebase `calorieiq-29762`; model `claude-sonnet-4-6`.
 Kevin gave a big UX batch; built in 2 commits (`99d385d` UX, `3293afa` Meals) — all verified live on
