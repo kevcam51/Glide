@@ -1976,7 +1976,7 @@ function CustomExerciseCreator({ exerciseType, onAdd }) {
     const ex = {
       id: `custom_${Date.now()}`,
       label: name.trim(),
-      icon: "⭐",
+      icon: "star",
       iconName,
       met: 0,
       calPerMin: Number(calPerMin),
@@ -2136,10 +2136,10 @@ function StepPersonal({ data, onChange, onNext }) {
           <label className={WZ.label}>I am a</label>
           <div className="grid grid-cols-2 gap-3">
             <button className={wzGbtn(data.gender==="male")} onClick={()=>onChange("gender","male")}>
-              <span className="text-xl">♂</span> Male
+              Male
             </button>
             <button className={wzGbtn(data.gender==="female")} onClick={()=>onChange("gender","female")}>
-              <span className="text-xl">♀</span> Female
+              Female
             </button>
           </div>
         </div>
@@ -2390,7 +2390,7 @@ function StepActivity({ data, onChange, onBack, onNext }) {
               <button className={`${wzAbtn(active)} flex-1`} onClick={()=>{onChange("activityLevel",a.id);setActiveInfo(null);}}>
                 <Icon name={a.iconName} size={26} color="var(--color-primary,#08DCE0)" className="shrink-0" />
                 <div><div className={`font-bold text-[.97rem] ${active?"text-primary":"text-fg"}`}>{a.label}</div><div className="text-[.76rem] text-muted leading-snug">{a.desc}</div></div>
-                {active && <span className="ml-auto shrink-0 w-7 h-7 rounded-full bg-[rgba(8,220,224,.15)] text-primary flex items-center justify-center text-lg">✓</span>}
+                {active && <span className="ml-auto shrink-0 w-7 h-7 rounded-full bg-[rgba(8,220,224,.15)] text-primary flex items-center justify-center"><Icon name="check" size={15} color="currentColor" /></span>}
               </button>
               <button className={`shrink-0 w-8 h-8 rounded-full border flex items-center justify-center text-sm cursor-pointer ${activeInfo===a.id?"border-primary text-primary bg-[rgba(8,220,224,.08)]":"border-border text-muted bg-surface2"}`}
                 onClick={(e)=>{e.stopPropagation();setActiveInfo(activeInfo===a.id?null:a.id);}}>i</button>
@@ -3466,24 +3466,26 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
     ...strengthDayData.filter(d=>d.burned>0).map(d=>d.day),
   ]).size;
   const TABS = [
-    "📊 No Cardio",
-    "🔥 + Cardio",
+    "No Cardio",
+    "+ Cardio",
     ...(hasGoal ? ["Timeline"] : []),
-    "🥗 Nutrients",
-    "⚠️ Fat Gain",
-    "💪 Muscle",
-    "🏋️ Strength",
-    "📋 Summary",
+    "Nutrients",
+    "Fat Gain",
+    "Muscle",
+    "Strength",
+    "Summary",
   ];
 
-  const strengthTabIdx = TABS.indexOf("🏋️ Strength");
-  const summaryTabIdx = TABS.indexOf("📋 Summary");
-  // Tab strings double as keys (indexOf above), so the emoji stays in the data —
-  // we render a custom <Icon> + the emoji-stripped label at display time only.
+  const strengthTabIdx = TABS.indexOf("Strength");
+  const summaryTabIdx = TABS.indexOf("Summary");
+  // Tab strings double as keys (indexOf above). Emoji removed (S97l) — the label
+  // IS the key now, so a key can no longer drift from its tab (the old
+  // "🎯 Timeline" key never matched the plain "Timeline" tab, so Timeline
+  // silently rendered with no icon).
   const TAB_ICONS = {
-    "📊 No Cardio": "chart", "🔥 + Cardio": "flame", "🎯 Timeline": "clock",
-    "🥗 Nutrients": "leaf", "⚠️ Fat Gain": "alert", "💪 Muscle": "muscle",
-    "🏋️ Strength": "dumbbell", "📋 Summary": "clipboard",
+    "No Cardio": "chart", "+ Cardio": "flame", "Timeline": "clock",
+    "Nutrients": "leaf", "Fat Gain": "alert", "Muscle": "muscle",
+    "Strength": "dumbbell", "Summary": "clipboard",
   };
 
   const colorsForCls = { "c-acc":"var(--accent)","c-grn":"var(--green)","c-yel":"var(--yellow)","c-red":"var(--red)" };
@@ -3743,7 +3745,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
         {TABS.map((t,i)=>(
           <button key={i} className={`rtab${tab===i?" active":""}`} onClick={()=>setTab(i)}
             style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:"3px",lineHeight:1.1}}>
-            <Icon name={TAB_ICONS[t]} size={16} />{t.replace(/^\S+\s/,"")}</button>
+            <Icon name={TAB_ICONS[t]} size={16} />{t}</button>
         ))}
       </div>
 
@@ -4030,7 +4032,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                       <div style={{fontSize:".76rem",color:"var(--muted)",lineHeight:1.5}}>{z.desc}</div>
                       {z.highlight && (
                         <div style={{fontSize:".74rem",color:"var(--green)",marginTop:"6px",fontWeight:600}}>
-                          ⭐ Recommended for steady-state fat loss cardio — aim to stay in this range for 30–60 minutes.
+                          Recommended for steady-state fat loss cardio — aim to stay in this range for 30–60 minutes.
                         </div>
                       )}
                     </div>
@@ -4252,7 +4254,7 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
       {/* Profile */}
       <div className="sec-title">Profile</div>
       <div className="card" style={{padding:"14px 16px"}}>
-        <Row label="Gender" value={gender === "male" ? "♂ Male" : "♀ Female"} />
+        <Row label="Gender" value={gender === "male" ? "Male" : "Female"} />
         <Row label="Age" value={`${age} years`} />
         <Row label="Weight" value={`${weightLbs} lbs`} />
         <Row label="Height" value={`${heightFt}'${heightIn}"`} />
@@ -4342,7 +4344,7 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
                 <span style={{ fontWeight: 800, fontSize: ".9rem", display: "inline-flex", alignItems: "center", gap: 6 }}>
                   <Icon name={opt.iconName} size={15} color="var(--accent)" />{opt.title}
                 </span>
-                {active && <span style={{ fontSize: ".68rem", fontWeight: 800, letterSpacing: ".5px", color: "var(--accent)" }}>✓ ACTIVE</span>}
+                {active && <span style={{ fontSize: ".68rem", fontWeight: 800, letterSpacing: ".5px", color: "var(--accent)" }}>ACTIVE</span>}
               </div>
               <div style={{ fontSize: ".76rem", color: "var(--muted-light)", margin: "4px 0 6px", lineHeight: 1.45 }}>{opt.desc}</div>
               <div style={{ fontFamily: "'Sora',sans-serif", fontSize: ".92rem", color: active ? "var(--accent)" : "var(--text-secondary)" }}>{opt.line}</div>
@@ -4929,7 +4931,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
               <strong>Your score: {(qualityFactor*100).toFixed(0)}%</strong> — your plan is <strong>{compoundPct}% compound</strong> movements.
               {qualityFactor >= 0.85 ? " Great exercise selection — mostly compound lifts." : qualityFactor >= 0.65 ? " Good mix. Adding more compound lifts (squats, presses, rows) would increase this." : " Consider swapping some isolation exercises for compound movements to boost muscle growth."}
             </div>
-            {customCount > 0 && <div style={{padding:"6px 10px",background:"rgba(181,123,255,.06)",borderRadius:"6px",fontSize:".75rem",color:"#b57bff",marginBottom:"6px"}}>⭐ {customCount} custom exercise(s) are scored at 65% since we can't verify their muscle-building stimulus.</div>}
+            {customCount > 0 && <div style={{padding:"6px 10px",background:"rgba(181,123,255,.06)",borderRadius:"6px",fontSize:".75rem",color:"#b57bff",marginBottom:"6px"}}><Icon name="star" size={12} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{customCount} custom exercise(s) are scored at 65% since we can't verify their muscle-building stimulus.</div>}
             <div style={{fontSize:".7rem",color:"var(--muted)",fontStyle:"italic"}}>Tap anywhere to close</div>
           </>)}
 
@@ -5210,7 +5212,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
               • <strong style={{color:"var(--text)"}}>Training experience</strong> — beginners gain faster than advanced lifters<br/>
               • <strong style={{color:"var(--text)"}}>Workout frequency</strong> — more training days = more stimulus (Schoenfeld 2017)<br/>
               • <strong style={{color:"var(--text)"}}>Exercise selection quality</strong> — compound movements (squats, presses, rows) drive more growth than isolation exercises (curls, extensions)
-              {customCount > 0 && <><br/>• <strong style={{color:"#b57bff"}}>⭐ Custom exercises</strong> — assigned a moderate quality factor (0.65) since we cannot verify their muscle-building stimulus</>}
+              {customCount > 0 && <><br/>• <strong style={{color:"#b57bff"}}>Custom exercises</strong> — assigned a moderate quality factor (0.65) since we cannot verify their muscle-building stimulus</>}
             </div>
 
             <div style={{fontSize:".92rem",fontWeight:700,color:"var(--green)",marginBottom:"8px"}}>What This Means for You</div>
@@ -5265,7 +5267,7 @@ function SurplusTab({ tdee, totalBurn, avgBurnPerDay, activeDays, name }) {
   };
 
   const fmtTime = (weeks) => {
-    if (weeks === null) return "Offset ✓";
+    if (weeks === null) return "Offset done";
     if (weeks < 1)  return `< 1 wk`;
     if (weeks < 8)  return `~${Math.round(weeks)} wk${Math.round(weeks)!==1?"s":""}`;
     const mo = Math.round(weeks / 4.33);
@@ -5577,7 +5579,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
       why:"Critical for testosterone, immune function, protein synthesis, and wound healing. Lost through sweat.",
       foods:["Oysters (3oz = 74mg)","Beef","Pumpkin seeds","Chickpeas","Cashews","Turkey","Lentils","Crab"],
       tip:"Zinc competes with copper — don't mega-dose. Food sources are generally sufficient.",
-      personalNote: (isMale && liftsHeavy) ? "♂️ Zinc directly supports testosterone production — essential for male lifters." : null },
+      personalNote: (isMale && liftsHeavy) ? "Zinc directly supports testosterone production — essential for male lifters." : null },
     { id:"selenium", name:"Selenium", emoji:"🇧🇷", amount:55, unit:"mcg", category:"Mineral",
       relevance: score([isHeavyCardio, doesEndurance, over40]),
       why:"Powerful antioxidant that protects against exercise-induced oxidative stress. Supports thyroid function and immune health.",
@@ -6308,7 +6310,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
                 >
                   <span className="psb-swatch" style={{background:rc(p), opacity: isGhosted?0.4:1}}></span>
                   <span className="psb-label">{p.label}</span>
-                  {isSelected && <span className="psb-check">✓</span>}
+                  {isSelected && <span className="psb-check"><Icon name="check" size={13} color="currentColor" /></span>}
                 </button>
               );
             })}
@@ -6390,7 +6392,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
                   color: parseFloat(v) <= goal ? "#08dce0" : rc(paces[i]),
                   fontWeight: allAtGoal ? "700" : "600"
                 }}>
-                  {parseFloat(v) <= goal ? `${goal} ✓` : `${v} lbs`}
+                  {parseFloat(v) <= goal ? <>{goal} <Icon name="check" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle"}} /></> : `${v} lbs`}
                 </div>
               ))}
               {hasCardio && (
@@ -6398,7 +6400,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
                   color: parseFloat(cardioVal) <= goal ? "#08dce0" : "var(--orange)",
                   fontWeight: allAtGoal ? "700" : "600"
                 }}>
-                  {parseFloat(cardioVal) <= goal ? `${goal} ✓` : `${cardioVal} lbs`}
+                  {parseFloat(cardioVal) <= goal ? <>{goal} <Icon name="check" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle"}} /></> : `${cardioVal} lbs`}
                 </div>
               )}
             </div>
@@ -6484,14 +6486,14 @@ function TimelineTab({ data, tdee, totalBurn }) {
                     {hasCardio ? (
                       <>
                         <div className={`ms-loss ${p.textCls}`}>
-                          <span style={{opacity:.65}}>Diet: {doneD?"✓":` −${lossD.toFixed(1)} lbs`}</span>
-                          <span style={{marginLeft:"6px"}}>+Cardio: {doneC?"✓ goal!":` −${lossC.toFixed(1)} lbs`}</span>
+                          <span style={{opacity:.65}}>Diet: {doneD?<><Icon name="check" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle"}} /></>:` −${lossD.toFixed(1)} lbs`}</span>
+                          <span style={{marginLeft:"6px"}}>+Cardio: {doneC?<><Icon name="check" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle"}} /> goal!</>:` −${lossC.toFixed(1)} lbs`}</span>
                         </div>
-                        <div className="ms-wt">{doneC?`${goal} lbs ✓`:`${wtC} lbs (w/cardio)`}</div>
+                        <div className="ms-wt">{doneC?<>{goal} lbs <Icon name="check" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle"}} /></>:`${wtC} lbs (w/cardio)`}</div>
                       </>
                     ) : (
                       <>
-                        <div className={`ms-loss ${p.textCls}`}>{doneD?"✓ Goal!":` −${lossD.toFixed(1)} lbs`}</div>
+                        <div className={`ms-loss ${p.textCls}`}>{doneD?<><Icon name="check" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle"}} /> Goal!</>:` −${lossD.toFixed(1)} lbs`}</div>
                         <div className="ms-wt">{doneD?`${goal} lbs`:wtD+" lbs"}</div>
                       </>
                     )}
@@ -6647,7 +6649,7 @@ function MicroBars({ micros, scale = 1 }) {
                     <span style={{ color: "var(--text)" }}>{d.label}{d.limit ? <span style={{ color: "var(--muted)", fontWeight: 400 }}> · limit</span> : null}</span>
                     <span style={{ color: over ? "var(--red)" : "var(--muted)", fontWeight: 600 }}>
                       {v}{d.rda ? <span style={{ opacity: .7, fontWeight: 400 }}> / {d.rda}</span> : ""} {d.unit}
-                      {met ? <span style={{ color: grp.color }}> ✓</span> : over ? " " : ""}
+                      {met ? <span style={{ color: grp.color }}> <Icon name="check" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle"}} /></span> : over ? " " : ""}
                     </span>
                   </div>
                   {/* Track. Nutrients with no reference (mono/poly fat, caffeine)
@@ -9315,7 +9317,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             notes: ci.notes || "", bodyFat: ci.bodyFat ?? null, loggedBy: "calendar", isFuturePlan: sel > todayKey })}
             style={{ padding: "9px 14px", fontSize: ".84rem", fontWeight: 700, borderRadius: 9, cursor: "pointer", border: "none",
               background: ci.workedOut ? "var(--orange)" : "var(--accent)", color: "#0b0b12" }}>
-            {ci.workedOut ? "✓ Worked out — tap to undo" : "Mark workout done"}
+            {ci.workedOut ? "Worked out — tap to undo" : "Mark workout done"}
           </button>
         </div>
       </>
@@ -9381,7 +9383,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   // button greys to "Logged ✓" for a beat, and a toast confirms it — so you know
   // it saved without scrolling up to check the number.
   const [toast, setToast] = useState(null);      // { msg } shown briefly at the bottom
-  const [flashBtn, setFlashBtn] = useState(null); // "water" | "weight" | "cal" — button showing "Logged ✓"
+  const [flashBtn, setFlashBtn] = useState(null); // "water" | "weight" | "cal" — button showing its transient "Logged" state
   const toastTimer = useRef(null); const flashTimer = useRef(null);
   const lastCommit = useRef({ water: null, weight: null });
   useEffect(() => () => { clearTimeout(toastTimer.current); clearTimeout(flashTimer.current); }, []);
@@ -10670,7 +10672,7 @@ function DailyCheckIn({ data, onSaveCheckIn }) {
 
       <button className="checkin-submit" disabled={!canSave || saved} onClick={handleSave}
         style={isFuture ? {background:"#b57bff"} : isPast ? {background:"var(--yellow)",color:"#0b0b12"} : {}}>
-        {saved ? "✓ Saved!" : isFuture ? "Save Future Plan" : isPast ? "Log Past Day" : "Save Today's Check-In"}
+        {saved ? "Saved!" : isFuture ? "Save Future Plan" : isPast ? "Log Past Day" : "Save Today's Check-In"}
       </button>
     </div>
   );
@@ -11220,7 +11222,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
               <span className="text-xs text-muted">lbs</span>
               <button onClick={logWeight}
                 className="rounded-lg bg-primaryfill px-4 py-2 text-sm font-bold text-primaryfg cursor-pointer">Log weight</button>
-              {weightMsg ? <span className="text-sm text-success">✓ {weightMsg}</span> : null}
+              {weightMsg ? <span className="text-sm text-success"><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{weightMsg}</span> : null}
             </div>
           </div>
         )}
@@ -11592,7 +11594,7 @@ function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
     setReqBusy(true); setReqMsg(null);
     try {
       await callSendTrainerRequest({ type: reqType, prompt: reqText.trim() });
-      setReqMsg({ ok: true, text: "✓ Sent — your trainer will see it on their dashboard." });
+      setReqMsg({ ok: true, text: "Sent — your trainer will see it on their dashboard." });
       setReqText("");
     } catch (e) {
       const m = (e && e.message) || "";
@@ -12080,8 +12082,8 @@ function tzSyncSummary(r) {
   if (r.workoutDaysTotal) bits.push(`${r.workoutDaysTotal} workout day${r.workoutDaysTotal === 1 ? "" : "s"}`);
   const who = `${r.total || 0} client${r.total === 1 ? "" : "s"}`;
   return bits.length
-    ? `✓ Synced ${who} — ${bits.join(" · ")}.`
-    : `✓ Checked ${who} — nothing new in Trainerize yet. Watch data usually lands a few hours after your workout.`;
+    ? `Synced ${who} — ${bits.join(" · ")}.`
+    : `Checked ${who} — nothing new in Trainerize yet. Watch data usually lands a few hours after your workout.`;
 }
 
 function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, meUid, meName, meRole, notifPrefs, onSetNotifPrefs }) {
@@ -12169,7 +12171,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       const meals = r.mealDaysTotal ? ` · ${r.mealDaysTotal} day${r.mealDaysTotal === 1 ? "" : "s"} of meals` : "";
       const health = r.healthDaysTotal ? ` · ${r.healthDaysTotal} day${r.healthDaysTotal === 1 ? "" : "s"} of tracker data` : "";
       const workouts = r.workoutDaysTotal ? ` · ${r.workoutDaysTotal} workout day${r.workoutDaysTotal === 1 ? "" : "s"}` : "";
-      setTzMsg({ ok: true, text: `✓ Imported ${r.total} client${r.total === 1 ? "" : "s"} (${r.created} new · ${r.updated} updated${meals}${health}${workouts}) — filed under the “Trainerize” folder in All clients.` });
+      setTzMsg({ ok: true, text: `Imported ${r.total} client${r.total === 1 ? "" : "s"} (${r.created} new · ${r.updated} updated${meals}${health}${workouts}) — filed under the “Trainerize” folder in All clients.` });
       setTzPick(null);
     } catch (e) {
       setTzMsg({ ok: false, text: tzErrText(e) });
@@ -12554,7 +12556,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                   <Icon name="inbox" size={19} color="var(--accent)" />Client Requests
                   {openInbox.length > 0 && <span className="rounded-full bg-primary px-2 text-[.7rem] font-bold text-primaryfg">{openInbox.length}</span>}
                 </div>
-                {openInbox.length === 0 && <div className={subCls}>All caught up ✓</div>}
+                {openInbox.length === 0 && <div className={subCls}>All caught up</div>}
                 {openInbox.map((r) => (
                   <div key={r.id} className="mt-2 rounded-xl border border-border bg-surface2 p-3">
                     <div className="flex items-baseline gap-2">
@@ -12563,7 +12565,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     </div>
                     <div className="mt-1 text-[.84rem] leading-relaxed text-fg">{r.prompt}</div>
                     <div className="mt-2 flex gap-2">
-                      <button className={mBtnCls} onClick={() => inboxDone(r.id)}>✓ Done</button>
+                      <button className={mBtnCls} onClick={() => inboxDone(r.id)}><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Done</button>
                       <button className={`${mBtnCls} text-muted`} onClick={() => inboxRemove(r.id)}>Dismiss</button>
                     </div>
                   </div>
@@ -12789,7 +12791,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                                     )}
                                     <button className={mBtnCls} onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid, p.id)}>Open</button>
                                     <button onClick={() => { setCpDraft(p.name); setCpRenaming({ uid: c.uid, planId: p.id }); }} title="Rename"
-                                      className="border-none bg-transparent text-muted cursor-pointer text-[.85rem]">✎</button>
+                                      className="border-none bg-transparent text-muted cursor-pointer text-[.85rem]"><Icon name="edit" size={14} color="currentColor" /></button>
                                     {p.id !== "self" && (c.plans || []).length > 1 && (
                                       <button onClick={() => setCpDelFor({ uid: c.uid, planId: p.id })} title="Delete"
                                         className="border-none bg-transparent text-danger cursor-pointer text-[.85rem]"><Icon name="close" size={15} color="currentColor" /></button>
@@ -12826,7 +12828,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                             </button>
                             {showDoneFor === c.uid && doneReqs.map((r) => (
                               <div key={r.id} className="flex justify-between items-start gap-2 text-[.78rem] px-2.5 py-1 rounded-md bg-surface2">
-                                <span className="text-muted">✓ {r.prompt}
+                                <span className="text-muted"><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{r.prompt}
                                   {r.doneAt ? <span className="block text-[.66rem] opacity-70 mt-0.5">Completed {fmtStamp(r.doneAt)}</span> : null}
                                 </span>
                                 <button onClick={() => cancelRequest(c.uid, r.id)} disabled={reqBusy} title="Remove"
@@ -12918,7 +12920,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                           {c.email ? <span className="text-muted text-xs"> · {c.email}</span> : null}
                         </span>
                         {c.imported
-                          ? <span className="text-[10px] font-bold text-success whitespace-nowrap">✓ in Glidna</span>
+                          ? <span className="text-[10px] font-bold text-success whitespace-nowrap"><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />in Glidna</span>
                           : <span className="text-[10px] font-bold text-primary whitespace-nowrap">new</span>}
                         {c.status && c.status !== "active" && (
                           <span className="text-[10px] text-warn whitespace-nowrap">{c.status}</span>
@@ -13004,7 +13006,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                           {p.customName || p.name || (sim ? "Untitled simulation" : "Unnamed client")}
                           {onRename && (
                             <button onClick={(e) => { e.stopPropagation(); setRenameDraft(p.customName || p.name || ""); setRenamingId(p.id); }}
-                              title="Rename" className="border-none bg-transparent text-muted cursor-pointer text-[.85rem] ml-1.5">✎</button>
+                              title="Rename" className="border-none bg-transparent text-muted cursor-pointer text-[.85rem] ml-1.5"><Icon name="edit" size={14} color="currentColor" /></button>
                           )}
                         </span>
                         {sim
@@ -13081,7 +13083,7 @@ const ATTENTION_DAYS = 3; // no logs in this many days → "needs attention"
 function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole }) {
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [nudged, setNudged] = useState({}); // clientUid -> true once a nudge is sent (transient ✓)
+  const [nudged, setNudged] = useState({}); // clientUid -> true once a nudge is sent (transient confirmation)
   const [nudgeBusy, setNudgeBusy] = useState(null); // clientUid currently sending
   const [attnDays, setAttnDays] = useState(ATTENTION_DAYS); // coach-configurable "needs attention" threshold (persisted)
 
@@ -13281,7 +13283,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
                         onClick={(e) => { e.stopPropagation(); if (!nudged[c.uid] && nudgeBusy !== c.uid) sendNudge(c.uid); }}
                         disabled={nudgeBusy === c.uid || nudged[c.uid]}
                         className={`shrink-0 px-2.5 py-1.5 rounded-md text-xs font-bold cursor-pointer whitespace-nowrap border ${nudged[c.uid] ? "border-success text-success bg-transparent" : "border-primary text-primary bg-[rgba(8,220,224,.08)]"} disabled:cursor-default`}>
-                        {nudged[c.uid] ? "✓ Nudged" : nudgeBusy === c.uid ? "…" : <span style={{display:"inline-flex",alignItems:"center",gap:"5px"}}><Icon name="invite" size={12} />Nudge</span>}
+                        {nudged[c.uid] ? "Nudged" : nudgeBusy === c.uid ? "…" : <span style={{display:"inline-flex",alignItems:"center",gap:"5px"}}><Icon name="invite" size={12} />Nudge</span>}
                       </button>
                     </div>
                   ))}
@@ -13356,7 +13358,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
                         {c.ratePerWeek != null && Math.abs(c.ratePerWeek) >= 0.05 && (
                           <span className="text-muted text-[.74rem]">{c.ratePerWeek < 0 ? "▼" : "▲"} {Math.abs(c.ratePerWeek).toFixed(1)}/wk</span>
                         )}
-                        {c.onTrack === true && <span className="text-success">✓ on track</span>}
+                        {c.onTrack === true && <span className="text-success"><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />on track</span>}
                         {c.onTrack === false && <span className="text-warn">off track</span>}
                       </span>
                     </div>
@@ -14440,7 +14442,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
             )}
             {boost === "granted" && (
               <div className="self-stretch rounded-lg border border-success/50 bg-[rgba(47,224,168,.08)] px-3 py-2.5">
-                <div className="text-[.84rem] font-bold text-success">✓ You've been approved!</div>
+                <div className="text-[.84rem] font-bold text-success"><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />You've been approved!</div>
                 <div className="mt-0.5 text-[.76rem] leading-relaxed text-muted">Your allowance has been raised for the rest of today — keep going.</div>
               </div>
             )}
@@ -14481,7 +14483,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
             <div className="border-t border-border bg-surface2 px-3 py-3">
               {proposal.status === "logged" ? (
                 <div className="flex items-center gap-2 text-[.88rem]">
-                  <span className="font-bold text-success">✓ Logged</span>
+                  <span className="font-bold text-success"><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Logged</span>
                   <span className="text-muted truncate">{proposal.name} · {proposal.calories} cal</span>
                   <button onClick={() => setProposal(null)} aria-label="Dismiss" className="ml-auto px-2 text-muted hover:text-fg"><Icon name="close" size={15} color="currentColor" /></button>
                 </div>
@@ -14528,7 +14530,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                   <div className="flex gap-2">
                     <button disabled={proposal.status === "saving"} onClick={() => acceptMeal()}
                       className="flex-1 rounded-lg bg-primaryfill px-3 py-2 text-[.88rem] font-bold text-primaryfg disabled:opacity-60">
-                      {proposal.status === "saving" ? "Saving…" : "✓ Log it"}</button>
+                      {proposal.status === "saving" ? "Saving…" : "Log it"}</button>
                     <button disabled={proposal.status === "saving"} onClick={() => setEditDraft({ ...proposal })}
                       className="rounded-lg border border-primary bg-[rgba(8,220,224,.12)] px-3 py-2 text-[.88rem] font-semibold text-primary disabled:opacity-60">Edit</button>
                     <button disabled={proposal.status === "saving"} onClick={() => setProposal(null)} aria-label="Dismiss"
@@ -14551,7 +14553,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               <div className="border-t border-border bg-surface2 px-3 py-3">
                 {workout.status === "saved" ? (
                   <div className="flex items-center gap-2 text-[.88rem]">
-                    <span className="font-bold text-success">✓ Program saved</span>
+                    <span className="font-bold text-success"><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Program saved</span>
                     <span className="text-muted truncate">{totalDays} training {totalDays === 1 ? "day" : "days"}/week</span>
                     <button onClick={() => setWorkout(null)} aria-label="Dismiss" className="ml-auto px-2 text-muted hover:text-fg"><Icon name="close" size={15} color="currentColor" /></button>
                   </div>
@@ -14577,7 +14579,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                     <div className="flex gap-2">
                       <button disabled={workout.status === "saving"} onClick={acceptWorkout}
                         className="flex-1 rounded-lg bg-primaryfill px-3 py-2 text-[.88rem] font-bold text-primaryfg disabled:opacity-60">
-                        {workout.status === "saving" ? "Saving…" : "✓ Save program"}</button>
+                        {workout.status === "saving" ? "Saving…" : "Save program"}</button>
                       <button disabled={workout.status === "saving"} onClick={() => setWorkout(null)} aria-label="Dismiss"
                         className="rounded-lg border border-border px-2.5 py-2 text-[.88rem] text-muted disabled:opacity-60"><Icon name="close" size={15} color="currentColor" /></button>
                     </div>
@@ -15286,7 +15288,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                           {p.id === activePlanId ? "● " : "○ "}{p.name}
                         </button>
                         <button onClick={() => { setPlanNameDraft(p.name); setRenamingPlanId(p.id); }} title="Rename"
-                          className="border-0 bg-transparent text-muted cursor-pointer text-sm">✎</button>
+                          className="border-0 bg-transparent text-muted cursor-pointer text-sm"><Icon name="edit" size={14} color="currentColor" /></button>
                         {p.id !== "self" && plans.length > 1 && (
                           <button onClick={() => deletePlan(p.id)} title="Delete plan"
                             className="border-0 bg-transparent text-danger cursor-pointer text-sm"><Icon name="close" size={15} color="currentColor" /></button>
@@ -15344,7 +15346,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                       </div>
                       <div className="flex gap-2 flex-wrap">
                         <button onClick={() => setQuickReq(r)} className={primaryBtnCls}>Do it now →</button>
-                        <button onClick={() => markRequestDone(r.id)} className={ghostBtnCls}>✓ Mark done</button>
+                        <button onClick={() => markRequestDone(r.id)} className={ghostBtnCls}><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Mark done</button>
                       </div>
                     </div>
                   );
@@ -15418,7 +15420,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                   <button className={miniBtnCls} onClick={() => setShowChart(true)} title="See your progress chart"><span className="inline-flex items-center gap-1"><Icon name="chart" size={13} />Progress</span></button>
                   <button className={showWt ? miniBtnActiveCls : miniBtnCls}
                     onClick={() => setShowWt(s => !s)} title="Log today's weight">
-                    {showWt ? "Close" : "✎ Log"}
+                    {showWt ? "Close" : "Log"}
                   </button>
                 </div>
               </div>
@@ -15694,7 +15696,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
           </div>
         </div>
         <button className="flex-none border-none bg-transparent text-muted cursor-pointer text-[.95rem] px-1" title="Rename"
-          onClick={e=>{e.stopPropagation(); setRenameDraft(displayName); setRenamingId(p.id);}}>✎</button>
+          onClick={e=>{e.stopPropagation(); setRenameDraft(displayName); setRenamingId(p.id);}}><Icon name="edit" size={14} color="currentColor" /></button>
         <button
           className={confirmDeleteId===p.id
             ? "flex-none cursor-pointer rounded-md border border-[rgba(248,113,113,.3)] bg-[rgba(248,113,113,.15)] text-danger text-[.68rem] font-bold px-2 py-0.5"
@@ -15848,12 +15850,12 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
           <div className="flex gap-2 mb-2 flex-wrap">
             <button className="flex-[1_1_140px] min-h-[44px] text-[.82rem] font-semibold rounded-lg border border-success text-success bg-[rgba(47,224,168,.08)] cursor-pointer"
               onClick={async ()=>{
-                setClipMsg("Copying...");
+                setClipMsg({tone:"info", text:"Copying..."});
                 const result = await onClipCopy();
                 if (result === true) {
-                  setClipMsg("Copied to clipboard! Paste on your other device.");
+                  setClipMsg({tone:"ok", text:"Copied to clipboard! Paste on your other device."});
                 } else {
-                  setClipMsg("Clipboard blocked — use File Export below instead.");
+                  setClipMsg({tone:"warn", text:"Clipboard blocked — use File Export below instead."});
                 }
                 setTimeout(()=>setClipMsg(null), 6000);
               }}>
@@ -15865,7 +15867,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
             </button>
           </div>
 
-          {clipMsg && <div className={`text-sm mb-2 text-center leading-snug ${clipMsg.startsWith("")?"text-success":clipMsg.startsWith("")?"text-warn":"text-muted"}`}>{clipMsg}</div>}
+          {clipMsg && (() => { const m = clipMsg; return <div className={`text-sm mb-2 text-center leading-snug ${m.tone==="ok"?"text-success":m.tone==="warn"?"text-warn":m.tone==="error"?"text-danger":"text-muted"}`}>{m.text}</div>; })()}
 
           {showPasteBox && (
             <div className="mb-2.5">
@@ -15880,9 +15882,9 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
                 <button className={`${primaryBtnCls} flex-1`}
                   disabled={!pasteText.trim()}
                   onClick={async ()=>{
-                    setClipMsg("Importing...");
+                    setClipMsg({tone:"info", text:"Importing..."});
                     const result = await onClipPaste(pasteText);
-                    setClipMsg(result.ok ? `${result.msg}` : `❌ ${result.msg}`);
+                    setClipMsg({tone: result.ok ? "ok" : "error", text: result.msg});
                     if(result.ok){ setPasteText(""); setShowPasteBox(false); }
                     setTimeout(()=>setClipMsg(null), 5000);
                   }}>
@@ -15898,9 +15900,9 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
           <div className="flex gap-2 mb-2.5 flex-wrap">
             <button className="flex-[1_1_140px] min-h-[42px] text-[.8rem] font-bold rounded-lg border-none bg-primaryfill text-primaryfg cursor-pointer"
               onClick={async ()=>{
-                setExportMsg("Packaging...");
+                setExportMsg({tone:"info", text:"Packaging..."});
                 const ok = await onExport();
-                setExportMsg(ok ? "Download started!" : "❌ Export failed");
+                setExportMsg({tone: ok ? "ok" : "error", text: ok ? "Download started!" : "Export failed"});
                 setTimeout(()=>setExportMsg(null), 4000);
               }}>
               Export All Clients
@@ -15913,15 +15915,15 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
               onChange={async (e)=>{
                 const file = e.target.files?.[0];
                 if (!file) return;
-                setExportMsg("Importing...");
+                setExportMsg({tone:"info", text:"Importing..."});
                 const result = await onImport(file);
-                setExportMsg(result.ok ? `${result.msg}` : `❌ ${result.msg}`);
+                setExportMsg({tone: result.ok ? "ok" : "error", text: result.msg});
                 e.target.value = "";
                 setTimeout(()=>setExportMsg(null), 5000);
               }}/>
           </div>
 
-          {exportMsg && <div className={`text-sm mb-2 text-center ${exportMsg.startsWith("")?"text-success":exportMsg.startsWith("❌")?"text-danger":"text-muted"}`}>{exportMsg}</div>}
+          {exportMsg && (() => { const m = exportMsg; return <div className={`text-sm mb-2 text-center ${m.tone==="ok"?"text-success":m.tone==="warn"?"text-warn":m.tone==="error"?"text-danger":"text-muted"}`}>{m.text}</div>; })()}
 
           <div className="text-[.73rem] text-muted leading-relaxed mb-2.5">
             <strong>Export</strong> downloads a JSON backup of all your clients, folders, and data. <strong>Import</strong> loads a backup file and merges it with your current profiles — no data is overwritten.
@@ -16187,7 +16189,7 @@ function InviteHub({ open, onClose, meName }) {
           <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
             <code style={{ flex: 1, padding: "9px 11px", borderRadius: 8, background: "var(--s2)", border: "1px solid var(--border)",
               fontFamily: "monospace", fontSize: ".78rem", color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shareLink || "…"}</code>
-            <button onClick={() => copy("link", shareLink)} disabled={!shareLink} style={{ ...btnGhost, whiteSpace: "nowrap" }}>{copied === "link" ? "✓" : "Copy"}</button>
+            <button onClick={() => copy("link", shareLink)} disabled={!shareLink} style={{ ...btnGhost, whiteSpace: "nowrap" }}>{copied === "link" ? "Copied" : "Copy"}</button>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={doShare} disabled={!shareLink} style={{ ...btnPrimary, flex: "1 1 140px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
@@ -16203,7 +16205,7 @@ function InviteHub({ open, onClose, meName }) {
               <div style={{ fontSize: ".74rem", color: "var(--muted)", marginTop: 6 }}>Have someone scan this to sign up in person.</div>
             </div>
           )}
-          <div style={{ marginTop: 10, fontSize: ".76rem", color: "var(--muted)" }}>Prefer a code? Clients can enter <strong style={{ color: "var(--text)" }}>{code ? formatInviteCode(code) : "…"}</strong>. <button onClick={() => copy("code", code ? formatInviteCode(code) : "")} disabled={!code} style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontWeight: 600, padding: 0 }}>{copied === "code" ? "Copied ✓" : "Copy code"}</button></div>
+          <div style={{ marginTop: 10, fontSize: ".76rem", color: "var(--muted)" }}>Prefer a code? Clients can enter <strong style={{ color: "var(--text)" }}>{code ? formatInviteCode(code) : "…"}</strong>. <button onClick={() => copy("code", code ? formatInviteCode(code) : "")} disabled={!code} style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", fontWeight: 600, padding: 0 }}>{copied === "code" ? "Copied" : "Copy code"}</button></div>
         </div>
 
         {/* Email invite */}
@@ -16978,7 +16980,7 @@ function AdminDashboard({ onClose }) {
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[.68rem] text-muted">
                       {u.email && <span className="truncate">{u.email}</span>}
                       <span>AI today: <span className="text-fg font-semibold">{k(u.aiTokensToday)}</span>{u.boostToday ? " (+boosted)" : ""}</span>
-                      {u.boostCount > 0 && <span className={flagged ? "text-warn font-bold" : ""}>{flagged ? "⚑ " : ""}boosts: {u.boostCount}</span>}
+                      {u.boostCount > 0 && <span className={flagged ? "text-warn font-bold" : ""}>{flagged ? "! " : ""}boosts: {u.boostCount}</span>}
                       {u.createdAt && <span>joined {new Date(u.createdAt).toLocaleDateString()}</span>}
                     </div>
                   </div>
@@ -16986,7 +16988,7 @@ function AdminDashboard({ onClose }) {
               })}
             </div>
             <div className="text-muted" style={{ fontSize: ".64rem", lineHeight: 1.5 }}>
-              ⚑ = 3+ allowance-boost requests (visibility only — nothing is auto-restricted). AI usage is today's tokens vs each tier's daily budget.
+              ! = 3+ allowance-boost requests (visibility only — nothing is auto-restricted). AI usage is today's tokens vs each tier's daily budget.
             </div>
           </>
         )}
@@ -17021,7 +17023,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
     setPushBusy(true); setPushMsg("");
     try {
       if (pushState === "on") { await disablePush(); setPushState("off"); setPushMsg("Push turned off for this device."); }
-      else { await enablePush(); setPushState("on"); setPushMsg("✓ This device will now get notifications."); }
+      else { await enablePush(); setPushState("on"); setPushMsg("This device will now get notifications."); }
     } catch (e) {
       const m = (e && e.message) || "";
       if (m === "blocked") { setPushState("blocked"); setPushMsg("Notifications are blocked in your device settings."); }
@@ -18628,7 +18630,7 @@ export default function App() {
     <>
       {chrome}
       <style>{css}</style>
-      {saving && <div className="prof-save-badge">✓ Saved</div>}
+      {saving && <div className="prof-save-badge"><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Saved</div>}
       <div className="app">
         {/* Slim brand header — min-height clears the fixed hamburger (App chrome).
             The safe-area padding matches the other four screen headers: in the
