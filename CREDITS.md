@@ -17,7 +17,8 @@ Path data transformed from Phosphor's 256×256 grid into our 24×24 viewBox.
 https://game-icons.net · Icons by **Delapouite** (https://delapouite.com),
 licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/)
 
-- "Weight lifting up" → the `liftup` (overhead-press / vertical-push) glyph
+- "Strong man" → the `liftup` (overhead-press / vertical-push) glyph
+- "Jumping rope" → the `jumprope` glyph
 - "Biceps" → the `muscle` (flexed-arm) glyph
 - "Weight lifting down" → the `liftdown` (deadlift / lower-pull) glyph
 - "Muscular torso" → the `core` (abs) glyph
