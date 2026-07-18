@@ -26,6 +26,7 @@ licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/)
 - "Female legs" → the `legs` (lower-body accessory) glyph
 - "High kick" → the `kick` (martial arts / kickboxing) glyph
 - "Roller skate" → the `skate` (rollerblading / skating) glyph
+- "Stairs" → the `stairs` (stair machines) glyph
 
 Path data transformed from the 512×512 grid into our 24×24 viewBox;
 backgrounds removed.
