@@ -1,5 +1,28 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S97o (Jul 18): Kevin approved the API queue; confetti + skeletons SHIPPED
+_Pushed @ `34b9fe5`. Read `docs/EXTERNAL-APIS.md` — Part 2 top has **⭐ KEVIN'S PICKS**
+(his approved API queue). Confetti-on-goal + skeleton loaders are LIVE (pick #3, done)._
+
+### ⏭️ NEXT — the remaining approved picks, in unblocked-first order
+1. **#4 Streaks + milestone PUSH nudges** (medium): badge tiers off `caliq-log` streaks,
+   celebrate() small-burst on milestone, push via the S96 sendPushTo path ("7-day streak!").
+2. **#7 TTS coach voice** (small): Groq Orpheus primary / OpenAI fallback, mirror
+   `functions/transcribe.js` provider pattern; `speakText` callable + speaker button in chat;
+   premium-gate. Keys already in Secret Manager.
+3. **Photo-logging accuracy harness** (offline): Nutrition5k ground-truth eval of the vision
+   logger; tune prompt with data.
+4. **BLOCKED ON KEVIN:** Stripe Tax (flip on during the live-mode swap) · Acuity sync (his
+   API key + tier) · Twilio SMS (account + A2P, lead time).
+NOT picked (reference only in the doc): recipe JSON-LD, weather tool, calendar-aware coaching.
+
+### Notes
+- `crossedGoal()`/`celebrate()`/`SkeletonCard` are module-level in App.jsx (top, ~L14).
+- canvas-confetti is lazy-imported; honors reduced motion; body-level canvas (transform-trap safe).
+- Casey's test data restored (weight 183). Exercise-demo prototype results: EXTERNAL-APIS.md.
+
+---
+
 ## ⚡⚡⚡ S97g–m (Jul 18): the ICON SYSTEM + the emoji rule, settled
 _Pushed through `7438683`. The emoji question Kevin kept reopening is now CLOSED —
 read this before touching any icon._
