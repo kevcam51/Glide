@@ -7,14 +7,14 @@
   "carb": 28.21829,
   "protein": 18.63397,
   "est": {
-   "cal": 620,
-   "protein": 28,
-   "carb": 42,
-   "fat": 36
+   "cal": 200,
+   "protein": null,
+   "carb": null,
+   "fat": null
   },
-  "name": "Grilled pork belly, brown rice & mixed green salad",
-  "via": "proposal",
-  "ape": 106.12094017838058
+  "name": "",
+  "via": "text",
+  "ape": 33.509374136006265
  },
  {
   "id": "dish_1562862493",
@@ -24,14 +24,14 @@
   "carb": 2.144,
   "protein": 13.400001,
   "est": {
-   "cal": 280,
-   "protein": 19,
-   "carb": 2,
-   "fat": 21
+   "cal": 220,
+   "protein": 13,
+   "carb": 4,
+   "fat": 16
   },
-  "name": "Scrambled eggs with paprika/veg (3 eggs, butter)",
+  "name": "Scrambled eggs with diced veg",
   "via": "proposal",
-  "ape": 41.18595709811567
+  "ape": 10.93182343423374
  },
  {
   "id": "dish_1563996485",
@@ -41,14 +41,14 @@
   "carb": 16.567097,
   "protein": 4.172902,
   "est": {
-   "cal": 320,
-   "protein": 7,
-   "carb": 45,
-   "fat": 12
+   "cal": 220,
+   "protein": null,
+   "carb": null,
+   "fat": null
   },
-  "name": "Arugula & mixed greens salad with roasted potatoes and cauliflower",
-  "via": "proposal",
-  "ape": 79.7357137980608
+  "name": "",
+  "via": "text",
+  "ape": 23.5683032361668
  },
  {
   "id": "dish_1558724959",
@@ -58,14 +58,14 @@
   "carb": 57.004002,
   "protein": 21.298,
   "est": {
-   "cal": 430,
-   "protein": null,
-   "carb": null,
-   "fat": null
+   "cal": 390,
+   "protein": 12,
+   "carb": 44,
+   "fat": 19
   },
-  "name": "",
-  "via": "text",
-  "ape": 26.045928477854808
+  "name": "Brussels sprouts, apple, almonds & baby carrots",
+  "via": "proposal",
+  "ape": 32.925376991542734
  },
  {
   "id": "dish_1566502505",
@@ -74,7 +74,15 @@
   "fat": 22.45969,
   "carb": 33.146801,
   "protein": 31.874937,
-  "error": "fetch failed"
+  "est": {
+   "cal": 200,
+   "protein": null,
+   "carb": null,
+   "fat": null
+  },
+  "name": "",
+  "via": "text",
+  "ape": 55.99728076395937
  },
  {
   "id": "dish_1560360055",
@@ -84,14 +92,14 @@
   "carb": 4.154,
   "protein": 22.556999,
   "est": {
-   "cal": 300,
-   "protein": null,
-   "carb": null,
-   "fat": null
+   "cal": 440,
+   "protein": 25,
+   "carb": 4,
+   "fat": 36
   },
-  "name": "",
-  "via": "text",
-  "ape": 17.29476901626834
+  "name": "Scrambled eggs with sausage slices",
+  "via": "proposal",
+  "ape": 21.301005442806435
  },
  {
   "id": "dish_1563568338",
@@ -100,7 +108,15 @@
   "fat": 29.600521,
   "carb": 57.599113,
   "protein": 38.704674,
-  "error": "no estimate in reply"
+  "est": {
+   "cal": 570,
+   "protein": null,
+   "carb": null,
+   "fat": null
+  },
+  "name": "",
+  "via": "text",
+  "ape": 9.768246627570415
  },
  {
   "id": "dish_1563464480",
@@ -110,13 +126,13 @@
   "carb": 25.838001,
   "protein": 8.302,
   "est": {
-   "cal": 420,
-   "protein": 14,
-   "carb": 38,
-   "fat": 24
+   "cal": 355,
+   "protein": 12,
+   "carb": 30,
+   "fat": 18
   },
-  "name": "Bacon, home fries & fruit salad",
+  "name": "Sausage links, home fries & fruit (watermelon + blueberries)",
   "via": "proposal",
-  "ape": 83.0145064487667
+  "ape": 54.69083283169566
  }
 ]
