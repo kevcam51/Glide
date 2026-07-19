@@ -1,0 +1,122 @@
+[
+ {
+  "id": "dish_1561662216",
+  "cal": 300.794281,
+  "mass": 193,
+  "fat": 12.387489,
+  "carb": 28.21829,
+  "protein": 18.63397,
+  "est": {
+   "cal": 620,
+   "protein": 28,
+   "carb": 42,
+   "fat": 36
+  },
+  "name": "Grilled pork belly, brown rice & mixed green salad",
+  "via": "proposal",
+  "ape": 106.12094017838058
+ },
+ {
+  "id": "dish_1562862493",
+  "cal": 198.320007,
+  "mass": 134,
+  "fat": 14.74,
+  "carb": 2.144,
+  "protein": 13.400001,
+  "est": {
+   "cal": 280,
+   "protein": 19,
+   "carb": 2,
+   "fat": 21
+  },
+  "name": "Scrambled eggs with paprika/veg (3 eggs, butter)",
+  "via": "proposal",
+  "ape": 41.18595709811567
+ },
+ {
+  "id": "dish_1563996485",
+  "cal": 178.039185,
+  "mass": 201,
+  "fat": 11.607642,
+  "carb": 16.567097,
+  "protein": 4.172902,
+  "est": {
+   "cal": 320,
+   "protein": 7,
+   "carb": 45,
+   "fat": 12
+  },
+  "name": "Arugula & mixed greens salad with roasted potatoes and cauliflower",
+  "via": "proposal",
+  "ape": 79.7357137980608
+ },
+ {
+  "id": "dish_1558724959",
+  "cal": 581.441956,
+  "mass": 426,
+  "fat": 36.466,
+  "carb": 57.004002,
+  "protein": 21.298,
+  "est": {
+   "cal": 430,
+   "protein": null,
+   "carb": null,
+   "fat": null
+  },
+  "name": "",
+  "via": "text",
+  "ape": 26.045928477854808
+ },
+ {
+  "id": "dish_1566502505",
+  "cal": 454.517365,
+  "mass": 275,
+  "fat": 22.45969,
+  "carb": 33.146801,
+  "protein": 31.874937,
+  "error": "fetch failed"
+ },
+ {
+  "id": "dish_1560360055",
+  "cal": 362.734009,
+  "mass": 180,
+  "fat": 27.786999,
+  "carb": 4.154,
+  "protein": 22.556999,
+  "est": {
+   "cal": 300,
+   "protein": null,
+   "carb": null,
+   "fat": null
+  },
+  "name": "",
+  "via": "text",
+  "ape": 17.29476901626834
+ },
+ {
+  "id": "dish_1563568338",
+  "cal": 631.706665,
+  "mass": 371,
+  "fat": 29.600521,
+  "carb": 57.599113,
+  "protein": 38.704674,
+  "error": "no estimate in reply"
+ },
+ {
+  "id": "dish_1563464480",
+  "cal": 229.490005,
+  "mass": 213,
+  "fat": 10.918,
+  "carb": 25.838001,
+  "protein": 8.302,
+  "est": {
+   "cal": 420,
+   "protein": 14,
+   "carb": 38,
+   "fat": 24
+  },
+  "name": "Bacon, home fries & fruit salad",
+  "via": "proposal",
+  "ape": 83.0145064487667
+ }
+]
