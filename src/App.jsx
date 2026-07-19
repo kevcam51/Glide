@@ -9827,21 +9827,34 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           catch (e) { setTzSync({ ok: false, text: "Couldn't reach Trainerize — try again in a moment." }); }
         };
         return (
-          <div className="card" style={{padding:"10px 14px",marginBottom:"14px",display:"flex",alignItems:"center",gap:"8px",fontSize:".82rem",flexWrap:"wrap"}}>
-            <Icon name="watch" size={16} color="var(--accent)" />
-            <span style={{color:"var(--muted)"}}>Tracker{w && w.source ? ` (${w.source})` : ""}{dayLabel ? ` · ${dayLabel}` : ""}:</span>
-            {w && w.active ? <span style={{fontFamily:"'Sora',sans-serif"}}>{Number(w.active).toLocaleString()} cal active</span> : null}
-            {w && w.steps ? <span style={{fontFamily:"'Sora',sans-serif"}}>· {Number(w.steps).toLocaleString()} steps</span> : null}
-            {!w ? <span style={{color:"var(--muted)"}}>no watch data yet</span> : null}
-            {onTrackerSync && (
-              <button onClick={syncNow} disabled={tzSync === "busy"} title="Pull the latest data from Trainerize"
-                style={{marginLeft:"auto",background:"none",border:"none",padding:"2px 0",display:"inline-flex",alignItems:"center",gap:"5px",
-                  fontSize:".74rem",fontWeight:700,fontFamily:"inherit",color:tzSync==="busy"?"var(--muted)":"var(--accent)",
-                  cursor:tzSync==="busy"?"default":"pointer"}}>
-                <Icon name="sync" size={13} color={tzSync==="busy"?"var(--muted)":"var(--accent)"} />
-                {tzSync === "busy" ? "Syncing…" : "Sync now"}
-              </button>
-            )}
+          // Sync is PINNED top-right beside the Tracker heading (S97u, Kevin: it
+          // was drifting to a ragged bottom-right). Previously the whole card was
+          // one wrapping row with the button on margin-left:auto, so as soon as
+          // the watch data wrapped, the button fell to its own line. Now the
+          // readings live in their own flex-1 group that wraps internally while
+          // the button never wraps — so it's always in the same spot. Shortened
+          // to "Sync" (Kevin's instinct) and given a border so it reads as a
+          // button rather than floating text.
+          <div className="card" style={{padding:"10px 14px",marginBottom:"14px",display:"flex",flexDirection:"column",gap:"6px",fontSize:".82rem"}}>
+            <div style={{display:"flex",alignItems:"flex-start",gap:"8px"}}>
+              <div style={{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap"}}>
+                <Icon name="watch" size={16} color="var(--accent)" />
+                <span style={{color:"var(--muted)"}}>Tracker{w && w.source ? ` (${w.source})` : ""}{dayLabel ? ` · ${dayLabel}` : ""}:</span>
+                {w && w.active ? <span style={{fontFamily:"'Sora',sans-serif"}}>{Number(w.active).toLocaleString()} cal active</span> : null}
+                {w && w.steps ? <span style={{fontFamily:"'Sora',sans-serif"}}>· {Number(w.steps).toLocaleString()} steps</span> : null}
+                {!w ? <span style={{color:"var(--muted)"}}>no watch data yet</span> : null}
+              </div>
+              {onTrackerSync && (
+                <button onClick={syncNow} disabled={tzSync === "busy"} title="Pull the latest data from Trainerize"
+                  style={{flexShrink:0,background:"transparent",border:"1px solid var(--border)",borderRadius:999,
+                    padding:"5px 11px 5px 9px",display:"inline-flex",alignItems:"center",gap:"5px",
+                    fontSize:".74rem",fontWeight:700,fontFamily:"inherit",color:tzSync==="busy"?"var(--muted)":"var(--accent)",
+                    cursor:tzSync==="busy"?"default":"pointer"}}>
+                  <Icon name="sync" size={13} color={tzSync==="busy"?"var(--muted)":"var(--accent)"} />
+                  {tzSync === "busy" ? "Syncing…" : "Sync"}
+                </button>
+              )}
+            </div>
             {todayW && trackerTdee ? <span style={{width:"100%",fontSize:".72rem",fontWeight:700,color:"var(--accent)"}}>Today's target is based on your tracker's measured burn</span> : null}
             {fb && tzSync !== "busy" && !tzSync ? <span style={{width:"100%",fontSize:".7rem",color:"var(--muted)"}}>Today's watch data hasn't synced yet — it usually arrives within a day.</span> : null}
             {tzSync && tzSync !== "busy" && tzSync.text ? (
@@ -10536,10 +10549,15 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           </div>
         </div>
         <div className="share-card-stats" style={{marginTop:"4px"}}>
+          {/* Use the SAME number as the Workout Burn tile (S97u, Kevin: snapshot
+              read 0 while the tile and tracker both read 384). The tile prefers
+              the tracker's measured active burn; this read only the scheduled
+              estimate, so any day without a planned workout showed 0 even with a
+              synced watch. */}
           <div className="share-stat">
-            <div className="share-stat-val" style={{color:"var(--orange)"}}>{todayTotalBurn}</div>
+            <div className="share-stat-val" style={{color:"var(--orange)"}}>{burnShown}</div>
             <div className="share-stat-lbl">Today's Burn</div>
-            <div style={{fontSize:".58rem",color:"var(--muted)",marginTop:"3px",lineHeight:1.3}}>Workout calories</div>
+            <div style={{fontSize:".58rem",color:"var(--muted)",marginTop:"3px",lineHeight:1.3}}>{burnFromTracker ? "Tracker active calories" : "Workout calories"}</div>
           </div>
           <div className="share-stat">
             <div className="share-stat-val" style={{color:"var(--green)"}}>{hasGoal ? ((tdee - target + Math.round(todayTotalBurn * 0.15)) / 500).toFixed(1) : "—"}</div>
@@ -11153,10 +11171,17 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
   // not to a transformed ancestor (the .page-transition wrapper keeps a CSS
   // transform, which would otherwise become the containing block for fixed).
   return createPortal(
-    <div onClick={onClose} style={{ fontFamily: "var(--font-sans)" }}
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4">
+    // z-[1500]: ABOVE the fixed hamburger + notification bell (both z-1390),
+    // which otherwise render on top and cover this modal's title and Back
+    // button (S97u, Kevin). Safe-area padding keeps the top clear of the notch
+    // on an installed PWA; the other overlays (library, sheets) sit at 1600.
+    <div onClick={onClose}
+      style={{ fontFamily: "var(--font-sans)",
+        paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
+        paddingBottom: "calc(16px + env(safe-area-inset-bottom,0px))" }}
+      className="fixed inset-0 z-[1500] flex items-center justify-center bg-black/60 px-4">
       <div onClick={e => e.stopPropagation()}
-        className="w-full max-w-[640px] max-h-[88vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
+        className="w-full max-w-[640px] max-h-[85vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
         <div className="mb-3 flex items-center justify-start gap-2.5">
           <div className="text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="chart" size={17} color="var(--accent)" />Weight progress</div>
           <button onClick={onClose} aria-label="Back"
@@ -11279,10 +11304,17 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   const suggested = metrics && metrics.goalWeightFromLeanMass;
 
   return createPortal(
-    <div onClick={onClose} style={{ fontFamily: "var(--font-sans)" }}
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4">
+    // z-[1500]: ABOVE the fixed hamburger + notification bell (both z-1390),
+    // which otherwise render on top and cover this modal's title and Back
+    // button (S97u, Kevin). Safe-area padding keeps the top clear of the notch
+    // on an installed PWA; the other overlays (library, sheets) sit at 1600.
+    <div onClick={onClose}
+      style={{ fontFamily: "var(--font-sans)",
+        paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
+        paddingBottom: "calc(16px + env(safe-area-inset-bottom,0px))" }}
+      className="fixed inset-0 z-[1500] flex items-center justify-center bg-black/60 px-4">
       <div onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-[640px] max-h-[88vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
+        className="w-full max-w-[640px] max-h-[85vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
         <div className="mb-3 flex items-center justify-start gap-2.5">
           <div className="text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="ruler" size={17} color="var(--accent)" />{showBF ? "Body measurements" : "Measurements"}</div>
           <button onClick={onClose} aria-label="Back"
@@ -12122,8 +12154,15 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
   }[type];
 
   return createPortal(
-    <div onClick={onClose} style={{ fontFamily: "var(--font-sans)" }}
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4">
+    // z-[1500]: ABOVE the fixed hamburger + notification bell (both z-1390),
+    // which otherwise render on top and cover this modal's title and Back
+    // button (S97u, Kevin). Safe-area padding keeps the top clear of the notch
+    // on an installed PWA; the other overlays (library, sheets) sit at 1600.
+    <div onClick={onClose}
+      style={{ fontFamily: "var(--font-sans)",
+        paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
+        paddingBottom: "calc(16px + env(safe-area-inset-bottom,0px))" }}
+      className="fixed inset-0 z-[1500] flex items-center justify-center bg-black/60 px-4">
       <div onClick={(e) => e.stopPropagation()}
         className="w-full max-w-[440px] rounded-card border border-border bg-surface p-[18px] text-fg">
         {done ? (
@@ -19022,3 +19061,4 @@ export default function App() {
     </>
   );
 }
+

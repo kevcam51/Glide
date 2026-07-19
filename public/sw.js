@@ -1,8 +1,17 @@
-// Minimal service worker — just enough to make Glidna installable as a home-screen
-// app (PWA) and give a graceful offline shell. Deliberately does NOT cache JS/CSS,
-// so users always get the latest app on every load (no stale-version bugs); only
-// page navigations fall back to a cached shell when fully offline.
-const SHELL = "glide-shell-v1";
+// Service worker: installability, an offline shell, and a fast cold start.
+//
+// STARTUP (S97u, Kevin: "it takes a little bit of time to get started" on the
+// installed PWA). This used to cache NOTHING but the shell, so every launch
+// re-downloaded the whole bundle (~1.9MB raw / ~500KB gzipped) before the app
+// could run. That caution was aimed at stale-version bugs — but Vite emits
+// CONTENT-HASHED filenames (index-B2uc0RTI.js), so an asset URL is immutable by
+// construction: change the content and the name changes. Caching those forever
+// therefore CANNOT serve a stale app, while navigations stay network-first, so a
+// deploy is picked up immediately and simply asks for the new hashed names.
+// Net effect: first launch downloads, every launch after reads from local disk.
+const SHELL = "glidna-shell-v2";
+const ASSETS = "glidna-assets-v2";
+const ASSET_CAP = 60;   // trim old hashed files so the cache can't grow forever
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();
@@ -11,10 +20,23 @@ self.addEventListener("install", (e) => {
 
 self.addEventListener("activate", (e) => {
   e.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== SHELL).map((k) => caches.delete(k))))
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== SHELL && k !== ASSETS).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
+
+// Keep the asset cache bounded: superseded hashed files are never requested
+// again (the fresh HTML only references current ones), so drop the oldest.
+async function trimAssets() {
+  try {
+    const c = await caches.open(ASSETS);
+    const keys = await c.keys();
+    if (keys.length > ASSET_CAP) {
+      await Promise.all(keys.slice(0, keys.length - ASSET_CAP).map((k) => c.delete(k)));
+    }
+  } catch { /* trimming is best-effort */ }
+}
 
 self.addEventListener("fetch", (e) => {
   const req = e.request;
@@ -36,7 +58,22 @@ self.addEventListener("fetch", (e) => {
         .catch(() => caches.match("/"))
     );
   }
-  // Everything else: default network (always fresh — no caching here).
+  // Hashed build assets: cache-first. Immutable by construction (see the note at
+  // the top), so a hit is always correct — this is what makes launch #2 instant.
+  const url = new URL(req.url);
+  if (url.origin === self.location.origin && url.pathname.startsWith("/assets/")) {
+    e.respondWith(
+      caches.match(req).then((hit) => hit || fetch(req).then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(ASSETS).then((c) => c.put(req, copy)).then(trimAssets).catch(() => {});
+        }
+        return res;
+      }))
+    );
+    return;
+  }
+  // Everything else (API calls, images, fonts): straight to network, never cached.
 });
 
 // ── Push delivery (S90) — Web Push payloads sent by functions/push.js ─────────
