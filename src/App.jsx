@@ -8,7 +8,6 @@ import { privGet, privSet, privSubscribe } from "./privateStore.js";
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
-import { startRegistration } from "@simplewebauthn/browser";
 import { Icon } from "./icons.jsx";
 
 // Milestone confetti (S97, Kevin's pick #3). Lazy-loaded like qrcode so it costs
@@ -7132,7 +7131,7 @@ function BottomSheet({ open, onClose, title, icon, children }) {
               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
           </div>
           <button onClick={onClose} aria-label="Back"
-            style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)",
+            style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)",
               background: "var(--surface)", color: "var(--text)", borderRadius: 999, padding: "7px 13px 7px 10px",
               cursor: "pointer", fontSize: ".82rem", fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>
             <Icon name="back" size={17} color="var(--accent)" />Back
@@ -7293,7 +7292,7 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
             ) : mealLabel ? <div style={{ fontSize: ".72rem", color: "var(--accent)", fontWeight: 700, marginTop: "2px" }}>{mealLabel}</div> : null}
           </div>
           <button onClick={onClose} aria-label="Back"
-            style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)",
+            style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)",
               color: "var(--text)", borderRadius: 999, padding: "6px 12px 6px 9px", cursor: "pointer",
               fontSize: ".8rem", fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>
             <Icon name="back" size={16} color="var(--accent)" />Back
@@ -7453,7 +7452,7 @@ function CopyMealModal({ sectionLabel, targetType, matchMeal, dateKey, onReadDay
           display: "flex", flexDirection: "column", gap: "12px" }}>
         <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 92, alignItems: "center", gap: "10px" }}>
           <div style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text)" }}>Copy a previous {sectionLabel}</div>
-          <button onClick={onClose} aria-label="Back" style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
+          <button onClick={onClose} aria-label="Back" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
         </div>
         {loading ? (
           <div style={{ fontSize: ".82rem", color: "var(--muted)", padding: "10px 0" }}>Looking through your recent days…</div>
@@ -7723,7 +7722,7 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
           </div>
           {/* Back arrow, top-right (S97, Kevin) — consistent way back on every page. */}
           <button onClick={onClose} aria-label="Back"
-            style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)",
+            style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)",
               background: "var(--surface)", color: "var(--text)", borderRadius: 999, padding: "7px 13px 7px 10px",
               cursor: "pointer", fontSize: ".82rem", fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>
             <Icon name="back" size={17} color="var(--accent)" />Back
@@ -9103,7 +9102,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
       <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 92, alignItems: "center", gap: 10, marginBottom: 12 }}>
         <div style={{ fontSize: "1.15rem", fontWeight: 800, display:"flex", alignItems:"center", gap:"8px" }}><Icon name="calendar" size={19} color="var(--accent)" />Calendar</div>
         <button onClick={onClose} aria-label="Back"
-          style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)",
+          style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)",
             color: "var(--text)", borderRadius: 999, padding: "7px 13px 7px 10px", cursor: "pointer",
             fontSize: ".82rem", fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>
           <Icon name="back" size={16} color="var(--accent)" />Back
@@ -11270,7 +11269,7 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
         <div className="mb-3 relative flex items-center justify-center px-[92px] gap-2.5">
           <div className="text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="chart" size={17} color="var(--accent)" />Weight progress</div>
           <button onClick={onClose} aria-label="Back"
-            className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+            className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
         <ProgressChart checkIns={chartCheckIns} goalWeight={goalWeight} currentWeight={w} showValues pxPerPoint={64}
           rangeLow={rangeLow} rangeHigh={rangeHigh} surfaceless />
@@ -11403,7 +11402,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         <div className="mb-3 relative flex items-center justify-center px-[92px] gap-2.5">
           <div className="text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="ruler" size={17} color="var(--accent)" />{showBF ? "Body measurements" : "Measurements"}</div>
           <button onClick={onClose} aria-label="Back"
-            className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+            className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
 
         {/* Optional: estimate body fat % from the tape numbers, or just track them. */}
@@ -13955,7 +13954,7 @@ function PlanPicker({ role, onClose }) {
         style={{ width:"min(94vw,420px)", padding:"22px 20px", display:"flex", flexDirection:"column", gap:"14px", margin:"auto 0" }}>
         <div className="relative flex items-center justify-center px-[92px] gap-2.5">
           <div className="font-display font-bold text-fg" style={{ fontSize:"1.08rem" }}>Choose your plan</div>
-          <button onClick={onClose} aria-label="Back" className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+          <button onClick={onClose} aria-label="Back" className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
         {/* Monthly / Annual toggle */}
         <div className="flex rounded-[10px] border border-border overflow-hidden">
@@ -16565,7 +16564,7 @@ function InviteHub({ open, onClose, meName }) {
             <Icon name="invite" size={22} color="var(--accent)" />
             <span style={{ fontFamily: "var(--font-display)", fontSize: "1.25rem", fontWeight: 700 }}>Invite clients</span>
           </div>
-          <button onClick={onClose} aria-label="Back" style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
+          <button onClick={onClose} aria-label="Back" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
         </div>
 
         {/* Referral stats */}
@@ -16831,7 +16830,7 @@ function AutomationsPanel({ open, onClose, role }) {
             <Icon name="bolt" size={22} color="var(--accent)" />
             <span style={{ fontFamily: "var(--font-display)", fontSize: "1.25rem", fontWeight: 700 }}>Automations</span>
           </div>
-          <button onClick={onClose} aria-label="Back" style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
+          <button onClick={onClose} aria-label="Back" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
         </div>
 
         {loading ? (
@@ -17036,7 +17035,7 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
           <div className="truncate font-display text-[.95rem] font-bold text-fg">{otherName || "Messages"}</div>
           <div className="text-[.66rem] text-muted">Direct message</div>
         </div>
-        <button onClick={onClose} aria-label="Back" className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+        <button onClick={onClose} aria-label="Back" className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
       </div>
       <div className="flex-1 overflow-y-auto px-3 py-3">
         {msgs === null && (
@@ -17240,7 +17239,7 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
         <div className="flex items-center gap-2">
           <Icon name="file" size={18} color="var(--accent)" />
           <div className="font-display font-bold text-fg" style={{ fontSize: "1.02rem" }}>{heading}</div>
-          <button onClick={onClose} aria-label="Back" className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+          <button onClick={onClose} aria-label="Back" className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
 
         {editing === null ? (
@@ -17324,7 +17323,7 @@ function NotifFeed({ items, onClose }) {
         <div className="flex items-center gap-2">
           <Icon name="bell" size={18} color="var(--accent)" />
           <div className="font-display font-bold text-fg" style={{ fontSize: "1.02rem" }}>Notifications</div>
-          <button onClick={onClose} aria-label="Back" className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+          <button onClick={onClose} aria-label="Back" className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
         <div className="flex flex-col gap-1.5 overflow-y-auto">
           {items.length === 0 && (
@@ -17380,7 +17379,7 @@ function AdminDashboard({ onClose }) {
         <div className="flex items-center gap-2">
           <Icon name="dashboard" size={18} color="var(--accent)" />
           <div className="font-display font-bold text-fg" style={{ fontSize: "1.05rem" }}>Admin — all users</div>
-          <button onClick={onClose} aria-label="Back" className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+          <button onClick={onClose} aria-label="Back" className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
         {err && <div className="text-danger text-[.82rem]">Couldn't load (admin only). Try again.</div>}
         {!data && !err && <div className="text-muted text-[.84rem]">Loading users…</div>}
@@ -17469,6 +17468,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
     try {
       if (!window.PublicKeyCredential) throw new Error("unsupported");
       const { data } = await callPasskeyRegOptions({ origin: window.location.origin });
+      const { startRegistration } = await import("@simplewebauthn/browser");
       const attResp = await startRegistration({ optionsJSON: data.options });
       await callPasskeyRegVerify({ origin: window.location.origin, challengeId: data.challengeId, attResp });
       try { localStorage.setItem(PASSKEY_HINT, "1"); } catch { /* private mode */ }

@@ -46,17 +46,36 @@ self.addEventListener("fetch", (e) => {
   // copy goes stale after a deploy (its hashed asset URLs 404), so keeping it
   // at most one page-load old is what makes the offline fallback actually boot.
   if (req.mode === "navigate") {
-    e.respondWith(
-      fetch(req)
-        .then((res) => {
-          if (res && res.ok) {
-            const copy = res.clone();
-            caches.open(SHELL).then((c) => c.put("/", copy)).catch(() => {});
-          }
-          return res;
-        })
-        .catch(() => caches.match("/"))
-    );
+    // Network-first RACED against a short timeout (S97y, Kevin: "sometimes it
+    // takes a little too long to open"). Pure network-first made every launch
+    // block on the HTML round-trip before anything could render — even though
+    // every JS/CSS asset was already cached locally and would have painted
+    // instantly. On a cold radio that gate is the whole delay.
+    //
+    // Now: if the network answers within SHELL_TIMEOUT_MS we use it (always
+    // freshest). If it's slower, we serve the cached shell so the app boots
+    // immediately, while the real response still lands in the cache for next
+    // launch. Deliberately NOT plain cache-first: that would routinely boot a
+    // one-deploy-old shell whose hashed asset URLs can 404.
+    const SHELL_TIMEOUT_MS = 1200;
+    e.respondWith((async () => {
+      const cached = await caches.match("/");
+      const network = fetch(req).then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(SHELL).then((c) => c.put("/", copy)).catch(() => {});
+        }
+        return res;
+      });
+      // No cached shell yet (first ever launch) — nothing to fall back to.
+      if (!cached) return network.catch(() => caches.match("/"));
+      const timeout = new Promise((resolve) => setTimeout(() => resolve(null), SHELL_TIMEOUT_MS));
+      const winner = await Promise.race([network.catch(() => null), timeout]);
+      // Let the network write its cache update either way (don't await it).
+      network.catch(() => {});
+      return winner || cached;
+    })());
+    return;   // handled — don't fall through to the asset branch
   }
   // Hashed build assets: cache-first. Immutable by construction (see the note at
   // the top), so a hit is always correct — this is what makes launch #2 instant.

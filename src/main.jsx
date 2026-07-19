@@ -1,10 +1,12 @@
-import { StrictMode } from 'react'
+import { StrictMode, lazy, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'           // Tailwind v4 (theme + utilities; preflight intentionally excluded)
 import './storage.js'          // installs window.storage (Firestore-backed) + imports firebase
 import AuthGate from './AuthGate.jsx'
 import App from './App.jsx'
-import Showcase from './Showcase.jsx'
+// Dev-only design preview — lazy so it (and its extra font CSS) stays OUT of the
+// production boot bundle. Nobody loading the real app should pay for it.
+const Showcase = lazy(() => import('./Showcase.jsx'))
 
 // Dev-only design preview: /?showcase=1 renders the Tailwind theme showcase
 // INSTEAD of the app (no login, fully isolated from the real app + auth flow).
@@ -15,7 +17,7 @@ const isShowcase = (() => {
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     {isShowcase ? (
-      <Showcase />
+      <Suspense fallback={null}><Showcase /></Suspense>
     ) : (
       <AuthGate>
         <App />

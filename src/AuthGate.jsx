@@ -14,7 +14,6 @@ import {
   sendPasswordResetEmail,
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
-import { startAuthentication } from "@simplewebauthn/browser";
 import { createProfile, hasProfile, ROLES } from "./profile.js";
 import { Icon } from "./icons.jsx";
 
@@ -207,6 +206,7 @@ export default function AuthGate({ children }) {
     setError(""); setNotice(""); setBusy(true);
     try {
       const { data } = await callPasskeyLoginOptions({ origin: window.location.origin });
+      const { startAuthentication } = await import("@simplewebauthn/browser");
       const asseResp = await startAuthentication({ optionsJSON: data.options });
       const res = await callPasskeyLoginVerify({ origin: window.location.origin, challengeId: data.challengeId, asseResp });
       await signInWithCustomToken(auth, res.data.token);
