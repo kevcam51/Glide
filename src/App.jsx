@@ -9509,6 +9509,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const [tzSync, setTzSync] = useState(null); // null | "busy" | { ok, text }
   const [showCalendar, setShowCalendar] = useState(false);
   const [editingWorkout, setEditingWorkout] = useState(null);
+  const [showBurnModes, setShowBurnModes] = useState(false);  // target chooser (S97z)
   const [expandedStat, setExpandedStat] = useState(null);
   const [expandedSnap, setExpandedSnap] = useState(false);
   const [showMacros, setShowMacros] = useState(false);
@@ -9643,6 +9644,19 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const target = manualTarget != null ? manualTarget : computedTargetForNote;
   const logged = dailyLog.calories || 0;
   const remaining = target - logged;         // signed — negative once over target
+
+  // The two targets, side by side (S97z, Kevin): a STATIC goal and the same goal
+  // with today's workout burn added back. Both are shown with real numbers so
+  // the choice is between outcomes, not jargon — and picking one writes the
+  // plan's existing deficitMode, so every other surface (Results, share card,
+  // projections, the server's AI targets) follows the same choice.
+  const scheduledBurn = Math.round(todayCardio.burned + todayStrength.burned);
+  const targetNoBurn   = Math.max(1200, tdee - dailyDeficitOf(data));
+  const targetWithBurn = Math.max(1200, tdee - dailyDeficitOf(data) + scheduledBurn);
+  // With the tracker adjustment live the watch's measured burn REPLACES the whole
+  // estimate, so it already contains activity — offering "add the burn on top"
+  // there would double-count it. Same reason a manual target hides the choice.
+  const canChooseBurnMode = !!onSetDeficitMode && !trackerTdee && manualTarget == null;
 
   // Today's real deficit (S95): how far under MAINTENANCE you are right now —
   // maintenance being the watch's measured burn when we have it, else TDEE plus
@@ -9784,6 +9798,80 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           </div>
         </div>
       </div>
+
+      {/* Which target is the ring using? (S97z, Kevin) Says plainly whether
+          today's exercise is counted, and taps through to a chooser with both
+          real numbers. Only shown when there IS a burn to argue about. */}
+      {canChooseBurnMode && scheduledBurn > 0 && (
+        <div style={{display:"flex",justifyContent:"center",marginTop:"-6px",marginBottom:"12px"}}>
+          <button onClick={()=>setShowBurnModes(true)}
+            style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 12px",borderRadius:999,
+              border:"1px solid var(--border)",background:"var(--s2)",color:"var(--text)",
+              fontFamily:"inherit",fontSize:".72rem",fontWeight:700,cursor:"pointer"}}>
+            <Icon name="flame" size={13} color={eatbackOn?"var(--green)":"var(--muted)"} />
+            {eatbackOn ? `+${scheduledBurn.toLocaleString()} from exercise included` : `+${scheduledBurn.toLocaleString()} from exercise not counted`}
+            <span style={{color:"var(--accent)",fontWeight:800}}>Change</span>
+          </button>
+        </div>
+      )}
+
+      {/* Target chooser (S97z, Kevin): both options with their REAL numbers, the
+          active one marked, one tap to make the other the new default. Writes
+          data.deficitMode — the same field Full Plan → Nutrition Approach uses,
+          so the two places can never disagree. */}
+      <BottomSheet open={showBurnModes} onClose={()=>setShowBurnModes(false)}
+        title="Today's calorie target" icon="target">
+        <div style={{fontSize:".8rem",color:"var(--muted)",lineHeight:1.5,marginBottom:"12px"}}>
+          You burned <strong style={{color:"var(--orange)"}}>{scheduledBurn.toLocaleString()} cal</strong> training today.
+          Choose whether that earns you more food, or speeds up your goal instead. Your pick becomes the default.
+        </div>
+        {[
+          { mode:"accelerate", val:targetNoBurn, name:"Target without workout burn",
+            desc:"Your goal stays fixed. Training burns extra, so you reach your goal sooner." },
+          { mode:"eatback", val:targetWithBurn, name:"Target with workout burn",
+            desc:"Training earns you more food today. Steady pace — train more, eat more." },
+        ].map((o)=>{
+          const active = eatbackOn === (o.mode === "eatback");
+          return (
+            <button key={o.mode}
+              onClick={()=>{ onSetDeficitMode(o.mode); setShowBurnModes(false); }}
+              style={{display:"flex",alignItems:"center",gap:"12px",width:"100%",textAlign:"left",
+                padding:"14px 14px",marginBottom:"10px",borderRadius:"12px",cursor:"pointer",
+                fontFamily:"inherit",
+                border:`1.5px solid ${active?"var(--accent)":"var(--border)"}`,
+                background:active?"rgba(8,220,224,.08)":"transparent"}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                  {active && <Icon name="check" size={14} color="var(--accent)" />}
+                  <span style={{fontSize:".88rem",fontWeight:800,color:active?"var(--accent)":"var(--text)"}}>{o.name}</span>
+                </div>
+                <div style={{fontSize:".72rem",color:"var(--muted)",lineHeight:1.45}}>{o.desc}</div>
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontFamily:"'Sora',sans-serif",fontWeight:800,fontSize:"1.25rem",
+                  color:active?"var(--accent)":"var(--text)"}}>{o.val.toLocaleString()}</div>
+                <div style={{fontSize:".6rem",color:"var(--muted)",fontWeight:700}}>cal/day</div>
+              </div>
+            </button>
+          );
+        })}
+        {/* Mini breakdown so the two numbers are explainable, not magic. */}
+        <div style={{marginTop:"6px",borderTop:"1px solid var(--border)",paddingTop:"10px"}}>
+          {[["Your body's daily burn (TDEE)", `${tdee.toLocaleString()} cal`, "var(--text)"],
+            [planRate === 0 ? "Maintenance — no deficit" : `Eat less to lose ~${RATE_SHORT[planRate]}`,
+             planRate === 0 ? "−0 cal" : `−${dailyDeficitOf(data).toLocaleString()} cal`, "var(--red)"],
+            ["Burned training today", `+${scheduledBurn.toLocaleString()} cal`, "var(--orange)"]
+          ].map(([l,v,c],i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",fontSize:".8rem"}}>
+              <span style={{color:"var(--muted)"}}>{l}</span>
+              <span style={{fontFamily:"'Sora',sans-serif",color:c}}>{v}</span>
+            </div>
+          ))}
+          <div style={{fontSize:".7rem",color:"var(--muted)",marginTop:"8px",lineHeight:1.45}}>
+            This also updates your Full Plan, projections and coaching — it's one setting, shown in both places.
+          </div>
+        </div>
+      </BottomSheet>
 
       {/* Quick stats — tappable */}
       <div className="dash-cta-grid">
@@ -10048,6 +10136,32 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 <span>Remaining</span>
                 <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:remaining>0?"var(--green)":"var(--red)"}}>{remaining} cal</span>
               </div>
+              {/* Exercise, spelled out while you log (S97z, Kevin): what you
+                  burned and what you'd have left if it counted — so the number
+                  is answerable here instead of scrolling back to the ring. */}
+              {burnShown > 0 && (
+                <div style={{marginTop:"8px",padding:"10px 12px",borderRadius:"10px",background:"var(--s2)",border:"1px solid var(--border)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:".8rem",padding:"3px 0"}}>
+                    <span style={{color:"var(--muted)",display:"inline-flex",alignItems:"center",gap:5}}>
+                      <Icon name={burnFromTracker?"watch":"flame"} size={13} color="var(--orange)" />
+                      Burned today{burnFromTracker?" · tracker":""}
+                    </span>
+                    <span style={{fontFamily:"'Sora',sans-serif",color:"var(--orange)"}}>+{burnShown.toLocaleString()} cal</span>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:".8rem",padding:"3px 0"}}>
+                    <span style={{color:"var(--muted)"}}>Remaining {eatbackOn ? "(burn included)" : "if burn counted"}</span>
+                    <span style={{fontFamily:"'Sora',sans-serif",fontWeight:700,
+                      color:(eatbackOn ? remaining : remaining + burnShown) > 0 ? "var(--green)" : "var(--red)"}}>
+                      {(eatbackOn ? remaining : remaining + burnShown).toLocaleString()} cal
+                    </span>
+                  </div>
+                  <div style={{fontSize:".68rem",color:"var(--muted)",marginTop:"5px",lineHeight:1.4}}>
+                    {eatbackOn
+                      ? "Your target already includes today's workout burn."
+                      : "Your target is fixed — this burn speeds up your goal instead."}
+                  </div>
+                </div>
+              )}
               <div style={{marginTop:"10px"}}>
                 <div style={{fontSize:".72rem",color:"var(--muted)",fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",marginBottom:"6px"}}>Quick Add</div>
                 <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
