@@ -7123,7 +7123,7 @@ function BottomSheet({ open, onClose, title, icon, children }) {
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 8 }}>
           <div style={{ width: 38, height: 4, borderRadius: 999, background: "var(--border)", marginBottom: 6 }} />
         </div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 10, gap: 10,
+        <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 92, alignItems: "center", gap: 10,
           padding: "4px 14px 12px", borderBottom: "1px solid var(--border)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
             {icon && <Icon name={icon} size={20} color="var(--accent)" />}
@@ -7131,7 +7131,7 @@ function BottomSheet({ open, onClose, title, icon, children }) {
               overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
           </div>
           <button onClick={onClose} aria-label="Back"
-            style={{ display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)",
+            style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)",
               background: "var(--surface)", color: "var(--text)", borderRadius: 999, padding: "7px 13px 7px 10px",
               cursor: "pointer", fontSize: ".82rem", fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>
             <Icon name="back" size={17} color="var(--accent)" />Back
@@ -7267,7 +7267,7 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
           borderRadius: "16px", padding: "18px",
           display: "flex", flexDirection: "column", gap: "14px",
           boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
-        <div style={{ display: "flex", justifyContent: "flex-start", gap: 10, alignItems: "flex-start", gap: "10px" }}>
+        <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 92, alignItems: "flex-start", gap: "10px" }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text)" }}>{food.name || "Food"}</div>
             {food.brand ? <div style={{ fontSize: ".76rem", color: "var(--muted)" }}>{food.brand}</div> : null}
@@ -7292,7 +7292,7 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
             ) : mealLabel ? <div style={{ fontSize: ".72rem", color: "var(--accent)", fontWeight: 700, marginTop: "2px" }}>{mealLabel}</div> : null}
           </div>
           <button onClick={onClose} aria-label="Back"
-            style={{ display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)",
+            style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)",
               color: "var(--text)", borderRadius: 999, padding: "6px 12px 6px 9px", cursor: "pointer",
               fontSize: ".8rem", fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>
             <Icon name="back" size={16} color="var(--accent)" />Back
@@ -7450,9 +7450,9 @@ function CopyMealModal({ sectionLabel, targetType, matchMeal, dateKey, onReadDay
           background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "16px 16px 0 0",
           padding: "18px", paddingBottom: "calc(18px + env(safe-area-inset-bottom,0px))",
           display: "flex", flexDirection: "column", gap: "12px" }}>
-        <div style={{ display: "flex", justifyContent: "flex-start", gap: 10, alignItems: "center", gap: "10px" }}>
+        <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 92, alignItems: "center", gap: "10px" }}>
           <div style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text)" }}>Copy a previous {sectionLabel}</div>
-          <button onClick={onClose} aria-label="Back" style={{ display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
+          <button onClick={onClose} aria-label="Back" style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
         </div>
         {loading ? (
           <div style={{ fontSize: ".82rem", color: "var(--muted)", padding: "10px 0" }}>Looking through your recent days…</div>
@@ -7714,7 +7714,7 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
     <div style={{ position: "fixed", inset: 0, zIndex: 1600, background: "var(--bg)", color: "var(--text)",
       fontFamily: "var(--font-sans)", overflowY: "auto", padding: "calc(14px + env(safe-area-inset-top,0px)) 14px 32px" }}>
       <div style={{ maxWidth: 560, margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "flex-start", gap: 10, alignItems: "center", marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 92, alignItems: "center", gap: 10, marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
             <Icon name="book" size={20} color="var(--accent)" />
             <span style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem", fontWeight: 700 }}>{mode === "meals" ? "Meal library" : "Food library"}</span>
@@ -7722,7 +7722,7 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
           </div>
           {/* Back arrow, top-right (S97, Kevin) — consistent way back on every page. */}
           <button onClick={onClose} aria-label="Back"
-            style={{ display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)",
+            style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 6, border: "1px solid var(--border)",
               background: "var(--surface)", color: "var(--text)", borderRadius: 999, padding: "7px 13px 7px 10px",
               cursor: "pointer", fontSize: ".82rem", fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>
             <Icon name="back" size={17} color="var(--accent)" />Back
@@ -9099,10 +9099,10 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   // Header (shared across views)
   const header = (
     <>
-      <div style={{ display: "flex", justifyContent: "flex-start", gap: 10, alignItems: "center", marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 92, alignItems: "center", gap: 10, marginBottom: 12 }}>
         <div style={{ fontSize: "1.15rem", fontWeight: 800, display:"flex", alignItems:"center", gap:"8px" }}><Icon name="calendar" size={19} color="var(--accent)" />Calendar</div>
         <button onClick={onClose} aria-label="Back"
-          style={{ display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)",
+          style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)",
             color: "var(--text)", borderRadius: 999, padding: "7px 13px 7px 10px", cursor: "pointer",
             fontSize: ".82rem", fontWeight: 700, fontFamily: "inherit", flexShrink: 0 }}>
           <Icon name="back" size={16} color="var(--accent)" />Back
@@ -11266,10 +11266,10 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
       className="fixed inset-0 z-[1500] flex items-center justify-center bg-black/60 px-4">
       <div onClick={e => e.stopPropagation()}
         className="w-full max-w-[640px] max-h-[85vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
-        <div className="mb-3 flex items-center justify-start gap-2.5">
+        <div className="mb-3 relative flex items-center justify-center px-[92px] gap-2.5">
           <div className="text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="chart" size={17} color="var(--accent)" />Weight progress</div>
           <button onClick={onClose} aria-label="Back"
-            className="order-first flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+            className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
         <ProgressChart checkIns={chartCheckIns} goalWeight={goalWeight} currentWeight={w} showValues pxPerPoint={64}
           rangeLow={rangeLow} rangeHigh={rangeHigh} surfaceless />
@@ -11399,10 +11399,10 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
       className="fixed inset-0 z-[1500] flex items-center justify-center bg-black/60 px-4">
       <div onClick={(e) => e.stopPropagation()}
         className="w-full max-w-[640px] max-h-[85vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
-        <div className="mb-3 flex items-center justify-start gap-2.5">
+        <div className="mb-3 relative flex items-center justify-center px-[92px] gap-2.5">
           <div className="text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="ruler" size={17} color="var(--accent)" />{showBF ? "Body measurements" : "Measurements"}</div>
           <button onClick={onClose} aria-label="Back"
-            className="order-first flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+            className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
 
         {/* Optional: estimate body fat % from the tape numbers, or just track them. */}
@@ -13852,9 +13852,9 @@ function PlanPicker({ role, onClose }) {
       padding:"20px", paddingTop:"calc(20px + env(safe-area-inset-top,0px))", overflowY:"auto" }}>
       <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card"
         style={{ width:"min(94vw,420px)", padding:"22px 20px", display:"flex", flexDirection:"column", gap:"14px", margin:"auto 0" }}>
-        <div className="flex items-center justify-start gap-2.5 gap-2">
+        <div className="relative flex items-center justify-center px-[92px] gap-2.5">
           <div className="font-display font-bold text-fg" style={{ fontSize:"1.08rem" }}>Choose your plan</div>
-          <button onClick={onClose} aria-label="Back" className="order-first flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+          <button onClick={onClose} aria-label="Back" className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
         {/* Monthly / Annual toggle */}
         <div className="flex rounded-[10px] border border-border overflow-hidden">
@@ -16459,12 +16459,12 @@ function InviteHub({ open, onClose, meName }) {
       fontFamily: "var(--font-sans)", overflowY: "auto", padding: "calc(14px + env(safe-area-inset-top,0px)) 14px 32px" }}>
       <div style={{ maxWidth: 560, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
         {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 10, padding: "2px 2px 4px" }}>
+        <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 92, alignItems: "center", gap: 10, padding: "2px 2px 4px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
             <Icon name="invite" size={22} color="var(--accent)" />
             <span style={{ fontFamily: "var(--font-display)", fontSize: "1.25rem", fontWeight: 700 }}>Invite clients</span>
           </div>
-          <button onClick={onClose} aria-label="Back" style={{ display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
+          <button onClick={onClose} aria-label="Back" style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
         </div>
 
         {/* Referral stats */}
@@ -16725,12 +16725,12 @@ function AutomationsPanel({ open, onClose, role }) {
       fontFamily: "var(--font-sans)", overflowY: "auto", padding: "calc(14px + env(safe-area-inset-top,0px)) 14px 32px" }}>
       <div style={{ maxWidth: 560, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
         {/* Header */}
-        <div style={{ display: "flex", justifyContent: "flex-start", gap: 10, alignItems: "center" }}>
+        <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 92, alignItems: "center", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <Icon name="bolt" size={22} color="var(--accent)" />
             <span style={{ fontFamily: "var(--font-display)", fontSize: "1.25rem", fontWeight: 700 }}>Automations</span>
           </div>
-          <button onClick={onClose} aria-label="Back" style={{ display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
+          <button onClick={onClose} aria-label="Back" style={{ position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)", display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
         </div>
 
         {loading ? (
@@ -16935,7 +16935,7 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
           <div className="truncate font-display text-[.95rem] font-bold text-fg">{otherName || "Messages"}</div>
           <div className="text-[.66rem] text-muted">Direct message</div>
         </div>
-        <button onClick={onClose} aria-label="Back" className="order-first flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+        <button onClick={onClose} aria-label="Back" className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
       </div>
       <div className="flex-1 overflow-y-auto px-3 py-3">
         {msgs === null && (
@@ -17139,7 +17139,7 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
         <div className="flex items-center gap-2">
           <Icon name="file" size={18} color="var(--accent)" />
           <div className="font-display font-bold text-fg" style={{ fontSize: "1.02rem" }}>{heading}</div>
-          <button onClick={onClose} aria-label="Back" className="order-first flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+          <button onClick={onClose} aria-label="Back" className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
 
         {editing === null ? (
@@ -17223,7 +17223,7 @@ function NotifFeed({ items, onClose }) {
         <div className="flex items-center gap-2">
           <Icon name="bell" size={18} color="var(--accent)" />
           <div className="font-display font-bold text-fg" style={{ fontSize: "1.02rem" }}>Notifications</div>
-          <button onClick={onClose} aria-label="Back" className="order-first flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+          <button onClick={onClose} aria-label="Back" className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
         <div className="flex flex-col gap-1.5 overflow-y-auto">
           {items.length === 0 && (
@@ -17279,7 +17279,7 @@ function AdminDashboard({ onClose }) {
         <div className="flex items-center gap-2">
           <Icon name="dashboard" size={18} color="var(--accent)" />
           <div className="font-display font-bold text-fg" style={{ fontSize: "1.05rem" }}>Admin — all users</div>
-          <button onClick={onClose} aria-label="Back" className="order-first flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+          <button onClick={onClose} aria-label="Back" className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
         {err && <div className="text-danger text-[.82rem]">Couldn't load (admin only). Try again.</div>}
         {!data && !err && <div className="text-muted text-[.84rem]">Loading users…</div>}
