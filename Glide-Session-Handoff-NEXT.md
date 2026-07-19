@@ -4,16 +4,25 @@
 _Pushed @ `34b9fe5`. Read `docs/EXTERNAL-APIS.md` — Part 2 top has **⭐ KEVIN'S PICKS**
 (his approved API queue). Confetti-on-goal + skeleton loaders are LIVE (pick #3, done)._
 
-### ⏭️ NEXT — the remaining approved picks, in unblocked-first order
-1. **#4 Streaks + milestone PUSH nudges** (medium): badge tiers off `caliq-log` streaks,
-   celebrate() small-burst on milestone, push via the S96 sendPushTo path ("7-day streak!").
-2. **#7 TTS coach voice** (small): Groq Orpheus primary / OpenAI fallback, mirror
-   `functions/transcribe.js` provider pattern; `speakText` callable + speaker button in chat;
-   premium-gate. Keys already in Secret Manager.
-3. **Photo-logging accuracy harness** (offline): Nutrition5k ground-truth eval of the vision
-   logger; tune prompt with data.
-4. **BLOCKED ON KEVIN:** Stripe Tax (flip on during the live-mode swap) · Acuity sync (his
-   API key + tier) · Twilio SMS (account + A2P, lead time).
+### ✅ S97p+q (same day): #4 streaks + photo harness BOTH DONE (@ `71d5097`)
+- **#4 Streak milestones SHIPPED**: first-log-of-day truly increments the streak (fixed the
+  stale Math.max(s,1) tile bug in all 3 log paths); DailyDashboard watcher fires small confetti
+  + toast when the streak RISES to 3/7/14/30/50/100/365 (arm-on-mount, no double-fire — E2E'd
+  as Casey: 6→7 fired, second log silent, test data restored). **⚠️ foodReminderPush is now
+  streak-aware ("Your N-day streak is on the line") but the DEPLOY IS PENDING — firebase creds
+  expired; after Kevin's `npx firebase-tools login --reauth --no-localhost`:
+  `npx firebase-tools deploy --only functions:foodReminderPush --project calorieiq-29762`.**
+- **Photo accuracy harness SHIPPED**: `scripts/photo-eval.mjs` (production-path eval vs
+  Nutrition5k ground truth) + `docs/AI-PHOTO-EVAL.md`. Baseline: MAPE 58.9%, and the error is
+  SYSTEMATIC (correct food ID, portions over-called on small plates). **Next: add portion-size
+  calibration to the vision block in functions/aichat.js prompt, deploy, re-run to measure.**
+
+### ⏭️ Remaining approved picks
+1. **#7 TTS coach voice** (small, unblocked): Groq Orpheus primary / OpenAI fallback, mirror
+   `functions/transcribe.js`; `speakText` callable + speaker button in chat; premium-gate.
+2. Vision-prompt portion tuning + eval re-run (needs the same reauth/deploy).
+3. **BLOCKED ON KEVIN:** firebase reauth (above) · Stripe Tax (live-mode swap) · Acuity
+   (API key + tier) · Twilio SMS (account + A2P lead time).
 NOT picked (reference only in the doc): recipe JSON-LD, weather tool, calendar-aware coaching.
 
 ### Notes
