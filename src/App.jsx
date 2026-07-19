@@ -9777,7 +9777,9 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
 
       {/* Calorie ring */}
       <div className="dash-ring-wrap">
-        <div style={{position:"relative",width:"150px",height:"150px"}}>
+        <div onClick={()=>{ if (canChooseBurnMode) setShowBurnModes(true); }}
+          title={canChooseBurnMode ? "Tap to switch between the target with and without workout burn" : undefined}
+          style={{position:"relative",width:"150px",height:"150px",cursor:canChooseBurnMode?"pointer":"default"}}>
           <svg viewBox="0 0 140 140" style={{width:"100%",height:"100%",transform:"rotate(-90deg)"}}>
             <circle cx="70" cy="70" r={ringR} fill="none" stroke="var(--border)" strokeWidth="8"/>
             <circle cx="70" cy="70" r={ringR} fill="none" stroke={ringColor} strokeWidth="8"
@@ -9808,14 +9810,17 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       {/* Which target is the ring using? (S97z, Kevin) Says plainly whether
           today's exercise is counted, and taps through to a chooser with both
           real numbers. Only shown when there IS a burn to argue about. */}
-      {canChooseBurnMode && scheduledBurn > 0 && (
+      {canChooseBurnMode && (
         <div style={{display:"flex",justifyContent:"center",marginTop:"-6px",marginBottom:"12px"}}>
           <button onClick={()=>setShowBurnModes(true)}
             style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 12px",borderRadius:999,
               border:"1px solid var(--border)",background:"var(--s2)",color:"var(--text)",
               fontFamily:"inherit",fontSize:".72rem",fontWeight:700,cursor:"pointer"}}>
             <Icon name="flame" size={13} color={eatbackOn?"var(--green)":"var(--muted)"} />
-            {eatbackOn ? `+${scheduledBurn.toLocaleString()} from exercise included` : `+${scheduledBurn.toLocaleString()} from exercise not counted`}
+            {scheduledBurn > 0
+              ? (eatbackOn ? `+${scheduledBurn.toLocaleString()} from exercise included`
+                           : `+${scheduledBurn.toLocaleString()} from exercise not counted`)
+              : (eatbackOn ? "Exercise counts toward today" : "Exercise doesn't change today")}
             <span style={{color:"var(--accent)",fontWeight:800}}>Change</span>
           </button>
         </div>
@@ -9828,8 +9833,13 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       <BottomSheet open={showBurnModes} onClose={()=>setShowBurnModes(false)}
         title="Today's calorie target" icon="target">
         <div style={{fontSize:".8rem",color:"var(--muted)",lineHeight:1.5,marginBottom:"12px"}}>
-          You burned <strong style={{color:"var(--orange)"}}>{scheduledBurn.toLocaleString()} cal</strong> training today.
-          Choose whether that earns you more food, or speeds up your goal instead. Your pick becomes the default.
+          {scheduledBurn > 0 ? (
+            <>You burned <strong style={{color:"var(--orange)"}}>{scheduledBurn.toLocaleString()} cal</strong>{burnFromTracker?" (from your tracker)":""} today.
+            Choose whether that earns you more food, or speeds up your goal instead. Your pick becomes the default.</>
+          ) : (
+            <>No exercise logged yet today, so both targets match right now. Your pick becomes the default and
+            applies the moment you train or your tracker syncs.</>
+          )}
         </div>
         {[
           { mode:"accelerate", val:targetNoBurn, name:"Target without workout burn",
