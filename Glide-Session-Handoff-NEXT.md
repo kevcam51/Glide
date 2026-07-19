@@ -8,10 +8,7 @@ _Pushed @ `34b9fe5`. Read `docs/EXTERNAL-APIS.md` — Part 2 top has **⭐ KEVIN
 - **#4 Streak milestones SHIPPED**: first-log-of-day truly increments the streak (fixed the
   stale Math.max(s,1) tile bug in all 3 log paths); DailyDashboard watcher fires small confetti
   + toast when the streak RISES to 3/7/14/30/50/100/365 (arm-on-mount, no double-fire — E2E'd
-  as Casey: 6→7 fired, second log silent, test data restored). **⚠️ foodReminderPush is now
-  streak-aware ("Your N-day streak is on the line") but the DEPLOY IS PENDING — firebase creds
-  expired; after Kevin's `npx firebase-tools login --reauth --no-localhost`:
-  `npx firebase-tools deploy --only functions:foodReminderPush --project calorieiq-29762`.**
+  as Casey: 6→7 fired, second log silent, test data restored). **foodReminderPush streak-aware push: DEPLOYED ✓**
 - **Photo accuracy harness SHIPPED**: `scripts/photo-eval.mjs` (production-path eval vs
   Nutrition5k ground truth) + `docs/AI-PHOTO-EVAL.md`. Baseline: MAPE 58.9%, and the error is
   SYSTEMATIC (correct food ID, portions over-called on small plates). **Next: add portion-size
@@ -20,7 +17,9 @@ _Pushed @ `34b9fe5`. Read `docs/EXTERNAL-APIS.md` — Part 2 top has **⭐ KEVIN
 ### ⏭️ Remaining approved picks
 1. **#7 TTS coach voice** (small, unblocked): Groq Orpheus primary / OpenAI fallback, mirror
    `functions/transcribe.js`; `speakText` callable + speaker button in chat; premium-gate.
-2. Vision-prompt portion tuning + eval re-run (needs the same reauth/deploy).
+2. ~~Vision-prompt portion tuning~~ **DONE (S97r)** — photo error 59%→30%, bias corrected,
+   8/8 dishes now estimate. Deployed. Re-measure any time: `node scripts/photo-eval.mjs 8`
+   (regression-tests the vision prompt against lab ground truth before/after any prompt change).
 3. **BLOCKED ON KEVIN:** firebase reauth (above) · Stripe Tax (live-mode swap) · Acuity
    (API key + tier) · Twilio SMS (account + A2P lead time).
 NOT picked (reference only in the doc): recipe JSON-LD, weather tool, calendar-aware coaching.
