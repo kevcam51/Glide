@@ -9623,7 +9623,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const trackerTdee = wearableTdee(data, dailyLog);
   const computedTargetForNote = trackerTdee
     ? Math.max(1200, trackerTdee - dailyDeficitOf(data))
-    : Math.max(1200, tdee - dailyDeficitOf(data) + (isEatback(data) ? Math.round(todayCardio.burned + todayStrength.burned) : 0));
+    : Math.max(1200, tdee - dailyDeficitOf(data) + (isEatback(data) ? burnShown : 0));
   // Pace (S95): the plan's chosen weekly rate + what each option would actually
   // let you eat today, so the picker shows outcomes rather than jargon. Mirrors
   // computedTargetForNote exactly — raw* is pre-floor, so we can tell the user
@@ -9634,7 +9634,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
     const def = Math.round((r * 3500) / 7);
     return trackerTdee
       ? trackerTdee - def
-      : tdee - def + (eatbackOn ? Math.round(todayCardio.burned + todayStrength.burned) : 0);
+      : tdee - def + (eatbackOn ? burnShown : 0);
   };
   const targetForRate = (r) => Math.max(1200, rawTargetForRate(r));
 
@@ -9650,7 +9650,13 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   // the choice is between outcomes, not jargon — and picking one writes the
   // plan's existing deficitMode, so every other surface (Results, share card,
   // projections, the server's AI targets) follows the same choice.
-  const scheduledBurn = Math.round(todayCardio.burned + todayStrength.burned);
+  // The burn the user ACTUALLY SEES on the Workout Burn tile: tracker-measured
+  // when today has watch data, else the scheduled-workout estimate. Gating on
+  // the scheduled number alone (S97z) meant a tracker user with no scheduled
+  // workout saw "384 cal" on the tile but got no chooser and no change in
+  // target — the screens disagreed. Same root cause as the Progress Snapshot
+  // reading 0 next to a 384 tile.
+  const scheduledBurn = burnShown;
   const targetNoBurn   = Math.max(1200, tdee - dailyDeficitOf(data));
   const targetWithBurn = Math.max(1200, tdee - dailyDeficitOf(data) + scheduledBurn);
   // With the tracker adjustment live the watch's measured burn REPLACES the whole
@@ -10730,9 +10736,9 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 <div style={{fontSize:".55rem",color:"var(--muted)",marginTop:"2px"}}>Eat this to lose weight*</div>
               </div>
               <div style={{padding:"10px",background:"var(--s2)",borderRadius:"8px",textAlign:"center"}}>
-                <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.3rem",color:"var(--orange)"}}>{(todayCardio.burned+todayStrength.burned).toLocaleString()}</div>
+                <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.3rem",color:"var(--orange)"}}>{burnShown.toLocaleString()}</div>
                 <div style={{fontSize:".62rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>Today's Burn</div>
-                <div style={{fontSize:".55rem",color:"var(--muted)",marginTop:"2px"}}>Est. calories from workouts*</div>
+                <div style={{fontSize:".55rem",color:"var(--muted)",marginTop:"2px"}}>{burnFromTracker ? "Measured by your tracker" : "Est. calories from workouts*"}</div>
               </div>
               <div style={{padding:"10px",background:"var(--s2)",borderRadius:"8px",textAlign:"center"}}>
                 <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.3rem",color:"#4fc3f7"}}>{Math.round(Number(weightLbs)*0.5)} oz</div>
