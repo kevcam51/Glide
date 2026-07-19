@@ -1653,7 +1653,11 @@ async function runTool(name, input, ctx) {
     const makeActive = input.makeActive !== false; // default true
     const m = await readManifest(db, uid);
     const newId = randId("p");
-    const data = {};
+    // New plans start WITHOUT today's workout burn folded into the target
+    // (S98, Kevin) — matches every client-side "new plan" path. Not carried by
+    // copyStats (PERSONAL_FIELDS is stats only), so this is unambiguous. Only
+    // NEW plans: existing plans leave deficitMode unset and stay on eat-back.
+    const data = { deficitMode: "accelerate" };
     if (copyStats) {
       const cur = await activePlanData(db, uid); // copy from the CURRENT active plan
       const s = cur.data || {};

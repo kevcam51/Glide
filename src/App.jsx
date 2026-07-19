@@ -9879,6 +9879,14 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="target" size={23} color="var(--accent)" /></div>
           <div className="dash-cta-val">{target.toLocaleString()}</div>
           <div className="dash-cta-lbl">Today's Target</div>
+          {/* Say WHICH target this is (S98, Kevin: "make sure it is clear that
+              it does not include calorie burn"). Only when a burn exists to
+              include — with none, the distinction is meaningless noise. */}
+          {canChooseBurnMode && scheduledBurn > 0 && (
+            <div style={{fontSize:".58rem",color:eatbackOn?"var(--green)":"var(--muted)",marginTop:"3px",lineHeight:1.25}}>
+              {eatbackOn ? "incl. workout burn" : "excl. workout burn"}
+            </div>
+          )}
         </div>
         <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="logged"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="logged"?null:"logged")}>
           <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="meal" size={23} color="var(--accent)" /></div>
@@ -10021,8 +10029,12 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                       </span>
                     </div>
                   )}
-                  <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontSize:".88rem",fontWeight:700}}>
-                    <span>Today's Target</span>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"8px 0",fontSize:".88rem",fontWeight:700}}>
+                    <span>Today's Target{canChooseBurnMode && scheduledBurn > 0 && (
+                      <span style={{display:"block",fontSize:".68rem",fontWeight:600,color:eatbackOn?"var(--green)":"var(--muted)"}}>
+                        {eatbackOn ? "includes today's workout burn" : "does NOT include workout burn"}
+                      </span>
+                    )}</span>
                     <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--accent)"}}>{target.toLocaleString()} cal</span>
                   </div>
                 </>
@@ -10129,7 +10141,11 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{logged.toLocaleString()} cal</span>
               </div>
               <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                <span style={{color:"var(--muted)"}}>Target</span>
+                <span style={{color:"var(--muted)"}}>Target{canChooseBurnMode && scheduledBurn > 0 && (
+                  <span style={{display:"block",fontSize:".66rem",color:eatbackOn?"var(--green)":"var(--muted)"}}>
+                    {eatbackOn ? "incl. workout burn" : "excl. workout burn"}
+                  </span>
+                )}</span>
                 <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{target.toLocaleString()} cal</span>
               </div>
               <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",fontSize:".88rem",fontWeight:700,borderBottom:"1px solid var(--border)"}}>
@@ -12509,6 +12525,12 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
 // Every target/projection surface routes through this so the two promises
 // ("eat more" vs "get there faster") can never both be claimed at once.
 const isEatback = (d) => ((d && d.deficitMode) || "eatback") !== "accelerate";
+// NEW plans start WITHOUT workout burn counted (S98, Kevin). Set explicitly at
+// each creation site rather than defaulting it in isEatback/EMPTY_DATA: those
+// are also the merge base when LOADING, so changing the fallback would silently
+// re-target every existing plan (someone eating 2,273 would open the app to
+// 1,929 with no explanation). Unset === an existing plan === eat-back, forever.
+const NEW_PLAN_DEFICIT_MODE = "accelerate";
 // Protein target basis (g per lb bodyweight) — user choice, default 1.0. Used for
 // the AUTO protein target everywhere so the dashboard + Results agree.
 const proteinBasisOf = (d) => (Number(d && d.proteinPerLb) === 0.7 ? 0.7 : 1.0);
@@ -12921,7 +12943,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     const id = `p${Date.now()}`;
     const next = { active: id, plans: [...m.plans, { id, name: `Plan ${m.plans.length + 1}`, createdAt: Date.now() }] };
     await writePlansManifest(clientSet(clientUid), next);
-    await setForUser(clientUid, planDataKey(id), JSON.stringify({ data: {}, step: 0 }));
+    await setForUser(clientUid, planDataKey(id), JSON.stringify({ data: { deficitMode: NEW_PLAN_DEFICIT_MODE }, step: 0 }));
     await loadClients();
     if (onOpenClientPlan) onOpenClientPlan(clientUid, id); // jump straight into the new plan
   };
@@ -15470,7 +15492,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
     const id = `p${Date.now()}`;
     const next = { active: id, plans: [...m.plans, { id, name: name || `Plan ${m.plans.length + 1}`, createdAt: Date.now() }] };
     await writePlansManifest(set, next);
-    await set(planDataKey(id), JSON.stringify({ data: {}, step: 0 }));
+    await set(planDataKey(id), JSON.stringify({ data: { deficitMode: NEW_PLAN_DEFICIT_MODE }, step: 0 }));
     await appendHistory(`created a new plan: "${name || `Plan ${m.plans.length + 1}`}"`);
     await load(id);
   };
@@ -18282,8 +18304,9 @@ export default function App() {
     const up = [...profiles, np];
     setProfiles(up);
     saveIndex(up);
-    setData({...EMPTY_DATA});
-    lastSnapshotRef.current = {...EMPTY_DATA};
+    const fresh = {...EMPTY_DATA, deficitMode: NEW_PLAN_DEFICIT_MODE};
+    setData(fresh);
+    lastSnapshotRef.current = fresh;
     setStep(0);
     setActiveRemoteUid(null);
     setActiveId(id);
