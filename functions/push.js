@@ -210,6 +210,26 @@ async function runReminderPass(db, prefKey, decide) {
 }
 
 // Daily 3pm ET: nothing logged today → nudge. Max once/day by construction.
+// Streak-aware (S97, Kevin's pick #4): when the user has an active streak on
+// the line, the push SAYS so — the single most effective retention copy in
+// fitness apps. Streak = consecutive logged days ending yesterday, walked in
+// one batched read (only for users already past the prefs/role/not-logged
+// gates, so the extra reads stay tiny).
+const STREAK_LOOKBACK = 30; // cap the walk; "30+-day streak" is plenty of urgency
+async function streakEndingYesterday(db, uid, plan, today) {
+  const d0 = new Date(today + "T12:00:00");
+  const keys = Array.from({ length: STREAK_LOOKBACK }, (_, i) => {
+    const d = new Date(d0); d.setDate(d.getDate() - (i + 1));
+    return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  });
+  const logs = await Promise.all(keys.map((k) => kvJSON(db, uid, `caliq-log-${plan}-${k}`)));
+  let n = 0;
+  for (const log of logs) {
+    if (log && ((Number(log.calories) || 0) > 0)) n++;
+    else break;
+  }
+  return n;
+}
 exports.foodReminderPush = onSchedule(
   { schedule: "0 15 * * *", timeZone: "America/New_York", region: "us-central1",
     secrets: [VAPID_PRIVATE_KEY], timeoutSeconds: 300, maxInstances: 1 },
@@ -220,6 +240,12 @@ exports.foodReminderPush = onSchedule(
       const log = await kvJSON(db, uid, `caliq-log-${plan}-${today}`);
       const logged = log && ((Number(log.calories) || 0) > 0 || (Array.isArray(log.meals) && log.meals.length > 0));
       if (logged) return null;
+      const streak = await streakEndingYesterday(db, uid, plan, today);
+      if (streak >= 3) {
+        return { title: `Your ${streak}${streak >= STREAK_LOOKBACK ? "+" : ""}-day streak is on the line`,
+          tag: "food-reminder", url: "/",
+          body: "Nothing logged yet today — one quick add keeps it alive." };
+      }
       return { title: "Log today's food", tag: "food-reminder", url: "/",
         body: "Nothing logged yet today — a quick add keeps your streak alive." };
     });

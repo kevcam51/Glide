@@ -9432,6 +9432,23 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const toastTimer = useRef(null); const flashTimer = useRef(null);
   const lastCommit = useRef({ water: null, weight: null });
   useEffect(() => () => { clearTimeout(toastTimer.current); clearTimeout(flashTimer.current); }, []);
+  // Streak milestones (S97, Kevin's pick #4): when the streak RISES to a
+  // milestone while the dashboard is mounted (first log of the day, incl. an
+  // AI-logged meal reloading the day), fire the small confetti + a toast.
+  // First render only ARMS the watcher — opening a plan that is already at a
+  // milestone must not celebrate every visit.
+  const prevStreakRef = useRef(null);
+  useEffect(() => {
+    const prev = prevStreakRef.current;
+    prevStreakRef.current = streak;
+    if (prev == null || streak <= prev) return;
+    if ([3, 7, 14, 30, 50, 100, 365].includes(streak)) {
+      celebrate("streak");
+      setToast({ msg: `${streak}-day streak — keep it rolling!` });
+      clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setToast(null), 4000);
+    }
+  }, [streak]);
   const confirmLogged = (field, msg) => {
     setToast({ msg });
     clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(null), 2200);
@@ -18202,8 +18219,9 @@ export default function App() {
     if (field === "weight" && value > 0 && value !== prev) appendHistory([`logged weight: ${value} lbs`]);
     else if (field === "calories" && value > prev) appendHistory([`logged ${value - prev} cal`]);
     else if (field === "water" && value > prev) appendHistory([`logged ${value - prev} oz water`]);
-    // Update streak: if calories logged > 0, count as active day
-    if (field === "calories" && value > 0) setStreak(s => Math.max(s, 1));
+    // Streak: the FIRST calories of the day extend the chain by one (the old
+    // Math.max(s,1) left the tile stale until reload); later logs change nothing.
+    if (field === "calories" && value > 0) setStreak(s => (prev > 0 ? Math.max(s, 1) : s + 1));
   };
 
   // Remember a named food for one-tap re-add later. Scoped PER MEAL TYPE and
@@ -18341,7 +18359,7 @@ export default function App() {
     setDailyLog(updated);
     persistLog(updated);
     appendHistory([`added ${m.type || "a food"}${m.name ? `: ${m.name}` : ""} (${m.calories} cal)`]);
-    if (m.calories > 0) setStreak(s => Math.max(s, 1));
+    if (m.calories > 0) setStreak(s => ((dailyLog.calories || 0) > 0 ? Math.max(s, 1) : s + 1));
   };
 
   // Batch-add several foods at once (copy-a-previous-meal, S94). One state update
@@ -18371,7 +18389,7 @@ export default function App() {
     persistLog(updated);
     const label = arr[0].type || "a meal";
     appendHistory([`copied ${arr.length} food${arr.length!==1?"s":""} into ${label}`]);
-    if (add("calories") > 0) setStreak(s => Math.max(s, 1));
+    if (add("calories") > 0) setStreak(s => ((dailyLog.calories || 0) > 0 ? Math.max(s, 1) : s + 1));
   };
 
   // Remove a logged food/meal and subtract its contribution from the totals.
