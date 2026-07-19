@@ -3390,7 +3390,7 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   );
 }
 
-function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, defaultView = "detailed", onSetPlanViewDefault }) {
+function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, defaultView = "detailed", onSetPlanViewDefault }) {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
   // Simple (plain-English) vs Detailed plan view — a display pref, remembered
@@ -3619,7 +3619,7 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
       {viewMode === "pro" && (
         <>
           <StreakBadges checkIns={data.checkIns || []} />
-          <DailyCheckIn data={data} onSaveCheckIn={onSaveCheckIn} />
+          <DailyCheckIn data={data} onSaveCheckIn={onSaveCheckIn} meUid={meUid} meName={meName} />
           {(data.checkIns || []).length >= 1 && (
             <div onClick={() => setShowWeightModal(true)} style={{ cursor: "pointer" }}
               title="Tap to manage weigh-ins">
@@ -3874,6 +3874,19 @@ function Results({ data, isSimulation, onReset, onEdit, onUpdateCardio, onUpdate
                               </div>
                             </div>
                           )}
+                          {/* Delete a session added by mistake (S97v, Kevin). Splices
+                              the day's array and writes it back whole via _replace —
+                              same pattern the dashboard's editor uses. */}
+                          <button onClick={()=>{
+                              const next = (Array.isArray(data.cardio[day]) ? [...data.cardio[day]] : []);
+                              next.splice(idx, 1);
+                              onUpdateCardio(day, 0, "_replace", next);
+                            }}
+                            style={{marginTop:"8px",display:"inline-flex",alignItems:"center",gap:6,padding:"7px 12px",
+                              borderRadius:8,border:"1px solid var(--red)",background:"rgba(255,79,107,.06)",
+                              color:"var(--red)",fontFamily:"inherit",fontSize:".76rem",fontWeight:700,cursor:"pointer"}}>
+                            <Icon name="trash" size={13} color="var(--red)" />Remove this exercise
+                          </button>
                         </div>
                       );
                     })}
@@ -10708,7 +10721,9 @@ function CheckInCalendar({ checkIns, selected, onSelect }) {
   );
 }
 
-function DailyCheckIn({ data, onSaveCheckIn }) {
+function DailyCheckIn({ data, onSaveCheckIn, meUid, meName }) {
+  const [notesOpen, setNotesOpen] = useState(false);   // expanded editor
+  const [noteSaveMsg, setNoteSaveMsg] = useState("");
   const [checkDate, setCheckDate] = useState(ymdLocal());
   const [weight, setWeight] = useState(data.weightLbs || "");
   const [calories, setCalories] = useState("");
@@ -10811,7 +10826,7 @@ function DailyCheckIn({ data, onSaveCheckIn }) {
       <div className="checkin-field" style={{marginBottom:"12px"}}>
         <label>Did you work out today?</label>
         <div style={{display:"flex",gap:"8px"}}>
-          <button className={`mood-btn${workedOut===true?" active":""}`} onClick={()=>setWorkedOut(true)} style={{flex:1,fontSize:".84rem",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}><Icon name="muscle" size={15} color="currentColor" />Yes</button>
+          <button className={`mood-btn${workedOut===true?" active":""}`} onClick={()=>setWorkedOut(true)} style={{flex:1,fontSize:".84rem",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}><Icon name="muscle" size={24} color="currentColor" />Yes</button>
           <button className={`mood-btn${workedOut===false?" active":""}`} onClick={()=>setWorkedOut(false)} style={{flex:1,fontSize:".84rem",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}><Icon name="moon" size={15} color="currentColor" />Rest Day</button>
         </div>
       </div>
@@ -10834,7 +10849,19 @@ function DailyCheckIn({ data, onSaveCheckIn }) {
         </div>
         <div className="checkin-field">
           <label>Notes (optional)</label>
-          <input type="text" placeholder="How did today go?" value={notes} onChange={e=>setNotes(e.target.value)} />
+          {/* Tap to expand (S97v, Kevin: "it is just one pretty small box"). The
+              single line stays the at-a-glance summary; the popup gives real room
+              and can also file the text as a Note — private, or shared with the
+              trainer — using the existing notes system. */}
+          <div onClick={()=>setNotesOpen(true)} title="Tap to write more"
+            style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",borderRadius:8,
+              border:"1px solid var(--border)",background:"var(--s2)",cursor:"pointer",minHeight:"42px"}}>
+            <span style={{flex:1,minWidth:0,fontSize:".86rem",color:notes?"var(--text)":"var(--muted)",
+              overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              {notes || "How did today go?"}
+            </span>
+            <Icon name="edit" size={15} color="var(--accent)" />
+          </div>
         </div>
       </div>
 
@@ -10842,6 +10869,63 @@ function DailyCheckIn({ data, onSaveCheckIn }) {
         style={isFuture ? {background:"#b57bff"} : isPast ? {background:"var(--yellow)",color:"#0b0b12"} : {}}>
         {saved ? "Saved!" : isFuture ? "Save Future Plan" : isPast ? "Log Past Day" : "Save Today's Check-In"}
       </button>
+
+      {/* Expanded notes editor (S97v, Kevin) — room to actually write, plus the
+          option to file it as a Note. Portaled so the .page-transition transform
+          can't capture the fixed overlay, and above the fixed chrome (z-1390). */}
+      {notesOpen && createPortal(
+        <div onClick={()=>setNotesOpen(false)}
+          style={{position:"fixed",inset:0,zIndex:1500,background:"rgba(0,0,0,.6)",display:"flex",
+            alignItems:"center",justifyContent:"center",padding:"16px",
+            paddingTop:"calc(16px + env(safe-area-inset-top,0px))",
+            paddingBottom:"calc(16px + env(safe-area-inset-bottom,0px))",fontFamily:"var(--font-sans)"}}>
+          <div onClick={(e)=>e.stopPropagation()}
+            style={{width:"min(560px,100%)",maxHeight:"85vh",overflowY:"auto",background:"var(--surface)",
+              border:"1px solid var(--border)",borderRadius:16,padding:18,display:"flex",
+              flexDirection:"column",gap:12}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"flex-start",gap:10}}>
+              <button onClick={()=>setNotesOpen(false)} aria-label="Back"
+                style={{order:-1,display:"flex",alignItems:"center",gap:6,border:"1px solid var(--border)",
+                  background:"var(--surface)",color:"var(--text)",borderRadius:999,padding:"6px 12px 6px 9px",
+                  cursor:"pointer",fontSize:".8rem",fontWeight:700,fontFamily:"inherit",flexShrink:0}}>
+                <Icon name="back" size={16} color="var(--accent)" />Back
+              </button>
+              <div style={{fontFamily:"var(--font-display)",fontSize:"1.05rem",fontWeight:700}}>Notes for {checkDate}</div>
+            </div>
+            <textarea value={notes} onChange={(e)=>setNotes(e.target.value)} autoFocus rows={9}
+              placeholder="How did today go? Energy, soreness, cravings, what you'd change tomorrow…"
+              style={{width:"100%",boxSizing:"border-box",padding:"12px",borderRadius:10,
+                border:"1px solid var(--border)",background:"var(--s2)",color:"var(--text)",
+                fontFamily:"inherit",fontSize:".9rem",lineHeight:1.5,resize:"vertical"}} />
+            <div style={{fontSize:".72rem",color:"var(--muted)"}}>
+              Saved with this check-in. You can also keep it in Notes:
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button disabled={!notes.trim()}
+                onClick={async()=>{ const ok=await appendNote({body:notes,visibility:"private",meUid,meName});
+                  setNoteSaveMsg(ok?"Saved to your private notes":"Couldn't save that note"); }}
+                style={{flex:"1 1 150px",padding:"10px",borderRadius:9,border:"1px solid var(--border)",
+                  background:"transparent",color:notes.trim()?"var(--text)":"var(--muted)",fontFamily:"inherit",
+                  fontSize:".8rem",fontWeight:700,cursor:notes.trim()?"pointer":"default",opacity:notes.trim()?1:.55}}>
+                Keep private
+              </button>
+              <button disabled={!notes.trim()}
+                onClick={async()=>{ const ok=await appendNote({body:notes,visibility:"shared",meUid,meName});
+                  setNoteSaveMsg(ok?"Shared with your trainer":"Couldn't save that note"); }}
+                style={{flex:"1 1 150px",padding:"10px",borderRadius:9,border:"1px solid var(--accent)",
+                  background:"rgba(8,220,224,.1)",color:"var(--accent)",fontFamily:"inherit",
+                  fontSize:".8rem",fontWeight:700,cursor:notes.trim()?"pointer":"default",opacity:notes.trim()?1:.55}}>
+                Share with trainer
+              </button>
+            </div>
+            {noteSaveMsg && <div style={{fontSize:".76rem",color:"var(--green)",fontWeight:700}}>{noteSaveMsg}</div>}
+            <button onClick={()=>setNotesOpen(false)}
+              style={{padding:"11px",borderRadius:9,border:"none",background:"var(--accent-fill)",
+                color:"#0b0b12",fontFamily:"inherit",fontSize:".88rem",fontWeight:800,cursor:"pointer"}}>
+              Done
+            </button>
+          </div>
+        </div>, document.body)}
     </div>
   );
 }
@@ -16896,6 +16980,28 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
 const NOTES_KEY = "caliq-notes";
 const parseNotes = (val) => { try { const a = val ? JSON.parse(val) : []; return Array.isArray(a) ? a : []; } catch { return []; } };
 const noteAutoTitle = (body) => (String(body || "").trim().split("\n")[0] || "Untitled").slice(0, 40);
+// Append a note from anywhere in the app (S97v, Kevin — the check-in notes box).
+// "private" goes to the owner-only privkv (a trainer can read all client kv by
+// design, so a flag alone would NOT be private); "shared" goes to the normal kv
+// the client and trainer both read/write.
+async function appendNote({ body, visibility, meUid, meName }) {
+  const text = String(body || "").trim();
+  if (!text) return false;
+  const note = { id: `n${Date.now()}${Math.floor(Math.random() * 1000)}`,
+    title: noteAutoTitle(text), body: text, authorUid: meUid || "", authorName: meName || "",
+    visibility: visibility === "private" ? "private" : "shared",
+    createdAt: Date.now(), updatedAt: Date.now() };
+  try {
+    if (visibility === "private") {
+      const cur = parseNotes(await privGet(NOTES_KEY));
+      await privSet(NOTES_KEY, JSON.stringify([note, ...cur].slice(0, 500)));
+    } else {
+      const cur = parseNotes(await window.storage.get(NOTES_KEY).then((v) => v && v.value).catch(() => null));
+      await window.storage.set(NOTES_KEY, JSON.stringify([note, ...cur].slice(0, 500)));
+    }
+    return true;
+  } catch (e) { return false; }
+}
 function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);
@@ -18999,7 +19105,7 @@ export default function App() {
             <div style={{marginBottom:"12px"}}>
               <button className="dash-nav-btn" style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:"7px"}} onClick={()=>setShowDash(true)}><Icon name="dashboard" size={16} color="var(--accent)" />Back to Dashboard</button>
             </div>
-            <Results data={data} isSimulation={activeIsSim} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
+            <Results data={data} isSimulation={activeIsSim} meUid={meUid} meName={meName} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
             defaultView={role === ROLES.CLIENT ? (data.planViewDefault || "simple") : "detailed"}
             onSetPlanViewDefault={activeRemoteUid ? (v)=>setDataAndSave(p=>({...p, planViewDefault: v})) : undefined}
             onSetFitnessGoal={(g)=>setDataAndSave(p=>({...p, fitnessGoal: g}))}
