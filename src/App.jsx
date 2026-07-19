@@ -1669,6 +1669,7 @@ body{
 .share-brand{font-size:.65rem;color:var(--muted);margin-top:10px;letter-spacing:1px}
 
 @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 @keyframes sheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
@@ -12167,6 +12168,96 @@ const planHistoryKey = (id) => `caliq-history-${id}`;
 // only fires on real changes, and the latest `reload` is always called via a ref
 // so a stale closure can't be captured. `clients` rows must carry `uid` +
 // `activePlanId`. Used by TrainerDashboard + TrainerAnalytics.
+// Re-run a loader when the app returns to the foreground (S97x, Kevin: on the
+// installed PWA the connected clients sometimes never appeared until he
+// force-quit and reopened). Loaders ran ONLY on mount — and resuming a PWA does
+// not remount — so if that single fetch failed (expired token / asleep radio on
+// wake), nothing ever retried it. Debounced so quick app-switches don't refetch.
+function useRefreshOnResume(fn, minGapMs = 20000) {
+  const fnRef = useRef(fn); fnRef.current = fn;
+  const lastRun = useRef(Date.now());
+  useEffect(() => {
+    const run = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastRun.current < minGapMs) return;
+      lastRun.current = now;
+      try { fnRef.current && fnRef.current(); } catch (e) { /* best-effort */ }
+    };
+    document.addEventListener("visibilitychange", run);
+    window.addEventListener("focus", run);
+    window.addEventListener("online", run);   // radio came back
+    return () => {
+      document.removeEventListener("visibilitychange", run);
+      window.removeEventListener("focus", run);
+      window.removeEventListener("online", run);
+    };
+  }, [minGapMs]);
+}
+
+// Pull-to-refresh (S97x, Kevin). Only arms when the page is ALREADY at the very
+// top, so it can never hijack a normal scroll; a downward drag past the
+// threshold runs the loader. Touch-only by design — desktop has no such gesture
+// and would just add stray handlers. Passive listeners keep scrolling smooth;
+// we never preventDefault, so the browser's own overscroll still feels native.
+function usePullToRefresh(onRefresh, enabled = true) {
+  const fnRef = useRef(onRefresh); fnRef.current = onRefresh;
+  const [pull, setPull] = useState(0);      // px pulled, for the indicator
+  const [busy, setBusy] = useState(false);
+  const startY = useRef(null);
+  const pullRef = useRef(0);                // authoritative: state may batch
+  const THRESHOLD = 70;
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined" || !("ontouchstart" in window)) return;
+    const atTop = () => (window.scrollY || document.documentElement.scrollTop || 0) <= 0;
+    const onStart = (e) => { startY.current = atTop() && e.touches.length === 1 ? e.touches[0].clientY : null; };
+    const onMove = (e) => {
+      if (startY.current == null) return;
+      const dy = e.touches[0].clientY - startY.current;
+      // Any upward move, or drifting off the top, cancels — never fight a scroll.
+      if (dy <= 0 || !atTop()) { startY.current = null; pullRef.current = 0; setPull(0); return; }
+      const next = Math.min(dy * 0.5, THRESHOLD + 20);   // resistance
+      pullRef.current = next;
+      setPull(next);
+    };
+    const onEnd = async () => {
+      const pulled = startY.current != null;
+      startY.current = null;
+      const shouldRun = pulled && pullRef.current >= THRESHOLD;
+      pullRef.current = 0;
+      setPull(0);
+      if (!shouldRun) return;
+      setBusy(true);
+      try { await fnRef.current?.(); } catch (e) { /* best-effort */ }
+      finally { setBusy(false); }
+    };
+    document.addEventListener("touchstart", onStart, { passive: true });
+    document.addEventListener("touchmove", onMove, { passive: true });
+    document.addEventListener("touchend", onEnd, { passive: true });
+    document.addEventListener("touchcancel", onEnd, { passive: true });
+    return () => {
+      document.removeEventListener("touchstart", onStart);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onEnd);
+      document.removeEventListener("touchcancel", onEnd);
+    };
+  }, [enabled]);
+  // Indicator, portaled so the .page-transition transform trap can't capture it.
+  const indicator = (pull > 0 || busy) ? createPortal(
+    <div style={{ position: "fixed", top: `calc(6px + env(safe-area-inset-top,0px))`, left: 0, right: 0,
+      display: "flex", justifyContent: "center", zIndex: 1450, pointerEvents: "none",
+      opacity: busy ? 1 : Math.min(1, pull / 70), transform: `translateY(${busy ? 0 : Math.max(0, pull - 10)}px)` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 14px", borderRadius: 999,
+        background: "var(--surface)", border: "1px solid var(--border)", color: "var(--accent)",
+        fontSize: ".76rem", fontWeight: 700, boxShadow: "0 4px 14px rgba(0,0,0,.35)" }}>
+        <Icon name="sync" size={14} color="var(--accent)"
+          style={{ animation: busy ? "spin 1s linear infinite" : "none" }} />
+        {busy ? "Refreshing…" : pull >= 70 ? "Release to refresh" : "Pull to refresh"}
+      </div>
+    </div>, document.body) : null;
+  return indicator;
+}
+
 function useClientLiveRefresh(clients, reload) {
   const reloadRef = useRef(reload);
   reloadRef.current = reload;
@@ -12534,7 +12625,11 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // (caliq-self in their account) so the overview shows live data, not a copy.
   const loadClients = async () => {
     let cs = [];
-    try { cs = await getMyClients(); } catch (e) { /* ignore */ }
+    // A throw here used to fall through and setClients([]) — so one failed fetch
+    // (offline wake / stale token) rendered "no clients" forever. Bail instead
+    // and keep whatever we last had; the resume hook below will retry.
+    try { cs = await getMyClients(); }
+    catch (e) { console.warn("loadClients failed; keeping last roster", e); return; }
     const rows = await Promise.all((cs || []).map(async (c) => {
       let data = null, lastLogDate = null;
       // A client may have several plans — show the ACTIVE one in the overview.
@@ -12568,6 +12663,8 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   useEffect(() => { loadClients(); }, []);
   // Live-refresh the cards when a client (or the AI) logs/edits (see the hook).
   useClientLiveRefresh(clients, loadClients);
+  useRefreshOnResume(loadClients);   // and when the PWA wakes from the background
+  const pullIndicator = usePullToRefresh(loadClients);
 
   // Link one of the trainer's local plans into a client's account (the local
   // copy is then removed by onLinked).
@@ -12830,6 +12927,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
 
   return (
     <div className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
+      {pullIndicator}
       <style>{css}</style>
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
       <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
@@ -13474,6 +13572,8 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
   useEffect(() => { load(); }, []);
   // Live-refresh the coaching dashboard when a client (or the AI) logs/edits.
   useClientLiveRefresh(clients, load);
+  useRefreshOnResume(load);   // and when the PWA wakes from the background
+  const pullIndicator = usePullToRefresh(load);
 
   // Aggregates
   const total = clients.length;
@@ -13518,6 +13618,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
 
   return (
     <div className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
+      {pullIndicator}
       <style>{css}</style>
       <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
         <BrandLogo />
