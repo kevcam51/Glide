@@ -7146,7 +7146,7 @@ const STAT_SHEET_META = {
 // variety) and fine-tune calories/protein/carbs/fat, then Add or Save. Opened
 // when you tap a search result OR edit a logged food. Rendered through a portal
 // so it escapes the page-transition transform trap (S27/S30).
-function FoodServingModal({ food: rawFood, editing, mealLabel, onConfirm, onClose }) {
+function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, mealType, onMealType, onConfirm, onClose }) {
   // Unlocking serving-only foods (S97s, Kevin: "it feels like I am locked in at
   // the serving type I originally saved it as"). A per-serving food has no
   // weight basis, so the unit was a frozen label — you could only change the
@@ -7258,7 +7258,25 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, onConfirm, onClos
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text)" }}>{food.name || "Food"}</div>
             {food.brand ? <div style={{ fontSize: ".76rem", color: "var(--muted)" }}>{food.brand}</div> : null}
-            {mealLabel ? <div style={{ fontSize: ".72rem", color: "var(--accent)", fontWeight: 700, marginTop: "2px" }}>{mealLabel}</div> : null}
+            {mealChoices && mealChoices.length ? (
+              // Pick the meal here (S97t, Kevin: "give the user the option to save
+              // that entry for whatever particular meal they wanted it for") —
+              // opening from the library shouldn't lock the food to the meal it
+              // happens to be filed under.
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: "5px" }}>
+                {mealChoices.map((t) => {
+                  const on = (mealType || "") === t;
+                  return (
+                    <button key={t || "other"} onClick={() => onMealType && onMealType(t)}
+                      style={{ padding: "4px 10px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
+                        fontSize: ".7rem", fontWeight: 700,
+                        border: `1px solid ${on ? "var(--accent)" : "var(--border)"}`,
+                        background: on ? "rgba(8,220,224,.12)" : "transparent",
+                        color: on ? "var(--accent)" : "var(--muted)" }}>{t || "Other"}</button>
+                  );
+                })}
+              </div>
+            ) : mealLabel ? <div style={{ fontSize: ".72rem", color: "var(--accent)", fontWeight: 700, marginTop: "2px" }}>{mealLabel}</div> : null}
           </div>
           <button onClick={onClose} aria-label="Back"
             style={{ display: "flex", alignItems: "center", gap: 5, border: "1px solid var(--border)", background: "var(--surface)",
@@ -7778,9 +7796,15 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
               </div>
             ) : groups.map(([k, arr]) => (
               <div key={k || "flat"} style={{ marginBottom: 14 }}>
+                {/* Brighter + rule-separated (S97t, Kevin: muted .68rem grey read
+                    as noise, so the meals ran together in the All view). */}
                 {k && (
-                  <div style={{ fontSize: ".68rem", color: "var(--muted)", textTransform: "uppercase",
-                    letterSpacing: ".5px", fontWeight: 700, marginBottom: 5 }}>{k === "other" ? "Other" : k}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                    <span style={{ fontSize: ".8rem", color: "var(--accent)", textTransform: "uppercase",
+                      letterSpacing: ".8px", fontWeight: 800, whiteSpace: "nowrap" }}>{k === "other" ? "Other" : k}</span>
+                    <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+                    <span style={{ fontSize: ".68rem", color: "var(--muted)", fontWeight: 700 }}>{arr.length}</span>
+                  </div>
                 )}
                 {arr.map(row)}
               </div>
@@ -8679,6 +8703,9 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
       {detailState && (
         <FoodServingModal food={detailState.food} editing={!!detailState.editingId}
           mealLabel={detailState.mealType && detailState.mealType !== "other" ? detailState.mealType : null}
+          mealChoices={detailState.fromLibrary ? TYPES : null}
+          mealType={detailState.mealType}
+          onMealType={(t) => setDetailState((d) => d && ({ ...d, mealType: t }))}
           onConfirm={confirmDetail} onClose={() => setDetailState(null)} />
       )}
       {copySection && (
@@ -8695,8 +8722,13 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
              recents store keys are lowercase; logged meals carry the display
              label ("Breakfast"), so map back rather than lean on the
              case-insensitive section match (S93). */
-          onAdd={(f) => quickAddRecent(f, lib.mealType != null ? lib.mealType
-            : (TYPES.find((t) => t.toLowerCase() === recentMealKey(f.type)) || ""))}
+          /* Tapping a library food opens the SERVING popup (S97t, Kevin) rather
+             than logging it instantly — so the amount can be adjusted, and the
+             meal chosen, before it's saved. deriveBasisFromMeal rebuilds a
+             scalable basis from the stored calories/macros/serving. */
+          onAdd={(f) => setDetailState({ food: deriveBasisFromMeal(f), editingId: null, fromLibrary: true,
+            mealType: lib.mealType != null ? lib.mealType
+              : (TYPES.find((t) => t.toLowerCase() === recentMealKey(f.type)) || "") })}
           onToggleSave={onToggleSaveFood} onRemoveRecent={onRemoveRecentFood} onRemoveSaved={onRemoveSavedFood}
           savedMeals={savedMeals} onToggleSaveMeal={onToggleSaveMeal} onRemoveSavedMeal={onRemoveSavedMeal}
           onLogMeal={(m) => { onLogMeal && onLogMeal(m); }}
@@ -14547,9 +14579,16 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               </div>
             ) : (
               messages.map((m, i) => (
-                <div key={i} className={m.role === "user" ? bubbleUser : bubbleAI}>
+                // A photo message gets a fixed-width bubble (S97t, Kevin: "the
+                // photo was off center and so was the text"). The image used to
+                // be a bare block in a text bubble, so the bubble sized to
+                // whichever was wider and the other floated off-center. Pinning
+                // the width lets the photo fill it edge-to-edge with the caption
+                // directly underneath — one tidy card instead of two ragged parts.
+                <div key={i} className={(m.role === "user" ? bubbleUser : bubbleAI) + (m.image ? " w-[min(74%,250px)]" : "")}>
                   {m.image && (
-                    <img src={m.image} alt="meal photo" className="mb-1.5 max-h-44 w-auto rounded-lg" />
+                    <img src={m.image} alt="meal photo"
+                      className="mb-2 block h-auto w-full max-h-56 rounded-lg object-cover" />
                   )}
                   {m.role === "user" ? m.content : <RichText text={m.content} />}
                 </div>
@@ -18286,6 +18325,36 @@ export default function App() {
   // it only shows under breakfast until the same food is logged for another meal.
   // Stored remote-aware with the plan (so it's per-client, and a client's trainer
   // sees the client's list when viewing their plan).
+  // Reconcile recents from a day's logged meals (S97t, Kevin). upsertRecentFood
+  // only runs in the CLIENT handlers, so anything written SERVER-side —
+  // Ask-Glidna log_meal/log_meals, the Accept card's logMeal callable, the
+  // Trainerize importer — never reached the food library. Since many people log
+  // mainly by chat, their library stayed empty. This runs on every day-log load:
+  // any named meal missing from recents is folded in, newest first, in ONE write.
+  const syncRecentsFromMeals = (meals) => {
+    if (!activeId || !Array.isArray(meals) || !meals.length) return;
+    const have = new Set(recentFoodsRef.current.map((f) => recentFoodKey(f.name, f.type)));
+    const add = [];
+    for (const m of meals) {
+      const raw = (m && m.name || "").trim();
+      if (!raw) continue;
+      const base = baseFoodName(raw) || raw;
+      const tkey = recentMealKey(m.type);
+      const key = base.toLowerCase() + "|" + tkey;
+      if (have.has(key)) continue;
+      have.add(key);
+      add.push({ name: base, type: tkey, brand: m.brand || "",
+        calories: m.calories || 0, protein: m.protein || 0, carbs: m.carbs || 0, fat: m.fat || 0,
+        grams: m.grams != null ? Number(m.grams) : null, unit: m.unit || null,
+        ...(m.micros ? { micros: m.micros } : {}), ts: Date.now() });
+    }
+    if (!add.length) return;
+    const next = [...add, ...recentFoodsRef.current].slice(0, 400);
+    recentFoodsRef.current = next;
+    setRecentFoods(next);
+    logWrite(`caliq-foods-${activeId}`, JSON.stringify(next));
+  };
+
   const upsertRecentFood = (m) => {
     const raw = (m.name || "").trim();
     if (!raw || !activeId) return;
@@ -18607,6 +18676,9 @@ export default function App() {
       if (fv) { try { foods = JSON.parse(fv) || []; } catch(e) {} }
       recentFoodsRef.current = foods;
       setRecentFoods(foods);
+      // Must run AFTER the recents load above — it diffs against that list, so
+      // calling it earlier would compare against a stale one and be overwritten.
+      syncRecentsFromMeals(parsed.meals);
       // Saved library — read from the USER's own account (not the plan, not the
       // client's), so it's the same library whichever plan is open.
       try {
