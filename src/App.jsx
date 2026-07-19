@@ -11,6 +11,51 @@ import { httpsCallable } from "firebase/functions";
 import { startRegistration } from "@simplewebauthn/browser";
 import { Icon } from "./icons.jsx";
 
+// Milestone confetti (S97, Kevin's pick #3). Lazy-loaded like qrcode so it costs
+// nothing until a celebration actually fires. canvas-confetti draws on its OWN
+// fixed canvas appended to <body>, so it automatically escapes the
+// .page-transition transform trap; disableForReducedMotion honors the user's
+// motion preference (the app already disables animations for them).
+let _confettiMod = null;
+async function celebrate(kind = "goal") {
+  try {
+    if (!_confettiMod) _confettiMod = (await import("canvas-confetti")).default;
+    const brand = ["#08DCE0", "#2fe0a8", "#eafcfc", "#4fc3f7"];
+    const base = { disableForReducedMotion: true, colors: brand, zIndex: 2000 };
+    if (kind === "goal") {
+      // The big one — reaching goal weight: two side cannons + a center burst.
+      _confettiMod({ ...base, particleCount: 90, spread: 70, origin: { x: 0.1, y: 0.8 }, angle: 60 });
+      _confettiMod({ ...base, particleCount: 90, spread: 70, origin: { x: 0.9, y: 0.8 }, angle: 120 });
+      setTimeout(() => _confettiMod({ ...base, particleCount: 120, spread: 100, origin: { y: 0.6 } }), 250);
+    } else {
+      // Small burst for lesser milestones (streaks etc., future).
+      _confettiMod({ ...base, particleCount: 60, spread: 75, origin: { y: 0.7 } });
+    }
+  } catch (e) { /* celebration is a nicety — never break a log over it */ }
+}
+// Fire only when a weigh-in CROSSES the goal (not every at-goal weigh-in after).
+function crossedGoal(prevW, newW, goalW) {
+  const p = Number(prevW), n = Number(newW), g = Number(goalW);
+  if (!(p > 0) || !(n > 0) || !(g > 0) || p === n) return false;
+  // Already AT goal: no direction to infer — a move away must never celebrate
+  // (a losing client regaining from exactly-goal would otherwise get confetti).
+  if (p === g) return false;
+  return p > g ? n <= g : n >= g; // losing: cross down through goal; gaining: cross up
+}
+
+// Skeleton loader (S97, Kevin's pick #3): pulsing placeholder bars where content
+// is about to appear — reads as "loading fast" instead of a bare text line.
+function SkeletonCard({ rows = 2 }) {
+  return (
+    <div aria-hidden className="animate-pulse rounded-card border border-border bg-surface p-4 flex flex-col gap-3">
+      <div className="h-4 w-1/3 rounded bg-surface2" />
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="h-3 rounded bg-surface2" style={{ width: `${78 - i * 16}%` }} />
+      ))}
+    </div>
+  );
+}
+
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
 const ACTIVITY_LEVELS = [
@@ -13254,7 +13299,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
         <div className={`${subCls} mb-4`}>Your clients at a glance — who's active, who needs a nudge, and how they're progressing.</div>
 
         {loading ? (
-          <div className={cardCls}><div className="text-muted text-sm">Loading your clients…</div></div>
+          <div className="flex flex-col gap-3"><SkeletonCard rows={3} /><SkeletonCard rows={2} /></div>
         ) : total === 0 ? (
           <div className={cardCls}>
             <div className={titleCls}>No connected clients yet</div>
@@ -15052,6 +15097,8 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
         ? JSON.parse(JSON.stringify(planWrapRef.current)) : { data: {}, step: 0 };
       const d = obj.data || (obj.data = {});
       const prev = Number(d.weightLbs) || v;
+      // Confetti when this weigh-in CROSSES the goal (Kevin's pick #3).
+      if (crossedGoal(prev, v, d.goalWeight)) celebrate("goal");
       if (d.startWeightLbs == null || d.startWeightLbs === "") d.startWeightLbs = prev;
       d.weightLbs = v;
       // Record in check-in history — the app's weight-history source (feeds the
@@ -16656,7 +16703,13 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
         <button onClick={onClose} aria-label="Back" className="flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
       </div>
       <div className="flex-1 overflow-y-auto px-3 py-3">
-        {msgs === null && <div className="py-6 text-center text-[.82rem] text-muted">Loading…</div>}
+        {msgs === null && (
+          <div aria-hidden className="animate-pulse flex flex-col gap-3 py-4">
+            <div className="h-9 w-3/5 self-start rounded-2xl bg-surface2" />
+            <div className="h-9 w-2/5 self-end rounded-2xl bg-surface2" />
+            <div className="h-9 w-1/2 self-start rounded-2xl bg-surface2" />
+          </div>
+        )}
         {msgs && msgs.length === 0 && !err && (
           <div className="py-6 text-center text-[.82rem] text-muted">No messages yet — say hi </div>
         )}
@@ -18130,6 +18183,8 @@ export default function App() {
     if (field === "weight" && value > 0) {
       setDataAndSave((p) => {
         const n = { ...p };
+        // Confetti when this weigh-in CROSSES the goal (Kevin's pick #3).
+        if (crossedGoal(n.weightLbs, value, n.goalWeight)) celebrate("goal");
         if (n.startWeightLbs == null || n.startWeightLbs === "") n.startWeightLbs = Number(n.weightLbs) || value;
         n.weightLbs = value;
         const cis = Array.isArray(n.checkIns) ? n.checkIns : [];
