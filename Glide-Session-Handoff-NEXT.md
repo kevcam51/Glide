@@ -1,5 +1,20 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡ S97s (Jul 18): four phone-UX fixes — all live (`6450786`)
+1. **Meals & Food Today header** no longer stacks/overflows on a phone — it used
+   `.sec-title` (a full-width heading whose `::after` divider has `flex:1` and eats the row).
+   Now a plain nowrap title in a `flexWrap` row; controls wrap to their own line inside the card.
+2. **Leading-zero input bug fixed** — `editField` coerced with `parseInt(v)||0` on every
+   keystroke, so clearing a box refilled "0" and the next key gave "05". Now keeps the raw
+   string; coercion happens at the boundaries via `num()`.
+3. **Back buttons moved top-RIGHT → top-LEFT** (all 14): `order:-1`/`order-first`, `ml-auto`
+   dropped, and the 10 `space-between` headers repacked to `flex-start`. **Kevin's current
+   preference is top-LEFT — the S97 top-right placement is superseded.**
+4. **Serving type is editable again** — per-serving foods were locked to a frozen unit label.
+   With the serving's WEIGHT you get a per-100 basis, so they're promoted to weight mode with
+   the full dropdown; when the weight is unknown a "1 serving weighs ___" input unlocks it.
+   Conversion round-trips exactly (verified 240g/221cal ↔ 100g/92 ↔ 1oz/26).
+
 ## ⚡⚡⚡ S97o (Jul 18): Kevin approved the API queue; confetti + skeletons SHIPPED
 _Pushed @ `34b9fe5`. Read `docs/EXTERNAL-APIS.md` — Part 2 top has **⭐ KEVIN'S PICKS**
 (his approved API queue). Confetti-on-goal + skeleton loaders are LIVE (pick #3, done)._
