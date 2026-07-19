@@ -138,6 +138,27 @@ comes later. **Not a priority right now** — this section is the saved plan.
 
 # Part 2 — API opportunity report (deep research, S97/Jul 2026)
 
+## ⭐ KEVIN'S PICKS (S97, Jul 18) — the approved queue
+Kevin approved these from the top-10 + ideas below. Build in whatever order is
+unblocked; the rest of the report stays as reference.
+
+| Pick | Status / blocker |
+|---|---|
+| **#3 Confetti milestones + skeleton loaders** | Unblocked — build anytime (small) |
+| **#4 Streaks + milestone PUSH nudges** | Unblocked — Web Push delivery shipped S96 |
+| **#5 Stripe Tax monitoring** | Rides the LIVE-mode swap (waiting on Kevin) |
+| **#6 Acuity sync** | Needs Kevin's Acuity API key + tier check (~$61/mo Premium) |
+| **#7 TTS coach voice (Groq primary)** | Unblocked — keys already in Secret Manager; premium-gate |
+| **Photo-logging accuracy harness (Nutrition5k)** | Unblocked — offline eval work |
+| **SMS reminders (Twilio ~$10–17/mo)** | Needs Kevin: Twilio account + A2P registration (lead time) |
+| Wearables | Deferred — platform choice already known (Trainerize bridge now, Garmin direct later) |
+
+NOT picked (for now): recipe JSON-LD import, weather tool, calendar-aware
+coaching, grocery list, Spanish, waivers. All remain below as reference.
+
+---
+
+
 _13-agent research pass over fitness + non-fitness APIs; every pricing claim adversarially_
 _re-verified against vendor sites (2 verify agents died mid-run — their claims kept but
 flagged lower-confidence: weather + food-nutrition groups). Decision-ready; nothing built._
