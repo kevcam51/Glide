@@ -7286,9 +7286,18 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
           borderRadius: "16px", padding: "18px",
           display: "flex", flexDirection: "column", gap: "14px",
           boxShadow: "0 20px 60px rgba(0,0,0,.5)" }}>
-        <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 92, alignItems: "flex-start", gap: "10px" }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text)" }}>{food.name || "Food"}</div>
+        {/* Long food names used to stack into a ragged column (S102e, Kevin:
+            "so long that it starts to stack up above each other"). Only the
+            LEFT side holds the Back button, so the symmetric 92px reservation
+            was throwing away half the width for nothing — the right is now a
+            small gutter, and the name is clamped to 2 lines with the full text
+            on hover/long-press. */}
+        <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 14, alignItems: "flex-start", gap: "10px" }}>
+          <div style={{ minWidth: 0, flex: 1, textAlign: "center" }}>
+            <div title={food.name || "Food"}
+              style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text)", lineHeight: 1.25,
+                display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+                wordBreak: "break-word" }}>{food.name || "Food"}</div>
             {food.brand ? <div style={{ fontSize: ".76rem", color: "var(--muted)" }}>{food.brand}</div> : null}
             {mealChoices && mealChoices.length ? (
               // Pick the meal here (S97t, Kevin: "give the user the option to save
@@ -9969,9 +9978,23 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   // was actually burned training.
   // Must stay below `logged` — these are consts, so reading it above its
   // declaration is a TDZ throw that blanks the whole dashboard.
-  const maintenanceToday = trackerTdee || (tdee + todayTotalBurn);
+  // ⚠️ ONLY BURN THAT WAS ACTUALLY EARNED COUNTS (S102e — Kevin: Jarvis showed
+  // "on pace for −1,191" with 2,336 remaining). Every figure reconciled: TDEE
+  // 3,591 → target 3,091 → logged 755 → 2,336 remaining ✓, and 1,191 = the 500
+  // diet deficit + 691 from his scheduled 60-min walk. But his check-in for
+  // that day was EMPTY — he hadn't walked yet. The dashboard was banking a
+  // workout that hadn't happened, promising 2.4 lb/wk against a 1 lb/wk plan.
+  // A SCHEDULE is an intention; only a tracker reading or a workout marked done
+  // is evidence. Unearned scheduled burn no longer inflates the deficit — it
+  // appears the moment it's real, which is also what makes the number move in
+  // real time as the day is logged.
+  const workedOutToday = !!(data.checkIns || []).find((c) => c && c.date === ymdLocal() && c.workedOut);
+  const earnedBurn = trackerActiveBurn != null ? trackerActiveBurn : (workedOutToday ? todayTotalBurn : 0);
+  const maintenanceToday = trackerTdee || (tdee + earnedBurn);
   const todayDeficit = Math.max(0, Math.round(maintenanceToday - Math.max(logged, target)));
   const deficitIsPace = logged < target; // still eating toward the target → it's a projection
+  // Scheduled-but-not-done burn is shown as an opportunity, not banked.
+  const unearnedBurn = trackerActiveBurn == null && !workedOutToday ? todayTotalBurn : 0;
   const overCals = remaining < 0;
   const pct = target > 0 ? Math.min(100, Math.round((logged / target) * 100)) : 0; // arc caps at full
   // Macro targets. Default (estimates): protein 1g/lb bodyweight, fat 28% of
@@ -10110,6 +10133,12 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 <div style={{fontSize:".62rem",color:"var(--green)",fontWeight:700,letterSpacing:".3px"}}>
                   −{todayDeficit.toLocaleString()} deficit
                 </div>
+                {/* The scheduled workout, offered rather than assumed. */}
+                {unearnedBurn > 0 && (
+                  <div style={{fontSize:".5rem",color:"var(--muted)",letterSpacing:".2px",marginTop:"1px"}}>
+                    +{unearnedBurn.toLocaleString()} if you train
+                  </div>
+                )}
               </div>
             )}
           </div>
