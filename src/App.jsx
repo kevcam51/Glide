@@ -10594,8 +10594,43 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           ))}
         </div>
       ) : (
-        <div className="dash-today-workout" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"8px",padding:"16px",color:"var(--muted)",fontSize:".84rem"}}>
-          <Icon name="moon" size={16} />Rest day — no workouts scheduled
+        <div className="dash-today-workout" style={{padding:"14px",color:"var(--muted)",fontSize:".84rem"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"8px"}}>
+            <Icon name="moon" size={16} />Rest day — nothing scheduled for {dayName}
+          </div>
+          {/* Show the REST of the week here (S98f, Kevin: "I don't see any of
+              the cardio exercises I entered"). Workouts are scheduled per
+              weekday, so on a rest day this panel was simply blank — which
+              reads as "my program didn't save" rather than "not today". */}
+          {(() => {
+            const week = DAYS.map((d) => {
+              const c = (Array.isArray(data.cardio?.[d]) ? data.cardio[d] : [])
+                .map((x) => (findCardioEx(x.type, data.customExercises) || {}).label).filter(Boolean);
+              const st = (Array.isArray(data.strength?.[d]) ? data.strength[d] : [])
+                .map((x) => (findStrengthEx(x.type, data.customExercises) || {}).label).filter(Boolean);
+              return { d, items: [...c, ...st] };
+            }).filter((x) => x.items.length);
+            if (!week.length) return (
+              <div style={{textAlign:"center",fontSize:".76rem",marginTop:"8px",lineHeight:1.45}}>
+                No workouts scheduled on any day yet — add some with the buttons below,
+                or in Full Plan → Cardio / Strength.
+              </div>
+            );
+            return (
+              <div style={{marginTop:"12px",borderTop:"1px solid var(--border)",paddingTop:"10px"}}>
+                <div style={{fontSize:".68rem",fontWeight:700,textTransform:"uppercase",letterSpacing:".5px",marginBottom:"6px"}}>
+                  Your week
+                </div>
+                {week.map(({d, items}) => (
+                  <div key={d} style={{display:"flex",gap:"8px",padding:"4px 0",fontSize:".78rem",
+                    color: d === dayName ? "var(--accent)" : "var(--muted)"}}>
+                    <span style={{width:"38px",flexShrink:0,fontWeight:700}}>{d.slice(0,3)}</span>
+                    <span style={{minWidth:0}}>{items.join(" · ")}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
               {todayTotalBurn > 0 && (
