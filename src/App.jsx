@@ -8012,6 +8012,8 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   // calories + macros from the typed description; the user tweaks, then Adds.
   const [aiBusy, setAiBusy] = useState(false);
   const [aiMode, setAiMode] = useState(null); // 'text' | 'photo' — which estimate is running (S102 bug: both buttons showed "Estimating…")
+  const [aiPhotos, setAiPhotos] = useState([]); // the photos behind a running/finished photo estimate (tap → full view)
+  const [mlViewPhoto, setMlViewPhoto] = useState(null);
   const [aiNote, setAiNote] = useState("");
   const [aiErr, setAiErr] = useState("");
   // After an AI estimate we keep the per-1-serving values so a servings stepper
@@ -8069,18 +8071,19 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   );
 
   const resetSearch = () => { setSearchOpen(false); setSearchQ(""); setResults([]); setSearching(false); setSearchErr(""); setPicked(null); setGrams("100"); setUnit("g"); setServingText(""); setServingSel(null); };
-  const resetFields = () => { setName(""); setBrand(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); resetSearch(); setAiBusy(false); setAiNote(""); setAiErr(""); setAiBase(null); setAiQty(1); };
+  const resetFields = () => { setName(""); setBrand(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); resetSearch(); setAiBusy(false); setAiNote(""); setAiErr(""); setAiBase(null); setAiQty(1); setAiPhotos([]); setMlViewPhoto(null); };
   // AI estimate: uses whatever the user typed (food name field, falling back
   // to the search box), fills the form, and reports the serving it assumed.
   // Budget + trial-expiry are enforced server-side (estimateFood callable).
-  const runAiEstimate = async (image) => {
+  const runAiEstimate = async (images) => {
+    const imgs = Array.isArray(images) ? images : (images ? [images] : []);
     const q = (name || searchQ).trim();
     if (aiBusy) return;
     // With a photo the description is optional — it just adds context.
-    if (!q && !image) { setAiErr("Type the food first — e.g. \"chicken burrito\" or \"2 eggs and toast\"."); return; }
-    setAiBusy(true); setAiMode(image ? "photo" : "text"); setAiErr(""); setAiNote("");
+    if (!q && !imgs.length) { setAiErr("Type the food first — e.g. \"chicken burrito\" or \"2 eggs and toast\"."); return; }
+    setAiBusy(true); setAiMode(imgs.length ? "photo" : "text"); setAiErr(""); setAiNote("");
     try {
-      const r = await callEstimateFood(image ? { food: q, image } : { food: q });
+      const r = await callEstimateFood(imgs.length ? { food: q, images: imgs } : { food: q });
       const d = r.data || {};
       // A photo estimate names the food itself (the user may have typed nothing).
       const label = q || String(d.name || "").trim() || "Meal";
@@ -8102,7 +8105,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
       const code = (e && e.code) || "";
       if (code.includes("permission-denied")) setAiErr("Your free trial has ended — upgrade to keep AI estimates.");
       else if (code.includes("resource-exhausted")) setAiErr("You've reached today's AI limit. It resets tomorrow.");
-      else if (image) setAiErr("Couldn't read that photo — try a clearer shot, or type the food instead.");
+      else if (imgs.length) setAiErr("Couldn't read that photo — try a clearer shot, or type the food instead.");
       else setAiErr("Couldn't estimate that — try rephrasing (e.g. \"2 eggs and toast\").");
     }
     setAiBusy(false); setAiMode(null);
@@ -8110,14 +8113,15 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   // Photo estimate: downscale to a ~1024px JPEG (caps upload + vision tokens),
   // hand it to the same estimate call, then discard it. Photos are NEVER stored.
   const onPhotoPicked = async (e) => {
-    const f = e.target.files && e.target.files[0];
-    e.target.value = ""; // let the same file be picked again
-    if (!f || aiBusy) return;
+    const files = [...(e.target.files || [])].filter((f) => f.type.startsWith("image/")).slice(0, 3);
+    e.target.value = ""; // let the same files be picked again
+    if (!files.length || aiBusy) return;
     setAiErr("");
-    let dataUrl;
-    try { dataUrl = await downscaleImage(f); }
-    catch { setAiErr("Couldn't read that image — try another photo."); return; }
-    runAiEstimate(dataUrl);
+    let dataUrls;
+    try { dataUrls = await Promise.all(files.map((f) => downscaleImage(f))); }
+    catch { setAiErr("Couldn't read those images — try other photos."); return; }
+    setAiPhotos(dataUrls); // thumbnails stay tappable while (and after) estimating
+    runAiEstimate(dataUrls);
   };
   // Run a food search. Progressive: results render the moment the fastest
   // source (usually USDA) lands, then upgrade to the full merged list. A
@@ -8504,9 +8508,20 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
                 <Icon name="camera" size={13} />{aiBusy && aiMode === "photo" ? "Estimating…" : "Estimate from photo"}
               </span>
             </button>
-            <input ref={photoInputRef} type="file" accept="image/*"
+            <input ref={photoInputRef} type="file" accept="image/*" multiple
               onChange={onPhotoPicked} style={{ display:"none" }} />
           </div>
+          {aiPhotos.length > 0 && (
+            <div style={{ display:"flex", alignItems:"center", gap:"6px", marginTop:"7px", flexWrap:"wrap" }}>
+              {aiPhotos.map((im, ix) => (
+                <img key={ix} src={im} alt={`meal photo ${ix + 1}`} onClick={() => setMlViewPhoto(im)}
+                  style={{ width:44, height:44, borderRadius:8, objectFit:"cover", cursor:"zoom-in",
+                    border:"1px solid var(--border)" }} />
+              ))}
+              <span style={{ fontSize:".7rem", color:"var(--muted)" }}>tap to view</span>
+            </div>
+          )}
+          <PhotoViewer src={mlViewPhoto} onClose={() => setMlViewPhoto(null)} />
           {scanErr && <div style={{ fontSize:".74rem", color:"var(--red)", marginTop:"6px" }}>{scanErr}</div>}
           {scanOpen && createPortal(
             <div onClick={closeScan} style={{ position:"fixed", inset:0, zIndex:2000, background:"rgba(0,0,0,.92)",
@@ -10084,8 +10099,17 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 crushing it when you simply haven't eaten yet. Also hidden at or
                 above maintenance — a surplus isn't a "deficit". */}
             {logged > 0 && todayDeficit > 0 && (
-              <div style={{fontSize:".62rem",color:"var(--green)",fontWeight:700,letterSpacing:".3px",marginTop:"3px"}}>
-                {deficitIsPace ? `on pace for −${todayDeficit.toLocaleString()} deficit` : `−${todayDeficit.toLocaleString()} deficit`}
+              // Stacked tiny lines (S102d, Kevin: the one-liner overflowed the
+              // 150px ring on his phone). The qualifier sits above the number,
+              // so the widest line is just "−1,958 deficit" — always inside
+              // the circle.
+              <div style={{marginTop:"3px",textAlign:"center",lineHeight:1.25}}>
+                {deficitIsPace && (
+                  <div style={{fontSize:".5rem",color:"var(--green)",opacity:.75,letterSpacing:".4px",textTransform:"uppercase"}}>on pace for</div>
+                )}
+                <div style={{fontSize:".62rem",color:"var(--green)",fontWeight:700,letterSpacing:".3px"}}>
+                  −{todayDeficit.toLocaleString()} deficit
+                </div>
               </div>
             )}
           </div>
@@ -14769,7 +14793,15 @@ function makeStreamSmoother(onFrame) {
 // intentionally not parsed; the system prompt asks the model to keep formatting
 // simple). Used by the chat bubbles and the AI Coaching Insights card.
 function RichText({ text }) {
-  const lines = String(text == null ? "" : text).split("\n");
+  // Repair missing spaces around inline **bold** (S102d, Kevin: "no spaces
+  // between some words, mostly with an ! at the end"). The model sometimes
+  // writes "**Nice work!**Let's go" — the ! ends the BOLD, and the next word
+  // abuts the closing **. Insert the space only at a bold↔word boundary, so
+  // legitimate tight text (parentheses, punctuation, URLs) is never touched.
+  const repaired = String(text == null ? "" : text)
+    .replace(/(\*\*[^*\n]+\*\*)(?=[A-Za-z0-9(])/g, "$1 ")   // **bold**word → **bold** word
+    .replace(/([A-Za-z0-9,.!?:;)])(?=\*\*[^*\n]+\*\*)/g, "$1 "); // word**bold** → word **bold**
+  const lines = repaired.split("\n");
   return (
     <>
       {lines.map((line, i) => {
@@ -14807,6 +14839,21 @@ function downscaleImage(file, maxDim = 1024, quality = 0.8) {
     reader.readAsDataURL(file);
   });
 }
+// Full-screen photo viewer (S102d, Kevin): tap any photo thumbnail to see it
+// large; tap anywhere (or ✕) to close. Portal — escapes the transform trap.
+function PhotoViewer({ src, onClose }) {
+  if (!src) return null;
+  return createPortal(
+    <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:3200, background:"rgba(0,0,0,.93)",
+      display:"flex", alignItems:"center", justifyContent:"center", padding:"18px", cursor:"zoom-out" }}>
+      <img src={src} alt="full view" style={{ maxWidth:"100%", maxHeight:"100%", borderRadius:12, objectFit:"contain" }} />
+      <button onClick={onClose} aria-label="Close photo"
+        style={{ position:"absolute", top:"calc(14px + env(safe-area-inset-top,0px))", right:14, width:40, height:40,
+          borderRadius:999, border:"1px solid rgba(255,255,255,.3)", background:"rgba(0,0,0,.55)", color:"#fff",
+          fontSize:"1.05rem", cursor:"pointer" }}>✕</button>
+    </div>, document.body);
+}
+
 // Parse a base64 image data URL into an Anthropic image content block.
 function imageBlockFromDataUrl(dataUrl) {
   const m = /^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/.exec(dataUrl || "");
@@ -14827,7 +14874,8 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]); // {role:'user'|'assistant', content, image?}
   const [draft, setDraft] = useState("");
-  const [pendingImage, setPendingImage] = useState(null); // dataURL of a photo to send
+  const [pendingImages, setPendingImages] = useState([]); // dataURLs of photos to send (≤3, S102d)
+  const [viewPhoto, setViewPhoto] = useState(null);        // tap a thumbnail → full-screen view
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [warn, setWarn] = useState(false); // ≥80% of daily budget used
@@ -14942,7 +14990,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   useEffect(() => {
     if (!loadedRef.current || busy || !activeChatId || !messages.length) return;
     try {
-      const slim = messages.slice(-20).map((m) => ({ role: m.role, content: m.content || "", hadImage: !!m.image }));
+      const slim = messages.slice(-20).map((m) => ({ role: m.role, content: m.content || "", hadImage: !!(m.image || (m.images && m.images.length)) }));
       window.storage.set(threadKey(activeChatId), JSON.stringify(slim));
       setConvos((prev) => {
         const next = prev.map((c) => c.id === activeChatId
@@ -15032,12 +15080,17 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const tipsGotIt = () => { markPhotoTipsSeen(); setPhotoTips(false); if (fileRef.current) fileRef.current.click(); };
   const tipsClose = () => { markPhotoTipsSeen(); setPhotoTips(false); };
   const onFile = async (e) => {
-    const f = e.target.files && e.target.files[0];
+    const files = [...(e.target.files || [])].filter((f) => f.type.startsWith("image/"));
     e.target.value = ""; // allow re-picking the same file
-    if (!f) return;
-    if (!f.type.startsWith("image/")) { setError("Please choose an image."); return; }
+    if (!files.length) { if (e.target.files && e.target.files.length) setError("Please choose an image."); return; }
     setError("");
-    try { setPendingImage(await downscaleImage(f)); }
+    try {
+      const room = Math.max(0, 3 - pendingImages.length);
+      if (!room) { setError("3 photos max per message."); return; }
+      const scaled = await Promise.all(files.slice(0, room).map((f) => downscaleImage(f)));
+      setPendingImages((prev) => [...prev, ...scaled].slice(0, 3));
+      if (files.length > room) setError("3 photos max per message — extra photos were skipped.");
+    }
     catch { setError("Couldn't read that photo. Try another."); }
   };
 
@@ -15206,16 +15259,16 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     // import). When called as an onClick handler the arg is an event — ignore it.
     const isOverride = typeof overrideText === "string";
     const text = (isOverride ? overrideText : draft).trim();
-    const img = isOverride ? null : pendingImage;
+    const imgs = isOverride ? [] : pendingImages;
     if (!premium) return; // trial expired — the lock panel is showing; server enforces too
-    if ((!text && !img) || busy) return;
+    if ((!text && !imgs.length) || busy) return;
     setError("");
     setBoost((b) => (b === "granted" || b === "already" ? null : b)); // clear settled boost cards on the next send
     setUltraOffer(false); // clear any Ultra upsell on the next send
-    const next = [...messages, { role: "user", content: text, image: img || undefined }];
+    const next = [...messages, { role: "user", content: text, images: imgs.length ? imgs : undefined }];
     setMessages(next);
     if (!isOverride) setDraft("");
-    setPendingImage(null);
+    setPendingImages([]);
     setProposal(null); // a new message supersedes any pending meal card
     setEditDraft(null);
     setWorkout(null); // …and any pending workout card
@@ -15223,13 +15276,15 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     // Build the API payload. Send the image block only on the most recent
     // message (older turns go as text) to bound vision token cost.
     const apiMsgs = next.map((m, i) => {
-      if (m.image && i === next.length - 1) {
-        const blk = imageBlockFromDataUrl(m.image);
-        const content = [{ type: "text", text: m.content || "Here's a photo of my meal — estimate the calories and macros, then we can log it." }];
-        if (blk) content.push(blk);
+      const mImgs = m.images || (m.image ? [m.image] : []); // m.image = pre-S102d single-photo shape
+      if (mImgs.length && i === next.length - 1) {
+        const content = [{ type: "text", text: m.content || (mImgs.length > 1
+          ? "Here are photos of my meal (same meal, different shots) — estimate the calories and macros once, then we can log it."
+          : "Here's a photo of my meal — estimate the calories and macros, then we can log it.") }];
+        for (const im of mImgs) { const blk = imageBlockFromDataUrl(im); if (blk) content.push(blk); }
         return { role: m.role, content };
       }
-      return { role: m.role, content: m.content || (m.image ? "(I sent a photo of my meal.)" : "") };
+      return { role: m.role, content: m.content || (mImgs.length ? "(I sent a photo of my meal.)" : "") };
     });
     // Track stream progress OUTSIDE the try: once ANY event arrived, server-side
     // tools may already have run (e.g. a meal write) — re-sending the identical
@@ -15443,11 +15498,19 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 // whichever was wider and the other floated off-center. Pinning
                 // the width lets the photo fill it edge-to-edge with the caption
                 // directly underneath — one tidy card instead of two ragged parts.
-                <div key={i} className={(m.role === "user" ? bubbleUser : bubbleAI) + (m.image ? " w-[min(74%,250px)]" : "")}>
-                  {m.image && (
-                    <img src={m.image} alt="meal photo"
-                      className="mb-2 block h-auto w-full max-h-56 rounded-lg object-cover" />
-                  )}
+                <div key={i} className={(m.role === "user" ? bubbleUser : bubbleAI) + ((m.images && m.images.length) || m.image ? " w-[min(74%,250px)]" : "")}>
+                  {(() => {
+                    const mImgs = m.images || (m.image ? [m.image] : []);
+                    if (!mImgs.length) return null;
+                    return (
+                      <div className={"mb-2 " + (mImgs.length > 1 ? "grid grid-cols-2 gap-1" : "")}>
+                        {mImgs.map((im, ix) => (
+                          <img key={ix} src={im} alt={`meal photo ${ix + 1}`} onClick={() => setViewPhoto(im)}
+                            className={"block w-full rounded-lg object-cover cursor-zoom-in " + (mImgs.length > 1 ? "max-h-28" : "h-auto max-h-56")} />
+                        ))}
+                      </div>
+                    );
+                  })()}
                   {m.role === "user" ? m.content : <RichText text={m.content} />}
                 </div>
               ))
@@ -15624,12 +15687,19 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
 
           {/* Composer */}
           <div className="border-t border-border bg-surface px-3 py-3">
-            {pendingImage && (
-              <div className="mb-2 flex items-center gap-2">
-                <img src={pendingImage} alt="meal to send" className="h-14 w-14 rounded-lg object-cover" />
-                <span className="text-[.78rem] text-muted">Photo attached — add a note or just send.</span>
-                <button onClick={() => setPendingImage(null)} aria-label="Remove photo"
-                  className="ml-auto rounded-md border-none bg-transparent px-2 py-1 text-muted cursor-pointer hover:text-fg"><Icon name="close" size={15} color="currentColor" /></button>
+            {pendingImages.length > 0 && (
+              <div className="mb-2 flex items-center gap-2 flex-wrap">
+                {pendingImages.map((im, ix) => (
+                  <span key={ix} className="relative inline-block">
+                    <img src={im} alt={`photo ${ix + 1} to send`} onClick={() => setViewPhoto(im)}
+                      className="h-14 w-14 rounded-lg object-cover cursor-zoom-in" />
+                    <button onClick={() => setPendingImages((p) => p.filter((_, j) => j !== ix))} aria-label={`Remove photo ${ix + 1}`}
+                      className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full border-0 bg-black/70 text-white text-[10px] cursor-pointer leading-none">✕</button>
+                  </span>
+                ))}
+                <span className="text-[.74rem] text-muted">
+                  {pendingImages.length}/3 · tap to view{pendingImages.length < 3 ? " · 📷 adds more" : ""}
+                </span>
               </div>
             )}
             {/* Live recording feedback: a waveform (reacts to your voice) + live
@@ -15649,7 +15719,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               </div>
             )}
             <div className="flex flex-wrap items-center gap-2">
-              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
+              <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={onFile} />
               <button onClick={pickImage} disabled={busy || recording || transcribing} aria-label="Add a photo" title="Photo of your meal"
                 className="flex items-center justify-center rounded-xl border border-border bg-surface2 px-3 py-2.5 text-fg cursor-pointer disabled:opacity-50 hover:text-primary">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[22px] h-[22px]">
@@ -15682,11 +15752,11 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 <Icon name="clipboard" size={20} /></button>
               {/* Full-width top row so the placeholder + typed text never get cramped/clipped on phones. */}
               <textarea ref={taRef} value={draft} onChange={e => setDraft(e.target.value)} rows={1}
-                placeholder={recording ? "Listening… tap ⏹ to stop" : transcribing ? "Transcribing…" : pendingImage ? "Add a note (optional)…" : "Message Glidna AI…"}
+                placeholder={recording ? "Listening… tap ⏹ to stop" : transcribing ? "Transcribing…" : pendingImages.length ? "Add a note (optional)…" : "Message Glidna AI…"}
                 style={{ fontFamily: "var(--font-sans)" }}
                 className="order-first basis-full w-full resize-none box-border min-h-[46px] max-h-[140px] rounded-xl border border-border bg-surface2 px-3.5 py-3 text-[.95rem] leading-relaxed text-fg outline-none placeholder:text-muted"
                 onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
-              <button onClick={send} disabled={busy || recording || transcribing || (!draft.trim() && !pendingImage)} aria-label="Send"
+              <button onClick={send} disabled={busy || recording || transcribing || (!draft.trim() && !pendingImages.length)} aria-label="Send"
                 className="ml-auto rounded-xl border-none bg-primaryfill px-6 py-2.5 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50 disabled:cursor-default">
                 {busy ? "…" : "Send"}
               </button>
@@ -15714,6 +15784,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               </div>
             </div>
           )}
+          <PhotoViewer src={viewPhoto} onClose={() => setViewPhoto(null)} />
           {/* Meal-photo tips overlay — how to shoot for the most accurate AI estimate */}
           {photoTips && (
             <div className="absolute inset-0 z-10 flex flex-col overflow-y-auto bg-surface p-4">

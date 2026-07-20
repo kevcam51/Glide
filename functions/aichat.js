@@ -160,7 +160,7 @@ function sanitizeContent(content, allowImages = false) {
     if (!b || typeof b !== "object") continue;
     if (b.type === "text" && typeof b.text === "string") {
       blocks.push({ type: "text", text: b.text.slice(0, 8000) });
-    } else if (allowImages && images < 2 && b.type === "image" && b.source && b.source.type === "base64"
+    } else if (allowImages && images < 3 && b.type === "image" && b.source && b.source.type === "base64"
         && IMG_TYPES.has(b.source.media_type) && typeof b.source.data === "string"
         && b.source.data.length <= MAX_IMG_B64) {
       images++;
@@ -628,7 +628,10 @@ exports.estimateFood = onCall(
     // Optional meal PHOTO (S99): a base64 data URL. Validated through the same
     // rules as the chat's photo logging (sanitizeContent) — never store it, it
     // goes straight to the model and is discarded with the request.
-    const imgBlock = sanitizeImageDataUrl((request.data && request.data.image) || "");
+    const rawImgs = Array.isArray(request.data && request.data.images)
+      ? request.data.images : [(request.data && request.data.image) || ""];
+    const imgBlocks = rawImgs.slice(0, 3).map(sanitizeImageDataUrl).filter(Boolean);
+    const imgBlock = imgBlocks.length > 0; // legacy truthiness for the checks below
     if (!desc && !imgBlock) throw new HttpsError("invalid-argument", "Describe the food or add a photo first.");
     const db = admin.firestore();
     const profile = (await db.doc(`users/${uid}`).get()).data() || {};
@@ -655,14 +658,16 @@ exports.estimateFood = onCall(
           + "If no quantity is given, assume ONE typical realistic serving and say what you assumed (e.g. "
           + "\"1 medium bowl, ~350g\" with grams:350, unit:\"g\"; or \"1 cup, 240ml\" with grams:240, unit:\"ml\"). "
           + "Use common US portions."
-          + (imgBlock ? " The user attached a PHOTO of the food. Identify what is on the plate and "
+          + (imgBlock ? ` The user attached ${imgBlocks.length > 1 ? `${imgBlocks.length} PHOTOS` : "a PHOTO"} of the food`
+            + (imgBlocks.length > 1 ? " (different angles or parts of the SAME meal — estimate it ONCE as one meal, don't double-count)" : "")
+            + ". Identify what is on the plate and "
             + "estimate the portion from visual size cues (plate/bowl/utensil scale). Set `assumed` to "
             + "what you saw and the portion you judged (e.g. \"chicken breast + rice, ~1.5 cups\"). "
             + "Include invisible cooking fats/oils and dressings in the calorie estimate." : ""),
         messages: [{
           role: "user",
           content: imgBlock
-            ? [imgBlock, { type: "text", text: desc ? `Estimate this meal. The user says it is: ${desc}` : "Estimate this meal." }]
+            ? [...imgBlocks, { type: "text", text: desc ? `Estimate this meal. The user says it is: ${desc}` : "Estimate this meal." }]
             : `Estimate: ${desc}`,
         }],
       });
