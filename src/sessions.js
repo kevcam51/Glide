@@ -258,6 +258,11 @@ export function consentLineFor(policy, trainerName = "your trainer") {
 // later policy edit can never retroactively change what someone agreed to —
 // and so there is a record of the exact wording shown, which is what makes an
 // electronic agreement worth anything in a dispute.
+// NOTE ON EVIDENCE: the research is explicit that acceptance needs a timestamp,
+// IP and the exact text version. IP and user-agent are deliberately NOT captured
+// here — anything the browser reports about itself is self-asserted and worth
+// little in a dispute. They must be stamped by the Cloud Function that records
+// the agreement (request.ip), which is where the checkout consent will be written.
 export function policySnapshot(policy, trainerName, extra = {}) {
   const p = policyOf({ sessionPolicy: policy || {} });
   return {
@@ -269,6 +274,49 @@ export function policySnapshot(policy, trainerName, extra = {}) {
     ...extra,
   };
 }
+// ─── Dispute evidence (S100c — from the chargeback research) ───────────────
+// A late-cancellation fee is the single most disputable charge this system can
+// make, and the research was blunt about two things:
+//  (1) the merchant does NOT choose the reason code — the issuer picks it from
+//      the client's story — so the record has to answer "no service received",
+//      "I cancelled", AND "I never authorized this" at the same time; and
+//  (2) Visa's Compelling Evidence 3.0 does NOT apply to consumer-dispute (13.x)
+//      codes, so there is no safe harbour to fall back on. The defence is
+//      entirely upstream: versioned terms, timestamped acceptance, and showing
+//      the lateness arithmetic so the issuer has to do no work.
+// This renders that arithmetic explicitly rather than leaving "it was late" as
+// an assertion. Pure + derived from stored facts, so it can't drift.
+export function cancellationEvidence(session, policy) {
+  if (!session || !session.startAt || !session.cancelledAt) return null;
+  const p = policyOf({ sessionPolicy: policy || {} });
+  const noticeMs = session.startAt - session.cancelledAt;
+  const noticeHrs = Math.round((noticeMs / 3600000) * 10) / 10;
+  const late = isLateCancel(session, p, session.cancelledAt);
+  const byClient = session.cancelledBy === session.clientUid;
+  const fmt = (ms) => new Date(ms).toISOString();
+  return {
+    sessionStart: fmt(session.startAt),
+    cancelledAt: fmt(session.cancelledAt),
+    cancelledBy: byClient ? "client" : "trainer",
+    noticeGivenHours: noticeHrs,
+    requiredNoticeHours: p.cancelType === "window" ? p.cancelWindowHours : null,
+    policyType: p.cancelType,
+    late,
+    chargeable: late && byClient,
+    feeCents: lateCancelFeeCents(session, p, session.cancelledBy, session.cancelledAt),
+    // The one-liner to paste into a representment.
+    summary: !byClient
+      ? `Cancelled by the trainer — not charged.`
+      : p.cancelType === "anytime"
+        ? `Cancelled ${noticeHrs}h before the session; policy allows free cancellation at any time — not charged.`
+        : p.cancelType === "never"
+          ? `Cancelled ${noticeHrs}h before the session; policy is no-free-cancellation, disclosed and accepted at purchase.`
+          : late
+            ? `Session started ${fmt(session.startAt)}. Policy required ${p.cancelWindowHours}h notice. Client cancelled ${fmt(session.cancelledAt)} — ${noticeHrs}h notice, i.e. ${Math.round((p.cancelWindowHours - noticeHrs) * 10) / 10}h inside the window. Fee charged per the terms accepted at purchase.`
+            : `Client cancelled ${noticeHrs}h before the session, meeting the ${p.cancelWindowHours}h requirement — not charged.`,
+  };
+}
+
 // Bump when the WORDING above changes, so snapshots stay interpretable.
 export const POLICY_TEXT_VERSION = 1;
 
