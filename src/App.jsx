@@ -9752,6 +9752,9 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   onSaveMeasurements, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise,
   onTrackerSync, onSetWeeklyRate, onSetDeficitMode, meUid: dashMeUid }) {
 
+  // Swipe-down to refresh the daily view (S104) — reuses the existing onRefresh
+  // (reloadPlanLive), which re-pulls the plan + today's log.
+  const pullIndicator = usePullToRefresh(onRefresh, !!onRefresh);
   const [tzSync, setTzSync] = useState(null); // null | "busy" | { ok, text }
   const [showCalendar, setShowCalendar] = useState(false);
   // ── Meal-card day navigation (S99) ──
@@ -9836,22 +9839,32 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const toastTimer = useRef(null); const flashTimer = useRef(null);
   const lastCommit = useRef({ water: null, weight: null });
   useEffect(() => () => { clearTimeout(toastTimer.current); clearTimeout(flashTimer.current); }, []);
-  // Streak milestones (S97, Kevin's pick #4): when the streak RISES to a
-  // milestone while the dashboard is mounted (first log of the day, incl. an
-  // AI-logged meal reloading the day), fire the small confetti + a toast.
-  // First render only ARMS the watcher — opening a plan that is already at a
-  // milestone must not celebrate every visit.
+  // Streak milestones (S97, Kevin's pick #4): fire the small confetti + toast
+  // when the streak RISES to a milestone. ONCE PER CALENDAR DAY (S104, Kevin:
+  // "every time I open the app I get the confetti").
+  //
+  // The old in-memory ref fired on every open: it armed at the mount value (0),
+  // then the async streak load (0 → real value) looked like a rise past a
+  // milestone, so any user sitting on a milestone celebrated every launch.
+  // Two guards now: (1) a persisted per-day key (caliq-streak-celebrated =
+  // "{milestone}@{YYYY-MM-DD}") so a given milestone celebrates at most once on
+  // a given local day across reloads; (2) require prev > 0, so the 0→loaded
+  // jump is never treated as a real increment.
   const prevStreakRef = useRef(null);
   useEffect(() => {
     const prev = prevStreakRef.current;
     prevStreakRef.current = streak;
-    if (prev == null || streak <= prev) return;
-    if ([3, 7, 14, 30, 50, 100, 365].includes(streak)) {
-      celebrate("streak");
-      setToast({ msg: `${streak}-day streak — keep it rolling!` });
-      clearTimeout(toastTimer.current);
-      toastTimer.current = setTimeout(() => setToast(null), 4000);
-    }
+    if (prev == null || prev <= 0 || streak <= prev) return; // arm on load; only a real climb celebrates
+    if (![3, 7, 14, 30, 50, 100, 365].includes(streak)) return;
+    const dayKey = `${streak}@${ymdLocal()}`;
+    let seen = "";
+    try { seen = localStorage.getItem("caliq-streak-celebrated") || ""; } catch (e) { /* private mode */ }
+    if (seen === dayKey) return; // already celebrated this milestone today
+    try { localStorage.setItem("caliq-streak-celebrated", dayKey); } catch (e) { /* best-effort */ }
+    celebrate("streak");
+    setToast({ msg: `${streak}-day streak — keep it rolling!` });
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 4000);
   }, [streak]);
   const confirmLogged = (field, msg) => {
     setToast({ msg });
@@ -10059,6 +10072,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   }
   return (
     <div className="dash">
+      {pullIndicator}
       {isRemote && (
         <div style={{ padding:"8px 12px", borderRadius:"8px", marginBottom:"10px",
           background:"rgba(8,220,224,.08)", border:"1px solid var(--accent)",
@@ -10135,6 +10149,16 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           </div>
         </div>
       </div>
+      {/* Discoverability (S104, Kevin: "I didn't see the weight projection").
+          The projected weight loss lives in the sheet the ring opens — say so,
+          right under the ring, so it's found. */}
+      <button onClick={()=>setShowBurnModes(true)}
+        style={{display:"block",margin:"6px auto 0",border:"none",background:"transparent",
+          color:"var(--accent)",cursor:"pointer",fontSize:".72rem",fontWeight:700,fontFamily:"inherit"}}>
+        <span style={{display:"inline-flex",alignItems:"center",gap:5}}>
+          <Icon name="scale" size={13} color="var(--accent)" />Tap the ring to see your projected weight loss
+        </span>
+      </button>
 
       {/* Which target is the ring using? (S97z, Kevin) Says plainly whether
           today's exercise is counted, and taps through to a chooser with both
@@ -10185,6 +10209,42 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           so the two places can never disagree. */}
       <BottomSheet open={showBurnModes} onClose={()=>setShowBurnModes(false)}
         title="Today's calorie target" icon="target">
+        {/* Weight projection FIRST (S104, Kevin: "I didn't see it") — the thing
+            he was looking for is now the top of the sheet, not buried below the
+            mode chooser. A pound of fat ≈ 3,500 cal, so lbs/wk = daily deficit
+            × 7 / 3,500; the faster "with your workouts" rate shows when the plan
+            counts exercise on top (accelerate). */}
+        {(() => {
+          const planDaily = dailyDeficitOf(data);
+          if (planDaily <= 0) return null;                  // maintenance — nothing to project
+          const weekBurn = DAYS.reduce((a, _d, i) =>
+            a + ((dayData[i] && dayData[i].burned) || 0) + ((strengthDayData[i] && strengthDayData[i].burned) || 0), 0);
+          const baseWk = (planDaily * 7) / 3500;
+          const withWk = baseWk + (isEatback(data) ? 0 : weekBurn / 3500);
+          const lb = (n) => `${n.toFixed(1)} lb`;
+          const row = (label, wk, strong) => (
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"5px 0",fontSize:".82rem"}}>
+              <span style={{color:"var(--muted)"}}>{label}</span>
+              <span style={{fontFamily:"'Sora',sans-serif",fontWeight:strong?800:600,color:strong?"var(--accent)":"var(--text)"}}>
+                {lb(wk)}<span style={{color:"var(--muted)",fontWeight:400,fontSize:".72rem"}}>/wk</span>
+                <span style={{color:"var(--muted)",fontWeight:400,fontSize:".72rem"}}>{"  ·  "}~{lb(wk * 4.345)}/mo</span>
+              </span>
+            </div>
+          );
+          return (
+            <div style={{marginBottom:"14px",padding:"12px",borderRadius:"12px",background:"var(--s2)",border:"1px solid var(--border)"}}>
+              <div style={{fontSize:".82rem",fontWeight:700,color:"var(--text)",marginBottom:"6px",display:"flex",alignItems:"center",gap:6}}>
+                <Icon name="scale" size={15} color="var(--accent)" />Projected weight loss
+              </div>
+              {row("Holding this plan", baseWk, !(withWk > baseWk + 0.05))}
+              {withWk > baseWk + 0.05 && row("With your workouts", withWk, true)}
+              <div style={{fontSize:".68rem",color:"var(--muted)",marginTop:"7px",lineHeight:1.45}}>
+                A pound of fat is about 3,500 calories. Real loss varies week to week —
+                the multi-week trend is what counts, not any single day.
+              </div>
+            </div>
+          );
+        })()}
         {manualTarget != null && (
           <div style={{fontSize:".82rem",color:"var(--text)",lineHeight:1.55,marginBottom:"10px"}}>
             You've set your own target of <strong style={{color:"var(--accent)"}}>{manualTarget.toLocaleString()} cal</strong>,
@@ -10264,44 +10324,6 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             This also updates your Full Plan, projections and coaching — it's one setting, shown in both places.
           </div>
         </div>
-
-        {/* What the deficit means for the scale (S102h, Kevin: "a formula that
-            tells someone how much weight they'll lose at a certain deficit").
-            A pound of fat ≈ 3,500 cal, so lbs/week = daily deficit × 7 / 3,500.
-            Projected from the PLAN's sustained deficit (the honest "if you hold
-            this" rate), with the faster with-workouts rate shown when the plan
-            counts exercise on top (accelerate mode). */}
-        {(() => {
-          const planDaily = dailyDeficitOf(data);          // e.g. 500/day
-          if (planDaily <= 0) return null;                  // maintenance — nothing to project
-          const weekBurn = DAYS.reduce((a, _d, i) =>
-            a + ((dayData[i] && dayData[i].burned) || 0) + ((strengthDayData[i] && strengthDayData[i].burned) || 0), 0);
-          const baseWk = (planDaily * 7) / 3500;            // lbs/week from diet alone
-          const withWk = baseWk + (isEatback(data) ? 0 : weekBurn / 3500);
-          const lb = (n) => `${n.toFixed(1)} lb`;
-          const row = (label, wk, strong) => (
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"5px 0",fontSize:".82rem"}}>
-              <span style={{color:"var(--muted)"}}>{label}</span>
-              <span style={{fontFamily:"'Sora',sans-serif",fontWeight:strong?800:600,color:strong?"var(--accent)":"var(--text)"}}>
-                {lb(wk)}<span style={{color:"var(--muted)",fontWeight:400,fontSize:".72rem"}}>/wk</span>
-                <span style={{color:"var(--muted)",fontWeight:400,fontSize:".72rem"}}>{"  ·  "}~{lb(wk * 4.345)}/mo</span>
-              </span>
-            </div>
-          );
-          return (
-            <div style={{marginTop:"12px",borderTop:"1px solid var(--border)",paddingTop:"12px"}}>
-              <div style={{fontSize:".8rem",fontWeight:700,color:"var(--text)",marginBottom:"6px",display:"flex",alignItems:"center",gap:6}}>
-                <Icon name="scale" size={15} color="var(--accent)" />What this means for the scale
-              </div>
-              {row("Holding this plan", baseWk, !(withWk > baseWk + 0.05))}
-              {withWk > baseWk + 0.05 && row("With your workouts", withWk, true)}
-              <div style={{fontSize:".68rem",color:"var(--muted)",marginTop:"7px",lineHeight:1.45}}>
-                A pound of fat is about 3,500 calories. Real loss varies week to week —
-                the trend over a few weeks is what counts. Consistency, not any single day, is what moves the scale.
-              </div>
-            </div>
-          );
-        })()}
       </BottomSheet>
 
       {/* Quick stats — tappable */}
@@ -16095,6 +16117,9 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
     } catch { setRecentFoods([]); }
   };
   useEffect(() => { load(); }, []);
+  // Swipe-down to refresh (S104, Kevin: "all pages that are not popups"). Pulls
+  // the active plan + today's log fresh from Firestore.
+  const pullIndicator = usePullToRefresh(() => load(activePlanId));
 
   // The client's start date = when they signed up (profile.createdAt). Read it
   // once so we can stamp it onto the plan (below) and gate the calendar.
@@ -16417,6 +16442,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   return (
     <div className="page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
+      {pullIndicator}
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
       <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
         <BrandLogo />
@@ -16892,12 +16918,14 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
 function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading,
   onCreateFolder, onRenameFolder, onDeleteFolder, onMoveProfile,
   confirmDeleteId, confirmFolderDel, onRecover, onExport, onImport,
-  onClipCopy, onClipPaste, showDashboardTab, onShowDashboard, onOpenClientPlan, onLinked, onCopyToLocal, onRename }) {
+  onClipCopy, onClipPaste, showDashboardTab, onShowDashboard, onOpenClientPlan, onLinked, onCopyToLocal, onRename, onPullRefresh }) {
 
   const [openFolders, setOpenFolders] = useState({});
   const [renamingId, setRenamingId] = useState(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [dragId, setDragId] = useState(null);
+  // Swipe-down to refresh the client/plan list (S104).
+  const pullIndicator = usePullToRefresh(onPullRefresh, !!onPullRefresh);
   const [dragOverFolder, setDragOverFolder] = useState(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [showNewFolder, setShowNewFolder] = useState(false);
@@ -16986,6 +17014,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
   return (
     <div className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
+      {pullIndicator}
       {/* Slim brand header — min-height clears the fixed hamburger (App chrome). */}
       <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
         <BrandLogo />
@@ -20547,7 +20576,7 @@ export default function App() {
       showDashboardTab={isTrainerHome} onShowDashboard={()=>setHomeTab("dashboard")}
       onOpenClientPlan={openClientPlan}
       onLinked={removeLocalProfileById} onCopyToLocal={copyClientToLocal}
-      onRename={renameProfile}
+      onRename={renameProfile} onPullRefresh={reloadProfilesIndex}
     /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
   }
 
