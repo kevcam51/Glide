@@ -9966,35 +9966,21 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   // there would double-count it. Same reason a manual target hides the choice.
   const canChooseBurnMode = !!onSetDeficitMode && !trackerTdee && manualTarget == null;
 
-  // Today's deficit under the wheel (S95, rewritten S102c — Kevin: "1,084 left
-  // but −1,958 deficit doesn't seem right"). The old figure was maintenance −
-  // logged AT THIS MOMENT, which mid-day counts every not-yet-eaten calorie as
-  // deficit — alarming and wrong-feeling at 2pm, only true at midnight.
-  // The honest number: the deficit you're ON PACE for — maintenance minus the
-  // target you're eating toward. Stable all day and it matches the plan's
-  // promised rate. Once eating passes the target it live-shrinks to the real
-  // arithmetic (maintenance − logged), hitting zero at maintenance.
-  // Maintenance = the watch's measured burn when we have it, else TDEE + what
-  // was actually burned training.
+  // Deficit / surplus under the wheel — measured against TODAY'S TARGET
+  // (S102f, Kevin's spec, replacing the maintenance-based figure that confused
+  // him three times running):
+  //   target 3,000, ate 1,500  →  "−1,500 deficit"  (green)
+  //   target 3,000, ate 3,200  →  "+200 surplus"    (red)
+  // Simple, literal, and it moves with every meal logged. It deliberately does
+  // NOT reason about maintenance, TDEE or workout burn — those already shaped
+  // the target itself, so measuring against the target keeps one honest story
+  // instead of two competing ones. (Burn still reaches this number the right
+  // way: in eat-back mode a workout raises the target, which widens the gap.)
   // Must stay below `logged` — these are consts, so reading it above its
   // declaration is a TDZ throw that blanks the whole dashboard.
-  // ⚠️ ONLY BURN THAT WAS ACTUALLY EARNED COUNTS (S102e — Kevin: Jarvis showed
-  // "on pace for −1,191" with 2,336 remaining). Every figure reconciled: TDEE
-  // 3,591 → target 3,091 → logged 755 → 2,336 remaining ✓, and 1,191 = the 500
-  // diet deficit + 691 from his scheduled 60-min walk. But his check-in for
-  // that day was EMPTY — he hadn't walked yet. The dashboard was banking a
-  // workout that hadn't happened, promising 2.4 lb/wk against a 1 lb/wk plan.
-  // A SCHEDULE is an intention; only a tracker reading or a workout marked done
-  // is evidence. Unearned scheduled burn no longer inflates the deficit — it
-  // appears the moment it's real, which is also what makes the number move in
-  // real time as the day is logged.
-  const workedOutToday = !!(data.checkIns || []).find((c) => c && c.date === ymdLocal() && c.workedOut);
-  const earnedBurn = trackerActiveBurn != null ? trackerActiveBurn : (workedOutToday ? todayTotalBurn : 0);
-  const maintenanceToday = trackerTdee || (tdee + earnedBurn);
-  const todayDeficit = Math.max(0, Math.round(maintenanceToday - Math.max(logged, target)));
-  const deficitIsPace = logged < target; // still eating toward the target → it's a projection
-  // Scheduled-but-not-done burn is shown as an opportunity, not banked.
-  const unearnedBurn = trackerActiveBurn == null && !workedOutToday ? todayTotalBurn : 0;
+  const vsTarget = Math.round(target - logged);
+  const todayDeficit = Math.max(0, vsTarget);   // under target
+  const todaySurplus = Math.max(0, -vsTarget);  // over target
   const overCals = remaining < 0;
   const pct = target > 0 ? Math.min(100, Math.round((logged / target) * 100)) : 0; // arc caps at full
   // Macro targets. Default (estimates): protein 1g/lb bodyweight, fat 28% of
@@ -10112,33 +10098,20 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
             <div style={{fontFamily:"'Sora',sans-serif",fontSize:"2.2rem",color:overCals?"var(--red)":"var(--accent)",lineHeight:1}}>{remaining.toLocaleString()}</div>
             <div style={{fontSize:".65rem",color:overCals?"var(--red)":"var(--muted)",letterSpacing:".5px"}}>{overCals?"CAL OVER":"CAL REMAINING"}</div>
-            {/* Deficit underneath (S95, Kevin): "remaining" answers "can I eat?",
-                deficit answers "am I actually losing?" — the second is the one
-                that moves the scale, so show both. Measured against MAINTENANCE
-                (TDEE + today's burn, or the watch's measured burn), NOT the
-                target, so it stays true no matter the pace or approach chosen.
-                Only once something is LOGGED: before that it just reports your
-                whole maintenance burn (−2,429 at 5am), which reads like you're
-                crushing it when you simply haven't eaten yet. Also hidden at or
-                above maintenance — a surplus isn't a "deficit". */}
-            {logged > 0 && todayDeficit > 0 && (
-              // Stacked tiny lines (S102d, Kevin: the one-liner overflowed the
-              // 150px ring on his phone). The qualifier sits above the number,
-              // so the widest line is just "−1,958 deficit" — always inside
-              // the circle.
+            {/* Deficit / surplus vs today's target (S102f, Kevin's spec).
+                Green when under target, RED "surplus" when over. Only once
+                something is logged — at 6am "0 eaten" would otherwise read as
+                a full-target deficit, which is the same trap that made the
+                earlier maintenance version feel wrong. Two stacked lines so
+                the text never overflows the 150px ring. */}
+            {logged > 0 && (todayDeficit > 0 || todaySurplus > 0) && (
               <div style={{marginTop:"3px",textAlign:"center",lineHeight:1.25}}>
-                {deficitIsPace && (
-                  <div style={{fontSize:".5rem",color:"var(--green)",opacity:.75,letterSpacing:".4px",textTransform:"uppercase"}}>on pace for</div>
-                )}
-                <div style={{fontSize:".62rem",color:"var(--green)",fontWeight:700,letterSpacing:".3px"}}>
-                  −{todayDeficit.toLocaleString()} deficit
+                <div style={{fontSize:".62rem",fontWeight:700,letterSpacing:".3px",
+                  color: todaySurplus > 0 ? "var(--red)" : "var(--green)"}}>
+                  {todaySurplus > 0
+                    ? `+${todaySurplus.toLocaleString()} surplus`
+                    : `−${todayDeficit.toLocaleString()} deficit`}
                 </div>
-                {/* The scheduled workout, offered rather than assumed. */}
-                {unearnedBurn > 0 && (
-                  <div style={{fontSize:".5rem",color:"var(--muted)",letterSpacing:".2px",marginTop:"1px"}}>
-                    +{unearnedBurn.toLocaleString()} if you train
-                  </div>
-                )}
               </div>
             )}
           </div>
