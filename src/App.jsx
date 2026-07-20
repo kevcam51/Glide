@@ -9942,15 +9942,21 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   // there would double-count it. Same reason a manual target hides the choice.
   const canChooseBurnMode = !!onSetDeficitMode && !trackerTdee && manualTarget == null;
 
-  // Today's real deficit (S95): how far under MAINTENANCE you are right now —
-  // maintenance being the watch's measured burn when we have it, else TDEE plus
-  // whatever you actually burned training. Deliberately independent of the pace
-  // and of eat-back/accelerate: those pick a TARGET, this reports what the body is
-  // actually doing, which is what moves the scale.
+  // Today's deficit under the wheel (S95, rewritten S102c — Kevin: "1,084 left
+  // but −1,958 deficit doesn't seem right"). The old figure was maintenance −
+  // logged AT THIS MOMENT, which mid-day counts every not-yet-eaten calorie as
+  // deficit — alarming and wrong-feeling at 2pm, only true at midnight.
+  // The honest number: the deficit you're ON PACE for — maintenance minus the
+  // target you're eating toward. Stable all day and it matches the plan's
+  // promised rate. Once eating passes the target it live-shrinks to the real
+  // arithmetic (maintenance − logged), hitting zero at maintenance.
+  // Maintenance = the watch's measured burn when we have it, else TDEE + what
+  // was actually burned training.
   // Must stay below `logged` — these are consts, so reading it above its
   // declaration is a TDZ throw that blanks the whole dashboard.
   const maintenanceToday = trackerTdee || (tdee + todayTotalBurn);
-  const todayDeficit = Math.max(0, Math.round(maintenanceToday - logged));
+  const todayDeficit = Math.max(0, Math.round(maintenanceToday - Math.max(logged, target)));
+  const deficitIsPace = logged < target; // still eating toward the target → it's a projection
   const overCals = remaining < 0;
   const pct = target > 0 ? Math.min(100, Math.round((logged / target) * 100)) : 0; // arc caps at full
   // Macro targets. Default (estimates): protein 1g/lb bodyweight, fat 28% of
@@ -10079,7 +10085,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 above maintenance — a surplus isn't a "deficit". */}
             {logged > 0 && todayDeficit > 0 && (
               <div style={{fontSize:".62rem",color:"var(--green)",fontWeight:700,letterSpacing:".3px",marginTop:"3px"}}>
-                −{todayDeficit.toLocaleString()} deficit
+                {deficitIsPace ? `on pace for −${todayDeficit.toLocaleString()} deficit` : `−${todayDeficit.toLocaleString()} deficit`}
               </div>
             )}
           </div>
