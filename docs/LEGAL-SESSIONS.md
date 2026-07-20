@@ -830,3 +830,106 @@ is what keeps 5.12.6 on top. So:
    would breach 5.12.6 (a merchant-agreement violation, independent of consumer law) AND, per §7,
    be legally ineffective anyway since Reg Z duties run against the issuer, not the merchant.
    Belt-and-braces wrong: prohibited by contract, useless in law.
+
+
+---
+
+## 13. Additional state findings (added S100d — sub-agents that reported after the main pass)
+
+Section 3 above marked most states as gaps. Several were filled afterward. **All still require
+counsel; confidence marked per item.**
+
+### 13.1 ⭐ THE PATTERN THAT MATTERS: these statutes key on PREPAYMENT, not on premises
+
+The consistent finding across every state verified is that the trigger is **taking money in
+advance for services not yet rendered** — not owning a gym. Ohio's statute does not even use
+fitness vocabulary in its title: it governs **"prepaid entertainment contracts."**
+
+Two structural traps follow, and both apply to Glide by design:
+1. **Disjunctive definitions.** CA, NY, IL, WA, OH all cover a seller offering "instruction,
+   training or assistance **or** the facilities…". The "or" means bare instruction with no gym is
+   covered. *"I'm a mobile trainer, not a gym"* is not the defence it feels like.
+2. **Prepayment-triggered obligations.** Florida's exemption and Maryland's bond both turn on how
+   far in advance money is collected.
+
+### 13.2 The service-window thresholds — the single most actionable finding
+
+| State | Threshold | Effect of staying under it |
+|---|---|---|
+| **Florida** | services rendered **≤30 days** after payment | keeps the personal-trainer exemption (§501.0125 prong c) |
+| **Pennsylvania** | services rendered over **≤3 months** | the Health Club Act does not apply **at all** — no registration, no bond, no mandated clauses, no criminal exposure |
+| **Maryland** | **>3 months** prepaid, or >$200 initiation | triggers the bond |
+
+**This is a product design lever, not just a disclosure problem.** A pack structured to be
+*consumed* inside the window sits outside these statutes entirely, rather than merely being
+well-disclosed inside them. The legally load-bearing field is the **service window**, not the
+price or the session count.
+
+### 13.3 Void-contract states — where a late-cancel fee may be uncollectable
+- **California** (Civ. Code §§1812.80–.97, verified): non-compliant contracts **"void and
+  unenforceable as contrary to public policy"** (§1812.91) + **treble damages and attorney fees**
+  (§1812.94). Prepayment cap **$4,400**. Cooling-off **5 business days**, scaling to 20/30/45 days
+  for higher-value contracts.
+- **Illinois** (815 ILCS 645, verified): contracts void and unenforceable, **express anti-waiver**
+  (you cannot draft around it), treble + fees. Prepay cap **$2,500/year**. **No** registration or
+  bond — the exposure is purely contractual. ⚠️ A widely-cited law-firm page claiming Illinois
+  requires registration + bond **appears to be wrong** — the Act has no such sections.
+- **Ohio** (ORC §§1345.41–.50, verified): violation is a **deceptive act** under the CSPA
+  (§1345.48) → treble + fees. Cooling-off runs from **when service first becomes available**, not
+  signing.
+- **Pennsylvania** (73 P.S. §§2161–2178, verified): contracts **voidable** (not void) — and
+  *Allen v. Holiday Universal* held voidable "implicitly contemplates ratification", so a member
+  who keeps paying may ratify. Anti-waiver at §2170. UTPCPL linkage is **express in the statute**
+  (§2175(a)), but treble/fees there are **discretionary, not automatic**, and require an
+  "ascertainable loss". Saturday **is** a business day in PA. Passive auto-renewal is
+  **prohibited** — §2164(b) requires affirmative acceptance at each term.
+
+**Why this matters more than a fine:** in a void-contract state, non-compliance does not merely
+risk a penalty — it can make the **late-cancellation fee itself uncollectable**, which is exactly
+the charge most likely to be disputed.
+
+### 13.4 Texas — no trainer exemption at all
+Occ. Code ch. 702 (definitions at **§702.003**, not §702.001). "Health spa" = a business offering
+"instruction in **or** the use of facilities". **No exemption for trainers without premises**,
+unlike Florida. Whether a finite prepaid package is a **"membership"** is unresolved — a genuine
+ambiguity, not a clean out. Registration with the **Secretary of State**; bond **$20k–$50k**
+(tiers unverified).
+
+### 13.5 Auto-renewal laws — likely the sharper edge, and separate from fitness statutes
+These bind **any** recurring charge regardless of fitness-statute coverage.
+- **California AB 2863** (Bus. & Prof. Code §§17601–17602 — *not* the health-studio statute),
+  operative **July 1, 2025**: express affirmative consent, same-medium cancellation, **consent
+  records kept 3+ years**, annual renewal reminders.
+- **New York GBL §527-a**: cancellation as easy as signup, through **every** medium that accepted
+  consent. Plus NY's Feb 2025 gym law (GBL §624): cancellations processed within **10 business
+  days**, and **if signed up via a website, cancellation must be accepted through that website**.
+- **Connecticut SB 3** — creates a **private right of action**, effective July 1 2026.
+- Colorado SB 25-145; NYC rule (Oct 2026); Louisiana (Jan 2027).
+- **Federal:** FTC click-to-cancel **vacated 8th Cir., July 8 2025**. **State law is now the
+  binding constraint — the strictest state sets the product spec.**
+
+### 13.6 Still unverified — do NOT assume "probably fine"
+New Jersey (definitions at **N.J.S.A. 56:8-42**, not 56:8-39; sits inside the Consumer Fraud Act,
+so **treble damages + mandatory fees** may attach — potentially the worst remedy stack found, and
+it is unverified), Michigan, Georgia, Arizona, Colorado. **North Carolina: the commonly cited
+Ch. 66 arts. 26/27 are farm machinery and sales commissions — do not cite them.**
+
+Also unresolved and important: **whether a white-label SaaS platform is itself a covered
+"seller"**, an aider/abettor, or neither. Nothing was found on this. It determines whether exposure
+sits with the trainer, with Glide, or both.
+
+### 13.7 What none of this covers
+**No verified statute addressed per-session late-cancellation or no-show fees directly.** These
+statutes govern contract formation, term, prepayment and cancellation *rights*. The risk to a
+late-cancel fee is **indirect** — via void-contract provisions (§13.3) and general UDAP
+unfairness/disclosure standards. That is a genuine gap in the research, not a clean bill of health.
+
+### 13.8 Payment-processor dispute economics (verified)
+- **PayPal**: dispute rate ≥**1.5%** (measured **by dollar amount**, counting only INR/SNAD claims)
+  over 3 months with >100 transactions → **$30** high-volume fee instead of **$15**; card
+  chargebacks **$20**. At high volume, fees apply **win or lose**, and Seller Protection can be
+  lost. Fees are **waived** if resolved with the buyer before escalation → *resolve fast*.
+- **Square**: publishes **no** numeric dispute threshold — purely discretionary ("if we believe").
+  Currently **$0** dispute fee in practice, but Payment Terms §21/§22 reserve the right to charge
+  on notice, create reserves, delay payouts, or terminate.
+- Implication either way: **the cheapest dispute is the one resolved directly with the client.**
