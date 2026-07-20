@@ -125,3 +125,44 @@ Kevin (Jul 19) refined the model — this supersedes per-session charging as the
 key + User ID as secrets), then the completed-session marker, then Sunday billing + the decline
 flow. Timing: after the S99 concerns batch (macro-save feedback, measurements asterisks, ID
 numbers) — Kevin's call, Jul 19.
+
+## ✅ S100 — SHIPPED: phases 1 & 2 (scheduling + the red line)
+
+**Phase 1 — sessions model + scheduling (LIVE, rules published).**
+`sessions/{sid}` = `{participants[2], trainerUid, clientUid, startAt, durationMin,
+status: scheduled|cancelled, title, location, priceCents, createdBy/At, updatedAt,
+cancelledBy/At, cancelReason}`. Queried via `where('participants','array-contains',uid)`
+— a single-field index, so **no composite index deploy is needed**; ordering is client-side.
+- Only a TRAINER books, only for a genuinely linked client (`isTrainerOf`). Either side
+  cancels; a client may ONLY cancel — not reschedule, re-price, retitle, or un-cancel.
+- Identity fields (participants/trainerUid/clientUid/createdBy/createdAt) immutable.
+- Participants cannot DELETE (that would erase billing history) — cancel instead; admin only.
+- **130 emulator tests** (was 87). Verified against PROD with raw writes that bypass the
+  client-side allowlist — the first attack pass went through `updateSession`'s own field
+  filter and reported false "ALLOWED", proving nothing. Always attack with raw `updateDoc`.
+- UI: trainer Sessions panel per client card (book/reschedule/cancel + upcoming count);
+  client NEXT SESSION card; calendar cyan dot + day-view detail block. Calendar sessions are
+  scoped to the owner's own view (a trainer viewing a CLIENT's plan must not see their other
+  clients' sessions painted on it).
+
+**Phase 2 — the red line (LIVE).** `sessionsMarkCompleted` (functions/sessions.js), an
+`onSchedule("every 15 minutes")` sweep, stamps `completedAt` on any session whose END time
+has passed. **This stamp is what Sunday billing bills from**, so only the Admin SDK writes it.
+- ⚠️ **`completedAt`, NOT `status:"completed"`** — the rules only permit a trainer update whose
+  RESULTING status is scheduled|cancelled, so writing `status:"completed"` would lock the
+  trainer out of their own past session and they could never waive a no-show before it bills.
+  `status` = booking state (owned by the two people); `completedAt` = billing fact (server).
+- Stamps the REAL end time, not when the sweep noticed. **Idempotent** — never re-stamps, so
+  an overlapping run or retry cannot double-mark. Skips cancelled. 14-day lookback, range on
+  ONE field (startAt) → single-field index; capped 500/run.
+
+### ⏭️ NEXT: phase 3 — Sunday batch billing (REAL MONEY — build in Stripe TEST mode first)
+Everything it needs already exists: `completedAt` (what to bill), `priceCents` (how much),
+`settled`/`chargeId` (already server-only + rules-tested). Build order:
+1. Card-on-file for clients (SetupIntent + saved payment method) + explicit auto-charge consent.
+2. Session credits/packages — decrement BEFORE any card charge (Kevin's rule: package first).
+3. The Sunday weekly Function: per client, sum sessions with `completedAt` set, `status !=
+   cancelled`, `settled == null` → one off-session PaymentIntent → write `settled` +
+   `chargeId` in the SAME transaction (idempotency).
+4. Decline → `sessionBillingHold` + notify BOTH sides + block new sessions until cleared.
+Still open for Kevin: late-cancel/no-show window, and whether packs ship in v1.
