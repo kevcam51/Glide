@@ -1,5 +1,99 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S98 (Jul 19): burn/target chooser, PWA speed, resume-refresh, icons, notes
+_All pushed (`origin/main` @ `05ff6bd`), tree clean, functions deployed. Firebase `calorieiq-29762`;
+model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`._
+
+### ⏭️ START HERE — two features Kevin asked for, both specced, NEITHER started
+
+**1. Photo uploader for the AI Estimate in Meals & Food Today. YES this is possible** — and it is
+smaller than it looks. `estimateFood` (functions/aichat.js ~L612) already calls the vision-capable
+`claude-sonnet-4-6`; it just sends text today:
+`messages:[{role:"user", content: \`Estimate: ${desc}\`}]`.
+- Backend: accept an optional `image` (base64 data URL) and send a CONTENT ARRAY —
+  `[{type:"image",source:{type:"base64",media_type,data}},{type:"text",text:"Estimate this meal"}]`.
+  Copy the validation from `aiChat`'s `sanitizeContent` (jpeg/png/webp/gif, ≤7MB) — do not re-invent it.
+- Frontend: `MealLog`'s AI-estimate block already has the button + `aiErr` state. Reuse
+  `downscaleImage()` and the hidden `<input type="file" accept="image/*" capture="environment">`
+  from `AIChatPanel` (both are module-level, already written and proven).
+- **Kevin's rule: do NOT store the photo.** It goes to the model and is discarded — he explicitly
+  dropped photo storage earlier this session ("lets not store photos. we don't need it"). This keeps
+  Storage costs at zero and avoids a PII surface.
+- Deploy note: `estimateFood` is its OWN function — deploying it does NOT require the 4-AI-fn dance
+  (that is only for `aitools.js` changes).
+
+**2. Left/right day arrows on "Meals & Food Today"** so a client can log yesterday / 3 days ago, with
+the title showing the date they moved to (only say "Today" when it IS today).
+- Most plumbing EXISTS: `MealLog` already takes `onReadDay`, `onListLoggedDays`, `dateKey` (see its
+  signature ~L7838), and **CalendarView's Day view already wires MealLog to an arbitrary date** with
+  working date-scoped `addMeal` / `removeMeal` / `editMeal` — copy those, do not write new ones.
+- The dashboard's MealLog is currently hardcoded to today: `meals={dailyLog.meals}`,
+  `onAddMeal={onAddMeal}`, `dateKey={ymdLocal()}` — those write via `persistLog` (today only).
+  Add a `selectedDate` state in DailyDashboard seeded from `useTodayKey()`, and swap in
+  `onWriteDay`-based handlers when the date is not today.
+- **Gotchas:** `useTodayKey()` rolls over at midnight — seed state FROM it, never recompute inline
+  (S85 corruption bug). Do NOT let the arrows affect the streak, ring, or week-summary — those are
+  deliberately today-only. Block navigating into the future.
+
+### ✅ What S98 shipped (all verified live)
+- **Target chooser on the CAL REMAINING wheel** (`798902b`→`9d4cb09`): tap the wheel → pick "Target
+  without workout burn" vs "with", both with real numbers; pick becomes the default. Writes the
+  EXISTING `data.deficitMode`, so Full Plan / Results / share card / server AI targets all follow.
+  Under the wheel: `1,929 target +384 burn (tracker) = 2,313 cal`, active figure highlighted.
+  Matching burn breakdown in Food & Calories while logging.
+- **New plans default to NO burn counted** (`104a890`) — set explicitly at all 4 creation sites
+  (local plan, client's own, trainer-for-client, AI `create_plan`). **Deliberately NOT changed in
+  `isEatback`/`EMPTY_DATA`** — those are also the merge base when LOADING, so moving the fallback
+  would silently re-target every existing plan. Unset === existing === eat-back, forever.
+- **THE BIG LESSON (cost 4 rounds of "I still don't see it")**: the chooser was gated on
+  `canChooseBurnMode` + `scheduledBurn > 0`. Kevin has a Garmin, so his burn came from `burnShown`
+  (tracker-preferred) while `scheduledBurn` was 0 → everything silently hid, and a manual target or
+  `wearableAdjust` also killed it. **Every surface now uses `burnShown`, and the wheel ALWAYS
+  responds** — when the choice can't apply it explains why (manual target / tracker adjustment) and
+  how to restore it. *A tap that does nothing is worse than no tap.*
+- **PWA cold start** (`ddb6273`): root cause was the SW, not bundle size — navigation was
+  network-first, so every launch blocked on the HTML round-trip while all JS sat cached. Now races
+  the network against a 1200ms timeout. **Side effect to remember: a fresh deploy can need ONE extra
+  app open to appear.** Also lazy-loaded Showcase + @simplewebauthn (~40kB off boot). Main chunk is
+  still ~1.38MB — real code-splitting of the 19k-line App.jsx is the next perf win.
+- **Connected clients not loading after PWA wake** (`1ab7c33`): loaders ran once on mount and a
+  resume doesn't remount, so a failed wake-fetch never retried; AND `loadClients` swallowed the
+  error and `setClients([])`, rendering "no clients" permanently. New `useRefreshOnResume`
+  (visibilitychange/focus/online, 20s debounce) + keep last good roster. Added `usePullToRefresh`.
+  **⚠️ Testing note: the headless preview tab reports `visibilityState:"hidden"`, so resume logic
+  silently no-ops there — you must override it to test.**
+- **Rest days show the week** (`05ff6bd`): wizard cardio DOES save (verified in storage); the panel
+  just only ever showed today, so a Sunday looked like data loss. Now lists YOUR WEEK beneath.
+- **Icons**: strength/cardio figures from game-icons.net (CC BY 3.0, credited in CREDITS.md) —
+  filled silhouettes, because organic shapes turn to mush as line art at 18px. Geometric icons
+  (stairs, target, chart) we draw ourselves. `ALWAYS_FILL` set in icons.jsx forces the solid ones.
+- **Photo accuracy**: vision portion-calibration halved the error (59%→30% MAPE, bias corrected).
+  Regression-test any prompt/model change with `node scripts/photo-eval.mjs 8`.
+- Also: back buttons top-LEFT with centred titles, scroll-jump on sheet close fixed, streak
+  milestones + streak-aware reminder push, meals saved/re-logged as whole meals, AI-logged foods now
+  reach the food library.
+
+### ⏭️ Kevin's queue after those two
+- Notes: private vs shared for BOTH trainer and client; the check-in "notes" box should open a
+  bigger editor (NotesPanel + privkv already exist — see docs/NOTES-PLAN.md).
+- Stripe LIVE-mode swap (real-card smoke + attorney pass) · Acuity sessions (needs his API key).
+- TTS coach voice (#7 from the API research); SMS reminders later.
+- Saved API research: `/private/tmp/.../tasks/wl1qyo4ey.output` — ranked list w/ verified pricing.
+
+### Standing rules (do not re-learn)
+- New features use `src/icons.jsx` house icons, **never emoji** (emoji are fine in OUTGOING text like
+  the share card — Kevin's call).
+- Deploy ALL FOUR AI fns when `aitools.js` changes (aiChat, aiChatStream, logMeal, setWorkoutSchedule).
+- `.page-transition` keeps a transform → any fixed overlay must `createPortal(…, document.body)`.
+- Local dates via `ymdLocal`/`useTodayKey` — never UTC "today".
+- kv range queries use the `\uf8ff` ESCAPE sequence in source (a raw char silently breaks it).
+- `Number(null) === 0` — screen null/""/undefined BEFORE trusting a 0.
+- Firebase creds expire constantly: `npx firebase-tools login --reauth --no-localhost`.
+- Verify by DRIVING the app and MEASURING, not by reading the diff — this session, three separate
+  "it works" conclusions were wrong until measured (grid centring, resume refresh, the burn gate).
+
+---
+
 ## ⚡ S97s (Jul 18): four phone-UX fixes — all live (`6450786`)
 1. **Meals & Food Today header** no longer stacks/overflows on a phone — it used
    `.sec-title` (a full-width heading whose `::after` divider has `flex:1` and eats the row).
