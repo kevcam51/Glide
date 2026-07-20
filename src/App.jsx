@@ -7828,11 +7828,10 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
     <div style={{ position: "fixed", inset: 0, zIndex: 1600, background: "var(--bg)", color: "var(--text)",
       fontFamily: "var(--font-sans)", overflowY: "auto", padding: "calc(14px + env(safe-area-inset-top,0px)) 14px 32px" }}>
       <div style={{ maxWidth: 560, margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 92, alignItems: "center", gap: 10, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 92, alignItems: "center", gap: 10, marginBottom: mode !== "meals" && mealType != null ? 2 : 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
             <Icon name="book" size={20} color="var(--accent)" />
-            <span style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem", fontWeight: 700 }}>{mode === "meals" ? "Meal library" : "Food library"}</span>
-            {mode !== "meals" && mealType != null && <span style={{ fontSize: ".76rem", color: "var(--accent)", fontWeight: 700, whiteSpace: "nowrap" }}>· adds to {mealType || "Other"}</span>}
+            <span style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem", fontWeight: 700, whiteSpace: "nowrap" }}>{mode === "meals" ? "Meal library" : "Food library"}</span>
           </div>
           {/* Back arrow, top-right (S97, Kevin) — consistent way back on every page. */}
           <button onClick={onClose} aria-label="Back"
@@ -7842,6 +7841,13 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
             <Icon name="back" size={17} color="var(--accent)" />Back
           </button>
         </div>
+        {/* Where a pick lands — its own centred line (S102, Kevin: inline it
+            crowded the title on a phone; symmetric beats clever). */}
+        {mode !== "meals" && mealType != null && (
+          <div style={{ textAlign: "center", fontSize: ".78rem", color: "var(--accent)", fontWeight: 700, marginBottom: 10 }}>
+            adds to {mealType || "Other"}
+          </div>
+        )}
 
         {/* Foods vs Meals (S97) — Meals = whole saved/previous combos of foods. */}
         {onToggleSaveMeal && (
@@ -8005,6 +8011,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   // AI estimate (S89c): for foods the library doesn't have — the AI fills
   // calories + macros from the typed description; the user tweaks, then Adds.
   const [aiBusy, setAiBusy] = useState(false);
+  const [aiMode, setAiMode] = useState(null); // 'text' | 'photo' — which estimate is running (S102 bug: both buttons showed "Estimating…")
   const [aiNote, setAiNote] = useState("");
   const [aiErr, setAiErr] = useState("");
   // After an AI estimate we keep the per-1-serving values so a servings stepper
@@ -8071,7 +8078,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
     if (aiBusy) return;
     // With a photo the description is optional — it just adds context.
     if (!q && !image) { setAiErr("Type the food first — e.g. \"chicken burrito\" or \"2 eggs and toast\"."); return; }
-    setAiBusy(true); setAiErr(""); setAiNote("");
+    setAiBusy(true); setAiMode(image ? "photo" : "text"); setAiErr(""); setAiNote("");
     try {
       const r = await callEstimateFood(image ? { food: q, image } : { food: q });
       const d = r.data || {};
@@ -8098,7 +8105,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
       else if (image) setAiErr("Couldn't read that photo — try a clearer shot, or type the food instead.");
       else setAiErr("Couldn't estimate that — try rephrasing (e.g. \"2 eggs and toast\").");
     }
-    setAiBusy(false);
+    setAiBusy(false); setAiMode(null);
   };
   // Photo estimate: downscale to a ~1024px JPEG (caps upload + vision tokens),
   // hand it to the same estimate call, then discard it. Photos are NEVER stored.
@@ -8485,7 +8492,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
               style={{ border:"none", background:"transparent", color:"var(--accent)", cursor:"pointer",
                 fontSize:".74rem", fontWeight:700, padding:"0", textAlign:"left", opacity: aiBusy ? .6 : 1 }}>
               <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}>
-                <Icon name="sparkle" variant="solid" size={13} />{aiBusy ? "Estimating…" : "AI estimate"}
+                <Icon name="sparkle" variant="solid" size={13} />{aiBusy && aiMode === "text" ? "Estimating…" : "AI estimate"}
               </span>
             </button>
             {/* Photo estimate — snap the plate instead of typing it. The photo is
@@ -8494,10 +8501,10 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
               style={{ border:"none", background:"transparent", color:"var(--accent)", cursor:"pointer",
                 fontSize:".74rem", fontWeight:700, padding:"0", textAlign:"left", opacity: aiBusy ? .6 : 1 }}>
               <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}>
-                <Icon name="camera" size={13} />{aiBusy ? "Estimating…" : "Estimate from photo"}
+                <Icon name="camera" size={13} />{aiBusy && aiMode === "photo" ? "Estimating…" : "Estimate from photo"}
               </span>
             </button>
-            <input ref={photoInputRef} type="file" accept="image/*" capture="environment"
+            <input ref={photoInputRef} type="file" accept="image/*"
               onChange={onPhotoPicked} style={{ display:"none" }} />
           </div>
           {scanErr && <div style={{ fontSize:".74rem", color:"var(--red)", marginTop:"6px" }}>{scanErr}</div>}
@@ -8822,13 +8829,17 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
               dashboard. The label only says "Today" when it actually IS today —
               otherwise the date is spelled out so a back-dated entry is obvious. */}
           {onDayStep ? (
-            <span onClick={(e) => e.stopPropagation()} style={{ display:"inline-flex", alignItems:"center", gap:"6px" }}>
+            <span onClick={(e) => e.stopPropagation()} style={{ display:"inline-flex", alignItems:"center" }}>
               <span>Meals &amp; Food</span>
-              <button onClick={() => onDayStep(-1)} aria-label="Previous day" style={dayNavBtn}>‹</button>
-              <span style={{ minWidth:"96px", textAlign:"center", fontSize:".82rem",
-                color: dayLabel === "Today" ? "var(--text-secondary)" : "var(--accent)", fontWeight:700 }}>{dayLabel}</span>
-              <button onClick={() => canGoNext && onDayStep(1)} disabled={!canGoNext} aria-label="Next day"
-                style={{ ...dayNavBtn, opacity: canGoNext ? 1 : .35, cursor: canGoNext ? "pointer" : "default" }}>›</button>
+              {/* The day-nav is its own tight group (S102, Kevin): clear air
+                  after the title, arrows hugging the date they change. */}
+              <span style={{ display:"inline-flex", alignItems:"center", gap:"2px", marginLeft:"18px" }}>
+                <button onClick={() => onDayStep(-1)} aria-label="Previous day" style={dayNavBtn}>‹</button>
+                <span style={{ minWidth:"76px", textAlign:"center", fontSize:".82rem",
+                  color: dayLabel === "Today" ? "var(--text-secondary)" : "var(--accent)", fontWeight:700 }}>{dayLabel}</span>
+                <button onClick={() => canGoNext && onDayStep(1)} disabled={!canGoNext} aria-label="Next day"
+                  style={{ ...dayNavBtn, opacity: canGoNext ? 1 : .35, cursor: canGoNext ? "pointer" : "default" }}>›</button>
+              </span>
             </span>
           ) : "Meals & Food Today"}
         </div>
@@ -15632,7 +15643,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               </div>
             )}
             <div className="flex flex-wrap items-center gap-2">
-              <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFile} />
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
               <button onClick={pickImage} disabled={busy || recording || transcribing} aria-label="Add a photo" title="Photo of your meal"
                 className="flex items-center justify-center rounded-xl border border-border bg-surface2 px-3 py-2.5 text-fg cursor-pointer disabled:opacity-50 hover:text-primary">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[22px] h-[22px]">
