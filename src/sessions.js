@@ -110,21 +110,45 @@ export function sessionsByDay(sessions) {
 // Offered as starting points in the UI; a trainer can pick one or write their own.
 export const CANCEL_WINDOW_PRESETS = [6, 12, 24, 48, 72];
 
+// How cancellations are treated. "never" is a real business choice (Kevin:
+// "someone can also have no cancellations if they want") — it is NOT the same
+// as a 0-hour window, which is the most LENIENT setting. The two live at
+// opposite ends, so they get distinct types rather than a magic number.
+export const CANCEL_TYPES = {
+  anytime: "Free cancellation any time",
+  window: "Free cancellation up to a set time before",
+  never: "No free cancellations — every client cancellation is charged",
+};
+
+// When money is actually taken. Kevin wants variety, chosen by the trainer:
+//  • per_session — charge as each session passes the red line. Most immediate,
+//    but every session is its own Stripe transaction (see stripeFeeNote).
+//  • weekly — one batched charge on Sunday for the week's sessions. Fewer
+//    transactions, so less fixed-fee drag; good for trainers who want flexible
+//    scheduling without packages piling up.
+//  • manual — Glide tracks what's owed; the trainer bills however they like.
+// Prepaid packs are orthogonal: credits are always consumed FIRST under every
+// mode, and only uncovered sessions ever reach a card.
+export const BILLING_MODES = {
+  per_session: "Charge as each session happens",
+  weekly: "Charge once a week (Sunday)",
+  manual: "Track only — I'll invoice myself",
+};
+
 export const DEFAULT_SESSION_POLICY = {
-  cancelWindowHours: 24,     // cancel earlier than this = free
+  cancelType: "window",      // anytime | window | never
+  cancelWindowHours: 24,     // cancel earlier than this = free (window type only)
   lateCancelChargePct: 100,  // % of the session price charged for a late CLIENT cancel
   noShowChargePct: 100,      // % charged when the client simply doesn't show
+  billingMode: "weekly",     // per_session | weekly | manual
   policyNote: "",            // trainer's own wording, shown to clients verbatim
 };
 
-// General packs offered to every trainer as a starting point. A trainer can use
-// these, edit them, or build their own — Kevin: "general pack options ... but
-// also allow them to create their own."
-export const STARTER_PACKS = [
-  { id: "pack5",  name: "5 sessions",  sessions: 5,  priceCents: 0, active: false },
-  { id: "pack10", name: "10 sessions", sessions: 10, priceCents: 0, active: false },
-  { id: "pack20", name: "20 sessions", sessions: 20, priceCents: 0, active: false },
-];
+// Starter packs (Kevin's sizes). Every trainer can enable, rename, re-price or
+// delete these, and add their own — they are suggestions, never a fixed menu.
+export const STARTER_PACKS = [4, 6, 8, 12, 24, 48].map((n) => ({
+  id: `pack${n}`, name: `${n} sessions`, sessions: n, priceCents: 0, active: false,
+}));
 
 // Read a trainer's policy with defaults filled in. Never throws — a missing or
 // partial policy falls back to the defaults rather than leaving the UI blank.
@@ -132,9 +156,11 @@ export function policyOf(trainerProfile) {
   const p = (trainerProfile && trainerProfile.sessionPolicy) || {};
   const hrs = Number(p.cancelWindowHours);
   return {
+    cancelType: CANCEL_TYPES[p.cancelType] ? p.cancelType : DEFAULT_SESSION_POLICY.cancelType,
     cancelWindowHours: Number.isFinite(hrs) && hrs >= 0 && hrs <= 336 ? hrs : DEFAULT_SESSION_POLICY.cancelWindowHours,
     lateCancelChargePct: clampPct(p.lateCancelChargePct, DEFAULT_SESSION_POLICY.lateCancelChargePct),
     noShowChargePct: clampPct(p.noShowChargePct, DEFAULT_SESSION_POLICY.noShowChargePct),
+    billingMode: BILLING_MODES[p.billingMode] ? p.billingMode : DEFAULT_SESSION_POLICY.billingMode,
     policyNote: String(p.policyNote || "").slice(0, 400),
   };
 }
@@ -148,14 +174,16 @@ export function packsOf(trainerProfile) {
   return (Array.isArray(list) ? list : []).filter((p) => p && p.active && Number(p.sessions) > 0);
 }
 
-// Is cancelling THIS session right now inside the late window?
+// Is cancelling THIS session right now inside the chargeable window?
 // Deliberately pure + shared: the UI warns with it before you confirm, and the
 // billing sweep will judge with the identical function, so what the client was
 // warned about and what they're charged for can never drift apart.
 export function isLateCancel(session, policy, atMs = Date.now()) {
   if (!session || !session.startAt) return false;
-  const windowMs = (policy ? policy.cancelWindowHours : DEFAULT_SESSION_POLICY.cancelWindowHours) * 3600000;
-  return session.startAt - atMs < windowMs;
+  const p = policy || DEFAULT_SESSION_POLICY;
+  if (p.cancelType === "anytime") return false;  // never chargeable
+  if (p.cancelType === "never") return true;     // always chargeable
+  return session.startAt - atMs < (p.cancelWindowHours || 0) * 3600000;
 }
 
 // What a late cancel would actually COST — the number the client must see
@@ -169,18 +197,102 @@ export function lateCancelFeeCents(session, policy, byUid, atMs = Date.now()) {
   return Math.round((Number(session.priceCents) || 0) * pct / 100);
 }
 
-// One-line human policy, e.g. "Free cancellation up to 24 hours before.
-// Cancelling later is charged 100% of the session."
+// Human phrase for the notice period, e.g. "2 days before" / "6 hours before".
+function noticePhrase(hrs) {
+  if (hrs % 24 === 0 && hrs >= 24) return `${hrs / 24} ${hrs === 24 ? "day" : "days"} before`;
+  return `${hrs} ${hrs === 1 ? "hour" : "hours"} before`;
+}
+
+// One-line human policy. Every wording branch is generated from the SAME policy
+// object the billing code reads, so the sentence a client is shown is always a
+// faithful description of what will actually happen.
 export function describePolicy(policy) {
   const p = policy || DEFAULT_SESSION_POLICY;
-  const hrs = p.cancelWindowHours;
-  const when = hrs === 0 ? "any time" : hrs % 24 === 0 && hrs >= 24
-    ? `${hrs / 24} ${hrs === 24 ? "day" : "days"} before`
-    : `${hrs} ${hrs === 1 ? "hour" : "hours"} before`;
-  if (hrs === 0) return "Cancel any time at no charge.";
+  if (p.cancelType === "anytime") return "Cancel any time at no charge.";
+  if (p.cancelType === "never") {
+    return p.lateCancelChargePct >= 100
+      ? "All sessions are final — a cancelled session is charged in full."
+      : `All sessions are final — a cancelled session is charged ${p.lateCancelChargePct}% of the session price.`;
+  }
+  const when = noticePhrase(p.cancelWindowHours);
   return p.lateCancelChargePct > 0
     ? `Free cancellation up to ${when}. Cancelling later is charged ${p.lateCancelChargePct}% of the session.`
     : `Free cancellation up to ${when}.`;
+}
+
+// ─── The standard disclosure that appears on EVERY invoice / checkout ───────
+// Kevin: "there should be a default message about the cancellation window and
+// the fee ... all invoices will have it, the only difference between them is
+// the window and the fee." So the STRUCTURE is fixed platform-wide and only the
+// trainer's numbers vary — a client sees the same familiar terms everywhere in
+// Glide, and a trainer cannot accidentally ship a checkout with no policy on it.
+export function cancellationDisclosure(policy, trainerName = "your trainer") {
+  const p = policyOf({ sessionPolicy: policy || {} });
+  const lines = [describePolicy(p)];
+  if (p.cancelType !== "anytime" && p.noShowChargePct > 0) {
+    lines.push(`Not showing up for a booked session is charged ${p.noShowChargePct}% of the session price.`);
+  }
+  lines.push(`Sessions cancelled or rescheduled by ${trainerName} are never charged.`);
+  if (p.billingMode === "per_session") {
+    lines.push("Sessions not covered by prepaid credit are charged to the card on file as each session takes place.");
+  } else if (p.billingMode === "weekly") {
+    lines.push("Sessions not covered by prepaid credit are totalled and charged to the card on file once a week.");
+  }
+  if (p.policyNote) lines.push(p.policyNote);
+  return lines;
+}
+
+// The exact sentence next to the agreement checkbox. Kept separate from the
+// bullet list so the affirmative act of consent is its own explicit statement.
+export function consentLineFor(policy, trainerName = "your trainer") {
+  const p = policyOf({ sessionPolicy: policy || {} });
+  const core = p.cancelType === "anytime"
+    ? "I understand I can cancel any session at no charge"
+    : p.cancelType === "never"
+      ? "I understand cancelled sessions are not refunded"
+      : `I understand I must give ${noticePhrase(p.cancelWindowHours).replace(" before", "")} notice to cancel free of charge`;
+  return `${core}, and I authorize ${trainerName} to charge my saved card for sessions and any cancellation fees described above.`;
+}
+
+// A frozen copy of the terms AT PURCHASE TIME. Stored with the purchase so a
+// later policy edit can never retroactively change what someone agreed to —
+// and so there is a record of the exact wording shown, which is what makes an
+// electronic agreement worth anything in a dispute.
+export function policySnapshot(policy, trainerName, extra = {}) {
+  const p = policyOf({ sessionPolicy: policy || {} });
+  return {
+    agreedAt: Date.now(),
+    policyVersion: POLICY_TEXT_VERSION,
+    policy: p,
+    shownText: cancellationDisclosure(p, trainerName),
+    consentLine: consentLineFor(p, trainerName),
+    ...extra,
+  };
+}
+// Bump when the WORDING above changes, so snapshots stay interpretable.
+export const POLICY_TEXT_VERSION = 1;
+
+// ─── Stripe fee awareness (Kevin: trainers "must be aware of the Stripe fees
+// adding up on them like this and need to price accordingly") ───────────────
+// Standard US Stripe pricing. The fixed per-transaction slice is what makes
+// charging every single session cost more than batching them.
+export const STRIPE_PCT = 0.029, STRIPE_FIXED_CENTS = 30;
+export const stripeFeeCents = (cents) => Math.round(cents * STRIPE_PCT) + STRIPE_FIXED_CENTS;
+
+// Compare the two automatic modes for a trainer's real numbers.
+export function feeComparison(sessionPriceCents, sessionsPerWeek) {
+  const price = Math.max(0, Number(sessionPriceCents) || 0);
+  const n = Math.max(0, Number(sessionsPerWeek) || 0);
+  if (!price || !n) return null;
+  const perSession = n * stripeFeeCents(price);          // one charge per session
+  const weekly = stripeFeeCents(price * n);              // one charge for the week
+  return {
+    perSessionWeekly: perSession, weeklyBatched: weekly,
+    savingPerWeek: perSession - weekly,
+    savingPerYear: (perSession - weekly) * 52,
+    netPerSessionMode: price * n - perSession,
+    netWeeklyMode: price * n - weekly,
+  };
 }
 
 // Save a trainer's policy / packs onto their own profile doc.

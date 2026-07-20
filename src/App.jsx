@@ -7,7 +7,9 @@ import { pushStatus, enablePush, disablePush } from "./push.js";
 import { privGet, privSet, privSubscribe } from "./privateStore.js";
 import { bookSession, updateSession, cancelSession, subscribeMySessions, sessionsByDay, isPastSession, sessionEndMs, SESSION_DEFAULT_MIN,
   policyOf, packsOf, describePolicy, isLateCancel, lateCancelFeeCents, saveSessionPolicy, saveSessionPacks,
-  CANCEL_WINDOW_PRESETS, STARTER_PACKS, DEFAULT_SESSION_POLICY } from "./sessions.js";
+  CANCEL_WINDOW_PRESETS, STARTER_PACKS, DEFAULT_SESSION_POLICY,
+  CANCEL_TYPES, BILLING_MODES, cancellationDisclosure, consentLineFor, policySnapshot,
+  stripeFeeCents, feeComparison } from "./sessions.js";
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -17964,13 +17966,13 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="text-[11px] font-bold uppercase tracking-wide text-muted mb-0.5">Cancellation policy</div>
-              <div className="text-[.78rem] text-fg leading-snug">{describePolicy(policy)}</div>
-              {policy.policyNote ? (
-                <div className="mt-1 text-[.74rem] text-muted leading-snug">{policy.policyNote}</div>
-              ) : null}
-              {!isTrainer && (
-                <div className="mt-1 text-[.7rem] text-muted">Set by your trainer. A session your trainer cancels or reschedules is never charged.</div>
-              )}
+              {/* The SAME standard disclosure that goes on every invoice and
+                  checkout — one wording platform-wide, only the trainer's
+                  numbers differ, so a client never meets unfamiliar terms. */}
+              {cancellationDisclosure(policy, isTrainer ? "you" : (otherName || "your trainer")).map((line, i) => (
+                <div key={i} className={i === 0 ? "text-[.78rem] text-fg leading-snug" : "mt-0.5 text-[.74rem] text-muted leading-snug"}>{line}</div>
+              ))}
+              {!isTrainer && <div className="mt-1 text-[.7rem] text-muted">Set by your trainer.</div>}
             </div>
             {isTrainer && (
               <button onClick={() => setEditPolicy(true)}
@@ -17981,6 +17983,22 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
 
         {isTrainer && editPolicy && (
           <div className="mb-3 rounded-lg border border-border bg-surface2 p-3">
+            {/* Cancellation STANCE first — the window only matters for one of
+                the three, so asking for hours before the stance is backwards. */}
+            <div className={lbl}>Cancellations</div>
+            <div className="mb-2 flex flex-col gap-1.5">
+              {Object.entries(CANCEL_TYPES).map(([k, label]) => (
+                <button key={k} onClick={() => setPolicyDraft((d) => ({ ...d, cancelType: k }))}
+                  className={`rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold cursor-pointer ${
+                    policyDraft.cancelType === k
+                      ? "bg-[rgba(8,220,224,.1)] text-primary border border-primary"
+                      : "bg-transparent text-fg border border-border"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {policyDraft.cancelType === "window" && (<>
             <div className={lbl}>Free-cancellation notice</div>
             <div className="mb-2 flex flex-wrap gap-1.5">
               {CANCEL_WINDOW_PRESETS.map((h) => (
@@ -17998,13 +18016,53 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
                 className="w-[86px] bg-surface border border-border rounded-lg px-2 py-1 text-fg text-xs outline-none" />
               <span className="self-center text-[11px] text-muted">hours</span>
             </div>
-            <div className="mb-2">
-              <div className={lbl}>Late-cancel charge (% of the session)</div>
-              <input type="number" inputMode="numeric" min="0" max="100" value={policyDraft.lateCancelChargePct}
-                onChange={(e) => setPolicyDraft((d) => ({ ...d, lateCancelChargePct: e.target.value }))}
-                className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none" />
-              <span className="ml-2 text-[11px] text-muted">0 = never charge for a late cancel</span>
+            </>)}
+
+            {policyDraft.cancelType !== "anytime" && (
+              <div className="mb-2">
+                <div className={lbl}>{policyDraft.cancelType === "never" ? "Cancellation charge" : "Late-cancel charge"} (% of the session)</div>
+                <input type="number" inputMode="numeric" min="0" max="100" value={policyDraft.lateCancelChargePct}
+                  onChange={(e) => setPolicyDraft((d) => ({ ...d, lateCancelChargePct: e.target.value }))}
+                  className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none" />
+                <span className="ml-2 text-[11px] text-muted">0 = never charge for a cancellation</span>
+              </div>
+            )}
+
+            {/* WHEN money is taken — Kevin wants a variety of ways to charge. */}
+            <div className={lbl}>How you get paid</div>
+            <div className="mb-2 flex flex-col gap-1.5">
+              {Object.entries(BILLING_MODES).map(([k, label]) => (
+                <button key={k} onClick={() => setPolicyDraft((d) => ({ ...d, billingMode: k }))}
+                  className={`rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold cursor-pointer ${
+                    policyDraft.billingMode === k
+                      ? "bg-[rgba(8,220,224,.1)] text-primary border border-primary"
+                      : "bg-transparent text-fg border border-border"}`}>
+                  {label}
+                </button>
+              ))}
             </div>
+            <div className="mb-2 text-[11px] text-muted leading-snug">
+              Prepaid credits are always used first — a card is only charged for sessions a package doesn't cover.
+            </div>
+
+            {/* Stripe's fixed per-transaction fee is what makes charging every
+                single session cost more than batching. Kevin: trainers "must be
+                aware of the Stripe fees adding up on them ... and need to price
+                accordingly". Shown with THEIR numbers, not a generic warning. */}
+            {policyDraft.billingMode === "per_session" && (() => {
+              const cmp = feeComparison(defaultPriceCents || 7500, 3);
+              if (!cmp) return null;
+              return (
+                <div className="mb-2 rounded-md px-2.5 py-2 text-[.74rem] leading-snug"
+                  style={{ background: "rgba(251,191,36,.09)", color: "var(--text)" }}>
+                  <b>Stripe fees add up in this mode.</b> Every session is its own transaction
+                  ({money(stripeFeeCents(defaultPriceCents || 7500))} on a {money(defaultPriceCents || 7500)} session).
+                  At 3 sessions/week that's {money(cmp.perSessionWeekly)}/week in fees vs {money(cmp.weeklyBatched)}/week
+                  if you charge weekly — about <b>{money(cmp.savingPerYear)}/year</b> more. Price accordingly.
+                </div>
+              );
+            })()}
+
             <div className="mb-2">
               <div className={lbl}>In your own words (optional)</div>
               <input placeholder="e.g. Life happens — text me and we'll work it out."
