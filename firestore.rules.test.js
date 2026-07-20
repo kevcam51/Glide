@@ -220,6 +220,60 @@ await check("ADMIN (client SDK) cannot read private notes", assertFails(getDoc(p
 await check("signed-out cannot read private notes", assertFails(getDoc(priv(anon, C1))));
 await check("unconstrained privkv list denied", assertFails(getDocs(collection(head, "users", C1, "privkv"))));
 
+// ---- Training sessions (S100) — sessions/{sid} -----------------------------
+// The trainer books; either side cancels; BILLING FIELDS ARE SERVER-ONLY.
+const sess = (db, sid) => doc(db, "sessions", sid);
+const booking = (over = {}) => ({
+  participants: [H, C1], trainerUid: H, clientUid: C1,
+  startAt: 1800000000000, durationMin: 60, status: "scheduled",
+  title: "Upper body", location: "Studio", priceCents: 7500,
+  createdBy: H, createdAt: 1, updatedAt: 1, ...over,
+});
+const c2ctx = ctx(C2);
+
+console.log("\nSESSIONS — booking ALLOWED:");
+await check("trainer books a session with own client", assertSucceeds(setDoc(sess(head, "s1"), booking())));
+await check("trainer reads that session", assertSucceeds(getDoc(sess(head, "s1"))));
+await check("the client reads their own session", assertSucceeds(getDoc(sess(c1, "s1"))));
+await check("trainer reschedules (startAt + duration)", assertSucceeds(updateDoc(sess(head, "s1"), { startAt: 1800003600000, durationMin: 45, updatedAt: 2 })));
+await check("trainer re-prices the session", assertSucceeds(updateDoc(sess(head, "s1"), { priceCents: 9000, updatedAt: 3 })));
+await check("head books for client of his sub", assertSucceeds(setDoc(sess(head, "s2"), booking({ participants: [H, C2], clientUid: C2 }))));
+await check("client cancels their own session", assertSucceeds(updateDoc(sess(c1, "s1"), { status: "cancelled", cancelledBy: C1, cancelledAt: 5, updatedAt: 5 })));
+await check("trainer cancels a session", assertSucceeds(updateDoc(sess(head, "s2"), { status: "cancelled", cancelledBy: H, cancelledAt: 6, updatedAt: 6 })));
+
+console.log("\nSESSIONS — booking DENIED:");
+await check("CLIENT cannot create a session", assertFails(setDoc(sess(c1, "bad1"), booking({ createdBy: C1 }))));
+await check("trainer books for a client who isn't theirs", assertFails(setDoc(sess(t2, "bad2"), booking({ participants: [T2, C1], trainerUid: T2, createdBy: T2 }))));
+await check("trainer books for an UNLINKED client", assertFails(setDoc(sess(head, "bad3"), booking({ participants: [H, C3], clientUid: C3 }))));
+await check("booking with mismatched participants array", assertFails(setDoc(sess(head, "bad4"), booking({ participants: [H, C3] }))));
+await check("booking that starts already 'completed'", assertFails(setDoc(sess(head, "bad5"), booking({ status: "completed" }))));
+await check("booking with an absurd duration", assertFails(setDoc(sess(head, "bad6"), booking({ durationMin: 5000 }))));
+await check("booking with a negative price", assertFails(setDoc(sess(head, "bad7"), booking({ priceCents: -100 }))));
+await check("signed-out books a session", assertFails(setDoc(sess(anon, "bad8"), booking())));
+await check("unrelated trainer reads someone's session", assertFails(getDoc(sess(t2, "s1"))));
+await check("unrelated client reads someone's session", assertFails(getDoc(sess(c3, "s1"))));
+await check("signed-out reads a session", assertFails(getDoc(sess(anon, "s1"))));
+await check("unconstrained sessions list DENIED", assertFails(getDocs(collection(t2, "sessions"))));
+
+console.log("\nSESSIONS — BILLING FIELDS are server-only:");
+await testEnv.withSecurityRulesDisabled(async (c) => {
+  await setDoc(doc(c.firestore(), "sessions", "s3"), booking({ startAt: 1800007200000 }));
+});
+await check("trainer cannot write settled", assertFails(updateDoc(sess(head, "s3"), { settled: "package" })));
+await check("trainer cannot write chargeId", assertFails(updateDoc(sess(head, "s3"), { chargeId: "pi_fake" })));
+await check("trainer cannot write completedAt", assertFails(updateDoc(sess(head, "s3"), { completedAt: 9 })));
+await check("CLIENT cannot write settled", assertFails(updateDoc(sess(c1, "s3"), { settled: "package" })));
+await check("client cannot mark their session completed", assertFails(updateDoc(sess(c1, "s3"), { status: "completed" })));
+await check("client cannot reschedule (move startAt)", assertFails(updateDoc(sess(c1, "s3"), { startAt: 1 })));
+await check("client cannot change the price", assertFails(updateDoc(sess(c1, "s3"), { priceCents: 0 })));
+await check("client cannot retitle the session", assertFails(updateDoc(sess(c1, "s3"), { title: "free lol" })));
+await check("client cannot un-cancel by setting scheduled", assertFails(updateDoc(sess(c1, "s3"), { status: "scheduled", updatedAt: 9 })));
+await check("trainer cannot reassign the session to another client", assertFails(updateDoc(sess(head, "s3"), { clientUid: C3, updatedAt: 9 })));
+await check("trainer cannot rewrite participants", assertFails(updateDoc(sess(head, "s3"), { participants: [H, C3], updatedAt: 9 })));
+await check("outsider cannot update a session", assertFails(updateDoc(sess(t2, "s3"), { title: "hijack" })));
+await check("participant cannot DELETE a session", assertFails(deleteDoc(sess(head, "s3"))));
+await check("client cannot delete a session", assertFails(deleteDoc(sess(c1, "s3"))));
+
 console.log(`\n==== ${passed} passed, ${failed} failed ====`);
 if (failures.length) console.log("FAILED:", failures.join(" | "));
 await testEnv.cleanup();

@@ -172,6 +172,89 @@ service cloud.firestore {
       }
     }
 
+    // ── Training sessions / appointments (S100, docs/SESSIONS-BILLING-PLAN.md) ─
+    // One doc per booked session at sessions/{sid}, readable only by the two
+    // people in it. The TRAINER books (a client can't create sessions for
+    // themselves); either side may cancel. Queries use
+    // where('participants','array-contains', myUid) — a single-field index, so
+    // no composite index is needed; ordering happens client-side.
+    //
+    // ⚠️ BILLING FIELDS ARE SERVER-ONLY. settled/settledAt/chargeId/
+    // completedAt/settleAttempts decide whether real money moves, so NEITHER
+    // participant may write them from the client SDK — only the Admin SDK
+    // (the scheduled settle dispatcher) can. Same lesson as subscriptionStatus
+    // in S85: if a field gates money or entitlement, the owner can't own it.
+    match /sessions/{sid} {
+      function bookingFields() {
+        return ['participants', 'trainerUid', 'clientUid', 'startAt', 'durationMin',
+                'status', 'title', 'location', 'priceCents',
+                'createdBy', 'createdAt', 'updatedAt',
+                'cancelledBy', 'cancelledAt', 'cancelReason'];
+      }
+      // Fields a CLIENT is allowed to touch — cancelling their own session and
+      // nothing else (they can't move it, re-price it, or un-cancel it).
+      function clientCancelFields() {
+        return ['status', 'cancelledBy', 'cancelledAt', 'cancelReason', 'updatedAt'];
+      }
+      function isParticipant() {
+        return isSignedIn() && request.auth.uid in resource.data.participants;
+      }
+      function changed() {
+        return request.resource.data.diff(resource.data).affectedKeys();
+      }
+      // The identity of the booking can never be rewritten after creation.
+      function identityIntact() {
+        return request.resource.data.trainerUid == resource.data.trainerUid
+          && request.resource.data.clientUid == resource.data.clientUid
+          && request.resource.data.participants == resource.data.participants
+          && request.resource.data.get('createdBy', '') == resource.data.get('createdBy', '')
+          && request.resource.data.get('createdAt', 0) == resource.data.get('createdAt', 0);
+      }
+
+      allow read: if isParticipant() || isAdmin();
+
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(bookingFields())
+        && request.resource.data.keys().hasAll(['participants', 'trainerUid', 'clientUid', 'startAt', 'durationMin', 'status'])
+        // Only the trainer books, and only for a client really linked to them.
+        && request.auth.uid == request.resource.data.trainerUid
+        && isTrainerOf(request.resource.data.trainerUid, request.resource.data.clientUid)
+        && request.resource.data.participants.size() == 2
+        && request.resource.data.participants[0] == request.resource.data.trainerUid
+        && request.resource.data.participants[1] == request.resource.data.clientUid
+        && request.resource.data.trainerUid != request.resource.data.clientUid
+        // A new booking always starts scheduled and unsettled.
+        && request.resource.data.status == 'scheduled'
+        && request.resource.data.startAt is number
+        && request.resource.data.durationMin is number
+        && request.resource.data.durationMin > 0
+        && request.resource.data.durationMin <= 480
+        && request.resource.data.get('priceCents', 0) is number
+        && request.resource.data.get('priceCents', 0) >= 0
+        && request.resource.data.get('priceCents', 0) <= 500000;
+
+      // TRAINER: may reschedule, re-price, retitle, or cancel — but never write
+      // a billing field and never rewrite whose session it is.
+      allow update: if isParticipant()
+        && request.auth.uid == resource.data.trainerUid
+        && changed().hasOnly(bookingFields())
+        && identityIntact()
+        && request.resource.data.status in ['scheduled', 'cancelled']
+        && request.resource.data.durationMin is number
+        && request.resource.data.durationMin > 0
+        && request.resource.data.durationMin <= 480;
+
+      // CLIENT: cancel only. Status may go to 'cancelled' and nothing else may move.
+      allow update: if isParticipant()
+        && request.auth.uid == resource.data.clientUid
+        && changed().hasOnly(clientCancelFields())
+        && identityIntact()
+        && request.resource.data.status == 'cancelled';
+
+      // Deleting would erase billing history — cancel instead. Admin only.
+      allow delete: if isAdmin();
+    }
+
     // Friendly invite-code lookup: doc id = the CODE, data = { trainerUid }.
     // Lets a not-yet-linked client resolve a code to a trainer with a single
     // doc read instead of querying the whole users collection — which is what
