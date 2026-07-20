@@ -10099,21 +10099,21 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             <div style={{fontFamily:"'Sora',sans-serif",fontSize:"2.2rem",color:overCals?"var(--red)":"var(--accent)",lineHeight:1}}>{remaining.toLocaleString()}</div>
             <div style={{fontSize:".65rem",color:overCals?"var(--red)":"var(--muted)",letterSpacing:".5px"}}>{overCals?"CAL OVER":"CAL REMAINING"}</div>
             {/* Deficit / surplus vs today's target (S102f, Kevin's spec).
-                Green when under target, RED "surplus" when over. Only once
-                something is logged — at 6am "0 eaten" would otherwise read as
-                a full-target deficit, which is the same trap that made the
-                earlier maintenance version feel wrong. Two stacked lines so
-                the text never overflows the 150px ring. */}
-            {logged > 0 && (todayDeficit > 0 || todaySurplus > 0) && (
-              <div style={{marginTop:"3px",textAlign:"center",lineHeight:1.25}}>
-                <div style={{fontSize:".62rem",fontWeight:700,letterSpacing:".3px",
-                  color: todaySurplus > 0 ? "var(--red)" : "var(--green)"}}>
-                  {todaySurplus > 0
-                    ? `+${todaySurplus.toLocaleString()} surplus`
-                    : `−${todayDeficit.toLocaleString()} deficit`}
-                </div>
+                ALWAYS SHOWN (S102g): it was hidden until something was logged,
+                so a trainer opening a client who hadn't eaten yet saw nothing
+                and it read as broken. Green under target, RED "surplus" over,
+                neutral "on target" at exactly zero — so there is always a
+                number where one is expected. */}
+            <div style={{marginTop:"3px",textAlign:"center",lineHeight:1.25}}>
+              <div style={{fontSize:".62rem",fontWeight:700,letterSpacing:".3px",
+                color: todaySurplus > 0 ? "var(--red)" : todayDeficit > 0 ? "var(--green)" : "var(--muted)"}}>
+                {todaySurplus > 0
+                  ? `+${todaySurplus.toLocaleString()} surplus`
+                  : todayDeficit > 0
+                    ? `−${todayDeficit.toLocaleString()} deficit`
+                    : "on target"}
               </div>
-            )}
+            </div>
           </div>
         </div>
       </div>
