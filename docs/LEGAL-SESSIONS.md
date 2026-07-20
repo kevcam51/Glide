@@ -792,3 +792,41 @@ buys time to get §8.3 verified before it matters.
 
 *Research findings only. Not legal advice. Requires review by licensed counsel before Glide accepts
 payment under this model.*
+
+
+---
+
+## 12. Network rules on waiving dispute rights — VERIFIED VERBATIM (added S100c)
+
+**Mastercard Rules (3 June 2025 ed.), rule 5.12.6, p.122 — "Cardholder Right of Dispute":**
+
+> "A Merchant must not impose, as a condition of Mastercard or Maestro Card acceptance, a
+> requirement that the Cardholder waive a right to dispute a Transaction."
+
+Complete rule text, no exceptions. Reinforced at 7.8.2 part 4 for payment facilitators and
+sponsored merchants. Retrieved from Wayback Machine archives (every live Mastercard host 403s
+automated fetches) — **archived, not live: recheck the rule number against a current edition
+before relying on it.** These are private network rules, not law.
+
+### The nuance that decides Glide's design — do not read one rule alone
+
+Transaction Processing Rules **3.11 expressly PERMITS "No Refunds" / "Final Sale" terms** and says
+they *govern in the event of a dispute* — but "subject to compliance with other Standards", which
+is what keeps 5.12.6 on top. So:
+
+| | Allowed? |
+|---|---|
+| A strict cancellation POLICY (incl. "no free cancellations") | ✅ Yes — this is policy substance |
+| Conditioning card acceptance on waiving the right to DISPUTE | ❌ No — 5.12.6, no exceptions |
+
+**Anyone reading only 3.11 would draw the wrong conclusion.**
+
+### What this means for what is already built
+1. The `cancelType: "never"` option (Kevin's "someone can also have no cancellations") is
+   **policy substance and is permitted.** It is not a dispute waiver. It stays.
+2. Its enforceability rests on **disclosure**, which is why the standard disclosure +
+   `policySnapshot()` consent record matter more than any contract wording.
+3. Glide must **never** add "you agree not to initiate a chargeback" to terms or checkout. It
+   would breach 5.12.6 (a merchant-agreement violation, independent of consumer law) AND, per §7,
+   be legally ineffective anyway since Reg Z duties run against the issuer, not the merchant.
+   Belt-and-braces wrong: prohibited by contract, useless in law.
