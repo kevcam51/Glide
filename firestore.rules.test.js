@@ -318,6 +318,24 @@ await check("client post-dates cancelledAt into the future", assertFails(updateD
 await check("honest client cancel at server time SUCCEEDS", assertSucceeds(updateDoc(sess(c1, "s9"),
   { status: "cancelled", cancelledBy: C1, cancelledAt: Date.now(), updatedAt: Date.now() })));
 
+// ---- S101c: charge ledger + test-mode flag ---------------------------------
+console.log("\nCHARGE LEDGER — participants read, nobody client-writes:");
+await testEnv.withSecurityRulesDisabled(async (c) => {
+  await setDoc(doc(c.firestore(), "sessionCharges", "ch1"),
+    { trainerUid: H, clientUid: C1, amountCents: 7500, status: "succeeded", kind: "sessions" });
+});
+await check("trainer reads own charge record", assertSucceeds(getDoc(doc(head, "sessionCharges", "ch1"))));
+await check("client reads own charge record", assertSucceeds(getDoc(doc(c1, "sessionCharges", "ch1"))));
+await check("outsider cannot read a charge record", assertFails(getDoc(doc(t2, "sessionCharges", "ch1"))));
+await check("client cannot rewrite a charge record", assertFails(updateDoc(doc(c1, "sessionCharges", "ch1"), { status: "refunded" })));
+await check("trainer cannot forge a charge record", assertFails(setDoc(doc(head, "sessionCharges", "forged"), { trainerUid: H, clientUid: C1, amountCents: 99999, status: "succeeded" })));
+await check("unconstrained charges list denied", assertFails(getDocs(collection(c1, "sessionCharges"))));
+
+console.log("\nTEST-MODE FLAG — server-only (free-training hole otherwise):");
+await check("client cannot set own sessionBillingTest", assertFails(updateDoc(prof(c1, C1), { sessionBillingTest: true })));
+await check("trainer cannot set a client's sessionBillingTest", assertFails(updateDoc(prof(head, C1), { sessionBillingTest: true })));
+await check("admin CAN set sessionBillingTest", assertSucceeds(updateDoc(prof(admin, C1), { sessionBillingTest: false })));
+
 console.log(`\n==== ${passed} passed, ${failed} failed ====`);
 if (failures.length) console.log("FAILED:", failures.join(" | "));
 await testEnv.cleanup();

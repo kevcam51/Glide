@@ -37,6 +37,7 @@ const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 
 const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
+const STRIPE_TEST_SECRET_KEY = defineSecret("STRIPE_TEST_SECRET_KEY");
 const REGION = "us-central1";
 
 const ALLOWED_ORIGINS = [
@@ -45,7 +46,11 @@ const ALLOWED_ORIGINS = [
 ];
 const safeOrigin = (o) => (ALLOWED_ORIGINS.includes(o) ? o : ALLOWED_ORIGINS[0]);
 
-const stripeClient = () => require("stripe")(STRIPE_SECRET_KEY.value());
+// Test-flagged clients (sessionBillingTest, admin-set, server-only in rules)
+// ride the TEST key so full card+charge cycles can run with 4242-cards while
+// real clients use the live key side by side.
+const stripeClient = (profile) => require("stripe")(
+  profile && profile.sessionBillingTest === true ? STRIPE_TEST_SECRET_KEY.value() : STRIPE_SECRET_KEY.value());
 
 // Is trainerUid actually this client's trainer? Mirrors firestore.rules
 // isTrainerOf EXACTLY: the direct trainer, or the head ABOVE that trainer —
@@ -93,7 +98,7 @@ function cleanPolicy(p) {
 // Returns a Stripe-hosted Checkout URL in SETUP mode. Card details go from the
 // client's browser straight to Stripe — they never touch Glide.
 exports.createSessionSetupIntent = onCall(
-  { secrets: [STRIPE_SECRET_KEY], region: REGION, maxInstances: 10 },
+  { secrets: [STRIPE_SECRET_KEY, STRIPE_TEST_SECRET_KEY], region: REGION, maxInstances: 10 },
   async (request) => {
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
@@ -106,7 +111,7 @@ exports.createSessionSetupIntent = onCall(
       throw new HttpsError("permission-denied", "You're not linked to that trainer.");
     }
 
-    const stripe = stripeClient();
+    const stripe = stripeClient(profile);
     const customerId = await ensureCustomer(db, uid, profile, stripe);
     const origin = safeOrigin(String((request.rawRequest && request.rawRequest.headers && request.rawRequest.headers.origin) || ""));
     const session = await stripe.checkout.sessions.create({
@@ -130,7 +135,7 @@ exports.createSessionSetupIntent = onCall(
 // checkout session id (the app's return path) or a raw SetupIntent id (test
 // harnesses and any future in-app flow).
 exports.recordSessionConsent = onCall(
-  { secrets: [STRIPE_SECRET_KEY], region: REGION, maxInstances: 10 },
+  { secrets: [STRIPE_SECRET_KEY, STRIPE_TEST_SECRET_KEY], region: REGION, maxInstances: 10 },
   async (request) => {
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
@@ -154,7 +159,7 @@ exports.recordSessionConsent = onCall(
       throw new HttpsError("permission-denied", "You're not linked to that trainer.");
     }
 
-    const stripe = stripeClient();
+    const stripe = stripeClient(profile);
     let si;
     if (checkoutSessionId) {
       const cs = await stripe.checkout.sessions.retrieve(checkoutSessionId, { expand: ["setup_intent"] });
@@ -235,7 +240,7 @@ exports.recordSessionConsent = onCall(
 // The consent LOG is kept (it is the record of what was true at the time); only
 // the live pointer is cleared and the credential detached at Stripe.
 exports.removeSessionCard = onCall(
-  { secrets: [STRIPE_SECRET_KEY], region: REGION, maxInstances: 10 },
+  { secrets: [STRIPE_SECRET_KEY, STRIPE_TEST_SECRET_KEY], region: REGION, maxInstances: 10 },
   async (request) => {
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
@@ -244,7 +249,7 @@ exports.removeSessionCard = onCall(
     const pm = profile.sessionPaymentMethod;
     if (!pm || !pm.id) return { ok: true, alreadyGone: true };
 
-    try { await stripeClient().paymentMethods.detach(pm.id); }
+    try { await stripeClient(profile).paymentMethods.detach(pm.id); }
     catch (e) { console.warn("detach failed (continuing to clear the pointer)", e && e.message); }
 
     await db.doc(`users/${uid}`).set({

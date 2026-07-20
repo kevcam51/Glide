@@ -81,7 +81,7 @@ service cloud.firestore {
         && request.auth.uid == uid
         && request.resource.data.uid == uid
         && request.resource.data.role in ['client', 'head_trainer']
-        && !request.resource.data.keys().hasAny(['entitlements', 'sessionCredits', 'sessionBillingHold', 'sessionPaymentMethod'])
+        && !request.resource.data.keys().hasAny(['entitlements', 'sessionCredits', 'sessionBillingHold', 'sessionPaymentMethod', 'sessionBillingTest'])
         && request.resource.data.get('subscriptionStatus', 'trial') == 'trial';
 
       // UPDATE: admin anything; owner may update own profile but MUST NOT
@@ -111,7 +111,7 @@ service cloud.firestore {
           && request.resource.data.role == resource.data.role
           && !request.resource.data.diff(resource.data).affectedKeys()
                .hasAny(['subscriptionStatus', 'entitlements', 'trialStartedAt', 'trialLengthDays',
-                        'sessionCredits', 'sessionBillingHold', 'sessionPaymentMethod'])
+                        'sessionCredits', 'sessionBillingHold', 'sessionPaymentMethod', 'sessionBillingTest'])
         );
 
       // DELETE: admin only.
@@ -285,6 +285,21 @@ service cloud.firestore {
 
       // Deleting would erase billing history — cancel instead. Admin only.
       allow delete: if isAdmin();
+    }
+
+    // ── Session charge ledger (S101c) ─────────────────────────────────────
+    // One doc per settlement attempt (a batch of sessions, or a late-cancel
+    // fee): what was charged, why, its Stripe id, and the dispute evidence.
+    // Written ONLY by the settle dispatcher (Admin SDK) — money records are
+    // never client-writable. Both participants can read their own, which is
+    // what powers the client's "what was I charged for" view and the
+    // trainer's earnings list.
+    match /sessionCharges/{cid} {
+      allow read: if isSignedIn() && (
+        request.auth.uid == resource.data.trainerUid
+        || request.auth.uid == resource.data.clientUid
+        || isAdmin());
+      allow write: if false; // Admin SDK only
     }
 
     // Friendly invite-code lookup: doc id = the CODE, data = { trainerUid }.
