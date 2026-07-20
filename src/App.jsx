@@ -14729,6 +14729,7 @@ const callEstimateFood = httpsCallable(functions, "estimateFood"); // AI macro e
 const callCreateCardSetup = httpsCallable(functions, "createSessionSetupIntent");
 const callRecordCardConsent = httpsCallable(functions, "recordSessionConsent");
 const callRemoveSessionCard = httpsCallable(functions, "removeSessionCard");
+const callPaySessionBalance = httpsCallable(functions, "paySessionBalance"); // pay-now retry (S103)
 // The policy snapshot must survive the round-trip to Stripe's hosted page.
 // localStorage (not state) — the app fully reloads on return. No PII in it:
 // it is the policy text the client was shown, nothing about the client.
@@ -15999,6 +16000,38 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
     if (!meUid) return;
     return subscribeMySessions(meUid, setMySessions);
   }, [meUid]);
+
+  // Pay-now (S103): retry a declined session balance from the banner.
+  const [hold, setHold] = useState(billingHold);
+  useEffect(() => { setHold(billingHold); }, [billingHold]);
+  const [payNowBusy, setPayNowBusy] = useState(false);
+  const [payNowMsg, setPayNowMsg] = useState("");
+  const [payNowOk, setPayNowOk] = useState(false);
+  const doPayNow = async () => {
+    if (payNowBusy) return;
+    setPayNowBusy(true); setPayNowMsg(""); setPayNowOk(false);
+    try {
+      const r = await callPaySessionBalance({});
+      const d = r.data || {};
+      if (d.ok && (d.paid || d.alreadyPaid || d.nothingDue)) {
+        setPayNowOk(true);
+        setPayNowMsg(d.nothingDue ? "You're all caught up." : "Payment received — you're all set!");
+        setTimeout(() => setHold(null), 1800); // clear the banner after the confirmation lands
+      } else if (d.needCard) {
+        setPayNowMsg("No card on file — tap Update card to add one.");
+      } else if (d.pending) {
+        setPayNowMsg("Your bank needs to verify this — tap Update card to finish.");
+      } else if (d.declined) {
+        setPayNowMsg("That card was declined again. Tap Update card to use a different one.");
+      } else {
+        setPayNowMsg("Couldn't process that — try again, or update your card.");
+      }
+    } catch (e) {
+      console.error("pay-now failed", e);
+      setPayNowMsg("Something went wrong — please try again.");
+    }
+    setPayNowBusy(false);
+  };
   const upcomingSessions = mySessions.filter((s) => s.status !== "cancelled" && !isPastSession(s));
   const nextSession = upcomingSessions[0] || null;
   const [showMsg, setShowMsg] = useState(false);
@@ -16445,22 +16478,36 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
         )}
 
         {/* Unpaid session balance after a declined charge (S102b — Kevin's
-            decline flow: the client must cover last week before continuing).
-            Deliberately NOT dismissible: it clears only when the balance does.
-            The path to fix it is one tap — update the card in Sessions. */}
-        {billingHold && (
-          <button onClick={() => setShowSessions(true)}
-            className="mb-4 w-full text-left rounded-card border p-3.5 cursor-pointer"
+            decline flow). NOT dismissible: it clears only when the balance
+            does. S103: PAY NOW retries the charge on the spot (the client is
+            here — it can trigger a bank check if the card needs one) instead of
+            waiting for the next weekly sweep. A repeat decline points them at
+            replacing the card in Sessions. */}
+        {hold && (
+          <div className="mb-4 w-full rounded-card border p-3.5"
             style={{ borderColor: "var(--danger,#f87171)", background: "rgba(248,113,113,.08)" }}>
             <div className="flex items-center gap-2 font-display text-base uppercase tracking-wide" style={{ color: "var(--danger,#f87171)" }}>
               <Icon name="alert" size={17} color="currentColor" />Payment needed
             </div>
             <div className="mt-1.5 text-sm text-fg leading-snug">
-              Your card was declined for <b>${((billingHold.amountCents || 0) / 100).toFixed(2)}</b> of
-              training{trainerInfo ? ` with ${trainerInfo.name}` : ""}. Update your card to cover it and keep training.
+              Your card was declined for <b>${((hold.amountCents || 0) / 100).toFixed(2)}</b> of
+              training{trainerInfo ? ` with ${trainerInfo.name}` : ""}. Clear it to keep training.
             </div>
-            <div className="mt-1 text-xs" style={{ color: "var(--danger,#f87171)" }}>Tap to update your card in Sessions →</div>
-          </button>
+            {payNowMsg && (
+              <div className="mt-2 text-sm font-semibold" style={{ color: payNowOk ? "var(--green,#2fe0a8)" : "var(--danger,#f87171)" }}>{payNowMsg}</div>
+            )}
+            <div className="mt-2.5 flex gap-2 flex-wrap">
+              <button onClick={doPayNow} disabled={payNowBusy}
+                className="rounded-lg px-4 py-2 text-sm font-bold cursor-pointer border-0"
+                style={{ background: "var(--danger,#f87171)", color: "#fff", opacity: payNowBusy ? .6 : 1 }}>
+                {payNowBusy ? "Charging…" : `Pay $${((hold.amountCents || 0) / 100).toFixed(2)} now`}
+              </button>
+              <button onClick={() => setShowSessions(true)} disabled={payNowBusy}
+                className="rounded-lg px-4 py-2 text-sm font-semibold cursor-pointer border border-border bg-transparent text-fg">
+                Update card
+              </button>
+            </div>
+          </div>
         )}
 
         {/* Next session (S100) — the client's view of what their trainer booked.

@@ -298,3 +298,98 @@ exports.settleNow = onCall(
     return runSettle({ dryRun: d.dryRun === true, force: d.force === true });
   },
 );
+
+// ── PAY NOW (S103): the client clears a declined balance on the spot ─────────
+// The decline flow already holds the account + banners the client. This is the
+// button on that banner: retry the held ledger against whatever card is on file
+// RIGHT NOW (which may be one they just replaced), without waiting for the next
+// Sunday sweep. On success the hold lifts and training resumes; a repeat
+// decline just says so and points them at replacing the card.
+//
+// The client pays their OWN hold (uid from auth — no clientId, so nobody can
+// trigger a charge on someone else). It re-reads everything server-side and
+// re-charges only the exact ledger the hold names, so the amount can't be
+// tampered with.
+exports.paySessionBalance = onCall(
+  { secrets: [STRIPE_SECRET_KEY, STRIPE_TEST_SECRET_KEY, VAPID_PRIVATE_KEY], region: REGION, maxInstances: 5 },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
+    const db = admin.firestore();
+    const client = (await db.doc(`users/${uid}`).get()).data() || {};
+    const hold = client.sessionBillingHold;
+    if (!hold || !hold.ledgerId) return { ok: true, nothingDue: true };
+
+    const pm = client.sessionPaymentMethod;
+    if (!pm || !pm.id || !client.stripeCustomerId) return { ok: false, needCard: true, amountCents: hold.amountCents || 0 };
+
+    const ledgerRef = db.doc(`sessionCharges/${hold.ledgerId}`);
+    const ledgerSnap = await ledgerRef.get();
+    const ledger = ledgerSnap.exists ? ledgerSnap.data() : null;
+    if (!ledger) {
+      // The ledger vanished (shouldn't happen) — clear the stale hold so the
+      // client isn't stuck behind a balance we can no longer identify.
+      await db.doc(`users/${uid}`).set({ sessionBillingHold: admin.firestore.FieldValue.delete() }, { merge: true });
+      return { ok: true, nothingDue: true };
+    }
+    if (ledger.status === "succeeded") {
+      // Already paid (e.g. the sweep beat the button) — just lift the hold.
+      await db.doc(`users/${uid}`).set({ sessionBillingHold: admin.firestore.FieldValue.delete() }, { merge: true });
+      return { ok: true, alreadyPaid: true };
+    }
+    const amountCents = Number(ledger.amountCents) || Number(hold.amountCents) || 0;
+    if (amountCents <= 0) {
+      await db.doc(`users/${uid}`).set({ sessionBillingHold: admin.firestore.FieldValue.delete() }, { merge: true });
+      return { ok: true, nothingDue: true };
+    }
+
+    const trainerUid = ledger.trainerUid || hold.trainerUid;
+    const trainer = trainerUid ? ((await db.doc(`users/${trainerUid}`).get()).data() || {}) : {};
+    const trainerName = trainer.displayName || "your trainer";
+    const stripe = require("stripe")(client.sessionBillingTest === true ? STRIPE_TEST_SECRET_KEY.value() : STRIPE_SECRET_KEY.value());
+
+    try {
+      // ON-session confirm — the client is right here, so a card that needs a
+      // bank check (3DS) can prompt on the hosted card flow if it must. A fresh
+      // idempotency key (the retry is a NEW attempt, distinct from the sweep's).
+      const pi = await stripe.paymentIntents.create({
+        amount: amountCents, currency: "usd",
+        customer: client.stripeCustomerId, payment_method: pm.id,
+        // Card only — no redirect methods, so no return_url is required (an
+        // unconstrained on-session intent defaults to redirect-capable methods
+        // and errors without one). off_session:false lets a bank check prompt.
+        payment_method_types: ["card"],
+        off_session: false, confirm: true,
+        description: `Training sessions with ${trainerName}`.slice(0, 100),
+        metadata: { trainerUid, clientUid: uid, ledgerId: ledgerRef.id, purpose: "glidna_sessions", retry: "1" },
+        // Per-attempt idempotency key: a stable one (ledger+pm) would cache the
+        // FIRST result for 24h, so a transient decline the client then fixes
+        // (topped-up balance, same card) couldn't be retried. Double-charge is
+        // instead prevented by the checks above — a succeeded ledger or a
+        // cleared hold both short-circuit before we ever reach here.
+      }, { idempotencyKey: `${ledgerRef.id}-retry-${Date.now()}` });
+
+      if (pi.status !== "succeeded") {
+        // requires_action / processing — don't lift the hold yet.
+        return { ok: false, pending: true, status: pi.status, amountCents };
+      }
+
+      await ledgerRef.update({ status: "succeeded", chargeId: pi.id, chargedAt: Date.now(), paidViaRetry: true });
+      // Lift the held sessions this ledger covered.
+      const ids = Array.isArray(ledger.sessionIds) ? ledger.sessionIds : [];
+      await Promise.all(ids.map((sid) => db.doc(`sessions/${sid}`).update({ settled: "charged", chargeId: pi.id }).catch(() => {})));
+      await db.doc(`users/${uid}`).set({ sessionBillingHold: admin.firestore.FieldValue.delete() }, { merge: true });
+
+      const dollars = (amountCents / 100).toFixed(2);
+      await notifyBoth(db, trainer, client, trainerUid, uid,
+        `$${dollars} received for training`, `${clientName(client)} cleared their balance.`,
+        `Payment received — $${dollars}`, `Thanks — your balance with ${trainerName} is cleared and you're all set.`);
+      return { ok: true, paid: true, amountCents };
+    } catch (e) {
+      const code = (e && (e.decline_code || e.code)) || "charge_failed";
+      console.warn("paySessionBalance declined", ledgerRef.id, code, e && e.message);
+      await ledgerRef.update({ lastRetryDeclineCode: String(code).slice(0, 60), lastRetryAt: Date.now() });
+      return { ok: false, declined: true, code: String(code).slice(0, 60), amountCents };
+    }
+  },
+);

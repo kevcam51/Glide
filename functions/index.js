@@ -113,6 +113,7 @@ exports.removeSessionCard = require("./sessionBilling").removeSessionCard;
 // The settle dispatcher (S101c): hourly sweep + Kevin's manual/dry-run trigger.
 exports.sessionsSettle = require("./sessionSettle").sessionsSettle;
 exports.settleNow = require("./sessionSettle").settleNow;
+exports.paySessionBalance = require("./sessionSettle").paySessionBalance; // pay-now retry for a declined balance (S103)
 // Biometric login (Face ID / Touch ID passkeys — S87). Register while signed in;
 // sign in signed-out via custom token. See functions/webauthn.js.
 exports.passkeyRegisterOptions = require("./webauthn").passkeyRegisterOptions;
