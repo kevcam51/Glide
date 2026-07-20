@@ -7168,10 +7168,19 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
   // (AI estimates carry it), or the user tells us below, promote the food to
   // weight mode and every unit (ml, g, oz, cup…) becomes editable, with
   // "serving" still offered as one of the options.
-  const [servingWeight, setServingWeight] = useState("");  // user-supplied, g/ml
+  // User-supplied serving weight for serving-only foods. DRAFT while typing,
+  // committed on Enter / blur / Set (S99, Kevin's bug: promoting on every
+  // keystroke meant typing the "2" of "240" instantly locked in a 2-gram
+  // serving and the input vanished mid-number).
+  const [servingWeight, setServingWeight] = useState("");
+  const [servingWeightSet, setServingWeightSet] = useState(0); // committed g/ml
+  const commitServingWeight = () => {
+    const v = parseFloat(servingWeight);
+    if (v > 0) setServingWeightSet(v);
+  };
   const knownServingG = Number(rawFood.servingGrams) > 0
     ? Number(rawFood.servingGrams)
-    : (parseFloat(servingWeight) > 0 ? parseFloat(servingWeight) : 0);
+    : servingWeightSet;
   const food = (rawFood.mode === "serving" && knownServingG > 0)
     ? (() => {
         const k = 100 / knownServingG;   // per-serving → per-100
@@ -7194,7 +7203,9 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
     const base = food.baseUnit === "ml" ? "ml" : "g";
     const order = [base, ...["g", "oz", "lb", "kg", "cup", "tbsp", "tsp", "floz"].filter((u) => u !== base)];
     const list = order.map((u) => FOOD_UNIT_MAP[u]).filter(Boolean);
-    return food.servingGrams ? [{ u: "serving", label: `serving${food.servingText ? ` (${food.servingText})` : ` (${Math.round(food.servingGrams)}g)`}`, grams: food.servingGrams, approx: false }, ...list] : list;
+    // Prefer the real weight over a label that just says "1 serving" (S99).
+    const servTxt = food.servingText && !/^(1\s+)?servings?$/i.test(food.servingText) ? food.servingText : "";
+    return food.servingGrams ? [{ u: "serving", label: `serving (${servTxt || `${Math.round(food.servingGrams)}${food.baseUnit === "ml" ? "ml" : "g"}`})`, grams: food.servingGrams, approx: false }, ...list] : list;
   })();
   // Default serving: honor an edited meal's own unit; else the food's serving if
   // known; else the base weight unit at a sensible amount.
@@ -7326,19 +7337,32 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
               component). Without a weight there is genuinely nothing to convert
               with, so we ask instead of guessing. */}
           {isServing && (
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "7px", flexWrap: "wrap" }}>
-              <span style={{ fontSize: ".72rem", color: "var(--muted)" }}>1 {food.servingLabel || "serving"} weighs</span>
-              <input style={{ ...inp, width: "88px", padding: "7px 9px", fontSize: ".82rem" }}
-                type="number" inputMode="decimal" min="0" placeholder="e.g. 240"
-                value={servingWeight} onChange={(e) => setServingWeight(e.target.value.replace(/[^\d.]/g, ""))} />
-              <span style={{ fontSize: ".72rem", color: "var(--muted)" }}>
-                {rawFood.baseUnit === "ml" ? "ml" : "g"} — unlocks g / oz / cup editing
-              </span>
+            <div style={{ marginTop: "8px", padding: "9px 11px", borderRadius: "9px", background: "var(--s2)", border: "1px solid var(--border)" }}>
+              <div style={{ fontSize: ".72rem", color: "var(--muted)", lineHeight: 1.5, marginBottom: "7px" }}>
+                <strong style={{ color: "var(--text)" }}>Optional:</strong> this food only lists nutrition per serving, not by weight.
+                If the package says what one serving weighs (e.g. "Serving size 240g"), enter it here to also
+                measure in <strong style={{ color: "var(--text)" }}>{rawFood.baseUnit === "ml" ? "ml / fl oz / cups" : "g / oz / cups"}</strong>.
+                Otherwise just use the serving count above.
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                <span style={{ fontSize: ".72rem", color: "var(--muted)", whiteSpace: "nowrap" }}>1 {(food.servingLabel || "serving").replace(/^1\s+/, "")} =</span>
+                <input style={{ ...inp, width: "88px", padding: "7px 9px", fontSize: ".82rem" }}
+                  type="number" inputMode="decimal" min="0" placeholder="e.g. 240"
+                  value={servingWeight}
+                  onChange={(e) => setServingWeight(e.target.value.replace(/[^\d.]/g, ""))}
+                  onKeyDown={(e) => { if (e.key === "Enter") commitServingWeight(); }}
+                  onBlur={commitServingWeight} />
+                <span style={{ fontSize: ".72rem", color: "var(--muted)" }}>{rawFood.baseUnit === "ml" ? "ml" : "g"}</span>
+                <button onClick={commitServingWeight} disabled={!(parseFloat(servingWeight) > 0)}
+                  style={{ padding: "7px 14px", fontSize: ".76rem", fontWeight: 700, borderRadius: "8px", border: "none",
+                    cursor: "pointer", background: "var(--accent-fill)", color: "#0b0b12", fontFamily: "inherit",
+                    opacity: parseFloat(servingWeight) > 0 ? 1 : .45 }}>Set</button>
+              </div>
             </div>
           )}
           <div style={{ fontSize: ".7rem", color: approxUnit ? "var(--orange)" : "var(--muted)", marginTop: "5px" }}>
             {isServing
-              ? (food.servingLabel && food.servingLabel !== "serving" ? `1 serving = ${food.servingLabel}` : "Scales by number of servings.")
+              ? (food.servingLabel && !/^(1\s+)?servings?$/i.test(food.servingLabel) ? `1 serving = ${food.servingLabel}` : "Scales by number of servings.")
               : approxUnit
                 ? `≈ ${Math.round(gramsNow)}${baseAmtLabel} · volume units are approximate (${food.baseUnit === "ml" ? "volume" : "weight"} is exact)`
                 : `= ${Math.round(gramsNow)}${baseAmtLabel}`}
@@ -7404,9 +7428,15 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
 // that logged something in this section; tap one to copy all its foods in.
 // Works wherever MealLog renders: today (dashboard) or any date (calendar Day
 // view), so you can also paste onto a FUTURE day.
-function CopyMealModal({ sectionLabel, targetType, matchMeal, dateKey, onReadDay, onListLoggedDays, onCopy, onClose }) {
+function CopyMealModal({ sectionLabel, targetType, dateKey, onReadDay, onListLoggedDays, onCopy, onClose }) {
   const [loading, setLoading] = useState(true);
-  const [days, setDays] = useState([]);
+  const [rawDays, setRawDays] = useState([]); // every recent day's full meals — filtered per browsed type below
+  // Browse ANY meal type (S99, Kevin): the toggles default to the section you
+  // came from, but you can flip to Breakfast/Lunch/… and copy — say, yesterday's
+  // lunch INTO tonight's dinner. Whatever you pick still lands in {sectionLabel}.
+  const COPY_TYPES = [["breakfast", "Breakfast"], ["lunch", "Lunch"], ["dinner", "Dinner"], ["snack", "Snack"], ["other", "Other"]];
+  const initKey = (targetType || "other").toLowerCase();
+  const [viewKey, setViewKey] = useState(COPY_TYPES.some(([k]) => k === initKey) ? initKey : "other");
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -7417,15 +7447,29 @@ function CopyMealModal({ sectionLabel, targetType, matchMeal, dateKey, onReadDay
         const out = [];
         for (const it of logs) {
           if (!it || !it.log) continue;
-          const foods = (it.log.meals || []).filter(matchMeal);
-          if (foods.length) out.push({ date: it.k, foods, cals: foods.reduce((s, m) => s + (m.calories || 0), 0) });
-          if (out.length >= 14) break;
+          const meals = it.log.meals || [];
+          if (meals.length) out.push({ date: it.k, meals });
         }
-        if (!cancelled) { setDays(out); setLoading(false); }
-      } catch (e) { if (!cancelled) { setDays([]); setLoading(false); } }
+        if (!cancelled) { setRawDays(out); setLoading(false); }
+      } catch (e) { if (!cancelled) { setRawDays([]); setLoading(false); } }
     })();
     return () => { cancelled = true; };
   }, []);
+  // Per-type view over the loaded days (no re-reads on toggle).
+  const typeMatch = (m) => {
+    const k = (m.type || "").toLowerCase();
+    return viewKey === "other" ? !["breakfast", "lunch", "dinner", "snack"].includes(k) : k === viewKey;
+  };
+  const days = (() => {
+    const out = [];
+    for (const d of rawDays) {
+      const foods = d.meals.filter(typeMatch);
+      if (foods.length) out.push({ date: d.date, foods, cals: foods.reduce((s, m) => s + (m.calories || 0), 0) });
+      if (out.length >= 14) break;
+    }
+    return out;
+  })();
+  const viewLabel = (COPY_TYPES.find(([k]) => k === viewKey) || [null, "meal"])[1];
   useBackClose(true, onClose);
   const fmtDay = (k) => {
     const t = ymdLocal(); const yd = new Date(); yd.setDate(yd.getDate() - 1);
@@ -7451,13 +7495,27 @@ function CopyMealModal({ sectionLabel, targetType, matchMeal, dateKey, onReadDay
           padding: "18px", paddingBottom: "calc(18px + env(safe-area-inset-bottom,0px))",
           display: "flex", flexDirection: "column", gap: "12px" }}>
         <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 92, alignItems: "center", gap: "10px" }}>
-          <div style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text)" }}>Copy a previous {sectionLabel}</div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text)" }}>Copy a previous meal</div>
+            <div style={{ fontSize: ".7rem", color: "var(--accent)", fontWeight: 700, marginTop: "2px" }}>adds to {sectionLabel}</div>
+          </div>
           <button onClick={onClose} aria-label="Back" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
+        </div>
+        {/* Meal-type toggles — browse any type; the copy still lands in {sectionLabel}. */}
+        <div style={{ display: "flex", gap: 5, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+          {COPY_TYPES.map(([k, label]) => (
+            <button key={k} onClick={() => setViewKey(k)}
+              style={{ padding: "7px 13px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
+                fontSize: ".76rem", fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0,
+                border: `1px solid ${viewKey === k ? "var(--accent)" : "var(--border)"}`,
+                background: viewKey === k ? "rgba(8,220,224,.12)" : "transparent",
+                color: viewKey === k ? "var(--accent)" : "var(--muted)" }}>{label}</button>
+          ))}
         </div>
         {loading ? (
           <div style={{ fontSize: ".82rem", color: "var(--muted)", padding: "10px 0" }}>Looking through your recent days…</div>
         ) : days.length === 0 ? (
-          <div style={{ fontSize: ".82rem", color: "var(--muted)", padding: "10px 0" }}>No previous {sectionLabel.toLowerCase()} to copy yet — log one and it'll show up here.</div>
+          <div style={{ fontSize: ".82rem", color: "var(--muted)", padding: "10px 0" }}>No previous {viewLabel.toLowerCase()} entries to copy yet — log one and it'll show up here.</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             {days.map(({ date, foods, cals }) => (
@@ -7509,10 +7567,19 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
   const [q, setQ] = useState("");
   const [flash, setFlash] = useState("");   // "added: <name>" confirmation
   const [confirmDel, setConfirmDel] = useState(""); // key pending delete confirm
+  const [logAs, setLogAs] = useState("");   // meal id awaiting a "log as which meal?" choice (S99)
   useBackClose(open, onClose);
   useBodyScrollLock(open);
   const [prevMeals, setPrevMeals] = useState([]); // previously-logged full meals (derived)
-  useEffect(() => { if (open) { setMode(initialMode); setQ(""); setFlash(""); setConfirmDel(""); setMealFilter("all"); setTab((savedFoods || []).length ? "saved" : "recent"); } }, [open]);
+  // Opened FROM a meal → the filter STARTS on that meal but stays switchable
+  // (S99, Kevin): browse any type's history; adding still goes to the meal you
+  // came from. Previously the from-a-meal open locked the view to one type.
+  useEffect(() => { if (open) {
+    setMode(initialMode); setQ(""); setFlash(""); setConfirmDel(""); setLogAs("");
+    const k = mealType != null ? recentMealKey(mealType) : "all";
+    setMealFilter(["breakfast", "lunch", "dinner", "snack"].includes(k) ? k : "all");
+    setTab((savedFoods || []).length ? "saved" : "recent");
+  } }, [open]);
   // Derive "previously logged meals" from the last ~14 logged days: each day's
   // foods grouped by meal section = one meal you can re-log or star. Only when
   // the Meals tab is actually open (async reads shouldn't run otherwise).
@@ -7560,8 +7627,9 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
     if (!s) return true;
     return (f.name || "").toLowerCase().includes(s) || (f.brand || "").toLowerCase().includes(s);
   };
-  const inScope = (f) => (mealType == null ? true
-    : (f.type == null ? true : recentMealKey(f.type) === recentMealKey(mealType)));
+  // Scoping is now entirely via the switchable mealFilter tabs (S99) — the
+  // from-a-meal open just seeds the filter instead of hard-locking the view.
+  const inScope = () => true;
   // Star a legacy/typeless food while viewing one meal and it should land under
   // THAT meal — normalizing to "other" filed it somewhere you couldn't see from
   // where you saved it, which reads as "the food vanished".
@@ -7576,9 +7644,8 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
   const saved = (savedFoods || []).filter((f) => f && f.name && inScope(f) && mealScope(f) && match(f));
   const list = tab === "saved" ? saved : recents;
 
-  // Flat list when scoped to one meal (opened from a meal, OR a meal-filter tab is
-  // active); grouped by meal only in the "All" view of the general library.
-  const scopedToOneMeal = mealType != null || mealFilter !== "all";
+  // Flat list when a meal-filter tab is active; grouped by meal in the "All" view.
+  const scopedToOneMeal = mealFilter !== "all";
   const groups = (() => {
     if (scopedToOneMeal) return [[null, list.slice(0, LIB_DISPLAY_CAP)]];
     const byKey = new Map(RECENT_MEAL_KEYS.map((k) => [k, []]));
@@ -7672,16 +7739,24 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
     );
   };
 
-  // A whole-meal row (S97): tap logs every item; star saves/unsaves; saved meals
-  // can be deleted. Shows the meal name + its foods.
+  // A whole-meal row (S97): tap asks WHICH meal to log it under (S99, Kevin —
+  // yesterday's lunch can become tonight's dinner), then logs every item; star
+  // saves/unsaves; saved meals can be deleted. Shows the meal name + its foods.
   const mealRow = (m) => {
     const isSavedMeal = savedMealSigs.has(mealSignature(m.type, m.items));
     const names = (m.items || []).map((i) => i.name).filter(Boolean);
     const shown = names.slice(0, 4).join(", ") + (names.length > 4 ? ` +${names.length - 4}` : "");
+    const choosing = logAs === m.id;
+    const logUnder = (t) => {
+      if (onLogMeal) onLogMeal({ ...m, type: t });
+      setLogAs("");
+      setFlash(m.name);
+      setTimeout(() => setFlash((v) => (v === m.name ? "" : v)), 1400);
+    };
     return (
-      <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 2px 4px 8px",
-        borderRadius: 10, background: "var(--tint-md)", marginBottom: 6 }}>
-        <button onClick={() => { onLogMeal && onLogMeal(m); setFlash(m.name); setTimeout(() => setFlash((v) => (v === m.name ? "" : v)), 1400); }}
+      <div key={m.id} style={{ borderRadius: 10, background: "var(--tint-md)", marginBottom: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 2px 4px 8px" }}>
+        <button onClick={() => setLogAs(choosing ? "" : m.id)}
           title={`Log ${m.name}`}
           style={{ flex: 1, minWidth: 0, textAlign: "left", border: "none", background: "transparent",
             color: "var(--text)", cursor: "pointer", padding: "8px 4px 8px 0", fontFamily: "inherit" }}>
@@ -7707,6 +7782,24 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
           )
         ) : <span style={{ width: 8 }} />}
       </div>
+      {/* Which meal should this land in? Defaults highlighted to its own type. */}
+      {choosing && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", padding: "0 8px 9px" }}>
+          <span style={{ fontSize: ".7rem", color: "var(--muted)", fontWeight: 700 }}>Log as:</span>
+          {["Breakfast", "Lunch", "Dinner", "Snack"].map((t) => {
+            const own = recentMealKey(m.type) === t.toLowerCase();
+            return (
+              <button key={t} onClick={() => logUnder(t)}
+                style={{ padding: "6px 12px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
+                  fontSize: ".74rem", fontWeight: 700,
+                  border: `1px solid ${own ? "var(--accent)" : "var(--border)"}`,
+                  background: own ? "rgba(8,220,224,.12)" : "transparent",
+                  color: own ? "var(--accent)" : "var(--text)" }}>{t}</button>
+            );
+          })}
+        </div>
+      )}
+      </div>
     );
   };
 
@@ -7718,7 +7811,7 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
           <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
             <Icon name="book" size={20} color="var(--accent)" />
             <span style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem", fontWeight: 700 }}>{mode === "meals" ? "Meal library" : "Food library"}</span>
-            {mode !== "meals" && mealType != null && <span style={{ fontSize: ".76rem", color: "var(--muted)", whiteSpace: "nowrap" }}>· {mealType || "Other"}</span>}
+            {mode !== "meals" && mealType != null && <span style={{ fontSize: ".76rem", color: "var(--accent)", fontWeight: 700, whiteSpace: "nowrap" }}>· adds to {mealType || "Other"}</span>}
           </div>
           {/* Back arrow, top-right (S97, Kevin) — consistent way back on every page. */}
           <button onClick={onClose} aria-label="Back"
@@ -7758,9 +7851,9 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
           ))}
         </div>
 
-        {/* Meal-type filter (S97) — in the general food library and always in
-            Meals mode; a meal-scoped food open is already narrowed to its meal. */}
-        {(mealType == null || mode === "meals") && (
+        {/* Meal-type filter (S97; always shown since S99) — opened from a meal
+            it STARTS on that meal, but any type is one tap away. */}
+        {(
           <div style={{ display: "flex", gap: 5, marginBottom: 10, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
             {[["all", "All"], ["breakfast", "Breakfast"], ["lunch", "Lunch"], ["dinner", "Dinner"], ["snack", "Snack"]].map(([k, label]) => (
               <button key={k} onClick={() => { setMealFilter(k); setConfirmDel(""); }}
@@ -8597,8 +8690,8 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
           <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
             <button style={addBtn} onClick={() => openForm(t)}>+ Add food to {t}</button>
             {canCopy && (
-              <button onClick={() => setCopySection({ label: t, type: t, matchMeal: (m) => inSection(m, t) })} style={copyLink}>
-                <Icon name="copy" size={12} /> Copy a previous {t}
+              <button onClick={() => setCopySection({ label: t, type: t })} style={copyLink}>
+                <Icon name="copy" size={12} /> Copy a previous meal
               </button>
             )}
           </div>
@@ -8618,8 +8711,8 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
         <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
           <button style={addBtn} onClick={() => openForm("other")}>+ Add a quick entry</button>
           {canCopy && (
-            <button onClick={() => setCopySection({ label: "Other", type: "", matchMeal: isOther })} style={copyLink}>
-              <Icon name="copy" size={12} /> Copy from a previous day
+            <button onClick={() => setCopySection({ label: "Other", type: "" })} style={copyLink}>
+              <Icon name="copy" size={12} /> Copy a previous meal
             </button>
           )}
         </div>
@@ -8777,7 +8870,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
       )}
       {copySection && (
         <CopyMealModal sectionLabel={copySection.label} targetType={copySection.type}
-          matchMeal={copySection.matchMeal} dateKey={dateKey || ymdLocal()}
+          dateKey={dateKey || ymdLocal()}
           onReadDay={onReadDay} onListLoggedDays={onListLoggedDays}
           onCopy={(foods) => onAddMeals(foods)} onClose={() => setCopySection(null)} />
       )}
