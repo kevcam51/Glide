@@ -14626,6 +14626,14 @@ const callSendTrainerRequest = httpsCallable(functions, "sendTrainerRequest"); /
 const callAdminOverview = httpsCallable(functions, "adminOverview"); // admin all-users dashboard (S90)
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
 const callEstimateFood = httpsCallable(functions, "estimateFood"); // AI macro estimate in the manual tracker (S89c)
+// Session card-on-file (S101): hosted Checkout in setup mode + the consent record.
+const callCreateCardSetup = httpsCallable(functions, "createSessionSetupIntent");
+const callRecordCardConsent = httpsCallable(functions, "recordSessionConsent");
+const callRemoveSessionCard = httpsCallable(functions, "removeSessionCard");
+// The policy snapshot must survive the round-trip to Stripe's hosted page.
+// localStorage (not state) — the app fully reloads on return. No PII in it:
+// it is the policy text the client was shown, nothing about the client.
+const CARD_CONSENT_STASH = "glidna-card-consent";
 const callSetWorkout = httpsCallable(functions, "setWorkoutSchedule"); // workout Accept-card direct write (Session 75)
 const callTranscribe = httpsCallable(functions, "transcribeAudio"); // voice → text (Whisper, Session 79)
 const callSendInvite = httpsCallable(functions, "sendInvite"); // email invites (Option C)
@@ -16255,6 +16263,16 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                 )}
               </button>
             )}
+            {/* Always reachable (S101 bug-check): the NEXT SESSION card only
+                renders once a session EXISTS, but the panel is also where the
+                client reads the cancellation policy and saves their card —
+                both of which they may need before anything is booked. */}
+            {trainerInfo && (
+              <button onClick={() => setShowSessions(true)} title="Your training sessions, policy and payment card"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
+                <Icon name="clock" size={13} color="var(--accent)" />Sessions
+              </button>
+            )}
             {planData && (
               <button onClick={() => setShowCalendar(true)} title="Open the calendar to log or back-date any day"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
@@ -17814,6 +17832,52 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
     return () => { alive = false; };
   }, [trainerUid]);
 
+  // Card on file (S101). The client reads their own profile; the trainer reads
+  // the client's (allowed by the assignedTrainerId read rule) for the indicator.
+  const [myCard, setMyCard] = useState(null);
+  const [clientCard, setClientCard] = useState(null);
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [cardBusy, setCardBusy] = useState(false);
+  const [confirmRemoveCard, setConfirmRemoveCard] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const target = isTrainer ? clientUid : meUid;
+    if (!target) return;
+    getProfile(target)
+      .then((p) => {
+        if (!alive) return;
+        const pm = (p && p.sessionPaymentMethod) || null;
+        if (isTrainer) setClientCard(pm); else setMyCard(pm);
+      })
+      .catch(() => { /* indicator only — never block the panel */ });
+    return () => { alive = false; };
+  }, [isTrainer, clientUid, meUid]);
+
+  const startCardSave = async () => {
+    if (cardBusy) return;
+    setCardBusy(true); setErr("");
+    try {
+      // Freeze the exact terms being agreed to BEFORE leaving for Stripe —
+      // recordSessionConsent stores this verbatim on return.
+      const snapshot = policySnapshot(policy, otherName || "your trainer");
+      localStorage.setItem(CARD_CONSENT_STASH, JSON.stringify({ trainerUid, snapshot }));
+      const r = await callCreateCardSetup({ trainerUid });
+      if (r.data && r.data.url) { window.location.assign(r.data.url); return; } // busy stays on through the redirect
+      throw new Error("no url");
+    } catch (e) {
+      console.error("card setup failed", e);
+      setErr("Couldn't open the card page — try again in a moment.");
+      setCardBusy(false);
+    }
+  };
+
+  const removeCard = async () => {
+    setCardBusy(true); setErr("");
+    try { await callRemoveSessionCard(); setMyCard(null); setConfirmRemoveCard(false); setMsg("Card removed."); setTimeout(() => setMsg(""), 2000); }
+    catch (e) { console.error("remove card failed", e); setErr("Couldn't remove the card."); }
+    setCardBusy(false);
+  };
+
   const savePolicy = async () => {
     // Normalize through policyOf so a typo ("abc" hours, 500%) can never be
     // persisted — the same clamp the reader uses, applied before the write.
@@ -17980,6 +18044,71 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
             )}
           </div>
         </div>
+
+        {/* ── Payment method (S101) ─────────────────────────────────────────
+            CLIENT: save/remove the card sessions are billed to. The consent
+            checkbox sits DIRECTLY under the policy above — the agreement and
+            the terms are one screen, which is exactly what the dispute
+            research says the record must show. Card entry happens on Stripe's
+            hosted page; Glidna never sees the number.
+            TRAINER: a read-only "card on file" indicator for this client. */}
+        {!isTrainer && (
+          <div className="mb-3 rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", background: "var(--s2)" }}>
+            <div className="text-[11px] font-bold uppercase tracking-wide text-muted mb-1">Payment method</div>
+            {myCard ? (
+              <>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="text-[.84rem] font-semibold text-fg inline-flex items-center gap-1.5">
+                    <Icon name="card" size={15} color="var(--accent)" />
+                    {(myCard.brand || "card").toUpperCase()} ····{myCard.last4}
+                    {myCard.expMonth ? <span className="text-muted font-normal">{` · exp ${myCard.expMonth}/${String(myCard.expYear || "").slice(-2)}`}</span> : null}
+                  </span>
+                  {confirmRemoveCard ? (
+                    <span className="flex gap-1.5">
+                      <button onClick={removeCard} disabled={cardBusy}
+                        className="rounded-md border-0 bg-danger px-2.5 py-1 text-xs font-bold text-white cursor-pointer">{cardBusy ? "…" : "Yes, remove"}</button>
+                      <button onClick={() => setConfirmRemoveCard(false)}
+                        className="rounded-md border border-border bg-transparent px-2.5 py-1 text-xs text-muted cursor-pointer">Keep</button>
+                    </span>
+                  ) : (
+                    <button onClick={() => setConfirmRemoveCard(true)}
+                      className="rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-semibold text-muted cursor-pointer">Remove</button>
+                  )}
+                </div>
+                <div className="mt-1 text-[.7rem] text-muted leading-snug">
+                  Charged only as described in the policy above. You can remove it any time.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-[.76rem] text-muted leading-snug mb-2">
+                  Save a card to cover sessions and any fees from the policy above — no more chasing payments after training.
+                </div>
+                <label className="flex items-start gap-2 cursor-pointer mb-2">
+                  <input type="checkbox" checked={consentChecked} onChange={(e) => setConsentChecked(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 accent-[#08dce0] shrink-0" />
+                  <span className="text-[.76rem] text-fg leading-snug">{consentLineFor(policy, otherName || "your trainer")}</span>
+                </label>
+                <button onClick={startCardSave} disabled={!consentChecked || cardBusy}
+                  className={`w-full rounded-lg px-4 py-2.5 text-sm font-bold cursor-pointer border-0 ${
+                    consentChecked ? "bg-primaryfill text-primaryfg" : "bg-surface text-muted cursor-default"}`}>
+                  {cardBusy ? "Opening secure page…" : "Continue to secure card entry"}
+                </button>
+                <div className="mt-1.5 text-[.68rem] text-muted leading-snug">
+                  Card details are entered on Stripe's secure page — Glidna never sees or stores them.
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        {isTrainer && (
+          <div className="mb-3 flex items-center gap-2 text-[.76rem] text-muted px-1">
+            <Icon name="card" size={14} color={clientCard ? "var(--accent)" : "var(--muted)"} />
+            {clientCard
+              ? <span><b className="text-fg">Card on file</b> — {(clientCard.brand || "card").toUpperCase()} ····{clientCard.last4}</span>
+              : <span>No card on file yet — {otherName || "your client"} can add one from their Sessions screen.</span>}
+          </div>
+        )}
 
         {isTrainer && editPolicy && (
           <div className="mb-3 rounded-lg border border-border bg-surface2 p-3">
@@ -19023,6 +19152,48 @@ export default function App() {
       if (tries >= 10) clearInterval(timer); // give up after ~20s; next app load picks it up
     }, 2000);
     return () => clearInterval(timer);
+  }, []);
+
+  // Returning from the card-save hosted page (?cardsetup=success): finish the
+  // job by writing the consent record — the card is only "on file" once
+  // recordSessionConsent has re-read it from Stripe and stored what was agreed.
+  const [cardNotice, setCardNotice] = useState("");
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const cardsetup = params.get("cardsetup");
+    if (!cardsetup) return;
+    const cs = params.get("cs") || "";
+    const trainerUid = params.get("trainer") || "";
+    for (const k of ["cardsetup", "cs", "trainer"]) params.delete(k);
+    const qs = params.toString();
+    window.history.replaceState({}, "", window.location.pathname + (qs ? "?" + qs : ""));
+    if (cardsetup !== "success" || !cs || !trainerUid) {
+      if (cardsetup === "cancelled") { setCardNotice("Card setup cancelled — nothing was saved."); setTimeout(() => setCardNotice(""), 6000); }
+      return;
+    }
+    let stash = null;
+    try { stash = JSON.parse(localStorage.getItem(CARD_CONSENT_STASH) || "null"); } catch (e) { /* fall through */ }
+    if (!stash || stash.trainerUid !== trainerUid || !stash.snapshot) {
+      // The agreement text didn't survive the round trip (cleared storage,
+      // different device). Without it there is no valid consent record, so the
+      // card is NOT put on file — better no card than an unevidenced one.
+      setCardNotice("Couldn't finish saving your card — please try again from Sessions.");
+      setTimeout(() => setCardNotice(""), 8000);
+      return;
+    }
+    setCardNotice("Finishing card setup…");
+    callRecordCardConsent({ checkoutSessionId: cs, trainerUid, policySnapshot: stash.snapshot })
+      .then((r) => {
+        localStorage.removeItem(CARD_CONSENT_STASH);
+        const c = (r.data && r.data.card) || {};
+        setCardNotice(`Card saved — ${(c.brand || "card").toUpperCase()} ending ${c.last4 || "····"}. Sessions can now be billed to it as agreed.`);
+        setTimeout(() => setCardNotice(""), 8000);
+      })
+      .catch((e) => {
+        console.error("recordSessionConsent failed", e);
+        setCardNotice("Couldn't finish saving your card — please try again from Sessions.");
+        setTimeout(() => setCardNotice(""), 8000);
+      });
   }, []);
 
   // Auto sign-out after inactivity — security hygiene, especially on shared or
@@ -20093,6 +20264,17 @@ export default function App() {
         )}
       </button>
       {feedOpen && <NotifFeed items={notifFeed.items} onClose={() => setFeedOpen(false)} />}
+      {/* Card-setup outcome (S101) — the one moment the client returns from
+          Stripe's hosted page with no panel open to report into. */}
+      {cardNotice && createPortal(
+        <div data-theme="pro" style={{ position: "fixed", left: "50%", transform: "translateX(-50%)",
+          top: "calc(64px + env(safe-area-inset-top,0px))", zIndex: 3000, maxWidth: "min(92vw, 480px)",
+          padding: "11px 16px", borderRadius: 12, border: "1px solid var(--accent,#08dce0)",
+          background: "var(--surface,#121b1e)", color: "var(--text,#eafcfc)",
+          fontSize: ".84rem", fontWeight: 600, lineHeight: 1.45, textAlign: "center",
+          boxShadow: "0 6px 24px rgba(0,0,0,.45)" }}>
+          {cardNotice}
+        </div>, document.body)}
       <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} role={role} meName={meName} meEmail={meEmail}
         idleSignOut={idleSignOut} onSetIdleSignOut={onSetIdleSignOut}
         isTrainer={isTrainerHome} trial={meTrial} subActive={meSubStatus === "active"}

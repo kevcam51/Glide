@@ -20,12 +20,17 @@
 //    browser reports about itself is self-asserted and near-worthless as
 //    evidence — that is why the client never sends them.
 //
+// CARD ENTRY IS STRIPE-HOSTED (Checkout in setup mode — the same pattern as
+// billing.js): no card field ever renders in Glide, no publishable key ships in
+// the bundle, and billing_address_collection:"required" makes Stripe gather the
+// address we need the STATE from.
+//
 // STATE IS STORED, ADDRESSES ARE NOT (Kevin's constraint, S101):
 // which state's rules apply depends on where the PAYING CLIENT is, not just
-// where the trainer is. But we don't want to hold anyone's home address. So
-// Stripe stays the system of record for the billing address (they already hold
-// it for AVS, and they're the PCI-compliant party), and Glide keeps only the
-// two-letter STATE code off the saved card. A state is not an address.
+// where the trainer is (virtual sessions). But we don't hold anyone's home
+// address. Stripe stays the system of record for the billing address (they
+// already hold it for AVS, and they're the PCI-compliant party); Glide keeps
+// only the two-letter STATE code off the saved card. A state is not an address.
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
@@ -34,13 +39,27 @@ const admin = require("firebase-admin");
 const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
 const REGION = "us-central1";
 
-// Reuse the same origin allowlist shape as billing.js / webauthn.js.
 const ALLOWED_ORIGINS = [
   "https://glidna.com", "https://www.glidna.com", "https://glidna.app",
   "http://localhost:5173",
 ];
+const safeOrigin = (o) => (ALLOWED_ORIGINS.includes(o) ? o : ALLOWED_ORIGINS[0]);
 
 const stripeClient = () => require("stripe")(STRIPE_SECRET_KEY.value());
+
+// Is trainerUid actually this client's trainer? Mirrors firestore.rules
+// isTrainerOf EXACTLY: the direct trainer, or the head ABOVE that trainer —
+// the chain runs client.assignedTrainerId → that trainer's headTrainerId.
+// (A client's own headTrainerId field is not part of the chain; checking it
+// was the S101 first-draft bug.)
+async function isTrainerOfClient(db, trainerUid, clientProfile) {
+  const direct = clientProfile.assignedTrainerId || null;
+  if (!direct) return false;
+  if (direct === trainerUid) return true;
+  const trainerDoc = await db.doc(`users/${direct}`).get();
+  const t = trainerDoc.exists ? trainerDoc.data() : null;
+  return !!t && t.headTrainerId === trainerUid;
+}
 
 // Get-or-create the Stripe customer for a user, reusing the id billing.js
 // already stores so a client never ends up with two customer records.
@@ -55,9 +74,24 @@ async function ensureCustomer(db, uid, profile, stripe) {
   return customer.id;
 }
 
-// ─── 1. Start saving a card ────────────────────────────────────────────────
-// Returns a SetupIntent client secret. The card details go from the browser
-// STRAIGHT to Stripe — they never touch Glide's servers or Firestore.
+// Keep only the policy fields we know, at bounded sizes — a consent record
+// must not be a vehicle for writing arbitrary payloads into Firestore.
+function cleanPolicy(p) {
+  if (!p || typeof p !== "object") return null;
+  const num = (v, lo, hi) => (Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Number(v))) : null);
+  return {
+    cancelType: ["anytime", "window", "never"].includes(p.cancelType) ? p.cancelType : "window",
+    cancelWindowHours: num(p.cancelWindowHours, 0, 336),
+    lateCancelChargePct: num(p.lateCancelChargePct, 0, 100),
+    noShowChargePct: num(p.noShowChargePct, 0, 100),
+    billingMode: ["per_session", "weekly", "manual"].includes(p.billingMode) ? p.billingMode : "weekly",
+    policyNote: String(p.policyNote || "").slice(0, 400),
+  };
+}
+
+// ─── 1. Start saving a card (hosted page) ──────────────────────────────────
+// Returns a Stripe-hosted Checkout URL in SETUP mode. Card details go from the
+// client's browser straight to Stripe — they never touch Glide.
 exports.createSessionSetupIntent = onCall(
   { secrets: [STRIPE_SECRET_KEY], region: REGION, maxInstances: 10 },
   async (request) => {
@@ -68,39 +102,45 @@ exports.createSessionSetupIntent = onCall(
 
     const db = admin.firestore();
     const profile = (await db.doc(`users/${uid}`).get()).data() || {};
-
-    // The client must actually be this trainer's client — same rule the
-    // sessions collection enforces. Prevents saving a card "for" a stranger.
-    const linked = profile.assignedTrainerId === trainerUid || profile.headTrainerId === trainerUid;
-    if (!linked) throw new HttpsError("permission-denied", "You're not linked to that trainer.");
+    if (!(await isTrainerOfClient(db, trainerUid, profile))) {
+      throw new HttpsError("permission-denied", "You're not linked to that trainer.");
+    }
 
     const stripe = stripeClient();
     const customerId = await ensureCustomer(db, uid, profile, stripe);
-    const si = await stripe.setupIntents.create({
+    const origin = safeOrigin(String((request.rawRequest && request.rawRequest.headers && request.rawRequest.headers.origin) || ""));
+    const session = await stripe.checkout.sessions.create({
+      mode: "setup",
       customer: customerId,
       payment_method_types: ["card"],
-      // off_session: this credential will be charged when the client isn't
-      // present. Declaring it here is what makes Stripe set up the mandate and
-      // the correct stored-credential indicators on later charges.
-      usage: "off_session",
+      // The billing address lives at Stripe; Glide will read back only the state.
+      billing_address_collection: "required",
+      setup_intent_data: { metadata: { uid, trainerUid, purpose: "glidna_sessions" } },
       metadata: { uid, trainerUid, purpose: "glidna_sessions" },
+      success_url: `${origin}/?cardsetup=success&cs={CHECKOUT_SESSION_ID}&trainer=${encodeURIComponent(trainerUid)}`,
+      cancel_url: `${origin}/?cardsetup=cancelled`,
     });
-    return { clientSecret: si.client_secret, customerId };
+    return { url: session.url };
   },
 );
 
 // ─── 2. Record the card + the authorization ────────────────────────────────
-// Called after Stripe confirms the SetupIntent. Re-reads the payment method
-// FROM STRIPE rather than trusting anything the browser says about it.
+// Called after the hosted page completes. Re-reads everything FROM STRIPE
+// rather than trusting anything the browser says about it. Accepts either the
+// checkout session id (the app's return path) or a raw SetupIntent id (test
+// harnesses and any future in-app flow).
 exports.recordSessionConsent = onCall(
   { secrets: [STRIPE_SECRET_KEY], region: REGION, maxInstances: 10 },
   async (request) => {
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
     const d = request.data || {};
+    const checkoutSessionId = String(d.checkoutSessionId || "").trim();
     const setupIntentId = String(d.setupIntentId || "").trim();
     const trainerUid = String(d.trainerUid || "").trim();
-    if (!setupIntentId || !trainerUid) throw new HttpsError("invalid-argument", "Missing setup details.");
+    if ((!checkoutSessionId && !setupIntentId) || !trainerUid) {
+      throw new HttpsError("invalid-argument", "Missing setup details.");
+    }
     // The exact wording the client was shown, echoed back so the record proves
     // WHAT was agreed to — not merely that some box was ticked.
     const snapshot = d.policySnapshot && typeof d.policySnapshot === "object" ? d.policySnapshot : null;
@@ -110,12 +150,22 @@ exports.recordSessionConsent = onCall(
 
     const db = admin.firestore();
     const profile = (await db.doc(`users/${uid}`).get()).data() || {};
-    const linked = profile.assignedTrainerId === trainerUid || profile.headTrainerId === trainerUid;
-    if (!linked) throw new HttpsError("permission-denied", "You're not linked to that trainer.");
+    if (!(await isTrainerOfClient(db, trainerUid, profile))) {
+      throw new HttpsError("permission-denied", "You're not linked to that trainer.");
+    }
 
     const stripe = stripeClient();
-    const si = await stripe.setupIntents.retrieve(setupIntentId);
-    if (!si || si.metadata.uid !== uid) throw new HttpsError("permission-denied", "That setup isn't yours.");
+    let si;
+    if (checkoutSessionId) {
+      const cs = await stripe.checkout.sessions.retrieve(checkoutSessionId, { expand: ["setup_intent"] });
+      if (!cs || (cs.metadata || {}).uid !== uid) throw new HttpsError("permission-denied", "That setup isn't yours.");
+      si = cs.setup_intent && typeof cs.setup_intent === "object" ? cs.setup_intent : null;
+      if (!si && typeof cs.setup_intent === "string") si = await stripe.setupIntents.retrieve(cs.setup_intent);
+    } else {
+      si = await stripe.setupIntents.retrieve(setupIntentId);
+    }
+    if (!si || (si.metadata || {}).uid !== uid) throw new HttpsError("permission-denied", "That setup isn't yours.");
+    if ((si.metadata || {}).trainerUid !== trainerUid) throw new HttpsError("permission-denied", "Trainer mismatch on that setup.");
     if (si.status !== "succeeded") throw new HttpsError("failed-precondition", "The card wasn't confirmed.");
     const pmId = typeof si.payment_method === "string" ? si.payment_method : (si.payment_method || {}).id;
     if (!pmId) throw new HttpsError("failed-precondition", "No card on that setup.");
@@ -124,14 +174,13 @@ exports.recordSessionConsent = onCall(
     const card = pm.card || {};
     const addr = (pm.billing_details && pm.billing_details.address) || {};
 
-    // Server-stamped evidence. request.rawRequest is the underlying Express
-    // request; the IP and user-agent come from the connection, not the payload.
+    // Server-stamped evidence. The IP and user-agent come from the connection,
+    // not the payload.
     const req = request.rawRequest || {};
     const hdrs = req.headers || {};
     const ip = String(hdrs["x-forwarded-for"] || req.ip || "").split(",")[0].trim() || null;
     const userAgent = String(hdrs["user-agent"] || "").slice(0, 300) || null;
     const origin = String(hdrs.origin || "");
-    const originOk = ALLOWED_ORIGINS.includes(origin);
 
     const now = Date.now();
     // ONLY the state — never the street, city or postcode. Stripe keeps the
@@ -144,11 +193,12 @@ exports.recordSessionConsent = onCall(
       agreedAt: now,
       consentLine: String(snapshot.consentLine).slice(0, 600),
       shownText: Array.isArray(snapshot.shownText) ? snapshot.shownText.slice(0, 12).map((t) => String(t).slice(0, 400)) : [],
-      policy: snapshot.policy || null,
+      policy: cleanPolicy(snapshot.policy),
       policyVersion: Number(snapshot.policyVersion) || 1,
       // Evidence, stamped here rather than accepted from the client.
-      ip, userAgent, origin: originOk ? origin : null,
-      setupIntentId, paymentMethodId: pmId,
+      ip, userAgent, origin: ALLOWED_ORIGINS.includes(origin) ? origin : null,
+      setupIntentId: si.id, paymentMethodId: pmId,
+      checkoutSessionId: checkoutSessionId || null,
       cardBrand: card.brand || null, cardLast4: card.last4 || null,
       cardExpMonth: card.exp_month || null, cardExpYear: card.exp_year || null,
       billingState, billingCountry,
@@ -160,7 +210,7 @@ exports.recordSessionConsent = onCall(
     await db.collection(`users/${uid}/sessionConsents`).add(consent);
 
     // The current card pointer, server-written (rules block the owner from
-    // touching these — a client must not be able to fake having a card).
+    // touching it — a client must not be able to fake having a card).
     await db.doc(`users/${uid}`).set({
       sessionPaymentMethod: {
         id: pmId, brand: card.brand || null, last4: card.last4 || null,
