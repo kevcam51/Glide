@@ -1,39 +1,38 @@
 # Glide — Next-Session Handoff (start here)
 
-## ⚡⚡⚡ S98 (Jul 19): burn/target chooser, PWA speed, resume-refresh, icons, notes
-_All pushed (`origin/main` @ `05ff6bd`), tree clean, functions deployed. Firebase `calorieiq-29762`;
+## ⚡⚡⚡ S99 (Jul 19): photo AI estimate + day arrows on Meals & Food — BOTH SHIPPED
+_Pushed (`origin/main` @ `4e83414`), tree clean, `estimateFood` redeployed. Firebase `calorieiq-29762`;
 model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`._
 
-### ⏭️ START HERE — two features Kevin asked for, both specced, NEITHER started
+### ✅ What S99 shipped (both S98-queued features, all verified live)
+- **Photo AI estimate in the meal tracker**: `estimateFood` accepts an optional `image` (base64 data
+  URL; new `sanitizeImageDataUrl` reuses the chat's IMG_TYPES/7MB rules) and sends a vision content
+  block with portion-calibration guidance; it also returns a **`name`** now so a photo-only estimate
+  labels the food. Frontend: "Estimate from photo" button (house `camera` icon, new in icons.jsx) +
+  hidden `capture="environment"` input beside "AI estimate" in MealLog, reusing `downscaleImage`.
+  **Photos are never stored** (Kevin's rule) — sent to the model, discarded. **Latent bug fixed:**
+  two `onClick={runAiEstimate}` handlers passed the click EVENT as the first arg — now the image
+  param; both wrapped in `() => runAiEstimate()`. **Measured** vs Nutrition5k through the DEPLOYED
+  fn: 34% MAPE over 4 dishes (matches the 30% chat-photo baseline); text-only regression clean;
+  guards reject no-input and bad-image-type with INVALID_ARGUMENT. UI E2E: canvas photo → "Eggs and
+  peas" 220 cal in the serving popup. Eval script: scratchpad `est-photo-eval.mjs` (session-temp).
+- **Day arrows on "Meals & Food"**: ‹ › in the MealLog header (dashboard mount only — new props
+  `onDayStep`/`dayLabel`/`canGoNext`; CalendarView's mount unchanged). Label = Today / Yesterday /
+  "Fri, Jul 17" (only "Today" when it IS today). State lives in DailyDashboard: `mealDate` seeded
+  FROM `useTodayKey()` (S85 rule), clamped ≤ today (next arrow disables at Today). Past days read
+  via `onReadDay` and write through `onWriteDay`-based handlers (copied from CalendarView's
+  addMeal/removeMeal/editMeal pattern); TODAY keeps the original handlers so the ring/streak/
+  week-summary stay today-only by design (verified: back-dated add landed on Jul 17, today's ring
+  untouched at 1,929). Phone width checked at 375px — header fits one line, tools row wraps clean.
 
-**1. Photo uploader for the AI Estimate in Meals & Food Today. YES this is possible** — and it is
-smaller than it looks. `estimateFood` (functions/aichat.js ~L612) already calls the vision-capable
-`claude-sonnet-4-6`; it just sends text today:
-`messages:[{role:"user", content: \`Estimate: ${desc}\`}]`.
-- Backend: accept an optional `image` (base64 data URL) and send a CONTENT ARRAY —
-  `[{type:"image",source:{type:"base64",media_type,data}},{type:"text",text:"Estimate this meal"}]`.
-  Copy the validation from `aiChat`'s `sanitizeContent` (jpeg/png/webp/gif, ≤7MB) — do not re-invent it.
-- Frontend: `MealLog`'s AI-estimate block already has the button + `aiErr` state. Reuse
-  `downscaleImage()` and the hidden `<input type="file" accept="image/*" capture="environment">`
-  from `AIChatPanel` (both are module-level, already written and proven).
-- **Kevin's rule: do NOT store the photo.** It goes to the model and is discarded — he explicitly
-  dropped photo storage earlier this session ("lets not store photos. we don't need it"). This keeps
-  Storage costs at zero and avoids a PII surface.
-- Deploy note: `estimateFood` is its OWN function — deploying it does NOT require the 4-AI-fn dance
-  (that is only for `aitools.js` changes).
+### ⏭️ START HERE — Kevin's queue (carried from S98)
+- Notes: private vs shared for BOTH trainer and client; the check-in "notes" box should open a
+  bigger editor (NotesPanel + privkv already exist — see docs/NOTES-PLAN.md).
+- Stripe LIVE-mode swap (real-card smoke + attorney pass) · Acuity sessions (needs his API key).
+- TTS coach voice (#7 from the API research); SMS reminders later.
+- Saved API research: `/private/tmp/.../tasks/wl1qyo4ey.output` — ranked list w/ verified pricing.
 
-**2. Left/right day arrows on "Meals & Food Today"** so a client can log yesterday / 3 days ago, with
-the title showing the date they moved to (only say "Today" when it IS today).
-- Most plumbing EXISTS: `MealLog` already takes `onReadDay`, `onListLoggedDays`, `dateKey` (see its
-  signature ~L7838), and **CalendarView's Day view already wires MealLog to an arbitrary date** with
-  working date-scoped `addMeal` / `removeMeal` / `editMeal` — copy those, do not write new ones.
-- The dashboard's MealLog is currently hardcoded to today: `meals={dailyLog.meals}`,
-  `onAddMeal={onAddMeal}`, `dateKey={ymdLocal()}` — those write via `persistLog` (today only).
-  Add a `selectedDate` state in DailyDashboard seeded from `useTodayKey()`, and swap in
-  `onWriteDay`-based handlers when the date is not today.
-- **Gotchas:** `useTodayKey()` rolls over at midnight — seed state FROM it, never recompute inline
-  (S85 corruption bug). Do NOT let the arrows affect the streak, ring, or week-summary — those are
-  deliberately today-only. Block navigating into the future.
+## ⚡⚡ S98 (Jul 19): burn/target chooser, PWA speed, resume-refresh, icons, notes
 
 ### ✅ What S98 shipped (all verified live)
 - **Target chooser on the CAL REMAINING wheel** (`798902b`→`9d4cb09`): tap the wheel → pick "Target
