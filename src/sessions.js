@@ -148,7 +148,59 @@ export const DEFAULT_SESSION_POLICY = {
 // delete these, and add their own — they are suggestions, never a fixed menu.
 export const STARTER_PACKS = [4, 6, 8, 12, 24, 48].map((n) => ({
   id: `pack${n}`, name: `${n} sessions`, sessions: n, priceCents: 0, active: false,
+  // Default to the Florida-safe window (see below). A trainer can widen it, but
+  // they get told what widening it means.
+  serviceWindowDays: 30,
 }));
+
+// ─── Prepaid-package service window (S100d — from the legal research) ───────
+// The research finding that changes product design: US health-studio statutes
+// key on TAKING MONEY IN ADVANCE for services not yet rendered, NOT on owning a
+// gym. "I'm a mobile trainer, not a facility" is not the defence it feels like —
+// CA/NY/IL/WA/OH all define coverage disjunctively ("instruction, training or
+// assistance OR the facilities"), and Ohio's statute is literally about
+// "prepaid entertainment contracts".
+//
+// The lever is how long the client has to USE the sessions:
+//   • Florida  — the personal-trainer exemption (§501.0125) requires that the
+//     trainer "does not accept payment for services that are to be rendered
+//     more than 30 days after the date of payment". Over 30 days, the trainer
+//     becomes a regulated "health studio": FDACS registration + a $25,000 bond.
+//     Kevin's own business is in Miami, so this is the home-market constraint.
+//   • Pennsylvania — the Health Club Act only reaches contracts for services
+//     "rendered over a period of more than three months". Under it, the Act
+//     does not apply at all.
+//   • Maryland — the bond triggers over 3 months prepaid.
+//
+// So a pack consumed INSIDE the window sits outside those statutes entirely,
+// rather than merely being well-disclosed inside them. That makes the service
+// window the legally load-bearing field on a package — not its price or size.
+//
+// ⚠️ This is research, not legal advice, and it is NOT a compliance guarantee:
+// several states are unverified, and whether a white-label platform is itself a
+// covered "seller" is unresolved. See docs/LEGAL-SESSIONS.md.
+export const FL_EXEMPT_WINDOW_DAYS = 30;   // Fla. Stat. 501.0125 prong (c)
+export const PA_ACT_THRESHOLD_DAYS = 92;   // 73 P.S. 2162 "more than three months"
+
+// Classify a pack's regulatory exposure by its service window. Pure, so the UI
+// and any future server-side check agree.
+export function packWindowRisk(pack) {
+  const days = Number(pack && pack.serviceWindowDays);
+  if (!Number.isFinite(days) || days <= 0) return { level: "unset", days: null };
+  if (days <= FL_EXEMPT_WINDOW_DAYS) return { level: "ok", days };
+  if (days <= PA_ACT_THRESHOLD_DAYS) return { level: "caution", days };
+  return { level: "high", days };
+}
+
+// Plain-English consequence of the chosen window, shown to the trainer AS THEY
+// price the pack — the moment the decision is actually made.
+export function packWindowNote(pack) {
+  const { level, days } = packWindowRisk(pack);
+  if (level === "unset") return "Set how long the client has to use these sessions — it affects which rules apply to you.";
+  if (level === "ok") return `Clients have ${days} days to use these sessions. Within Florida's 30-day personal-trainer exemption.`;
+  if (level === "caution") return `${days} days is over Florida's 30-day limit. In Florida this can make you a registered "health studio" (state registration + a $25,000 bond). Check with your accountant or attorney for your state.`;
+  return `${days} days is a long prepaid window. Most states' health-club rules apply to prepaid packages this long — several require registration and a bond, and in some (e.g. California, Illinois) a non-compliant contract can be unenforceable, meaning you could not collect a cancellation fee. Worth legal advice before selling this.`;
+}
 
 // Read a trainer's policy with defaults filled in. Never throws — a missing or
 // partial policy falls back to the defaults rather than leaving the UI blank.
