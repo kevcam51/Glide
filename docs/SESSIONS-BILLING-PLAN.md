@@ -165,4 +165,34 @@ Everything it needs already exists: `completedAt` (what to bill), `priceCents` (
    cancelled`, `settled == null` → one off-session PaymentIntent → write `settled` +
    `chargeId` in the SAME transaction (idempotency).
 4. Decline → `sessionBillingHold` + notify BOTH sides + block new sessions until cleared.
-Still open for Kevin: late-cancel/no-show window, and whether packs ship in v1.
+### ✅ DECIDED (Kevin, S100b) — both former open questions are now closed
+**Cancellation policy — TRAINER-SET, not a Glide constant.** Each trainer/company picks
+their own free-cancellation window (6h / 12h / 24h / 48h / 72h presets, or any custom
+value up to 336h) and their own late-cancel charge (0-100% of the session price), plus an
+optional note in their own words. Stored as `sessionPolicy` on the TRAINER's profile doc,
+which clients can already read via the trainer-directory rule — so a client always sees the
+exact terms their own trainer set, never a Glide-invented default.
+- **Who cancels decides the fee.** A CLIENT cancelling inside the window is charged; the
+  TRAINER cancelling or rescheduling is ALWAYS free, whenever they do it.
+- **Disclosure is mandatory and up-front.** The policy renders permanently in the Sessions
+  panel for both sides, and the exact dollar fee appears in the cancel confirmation BEFORE
+  the irreversible tap (the button reads "Cancel & accept charge", not "Yes"). Must also be
+  shown before any pack purchase is finalized when Checkout lands.
+- **One source of truth:** the UI warning and the future billing sweep both call
+  `lateCancelFeeCents()`, so what the client was warned about and what they are charged
+  can never drift apart.
+
+**Prepaid packs — YES, general options AND trainer-built.** `STARTER_PACKS` (5/10/20) ship as
+starting points every trainer can enable/price/rename, and a trainer can define their own
+packs. Stored as `sessionPacks` on the trainer's profile alongside the policy.
+
+### 🔒 Security added with the decisions (rules PUBLISHED, 143 tests)
+- `sessionCredits` + `sessionBillingHold` joined the owner-locked profile field set. Credits
+  are money in the bank ("grant yourself 100 free sessions") and the hold is the unpaid-
+  lockout flag ("clear your own hold") — both Admin-SDK-only, like subscriptionStatus (S85).
+- **`cancelledAt` is pinned to server time (±5 min)** on BOTH cancel paths. Without it, a
+  client cancelling an hour before could write `cancelledAt = 3 days ago` and slip outside
+  the window for free — the single highest-value exploit the fee model introduces. Verified
+  denied in PROD; honest cancels still work. `sessionPolicy`/`sessionPacks` are deliberately
+  NOT locked (a trainer's own price list, on their own profile) but a CLIENT rewriting their
+  trainer's policy is denied.

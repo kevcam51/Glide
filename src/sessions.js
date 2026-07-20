@@ -99,3 +99,94 @@ export function sessionsByDay(sessions) {
   Object.values(out).forEach((arr) => arr.sort(bySoonest));
   return out;
 }
+
+// ─── Cancellation policy + prepaid packs (S100b, Kevin's rules) ─────────────
+// The trainer sets their OWN cancellation window and pack prices — Glide never
+// presets them (the trainer-set-pricing principle from the plan doc). Both live
+// on the TRAINER's profile doc, which every signed-in user can already read via
+// the trainer-directory rule, so a client can always see the policy they're
+// agreeing to BEFORE they buy. Credits themselves are server-only.
+
+// Offered as starting points in the UI; a trainer can pick one or write their own.
+export const CANCEL_WINDOW_PRESETS = [6, 12, 24, 48, 72];
+
+export const DEFAULT_SESSION_POLICY = {
+  cancelWindowHours: 24,     // cancel earlier than this = free
+  lateCancelChargePct: 100,  // % of the session price charged for a late CLIENT cancel
+  noShowChargePct: 100,      // % charged when the client simply doesn't show
+  policyNote: "",            // trainer's own wording, shown to clients verbatim
+};
+
+// General packs offered to every trainer as a starting point. A trainer can use
+// these, edit them, or build their own — Kevin: "general pack options ... but
+// also allow them to create their own."
+export const STARTER_PACKS = [
+  { id: "pack5",  name: "5 sessions",  sessions: 5,  priceCents: 0, active: false },
+  { id: "pack10", name: "10 sessions", sessions: 10, priceCents: 0, active: false },
+  { id: "pack20", name: "20 sessions", sessions: 20, priceCents: 0, active: false },
+];
+
+// Read a trainer's policy with defaults filled in. Never throws — a missing or
+// partial policy falls back to the defaults rather than leaving the UI blank.
+export function policyOf(trainerProfile) {
+  const p = (trainerProfile && trainerProfile.sessionPolicy) || {};
+  const hrs = Number(p.cancelWindowHours);
+  return {
+    cancelWindowHours: Number.isFinite(hrs) && hrs >= 0 && hrs <= 336 ? hrs : DEFAULT_SESSION_POLICY.cancelWindowHours,
+    lateCancelChargePct: clampPct(p.lateCancelChargePct, DEFAULT_SESSION_POLICY.lateCancelChargePct),
+    noShowChargePct: clampPct(p.noShowChargePct, DEFAULT_SESSION_POLICY.noShowChargePct),
+    policyNote: String(p.policyNote || "").slice(0, 400),
+  };
+}
+const clampPct = (v, dflt) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? Math.round(n) : dflt;
+};
+
+export function packsOf(trainerProfile) {
+  const list = (trainerProfile && trainerProfile.sessionPacks) || [];
+  return (Array.isArray(list) ? list : []).filter((p) => p && p.active && Number(p.sessions) > 0);
+}
+
+// Is cancelling THIS session right now inside the late window?
+// Deliberately pure + shared: the UI warns with it before you confirm, and the
+// billing sweep will judge with the identical function, so what the client was
+// warned about and what they're charged for can never drift apart.
+export function isLateCancel(session, policy, atMs = Date.now()) {
+  if (!session || !session.startAt) return false;
+  const windowMs = (policy ? policy.cancelWindowHours : DEFAULT_SESSION_POLICY.cancelWindowHours) * 3600000;
+  return session.startAt - atMs < windowMs;
+}
+
+// What a late cancel would actually COST — the number the client must see
+// before they confirm. A trainer-initiated cancel is ALWAYS free (Kevin's
+// rule: "the trainer has the option to cancel or reschedule ... and if they do
+// so then they will not be charged"), so this only ever applies to the client.
+export function lateCancelFeeCents(session, policy, byUid, atMs = Date.now()) {
+  if (!session || byUid !== session.clientUid) return 0;      // trainer cancel → free
+  if (!isLateCancel(session, policy, atMs)) return 0;          // in time → free
+  const pct = policy ? policy.lateCancelChargePct : DEFAULT_SESSION_POLICY.lateCancelChargePct;
+  return Math.round((Number(session.priceCents) || 0) * pct / 100);
+}
+
+// One-line human policy, e.g. "Free cancellation up to 24 hours before.
+// Cancelling later is charged 100% of the session."
+export function describePolicy(policy) {
+  const p = policy || DEFAULT_SESSION_POLICY;
+  const hrs = p.cancelWindowHours;
+  const when = hrs === 0 ? "any time" : hrs % 24 === 0 && hrs >= 24
+    ? `${hrs / 24} ${hrs === 24 ? "day" : "days"} before`
+    : `${hrs} ${hrs === 1 ? "hour" : "hours"} before`;
+  if (hrs === 0) return "Cancel any time at no charge.";
+  return p.lateCancelChargePct > 0
+    ? `Free cancellation up to ${when}. Cancelling later is charged ${p.lateCancelChargePct}% of the session.`
+    : `Free cancellation up to ${when}.`;
+}
+
+// Save a trainer's policy / packs onto their own profile doc.
+export function saveSessionPolicy(trainerUid, policy) {
+  return updateDoc(doc(db, "users", trainerUid), { sessionPolicy: policy });
+}
+export function saveSessionPacks(trainerUid, packs) {
+  return updateDoc(doc(db, "users", trainerUid), { sessionPacks: packs });
+}

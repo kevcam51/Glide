@@ -5,7 +5,9 @@ import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } 
 import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads } from "./messaging.js";
 import { pushStatus, enablePush, disablePush } from "./push.js";
 import { privGet, privSet, privSubscribe } from "./privateStore.js";
-import { bookSession, updateSession, cancelSession, subscribeMySessions, sessionsByDay, isPastSession, sessionEndMs, SESSION_DEFAULT_MIN } from "./sessions.js";
+import { bookSession, updateSession, cancelSession, subscribeMySessions, sessionsByDay, isPastSession, sessionEndMs, SESSION_DEFAULT_MIN,
+  policyOf, packsOf, describePolicy, isLateCancel, lateCancelFeeCents, saveSessionPolicy, saveSessionPacks,
+  CANCEL_WINDOW_PRESETS, STARTER_PACKS, DEFAULT_SESSION_POLICY } from "./sessions.js";
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -17795,6 +17797,34 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
   // Keep "upcoming vs past" honest while the panel sits open (the red line moves).
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
 
+  // The TRAINER's cancellation policy (S100b). Read from their profile doc —
+  // readable by the client through the trainer-directory rule — so the client
+  // sees the exact terms their trainer set, never a Glide-invented default.
+  const [policy, setPolicy] = useState(DEFAULT_SESSION_POLICY);
+  const [editPolicy, setEditPolicy] = useState(false);
+  const [policyDraft, setPolicyDraft] = useState(DEFAULT_SESSION_POLICY);
+  useEffect(() => {
+    if (!trainerUid) return;
+    let alive = true;
+    getProfile(trainerUid)
+      .then((p) => { if (alive) { const pol = policyOf(p); setPolicy(pol); setPolicyDraft(pol); } })
+      .catch(() => { /* keep the safe default */ });
+    return () => { alive = false; };
+  }, [trainerUid]);
+
+  const savePolicy = async () => {
+    // Normalize through policyOf so a typo ("abc" hours, 500%) can never be
+    // persisted — the same clamp the reader uses, applied before the write.
+    const clean = policyOf({ sessionPolicy: policyDraft });
+    setBusy(true);
+    try {
+      await saveSessionPolicy(trainerUid, clean);
+      setPolicy(clean); setPolicyDraft(clean); setEditPolicy(false);
+      setMsg("Cancellation policy saved."); setTimeout(() => setMsg(""), 2000);
+    } catch (e) { console.error("policy save failed", e); setErr("Couldn't save the policy."); }
+    setBusy(false);
+  };
+
   const openNew = () => { setEditingId(null); setErr(""); setForm({
     when: toLocalInput(defaultSlot()), durationMin: String(SESSION_DEFAULT_MIN),
     title: "", location: "", price: defaultPriceCents ? String(defaultPriceCents / 100) : "" }); };
@@ -17873,8 +17903,29 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
           )}
           {confirmCancel === s.id ? (
             <>
+              {/* The fee is shown BEFORE the irreversible tap, never after —
+                  and it's computed with the SAME isLateCancel/lateCancelFee
+                  the billing sweep uses, so the warning and the charge can't
+                  disagree. A TRAINER cancelling is always free (Kevin's rule),
+                  which falls out of lateCancelFeeCents returning 0 for them. */}
+              {(() => {
+                const fee = lateCancelFeeCents(s, policy, meUid, now);
+                if (!fee) return isTrainer ? null : (
+                  <span className="w-full mb-1 text-[11px] text-success">
+                    In time — no cancellation charge.
+                  </span>
+                );
+                return (
+                  <span className="w-full mb-1 text-[11px] text-warn font-semibold">
+                    Late cancellation — your trainer charges {money(fee)} for this
+                    ({policy.cancelWindowHours}h notice required).
+                  </span>
+                );
+              })()}
               <button onClick={() => doCancel(s.id)} disabled={busy}
-                className="rounded-md border-0 bg-danger px-2.5 py-1 text-xs font-bold text-white cursor-pointer">Yes, cancel</button>
+                className="rounded-md border-0 bg-danger px-2.5 py-1 text-xs font-bold text-white cursor-pointer">
+                {lateCancelFeeCents(s, policy, meUid, now) ? "Cancel & accept charge" : "Yes, cancel"}
+              </button>
               <button onClick={() => setConfirmCancel("")}
                 className="rounded-md border border-border bg-transparent px-2.5 py-1 text-xs text-muted cursor-pointer">Keep it</button>
             </>
@@ -17903,6 +17954,74 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
             className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
         {otherName && <div className="mb-3 text-center text-xs text-muted">with {otherName}</div>}
+
+        {/* CANCELLATION POLICY — always on screen, for both sides (Kevin: "all
+            clients can see clearly what the cancellation policy is and it should
+            be obvious"). The client reads their own trainer's terms; the trainer
+            sees what their clients are being shown, and can edit it here. */}
+        <div className="mb-3 rounded-lg border px-3 py-2"
+          style={{ borderColor: "var(--border)", background: "var(--s2)" }}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-muted mb-0.5">Cancellation policy</div>
+              <div className="text-[.78rem] text-fg leading-snug">{describePolicy(policy)}</div>
+              {policy.policyNote ? (
+                <div className="mt-1 text-[.74rem] text-muted leading-snug">{policy.policyNote}</div>
+              ) : null}
+              {!isTrainer && (
+                <div className="mt-1 text-[.7rem] text-muted">Set by your trainer. A session your trainer cancels or reschedules is never charged.</div>
+              )}
+            </div>
+            {isTrainer && (
+              <button onClick={() => setEditPolicy(true)}
+                className="shrink-0 rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-semibold text-fg cursor-pointer">Edit</button>
+            )}
+          </div>
+        </div>
+
+        {isTrainer && editPolicy && (
+          <div className="mb-3 rounded-lg border border-border bg-surface2 p-3">
+            <div className={lbl}>Free-cancellation notice</div>
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {CANCEL_WINDOW_PRESETS.map((h) => (
+                <button key={h} onClick={() => setPolicyDraft((d) => ({ ...d, cancelWindowHours: h }))}
+                  className={`rounded-full px-2.5 py-1 text-xs font-semibold cursor-pointer ${
+                    Number(policyDraft.cancelWindowHours) === h
+                      ? "bg-primaryfill text-primaryfg border-0"
+                      : "bg-transparent text-fg border border-border"}`}>
+                  {h % 24 === 0 && h >= 24 ? `${h / 24}d` : `${h}h`}
+                </button>
+              ))}
+              <input type="number" inputMode="numeric" min="0" max="336" placeholder="custom"
+                value={policyDraft.cancelWindowHours}
+                onChange={(e) => setPolicyDraft((d) => ({ ...d, cancelWindowHours: e.target.value }))}
+                className="w-[86px] bg-surface border border-border rounded-lg px-2 py-1 text-fg text-xs outline-none" />
+              <span className="self-center text-[11px] text-muted">hours</span>
+            </div>
+            <div className="mb-2">
+              <div className={lbl}>Late-cancel charge (% of the session)</div>
+              <input type="number" inputMode="numeric" min="0" max="100" value={policyDraft.lateCancelChargePct}
+                onChange={(e) => setPolicyDraft((d) => ({ ...d, lateCancelChargePct: e.target.value }))}
+                className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none" />
+              <span className="ml-2 text-[11px] text-muted">0 = never charge for a late cancel</span>
+            </div>
+            <div className="mb-2">
+              <div className={lbl}>In your own words (optional)</div>
+              <input placeholder="e.g. Life happens — text me and we'll work it out."
+                value={policyDraft.policyNote}
+                onChange={(e) => setPolicyDraft((d) => ({ ...d, policyNote: e.target.value }))} className={inp} />
+            </div>
+            <div className="mb-2 rounded-md px-2.5 py-1.5 text-[.74rem]" style={{ background: "rgba(8,220,224,.08)", color: "var(--text)" }}>
+              Clients will see: “{describePolicy(policyOf({ sessionPolicy: policyDraft }))}”
+            </div>
+            <div className="flex gap-1.5">
+              <button onClick={savePolicy} disabled={busy}
+                className="rounded-lg bg-primaryfill px-3.5 py-1.5 text-xs font-bold text-primaryfg cursor-pointer">Save policy</button>
+              <button onClick={() => { setEditPolicy(false); setPolicyDraft(policy); }}
+                className="rounded-lg border border-border bg-transparent px-3 py-1.5 text-xs text-muted cursor-pointer">Cancel</button>
+            </div>
+          </div>
+        )}
 
         {isTrainer && !form && (
           <button onClick={openNew}

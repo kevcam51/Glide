@@ -238,8 +238,10 @@ await check("the client reads their own session", assertSucceeds(getDoc(sess(c1,
 await check("trainer reschedules (startAt + duration)", assertSucceeds(updateDoc(sess(head, "s1"), { startAt: 1800003600000, durationMin: 45, updatedAt: 2 })));
 await check("trainer re-prices the session", assertSucceeds(updateDoc(sess(head, "s1"), { priceCents: 9000, updatedAt: 3 })));
 await check("head books for client of his sub", assertSucceeds(setDoc(sess(head, "s2"), booking({ participants: [H, C2], clientUid: C2 }))));
-await check("client cancels their own session", assertSucceeds(updateDoc(sess(c1, "s1"), { status: "cancelled", cancelledBy: C1, cancelledAt: 5, updatedAt: 5 })));
-await check("trainer cancels a session", assertSucceeds(updateDoc(sess(head, "s2"), { status: "cancelled", cancelledBy: H, cancelledAt: 6, updatedAt: 6 })));
+// cancelledAt must be ~server time (S100b anti-backdating rule), so these use
+// a real clock rather than the placeholder integers the rest of the fixtures use.
+await check("client cancels their own session", assertSucceeds(updateDoc(sess(c1, "s1"), { status: "cancelled", cancelledBy: C1, cancelledAt: Date.now(), updatedAt: Date.now() })));
+await check("trainer cancels a session", assertSucceeds(updateDoc(sess(head, "s2"), { status: "cancelled", cancelledBy: H, cancelledAt: Date.now(), updatedAt: Date.now() })));
 
 console.log("\nSESSIONS — booking DENIED:");
 await check("CLIENT cannot create a session", assertFails(setDoc(sess(c1, "bad1"), booking({ createdBy: C1 }))));
@@ -273,6 +275,39 @@ await check("trainer cannot rewrite participants", assertFails(updateDoc(sess(he
 await check("outsider cannot update a session", assertFails(updateDoc(sess(t2, "s3"), { title: "hijack" })));
 await check("participant cannot DELETE a session", assertFails(deleteDoc(sess(head, "s3"))));
 await check("client cannot delete a session", assertFails(deleteDoc(sess(c1, "s3"))));
+
+// ---- S100b: cancellation policy + prepaid credits ------------------------
+// Two new money-bearing surfaces, so two new attack classes.
+console.log("\nSESSION CREDITS / HOLD — server-only (money in the bank):");
+await check("client cannot grant self session credits", assertFails(updateDoc(prof(c1, C1), { sessionCredits: 100 })));
+await check("trainer cannot grant self session credits", assertFails(updateDoc(prof(head, H), { sessionCredits: 50 })));
+await check("client cannot clear own unpaid billing hold", assertFails(updateDoc(prof(c1, C1), { sessionBillingHold: false })));
+await check("trainer cannot set a client's credits", assertFails(updateDoc(prof(head, C1), { sessionCredits: 10 })));
+await check("signup cannot self-grant credits", assertFails(setDoc(prof(ctx("newbie_X"), "newbie_X"),
+  { uid: "newbie_X", email: "n@x.co", role: "client", sessionCredits: 25 })));
+await check("admin CAN set credits (the settle dispatcher's path)", assertSucceeds(updateDoc(prof(admin, C1), { sessionCredits: 5 })));
+
+console.log("\nCANCEL POLICY — trainer-set, client-readable:");
+await check("trainer sets own cancellation window + packs", assertSucceeds(updateDoc(prof(head, H),
+  { sessionPolicy: { cancelWindowHours: 48, lateCancelChargePct: 100 },
+    sessionPacks: [{ id: "p10", name: "10 pack", sessions: 10, priceCents: 70000, active: true }] })));
+await check("client can READ their trainer's policy (must be visible pre-purchase)", assertSucceeds(getDoc(prof(c1, H))));
+await check("client cannot rewrite the trainer's policy", assertFails(updateDoc(prof(c1, H),
+  { sessionPolicy: { cancelWindowHours: 0, lateCancelChargePct: 0 } })));
+
+console.log("\nCANCEL TIMESTAMP — cannot be backdated to dodge a late fee:");
+await testEnv.withSecurityRulesDisabled(async (c) => {
+  await setDoc(doc(c.firestore(), "sessions", "s9"), booking({ startAt: Date.now() + 3600000 }));
+});
+const THREE_DAYS_AGO = Date.now() - 3 * 86400000;
+await check("client BACKDATES cancelledAt 3 days to dodge the window", assertFails(updateDoc(sess(c1, "s9"),
+  { status: "cancelled", cancelledBy: C1, cancelledAt: THREE_DAYS_AGO, updatedAt: Date.now() })));
+await check("trainer backdates cancelledAt (symmetric — no rewriting history)", assertFails(updateDoc(sess(head, "s9"),
+  { status: "cancelled", cancelledBy: H, cancelledAt: THREE_DAYS_AGO, updatedAt: Date.now() })));
+await check("client post-dates cancelledAt into the future", assertFails(updateDoc(sess(c1, "s9"),
+  { status: "cancelled", cancelledBy: C1, cancelledAt: Date.now() + 5 * 86400000, updatedAt: Date.now() })));
+await check("honest client cancel at server time SUCCEEDS", assertSucceeds(updateDoc(sess(c1, "s9"),
+  { status: "cancelled", cancelledBy: C1, cancelledAt: Date.now(), updatedAt: Date.now() })));
 
 console.log(`\n==== ${passed} passed, ${failed} failed ====`);
 if (failures.length) console.log("FAILED:", failures.join(" | "));

@@ -81,7 +81,7 @@ service cloud.firestore {
         && request.auth.uid == uid
         && request.resource.data.uid == uid
         && request.resource.data.role in ['client', 'head_trainer']
-        && !request.resource.data.keys().hasAny(['entitlements'])
+        && !request.resource.data.keys().hasAny(['entitlements', 'sessionCredits', 'sessionBillingHold'])
         && request.resource.data.get('subscriptionStatus', 'trial') == 'trial';
 
       // UPDATE: admin anything; owner may update own profile but MUST NOT
@@ -89,12 +89,25 @@ service cloud.firestore {
       // trial fields — the AI budget tier and the Pro food-data gate read
       // subscriptionStatus/entitlements from this doc, so owner-writable
       // billing fields were a self-serve Pro upgrade + infinite-trial hole.
+      //
+      // S100b adds the SESSION-BILLING fields to the same locked set:
+      //  • sessionCredits — prepaid training sessions in the bank. Owner-writable
+      //    would be "grant yourself 100 free sessions with your trainer".
+      //  • sessionBillingHold — the lockout flag after a declined weekly charge.
+      //    Owner-writable would let a client clear their own unpaid hold.
+      // Both are written ONLY by the Admin SDK (purchase + settle dispatchers).
+      // NOTE: sessionPolicy / sessionPacks are deliberately NOT locked — they are
+      // the TRAINER's own cancellation window and price list on their OWN profile,
+      // and trainer-set pricing is a core product principle. A trainer editing
+      // their own policy can only affect their own business; the fields are read
+      // by clients through the existing trainer-directory read rule.
       allow update: if isAdmin()
         || (
           request.auth.uid == uid
           && request.resource.data.role == resource.data.role
           && !request.resource.data.diff(resource.data).affectedKeys()
-               .hasAny(['subscriptionStatus', 'entitlements', 'trialStartedAt', 'trialLengthDays'])
+               .hasAny(['subscriptionStatus', 'entitlements', 'trialStartedAt', 'trialLengthDays',
+                        'sessionCredits', 'sessionBillingHold'])
         );
 
       // DELETE: admin only.
@@ -202,6 +215,19 @@ service cloud.firestore {
       function changed() {
         return request.resource.data.diff(resource.data).affectedKeys();
       }
+      // ⚠️ cancelledAt decides whether a LATE-CANCEL FEE applies, so it cannot be
+      // a number the canceller just types. Without this, a client cancelling 1
+      // hour before a session could write cancelledAt = "3 days ago" and slip
+      // outside the trainer's window for free. Pinned to server time
+      // (request.time) with ±5 min of slack for honest device-clock skew —
+      // far too tight to fake the hours-scale backdating the fee turns on, and
+      // it binds the TRAINER symmetrically so neither side can rewrite history.
+      function cancelStampHonest() {
+        return !changed().hasAny(['cancelledAt'])
+          || (request.resource.data.cancelledAt is number
+              && request.resource.data.cancelledAt >= request.time.toMillis() - 300000
+              && request.resource.data.cancelledAt <= request.time.toMillis() + 300000);
+      }
       // The identity of the booking can never be rewritten after creation.
       function identityIntact() {
         return request.resource.data.trainerUid == resource.data.trainerUid
@@ -239,6 +265,7 @@ service cloud.firestore {
         && request.auth.uid == resource.data.trainerUid
         && changed().hasOnly(bookingFields())
         && identityIntact()
+        && cancelStampHonest()
         && request.resource.data.status in ['scheduled', 'cancelled']
         && request.resource.data.durationMin is number
         && request.resource.data.durationMin > 0
@@ -249,6 +276,7 @@ service cloud.firestore {
         && request.auth.uid == resource.data.clientUid
         && changed().hasOnly(clientCancelFields())
         && identityIntact()
+        && cancelStampHonest()
         && request.resource.data.status == 'cancelled';
 
       // Deleting would erase billing history — cancel instead. Admin only.
