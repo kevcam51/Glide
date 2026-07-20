@@ -10023,16 +10023,22 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             </button>
           );
         })}
-        {/* Mini breakdown so the two numbers are explainable, not magic. */}
+        {/* Mini breakdown so the two numbers are explainable, not magic. The
+            "=" rows spell out each running total (S99, Kevin): what the deficit
+            leaves you, and the full amount you could eat with today's burn. */}
         <div style={{marginTop:"6px",borderTop:"1px solid var(--border)",paddingTop:"10px"}}>
-          {[["Your body's daily burn (TDEE)", `${tdee.toLocaleString()} cal`, "var(--text)"],
+          {[["Your body's daily burn (TDEE)", `${tdee.toLocaleString()} cal`, "var(--text)", false],
             [planRate === 0 ? "Maintenance — no deficit" : `Eat less to lose ~${RATE_SHORT[planRate]}`,
-             planRate === 0 ? "−0 cal" : `−${dailyDeficitOf(data).toLocaleString()} cal`, "var(--red)"],
-            ["Burned training today", `+${scheduledBurn.toLocaleString()} cal`, "var(--orange)"]
-          ].map(([l,v,c],i)=>(
-            <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",fontSize:".8rem"}}>
-              <span style={{color:"var(--muted)"}}>{l}</span>
-              <span style={{fontFamily:"'Sora',sans-serif",color:c}}>{v}</span>
+             planRate === 0 ? "−0 cal" : `−${dailyDeficitOf(data).toLocaleString()} cal`, "var(--red)", false],
+            ["= Target before exercise", `${targetNoBurn.toLocaleString()} cal`, "var(--text)", true],
+            ["Burned training today", `+${scheduledBurn.toLocaleString()} cal`, "var(--orange)", false],
+            ["= Total with today's burn", `${targetWithBurn.toLocaleString()} cal`, "var(--accent)", true]
+          ].map(([l,v,c,tot],i)=>(
+            <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",
+              fontSize:tot?".82rem":".8rem", fontWeight:tot?700:400,
+              borderTop:tot?"1px dashed var(--border)":"none"}}>
+              <span style={{color:tot?"var(--text)":"var(--muted)"}}>{l}</span>
+              <span style={{fontFamily:"'Sora',sans-serif",color:c,fontWeight:tot?800:400}}>{v}</span>
             </div>
           ))}
           <div style={{fontSize:".7rem",color:"var(--muted)",marginTop:"8px",lineHeight:1.45}}>
@@ -10187,13 +10193,26 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                       {planRate === 0 ? "−0 cal" : `−${dailyDeficitOf(data)} cal`}
                     </span>
                   </div>
+                  {/* Running total after the deficit (S99, Kevin) — the number the
+                      deficit leaves you, before exercise enters the picture. With
+                      the tracker override there's no exercise row below, so this
+                      would just repeat Today's Target — skipped there. */}
+                  {!trackerTdee && (
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem",fontWeight:700}}>
+                      <span style={{color:"var(--text)"}}>= Target before exercise</span>
+                      <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",fontWeight:800}}>{targetNoBurn.toLocaleString()} cal</span>
+                    </div>
+                  )}
                   {/* Calories from exercise (Kevin) — only meaningful when the burn
                       actually moves the target, i.e. eat-back and no tracker override. */}
                   {!trackerTdee && (
                     <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
+                      {/* burnShown, not todayTotalBurn (S99): with a tracker and no
+                          scheduled workout this row said "+0" while the target above
+                          included the tracker's burn — the ladder didn't add up. */}
                       <span style={{color:"var(--muted)"}}>Calories from exercise{eatbackOn ? "" : " (not added)"}</span>
                       <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:eatbackOn?"var(--green)":"var(--muted)"}}>
-                        {eatbackOn ? `+${todayTotalBurn}` : `+0`} cal
+                        {eatbackOn ? `+${burnShown.toLocaleString()}` : `+0`} cal
                       </span>
                     </div>
                   )}
@@ -10323,7 +10342,18 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
               {/* Exercise, spelled out while you log (S97z, Kevin): what you
                   burned and what you'd have left if it counted — so the number
                   is answerable here instead of scrolling back to the ring. */}
-              {burnShown > 0 && (
+              {burnShown > 0 && (() => {
+                // Whether the Target row ABOVE already contains today's burn.
+                // Eat-back adds it into the computed target — but a MANUAL
+                // target is a fixed number that never moves with workouts, so
+                // labeling its remainder "burn included" was wrong (S99 bug,
+                // Kevin: the row just repeated the target remainder). When the
+                // burn isn't in the target we add it here, and we always spell
+                // out the TOTAL you could eat, not just the remainder.
+                const burnInTarget = eatbackOn && manualTarget == null;
+                const totalWithBurn = burnInTarget ? target : target + burnShown;
+                const remainingWithBurn = totalWithBurn - logged;
+                return (
                 <div style={{marginTop:"8px",padding:"10px 12px",borderRadius:"10px",background:"var(--s2)",border:"1px solid var(--border)"}}>
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:".8rem",padding:"3px 0"}}>
                     <span style={{color:"var(--muted)",display:"inline-flex",alignItems:"center",gap:5}}>
@@ -10333,19 +10363,28 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                     <span style={{fontFamily:"'Sora',sans-serif",color:"var(--orange)"}}>+{burnShown.toLocaleString()} cal</span>
                   </div>
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:".8rem",padding:"3px 0"}}>
-                    <span style={{color:"var(--muted)"}}>Remaining {eatbackOn ? "(burn included)" : "if burn counted"}</span>
+                    <span style={{color:"var(--muted)"}}>Total you can eat {burnInTarget ? "(burn included)" : "if burn counted"}</span>
+                    <span style={{fontFamily:"'Sora',sans-serif",fontWeight:700,color:"var(--accent)"}}>
+                      {totalWithBurn.toLocaleString()} cal
+                    </span>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:".8rem",padding:"3px 0"}}>
+                    <span style={{color:"var(--muted)"}}>Remaining {burnInTarget ? "(burn included)" : "if burn counted"}</span>
                     <span style={{fontFamily:"'Sora',sans-serif",fontWeight:700,
-                      color:(eatbackOn ? remaining : remaining + burnShown) > 0 ? "var(--green)" : "var(--red)"}}>
-                      {(eatbackOn ? remaining : remaining + burnShown).toLocaleString()} cal
+                      color:remainingWithBurn > 0 ? "var(--green)" : "var(--red)"}}>
+                      {remainingWithBurn.toLocaleString()} cal
                     </span>
                   </div>
                   <div style={{fontSize:".68rem",color:"var(--muted)",marginTop:"5px",lineHeight:1.4}}>
-                    {eatbackOn
-                      ? "Your target already includes today's workout burn."
-                      : "Your target is fixed — this burn speeds up your goal instead."}
+                    {manualTarget != null
+                      ? "Your custom target is fixed — this shows what you'd have if today's burn counted."
+                      : eatbackOn
+                        ? "Your target already includes today's workout burn."
+                        : "Your target is fixed — this burn speeds up your goal instead."}
                   </div>
                 </div>
-              )}
+                );
+              })()}
               <div style={{marginTop:"10px"}}>
                 <div style={{fontSize:".72rem",color:"var(--muted)",fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",marginBottom:"6px"}}>Quick Add</div>
                 <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
