@@ -9810,6 +9810,28 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       {/* Which target is the ring using? (S97z, Kevin) Says plainly whether
           today's exercise is counted, and taps through to a chooser with both
           real numbers. Only shown when there IS a burn to argue about. */}
+      {/* The full sum spelled out (S98e, Kevin: "show the total calories with the
+          burn added to it at the bottom") — base target + today's burn = total,
+          with the figure actually in effect highlighted so the two modes are
+          readable at a glance instead of having to open the sheet. */}
+      {scheduledBurn > 0 && manualTarget == null && !trackerTdee && (
+        <div style={{display:"flex",justifyContent:"center",alignItems:"baseline",gap:5,
+          marginTop:"-2px",marginBottom:"8px",fontSize:".74rem",flexWrap:"wrap"}}>
+          <span style={{color:eatbackOn?"var(--muted)":"var(--accent)",fontWeight:eatbackOn?600:800}}>
+            {targetNoBurn.toLocaleString()}
+          </span>
+          <span style={{color:"var(--muted)"}}>target</span>
+          <span style={{color:"var(--orange)",fontWeight:700}}>+{scheduledBurn.toLocaleString()}</span>
+          <span style={{color:"var(--muted)"}}>burn{burnFromTracker?" (tracker)":""}</span>
+          <span style={{color:"var(--muted)"}}>=</span>
+          <span style={{fontFamily:"'Sora',sans-serif",fontWeight:800,fontSize:".92rem",
+            color:eatbackOn?"var(--accent)":"var(--muted)"}}>
+            {targetWithBurn.toLocaleString()}
+          </span>
+          <span style={{color:"var(--muted)"}}>cal</span>
+        </div>
+      )}
+
       {(
         <div style={{display:"flex",justifyContent:"center",marginTop:"-6px",marginBottom:"12px"}}>
           <button onClick={()=>setShowBurnModes(true)}
