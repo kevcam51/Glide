@@ -7835,7 +7835,20 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
   );
 }
 
-function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, savedFoods, onToggleSaveFood, onRemoveSavedFood, savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onReadDay, onListLoggedDays, dateKey, hideMicros }) {
+// Small ‹ › buttons for the meal card's day navigation.
+const dayNavBtn = { width:"26px", height:"26px", borderRadius:"7px", border:"1px solid var(--border)",
+  background:"var(--s2)", color:"var(--text)", fontSize:"1rem", fontWeight:700, cursor:"pointer",
+  lineHeight:1, padding:0, fontFamily:"inherit" };
+// "Today" / "Yesterday" / "Thu, Jul 17" for a local YYYY-MM-DD key.
+function dayLabelFor(key, todayKey) {
+  if (key === todayKey) return "Today";
+  const p = todayKey.split("-").map(Number);
+  if (key === ymdLocal(new Date(p[0], p[1] - 1, p[2] - 1))) return "Yesterday";
+  const q = key.split("-").map(Number);
+  return new Date(q[0], q[1] - 1, q[2]).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+
+function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, savedFoods, onToggleSaveFood, onRemoveSavedFood, savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onReadDay, onListLoggedDays, dateKey, hideMicros, onDayStep, dayLabel, canGoNext }) {
   const [name, setName] = useState("");
   const [brand, setBrand] = useState(""); // brand of a picked food (e.g. "Kirkland Signature") — shown under the name
   const [cals, setCals] = useState("");
@@ -7897,6 +7910,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   const videoRef = useRef(null);              // <video> preview for live scanning
   const scanCtlRef = useRef(null);            // zxing scanner controls (to stop)
   const searchInputRef = useRef(null);        // food-search box — auto-focused when a meal form opens
+  const photoInputRef = useRef(null);         // hidden file input for the photo estimate
 
   const list = meals || [];
   const loggedTotal = list.reduce((s, m) => s + (m.calories || 0), 0);
@@ -7938,14 +7952,17 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   // AI estimate: uses whatever the user typed (food name field, falling back
   // to the search box), fills the form, and reports the serving it assumed.
   // Budget + trial-expiry are enforced server-side (estimateFood callable).
-  const runAiEstimate = async () => {
+  const runAiEstimate = async (image) => {
     const q = (name || searchQ).trim();
     if (aiBusy) return;
-    if (!q) { setAiErr("Type the food first — e.g. \"chicken burrito\" or \"2 eggs and toast\"."); return; }
+    // With a photo the description is optional — it just adds context.
+    if (!q && !image) { setAiErr("Type the food first — e.g. \"chicken burrito\" or \"2 eggs and toast\"."); return; }
     setAiBusy(true); setAiErr(""); setAiNote("");
     try {
-      const r = await callEstimateFood({ food: q });
+      const r = await callEstimateFood(image ? { food: q, image } : { food: q });
       const d = r.data || {};
+      // A photo estimate names the food itself (the user may have typed nothing).
+      const label = q || String(d.name || "").trim() || "Meal";
       const cal = Number(d.calories) || 0, p = Number(d.protein) || 0, c = Number(d.carbs) || 0, f = Number(d.fat) || 0;
       const g = Number(d.grams) > 0 ? Number(d.grams) : null;
       const unit = d.unit === "ml" ? "ml" : "g";
@@ -7954,9 +7971,9 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
       // — instead of a coarse ±0.5-servings stepper. When the AI gave the serving's
       // weight we scale by weight; otherwise we scale by number of servings.
       const basis = g
-        ? { name: q, brand: "", mode: "weight", per100: { kcal: cal * 100 / g, p: p * 100 / g, c: c * 100 / g, f: f * 100 / g },
+        ? { name: label, brand: "", mode: "weight", per100: { kcal: cal * 100 / g, p: p * 100 / g, c: c * 100 / g, f: f * 100 / g },
             micros: null, baseUnit: unit, servingGrams: g, servingText: d.assumed || `${g}${unit}`, source: "ai" }
-        : { name: q, brand: "", mode: "serving", per: { kcal: cal, p, c, f }, micros: null,
+        : { name: label, brand: "", mode: "serving", per: { kcal: cal, p, c, f }, micros: null,
             servingLabel: d.assumed || "serving", source: "ai" };
       setResults([]); setSearchErr(""); // the search list is done — we're logging the estimate
       setDetailState({ food: basis, editingId: null, mealType: addingTo });
@@ -7964,9 +7981,22 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
       const code = (e && e.code) || "";
       if (code.includes("permission-denied")) setAiErr("Your free trial has ended — upgrade to keep AI estimates.");
       else if (code.includes("resource-exhausted")) setAiErr("You've reached today's AI limit. It resets tomorrow.");
+      else if (image) setAiErr("Couldn't read that photo — try a clearer shot, or type the food instead.");
       else setAiErr("Couldn't estimate that — try rephrasing (e.g. \"2 eggs and toast\").");
     }
     setAiBusy(false);
+  };
+  // Photo estimate: downscale to a ~1024px JPEG (caps upload + vision tokens),
+  // hand it to the same estimate call, then discard it. Photos are NEVER stored.
+  const onPhotoPicked = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = ""; // let the same file be picked again
+    if (!f || aiBusy) return;
+    setAiErr("");
+    let dataUrl;
+    try { dataUrl = await downscaleImage(f); }
+    catch { setAiErr("Couldn't read that image — try another photo."); return; }
+    runAiEstimate(dataUrl);
   };
   // Run a food search. Progressive: results render the moment the fastest
   // source (usually USDA) lands, then upgrade to the full merged list. A
@@ -8337,13 +8367,24 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
                 Scan barcode
               </span>
             </button>
-            <button onClick={runAiEstimate} disabled={aiBusy}
+            <button onClick={() => runAiEstimate()} disabled={aiBusy}
               style={{ border:"none", background:"transparent", color:"var(--accent)", cursor:"pointer",
                 fontSize:".74rem", fontWeight:700, padding:"0", textAlign:"left", opacity: aiBusy ? .6 : 1 }}>
               <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}>
                 <Icon name="sparkle" variant="solid" size={13} />{aiBusy ? "Estimating…" : "AI estimate"}
               </span>
             </button>
+            {/* Photo estimate — snap the plate instead of typing it. The photo is
+                sent to the model and discarded; nothing is stored. */}
+            <button onClick={() => photoInputRef.current && photoInputRef.current.click()} disabled={aiBusy}
+              style={{ border:"none", background:"transparent", color:"var(--accent)", cursor:"pointer",
+                fontSize:".74rem", fontWeight:700, padding:"0", textAlign:"left", opacity: aiBusy ? .6 : 1 }}>
+              <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}>
+                <Icon name="camera" size={13} />{aiBusy ? "Estimating…" : "Estimate from photo"}
+              </span>
+            </button>
+            <input ref={photoInputRef} type="file" accept="image/*" capture="environment"
+              onChange={onPhotoPicked} style={{ display:"none" }} />
           </div>
           {scanErr && <div style={{ fontSize:".74rem", color:"var(--red)", marginTop:"6px" }}>{scanErr}</div>}
           {scanOpen && createPortal(
@@ -8379,7 +8420,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
               {!searching && !searchErr && results.length === 0 && searchQ.trim().length >= 2 && (
                 <div style={{ fontSize:".74rem", color:"var(--muted)", display:"flex", alignItems:"center", gap:"8px", flexWrap:"wrap" }}>
                   <span>No matches — try a simpler term, or</span>
-                  <button onClick={runAiEstimate} disabled={aiBusy}
+                  <button onClick={() => runAiEstimate()} disabled={aiBusy}
                     style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"5px 10px", borderRadius:"999px",
                       cursor:"pointer", border:"1px solid var(--accent)", background:"rgba(8,220,224,.08)",
                       color:"var(--accent)", fontSize:".72rem", fontWeight:700, opacity: aiBusy ? .6 : 1 }}>
@@ -8662,7 +8703,20 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
           cursor:"pointer", columnGap:"8px", rowGap:"8px" }}>
         <div style={{ display:"flex", alignItems:"center", gap:"8px", flexShrink:0, whiteSpace:"nowrap",
           fontFamily:"'Sora',sans-serif", fontSize:".95rem", letterSpacing:".5px", color:"var(--text-secondary)" }}>
-          <Icon name="meal" size={17} color="var(--accent)" />Meals &amp; Food Today
+          <Icon name="meal" size={17} color="var(--accent)" />
+          {/* Day arrows (S99): step back to log a past day without leaving the
+              dashboard. The label only says "Today" when it actually IS today —
+              otherwise the date is spelled out so a back-dated entry is obvious. */}
+          {onDayStep ? (
+            <span onClick={(e) => e.stopPropagation()} style={{ display:"inline-flex", alignItems:"center", gap:"6px" }}>
+              <span>Meals &amp; Food</span>
+              <button onClick={() => onDayStep(-1)} aria-label="Previous day" style={dayNavBtn}>‹</button>
+              <span style={{ minWidth:"96px", textAlign:"center", fontSize:".82rem",
+                color: dayLabel === "Today" ? "var(--text-secondary)" : "var(--accent)", fontWeight:700 }}>{dayLabel}</span>
+              <button onClick={() => canGoNext && onDayStep(1)} disabled={!canGoNext} aria-label="Next day"
+                style={{ ...dayNavBtn, opacity: canGoNext ? 1 : .35, cursor: canGoNext ? "pointer" : "default" }}>›</button>
+            </span>
+          ) : "Meals & Food Today"}
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:"8px", marginLeft:"auto", flexShrink:0 }}>
           {list.length > 0 && (
@@ -9508,6 +9562,62 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
 
   const [tzSync, setTzSync] = useState(null); // null | "busy" | { ok, text }
   const [showCalendar, setShowCalendar] = useState(false);
+  // ── Meal-card day navigation (S99) ──
+  // Arrows on "Meals & Food" step back through past days so a client can log
+  // yesterday without opening the calendar. Seeded FROM useTodayKey (never
+  // recomputed inline — that caused the S85 midnight-corruption bug), and the
+  // rest of the dashboard (ring, streak, week summary) stays TODAY-only on
+  // purpose: this is a logging shortcut, not a time machine for the whole page.
+  const dashToday = useTodayKey();
+  const [mealDate, setMealDate] = useState(dashToday);
+  const mealIsToday = mealDate === dashToday;
+  const [mealDayLog, setMealDayLog] = useState(null); // the past day's log (today reads dailyLog)
+  useEffect(() => { if (mealDate > dashToday) setMealDate(dashToday); }, [dashToday, mealDate]);
+  useEffect(() => {
+    let alive = true;
+    if (mealIsToday) { setMealDayLog(null); return; }
+    Promise.resolve(onReadDay ? onReadDay(mealDate) : null)
+      .then((d) => { if (alive) setMealDayLog(d || {}); })
+      .catch(() => { if (alive) setMealDayLog({}); });
+    return () => { alive = false; };
+  }, [mealDate, mealIsToday, onReadDay]);
+  const shiftMealDate = (n) => setMealDate((k) => {
+    const p = k.split("-").map(Number);
+    const d = new Date(p[0], p[1] - 1, p[2] + n);
+    const next = ymdLocal(d);
+    return next > dashToday ? k : next; // never navigate into the future
+  });
+  // Past-day writes go through onWriteDay (date-scoped); today keeps the
+  // existing handlers so the ring/streak/week-summary stay wired as they were.
+  const mealWriteDay = (next) => { setMealDayLog(next); if (onWriteDay) onWriteDay(mealDate, next); };
+  const pastAddMeals = (list) => {
+    const arr = (list || []).map((meal, i) => ({
+      id: `m${Date.now()}${i}${Math.floor(Math.random() * 1000)}`, name: meal.name || "", type: meal.type || "",
+      calories: Number(meal.calories) || 0, protein: Number(meal.protein) || 0, carbs: Number(meal.carbs) || 0, fat: Number(meal.fat) || 0,
+      ...(meal.brand ? { brand: meal.brand } : {}),
+      ...(meal.grams != null ? { grams: Number(meal.grams), unit: meal.unit || "g" } : {}),
+      ...(meal.micros ? { micros: meal.micros } : {}) }));
+    if (!arr.length) return;
+    const d = mealDayLog || {}; const sum = (f) => arr.reduce((s, m) => s + (m[f] || 0), 0);
+    mealWriteDay({ ...d, meals: [...(d.meals || []), ...arr], calories: (d.calories || 0) + sum("calories"),
+      protein: (d.protein || 0) + sum("protein"), carbs: (d.carbs || 0) + sum("carbs"), fat: (d.fat || 0) + sum("fat") });
+  };
+  const pastAddMeal = (meal) => pastAddMeals([meal]);
+  const pastRemoveMeal = (id) => {
+    const d = mealDayLog || {}; const m = (d.meals || []).find((x) => x.id === id); if (!m) return;
+    mealWriteDay({ ...d, meals: (d.meals || []).filter((x) => x.id !== id), calories: Math.max(0, (d.calories || 0) - m.calories),
+      protein: Math.max(0, (d.protein || 0) - m.protein), carbs: Math.max(0, (d.carbs || 0) - m.carbs), fat: Math.max(0, (d.fat || 0) - m.fat) });
+  };
+  const pastEditMeal = (id, fields) => {
+    const d = mealDayLog || {}; const old = (d.meals || []).find((x) => x.id === id); if (!old) return;
+    const nm = { ...old, ...fields, calories: Number(fields.calories) || 0, protein: Number(fields.protein) || 0,
+      carbs: Number(fields.carbs) || 0, fat: Number(fields.fat) || 0 };
+    mealWriteDay({ ...d, meals: (d.meals || []).map((x) => x.id === id ? nm : x),
+      calories: Math.max(0, (d.calories || 0) - old.calories + nm.calories),
+      protein: Math.max(0, (d.protein || 0) - old.protein + nm.protein),
+      carbs: Math.max(0, (d.carbs || 0) - old.carbs + nm.carbs),
+      fat: Math.max(0, (d.fat || 0) - old.fat + nm.fat) });
+  };
   const [editingWorkout, setEditingWorkout] = useState(null);
   const [showBurnModes, setShowBurnModes] = useState(false);  // target chooser (S97z)
   const [expandedStat, setExpandedStat] = useState(null);
@@ -10489,7 +10599,13 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         })()}
         </div>)}
         </div>
-      <MealLog meals={dailyLog.meals} onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood} savedMeals={savedMeals} onToggleSaveMeal={onToggleSaveMeal} onRemoveSavedMeal={onRemoveSavedMeal} onLogMeal={onLogMeal} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={ymdLocal()} hideMicros />
+      <MealLog meals={mealIsToday ? dailyLog.meals : ((mealDayLog && mealDayLog.meals) || [])}
+        onAddMeal={mealIsToday ? onAddMeal : pastAddMeal} onAddMeals={mealIsToday ? onAddMeals : pastAddMeals}
+        onRemoveMeal={mealIsToday ? onRemoveMeal : pastRemoveMeal} onEditMeal={mealIsToday ? onEditMeal : pastEditMeal}
+        recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood} savedMeals={savedMeals} onToggleSaveMeal={onToggleSaveMeal} onRemoveSavedMeal={onRemoveSavedMeal}
+        onLogMeal={mealIsToday ? onLogMeal : undefined} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays}
+        dateKey={mealDate} hideMicros
+        onDayStep={shiftMealDate} dayLabel={dayLabelFor(mealDate, dashToday)} canGoNext={!mealIsToday} />
             </>
           )}
           {expandedStat === "burn" && (

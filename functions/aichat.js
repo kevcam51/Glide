@@ -170,6 +170,16 @@ function sanitizeContent(content, allowImages = false) {
   return blocks.length ? blocks : null;
 }
 
+// Validate a base64 image data URL into an Anthropic image block, reusing the
+// same type/size rules as chat photo logging. Returns null if absent/invalid.
+function sanitizeImageDataUrl(dataUrl) {
+  const m = /^data:(image\/[a-z+]+);base64,(.+)$/.exec(String(dataUrl || ""));
+  if (!m) return null;
+  const [, mediaType, data] = m;
+  if (!IMG_TYPES.has(mediaType) || data.length > MAX_IMG_B64) return null;
+  return { type: "image", source: { type: "base64", media_type: mediaType, data } };
+}
+
 // How many recent messages to re-send to the model. The whole window is
 // re-sent on every tool round, so this is the single biggest input-cost lever.
 // 10 messages = ~5 exchanges — plenty for meal corrections ("make it one egg")
@@ -615,7 +625,11 @@ exports.estimateFood = onCall(
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
     const desc = String((request.data && request.data.food) || "").trim().slice(0, 200);
-    if (!desc) throw new HttpsError("invalid-argument", "Describe the food first.");
+    // Optional meal PHOTO (S99): a base64 data URL. Validated through the same
+    // rules as the chat's photo logging (sanitizeContent) — never store it, it
+    // goes straight to the model and is discarded with the request.
+    const imgBlock = sanitizeImageDataUrl((request.data && request.data.image) || "");
+    if (!desc && !imgBlock) throw new HttpsError("invalid-argument", "Describe the food or add a photo first.");
     const db = admin.firestore();
     const profile = (await db.doc(`users/${uid}`).get()).data() || {};
     if (trialExpiredFor(profile)) {
@@ -634,13 +648,23 @@ exports.estimateFood = onCall(
       msg = await client.messages.create({
         model: MODEL, max_tokens: 250,
         system: "You estimate nutrition for foods and meals. Reply with ONLY a JSON object, no prose: "
-          + '{"calories":int,"protein":int,"carbs":int,"fat":int,"assumed":"short serving you assumed","grams":number,"unit":"g"|"ml"}. '
+          + '{"name":"short food name","calories":int,"protein":int,"carbs":int,"fat":int,"assumed":"short serving you assumed","grams":number,"unit":"g"|"ml"}. '
+          + "`name` is a short label for the food (e.g. \"Chicken burrito\"). "
           + "Macros in grams. `grams` = the weight (or volume for a drink) of the serving you assumed, and "
           + "`unit` is \"g\" for solids or \"ml\" for liquids — this lets the user rescale by exact amount. "
           + "If no quantity is given, assume ONE typical realistic serving and say what you assumed (e.g. "
           + "\"1 medium bowl, ~350g\" with grams:350, unit:\"g\"; or \"1 cup, 240ml\" with grams:240, unit:\"ml\"). "
-          + "Use common US portions.",
-        messages: [{ role: "user", content: `Estimate: ${desc}` }],
+          + "Use common US portions."
+          + (imgBlock ? " The user attached a PHOTO of the food. Identify what is on the plate and "
+            + "estimate the portion from visual size cues (plate/bowl/utensil scale). Set `assumed` to "
+            + "what you saw and the portion you judged (e.g. \"chicken breast + rice, ~1.5 cups\"). "
+            + "Include invisible cooking fats/oils and dressings in the calorie estimate." : ""),
+        messages: [{
+          role: "user",
+          content: imgBlock
+            ? [imgBlock, { type: "text", text: desc ? `Estimate this meal. The user says it is: ${desc}` : "Estimate this meal." }]
+            : `Estimate: ${desc}`,
+        }],
       });
     } catch (e) {
       console.error("estimateFood API error:", e && e.message);
@@ -662,6 +686,7 @@ exports.estimateFood = onCall(
     }
     const g = Number(out.grams);
     return {
+      name: String(out.name || "").slice(0, 60),
       calories: n(out.calories),
       protein: n(out.protein) || 0, carbs: n(out.carbs) || 0, fat: n(out.fat) || 0,
       assumed: String(out.assumed || "").slice(0, 120),
