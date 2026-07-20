@@ -287,6 +287,15 @@ await check("signup cannot self-grant credits", assertFails(setDoc(prof(ctx("new
   { uid: "newbie_X", email: "n@x.co", role: "client", sessionCredits: 25 })));
 await check("admin CAN set credits (the settle dispatcher's path)", assertSucceeds(updateDoc(prof(admin, C1), { sessionCredits: 5 })));
 
+await check("client cannot forge a saved card", assertFails(updateDoc(prof(c1, C1),
+  { sessionPaymentMethod: { id: "pm_fake", brand: "visa", last4: "4242" } })));
+await check("client cannot repoint billing at another card", assertFails(updateDoc(prof(c1, C1),
+  { sessionPaymentMethod: { id: "pm_someone_elses" } })));
+await check("signup cannot self-grant a saved card", assertFails(setDoc(prof(ctx("newbie_Y"), "newbie_Y"),
+  { uid: "newbie_Y", email: "y@x.co", role: "client", sessionPaymentMethod: { id: "pm_x" } })));
+await check("admin CAN write the card pointer (recordSessionConsent's path)", assertSucceeds(
+  updateDoc(prof(admin, C1), { sessionPaymentMethod: { id: "pm_real", brand: "visa", last4: "4242" } })));
+
 console.log("\nCANCEL POLICY — trainer-set, client-readable:");
 await check("trainer sets own cancellation window + packs", assertSucceeds(updateDoc(prof(head, H),
   { sessionPolicy: { cancelWindowHours: 48, lateCancelChargePct: 100 },

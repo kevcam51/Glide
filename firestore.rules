@@ -81,7 +81,7 @@ service cloud.firestore {
         && request.auth.uid == uid
         && request.resource.data.uid == uid
         && request.resource.data.role in ['client', 'head_trainer']
-        && !request.resource.data.keys().hasAny(['entitlements', 'sessionCredits', 'sessionBillingHold'])
+        && !request.resource.data.keys().hasAny(['entitlements', 'sessionCredits', 'sessionBillingHold', 'sessionPaymentMethod'])
         && request.resource.data.get('subscriptionStatus', 'trial') == 'trial';
 
       // UPDATE: admin anything; owner may update own profile but MUST NOT
@@ -95,6 +95,10 @@ service cloud.firestore {
       //    would be "grant yourself 100 free sessions with your trainer".
       //  • sessionBillingHold — the lockout flag after a declined weekly charge.
       //    Owner-writable would let a client clear their own unpaid hold.
+      //  • sessionPaymentMethod — the saved-card pointer. Owner-writable would
+      //    let a client fake having a card on file (or point billing at someone
+      //    else's payment method id). Written ONLY by recordSessionConsent,
+      //    which re-reads the card from Stripe rather than trusting the browser.
       // Both are written ONLY by the Admin SDK (purchase + settle dispatchers).
       // NOTE: sessionPolicy / sessionPacks are deliberately NOT locked — they are
       // the TRAINER's own cancellation window and price list on their OWN profile,
@@ -107,7 +111,7 @@ service cloud.firestore {
           && request.resource.data.role == resource.data.role
           && !request.resource.data.diff(resource.data).affectedKeys()
                .hasAny(['subscriptionStatus', 'entitlements', 'trialStartedAt', 'trialLengthDays',
-                        'sessionCredits', 'sessionBillingHold'])
+                        'sessionCredits', 'sessionBillingHold', 'sessionPaymentMethod'])
         );
 
       // DELETE: admin only.

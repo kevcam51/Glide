@@ -104,6 +104,12 @@ exports.runDueWorkflows = require("./workflows").runDueWorkflows; // hourly disp
 exports.trainerizeTest = require("./trainerize").trainerizeTest; // Trainerize connection test (import step 1)
 exports.trainerizeImport = require("./trainerize").trainerizeImport; // Trainerize roster + snapshot importer (v1)
 exports.trainerizeAutoSync = require("./trainerize").trainerizeAutoSync; // 30-min background sync of imported clients
+// Session billing phase 3 step 1 (S101): card on file + the authorization
+// record. Saves and removes cards; charges nothing — the per-session and
+// weekly dispatchers come next and can only run against a card saved here.
+exports.createSessionSetupIntent = require("./sessionBilling").createSessionSetupIntent;
+exports.recordSessionConsent = require("./sessionBilling").recordSessionConsent;
+exports.removeSessionCard = require("./sessionBilling").removeSessionCard;
 // Biometric login (Face ID / Touch ID passkeys — S87). Register while signed in;
 // sign in signed-out via custom token. See functions/webauthn.js.
 exports.passkeyRegisterOptions = require("./webauthn").passkeyRegisterOptions;
