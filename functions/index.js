@@ -137,6 +137,10 @@ exports.sendTrainerRequest = require("./requests").sendTrainerRequest;
 // the (Kevin) FatSecret account + secret setup. No-op until the secrets are set.
 exports.foodSearch = require("./foodsearch").foodSearch;
 
+// Training sessions (S100): the "red line" — stamps completedAt on sessions
+// whose end time has passed. That stamp is what Sunday billing will bill from.
+exports.sessionsMarkCompleted = require("./sessions").sessionsMarkCompleted;
+
 // ── adminOverview (S90, Kevin's ask): every user at a glance ────────────────
 // Admin-only. Server-side Admin SDK reads (no rules change needed): profile +
 // subscription/trial state + today's AI usage + boost-request flags. Read-only.
