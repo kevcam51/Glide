@@ -102,3 +102,26 @@ Same integration shape as Trainerize (Kevin provides credentials as secrets, the
   card save (auto-charge disclosure, like the trial ToS clause), refund/dispute handling.
 - Timezone matters for "when the line crosses" — store `startAt` as UTC, schedule in the trainer's tz.
 - This is a multi-session build; do NOT start until the scheduling source + billing model are decided.
+
+## ⭐ S99 UPDATE — Kevin's chosen v1: SUNDAY WEEKLY BATCH billing
+Kevin (Jul 19) refined the model — this supersedes per-session charging as the v1 design:
+
+1. **Sessions on the calendar; the red line counts them.** As the current-time line passes a
+   scheduled session, it's marked `completed` (a scheduled dispatcher — same machinery as the
+   Trainerize 30-min auto-sync — no webhook needed for this part).
+2. **One charge per week, Sunday night:** a weekly scheduled Function sums the week's completed,
+   unpaid, non-package sessions per client and makes ONE off-session Stripe charge to the saved
+   card. Fewer charges = fewer Stripe fees, fewer decline events, cleaner statements — strictly
+   better than per-session charging.
+3. **Decline → lockout + notify BOTH sides:** if the Sunday charge declines and isn't cured by the
+   start of the next week, the client's account is flagged (`sessionBillingHold`) — they see a
+   "cover last week's sessions to continue training" card (home screen + push), the TRAINER gets a
+   notification too, and booking/attending new sessions is blocked until the balance clears (a
+   retry/pay-now button hits a fresh PaymentIntent).
+4. Package credits still settle FIRST (unchanged rule): Sunday only bills sessions that no credit
+   covered.
+
+**Build order stays:** scheduling layer first (Acuity import recommended; Kevin to provide API
+key + User ID as secrets), then the completed-session marker, then Sunday billing + the decline
+flow. Timing: after the S99 concerns batch (macro-save feedback, measurements asterisks, ID
+numbers) — Kevin's call, Jul 19.

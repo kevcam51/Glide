@@ -1960,7 +1960,9 @@ body{
   padding:6px 12px;border-radius:20px;
   background:rgba(79,255,176,.12);border:1px solid rgba(79,255,176,.3);
   color:var(--green);font-size:.7rem;font-weight:600;letter-spacing:.5px;
-  z-index:40;animation:fadeUp .2s ease both;pointer-events:none;
+  /* Above every sheet/modal (they sit at 1500-2200) — the "Saved" confirmation
+     was invisible while editing inside the Food & Calories sheet (S99, Kevin). */
+  z-index:3000;animation:fadeUp .2s ease both;pointer-events:none;
 }
 .prof-header-bar{
   display:flex;align-items:center;justify-content:space-between;gap:10px;
@@ -7174,6 +7176,7 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
   // serving and the input vanished mid-number).
   const [servingWeight, setServingWeight] = useState("");
   const [servingWeightSet, setServingWeightSet] = useState(0); // committed g/ml
+  const [weightAddOpen, setWeightAddOpen] = useState(false);   // the add-a-weight box, collapsed by default
   const commitServingWeight = () => {
     const v = parseFloat(servingWeight);
     if (v > 0) setServingWeightSet(v);
@@ -7336,13 +7339,23 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
               promotes this food to full unit editing above (see the top of the
               component). Without a weight there is genuinely nothing to convert
               with, so we ask instead of guessing. */}
-          {isServing && (
+          {/* Collapsed by default (S99, Kevin): most people don't know a serving's
+              weight and shouldn't be asked — the database serving works as-is.
+              The link is only for those who WANT exact weight units. */}
+          {isServing && !weightAddOpen && (
+            <button onClick={() => setWeightAddOpen(true)}
+              style={{ marginTop: "7px", border: "none", background: "transparent", color: "var(--muted)",
+                cursor: "pointer", fontSize: ".72rem", padding: 0, textAlign: "left", textDecoration: "underline", fontFamily: "inherit" }}>
+              Know what a serving weighs? Add it to measure in {rawFood.baseUnit === "ml" ? "ml / cups" : "g / oz / cups"} (optional)
+            </button>
+          )}
+          {isServing && weightAddOpen && (
             <div style={{ marginTop: "8px", padding: "9px 11px", borderRadius: "9px", background: "var(--s2)", border: "1px solid var(--border)" }}>
               <div style={{ fontSize: ".72rem", color: "var(--muted)", lineHeight: 1.5, marginBottom: "7px" }}>
                 <strong style={{ color: "var(--text)" }}>Optional:</strong> this food only lists nutrition per serving, not by weight.
                 If the package says what one serving weighs (e.g. "Serving size 240g"), enter it here to also
                 measure in <strong style={{ color: "var(--text)" }}>{rawFood.baseUnit === "ml" ? "ml / fl oz / cups" : "g / oz / cups"}</strong>.
-                Otherwise just use the serving count above.
+                Don't know it? Just use the serving count above — that's fine.
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                 <span style={{ fontSize: ".72rem", color: "var(--muted)", whiteSpace: "nowrap" }}>1 {(food.servingLabel || "serving").replace(/^1\s+/, "")} =</span>
@@ -7357,6 +7370,9 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
                   style={{ padding: "7px 14px", fontSize: ".76rem", fontWeight: 700, borderRadius: "8px", border: "none",
                     cursor: "pointer", background: "var(--accent-fill)", color: "#0b0b12", fontFamily: "inherit",
                     opacity: parseFloat(servingWeight) > 0 ? 1 : .45 }}>Set</button>
+                <button onClick={() => setWeightAddOpen(false)}
+                  style={{ border: "none", background: "transparent", color: "var(--muted)", cursor: "pointer",
+                    fontSize: ".74rem", padding: "7px 4px", fontFamily: "inherit" }}>Cancel</button>
               </div>
             </div>
           )}
@@ -11828,6 +11844,13 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   const needed = d.gender === "male" ? "waist, hips, forearm + wrist (Bailey) · waist + neck (Navy)"
     : d.gender === "female" ? "hips, thigh, calf + wrist (Bailey) · waist, hips + neck (Navy)"
     : "set gender on the profile to compute body fat %";
+  // The union of fields either formula uses, per gender — starred in the grid
+  // (S99, Kevin: mark which measurements the body-fat % actually needs; the
+  // sets differ by gender, so the asterisks follow the plan's gender).
+  const bfNeededFields = new Set(
+    d.gender === "male" ? ["waist", "hips", "neck", "forearm", "wrist"]
+    : d.gender === "female" ? ["waist", "hips", "neck", "thigh", "calf", "wrist"]
+    : []);
 
   const save = () => {
     const vals = {};
@@ -12040,13 +12063,21 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         <div className="grid grid-cols-2 gap-2">
           {MEASUREMENT_FIELDS.map((f) => (
             <div key={f} className="flex items-center gap-2">
-              <span className="w-[64px] shrink-0 text-xs text-muted">{MEASUREMENT_LABELS[f]}</span>
+              <span className="w-[64px] shrink-0 text-xs text-muted">
+                {MEASUREMENT_LABELS[f]}{showBF && bfNeededFields.has(f) ? <span className="text-primary font-bold">*</span> : null}
+              </span>
               <input type="number" inputMode="decimal" placeholder={latest && latest[f] != null ? `${latest[f]}` : "—"}
                 value={drafts[f] ?? ""} onChange={(e) => setDrafts((s) => ({ ...s, [f]: e.target.value }))}
                 className="w-full min-w-0 bg-surface2 border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted" />
             </div>
           ))}
         </div>
+        {showBF && bfNeededFields.size > 0 && (
+          <div className="mt-1.5 text-[11px] text-muted">
+            <span className="text-primary font-bold">*</span> used in your body-fat estimate ({d.gender === "male" ? "men" : "women"}: {needed}).
+            The others are optional — tracked for their own trends.
+          </div>
+        )}
         {/* Live tape body-fat preview (Bailey/Navy computed as you type). */}
         {live && live.tapeBF != null && (
           <div className="mt-2 rounded-lg px-3 py-2 text-sm flex items-center gap-2 flex-wrap" style={{ background: "rgba(8,220,224,.08)" }}>
@@ -12943,6 +12974,23 @@ function tzSyncSummary(r) {
     : `Checked ${who} — nothing new in Trainerize yet. Watch data usually lands a few hours after your workout.`;
 }
 
+// ─── Stable ID numbers (S99, Kevin) ─────────────────────────────────────────
+// Every connected client and local plan/simulation gets a short permanent
+// number (#1, #2, …) so two clients with the same name are never ambiguous.
+// Assigned once, in load order, into the trainer's own kv (caliq-idnums) and
+// NEVER renumbered — deleting #2 does not shift #3, and a client keeps their
+// number for life.
+async function ensureIdNums(keys) {
+  let docv = {};
+  try { const r = await window.storage.get("caliq-idnums"); docv = JSON.parse(r.value) || {}; } catch (e) { /* first use */ }
+  const map = docv.map || {}; let next = Number(docv.next) || 1; let changed = false;
+  for (const k of keys) { if (k && map[k] == null) { map[k] = next++; changed = true; } }
+  if (changed) { try { await window.storage.set("caliq-idnums", JSON.stringify({ next, map })); } catch (e) { console.warn("idnums save failed", e); } }
+  return map;
+}
+// The little "#3" tag rendered next to a name.
+const IdTag = ({ n }) => (n ? <span style={{ fontSize: ".7rem", fontWeight: 700, color: "var(--muted)", marginLeft: 6 }}>#{n}</span> : null);
+
 function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, meUid, meName, meRole, notifPrefs, onSetNotifPrefs }) {
   const [details, setDetails] = useState({}); // id -> { tdee, target }
   // Trainerize import: the button opens a PICKER (roster preview, no writes)
@@ -13041,6 +13089,15 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const [planFilter, setPlanFilter] = useState("all");       // all | plans | sims (merged local list)
   const [confirmDelFor, setConfirmDelFor] = useState(null);  // local-plan id awaiting delete confirm
   const [clients, setClients] = useState([]); // connected client accounts (live data)
+  // Permanent #numbers for clients + local plans (assigned on first sight).
+  const [idNums, setIdNums] = useState({});
+  const idSig = [...clients.map((c) => c.uid), ...(profiles || []).map((p) => p.id)].join(",");
+  useEffect(() => {
+    if (!idSig) return;
+    let alive = true;
+    ensureIdNums(idSig.split(",")).then((m) => { if (alive) setIdNums(m); });
+    return () => { alive = false; };
+  }, [idSig]);
   const [renamingId, setRenamingId] = useState(null);
   const [renameDraft, setRenameDraft] = useState("");
   // Connected-client management (moved here from the role panel).
@@ -13478,7 +13535,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     <div onClick={() => { if (c.hasPlan && onOpenClientPlan) onOpenClientPlan(c.uid); }}
                       className={c.hasPlan ? "cursor-pointer" : "cursor-default"}>
                       <div className="flex justify-between items-center mb-2">
-                        <span className="font-bold text-[.95rem]">{c.name}</span>
+                        <span className="font-bold text-[.95rem]">{c.name}<IdTag n={idNums[c.uid]} /></span>
                         <span className="flex gap-2 items-center">
                           {reqsOn && openReqs.length > 0 && (
                             <span className="text-[.68rem] font-bold text-primaryfg bg-primaryfill rounded-[10px] px-2 py-0.5 inline-flex items-center gap-1">
@@ -13868,6 +13925,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                       <div className="flex justify-between items-center mb-2">
                         <span className="font-bold text-[.95rem]">
                           {p.customName || p.name || (sim ? "Untitled simulation" : "Unnamed client")}
+                          <IdTag n={idNums[p.id]} />
                           {onRename && (
                             <button onClick={(e) => { e.stopPropagation(); setRenameDraft(p.customName || p.name || ""); setRenamingId(p.id); }}
                               title="Rename" className="border-none bg-transparent text-muted cursor-pointer text-[.85rem] ml-1.5"><Icon name="edit" size={14} color="currentColor" /></button>
