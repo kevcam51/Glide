@@ -15828,7 +15828,7 @@ const COACH_TIPS = [
   "Ask your AI coach to estimate a meal — just describe it or snap a photo.",
 ];
 
-function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPrefs, premium = true }) {
+function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPrefs, premium = true, billingHold = null }) {
   // The client's plan lives in their own account as "caliq-self"; today's log is
   // "caliq-log-self-{date}". The client is always on their own account (no remote
   // routing), so we read/write their own window.storage directly.
@@ -16307,6 +16307,25 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
         {showSessions && trainerInfo && (
           <SessionsPanel meUid={meUid} role="client" trainerUid={trainerInfo.uid} clientUid={meUid}
             otherName={trainerInfo.name} onClose={() => setShowSessions(false)} />
+        )}
+
+        {/* Unpaid session balance after a declined charge (S102b — Kevin's
+            decline flow: the client must cover last week before continuing).
+            Deliberately NOT dismissible: it clears only when the balance does.
+            The path to fix it is one tap — update the card in Sessions. */}
+        {billingHold && (
+          <button onClick={() => setShowSessions(true)}
+            className="mb-4 w-full text-left rounded-card border p-3.5 cursor-pointer"
+            style={{ borderColor: "var(--danger,#f87171)", background: "rgba(248,113,113,.08)" }}>
+            <div className="flex items-center gap-2 font-display text-base uppercase tracking-wide" style={{ color: "var(--danger,#f87171)" }}>
+              <Icon name="alert" size={17} color="currentColor" />Payment needed
+            </div>
+            <div className="mt-1.5 text-sm text-fg leading-snug">
+              Your card was declined for <b>${((billingHold.amountCents || 0) / 100).toFixed(2)}</b> of
+              training{trainerInfo ? ` with ${trainerInfo.name}` : ""}. Update your card to cover it and keep training.
+            </div>
+            <div className="mt-1 text-xs" style={{ color: "var(--danger,#f87171)" }}>Tap to update your card in Sessions →</div>
+          </button>
         )}
 
         {/* Next session (S100) — the client's view of what their trainer booked.
@@ -19027,6 +19046,7 @@ export default function App() {
   const [meUid, setMeUid] = useState("");     // current user's uid
   const [meEmail, setMeEmail] = useState(""); // current user's email (for the menu)
   const [meTrial, setMeTrial] = useState(null); // trial countdown state (or null)
+  const [meBillingHold, setMeBillingHold] = useState(null); // unpaid session balance after a declined charge (S102b)
   // Appearance (S95): the inline script in index.html already painted the theme
   // before first paint; this just mirrors the stored pref so the menu can show it.
   const [themePref, setThemePref] = useState(readThemePref);
@@ -19127,6 +19147,7 @@ export default function App() {
           setMeTrial(trialInfo(prof));
           setMePremium(isPremium(prof));
           setMeSubStatus(prof.subscriptionStatus || null);
+          setMeBillingHold(prof.sessionBillingHold || null); // declined session charge → the home banner (S102b)
         }
       } catch(e) {}
       try {
@@ -20307,6 +20328,7 @@ export default function App() {
     if (role === ROLES.CLIENT) {
       return <>{chrome}<ClientHome onOpenPlan={() => selectProfile("self")}
         meUid={meUid} meName={meName} role={role} premium={mePremium}
+        billingHold={meBillingHold}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs} /></>;
     }
     if (isTrainerHome && homeTab === "analytics") {
