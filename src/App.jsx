@@ -9981,6 +9981,13 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const vsTarget = Math.round(target - logged);
   const todayDeficit = Math.max(0, vsTarget);   // under target
   const todaySurplus = Math.max(0, -vsTarget);  // over target
+  // The "with your workout" option (S102h, Kevin: "both options to see"). The
+  // workout burn DEEPENS the deficit only when it isn't already spent back as
+  // food — i.e. accelerate mode. In eat-back mode the burn is baked into the
+  // target (you eat it back), so it doesn't add a second deficit; and a tracker
+  // day already measures total burn, so adding on top would double-count.
+  const burnDeepensDeficit = burnShown > 0 && !isEatback(data) && manualTarget == null && !trackerTdee;
+  const vsTargetWithBurn = vsTarget + (burnDeepensDeficit ? burnShown : 0);
   const overCals = remaining < 0;
   const pct = target > 0 ? Math.min(100, Math.round((logged / target) * 100)) : 0; // arc caps at full
   // Macro targets. Default (estimates): protein 1g/lb bodyweight, fat 28% of
@@ -10104,7 +10111,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 and it read as broken. Green under target, RED "surplus" over,
                 neutral "on target" at exactly zero — so there is always a
                 number where one is expected. */}
-            <div style={{marginTop:"3px",textAlign:"center",lineHeight:1.25}}>
+            <div style={{marginTop:"3px",textAlign:"center",lineHeight:1.2}}>
               <div style={{fontSize:".62rem",fontWeight:700,letterSpacing:".3px",
                 color: todaySurplus > 0 ? "var(--red)" : todayDeficit > 0 ? "var(--green)" : "var(--muted)"}}>
                 {todaySurplus > 0
@@ -10113,6 +10120,17 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                     ? `−${todayDeficit.toLocaleString()} deficit`
                     : "on target"}
               </div>
+              {/* The second option (S102h): the deficit WITH today's workout
+                  burn added. Only when the burn actually deepens it — an
+                  accelerate-mode day with a real burn — otherwise it would
+                  just repeat the line above. */}
+              {burnDeepensDeficit && (
+                <div style={{fontSize:".5rem",color:"var(--green)",opacity:.85,letterSpacing:".2px",marginTop:"1px"}}>
+                  {vsTargetWithBurn > 0
+                    ? `−${vsTargetWithBurn.toLocaleString()} with workout`
+                    : `+${Math.abs(vsTargetWithBurn).toLocaleString()} even with workout`}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -10246,6 +10264,44 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             This also updates your Full Plan, projections and coaching — it's one setting, shown in both places.
           </div>
         </div>
+
+        {/* What the deficit means for the scale (S102h, Kevin: "a formula that
+            tells someone how much weight they'll lose at a certain deficit").
+            A pound of fat ≈ 3,500 cal, so lbs/week = daily deficit × 7 / 3,500.
+            Projected from the PLAN's sustained deficit (the honest "if you hold
+            this" rate), with the faster with-workouts rate shown when the plan
+            counts exercise on top (accelerate mode). */}
+        {(() => {
+          const planDaily = dailyDeficitOf(data);          // e.g. 500/day
+          if (planDaily <= 0) return null;                  // maintenance — nothing to project
+          const weekBurn = DAYS.reduce((a, _d, i) =>
+            a + ((dayData[i] && dayData[i].burned) || 0) + ((strengthDayData[i] && strengthDayData[i].burned) || 0), 0);
+          const baseWk = (planDaily * 7) / 3500;            // lbs/week from diet alone
+          const withWk = baseWk + (isEatback(data) ? 0 : weekBurn / 3500);
+          const lb = (n) => `${n.toFixed(1)} lb`;
+          const row = (label, wk, strong) => (
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"5px 0",fontSize:".82rem"}}>
+              <span style={{color:"var(--muted)"}}>{label}</span>
+              <span style={{fontFamily:"'Sora',sans-serif",fontWeight:strong?800:600,color:strong?"var(--accent)":"var(--text)"}}>
+                {lb(wk)}<span style={{color:"var(--muted)",fontWeight:400,fontSize:".72rem"}}>/wk</span>
+                <span style={{color:"var(--muted)",fontWeight:400,fontSize:".72rem"}}>{"  ·  "}~{lb(wk * 4.345)}/mo</span>
+              </span>
+            </div>
+          );
+          return (
+            <div style={{marginTop:"12px",borderTop:"1px solid var(--border)",paddingTop:"12px"}}>
+              <div style={{fontSize:".8rem",fontWeight:700,color:"var(--text)",marginBottom:"6px",display:"flex",alignItems:"center",gap:6}}>
+                <Icon name="scale" size={15} color="var(--accent)" />What this means for the scale
+              </div>
+              {row("Holding this plan", baseWk, !(withWk > baseWk + 0.05))}
+              {withWk > baseWk + 0.05 && row("With your workouts", withWk, true)}
+              <div style={{fontSize:".68rem",color:"var(--muted)",marginTop:"7px",lineHeight:1.45}}>
+                A pound of fat is about 3,500 calories. Real loss varies week to week —
+                the trend over a few weeks is what counts. Consistency, not any single day, is what moves the scale.
+              </div>
+            </div>
+          );
+        })()}
       </BottomSheet>
 
       {/* Quick stats — tappable */}
