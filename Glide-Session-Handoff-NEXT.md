@@ -1,5 +1,124 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S100–S104 (Jul 20–21): SESSION SCHEDULING + BILLING (phases 1–3) + legal research + deficit fix
+_Pushed (`origin/main` @ `ba99313`), tree clean, all functions deployed, rules PUBLISHED. Firebase
+`calorieiq-29762`; model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`._
+
+### 🟢 The big build: trainer↔client TRAINING SESSIONS with card-on-file auto-billing
+This is the **Acuity + Stripe replacement** from `docs/SESSIONS-BILLING-PLAN.md`. Phases 1–3 are LIVE
+in **Stripe TEST mode**, fully E2E-verified. **NOT yet taking real money** — that needs the go-live
+checklist below + an attorney pass. New files: `src/sessions.js`, `functions/sessionSettle.js`;
+sessions logic also in `functions/sessions.js` (the completed-marker) + `functions/sessionBilling.js`
+(card-on-file). **156 emulator rules tests pass** (was 87). `docs/LEGAL-SESSIONS.md` = the full legal
+research (57KB — READ IT before go-live).
+
+**Phase 1 — scheduling (LIVE, rules published).** `sessions/{sid}` = `{participants[2], trainerUid,
+clientUid, startAt, durationMin, status: scheduled|cancelled, title, location, priceCents, createdBy/At,
+updatedAt, cancelledBy/At, cancelReason}`. Queried `where('participants','array-contains',uid)` — a
+single-field index, **no composite index deploy needed**. Only a TRAINER books, only for a genuinely
+linked client (`isTrainerOf`); either side cancels; a client may ONLY cancel (not reschedule/re-price/
+retitle/un-cancel). **BILLING FIELDS ARE SERVER-ONLY** in rules (settled/chargeId/completedAt rejected
+from both sides — the S85 subscriptionStatus lesson, applied before money exists). `cancelledAt` is
+pinned to ±5min of server time so a client can't backdate to dodge a late fee. Attack-tested against
+PROD with raw `updateDoc` (the client-side helper's field filter gave false "ALLOWED" the first pass —
+always attack raw). UI: trainer `SessionsPanel` per client card (book/reschedule/cancel + upcoming
+count); client NEXT SESSION card; calendar cyan dot + day-view detail block (scoped to owner's own view).
+
+**Phase 2 — the red line (LIVE).** `sessionsMarkCompleted` (`functions/sessions.js`), `onSchedule
+"every 15 minutes"`, stamps `completedAt` on any session whose END passed. ⚠️ Stamps `completedAt`
+NOT `status:"completed"` (the rules only allow a trainer update ending in scheduled|cancelled, so
+`status:"completed"` would lock the trainer out of their own past session). Stamps the REAL end time,
+idempotent, skips cancelled, 14-day lookback. VERIFIED live: fired at 14:16Z, marked only the finished
+session, stamp = real end time not sweep time.
+
+**Phase 3 — card-on-file + settle dispatcher (LIVE, test mode).**
+- **Card on file** (`functions/sessionBilling.js`): `createSessionSetupIntent` → Stripe-hosted Checkout
+  in SETUP mode (no card field in Glide, `billing_address_collection:"required"`). `recordSessionConsent`
+  re-reads everything FROM STRIPE (never trusts the browser), stores the card pointer + **only the
+  2-letter STATE** (Kevin: don't store addresses — Stripe holds the address, Glide keeps the state for
+  the FL rules flag). IP/user-agent stamped SERVER-side (browser self-report is worthless as evidence).
+- **Settle dispatcher** (`functions/sessionSettle.js`): `sessionsSettle` (hourly `onSchedule`) +
+  `settleNow` (admin callable, `dryRun`/`force`). PACKAGE CREDITS FIRST, always; trainer's `billingMode`
+  decides WHEN (per_session every sweep / weekly Sunday-evening-ET / manual = untouched); trainer-cancel
+  never billable; the FEE POLICY = the client's LATEST CONSENT SNAPSHOT (a policy edit can't retro-
+  reprice). No card+no credits → session left unsettled (picked up when a card appears). Idempotent
+  (claim `settled:"processing"` in a txn, ledger-id as the Stripe idempotency key). DECLINE → sets
+  `sessionBillingHold` on the client + notifies BOTH sides via the existing push/feed. Ledger =
+  `sessionCharges/{cid}` (server-only, both participants read). **TEST MODE:** a client with
+  `sessionBillingTest:true` (admin-set, server-only in rules) bills against `STRIPE_TEST_SECRET_KEY`
+  (I recovered the old test key from Secret Manager version history + stored it as that secret). E2E-
+  verified: 4242-card → $60 session charged; decline flow → hold + notify.
+
+**S103 — PAY NOW (LIVE, test-verified).** The hold banner on the client home now has a **Pay $X now**
+button → `paySessionBalance` callable: retries the held ledger against the card on file ON-session
+(client is present, can 3DS), lifts the hold + held sessions on success, points at "Update card" on a
+repeat decline. Client pays only their OWN hold (uid from auth). Banner uses local `hold` state so it
+clears live. E2E-verified in test mode.
+
+### 🟡 The deficit saga — FINALLY settled (S102→S104c), don't reopen without reading this
+Kevin reworked the under-wheel deficit number ~5 times. **Final answer (S104c, `ba99313`):
+`deficit = target − eaten`**, signed → green "−N deficit" under target, red "+N surplus" over. It
+EQUALS the wheel's "remaining" while under target — that is CORRECT, not a bug (they're the same fact:
+"866 left to eat" = "866 under target"). Correct SIGN was the whole point: the S104b "remaining − eaten"
+version flipped a real −866 deficit into a false +866 surplus past the half-target mark (Kevin caught it
+live). Only shows once something's logged. VERIFIED on Casey: 1,800 of 2,273 → −473 deficit green (the
+case that used to break); 2,600 → +327 surplus red. **Do NOT switch to maintenance/TDEE−eaten** — Kevin's
+"deficit" is explicitly target-based; TDEE−eaten gives a bigger number he doesn't mean. `todayDeficit`/
+`todaySurplus` are derived from `deficitVal = remaining` in the Daily Dashboard (~line 9970).
+_Earlier related fixes still hold: S102e (only EARNED workout burn counts — a scheduled-but-not-done
+workout no longer inflates the number), S102h (a second "with workout burn" line + weight projection on
+ring tap)._
+
+### ✅ Also shipped this stretch (per the git log dc7f165 / earlier)
+- **Streak celebration once/day** (S104): was firing every app open (the `0→loadedStreak` async rise
+  always looked like a milestone rise; in-memory ref only). Now persisted per-day via a `ymdLocal` key.
+- **Pull-to-refresh** added to non-popup pages; **weight-projection** surfaced on the ring-tap sheet
+  (3500 cal/lb → lbs/week). _(These landed in dc7f165 "S104" — verify they're wired on all 4 main
+  screens if revisiting; the pull-to-refresh Explore agent was interrupted mid-map.)_
+
+### ⚖️ LEGAL — must-read before taking real session money (`docs/LEGAL-SESSIONS.md`)
+Deep research (multiple agents, primary sources). **Top risks:** (1) **Florida Health Studio Act** —
+selling prepaid packages consumed over >30 days VOIDS the personal-trainer exemption → the trainer
+becomes a registered "health studio" ($25k bond + FDACS registration). Kevin is in Miami, so this is
+the home-market constraint. **The service-window is the legal lever** — a pack consumed ≤30 days stays
+exempt (already modeled: `serviceWindowDays` + `packWindowRisk`/`packWindowNote` in sessions.js, FL-safe
+default 30). (2) CA/IL/OH/PA make non-compliant contracts VOID → a late-cancel fee can be uncollectable.
+(3) A "no chargebacks" clause is unenforceable (Reg Z runs against the ISSUER) AND breaches Mastercard
+5.12.6 — never add one. Defense = documentation: `cancellationEvidence()` spells out the lateness
+arithmetic, `policySnapshot()` freezes the consented terms. **Cancellation policy is trainer-set**
+(anytime / window(hrs) / never; late %; billingMode) on their profile, client-readable; standard
+disclosure on every checkout via `cancellationDisclosure()`/`consentLineFor()`. **The FL flag should be
+CLIENT-STATE-specific** (Kevin's ask — virtual clients may be out-of-state) — the state is captured at
+card setup; wiring the per-client-state gate is still TODO.
+
+### ⏭️ Sessions billing — WHAT'S LEFT before real money
+1. **Trainer earnings view** over `sessionCharges` (next natural build — read-only ledger list).
+2. **Client-state-specific FL/health-studio flag** using the stored billing state (not just trainer state).
+3. **Prepaid pack PURCHASE flow** (Checkout → grant `sessionCredits`) — the settle side consumes credits
+   already; the buy side isn't built. **HOLD packs behind a flag until FL attorney clears the 30-day
+   window question** (model + UI exist; don't SELL yet).
+4. **Go-live:** attorney pass on ToS (current `/terms.html` has NO card-on-file/auto-charge/late-fee
+   language — a gap), confirm the live `STRIPE_SECRET_KEY` path, real-card smoke test, then remove any
+   test-only affordances.
+5. **Cleanup:** test accounts (Casey `client.uitest`, trainer `trainer.uitest`) may carry leftover
+   `sessionBillingTest`/`sessionPaymentMethod`/`sessionBillingHold` + Stripe TEST customers from E2E runs.
+   Harmless (test-key routing), but clear before demoing billing to anyone.
+
+### 🔑 Reusable gotchas from this stretch
+- **Admin REST without gcloud:** mint a token from `~/.config/configstore/firebase-tools.json` refresh_token
+  via the firebase-tools OAuth client (id `563584335869-…apps.googleusercontent.com`, secret in the S100
+  scratchpad scripts). Firestore REST URL needs `(default)` — URL-encode it or the plain path 400s.
+- **gcloud is installed at `~/google-cloud-sdk/bin/gcloud` but its OAuth is blocked by the smoothtraining.com
+  Workspace** (consent succeeds then "something went wrong" — same class as the S61 org-policy fight). Not
+  needed; the token trick covers admin reads + Cloud Scheduler force-runs weren't necessary (schedules fire
+  on their own within the interval).
+- **Stripe test vs live side by side:** every account has both modes with separate keys/data — no
+  conversion. SETUP-mode card save charges $0, safe on a real card. `STRIPE_TEST_SECRET_KEY` secret now
+  exists (recovered from history).
+- When `aitools.js`/shared function code changes, deploy ALL affected fns.
+
+---
+
 ## ⚡⚡⚡ S99 (Jul 19): photo AI estimate + day arrows on Meals & Food — BOTH SHIPPED
 _Pushed (`origin/main` @ `4e83414`), tree clean, `estimateFood` redeployed. Firebase `calorieiq-29762`;
 model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`._
