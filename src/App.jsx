@@ -9979,28 +9979,28 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   // there would double-count it. Same reason a manual target hides the choice.
   const canChooseBurnMode = !!onSetDeficitMode && !trackerTdee && manualTarget == null;
 
-  // Deficit / surplus under the wheel — measured against TODAY'S TARGET
-  // (S102f, Kevin's spec, replacing the maintenance-based figure that confused
-  // him three times running):
-  //   target 3,000, ate 1,500  →  "−1,500 deficit"  (green)
-  //   target 3,000, ate 3,200  →  "+200 surplus"    (red)
-  // Simple, literal, and it moves with every meal logged. It deliberately does
-  // NOT reason about maintenance, TDEE or workout burn — those already shaped
-  // the target itself, so measuring against the target keeps one honest story
-  // instead of two competing ones. (Burn still reaches this number the right
-  // way: in eat-back mode a workout raises the target, which widens the gap.)
+  // Deficit / surplus under the wheel (S104 — Kevin's exact spec, verbatim:
+  // "the number in the wheel minus the calories eaten"). The wheel shows
+  // `remaining` (target − eaten), so:
+  //     deficit = remaining − eaten
+  // This is DISTINCT from the wheel number — which was the whole point: the
+  // earlier target−eaten version equalled the wheel exactly, so a client at
+  // 2,336 remaining showed "−2,336 deficit" too and it read as a doubled 4,672.
+  // Now (Jarvis: 2,336 remaining, 755 eaten → −1,581 deficit) the two numbers
+  // differ, and it still shrinks with every meal logged. Positive = deficit
+  // (green), negative = surplus (red).
   // Must stay below `logged` — these are consts, so reading it above its
   // declaration is a TDZ throw that blanks the whole dashboard.
-  const vsTarget = Math.round(target - logged);
-  const todayDeficit = Math.max(0, vsTarget);   // under target
-  const todaySurplus = Math.max(0, -vsTarget);  // over target
+  const deficitVal = Math.round(remaining - logged); // remaining is target − logged (defined above)
+  const todayDeficit = Math.max(0, deficitVal);   // under
+  const todaySurplus = Math.max(0, -deficitVal);  // over
   // The "with your workout" option (S102h, Kevin: "both options to see"). The
   // workout burn DEEPENS the deficit only when it isn't already spent back as
   // food — i.e. accelerate mode. In eat-back mode the burn is baked into the
   // target (you eat it back), so it doesn't add a second deficit; and a tracker
   // day already measures total burn, so adding on top would double-count.
   const burnDeepensDeficit = burnShown > 0 && !isEatback(data) && manualTarget == null && !trackerTdee;
-  const vsTargetWithBurn = vsTarget + (burnDeepensDeficit ? burnShown : 0);
+  const vsTargetWithBurn = deficitVal + (burnDeepensDeficit ? burnShown : 0);
   const overCals = remaining < 0;
   const pct = target > 0 ? Math.min(100, Math.round((logged / target) * 100)) : 0; // arc caps at full
   // Macro targets. Default (estimates): protein 1g/lb bodyweight, fat 28% of
