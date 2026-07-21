@@ -9,7 +9,8 @@ import { bookSession, updateSession, cancelSession, subscribeMySessions, session
   policyOf, packsOf, describePolicy, isLateCancel, lateCancelFeeCents, saveSessionPolicy, saveSessionPacks,
   CANCEL_WINDOW_PRESETS, STARTER_PACKS, DEFAULT_SESSION_POLICY,
   CANCEL_TYPES, BILLING_MODES, cancellationDisclosure, consentLineFor, policySnapshot,
-  stripeFeeCents, feeComparison } from "./sessions.js";
+  stripeFeeCents, feeComparison,
+  subscribeMyEarnings, earningsSummary, chargeStatusLabel, centsToUsd } from "./sessions.js";
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -14497,6 +14498,155 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
   );
 }
 
+// ─── Trainer earnings view (Session 105) ────────────────────────────────────
+// A read-only ledger over sessionCharges: what each client was billed for
+// training sessions, when, how much, and whether it went through. Powered by the
+// live subscribeMyEarnings subscription (the settle dispatcher is the only
+// writer; the rules already scope reads to the trainer). Headline totals are
+// LIVE money only — test-mode charges (from the not-yet-live billing + E2E runs)
+// are shown clearly tagged but never counted, so the numbers mean real dollars.
+function TrainerEarnings({ onOpenClientPlan, onGoClients, meUid }) {
+  const [charges, setCharges] = useState(null); // null = still loading
+  const [names, setNames] = useState({});        // clientUid -> display name
+
+  useEffect(() => {
+    if (!meUid) return;
+    const unsub = subscribeMyEarnings(meUid, setCharges);
+    return unsub;
+  }, [meUid]);
+
+  // Resolve client names once (profiles the trainer can already read). Charges to
+  // a client who later unlinked fall back to a short id, never blank.
+  useEffect(() => {
+    getMyClients().then((cs) => {
+      const m = {};
+      for (const c of cs || []) {
+        m[c.uid] = c.displayName
+          || `${c.firstName || ""} ${c.lastName || ""}`.trim()
+          || c.email || "Client";
+      }
+      setNames(m);
+    }).catch(() => { /* ignore */ });
+  }, [meUid]);
+
+  const nameOf = (uid) => names[uid] || (uid ? `Client ${String(uid).slice(-4)}` : "Client");
+  const sum = earningsSummary(charges || []);
+
+  // What a ledger row was for, in plain English.
+  const describeCharge = (c) => {
+    const items = c.items || [];
+    const sessions = items.filter((i) => !i.fee).length;
+    const fees = items.filter((i) => i.fee).length;
+    const credits = Number(c.creditsUsed) || 0;
+    const parts = [];
+    if (sessions) parts.push(`${sessions} session${sessions === 1 ? "" : "s"}`);
+    if (fees) parts.push(`${fees} late-cancel fee${fees === 1 ? "" : "s"}`);
+    if (!parts.length && credits) parts.push(`${credits} session${credits === 1 ? "" : "s"} covered by package`);
+    else if (credits) parts.push(`+${credits} covered by package`);
+    return parts.join(" · ") || "Training";
+  };
+
+  // Brand class strings (match TrainerAnalytics / TrainerDashboard)
+  const cardCls = "bg-surface border border-border rounded-card p-5 mb-4";
+  const titleCls = "font-display text-lg tracking-wider text-primary mb-1";
+  const subCls = "text-sm text-muted";
+
+  const Tile = ({ value, label, color }) => (
+    <div className="bg-surface2 border border-border rounded-lg py-3 px-2 text-center">
+      <div className={`font-display text-2xl ${color}`}>{value}</div>
+      <div className="text-[.62rem] uppercase tracking-wide text-muted mt-0.5 leading-tight">{label}</div>
+    </div>
+  );
+
+  const statusChip = (status) => {
+    const map = {
+      succeeded: "border-success text-success",
+      declined: "border-danger text-danger",
+      no_card: "border-warn text-warn",
+      pending: "border-warn text-warn",
+      processing: "border-warn text-warn",
+      covered_by_package: "border-primary text-primary",
+    };
+    return `shrink-0 px-2 py-0.5 rounded-md text-[.66rem] font-bold uppercase tracking-wide border bg-transparent whitespace-nowrap ${map[status] || "border-border text-muted"}`;
+  };
+
+  return (
+    <div className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
+      <style>{css}</style>
+      <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
+        <BrandLogo />
+      </div>
+      <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
+        <div className="text-2xl font-extrabold tracking-tight mb-1 flex items-center gap-2"><Icon name="receipt" size={22} color="var(--accent)" />Earnings</div>
+        <div className={`${subCls} mb-4`}>Every training-session charge to your clients — what it was for, when, and whether it went through.</div>
+
+        {charges === null ? (
+          <div className="flex flex-col gap-3"><SkeletonCard rows={2} /><SkeletonCard rows={3} /></div>
+        ) : (
+          <>
+            {/* Summary tiles — LIVE money only (test charges excluded). */}
+            <div className="grid grid-cols-4 gap-2 mb-2">
+              <Tile value={centsToUsd(sum.collectedCents)} label="Collected" color="text-success" />
+              <Tile value={centsToUsd(sum.monthCents)} label="This month" color="text-primary" />
+              <Tile value={centsToUsd(sum.pendingCents)} label="Pending" color={sum.pendingCents ? "text-warn" : "text-muted"} />
+              <Tile value={centsToUsd(sum.declinedCents)} label="Declined" color={sum.declinedCents ? "text-danger" : "text-muted"} />
+            </div>
+            <div className="text-[.7rem] text-muted mb-4 flex flex-wrap gap-x-3 gap-y-0.5">
+              <span>{sum.collectedCount} paid charge{sum.collectedCount === 1 ? "" : "s"}</span>
+              {sum.creditsCovered > 0 && <span>{sum.creditsCovered} session{sum.creditsCovered === 1 ? "" : "s"} covered by packages</span>}
+              {sum.testCount > 0 && <span className="text-warn">{sum.testCount} test-mode charge{sum.testCount === 1 ? " below isn't" : "s below aren't"} counted here</span>}
+            </div>
+
+            {charges.length === 0 ? (
+              <div className={cardCls}>
+                <div className={titleCls}>No charges yet</div>
+                <div className={subCls}>When a session passes its scheduled end and gets settled, the charge shows up here. Book sessions and set up card-on-file billing from a client's card, then this fills in automatically.</div>
+                <button onClick={onGoClients} className="mt-3 w-full py-3 rounded-lg border border-border bg-transparent text-fg text-sm font-semibold cursor-pointer">
+                  Go to clients
+                </button>
+              </div>
+            ) : (
+              <div className={cardCls}>
+                <div className={`${titleCls} flex items-center gap-2`}><Icon name="clock" size={18} color="var(--accent)" />History</div>
+                <div className="flex flex-col gap-1.5 mt-2">
+                  {charges.map((c) => {
+                    const dollars = centsToUsd(c.amountCents);
+                    const isCovered = c.status === "covered_by_package" || (!Number(c.amountCents) && Number(c.creditsUsed) > 0);
+                    return (
+                      <div key={c.id}
+                        onClick={() => onOpenClientPlan && onOpenClientPlan(c.clientUid)}
+                        className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg bg-surface2 cursor-pointer">
+                        <span className="flex-1 min-w-0">
+                          <span className="font-semibold text-[.9rem] truncate block flex items-center gap-1.5">
+                            {nameOf(c.clientUid)}
+                            {c.testMode && <span className="shrink-0 px-1.5 py-0.5 rounded text-[.6rem] font-bold uppercase tracking-wide border border-warn text-warn">Test</span>}
+                          </span>
+                          <span className="text-[.74rem] text-muted truncate block mt-0.5">{describeCharge(c)}</span>
+                          <span className="text-[.68rem] text-muted block mt-0.5">{fmtStamp(c.chargedAt || c.createdAt)}</span>
+                        </span>
+                        <span className="flex flex-col items-end gap-1 shrink-0">
+                          <span className={`font-display text-base ${c.status === "declined" ? "text-danger line-through" : isCovered ? "text-muted" : "text-fg"}`}>
+                            {isCovered ? "—" : dollars}
+                          </span>
+                          <span className={statusChip(c.status)}>{chargeStatusLabel(c.status)}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <button onClick={onGoClients} className="w-full py-3 rounded-lg border border-border bg-transparent text-fg text-sm font-semibold cursor-pointer">
+              Manage clients & sessions
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── AI chat panel (Session 61) ─────────────────────────────────────────────
 // Stage-1 conversational assistant: a collapsible chat dismissed to a floating
 // button (per the spec's UI notes). It calls the server-side `aiChat` callable
@@ -18855,7 +19005,7 @@ function AdminDashboard({ onClose }) {
     </div>, document.body);
 }
 
-function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onNameSaved, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme }) {
+function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onEarnings, onNameSaved, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
@@ -19051,6 +19201,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
         <button style={item} onClick={() => go(onHome)}><Icon name="home" size={19} color="var(--accent)" /> <span>Home</span></button>
         {isTrainer && <button style={item} onClick={() => go(onDashboard)}><Icon name="dashboard" size={19} color="var(--accent)" /> <span>Dashboard</span></button>}
         {isTrainer && <button style={item} onClick={() => go(onClients)}><Icon name="clients" size={19} color="var(--accent)" /> <span>All clients</span></button>}
+        {isTrainer && onEarnings && <button style={item} onClick={() => go(onEarnings)}><Icon name="receipt" size={19} color="var(--accent)" /> <span>Earnings</span></button>}
 
         {/* Notification Center (Session 76) — master on/off + per-type toggles.
             One notification type today (trainer to-dos); more slot in as features
@@ -19232,7 +19383,7 @@ export default function App() {
   const [streak, setStreak] = useState(0);
   const [navFrom, setNavFrom] = useState(null); // "dashboard" | "results" | null
   const [role, setRole] = useState(null); // this user's role (for the trainer home)
-  const [homeTab, setHomeTab] = useState("dashboard"); // "dashboard" | "clients"
+  const [homeTab, setHomeTab] = useState("dashboard"); // "dashboard" | "clients" | "analytics" | "earnings"
   // When a trainer opens a LINKED client's plan, this holds that client's uid so
   // edits save into the client's account ("caliq-self") instead of locally.
   const [activeRemoteUid, setActiveRemoteUid] = useState(null);
@@ -20525,6 +20676,7 @@ export default function App() {
         onHome={() => { if (isTrainerHome) setHomeTab("dashboard"); goToProfiles(); }}
         onDashboard={() => { setHomeTab("analytics"); goToProfiles(); }}
         onClients={() => { setHomeTab("clients"); goToProfiles(); }}
+        onEarnings={() => { setHomeTab("earnings"); goToProfiles(); }}
         onNameSaved={(n) => setMeName(n)}
         isAdminUid={meUid === OWNER_UID} />
       <InstallPrompt />
@@ -20546,6 +20698,13 @@ export default function App() {
         onOpenClientPlan={openClientPlan}
         onGoClients={() => setHomeTab("clients")}
         meUid={meUid} meName={meName} meRole={role}
+      /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
+    }
+    if (isTrainerHome && homeTab === "earnings") {
+      return <>{chrome}<TrainerEarnings
+        onOpenClientPlan={openClientPlan}
+        onGoClients={() => setHomeTab("clients")}
+        meUid={meUid}
       /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
     }
     if (isTrainerHome && homeTab === "dashboard") {

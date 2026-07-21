@@ -402,3 +402,65 @@ export function saveSessionPolicy(trainerUid, policy) {
 export function saveSessionPacks(trainerUid, packs) {
   return updateDoc(doc(db, "users", trainerUid), { sessionPacks: packs });
 }
+
+// ─── Earnings ledger (S105 — trainer read-only view over sessionCharges) ─────
+// One doc per settlement attempt lives at sessionCharges/{cid}, written ONLY by
+// the settle dispatcher (Admin SDK). The rules already let each participant read
+// their own, so a trainer can query their whole history with a single-field
+// equality filter — no composite index, sort newest-first in JS (same pattern as
+// the sessions list). This is a READ view: nothing here can write money records.
+export function subscribeMyEarnings(trainerUid, cb) {
+  return onSnapshot(
+    query(collection(db, "sessionCharges"), where("trainerUid", "==", trainerUid)),
+    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))),
+    () => cb([]), // denied/offline → empty rather than throwing into the UI
+  );
+}
+
+export const centsToUsd = (cents) => `$${(Math.max(0, Number(cents) || 0) / 100).toFixed(2)}`;
+
+// Pure aggregation over the ledger. TEST-mode charges (from E2E runs, and from
+// today's not-yet-live billing) are counted SEPARATELY so they never inflate a
+// trainer's real-money totals — the UI shows them clearly tagged, but the
+// headline numbers are live money only. Idempotent + derived, so the summary and
+// the list can never disagree.
+export function earningsSummary(charges, now = Date.now()) {
+  const d = new Date(now);
+  const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+  const s = {
+    collectedCents: 0, monthCents: 0, pendingCents: 0, declinedCents: 0,
+    collectedCount: 0, declinedCount: 0, creditsCovered: 0,
+    testCents: 0, testCount: 0,
+  };
+  for (const c of charges || []) {
+    const amt = Math.max(0, Number(c.amountCents) || 0);
+    if (c.testMode === true) {
+      s.testCount++;
+      if (c.status === "succeeded") s.testCents += amt;
+      continue; // test money is never mixed into real totals
+    }
+    s.creditsCovered += Number(c.creditsUsed) || 0;
+    if (c.status === "succeeded") {
+      s.collectedCents += amt; s.collectedCount++;
+      if ((c.chargedAt || c.createdAt || 0) >= monthStart) s.monthCents += amt;
+    } else if (c.status === "declined") {
+      s.declinedCents += amt; s.declinedCount++;
+    } else if (c.status === "pending" || c.status === "no_card" || c.status === "processing") {
+      s.pendingCents += amt;
+    }
+  }
+  return s;
+}
+
+// Human status for a ledger row. Kept here so the label matches the money math.
+export function chargeStatusLabel(status) {
+  return ({
+    succeeded: "Paid",
+    declined: "Declined",
+    pending: "Pending",
+    processing: "Processing",
+    no_card: "Awaiting card",
+    covered_by_package: "Covered by package",
+  })[status] || status || "—";
+}
