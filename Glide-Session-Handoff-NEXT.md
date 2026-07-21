@@ -1,5 +1,33 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡ S105 (Jul 21): Trainer EARNINGS view — read-only ledger over sessionCharges
+_Pushed (`origin/main` @ `bf9f73d`), tree clean, build passes. Purely additive UI — no rules,
+no functions, no money paths touched. Firebase `calorieiq-29762`; model `claude-sonnet-4-6`;
+admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`._
+
+The first of the "what's left before real money" items (§ below), and the one the S104 handoff
+flagged as "the next natural build." A trainer now has an **Earnings** screen (≡ menu → Earnings)
+that reads their whole `sessionCharges` history — the settle dispatcher stays the ONLY writer
+(rules already scope reads to the trainer; this view writes nothing).
+
+- **`src/sessions.js`** (new helpers): `subscribeMyEarnings(trainerUid, cb)` — live `onSnapshot`
+  query `where('trainerUid','==',uid)`, a **single-field index (no composite deploy)**, sorted
+  newest-first in JS. `earningsSummary(charges)` — pure aggregation; **test-mode charges are counted
+  SEPARATELY** (`testCents`/`testCount`) so live totals mean real dollars once billing goes live.
+  `chargeStatusLabel`, `centsToUsd`.
+- **`src/App.jsx`**: `TrainerEarnings` component (matches TrainerAnalytics styling), a `homeTab
+  === "earnings"` route, and the side-menu "Earnings" item (gated on `isTrainer`). Four summary
+  tiles (Collected / This month / Pending / Declined — LIVE money only) + a History list: client
+  name (resolved via `getMyClients`, short-uid fallback), what-for ("2 sessions" / "1 late-cancel
+  fee" / "N covered by package"), date, amount, color-coded status chip; tap a row → open that
+  client's plan. Test-mode rows carry a `TEST` tag and are excluded from the tiles.
+- **`src/icons.jsx`**: `receipt` glyph (per the icons-not-emoji rule).
+- **Verified:** 17 unit assertions (summary math, month-boundary, test exclusion, labels,
+  what-for). Live in the preview as `trainer.uitest`: empty state renders; a mock ledger confirmed
+  the populated view (tiles $90/$60/$30/$45, every row type, name resolution + fallback, TEST tag);
+  mock removed and the live-subscription empty state re-confirmed. `npm run build` passes, no
+  console errors.
+
 ## ⚡⚡⚡ S100–S104 (Jul 20–21): SESSION SCHEDULING + BILLING (phases 1–3) + legal research + deficit fix
 _Pushed (`origin/main` @ `ba99313`), tree clean, all functions deployed, rules PUBLISHED. Firebase
 `calorieiq-29762`; model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`._
@@ -92,7 +120,7 @@ CLIENT-STATE-specific** (Kevin's ask — virtual clients may be out-of-state) �
 card setup; wiring the per-client-state gate is still TODO.
 
 ### ⏭️ Sessions billing — WHAT'S LEFT before real money
-1. **Trainer earnings view** over `sessionCharges` (next natural build — read-only ledger list).
+1. ~~**Trainer earnings view** over `sessionCharges` (read-only ledger list).~~ **DONE — S105** (`bf9f73d`).
 2. **Client-state-specific FL/health-studio flag** using the stored billing state (not just trainer state).
 3. **Prepaid pack PURCHASE flow** (Checkout → grant `sessionCredits`) — the settle side consumes credits
    already; the buy side isn't built. **HOLD packs behind a flag until FL attorney clears the 30-day
