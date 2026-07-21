@@ -1,5 +1,40 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡ S105b (Jul 21): Client-state-aware prepaid-pack risk flag — SCAFFOLDING (informational, not a gate)
+_Pushed (`origin/main` @ `f70232a`), tree clean, build passes. `src/sessions.js` + `src/App.jsx` only;
+no rules, no functions, no money paths. Firebase `calorieiq-29762`; model `claude-sonnet-4-6`._
+
+Sessions-billing item #2 ("client-state-specific FL/health-studio flag"). The understand pass found the
+flag was **greenfield** (`packWindowRisk`/`packWindowNote` had ZERO consumers — the prepaid-pack UI it
+would feed isn't built, that's item #3), there is **no trainer-state in the system at all** (the only
+state captured is the CLIENT's card `billingState`, from Stripe at card setup, on
+`users/{clientUid}.sessionPaymentMethod.billingState` — trainer-readable, already loaded-but-unused in
+SessionsPanel), and — critically — **whose law governs a remote/out-of-state client is UNRESOLVED** in
+`docs/LEGAL-SESSIONS.md` (it keys everything on the trainer's state; must go to counsel). So a *live*
+client-state compliance gate can't be responsibly shipped yet. Kevin chose to build the **safe
+scaffolding** instead.
+
+**What shipped:**
+- **`STATE_PACK_RULES`** (`src/sessions.js`) — a per-state model distilled from the legal research:
+  FL(30)/PA(90)/MD(90) day-window states, CA/IL/OH/TX no-window statutes (window doesn't help),
+  7 unverified states (NJ/NY/WA/MI/GA/AZ/CO) flagged "check first". `packWindowRisk(pack, state)` /
+  `packWindowNote(pack, state)` now take a state; new `clientStateInfo(state)` + `statePackRule(state)`.
+  Every user-facing string ends with "Informational only — not legal advice" and it never claims to
+  resolve remote choice-of-law.
+- **UI** (`src/App.jsx` SessionsPanel, trainer view): the card-on-file row now shows the client's
+  captured state ("billed in CA") + a tone-coded note (ok=green / caution+review=amber / high=red /
+  unknown=muted) + a remote-client caveat line. Surfaces whether a client is out-of-state BEFORE packs
+  ship. **Informational only — deliberately NOT a gate.**
+- **Adversarially verified** (3-lens workflow vs the source doc + a 4th over-claim pass): PA corrected to
+  a void-contract state (over-window → red); NJ's harsh-remedy signal surfaced in the note without
+  rendering an unverified state red; FL "stays exempt" → "likely to stay exempt (an open point for
+  counsel)" to match the doc's own hedging. 32 unit assertions; CA/FL tones verified live.
+
+**Item #2 status:** scaffolding done; the *authoritative* gate (and whether to geo-gate pack sales)
+still waits on counsel resolving choice-of-law + item #3 (packs). When packs are built, wire
+`packWindowRisk`/`packWindowNote` into the pack editor / per-client checkout (server-side settle path is
+the natural place — `sessionSettle.js` already loads the client's `billingState`).
+
 ## ⚡ S105 (Jul 21): Trainer EARNINGS view — read-only ledger over sessionCharges
 _Pushed (`origin/main` @ `bf9f73d`), tree clean, build passes. Purely additive UI — no rules,
 no functions, no money paths touched. Firebase `calorieiq-29762`; model `claude-sonnet-4-6`;
@@ -121,7 +156,9 @@ card setup; wiring the per-client-state gate is still TODO.
 
 ### ⏭️ Sessions billing — WHAT'S LEFT before real money
 1. ~~**Trainer earnings view** over `sessionCharges` (read-only ledger list).~~ **DONE — S105** (`bf9f73d`).
-2. **Client-state-specific FL/health-studio flag** using the stored billing state (not just trainer state).
+2. **Client-state-specific FL/health-studio flag** — **SCAFFOLDING DONE — S105b** (`f70232a`): per-state
+   model + informational trainer note off the client's captured card state. The *live gate* still waits on
+   counsel (remote choice-of-law unresolved) + item #3 (packs, its only consumer).
 3. **Prepaid pack PURCHASE flow** (Checkout → grant `sessionCredits`) — the settle side consumes credits
    already; the buy side isn't built. **HOLD packs behind a flag until FL attorney clears the 30-day
    window question** (model + UI exist; don't SELL yet).
