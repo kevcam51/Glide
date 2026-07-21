@@ -10,7 +10,8 @@ import { bookSession, updateSession, cancelSession, subscribeMySessions, session
   CANCEL_WINDOW_PRESETS, STARTER_PACKS, DEFAULT_SESSION_POLICY,
   CANCEL_TYPES, BILLING_MODES, cancellationDisclosure, consentLineFor, policySnapshot,
   stripeFeeCents, feeComparison,
-  subscribeMyEarnings, earningsSummary, chargeStatusLabel, centsToUsd } from "./sessions.js";
+  subscribeMyEarnings, earningsSummary, chargeStatusLabel, centsToUsd,
+  clientStateInfo } from "./sessions.js";
 import { auth, functions } from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -18492,11 +18493,33 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
           </div>
         )}
         {isTrainer && (
-          <div className="mb-3 flex items-center gap-2 text-[.76rem] text-muted px-1">
-            <Icon name="card" size={14} color={clientCard ? "var(--accent)" : "var(--muted)"} />
-            {clientCard
-              ? <span><b className="text-fg">Card on file</b> — {(clientCard.brand || "card").toUpperCase()} ····{clientCard.last4}</span>
-              : <span>No card on file yet — {otherName || "your client"} can add one from their Sessions screen.</span>}
+          <div className="mb-3 flex flex-col gap-1.5 px-1">
+            <div className="flex items-center gap-2 text-[.76rem] text-muted">
+              <Icon name="card" size={14} color={clientCard ? "var(--accent)" : "var(--muted)"} />
+              {clientCard
+                ? <span><b className="text-fg">Card on file</b> — {(clientCard.brand || "card").toUpperCase()} ····{clientCard.last4}
+                    {clientCard.billingState ? <span>{` · billed in ${clientCard.billingState}`}</span> : null}</span>
+                : <span>No card on file yet — {otherName || "your client"} can add one from their Sessions screen.</span>}
+            </div>
+            {/* Client-state readiness (S105b) — informational only, never a gate.
+                Surfaces where a client's card is billed so a trainer sees whether a
+                (possibly remote) client is out-of-state BEFORE prepaid packs ship. */}
+            {(() => {
+              const info = clientCard && clientStateInfo(clientCard.billingState);
+              if (!info) return null;
+              // Explicit per-level tone (no catch-all) so a neutral level like
+              // "unset" can never mis-render as an amber risk.
+              const TONES = { ok: "text-success border-success", high: "text-danger border-danger",
+                caution: "text-warn border-warn", review: "text-warn border-warn",
+                unknown: "text-muted border-border", unset: "text-muted border-border" };
+              const tone = TONES[info.level] || "text-muted border-border";
+              return (
+                <div className={`text-[.72rem] leading-snug rounded-md border ${tone} bg-transparent px-2 py-1.5`}>
+                  <div><b>{info.label}</b> — {info.note}</div>
+                  <div className="mt-1 text-muted">Based on the card's billing state. Which state's rules apply to a remote, out-of-state client isn't settled — confirm before selling prepaid packs.</div>
+                </div>
+              );
+            })()}
           </div>
         )}
 

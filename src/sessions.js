@@ -180,26 +180,131 @@ export const STARTER_PACKS = [4, 6, 8, 12, 24, 48].map((n) => ({
 // several states are unverified, and whether a white-label platform is itself a
 // covered "seller" is unresolved. See docs/LEGAL-SESSIONS.md.
 export const FL_EXEMPT_WINDOW_DAYS = 30;   // Fla. Stat. 501.0125 prong (c)
-export const PA_ACT_THRESHOLD_DAYS = 92;   // 73 P.S. 2162 "more than three months"
+export const PA_ACT_THRESHOLD_DAYS = 90;   // 73 P.S. 2162 "more than three months"
 
-// Classify a pack's regulatory exposure by its service window. Pure, so the UI
-// and any future server-side check agree.
-export function packWindowRisk(pack) {
-  const days = Number(pack && pack.serviceWindowDays);
-  if (!Number.isFinite(days) || days <= 0) return { level: "unset", days: null };
-  if (days <= FL_EXEMPT_WINDOW_DAYS) return { level: "ok", days };
-  if (days <= PA_ACT_THRESHOLD_DAYS) return { level: "caution", days };
-  return { level: "high", days };
+// ─── Per-state prepaid-pack exposure model (S105b — client-state scaffolding) ─
+// Distilled from docs/LEGAL-SESSIONS.md so the pack-window flag can judge against
+// the CLIENT's state (captured at card setup), not just the trainer's Florida
+// home market. Each entry says HOW that state's health-studio / prepaid-fitness
+// statute triggers:
+//   windowDays — the prepaid service-window (days) at/under which a pack sits
+//                OUTSIDE the statute (the legal "lever"). null = NO day-window
+//                lever: the statute reaches prepaid packages regardless of how
+//                fast they're used, so shortening the window doesn't help.
+//   verified   — did the legal research confirm this against primary/named
+//                sources. false = flagged but NOT verified → "check first",
+//                never "fine".
+//   strict     — elevated risk that a non-compliant contract or fee is
+//                UNENFORCEABLE there — a void/voidable contract (CA/IL/OH/PA) or
+//                an unusually harsh remedy stack (NJ) — i.e. a late-cancel fee is
+//                at real risk. For a verified state this drives a red verdict;
+//                for an unverified one (NJ) it only enriches the note (we never
+//                render an unverified state red — that would over-claim).
+//   note       — plain-English, trainer-facing.
+//
+// ⚠️ INFORMATIONAL, NOT LEGAL ADVICE, and deliberately NOT a live gate. Several
+// states are unverified, and — critically — WHICH state's law governs a REMOTE /
+// out-of-state client (their residence vs the trainer's) is UNRESOLVED in the
+// research and must go to counsel. This table informs a trainer; it does not
+// decide anything. See docs/LEGAL-SESSIONS.md.
+export const STATE_PACK_RULES = {
+  FL: { windowDays: FL_EXEMPT_WINDOW_DAYS, verified: true, strict: false, label: "Florida",
+        note: "Florida's personal-trainer exemption covers payment only for services rendered within 30 days. A pack used within 30 days is likely to stay exempt (an open point for counsel); a longer window can make the trainer a registered \"health studio\" (registration + a $25,000 bond)." },
+  PA: { windowDays: PA_ACT_THRESHOLD_DAYS, verified: true, strict: true, label: "Pennsylvania",
+        note: "Pennsylvania's Health Club Act only reaches contracts for services over ~3 months. A pack used within that window sits outside it; a longer window triggers registration + a bond, and a non-compliant contract can be voidable — a late-cancel fee could be at risk." },
+  MD: { windowDays: 90, verified: true, strict: false, label: "Maryland",
+        note: "Maryland requires a surety bond once prepaid services run more than ~3 months out (or on a large upfront fee)." },
+  CA: { windowDays: null, verified: true, strict: true, label: "California",
+        note: "California regulates prepaid fitness contracts no matter how fast they're used (prepay cap, cooling-off, refund rules). A non-compliant contract can be void — a late-cancel fee could be uncollectable." },
+  IL: { windowDays: null, verified: true, strict: true, label: "Illinois",
+        note: "Illinois caps prepaid fitness services (~$2,500/yr) regardless of window, with an anti-waiver clause. A non-compliant contract can be void and unenforceable." },
+  OH: { windowDays: null, verified: true, strict: true, label: "Ohio",
+        note: "Ohio's prepaid-services law covers instruction with no gym at all; a violation is a deceptive act (treble damages + attorney fees)." },
+  TX: { windowDays: null, verified: true, strict: false, label: "Texas",
+        note: "Texas 'health spa' rules have NO trainer exemption and may require registration + a bond; whether a finite pack counts as a covered membership is unsettled." },
+  // Flagged in the research but NOT verified — treat as "check first", never "fine".
+  NJ: { windowDays: null, verified: false, strict: true, label: "New Jersey", note: "" },
+  NY: { windowDays: null, verified: false, strict: false, label: "New York", note: "" },
+  WA: { windowDays: null, verified: false, strict: false, label: "Washington", note: "" },
+  MI: { windowDays: null, verified: false, strict: false, label: "Michigan", note: "" },
+  GA: { windowDays: null, verified: false, strict: false, label: "Georgia", note: "" },
+  AZ: { windowDays: null, verified: false, strict: false, label: "Arizona", note: "" },
+  CO: { windowDays: null, verified: false, strict: false, label: "Colorado", note: "" },
+};
+
+// Look up a state's model from a raw 2-letter code (case-insensitive). Returns
+// null for unknown / non-US / empty — callers treat that as "can't clear it".
+export function statePackRule(state) {
+  const st = String(state || "").trim().toUpperCase();
+  return STATE_PACK_RULES[st] || null;
 }
 
-// Plain-English consequence of the chosen window, shown to the trainer AS THEY
-// price the pack — the moment the decision is actually made.
-export function packWindowNote(pack) {
-  const { level, days } = packWindowRisk(pack);
-  if (level === "unset") return "Set how long the client has to use these sessions — it affects which rules apply to you.";
-  if (level === "ok") return `Clients have ${days} days to use these sessions. Within Florida's 30-day personal-trainer exemption.`;
-  if (level === "caution") return `${days} days is over Florida's 30-day limit. In Florida this can make you a registered "health studio" (state registration + a $25,000 bond). Check with your accountant or attorney for your state.`;
-  return `${days} days is a long prepaid window. Most states' health-club rules apply to prepaid packages this long — several require registration and a bond, and in some (e.g. California, Illinois) a non-compliant contract can be unenforceable, meaning you could not collect a cancellation fee. Worth legal advice before selling this.`;
+const NOT_ADVICE = "Informational only — not legal advice.";
+
+// Classify a pack's regulatory exposure for a SPECIFIC client's state. Pure, so
+// the UI and any future server-side check agree. `state` is optional: when it's
+// unknown we return a conservative "review" verdict rather than assuming a
+// jurisdiction (the choice-of-law question for remote clients is unresolved).
+export function packWindowRisk(pack, state) {
+  const days = Number(pack && pack.serviceWindowDays);
+  const daysValid = Number.isFinite(days) && days > 0;
+  const rule = statePackRule(state);
+  const st = String(state || "").trim().toUpperCase() || null;
+  if (!daysValid) return { level: "unset", days: null, state: st, rule };
+  if (rule && rule.verified && rule.windowDays != null) {
+    // Day-window state (FL/PA/MD): a pack consumed inside the window is outside the statute.
+    return { level: days <= rule.windowDays ? "ok" : (rule.strict ? "high" : "caution"), days, state: st, rule };
+  }
+  if (rule && rule.verified && rule.windowDays == null) {
+    // No-window statute (CA/IL/OH/TX): shortening the window doesn't help.
+    return { level: rule.strict ? "high" : "caution", days, state: st, rule };
+  }
+  // Known-but-unverified state, or unknown / non-US → can't clear it.
+  return { level: "review", days, state: st, rule };
+}
+
+// Plain-English consequence for the trainer, tailored to the client's state.
+export function packWindowNote(pack, state) {
+  const r = packWindowRisk(pack, state);
+  const days = r.days, rule = r.rule;
+  if (r.level === "unset")
+    return `Set how long a client has to use these sessions — it affects which rules may apply. ${NOT_ADVICE}`;
+  if (rule && r.level === "ok")
+    return `${days} days is within ${rule.label}'s prepaid window. ${rule.note} ${NOT_ADVICE}`;
+  if (rule && rule.windowDays != null && (r.level === "caution" || r.level === "high"))
+    return `${days} days is over ${rule.label}'s ~${rule.windowDays}-day window. ${rule.note} ${NOT_ADVICE}`;
+  if (rule && rule.windowDays == null && rule.verified)
+    return `${rule.label}: ${rule.note} A ${days}-day window doesn't change this. ${NOT_ADVICE}`;
+  if (rule && !rule.verified) {
+    // NJ is unverified but flagged harsh — surface that without rendering it red.
+    const extra = rule.strict ? " Some sources flag it as a state where a non-compliant contract or fee may be unenforceable, so treat it with extra care." : "";
+    return `We haven't verified ${rule.label}'s prepaid-fitness rules — check before selling a pack to a client there.${extra} ${NOT_ADVICE}`;
+  }
+  // unknown / no state
+  return `Which prepaid-fitness rules apply depends on where the client is — several states regulate prepaid packages, and some make a non-compliant contract unenforceable. Confirm the client's state (and, for a remote client, which state's law governs) before selling. ${NOT_ADVICE}`;
+}
+
+// One-line state readiness for the trainer's card-on-file row (S105b). Given a
+// client's captured card state (no pack in scope), a short informational badge +
+// note — so a trainer SEES that a remote client may be out-of-state before packs
+// ever ship. Never a gate; always hedged. Returns null when no state is known.
+export function clientStateInfo(state) {
+  const st = String(state || "").trim().toUpperCase();
+  if (!st) return null;
+  const rule = statePackRule(st);
+  if (!rule) return { state: st, level: "unknown", label: st,
+    note: `We don't have prepaid-fitness rules on file for ${st}. If you sell prepaid packs, confirm that state's rules first. ${NOT_ADVICE}` };
+  if (!rule.verified) {
+    // Unverified — never render red (that would over-claim), but if the state is
+    // flagged harsh (NJ), carry that signal in the note rather than losing it.
+    const extra = rule.strict ? " Some sources flag it as a state where a non-compliant contract or fee may be unenforceable, so treat it with extra care." : "";
+    return { state: st, level: "review", label: rule.label,
+      note: `${rule.label}'s prepaid-fitness rules aren't verified in Glidna yet — check before selling a pack.${extra} ${NOT_ADVICE}` };
+  }
+  if (rule.strict) return { state: st, level: "high", label: rule.label, note: `${rule.note} ${NOT_ADVICE}` };
+  if (rule.windowDays != null) return { state: st, level: "ok", label: rule.label,
+    note: `${rule.label} allows prepaid packs used within ~${rule.windowDays} days. ${rule.note} ${NOT_ADVICE}` };
+  return { state: st, level: "caution", label: rule.label, note: `${rule.note} ${NOT_ADVICE}` };
 }
 
 // Read a trainer's policy with defaults filled in. Never throws — a missing or
