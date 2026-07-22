@@ -12022,10 +12022,16 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   const [weightMsg, setWeightMsg] = useState("");
   const logWeight = () => {
     const v = Math.round(Number(weightDraft) * 10) / 10;
-    if (!(v > 0)) return;
+    if (!(v > 0)) return false;
     onLogWeight(v); setWeightDraft(""); setWeightMsg(`Logged ${v} lbs`);
     setTimeout(() => setWeightMsg(""), 2200);
+    return true;
   };
+  // Commit a typed-but-not-yet-logged weight when the user hits Save or closes,
+  // so a pending weight can never be silently lost by tapping the wrong button
+  // (the tile then reflects it). Safe to call with nothing typed — it no-ops.
+  const flushWeight = () => { if (Number(weightDraft) > 0) return logWeight(); return false; };
+  const handleClose = () => { flushWeight(); onClose(); };
   // Body-fat estimate is optional: some people just want to track tape numbers
   // as a tool. `data.hideBodyFat` turns off all the % / lean-mass / goal math
   // and makes this a plain measurement tracker. Default = show.
@@ -12074,6 +12080,8 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
     : []);
 
   const save = () => {
+    // Also commit a typed-but-unlogged weight, so tapping "Save" never drops it.
+    const wLogged = flushWeight();
     const vals = {};
     for (const f of MEASUREMENT_FIELDS) {
       const v = Math.round(Number(drafts[f]) * 10) / 10;
@@ -12085,7 +12093,11 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
     }
     const bf = Math.round(Number(drafts.bodyFatManual) * 10) / 10; // scale/scanner %
     if (drafts.bodyFatManual !== undefined && drafts.bodyFatManual !== "" && bf >= 3 && bf <= 70) vals.bodyFatManual = bf;
-    if (!Object.keys(vals).length) { setMsg("Enter a body-fat %, a caliper reading, or a tape measurement."); return; }
+    if (!Object.keys(vals).length) {
+      // Weight-only saves are fine now — only nag if nothing at all was entered.
+      if (!wLogged) setMsg("Enter a weight, body-fat %, a caliper reading, or a tape measurement.");
+      return;
+    }
     onSave(vals);
     setDrafts({}); setMsg("Saved.");
   };
@@ -12107,7 +12119,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
     // which otherwise render on top and cover this modal's title and Back
     // button (S97u, Kevin). Safe-area padding keeps the top clear of the notch
     // on an installed PWA; the other overlays (library, sheets) sit at 1600.
-    <div onClick={onClose}
+    <div onClick={handleClose}
       style={{ fontFamily: "var(--font-sans)",
         paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
         paddingBottom: "calc(16px + env(safe-area-inset-bottom,0px))" }}
@@ -12116,7 +12128,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         className="w-full max-w-[640px] max-h-[85vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
         <div className="mb-3 relative flex items-center justify-center px-[92px] gap-2.5">
           <div className="text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="ruler" size={17} color="var(--accent)" />{showBF ? "Body measurements" : "Measurements"}</div>
-          <button onClick={onClose} aria-label="Back"
+          <button onClick={handleClose} aria-label="Back"
             className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
 
