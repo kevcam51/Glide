@@ -2744,14 +2744,20 @@ function cardioExFor(session, data) {
 // tap-to-open BottomSheet: search + grouped rows, each with its real Glidna
 // category icon (Apple/Garmin-style pictograms). One control instead of the old
 // SearchableSelect + <select> pair. kind: "cardio" | "strength".
-function ExercisePicker({ kind, value, onChange, customExercises }) {
+// A pickable "Heart Rate" entry that sits at the top of the cardio list (S108b,
+// Kevin) — for someone who just wants to train by heart rate instead of a named
+// exercise. Picking it calls onPickHr (the parent converts the session to
+// {type:"hr",…}) rather than the normal exercise onChange.
+const HR_CARDIO_OPTION = { id: "hr", label: "Heart Rate", note: "log by heart-rate zone", isHr: true };
+function ExercisePicker({ kind, value, onChange, onPickHr, customExercises }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const custom = customOf(customExercises, kind);
   const current = kind === "cardio" ? findCardioEx(value, customExercises) : findStrengthEx(value, customExercises);
   const groups = (() => {
     const g = kind === "cardio"
-      ? CARDIO_GROUPS.map((gr) => [gr.group.replace(/^[^A-Za-z]+/, ""), gr.options])
+      ? [...(onPickHr ? [["Heart Rate", [HR_CARDIO_OPTION]]] : []),
+         ...CARDIO_GROUPS.map((gr) => [gr.group.replace(/^[^A-Za-z]+/, ""), gr.options])]
       : [["Rest", [REST_ST]], ...STRENGTH_GROUPS.map((cat) => [cat, STRENGTH_EXERCISES.filter((e) => e.cat === cat)])];
     if (custom.length) g.push(["Your Custom Exercises", custom]);
     return g.filter(([, arr]) => arr.length);
@@ -2759,7 +2765,10 @@ function ExercisePicker({ kind, value, onChange, customExercises }) {
   const query = q.trim().toLowerCase();
   const match = (e) => !query || e.label.toLowerCase().includes(query)
     || (e.cat && e.cat.toLowerCase().includes(query)) || (e.note && e.note.toLowerCase().includes(query));
-  const pick = (id) => { onChange(id); setOpen(false); setQ(""); };
+  const pick = (id) => {
+    if (id === "hr") { if (onPickHr) onPickHr(); setOpen(false); setQ(""); return; }
+    onChange(id); setOpen(false); setQ("");
+  };
   return (
     <>
       <button type="button" onClick={() => setOpen(true)}
@@ -2785,7 +2794,7 @@ function ExercisePicker({ kind, value, onChange, customExercises }) {
             <div key={label} style={{ marginBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: ".68rem", color: "var(--muted)",
                 textTransform: "uppercase", letterSpacing: ".5px", fontWeight: 700, marginBottom: 5 }}>
-                <Icon name={exerciseCategory(shown[0], kind)} size={13} color="var(--muted)" />{label}
+                <Icon name={shown[0].isHr ? "heartRate" : exerciseCategory(shown[0], kind)} size={13} color="var(--muted)" />{label}
               </div>
               {shown.map((ex) => {
                 const active = ex.id === value;
@@ -2794,10 +2803,11 @@ function ExercisePicker({ kind, value, onChange, customExercises }) {
                     style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 10px",
                       borderRadius: 9, border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left",
                       background: active ? "rgba(8,220,224,.1)" : "transparent", color: "var(--text)", marginBottom: 2 }}>
-                    <Icon name={exerciseCategory(ex, kind)} size={18} color={active ? "var(--accent)" : "var(--muted)"} />
+                    <Icon name={ex.isHr ? "heartRate" : exerciseCategory(ex, kind)} size={18} color={active ? "var(--accent)" : "var(--muted)"} />
                     <span style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ display: "block", fontSize: ".86rem", fontWeight: active ? 700 : 600,
                         color: active ? "var(--accent)" : "var(--text)" }}>{ex.label}</span>
+                      {ex.isHr && <span style={{ display: "block", fontSize: ".66rem", color: "var(--muted)" }}>{ex.note}</span>}
                       {ex.isCustom && <span style={{ display: "block", fontSize: ".66rem", color: "var(--muted)" }}>Custom · {ex.calPerMin} cal/min</span>}
                     </span>
                     {active && <Icon name="check" size={15} color="var(--accent)" />}
@@ -3285,7 +3295,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
                                     onClick={()=>setWorkout(day,idx,{type:"hr",hr:0,duration:sess.duration||30})}><Icon name="heartRate" size={13} color="var(--accent)" />By heart rate</button>
                                 )}
                               </div>
-                              <ExercisePicker kind="cardio" value={sess.type} onChange={val=>updateWorkout(day,idx,"type",val)} customExercises={data.customExercises} />
+                              <ExercisePicker kind="cardio" value={sess.type} onChange={val=>updateWorkout(day,idx,"type",val)} onPickHr={()=>setWorkout(day,idx,{type:"hr",hr:0,duration:sess.duration||30})} customExercises={data.customExercises} />
                             </div>
                             {sess.type!=="rest" && (
                               <div className="mb-4">
@@ -4056,7 +4066,7 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
                                       onClick={()=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"hr",hr:0,duration:sess.duration||30};onUpdateCardio(day,0,"_replace",arr);}}><Icon name="heartRate" size={13} color="var(--accent)" />By heart rate</button>
                                   )}
                                 </div>
-                                <ExercisePicker kind="cardio" value={sess.type} onChange={val=>onUpdateCardio(day,idx,"type",val)} customExercises={data.customExercises} />
+                                <ExercisePicker kind="cardio" value={sess.type} onChange={val=>onUpdateCardio(day,idx,"type",val)} onPickHr={()=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"hr",hr:0,duration:sess.duration||30};onUpdateCardio(day,0,"_replace",arr);}} customExercises={data.customExercises} />
                               </div>
                               {sess.type!=="rest" && (
                                 <div className="field" style={{marginBottom:0}}>
@@ -4210,7 +4220,7 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
                                       onClick={()=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"hr",hr:0,duration:sess.duration||30};onUpdateCardio(day,0,"_replace",arr);}}><Icon name="heartRate" size={13} color="var(--accent)" />By heart rate</button>
                                   )}
                                 </div>
-                                <ExercisePicker kind="cardio" value={sess.type} onChange={val=>onUpdateCardio(day,idx,"type",val)} customExercises={data.customExercises} />
+                                <ExercisePicker kind="cardio" value={sess.type} onChange={val=>onUpdateCardio(day,idx,"type",val)} onPickHr={()=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"hr",hr:0,duration:sess.duration||30};onUpdateCardio(day,0,"_replace",arr);}} customExercises={data.customExercises} />
                               </div>
                               {sess.type!=="rest" && (
                                 <div className="field" style={{marginBottom:0}}>
@@ -11194,7 +11204,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                         <button style={{background:"transparent",border:"none",color:"var(--accent)",fontSize:".74rem",fontWeight:700,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:"4px"}}
                           onClick={()=>{const arr=[...(data.cardio[dayName]||[])];arr[i]={type:"hr",hr:0,duration:w.duration||30};onUpdateCardio(dayName,0,"_replace",arr);}}><Icon name="heartRate" size={13} color="var(--accent)" />By heart rate</button>
                       </div>
-                      <ExercisePicker kind="cardio" value={w.type} onChange={val=>onUpdateCardio(dayName,i,"type",val)} customExercises={data.customExercises} />
+                      <ExercisePicker kind="cardio" value={w.type} onChange={val=>onUpdateCardio(dayName,i,"type",val)} onPickHr={()=>{const arr=[...(data.cardio[dayName]||[])];arr[i]={type:"hr",hr:0,duration:w.duration||30};onUpdateCardio(dayName,0,"_replace",arr);}} customExercises={data.customExercises} />
                       <select value={(todayCardio.workouts[i]||{}).duration||30} onChange={e=>onUpdateCardio(dayName,i,"duration",Number(e.target.value))}
                         style={{width:"100%",padding:"10px",borderRadius:"8px",border:"1.5px solid var(--border)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".84rem",marginTop:"6px"}}>
                         {DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
