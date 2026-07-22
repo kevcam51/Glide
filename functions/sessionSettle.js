@@ -41,6 +41,15 @@ const STRIPE_TEST_SECRET_KEY = defineSecret("STRIPE_TEST_SECRET_KEY");
 const VAPID_PRIVATE_KEY = defineSecret("VAPID_PRIVATE_KEY");
 const REGION = "us-central1";
 const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
+// For the ON-session pay-now retry: Stripe requires a return_url on a confirmed
+// intent that could need a redirect (e.g. a 3DS card check), so we pass the
+// caller's validated origin. (The off_session sweep never redirects, so it needs
+// none.) Mirrors sessionBilling.js.
+const ALLOWED_ORIGINS = [
+  "https://glidna.com", "https://www.glidna.com", "https://glidna.app",
+  "http://localhost:5173",
+];
+const safeOrigin = (o) => (ALLOWED_ORIGINS.includes(o) ? o : ALLOWED_ORIGINS[0]);
 
 const LOOKBACK_MS = 30 * 86400000; // how far back the sweep looks for unsettled items
 const MAX_PER_RUN = 200;
@@ -352,14 +361,15 @@ exports.paySessionBalance = onCall(
       // ON-session confirm — the client is right here, so a card that needs a
       // bank check (3DS) can prompt on the hosted card flow if it must. A fresh
       // idempotency key (the retry is a NEW attempt, distinct from the sweep's).
+      const origin = safeOrigin(String((request.rawRequest && request.rawRequest.headers && request.rawRequest.headers.origin) || ""));
       const pi = await stripe.paymentIntents.create({
         amount: amountCents, currency: "usd",
         customer: client.stripeCustomerId, payment_method: pm.id,
-        // Card only — no redirect methods, so no return_url is required (an
-        // unconstrained on-session intent defaults to redirect-capable methods
-        // and errors without one). off_session:false lets a bank check prompt.
         payment_method_types: ["card"],
         off_session: false, confirm: true,
+        // Required by Stripe when a confirmed on-session card intent may need a
+        // redirect for a 3DS bank check — where the browser returns after auth.
+        return_url: `${origin}/?sessionpay=done`,
         description: `Training sessions with ${trainerName}`.slice(0, 100),
         metadata: { trainerUid, clientUid: uid, ledgerId: ledgerRef.id, purpose: "glidna_sessions", retry: "1" },
         // Per-attempt idempotency key: a stable one (ledger+pm) would cache the
