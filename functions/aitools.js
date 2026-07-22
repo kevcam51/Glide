@@ -289,18 +289,27 @@ async function searchFoodDb(query) {
 function buildWorkoutWeek(provided, validSet, defDur, existing, replace, dropped) {
   const clampDur = (v, def) => Math.max(5, Math.min(120, Math.round(Number(v) || def)));
   const result = replace ? {} : { ...(existing || {}) };
+  // "By heart rate" cardio ({type:"hr", hr, duration}) is user-owned logging the AI
+  // scheduler doesn't manage — it must NEVER be dropped or overwritten by a rebuild.
+  // It has no exercise id, so it fails validSet; carry any existing HR sessions per day
+  // forward, even on a replace (so "rebuild my cardio" can't silently delete an HR day).
+  const hrOf = (day) => (Array.isArray((existing || {})[day]) ? existing[day] : []).filter((s) => s && s.type === "hr");
+  const mkHr = (s) => ({ type: "hr", hr: Number(s.hr) || 0, duration: clampDur(s.duration, defDur) });
   for (const day of DAYS) {
     const arr = provided && Array.isArray(provided[day]) ? provided[day] : null;
     if (arr) {
       const sessions = [];
       for (const s of arr) {
         const type = s && s.type;
-        if (validSet.has(type)) sessions.push({ type, duration: clampDur(s.duration, defDur) });
+        if (type === "hr") sessions.push(mkHr(s));       // HR sessions are always valid
+        else if (validSet.has(type)) sessions.push({ type, duration: clampDur(s.duration, defDur) });
         else if (type) dropped.push(type);
       }
+      // If the rebuild for this day didn't re-emit HR, keep the existing HR session(s).
+      if (!sessions.some((s) => s.type === "hr")) sessions.push(...hrOf(day));
       result[day] = sessions;
     } else if (replace) {
-      result[day] = []; // unlisted day within a replaced category → rest
+      result[day] = hrOf(day); // unlisted day in a replaced category → rest, but keep HR
     }
   }
   return result;
@@ -311,7 +320,9 @@ function weekWithLabels(week, labelMap) {
   const r = {};
   for (const day of DAYS) {
     const arr = (week || {})[day] || [];
-    if (arr.length) r[day] = arr.map((s) => ({ type: s.type, label: (labelMap && labelMap[s.type]) || EX_LABEL[s.type] || s.type, duration: s.duration }));
+    if (arr.length) r[day] = arr.map((s) => (s.type === "hr"
+      ? { type: "hr", hr: s.hr, label: `${Number(s.hr) || 0} bpm (heart rate)`, duration: s.duration }
+      : { type: s.type, label: (labelMap && labelMap[s.type]) || EX_LABEL[s.type] || s.type, duration: s.duration }));
   }
   return r;
 }
@@ -522,12 +533,27 @@ function dailyDeficit(d) {
   return Math.round((weeklyRate(d) * 3500) / 7);
 }
 
+// Heart-rate calorie burn (Keytel et al., 2005) — MIRRORS App.jsx hrCaloriesPerMin.
+// A "By heart rate" cardio session is stored {type:"hr", hr, duration}; there is no
+// MET for it, so the server must compute its burn the same way the client does, or
+// eat-back targets undercount HR cardio (the AI would quote a lower target than the app).
+function hrCalPerMin(hr, gender, weightLbs, age) {
+  const w = Number(weightLbs) * 0.453592; // kg
+  const a = Number(age), h = Number(hr);
+  if (!(h > 0) || !(w > 0) || !(a > 0)) return 0;
+  const kcalMin = gender === "female"
+    ? (-20.4022 + 0.4472 * h - 0.1263 * w + 0.074 * a) / 4.184
+    : (-55.0969 + 0.6309 * h + 0.1988 * w + 0.2017 * a) / 4.184;
+  return Math.max(0, kcalMin);
+}
+
 function weeklyPlanBurn(d) {
   const w = Number(d.weightLbs) || 0;
   const custom = {};
   (Array.isArray(d.customExercises) ? d.customExercises : []).forEach((e) => { if (e && e.id) custom[e.id] = e; });
   const burnOf = (s) => {
     if (!s || !s.duration) return 0;
+    if (s.type === "hr") return Math.round(hrCalPerMin(s.hr, d.gender, d.weightLbs, d.age) * s.duration);
     const ce = custom[s.type];
     if (ce && ce.calPerMin) return Math.round(Number(ce.calPerMin) * s.duration);
     return Math.round((MET[s.type] || 0) * w * 0.453592 * (s.duration / 60));
