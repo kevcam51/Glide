@@ -66,6 +66,8 @@ const GLYPHS = {
   watch: (<><circle cx="12" cy="12" r="5.6" /><path d="M12 9.5V12l1.8 1.2" /><path d="M9 6.6 9.6 2.5h4.8L15 6.6" /><path d="M9 17.4 9.6 21.5h4.8L15 17.4" /></>),
   card: (<><rect x="2.5" y="5.5" width="19" height="13" rx="2.2" /><path d="M2.5 10h19" /><path d="M6 14.5h4" /></>),
   receipt: (<><path d="M5 3.5h14v17l-2.3-1.5-2.3 1.5-2.4-1.5L7.3 20 5 20.5z" /><path d="M9 8h6" /><path d="M9 11.5h6" /><path d="M9 15h4" /></>),
+  heart: (<path d="M12 20.5C7 17 3.5 13.8 3.5 9.6A4.1 4.1 0 0 1 12 7a4.1 4.1 0 0 1 8.5 2.6c0 4.2-3.5 7.4-8.5 10.9z" />),
+  heartRate: (<><path d="M20.5 10.5H16l-2 5-4-9-2 4H3.5" /><path d="M20.5 11c.3-.5.5-1.1.5-1.9A3.6 3.6 0 0 0 12 6.8 3.6 3.6 0 0 0 3.5 9.1c0 3.7 3.4 6.6 8.5 10.4 1.8-1.3 3.4-2.6 4.7-3.8" /></>),
   // — S94: move a logged item between meals (up/down swap arrows) & copy —
   move: (<><path d="M8 4.5 5 7.5 8 10.5" /><path d="M5 7.5h9" /><path d="M16 13.5l3 3-3 3" /><path d="M19 16.5h-9" /></>),
   copy: (<><rect x="8.5" y="8.5" width="11" height="11" rx="2" /><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5" /></>),

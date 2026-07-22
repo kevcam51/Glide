@@ -123,6 +123,7 @@ const CARDIO_GROUPS = [
     { id:"kickboxing",       label:"Kickboxing Class",             icon:"🥊", met:8.0  },
     { id:"jump_rope",        label:"Jump Rope – Moderate",         icon:"🪢", met:11.0 },
     { id:"jump_rope_fast",   label:"Jump Rope – Fast/Double",      icon:"⚡", met:13.0 },
+    { id:"trampoline",       label:"Trampoline Jumping",           icon:"🤸", met:4.5  },
   ]},
   { group:"🏀 Sports & Outdoor", options:[
     { id:"basketball",       label:"Basketball – Game",            icon:"🏀", met:8.0  },
@@ -210,6 +211,55 @@ function calcBMR(gender, weightLbs, heightFt, heightIn, age) {
 function calcBurn(met, weightLbs, minutes) {
   if (!met || !minutes) return 0;
   return Math.round(met * weightLbs * 0.453592 * (minutes / 60));
+}
+
+// ─── Heart-rate-based calorie burn (Keytel et al., 2005) ────────────────────
+// Estimates calories from heart rate + the SAME personal metrics the MET calc
+// uses (weight, age, gender) — a second, HR-first way to log cardio. The formula
+// is validated for exercise-range HR (~90–150+ bpm); it can go slightly negative
+// at very low HR, so we clamp at 0. Returns whole kcal for `minutes`.
+function hrCaloriesPerMin(hr, gender, weightLbs, age) {
+  const w = Number(weightLbs) * 0.453592; // kg
+  const a = Number(age), h = Number(hr);
+  if (!(h > 0) || !(w > 0) || !(a > 0)) return 0;
+  const kcalMin = gender === "female"
+    ? (-20.4022 + 0.4472 * h - 0.1263 * w + 0.074 * a) / 4.184
+    : (-55.0969 + 0.6309 * h + 0.1988 * w + 0.2017 * a) / 4.184;
+  return Math.max(0, kcalMin);
+}
+function hrBurn(hr, gender, weightLbs, age, minutes) {
+  if (!minutes) return 0;
+  return Math.round(hrCaloriesPerMin(hr, gender, weightLbs, age) * Number(minutes));
+}
+
+// Age-predicted max heart rate (Tanaka 2001 — more accurate than 220−age).
+function maxHeartRate(age) {
+  const a = Number(age);
+  return a > 0 ? Math.round(208 - 0.7 * a) : 190;
+}
+// The five standard HR training zones, as % of max HR, each with a brand color
+// and a plain-English name. `pct` is where `hr` sits relative to max HR.
+const HR_ZONES = [
+  { key: "z1", name: "Very Light",  lo: 0.50, hi: 0.60, color: "#9bb8b8", note: "warm-up / recovery" },
+  { key: "z2", name: "Light",       lo: 0.60, hi: 0.70, color: "#2fe0a8", note: "fat-burn / base" },
+  { key: "z3", name: "Moderate",    lo: 0.70, hi: 0.80, color: "#fbbf24", note: "aerobic / cardio" },
+  { key: "z4", name: "Hard",        lo: 0.80, hi: 0.90, color: "#fb923c", note: "anaerobic / threshold" },
+  { key: "z5", name: "Maximum",     lo: 0.90, hi: 1.01, color: "#f87171", note: "max effort — brief only" },
+];
+// Which zone a given HR falls in for this person (null below 50% max = "very easy").
+function hrZoneFor(hr, age) {
+  const mhr = maxHeartRate(age);
+  const pct = Number(hr) / mhr;
+  const z = HR_ZONES.find((zn) => pct >= zn.lo && pct < zn.hi);
+  return { pct, mhr, zone: z || (pct < 0.50 ? { key: "rest", name: "Very easy", color: "#7e9a9a", note: "below training zones" } : HR_ZONES[4]) };
+}
+// The heart-rate range we let a person pick within — from a light 50% of max up
+// to 90% of max (sustained-safe ceiling). Above ~90% is a brief-only caution, so
+// the picker flags it rather than encouraging it. Floor at 90 bpm (Kevin's spec).
+function hrHealthyRange(age) {
+  const mhr = maxHeartRate(age);
+  return { min: Math.max(90, Math.round(mhr * 0.50)), max: Math.round(mhr * 0.90), mhr,
+    cautionAbove: Math.round(mhr * 0.90) };
 }
 function weeksToGoal(totalLbs, weeklyDeficitCal) {
   if (weeklyDeficitCal <= 0) return null;
