@@ -152,6 +152,8 @@ const ALL_CARDIO = CARDIO_GROUPS.flatMap(g => g.options);
 // on-brand glyph. kind: "cardio" | "strength".
 function exerciseCategory(ex, kind) {
   if (!ex) return kind === "strength" ? "dumbbell" : "run";
+  // Heart-rate cardio entries carry no exercise — show the heart-rate glyph.
+  if (ex.isHr) return "heartRate";
   // Custom exercises can carry a user-picked icon (S97b) — it always wins.
   if (ex.iconName) return ex.iconName;
   const s = `${ex.id || ""} ${ex.label || ""}`.toLowerCase();
@@ -180,6 +182,7 @@ function exerciseCategory(ex, kind) {
   if (/stair|climb|ladder|versa/.test(s)) return "stairs";
   if (/kick|martial|wrestl|grappl|mma|karate|judo/.test(s)) return "kick";
   if (/box/.test(s)) return "boxing";
+  if (/trampolin|rebound/.test(s)) return "jump";
   if (/jump.?rope/.test(s)) return "jumprope";
   if (/hik|mountain/.test(s)) return "hike";
   if (/basketball|bball/.test(s)) return "basketball";
@@ -187,7 +190,7 @@ function exerciseCategory(ex, kind) {
   if (/tennis|pickle|badminton|squash/.test(s)) return "tennis";
   if (/volley/.test(s)) return "volleyball";
   if (/football|flag/.test(s)) return "football";
-  if (/ping|table.?tennis/.test(s)) return "pingpong";
+  if (/ping.?pong|table.?tennis/.test(s)) return "pingpong";
   if (/skat|rollerblad/.test(s)) return "skate";
   if (/danc|zumba/.test(s)) return "dance";
   if (/\bwalk\b|walking|walk_|_walk/.test(s)) return "walk";
@@ -3072,6 +3075,9 @@ function HeartRatePicker({ data, hr, duration = 30, onChange }) {
   const bpm = clamp(Number(hr) > 0 ? Number(hr) : range.min + Math.round((range.max - range.min) * 0.45));
   const mins = Number(duration) || 30;
   const emit = (nhr, nmin) => onChange && onChange({ hr: clamp(nhr), duration: nmin });
+  // On first switch to heart-rate mode the session has no hr yet — persist the
+  // sensible default so it isn't saved as 0 (which would compute no calories).
+  useEffect(() => { if (!(Number(hr) > 0)) emit(bpm, mins); /* mount only */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const { zone, pct } = hrZoneFor(bpm, age);
   const cal = hrBurn(bpm, data && data.gender, data && data.weightLbs, age, mins);
   const over = bpm > range.cautionAbove;
@@ -3087,7 +3093,7 @@ function HeartRatePicker({ data, hr, duration = 30, onChange }) {
         <span style={{ fontSize: ".8rem", color: "var(--muted)" }}>bpm</span>
       </div>
       <div style={{ textAlign: "center", fontSize: ".78rem", fontWeight: 700, color: zone.color, marginBottom: 10 }}>
-        {zone.name} zone · {pct}% of max <span style={{ color: "var(--muted)", fontWeight: 400 }}>({zone.note})</span>
+        {zone.name} zone · {Math.round(pct * 100)}% of max <span style={{ color: "var(--muted)", fontWeight: 400 }}>({zone.note})</span>
       </div>
       {/* steppers + slider */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
@@ -3146,6 +3152,13 @@ function StepCardio({ data, onChange, onBack, onNext }) {
   const updateWorkout = (day, idx, field, val) => {
     const curr = [...(data.cardio[day] || [])];
     curr[idx] = {...curr[idx], [field]: val};
+    onChange("cardio", {...data.cardio, [day]: curr});
+  };
+  // Replace a whole session object (used to switch a session to/from "by heart
+  // rate" mode, where the session shape changes to {type:"hr", hr, duration}).
+  const setWorkout = (day, idx, session) => {
+    const curr = [...(data.cardio[day] || [])];
+    curr[idx] = session;
     onChange("cardio", {...data.cardio, [day]: curr});
   };
   const removeWorkout = (day, idx) => {
@@ -3222,7 +3235,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
           const sessions = Array.isArray(data.cardio[day]) ? data.cardio[day] : [];
           const isRest = sessions.length === 0;
           const totalBurned = sessions.reduce((s,sess)=>{
-            const co = findCardioEx(sess.type, data.customExercises);
+            const co = cardioExFor(sess, data);
             return s + exBurn(co, Number(data.weightLbs), sess.duration);
           }, 0);
           const isOpen = openDay===day;
@@ -3232,7 +3245,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
                 <div className={WZW.dayChip}>{DAY_SHORT[i]}</div>
                 <div className={`text-[.88rem] ${isRest?"text-muted":"text-fg font-semibold"}`}>
                   {isRest ? <><Icon name="moon" size={14} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />Rest Day</> : sessions.length === 1
-                    ? <><Icon name={exerciseCategory(findCardioEx(sessions[0].type, data.customExercises), "cardio")} size={15} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />{(findCardioEx(sessions[0].type, data.customExercises)||{label:"Cardio"}).label} · {sessions[0].duration}m</>
+                    ? <><Icon name={exerciseCategory(cardioExFor(sessions[0], data), "cardio")} size={15} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />{(cardioExFor(sessions[0], data)||{label:"Cardio"}).label} · {sessions[0].duration}m</>
                     : `${sessions.length} sessions`
                   }
                 </div>
@@ -3242,7 +3255,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
               {isOpen && (
                 <div className={WZW.dayBody}>
                   {sessions.map((sess, idx) => {
-                    const co = findCardioEx(sess.type, data.customExercises);
+                    const co = cardioExFor(sess, data);
                     const burn = exBurn(co, Number(data.weightLbs), sess.duration);
                     return (
                       <div key={idx} className="py-2.5" style={{borderBottom:idx<sessions.length-1?"1px solid var(--color-border)":"none"}}>
@@ -3252,19 +3265,39 @@ function StepCardio({ data, onChange, onBack, onNext }) {
                             <button className="bg-transparent border-none text-danger cursor-pointer text-[.78rem] px-1.5" onClick={()=>removeWorkout(day,idx)}>Remove</button>
                           </div>
                         )}
-                        <div className="mb-4">
-                          <label className={WZ.label}>Exercise</label>
-                          <ExercisePicker kind="cardio" value={sess.type} onChange={val=>updateWorkout(day,idx,"type",val)} customExercises={data.customExercises} />
-                        </div>
-                        {sess.type!=="rest" && (
+                        {sess.type==="hr" ? (
                           <div className="mb-4">
-                            <label className={WZ.label}>Duration</label>
-                            <select className={WZW.select} value={sess.duration} onChange={e=>updateWorkout(day,idx,"duration",Number(e.target.value))}>
-                              {DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
-                            </select>
+                            <div className="flex items-center justify-between mb-2">
+                              <label className={WZ.label} style={{marginBottom:0}}>Cardio by heart rate</label>
+                              <button className="bg-transparent border-none cursor-pointer text-[.74rem] underline" style={{color:"var(--accent)"}}
+                                onClick={()=>setWorkout(day,idx,{type:"outdoor_jog",duration:sess.duration||30})}>Pick an exercise instead</button>
+                            </div>
+                            <HeartRatePicker data={data} hr={sess.hr} duration={sess.duration}
+                              onChange={({hr,duration})=>setWorkout(day,idx,{type:"hr",hr,duration})} />
                           </div>
+                        ) : (
+                          <>
+                            <div className="mb-4">
+                              <div className="flex items-center justify-between mb-2">
+                                <label className={WZ.label} style={{marginBottom:0}}>Exercise</label>
+                                {sess.type!=="rest" && (
+                                  <button className="bg-transparent border-none cursor-pointer text-[.74rem] font-semibold inline-flex items-center gap-1" style={{color:"var(--accent)"}}
+                                    onClick={()=>setWorkout(day,idx,{type:"hr",hr:0,duration:sess.duration||30})}><Icon name="heartRate" size={13} color="var(--accent)" />By heart rate</button>
+                                )}
+                              </div>
+                              <ExercisePicker kind="cardio" value={sess.type} onChange={val=>updateWorkout(day,idx,"type",val)} customExercises={data.customExercises} />
+                            </div>
+                            {sess.type!=="rest" && (
+                              <div className="mb-4">
+                                <label className={WZ.label}>Duration</label>
+                                <select className={WZW.select} value={sess.duration} onChange={e=>updateWorkout(day,idx,"duration",Number(e.target.value))}>
+                                  {DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
+                                </select>
+                              </div>
+                            )}
+                            {burn > 0 && <div className="text-[.78rem] text-warn font-semibold">~{burn} cal</div>}
+                          </>
                         )}
-                        {burn > 0 && <div className="text-[.78rem] text-warn font-semibold">~{burn} cal</div>}
                       </div>
                     );
                   })}
@@ -3626,7 +3659,7 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
   const dayData = DAYS.map(day=>{
     const sessions = Array.isArray(cardio[day]) ? cardio[day] : [];
     const sessionData = sessions.filter(s=>s.type!=="rest").map(s=>{
-      const co = findCardioEx(s.type, data.customExercises);
+      const co = cardioExFor(s, data);
       return { co, duration:s.duration, burned:exBurn(co, Number(weightLbs), s.duration), type:s.type };
     });
     const burned = sessionData.reduce((s,d)=>s+d.burned, 0);
@@ -3972,7 +4005,7 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
             const sessions = Array.isArray(data.cardio[day]) ? data.cardio[day] : [];
             const isRest = sessions.length === 0;
             const totalBurnDay = sessions.reduce((s,sess)=>{
-              const c = findCardioEx(sess.type, data.customExercises);
+              const c = cardioExFor(sess, data);
               return s + exBurn(c, Number(weightLbs), sess.duration);
             },0);
             const isOpen = openResultDay === day;
@@ -3984,7 +4017,7 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
                     {isRest
                       ? <span style={{color:"var(--muted)"}}><Icon name="moon" size={14} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />Rest — tap to add cardio</span>
                       : sessions.length === 1
-                        ? <span><Icon name={exerciseCategory(findCardioEx(sessions[0].type, data.customExercises), "cardio")} size={15} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />{(findCardioEx(sessions[0].type, data.customExercises)||{label:"Cardio"}).label.split("–")[0].trim()} · {sessions[0].duration}m</span>
+                        ? <span><Icon name={exerciseCategory(cardioExFor(sessions[0], data), "cardio")} size={15} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:5}} />{(cardioExFor(sessions[0], data)||{label:"Cardio"}).label.split("–")[0].trim()} · {sessions[0].duration}m</span>
                         : <span>{sessions.length} sessions</span>
                     }
                   </div>
@@ -3994,7 +4027,7 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
                 {isOpen && (
                   <div className="drc-edit-body">
                     {sessions.map((sess, idx)=>{
-                      const co = findCardioEx(sess.type, data.customExercises);
+                      const co = cardioExFor(sess, data);
                       const burn = exBurn(co, Number(weightLbs), sess.duration);
                       return (
                         <div key={idx} style={{padding:"10px 0",borderBottom:idx<sessions.length-1?"1px solid var(--border)":"none"}}>
@@ -4003,26 +4036,46 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
                               <span style={{fontSize:".7rem",color:"var(--muted)",fontWeight:700,letterSpacing:"1px",textTransform:"uppercase"}}>Session {idx+1}</span>
                             </div>
                           )}
-                          <div className="field">
-                            <label>Exercise</label>
-                            <ExercisePicker kind="cardio" value={sess.type} onChange={val=>onUpdateCardio(day,idx,"type",val)} customExercises={data.customExercises} />
-                          </div>
-                          {sess.type!=="rest" && (
+                          {sess.type==="hr" ? (
                             <div className="field" style={{marginBottom:0}}>
-                              <label>Duration</label>
-                              <select value={sess.duration} onChange={e=>onUpdateCardio(day,idx,"duration",Number(e.target.value))}>
-                                {DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
-                              </select>
-                            </div>
-                          )}
-                          {burn>0 && (
-                            <div className="drc-edit-live">
-                              <span style={{display:"inline-flex",alignItems:"center"}}><Icon name="flame" size={15} color="var(--orange)" /></span>
-                              <div>
-                                <span className="burn-num">+{burn} cal</span>
-                                <span style={{color:"var(--muted)",fontSize:".76rem",marginLeft:"6px"}}>burned this session — flip to the <strong style={{color:"var(--accent)"}}>+ Cardio</strong> tab to see your updated targets.</span>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}>
+                                <label style={{margin:0}}>By heart rate</label>
+                                <button style={{background:"transparent",border:"none",color:"var(--accent)",fontSize:".74rem",textDecoration:"underline",cursor:"pointer"}}
+                                  onClick={()=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"outdoor_jog",duration:sess.duration||30};onUpdateCardio(day,0,"_replace",arr);}}>Pick an exercise instead</button>
                               </div>
+                              <HeartRatePicker data={data} hr={sess.hr} duration={sess.duration}
+                                onChange={({hr,duration})=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"hr",hr,duration};onUpdateCardio(day,0,"_replace",arr);}} />
                             </div>
+                          ) : (
+                            <>
+                              <div className="field">
+                                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                                  <label style={{margin:0}}>Exercise</label>
+                                  {sess.type!=="rest" && (
+                                    <button style={{background:"transparent",border:"none",color:"var(--accent)",fontSize:".74rem",fontWeight:700,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:"4px"}}
+                                      onClick={()=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"hr",hr:0,duration:sess.duration||30};onUpdateCardio(day,0,"_replace",arr);}}><Icon name="heartRate" size={13} color="var(--accent)" />By heart rate</button>
+                                  )}
+                                </div>
+                                <ExercisePicker kind="cardio" value={sess.type} onChange={val=>onUpdateCardio(day,idx,"type",val)} customExercises={data.customExercises} />
+                              </div>
+                              {sess.type!=="rest" && (
+                                <div className="field" style={{marginBottom:0}}>
+                                  <label>Duration</label>
+                                  <select value={sess.duration} onChange={e=>onUpdateCardio(day,idx,"duration",Number(e.target.value))}>
+                                    {DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
+                                  </select>
+                                </div>
+                              )}
+                              {burn>0 && (
+                                <div className="drc-edit-live">
+                                  <span style={{display:"inline-flex",alignItems:"center"}}><Icon name="flame" size={15} color="var(--orange)" /></span>
+                                  <div>
+                                    <span className="burn-num">+{burn} cal</span>
+                                    <span style={{color:"var(--muted)",fontSize:".76rem",marginLeft:"6px"}}>burned this session — flip to the <strong style={{color:"var(--accent)"}}>+ Cardio</strong> tab to see your updated targets.</span>
+                                  </div>
+                                </div>
+                              )}
+                            </>
                           )}
                           {/* Delete a session added by mistake (S97v, Kevin). Splices
                               the day's array and writes it back whole via _replace —
@@ -4132,28 +4185,48 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
                 {isOpen && (
                   <div className="drc-edit-body">
                     {allSessions.map((sess,idx)=>{
-                      const co = findCardioEx(sess.type, data.customExercises);
+                      const co = cardioExFor(sess, data);
                       const burn = exBurn(co, Number(weightLbs), sess.duration);
                       return (
                         <div key={idx} style={{padding:"10px 0",borderBottom:idx<allSessions.length-1?"1px solid var(--border)":"none"}}>
                           {allSessions.length>1 && <div style={{fontSize:".7rem",color:"var(--muted)",fontWeight:700,letterSpacing:"1px",textTransform:"uppercase",marginBottom:"6px"}}>Session {idx+1}</div>}
-                          <div className="field">
-                            <label>Exercise</label>
-                            <ExercisePicker kind="cardio" value={sess.type} onChange={val=>onUpdateCardio(day,idx,"type",val)} customExercises={data.customExercises} />
-                          </div>
-                          {sess.type!=="rest" && (
+                          {sess.type==="hr" ? (
                             <div className="field" style={{marginBottom:0}}>
-                              <label>Duration</label>
-                              <select value={sess.duration} onChange={e=>onUpdateCardio(day,idx,"duration",Number(e.target.value))}>
-                                {DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
-                              </select>
+                              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}>
+                                <label style={{margin:0}}>By heart rate</label>
+                                <button style={{background:"transparent",border:"none",color:"var(--accent)",fontSize:".74rem",textDecoration:"underline",cursor:"pointer"}}
+                                  onClick={()=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"outdoor_jog",duration:sess.duration||30};onUpdateCardio(day,0,"_replace",arr);}}>Pick an exercise instead</button>
+                              </div>
+                              <HeartRatePicker data={data} hr={sess.hr} duration={sess.duration}
+                                onChange={({hr,duration})=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"hr",hr,duration};onUpdateCardio(day,0,"_replace",arr);}} />
                             </div>
-                          )}
-                          {burn>0 && (
-                            <div className="drc-edit-live">
-                              <span style={{display:"inline-flex",alignItems:"center"}}><Icon name="flame" size={15} color="var(--orange)" /></span>
-                              <div><span className="burn-num">+{burn} cal</span><span style={{color:"var(--muted)",fontSize:".76rem",marginLeft:"6px"}}>burned — targets below updated automatically.</span></div>
-                            </div>
+                          ) : (
+                            <>
+                              <div className="field">
+                                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                                  <label style={{margin:0}}>Exercise</label>
+                                  {sess.type!=="rest" && (
+                                    <button style={{background:"transparent",border:"none",color:"var(--accent)",fontSize:".74rem",fontWeight:700,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:"4px"}}
+                                      onClick={()=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"hr",hr:0,duration:sess.duration||30};onUpdateCardio(day,0,"_replace",arr);}}><Icon name="heartRate" size={13} color="var(--accent)" />By heart rate</button>
+                                  )}
+                                </div>
+                                <ExercisePicker kind="cardio" value={sess.type} onChange={val=>onUpdateCardio(day,idx,"type",val)} customExercises={data.customExercises} />
+                              </div>
+                              {sess.type!=="rest" && (
+                                <div className="field" style={{marginBottom:0}}>
+                                  <label>Duration</label>
+                                  <select value={sess.duration} onChange={e=>onUpdateCardio(day,idx,"duration",Number(e.target.value))}>
+                                    {DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
+                                  </select>
+                                </div>
+                              )}
+                              {burn>0 && (
+                                <div className="drc-edit-live">
+                                  <span style={{display:"inline-flex",alignItems:"center"}}><Icon name="flame" size={15} color="var(--orange)" /></span>
+                                  <div><span className="burn-num">+{burn} cal</span><span style={{color:"var(--muted)",fontSize:".76rem",marginLeft:"6px"}}>burned — targets below updated automatically.</span></div>
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
                       );
@@ -11106,11 +11179,28 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
               </div>
               {editingWorkout===`c${i}` && (
                 <div style={{padding:"10px 0 12px",borderBottom:"1px solid var(--border)",animation:"fadeUp .15s ease both"}}>
-                  <ExercisePicker kind="cardio" value={w.type} onChange={val=>onUpdateCardio(dayName,i,"type",val)} customExercises={data.customExercises} />
-                  <select value={(todayCardio.workouts[i]||{}).duration||30} onChange={e=>onUpdateCardio(dayName,i,"duration",Number(e.target.value))}
-                    style={{width:"100%",padding:"10px",borderRadius:"8px",border:"1.5px solid var(--border)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".84rem",marginTop:"6px"}}>
-                    {DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
-                  </select>
+                  {w.type==="hr" ? (
+                    <>
+                      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:"6px"}}>
+                        <button style={{background:"transparent",border:"none",color:"var(--accent)",fontSize:".74rem",textDecoration:"underline",cursor:"pointer"}}
+                          onClick={()=>{const arr=[...(data.cardio[dayName]||[])];arr[i]={type:"outdoor_jog",duration:w.duration||30};onUpdateCardio(dayName,0,"_replace",arr);}}>Pick an exercise instead</button>
+                      </div>
+                      <HeartRatePicker data={data} hr={w.hr} duration={w.duration}
+                        onChange={({hr,duration})=>{const arr=[...(data.cardio[dayName]||[])];arr[i]={type:"hr",hr,duration};onUpdateCardio(dayName,0,"_replace",arr);}} />
+                    </>
+                  ) : (
+                    <>
+                      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:"6px"}}>
+                        <button style={{background:"transparent",border:"none",color:"var(--accent)",fontSize:".74rem",fontWeight:700,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:"4px"}}
+                          onClick={()=>{const arr=[...(data.cardio[dayName]||[])];arr[i]={type:"hr",hr:0,duration:w.duration||30};onUpdateCardio(dayName,0,"_replace",arr);}}><Icon name="heartRate" size={13} color="var(--accent)" />By heart rate</button>
+                      </div>
+                      <ExercisePicker kind="cardio" value={w.type} onChange={val=>onUpdateCardio(dayName,i,"type",val)} customExercises={data.customExercises} />
+                      <select value={(todayCardio.workouts[i]||{}).duration||30} onChange={e=>onUpdateCardio(dayName,i,"duration",Number(e.target.value))}
+                        style={{width:"100%",padding:"10px",borderRadius:"8px",border:"1.5px solid var(--border)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".84rem",marginTop:"6px"}}>
+                        {DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
+                      </select>
+                    </>
+                  )}
                   <div style={{display:"flex",gap:"8px",marginTop:"8px"}}>
                     <button style={{flex:1,padding:"10px",borderRadius:"8px",border:"none",background:"var(--green)",color:"#0b0b12",fontFamily:"'Sora',sans-serif",fontSize:".95rem",letterSpacing:"2px",cursor:"pointer"}}
                       onClick={()=>setEditingWorkout(null)}>
@@ -11181,7 +11271,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           {(() => {
             const week = DAYS.map((d) => {
               const c = (Array.isArray(data.cardio?.[d]) ? data.cardio[d] : [])
-                .map((x) => (findCardioEx(x.type, data.customExercises) || {}).label).filter(Boolean);
+                .map((x) => (cardioExFor(x, data) || {}).label).filter(Boolean);
               const st = (Array.isArray(data.strength?.[d]) ? data.strength[d] : [])
                 .map((x) => (findStrengthEx(x.type, data.customExercises) || {}).label).filter(Boolean);
               return { d, items: [...c, ...st] };
@@ -13262,7 +13352,7 @@ function computeClientCalories(d) {
   let cardio = 0, strength = 0;
   DAYS.forEach((day) => {
     (Array.isArray((d.cardio || {})[day]) ? d.cardio[day] : []).forEach((s) => {
-      const co = findCardioEx(s.type, d.customExercises);
+      const co = cardioExFor(s, d);
       cardio += exBurn(co, w, s.duration);
     });
     (Array.isArray((d.strength || {})[day]) ? d.strength[day] : []).forEach((s) => {
@@ -20787,8 +20877,8 @@ export default function App() {
     const raw = data.cardio[day];
     const sessions = Array.isArray(raw) ? raw : [];
     const wkData = sessions.map(w => {
-      const co = findCardioEx(w.type, data.customExercises);
-      return { co, duration:w.duration, burned:exBurn(co, Number(data.weightLbs), w.duration), type:w.type };
+      const co = cardioExFor(w, data);
+      return { co, duration:w.duration, burned:exBurn(co, Number(data.weightLbs), w.duration), type:w.type, hr:w.hr };
     });
     return { day, workouts:wkData, burned:wkData.reduce((s,w)=>s+w.burned,0) };
   });
