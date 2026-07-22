@@ -39,6 +39,11 @@ const admin = require("firebase-admin");
 const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
 const STRIPE_TEST_SECRET_KEY = defineSecret("STRIPE_TEST_SECRET_KEY");
 const REGION = "us-central1";
+// Keep in lock-step with POLICY_TEXT_VERSION in src/sessions.js (CommonJS here
+// can't import the ESM constant). Used only as a fallback if a consent snapshot
+// somehow arrives without its own version — never stamp a stale label on the
+// current wording. Currently 2 (S106).
+const CURRENT_POLICY_VERSION = 2;
 
 const ALLOWED_ORIGINS = [
   "https://glidna.com", "https://www.glidna.com", "https://glidna.app",
@@ -199,7 +204,7 @@ exports.recordSessionConsent = onCall(
       consentLine: String(snapshot.consentLine).slice(0, 600),
       shownText: Array.isArray(snapshot.shownText) ? snapshot.shownText.slice(0, 12).map((t) => String(t).slice(0, 400)) : [],
       policy: cleanPolicy(snapshot.policy),
-      policyVersion: Number(snapshot.policyVersion) || 1,
+      policyVersion: Number(snapshot.policyVersion) || CURRENT_POLICY_VERSION,
       // Evidence, stamped here rather than accepted from the client.
       ip, userAgent, origin: ALLOWED_ORIGINS.includes(origin) ? origin : null,
       setupIntentId: si.id, paymentMethodId: pmId,

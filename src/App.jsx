@@ -18475,11 +18475,14 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
                 <div className="text-[.76rem] text-muted leading-snug mb-2">
                   Save a card to cover sessions and any fees from the policy above — no more chasing payments after training.
                 </div>
-                <label className="flex items-start gap-2 cursor-pointer mb-2">
+                <label className="flex items-start gap-2 cursor-pointer mb-1.5">
                   <input type="checkbox" checked={consentChecked} onChange={(e) => setConsentChecked(e.target.checked)}
                     className="mt-0.5 w-4 h-4 accent-[#08dce0] shrink-0" />
                   <span className="text-[.76rem] text-fg leading-snug">{consentLineFor(policy, otherName || "your trainer")}</span>
                 </label>
+                <div className="mb-2 text-[.7rem] text-muted leading-snug">
+                  Read the <a href="/terms.html" target="_blank" rel="noopener" className="text-primary underline">Terms of Service</a> — Section&nbsp;6 covers session billing.
+                </div>
                 <button onClick={startCardSave} disabled={!consentChecked || cardBusy}
                   className={`w-full rounded-lg px-4 py-2.5 text-sm font-bold cursor-pointer border-0 ${
                     consentChecked ? "bg-primaryfill text-primaryfg" : "bg-surface text-muted cursor-default"}`}>

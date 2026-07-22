@@ -408,7 +408,7 @@ export function consentLineFor(policy, trainerName = "your trainer") {
     : p.cancelType === "never"
       ? "I understand cancelled sessions are not refunded"
       : `I understand I must give ${noticePhrase(p.cancelWindowHours).replace(" before", "")} notice to cancel free of charge`;
-  return `${core}, and I authorize ${trainerName} to charge my saved card for sessions and any cancellation fees described above.`;
+  return `${core}, and I authorize ${trainerName} to charge my saved card for completed sessions and any cancellation fees described above. I agree to the Terms of Service.`;
 }
 
 // A frozen copy of the terms AT PURCHASE TIME. Stored with the purchase so a
@@ -475,7 +475,8 @@ export function cancellationEvidence(session, policy) {
 }
 
 // Bump when the WORDING above changes, so snapshots stay interpretable.
-export const POLICY_TEXT_VERSION = 1;
+// v2 (S106): consent line now references the Terms of Service + "completed sessions".
+export const POLICY_TEXT_VERSION = 2;
 
 // ─── Stripe fee awareness (Kevin: trainers "must be aware of the Stripe fees
 // adding up on them like this and need to price accordingly") ───────────────
