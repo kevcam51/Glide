@@ -9976,7 +9976,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
   onSaveMeasurements, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise,
-  onTrackerSync, onSetWeeklyRate, onSetDeficitMode, meUid: dashMeUid }) {
+  onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, meUid: dashMeUid }) {
 
   // Swipe-down to refresh the daily view (S104) — reuses the existing onRefresh
   // (reloadPlanLive), which re-pulls the plan + today's log.
@@ -10219,6 +10219,30 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const deficitVal = remaining; // target − logged, signed (negative once over)
   const todayDeficit = Math.max(0, deficitVal);   // under target
   const todaySurplus = Math.max(0, -deficitVal);  // over target
+  // Calorie goal direction (S108b, Kevin): the user picks whether they WANT a
+  // deficit, to maintain, or a surplus. The under-wheel label then shows the
+  // actual state as a WORD (no number) colored by whether it MATCHES that goal —
+  // green when they're where they want to be, red when not. Default derives from
+  // the plan's fitness goal (lose→deficit, build→surplus, health→maintain),
+  // falling back to goal-vs-current weight.
+  const goalDir = data.calorieGoalDirection
+    || (data.fitnessGoal === "build" ? "surplus"
+      : data.fitnessGoal === "health" ? "maintain"
+      : data.fitnessGoal === "lose" ? "deficit"
+      : (Number(data.goalWeight) > Number(data.weightLbs) ? "surplus" : "deficit"));
+  // Maintain: within ±5% of target (min ±100 cal) reads as "On target" (green);
+  // drifting either way past the band reads red. Tunable.
+  const maintainBand = Math.max(100, Math.round(target * 0.05));
+  const goalState = (() => {
+    const GRN = "var(--green)", RED = "var(--red)", MUT = "var(--muted)";
+    if (goalDir === "maintain") {
+      if (Math.abs(deficitVal) <= maintainBand) return { word: "On target", color: GRN };
+      return { word: todaySurplus > 0 ? "Surplus" : "Deficit", color: RED };
+    }
+    if (todaySurplus > 0) return { word: "Surplus", color: goalDir === "surplus" ? GRN : RED };
+    if (todayDeficit > 0) return { word: "Deficit", color: goalDir === "deficit" ? GRN : RED };
+    return { word: "On target", color: MUT };
+  })();
   // The "with your workout" option (S102h, Kevin: "both options to see"). The
   // workout burn DEEPENS the deficit only when it isn't already spent back as
   // food — i.e. accelerate mode. In eat-back mode the burn is baked into the
@@ -10344,20 +10368,15 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
             <div style={{fontFamily:"'Sora',sans-serif",fontSize:"2.2rem",color:overCals?"var(--red)":"var(--accent)",lineHeight:1}}>{remaining.toLocaleString()}</div>
             <div style={{fontSize:".65rem",color:overCals?"var(--red)":"var(--muted)",letterSpacing:".5px"}}>{overCals?"CAL OVER":"CAL REMAINING"}</div>
-            {/* Deficit / surplus vs today's target (S102f, Kevin's spec).
-                ALWAYS SHOWN (S102g): it was hidden until something was logged,
-                so a trainer opening a client who hadn't eaten yet saw nothing
-                and it read as broken. Green under target, RED "surplus" over,
-                neutral "on target" at exactly zero — so there is always a
-                number where one is expected. */}
+            {/* Deficit / surplus vs today's target (S108b, Kevin's spec).
+                Just the WORD now (no number) — "Deficit"/"Surplus"/"On target" —
+                colored by whether it MATCHES the user's chosen goal direction:
+                green when they're where they want to be, red when not (a
+                deficit-seeker eating over goes red; a surplus-seeker eating
+                under goes red). ALWAYS SHOWN so the spot is never empty. */}
             <div style={{marginTop:"3px",textAlign:"center",lineHeight:1.2}}>
-              <div style={{fontSize:".62rem",fontWeight:700,letterSpacing:".3px",
-                color: todaySurplus > 0 ? "var(--red)" : todayDeficit > 0 ? "var(--green)" : "var(--muted)"}}>
-                {todaySurplus > 0
-                  ? `+${todaySurplus.toLocaleString()} surplus`
-                  : todayDeficit > 0
-                    ? `−${todayDeficit.toLocaleString()} deficit`
-                    : "on target"}
+              <div style={{fontSize:".72rem",fontWeight:800,letterSpacing:".4px",color:goalState.color}}>
+                {goalState.word}
               </div>
               {/* The second option (S102h): the deficit WITH today's workout
                   burn added. Only when the burn actually deepens it — an
@@ -10384,6 +10403,28 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <Icon name="scale" size={13} color="var(--accent)" />Tap the ring to see your projected weight loss
         </span>
       </button>
+
+      {/* Daily goal preference (S108b, Kevin): pick Deficit / Maintain / Surplus.
+          Colors the label inside the ring by whether the day matches this goal.
+          Editable by the client on their own dashboard AND the trainer viewing
+          them (rides setDataAndSave like every other plan field). */}
+      {onSetCalorieGoal && (
+        <div style={{marginTop:"10px",marginBottom:"2px",textAlign:"center"}}>
+          <div style={{fontSize:".56rem",color:"var(--muted)",letterSpacing:".5px",textTransform:"uppercase",fontWeight:700,marginBottom:"6px"}}>Daily goal</div>
+          <div style={{display:"inline-flex",gap:6}}>
+            {[["deficit","Deficit"],["maintain","Maintain"],["surplus","Surplus"]].map(([v,l])=>{
+              const on = goalDir===v;
+              return (
+                <button key={v} onClick={()=>onSetCalorieGoal(v)}
+                  style={{padding:"5px 13px",borderRadius:999,fontFamily:"inherit",fontSize:".72rem",fontWeight:700,cursor:"pointer",
+                    border:on?"1.5px solid var(--accent)":"1px solid var(--border)",
+                    background:on?"rgba(8,220,224,.08)":"var(--s2)",
+                    color:on?"var(--accent)":"var(--muted)"}}>{l}</button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Which target is the ring using? (S97z, Kevin) Says plainly whether
           today's exercise is counted, and taps through to a chooser with both
@@ -21098,6 +21139,7 @@ export default function App() {
               onTrackerSync={isOwnerUid ? syncTrackerNow : null}
               onSetWeeklyRate={(r)=>setDataAndSave(p=>({...p, weeklyRate: r}))}
               onSetDeficitMode={(m)=>setDataAndSave(p=>({...p, deficitMode: m}))}
+              onSetCalorieGoal={(g)=>setDataAndSave(p=>({...p, calorieGoalDirection: g}))}
               // Sessions on the calendar are MINE. When a trainer is viewing a
               // CLIENT's plan (activeRemoteUid set), passing my uid would paint
               // my other clients' sessions onto this client's calendar — so it's
