@@ -2720,6 +2720,22 @@ function exBurn(ex, weightLbs, minutes) {
   if (ex.calPerMin) return Math.round(Number(ex.calPerMin) * minutes);
   return Math.round((Number(ex.met) || 0) * weightLbs * 0.453592 * (minutes / 60));
 }
+// A cardio session is EITHER a normal exercise ({type,duration}) OR a heart-rate
+// entry ({type:"hr", hr, duration}). This resolves either to the exercise-like
+// object exBurn/label code expects: an HR entry gets a calPerMin from the Keytel
+// formula (using the plan's gender/age/weight), so the SAME exBurn (calPerMin
+// path) and label rendering work for both. Use this instead of
+// findCardioEx(s.type) at cardio burn/label sites so heart-rate cardio is
+// counted and named everywhere.
+function cardioExFor(session, data) {
+  if (session && session.type === "hr") {
+    const hr = Number(session.hr) || 0;
+    const d = data || {};
+    return { id: "hr", label: `${hr} bpm`, hr, isHr: true,
+      calPerMin: hrCaloriesPerMin(hr, d.gender, d.weightLbs, d.age) };
+  }
+  return findCardioEx(session ? session.type : undefined, (data || {}).customExercises);
+}
 // ─── ExercisePicker (S97b) ───────────────────────────────────────────────────
 // Replaces the native exercise <select>s (where SVG icons can't render) with a
 // tap-to-open BottomSheet: search + grouped rows, each with its real Glidna
@@ -3040,6 +3056,81 @@ function StepStrength({ data, onChange, onBack, onNext }) {
 
 
 // ─── Step 4: Cardio (continued) ──────────────────────────────────────────────
+
+// ─── HeartRatePicker (S107c) — log cardio "by heart rate" ───────────────────
+// An alternative to picking an exercise: choose a heart rate (1-bpm steps within
+// this person's healthy range) + duration, with the live training ZONE
+// (color-coded) and a calorie estimate (Keytel). Controlled — stores
+// {type:"hr", hr, duration}; cardioExFor turns that into calories/labels
+// everywhere. Estimates only; the pick range tops out near 90% of max HR and
+// flags anything higher as brief-only, so we don't push anyone too hard.
+function HeartRatePicker({ data, hr, duration = 30, onChange }) {
+  const age = Number(data && data.age) || 30;
+  const range = hrHealthyRange(age);
+  const pickMin = Math.max(60, range.min - 10), pickMax = range.mhr;
+  const clamp = (v) => Math.min(pickMax, Math.max(pickMin, Math.round(v)));
+  const bpm = clamp(Number(hr) > 0 ? Number(hr) : range.min + Math.round((range.max - range.min) * 0.45));
+  const mins = Number(duration) || 30;
+  const emit = (nhr, nmin) => onChange && onChange({ hr: clamp(nhr), duration: nmin });
+  const { zone, pct } = hrZoneFor(bpm, age);
+  const cal = hrBurn(bpm, data && data.gender, data && data.weightLbs, age, mins);
+  const over = bpm > range.cautionAbove;
+  const DURS = [5, 10, 15, 20, 30, 40, 45, 60, 75, 90];
+  const stepBtn = { width: 38, height: 38, borderRadius: 10, border: "1px solid var(--border)",
+    background: "var(--s2)", color: "var(--text)", fontSize: "1.3rem", fontWeight: 700, cursor: "pointer", lineHeight: 1 };
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--s2)", padding: 14 }}>
+      {/* HR value + zone color */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center", gap: 6, marginBottom: 2 }}>
+        <Icon name="heartRate" size={22} color={zone.color} />
+        <span style={{ fontFamily: "'Sora',sans-serif", fontSize: "2.6rem", fontWeight: 800, color: zone.color, lineHeight: 1 }}>{bpm}</span>
+        <span style={{ fontSize: ".8rem", color: "var(--muted)" }}>bpm</span>
+      </div>
+      <div style={{ textAlign: "center", fontSize: ".78rem", fontWeight: 700, color: zone.color, marginBottom: 10 }}>
+        {zone.name} zone · {pct}% of max <span style={{ color: "var(--muted)", fontWeight: 400 }}>({zone.note})</span>
+      </div>
+      {/* steppers + slider */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+        <button style={stepBtn} onClick={() => emit(bpm - 1, mins)} aria-label="lower">−</button>
+        <input type="range" min={pickMin} max={pickMax} step={1} value={bpm}
+          onChange={(e) => emit(Number(e.target.value), mins)}
+          style={{ flex: 1, accentColor: zone.color }} />
+        <button style={stepBtn} onClick={() => emit(bpm + 1, mins)} aria-label="raise">+</button>
+      </div>
+      {/* zone scale (mini legend) */}
+      <div style={{ display: "flex", gap: 2, marginBottom: 12 }}>
+        {HR_ZONES.map((z) => (
+          <div key={z.key} title={`${z.name} (${Math.round(z.lo * 100)}–${Math.round(z.hi * 100)}%)`}
+            style={{ flex: 1, height: 6, borderRadius: 3, background: z.color, opacity: z.key === zone.key ? 1 : 0.32 }} />
+        ))}
+      </div>
+      {over && (
+        <div style={{ fontSize: ".72rem", color: "var(--red)", textAlign: "center", marginBottom: 10 }}>
+          Above ~90% of your max — safe only in short bursts. Pick a lower rate for a steady session.
+        </div>
+      )}
+      {/* duration */}
+      <div style={{ fontSize: ".72rem", color: "var(--muted)", marginBottom: 5 }}>Duration</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+        {DURS.map((m) => (
+          <button key={m} onClick={() => emit(bpm, m)}
+            style={{ padding: "6px 11px", borderRadius: 8, fontSize: ".82rem", fontWeight: 700, cursor: "pointer",
+              border: `1px solid ${m === mins ? "var(--accent)" : "var(--border)"}`,
+              background: m === mins ? "rgba(8,220,224,.12)" : "transparent",
+              color: m === mins ? "var(--accent)" : "var(--text)" }}>{m}m</button>
+        ))}
+      </div>
+      {/* calorie estimate + safety */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center", gap: 6 }}>
+        <span style={{ fontFamily: "'Sora',sans-serif", fontSize: "1.6rem", fontWeight: 800, color: "var(--accent)" }}>≈ {cal.toLocaleString()}</span>
+        <span style={{ fontSize: ".78rem", color: "var(--muted)" }}>cal in {mins} min</span>
+      </div>
+      <div style={{ fontSize: ".68rem", color: "var(--muted)", textAlign: "center", marginTop: 4, lineHeight: 1.35 }}>
+        Estimate from your heart rate, weight, age &amp; sex. Pick a rate that feels sustainable — check with a doctor before hard efforts.
+      </div>
+    </div>
+  );
+}
 
 function StepCardio({ data, onChange, onBack, onNext }) {
   const [openDay, setOpenDay]           = useState(null);
