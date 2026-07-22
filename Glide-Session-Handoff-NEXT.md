@@ -1,5 +1,87 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S106–S107 (Jul 22): session-billing ToS + waiver/legal + trainer earnings + heart-rate cardio + fixes
+_All pushed to `origin/main` (@ `4bf024a`), tree clean, functions deployed. Firebase `calorieiq-29762`;
+model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`. Marathon session — lots shipped._
+
+### 🔴 DO THIS FIRST NEXT SESSION — the deferred "second check" + a known HR parity gap
+Kevin asked me to run a **second adversarial check** on the heart-rate cardio feature after building it; I
+ran out of context before doing it. Run a verification workflow (or careful review) covering:
+1. **cardioExFor drop-in correctness** — confirm existing exercise/strength calorie burns are byte-unchanged
+   (cardioExFor(non-hr) === findCardioEx) at every swapped site, and HR burn is right everywhere.
+2. **⚠️ SERVER-SIDE HR PARITY GAP (likely real, fix it):** `functions/exercises.js` MET map has **no "hr"**,
+   and `functions/aitools.js` `nutritionTargets`/`weeklyPlanBurn` don't handle `{type:"hr"}` sessions — so
+   the AI's + `coach_summary`'s server-computed calorie **targets undercount HR-cardio burn** (eat-back
+   mode). The CLIENT app computes it correctly (cardioExFor). Port the Keytel `hrBurn` server-side.
+3. **⚠️ AI schedule tools DROP HR sessions:** `set_workout_schedule`/`propose_workout` validate cardio
+   `type` against `CARDIO_IDS`; `{type:"hr"}` isn't a valid id, so if the AI rebuilds a day it would **wipe
+   a user's HR cardio**. Decide: teach the tools to preserve/emit `hr` entries, or exclude HR days from AI
+   rescheduling.
+4. **Regression sweep:** any code reading a cardio session's `.type` as an exercise id (e.g. the
+   `["hiit","jump_rope",...].includes(s?.type)` heavy-sweat/high-impact filters ~line 5557/5559 — HR just
+   won't match, harmless) and the icon-regex tightening (`/ping/`→`/ping.?pong/`; new `/trampolin/`→jump).
+
+### ✅ Heart-rate cardio "By heart rate" — BUILT & VERIFIED LIVE (S107c/d)
+Log cardio by heart rate instead of picking an exercise. **Formula: Keytel (2005)** — calories from HR +
+weight + age + sex (`hrCaloriesPerMin`/`hrBurn` in App.jsx, unit-tested). **Zones**: `maxHeartRate` (Tanaka
+208−0.7·age), `HR_ZONES` (5 color-coded), `hrZoneFor`, `hrHealthyRange` (pick 50–90% max, floor 90bpm,
+caution >90%). **`cardioExFor(session,data)`** resolves a session for burn/labels — HR entries get a
+`calPerMin` so the existing `exBurn` counts them; **drop-in for normal exercises** (all ~8 burn/label sites
+swapped from `findCardioEx(s.type)`). **`HeartRatePicker`** component (slider + 1-bpm steppers + live
+color zone + calorie + safety caution). Wired into ALL cardio editors (StepCardio, Results Basic+Pro,
+DailyDashboard) via a "By heart rate" ⇄ "Pick an exercise instead" toggle; HR sessions stored
+`{type:"hr", hr, duration}`. Icons `heart`/`heartRate`/`jump` added. VERIFIED live (Casey): toggle→picker,
+default 127bpm persists (emit-on-mount), ~200 cal (matches Keytel F/30/183lb), 165bpm→orange Hard zone→
+~322 cal; existing Outdoor Jog unchanged (~350). **Trampoline** cardio added (MET 4.5, both app + AI
+mirror) — icon bug fixed ("jum**PING**" was matching `/ping/`→ping-pong paddle).
+
+### ✅ Also shipped this session
+- **Trainer EARNINGS view** (S105, `bf9f73d`) — ≡-menu → Earnings; read-only ledger over `sessionCharges`
+  (tiles: collected/this-month/pending/declined + history rows; test-mode excluded from totals + tagged).
+- **Session-billing Terms of Service** (S106, `910f363`) — `public/terms.html` new **Section 6 "Training
+  sessions & payments"** (Smooth Training LLC, card-on-file, weekly-arrears auto-charge, late-cancel fees,
+  consent-anchored policy, no packages), consent line refs the ToS + a link at the card-setup checkbox,
+  `POLICY_TEXT_VERSION`→2, `recordSessionConsent` version-label fix (deployed). **Adversarially reviewed +
+  reworded to match the code** (removed a false "no packages" absolute, fixed the policy-change clause to
+  consent-anchored not booking-time). This unblocks **Kevin billing his OWN clients on the weekly sweep**
+  (his explicit ask) — packages stay off (no buy flow exists), live Stripe key already set.
+- **Stripe `return_url` fix** (S107e, `4bf024a`, deployed) — Kevin got a Stripe test-email re a SetupIntent
+  missing return_url; production card-setup uses hosted Checkout (has return URLs) so it was a test-script
+  artifact, but I hardened `paySessionBalance`'s on-session confirm with a validated `return_url` (3DS).
+- **Weight-tile bug FIXED** (S107b, `0c71980`, verified) — the measurements modal dropped a typed weight if
+  you didn't tap "Log weight"; now it flushes on Save AND on close (`flushWeight`).
+
+### ⚖️ WAIVER + Florida legal research — DONE (drafts for attorney), `9ebe874`
+`docs/SMOOTH-TRAINING-WAIVER-DRAFT.md` (v2) + `docs/LEGAL-WAIVER.md`. Multi-agent primary-source research,
+adversarially verified. **Verbatim Fla. Stat. § 744.301(3) minor-waiver notice** inserted (confirmed vs
+the official statute — must render UPPERCASE, ≥5pt larger, boxed). Minor section reframed to *Kirton v.
+Fields* (997 So.2d 349) — a guardian CAN'T waive the company's own negligence; only inherent-risk. Adult
+release enforceable for ordinary negligence (*Sanislo*, **157 So.3d 256** — corrected cite). Added a
+public-policy carve-out, fixed the fees cap, split media/likeness into a separate opt-in. **Attorney
+questions** in the doc. **Kevin CAN serve minors** (guardian signs; waiver reduces ≠ eliminates risk).
+Also: `docs/SESSIONS-ATTORNEY-QUESTIONS.md` (+ `.docx`) + `docs/SESSIONS-GO-LIVE.md` (`6e670ff`).
+
+### ⏭️ Queue after the second-check
+- **Body-composition feature** (Kevin's 3rd request, NOT started): muscle-mass formula (recommend **Lee
+  2000** — uses height/weight/age/sex, all available; from weight+BF% we get fat & lean mass exactly,
+  muscle mass is an estimate) + a **side-scrolling multi-metric line graph** (weight, fat mass, BF%, muscle
+  mass) with **scanner BF% kept separate from caliper/tape** + per-metric visibility toggles. The
+  measurements hub (`MeasurementsModal`, `measurementMetrics`, `mergeMeasurements`) is the place.
+- **Waiver/minors APP FLOW** (after attorney clears the waiver): DOB at intake, gate program-requests behind
+  a guardian-signed waiver (minor can't unlock), a "request a training program" button → emails Kevin (he
+  builds on Trainerize). Frame the app's exercise section as informational/calorie-tracking (waiver §10).
+  Kevin's DOB-lying concern → age attestation + records + his manual review of program requests.
+- **Sessions billing go-live** (attorney ToS pass, real-card smoke test) — `docs/SESSIONS-GO-LIVE.md`.
+
+### 🔑 Gotchas reused this session
+- When `functions/exercises.js` OR `aitools.js` change → deploy **all four AI fns** (aiChat, aiChatStream,
+  logMeal, setWorkoutSchedule). `firebase deploy --only functions:<name>` per fn otherwise.
+- Preview `read_page` was flaky (0x0 viewport) on a fresh tab — screenshots + `javascript_tool` worked.
+  HMR throws benign `createRoot()` console warnings after edits (not real errors).
+- pdftotext/LibreOffice/pandoc NOT installed; `pypdf` (python3) reads PDFs; `docx` npm installs in scratchpad.
+
+---
+
 ## ⚡ S105b (Jul 21): Client-state-aware prepaid-pack risk flag — SCAFFOLDING (informational, not a gate)
 _Pushed (`origin/main` @ `f70232a`), tree clean, build passes. `src/sessions.js` + `src/App.jsx` only;
 no rules, no functions, no money paths. Firebase `calorieiq-29762`; model `claude-sonnet-4-6`._
