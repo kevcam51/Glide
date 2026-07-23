@@ -17361,6 +17361,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
 
 function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading,
   onCreateFolder, onRenameFolder, onDeleteFolder, onMoveProfile,
+  connectedClients = [], clientFolders = {}, onMoveClient,
   confirmDeleteId, confirmFolderDel, onRecover, onExport, onImport,
   onClipCopy, onClipPaste, showDashboardTab, onShowDashboard, onOpenClientPlan, onLinked, onCopyToLocal, onRename, onPullRefresh }) {
 
@@ -17387,20 +17388,41 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
   useEffect(()=>{ if(showNewFolder && folderInputRef.current) folderInputRef.current.focus(); },[showNewFolder]);
 
   const toggleFolder = (id) => setOpenFolders(p=>({...p,[id]:!p[id]}));
-  // Simulations are sandbox plans — they live in their own section on the
-  // dashboard, not in the All-clients folders.
-  const sorted = [...profiles].filter(p=>!p.isSimulation).sort((a,b)=>(b.lastSaved||0)-(a.lastSaved||0));
-  const unfiled = sorted.filter(p=>!p.folderId);
-  const inFolder = (fid) => sorted.filter(p=>p.folderId===fid);
+  // Unified organizer (S108d): local plans, simulations, AND connected clients
+  // all live in the folders now. Each becomes an "item" carrying its kind + the
+  // folder it belongs to (local plans/sims store folderId on the index entry;
+  // connected clients store it in the trainer-owned clientFolders map).
+  const localItems = [...profiles]
+    .sort((a,b)=>(b.lastSaved||0)-(a.lastSaved||0))
+    .map(p => ({ kind: p.isSimulation ? "sim" : "local", key: `p-${p.id}`, id: p.id, folderId: p.folderId || null, p }));
+  const clientItems = [...connectedClients]
+    .sort((a,b)=>(a.name||"").localeCompare(b.name||""))
+    .map(c => ({ kind: "client", key: `c-${c.uid}`, id: c.uid, folderId: clientFolders[c.uid] || null, c }));
+  // Connected clients first (the real people), then plans, then sims.
+  const rank = { client: 0, local: 1, sim: 2 };
+  const allItems = [...clientItems, ...localItems].sort((a,b)=>rank[a.kind]-rank[b.kind]);
+  const unfiled = allItems.filter(it => !it.folderId);
+  const inFolder = (fid) => allItems.filter(it => it.folderId === fid);
+  const planCount = profiles.filter(p => !p.isSimulation).length;
+  const simCount = profiles.filter(p => p.isSimulation).length;
+  const renderItem = (it) => it.kind === "client"
+    ? <ClientCard key={it.key} c={it.c} />
+    : <ProfileCard key={it.key} p={it.p} />;
 
-  // Drag handlers
-  const onDragStart = (e, profileId) => { setDragId(profileId); e.dataTransfer.effectAllowed="move"; };
-  const onDragEnd = () => { setDragId(null); setDragOverFolder(null); };
+  // Drag handlers — dragItem carries the kind so the drop routes to the right
+  // mover (local/sim → onMoveProfile on the index; client → onMoveClient map).
+  const [dragKind, setDragKind] = useState(null);
+  const onDragStart = (e, id, kind) => { setDragId(id); setDragKind(kind); e.dataTransfer.effectAllowed="move"; };
+  const onDragEnd = () => { setDragId(null); setDragKind(null); setDragOverFolder(null); };
   const onFolderDragOver = (e, folderId) => { e.preventDefault(); e.dataTransfer.dropEffect="move"; setDragOverFolder(folderId); };
   const onFolderDragLeave = () => setDragOverFolder(null);
   const onFolderDrop = (e, folderId) => {
     e.preventDefault();
-    if (dragId) { onMoveProfile(dragId, folderId); setDragId(null); setDragOverFolder(null); }
+    if (dragId) {
+      if (dragKind === "client") { onMoveClient && onMoveClient(dragId, folderId); }
+      else { onMoveProfile(dragId, folderId); }
+      setDragId(null); setDragKind(null); setDragOverFolder(null);
+    }
   };
 
   // Tailwind class strings (Session 29 redesign — brand theme via).
@@ -17425,22 +17447,26 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
         </div>
       );
     }
+    const sim = !!p.isSimulation;
     return (
-      <div className={`flex items-center gap-3 p-3 rounded-[10px] bg-surface2 border border-border cursor-pointer transition-opacity ${dragId===p.id?"opacity-40":""}`}
+      <div className={`flex items-center gap-3 p-3 rounded-[10px] border cursor-pointer transition-opacity ${dragId===p.id?"opacity-40":""} ${sim?"bg-[rgba(181,123,255,.06)] border-[rgba(181,123,255,.35)]":"bg-surface2 border-border"}`}
         draggable="true"
-        onDragStart={e=>onDragStart(e,p.id)}
+        onDragStart={e=>onDragStart(e,p.id,sim?"sim":"local")}
         onDragEnd={onDragEnd}
         onClick={()=>onSelect(p.id)}>
-        <div className="flex-none w-10 h-10 rounded-full bg-primaryfill text-primaryfg font-bold text-sm flex items-center justify-center">
+        <div className={`flex-none w-10 h-10 rounded-full font-bold text-sm flex items-center justify-center ${sim?"bg-[rgba(181,123,255,.18)] text-[#b57bff]":"bg-primaryfill text-primaryfg"}`}>
           {(displayName||"?").slice(0,2).toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="font-semibold text-[.92rem] text-fg truncate">{displayName}</div>
+          <div className="font-semibold text-[.92rem] text-fg truncate flex items-center gap-1.5">
+            <span className="truncate">{displayName}</span>
+            {sim && <span className="flex-none text-[.55rem] font-bold tracking-wide px-1.5 py-0.5 rounded bg-[rgba(181,123,255,.18)] text-[#b57bff]">SANDBOX</span>}
+          </div>
           <div className="text-xs text-muted truncate">
-            {p.weight ? `${p.weight} lbs` : "—"}
+            {sim ? "Simulation" : "Local plan"}
+            {p.weight ? ` · ${p.weight} lbs` : ""}
             {p.goal ? ` → ${p.goal} lbs` : ""}
             {p.lastSaved ? ` · ${new Date(p.lastSaved).toLocaleDateString()}` : ""}
-            {p.stepLabel ? ` · ${p.stepLabel}` : ""}
           </div>
         </div>
         <button className="flex-none border-none bg-transparent text-muted cursor-pointer text-[.95rem] px-1" title="Rename"
@@ -17451,6 +17477,32 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
             : "flex-none border-none bg-transparent text-muted cursor-pointer text-[.95rem] px-1"}
           onClick={e=>{e.stopPropagation();onDelete(p.id,p.name)}}
           title="Delete">{confirmDeleteId===p.id?"Confirm?":"×"}</button>
+      </div>
+    );
+  };
+
+  // Connected-client card (S108d) — a real linked client account. Draggable into
+  // folders like a local plan (kind "client" routes the drop to onMoveClient);
+  // tapping it opens that client's plan. No rename/delete (it's their account).
+  const ClientCard = ({ c }) => {
+    const nm = c.name || c.email || "Client";
+    return (
+      <div className={`flex items-center gap-3 p-3 rounded-[10px] border cursor-pointer transition-opacity bg-surface2 border-[rgba(8,220,224,.35)] ${dragId===c.uid?"opacity-40":""}`}
+        draggable="true"
+        onDragStart={e=>onDragStart(e,c.uid,"client")}
+        onDragEnd={onDragEnd}
+        onClick={()=>onOpenClientPlan && onOpenClientPlan(c.uid)}>
+        <div className="flex-none w-10 h-10 rounded-full bg-primaryfill text-primaryfg font-bold text-sm flex items-center justify-center">
+          {(nm||"?").slice(0,2).toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold text-[.92rem] text-fg truncate flex items-center gap-1.5">
+            <span className="truncate">{nm}</span>
+            <span className="flex-none text-[.55rem] font-bold tracking-wide px-1.5 py-0.5 rounded bg-[rgba(8,220,224,.15)] text-primary">CONNECTED</span>
+          </div>
+          <div className="text-xs text-muted truncate">{c.email || "Linked client account"}</div>
+        </div>
+        <span className="flex-none text-muted text-lg leading-none">›</span>
       </div>
     );
   };
@@ -17467,22 +17519,22 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
         <div className={cardCls}>
           <div className={`${sectionTitleCls} flex items-center gap-2`}><Icon name="folder" size={18} color="var(--accent)" />Client Profiles</div>
           <div className={subCls}>
-            {loading ? "Loading saved profiles..." : profiles.length > 0
-              ? `${profiles.length} client${profiles.length!==1?"s":""} · ${folders.length} folder${folders.length!==1?"s":""}. Drag and drop clients between folders.`
-              : "No saved profiles yet. Create a folder for your team, then add clients."
+            {loading ? "Loading saved profiles..." : allItems.length > 0
+              ? `${connectedClients.length} connected · ${planCount} plan${planCount!==1?"s":""}${simCount?` · ${simCount} sim${simCount!==1?"s":""}`:""} · ${folders.length} folder${folders.length!==1?"s":""}. Drag any card between folders.`
+              : "Nothing here yet. Connected clients, local plans, and simulations all show up here — create a folder to organize them."
             }
           </div>
 
           {/* Dashboard Stats */}
-          {!loading && profiles.length > 0 && (
+          {!loading && allItems.length > 0 && (
             <div className="grid grid-cols-3 gap-2 my-4">
               <div className="bg-surface2 border border-border rounded-lg py-3 text-center">
-                <div className="font-display text-2xl text-primary">{profiles.length}</div>
-                <div className="text-[.66rem] uppercase tracking-wide text-muted mt-0.5">Total Clients</div>
+                <div className="font-display text-2xl text-primary">{connectedClients.length}</div>
+                <div className="text-[.66rem] uppercase tracking-wide text-muted mt-0.5">Connected</div>
               </div>
               <div className="bg-surface2 border border-border rounded-lg py-3 text-center">
-                <div className="font-display text-2xl text-success">{profiles.filter(p => p.lastSaved && (Date.now() - p.lastSaved) < 7*86400000).length}</div>
-                <div className="text-[.66rem] uppercase tracking-wide text-muted mt-0.5">Active This Week</div>
+                <div className="font-display text-2xl text-success">{planCount}</div>
+                <div className="text-[.66rem] uppercase tracking-wide text-muted mt-0.5">Local Plans</div>
               </div>
               <div className="bg-surface2 border border-border rounded-lg py-3 text-center">
                 <div className="font-display text-2xl text-warn">{folders.length}</div>
@@ -17543,7 +17595,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
                           {dragId ? "Drop here to move client into this folder" : "No clients yet — drag one here or create new"}
                         </div>
                       )}
-                      {clients.map(p=><ProfileCard key={p.id} p={p}/>)}
+                      {clients.map(renderItem)}
                     </div>
                     <div className="flex flex-wrap gap-2 px-3 pb-3">
                       <button className={ghostBtnCls} onClick={e=>{e.stopPropagation();onNew(folder.id)}}>+ Add Client</button>
@@ -17575,7 +17627,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
               </div>
               {openFolders["unfiled"]!==false && (
                 <div className="flex flex-col gap-2 px-3 pb-3">
-                  {unfiled.map(p=><ProfileCard key={p.id} p={p}/>)}
+                  {unfiled.map(renderItem)}
                 </div>
               )}
             </div>
@@ -17707,6 +17759,11 @@ const EMPTY_DATA = {
 };
 const STORAGE_INDEX = "caliq-index";
 const STORAGE_FOLDERS = "caliq-folders";
+// Connected clients (linked accounts) → folderId, stored in the TRAINER's own
+// account so a trainer can organize real clients alongside local plans + sims
+// on the All-clients page (S108d). Clients are separate accounts, so this map
+// is trainer-owned metadata, not a cross-account write.
+const STORAGE_CLIENT_FOLDERS = "caliq-client-folders";
 const profileKey = (id) => `caliq-${id}`;
 
 // Normalize a stored plan's `data` object into the shape the editor expects
@@ -19693,6 +19750,12 @@ export default function App() {
   const [screen, setScreen] = useState("profiles");
   const [profiles, setProfiles] = useState([]);
   const [folders, setFolders] = useState([]);
+  // Connected clients (linked accounts) + their folder assignments, so a trainer
+  // can organize real clients on the All-clients page next to local plans + sims
+  // (S108d). Assignments live in the trainer's own account (see
+  // STORAGE_CLIENT_FOLDERS) — clients are separate accounts.
+  const [connectedClients, setConnectedClients] = useState([]);
+  const [clientFolders, setClientFolders] = useState({});
   const [activeId, setActiveId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -19819,6 +19882,10 @@ export default function App() {
         if (fResult && fResult.value) setFolders(JSON.parse(fResult.value));
       } catch(e) {}
       try {
+        const cfResult = await window.storage.get(STORAGE_CLIENT_FOLDERS);
+        if (cfResult && cfResult.value) setClientFolders(JSON.parse(cfResult.value));
+      } catch(e) {}
+      try {
         const prof = await getProfile();
         if (prof) {
           if (prof.role) setRole(prof.role);
@@ -19838,6 +19905,26 @@ export default function App() {
       setLoading(false);
     })();
   }, []);
+
+  // Load connected clients for the All-clients organizer (trainers only, S108d).
+  // getMyClients() returns the profile docs (name/email — no extra reads), which
+  // is all the organizer card needs; opening a client still reads their plan.
+  useEffect(() => {
+    const trainerRole = role === "head_trainer" || role === "sub_trainer" || role === "admin";
+    if (!trainerRole) { setConnectedClients([]); return; }
+    let alive = true;
+    getMyClients().then((list) => {
+      if (!alive) return;
+      setConnectedClients((list || []).map((c) => ({
+        uid: c.uid,
+        name: (c.firstName || c.lastName)
+          ? `${c.firstName || ""} ${c.lastName || ""}`.trim()
+          : (c.displayName || c.email || "Client"),
+        email: c.email || "",
+      })));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [role, meUid]);
 
   // Returning from Stripe Checkout (?billing=success): the webhook flips
   // profile.subscriptionStatus moments later — poll the profile briefly so the
@@ -20170,12 +20257,32 @@ export default function App() {
     const upP = profiles.map(p=>p.folderId===id?{...p, folderId:null}:p);
     setProfiles(upP);
     saveIndex(upP);
+    // Also unfile any connected clients that were in this folder (S108d).
+    setClientFolders(prev => {
+      let changed = false; const next = { ...prev };
+      for (const k of Object.keys(next)) if (next[k] === id) { delete next[k]; changed = true; }
+      if (changed) saveClientFolders(next);
+      return next;
+    });
     setConfirmFolderDel(null);
   };
   const moveProfileToFolder = (profileId, folderId) => {
     const up = profiles.map(p=>p.id===profileId?{...p, folderId: folderId||null}:p);
     setProfiles(up);
     saveIndex(up);
+  };
+  // Connected-client → folder assignment (S108d). Trainer-owned metadata written
+  // to the trainer's own account, so no cross-account write / rules change.
+  const saveClientFolders = async (map) => {
+    try { await window.storage.set(STORAGE_CLIENT_FOLDERS, JSON.stringify(map)); } catch(e) {}
+  };
+  const moveClientToFolder = (uid, folderId) => {
+    setClientFolders(prev => {
+      const next = { ...prev };
+      if (folderId) next[uid] = folderId; else delete next[uid];
+      saveClientFolders(next);
+      return next;
+    });
   };
 
   // Trainerize bridge (server-side via the trainerizeImport callable).
@@ -21048,6 +21155,7 @@ export default function App() {
       onSelect={selectProfile} onNew={createProfile} onDelete={deleteProfile}
       onCreateFolder={createFolder} onRenameFolder={renameFolder}
       onDeleteFolder={deleteFolder} onMoveProfile={moveProfileToFolder}
+      connectedClients={connectedClients} clientFolders={clientFolders} onMoveClient={moveClientToFolder}
       confirmDeleteId={confirmDeleteId} confirmFolderDel={confirmFolderDel}
       onRecover={recoverProfiles} onExport={exportAllData} onImport={importData}
       onClipCopy={clipboardExport} onClipPaste={clipboardImport}
