@@ -1,5 +1,59 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S108 (Jul 23): HR second-check + HR in cardio picker + calorie-wheel goal + unified folders
+_All pushed to `origin/main` (@ `3c65fba`), tree clean. AI functions redeployed. Firebase `calorieiq-29762`;
+model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`. Four features, all verified live._
+
+### ✅ Shipped this session
+- **S108 (`b207308`, functions deployed) — HR "second check" from the S107 handoff, both gaps were REAL & fixed:**
+  (1) `functions/aitools.js weeklyPlanBurn` ignored `{type:"hr"}` (MET map has no "hr") → the AI's +
+  `coach_summary`'s eat-back targets undercounted HR-cardio burn. Ported the Keytel formula server-side
+  (client/server parity checked). (2) `buildWorkoutWeek` dropped HR sessions and, in default replace mode, an
+  AI cardio rebuild WIPED HR days it didn't re-specify — Kevin explicitly does NOT want that. HR cardio is now
+  user-owned data the AI scheduler never deletes: existing HR sessions are preserved per-day across a rebuild.
+  Deployed all four AI fns (aiChat, aiChatStream, logMeal, setWorkoutSchedule — aitools.js is shared).
+- **S108b (`48a7e09`) — "Heart Rate" is now a pickable option at the TOP of the cardio ExercisePicker list**
+  (new `onPickHr` prop at all 4 cardio editors: StepCardio, Results Basic+Pro, DailyDashboard). Before, HR was
+  only reachable via a "By heart rate" toggle on an already-added non-rest session — Kevin couldn't find it.
+  Picking it converts the session to `{type:"hr"}` via the same conversion the toggle uses. VERIFIED live
+  (Casey → Edit Workouts → Mon): HR lists at top; selecting opens the picker (127bpm default, Light zone,
+  ~200 cal); "Pick an exercise instead" switches back. Keytel formula = HR + weight + age + sex (NOT height).
+- **S108c (`ff08275`) — calorie-wheel goal preference (Deficit / Maintain / Surplus).** Under-wheel label is
+  now the WORD only (no number), colored by whether the day MATCHES the user's chosen goal: green = where they
+  want to be, red = not (a deficit-seeker eating over → red; surplus-seeker under → red; maintain green within
+  ±5%/±100cal of target). New per-plan field `data.calorieGoalDirection`, default from `data.fitnessGoal`
+  (lose→deficit/build→surplus/health→maintain), else goal-vs-weight. "Daily goal" 3-way selector below the
+  ring (setDataAndSave; client on own dashboard + trainer viewing them). VERIFIED live (color flips correctly).
+- **S108d (`3c65fba`) — UNIFIED All-clients folders: connected clients + local plans + sims all organizable.**
+  Before, the All-clients page (`ProfileSelector`) foldered only local plans; connected clients lived only on
+  the home dashboard and couldn't be foldered, and sims were filtered out. Now `ProfileSelector` builds a
+  unified item list (kind: client|local|sim). Connected clients render with a CONNECTED badge (tap → open
+  their plan); their folder assignment stored in the TRAINER's own account as **`caliq-client-folders`
+  `{clientUid: folderId}`** (trainer-owned metadata, NO cross-account write, NO rules change). Sims render with
+  a purple SANDBOX badge. Drag carries `dragKind` so drops route to `onMoveClient` (map) vs `onMoveProfile`
+  (index). Deleting a folder now also unfiles its connected clients + prunes the map. New App state
+  `connectedClients` (loaded via `getMyClients`, trainers only) + `clientFolders`. Home dashboard's Connected
+  Clients card left unchanged (additive). VERIFIED live (Casey drag→folder persists + survives reload; folder
+  delete unfiles her + clears map to `{}`).
+
+### ⏭️ Declined/optional (Kevin said "everything looks good" — did NOT want these now)
+- Show connected clients ONLY on All-clients (remove the home-dashboard duplicate card).
+- Add weight→goal to the connected-client cards (currently name + email only, to avoid extra per-client reads).
+- Mirror the Deficit/Surplus green/red coloring onto the CLIENT's own home "Today" card (still "N left/over").
+
+### ⏭️ Still queued (pre-S108, unchanged)
+- **Body-composition feature** (Kevin's earlier 3rd request): Lee-2000 muscle-mass estimate + side-scrolling
+  multi-metric line graph (weight/fat mass/BF%/muscle mass), scanner BF% separate from caliper/tape. Home:
+  `MeasurementsModal` / `measurementMetrics` / `mergeMeasurements`.
+- **Waiver/minors app flow** (after attorney clears the waiver draft). **Sessions billing go-live** (attorney
+  ToS pass + real-card smoke test) — `docs/SESSIONS-GO-LIVE.md`.
+
+### 🔑 Gotchas (unchanged, reused this session)
+- `functions/exercises.js` OR `aitools.js` change → deploy **all four AI fns**.
+- Preview flaky (0x0 viewport, black screenshots, day-rows are nested divs with delegated onClick) — drive via
+  `javascript_tool` DOM clicks + reads; HTML5 drag is simulatable with a shared `new DataTransfer()`.
+- No right-chevron in `src/icons.jsx` (used text "›"). Firebase reauth = `firebase login --reauth --no-localhost`.
+
 ## ⚡⚡⚡ S106–S107 (Jul 22): session-billing ToS + waiver/legal + trainer earnings + heart-rate cardio + fixes
 _All pushed to `origin/main` (@ `4bf024a`), tree clean, functions deployed. Firebase `calorieiq-29762`;
 model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`. Marathon session — lots shipped._
