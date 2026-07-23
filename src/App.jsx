@@ -459,6 +459,32 @@ function whtrOf(d, m) {
   return Math.round((waist / heightIn) * 100) / 100;
 }
 
+// Skeletal muscle mass — Lee et al. (2000), Am J Clin Nutr 72:796-803, the
+// height-weight-age-sex anthropometric model (SM2; R²=0.86, SEE±2.8 kg).
+// Coefficients verified against the primary paper + two independent secondary
+// sources (S109 workflow): SMM(kg) = 0.244·weightKg + 7.80·heightM − 0.098·age
+// + 6.6·sex − 3.3, sex male=1/female=0. The paper has a race term; we don't
+// collect ancestry, so we use race=0 (the White/Hispanic reference) — the
+// estimate is ±~2.8 kg regardless, and this is the safe default. Weight defaults
+// to the plan's current weight but can be overridden (the trend chart passes the
+// weight at each past date). Returns whole POUNDS, or null if inputs are missing
+// or out of realistic range (a result outside 10–60 kg means the inputs are off).
+function leeMuscleMassLbs(d, weightLbsOverride) {
+  const weightLbs = Number(weightLbsOverride != null ? weightLbsOverride : (d && d.weightLbs)) || 0;
+  const heightIn = (Number(d && d.heightFt) || 0) * 12 + (Number(d && d.heightIn) || 0);
+  const age = Number(d && d.age) || 0;
+  const sex = d && d.gender === "male" ? 1 : d && d.gender === "female" ? 0 : null;
+  if (sex == null) return null;
+  if (!(weightLbs >= 60 && weightLbs <= 500)) return null;
+  if (!(heightIn >= 42 && heightIn <= 90)) return null; // 3'6"–7'6"
+  if (!(age >= 15 && age <= 100)) return null;
+  const weightKg = weightLbs * 0.453592;
+  const heightM = heightIn * 0.0254;
+  const smmKg = 0.244 * weightKg + 7.80 * heightM - 0.098 * age + 6.6 * sex - 3.3;
+  if (!(smmKg >= 10 && smmKg <= 60)) return null; // out of physiological window → inputs off
+  return Math.round(smmKg / 0.453592);
+}
+
 // One measurement entry → all derived metrics (nulls where inputs are missing).
 // bodyFatPct = average of whichever of Bailey/Navy computed (they cross-check
 // each other); goalWeightFromLeanMass = Bailey's lean mass ÷ (1 − target BF%).
@@ -476,11 +502,15 @@ function measurementMetrics(d, m) {
   const whtr = whtrOf(d, m);
   const weight = Number(d.weightLbs) || 0;
   const leanMassLbs = weight > 0 && avg != null ? Math.round(weight * (1 - avg / 100)) : null;
+  // Fat mass = weight × BF% (exact given BF%). Muscle mass = Lee-2000 estimate
+  // (needs only height/weight/age/sex, so it shows even without a BF% reading).
+  const fatMassLbs = weight > 0 && avg != null ? Math.round(weight * (avg / 100)) : null;
+  const muscleMassLbs = leeMuscleMassLbs(d, weight);
   const targetBf = Number(d.goalBodyFat) || null;
   const goalWeightFromLeanMass = leanMassLbs && targetBf && targetBf > 1 && targetBf < 60
     ? Math.round(leanMassLbs / (1 - targetBf / 100)) : null;
   return { baileyBF: bailey, navyBF: navy, caliperBF: caliper, manualBF: manual, tapeBF: tapeAvg,
-    bodyFatPct: avg, bodyFatSource, waistToHeight: whtr, leanMassLbs, goalWeightFromLeanMass };
+    bodyFatPct: avg, bodyFatSource, waistToHeight: whtr, leanMassLbs, fatMassLbs, muscleMassLbs, goalWeightFromLeanMass };
 }
 
 // Merge tape values into the date's measurements entry (one entry per date —
@@ -12241,6 +12271,111 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
   );
 }
 
+// ─── Body-composition trend chart (S109) ────────────────────────────────────
+// A side-scrolling MULTI-metric line graph: weight, muscle mass, fat mass, lean
+// mass (all lbs, shared left axis) + body-fat % (its own right axis, dashed),
+// each toggleable. `rows` = a per-date timeline built by MeasurementsModal from
+// weigh-ins (weight) joined with measurement entries (BF%), carried forward so
+// the two sparse sources line up. This is the "weight holds while fat drops and
+// muscle rises" (recomposition) view — the thing a scale alone can't show.
+function BodyCompChart({ rows }) {
+  const METRICS = [
+    { key: "weight", label: "Weight",    color: "var(--accent)", axis: "lbs", unit: "lbs" },
+    { key: "muscle", label: "Muscle",    color: "var(--green)",  axis: "lbs", unit: "lbs" },
+    { key: "fat",    label: "Fat mass",  color: "var(--orange)", axis: "lbs", unit: "lbs" },
+    { key: "lean",   label: "Lean mass", color: "#b57bff",       axis: "lbs", unit: "lbs" },
+    { key: "bf",     label: "Body fat %",color: "var(--yellow)", axis: "pct", unit: "%"   },
+  ];
+  const [vis, setVis] = useState({ weight: true, muscle: true, fat: true, lean: false, bf: true });
+  const data = [...(rows || [])].filter(r => r && r.t).sort((a, b) => a.t - b.t);
+  const hasPts = (k) => data.filter(r => r[k] != null).length >= 2;
+  const available = METRICS.filter(m => hasPts(m.key));
+  if (available.length === 0 || data.length < 2) return (
+    <div style={{ padding: "16px", textAlign: "center", color: "var(--muted)", fontSize: ".82rem", lineHeight: 1.6 }}>
+      Your body-composition graph appears once you have 2+ weigh-ins. Add a body-fat reading (calipers, scale, or tape) to also chart fat &amp; lean mass.
+    </div>
+  );
+  const enabled = available.filter(m => vis[m.key]);
+  const H = 240, PAD = { top: 18, right: 52, bottom: 30, left: 46 };
+  const pxPerPoint = 56;
+  const W = PAD.left + PAD.right + Math.max(1, data.length - 1) * pxPerPoint;
+  const chartW = W - PAD.left - PAD.right, chartH = H - PAD.top - PAD.bottom;
+  const xAt = (i) => PAD.left + (data.length === 1 ? 0 : (i / (data.length - 1)) * chartW);
+  const lbsVals = enabled.filter(m => m.axis === "lbs").flatMap(m => data.map(r => r[m.key]).filter(v => v != null));
+  const pctVals = enabled.filter(m => m.axis === "pct").flatMap(m => data.map(r => r[m.key]).filter(v => v != null));
+  const lbsMin = lbsVals.length ? Math.min(...lbsVals) - 4 : 0;
+  const lbsMax = lbsVals.length ? Math.max(...lbsVals) + 4 : 1;
+  const pctMin = pctVals.length ? Math.max(0, Math.min(...pctVals) - 3) : 0;
+  const pctMax = pctVals.length ? Math.max(...pctVals) + 3 : 1;
+  const yLbs = (v) => PAD.top + (chartH - ((v - lbsMin) / ((lbsMax - lbsMin) || 1)) * chartH);
+  const yPct = (v) => PAD.top + (chartH - ((v - pctMin) / ((pctMax - pctMin) || 1)) * chartH);
+  const yFor = (m, v) => (m.axis === "pct" ? yPct(v) : yLbs(v));
+  const pathFor = (m) => {
+    let dstr = "", started = false;
+    data.forEach((r, i) => {
+      if (r[m.key] == null) return;
+      dstr += `${started ? "L" : "M"}${xAt(i).toFixed(1)},${yFor(m, r[m.key]).toFixed(1)} `;
+      started = true;
+    });
+    return dstr.trim();
+  };
+  const lastPoint = (m) => {
+    for (let i = data.length - 1; i >= 0; i--) if (data[i][m.key] != null) return { i, v: data[i][m.key] };
+    return null;
+  };
+  const showPct = enabled.some(m => m.axis === "pct");
+  return (
+    <div>
+      {/* Toggle chips */}
+      <div className="mb-2 flex flex-wrap gap-1.5">
+        {available.map(m => {
+          const on = vis[m.key];
+          return (
+            <button key={m.key} onClick={() => setVis(v => ({ ...v, [m.key]: !v[m.key] }))}
+              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer whitespace-nowrap border"
+              style={{ borderColor: on ? m.color : "var(--border)", background: on ? "var(--s2)" : "transparent", color: on ? "var(--text)" : "var(--muted)", opacity: on ? 1 : 0.7 }}>
+              <span style={{ width: 9, height: 9, borderRadius: 999, background: m.color, opacity: on ? 1 : 0.4, display: "inline-block" }} />
+              {m.label}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mb-1 text-[.72rem] text-muted flex items-center gap-2">
+        <span style={{ fontFamily: "'Sora',sans-serif", letterSpacing: "1.5px", color: "var(--accent)" }}>BODY COMPOSITION</span>
+        <span>· {data.length} points{showPct ? " · % on right axis" : ""}</span>
+      </div>
+      <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        <svg width={W} height={H} style={{ display: "block" }}>
+          {/* left (lbs) axis labels */}
+          {lbsVals.length > 0 && [lbsMax - 4, (lbsMin + lbsMax) / 2, lbsMin + 4].map((v, i) => (
+            <text key={`l${i}`} x={PAD.left - 6} y={yLbs(v) + 3} textAnchor="end" fontSize="9" fill="var(--muted)">{Math.round(v)}</text>
+          ))}
+          {/* right (pct) axis labels */}
+          {showPct && pctVals.length > 0 && [pctMax - 3, pctMin + 3].map((v, i) => (
+            <text key={`p${i}`} x={W - PAD.right + 6} y={yPct(v) + 3} textAnchor="start" fontSize="9" fill="var(--yellow)">{Math.round(v)}%</text>
+          ))}
+          {/* series */}
+          {enabled.map(m => (
+            <g key={m.key}>
+              <path d={pathFor(m)} fill="none" stroke={m.color} strokeWidth="2"
+                strokeDasharray={m.axis === "pct" ? "5 4" : "0"} strokeLinejoin="round" strokeLinecap="round" />
+              {data.map((r, i) => r[m.key] != null ? (
+                <circle key={i} cx={xAt(i)} cy={yFor(m, r[m.key])} r="2.6" fill={m.color} />
+              ) : null)}
+              {(() => {
+                const lp = lastPoint(m);
+                if (!lp) return null;
+                return <text x={xAt(lp.i) + 6} y={yFor(m, lp.v) + 3} fontSize="9.5" fontWeight="700" fill={m.color}>{lp.v}{m.unit === "%" ? "%" : ""}</text>;
+              })()}
+            </g>
+          ))}
+        </svg>
+      </div>
+      <div className="mt-1 text-[10px] text-muted italic">Muscle mass is a Lee-2000 estimate (±~6 lb). Body-fat % between readings is carried forward.</div>
+    </div>
+  );
+}
+
 // ─── Body measurements modal (tape → body fat, no scale needed) ──────────────
 // Log tape measurements (any subset), see Bailey/Navy body-fat % + waist-to-
 // height, trend any metric, delete mistakes, and (when weight + a goal body-fat
@@ -12298,6 +12433,32 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         .map((e) => ({ date: e.date, timestamp: e.timestamp, weight: Number(e[activeMetric]) })) : [];
   const chartLabel = (f) => (f === "bodyFat" ? "Body fat %" : CALIPER_LABELS[f] || MEASUREMENT_LABELS[f]);
   const chartUnit = (f) => (f === "bodyFat" ? "%" : CALIPER_ALL.includes(f) ? "mm" : "in");
+
+  // Body-composition timeline (S109): join weigh-ins (weight over time) with
+  // measurement entries (BF% over time) by date, carrying each forward so the
+  // two sparse sources line up. Per date → weight, BF%, fat mass, lean mass,
+  // and Lee-2000 muscle mass (which needs only weight + static height/age/sex,
+  // so it shows even without a BF% reading). Feeds the multi-metric BodyCompChart.
+  const bodyCompRows = (() => {
+    const weighIns = [...(d.checkIns || [])]
+      .filter((c) => c && Number(c.weight) > 0)
+      .map((c) => ({ t: c.timestamp || new Date(((c.date) || "") + "T12:00:00").getTime(), weight: Number(c.weight) }))
+      .filter((c) => c.t > 0).sort((a, b) => a.t - b.t);
+    const bfReads = entries
+      .map((e) => ({ t: e.timestamp, bf: showBF ? measurementMetrics(d, e).bodyFatPct : null }))
+      .filter((e) => e.bf != null && e.t > 0).sort((a, b) => a.t - b.t);
+    const allT = [...new Set([...weighIns.map((x) => x.t), ...bfReads.map((x) => x.t)])].sort((a, b) => a - b);
+    if (allT.length < 2) return [];
+    const carry = (arr, t, key) => { let v = null; for (const x of arr) { if (x.t <= t) v = x[key]; else break; } return v; };
+    return allT.map((t) => {
+      const weight = carry(weighIns, t, "weight");
+      const bf = carry(bfReads, t, "bf");
+      const fat = (weight != null && bf != null) ? Math.round(weight * bf / 100) : null;
+      const lean = (weight != null && bf != null) ? Math.round(weight * (1 - bf / 100)) : null;
+      const muscle = weight != null ? leeMuscleMassLbs(d, weight) : null;
+      return { t, weight: weight != null ? Math.round(weight) : null, bf, fat, lean, muscle };
+    });
+  })();
 
   // Which tape fields this person's body-fat formulas need (docs/METRICS-PLAN.md).
   const needed = d.gender === "male" ? "waist, hips, forearm + wrist (Bailey) · waist + neck (Navy)"
@@ -12391,6 +12552,14 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                 <div><span className="font-display text-2xl">{metrics.leanMassLbs}</span>
                   <span className="ml-1.5 text-xs text-muted">lbs lean mass</span></div>
               )}
+              {metrics.fatMassLbs != null && (
+                <div><span className="font-display text-2xl text-warn">{metrics.fatMassLbs}</span>
+                  <span className="ml-1.5 text-xs text-muted">lbs fat mass</span></div>
+              )}
+              {metrics.muscleMassLbs != null && (
+                <div><span className="font-display text-2xl text-success">{metrics.muscleMassLbs}</span>
+                  <span className="ml-1.5 text-xs text-muted">lbs muscle (est.)</span></div>
+              )}
             </div>
             {(() => {
               const parts = [];
@@ -12420,6 +12589,13 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
             Log your measurements below and watch the inches trend over time — no scale, no body-fat math.
           </div>
         ) : null}
+
+        {/* Body-composition multi-metric chart (S109) */}
+        {bodyCompRows.length >= 2 && (
+          <div className="mb-3 rounded-lg bg-surface2 p-3">
+            <BodyCompChart rows={bodyCompRows} />
+          </div>
+        )}
 
         {/* Trend chart with a metric picker */}
         {chartable.length > 0 && (
