@@ -12375,7 +12375,7 @@ function BodyCompCharts({ weighIns, bfReads, onEditWeighIn }) {
     { key: "weight", label: "Bodyweight", unit: "lbs", color: "var(--accent)", src: w, editable: true },
     { key: "muscle", label: "Muscle mass", unit: "lbs", color: "var(--green)", src: w },
     { key: "fat", label: "Fat mass", unit: "lbs", color: "var(--orange)", src: w },
-    { key: "lean", label: "Lean mass", unit: "lbs", color: "#b57bff", src: w },
+    { key: "lean", label: "Lean mass", unit: "lbs", color: "var(--purple)", src: w },
     { key: "bf", label: "Body fat %", unit: "%", color: "var(--yellow)", src: b },
   ];
   const seriesOf = (c) => c.src.map((r) => ({ t: r.t, date: r.date, v: r[c.key] != null ? r[c.key] : (c.key === "bf" ? r.bf : null) })).filter((p) => p.v != null);
