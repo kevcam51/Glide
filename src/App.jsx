@@ -12357,8 +12357,9 @@ function BodyCompCharts({ weighIns, bfReads, onEditWeighIn }) {
   const bAll = [...(bfReads || [])].filter((b) => b && b.t).sort((a, b) => a.t - b.t);
   if (wAll.length < 2 && bAll.length < 2) return (
     <div className="rounded-lg bg-surface2 p-4 text-center text-[.82rem] leading-relaxed text-muted">
-      Your body-composition charts appear once you have 2+ weigh-ins. Add a body-fat reading
-      (calipers, scale, or tape) to also chart fat &amp; lean mass.
+      {wAll.length === 1
+        ? <>Nice — <b className="text-fg">1 weigh-in</b> logged. Log <b className="text-fg">one more on a different day</b> and your Bodyweight &amp; Muscle charts appear here. Add a body-fat reading (scale, calipers, or tape) to also chart fat &amp; lean mass.</>
+        : <>Your body-composition charts appear once you have <b className="text-fg">2+ weigh-ins on different days</b>. Add a body-fat reading (scale, calipers, or tape) to also chart fat &amp; lean mass.</>}
     </div>
   );
   const RANGES = [["all", "All"], ["1y", "1Y"], ["6m", "6M"], ["3m", "3M"], ["1m", "1M"]];
@@ -12776,8 +12777,10 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
 
         {/* ── Trends & charts (S109b, Kevin: at the BOTTOM, under the stat entry) ──
             Separate per-metric body-composition charts + the tape/caliper trend,
-            all with dates on the x-axis, side-scroll, and a shared timeframe filter. */}
-        {(bodyCompData.weighIns.length >= 2 || bodyCompData.bfReads.length >= 2 || chartable.length > 0) && (
+            all with dates on the x-axis, side-scroll, and a shared timeframe filter.
+            Shown once there's ANY weigh-in / reading so the section (and the "what
+            you need" guidance) is always discoverable — not hidden until 2+. */}
+        {(bodyCompData.weighIns.length >= 1 || bodyCompData.bfReads.length >= 1 || chartable.length > 0) && (
           <div className="mt-5 border-t border-border pt-4">
             <div className="mb-3 flex items-center gap-2">
               <Icon name="chart" size={16} color="var(--accent)" />
