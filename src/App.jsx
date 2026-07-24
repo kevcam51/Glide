@@ -12337,7 +12337,7 @@ function MetricLineChart({ points, label, unit, color, onEditPoint }) {
               {/* Value label with a background-colored halo (paint-order: stroke)
                   so the number stays readable where the line passes behind it. */}
               <text x={xAt(i)} y={yAt(p.v) - 10} textAnchor="middle" fontSize="9.5" fontWeight="700"
-                fill={color} stroke="var(--color-surface2)" strokeWidth="3.2" paintOrder="stroke"
+                fill="var(--color-fg)" stroke="var(--color-surface2)" strokeWidth="3.2" paintOrder="stroke"
                 style={{ strokeLinejoin: "round" }}>{p.v}</text>
               <text x={xAt(i)} y={H - 24} textAnchor="middle" fontSize="8.5" fill="var(--muted)">{fmtDate(p.t)}</text>
               <text x={xAt(i)} y={H - 13} textAnchor="middle" fontSize="7.5" fill="var(--muted)" opacity="0.65">’{fmtYear(p.t)}</text>
