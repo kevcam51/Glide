@@ -3882,6 +3882,12 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
             <MeasurementsModal data={data} onSave={onSaveMeasurements}
               onDelete={onDeleteMeasurement} onSetGoalWeight={onSetGoalWeight}
               onToggleBodyFat={onToggleBodyFat}
+              onEditWeighIn={(dateKey, weight) => {
+                const ex = (data.checkIns || []).find((c) => c.date === dateKey);
+                if (weight == null) { if (ex && onDeleteCheckIn) onDeleteCheckIn(ex.timestamp); return; }
+                onSaveCheckIn && onSaveCheckIn({ ...(ex || {}), date: dateKey,
+                  timestamp: (ex && ex.timestamp) || new Date(dateKey + "T12:00:00").getTime(), weight });
+              }}
               onClose={() => setShowMeasureModal(false)} />
           )}
           <AICoach data={data} tdee={tdee} totalBurn={totalBurn} totalStrBurn={totalStrBurn} activeDays={activeDays} activeStrDays={activeStrDays} />
@@ -11461,7 +11467,14 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       {showMeasure && onSaveMeasurements && (
         <MeasurementsModal data={data} onSave={onSaveMeasurements} onDelete={onDeleteMeasurement}
           onSetGoalWeight={onSetGoalWeight} onToggleBodyFat={onToggleBodyFat}
-          onLogWeight={(v)=>onLogUpdate("weight", v)} onClose={()=>setShowMeasure(false)} />
+          onLogWeight={(v)=>onLogUpdate("weight", v)}
+          onEditWeighIn={(dateKey, weight)=>{
+            const ex = (data.checkIns || []).find((c) => c.date === dateKey);
+            if (weight == null) { if (ex && onDeleteCheckIn) onDeleteCheckIn(ex.timestamp); return; }
+            onSaveCheckIn && onSaveCheckIn({ ...(ex || {}), date: dateKey,
+              timestamp: (ex && ex.timestamp) || new Date(dateKey + "T12:00:00").getTime(), weight });
+          }}
+          onClose={()=>setShowMeasure(false)} />
       )}
 
       {/* Log-confirmation toast — fixed at the bottom so it's visible no matter
@@ -12271,107 +12284,132 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
   );
 }
 
-// ─── Body-composition trend chart (S109) ────────────────────────────────────
-// A side-scrolling MULTI-metric line graph: weight, muscle mass, fat mass, lean
-// mass (all lbs, shared left axis) + body-fat % (its own right axis, dashed),
-// each toggleable. `rows` = a per-date timeline built by MeasurementsModal from
-// weigh-ins (weight) joined with measurement entries (BF%), carried forward so
-// the two sparse sources line up. This is the "weight holds while fat drops and
-// muscle rises" (recomposition) view — the thing a scale alone can't show.
-function BodyCompChart({ rows }) {
-  const METRICS = [
-    { key: "weight", label: "Weight",    color: "var(--accent)", axis: "lbs", unit: "lbs" },
-    { key: "muscle", label: "Muscle",    color: "var(--green)",  axis: "lbs", unit: "lbs" },
-    { key: "fat",    label: "Fat mass",  color: "var(--orange)", axis: "lbs", unit: "lbs" },
-    { key: "lean",   label: "Lean mass", color: "#b57bff",       axis: "lbs", unit: "lbs" },
-    { key: "bf",     label: "Body fat %",color: "var(--yellow)", axis: "pct", unit: "%"   },
-  ];
-  const [vis, setVis] = useState({ weight: true, muscle: true, fat: true, lean: false, bf: true });
-  const data = [...(rows || [])].filter(r => r && r.t).sort((a, b) => a.t - b.t);
-  const hasPts = (k) => data.filter(r => r[k] != null).length >= 2;
-  const available = METRICS.filter(m => hasPts(m.key));
-  if (available.length === 0 || data.length < 2) return (
-    <div style={{ padding: "16px", textAlign: "center", color: "var(--muted)", fontSize: ".82rem", lineHeight: 1.6 }}>
-      Your body-composition graph appears once you have 2+ weigh-ins. Add a body-fat reading (calipers, scale, or tape) to also chart fat &amp; lean mass.
-    </div>
-  );
-  const enabled = available.filter(m => vis[m.key]);
-  const H = 240, PAD = { top: 18, right: 52, bottom: 30, left: 46 };
-  const pxPerPoint = 56;
+// ─── Body-composition charts (S109b) ────────────────────────────────────────
+// SEPARATE single-metric line graphs (Kevin): one chart each for bodyweight,
+// muscle mass, fat mass, lean mass, and body-fat %. Each shows DATES on the
+// x-axis, side-scrolls when long, and (bodyweight only) lets you tap a point to
+// fix a past weigh-in. A shared timeframe filter zooms every chart to All / 1Y /
+// 6M / 3M / 1M. Fed by `weighIns` (actual weigh-ins, each carrying its computed
+// muscle/fat/lean) + `bfReads` (actual body-fat readings) so every plotted point
+// maps to a real, editable entry — no synthetic carry-forward points.
+
+// One metric → one side-scrolling line chart with date labels. points =
+// [{ t, v, date }] sorted ascending. onEditPoint(point) makes the dots tappable.
+function MetricLineChart({ points, label, unit, color, onEditPoint }) {
+  const data = [...(points || [])].filter((p) => p && p.t && p.v != null).sort((a, b) => a.t - b.t);
+  if (data.length < 2) return null;
+  const H = 172, PAD = { top: 18, right: 20, bottom: 40, left: 38 };
+  const pxPerPoint = 64;
   const W = PAD.left + PAD.right + Math.max(1, data.length - 1) * pxPerPoint;
   const chartW = W - PAD.left - PAD.right, chartH = H - PAD.top - PAD.bottom;
   const xAt = (i) => PAD.left + (data.length === 1 ? 0 : (i / (data.length - 1)) * chartW);
-  const lbsVals = enabled.filter(m => m.axis === "lbs").flatMap(m => data.map(r => r[m.key]).filter(v => v != null));
-  const pctVals = enabled.filter(m => m.axis === "pct").flatMap(m => data.map(r => r[m.key]).filter(v => v != null));
-  const lbsMin = lbsVals.length ? Math.min(...lbsVals) - 4 : 0;
-  const lbsMax = lbsVals.length ? Math.max(...lbsVals) + 4 : 1;
-  const pctMin = pctVals.length ? Math.max(0, Math.min(...pctVals) - 3) : 0;
-  const pctMax = pctVals.length ? Math.max(...pctVals) + 3 : 1;
-  const yLbs = (v) => PAD.top + (chartH - ((v - lbsMin) / ((lbsMax - lbsMin) || 1)) * chartH);
-  const yPct = (v) => PAD.top + (chartH - ((v - pctMin) / ((pctMax - pctMin) || 1)) * chartH);
-  const yFor = (m, v) => (m.axis === "pct" ? yPct(v) : yLbs(v));
-  const pathFor = (m) => {
-    let dstr = "", started = false;
-    data.forEach((r, i) => {
-      if (r[m.key] == null) return;
-      dstr += `${started ? "L" : "M"}${xAt(i).toFixed(1)},${yFor(m, r[m.key]).toFixed(1)} `;
-      started = true;
-    });
-    return dstr.trim();
-  };
-  const lastPoint = (m) => {
-    for (let i = data.length - 1; i >= 0; i--) if (data[i][m.key] != null) return { i, v: data[i][m.key] };
-    return null;
-  };
-  const showPct = enabled.some(m => m.axis === "pct");
+  const vals = data.map((p) => p.v);
+  const vMin = Math.min(...vals), vMax = Math.max(...vals);
+  const pad = Math.max(1, (vMax - vMin) * 0.18);
+  const lo = vMin - pad, hi = vMax + pad;
+  const yAt = (v) => PAD.top + (chartH - ((v - lo) / ((hi - lo) || 1)) * chartH);
+  const path = data.map((p, i) => `${i ? "L" : "M"}${xAt(i).toFixed(1)},${yAt(p.v).toFixed(1)}`).join(" ");
+  const fmtDate = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const fmtYear = (t) => new Date(t).toLocaleDateString(undefined, { year: "2-digit" });
+  const diff = Math.round((data[data.length - 1].v - data[0].v) * 10) / 10;
+  const diffColor = diff < 0 ? "var(--green)" : diff > 0 ? "var(--orange)" : "var(--muted)";
   return (
-    <div>
-      {/* Toggle chips */}
-      <div className="mb-2 flex flex-wrap gap-1.5">
-        {available.map(m => {
-          const on = vis[m.key];
-          return (
-            <button key={m.key} onClick={() => setVis(v => ({ ...v, [m.key]: !v[m.key] }))}
-              className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer whitespace-nowrap border"
-              style={{ borderColor: on ? m.color : "var(--border)", background: on ? "var(--s2)" : "transparent", color: on ? "var(--text)" : "var(--muted)", opacity: on ? 1 : 0.7 }}>
-              <span style={{ width: 9, height: 9, borderRadius: 999, background: m.color, opacity: on ? 1 : 0.4, display: "inline-block" }} />
-              {m.label}
-            </button>
-          );
-        })}
-      </div>
-      <div className="mb-1 text-[.72rem] text-muted flex items-center gap-2">
-        <span style={{ fontFamily: "'Sora',sans-serif", letterSpacing: "1.5px", color: "var(--accent)" }}>BODY COMPOSITION</span>
-        <span>· {data.length} points{showPct ? " · % on right axis" : ""}</span>
+    <div className="rounded-lg bg-surface2 p-3">
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <span style={{ fontFamily: "'Sora',sans-serif", letterSpacing: "1px", color, fontSize: ".92rem" }}>{label}</span>
+        <span className="text-[.7rem]" style={{ color: diffColor }}>
+          {diff > 0 ? `+${diff}` : diff}{unit === "%" ? "%" : ` ${unit}`}{onEditPoint ? " · tap a dot to edit" : ""}
+        </span>
       </div>
       <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
         <svg width={W} height={H} style={{ display: "block" }}>
-          {/* left (lbs) axis labels */}
-          {lbsVals.length > 0 && [lbsMax - 4, (lbsMin + lbsMax) / 2, lbsMin + 4].map((v, i) => (
-            <text key={`l${i}`} x={PAD.left - 6} y={yLbs(v) + 3} textAnchor="end" fontSize="9" fill="var(--muted)">{Math.round(v)}</text>
+          {[hi - pad / 2, (lo + hi) / 2, lo + pad / 2].map((v, i) => (
+            <text key={i} x={PAD.left - 6} y={yAt(v) + 3} textAnchor="end" fontSize="9" fill="var(--muted)">
+              {Math.round(v)}{unit === "%" ? "%" : ""}
+            </text>
           ))}
-          {/* right (pct) axis labels */}
-          {showPct && pctVals.length > 0 && [pctMax - 3, pctMin + 3].map((v, i) => (
-            <text key={`p${i}`} x={W - PAD.right + 6} y={yPct(v) + 3} textAnchor="start" fontSize="9" fill="var(--yellow)">{Math.round(v)}%</text>
-          ))}
-          {/* series */}
-          {enabled.map(m => (
-            <g key={m.key}>
-              <path d={pathFor(m)} fill="none" stroke={m.color} strokeWidth="2"
-                strokeDasharray={m.axis === "pct" ? "5 4" : "0"} strokeLinejoin="round" strokeLinecap="round" />
-              {data.map((r, i) => r[m.key] != null ? (
-                <circle key={i} cx={xAt(i)} cy={yFor(m, r[m.key])} r="2.6" fill={m.color} />
-              ) : null)}
-              {(() => {
-                const lp = lastPoint(m);
-                if (!lp) return null;
-                return <text x={xAt(lp.i) + 6} y={yFor(m, lp.v) + 3} fontSize="9.5" fontWeight="700" fill={m.color}>{lp.v}{m.unit === "%" ? "%" : ""}</text>;
-              })()}
+          <path d={path} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+          {data.map((p, i) => (
+            <g key={i}>
+              <circle cx={xAt(i)} cy={yAt(p.v)} r={onEditPoint ? 5 : 3.4} fill={color}
+                style={onEditPoint ? { cursor: "pointer" } : undefined}
+                onClick={onEditPoint ? () => onEditPoint(p) : undefined} />
+              <text x={xAt(i)} y={yAt(p.v) - 9} textAnchor="middle" fontSize="9.5" fontWeight="700" fill={color}>{p.v}</text>
+              <text x={xAt(i)} y={H - 24} textAnchor="middle" fontSize="8.5" fill="var(--muted)">{fmtDate(p.t)}</text>
+              <text x={xAt(i)} y={H - 13} textAnchor="middle" fontSize="7.5" fill="var(--muted)" opacity="0.65">’{fmtYear(p.t)}</text>
             </g>
           ))}
         </svg>
       </div>
-      <div className="mt-1 text-[10px] text-muted italic">Muscle mass is a Lee-2000 estimate (±~6 lb). Body-fat % between readings is carried forward.</div>
+    </div>
+  );
+}
+
+// The stack of body-composition charts + the shared timeframe filter + the tap-
+// to-edit weigh-in editor. `weighIns` = [{ t, date, weight, muscle, fat, lean }]
+// (fat/lean null until a BF% reading exists), `bfReads` = [{ t, date, bf }].
+// onEditWeighIn(dateKey, weightOrNull) saves (weight>0) or deletes (null) that
+// date's weigh-in — every other chart recomputes from it.
+function BodyCompCharts({ weighIns, bfReads, onEditWeighIn }) {
+  const [range, setRange] = useState("all");
+  const [edit, setEdit] = useState(null); // { date, t, value } when editing a weigh-in
+  const wAll = [...(weighIns || [])].filter((w) => w && w.t).sort((a, b) => a.t - b.t);
+  const bAll = [...(bfReads || [])].filter((b) => b && b.t).sort((a, b) => a.t - b.t);
+  if (wAll.length < 2 && bAll.length < 2) return (
+    <div className="rounded-lg bg-surface2 p-4 text-center text-[.82rem] leading-relaxed text-muted">
+      Your body-composition charts appear once you have 2+ weigh-ins. Add a body-fat reading
+      (calipers, scale, or tape) to also chart fat &amp; lean mass.
+    </div>
+  );
+  const RANGES = [["all", "All"], ["1y", "1Y"], ["6m", "6M"], ["3m", "3M"], ["1m", "1M"]];
+  const spanDays = { "1y": 365, "6m": 182, "3m": 91, "1m": 31 }[range];
+  const maxT = Math.max(wAll.length ? wAll[wAll.length - 1].t : 0, bAll.length ? bAll[bAll.length - 1].t : 0);
+  const inRange = (arr) => (spanDays ? arr.filter((x) => x.t >= maxT - spanDays * 86400000) : arr);
+  const w = inRange(wAll), b = inRange(bAll);
+  const CHARTS = [
+    { key: "weight", label: "Bodyweight", unit: "lbs", color: "var(--accent)", src: w, editable: true },
+    { key: "muscle", label: "Muscle mass", unit: "lbs", color: "var(--green)", src: w },
+    { key: "fat", label: "Fat mass", unit: "lbs", color: "var(--orange)", src: w },
+    { key: "lean", label: "Lean mass", unit: "lbs", color: "#b57bff", src: w },
+    { key: "bf", label: "Body fat %", unit: "%", color: "var(--yellow)", src: b },
+  ];
+  const seriesOf = (c) => c.src.map((r) => ({ t: r.t, date: r.date, v: r[c.key] != null ? r[c.key] : (c.key === "bf" ? r.bf : null) })).filter((p) => p.v != null);
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="text-[.68rem] font-bold uppercase tracking-wide text-muted mr-1">Timeframe</span>
+        {RANGES.map(([k, l]) => (
+          <button key={k} onClick={() => setRange(k)}
+            className={`rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer ${range === k ? "bg-primaryfill text-primaryfg border-0" : "bg-transparent text-fg border border-border"}`}>{l}</button>
+        ))}
+      </div>
+      {edit && onEditWeighIn && (
+        <div className="rounded-lg bg-surface2 p-3 border border-primary">
+          <div className="mb-2 text-sm font-semibold">
+            Edit weigh-in · {new Date(edit.t).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <input type="number" inputMode="decimal" step="0.1" autoFocus value={edit.value}
+              onChange={(e) => setEdit((s) => ({ ...s, value: e.target.value }))}
+              onKeyDown={(e) => { if (e.key === "Enter") { const v = Math.round(Number(edit.value) * 10) / 10; if (v > 0) onEditWeighIn(edit.date, v); setEdit(null); } }}
+              className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-sm outline-none" />
+            <span className="text-xs text-muted">lbs</span>
+            <button onClick={() => { const v = Math.round(Number(edit.value) * 10) / 10; if (v > 0) onEditWeighIn(edit.date, v); setEdit(null); }}
+              className="rounded-lg bg-primaryfill px-3.5 py-2 text-sm font-bold text-primaryfg cursor-pointer">Save</button>
+            <button onClick={() => { onEditWeighIn(edit.date, null); setEdit(null); }}
+              className="rounded-lg border border-danger bg-transparent px-3.5 py-2 text-sm font-bold text-danger cursor-pointer">Delete</button>
+            <button onClick={() => setEdit(null)}
+              className="rounded-lg border border-border bg-transparent px-3.5 py-2 text-sm text-fg cursor-pointer">Cancel</button>
+          </div>
+        </div>
+      )}
+      {CHARTS.map((c) => (
+        <MetricLineChart key={c.key} points={seriesOf(c)} label={c.label} unit={c.unit} color={c.color}
+          onEditPoint={c.editable && onEditWeighIn ? (p) => setEdit({ date: p.date, t: p.t, value: String(p.v) }) : undefined} />
+      ))}
+      <div className="text-[10px] text-muted italic">
+        Muscle mass is a Lee-2000 estimate (±~6 lb). Fat &amp; lean mass use the nearest body-fat reading on or before each weigh-in.
+      </div>
     </div>
   );
 }
@@ -12381,7 +12419,7 @@ function BodyCompChart({ rows }) {
 // height, trend any metric, delete mistakes, and (when weight + a goal body-fat
 // % exist) get the lean-mass-derived goal weight. docs/METRICS-PLAN.md is the
 // formula reference. Shared by ClientHome and Results (like WeightChartModal).
-function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBodyFat, onLogWeight, onClose }) {
+function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBodyFat, onLogWeight, onEditWeighIn, onClose }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);
   const d = data || {};
@@ -12439,25 +12477,33 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   // two sparse sources line up. Per date → weight, BF%, fat mass, lean mass,
   // and Lee-2000 muscle mass (which needs only weight + static height/age/sex,
   // so it shows even without a BF% reading). Feeds the multi-metric BodyCompChart.
-  const bodyCompRows = (() => {
+  // Body-composition timeline (S109b): each plotted point is a REAL entry so it
+  // maps back to something editable. weighIns carry their own computed muscle/fat/
+  // lean (fat/lean use the nearest BF% reading on or before that weigh-in); bfReads
+  // are the actual body-fat readings. Dates come straight from the check-in / entry.
+  const bodyCompData = (() => {
     const weighIns = [...(d.checkIns || [])]
       .filter((c) => c && Number(c.weight) > 0)
-      .map((c) => ({ t: c.timestamp || new Date(((c.date) || "") + "T12:00:00").getTime(), weight: Number(c.weight) }))
-      .filter((c) => c.t > 0).sort((a, b) => a.t - b.t);
+      .map((c) => ({
+        t: c.timestamp || new Date(((c.date) || "") + "T12:00:00").getTime(),
+        date: c.date || (c.timestamp ? ymdLocal(new Date(c.timestamp)) : ""),
+        weight: Math.round(Number(c.weight) * 10) / 10,
+      }))
+      .filter((c) => c.t > 0 && c.date).sort((a, b) => a.t - b.t);
     const bfReads = entries
-      .map((e) => ({ t: e.timestamp, bf: showBF ? measurementMetrics(d, e).bodyFatPct : null }))
+      .map((e) => ({ t: e.timestamp, date: e.date, bf: showBF ? measurementMetrics(d, e).bodyFatPct : null }))
       .filter((e) => e.bf != null && e.t > 0).sort((a, b) => a.t - b.t);
-    const allT = [...new Set([...weighIns.map((x) => x.t), ...bfReads.map((x) => x.t)])].sort((a, b) => a - b);
-    if (allT.length < 2) return [];
-    const carry = (arr, t, key) => { let v = null; for (const x of arr) { if (x.t <= t) v = x[key]; else break; } return v; };
-    return allT.map((t) => {
-      const weight = carry(weighIns, t, "weight");
-      const bf = carry(bfReads, t, "bf");
-      const fat = (weight != null && bf != null) ? Math.round(weight * bf / 100) : null;
-      const lean = (weight != null && bf != null) ? Math.round(weight * (1 - bf / 100)) : null;
-      const muscle = weight != null ? leeMuscleMassLbs(d, weight) : null;
-      return { t, weight: weight != null ? Math.round(weight) : null, bf, fat, lean, muscle };
+    const carryBf = (t) => { let v = null; for (const x of bfReads) { if (x.t <= t) v = x.bf; else break; } return v; };
+    const wRows = weighIns.map((wi) => {
+      const bf = carryBf(wi.t);
+      return {
+        ...wi,
+        muscle: leeMuscleMassLbs(d, wi.weight),
+        fat: bf != null ? Math.round(wi.weight * bf / 100) : null,
+        lean: bf != null ? Math.round(wi.weight * (1 - bf / 100)) : null,
+      };
     });
+    return { weighIns: wRows, bfReads };
   })();
 
   // Which tape fields this person's body-fat formulas need (docs/METRICS-PLAN.md).
@@ -12590,29 +12636,8 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
           </div>
         ) : null}
 
-        {/* Body-composition multi-metric chart (S109) */}
-        {bodyCompRows.length >= 2 && (
-          <div className="mb-3 rounded-lg bg-surface2 p-3">
-            <BodyCompChart rows={bodyCompRows} />
-          </div>
-        )}
-
-        {/* Trend chart with a metric picker */}
-        {chartable.length > 0 && (
-          <div className="mb-3">
-            <div className="mb-1.5 flex flex-wrap gap-1.5">
-              {chartable.map((f) => (
-                <button key={f} onClick={() => setMetric(f)}
-                  className={`rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer whitespace-nowrap ${activeMetric === f ? "bg-primaryfill text-primaryfg border-0" : "bg-transparent text-fg border border-border"}`}>
-                  {chartLabel(f)}
-                </button>
-              ))}
-            </div>
-            <ProgressChart checkIns={points} showValues pxPerPoint={64} surfaceless hideAdherence
-              unit={activeMetric ? chartUnit(activeMetric) : ""} pointNoun="entry"
-              label={activeMetric ? `${chartLabel(activeMetric)} Trend` : "Trend"} />
-          </div>
-        )}
+        {/* Charts moved to the BOTTOM (S109b, Kevin) — see "Trends & charts"
+            below, under the entry inputs + history. */}
 
         {/* Weight — log a weigh-in right here (feeds the weight chart + current weight). */}
         {onLogWeight && (
@@ -12746,6 +12771,36 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* ── Trends & charts (S109b, Kevin: at the BOTTOM, under the stat entry) ──
+            Separate per-metric body-composition charts + the tape/caliper trend,
+            all with dates on the x-axis, side-scroll, and a shared timeframe filter. */}
+        {(bodyCompData.weighIns.length >= 2 || bodyCompData.bfReads.length >= 2 || chartable.length > 0) && (
+          <div className="mt-5 border-t border-border pt-4">
+            <div className="mb-3 flex items-center gap-2">
+              <Icon name="chart" size={16} color="var(--accent)" />
+              <span style={{ fontFamily: "'Sora',sans-serif", letterSpacing: "1.5px", color: "var(--accent)", fontSize: ".95rem" }}>TRENDS &amp; CHARTS</span>
+            </div>
+            <BodyCompCharts weighIns={bodyCompData.weighIns} bfReads={bodyCompData.bfReads} onEditWeighIn={onEditWeighIn} />
+            {/* Tape / caliper single-metric trend (inches + skinfold sites) */}
+            {chartable.length > 0 && (
+              <div className="mt-4 rounded-lg bg-surface2 p-3">
+                <div className="mb-1.5 text-[.72rem] font-bold uppercase tracking-wide text-muted">Tape &amp; caliper sites</div>
+                <div className="mb-1.5 flex flex-wrap gap-1.5">
+                  {chartable.map((f) => (
+                    <button key={f} onClick={() => setMetric(f)}
+                      className={`rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer whitespace-nowrap ${activeMetric === f ? "bg-primaryfill text-primaryfg border-0" : "bg-transparent text-fg border border-border"}`}>
+                      {chartLabel(f)}
+                    </button>
+                  ))}
+                </div>
+                <ProgressChart checkIns={points} showValues pxPerPoint={64} surfaceless hideAdherence
+                  unit={activeMetric ? chartUnit(activeMetric) : ""} pointNoun="entry"
+                  label={activeMetric ? `${chartLabel(activeMetric)} Trend` : "Trend"} />
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -16993,6 +17048,26 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   const deleteMeasurement = (ts) => savePlanDataMutation((d) => {
     d.measurements = (d.measurements || []).filter((e) => e && e.timestamp !== ts);
   });
+  // Fix a past weigh-in from the body-comp chart (S109b): merge by date so other
+  // check-in fields (workout/notes) survive, then repoint current weight to the
+  // latest remaining weigh-in. weight == null deletes that date's weigh-in.
+  const editWeighIn = async (dateKey, weight) => {
+    await savePlanDataMutation((d) => {
+      const list = Array.isArray(d.checkIns) ? d.checkIns : [];
+      if (weight == null) {
+        d.checkIns = list.filter((c) => c.date !== dateKey);
+      } else {
+        const ex = list.find((c) => c.date === dateKey);
+        const ci = { ...(ex || {}), date: dateKey,
+          timestamp: (ex && ex.timestamp) || new Date(dateKey + "T12:00:00").getTime(), weight };
+        d.checkIns = [...list.filter((c) => c.date !== dateKey), ci];
+      }
+      const remaining = (d.checkIns || []).filter((c) => c.weight).sort((a, b) => a.timestamp - b.timestamp);
+      if (remaining.length) d.weightLbs = remaining[remaining.length - 1].weight;
+      else if (d.startWeightLbs) d.weightLbs = d.startWeightLbs;
+    });
+    await appendHistory(weight == null ? "deleted a weigh-in" : `edited a past weigh-in to ${weight} lbs`);
+  };
   const setGoalFromLeanMass = async (lbs) => {
     await savePlanDataMutation((d) => { d.goalWeight = lbs; });
     await appendHistory(`set goal weight to ${lbs} lbs (from lean mass)`);
@@ -17498,6 +17573,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
         <MeasurementsModal data={planData || {}} onSave={saveMeasurements}
           onDelete={deleteMeasurement} onSetGoalWeight={setGoalFromLeanMass}
           onToggleBodyFat={toggleBodyFat} onLogWeight={(v)=>logWeight(v)}
+          onEditWeighIn={editWeighIn}
           onClose={() => setShowMeasure(false)} />
       )}
 
