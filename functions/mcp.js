@@ -93,14 +93,30 @@ const READ_TOOLS = new Set([
 //
 // ⚠️ coach_summary is the outlier — ~120 reads (12x a normal call, ~0.01c). It's
 // trainer-only and rate-limited by these same caps, so it stays bounded.
-const DAILY_CALLS = { free: 200, premium: 2000, max: 10000 };
+// Trainers act on behalf of MANY clients (a 50-client roster logging meals is
+// ~200 calls/day), so the coach tiers get proportionally more headroom than a
+// solo client on the same price level. Tier ids come from billing.js CATALOG:
+// premium | max | ultra | coach | coach_max | coach_ultra.
+const DAILY_CALLS = {
+  free: 200,
+  premium: 2000,
+  coach: 5000,
+  max: 10000,
+  ultra: 25000,
+};
 function planFor(profile) {
   if (!profile) return "free";
-  if (profile.role === "admin") return "max";
+  if (profile.role === "admin") return "ultra";
   if (profile.entitlements && profile.entitlements.premium === true) return "premium";
   if (profile.subscriptionStatus === "active") {
+    // Order matters: check ultra before max before coach, since the coach tiers
+    // are named coach_max / coach_ultra. (A plain "includes(max)" test used to
+    // drop ultra/coach_ultra — the TOP tiers — down to the premium cap.)
     const t = String(profile.subscriptionTier || "").toLowerCase();
-    return t.includes("max") ? "max" : "premium";
+    if (t.includes("ultra")) return "ultra";
+    if (t.includes("max")) return "max";
+    if (t.includes("coach")) return "coach";
+    return "premium";
   }
   // Active trial counts as premium (mirrors the app's isPremium semantics).
   const t = profile.trialStartedAt;

@@ -260,9 +260,59 @@ premium 2,000/day ≈ **$0.79** · max 10,000/day ≈ **$3.93**. Realistic daily
 well under a cent per user per month. **So: not literally free, but ~1/1000¢ per call — the cap
 exists as an abuse/runaway backstop, not a cost control.**
 
-**Caps set (S112):** free **200/day**, premium **2,000/day**, max **10,000/day**. Raising the free
-READ tier does not cannibalize revenue because the paywall is Phase 2 **writes** — "read your data
-free, log/edit with Premium" is the clean story.
+**Caps set (S112):** free **200/day**, premium **2,000**, coach **5,000**, max **10,000**, ultra
+**25,000**. Raising the free READ tier does not cannibalize revenue because the paywall is Phase 2
+**writes** — "read your data free, log/edit with Premium" is the clean story.
+⚠️ Tier mapping bug fixed here: a plain `includes("max")` test dropped `ultra` **and**
+`coach_ultra` — the TOP tiers — to the premium cap. Check ultra → max → coach, in that order
+(the coach tiers are literally named `coach_max` / `coach_ultra`).
+
+### 8c. Does it still hold at scale? Trainer logging meals for 10–50 clients (S112c)
+
+> Kevin: "what if a trainer logs all their clients' meals through the connector — 10, 20, 30, 40,
+> 50 clients?" (Note: writes are **Phase 2**; costed here so the cap design is right up front.)
+
+**The batching insight that dominates this math:** `log_meals` accepts up to **30 meals in one
+call** and writes them **grouped BY DATE**. So logging a client's entire day — or week — costs the
+SAME database operations as logging a single meal. Per-client-per-day the ops are flat:
+```
+MCP overhead            2 reads + 1 write   (profile + usage counter)
+resolveTargetUid        1 read              (verify the client is theirs)
+activePlanData          2 reads             (manifest + plan)
+day-log transaction     1 read + 1 write
+history transaction     1 read + 1 write
+                      = ~7 reads + 3 writes   ← flat, 1 meal or 30
+```
+Writes cost 3× reads in nam5 ($0.18 vs $0.06 per 100k), so per client-day:
+`7 × $0.0000006 + 3 × $0.0000018 + ~$0.0000053 compute` ≈ **$0.0000149**.
+
+**A trainer logging a full day of meals for their whole roster** (one `list_clients` to resolve
+ids + one `log_meals` per client):
+
+| Clients | Calls/day | Reads/day | Writes/day | Cost/day | **Cost/month** |
+|---|---|---|---|---|---|
+| 10 | ~11 | ~110 | 30 | $0.00019 | **$0.006** |
+| 20 | ~21 | ~210 | 60 | $0.00036 | **$0.011** |
+| 30 | ~31 | ~310 | 90 | $0.00053 | **$0.016** |
+| 40 | ~41 | ~410 | 120 | $0.00070 | **$0.021** |
+| 50 | ~51 | ~510 | 150 | $0.00087 | **$0.026** |
+
+**So yes — the math holds. Logging 50 clients' meals every day for a month costs ~2.6 cents.**
+Even un-batched (a separate call per meal, 3×/day) it's ~8¢/month. Firestore's 50,000 free
+reads/day swallows this whole (~1% used).
+
+**What actually constrains this — none of it is money:**
+1. **The daily call cap.** 50 clients ≈ 51 calls batched, but ~150+ if the AI logs meal-by-meal.
+   Free (200) would be tight; that's why **coach = 5,000/day** exists. Cost isn't the reason for
+   the cap; runaway loops are.
+2. **The trainer's own Claude limits.** 50 tool calls in one conversation is a lot of context on
+   THEIR subscription, and Claude enforces a 300 s per-call timeout. This bites long before our
+   costs do.
+3. **Prompt guidance (parity rule §3b).** The in-app prompt already tells the AI to call
+   `log_meals` ONCE with all items rather than looping `log_meal`. The connector's tool
+   descriptions must carry that same batching guidance, since an external model has none of our
+   system prompt. **Phase 2 must not ship without it** — un-batched logging is ~3× the ops and
+   burns the call cap ~3× faster.
 
 ### RECOMMENDATION (locks Kevin's Premium/Max decision, refined)
 **Gate the connector behind Premium/Max — with a free READ-ONLY taste, Figma/Strava-style:**
