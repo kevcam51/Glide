@@ -8384,7 +8384,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   };
   // Photo estimate: downscale to a ~1024px JPEG (caps upload + vision tokens),
   // hand it to the same estimate call, then discard it. Photos are NEVER stored.
-  const MAX_MEAL_PHOTOS = 5;
+  const MAX_MEAL_PHOTOS = 20;
   const onPhotoPicked = async (e) => {
     const files = [...(e.target.files || [])].filter((f) => f.type.startsWith("image/"));
     e.target.value = ""; // let the same files be picked again
@@ -15676,7 +15676,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]); // {role:'user'|'assistant', content, image?}
   const [draft, setDraft] = useState("");
-  const [pendingImages, setPendingImages] = useState([]); // dataURLs of photos to send (≤3, S102d)
+  const [pendingImages, setPendingImages] = useState([]); // dataURLs of photos to send (≤20, S110b)
   const [viewPhoto, setViewPhoto] = useState(null);        // tap a thumbnail → full-screen view
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -15887,11 +15887,11 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     if (!files.length) { if (e.target.files && e.target.files.length) setError("Please choose an image."); return; }
     setError("");
     try {
-      const room = Math.max(0, 3 - pendingImages.length);
-      if (!room) { setError("3 photos max per message."); return; }
+      const room = Math.max(0, 20 - pendingImages.length);
+      if (!room) { setError("20 photos max per message."); return; }
       const scaled = await Promise.all(files.slice(0, room).map((f) => downscaleImage(f)));
-      setPendingImages((prev) => [...prev, ...scaled].slice(0, 3));
-      if (files.length > room) setError("3 photos max per message — extra photos were skipped.");
+      setPendingImages((prev) => [...prev, ...scaled].slice(0, 20));
+      if (files.length > room) setError("20 photos max per message — extra photos were skipped.");
     }
     catch { setError("Couldn't read that photo. Try another."); }
   };
@@ -16500,7 +16500,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                   </span>
                 ))}
                 <span className="text-[.74rem] text-muted">
-                  {pendingImages.length}/3 · tap to view{pendingImages.length < 3 ? " · 📷 adds more" : ""}
+                  {pendingImages.length}/20 · tap to view{pendingImages.length < 20 ? " · 📷 adds more" : ""}
                 </span>
               </div>
             )}

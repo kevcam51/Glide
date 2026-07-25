@@ -160,7 +160,7 @@ function sanitizeContent(content, allowImages = false) {
     if (!b || typeof b !== "object") continue;
     if (b.type === "text" && typeof b.text === "string") {
       blocks.push({ type: "text", text: b.text.slice(0, 8000) });
-    } else if (allowImages && images < 3 && b.type === "image" && b.source && b.source.type === "base64"
+    } else if (allowImages && images < 20 && b.type === "image" && b.source && b.source.type === "base64"
         && IMG_TYPES.has(b.source.media_type) && typeof b.source.data === "string"
         && b.source.data.length <= MAX_IMG_B64) {
       images++;
@@ -193,9 +193,10 @@ function capHistory(messages) {
   for (let i = 0; i < arr.length; i++) {
     const m = arr[i];
     if (!m || (m.role !== "user" && m.role !== "assistant")) continue;
-    // Images are only honored on the FINAL message (the frontend only attaches
-    // one there anyway) and capped at 2 — history images would be re-billed as
-    // vision input on every tool round, a crafted-payload cost hole otherwise.
+    // Images are only honored on the FINAL message (up to 20 — Kevin) — history
+    // images would be re-billed as vision input on every tool round, a crafted-
+    // payload cost hole otherwise. The per-user daily token budget bounds the
+    // cost of a large photo batch.
     const content = sanitizeContent(m.content, i === arr.length - 1);
     if (content == null) continue;
     clean.push({ role: m.role, content });
@@ -630,7 +631,7 @@ exports.estimateFood = onCall(
     // goes straight to the model and is discarded with the request.
     const rawImgs = Array.isArray(request.data && request.data.images)
       ? request.data.images : [(request.data && request.data.image) || ""];
-    const imgBlocks = rawImgs.slice(0, 5).map(sanitizeImageDataUrl).filter(Boolean);
+    const imgBlocks = rawImgs.slice(0, 20).map(sanitizeImageDataUrl).filter(Boolean);
     const imgBlock = imgBlocks.length > 0; // legacy truthiness for the checks below
     if (!desc && !imgBlock) throw new HttpsError("invalid-argument", "Describe the food or add a photo first.");
     const db = admin.firestore();
