@@ -12470,6 +12470,10 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
     setTimeout(() => setWeightMsg(""), 2200);
     return true;
   };
+  // Logging weight is usually a standalone action, so close the modal once it's
+  // saved (S110d, Kevin: "I expected it to close for me"). Brief delay lets the
+  // "Logged N lbs" confirmation register first.
+  const logWeightAndClose = () => { if (logWeight()) setTimeout(() => onClose(), 850); };
   // Commit a typed-but-not-yet-logged weight when the user hits Save or closes,
   // so a pending weight can never be silently lost by tapping the wrong button
   // (the tile then reflects it). Safe to call with nothing typed — it no-ops.
@@ -12684,10 +12688,10 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
             <div className="flex items-center gap-2 flex-wrap">
               <input type="number" inputMode="decimal" step="0.1" placeholder={d.weightLbs ? `${d.weightLbs}` : "lbs"}
                 value={weightDraft} onChange={(e) => setWeightDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") logWeight(); }}
+                onKeyDown={(e) => { if (e.key === "Enter") logWeightAndClose(); }}
                 className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted" />
               <span className="text-xs text-muted">lbs</span>
-              <button onClick={logWeight}
+              <button onClick={logWeightAndClose}
                 className="rounded-lg bg-primaryfill px-4 py-2 text-sm font-bold text-primaryfg cursor-pointer">Log weight</button>
               {weightMsg ? <span className="text-sm text-success"><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{weightMsg}</span> : null}
             </div>

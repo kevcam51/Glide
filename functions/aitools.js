@@ -1275,8 +1275,18 @@ function buildTools(role, opts = {}) {
     tools.push({
       name: "list_clients",
       description:
-        "List your connected clients (id, name, last log date, days since last logged). Use the returned id with the other tools.",
+        "List ALL your connected clients (id, name, last log date, days since last logged). Use ONLY when the user wants the whole roster — for ONE named person, use find_client instead (much cheaper). Use the returned id with the other tools.",
       input_schema: { type: "object", properties: {} },
+    });
+    tools.push({
+      name: "find_client",
+      description:
+        "Resolve ONE specific person by name to their id. Returns just {clientId, name} for matches — NO activity, NO stats, NO per-client lookups, so it's far cheaper than list_clients (which loads every client) and coach_summary (every client's full snapshot). ALWAYS use this when the user asks about a SINGLE named client, then use the returned clientId with the data tools. Reserve list_clients for 'list everyone' and coach_summary for across-all-clients questions.",
+      input_schema: {
+        type: "object",
+        properties: { query: { type: "string", description: "Part of the client's name (or email) to match, case-insensitive." } },
+        required: ["query"],
+      },
     });
     tools.push({
       name: "coach_summary",
@@ -1402,6 +1412,33 @@ async function runTool(name, input, ctx) {
     }
     out.sort((a, b) => (b.daysSinceLastLog ?? 1e9) - (a.daysSinceLastLog ?? 1e9));
     return { clients: out, count: out.length };
+  }
+
+  if (name === "find_client") {
+    // Lightweight name → id resolver for a SINGLE person (S110d, Kevin). Unlike
+    // list_clients/coach_summary it does NO per-client sub-reads and returns a
+    // tiny result, so focusing on one client is cheap. One roster query, matched
+    // in memory by name/email.
+    if (!ctx.isTrainer) return { error: "Only trainers can find clients." };
+    const q = String(input.query || "").trim().toLowerCase();
+    if (!q) return { error: "Provide part of the client's name to search for." };
+    const snap = await db.collection("users")
+      .where("assignedTrainerId", "==", ctx.callerUid).limit(200).get();
+    const matches = [];
+    for (const doc of snap.docs) {
+      const p = doc.data();
+      const nm = p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Client";
+      if (nm.toLowerCase().includes(q) || String(p.email || "").toLowerCase().includes(q)) {
+        matches.push({ clientId: doc.id, name: nm });
+        if (matches.length >= 10) break;
+      }
+    }
+    return {
+      matches, count: matches.length,
+      note: matches.length === 0
+        ? "No connected client matched. Most of a trainer's people are LOCAL files — check list_local_plans (imported/sim/template plans) before assuming they aren't in Glide."
+        : undefined,
+    };
   }
 
   if (name === "coach_summary") {
