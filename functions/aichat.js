@@ -97,7 +97,7 @@ If a user asks something outside your scope, respond:
 
 Be encouraging and clear. Avoid jargon unless the client has demonstrated familiarity.
 
-Formatting: replies render in a narrow mobile chat, so write like a person texting — natural prose in short paragraphs. Match your length to the question: a quick log or fact gets a sentence or two; a real "how am I doing / what should I change" question deserves a genuine, complete answer (don't truncate a good explanation to save space). Light markdown is fine — **bold** for the occasional label, and a dash list only when you're truly listing things. Skip big markdown tables, heading syntax (#), and code blocks; they render badly here.`;
+Formatting: replies render in a narrow mobile chat, so write like a person texting — natural prose in short paragraphs. Match your length to the question: a quick log or fact gets a sentence or two; a real "how am I doing / what should I change" question deserves a genuine, complete answer (don't truncate a good explanation to save space). Light markdown is fine — **bold** for the occasional label, and a dash list only when you're truly listing things. Skip big markdown tables, heading syntax (#), and code blocks; they render badly here. Write clean, properly-spaced prose: always put a normal space after periods, commas, colons, and every other punctuation mark, and never run one sentence into the next — write "Nice work. Keep it up.", never "Nice work.Keep it up." Hold yourself to the same polish, spacing, and correctness you'd expect from a top-tier writing assistant.`;
 
 const SYSTEM_TRAINER = `You are a fitness coaching assistant for Glidna, a personal training platform.
 
@@ -114,7 +114,7 @@ You must NOT:
 
 If asked something outside scope, redirect: "I can help you with client nutrition data, progress tracking, and fitness questions."
 
-Formatting: replies render in a narrow mobile chat, so write like a person texting — natural prose in short paragraphs. Match your length to the question: a quick lookup gets a sentence or two; a real coaching question (who's off track, what should I change) deserves a complete, useful answer — don't truncate real analysis to save space. Light markdown is fine — **bold** for the occasional label, and a dash list only when you're truly listing things. Skip big markdown tables, heading syntax (#), and code blocks; they render badly here.`;
+Formatting: replies render in a narrow mobile chat, so write like a person texting — natural prose in short paragraphs. Match your length to the question: a quick lookup gets a sentence or two; a real coaching question (who's off track, what should I change) deserves a complete, useful answer — don't truncate real analysis to save space. Light markdown is fine — **bold** for the occasional label, and a dash list only when you're truly listing things. Skip big markdown tables, heading syntax (#), and code blocks; they render badly here. Write clean, properly-spaced prose: always put a normal space after periods, commas, colons, and every other punctuation mark, and never run one sentence into the next — write "Nice work. Keep it up.", never "Nice work.Keep it up." Hold yourself to the same polish, spacing, and correctness you'd expect from a top-tier writing assistant.`;
 
 // UTC YYYY-MM-DD key for the per-user daily usage doc.
 function todayKey() {
@@ -630,7 +630,7 @@ exports.estimateFood = onCall(
     // goes straight to the model and is discarded with the request.
     const rawImgs = Array.isArray(request.data && request.data.images)
       ? request.data.images : [(request.data && request.data.image) || ""];
-    const imgBlocks = rawImgs.slice(0, 3).map(sanitizeImageDataUrl).filter(Boolean);
+    const imgBlocks = rawImgs.slice(0, 5).map(sanitizeImageDataUrl).filter(Boolean);
     const imgBlock = imgBlocks.length > 0; // legacy truthiness for the checks below
     if (!desc && !imgBlock) throw new HttpsError("invalid-argument", "Describe the food or add a photo first.");
     const db = admin.firestore();

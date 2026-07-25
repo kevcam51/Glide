@@ -8384,16 +8384,21 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   };
   // Photo estimate: downscale to a ~1024px JPEG (caps upload + vision tokens),
   // hand it to the same estimate call, then discard it. Photos are NEVER stored.
+  const MAX_MEAL_PHOTOS = 5;
   const onPhotoPicked = async (e) => {
-    const files = [...(e.target.files || [])].filter((f) => f.type.startsWith("image/")).slice(0, 3);
+    const files = [...(e.target.files || [])].filter((f) => f.type.startsWith("image/"));
     e.target.value = ""; // let the same files be picked again
     if (!files.length || aiBusy) return;
     setAiErr("");
+    // ACCUMULATE (S110b, Kevin): add photos one/a-few at a time — snap the plate,
+    // then the label, then another angle — instead of estimating on the first
+    // pick. The estimate runs on the whole set via the separate button below.
+    const room = Math.max(0, MAX_MEAL_PHOTOS - aiPhotos.length);
+    if (room === 0) { setAiErr(`You can add up to ${MAX_MEAL_PHOTOS} photos per estimate.`); return; }
     let dataUrls;
-    try { dataUrls = await Promise.all(files.map((f) => downscaleImage(f))); }
+    try { dataUrls = await Promise.all(files.slice(0, room).map((f) => downscaleImage(f))); }
     catch { setAiErr("Couldn't read those images — try other photos."); return; }
-    setAiPhotos(dataUrls); // thumbnails stay tappable while (and after) estimating
-    runAiEstimate(dataUrls);
+    setAiPhotos((prev) => [...prev, ...dataUrls]);
   };
   // Run a food search. Progressive: results render the moment the fastest
   // source (usually USDA) lands, then upgrade to the full merged list. A
@@ -8782,24 +8787,42 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
             </button>
             {/* Photo estimate — snap the plate instead of typing it. The photo is
                 sent to the model and discarded; nothing is stored. */}
-            <button onClick={() => photoInputRef.current && photoInputRef.current.click()} disabled={aiBusy}
+            <button onClick={() => photoInputRef.current && photoInputRef.current.click()}
+              disabled={aiBusy || aiPhotos.length >= MAX_MEAL_PHOTOS}
               style={{ border:"none", background:"transparent", color:"var(--accent)", cursor:"pointer",
-                fontSize:".74rem", fontWeight:700, padding:"0", textAlign:"left", opacity: aiBusy ? .6 : 1 }}>
+                fontSize:".74rem", fontWeight:700, padding:"0", textAlign:"left",
+                opacity: (aiBusy || aiPhotos.length >= MAX_MEAL_PHOTOS) ? .5 : 1 }}>
               <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}>
-                <Icon name="camera" size={13} />{aiBusy && aiMode === "photo" ? "Estimating…" : "Estimate from photo"}
+                <Icon name="camera" size={13} />{aiPhotos.length ? "Add another photo" : "Add a photo"}
               </span>
             </button>
             <input ref={photoInputRef} type="file" accept="image/*" multiple
               onChange={onPhotoPicked} style={{ display:"none" }} />
           </div>
           {aiPhotos.length > 0 && (
-            <div style={{ display:"flex", alignItems:"center", gap:"6px", marginTop:"7px", flexWrap:"wrap" }}>
-              {aiPhotos.map((im, ix) => (
-                <img key={ix} src={im} alt={`meal photo ${ix + 1}`} onClick={() => setMlViewPhoto(im)}
-                  style={{ width:44, height:44, borderRadius:8, objectFit:"cover", cursor:"zoom-in",
-                    border:"1px solid var(--border)" }} />
-              ))}
-              <span style={{ fontSize:".7rem", color:"var(--muted)" }}>tap to view</span>
+            <div style={{ marginTop:"7px" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:"7px", flexWrap:"wrap" }}>
+                {aiPhotos.map((im, ix) => (
+                  <div key={ix} style={{ position:"relative", width:48, height:48 }}>
+                    <img src={im} alt={`meal photo ${ix + 1}`} onClick={() => setMlViewPhoto(im)}
+                      style={{ width:48, height:48, borderRadius:8, objectFit:"cover", cursor:"zoom-in",
+                        border:"1px solid var(--border)" }} />
+                    <button onClick={() => setAiPhotos((prev) => prev.filter((_, i) => i !== ix))}
+                      disabled={aiBusy} aria-label="Remove photo"
+                      style={{ position:"absolute", top:-6, right:-6, width:18, height:18, borderRadius:999,
+                        border:"none", background:"var(--red)", color:"#fff", cursor:"pointer", fontSize:"11px",
+                        lineHeight:"18px", padding:0, display:"flex", alignItems:"center", justifyContent:"center" }}>×</button>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => runAiEstimate(aiPhotos)} disabled={aiBusy}
+                style={{ marginTop:"8px", display:"inline-flex", alignItems:"center", gap:"6px",
+                  padding:"8px 14px", borderRadius:"999px", border:"none", background:"var(--accent-fill)",
+                  color:"#0b0b12", fontSize:".76rem", fontWeight:800, cursor:"pointer", opacity: aiBusy ? .6 : 1 }}>
+                <Icon name="sparkle" variant="solid" size={13} />
+                {aiBusy && aiMode === "photo" ? "Estimating…" : `Estimate from ${aiPhotos.length} photo${aiPhotos.length > 1 ? "s" : ""}`}
+              </button>
+              <span style={{ fontSize:".68rem", color:"var(--muted)", marginLeft:"8px" }}>tap a photo to view · × to remove</span>
             </div>
           )}
           <PhotoViewer src={mlViewPhoto} onClose={() => setMlViewPhoto(null)} />
