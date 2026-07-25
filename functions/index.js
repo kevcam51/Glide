@@ -147,6 +147,12 @@ exports.sendTrainerRequest = require("./requests").sendTrainerRequest;
 // the (Kevin) FatSecret account + secret setup. No-op until the secrets are set.
 exports.foodSearch = require("./foodsearch").foodSearch;
 
+// MCP connector (S112, Phase 1 — READ-ONLY): exposes Glide as a remote MCP
+// server so a user's OWN Claude can read their Glide data. Stateless Streamable
+// HTTP over the same aitools.js runTool the chat uses. See docs/MCP-CONNECTOR.md.
+// ⭐ Parity rule: in-app AI and this connector must keep the same capabilities.
+exports.mcp = require("./mcp").mcp;
+
 // Training sessions (S100): the "red line" — stamps completedAt on sessions
 // whose end time has passed. That stamp is what Sunday billing will bill from.
 exports.sessionsMarkCompleted = require("./sessions").sessionsMarkCompleted;

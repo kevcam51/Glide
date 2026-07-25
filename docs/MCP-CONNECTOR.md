@@ -92,6 +92,21 @@ Same protocol, opposite direction — a later phase.
   defensible headline — especially for the trainer-platform story. Natural Premium/Max perk (and it
   LOWERS our cost to serve, the opposite of every other premium AI feature).
 
+## 3b. ⭐ STANDING RULE — in-app AI ↔ connector PARITY (Kevin, S111)
+
+**The in-app "Ask Glidna" AI and the MCP connector must always have the SAME capabilities.** If we
+discover a useful new function while building the connector, the in-app AI gets it too — and vice
+versa. Kevin: *"I want both to be great to work with while using the app."*
+
+- Build every capability into the SHARED tool layer (`functions/aitools.js` → `runTool`), never
+  into one front door only. Both surfaces are just doors onto that layer.
+- The ONLY legitimate differences are **presentation**, not capability: `propose_meal` /
+  `propose_workout` exist to render in-app Accept cards, while an external AI confirms
+  conversationally — same underlying write ability, different confirmation UX.
+- New tools need descriptions that stand alone for an EXTERNAL model (no Glide system prompt), and
+  the in-app prompt updated to match.
+- Deploy gotcha stays: `aitools.js` changes → deploy all four AI fns.
+
 ## 4. Architecture (to be finalized against verified current specs)
 
 > Verified against Anthropic's current connector requirements + the current MCP spec — see §7
