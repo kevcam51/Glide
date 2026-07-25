@@ -326,6 +326,17 @@ function weekWithLabels(week, labelMap) {
   }
   return r;
 }
+// Short human reference code for a client/plan, derived from its unique id
+// (S110e, Kevin). Every account/plan already has a unique id, so this gives each
+// one a stable 4-char badge (shown in the app) that a trainer can see and say —
+// e.g. "how's #7K2M" — to pick a specific one when names collide. Deterministic:
+// the app and the AI compute the SAME code from the same id. MUST match
+// src/App.jsx refCode().
+function refCode(id) {
+  const s = String(id || "").replace(/[^a-zA-Z0-9]/g, "");
+  return s ? s.slice(-4).toUpperCase() : "----";
+}
+
 // The plan's custom exercises, as id sets (by type) + an id→label map, so the AI
 // can build programs that include them (valid ids) and label them on the card.
 function customExerciseSets(data) {
@@ -1366,6 +1377,7 @@ async function runTool(name, input, ctx) {
     return {
       plans: index.filter((p) => p && p.id).map((p) => ({
         localPlanId: p.id,
+        ref: refCode(p.id),
         name: p.customName || p.name || "(unnamed)",
         isSimulation: !!p.isSimulation,
         importedFromTrainerize: !!p.trainerizeId,
@@ -1405,6 +1417,7 @@ async function runTool(name, input, ctx) {
       }
       out.push({
         clientId: doc.id,
+        ref: refCode(doc.id),
         name: p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Client",
         lastLogDate: last,
         daysSinceLastLog: daysSince,
@@ -1424,12 +1437,16 @@ async function runTool(name, input, ctx) {
     if (!q) return { error: "Provide part of the client's name to search for." };
     const snap = await db.collection("users")
       .where("assignedTrainerId", "==", ctx.callerUid).limit(200).get();
+    // Let the user reference a client by their SHORT ID code too (e.g. "#7K2M"),
+    // not just the name — strip any leading "#" and compare case-insensitively.
+    const qCode = q.replace(/[^a-z0-9]/g, "").toUpperCase();
     const matches = [];
     for (const doc of snap.docs) {
       const p = doc.data();
       const nm = p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Client";
-      if (nm.toLowerCase().includes(q) || String(p.email || "").toLowerCase().includes(q)) {
-        matches.push({ clientId: doc.id, name: nm, email: p.email || null });
+      const code = refCode(doc.id);
+      if (nm.toLowerCase().includes(q) || String(p.email || "").toLowerCase().includes(q) || (qCode && code === qCode)) {
+        matches.push({ clientId: doc.id, ref: code, name: nm, email: p.email || null });
         if (matches.length >= 10) break;
       }
     }

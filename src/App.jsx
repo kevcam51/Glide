@@ -13401,6 +13401,11 @@ const PLANS_KEY = "caliq-plans";
 const planDataKey    = (id) => `caliq-${id}`;            // caliq-self, caliq-p1700…
 const planLogPrefix  = (id) => `caliq-log-${id}-`;       // + YYYY-MM-DD
 const planHistoryKey = (id) => `caliq-history-${id}`;
+// Short human reference code for a client/plan from its unique id (S110e, Kevin):
+// a stable 4-char badge shown on cards so same-named people/plans can be told
+// apart and referenced ("#7K2M") — including to the AI. MUST match aitools.js
+// refCode() so the app and the AI agree on the same code.
+const refCode = (id) => { const s = String(id || "").replace(/[^a-zA-Z0-9]/g, ""); return s ? s.slice(-4).toUpperCase() : "----"; };
 
 // Live-refresh a trainer's client summary cards. Watches each connected client's
 // active-plan history doc — it changes on nearly every client action (meals,
@@ -17765,7 +17770,8 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
             {sim && <span className="flex-none text-[.55rem] font-bold tracking-wide px-1.5 py-0.5 rounded bg-[rgba(181,123,255,.18)] text-[#b57bff]">SANDBOX</span>}
           </div>
           <div className="text-xs text-muted truncate">
-            {sim ? "Simulation" : "Local plan"}
+            <span className="font-mono text-primary">#{refCode(p.id)}</span>
+            {" · "}{sim ? "Simulation" : "Local plan"}
             {p.weight ? ` · ${p.weight} lbs` : ""}
             {p.goal ? ` → ${p.goal} lbs` : ""}
             {p.lastSaved ? ` · ${new Date(p.lastSaved).toLocaleDateString()}` : ""}
@@ -17802,7 +17808,10 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
             <span className="truncate">{nm}</span>
             <span className="flex-none text-[.55rem] font-bold tracking-wide px-1.5 py-0.5 rounded bg-[rgba(8,220,224,.15)] text-primary">CONNECTED</span>
           </div>
-          <div className="text-xs text-muted truncate">{c.email || "Linked client account"}</div>
+          <div className="text-xs text-muted truncate">
+            <span className="font-mono text-primary">#{refCode(c.uid)}</span>
+            {" · "}{c.email || "Linked client account"}
+          </div>
         </div>
         <span className="flex-none text-muted text-lg leading-none">›</span>
       </div>
