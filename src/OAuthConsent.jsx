@@ -173,6 +173,20 @@ export default function OAuthConsent() {
             Cancel
           </button>
         </div>
+
+        {/* Terms + Privacy (S114). Deliberately LINKS, not a checkbox: the person
+            here already has a Glidna account and accepted the Terms at signup —
+            this authorizes a different door into their OWN data, not a new
+            agreement. A second checkbox would imply a second contract that
+            doesn't exist (and Anthropic's directory review expects a reachable
+            privacy policy). */}
+        <div className="mt-4 pt-3 border-t border-border text-[11px] text-muted leading-relaxed">
+          Connecting shares your Glidna data with the AI assistant you're linking, which processes
+          it under its own terms. See our{" "}
+          <a href="/terms.html" target="_blank" rel="noopener noreferrer" className="text-primary underline">Terms of Service</a>
+          {" "}and{" "}
+          <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="text-primary underline">Privacy Policy</a>.
+        </div>
       </div>
     </div>
   );
