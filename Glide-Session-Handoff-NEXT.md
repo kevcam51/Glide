@@ -1,5 +1,107 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S109–S111 (Jul 24): body-comp charts · food/AI UX · #ID codes · DOB · MCP connector design
+_All pushed to `origin/main` (@ `7d3129e`), tree clean, all functions deployed. Firebase
+`calorieiq-29762`; model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`.
+Long session — 14 commits. **Firebase CLI login was re-fixed this session** (see gotchas)._
+
+### 🔴 DO THIS FIRST NEXT SESSION — live verification debt
+Several S109–S110 features shipped **build-verified but NOT live-clicked**, because the preview's
+test session logged out mid-session and I don't type login passwords. **Kevin should sign the
+preview into `trainer.uitest@calorieiq-test.com` / `TestPass123`, then ask for verification.**
+Specifically unverified in-app:
+1. **Body-comp charts** (S109b–f) — Kevin DID confirm charts render + asked for the label fixes,
+   but the **tap-a-bodyweight-point → edit/delete past weigh-in** flow was never clicked live.
+2. **DOB field** (S110g) — never seen live at all: optional Date-of-birth on the Personal step,
+   age auto-derives + auto-updates. Verify it renders, computes, and that leaving it blank still
+   works (age stays manually editable).
+3. **#ID codes** (S110f) — verify the short code shows on client/plan cards AND that asking the AI
+   about "#ABC123" resolves correctly.
+4. **Multi-photo** (S110b/c) — verify accumulate-then-estimate in Add Food, and 20-photo chat.
+5. **Food-form scroll-into-view** (S110) — Kevin's original complaint was mobile-specific; verify
+   on a narrow viewport that tapping "Add food" lifts the form into view.
+
+### ✅ S109 — Body composition (Kevin's queued 3rd request) — SHIPPED
+- **`leeMuscleMassLbs()`** — skeletal muscle mass via **Lee et al. (2000) Model 2**, coefficients
+  adversarially verified across the primary paper + 2 independent sources:
+  `SMM(kg) = 0.244·wtKg + 7.80·htM − 0.098·age + 6.6·sex − 3.3` (male=1/female=0; race term = 0 =
+  the White/Hispanic reference, since we don't collect ancestry). Gated on valid inputs, clamped
+  10–60 kg. Worked example 30M/80kg/1.80m → 33.92 kg ✓. **Uses weight/age/sex — NOT height-free,
+  and NOT circumference-based** (that's the other Lee model, deliberately not used).
+- `measurementMetrics()` also returns **fatMassLbs** + **muscleMassLbs**; readout gained Fat mass +
+  Muscle tiles.
+- **Charts (S109b, reworked per Kevin):** SEPARATE per-metric graphs (`MetricLineChart`) for
+  Bodyweight / Muscle / Fat mass / Lean mass / Body fat % — **dates on the x-axis**, side-scroll,
+  shared **timeframe filter** (All/1Y/6M/3M/1M), all moved to a **"Trends & Charts" section at the
+  BOTTOM** of the measurements modal (under the stat entry + history). **Tap a Bodyweight point →
+  inline edit/delete that past weigh-in** (`onEditWeighIn(date, weight|null)`, wired at all 3 call
+  sites: Results, DailyDashboard, ClientHome; merge-by-date so a day's workout/notes survive).
+- Every point maps to a REAL entry (actual weigh-ins carrying computed muscle/fat/lean via the
+  nearest BF% reading; actual BF readings) — no synthetic carry-forward points.
+- **S109c–f polish:** section + guidance show from the FIRST weigh-in (was hidden until 2);
+  value labels got a **halo** (`paintOrder: stroke`, stroke `--color-surface2`) so lines can't
+  block them; labels switched to neutral `--color-fg`; **lean line hardcoded `#b57bff` →
+  `var(--purple)`** so every color adapts to light/dark theme (Kevin's explicit ask).
+
+### ✅ S110 — Food-entry + AI-chat UX
+- **AI sentence-spacing (root-caused):** the space is NOT lost in transport — the model sometimes
+  emits `end.Next`. Fixed BOTH ends: (a) `RichText` repair regex
+  `/([a-z0-9)\]"'%])([.!?])(?=[A-Z])/g → "$1$2 "` (won't touch decimals/abbrevs/domains);
+  (b) both system prompts now demand properly-spaced prose + "same polish as a top-tier writing
+  assistant."
+- **Food form lifts into view** on open (mobile squint fix) + **multi-photo**: Add Food now
+  ACCUMULATES photos ("Add a photo"/"Add another photo", × to remove, "Estimate from N photos"),
+  and BOTH surfaces raised to **20 photos** (chat + food estimate; backend caps raised to match).
+- **S110d — AI cost + focus (Kevin's ask):** new **`find_client`** tool resolves ONE named client
+  cheaply; prompt now forbids `list_clients`/`coach_summary` for single-person questions and makes
+  the resolved client the sticky active subject. Client-role accounts were already self-scoped.
+- **S110e — same-name disambiguation:** `find_client` returns email always, and when 2+ match it
+  enriches each with current weight + last-log date (per-match reads ONLY when ambiguous); prompt
+  makes the AI ASK which one using human details, never raw ids.
+- **S110f — short #ID codes:** every client + plan now has a visible short code derived from its
+  unique id, shown on cards and usable in AI search ("open #7K2M").
+- **S110g — optional Date of Birth:** DOB → age auto-derives and stays current; **clearly marked
+  optional**, age still manually editable when DOB is blank.
+
+### 📄 S111 — MCP connector design doc (`docs/MCP-CONNECTOR.md`) — DESIGN ONLY, nothing built
+Kevin wants users to drive Glide from **their own Claude**. Doc has: plain-language explainer, the
+**KEEP-FOREVER benefits brainstorm** (Kevin explicitly asked to save it), inventory of the **34
+existing `aitools.js` tools** the connector would front, verified architecture, phased plan, and a
+verified monetization section. Two research workflows (7 researchers + 7 adversarial verifiers,
+primary sources) produced:
+- **[CORRECTED] Custom connectors work on ALL Claude plans incl. FREE** (Free = 1 connector). No
+  user-side price floor — earlier assumption was wrong.
+- **[CORRECTED] Auth is NOT required by Claude** (authless supported) — our auth is our choice.
+- Transport = **Streamable HTTP** (legacy SSE deprecated). Spec 2025-11-25 (2026-07-28 imminent).
+- If we do OAuth: OAuth 2.1 RS + RFC 9728 PRM + RFC 8414 metadata + **PKCE S256** + RFC 8707
+  audience binding; **CIMD recommended over DCR**. Claude callback
+  `https://claude.ai/api/mcp/auth_callback`. Limits: 150K-char tool result, 300s timeout.
+- **Hosting on our stack is Google's documented pattern** (Cloud Run / Functions v2 — our
+  `aiChatStream` already streams SSE there). Use the SDK's **stateless per-request-instance**
+  shape (Cloud Run session affinity is best-effort; SDK bug #1994 if you reuse one transport).
+- **The only real new build = a small OAuth AS layer** (authorize/token/metadata) over Firebase
+  sign-in; the MCP endpoint then calls the SAME `runTool` with the same `ctx`.
+- **Monetization [DECIDED]:** Kevin chose Premium/Max. Research refined it to **"gated with a free
+  read-only taste"** (Figma/Strava style). Key findings: general SaaS connectors are free, BUT
+  **fitness is the exception — Strava's (Jun 2026) is the only official fitness MCP connector and
+  it's PAID-subscriber-only + read-only**; ZERO coaching platforms (Trainerize/TrueCoach/Everfit)
+  ship anything; **Glide's closed API means no community undercut is possible**; the cautionary
+  tales (Twitter/Reddit/IFTTT) are about REVOKING free access, not launching gated; ~zero marginal
+  cost makes the gate a **reversible dial**.
+- **Next if building:** Phase 1 = read-only connector (OAuth + Streamable HTTP + read tools).
+
+### 🔑 Gotchas (this session)
+- **Firebase CLI login broke again** ("invalid_request / Unable to verify client" on the paste
+  flow). Fix that worked: `firebase logout` → `firebase login` → complete Google sign-in in a
+  **Firefox Private Window** (Cmd+Shift+P). Verify with `firebase login:list` +
+  `firebase projects:list`. NOT needed for frontend-only work (Vercel auto-deploys on push).
+- `aitools.js` changed → deploy **all four** AI fns (aiChat, aiChatStream, logMeal,
+  setWorkoutSchedule). `estimateFood` is separate; deploy it when the food-estimate path changes.
+- Preview flakiness persists (0x0 viewport, day-rows are nested divs with delegated onClick) —
+  drive via `javascript_tool` DOM clicks/reads; HTML5 drag works with a shared `new DataTransfer()`.
+- **I do not type login passwords** (even test-account ones) — Kevin must sign the preview in for
+  live verification.
+
 ## ⚡⚡⚡ S108 (Jul 23): HR second-check + HR in cardio picker + calorie-wheel goal + unified folders
 _All pushed to `origin/main` (@ `3c65fba`), tree clean. AI functions redeployed. Firebase `calorieiq-29762`;
 model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`. Four features, all verified live._
