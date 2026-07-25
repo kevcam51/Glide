@@ -36,6 +36,7 @@ const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const { StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/server/streamableHttp.js");
 const { z } = require("zod");
 const { buildTools, runTool } = require("./aitools");
+const { verifyAccessToken, RESOURCE_URL, CANONICAL_BASE } = require("./mcpauth");
 
 // Origins allowed to reach this endpoint. Anthropic connects from its own
 // cloud (no Origin header on server-to-server calls), so a MISSING Origin is
@@ -152,8 +153,17 @@ async function uidFromRequest(req) {
   const h = req.get("authorization") || req.get("Authorization") || "";
   const m = /^Bearer\s+(.+)$/i.exec(h.trim());
   if (!m) return null;
+  const token = m[1];
+  // 1) An OAuth access token we issued (how Claude and every real MCP client
+  //    authenticates — opaque, hashed in Firestore, audience-bound).
   try {
-    const decoded = await admin.auth().verifyIdToken(m[1]);
+    const grant = await verifyAccessToken(admin.firestore(), token);
+    if (grant && grant.uid) return grant.uid;
+  } catch (e) { /* fall through */ }
+  // 2) A Firebase ID token — first-party/testing path (kept so the endpoint
+  //    stays directly testable without running the whole OAuth dance).
+  try {
+    const decoded = await admin.auth().verifyIdToken(token);
     return decoded && decoded.uid ? decoded.uid : null;
   } catch (e) {
     return null;
@@ -163,9 +173,10 @@ async function uidFromRequest(req) {
 // A 401 that tells the client WHERE to authenticate (RFC 9728 discovery
 // pointer). Phase 2 serves the actual metadata document at that URL.
 function unauthorized(req, res) {
-  const base = `https://${req.get("host")}`;
+  // Point at the CANONICAL domain: Cloud Functions can't own the host root,
+  // so glidna.com (Vercel) serves /.well-known/* and rewrites to mcpMetadata.
   res.set("WWW-Authenticate",
-    `Bearer realm="Glidna", resource_metadata="${base}/.well-known/oauth-protected-resource"`);
+    `Bearer realm="Glidna", resource_metadata="${CANONICAL_BASE}/.well-known/oauth-protected-resource"`);
   res.status(401).json({
     jsonrpc: "2.0",
     error: { code: -32001, message: "Unauthorized — connect your Glidna account." },

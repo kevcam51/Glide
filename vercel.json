@@ -1,7 +1,15 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/i/:code", "destination": "/api/invite?c=:code" }
+    { "source": "/i/:code", "destination": "/api/invite?c=:code" },
+    { "source": "/mcp", "destination": "https://us-central1-calorieiq-29762.cloudfunctions.net/mcp" },
+    { "source": "/.well-known/oauth-protected-resource", "destination": "https://us-central1-calorieiq-29762.cloudfunctions.net/mcpMetadata?doc=prm" },
+    { "source": "/.well-known/oauth-protected-resource/mcp", "destination": "https://us-central1-calorieiq-29762.cloudfunctions.net/mcpMetadata?doc=prm" },
+    { "source": "/.well-known/oauth-authorization-server", "destination": "https://us-central1-calorieiq-29762.cloudfunctions.net/mcpMetadata?doc=as" },
+    { "source": "/oauth/token", "destination": "https://us-central1-calorieiq-29762.cloudfunctions.net/mcpToken" },
+    { "source": "/oauth/register", "destination": "https://us-central1-calorieiq-29762.cloudfunctions.net/mcpRegister" },
+    { "source": "/oauth/authorize", "destination": "/index.html" },
+    { "source": "/connect", "destination": "/index.html" }
   ],
   "functions": {
     "api/og.js": {

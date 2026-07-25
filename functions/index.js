@@ -152,6 +152,13 @@ exports.foodSearch = require("./foodsearch").foodSearch;
 // HTTP over the same aitools.js runTool the chat uses. See docs/MCP-CONNECTOR.md.
 // ⭐ Parity rule: in-app AI and this connector must keep the same capabilities.
 exports.mcp = require("./mcp").mcp;
+// Phase 2 (S113) — the OAuth 2.1 layer that lets a user connect their Glidna
+// account from their OWN Claude. Fronted by glidna.com via vercel.json rewrites
+// (OAuth discovery requires /.well-known/* on the issuer's host).
+exports.mcpMetadata = require("./mcpauth").mcpMetadata;   // RFC 9728 + RFC 8414 discovery
+exports.mcpRegister = require("./mcpauth").mcpRegister;   // RFC 7591 dynamic client registration
+exports.mcpAuthorize = require("./mcpauth").mcpAuthorize; // consent page → single-use code
+exports.mcpToken = require("./mcpauth").mcpToken;         // code/refresh → opaque tokens
 
 // Training sessions (S100): the "red line" — stamps completedAt on sessions
 // whose end time has passed. That stamp is what Sunday billing will bill from.
