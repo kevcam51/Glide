@@ -204,6 +204,24 @@ const DAY_SHORT  = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Age from an OPTIONAL date of birth (S110g, Kevin) — so age stays current on
+// its own instead of going stale. Returns a whole-year age, or null if there's
+// no valid dob. `data.dob` is "YYYY-MM-DD"; entering it is the user's choice.
+function ageFromDob(dob) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dob || "").trim());
+  if (!m) return null;
+  const y = +m[1], mo = +m[2], d = +m[3];
+  const now = new Date();
+  let age = now.getFullYear() - y;
+  const beforeBday = (now.getMonth() + 1 < mo) || (now.getMonth() + 1 === mo && now.getDate() < d);
+  if (beforeBday) age -= 1;
+  return (age >= 0 && age <= 120) ? age : null;
+}
+// The age to USE in every calc: the dob-derived age when a birthday is set
+// (always current), else the manually-entered age. One source so DOB and manual
+// entry never disagree. MUST match aitools.js effectiveAge().
+const effectiveAge = (d) => { const a = ageFromDob(d && d.dob); return a != null ? a : (Number(d && d.age) || 0); };
+
 function calcBMR(gender, weightLbs, heightFt, heightIn, age) {
   const kg = weightLbs * 0.453592;
   const cm = (heightFt * 12 + Number(heightIn)) * 2.54;
@@ -393,7 +411,7 @@ const TAPE_SITE_HELP = {
 // Jackson-Pollock 3-site skinfold → body density → Siri body-fat %. Needs age +
 // gender (both on the plan). Skinfolds in millimetres.
 function caliperBF(d, m) {
-  const age = Number(d.age) || 0;
+  const age = effectiveAge(d);
   const n = (v) => (Number(v) > 0 ? Number(v) : null);
   let sum = null, bd = null;
   if (d.gender === "male") {
@@ -415,7 +433,7 @@ function caliperBF(d, m) {
 // Covert Bailey (The Ultimate Fit or Fat): body fat % from tape alone — no
 // scale, no height. Age/gender variants selected from the plan's own fields.
 function baileyBF(d, m) {
-  const age = Number(d.age) || 0;
+  const age = effectiveAge(d);
   const n = (v) => (Number(v) > 0 ? Number(v) : null);
   if (d.gender === "male") {
     const waist = n(m.waist), hips = n(m.hips), forearm = n(m.forearm), wrist = n(m.wrist);
@@ -472,7 +490,7 @@ function whtrOf(d, m) {
 function leeMuscleMassLbs(d, weightLbsOverride) {
   const weightLbs = Number(weightLbsOverride != null ? weightLbsOverride : (d && d.weightLbs)) || 0;
   const heightIn = (Number(d && d.heightFt) || 0) * 12 + (Number(d && d.heightIn) || 0);
-  const age = Number(d && d.age) || 0;
+  const age = effectiveAge(d);
   const sex = d && d.gender === "male" ? 1 : d && d.gender === "female" ? 0 : null;
   if (sex == null) return null;
   if (!(weightLbs >= 60 && weightLbs <= 500)) return null;
@@ -2237,7 +2255,7 @@ function BottomNav({ onBack, onNext, nextLabel = "Next →", nextDisabled = fals
 // ─── Step 1: Personal ─────────────────────────────────────────────────────────
 
 function StepPersonal({ data, onChange, onNext }) {
-  const valid = data.age && data.weightLbs && data.heightFt && data.heightIn !== "" && data.gender;
+  const valid = effectiveAge(data) && data.weightLbs && data.heightFt && data.heightIn !== "" && data.gender;
 
   const numOnly = (key) => (e) => {
     const filtered = e.target.value.replace(/[^0-9]/g, "");
@@ -2284,12 +2302,35 @@ function StepPersonal({ data, onChange, onNext }) {
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div>
             <label className={WZ.label}>Age <span className={WZ.hint}>years</span></label>
-            <input className={WZ.input} inputMode="numeric" placeholder="28" value={data.age} onChange={numOnly("age")} maxLength={3} onKeyDown={advanceOnEnter}/>
+            {data.dob ? (
+              <input className={WZ.input + " opacity-75"} value={ageFromDob(data.dob) != null ? `${ageFromDob(data.dob)} · from birthday` : "—"} readOnly
+                title="Set from your date of birth below — clear it there to type age directly." />
+            ) : (
+              <input className={WZ.input} inputMode="numeric" placeholder="28" value={data.age} onChange={numOnly("age")} maxLength={3} onKeyDown={advanceOnEnter}/>
+            )}
           </div>
           <div>
             <label className={WZ.label}>Current Weight <span className={WZ.hint}>lbs</span></label>
             <input className={WZ.input} inputMode="decimal" placeholder="185" value={data.weightLbs} onChange={decOnly("weightLbs")} maxLength={6} onKeyDown={advanceOnEnter}/>
           </div>
+        </div>
+
+        {/* Optional date of birth (S110g, Kevin) — if given, age is computed from
+            it and stays current on its own. Entirely optional; the manual age
+            field above works fine on its own. */}
+        <div className="mb-4">
+          <label className={WZ.label}>Date of birth <span className={WZ.hint}>optional — keeps your age up to date automatically</span></label>
+          <input className={WZ.input} type="date" max={ymdLocal()} value={data.dob || ""}
+            onChange={(e) => onChange("dob", e.target.value)} />
+          {data.dob ? (
+            <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+              <span className="text-[.72rem] text-muted">{ageFromDob(data.dob) != null ? `You're ${ageFromDob(data.dob)} — this updates on its own, so you never have to.` : "That date doesn't look right — check it or clear it."}</span>
+              <button type="button" onClick={() => onChange("dob", "")}
+                className="text-[.72rem] font-semibold text-primary underline cursor-pointer border-0 bg-transparent p-0">Clear &amp; type age instead</button>
+            </div>
+          ) : (
+            <div className="mt-1.5 text-[.68rem] text-muted">Prefer not to share it? Leave it blank and just enter your age above — totally fine.</div>
+          )}
         </div>
 
         <div className="mb-4">
@@ -2765,7 +2806,7 @@ function cardioExFor(session, data) {
     const hr = Number(session.hr) || 0;
     const d = data || {};
     return { id: "hr", label: `${hr} bpm`, hr, isHr: true,
-      calPerMin: hrCaloriesPerMin(hr, d.gender, d.weightLbs, d.age) };
+      calPerMin: hrCaloriesPerMin(hr, d.gender, d.weightLbs, effectiveAge(d)) };
   }
   return findCardioEx(session ? session.type : undefined, (data || {}).customExercises);
 }
@@ -3108,7 +3149,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
 // everywhere. Estimates only; the pick range tops out near 90% of max HR and
 // flags anything higher as brief-only, so we don't push anyone too hard.
 function HeartRatePicker({ data, hr, duration = 30, onChange }) {
-  const age = Number(data && data.age) || 30;
+  const age = effectiveAge(data) || 30;
   const range = hrHealthyRange(age);
   const pickMin = Math.max(60, range.min - 10), pickMax = range.mhr;
   const clamp = (v) => Math.min(pickMax, Math.max(pickMin, Math.round(v)));
@@ -3640,7 +3681,7 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
   // set yet) so Results never crashes on a half-built plan. Matches the guarded
   // lookups elsewhere (computeClientCalories, App's computedTdee).
   const actObj = ACTIVITY_LEVELS.find(a=>a.id===activityLevel) || ACTIVITY_LEVELS[0];
-  const bmr    = calcBMR(gender, Number(weightLbs), Number(heightFt), Number(heightIn), Number(age));
+  const bmr    = calcBMR(gender, Number(weightLbs), Number(heightFt), Number(heightIn), effectiveAge(data));
   const tdee   = Math.round(bmr * actObj.multiplier);
   const floor  = n => Math.max(n, 1200);
 
@@ -12882,7 +12923,7 @@ function AICoach({ data, tdee, totalBurn, totalStrBurn, activeDays, activeStrDay
 
 CLIENT PROFILE:
 - Name: ${fullName(data) || "Client"}
-- Age: ${data.age}, Gender: ${data.gender}, Weight: ${data.weightLbs} lbs, Height: ${data.heightFt}'${data.heightIn}"
+- Age: ${effectiveAge(data)}, Gender: ${data.gender}, Weight: ${data.weightLbs} lbs, Height: ${data.heightFt}'${data.heightIn}"
 - Goal weight: ${data.goalWeight || "not set"} lbs
 - TDEE: ${tdee} cal/day
 - Cardio: ${activeDays} days/week, ${totalBurn} cal/week burned
@@ -13676,7 +13717,7 @@ function computeClientCalories(d) {
   const w = Number(d.weightLbs);
   if (!w || !d.gender) return null;
   const actObj = ACTIVITY_LEVELS.find((a) => a.id === d.activityLevel) || ACTIVITY_LEVELS[0];
-  const bmr = calcBMR(d.gender, w, Number(d.heightFt), Number(d.heightIn), Number(d.age));
+  const bmr = calcBMR(d.gender, w, Number(d.heightFt), Number(d.heightIn), effectiveAge(d));
   if (!bmr || !isFinite(bmr)) return null;
   const tdee = Math.round(bmr * actObj.multiplier);
   const allStrEx = [REST_ST, ...STRENGTH_EXERCISES, ...customOf(d.customExercises, "strength")];
@@ -21339,7 +21380,7 @@ export default function App() {
 
   // ── Compute values for dashboard (same formulas as Results) ──
   const actObj = ACTIVITY_LEVELS.find(a=>a.id===data.activityLevel) || ACTIVITY_LEVELS[0];
-  const bmr = calcBMR(data.gender, Number(data.weightLbs), Number(data.heightFt), Number(data.heightIn), Number(data.age));
+  const bmr = calcBMR(data.gender, Number(data.weightLbs), Number(data.heightFt), Number(data.heightIn), effectiveAge(data));
   const computedTdee = Math.round(bmr * actObj.multiplier);
   const allStrEx = [REST_ST, ...STRENGTH_EXERCISES, ...customOf(data.customExercises, "strength")];
   const computedDayData = DAYS.map(day => {

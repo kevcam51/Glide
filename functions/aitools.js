@@ -511,6 +511,19 @@ async function appendHistory(db, uid, planId, ctx, action) {
 // the dashboard macro defaults). The scheduled-exercise add-back is omitted —
 // it's a small adjustment and zero for the common all-rest-days plan. ──────────
 const ACTIVITY_MULT = { sedentary: 1.2, light: 1.375, moderate: 1.55, very: 1.725, extra: 1.9 };
+// Age from an OPTIONAL date of birth (S110g) — keeps age current on its own.
+// MUST match src/App.jsx ageFromDob()/effectiveAge().
+function ageFromDob(dob) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dob || "").trim());
+  if (!m) return null;
+  const y = +m[1], mo = +m[2], d = +m[3];
+  const now = new Date();
+  let age = now.getFullYear() - y;
+  const beforeBday = (now.getMonth() + 1 < mo) || (now.getMonth() + 1 === mo && now.getDate() < d);
+  if (beforeBday) age -= 1;
+  return (age >= 0 && age <= 120) ? age : null;
+}
+const effectiveAge = (d) => { const a = ageFromDob(d && d.dob); return a != null ? a : (Number(d && d.age) || 0); };
 function calcBMR(gender, weightLbs, heightFt, heightIn, age) {
   const kg = weightLbs * 0.453592;
   const cm = (Number(heightFt) * 12 + Number(heightIn)) * 2.54;
@@ -564,7 +577,7 @@ function weeklyPlanBurn(d) {
   (Array.isArray(d.customExercises) ? d.customExercises : []).forEach((e) => { if (e && e.id) custom[e.id] = e; });
   const burnOf = (s) => {
     if (!s || !s.duration) return 0;
-    if (s.type === "hr") return Math.round(hrCalPerMin(s.hr, d.gender, d.weightLbs, d.age) * s.duration);
+    if (s.type === "hr") return Math.round(hrCalPerMin(s.hr, d.gender, d.weightLbs, effectiveAge(d)) * s.duration);
     const ce = custom[s.type];
     if (ce && ce.calPerMin) return Math.round(Number(ce.calPerMin) * s.duration);
     return Math.round((MET[s.type] || 0) * w * 0.453592 * (s.duration / 60));
@@ -581,7 +594,7 @@ function nutritionTargets(d) {
   const w = Number(d.weightLbs);
   let cal = null;
   if (w && d.gender) {
-    const bmr = calcBMR(d.gender, w, d.heightFt, d.heightIn, Number(d.age));
+    const bmr = calcBMR(d.gender, w, d.heightFt, d.heightIn, effectiveAge(d));
     if (bmr && isFinite(bmr)) {
       const tdee = Math.round(bmr * (ACTIVITY_MULT[d.activityLevel] || 1.2));
       // Nutrition approach (matches App.jsx isEatback): "eatback" (default)
@@ -621,7 +634,7 @@ function profileSummary(d) {
   const num = (v) => (v === "" || v == null ? null : Number(v));
   const required = {
     gender: !!d.gender,
-    age: num(d.age) > 0,
+    age: effectiveAge(d) > 0,
     height: num(d.heightFt) > 0,
     weight: num(d.weightLbs) > 0,
     activityLevel: !!d.activityLevel,
@@ -632,7 +645,9 @@ function profileSummary(d) {
     firstName: d.firstName || null,
     lastName: d.lastName || null,
     gender: d.gender || null,
-    age: num(d.age),
+    age: effectiveAge(d) || null,
+    dob: d.dob || null,
+    ageAutoFromDob: ageFromDob(d.dob) != null,
     heightFeet: num(d.heightFt),
     heightInches: num(d.heightIn),
     weightLbs: num(d.weightLbs),
@@ -663,7 +678,7 @@ function profileSummary(d) {
 // Covert Bailey (The Ultimate Fit or Fat): needs NO scale and NO height —
 // the metric for scale-averse clients. Age/gender variants auto-selected.
 function baileyBF(d, m) {
-  const age = Number(d.age) || 0;
+  const age = effectiveAge(d);
   const g = d.gender;
   const n = (v) => (v > 0 ? Number(v) : null);
   if (g === "male") {
@@ -834,7 +849,8 @@ function buildTools(role, opts = {}) {
           firstName: { type: "string" },
           lastName: { type: "string" },
           gender: { type: "string", enum: ["male", "female"], description: "Biological sex (for the BMR calc)" },
-          age: { type: "number", description: "Years" },
+          age: { type: "number", description: "Years. OPTIONAL if dob is given (dob keeps age current automatically)." },
+          dob: { type: "string", description: "OPTIONAL date of birth as YYYY-MM-DD. If set, age is derived from it and stays current — don't also pass age. Only set when the user volunteers their birthday; it's their choice." },
           heightFeet: { type: "number", description: "Height feet part, e.g. 5" },
           heightInches: { type: "number", description: "Height inches part 0–11 (convert from cm/total inches if given)" },
           weightLbs: { type: "number", description: "Current weight, lbs" },
@@ -1706,6 +1722,13 @@ async function runTool(name, input, ctx) {
     }
     if (input.gender === "male" || input.gender === "female") { d.gender = input.gender; changes.push(`gender ${input.gender}`); }
     if (input.age != null) { const a = clampNum(input.age, 13, 100); if (a) { d.age = a; changes.push(`age ${a}`); } }
+    // Optional date of birth (S110g) — validate, store, and derive age. Empty
+    // string clears it (falls back to the manual age).
+    if (typeof input.dob === "string") {
+      const dob = input.dob.trim();
+      if (dob === "") { delete d.dob; changes.push("cleared dob"); }
+      else if (ageFromDob(dob) != null) { d.dob = dob; changes.push(`date of birth (age ${ageFromDob(dob)})`); }
+    }
     if (input.heightFeet != null) { const ft = clampNum(input.heightFeet, 3, 8); if (ft) { d.heightFt = ft; if (!changes.includes("height")) changes.push("height"); } }
     if (input.heightInches != null) { const inch = clampNum(input.heightInches, 0, 11); if (inch != null) { d.heightIn = inch; if (!changes.includes("height")) changes.push("height"); } }
     if (input.weightLbs != null) { const w = clampNum(input.weightLbs, 50, 1000, true); if (w) { d.weightLbs = w; changes.push(`weight ${w} lbs`); } }
