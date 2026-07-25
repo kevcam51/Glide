@@ -1429,15 +1429,36 @@ async function runTool(name, input, ctx) {
       const p = doc.data();
       const nm = p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Client";
       if (nm.toLowerCase().includes(q) || String(p.email || "").toLowerCase().includes(q)) {
-        matches.push({ clientId: doc.id, name: nm });
+        matches.push({ clientId: doc.id, name: nm, email: p.email || null });
         if (matches.length >= 10) break;
+      }
+    }
+    // Same-name disambiguation (Kevin, S110e): when 2+ people match, enrich each
+    // with current weight + last-log date so they can be told apart by a HUMAN
+    // detail instead of the raw id. Only pay for these per-match reads when it's
+    // actually ambiguous — a unique name stays a single cheap roster query.
+    if (matches.length > 1) {
+      for (const m of matches) {
+        try {
+          const pid = await activePlanId(db, m.clientId);
+          const wrap = await kvGetJSON(db, m.clientId, `caliq-${pid}`);
+          const w = wrap && wrap.data && wrap.data.weightLbs;
+          if (w) m.currentWeightLbs = Math.round(Number(w));
+          const prefix = `caliq-log-${pid}-`;
+          const logs = await db.collection(`users/${m.clientId}/kv`)
+            .where("k", ">=", prefix).where("k", "<=", prefix + "")
+            .orderBy("k", "desc").limit(1).get();
+          logs.forEach((l) => { m.lastLogDate = (l.data().k || "").slice(-10); });
+        } catch (e) { /* best-effort disambiguation */ }
       }
     }
     return {
       matches, count: matches.length,
       note: matches.length === 0
         ? "No connected client matched. Most of a trainer's people are LOCAL files — check list_local_plans (imported/sim/template plans) before assuming they aren't in Glide."
-        : undefined,
+        : matches.length > 1
+          ? "Several people match that name. Ask the user which one, describing them by a human detail (email, current weight, or last-log date) — NEVER the raw id. Then use that clientId."
+          : undefined,
     };
   }
 
