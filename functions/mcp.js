@@ -74,9 +74,26 @@ const READ_TOOLS = new Set([
   "list_local_plans",
 ]);
 
-// Free accounts get a read-only taste (design doc §8: gated-with-free-taste,
-// Figma/Strava style). Premium/Max get generous limits; Phase 2 adds writes.
-const DAILY_CALLS = { free: 10, premium: 200, max: 1000 };
+// Daily call caps. These are ABUSE BACKSTOPS, not a revenue lever — measured
+// cost is ~0.0013¢ per typical call (S112 costing, verified rates below), so
+// generosity is basically free and Kevin wants the connector to become a daily
+// habit. The real paywall is Phase 2 WRITES (logging/editing), not reads, so a
+// generous free READ tier costs us ~nothing and cannibalizes nothing.
+//
+// MEASURED COST PER TYPICAL CALL (get_nutrition_log, 7 days = 10 reads/1 write):
+//   Firestore nam5 (multi-region, 2x regional): reads $0.06/100k, writes $0.18/100k
+//     → 10 x $0.0000006 + 1 x $0.0000018            = $0.0000078
+//   Cloud Run request-based, Firebase v2 defaults (256MiB but a FULL 1 vCPU),
+//   ~200ms billable (rounded up to 100ms):
+//     req $0.0000004 + cpu 0.2 x $0.000024 + mem 0.2 x 0.25 x $0.0000025
+//                                                    = $0.0000053
+//   TOTAL ~ $0.000013/call  (~1/1000 of a cent)
+// So: 200 calls/day/user ~ $0.08/user/month. 2,000/day ~ $0.79. 10,000/day ~ $3.93.
+// Free-tier cushion on top: 50,000 Firestore reads/day + 2M Cloud Run req/month.
+//
+// ⚠️ coach_summary is the outlier — ~120 reads (12x a normal call, ~0.01c). It's
+// trainer-only and rate-limited by these same caps, so it stays bounded.
+const DAILY_CALLS = { free: 200, premium: 2000, max: 10000 };
 function planFor(profile) {
   if (!profile) return "free";
   if (profile.role === "admin") return "max";

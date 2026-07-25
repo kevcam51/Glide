@@ -220,6 +220,50 @@ standalone "connector fee." The instructive exceptions:
    inference; we pay Firestore ops + function invocations). Real cost = build labor (~5–10 days)
    + trivial maintenance. Every model above is "profitable" — the question is only funnel vs perk.
 
+### 8b. What a connector call ACTUALLY costs us (S112 — measured + verified)
+
+> Kevin asked for exact numbers ("last time the math was far off"). Op counts were counted from
+> the code; rates verified against Google's live pricing pages with an adversarial pass.
+> ⚠️ Methodology catch: the Firestore pricing table **lazy-renders** — the first read after
+> switching region showed a stale `$0.03` for nam5; the true nam5 rate is `$0.06` (caught by a
+> control test on a third region). Anyone re-checking this must let the table settle.
+
+**Verified rates (July 2026):**
+- **Firestore, `nam5` US multi-region** (Glide's DB — multi-region is **exactly 2× regional**):
+  reads **$0.06 / 100k**, writes **$0.18 / 100k**, deletes $0.02 / 100k.
+  Free tier: **50,000 reads/day**, 20,000 writes/day (per project, per DAY).
+- **Cloud Run request-based** (all Firebase v2 fns bill here now; Functions pricing page redirects):
+  **$0.40 / 1M requests**, CPU **$0.000024 / vCPU-s**, memory **$0.0000025 / GiB-s**, billable time
+  rounded up to 100 ms. Free tier: **2M requests + 180,000 vCPU-s + 360,000 GiB-s per month**.
+- ⚠️ **Firebase v2 defaults = 256 MiB but a FULL 1 vCPU** (not Cloud Run's fractional default) —
+  Firebase's own docs call this a 5.3× per-ms increase vs gen 1. Concurrency defaults to 80, which
+  shares one instance's CPU across many in-flight requests and blunts this a lot.
+- ⚠️ The Firebase pricing page's Functions free-tier row (2M invocations / 400k GB-s) is the
+  **1st-gen** tier and does NOT apply to our v2 functions.
+
+**Measured ops per MCP call** (counted in code): fixed overhead **2 reads + 1 write** (profile +
+usage counter), plus the tool: `list_exercises` 0 · `list_plans` 1 · `get_profile` /
+`get_nutrition_targets` / `get_measurements` 2 · `get_nutrition_log` ~8 (7d) or ~32 (31d) ·
+`find_client` / `list_clients` ~10–30 · **`coach_summary` ~120** (the outlier, 10–30× a normal call).
+
+**Cost of a typical call** (`get_nutrition_log`, 7 days = 10 reads + 1 write, ~200 ms):
+```
+Firestore : 10 × $0.0000006 + 1 × $0.0000018                    = $0.0000078
+Cloud Run : $0.0000004 + 0.2×$0.000024 + 0.2×0.25×$0.0000025    = $0.0000053
+TOTAL     ≈ $0.000013 per call   (~1/1000 of one cent)
+```
+`coach_summary` ≈ **$0.0001/call** (~0.01¢). Cold starts (~1–3 s) cost ~5× the warm compute — still
+a fraction of a cent.
+
+**At the caps, if a user maxed out EVERY day for a month:** free 200/day ≈ **$0.08/user/mo** ·
+premium 2,000/day ≈ **$0.79** · max 10,000/day ≈ **$3.93**. Realistic daily use (10–50 calls) is
+well under a cent per user per month. **So: not literally free, but ~1/1000¢ per call — the cap
+exists as an abuse/runaway backstop, not a cost control.**
+
+**Caps set (S112):** free **200/day**, premium **2,000/day**, max **10,000/day**. Raising the free
+READ tier does not cannibalize revenue because the paywall is Phase 2 **writes** — "read your data
+free, log/edit with Premium" is the clean story.
+
 ### RECOMMENDATION (locks Kevin's Premium/Max decision, refined)
 **Gate the connector behind Premium/Max — with a free READ-ONLY taste, Figma/Strava-style:**
 - **Free accounts:** can connect, read-only tools, tight daily cap (e.g. 10 calls/day). Preserves
