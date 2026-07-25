@@ -8305,6 +8305,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   const scanCtlRef = useRef(null);            // zxing scanner controls (to stop)
   const searchInputRef = useRef(null);        // food-search box — auto-focused when a meal form opens
   const photoInputRef = useRef(null);         // hidden file input for the photo estimate
+  const formRef = useRef(null);               // the add-food form — scrolled up into view when opened (S110)
 
   const list = meals || [];
   const loggedTotal = list.reduce((s, m) => s + (m.calories || 0), 0);
@@ -8589,6 +8590,15 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   // Search is the DEFAULT when adding food (the primary way to log) — open it up front.
   const openForm = (key) => { resetFields(); setEditingId(null); setAddingTo(key); setSearchOpen(true); };
   const closeForm = () => { resetFields(); setEditingId(null); setAddingTo(null); };
+  // When the add-food form opens, lift it up into view — otherwise it expands at
+  // the very bottom of the screen where it's easy to miss (S110, Kevin). Small
+  // delay lets the form + search box lay out first; block:"center" puts it in the
+  // middle of the viewport instead of pinned to the bottom.
+  useEffect(() => {
+    if (!addingTo || !formRef.current) return;
+    const id = setTimeout(() => { formRef.current && formRef.current.scrollIntoView({ behavior: "smooth", block: "center" }); }, 80);
+    return () => clearTimeout(id);
+  }, [addingTo]);
   // Open the form pre-filled to fix an existing entry.
   const openEdit = (m) => {
     resetSearch(); // clear any stale picked-food / search state; edit starts with search collapsed
@@ -8723,8 +8733,8 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
 
   // The inline add-form, shown under whichever meal you tapped "+ Add" on.
   const addForm = () => (
-    <div style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"6px",
-      padding:"8px", borderRadius:"8px", background:"var(--tint-md)" }}>
+    <div ref={formRef} style={{ marginTop:"6px", display:"flex", flexDirection:"column", gap:"6px",
+      padding:"8px", borderRadius:"8px", background:"var(--tint-md)", scrollMarginTop:"70px" }}>
       {/* Your foods — opens the library (S95). This used to be an inline row of
           chips that grew unbounded and buried the form; one button keeps the
           add-form short, and the library is a better place to browse/manage. */}
@@ -15563,7 +15573,13 @@ function RichText({ text }) {
   // legitimate tight text (parentheses, punctuation, URLs) is never touched.
   const repaired = String(text == null ? "" : text)
     .replace(/(\*\*[^*\n]+\*\*)(?=[A-Za-z0-9(])/g, "$1 ")   // **bold**word → **bold** word
-    .replace(/([A-Za-z0-9,.!?:;)])(?=\*\*[^*\n]+\*\*)/g, "$1 "); // word**bold** → word **bold**
+    .replace(/([A-Za-z0-9,.!?:;)])(?=\*\*[^*\n]+\*\*)/g, "$1 ") // word**bold** → word **bold**
+    // Missing space after sentence punctuation (S110, Kevin: "sentence.Next"):
+    // the model sometimes runs a sentence into the next with no space. Insert
+    // one only when a word/`)`/`%`/quote is followed by . ! or ? and then an
+    // UPPERCASE letter — so decimals (3.5), abbreviations (U.S.A), and lowercase
+    // domains (site.com) are never touched.
+    .replace(/([a-z0-9)\]"'%])([.!?])(?=[A-Z])/g, "$1$2 ");
   const lines = repaired.split("\n");
   return (
     <>
