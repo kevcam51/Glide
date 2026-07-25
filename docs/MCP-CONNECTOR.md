@@ -94,9 +94,8 @@ Same protocol, opposite direction — a later phase.
 
 ## 4. Architecture (to be finalized against verified current specs)
 
-> ⚠️ This section is being verified against Anthropic's current connector requirements + the
-> current MCP spec by a research pass; treat details as DRAFT until the verification block below
-> is filled in.
+> Verified against Anthropic's current connector requirements + the current MCP spec — see §7
+> for the primary-source findings and the concrete design consequences.
 
 **Shape:** a hosted **remote MCP server** (Streamable HTTP transport) running on our existing
 Firebase Blaze / Cloud Functions v2 (Cloud Run) infrastructure, publishing a curated subset of the
@@ -150,8 +149,76 @@ request).
 - Trainer tools in v1 or v1.5?
 - Naming on the consent screen: "Glidna" (app brand) — confirm.
 
-## 7. Verified current-spec findings
+## 7. Verified current-spec findings (Session-111 research + adversarial verification)
 
-> Filled in from the Session-111 research + adversarial verification pass.
+> 4 researchers + 4 adversarial verifiers against primary sources (claude.com/docs/connectors,
+> modelcontextprotocol.io spec, cloud.google.com, SDK repos), July 2026. Verdicts noted.
 
-*(pending — research workflow running)*
+### Claude custom connectors — [CONFIRMED/CORRECTED]
+- A custom connector = a **remote MCP server** added by URL (Settings → Connectors → "Add custom
+  connector"). Must be reachable from the public internet — connections come from **Anthropic's
+  cloud** (egress 160.79.104.0/21), not the user's device.
+- **Transport: Streamable HTTP** (single endpoint, POST+GET); legacy HTTP+SSE is deprecated. Build
+  Streamable HTTP only.
+- **[CORRECTED] Available on ALL Claude plans, including Free** (Free = limited to ONE custom
+  connector). This kills the earlier assumption that Claude's own plan gating filters who can use
+  it — the user-side floor is $0. (Team/Enterprise: only org Owners add them.)
+- **[CORRECTED] Auth is NOT required by Claude** — authless (`none`) servers are supported. Glide
+  still needs auth (per-user data), but this confirms auth burden is ours to choose, not imposed.
+- **Limits:** ~150,000-char max tool result; 300-second timeout on Claude.ai/Desktop. OAuth
+  endpoints must answer in ≤10s (30s for refresh). No machine-to-machine `client_credentials` —
+  every connection is user-consented.
+- **Directory exists:** submission portal requires a **Team or Enterprise org** (Owner access),
+  tool `title` + `readOnlyHint`/`destructiveHint` annotations on every tool, OAuth 2.0 for
+  authenticated services, privacy policy URL, docs URL, support contact, icon, reviewer test
+  account, 7 policy acknowledgments. Escalations: mcp-review@anthropic.com.
+
+### MCP spec (ratified 2025-11-25; 2026-07-28 revision ships days from now) — [CONFIRMED]
+- Streamable HTTP details: every client message is a new POST; server replies `application/json`
+  or an SSE stream; **sessions are OPTIONAL** (server MAY issue `MCP-Session-Id`) — a stateless
+  server is fully spec-legal. Server MUST validate `Origin` (403 otherwise).
+- **Authorization (if implemented):** server = OAuth 2.1 resource server. MUSTs: RFC 9728
+  protected-resource metadata (advertised via 401 `WWW-Authenticate resource_metadata` and/or
+  `/.well-known/oauth-protected-resource`); the AS must serve RFC 8414 / OIDC discovery metadata;
+  PKCE **S256 mandatory** (Claude sends it on every auth request and refuses if
+  `code_challenge_methods_supported` is absent); RFC 8707 resource-indicator audience binding
+  (tokens must be issued FOR this server; no token passthrough).
+- **Client registration:** Dynamic Client Registration (RFC 7591) is now MAY (back-compat);
+  **CIMD (Client ID Metadata Documents) is the recommended path**, or Anthropic-held client
+  credentials (`oauth_anthropic_creds`, via mcp-review@) for directory/high-traffic servers —
+  Anthropic explicitly recommends against DCR for directory servers (it registers a new client
+  per connection).
+- Claude's hosted OAuth callback: `https://claude.ai/api/mcp/auth_callback`.
+- Tools should carry the annotations (`title`, `readOnlyHint`, `destructiveHint`) — required for
+  directory listing anyway.
+
+### Hosting on our existing stack — [CONFIRMED]
+- **Officially supported pattern:** Google publishes "Host MCP servers on Cloud Run" docs + a
+  deploy tutorial. Cloud Functions v2 run on Cloud Run — same properties. Our `aiChatStream`
+  already streams SSE from a v2 onRequest function on this exact stack, so streaming is proven
+  in OUR project.
+- **Stateless is the right shape here:** Cloud Run session affinity is explicitly best-effort →
+  don't pin in-memory MCP sessions. The official TypeScript SDK (v1.29.0) documents stateless
+  Streamable HTTP (`sessionIdGenerator: undefined`) with a **new server+transport instance per
+  request** as its serverless pattern (and the v2 SDK beta is stateless by default). ⚠️ Known SDK
+  regression (#1994): REUSING one stateless transport across requests 500s — per-request
+  instances (the documented pattern) avoid it.
+- Timeouts ample: v2 HTTP functions go to 60 min; Claude's own 300s ceiling is the binding limit.
+- **The real build is the OAuth AS layer:** Firebase Auth is an identity provider, NOT an OAuth
+  2.1 authorization server (no PRM/AS-metadata/CIMD). So we add a small authorization + token
+  endpoint pair on our Functions: user lands on a Glide consent page → signs in with their
+  existing Firebase account → we issue OUR access/refresh tokens bound to their uid + scopes
+  (+ PKCE, + RFC 8707 audience). The MCP endpoint verifies our token per request (the SDK ships
+  `requireBearerAuth` middleware that delegates to any verifier we supply) and builds the same
+  `ctx` as the chat backend.
+
+### Design consequences (folding back into §4)
+1. Stateless Streamable HTTP server on a new Cloud Functions v2 onRequest (or a thin Cloud Run
+   service if bundle size demands) — per-request McpServer instances over the existing `runTool`.
+2. Our own mini-AS: `/authorize` (Glide-branded consent page reusing Firebase sign-in incl.
+   passkeys) + `/token` (PKCE S256, refresh, audience-bound JWTs) + RFC 9728/8414 metadata docs.
+   Support CIMD; DCR optional.
+3. Tool annotations from day one (needed for directory later; helps Claude's confirm UX now).
+4. Directory listing requires a Team/Enterprise Claude org — factor ~$150/yr-per-seat org cost
+   into the launch plan (or start unlisted: users add by URL, which works on every plan).
+5. Keep every tool result well under the 150K-char cap (coach_summary is the one to watch).
