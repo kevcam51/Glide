@@ -75,6 +75,56 @@ const READ_TOOLS = new Set([
   "list_local_plans",
 ]);
 
+// ── Phase 3 (S115): WRITE tools, each behind an OAuth scope ────────────────
+// The ENFORCEMENT point. A tool is only registered when the caller's token
+// carries its scope, AND re-checked at call time (defence in depth). Role
+// filtering still applies first via buildTools, so a client never sees the
+// trainer tools regardless of what their token claims.
+//
+// propose_meal / propose_workout are deliberately OMITTED: they exist to render
+// the in-app Accept cards. An external AI confirms conversationally and then
+// calls the real write tool, so exposing them here would just add a dead step.
+// That's a PRESENTATION difference, not a capability gap — the parity rule
+// (§3b of docs/MCP-CONNECTOR.md) is satisfied because the underlying write
+// ability is identical on both surfaces.
+const SCOPE_FOR_TOOL = {
+  // write:logs — day-to-day diary entries
+  log_meal: "write:logs",
+  log_meals: "write:logs",
+  remove_meal: "write:logs",
+  log_workout: "write:logs",
+  log_weigh_in: "write:logs",
+  log_check_in: "write:logs",
+  log_measurements: "write:logs",
+  log_water: "write:logs",
+  create_note: "write:logs",
+  update_note: "write:logs",
+  // write:plan — the plan's structure and settings
+  set_personal_info: "write:plan",
+  set_targets: "write:plan",
+  set_workout_schedule: "write:plan",
+  add_custom_exercise: "write:plan",
+  create_plan: "write:plan",
+  switch_plan: "write:plan",
+  rename_plan: "write:plan",
+  set_notification_prefs: "write:plan",
+  // trainer — acting on a connected client
+  send_client_request: "trainer",
+};
+// Tools that DELETE or overwrite user data — flagged so Claude shows a stronger
+// confirmation prompt before running them.
+const DESTRUCTIVE_TOOLS = new Set(["remove_meal", "set_workout_schedule", "switch_plan"]);
+
+// Extra guidance appended to a tool's description for EXTERNAL models, which
+// have none of our in-app system prompt. Batching is the important one: logging
+// meal-by-meal is ~3x the database ops and burns the daily cap ~3x faster.
+const MCP_DESCRIPTION_EXTRA = {
+  log_meal: " For MORE THAN ONE food, use log_meals instead — one call for the whole list.",
+  log_meals: " Always prefer this over repeated log_meal calls; it saves the entire list in a single operation.",
+  set_workout_schedule: " This REPLACES the schedule for any category you provide. Confirm with the user before calling.",
+  remove_meal: " This permanently deletes the entry. Confirm with the user first.",
+};
+
 // Daily call caps. These are ABUSE BACKSTOPS, not a revenue lever — measured
 // cost is ~0.0013¢ per typical call (S112 costing, verified rates below), so
 // generosity is basically free and Kevin wants the connector to become a daily
@@ -149,22 +199,27 @@ async function chargeCall(db, uid, plan) {
 // Phase 1: verify a Firebase ID token from the Authorization: Bearer header.
 // Phase 2 swaps this for our own OAuth 2.1 access tokens (same interface:
 // token in → uid out), so nothing else here changes.
-async function uidFromRequest(req) {
+async function grantFromRequest(req) {
   const h = req.get("authorization") || req.get("Authorization") || "";
   const m = /^Bearer\s+(.+)$/i.exec(h.trim());
   if (!m) return null;
   const token = m[1];
   // 1) An OAuth access token we issued (how Claude and every real MCP client
-  //    authenticates — opaque, hashed in Firestore, audience-bound).
+  //    authenticates — opaque, hashed in Firestore, audience-bound). Its
+  //    granted scopes decide which write tools get exposed.
   try {
     const grant = await verifyAccessToken(admin.firestore(), token);
-    if (grant && grant.uid) return grant.uid;
+    if (grant && grant.uid) return { uid: grant.uid, scope: grant.scope || "read" };
   } catch (e) { /* fall through */ }
   // 2) A Firebase ID token — first-party/testing path (kept so the endpoint
-  //    stays directly testable without running the whole OAuth dance).
+  //    stays directly testable without running the whole OAuth dance). This is
+  //    the account owner's own session, so it carries every scope their ROLE
+  //    allows; buildTools still role-gates the trainer tools on top.
   try {
     const decoded = await admin.auth().verifyIdToken(token);
-    return decoded && decoded.uid ? decoded.uid : null;
+    return decoded && decoded.uid
+      ? { uid: decoded.uid, scope: "read write:logs write:plan trainer" }
+      : null;
   } catch (e) {
     return null;
   }
@@ -185,15 +240,21 @@ function unauthorized(req, res) {
 }
 
 // Build the MCP server for ONE request (stateless: never reused).
-function buildServer(ctx, profile, db) {
+function buildServer(ctx, profile, db, scopes) {
   const server = new McpServer(
     { name: "glidna", version: "1.0.0" },
     { capabilities: { tools: {} } },
   );
 
   const plan = planFor(profile);
-  // buildTools() already role-filters (clients never see trainer tools).
-  const defs = buildTools(ctx.role).filter((t) => READ_TOOLS.has(t.name));
+  const granted = new Set(Array.isArray(scopes) ? scopes : String(scopes || "read").split(/\s+/));
+  // Two gates, in order: (1) buildTools role-filters, so a client never sees a
+  // trainer tool; (2) the token's scopes decide which writes are exposed.
+  const defs = buildTools(ctx.role).filter((t) => {
+    if (READ_TOOLS.has(t.name)) return granted.has("read");
+    const need = SCOPE_FOR_TOOL[t.name];
+    return need ? granted.has(need) : false; // unlisted tools are never exposed
+  });
 
   for (const def of defs) {
     // The MCP SDK wants a Zod shape; our tools carry JSON Schema. Phase 1's
@@ -216,19 +277,38 @@ function buildServer(ctx, profile, db) {
       shape[key] = required.has(key) ? zt : zt.optional();
     }
 
+    const isRead = READ_TOOLS.has(def.name);
+    const needScope = SCOPE_FOR_TOOL[def.name] || null;
     server.registerTool(
       def.name,
       {
         title: def.name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
         // Descriptions must stand alone: an external model has none of our
-        // system prompt. aitools.js descriptions are already self-contained.
-        description: def.description,
+        // system prompt. aitools.js descriptions are already self-contained;
+        // MCP_DESCRIPTION_EXTRA adds the batching/confirmation guidance the
+        // in-app system prompt would otherwise supply.
+        description: def.description + (MCP_DESCRIPTION_EXTRA[def.name] || ""),
         inputSchema: shape,
         // Required for the Anthropic connector directory; also drives Claude's
-        // confirmation UX. Everything in Phase 1 is a safe read.
-        annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+        // confirmation UX (a destructive tool gets a stronger prompt).
+        annotations: {
+          readOnlyHint: isRead,
+          destructiveHint: DESTRUCTIVE_TOOLS.has(def.name),
+          openWorldHint: false,
+        },
       },
       async (args) => {
+        // Defence in depth: re-check scope at CALL time, not just at
+        // registration. A client that somehow invokes an unregistered tool
+        // still can't write.
+        if (needScope && !granted.has(needScope)) {
+          return {
+            isError: true,
+            content: [{ type: "text", text:
+              `Permission "${needScope}" was not granted for this connection. `
+              + "Reconnect Glidna in your AI assistant's settings and approve the additional permission." }],
+          };
+        }
         const charge = await chargeCall(db, ctx.callerUid, plan);
         if (!charge.ok) {
           return {
@@ -280,8 +360,9 @@ exports.mcp = onRequest({ cors: false, timeoutSeconds: 300 }, async (req, res) =
   }
   if (req.method !== "POST") { res.status(405).end(); return; }
 
-  const uid = await uidFromRequest(req);
-  if (!uid) { unauthorized(req, res); return; }
+  const grant = await grantFromRequest(req);
+  if (!grant) { unauthorized(req, res); return; }
+  const uid = grant.uid;
 
   const db = admin.firestore();
   const profile = (await db.doc(`users/${uid}`).get()).data() || {};
@@ -303,7 +384,7 @@ exports.mcp = onRequest({ cors: false, timeoutSeconds: 300 }, async (req, res) =
 
   let server, transport;
   try {
-    server = buildServer(ctx, profile, db);
+    server = buildServer(ctx, profile, db, grant.scope);
     transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     // Per-request instances (SDK's documented serverless pattern) — closing
     // them when the response ends prevents the #1994 reuse bug.

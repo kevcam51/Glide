@@ -143,6 +143,32 @@ function invocations are ours — add a per-uid daily MCP request budget (cheap 
 as `aiUsage`), and gate the connector behind Premium/Max entitlement (checked at token issue AND per
 request).
 
+## 4b. SHIPPED STATUS (S112–S115)
+
+- **Phase 1 — read-only server: DONE** (`functions/mcp.js`). Stateless Streamable HTTP,
+  per-request McpServer, origin validation, daily caps.
+- **Phase 2 — OAuth 2.1: DONE** (`functions/mcpauth.js` + `src/OAuthConsent.jsx` +
+  `vercel.json`). Discovery, DCR, PKCE S256, opaque audience-bound tokens, consent screen.
+  **Connector is LIVE at `https://glidna.com/mcp`** and Kevin has connected it in his Claude.
+- **Phase 3 — WRITES behind scopes: DONE (S115).** Scope model enforced at two gates:
+  `buildTools` role-filters first (a client never sees a trainer tool no matter what its token
+  claims), then the token's scopes decide which writes are exposed — re-checked at call time.
+  | scope | tools |
+  |---|---|
+  | `read` | 7 (client) / 11 (trainer) read tools |
+  | `write:logs` | log_meal(s), remove_meal, log_workout, log_weigh_in, log_check_in, log_measurements, log_water, create/update_note |
+  | `write:plan` | set_personal_info, set_targets, set_workout_schedule, add_custom_exercise, create/switch/rename_plan, set_notification_prefs |
+  | `trainer` | send_client_request (**role-gated at authorize** — never granted to a client) |
+  Verified live: read-only token = 11 tools and `log_meal` is *not even visible*; full-scope
+  token = 30 tools and logged a real meal + a 3-item batch; a client requesting `trainer`
+  scope does not receive it. `propose_meal`/`propose_workout` are omitted by design (they
+  render in-app Accept cards; an external AI confirms conversationally) — a presentation
+  difference, not a capability gap, so §3b parity holds.
+- **Existing connections stay read-only** until the user reconnects: their token was issued
+  with `scope=read`. Claude requests scopes from `scopes_supported` at connect time, so a fresh
+  connection now asks for writes. Reconnecting re-shows the consent screen listing the new
+  permissions — which is exactly the "will users be told about new abilities?" answer.
+
 ## 5. Phased build plan (draft)
 
 1. **Phase 0 — design lock:** finish this doc with verified specs; pick OAuth implementation.

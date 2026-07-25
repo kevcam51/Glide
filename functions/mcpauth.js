@@ -43,11 +43,16 @@ const CODE_TTL_MS = 5 * 60 * 1000;          // 5 minutes (spec: short-lived)
 const ACCESS_TTL_MS = 60 * 60 * 1000;       // 1 hour
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-// Phase 2 ships the READ-ONLY server, so only `read` is grantable today.
-// write:logs / write:plan / trainer are declared for Phase 3 so clients can
-// already discover the vocabulary. Keep in step with mcp.js's tool surface.
-const SUPPORTED_SCOPES = ["read"];
+// Phase 3 (S115): writes are grantable. `trainer` is additionally role-gated at
+// authorize time — a client account can never be granted it even if asked.
+//   read        profile, targets, logs, measurements, plans (+ trainer reads)
+//   write:logs  meals, weigh-ins, workouts, water, measurements, notes
+//   write:plan  targets, personal info, workout schedule, plans/phases
+//   trainer     acting on clients (to-dos)
+// Keep in step with SCOPE_FOR_TOOL in mcp.js — that's the enforcement point.
+const SUPPORTED_SCOPES = ["read", "write:logs", "write:plan", "trainer"];
 const ALL_SCOPES = ["read", "write:logs", "write:plan", "trainer"];
+const TRAINER_ROLES = new Set(["head_trainer", "sub_trainer", "admin"]);
 
 const b64url = (buf) => buf.toString("base64")
   .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -223,9 +228,20 @@ exports.mcpAuthorize = onRequest({ cors: true }, async (req, res) => {
     return;
   }
 
-  // Grant only what we actually support today (read-only server in Phase 2).
-  const granted = requested.filter((s) => SUPPORTED_SCOPES.includes(s));
-  if (!granted.length) granted.push("read");
+  // Grant only what we support, and role-gate `trainer` SERVER-side: a client
+  // account can never receive it even if the client asks for it. (The tool
+  // layer would refuse anyway — buildTools role-filters — but never issue a
+  // credential that claims more authority than the person actually has.)
+  let profileRole = "client";
+  try {
+    const prof = (await db.doc(`users/${uid}`).get()).data() || {};
+    profileRole = prof.role || "client";
+  } catch (e) { /* default to client — the safe direction */ }
+  const isTrainer = TRAINER_ROLES.has(profileRole);
+  const granted = requested
+    .filter((s) => SUPPORTED_SCOPES.includes(s))
+    .filter((s) => (s === "trainer" ? isTrainer : true));
+  if (!granted.includes("read")) granted.push("read"); // read is always implied
 
   const code = randomToken();
   await db.doc(`mcpAuthCodes/${hashToken(code)}`).set({
