@@ -143,11 +143,78 @@ request).
 
 ## 6. Open questions (for Kevin)
 
-- Gate behind which tier — Premium, Max, or free-with-account? (Recommend: Premium+ at launch;
-  it's a retention feature and lowers our costs.)
+- ~~Gate behind which tier?~~ **DECIDED (S111): Premium/Max perk** — refined by the §8 research
+  into "gated with a free taste" (see §8 recommendation). Kevin's undercut concern researched;
+  verdict: low risk today, and the gate is a reversible dial.
 - Read-only Phase 1 public beta, or wait for writes before announcing?
 - Trainer tools in v1 or v1.5?
 - Naming on the consent screen: "Glidna" (app brand) — confirm.
+
+## 8. Monetization — verified market research (S111) + recommendation
+
+> Kevin's question: "Are connectors usually free? Can competitors undercut a paid connector?
+> If not Premium/Max, how else is it profitable?" 3 researchers + 3 adversarial verifiers,
+> primary sources, July 2026.
+
+### Are connectors usually free? YES — in general SaaS (but fitness is different)
+Across ~18 products with official MCP connectors / ChatGPT apps, the overwhelming norm is
+**free with any product account, including free tiers**: Notion, Linear (pricing table shows MCP
+✓ on Free), Canva ("any plan"), Asana, Atlassian (incl. Free, 500 calls/hr), monday.com, ClickUp,
+Sentry, Cloudflare, Stripe, PayPal, Spotify/Expedia/Booking (ChatGPT apps). Nobody charges a
+standalone "connector fee." The instructive exceptions:
+- **Figma** — gates real MCP usage by SEAT: free/View seats get ~6 tool calls/MONTH (a taste),
+  paid Dev/Full seats get real limits (200–600/day). The cleanest hybrid template.
+- **ClickUp** — connector on all plans, but Free capped 50 calls/day; the "Everything AI" add-on
+  lifts limits (the one true "AI add-on" case).
+- **Zapier** — meters MCP calls against the plan's task quota (1 call = 2 tasks): usage-metering
+  works only when the meter IS the product.
+
+### Fitness is the exception — and the precedent favors PAID
+- **Strava shipped the first (and only) official fitness MCP connector (June 1, 2026)** —
+  Claude-first, read-only, **paid-subscriber-only**. The fitness market leader set a PAID
+  precedent, not a free one.
+- **ChatGPT Health launch partners** (Jan 2026): MyFitnessPal, Peloton, Weight Watchers,
+  AllTrails — but MFP's app only serves recipes/macro guidance; it can NOT read/write the user's
+  own diary yet ("future iterations"). Nobody is doing what Glide's connector would do.
+- **ZERO coaching-platform competitors** (Trainerize, TrueCoach, Everfit) ship any MCP/ChatGPT
+  integration. Cronometer, MacroFactor, Lose It!, Hevy, Strong, Fitbod, Caliber, Whoop, Oura,
+  Garmin, Withings: none official either (the viral "Garmin Chat Connector" is a third-party
+  side project).
+- **In-app AI in fitness is overwhelmingly paid** (Strava AI subscriber-only, Garmin Connect+
+  $6.99/mo, Withings+ $9.95/mo, MFP Premium, Whoop/Oura effectively paid via mandatory
+  membership). Gating AI access is the fitness-industry NORM.
+
+### The undercut risk, honestly assessed: LOW today, and structurally manageable
+- Community/unofficial undercutting only happens to OPEN-API platforms (Whoop/Oura/Garmin have
+  many community MCPs; MFP gets scraped). **Glide's API is closed → nobody can ship an unofficial
+  Glide connector.** The only person who can undercut Glide's connector price is us.
+- Competitor undercutting would require a competitor to ship a connector at all — none of the
+  coaching platforms have; the one fitness mover priced it PAID.
+- The cautionary tales (Twitter/X API, Reddit/Apollo, IFTTT, Strava's 2024 API backlash) are all
+  about TAKING AWAY existing free access — launching gated from day one carries none of that
+  risk, and our ~zero marginal cost means the gate is a **reversible dial**: if a credible
+  competitor ever goes free, we can match within a day without bleeding money.
+
+### If not Premium/Max — the other profitable models (evidence-backed)
+1. **Free-as-acquisition** (Notion ~100M users/4% convert; Atlassian/Stripe/PayPal; Zapier's
+   partner flywheel): connector free, monetize the core product it pulls people into.
+2. **Rate-limited freemium** (Figma/ClickUp/GitHub-Copilot-Free pattern): everyone connects,
+   free tier gets a taste, paid gets real limits.
+3. **Usage metering**: only works when the meter is the product (Zapier) — NOT our shape; avoid.
+4. **Vendor cost reality**: hosting an MCP connector runs ~$0–15/mo (user's Claude pays all
+   inference; we pay Firestore ops + function invocations). Real cost = build labor (~5–10 days)
+   + trivial maintenance. Every model above is "profitable" — the question is only funnel vs perk.
+
+### RECOMMENDATION (locks Kevin's Premium/Max decision, refined)
+**Gate the connector behind Premium/Max — with a free READ-ONLY taste, Figma/Strava-style:**
+- **Free accounts:** can connect, read-only tools, tight daily cap (e.g. 10 calls/day). Preserves
+  the "Glide works with your AI" marketing story + acquisition funnel, costs us ~nothing.
+- **Premium:** full read + logging writes, generous cap.
+- **Max / Coach tiers:** everything incl. plan-editing writes + trainer tools, highest caps.
+This matches the fitness market leader (Strava = paid, and ours is BETTER: read+write vs their
+read-only), matches industry AI norms, monetizes where willingness-to-pay lives (trainers), keeps
+the undercut answer in our pocket (dial, not door), and avoids the only historically-punished
+move (revoking free access later — we never grant what we'd want to revoke).
 
 ## 7. Verified current-spec findings (Session-111 research + adversarial verification)
 
