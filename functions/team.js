@@ -68,8 +68,11 @@ exports.joinTeam = onCall(async (request) => {
   }
   // Two levels only (the documented cap): someone who already has people under
   // them can't also sit under someone else, or access chains get ambiguous.
-  const subs = await db.collection("users").where("headTrainerId", "==", uid).limit(1).get();
-  if (!subs.empty) {
+  // NOTE: a head trainer's OWN headTrainerId points at itself (createProfile),
+  // so this query always returns the caller's own doc — filter it out or the
+  // guard fires for everyone and nobody can ever join a team.
+  const subs = await db.collection("users").where("headTrainerId", "==", uid).limit(5).get();
+  if (subs.docs.some((d) => d.id !== uid)) {
     throw new HttpsError("failed-precondition", "You already have trainers on your own team. Teams are limited to two levels.");
   }
 
