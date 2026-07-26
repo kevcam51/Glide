@@ -13908,6 +13908,11 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const [linkingFor, setLinkingFor] = useState(null);   // clientUid choosing a profile to link
   const [pendingLink, setPendingLink] = useState(null);  // { clientUid, localId, label } awaiting confirm
   const [confirmUnlink, setConfirmUnlink] = useState(null); // clientUid awaiting unlink confirm
+  const [dashHubOpen, setDashHubOpen] = useState(false);   // S119 (#4): invite CTA from the empty roster state
+  // S119 (#1): Local Plans is a power drawer now (templates / sims / imports),
+  // collapsed by default so the roster owns the home. Opens automatically for a
+  // trainer with no connected clients — for them it IS the main surface.
+  const [plansOpen, setPlansOpen] = useState(false);
   const [linkBusy, setLinkBusy] = useState(false);
   const [cMsg, setCMsg] = useState("");
   // S117e (critique P4): feedback is PER-CLIENT and valenced — it renders inside
@@ -14280,6 +14285,26 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
+        {/* S119 (#4): a brand-new trainer used to see NOTHING here — the whole
+            card was hidden when the roster was empty, so their actual first job
+            (invite a client) had no affordance on this screen at all. */}
+        {clients.length === 0 && !loading && (
+          <div className={cardCls}>
+            <div className={`${sectionTitleCls} flex items-center gap-2`}>
+              <Icon name="link" size={19} color="var(--accent)" />Your Connected Clients
+            </div>
+            <div className={`${subCls} mt-1`}>
+              No clients connected yet. Share your invite code and their plan, logs and progress
+              show up here — editable from both sides.
+            </div>
+            {(
+              <button onClick={() => setDashHubOpen(true)} className={`${mPrimaryCls} mt-3 inline-flex items-center gap-1.5`}>
+                <Icon name="invite" size={15} color="currentColor" />Invite your first client
+              </button>
+            )}
+          </div>
+        )}
+
         {clients.length > 0 && (
           <div className={cardCls}>
             {/* Client → trainer requests inbox (S90) — shows only when there's
@@ -14287,7 +14312,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
             {inbox.length > 0 && (
               <div className="mb-4 rounded-card border border-[color-mix(in_srgb,var(--color-primary)_45%,transparent)] bg-[color-mix(in_srgb,var(--color-primary)_5%,transparent)] p-4">
                 <div className={`${sectionTitleCls} flex items-center gap-2`}>
-                  <Icon name="inbox" size={19} color="var(--accent)" />Client Requests
+                  <Icon name="inbox" size={19} color="var(--accent)" />Asks From Clients
                   {openInbox.length > 0 && <span className="rounded-full bg-primaryfill px-2 text-[.7rem] font-bold text-primaryfg">{openInbox.length}</span>}
                 </div>
                 {openInbox.length === 0 && <div className={subCls}>All caught up</div>}
@@ -14384,12 +14409,12 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     {confirmUnlink === c.uid ? (
                       <div className="mt-2.5">
                         <div className="text-[.78rem] text-fg mb-2">
-                          Unlink <strong>{c.name}</strong>'s plan? We'll save a local copy to your files
+                          Take <strong>{c.name}</strong>'s plan back? We'll save a copy to your files
                           first, then remove it from their account.
                         </div>
                         <div className="flex gap-2">
                           <button className={dangerBtnCls} disabled={linkBusy}
-                            onClick={() => unlinkPlan(c.uid)}>{linkBusy ? "…" : "Yes, unlink"}</button>
+                            onClick={() => unlinkPlan(c.uid)}>{linkBusy ? "…" : "Yes, take it back"}</button>
                           <button className={mBtnCls} disabled={linkBusy} onClick={() => setConfirmUnlink(null)}>Cancel</button>
                         </div>
                       </div>
@@ -14427,7 +14452,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     ) : (<>
                       <div className="flex gap-2 mt-2.5 flex-wrap">
                         <button className={`${mPrimaryCls} inline-flex items-center gap-1.5`} onClick={() => { setComposingFor(composingFor === c.uid ? null : c.uid); setReqDraft(""); }}>
-                          <Icon name="mail" size={16} />Send request
+                          <Icon name="mail" size={16} />Send to-do
                         </button>
                         <button className={`${mBtnCls} inline-flex items-center gap-1.5`} onClick={() => setMsgFor(c)}>
                           <Icon name="inbox" size={16} color="var(--accent)" />Message
@@ -14459,13 +14484,13 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                           <Icon name="folder" size={16} color="var(--accent)" />Plans{(c.plans && c.plans.length > 1) ? ` (${c.plans.length})` : ""}
                         </button>
                         <button className={mBtnCls} onClick={() => setLinkingFor(c.uid)}>
-                          {c.hasPlan ? "Re-link a different plan" : "Link a profile"}
+                          {c.hasPlan ? "Assign a different plan" : "Assign a plan"}
                         </button>
                         {c.hasPlan && (
-                          <button className={mBtnCls} disabled={linkBusy} onClick={() => copyLocal(c.uid)}>Copy to local file</button>
+                          <button className={mBtnCls} disabled={linkBusy} onClick={() => copyLocal(c.uid)}>Save a copy to my files</button>
                         )}
                         {c.hasPlan && (
-                          <button className={dangerGhostCls} onClick={() => setConfirmUnlink(c.uid)}>Unlink</button>
+                          <button className={dangerGhostCls} onClick={() => setConfirmUnlink(c.uid)}>Take plan back</button>
                         )}
                         </div>
                       )}
@@ -14475,7 +14500,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     {composingFor === c.uid && (
                       <div className="mt-2.5 p-3 rounded-lg bg-bg border border-border">
                         <div className={`${subCls} mb-1.5`}>
-                          Quick requests — tap to send:
+                          Quick to-dos — tap to send:
                         </div>
                         <div className="flex flex-wrap gap-1.5 mb-2.5">
                           {REQUEST_TEMPLATES.map((t) => (
@@ -14599,7 +14624,17 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         )}
 
         <div className={cardCls}>
-          <div className={`${sectionTitleCls} whitespace-nowrap flex items-center gap-2`}><Icon name="clipboard" size={18} color="var(--accent)" />Local Plans</div>
+          <button onClick={() => setPlansOpen((v) => !v)} aria-expanded={plansOpen || clients.length === 0}
+            className="w-full flex items-center gap-2 bg-transparent border-0 p-0 cursor-pointer text-left"
+            style={{ minHeight: 44 }}>
+            <div className={`${sectionTitleCls} whitespace-nowrap flex items-center gap-2 mb-0`}><Icon name="clipboard" size={18} color="var(--accent)" />Local Plans</div>
+            <span className="text-xs text-muted ml-1">{realPlans.length + sims.length || ""}</span>
+            <span className="ml-auto text-muted text-xs">{(plansOpen || clients.length === 0) ? "Hide" : "Show"}</span>
+          </button>
+          {!(plansOpen || clients.length === 0) && (
+            <div className={`${subCls} mt-1`}>Your own working files — templates, simulations and imported plans.</div>
+          )}
+          {(plansOpen || clients.length === 0) && (<>
           <div className="flex gap-1.5 mt-2 flex-wrap">
             <button onClick={onNewPlan} className={mPrimaryCls}>+ Plan</button>
             <button onClick={onNewSimulation}
@@ -14821,8 +14856,11 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
               })}
             </div>
           )}
+          </>)}
         </div>
       </div>
+      {/* Invite Hub, reachable from the empty-roster CTA (S119 #4) */}
+      <InviteHub open={dashHubOpen} onClose={() => setDashHubOpen(false)} meName={meName} />
     </div>
   );
 }
