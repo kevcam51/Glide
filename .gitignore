@@ -27,3 +27,8 @@ dist-ssr
 *.sln
 *.sw?
 .vercel
+
+# Impeccable design skill (installed via `npx impeccable install`) — 2.8M of
+# third-party tooling, reinstallable in one command. PRODUCT.md/DESIGN.md, the
+# durable design context it reads, ARE committed.
+.claude/skills/
