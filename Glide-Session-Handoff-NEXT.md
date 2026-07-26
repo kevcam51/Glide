@@ -97,9 +97,9 @@ stop re-flagging them (raw calorie quick-add STAYS; amber grace band, never red 
 
 ### ⏭️ Next up
 - **Verify the S117–S125 UI live** (see verification debt above) — biggest outstanding risk.
-- **Timeline is only reachable for weight-loss goals** (`...(hasGoal ? ["Timeline"] : [])`,
-  and `hasGoal` means goal < current). Maintain/gain clients get no projections at all —
-  worth deciding whether that's right.
+- ~~Timeline only for weight-loss goals~~ **DECIDED (S126): correct as-is.** Muscle gain is
+  too unpredictable to project honestly and maintenance is just holding a range, so neither
+  gets a goal-date projection. Recorded in PRODUCT.md — do not re-flag or "fix" it.
 - Connector Phase 4: directory submission (needs a Claude Team/Enterprise org), ChatGPT.
 - Legal: waiver, session-billing ToS, AI-connector privacy — all awaiting counsel.
 

@@ -80,6 +80,11 @@ per-session billing; passkey sign-in; MCP connector with OAuth.
   intakes to model outcomes. It is not a data-quality accident.
 - **Over-target states get an amber grace band**: up to 10% over target renders amber
   ("close enough — no shame"); red is reserved for meaningfully over. Never red at +1 cal.
+- **The Timeline / projection chart is for WEIGHT-LOSS goals only** (confirmed S126). Muscle
+  gain is too unpredictable to project honestly, and maintenance is just staying inside a
+  weight range — neither earns a goal-date projection. The tab correctly omits itself when
+  the goal is not below current weight; the "Show more detail" doorway still opens the
+  detailed plan, so those users are never sent to a dead end. Do not "fix" this.
 - A future **compliance tracker** (how consistently the user hits their calorie goal,
   fused with burn, projecting time-to-goal) is the intended replacement for leading the
   daily screen with weight — and it must be **hideable by the user or trainer** (some
