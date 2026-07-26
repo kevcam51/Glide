@@ -817,7 +817,7 @@ body{
   padding:11px 14px;margin-top:10px;
   background:rgba(112,112,160,.08);
   border-radius:var(--radius-sm);
-  border-left:3px solid rgba(112,112,160,.3);
+  border:1px solid var(--border);
 }
 .privacy-note{
   font-size:.7rem;color:var(--muted);text-align:center;
@@ -1499,7 +1499,7 @@ body{
 .micro-tip{
   font-size:.77rem;color:var(--muted);line-height:1.55;
   padding:9px 11px;background:rgba(8,220,224,.04);
-  border-radius:var(--radius-sm);border-left:3px solid var(--accent);
+  border-radius:var(--radius-sm);border:1px solid var(--border);
 }
 @media(min-width:640px){.macro-grid{grid-template-columns:repeat(4,1fr)}}
 
@@ -1624,7 +1624,7 @@ body{
 .mt-header>div,.mt-col,.mt-label-col{padding:10px 9px}
 .mt-row{display:grid;grid-template-columns:140px repeat(4,1fr);border-bottom:1px solid var(--border);align-items:center}
 .mt-row:last-child{border-bottom:none}
-.mt-row-rec{background:rgba(79,255,176,.04);border-left:3px solid var(--green)}
+.mt-row-rec{background:rgba(79,255,176,.09)}
 .mt-label-col{font-size:.8rem;padding:10px 9px;border-right:1px solid var(--border)}
 .mt-col{padding:10px 7px;text-align:center;border-right:1px solid var(--border)}
 .mt-col:last-child{border-right:none}
@@ -1682,7 +1682,7 @@ body{
 .step-name-item{font-size:.65rem;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);flex:1;text-align:center;transition:color .3s;max-width:80px}
 .step-name-item.active{color:var(--accent);font-weight:700}
 .step-name-item.done{color:var(--accent);opacity:.45}
-.field-tip{font-size:.78rem;color:var(--muted);line-height:1.55;padding:11px 14px;margin-top:10px;background:rgba(112,112,160,.08);border-radius:var(--radius-sm);border-left:3px solid rgba(112,112,160,.3)}
+.field-tip{font-size:.78rem;color:var(--muted);line-height:1.55;padding:11px 14px;margin-top:10px;background:rgba(112,112,160,.08);border-radius:var(--radius-sm);border:1px solid var(--border)}
 .privacy-note{font-size:.7rem;color:var(--muted);text-align:center;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);line-height:1.5}
 
 /* ── Results summary ── */
@@ -2204,7 +2204,7 @@ const WZ = {
   hint: "text-[.65rem] font-normal text-muted ml-1.5 normal-case",
   input: "w-full min-h-[48px] px-4 py-3 bg-surface2 border border-border rounded-lg text-fg text-base outline-none focus:border-primary placeholder:text-muted",
   err: "text-[.78rem] text-danger bg-[rgba(248,113,113,.08)] border border-[rgba(248,113,113,.3)] rounded-lg px-3 py-2 mt-2",
-  tip: "text-[.78rem] text-muted leading-relaxed px-3.5 py-3 mt-2.5 bg-surface2 rounded-lg border-l-2 border-border",
+  tip: "text-[.78rem] text-muted leading-relaxed px-3.5 py-3 mt-2.5 bg-surface2 rounded-lg border border-border",
 };
 // Big toggle button (gender, etc.) — cyan when active.
 const wzGbtn = (active) => `min-h-[48px] p-4 rounded-lg border-2 cursor-pointer font-semibold flex items-center justify-center gap-2 transition-colors ${active ? "border-primary text-primary bg-[rgba(8,220,224,.08)]" : "border-border text-muted bg-surface2"}`;
@@ -4391,7 +4391,6 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
                       background: z.highlight ? "rgba(79,255,176,.04)" : "var(--surface)",
                       border: `1.5px solid ${z.highlight ? "rgba(79,255,176,.25)" : "var(--border)"}`,
                       borderRadius:"var(--radius-sm)",padding:"14px",marginBottom:"8px",
-                      borderLeft: `4px solid ${z.color}`,
                     }}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"4px"}}>
                         <div style={{fontWeight:700,fontSize:".88rem",color:z.color}}>{z.name}</div>
@@ -4406,7 +4405,7 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
                     </div>
                   );
                 })}
-                <div style={{fontSize:".76rem",color:"var(--muted)",lineHeight:1.5,marginTop:"8px",padding:"10px 12px",background:"rgba(8,220,224,.03)",borderRadius:"8px",borderLeft:"3px solid var(--accent)"}}>
+                <div style={{fontSize:".76rem",color:"var(--muted)",lineHeight:1.5,marginTop:"8px",padding:"10px 12px",background:"rgba(8,220,224,.03)",borderRadius:"8px",border:"1px solid var(--border)"}}>
                   <strong style={{color:"var(--text)"}}>Fat Burn vs. Total Burn:</strong> Zone 2 burns the highest <em>percentage</em> of calories from fat (~60–70%). But higher zones burn more <em>total</em> calories per minute. For fat loss, Zone 2 for longer sessions (45–60 min) or Zone 4–5 intervals (HIIT) are both effective — pick what you'll stick with consistently.
                 </div>
               </>
@@ -6236,7 +6235,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
                   <span style={{textAlign:"right",fontFamily:"'Sora',sans-serif",fontSize:".9rem",color:cat.color,minWidth:"32px"}}>{cat.id==="protein"?f.f+"g":cat.id==="carbs"?f.c+"g":f.f+"g"}</span>
                 </div>
               ))}
-              <div style={{marginTop:"10px",fontSize:".75rem",color:"var(--muted)",lineHeight:1.5,padding:"8px 10px",background:"rgba(8,220,224,.04)",borderRadius:"8px",borderLeft:"3px solid "+cat.color}}>
+              <div style={{marginTop:"10px",fontSize:".75rem",color:"var(--muted)",lineHeight:1.5,padding:"8px 10px",background:"rgba(8,220,224,.04)",borderRadius:"8px",border:"1px solid var(--border)"}}>
                 {cat.id==="protein"
                   ? `Aim for 25–40g protein per meal across 3–5 meals to maximize muscle protein synthesis. Spread evenly — don't back-load all ${proteinG}g into dinner.`
                   : cat.id==="carbs"
