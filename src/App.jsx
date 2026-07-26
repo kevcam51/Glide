@@ -3667,6 +3667,15 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
     } catch { /* fall through to role default */ }
     return defaultView === "simple";
   });
+  // Consume a deep-link from the home screen (S121): land on the requested tab
+  // and force Detailed view, since Simple hides the tabs entirely.
+  useEffect(() => {
+    const want = consumePlanTab();
+    if (!want) return;
+    const i = TABS.indexOf(want);
+    if (i >= 0) { setSimpleViewRaw(false); setTab(i); }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const setSimpleView = (v) => {
     setSimpleViewRaw(v);
     try { localStorage.setItem("glide-plan-view", v ? "simple" : "detailed"); } catch {}
@@ -16823,7 +16832,7 @@ const COACH_TIPS = [
   "Ask your AI coach to estimate a meal — just describe it or snap a photo.",
 ];
 
-function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPrefs, premium = true, billingHold = null }) {
+function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPrefs, onSetNotifPrefs, premium = true, billingHold = null }) {
   // The client's plan lives in their own account as "caliq-self"; today's log is
   // "caliq-log-self-{date}". The client is always on their own account (no remote
   // routing), so we read/write their own window.storage directly.
@@ -17715,7 +17724,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
             {/* On-track / compliance tracker (S120, Kevin's spec) — hideable */}
             {target != null && (
               <ComplianceTracker data={planData || {}} target={target} days={compDays}
-                hidden={compHidden} onToggleHidden={setCompHidden} />
+                hidden={compHidden} onToggleHidden={setCompHidden} onOpenTimeline={onOpenTimeline} />
             )}
 
             {/* Today's calories + quick-log */}
@@ -19837,6 +19846,16 @@ function AdminDashboard({ onClose }) {
     </div>, document.body);
 }
 
+// ─── Plan deep-link (S121) ──────────────────────────────────────────────────
+// Lets a home-screen card open the Full Plan on a SPECIFIC Results tab. The
+// Timeline (compliance projections) was effectively unreachable: it needs a
+// goal weight, sits at tab 3 of 8 in a scroll strip, and clients default to
+// Simple view which hides every tab. This is the handoff — set the wanted tab,
+// navigate, and Results consumes it once on mount.
+let _pendingPlanTab = null;
+const requestPlanTab = (name) => { _pendingPlanTab = name; };
+const consumePlanTab = () => { const t = _pendingPlanTab; _pendingPlanTab = null; return t; };
+
 // ─── Compliance tracker (S120, Kevin's spec) ────────────────────────────────
 // The counterpart to the Timeline tab's HYPOTHETICAL compliance scenarios: this
 // measures what actually happened. How often did they hit their calorie goal,
@@ -19864,7 +19883,7 @@ function complianceStats(days, target, graceFrac = 0.10) {
   return { loggedDays: logged.length, onPlan, rate, avgCal, ceiling: Math.round(ceiling) };
 }
 
-function ComplianceTracker({ data, target, days, hidden, onToggleHidden }) {
+function ComplianceTracker({ data, target, days, hidden, onToggleHidden, onOpenTimeline }) {
   const st = complianceStats(days, target);
   if (hidden) {
     return (
@@ -19945,6 +19964,22 @@ function ComplianceTracker({ data, target, days, hidden, onToggleHidden }) {
             : !toGo ? "Set a goal weight to see a projected date."
             : "Not enough consistency yet to project a date — that's fine, keep logging."}
         </div>
+      )}
+      {/* Doorway to the Timeline tab (S121). The tracker says what consistency
+          you ARE at; the Timeline shows what other levels would mean. It needs a
+          goal weight to exist, so only offer it when there is one. */}
+      {/* Gate MUST match Results' hasGoal (goal below current weight) — the
+          Timeline tab only exists for a weight-loss goal, and offering a
+          doorway to a tab that isn't there is a broken promise. */}
+      {onOpenTimeline && Number(data.goalWeight) > 0
+        && Number(data.goalWeight) < Number(data.weightLbs) && (
+        <button onClick={onOpenTimeline}
+          className="mt-3 w-full text-left rounded-lg bg-surface2 px-3 text-sm text-fg cursor-pointer border-0 flex items-center gap-2"
+          style={{ minHeight: 44 }}>
+          <Icon name="chart" size={16} color="var(--accent)" />
+          <span>See how different consistency changes your date</span>
+          <span className="ml-auto text-primary font-semibold">View</span>
+        </button>
       )}
     </div>
   );
@@ -21969,6 +22004,7 @@ export default function App() {
     // "caliq-self"), not a list of other people's profiles.
     if (role === ROLES.CLIENT) {
       return <>{chrome}<ClientHome onOpenPlan={() => selectProfile("self")}
+        onOpenTimeline={async () => { requestPlanTab("Timeline"); await selectProfile("self"); setShowDash(false); }}
         meUid={meUid} meName={meName} role={role} premium={mePremium}
         billingHold={meBillingHold}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs} /></>;
