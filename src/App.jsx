@@ -10094,7 +10094,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
   onSaveMeasurements, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise,
-  onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, meUid: dashMeUid }) {
+  onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetHideCompliance, meUid: dashMeUid }) {
 
   // Swipe-down to refresh the daily view (S104) — reuses the existing onRefresh
   // (reloadPlanLive), which re-pulls the plan + today's log.
@@ -10159,6 +10159,26 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   };
   const [editingWorkout, setEditingWorkout] = useState(null);
   const [showBurnModes, setShowBurnModes] = useState(false);  // target chooser (S97z)
+  // Last 14 days of logged calories for the compliance tracker (S123). Uses the
+  // remote-aware onReadDay, so a trainer viewing a client reads THAT client's log.
+  const [compDays, setCompDays] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    if (!onReadDay) { setCompDays([]); return; }
+    (async () => {
+      try {
+        const out = [];
+        for (let i = 0; i < 14; i++) {
+          const dt = new Date(); dt.setDate(dt.getDate() - i);
+          const key = ymdLocal(dt);
+          const v = await onReadDay(key);
+          if (v && Number(v.calories) > 0) out.push({ date: key, calories: Number(v.calories) });
+        }
+        if (alive) setCompDays(out);
+      } catch { if (alive) setCompDays([]); }
+    })();
+    return () => { alive = false; };
+  }, [onReadDay, dashToday, dailyLog && dailyLog.calories]);
   const [expandedStat, setExpandedStat] = useState(null);
   const [expandedSnap, setExpandedSnap] = useState(false);
   const [showMacros, setShowMacros] = useState(false);
@@ -11576,6 +11596,18 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
 
       {/* ── Progress & insights (display, not entry) ── */}
       <div className="sec-title" style={{ display:"flex", alignItems:"center", gap:"8px" }}><Icon name="chart" size={17} color="var(--accent)" />Progress &amp; Insights</div>
+
+      {/* Compliance tracker (S123) — ALSO here, not just the client home, because
+          this is the screen a trainer opens to review a client in person. Same
+          component, same honesty rules; the trainer can hide it per plan. */}
+      {target != null && (
+        <div style={{ marginBottom: "14px" }}>
+          <ComplianceTracker data={data} target={target} days={compDays}
+            hidden={data.hideCompliance === true}
+            onToggleHidden={(h) => onSetHideCompliance && onSetHideCompliance(h)}
+            onOpenTimeline={onOpenResults ? () => { requestPlanTab("Timeline"); onOpenResults(); } : undefined} />
+        </div>
+      )}
 
       {/* This week — nutrition averages over the days logged in the last 7 (Session 40) */}
       {weekSummary && weekSummary.days > 0 && (
@@ -14475,6 +14507,8 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         <button className={`${mBtnCls} inline-flex items-center gap-1.5`} aria-expanded={manageFor === c.uid}
                           onClick={() => setManageFor(manageFor === c.uid ? null : c.uid)}>
                           <Icon name="folder" size={16} color="var(--accent)" />{manageFor === c.uid ? "Close" : "Manage"}
+                          <span aria-hidden="true" style={{ display:"inline-block", transition:"transform .18s",
+                            transform: manageFor === c.uid ? "rotate(180deg)" : "rotate(0deg)", fontSize:".7em", opacity:.8 }}>▾</span>
                         </button>
                       </div>
                       {/* Secondary/plumbing actions live behind Manage (critique P2) */}
@@ -22137,6 +22171,7 @@ export default function App() {
               onSetWeeklyRate={(r)=>setDataAndSave(p=>({...p, weeklyRate: r}))}
               onSetDeficitMode={(m)=>setDataAndSave(p=>({...p, deficitMode: m}))}
               onSetCalorieGoal={(g)=>setDataAndSave(p=>({...p, calorieGoalDirection: g}))}
+              onSetHideCompliance={(h)=>setDataAndSave(p=>({...p, hideCompliance: h}))}
               // Sessions on the calendar are MINE. When a trainer is viewing a
               // CLIENT's plan (activeRemoteUid set), passing my uid would paint
               // my other clients' sessions onto this client's calendar — so it's
