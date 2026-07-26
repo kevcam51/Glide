@@ -17203,6 +17203,28 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
       await window.storage.set(planDataKey(activePlanId), s);
     } catch { /* ignore */ }
   };
+  // ── Compliance tracker (S120) — last 14 days of logged calories ──
+  const [compDays, setCompDays] = useState([]);
+  const compHidden = (planData || {}).hideCompliance === true;
+  const setCompHidden = (hide) => savePlanDataMutation((d) => { d.hideCompliance = hide; });
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const out = [];
+        for (let i = 0; i < 14; i++) {
+          const dt = new Date(); dt.setDate(dt.getDate() - i);
+          const key = ymdLocal(dt);
+          const r = await get(planLogPrefix(activePlanId) + key);
+          const v = r && r.value ? JSON.parse(r.value) : null;
+          if (v && Number(v.calories) > 0) out.push({ date: key, calories: Number(v.calories) });
+        }
+        if (alive) setCompDays(out);
+      } catch { if (alive) setCompDays([]); }
+    })();
+    return () => { alive = false; };
+  }, [activePlanId, todayKey, log.calories]);
+
   // Body measurements (tape) — merge into today's entry, echo-safe write path.
   const saveMeasurements = async (vals) => {
     await savePlanDataMutation((d) => { mergeMeasurements(d, vals, todayKey, "client"); });
@@ -17689,6 +17711,12 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                 </>
               )}
             </div>
+
+            {/* On-track / compliance tracker (S120, Kevin's spec) — hideable */}
+            {target != null && (
+              <ComplianceTracker data={planData || {}} target={target} days={compDays}
+                hidden={compHidden} onToggleHidden={setCompHidden} />
+            )}
 
             {/* Today's calories + quick-log */}
             <div className={cardCls}>
@@ -19807,6 +19835,119 @@ function AdminDashboard({ onClose }) {
         )}
       </div>
     </div>, document.body);
+}
+
+// ─── Compliance tracker (S120, Kevin's spec) ────────────────────────────────
+// The counterpart to the Timeline tab's HYPOTHETICAL compliance scenarios: this
+// measures what actually happened. How often did they hit their calorie goal,
+// what does that imply for the goal date, and how much closer are they?
+//
+// Kevin's brief: "determine how on track someone is to reaching their goal …
+// based on how often clients are sticking to their calorie goal, and also
+// calculate their calorie burn with it … and make it so a user or Trainer can
+// hide this — some people don't want to measure success with those numbers."
+//
+// Honesty rules this obeys (PRODUCT.md credibility floor):
+//  • Only counts days that were actually LOGGED. An unlogged day is unknown,
+//    not a failure — inferring failure from silence would be a lie.
+//  • Says how thin the evidence is, and refuses to project under 5 logged days.
+//  • The projection is explicitly an estimate, from THEIR observed rate.
+//  • No shame register: uses the amber grace band, never red (S117 decision).
+function complianceStats(days, target, graceFrac = 0.10) {
+  // days: [{ date, calories }] — only entries with a real logged total count.
+  const logged = (days || []).filter((d) => d && Number(d.calories) > 0);
+  if (!target || !logged.length) return null;
+  const ceiling = target * (1 + graceFrac);
+  const onPlan = logged.filter((d) => Number(d.calories) <= ceiling).length;
+  const rate = onPlan / logged.length;
+  const avgCal = Math.round(logged.reduce((a, d) => a + Number(d.calories), 0) / logged.length);
+  return { loggedDays: logged.length, onPlan, rate, avgCal, ceiling: Math.round(ceiling) };
+}
+
+function ComplianceTracker({ data, target, days, hidden, onToggleHidden }) {
+  const st = complianceStats(days, target);
+  if (hidden) {
+    return (
+      <button onClick={() => onToggleHidden(false)}
+        className="w-full text-left rounded-card border border-border bg-surface px-4 text-sm text-muted cursor-pointer"
+        style={{ minHeight: 44 }}>
+        Progress tracker hidden · <span className="text-primary font-semibold">Show</span>
+      </button>
+    );
+  }
+  const cardCls = "bg-surface border border-border rounded-card p-4";
+  const HideBtn = (
+    <button onClick={() => onToggleHidden(true)}
+      className="ml-auto text-xs text-muted bg-transparent border-0 cursor-pointer px-2"
+      style={{ minHeight: 44 }}>Hide</button>
+  );
+  const Head = (
+    <div className="font-display text-base tracking-wide text-primary uppercase mb-2 flex items-center gap-2">
+      <Icon name="target" size={18} color="var(--accent)" />On track
+      {HideBtn}
+    </div>
+  );
+  if (!st || st.loggedDays < 3) {
+    return (
+      <div className={cardCls}>
+        {Head}
+        <div className="text-sm text-muted leading-relaxed">
+          Log a few days of food and this will show how consistently you're hitting your
+          calorie goal — and what that means for your goal date.
+        </div>
+      </div>
+    );
+  }
+  const pct = Math.round(st.rate * 100);
+  // Amber grace, never red (S117): consistency is encouraged, not punished.
+  const tone = st.rate >= 0.8 ? "text-success" : st.rate >= 0.5 ? "text-warn" : "text-muted";
+  const label = st.rate >= 0.8 ? "Dialed in" : st.rate >= 0.5 ? "Mostly on track" : "Finding your rhythm";
+
+  // Projection: scale the PLAN's intended weekly rate by observed compliance.
+  // Needs a goal, a current weight, and enough logged days to mean anything.
+  const cur = Number(data.weightLbs) || 0;
+  const goal = Number(data.goalWeight) || 0;
+  const toGo = cur && goal ? Math.abs(cur - goal) : null;
+  const plannedRate = weeklyRateOf(data);                 // lb/week the plan intends
+  const effRate = plannedRate * st.rate;                  // what their consistency actually buys
+  const enough = st.loggedDays >= 5;
+  const weeks = enough && toGo && effRate > 0 ? toGo / effRate : null;
+  const eta = weeks && weeks < 260 ? friendlyTime(weeks) : null;
+  const etaDate = weeks && weeks < 260
+    ? new Date(Date.now() + weeks * 7 * 86400000).toLocaleDateString(undefined, { month: "long", year: "numeric" })
+    : null;
+
+  return (
+    <div className={cardCls}>
+      {Head}
+      <div className="flex items-baseline gap-2 flex-wrap">
+        <span className={`font-display text-4xl leading-none ${tone}`}>{pct}%</span>
+        <span className="text-sm text-muted">of your logged days hit your goal</span>
+      </div>
+      <div className={`mt-1 text-sm font-semibold ${tone}`}>{label}</div>
+      <div className="mt-1 text-xs text-muted">
+        {st.onPlan} of {st.loggedDays} logged {st.loggedDays === 1 ? "day" : "days"} at or near your{" "}
+        {target.toLocaleString()} cal target · averaging {st.avgCal.toLocaleString()} cal
+      </div>
+      {eta ? (
+        <div className="mt-3 rounded-lg bg-surface2 p-3">
+          <div className="text-sm text-fg leading-relaxed">
+            Keep this up and you'd reach <b>{goal} lbs</b> in about <b>{eta}</b>
+            {etaDate ? <> — around <b>{etaDate}</b></> : null}.
+          </div>
+          <div className="mt-1 text-[11px] text-muted italic">
+            Estimate at your current consistency ({pct}%), not a promise. It updates as you log.
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 text-xs text-muted italic">
+          {!enough ? "Log a few more days and we'll project your goal date from your real consistency."
+            : !toGo ? "Set a goal weight to see a projected date."
+            : "Not enough consistency yet to project a date — that's fine, keep logging."}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Connect-your-AI panel (S118) — the MCP connector's front door ──────────
