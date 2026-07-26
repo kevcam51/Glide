@@ -13923,6 +13923,13 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const [planFilter, setPlanFilter] = useState("all");       // all | plans | sims (merged local list)
   const [confirmDelFor, setConfirmDelFor] = useState(null);  // local-plan id awaiting delete confirm
   const [clients, setClients] = useState([]); // connected client accounts (live data)
+  // Has the roster actually been fetched? `clients.length === 0` on its own
+  // cannot tell "this trainer has no clients" from "the multi-round-trip fetch
+  // hasn't finished" or "it failed" — and reading it as the first flashed
+  // "No clients connected yet" on every home load (~285ms, longer on cellular)
+  // and left that message up FOREVER after a failed wake-fetch. Tri-state, not
+  // a boolean: "error" must not render the same empty state as "ready".
+  const [rosterState, setRosterState] = useState("loading"); // loading | ready | error
   const [sessionsFor, setSessionsFor] = useState(null); // client whose Sessions panel is open
   // Upcoming-session count per client, for the badge on the Sessions button.
   // One live subscription over MY sessions (array-contains me) covers every
@@ -13959,6 +13966,18 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // collapsed by default so the roster owns the home. Opens automatically for a
   // trainer with no connected clients — for them it IS the main surface.
   const [plansOpen, setPlansOpen] = useState(false);
+  // A trainer with no connected clients has nothing else on this screen, so the
+  // drawer opens for them — but SEEDED once, never derived. It used to render
+  // from `plansOpen OR an empty roster`, which (a) flashed open then shut on
+  // every load while the roster resolved, and (b) made the Show/Hide button
+  // a dead control for the very trainers it was meant to help: the OR stayed
+  // true no matter what the toggle did, so the drawer could never be closed.
+  const seededPlansOpen = useRef(false);
+  useEffect(() => {
+    if (seededPlansOpen.current || rosterState !== "ready") return;
+    seededPlansOpen.current = true;              // decide once, then leave it alone
+    if (clients.length === 0) setPlansOpen(true);
+  }, [rosterState, clients.length]);
   const [linkBusy, setLinkBusy] = useState(false);
   const [cMsg, setCMsg] = useState("");
   // S117e (critique P4): feedback is PER-CLIENT and valenced — it renders inside
@@ -14026,7 +14045,13 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     // (offline wake / stale token) rendered "no clients" forever. Bail instead
     // and keep whatever we last had; the resume hook below will retry.
     try { cs = await getMyClients(); }
-    catch (e) { console.warn("loadClients failed; keeping last roster", e); return; }
+    catch (e) {
+      console.warn("loadClients failed; keeping last roster", e);
+      // Attempted but failed. Deliberately NOT "ready" — a trainer whose fetch
+      // died offline must never be told they have no clients.
+      setRosterState("error");
+      return;
+    }
     const rows = await Promise.all((cs || []).map(async (c) => {
       let data = null, lastLogDate = null;
       // A client may have several plans — show the ACTIVE one in the overview.
@@ -14056,6 +14081,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         plans: manifest.plans, activePlanId: activeId };
     }));
     setClients(rows);
+    setRosterState("ready");
   };
   useEffect(() => { loadClients(); }, []);
   // Live-refresh the cards when a client (or the AI) logs/edits (see the hook).
@@ -14344,7 +14370,26 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         {/* S119 (#4): a brand-new trainer used to see NOTHING here — the whole
             card was hidden when the roster was empty, so their actual first job
             (invite a client) had no affordance on this screen at all. */}
-        {clients.length === 0 && !loading && (
+        {/* Roster still in flight — show the shape of what's coming, never a
+            claim about how many clients this trainer has. */}
+        {rosterState === "loading" && <SkeletonCard rows={3} />}
+
+        {/* Fetch failed and we have nothing cached to fall back on. Say THAT,
+            rather than "no clients connected yet" — which is a lie that used to
+            persist until the next successful load. */}
+        {rosterState === "error" && clients.length === 0 && (
+          <div className={cardCls}>
+            <div className={`${sectionTitleCls} flex items-center gap-2`}>
+              <Icon name="alert" size={19} color="var(--color-warn)" />Your Connected Clients
+            </div>
+            <div className={`${subCls} mt-1`}>
+              Couldn't load your clients just now — you may be offline. This retries by itself when
+              the connection is back; pull down to refresh to try again straight away.
+            </div>
+          </div>
+        )}
+
+        {rosterState === "ready" && clients.length === 0 && (
           <div className={cardCls}>
             <div className={`${sectionTitleCls} flex items-center gap-2`}>
               <Icon name="link" size={19} color="var(--accent)" />Your Connected Clients
@@ -14361,38 +14406,43 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           </div>
         )}
 
+        {/* Client → trainer requests inbox (S90) — shows only when there's
+            something in it; done/dismiss write my own kv (owner access).
+            TOP-LEVEL on purpose: this is the trainer's OWN kv (caliq-inbox) and
+            has nothing to do with the roster. Nested inside the roster card it
+            became unreachable the moment getMyClients() returned [] — including
+            when a client used "Leave trainer" after asking for something. */}
+        {inbox.length > 0 && (
+          <div className="mb-4 rounded-card border border-[color-mix(in_srgb,var(--color-primary)_45%,transparent)] bg-[color-mix(in_srgb,var(--color-primary)_5%,transparent)] p-4">
+            <div className={`${sectionTitleCls} flex items-center gap-2`}>
+              <Icon name="inbox" size={19} color="var(--accent)" />Asks From Clients
+              {openInbox.length > 0 && <span className="rounded-full bg-primaryfill px-2 text-[.7rem] font-bold text-primaryfg">{openInbox.length}</span>}
+            </div>
+            {openInbox.length === 0 && <div className={subCls}>All caught up</div>}
+            {openInbox.map((r) => (
+              <div key={r.id} className="mt-2 rounded-xl border border-border bg-surface2 p-3">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[.84rem] font-bold text-fg">{r.fromName || "Client"}</span>
+                  <span className="text-[.66rem] text-muted">{fmtStamp(r.createdAt)}</span>
+                </div>
+                <div className="mt-1 text-[.84rem] leading-relaxed text-fg">{r.prompt}</div>
+                <div className="mt-2 flex gap-2">
+                  <button className={mBtnCls} onClick={() => inboxDone(r.id)}><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Done</button>
+                  <button className={`${mBtnCls} text-muted`} onClick={() => inboxRemove(r.id)}>Dismiss</button>
+                </div>
+              </div>
+            ))}
+            {inbox.some((r) => r.status === "done") && (
+              <button className="mt-2 border-0 bg-transparent p-0 text-[.72rem] text-muted underline cursor-pointer"
+                onClick={() => writeInbox(inbox.filter((r) => r.status !== "done"))}>
+                Clear {inbox.filter((r) => r.status === "done").length} completed
+              </button>
+            )}
+          </div>
+        )}
+
         {clients.length > 0 && (
           <div className={cardCls}>
-            {/* Client → trainer requests inbox (S90) — shows only when there's
-                something in it; done/dismiss write my own kv (owner access). */}
-            {inbox.length > 0 && (
-              <div className="mb-4 rounded-card border border-[color-mix(in_srgb,var(--color-primary)_45%,transparent)] bg-[color-mix(in_srgb,var(--color-primary)_5%,transparent)] p-4">
-                <div className={`${sectionTitleCls} flex items-center gap-2`}>
-                  <Icon name="inbox" size={19} color="var(--accent)" />Asks From Clients
-                  {openInbox.length > 0 && <span className="rounded-full bg-primaryfill px-2 text-[.7rem] font-bold text-primaryfg">{openInbox.length}</span>}
-                </div>
-                {openInbox.length === 0 && <div className={subCls}>All caught up</div>}
-                {openInbox.map((r) => (
-                  <div key={r.id} className="mt-2 rounded-xl border border-border bg-surface2 p-3">
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-[.84rem] font-bold text-fg">{r.fromName || "Client"}</span>
-                      <span className="text-[.66rem] text-muted">{fmtStamp(r.createdAt)}</span>
-                    </div>
-                    <div className="mt-1 text-[.84rem] leading-relaxed text-fg">{r.prompt}</div>
-                    <div className="mt-2 flex gap-2">
-                      <button className={mBtnCls} onClick={() => inboxDone(r.id)}><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Done</button>
-                      <button className={`${mBtnCls} text-muted`} onClick={() => inboxRemove(r.id)}>Dismiss</button>
-                    </div>
-                  </div>
-                ))}
-                {inbox.some((r) => r.status === "done") && (
-                  <button className="mt-2 border-0 bg-transparent p-0 text-[.72rem] text-muted underline cursor-pointer"
-                    onClick={() => writeInbox(inbox.filter((r) => r.status !== "done"))}>
-                    Clear {inbox.filter((r) => r.status === "done").length} completed
-                  </button>
-                )}
-              </div>
-            )}
             <div className={`${sectionTitleCls} flex items-center gap-2`}><Icon name="link" size={19} color="var(--accent)" />Your Connected Clients</div>
             <div className={`${subCls} mt-1 mb-2`}>
               Live data from each client's shared plan. Tap a card to open it.
@@ -14682,17 +14732,17 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         )}
 
         <div className={cardCls}>
-          <button onClick={() => setPlansOpen((v) => !v)} aria-expanded={plansOpen || clients.length === 0}
+          <button onClick={() => setPlansOpen((v) => !v)} aria-expanded={plansOpen}
             className="w-full flex items-center gap-2 bg-transparent border-0 p-0 cursor-pointer text-left"
             style={{ minHeight: 44 }}>
             <div className={`${sectionTitleCls} whitespace-nowrap flex items-center gap-2 mb-0`}><Icon name="clipboard" size={18} color="var(--accent)" />Local Plans</div>
             <span className="text-xs text-muted ml-1">{realPlans.length + sims.length || ""}</span>
-            <span className="ml-auto text-muted text-xs">{(plansOpen || clients.length === 0) ? "Hide" : "Show"}</span>
+            <span className="ml-auto text-muted text-xs">{plansOpen ? "Hide" : "Show"}</span>
           </button>
-          {!(plansOpen || clients.length === 0) && (
+          {!plansOpen && (
             <div className={`${subCls} mt-1`}>Your own working files — templates, simulations and imported plans.</div>
           )}
-          {(plansOpen || clients.length === 0) && (<>
+          {plansOpen && (<>
           <div className="flex gap-1.5 mt-2 flex-wrap">
             <button onClick={onNewPlan} className={mPrimaryCls}>+ Plan</button>
             <button onClick={onNewSimulation}
@@ -14792,7 +14842,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           )}
           <div className={`${subCls} mt-1.5 mb-1.5`}>
             Plans not connected to a client login — templates, backups, and simulations (sandbox
-            what-if projections). Connected clients are under “Your clients” above.
+            what-if projections). Connected clients are under “Your Connected Clients” above.
           </div>
           <div className={subCls}>
             {loading ? "Loading…"
