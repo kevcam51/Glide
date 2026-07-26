@@ -3672,8 +3672,13 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
   useEffect(() => {
     const want = consumePlanTab();
     if (!want) return;
+    // Always leave Simple view — the caller asked for detail. If the requested
+    // tab exists (Timeline only exists for a weight-loss goal), land on it;
+    // otherwise the detailed plan itself is still the useful answer, never a
+    // dead end (S125).
+    setSimpleViewRaw(false);
     const i = TABS.indexOf(want);
-    if (i >= 0) { setSimpleViewRaw(false); setTab(i); }
+    if (i >= 0) setTab(i);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setSimpleView = (v) => {
@@ -19992,6 +19997,21 @@ function ComplianceTracker({ data, target, days, hidden, onToggleHidden, onOpenT
       {HideBtn}
     </div>
   );
+  // ALWAYS-PRESENT doorway to the full projections (S125, Kevin: he could not
+  // find the Timeline three times running). It used to be triple-gated — 3+
+  // logged days AND a goal weight AND a weight-loss goal — so in the common
+  // early state there was no link at all. Now it shows in every state and
+  // simply opens the detailed plan; Results lands on Timeline when that tab
+  // exists and otherwise just opens Detailed, so it is never a dead end.
+  const MoreLink = onOpenTimeline ? (
+    <button onClick={onOpenTimeline}
+      className="mt-3 w-full text-left rounded-lg bg-surface2 px-3 text-sm text-fg cursor-pointer border-0 flex items-center gap-2"
+      style={{ minHeight: 44 }}>
+      <Icon name="chart" size={16} color="var(--accent)" />
+      <span>Show more detail</span>
+      <span className="ml-auto text-primary font-semibold">View</span>
+    </button>
+  ) : null;
   if (!st || st.loggedDays < 3) {
     return (
       <div className={cardCls}>
@@ -20000,6 +20020,7 @@ function ComplianceTracker({ data, target, days, hidden, onToggleHidden, onOpenT
           Log a few days of food and this will show how consistently you're hitting your
           calorie goal — and what that means for your goal date.
         </div>
+        {MoreLink}
       </div>
     );
   }
@@ -20051,22 +20072,7 @@ function ComplianceTracker({ data, target, days, hidden, onToggleHidden, onOpenT
             : "Not enough consistency yet to project a date — that's fine, keep logging."}
         </div>
       )}
-      {/* Doorway to the Timeline tab (S121). The tracker says what consistency
-          you ARE at; the Timeline shows what other levels would mean. It needs a
-          goal weight to exist, so only offer it when there is one. */}
-      {/* Gate MUST match Results' hasGoal (goal below current weight) — the
-          Timeline tab only exists for a weight-loss goal, and offering a
-          doorway to a tab that isn't there is a broken promise. */}
-      {onOpenTimeline && Number(data.goalWeight) > 0
-        && Number(data.goalWeight) < Number(data.weightLbs) && (
-        <button onClick={onOpenTimeline}
-          className="mt-3 w-full text-left rounded-lg bg-surface2 px-3 text-sm text-fg cursor-pointer border-0 flex items-center gap-2"
-          style={{ minHeight: 44 }}>
-          <Icon name="chart" size={16} color="var(--accent)" />
-          <span>See how different consistency changes your date</span>
-          <span className="ml-auto text-primary font-semibold">View</span>
-        </button>
-      )}
+      {MoreLink}
     </div>
   );
 }
