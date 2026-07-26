@@ -19771,6 +19771,93 @@ function AdminDashboard({ onClose }) {
     </div>, document.body);
 }
 
+// ─── Connect-your-AI panel (S118) — the MCP connector's front door ──────────
+// The connector shipped working (S112–S116) but had ZERO in-app discoverability:
+// nothing told a user it existed or how to switch it on. This is that surface.
+// Kept deliberately plain — the instructions have to survive being read once, on
+// a phone, by someone who has never heard of MCP.
+function ConnectAIPanel({ onClose }) {
+  useBodyScrollLock(true);
+  useBackClose(true, onClose);
+  const [copied, setCopied] = useState(false);
+  const MCP_URL = "https://glidna.com/mcp";
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(MCP_URL);
+      setCopied(true); setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard blocked — the URL is visible to select manually */ }
+  };
+  const card = "rounded-lg bg-surface2 p-3";
+  return createPortal(
+    <div onClick={onClose}
+      style={{ fontFamily: "var(--font-sans)", paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
+        paddingBottom: "calc(16px + env(safe-area-inset-bottom,0px))" }}
+      className="fixed inset-0 z-[1500] flex items-start justify-center bg-black/60 px-4 overflow-auto">
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-[520px] rounded-card border border-border bg-surface p-4 text-fg my-auto">
+        <div className="mb-3 relative flex items-center justify-center px-[92px]">
+          <div className="text-[1.05rem] font-extrabold flex items-center gap-2">
+            <Icon name="sparkle" size={17} color="var(--accent)" />Connect your AI
+          </div>
+          <button onClick={onClose} aria-label="Back"
+            className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer"
+            style={{ minHeight: 44 }}>
+            <Icon name="back" size={15} color="var(--accent)" />Back
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-muted leading-relaxed">
+            Use Glidna from inside your own AI assistant. Ask it to log your meals, check your
+            progress, or build a workout — and it writes straight into your Glidna account.
+          </p>
+
+          <div className={card}>
+            <div className="text-[.68rem] font-bold uppercase tracking-wide text-muted mb-1.5">Your connection link</div>
+            <div className="flex gap-2 items-center flex-wrap">
+              <code className="flex-1 min-w-[180px] text-sm text-fg bg-surface rounded-lg px-3 py-2.5 break-all">{MCP_URL}</code>
+              <button onClick={copy}
+                className="rounded-lg bg-primaryfill px-4 text-sm font-bold text-primaryfg cursor-pointer"
+                style={{ minHeight: 44 }}>{copied ? "Copied" : "Copy"}</button>
+            </div>
+          </div>
+
+          <div className={card}>
+            <div className="text-sm font-semibold mb-2">How to connect (Claude)</div>
+            <ol className="text-sm text-muted leading-relaxed flex flex-col gap-1.5" style={{ paddingLeft: "1.1rem", listStyle: "decimal" }}>
+              <li>Open Claude, go to <b className="text-fg">Settings → Connectors</b>.</li>
+              <li>Choose <b className="text-fg">Add custom connector</b>.</li>
+              <li>Paste the link above and confirm.</li>
+              <li>Claude sends you back here to sign in and approve — that's it.</li>
+            </ol>
+            <div className="mt-2 text-[11px] text-muted leading-relaxed">
+              Works the same way in other assistants that support connectors (MCP).
+            </div>
+          </div>
+
+          <div className={card}>
+            <div className="text-sm font-semibold mb-1.5">Things to try</div>
+            <div className="flex flex-col gap-1.5 text-sm text-muted leading-relaxed">
+              <div>“Log a chicken salad, about 450 calories, for lunch.”</div>
+              <div>“What did I eat this week, and am I hitting my protein?”</div>
+              <div>“I weighed 182 this morning.”</div>
+              <div>“Build me a 3-day full-body program.”</div>
+            </div>
+          </div>
+
+          <div className="text-[11px] text-muted leading-relaxed">
+            You choose what it may do when you approve the connection, and only your own data is
+            shared. Your assistant handles that data under its own terms. You can disconnect any
+            time from your assistant's settings.{" "}
+            <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="text-primary underline">Privacy Policy</a>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ─── Team panel (S116) — head trainer ↔ sub-trainers ────────────────────────
 // The UI for the hierarchy fix. A trainer JOINS a team by entering the head's
 // invite code (the sub always initiates, so joining is consented by design);
@@ -19961,6 +20048,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
   const [showAdmin, setShowAdmin] = useState(false);      // S90 admin all-users dashboard
   const [showMyNotes, setShowMyNotes] = useState(false);  // S91 trainer general notes
   const [showTeam, setShowTeam] = useState(false);        // S116 head trainer <-> sub-trainers
+  const [showConnectAI, setShowConnectAI] = useState(false); // S118 MCP connector how-to
   const [showAuto, setShowAuto] = useState(false);        // S93 scheduled AI automations
   const [upgradeErr, setUpgradeErr] = useState(false);
   useBackClose(open, onClose);                        // phone Back closes the menu
@@ -20254,6 +20342,14 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
           </button>
         )}
         {showTeam && <TeamPanel onClose={() => setShowTeam(false)} />}
+
+        {/* Connect your AI (S118) — the MCP connector's only discoverable entry
+            point. Shown to EVERY role: clients benefit as much as trainers. */}
+        <button style={item} onClick={() => setShowConnectAI(true)}>
+          <Icon name="sparkle" size={19} color="var(--accent)" /> <span>Connect your AI</span>
+          <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
+        </button>
+        {showConnectAI && <ConnectAIPanel onClose={() => setShowConnectAI(false)} />}
 
         {/* My notes (trainer) — general notes; per-client notes live on the client cards (S91) */}
         {isTrainer && (
