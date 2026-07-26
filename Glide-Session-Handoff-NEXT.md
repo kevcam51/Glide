@@ -1,5 +1,108 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S112–S125 (Jul 25–26): MCP CONNECTOR SHIPPED · Impeccable design pass · trainer teams
+_All pushed to `origin/main` (@ `b34794f`), tree clean, functions deployed, rules PUBLISHED
+(167/167 emulator tests). Firebase `calorieiq-29762`; model `claude-sonnet-4-6`; admin UID
+`G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`. 22 commits — the biggest arc since the AI layer._
+
+### 🔴 READ FIRST — verification debt + one standing gotcha
+- **Most S117–S125 UI is BUILD-VERIFIED ONLY.** The preview's test session logged out
+  repeatedly and I do not type login passwords, so there was no visual click-through for:
+  the trainer-home critique fixes, the Local Plans drawer, the team panel, Connect-your-AI,
+  the compliance tracker, and the Show-more-detail doorway. **Ask Kevin to sign the preview
+  into `trainer.uitest@calorieiq-test.com` / `TestPass123`, then verify these.**
+- **Kevin repeatedly could not find features that render only for `role === client`.** He is
+  a trainer/admin — ClientHome NEVER renders for him. When building on ClientHome, say so, or
+  put it on DailyDashboard too (which trainers see when they open a client's plan).
+- **Firebase CLI creds expire constantly.** `firebase login --reauth`, finish sign-in in a
+  Firefox **Private Window** (Cmd+Shift+P) if the normal flow errors.
+
+### ✅ THE MCP CONNECTOR IS LIVE — `https://glidna.com/mcp`
+Users drive Glidna from their OWN Claude. Kevin has it connected; verified end-to-end through
+real Claude tool-calling (not just curl). Full design + verified spec research in
+`docs/MCP-CONNECTOR.md`.
+- **Phase 1** (`303f027`): stateless Streamable HTTP MCP server on Cloud Functions,
+  per-request McpServer (SDK bug #1994 — never reuse a transport), origin validation,
+  daily caps. Fronts the SAME `aitools.js runTool` as the in-app AI.
+- **Phase 2** (`384ae46`): full OAuth 2.1 — RFC 9728 discovery, RFC 7591 DCR, PKCE S256,
+  RFC 8707 audience binding. **Tokens are OPAQUE, hashed in Firestore** (no signing secret,
+  instantly revocable). Consent screen at `/oauth/authorize` renders inside AuthGate so it
+  reuses the existing login. `vercel.json` fronts `/mcp`, `/.well-known/*`, `/oauth/*`.
+  Verified: code replay, wrong PKCE, unregistered redirect_uri, plain-PKCE downgrade all REFUSED.
+- **Phase 3** (`584a500`): WRITES behind scopes (`read` / `write:logs` / `write:plan` /
+  `trainer`). Two gates: buildTools role-filters first, then token scopes, re-checked at call
+  time. Verified live: read-only token = 11 tools with `log_meal` invisible; full = 30 tools.
+- **Caps** (`ee33d88`, `a7c2ec3`): free 200/day · premium 2,000 · coach 5,000 · max 10,000 ·
+  ultra 25,000. Measured cost ~$0.000013/call. **Bug fixed:** `includes("max")` dropped
+  `ultra`/`coach_ultra` (the TOP tiers) to the premium cap.
+- **`S118` Connect-your-AI panel** — ≡ menu, every role. The connector had ZERO
+  discoverability before this; only Kevin knew it existed.
+- **Scope changes require a reconnect** (token carries old scopes); new TOOLS do not.
+
+### ✅ Trainer teams — the hierarchy actually works now (S116, S118b)
+Heads can manage sub-trainers AND their clients. `functions/team.js`: joinTeam / leaveTeam /
+listTeam / removeSubTrainer (server-side because rules block self-role-changes). The sub
+initiates via the head's invite code, so consent is inherent.
+- **Root cause of the old breakage:** nothing ever SET a sub-trainer's `headTrainerId`, and
+  `resolveTargetUid` checked the CLIENT's `headTrainerId` instead of walking client →
+  trainer → that trainer's head (which is what `firestore.rules isHeadOfTrainer` does, and
+  it was already correct + tested). No rules change was needed.
+- **Bug caught by E2E testing:** a head's own `headTrainerId` points at ITSELF, so the
+  two-level-cap guard counted the caller as their own sub and refused EVERY join.
+- New AI/connector tools: `list_sub_trainers`, `list_clients({includeTeam})`.
+- UI: ≡ menu → **My team**.
+
+### ✅ Impeccable design skill adopted (S117) — `PRODUCT.md` is the durable artifact
+`npx impeccable install` (skill gitignored; hooks are local-only). **PRODUCT.md is committed
+and binds future design work** — two co-primary audiences, WCAG 2.2 AA in BOTH themes, and
+the collision order Kevin confirmed: **credible (never sacrificed) → effortless in the daily
+loop → AI-native as the signature layer.** It also records deliberate decisions so critiques
+stop re-flagging them (raw calorie quick-add STAYS; amber grace band, never red at +1 cal).
+- **Critiques run as 2 isolated sub-agents (design + measured evidence), then synthesized.**
+  Snapshots in `.impeccable/critique/`. Both screens' fixes applied:
+  - **ClientHome** (`f2587bd`, `74434aa`): found `--danger` was **undefined** (the payment
+    banner was hard-locked to dark-theme red; the Pay button measured 2.77:1 in BOTH themes),
+    and the light theme broadly FAILED the AA commitment (`--color-primary` 3.92:1, not the
+    ~4.5 its own comment claimed). Retuned light tokens with computed values, added
+    `--color-dangerfg`, one-tap plan delete now confirms, weigh-in typo guard, 44px targets.
+  - **TrainerDashboard** (`64fefcc`, `21921b5`): verdict "designed, but accreted" — up to
+    NINE flat buttons per client card, now collapsed behind **Manage ▾**; hardcoded
+    `#39d98a`/`#f0a020`/`#b57bff` measured 1.6–2.9:1 in light → theme tokens + new
+    `--color-sim`; per-client valenced feedback (was one gray string below the whole roster);
+    quiet-client salience.
+- Detector: `node .claude/skills/impeccable/scripts/detect.mjs src/App.jsx` — steady at 5
+  (deferred `transition:width`).
+
+### ✅ Also shipped
+- **S119 parked decisions:** Local Plans → collapsed drawer (auto-opens when the roster is
+  empty) · "Client Requests"→**Asks From Clients** / "Send request"→**Send to-do** ·
+  link/unlink/copy → **Assign a plan / Take plan back / Save a copy to my files** ·
+  empty-state **"Invite your first client"** CTA.
+- **S120/S123/S125 compliance tracker** (Kevin's spec): % of logged days hitting the calorie
+  goal → consistency-scaled goal date. Amber grace, never red. Hideable per plan
+  (`data.hideCompliance`). On the client home AND DailyDashboard (so a trainer can show a
+  client in person). **S125:** the "Show more detail" doorway was triple-gated (3+ logged
+  days AND goal weight AND weight-loss goal) so it was usually invisible — now ungated in
+  both card states, and the destination always leaves Simple view.
+- **S124 requests↔DMs merge:** to-dos now appear in the DM thread as task cards. The message
+  is a **POINTER** (`kind:"todo"`, `todoId`) — status stays in `caliq-requests`, so chat and
+  the home screen can never disagree. Rules extended + **11 new tests (167/167)**, PUBLISHED.
+  Only the thread's TRAINER may send a to-do. The client's home task cards and the
+  "Do it now →" QuickActionModal flow were deliberately PRESERVED.
+- **S114:** consent-screen Terms/Privacy links + `docs/PRIVACY-AI-CONNECTOR-DRAFT.md` for
+  counsel (the existing policy covers the in-app AI as OUR processor; the connector is a
+  materially different flow — the user's own AI as an independent controller). **Not
+  published** — pending review. Sharpest open question: when a TRAINER routes CLIENT data
+  through their own external AI, is existing trainer-access consent enough?
+
+### ⏭️ Next up
+- **Verify the S117–S125 UI live** (see verification debt above) — biggest outstanding risk.
+- **Timeline is only reachable for weight-loss goals** (`...(hasGoal ? ["Timeline"] : [])`,
+  and `hasGoal` means goal < current). Maintain/gain clients get no projections at all —
+  worth deciding whether that's right.
+- Connector Phase 4: directory submission (needs a Claude Team/Enterprise org), ChatGPT.
+- Legal: waiver, session-billing ToS, AI-connector privacy — all awaiting counsel.
+
 ## ⚡⚡⚡ S109–S111 (Jul 24): body-comp charts · food/AI UX · #ID codes · DOB · MCP connector design
 _All pushed to `origin/main` (@ `7d3129e`), tree clean, all functions deployed. Firebase
 `calorieiq-29762`; model `claude-sonnet-4-6`; admin UID `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`.
