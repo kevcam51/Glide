@@ -160,6 +160,13 @@ exports.mcpRegister = require("./mcpauth").mcpRegister;   // RFC 7591 dynamic cl
 exports.mcpAuthorize = require("./mcpauth").mcpAuthorize; // consent page → single-use code
 exports.mcpToken = require("./mcpauth").mcpToken;         // code/refresh → opaque tokens
 
+// Trainer TEAM management (S116) — head trainer ↔ sub-trainers. Server-side
+// because firestore.rules blocks a user changing their own role. See team.js.
+exports.joinTeam = require("./team").joinTeam;
+exports.leaveTeam = require("./team").leaveTeam;
+exports.removeSubTrainer = require("./team").removeSubTrainer;
+exports.listTeam = require("./team").listTeam;
+
 // Training sessions (S100): the "red line" — stamps completedAt on sessions
 // whose end time has passed. That stamp is what Sunday billing will bill from.
 exports.sessionsMarkCompleted = require("./sessions").sessionsMarkCompleted;

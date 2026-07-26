@@ -73,6 +73,7 @@ const READ_TOOLS = new Set([
   "find_client",
   "coach_summary",
   "list_local_plans",
+  "list_sub_trainers",   // head trainer's team (S116)
 ]);
 
 // ── Phase 3 (S115): WRITE tools, each behind an OAuth scope ────────────────

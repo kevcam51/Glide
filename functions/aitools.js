@@ -1302,7 +1302,20 @@ function buildTools(role, opts = {}) {
     tools.push({
       name: "list_clients",
       description:
-        "List ALL your connected clients (id, name, last log date, days since last logged). Use ONLY when the user wants the whole roster — for ONE named person, use find_client instead (much cheaper). Use the returned id with the other tools.",
+        "List ALL your connected clients (id, name, last log date, days since last logged). Use ONLY when the user wants the whole roster — for ONE named person, use find_client instead (much cheaper). Use the returned id with the other tools. "
+        + "Head trainers: pass includeTeam=true to ALSO include the clients of the sub-trainers on your team (each row is tagged with viaTrainer).",
+      input_schema: {
+        type: "object",
+        properties: {
+          includeTeam: { type: "boolean", description: "Head trainers only: also include clients belonging to your sub-trainers. Default false (your direct clients only)." },
+        },
+      },
+    });
+    tools.push({
+      name: "list_sub_trainers",
+      description:
+        "List the sub-trainers on YOUR team (head trainers). Returns each one's id, name, email and how many clients they carry. "
+        + "Use the returned subTrainerId with list_clients(includeTeam)/coach_summary to drill into their roster, and remember you can act on their clients directly with any tool by passing that client's clientId.",
       input_schema: { type: "object", properties: {} },
     });
     tools.push({
@@ -1359,7 +1372,20 @@ async function resolveTargetUid(db, input, ctx) {
   const prof = (await db.doc(`users/${clientId}`).get()).data();
   if (!prof) return { error: "No client found with that id." };
   if (ctx.role === "admin") return clientId;
+  // Direct client, or a trainer directly under me.
   if (prof.assignedTrainerId === ctx.callerUid || prof.headTrainerId === ctx.callerUid) return clientId;
+  // HEAD-OF-CHAIN (S116): a head trainer also reaches the clients of their
+  // sub-trainers. This walks the SAME path firestore.rules isHeadOfTrainer()
+  // uses — client → their assigned trainer → that trainer's headTrainerId —
+  // rather than looking for headTrainerId on the CLIENT (never set there, which
+  // is why head access silently failed before). One extra read, and only on the
+  // fallback path, so direct-client access is unchanged.
+  if (prof.assignedTrainerId) {
+    try {
+      const up = (await db.doc(`users/${prof.assignedTrainerId}`).get()).data();
+      if (up && up.headTrainerId === ctx.callerUid) return clientId;
+    } catch (e) { /* fall through to the denial below */ }
+  }
   return { error: "You don't have access to that client." };
 }
 
@@ -1405,11 +1431,66 @@ async function runTool(name, input, ctx) {
     };
   }
 
+  if (name === "list_sub_trainers") {
+    // The head's team (S116). Mirrors src/profile.js getMySubTrainers, but does
+    // NOT filter on role: a trainer linked under a head is a member of the team
+    // regardless of the exact role string, and the access rules key off
+    // headTrainerId, not role.
+    if (!ctx.isTrainer) return { error: "Only trainers have a team." };
+    const snap = await db.collection("users")
+      .where("headTrainerId", "==", ctx.callerUid).limit(100).get();
+    const team = [];
+    for (const doc of snap.docs) {
+      if (doc.id === ctx.callerUid) continue; // a head's own headTrainerId points at itself
+      const p = doc.data();
+      const clients = await db.collection("users")
+        .where("assignedTrainerId", "==", doc.id).limit(200).get();
+      team.push({
+        subTrainerId: doc.id,
+        ref: refCode(doc.id),
+        name: p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Trainer",
+        email: p.email || null,
+        clientCount: clients.size,
+      });
+    }
+    return {
+      team, count: team.length,
+      note: team.length
+        ? "You can act on any of their clients directly — pass that client's clientId to any tool. Use list_clients with includeTeam=true to see the whole roster."
+        : "No sub-trainers yet. A trainer joins your team by entering your invite code in Glidna.",
+    };
+  }
+
   if (name === "list_clients") {
     if (!ctx.isTrainer) return { error: "Only trainers can list clients." };
     const MAX_LIST = 60; // same roster cap as coach_summary
-    const snap = await db.collection("users")
-      .where("assignedTrainerId", "==", ctx.callerUid).limit(MAX_LIST).get();
+    // Direct clients, plus (head trainers, opt-in) the clients of every
+    // sub-trainer on the team. The access rules already permit a head to read
+    // and write those clients — this just makes them DISCOVERABLE, which was
+    // the missing half (S116).
+    const trainerIds = [ctx.callerUid];
+    const viaName = {};
+    if (input.includeTeam) {
+      const subs = await db.collection("users")
+        .where("headTrainerId", "==", ctx.callerUid).limit(100).get();
+      for (const s of subs.docs) {
+        if (s.id === ctx.callerUid) continue;
+        trainerIds.push(s.id);
+        const sp = s.data();
+        viaName[s.id] = sp.displayName || [sp.firstName, sp.lastName].filter(Boolean).join(" ") || sp.email || "Trainer";
+      }
+    }
+    // Firestore `in` takes at most 30 values — chunk the roster query.
+    const docs = [];
+    for (let i = 0; i < trainerIds.length; i += 30) {
+      const chunk = trainerIds.slice(i, i + 30);
+      const s = await db.collection("users")
+        .where("assignedTrainerId", chunk.length === 1 ? "==" : "in", chunk.length === 1 ? chunk[0] : chunk)
+        .limit(MAX_LIST).get();
+      docs.push(...s.docs);
+      if (docs.length >= MAX_LIST) break;
+    }
+    const snap = { docs: docs.slice(0, MAX_LIST) };
     const out = [];
     for (const doc of snap.docs) {
       const p = doc.data();
@@ -1437,10 +1518,14 @@ async function runTool(name, input, ctx) {
         name: p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Client",
         lastLogDate: last,
         daysSinceLastLog: daysSince,
+        // Whose client is this? Absent = your own; set = on a sub-trainer's roster.
+        ...(p.assignedTrainerId && p.assignedTrainerId !== ctx.callerUid
+          ? { viaTrainer: viaName[p.assignedTrainerId] || "a sub-trainer", viaTrainerId: p.assignedTrainerId }
+          : {}),
       });
     }
     out.sort((a, b) => (b.daysSinceLastLog ?? 1e9) - (a.daysSinceLastLog ?? 1e9));
-    return { clients: out, count: out.length };
+    return { clients: out, count: out.length, includedTeam: !!input.includeTeam };
   }
 
   if (name === "find_client") {
