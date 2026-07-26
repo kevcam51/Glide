@@ -15511,6 +15511,12 @@ const callRequestBoost = httpsCallable(functions, "requestBudgetBoost"); // Max-
 const callSendTrainerRequest = httpsCallable(functions, "sendTrainerRequest"); // client → trainer inbox (S90)
 const callAdminOverview = httpsCallable(functions, "adminOverview"); // admin all-users dashboard (S90)
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
+// Trainer teams (S116): head trainer ↔ sub-trainers. Server-side because the
+// rules block a user changing their own role. See functions/team.js.
+const callJoinTeam = httpsCallable(functions, "joinTeam");
+const callLeaveTeam = httpsCallable(functions, "leaveTeam");
+const callListTeam = httpsCallable(functions, "listTeam");
+const callRemoveSubTrainer = httpsCallable(functions, "removeSubTrainer");
 const callEstimateFood = httpsCallable(functions, "estimateFood"); // AI macro estimate in the manual tracker (S89c)
 // Session card-on-file (S101): hosted Checkout in setup mode + the consent record.
 const callCreateCardSetup = httpsCallable(functions, "createSessionSetupIntent");
@@ -19734,6 +19740,185 @@ function AdminDashboard({ onClose }) {
     </div>, document.body);
 }
 
+// ─── Team panel (S116) — head trainer ↔ sub-trainers ────────────────────────
+// The UI for the hierarchy fix. A trainer JOINS a team by entering the head's
+// invite code (the sub always initiates, so joining is consented by design);
+// a head sees their team and can remove anyone; a sub can leave anytime.
+// All four actions are Cloud Functions because firestore.rules deliberately
+// blocks a user from changing their own role/links.
+function TeamPanel({ onClose }) {
+  useBodyScrollLock(true);
+  useBackClose(true, onClose);
+  const [loading, setLoading] = useState(true);
+  const [team, setTeam] = useState([]);
+  const [headId, setHeadId] = useState(null);
+  const [headName, setHeadName] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(null);
+
+  const load = async () => {
+    setLoading(true); setErr("");
+    try {
+      const me = auth.currentUser;
+      const prof = me ? await getProfile(me.uid) : null;
+      // A head's own headTrainerId points at itself — that's NOT being on a team.
+      const h = prof && prof.headTrainerId && prof.headTrainerId !== me.uid ? prof.headTrainerId : null;
+      setHeadId(h);
+      if (h) {
+        try {
+          const hp = await getProfile(h);
+          setHeadName((hp && (hp.displayName || [hp.firstName, hp.lastName].filter(Boolean).join(" ") || hp.email)) || "your head trainer");
+        } catch { setHeadName("your head trainer"); }
+      }
+      const r = await callListTeam();
+      setTeam((r.data && r.data.team) || []);
+    } catch (e) {
+      setErr("Couldn't load your team. Pull down to retry.");
+    }
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const join = async () => {
+    const c = code.trim();
+    if (!c) { setErr("Enter your head trainer's invite code."); return; }
+    setBusy(true); setErr(""); setMsg("");
+    try {
+      const r = await callJoinTeam({ code: c });
+      setMsg(`You're now on ${(r.data && r.data.headName) || "the"} team.`);
+      setCode("");
+      await load();
+    } catch (e) {
+      setErr((e && e.message) || "Couldn't join that team.");
+    }
+    setBusy(false);
+  };
+  const leave = async () => {
+    setBusy(true); setErr(""); setMsg("");
+    try { await callLeaveTeam(); setMsg("You've left the team."); setConfirmLeave(false); await load(); }
+    catch (e) { setErr((e && e.message) || "Couldn't leave the team."); }
+    setBusy(false);
+  };
+  const remove = async (subTrainerId) => {
+    setBusy(true); setErr(""); setMsg("");
+    try { await callRemoveSubTrainer({ subTrainerId }); setMsg("Removed from your team."); setConfirmRemove(null); await load(); }
+    catch (e) { setErr((e && e.message) || "Couldn't remove that trainer."); }
+    setBusy(false);
+  };
+
+  const card = "rounded-lg bg-surface2 p-3";
+  const btn = "rounded-lg bg-primaryfill px-4 py-2.5 text-sm font-bold text-primaryfg cursor-pointer disabled:opacity-60";
+  const ghost = "rounded-lg border border-border bg-transparent px-3 py-2 text-xs font-semibold text-fg cursor-pointer disabled:opacity-60";
+
+  return createPortal(
+    <div onClick={onClose} data-theme="pro"
+      style={{ fontFamily: "var(--font-sans)", paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
+        paddingBottom: "calc(16px + env(safe-area-inset-bottom,0px))" }}
+      className="fixed inset-0 z-[1500] flex items-start justify-center bg-black/60 px-4 overflow-auto">
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-[520px] rounded-card border border-border bg-surface p-4 text-fg my-auto">
+        <div className="mb-3 relative flex items-center justify-center px-[92px]">
+          <div className="text-[1.05rem] font-extrabold flex items-center gap-2">
+            <Icon name="clients" size={17} color="var(--accent)" />My team
+          </div>
+          <button onClick={onClose} aria-label="Back"
+            className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer">
+            <Icon name="back" size={15} color="var(--accent)" />Back
+          </button>
+        </div>
+
+        {loading ? <div className="text-sm text-muted p-3">Loading…</div> : (
+          <div className="flex flex-col gap-3">
+            {/* On someone's team */}
+            {headId ? (
+              <div className={card}>
+                <div className="text-sm font-semibold mb-1">You're on {headName}'s team</div>
+                <div className="text-xs text-muted leading-relaxed mb-2">
+                  They can see and help with your clients. Your clients stay yours.
+                </div>
+                {confirmLeave ? (
+                  <div className="flex gap-2 items-center flex-wrap">
+                    <span className="text-xs text-muted">Leave this team?</span>
+                    <button className="rounded-lg bg-danger px-3 py-2 text-xs font-bold text-white cursor-pointer" disabled={busy} onClick={leave}>Yes, leave</button>
+                    <button className={ghost} onClick={() => setConfirmLeave(false)}>Cancel</button>
+                  </div>
+                ) : (
+                  <button className={ghost} onClick={() => setConfirmLeave(true)}>Leave team</button>
+                )}
+              </div>
+            ) : (
+              /* Join a team */
+              <div className={card}>
+                <div className="text-sm font-semibold mb-1">Join a team</div>
+                <div className="text-xs text-muted leading-relaxed mb-2">
+                  Working under another trainer? Enter their invite code and they'll be able to help
+                  manage your clients.
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <input value={code} onChange={(e) => setCode(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") join(); }}
+                    placeholder="ABC-1234" disabled={busy}
+                    className="flex-1 min-w-[140px] bg-surface border border-border rounded-lg px-3 py-2.5 text-fg text-sm outline-none placeholder:text-muted" />
+                  <button className={btn} disabled={busy} onClick={join}>{busy ? "…" : "Join"}</button>
+                </div>
+              </div>
+            )}
+
+            {/* My sub-trainers */}
+            <div className={card}>
+              <div className="text-sm font-semibold mb-1">
+                Trainers on your team{team.length ? ` (${team.length})` : ""}
+              </div>
+              {team.length === 0 ? (
+                <div className="text-xs text-muted leading-relaxed">
+                  Nobody yet. Share your invite code (≡ menu → Invite clients) with a trainer and have
+                  them enter it here under "Join a team" — you'll then be able to see and manage their
+                  clients alongside your own.
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 mt-1">
+                  {team.map((t) => (
+                    <div key={t.subTrainerId} className="rounded-lg bg-surface p-2.5">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold truncate">{t.name}</div>
+                          <div className="text-[11px] text-muted truncate">
+                            {t.clientCount} client{t.clientCount === 1 ? "" : "s"}{t.email ? ` · ${t.email}` : ""}
+                          </div>
+                        </div>
+                        {confirmRemove === t.subTrainerId ? (
+                          <div className="flex gap-1.5 items-center">
+                            <button className="rounded-md bg-danger px-2.5 py-1.5 text-[11px] font-bold text-white cursor-pointer" disabled={busy} onClick={() => remove(t.subTrainerId)}>Remove</button>
+                            <button className={ghost} onClick={() => setConfirmRemove(null)}>Cancel</button>
+                          </div>
+                        ) : (
+                          <button className={ghost} onClick={() => setConfirmRemove(t.subTrainerId)}>Remove</button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="text-[11px] text-muted leading-relaxed mt-1">
+                    You can open, log for, and message their clients just like your own — and ask Glidna
+                    things like "how is my whole team doing?"
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {msg ? <div className="text-sm text-success">{msg}</div> : null}
+            {err ? <div className="text-sm text-danger">{err}</div> : null}
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onEarnings, onNameSaved, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
@@ -19744,6 +19929,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
   const [showPicker, setShowPicker] = useState(false);   // S89c plan picker (Upgrade → choose plan → Checkout)
   const [showAdmin, setShowAdmin] = useState(false);      // S90 admin all-users dashboard
   const [showMyNotes, setShowMyNotes] = useState(false);  // S91 trainer general notes
+  const [showTeam, setShowTeam] = useState(false);        // S116 head trainer <-> sub-trainers
   const [showAuto, setShowAuto] = useState(false);        // S93 scheduled AI automations
   const [upgradeErr, setUpgradeErr] = useState(false);
   useBackClose(open, onClose);                        // phone Back closes the menu
@@ -20029,6 +20215,15 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
             <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
           </button>
         )}
+        {/* My team (S116) — join a head trainer's team, or manage your sub-trainers */}
+        {isTrainer && (
+          <button style={item} onClick={() => setShowTeam(true)}>
+            <Icon name="clients" size={19} color="var(--accent)" /> <span>My team</span>
+            <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
+          </button>
+        )}
+        {showTeam && <TeamPanel onClose={() => setShowTeam(false)} />}
+
         {/* My notes (trainer) — general notes; per-client notes live on the client cards (S91) */}
         {isTrainer && (
           <button style={item} onClick={() => setShowMyNotes(true)}>
