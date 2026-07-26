@@ -180,10 +180,25 @@ service cloud.firestore {
         allow create: if isSignedIn()
           && request.auth.uid in threadData().participants
           && request.resource.data.from == request.auth.uid
-          && request.resource.data.keys().hasOnly(['from', 'text', 'ts'])
+          // S124: a message may optionally be a TO-DO pointer — kind:"todo" plus
+          // the id of an item in the client's caliq-requests. Status is NOT
+          // stored here on purpose: the kv request stays the single source of
+          // truth, so a to-do can never read "open" in chat and "done" on the
+          // home screen. Messages remain append-only.
+          && request.resource.data.keys().hasOnly(['from', 'text', 'ts', 'kind', 'todoId'])
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
-          && request.resource.data.text.size() <= 2000;
+          && request.resource.data.text.size() <= 2000
+          && (!('kind' in request.resource.data) || request.resource.data.kind == 'todo')
+          && (!('todoId' in request.resource.data)
+              || (request.resource.data.todoId is string
+                  && request.resource.data.todoId.size() > 0
+                  && request.resource.data.todoId.size() <= 64))
+          // kind:"todo" is only meaningful with an id, and only a TRAINER sends
+          // to-dos (a client sending one would be a fake assignment).
+          && (!('kind' in request.resource.data)
+              || ('todoId' in request.resource.data
+                  && request.auth.uid == threadData().trainerUid));
         allow update: if false; // append-only
         allow delete: if isAdmin();
       }

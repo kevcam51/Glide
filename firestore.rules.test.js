@@ -198,6 +198,21 @@ await check("participant tampers with participants list", assertFails(updateDoc(
 await check("lastFrom outside participants DENIED", assertFails(updateDoc(threadDoc(c1, H, C1), { lastFrom: T2, updatedAt: 3 })));
 await check("oversized message text (2001 chars) DENIED", assertFails(setDoc(doc(msgCol(c1, H, C1), "big"), { from: C1, text: "x".repeat(2001), ts: 5 })));
 await check("message with extra fields DENIED", assertFails(setDoc(doc(msgCol(c1, H, C1), "extra"), { from: C1, text: "hi", ts: 6, evil: true })));
+
+console.log("\nTO-DO MESSAGES (S124) — ALLOWED:");
+await check("trainer sends a to-do message", assertSucceeds(setDoc(doc(msgCol(head, H, C1), "td1"), { from: H, text: "Please log your dinner", ts: 10, kind: "todo", todoId: "r_abc123" })));
+await check("plain message still works (no kind/todoId)", assertSucceeds(setDoc(doc(msgCol(head, H, C1), "td2"), { from: H, text: "nice work", ts: 11 })));
+await check("head sends a to-do in his SUB's client thread", assertSucceeds(setDoc(doc(msgCol(head, H, C2), "td3"), { from: H, text: "weigh in please", ts: 12, kind: "todo", todoId: "r_x" })));
+
+console.log("\nTO-DO MESSAGES (S124) — DENIED (attack cases):");
+await check("CLIENT sends a to-do (fake assignment) DENIED", assertFails(setDoc(doc(msgCol(c1, H, C1), "td4"), { from: C1, text: "do my laundry", ts: 13, kind: "todo", todoId: "r_y" })));
+await check("kind:todo WITHOUT todoId DENIED", assertFails(setDoc(doc(msgCol(head, H, C1), "td5"), { from: H, text: "orphan todo", ts: 14, kind: "todo" })));
+await check("unknown kind value DENIED", assertFails(setDoc(doc(msgCol(head, H, C1), "td6"), { from: H, text: "x", ts: 15, kind: "announcement", todoId: "r_z" })));
+await check("empty todoId DENIED", assertFails(setDoc(doc(msgCol(head, H, C1), "td7"), { from: H, text: "x", ts: 16, kind: "todo", todoId: "" })));
+await check("oversized todoId (65 chars) DENIED", assertFails(setDoc(doc(msgCol(head, H, C1), "td8"), { from: H, text: "x", ts: 17, kind: "todo", todoId: "z".repeat(65) })));
+await check("non-string todoId DENIED", assertFails(setDoc(doc(msgCol(head, H, C1), "td9"), { from: H, text: "x", ts: 18, kind: "todo", todoId: 42 })));
+await check("to-do message is still append-only (no update)", assertFails(updateDoc(doc(msgCol(head, H, C1), "td1"), { text: "changed" })));
+await check("non-participant sends a to-do DENIED", assertFails(setDoc(doc(msgCol(t2, H, C1), "td10"), { from: T2, text: "x", ts: 19, kind: "todo", todoId: "r_q" })));
 await check("message EDIT denied (append-only)", assertFails(updateDoc(doc(msgCol(c1, H, C1), "m2"), { text: "edited" })));
 await check("message DELETE by participant denied", assertFails(deleteDoc(doc(msgCol(c1, H, C1), "m2"))));
 await check("signed-out reads a thread", assertFails(getDoc(threadDoc(anon, H, C1))));

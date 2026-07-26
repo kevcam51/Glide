@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium } from "./profile.js";
 import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } from "./clientData.js";
@@ -14169,8 +14169,18 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           action: `sent a request: "${item.prompt}"`, ts: now };
         await setForUser(clientUid, "caliq-history-self", JSON.stringify([ev, ...hist].slice(0, 250)));
       } catch { /* history is best-effort */ }
+      // Mirror the to-do into the DM thread (S124) so the conversation is the
+      // one place a client sees everything from their trainer. The message is a
+      // POINTER (kind:"todo" + todoId) — status stays in caliq-requests above,
+      // so chat and the home screen can never disagree. Best-effort: a failed
+      // mirror must never lose the to-do itself, which is already saved.
+      try {
+        const tid = threadIdFor(meUid, clientUid);
+        await ensureThread(meUid, clientUid, meUid);
+        await sendMessage(tid, meUid, clientUid, item.prompt, req.id);
+      } catch { /* the to-do is saved; the chat mirror is a convenience */ }
       setComposingFor(null); setReqDraft("");
-      flashCMsg(clientUid, true, "Request sent.");
+      flashCMsg(clientUid, true, "To-do sent.");
       await loadClients();
     } catch (e) { flashCMsg(clientUid, false, (e && e.message) || "Couldn't send that request."); }
     finally { setReqBusy(false); }
@@ -18914,6 +18924,35 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
   const [draft, setDraft] = useState("");
   const [err, setErr] = useState(false);
   const endRef = useRef(null);
+  // Live status for any to-do messages in this thread (S124). The message is
+  // only a pointer; truth lives in the client's caliq-requests, so we resolve
+  // it here. Client reads their own kv; trainer reads the client's (allowed by
+  // the same trainer↔client access the rest of the app uses).
+  const [todoStatus, setTodoStatus] = useState({}); // todoId -> "open" | "done"
+  const iAmClient = meUid === clientUid;
+  const loadTodos = useCallback(async () => {
+    try {
+      const raw = iAmClient
+        ? await window.storage.get(REQUEST_KEY)
+        : await getForUser(clientUid, REQUEST_KEY);
+      const list = raw && raw.value ? (JSON.parse(raw.value) || []) : [];
+      const map = {};
+      for (const r of list) if (r && r.id) map[r.id] = r.status === "done" ? "done" : "open";
+      setTodoStatus(map);
+    } catch { /* leave unknown — the card just won't show a status chip */ }
+  }, [clientUid, iAmClient]);
+  useEffect(() => { loadTodos(); }, [loadTodos]);
+  // The client can complete a to-do straight from the conversation.
+  const markTodoDone = async (todoId) => {
+    if (!iAmClient) return;
+    try {
+      const raw = await window.storage.get(REQUEST_KEY);
+      const list = raw && raw.value ? (JSON.parse(raw.value) || []) : [];
+      const next = list.map((r) => (r && r.id === todoId ? { ...r, status: "done", doneAt: Date.now() } : r));
+      await window.storage.set(REQUEST_KEY, JSON.stringify(next));
+      setTodoStatus((m) => ({ ...m, [todoId]: "done" }));
+    } catch { /* ignore — status will re-resolve on next open */ }
+  };
   useEffect(() => {
     let unsub = null, dead = false;
     (async () => {
@@ -18955,8 +18994,21 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
         )}
         {(msgs || []).map((m) => (
           <div key={m.id} className={`mb-2 flex ${m.from === meUid ? "justify-end" : "justify-start"}`}>
-            <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 ${m.from === meUid ? "bg-primary text-primaryfg" : "bg-surface2 text-fg border border-border"}`}>
+            <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 ${m.kind === "todo"
+              ? "bg-surface2 text-fg border-2 border-primary"
+              : m.from === meUid ? "bg-primary text-primaryfg" : "bg-surface2 text-fg border border-border"}`}>
+              {m.kind === "todo" && (
+                <div className="mb-1 flex items-center gap-1.5 text-[.62rem] font-bold uppercase tracking-wide text-primary">
+                  <Icon name="check" size={12} color="currentColor" />To-do
+                  {todoStatus[m.todoId] === "done" && <span className="text-success">· done</span>}
+                </div>
+              )}
               <div className="whitespace-pre-wrap break-words text-[.9rem] leading-relaxed">{m.text}</div>
+              {m.kind === "todo" && iAmClient && todoStatus[m.todoId] !== "done" && (
+                <button onClick={() => markTodoDone(m.todoId)}
+                  className="mt-1.5 rounded-lg bg-primaryfill px-3 text-xs font-bold text-primaryfg cursor-pointer"
+                  style={{ minHeight: 40 }}>Mark done</button>
+              )}
               <div className={`mt-0.5 text-[.6rem] ${m.from === meUid ? "text-primaryfg/60" : "text-muted"}`}>{timeOf(m.ts)}</div>
             </div>
           </div>

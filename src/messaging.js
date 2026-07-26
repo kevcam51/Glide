@@ -37,10 +37,16 @@ export async function ensureThread(trainerUid, clientUid, creatorUid) {
 // Append a message + bump the thread metadata (lastMsg preview, the other
 // side's unread count). Two writes; the msg lands first so a metadata failure
 // never loses the message itself.
-export async function sendMessage(tid, fromUid, toUid, text) {
+// `todoId` (optional, trainers only) turns this into a TO-DO message: the chat
+// bubble becomes a tappable task card. The message stores only the POINTER —
+// status lives in the client's caliq-requests item, so chat and the client's
+// home can never disagree about whether a to-do is done (S124).
+export async function sendMessage(tid, fromUid, toUid, text, todoId = null) {
   const body = String(text || "").trim().slice(0, 2000);
   if (!body) return false;
-  await addDoc(collection(db, "threads", tid, "msgs"), { from: fromUid, text: body, ts: Date.now() });
+  const msg = { from: fromUid, text: body, ts: Date.now() };
+  if (todoId) { msg.kind = "todo"; msg.todoId = String(todoId).slice(0, 64); }
+  await addDoc(collection(db, "threads", tid, "msgs"), msg);
   await updateDoc(doc(db, "threads", tid), {
     lastMsg: body.slice(0, 80), lastFrom: fromUid, updatedAt: Date.now(),
     [`unread.${toUid}`]: increment(1),
