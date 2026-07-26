@@ -13910,9 +13910,18 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const [confirmUnlink, setConfirmUnlink] = useState(null); // clientUid awaiting unlink confirm
   const [linkBusy, setLinkBusy] = useState(false);
   const [cMsg, setCMsg] = useState("");
+  // S117e (critique P4): feedback is PER-CLIENT and valenced — it renders inside
+  // that client's card, green/red by outcome, and success clears itself.
+  const cMsgTimer = useRef(null);
+  const flashCMsg = (uid, ok, text) => {
+    setCMsg({ uid, ok, text });
+    if (cMsgTimer.current) clearTimeout(cMsgTimer.current);
+    if (ok) cMsgTimer.current = setTimeout(() => setCMsg(null), 4000);
+  };
   // Request composer (Session 19): clientUid currently composing, the free-text
   // custom draft, and a busy flag while a request write is in flight.
   const [composingFor, setComposingFor] = useState(null);
+  const [manageFor, setManageFor] = useState(null);   // S117e (critique P2): secondary card actions collapsed behind "Manage"
   const [reqDraft, setReqDraft] = useState("");
   const [reqBusy, setReqBusy] = useState(false);
   const [showDoneFor, setShowDoneFor] = useState(null); // clientUid whose done-list is expanded
@@ -14006,7 +14015,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // Link one of the trainer's local plans into a client's account (the local
   // copy is then removed by onLinked).
   const linkPlan = async (clientUid, localId) => {
-    setLinkBusy(true); setCMsg("");
+    setLinkBusy(true); setCMsg(null);
     try {
       let payload = JSON.stringify({ data: {}, step: 0 });
       try { const r = await window.storage.get(profileKey(localId)); if (r && r.value) payload = r.value; } catch {}
@@ -14069,35 +14078,35 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       // watch/meal/workout data (now routed to them via the mapping above), instead of
       // waiting for the 30-min auto-sync.
       if (tzId) { try { await callTrainerizeImport({ clientIds: [tzId] }); } catch (e) { /* auto-sync will catch up */ } }
-      setCMsg("Plan linked — it now lives in the client's account (logs + watch data moved too).");
+      flashCMsg(clientUid, true, "Plan linked — it now lives in the client's account (logs + watch data moved too).");
       setLinkingFor(null); setPendingLink(null);
       await loadClients();
-    } catch (e) { setCMsg((e && e.message) || "Couldn't link that plan."); }
+    } catch (e) { flashCMsg(clientUid, false, (e && e.message) || "Couldn't link that plan."); }
     finally { setLinkBusy(false); }
   };
   const copyLocal = async (clientUid) => {
-    setLinkBusy(true); setCMsg("");
-    try { if (onCopyToLocal) await onCopyToLocal(clientUid); setCMsg("Saved a local copy to your files."); }
-    catch (e) { setCMsg("Couldn't copy to a local file."); }
+    setLinkBusy(true); setCMsg(null);
+    try { if (onCopyToLocal) await onCopyToLocal(clientUid); flashCMsg(clientUid, true, "Saved a local copy to your files."); }
+    catch (e) { flashCMsg(clientUid, false, "Couldn't copy to a local file."); }
     finally { setLinkBusy(false); }
   };
   const unlinkPlan = async (clientUid) => {
-    setLinkBusy(true); setCMsg("");
+    setLinkBusy(true); setCMsg(null);
     try {
       if (onCopyToLocal) await onCopyToLocal(clientUid); // keep a local backup
       const m = await readPlansManifest(clientGet(clientUid));
       await deleteForUser(clientUid, planDataKey(m.active));
-      setCMsg("Unlinked. A local copy was saved to your files.");
+      flashCMsg(clientUid, true, "Unlinked. A local copy was saved to your files.");
       setConfirmUnlink(null);
       await loadClients();
-    } catch (e) { setCMsg((e && e.message) || "Couldn't unlink that plan."); }
+    } catch (e) { flashCMsg(clientUid, false, (e && e.message) || "Couldn't unlink that plan."); }
     finally { setLinkBusy(false); }
   };
 
   // Send a request to a client: append to their caliq-requests and drop a note
   // into their activity history so the feed reflects it. (Session 19)
   const sendRequest = async (clientUid, item) => {
-    setReqBusy(true); setCMsg("");
+    setReqBusy(true); setCMsg(null);
     try {
       const cur = await readRequestsFor(clientUid, getForUser);
       const now = Date.now();
@@ -14115,9 +14124,9 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         await setForUser(clientUid, "caliq-history-self", JSON.stringify([ev, ...hist].slice(0, 250)));
       } catch { /* history is best-effort */ }
       setComposingFor(null); setReqDraft("");
-      setCMsg("Request sent.");
+      flashCMsg(clientUid, true, "Request sent.");
       await loadClients();
-    } catch (e) { setCMsg((e && e.message) || "Couldn't send that request."); }
+    } catch (e) { flashCMsg(clientUid, false, (e && e.message) || "Couldn't send that request."); }
     finally { setReqBusy(false); }
   };
   // Remove a request the trainer sent (e.g. by mistake, or to clear a done one).
@@ -14216,8 +14225,8 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   }, [profiles]);
 
   const statusOf = (p) => {
-    if (p.stepLabel === "Results") return { label: "Plan complete", color: "#39d98a" };
-    if (p.name || p.weight) return { label: "In progress", color: "#f0a020" };
+    if (p.stepLabel === "Results") return { label: "Plan complete", color: "var(--color-success)" };
+    if (p.name || p.weight) return { label: "In progress", color: "var(--color-warn)" };
     return { label: "Needs setup", color: "var(--muted)" };
   };
   const logTs = (p) => (lastLog[p.id] ? new Date(lastLog[p.id] + "T00:00:00").getTime() : 0);
@@ -14253,14 +14262,14 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const cardCls = "bg-surface border border-border rounded-card p-5 mb-4";
   const sectionTitleCls = "font-display text-lg tracking-wider text-primary";
   const subCls = "text-sm text-muted";
-  const mBtnCls = "px-2.5 py-2 rounded-md text-xs font-semibold border border-border bg-transparent text-fg cursor-pointer text-left whitespace-nowrap disabled:opacity-55";
-  const mPrimaryCls = "px-2.5 py-2 rounded-md text-xs font-bold border-none bg-primaryfill text-primaryfg cursor-pointer whitespace-nowrap disabled:opacity-55";
-  const dangerBtnCls = "px-2.5 py-2 rounded-md text-xs font-bold border-none bg-danger text-white cursor-pointer whitespace-nowrap disabled:opacity-55";
-  const dangerGhostCls = "px-2.5 py-2 rounded-md text-xs font-semibold border border-[rgba(248,113,113,.4)] bg-transparent text-danger cursor-pointer whitespace-nowrap disabled:opacity-55";
-  const inputCls = "flex-1 min-w-0 box-border rounded-md border border-border bg-surface2 text-fg px-2.5 py-1.5 text-sm outline-none placeholder:text-muted";
+  const mBtnCls = "px-3 py-2.5 min-h-[44px] rounded-md text-xs font-semibold border border-border bg-transparent text-fg cursor-pointer text-left whitespace-nowrap disabled:opacity-55";
+  const mPrimaryCls = "px-3 py-2.5 min-h-[44px] rounded-md text-xs font-bold border-none bg-primaryfill text-primaryfg cursor-pointer whitespace-nowrap disabled:opacity-55";
+  const dangerBtnCls = "px-3 py-2.5 min-h-[44px] rounded-md text-xs font-bold border-none bg-danger text-dangerfg cursor-pointer whitespace-nowrap disabled:opacity-55";
+  const dangerGhostCls = "px-3 py-2.5 min-h-[44px] rounded-md text-xs font-semibold border border-danger bg-transparent text-danger cursor-pointer whitespace-nowrap disabled:opacity-55";
+  const inputCls = "flex-1 min-w-0 box-border rounded-md border border-border bg-surface2 text-fg px-2.5 py-2.5 min-h-[44px] text-sm outline-none focus:border-primary placeholder:text-muted";
   // Filter/sort chips: highlighted via border when active. `purple` variant for sim filter.
-  const chip = (active) => `px-2.5 py-1.5 text-xs rounded-md cursor-pointer border ${active ? "border-primary bg-surface2 text-fg" : "border-border bg-transparent text-fg"}`;
-  const purpleChip = (active) => `px-2.5 py-1.5 text-xs rounded-md cursor-pointer border ${active ? "border-[#b57bff] bg-[rgba(181,123,255,.12)] text-fg" : "border-border bg-transparent text-fg"}`;
+  const chip = (active) => `px-3 py-2.5 min-h-[44px] text-xs rounded-md cursor-pointer border ${active ? "border-primary bg-surface2 text-fg" : "border-border bg-transparent text-fg"}`;
+  const purpleChip = (active) => `px-3 py-2.5 min-h-[44px] text-xs rounded-md cursor-pointer border ${active ? "border-[color:var(--color-sim)] bg-[color-mix(in_srgb,var(--color-sim)_12%,transparent)] text-fg" : "border-border bg-transparent text-fg"}`;
 
   return (
     <div className="prof-screen page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
@@ -14276,10 +14285,10 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
             {/* Client → trainer requests inbox (S90) — shows only when there's
                 something in it; done/dismiss write my own kv (owner access). */}
             {inbox.length > 0 && (
-              <div className="mb-4 rounded-card border border-[rgba(8,220,224,.35)] bg-[rgba(8,220,224,.04)] p-4">
+              <div className="mb-4 rounded-card border border-[color-mix(in_srgb,var(--color-primary)_45%,transparent)] bg-[color-mix(in_srgb,var(--color-primary)_5%,transparent)] p-4">
                 <div className={`${sectionTitleCls} flex items-center gap-2`}>
                   <Icon name="inbox" size={19} color="var(--accent)" />Client Requests
-                  {openInbox.length > 0 && <span className="rounded-full bg-primary px-2 text-[.7rem] font-bold text-primaryfg">{openInbox.length}</span>}
+                  {openInbox.length > 0 && <span className="rounded-full bg-primaryfill px-2 text-[.7rem] font-bold text-primaryfg">{openInbox.length}</span>}
                 </div>
                 {openInbox.length === 0 && <div className={subCls}>All caught up</div>}
                 {openInbox.map((r) => (
@@ -14334,7 +14343,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                 const openReqs = reqs.filter((r) => r.status !== "done");
                 const doneReqs = reqs.filter((r) => r.status === "done");
                 return (
-                  <div key={c.uid} className="p-3.5 rounded-[10px] bg-surface2 border border-primary">
+                  <div key={c.uid} className="p-3.5 rounded-[10px] bg-surface2 border border-border">
                     {/* Tapping the card body opens the client's active plan (buttons below stay separate). */}
                     <div onClick={() => { if (c.hasPlan && onOpenClientPlan) onOpenClientPlan(c.uid); }}
                       className={c.hasPlan ? "cursor-pointer" : "cursor-default"}>
@@ -14360,7 +14369,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                           </div>
                           <div className="flex flex-wrap gap-3.5 text-sm text-muted mt-2">
                             <span className="inline-flex items-center gap-1.5"><Icon name="flame" size={15} />{c.target != null ? `${c.target.toLocaleString()} cal/day` : "—"}</span>
-                            <span className="inline-flex items-center gap-1.5"><Icon name="clock" size={15} />{ds === null ? "no logs yet" : ds === 0 ? "active today" : ds === 1 ? "1 day ago" : `${ds} days ago`}</span>
+                            <span className={`inline-flex items-center gap-1.5${ds != null && ds >= 5 ? " text-warn font-semibold" : ""}`}><Icon name="clock" size={15} />{ds === null ? "no logs yet" : ds === 0 ? "active today" : ds === 1 ? "1 day ago" : `${ds} days ago`}{ds != null && ds >= 5 ? " · quiet" : ""}</span>
                           </div>
                           <div className="text-[.72rem] text-primary mt-2">Tap to open plan →</div>
                         </>
@@ -14415,7 +14424,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         </div>
                         <button className={`${mBtnCls} mt-1.5`} disabled={linkBusy} onClick={() => setLinkingFor(null)}>Cancel</button>
                       </div>
-                    ) : (
+                    ) : (<>
                       <div className="flex gap-2 mt-2.5 flex-wrap">
                         <button className={`${mPrimaryCls} inline-flex items-center gap-1.5`} onClick={() => { setComposingFor(composingFor === c.uid ? null : c.uid); setReqDraft(""); }}>
                           <Icon name="mail" size={16} />Send request
@@ -14423,22 +14432,30 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         <button className={`${mBtnCls} inline-flex items-center gap-1.5`} onClick={() => setMsgFor(c)}>
                           <Icon name="inbox" size={16} color="var(--accent)" />Message
                           {msgBadgesOn && (msgUnread[c.uid] || 0) > 0 && (
-                            <span className="rounded-full bg-primary px-1.5 text-[.66rem] font-bold text-primaryfg">{msgUnread[c.uid]}</span>
+                            <span className="rounded-full bg-primaryfill px-1.5 text-[.66rem] font-bold text-primaryfg">{msgUnread[c.uid]}</span>
                           )}
                         </button>
+                        {c.hasPlan && (
+                          <button className={mBtnCls} onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>Open plan</button>
+                        )}
+                        <button className={`${mBtnCls} inline-flex items-center gap-1.5`} aria-expanded={manageFor === c.uid}
+                          onClick={() => setManageFor(manageFor === c.uid ? null : c.uid)}>
+                          <Icon name="folder" size={16} color="var(--accent)" />{manageFor === c.uid ? "Close" : "Manage"}
+                        </button>
+                      </div>
+                      {/* Secondary/plumbing actions live behind Manage (critique P2) */}
+                      {manageFor === c.uid && (
+                        <div className="flex gap-2 mt-2 flex-wrap">
                         <button className={`${mBtnCls} inline-flex items-center gap-1.5`} onClick={() => setNotesFor(c)}>
                           <Icon name="file" size={16} color="var(--accent)" />Notes
                         </button>
                         <button className={`${mBtnCls} inline-flex items-center gap-1.5`} onClick={() => setSessionsFor(c)}>
                           <Icon name="calendar" size={16} color="var(--accent)" />Sessions
                           {(sessionCounts[c.uid] || 0) > 0 && (
-                            <span className="rounded-full bg-primary px-1.5 text-[.66rem] font-bold text-primaryfg">{sessionCounts[c.uid]}</span>
+                            <span className="rounded-full bg-primaryfill px-1.5 text-[.66rem] font-bold text-primaryfg">{sessionCounts[c.uid]}</span>
                           )}
                         </button>
-                        {c.hasPlan && (
-                          <button className={mBtnCls} onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>Open plan</button>
-                        )}
-                        <button className={`${mBtnCls} inline-flex items-center gap-1.5`} onClick={() => setPlansForClient(plansForClient === c.uid ? null : c.uid)}>
+                                                <button className={`${mBtnCls} inline-flex items-center gap-1.5`} onClick={() => setPlansForClient(plansForClient === c.uid ? null : c.uid)}>
                           <Icon name="folder" size={16} color="var(--accent)" />Plans{(c.plans && c.plans.length > 1) ? ` (${c.plans.length})` : ""}
                         </button>
                         <button className={mBtnCls} onClick={() => setLinkingFor(c.uid)}>
@@ -14450,8 +14467,9 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         {c.hasPlan && (
                           <button className={dangerGhostCls} onClick={() => setConfirmUnlink(c.uid)}>Unlink</button>
                         )}
-                      </div>
-                    )}
+                        </div>
+                      )}
+                    </>)}
 
                     {/* Request composer (Session 19) */}
                     {composingFor === c.uid && (
@@ -14498,7 +14516,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                             const renaming = cpRenaming && cpRenaming.uid === c.uid && cpRenaming.planId === p.id;
                             const delConfirm = cpDelFor && cpDelFor.uid === c.uid && cpDelFor.planId === p.id;
                             return (
-                              <div key={p.id} className={`flex items-center gap-1.5 px-2 py-1.5 rounded-[7px] ${isActive ? "bg-[rgba(8,220,224,.08)]" : "bg-surface2"}`}>
+                              <div key={p.id} className={`flex items-center gap-1.5 px-2 py-1.5 rounded-[7px] ${isActive ? "bg-[color-mix(in_srgb,var(--color-primary)_14%,transparent)]" : "bg-surface2"}`}>
                                 {renaming ? (
                                   <>
                                     <input autoFocus value={cpDraft} onChange={(e) => setCpDraft(e.target.value)}
@@ -14521,11 +14539,11 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                                       <button className={mBtnCls} onClick={() => setActiveClientPlan(c.uid, p.id)}>Make active</button>
                                     )}
                                     <button className={mBtnCls} onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid, p.id)}>Open</button>
-                                    <button onClick={() => { setCpDraft(p.name); setCpRenaming({ uid: c.uid, planId: p.id }); }} title="Rename"
-                                      className="border-none bg-transparent text-muted cursor-pointer text-[.85rem]"><Icon name="edit" size={14} color="currentColor" /></button>
+                                    <button onClick={() => { setCpDraft(p.name); setCpRenaming({ uid: c.uid, planId: p.id }); }} title="Rename" aria-label="Rename plan"
+                                      className="border-none bg-transparent text-muted cursor-pointer text-[.85rem] p-2.5 -m-1.5"><Icon name="edit" size={14} color="currentColor" /></button>
                                     {p.id !== "self" && (c.plans || []).length > 1 && (
-                                      <button onClick={() => setCpDelFor({ uid: c.uid, planId: p.id })} title="Delete"
-                                        className="border-none bg-transparent text-danger cursor-pointer text-[.85rem]"><Icon name="close" size={15} color="currentColor" /></button>
+                                      <button onClick={() => setCpDelFor({ uid: c.uid, planId: p.id })} title="Delete" aria-label="Delete plan"
+                                        className="border-none bg-transparent text-danger cursor-pointer text-[.85rem] p-2.5 -m-1.5"><Icon name="close" size={15} color="currentColor" /></button>
                                     )}
                                   </>
                                 )}
@@ -14543,12 +14561,12 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     {reqsOn && (openReqs.length > 0 || doneReqs.length > 0) && (
                       <div className="mt-2.5 flex flex-col gap-1">
                         {openReqs.map((r) => (
-                          <div key={r.id} className="flex justify-between items-start gap-2 text-sm px-2.5 py-1.5 rounded-md bg-[rgba(8,220,224,.06)] border border-[rgba(8,220,224,.18)]">
+                          <div key={r.id} className="flex justify-between items-start gap-2 text-sm px-2.5 py-1.5 rounded-md bg-[color-mix(in_srgb,var(--color-primary)_8%,transparent)] border border-[color-mix(in_srgb,var(--color-primary)_35%,transparent)]">
                             <span className="text-fg inline-flex items-start gap-1.5"><Icon name="inbox" size={14} color="var(--accent)" style={{marginTop:2}} />{r.prompt}
-                              {r.createdAt ? <span className="block text-[.66rem] opacity-70 mt-0.5">Sent {fmtStamp(r.createdAt)}</span> : null}
+                              {r.createdAt ? <span className="block text-[.66rem] text-muted mt-0.5">Sent {fmtStamp(r.createdAt)}</span> : null}
                             </span>
-                            <button onClick={() => cancelRequest(c.uid, r.id)} disabled={reqBusy} title="Cancel this request"
-                              className="bg-transparent border-none text-muted cursor-pointer text-[.9rem]"><Icon name="close" size={15} color="currentColor" /></button>
+                            <button onClick={() => cancelRequest(c.uid, r.id)} disabled={reqBusy} title="Cancel this request" aria-label="Cancel this request"
+                              className="bg-transparent border-none text-muted cursor-pointer text-[.9rem] p-2.5 -m-1.5"><Icon name="close" size={15} color="currentColor" /></button>
                           </div>
                         ))}
                         {doneReqs.length > 0 && (
@@ -14560,20 +14578,22 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                             {showDoneFor === c.uid && doneReqs.map((r) => (
                               <div key={r.id} className="flex justify-between items-start gap-2 text-[.78rem] px-2.5 py-1 rounded-md bg-surface2">
                                 <span className="text-muted"><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{r.prompt}
-                                  {r.doneAt ? <span className="block text-[.66rem] opacity-70 mt-0.5">Completed {fmtStamp(r.doneAt)}</span> : null}
+                                  {r.doneAt ? <span className="block text-[.66rem] text-muted mt-0.5">Completed {fmtStamp(r.doneAt)}</span> : null}
                                 </span>
-                                <button onClick={() => cancelRequest(c.uid, r.id)} disabled={reqBusy} title="Remove"
-                                  className="bg-transparent border-none text-muted cursor-pointer text-[.9rem]"><Icon name="close" size={15} color="currentColor" /></button>
+                                <button onClick={() => cancelRequest(c.uid, r.id)} disabled={reqBusy} title="Remove" aria-label="Remove completed request"
+                                  className="bg-transparent border-none text-muted cursor-pointer text-[.9rem] p-2.5 -m-1.5"><Icon name="close" size={15} color="currentColor" /></button>
                               </div>
                             ))}
                           </>
                         )}
                       </div>
                     )}
+                    {cMsg && cMsg.uid === c.uid && (
+                      <div className={`text-sm mt-2 ${cMsg.ok ? "text-success" : "text-danger"}`}>{cMsg.ok ? "" : "Something went wrong — "}{cMsg.text}</div>
+                    )}
                   </div>
                 );
               })}
-              {cMsg && <div className="text-sm text-muted mt-1">{cMsg}</div>}
             </div>
           </div>
         )}
@@ -14583,8 +14603,8 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           <div className="flex gap-1.5 mt-2 flex-wrap">
             <button onClick={onNewPlan} className={mPrimaryCls}>+ Plan</button>
             <button onClick={onNewSimulation}
-              className="flex items-center gap-1.5 px-2.5 py-2 rounded-md text-xs font-bold border border-[#b57bff] bg-transparent text-[#b57bff] cursor-pointer whitespace-nowrap">
-              <Icon name="flask" size={14} color="#b57bff" />Simulation
+              className="flex items-center gap-1.5 px-2.5 py-2 rounded-md text-xs font-bold border border-[color:var(--color-sim)] bg-transparent text-[color:var(--color-sim)] cursor-pointer whitespace-nowrap">
+              <Icon name="flask" size={14} color="var(--color-sim)" />Simulation
             </button>
             {/* v1 runs on the platform owner's shared Trainerize token, so the
                 button only shows for that account (the backend enforces it too).
@@ -14650,7 +14670,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                       <label key={c.id} className="flex items-center gap-2.5 py-1.5 px-1 rounded cursor-pointer hover:bg-[rgba(8,220,224,.05)]">
                         <input type="checkbox" checked={!!tzPick.sel[c.id]}
                           onChange={(e) => setTzPick((p) => ({ ...p, sel: { ...p.sel, [c.id]: e.target.checked } }))}
-                          className="w-4 h-4 accent-[#08dce0]" />
+                          className="w-4 h-4 accent-[color:var(--color-primary)]" />
                         <span className="text-sm text-fg flex-1 min-w-0 truncate">{c.name}
                           {c.email ? <span className="text-muted text-xs"> · {c.email}</span> : null}
                         </span>
@@ -14725,7 +14745,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                 const pct = det && det.pct != null ? det.pct : null;
                 return (
                   <div key={p.id} onClick={() => onSelect(p.id)}
-                    className={`cursor-pointer p-3.5 rounded-[10px] ${sim ? "bg-[rgba(181,123,255,.06)] border border-[rgba(181,123,255,.35)]" : "bg-surface2 border border-border"}`}>
+                    className={`cursor-pointer p-3.5 rounded-[10px] ${sim ? "bg-[color-mix(in_srgb,var(--color-sim)_8%,transparent)] border border-[color-mix(in_srgb,var(--color-sim)_45%,transparent)]" : "bg-surface2 border border-border"}`}>
                     {renamingId === p.id ? (
                       <div onClick={(e) => e.stopPropagation()} className="flex gap-1.5 mb-2">
                         <input autoFocus value={renameDraft} onChange={(e) => setRenameDraft(e.target.value)}
@@ -14742,11 +14762,11 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                           <IdTag n={idNums[p.id]} />
                           {onRename && (
                             <button onClick={(e) => { e.stopPropagation(); setRenameDraft(p.customName || p.name || ""); setRenamingId(p.id); }}
-                              title="Rename" className="border-none bg-transparent text-muted cursor-pointer text-[.85rem] ml-1.5"><Icon name="edit" size={14} color="currentColor" /></button>
+                              title="Rename" aria-label="Rename" className="border-none bg-transparent text-muted cursor-pointer text-[.85rem] ml-1.5 p-2.5 -m-1.5"><Icon name="edit" size={14} color="currentColor" /></button>
                           )}
                         </span>
                         {sim
-                          ? <span className="inline-flex items-center gap-1 text-[.66rem] font-bold text-[#b57bff]"><Icon name="flask" size={11} color="#b57bff" />SANDBOX</span>
+                          ? <span className="inline-flex items-center gap-1 text-[.66rem] font-bold text-[color:var(--color-sim)]"><Icon name="flask" size={11} color="var(--color-sim)" />SANDBOX</span>
                           : <span className="text-[.72rem] font-semibold" style={{ color: st.color }}>{st.label}</span>}
                       </div>
                     )}
@@ -14762,7 +14782,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     {!sim && pct !== null && (
                       <div className="mt-2 mb-0.5">
                         <div className="h-[7px] rounded overflow-hidden bg-surface">
-                          <div className="h-full rounded bg-primaryfill" style={{ width: `${pct}%` }} />
+                          <div className="h-full rounded bg-primary" style={{ width: `${pct}%` }} />
                         </div>
                         <div className="text-[.68rem] text-muted mt-1">{pct}% to goal</div>
                       </div>
@@ -14770,7 +14790,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     {!sim && (
                       <div className="flex flex-wrap gap-3.5 text-sm text-muted mt-2">
                         <span className="inline-flex items-center gap-1.5"><Icon name="flame" size={15} />{det && det.target != null ? `${det.target.toLocaleString()} cal/day` : "—"}</span>
-                        <span className="inline-flex items-center gap-1.5"><Icon name="clock" size={15} />{ds === null ? "no logs yet" : ds === 0 ? "active today" : ds === 1 ? "1 day ago" : `${ds} days ago`}</span>
+                        <span className={`inline-flex items-center gap-1.5${ds != null && ds >= 5 ? " text-warn font-semibold" : ""}`}><Icon name="clock" size={15} />{ds === null ? "no logs yet" : ds === 0 ? "active today" : ds === 1 ? "1 day ago" : `${ds} days ago`}{ds != null && ds >= 5 ? " · quiet" : ""}</span>
                       </div>
                     )}
                     {/* Actions: convert (sims) + delete (all) */}

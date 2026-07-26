@@ -41,6 +41,7 @@
   --color-warn: #f59e0b;
   --color-danger: #ef4444;
   --color-dangerfg: #ffffff;    /* text on danger-filled controls; themed per look */
+  --color-sim: #7c3aed;         /* sandbox/sim identity; pro/light themes override */
 
   --font-sans: 'Inter', system-ui, sans-serif;
   --font-display: 'Inter', system-ui, sans-serif;

@@ -104,6 +104,7 @@
   --color-warn: #b45309;
   --color-danger: #cf2020;      /* 4.7:1 on surface2; white on it 5.4:1 */
   --color-dangerfg: #ffffff;    /* text on a danger-filled control */
+  --color-sim: #6d3bd6;         /* sandbox/simulation identity — darkened for light surfaces */
   --radius-card: 10px;
   --font-sans: 'Sora', system-ui, sans-serif;
   --font-display: 'Sora', system-ui, sans-serif;
@@ -126,6 +127,7 @@
   --color-warn: #fbbf24;
   --color-danger: #f87171;
   --color-dangerfg: #0d1418;    /* dark text on the light-red fill — 6.7:1 (white was 2.8:1) */
+  --color-sim: #b57bff;         /* sandbox/simulation identity (purple = not a real client) */
   --radius-card: 10px;
   --font-sans: 'Sora', system-ui, sans-serif;
   --font-display: 'Sora', system-ui, sans-serif;
