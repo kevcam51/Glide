@@ -631,19 +631,19 @@ const css = `
   --border:#d6e0e2;
   --border-light:#c2d0d3;
 
-  --accent:#0a8f93;        /* text/icons/borders — darkened for contrast on white */
+  --accent:#087478;        /* text/icons/borders — darkened; 4.8:1 on the worst light surface (was #0a8f93 = 3.4–3.9, failed AA) */
   --accent-fill:#08dce0;   /* filled buttons keep the bright brand cyan */
-  --accent-dim:rgba(10,143,147,.10);
+  --accent-dim:rgba(8,116,120,.10);
   --orange:#c2410c;
-  --green:#0f9d6e;
+  --green:#0b7a55;
   --yellow:#b45309;
-  --red:#dc2626;
+  --red:#cf2020;
   --purple:#7c3aed;
   --blue:#0284c7;
 
   --text:#0d1418;
   --text-secondary:#33474d;
-  --muted:#5c7175;
+  --muted:#576b6f;
   --muted-light:#41575c;
 
   /* The film flips to black — see the --tint-* note on :root. Slightly stronger
@@ -10360,6 +10360,9 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
   const burnDeepensDeficit = burnShown > 0 && !isEatback(data) && manualTarget == null && !trackerTdee;
   const vsTargetWithBurn = deficitVal + (burnDeepensDeficit ? burnShown : 0);
   const overCals = remaining < 0;
+  // ≤10% over target reads AMBER, not red (S117c, Kevin): the voice never shames
+  // a rounding error; red is reserved for meaningfully over.
+  const overMild = overCals && target > 0 && logged <= target * 1.1;
   const pct = target > 0 ? Math.min(100, Math.round((logged / target) * 100)) : 0; // arc caps at full
   // Macro targets. Default (estimates): protein 1g/lb bodyweight, fat 28% of
   // calories, carbs fill the remaining calories. A coach or client can override
@@ -10475,8 +10478,8 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
               strokeLinecap="round" style={{transition:"stroke-dashoffset .5s ease"}}/>
           </svg>
           <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-            <div style={{fontFamily:"'Sora',sans-serif",fontSize:"2.2rem",color:overCals?"var(--red)":"var(--accent)",lineHeight:1}}>{remaining.toLocaleString()}</div>
-            <div style={{fontSize:".65rem",color:overCals?"var(--red)":"var(--muted)",letterSpacing:".5px"}}>{overCals?"CAL OVER":"CAL REMAINING"}</div>
+            <div style={{fontFamily:"'Sora',sans-serif",fontSize:"2.2rem",color:overCals?(overMild?"var(--yellow)":"var(--red)"):"var(--accent)",lineHeight:1}}>{remaining.toLocaleString()}</div>
+            <div style={{fontSize:".65rem",color:overCals?(overMild?"var(--yellow)":"var(--red)"):"var(--muted)",letterSpacing:".5px"}}>{overCals?"CAL OVER":"CAL REMAINING"}</div>
             {/* Deficit / surplus vs today's target (S108b, Kevin's spec).
                 Just the WORD now (no number) — "Deficit"/"Surplus"/"On target" —
                 colored by whether it MATCHES the user's chosen goal direction:
@@ -16848,6 +16851,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
   const [activePlanId, setActivePlanId] = useState("self");
   const [showPlans, setShowPlans] = useState(false); // plan switcher open
   const [renamingPlanId, setRenamingPlanId] = useState(null);
+  const [confirmDelPlanId, setConfirmDelPlanId] = useState(null); // S117c: plan delete requires an inline confirm (critique P1 — it wipes plan+logs+history)
   const [planNameDraft, setPlanNameDraft] = useState("");
   // The full plan wrapper ({data, step, …}) kept in memory so weight logging
   // appends to the latest in-memory copy (no Firestore round-trip per log, which
@@ -17229,11 +17233,11 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
 
   // Tailwind class strings (Session 26 redesign — brand theme via).
   const cardCls = "bg-surface border border-border rounded-card p-5";
-  const inputCls = "flex-1 min-w-0 bg-surface2 border border-border rounded-lg px-3 py-2.5 text-fg text-[.95rem] outline-none placeholder:text-muted";
-  const primaryBtnCls = "px-4 py-2.5 rounded-lg font-bold text-sm bg-primaryfill text-primaryfg cursor-pointer whitespace-nowrap";
-  const ghostBtnCls = "px-4 py-2.5 rounded-lg font-semibold text-sm bg-transparent text-fg border border-border cursor-pointer whitespace-nowrap";
-  const miniBtnCls = "px-2.5 py-1.5 rounded-md text-xs font-semibold bg-transparent text-fg border border-border cursor-pointer whitespace-nowrap";
-  const miniBtnActiveCls = "px-2.5 py-1.5 rounded-md text-xs font-bold bg-primaryfill text-primaryfg border-0 cursor-pointer whitespace-nowrap";
+  const inputCls = "flex-1 min-w-0 bg-surface2 border border-border rounded-lg px-3 py-2.5 text-fg text-[.95rem] outline-none focus:border-primary placeholder:text-muted";
+  const primaryBtnCls = "px-4 py-2.5 min-h-[44px] rounded-lg font-bold text-sm bg-primaryfill text-primaryfg cursor-pointer whitespace-nowrap";
+  const ghostBtnCls = "px-4 py-2.5 min-h-[44px] rounded-lg font-semibold text-sm bg-transparent text-fg border border-border cursor-pointer whitespace-nowrap";
+  const miniBtnCls = "px-3 py-2.5 min-h-[44px] rounded-md text-xs font-semibold bg-transparent text-fg border border-border cursor-pointer whitespace-nowrap";
+  const miniBtnActiveCls = "px-3 py-2.5 min-h-[44px] rounded-md text-xs font-bold bg-primaryfill text-primaryfg border-0 cursor-pointer whitespace-nowrap";
 
   return (
     <div className="page-transition min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
@@ -17252,15 +17256,15 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button onClick={() => setShowNotes(true)} title="Your notes"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
+              className="inline-flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
               <Icon name="file" size={13} color="var(--accent)" />Notes
             </button>
             {trainerInfo && (
               <button onClick={() => setShowMsg(true)} title="Message your trainer"
-                className="relative inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
+                className="relative inline-flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
                 <Icon name="inbox" size={13} color="var(--accent)" />Message
                 {msgBadgeOn && myUnread > 0 && (
-                  <span className="rounded-full bg-primary px-1.5 text-[.64rem] font-bold text-primaryfg">{myUnread}</span>
+                  <span className="rounded-full bg-primaryfill px-1.5 text-[.64rem] font-bold text-primaryfg">{myUnread}</span>
                 )}
               </button>
             )}
@@ -17270,13 +17274,13 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                 both of which they may need before anything is booked. */}
             {trainerInfo && (
               <button onClick={() => setShowSessions(true)} title="Your training sessions, policy and payment card"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
+                className="inline-flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
                 <Icon name="clock" size={13} color="var(--accent)" />Sessions
               </button>
             )}
             {planData && (
               <button onClick={() => setShowCalendar(true)} title="Open the calendar to log or back-date any day"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
+                className="inline-flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
                 <Icon name="calendar" size={13} color="var(--accent)" />Calendar
               </button>
             )}
@@ -17307,8 +17311,8 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
             replacing the card in Sessions. */}
         {hold && (
           <div className="mb-4 w-full rounded-card border p-3.5"
-            style={{ borderColor: "var(--danger,#f87171)", background: "rgba(248,113,113,.08)" }}>
-            <div className="flex items-center gap-2 font-display text-base uppercase tracking-wide" style={{ color: "var(--danger,#f87171)" }}>
+            style={{ borderColor: "var(--color-danger)", background: "color-mix(in srgb, var(--color-danger) 9%, transparent)" }}>
+            <div className="flex items-center gap-2 font-display text-base uppercase tracking-wide" style={{ color: "var(--color-danger)" }}>
               <Icon name="alert" size={17} color="currentColor" />Payment needed
             </div>
             <div className="mt-1.5 text-sm text-fg leading-snug">
@@ -17316,16 +17320,16 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
               training{trainerInfo ? ` with ${trainerInfo.name}` : ""}. Clear it to keep training.
             </div>
             {payNowMsg && (
-              <div className="mt-2 text-sm font-semibold" style={{ color: payNowOk ? "var(--green,#2fe0a8)" : "var(--danger,#f87171)" }}>{payNowMsg}</div>
+              <div className="mt-2 text-sm font-semibold" style={{ color: payNowOk ? "var(--color-success)" : "var(--color-danger)" }}>{payNowMsg}</div>
             )}
             <div className="mt-2.5 flex gap-2 flex-wrap">
               <button onClick={doPayNow} disabled={payNowBusy}
-                className="rounded-lg px-4 py-2 text-sm font-bold cursor-pointer border-0"
-                style={{ background: "var(--danger,#f87171)", color: "#fff", opacity: payNowBusy ? .6 : 1 }}>
+                className="rounded-lg px-4 py-2.5 min-h-[44px] text-sm font-bold cursor-pointer border-0"
+                style={{ background: "var(--color-danger)", color: "var(--color-dangerfg)", opacity: payNowBusy ? .6 : 1 }}>
                 {payNowBusy ? "Charging…" : `Pay $${((hold.amountCents || 0) / 100).toFixed(2)} now`}
               </button>
               <button onClick={() => setShowSessions(true)} disabled={payNowBusy}
-                className="rounded-lg px-4 py-2 text-sm font-semibold cursor-pointer border border-border bg-transparent text-fg">
+                className="rounded-lg px-4 py-2.5 min-h-[44px] text-sm font-semibold cursor-pointer border border-border bg-transparent text-fg">
                 Update card
               </button>
             </div>
@@ -17374,22 +17378,30 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                       <>
                         <input autoFocus value={planNameDraft} onChange={(e) => setPlanNameDraft(e.target.value)}
                           onKeyDown={(e) => { if (e.key === "Enter") { renamePlan(p.id, planNameDraft.trim()); setRenamingPlanId(null); } }}
-                          className="flex-1 px-2 py-1 rounded border border-border bg-bg text-fg text-sm outline-none" />
+                          aria-label="Plan name" className="flex-1 px-2 py-2.5 min-h-[44px] rounded border border-border bg-bg text-fg text-sm outline-none focus:border-primary" />
                         <button onClick={() => { renamePlan(p.id, planNameDraft.trim()); setRenamingPlanId(null); }}
-                          className="border-0 bg-primaryfill text-primaryfg font-bold rounded px-2.5 py-1 text-xs cursor-pointer">Save</button>
+                          className="border-0 bg-primaryfill text-primaryfg font-bold rounded px-3 py-2.5 min-h-[44px] text-xs cursor-pointer">Save</button>
                       </>
                     ) : (
                       <>
                         <button onClick={() => switchPlan(p.id)}
-                          className={`flex-1 text-left border-0 bg-transparent cursor-pointer text-fg text-sm ${p.id === activePlanId ? "font-bold" : "font-normal"}`}>
+                          className={`flex-1 text-left py-2.5 min-h-[44px] border-0 bg-transparent cursor-pointer text-fg text-sm ${p.id === activePlanId ? "font-bold" : "font-normal"}`}>
                           {p.id === activePlanId ? "● " : "○ "}{p.name}
                         </button>
                         <button onClick={() => { setPlanNameDraft(p.name); setRenamingPlanId(p.id); }} title="Rename"
-                          className="border-0 bg-transparent text-muted cursor-pointer text-sm"><Icon name="edit" size={14} color="currentColor" /></button>
-                        {p.id !== "self" && plans.length > 1 && (
-                          <button onClick={() => deletePlan(p.id)} title="Delete plan"
-                            className="border-0 bg-transparent text-danger cursor-pointer text-sm"><Icon name="close" size={15} color="currentColor" /></button>
-                        )}
+                          className="border-0 bg-transparent text-muted cursor-pointer text-sm p-2.5 -m-1.5"><Icon name="edit" size={14} color="currentColor" /></button>
+                        {p.id !== "self" && plans.length > 1 && (confirmDelPlanId === p.id ? (
+                          <span className="flex items-center gap-1.5 shrink-0">
+                            <button onClick={() => { deletePlan(p.id); setConfirmDelPlanId(null); }}
+                              className="rounded-md border-0 px-2.5 py-2.5 min-h-[44px] text-[11px] font-bold cursor-pointer"
+                              style={{ background: "var(--color-danger)", color: "var(--color-dangerfg)" }}>Delete plan</button>
+                            <button onClick={() => setConfirmDelPlanId(null)}
+                              className="rounded-md border border-border bg-transparent px-2.5 py-2.5 min-h-[44px] text-[11px] font-semibold text-fg cursor-pointer">Keep</button>
+                          </span>
+                        ) : (
+                          <button onClick={() => setConfirmDelPlanId(p.id)} title="Delete plan"
+                            className="border-0 bg-transparent text-danger cursor-pointer text-sm p-2.5 -m-1.5"><Icon name="close" size={15} color="currentColor" /></button>
+                        ))}
                       </>
                     )}
                   </div>
@@ -17417,7 +17429,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                   <Icon name="bellOff" size={13} />{openReqs.length} trainer reminder{openReqs.length !== 1 ? "s" : ""} hidden
                 </span>
                 <button onClick={() => onSetNotifPrefs({ trainerReminders: true })}
-                  className="border-0 bg-transparent text-primary cursor-pointer text-xs font-bold whitespace-nowrap">Show</button>
+                  className="border-0 bg-transparent text-primary cursor-pointer text-xs font-bold whitespace-nowrap p-2.5 -m-1.5">Show</button>
               </div>
             );
           }
@@ -17427,7 +17439,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
               <div className="flex justify-between items-start gap-2 mb-0.5">
                 <div className="font-display text-base tracking-wide text-primary uppercase flex items-center gap-2"><Icon name="inbox" size={18} color="var(--accent)" />From your trainer</div>
                 <button onClick={() => onSetNotifPrefs({ trainerReminders: false })} title="Hide trainer reminders"
-                  className="border-0 bg-transparent text-muted cursor-pointer text-xs font-bold whitespace-nowrap inline-flex items-center gap-1"><Icon name="bellOff" size={13} />Hide</button>
+                  className="border-0 bg-transparent text-muted cursor-pointer text-xs font-bold whitespace-nowrap inline-flex items-center gap-1 p-2.5 -m-1.5"><Icon name="bellOff" size={13} />Hide</button>
               </div>
               <div className="text-muted text-sm mb-3">
                 {openReqs.length} thing{openReqs.length !== 1 ? "s" : ""} to do
@@ -17494,7 +17506,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
               if (!nudges.length) return null;
               return (
                 <div className="flex flex-col gap-2">
-                  {nudges.map((n) => (
+                  {nudges.slice(0, 1).map((n) => ( // S117c: one nudge at a time (they are pushed in priority order)
                     <div key={n.key} className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-surface2 border border-border">
                       <Icon name={n.icon} size={18} color="var(--accent)" className="shrink-0" />
                       <span className="text-[.85rem] text-fg flex-1 min-w-0">{n.text}</span>
@@ -17502,7 +17514,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                         <button onClick={n.cta.onClick} className={`${miniBtnCls} shrink-0`}>{n.cta.label}</button>
                       )}
                       <button onClick={() => setNudgeDismiss((d) => ({ ...d, [n.key]: true }))} aria-label="Dismiss"
-                        className="shrink-0 border-0 bg-transparent text-muted cursor-pointer text-sm px-1"><Icon name="close" size={15} color="currentColor" /></button>
+                        className="shrink-0 border-0 bg-transparent text-muted cursor-pointer text-sm p-2.5 -m-1.5"><Icon name="close" size={15} color="currentColor" /></button>
                     </div>
                   ))}
                 </div>
@@ -17540,14 +17552,14 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                 </div>
                 <div className="bg-surface2 rounded-lg py-3 text-center">
                   <div className={`font-display text-2xl leading-none ${change == null ? "text-fg" : towardGoal ? "text-success" : "text-danger"}`}>{change != null ? `${change < 0 ? "−" : "+"}${Math.abs(change)}` : "—"}</div>
-                  <div className="text-[10px] uppercase tracking-wide text-muted mt-1">Since start</div>
+                  <div className="text-[10px] uppercase tracking-wide text-muted mt-1">{change == null ? "Since start" : towardGoal ? "Since start · toward goal" : "Since start · away"}</div>
                 </div>
               </div>
               {/* Progress bar from start → goal */}
               {g && start && start !== g && (
                 <div className="mt-4">
                   <div className="h-2.5 rounded-full bg-surface2 overflow-hidden">
-                    <div className="h-full bg-primaryfill rounded-full" style={{ width: `${Math.max(2, Math.min(100, Math.round(((start - w) / (start - g)) * 100)))}%` }} />
+                    <div className="h-full bg-primary rounded-full" style={{ width: `${Math.max(2, Math.min(100, Math.round(((start - w) / (start - g)) * 100)))}%` }} />
                   </div>
                   <div className="flex justify-between text-[11px] text-muted mt-1">
                     <span>Start {start}</span><span>Goal {g}</span>
@@ -17556,7 +17568,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
               )}
               {hasRange && (
                 <div className="mt-3 text-sm">
-                  <span className="text-muted">Healthy range: {rLo}–{rHi} lbs</span>
+                  <span className="text-muted">Goal range: {rLo}–{rHi} lbs</span>
                   {" · "}
                   <span className={`font-semibold ${inRange ? "text-success" : "text-warn"}`}>
                     {inRange ? "in range" : w < rLo ? `${rangeGap} below` : `${rangeGap} above`}
@@ -17568,7 +17580,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                   <div className="text-sm text-muted mb-1.5">Log today's weight</div>
                   <div className="flex gap-2">
                     <input className={inputCls} type="number" inputMode="decimal" placeholder="Today's weight (lbs)"
-                      value={wtDraft} onChange={e => setWtDraft(e.target.value)}
+                      aria-label="Today's weight in pounds" value={wtDraft} onChange={e => setWtDraft(e.target.value)}
                       onKeyDown={e => { if (e.key === "Enter") logWeight(); }} autoFocus />
                     <button className={primaryBtnCls} onClick={logWeight}>Log</button>
                   </div>
@@ -17628,13 +17640,13 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
                   <div className="flex items-baseline gap-2 flex-wrap">
                     <span className="font-display text-4xl leading-none">{consumed.toLocaleString()}</span>
                     <span className="text-muted">/ {target.toLocaleString()} cal</span>
-                    <span className={`ml-auto font-bold ${remaining >= 0 ? "text-success" : "text-danger"}`}>
+                    <span className={`ml-auto font-bold ${remaining >= 0 ? "text-success" : consumed <= target * 1.1 ? "text-warn" : "text-danger"}`}>
                       {remaining >= 0 ? `${remaining.toLocaleString()} left` : `${Math.abs(remaining).toLocaleString()} over`}
                     </span>
                   </div>
                   <div className="h-2.5 rounded-full bg-surface2 overflow-hidden mt-3">
                     <div className="h-full rounded-full" style={{ width: `${Math.max(0, Math.min(100, Math.round((consumed / target) * 100)))}%`,
-                      background: remaining >= 0 ? "var(--color-primary)" : "var(--color-danger)" }} />
+                      background: remaining >= 0 ? "var(--color-primary)" : consumed <= target * 1.1 ? "var(--color-warn)" : "var(--color-danger)" }} />
                   </div>
                 </>
               ) : (
@@ -17642,7 +17654,7 @@ function ClientHome({ onOpenPlan, meUid, meName, role, notifPrefs, onSetNotifPre
               )}
 
               <div className="mt-3 flex flex-col gap-2">
-                <input className={`${inputCls} w-full`} type="number" inputMode="numeric" placeholder="Calories"
+                <input aria-label="Calories to add" className={`${inputCls} w-full`} type="number" inputMode="numeric" placeholder="Calories"
                   value={calDraft} onChange={e => setCalDraft(e.target.value)}
                   onKeyDown={e => { if (e.key === "Enter") adjustCalories(1); }} />
                 <div className="flex gap-2">

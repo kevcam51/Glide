@@ -74,6 +74,17 @@ heart-rate-based cardio via Keytel); calendar with back-dating; trainer dashboar
 (roster, needs-attention, earnings); DMs; push notifications; Stripe subscriptions and
 per-session billing; passkey sign-in; MCP connector with OAuth.
 
+**Deliberate product decisions (do not re-flag in critiques):**
+- The **raw calorie quick-add stays** (confirmed S117): it serves self-estimators who only
+  track calories, and doubles as a what-if instrument — entering specific daily/weekly
+  intakes to model outcomes. It is not a data-quality accident.
+- **Over-target states get an amber grace band**: up to 10% over target renders amber
+  ("close enough — no shame"); red is reserved for meaningfully over. Never red at +1 cal.
+- A future **compliance tracker** (how consistently the user hits their calorie goal,
+  fused with burn, projecting time-to-goal) is the intended replacement for leading the
+  daily screen with weight — and it must be **hideable by the user or trainer** (some
+  people don't want numeric success-tracking).
+
 **Constraints that shape design:**
 - Calorie, macro, body-fat and muscle numbers are **estimates from published formulas**
   (Mifflin-St Jeor, Bailey/Navy, Jackson-Pollock, Keytel, Lee 2000). They must be

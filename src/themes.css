@@ -83,7 +83,8 @@
  *
  *    ⚠️ The brand cyan #08dce0 is a ~1.9:1 contrast on white — illegible as text.
  *    So the token splits by JOB, which is why both exist:
- *      --color-primary      → text/icons/borders  → DARKENED cyan (#0a8f93, ~4.5:1)
+ *      --color-primary      → text/icons/borders  → DARKENED cyan (#087478, measured
+ *                             4.8:1 on the worst-case surface2 — AA for normal text)
  *      --color-primaryfill  → large filled buttons → the bright brand cyan, with
  *                             near-black --color-primaryfg on top
  *    Semantic colors are darkened for the same reason (#2fe0a8 green etc. is
@@ -94,14 +95,15 @@
   --color-surface2: #eaf0f1;
   --color-border: #d6e0e2;
   --color-fg: #0d1418;
-  --color-muted: #5c7175;
-  --color-primary: #0a8f93;     /* darkened cyan — legible on white */
+  --color-muted: #576b6f;       /* 4.9:1 on surface2 (was #5c7175 = 4.48 — hairline AA fail) */
+  --color-primary: #087478;     /* darkened cyan — 4.8:1 on surface2 (was #0a8f93 = 3.4–3.9, FAILED AA) */
   --color-primaryfill: #08dce0; /* the bright brand cyan reads great as a FILL */
   --color-primaryfg: #04201f;   /* near-black on cyan */
   --color-accent: #0284c7;
-  --color-success: #0f9d6e;
+  --color-success: #0b7a55;     /* 4.6:1 on surface2 (was #0f9d6e = 3.0–3.5, FAILED AA normal text) */
   --color-warn: #b45309;
-  --color-danger: #dc2626;
+  --color-danger: #cf2020;      /* 4.7:1 on surface2; white on it 5.4:1 */
+  --color-dangerfg: #ffffff;    /* text on a danger-filled control */
   --radius-card: 10px;
   --font-sans: 'Sora', system-ui, sans-serif;
   --font-display: 'Sora', system-ui, sans-serif;
@@ -123,6 +125,7 @@
   --color-success: #2fe0a8;
   --color-warn: #fbbf24;
   --color-danger: #f87171;
+  --color-dangerfg: #0d1418;    /* dark text on the light-red fill — 6.7:1 (white was 2.8:1) */
   --radius-card: 10px;
   --font-sans: 'Sora', system-ui, sans-serif;
   --font-display: 'Sora', system-ui, sans-serif;
