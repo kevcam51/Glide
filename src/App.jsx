@@ -10530,14 +10530,14 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           Editable by the client on their own dashboard AND the trainer viewing
           them (rides setDataAndSave like every other plan field). */}
       {onSetCalorieGoal && (
-        <div style={{marginTop:"10px",marginBottom:"2px",textAlign:"center"}}>
+        <div style={{marginTop:"10px",marginBottom:"14px",textAlign:"center"}}>
           <div style={{fontSize:".56rem",color:"var(--muted)",letterSpacing:".5px",textTransform:"uppercase",fontWeight:700,marginBottom:"6px"}}>Daily goal</div>
           <div style={{display:"inline-flex",gap:6}}>
             {[["deficit","Deficit"],["maintain","Maintain"],["surplus","Surplus"]].map(([v,l])=>{
               const on = goalDir===v;
               return (
                 <button key={v} onClick={()=>onSetCalorieGoal(v)}
-                  style={{padding:"5px 13px",borderRadius:999,fontFamily:"inherit",fontSize:".72rem",fontWeight:700,cursor:"pointer",
+                  style={{padding:"0 15px",minHeight:44,borderRadius:999,fontFamily:"inherit",fontSize:".78rem",fontWeight:700,cursor:"pointer",
                     border:on?"1.5px solid var(--accent)":"1px solid var(--border)",
                     background:on?"rgba(8,220,224,.08)":"var(--s2)",
                     color:on?"var(--accent)":"var(--muted)"}}>{l}</button>
@@ -10573,9 +10573,9 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       )}
 
       {(
-        <div style={{display:"flex",justifyContent:"center",marginTop:"-6px",marginBottom:"12px"}}>
+        <div style={{display:"flex",justifyContent:"center",marginTop:"0",marginBottom:"12px"}}>
           <button onClick={()=>setShowBurnModes(true)}
-            style={{display:"inline-flex",alignItems:"center",gap:6,padding:"6px 12px",borderRadius:999,
+            style={{display:"inline-flex",alignItems:"center",gap:6,padding:"0 14px",minHeight:44,borderRadius:999,
               border:"1px solid var(--border)",background:"var(--s2)",color:"var(--text)",
               fontFamily:"inherit",fontSize:".72rem",fontWeight:700,cursor:"pointer"}}>
             <Icon name="flame" size={13} color={eatbackOn?"var(--green)":"var(--muted)"} />
