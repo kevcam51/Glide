@@ -10299,18 +10299,27 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
     }
   }, [editingWorkout]);
   const { firstName, lastName, weightLbs, goalWeight } = data;
-  const today = new Date();
+  const today = viewDate ? new Date(viewDate + "T12:00:00") : new Date();
   const dayName = DAYS[today.getDay() === 0 ? 6 : today.getDay() - 1]; // Mon=0
   const dayIdx = DAYS.indexOf(dayName);
+  // The weigh-in recorded ON this day — NOT the plan's current weight. Showing
+  // the current weight on every past day made it look like they weighed the same
+  // all week (Kevin). Blank means "no weigh-in that day", which is the truth and
+  // is also the prompt to add one — including days they missed at the time.
+  const dayCheckIn = (Array.isArray(data.checkIns) ? data.checkIns : [])
+    .find((c) => c && c.date === (viewDate || "") && c.weight != null) || null;
+  const dayWeight = dayCheckIn ? Number(dayCheckIn.weight) : null;
 
   // Today's scheduled workouts
   const todayCardio = dayData[dayIdx] || { burned: 0, workouts: [] };
   const todayStrength = strengthDayData[dayIdx] || { burned: 0, sessions: [] };
   const todayTotalBurn = todayCardio.burned + todayStrength.burned;
-  // Workout burn PREFERS the fitness tracker's measured active calories for today
-  // (real > estimated); falls back to the in-app scheduled-workout estimate when
-  // there's no tracker data for today (Kevin's call). Only today's reading is used
-  // here — a stale prior-day active burn would misreport today's effort.
+  // Workout burn PREFERS the tracker's measured active calories for the day being
+  // SHOWN (real > estimated), falling back to that day's scheduled-workout
+  // estimate. Reading it from dailyLog — which is now the viewed day's log — is
+  // what makes a past day report the burn actually recorded then, rather than
+  // today's. It is never carried across days: a stale reading would misreport
+  // effort, which is the whole reason the fallback is per-day.
   const trackerActiveBurn = (dailyLog.wearable && Number(dailyLog.wearable.active) > 0)
     ? Math.round(Number(dailyLog.wearable.active)) : null;
   const burnShown = trackerActiveBurn != null ? trackerActiveBurn : todayTotalBurn;
@@ -10819,8 +10828,11 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         {!tileHidden("weight") && <div className="dash-cta" style={{gridColumn:"1 / -1",cursor:onSaveMeasurements?"pointer":"default",borderColor:"var(--border)"}}
           onClick={onSaveMeasurements?()=>setShowMeasure(true):undefined}>
           <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="scale" size={23} color="var(--muted)" /></div>
-          <div className="dash-cta-val">{weightLbs?Number(weightLbs).toFixed(1):"—"}<span style={{fontSize:".5em",color:"var(--muted)",marginLeft:"3px"}}>lbs</span></div>
-          <div className="dash-cta-lbl">Today's Weight{onSaveMeasurements?" ›":""}</div>
+          <div className="dash-cta-val">{dayWeight?dayWeight.toFixed(1):"—"}<span style={{fontSize:".5em",color:"var(--muted)",marginLeft:"3px"}}>lbs</span></div>
+          <div className="dash-cta-lbl">
+            {viewIsToday ? "Today's Weight" : (dayWeight != null ? "Weight that day" : "No weigh-in — add one")}
+            {onSaveMeasurements?" ›":""}
+          </div>
         </div>}
       </div>
       {/* One place to hide AND bring back tiles (Kevin, S143). Stored on the
