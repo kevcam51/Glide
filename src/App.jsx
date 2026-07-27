@@ -10109,6 +10109,7 @@ function WeightDayLogger({ date, existing, onSave }) {
 }
 
 function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
+  viewDate, viewIsToday = true, todayKeyProp, onStepDay, onGoToday,
   data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood,
@@ -10129,11 +10130,12 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // recomputed inline — that caused the S85 midnight-corruption bug), and the
   // rest of the dashboard (ring, streak, week summary) stays TODAY-only on
   // purpose: this is a logging shortcut, not a time machine for the whole page.
-  const dashToday = useTodayKey();
-  const [mealDate, setMealDate] = useState(dashToday);
+  const dashToday = todayKeyProp || useTodayKey();
+  // Follow the screen's selected day rather than keeping a second one.
+  const mealDate = viewDate || dashToday;
   const mealIsToday = mealDate === dashToday;
   const [mealDayLog, setMealDayLog] = useState(null); // the past day's log (today reads dailyLog)
-  useEffect(() => { if (mealDate > dashToday) setMealDate(dashToday); }, [dashToday, mealDate]);
+  // (clamping now lives with the single owner of the date, in App)
   useEffect(() => {
     let alive = true;
     if (mealIsToday) { setMealDayLog(null); return; }
@@ -10142,12 +10144,9 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
       .catch(() => { if (alive) setMealDayLog({}); });
     return () => { alive = false; };
   }, [mealDate, mealIsToday, onReadDay]);
-  const shiftMealDate = (n) => setMealDate((k) => {
-    const p = k.split("-").map(Number);
-    const d = new Date(p[0], p[1] - 1, p[2] + n);
-    const next = ymdLocal(d);
-    return next > dashToday ? k : next; // never navigate into the future
-  });
+  // Delegates to the one owner of the selected day. Kept so MealLog's own
+  // arrows keep working — they now move the WHOLE screen, which is the point.
+  const shiftMealDate = (n) => { if (onStepDay) onStepDay(n); };
   // Past-day writes go through onWriteDay (date-scoped); today keeps the
   // existing handlers so the ring/streak/week-summary stay wired as they were.
   const mealWriteDay = (next) => { setMealDayLog(next); if (onWriteDay) onWriteDay(mealDate, next); };
@@ -10496,8 +10495,36 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           <span>Shared client plan — you're viewing {fullName(data) || "this client"}'s account. Your changes save to their login, and you both see the same activity.</span>
         </div>
       )}
-      <div className="dash-date">{today.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}</div>
-      <div className="dash-greeting">{firstName ? `Hey ${firstName}` : "Your Daily Plan"}</div>
+      {/* The date IS the context now (S144): every number on this screen belongs
+          to the day named here, so it has to be unmissable and steppable. Tap it
+          to jump anywhere via the calendar. */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10,marginBottom:2}}>
+        <button onClick={()=>onStepDay&&onStepDay(-1)} aria-label="Previous day"
+          style={{background:"transparent",border:"1px solid var(--border)",borderRadius:9,width:34,height:34,
+            color:"var(--text)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>‹</button>
+        <button onClick={()=>setShowCalendar(true)}
+          style={{background:"transparent",border:"none",cursor:"pointer",padding:"2px 4px",minWidth:0}}>
+          <div className="dash-date" style={{marginBottom:0}}>
+            {new Date(viewDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}
+          </div>
+          {!viewIsToday && (
+            <div style={{fontSize:".64rem",fontWeight:700,letterSpacing:".04em",
+              color: viewDate > todayKeyProp ? "var(--yellow)" : "var(--accent)"}}>
+              {viewDate > todayKeyProp ? "PLANNING AHEAD" : "PAST DAY"} · tap for calendar
+            </div>
+          )}
+        </button>
+        <button onClick={()=>onStepDay&&onStepDay(1)} aria-label="Next day"
+          style={{background:"transparent",border:"1px solid var(--border)",borderRadius:9,width:34,height:34,
+            color:"var(--text)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>›</button>
+      </div>
+      {!viewIsToday && (
+        <button onClick={()=>onGoToday&&onGoToday()}
+          style={{display:"block",margin:"0 auto 8px",background:"transparent",border:"none",
+            color:"var(--accent)",fontSize:".72rem",fontWeight:700,cursor:"pointer",textDecoration:"underline"}}>
+          Back to today
+        </button>
+      )}      <div className="dash-greeting">{firstName ? `Hey ${firstName}` : "Your Daily Plan"}</div>
       <button onClick={() => setShowCalendar(true)}
         style={{ display:"flex", alignItems:"center", gap:"7px", margin:"0 auto 16px", padding:"9px 16px", fontSize:".82rem", fontWeight:700,
           borderRadius:"10px", cursor:"pointer", border:"1px solid var(--border)",
@@ -11386,7 +11413,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood} savedMeals={savedMeals} onToggleSaveMeal={onToggleSaveMeal} onRemoveSavedMeal={onRemoveSavedMeal}
         onLogMeal={mealIsToday ? onLogMeal : undefined} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays}
         dateKey={mealDate} hideMicros
-        onDayStep={shiftMealDate} dayLabel={dayLabelFor(mealDate, dashToday)} canGoNext={!mealIsToday} />
+        onDayStep={shiftMealDate} dayLabel={dayLabelFor(mealDate, dashToday)} canGoNext />
             </>
           )}
           {expandedStat === "burn" && (
@@ -21970,6 +21997,20 @@ export default function App() {
 
   // ── Daily log handler ──
   const todayKey = useTodayKey(); // stateful: re-runs the log effects at midnight
+  // The day the dashboard is SHOWING (Kevin, S144: "everything changes and goes
+  // in the past or present" — a past day should read as a complete record, not
+  // today's numbers with an old meal list underneath). Defaults to today and
+  // follows the midnight rollover ONLY while you're looking at today, so an open
+  // past day doesn't jump when the clock ticks over.
+  const [viewDate, setViewDate] = useState(todayKey);
+  const viewIsToday = viewDate === todayKey;
+  const prevTodayRef = useRef(todayKey);
+  useEffect(() => {
+    if (prevTodayRef.current !== todayKey) {
+      if (viewDate === prevTodayRef.current) setViewDate(todayKey); // was on "today" → follow it
+      prevTodayRef.current = todayKey;
+    }
+  }, [todayKey, viewDate]);
   // Daily logs live with the plan: when a trainer is editing a LINKED client's
   // plan (activeRemoteUid set), the log reads/writes go to the CLIENT's account;
   // otherwise they use the signed-in user's own storage.
@@ -21998,7 +22039,7 @@ export default function App() {
   };
   const persistLog = (logObj) => {
     if (!activeId) return;
-    logWrite(`caliq-log-${activeId}-${todayKey}`, JSON.stringify(logObj));
+    logWrite(`caliq-log-${activeId}-${viewDate}`, JSON.stringify(logObj));
   };
   // Calendar back-dated logging: read / write / list any date's log for the
   // active plan (today's log keeps its own state; these are for other dates).
@@ -22008,7 +22049,7 @@ export default function App() {
   };
   const onWriteDay = (date, logObj) => {
     logWrite(`caliq-log-${activeId}-${date}`, JSON.stringify(logObj));
-    if (date === todayKey) setDailyLog(logObj); // keep today's live state in sync
+    if (date === viewDate) setDailyLog(logObj); // keep the SHOWN day's live state in sync
   };
   const onListLoggedDays = async () => {
     const keys = await logList(`caliq-log-${activeId}-`);
@@ -22043,17 +22084,19 @@ export default function App() {
       setDataAndSave((p) => {
         const n = { ...p };
         // Confetti when this weigh-in CROSSES the goal (Kevin's pick #3).
-        if (crossedGoal(n.weightLbs, value, n.goalWeight)) celebrate("goal");
+        const isNewest = viewDate >= (Array.isArray(n.checkIns) ? n.checkIns : [])
+          .reduce((a, c) => (c && c.date && c.weight != null && (!a || c.date > a)) ? c.date : a, "");
+        if (isNewest && crossedGoal(n.weightLbs, value, n.goalWeight)) celebrate("goal");
         if (n.startWeightLbs == null || n.startWeightLbs === "") n.startWeightLbs = Number(n.weightLbs) || value;
-        n.weightLbs = value;
+        if (isNewest) n.weightLbs = value;   // back-dating must not rewrite the current weight
         const cis = Array.isArray(n.checkIns) ? n.checkIns : [];
-        const ts = new Date(todayKey + "T12:00:00").getTime();
-        const entry = { date: todayKey, timestamp: ts, weight: value, calories: null,
+        const ts = new Date(viewDate + "T12:00:00").getTime();
+        const entry = { date: viewDate, timestamp: ts, weight: value, calories: null,
           hitTarget: null, workedOut: null, mood: null, notes: "", bodyFat: null,
-          loggedBy: role === ROLES.CLIENT ? "client" : "trainer", isFuturePlan: false,
-          ...(cis.find((c) => c && c.date === todayKey) || {}) };
+          loggedBy: role === ROLES.CLIENT ? "client" : "trainer", isFuturePlan: viewDate > todayKey,
+          ...(cis.find((c) => c && c.date === viewDate) || {}) };
         entry.weight = value; entry.timestamp = ts;
-        n.checkIns = [...cis.filter((c) => c && c.date !== todayKey), entry];
+        n.checkIns = [...cis.filter((c) => c && c.date !== viewDate), entry];
         return n;
       });
     }
@@ -22327,7 +22370,7 @@ export default function App() {
       const pv = await logRead(planDataKey(activeId));
       if (pv) { try { const wrap = JSON.parse(pv); const merged = buildMergedData(wrap.data); setData(merged); lastSnapshotRef.current = merged; } catch(e) {} }
     }
-    const v = await logRead(`caliq-log-${activeId}-${todayKey}`);
+    const v = await logRead(`caliq-log-${activeId}-${viewDate}`);
     let parsed = {calories:0, water:0, weight:0, meals:[]};
     if (v) { try { parsed = JSON.parse(v); } catch(e) {} }
     setDailyLog(parsed);
@@ -22363,7 +22406,7 @@ export default function App() {
     }));
 
     // 2) Today's daily log (meals / calories / water / weight)
-    unsubs.push(subscribeForUser(uid, `caliq-log-${pid}-${todayKey}`, (value) => {
+    unsubs.push(subscribeForUser(uid, `caliq-log-${pid}-${viewDate}`, (value) => {
       let parsed = {calories:0, water:0, weight:0, meals:[]};
       if (value) { try { parsed = JSON.parse(value); } catch(e) {} }
       setDailyLog(parsed);
@@ -22378,7 +22421,7 @@ export default function App() {
     }));
 
     return () => unsubs.forEach((u) => { try { u(); } catch(e) {} });
-  }, [activeRemoteUid, activeId, todayKey]);
+  }, [activeRemoteUid, activeId, viewDate]);
 
   // Load daily log when the active plan changes (own profile or a linked client)
   useEffect(() => {
@@ -22390,7 +22433,7 @@ export default function App() {
     // full reload — which is exactly why the bug survived going back and forth.
     let alive = true;
     (async () => {
-      const v = await logRead(`caliq-log-${activeId}-${todayKey}`);
+      const v = await logRead(`caliq-log-${activeId}-${viewDate}`);
       if (!alive) return;
       let parsed = {calories:0, water:0, weight:0, meals:[]};
       if (v) { try { parsed = JSON.parse(v); } catch(e) {} }
@@ -22400,7 +22443,9 @@ export default function App() {
       // day, so a long streak took seconds to load) and cached so the week
       // summary below reuses the first 7 instead of re-reading them.
       const dayVals = {};
-      const keyFor = (i) => { const d = new Date(); d.setDate(d.getDate() - i); return ymdLocal(d); };
+      // Anchor on the day being VIEWED: a streak or week average shown for a past
+      // day must describe that day, not today.
+      const keyFor = (i) => { const d = new Date(viewDate + "T12:00:00"); d.setDate(d.getDate() - i); return ymdLocal(d); };
       const readDayCached = async (dk) => {
         if (!(dk in dayVals)) dayVals[dk] = await logRead(`caliq-log-${activeId}-${dk}`);
         return dayVals[dk];
@@ -22485,7 +22530,7 @@ export default function App() {
     return () => { alive = false; };
     // todayKey: re-load at the midnight rollover so yesterday's totals aren't
     // carried into (and written onto) the new day's key.
-  }, [activeId, activeRemoteUid, todayKey]);
+  }, [activeId, activeRemoteUid, viewDate]);
 
   // ── Compute values for dashboard (same formulas as Results) ──
   const actObj = ACTIVITY_LEVELS.find(a=>a.id===data.activityLevel) || ACTIVITY_LEVELS[0];
@@ -22697,6 +22742,9 @@ export default function App() {
           {step===4 && <StepStrength   data={data} onChange={update} onBack={()=>setStepAndSave(3)} onNext={()=>setStepAndSave(5)}/>}
           {step===5 && showDash && (
             <DailyDashboard hiddenTiles={hiddenTiles} onSetHiddenTiles={onSetHiddenTiles}
+              viewDate={viewDate} viewIsToday={viewIsToday} todayKeyProp={todayKey}
+              onStepDay={(n)=>{ const d=new Date(viewDate+"T12:00:00"); d.setDate(d.getDate()+n); setViewDate(ymdLocal(d)); }}
+              onGoToday={()=>setViewDate(todayKey)}
               data={data} step={step} tdee={computedTdee}
               dayData={computedDayData} strengthDayData={computedStrDayData}
               avgBurnPerDay={computedAvgBurn}
@@ -22707,7 +22755,7 @@ export default function App() {
               onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; n.macroTargetsEditedAt=Date.now(); return n; })}
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
-              onSaveMeasurements={(vals)=>setDataAndSave(p=>{ const next={...p}; mergeMeasurements(next, vals, todayKey, activeRemoteUid ? "trainer" : "client"); return next; })}
+              onSaveMeasurements={(vals)=>setDataAndSave(p=>{ const next={...p}; mergeMeasurements(next, vals, viewDate, activeRemoteUid ? "trainer" : "client"); return next; })}
               onDeleteMeasurement={(ts)=>setDataAndSave(p=>({...p, measurements:(p.measurements||[]).filter(e=>e && e.timestamp!==ts)}))}
               onToggleBodyFat={(show)=>setDataAndSave(p=>({...p, hideBodyFat: !show}))}
               onSetGoalWeight={(lbs)=>setDataAndSave(p=>({...p, goalWeight: lbs}))}
@@ -22783,7 +22831,7 @@ export default function App() {
               // refresh bodyFat from the tape formulas. mergeMeasurements builds
               // a NEW measurements array, so mutating the shallow copy is safe.
               const next = {...p};
-              mergeMeasurements(next, vals, todayKey, activeRemoteUid ? "trainer" : "client");
+              mergeMeasurements(next, vals, viewDate, activeRemoteUid ? "trainer" : "client");
               return next;
             })}
             onDeleteMeasurement={(ts)=>setDataAndSave(p=>({...p,
