@@ -58,6 +58,55 @@ pencil with `titleLocked` so the auto-title can't overwrite it.
 - Phase 4b (reverse MCP) — parked: Trainerize already covers Apple Health/Fitbit/MFP/Withings/
   Garmin, and Whoop/Oura ship no MCP server today. Revisit when one exists or a native app lands.
 
+## ⏭️ NEXT SESSION — START HERE: make every surface DATE-AWARE (Kevin, S138 close)
+_Nothing started, working tree clean. This is one coherent theme, not five asks._
+
+### The bug that makes it urgent (verified, exact lines)
+The Meals & Food day arrows (S99) change ONLY the meal list. `mealDate`
+(App.jsx:10132) is passed to `<MealLog>` at **App.jsx:11353-11354** and nowhere
+else — the tiles above it (Logged So Far / Today's Target / Workout Burn / oz
+Water) read `dailyLog`, which is always TODAY. So stepping back a day shows
+**yesterday's meals underneath today's totals**. Kevin found this; it is worse
+than having no arrow, because the numbers look authoritative.
+- **The data is already loaded.** `mealDayLog` (App.jsx:10139-10143) fetches the
+  selected day via `onReadDay`. The tiles simply don't read it. Start there.
+- Watch: the per-day TARGET is not constant — `wearableTdee(d, log)` adjusts it
+  from that day's tracker data, and the deficit/eat-back mode affects it. So
+  "yesterday's target" must be recomputed for that date, not reused from today.
+  Same for Workout Burn (earned vs scheduled, S102e).
+- Keep the streak, week-summary and ring TODAY-only by design (S99 did this
+  deliberately) unless Kevin says otherwise — a back-dated add must not
+  retroactively change a streak.
+
+### What Kevin asked for, in his words
+1. **Forward/back arrows on the WORKOUT section** — review past workouts AND
+   pre-write future ones so clients have sessions ready. Future dates are a real
+   change: today's day-nav clamps at today (App.jsx:10135).
+2. **The same day-nav on every tracker** — food, water, workouts, body
+   measurements. One shared control, not four copies.
+3. **Calendar as the entry point** — tap any date and enter ANY metric for it.
+   `CalendarView` already has a Day view with back-dated food/weight/workout
+   (S22/S84); extend it to the full metric set rather than rebuilding.
+4. **Tapping the date opens the calendar** to jump to any day.
+5. **Move the day-nav to the top** of Food & Calories (his suggestion, since the
+   header stats are what should follow it).
+
+### Suggested order
+(a) Make the Food & Calories tiles follow `mealDate` — fixes the live bug, and
+establishes the "selected day" pattern the rest copies. (b) Extract that day-nav
+into one shared component. (c) Add it to workouts + measurements + water.
+(d) Allow FUTURE dates for workouts only (programming ahead), still clamping the
+logging surfaces to today. (e) Wire tap-date → calendar.
+
+### Also queued (not started)
+- **App requests via AI** — user asks the AI for a feature, it offers to send it,
+  admin sees them in an "App requests" screen. Kevin wants this.
+- **YouTube exercise videos** — Kevin has his OWN library, which beats the Free
+  Exercise DB photo pairs (no licensing, no storage). ⚠️ ENRICHMENT ONLY: our 184
+  exercises carry the MET values the whole burn engine runs on; no third-party
+  source ships METs.
+- Kevin said he has "a few more things" to add before the videos.
+
 ## ⚡⚡⚡ S129–S133 (Jul 26–27): #ID fix · privacy published · AI opt-out ENFORCED · ChatGPT works
 _All pushed (@ `9bb56db`), functions deployed, tree clean. Frontend + functions; no rules change._
 
