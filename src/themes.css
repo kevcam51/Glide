@@ -101,7 +101,7 @@
   --color-primaryfg: #04201f;   /* near-black on cyan */
   --color-accent: #0284c7;
   --color-success: #0b7a55;     /* 4.6:1 on surface2 (was #0f9d6e = 3.0–3.5, FAILED AA normal text) */
-  --color-warn: #b45309;
+  --color-warn: #a34a08;
   --color-danger: #cf2020;      /* 4.7:1 on surface2; white on it 5.4:1 */
   --color-dangerfg: #ffffff;    /* text on a danger-filled control */
   --color-sim: #6d3bd6;         /* sandbox/simulation identity — darkened for light surfaces */

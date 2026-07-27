@@ -26,7 +26,7 @@ let _confettiMod = null;
 async function celebrate(kind = "goal") {
   try {
     if (!_confettiMod) _confettiMod = (await import("canvas-confetti")).default;
-    const brand = ["#08DCE0", "#2fe0a8", "#eafcfc", "#4fc3f7"];
+    const brand = ["#08DCE0", "#2fe0a8", "#eafcfc", "var(--blue)"];
     const base = { disableForReducedMotion: true, colors: brand, zIndex: 2000 };
     if (kind === "goal") {
       // The big one — reaching goal weight: two side cannons + a center burst.
@@ -61,6 +61,22 @@ function SkeletonCard({ rows = 2 }) {
     </div>
   );
 }
+
+// SVG presentation attributes (stroke=, fill=, stopColor=) cannot parse var(),
+// so chart colours have to be resolved to real values. That is why the charts
+// used to carry a `rawColor` map translating "var(--green)" back into a
+// hardcoded dark-theme hex — which then rendered at ~1.1:1 on the light theme's
+// white cards, i.e. invisible. Resolve against the LIVE theme instead: themePref
+// is React state, so a theme switch re-renders these components and this re-reads.
+// Returns the input untouched for anything that isn't a plain var() reference.
+const cssVarColor = (expr) => {
+  const m = /^var\(\s*(--[\w-]+)\s*\)$/.exec(String(expr || "").trim());
+  if (!m) return expr;
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim();
+    return v || expr;
+  } catch (e) { return expr; }
+};
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
@@ -580,6 +596,7 @@ const css = `
   --yellow:#fbbf24;
   --red:#f87171;
   --purple:#b57bff;
+  --pink:#ff6b9d;
   --blue:#4fc3f7;
 
   /* Text */
@@ -636,10 +653,11 @@ const css = `
   --accent-dim:rgba(8,116,120,.10);
   --orange:#c2410c;
   --green:#0b7a55;
-  --yellow:#b45309;
+  --yellow:#a34a08;
   --red:#cf2020;
   --purple:#7c3aed;
-  --blue:#0284c7;
+  --pink:#b0184f;
+  --blue:#0369a1;
 
   --text:#0d1418;
   --text-secondary:#33474d;
@@ -768,7 +786,7 @@ body{
 
 /* ── Welcome banner ── */
 .welcome-banner{
-  background:linear-gradient(135deg,rgba(8,220,224,.07),rgba(79,255,176,.04));
+  background:linear-gradient(135deg,rgba(8,220,224,.07),color-mix(in srgb,var(--green) 4%,transparent));
   border:1px solid rgba(8,220,224,.22);
   border-radius:var(--radius-lg);
   padding:18px;margin-bottom:16px;
@@ -1004,7 +1022,7 @@ body{
 .drc-edit-live{
   display:flex;align-items:center;gap:10px;
   margin-top:10px;padding:10px 13px;
-  background:rgba(255,107,53,.07);border:1px solid rgba(255,107,53,.18);
+  background:color-mix(in srgb,var(--orange) 7%,transparent);border:1px solid color-mix(in srgb,var(--orange) 18%,transparent);
   border-radius:var(--radius-sm);font-size:.79rem;color:var(--text);line-height:1.5;
 }
 .drc-edit-live .burn-num{
@@ -1042,7 +1060,7 @@ body{
 
 /* ── Timeline ── */
 .goal-banner{
-  background:rgba(181,123,255,.07);border:1px solid rgba(181,123,255,.2);
+  background:color-mix(in srgb,var(--purple) 7%,transparent);border:1px solid color-mix(in srgb,var(--purple) 20%,transparent);
   border-radius:var(--radius-sm);padding:16px;margin-bottom:18px;
   display:flex;gap:14px;align-items:center;
 }
@@ -1102,7 +1120,7 @@ body{
 .wc-unit{font-size:.72rem;color:var(--muted)}
 .wc-arrow{color:var(--orange);font-size:1.3rem;text-align:center}
 .lose-badge{
-  background:rgba(255,107,53,.08);border:1px solid rgba(255,107,53,.22);
+  background:color-mix(in srgb,var(--orange) 8%,transparent);border:1px solid color-mix(in srgb,var(--orange) 22%,transparent);
   border-radius:var(--radius-sm);padding:14px 16px;text-align:center;margin-bottom:16px;
 }
 .lb-lbl{font-size:.68rem;letter-spacing:1px;text-transform:uppercase;color:var(--orange);margin-bottom:4px}
@@ -1116,11 +1134,11 @@ body{
 /* ── Misc ── */
 .footnote{font-size:.68rem;color:var(--muted);margin-top:12px;line-height:1.6;padding:0 2px}
 .error-box{
-  background:rgba(255,79,107,.07);border:1px solid rgba(255,79,107,.22);
+  background:color-mix(in srgb,var(--red) 7%,transparent);border:1px solid color-mix(in srgb,var(--red) 22%,transparent);
   border-radius:var(--radius-sm);padding:12px 14px;font-size:.83rem;color:var(--red);margin-bottom:12px;
 }
 .warn-box{
-  background:rgba(255,204,68,.07);border:1px solid rgba(255,204,68,.22);
+  background:color-mix(in srgb,var(--yellow) 7%,transparent);border:1px solid color-mix(in srgb,var(--yellow) 22%,transparent);
   border-radius:var(--radius-sm);padding:12px 14px;font-size:.83rem;color:var(--yellow);margin-bottom:12px;line-height:1.55;
 }
 
@@ -1160,7 +1178,7 @@ body{
 }
 .ibw-bar-healthy{
   position:absolute;left:33%;right:33%;top:0;bottom:0;
-  background:rgba(79,255,176,.25);border-radius:6px;
+  background:color-mix(in srgb,var(--green) 25%,transparent);border-radius:6px;
   border-left:2px solid var(--green);border-right:2px solid var(--green);
 }
 .ibw-bar-marker{
@@ -1201,8 +1219,8 @@ body{
 }
 .info-panel strong{display:block;font-size:.85rem;color:var(--accent);margin-bottom:5px;font-weight:600}
 .ibw-goal-note{border-radius:var(--radius-sm);padding:10px 13px;font-size:.8rem;line-height:1.5;margin-bottom:12px}
-.ibw-goal-good{background:rgba(79,255,176,.07);border:1px solid rgba(79,255,176,.22);color:var(--green)}
-.ibw-goal-check{background:rgba(255,204,68,.06);border:1px solid rgba(255,204,68,.22);color:var(--yellow)}
+.ibw-goal-good{background:color-mix(in srgb,var(--green) 7%,transparent);border:1px solid color-mix(in srgb,var(--green) 22%,transparent);color:var(--green)}
+.ibw-goal-check{background:color-mix(in srgb,var(--yellow) 6%,transparent);border:1px solid color-mix(in srgb,var(--yellow) 22%,transparent);color:var(--yellow)}
 .ibw-footnote{font-size:.67rem;color:var(--muted);line-height:1.5;font-style:italic}
 @media(max-width:400px){
   .ibw-formula-row{grid-template-columns:1fr auto;gap:4px}
@@ -1272,7 +1290,7 @@ body{
 .gtt-block{border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden;margin-bottom:0}
 .gtt-block-header{padding:10px 14px;font-size:.72rem;letter-spacing:1.2px;text-transform:uppercase;font-weight:700}
 .diet-header{background:rgba(117,117,160,.1);color:var(--muted)}
-.cardio-header{background:rgba(255,107,53,.08);color:var(--orange)}
+.cardio-header{background:color-mix(in srgb,var(--orange) 8%,transparent);color:var(--orange)}
 .gtt-block-row{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border-top:1px solid var(--border)}
 
 /* ── Explainer box ── */
@@ -1284,7 +1302,7 @@ body{
 .exp-body{font-size:.83rem;color:var(--muted);line-height:1.6;margin-bottom:10px}
 .exp-body strong{color:var(--text)}
 .exp-callout{
-  background:rgba(255,107,53,.07);border:1px solid rgba(255,107,53,.18);
+  background:color-mix(in srgb,var(--orange) 7%,transparent);border:1px solid color-mix(in srgb,var(--orange) 18%,transparent);
   border-radius:var(--radius-sm);padding:10px 13px;font-size:.8rem;color:var(--muted);line-height:1.5;margin-bottom:10px;
 }
 .exp-callout strong{color:var(--text)}
@@ -1381,12 +1399,12 @@ body{
 /* ── Clear day button ── */
 .clear-day-btn{
   width:100%;min-height:40px;margin-top:12px;
-  border-radius:8px;border:1px solid rgba(255,79,107,.25);
-  background:rgba(255,79,107,.05);color:var(--red);
+  border-radius:8px;border:1px solid color-mix(in srgb,var(--red) 25%,transparent);
+  background:color-mix(in srgb,var(--red) 5%,transparent);color:var(--red);
   cursor:pointer;font-family:inherit;font-size:.8rem;font-weight:600;
   transition:all .15s;-webkit-tap-highlight-color:transparent;
 }
-.clear-day-btn:hover{background:rgba(255,79,107,.1)}
+.clear-day-btn:hover{background:color-mix(in srgb,var(--red) 10%,transparent)}
 
 /* ── Edit bar ── */
 .edit-bar{
@@ -1400,11 +1418,11 @@ body{
 }
 .edit-bar-btn:hover{border-color:var(--accent);color:var(--accent)}
 .edit-bar-reset{
-  min-height:44px;padding:0 16px;border-radius:10px;border:1.5px solid rgba(255,79,107,.25);
-  background:rgba(255,79,107,.05);color:var(--red);cursor:pointer;
+  min-height:44px;padding:0 16px;border-radius:10px;border:1.5px solid color-mix(in srgb,var(--red) 25%,transparent);
+  background:color-mix(in srgb,var(--red) 5%,transparent);color:var(--red);cursor:pointer;
   font-family:inherit;font-size:.84rem;font-weight:600;transition:all .15s;
 }
-.edit-bar-reset:hover{background:rgba(255,79,107,.1)}
+.edit-bar-reset:hover{background:color-mix(in srgb,var(--red) 10%,transparent)}
 .edit-panel{
   background:var(--s2);border:1px solid var(--border);
   border-radius:var(--radius-sm);padding:16px;margin-top:10px;
@@ -1444,17 +1462,17 @@ body{
 .macro-bar-wrap{margin-bottom:18px}
 .macro-bar{height:13px;border-radius:7px;overflow:hidden;display:flex;margin-bottom:7px}
 .macro-bar-seg{height:100%;transition:width .4s ease}
-.macro-bar-seg.protein{background:#ff6b9d}
-.macro-bar-seg.carbs{background:#ffcc44}
-.macro-bar-seg.fat{background:#4fc3f7}
+.macro-bar-seg.protein{background:var(--pink)}
+.macro-bar-seg.carbs{background:var(--yellow)}
+.macro-bar-seg.fat{background:var(--blue)}
 .macro-bar-legend{display:flex;gap:14px;flex-wrap:wrap}
 .macro-bar-legend span{font-size:.74rem;color:var(--muted);display:flex;align-items:center;gap:5px}
 .macro-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
-.macro-dot.protein{background:#ff6b9d}.macro-dot.carbs{background:#ffcc44}.macro-dot.fat{background:#4fc3f7}
+.macro-dot.protein{background:var(--pink)}.macro-dot.carbs{background:var(--yellow)}.macro-dot.fat{background:var(--blue)}
 .macro-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-bottom:16px}
 .macro-card{border-radius:var(--radius-sm);padding:15px 13px;border:1px solid var(--border);background:var(--surface)}
-.macro-protein{border-top:3px solid #ff6b9d}.macro-carbs{border-top:3px solid #ffcc44}
-.macro-fat{border-top:3px solid #4fc3f7}.macro-fibre{border-top:3px solid var(--green)}
+.macro-protein{border-top:3px solid var(--pink)}.macro-carbs{border-top:3px solid var(--yellow)}
+.macro-fat{border-top:3px solid var(--blue)}.macro-fibre{border-top:3px solid var(--green)}
 .mc-emoji{font-size:1.3rem;margin-bottom:5px}
 .mc-name{font-size:.68rem;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:2px}
 .mc-grams{font-family:'Sora',sans-serif;font-size:2.1rem;line-height:1;color:var(--text)}
@@ -1462,13 +1480,13 @@ body{
 .mc-cals{font-size:.7rem;color:var(--muted);margin-bottom:7px}
 .mc-why{font-size:.72rem;color:var(--muted);line-height:1.55;border-top:1px solid var(--border);padding-top:7px;margin-top:4px}
 .nutr-hydration{
-  background:rgba(79,195,247,.06);border:1px solid rgba(79,195,247,.18);
+  background:color-mix(in srgb,var(--blue) 6%,transparent);border:1px solid color-mix(in srgb,var(--blue) 18%,transparent);
   border-radius:var(--radius-sm);padding:15px;margin-bottom:18px;
   display:flex;gap:13px;align-items:flex-start;
 }
 .nutr-hydration-icon{font-size:1.7rem;line-height:1;flex-shrink:0}
 .nutr-hydration-title{font-weight:700;font-size:.92rem;margin-bottom:4px}
-.nutr-hydration-val{font-family:'Sora',sans-serif;font-size:1.15rem;letter-spacing:.5px;color:#4fc3f7;margin-bottom:3px}
+.nutr-hydration-val{font-family:'Sora',sans-serif;font-size:1.15rem;letter-spacing:.5px;color:var(--blue);margin-bottom:3px}
 .nutr-hydration-note{font-size:.75rem;color:var(--muted);line-height:1.5}
 .micro-cat-label{font-size:.68rem;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:700;margin:16px 0 7px}
 .micro-row{
@@ -1506,7 +1524,7 @@ body{
 /* ── Surplus Tab ── */
 .surplus-hero{
   display:flex;align-items:flex-start;gap:14px;
-  background:rgba(255,107,53,.06);border:1px solid rgba(255,107,53,.18);
+  background:color-mix(in srgb,var(--orange) 6%,transparent);border:1px solid color-mix(in srgb,var(--orange) 18%,transparent);
   border-radius:var(--radius-sm);padding:16px;margin-bottom:16px;
 }
 .surplus-hero-icon{font-size:2rem;line-height:1;flex-shrink:0}
@@ -1543,7 +1561,7 @@ body{
 .st-cell:last-child{border-right:none}
 .surplus-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:18px}
 .surplus-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 13px}
-.surplus-card-offset{border-color:rgba(79,255,176,.22);background:rgba(79,255,176,.025)}
+.surplus-card-offset{border-color:color-mix(in srgb,var(--green) 22%,transparent);background:color-mix(in srgb,var(--green) 2%,transparent)}
 .sc-surplus{font-family:'Sora',sans-serif;font-size:1.4rem;letter-spacing:1px;color:var(--orange);margin-bottom:7px}
 .sc-surplus-unit{font-size:.75rem;color:var(--muted);letter-spacing:0;font-family:'DM Sans',sans-serif}
 .sc-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)}
@@ -1568,7 +1586,7 @@ body{
 /* ── Muscle Building Tab ── */
 .muscle-hero{
   display:flex;align-items:flex-start;gap:13px;
-  background:rgba(79,255,176,.05);border:1px solid rgba(79,255,176,.18);
+  background:color-mix(in srgb,var(--green) 5%,transparent);border:1px solid color-mix(in srgb,var(--green) 18%,transparent);
   border-radius:var(--radius-sm);padding:16px;margin-bottom:16px;
 }
 .muscle-hero-icon{font-size:2rem;flex-shrink:0}
@@ -1580,7 +1598,7 @@ body{
   background:var(--s2);color:var(--text);cursor:pointer;font-family:inherit;
   text-align:left;transition:all .15s;-webkit-tap-highlight-color:transparent;
 }
-.exp-btn.exp-active{border-color:var(--green);background:rgba(79,255,176,.05)}
+.exp-btn.exp-active{border-color:var(--green);background:color-mix(in srgb,var(--green) 5%,transparent)}
 .exp-label{font-weight:700;font-size:.93rem;margin-bottom:2px}
 .exp-btn.exp-active .exp-label{color:var(--green)}
 .exp-desc{font-size:.76rem;color:var(--muted);margin-bottom:3px}
@@ -1601,11 +1619,11 @@ body{
 .mch-box-val.muscle{color:var(--green)}.mch-box-val.fat{color:var(--orange)}
 .mch-box-sub{font-size:.62rem;color:var(--muted);margin-top:2px}
 .recomp-note{
-  background:rgba(181,123,255,.07);border:1px solid rgba(181,123,255,.18);
+  background:color-mix(in srgb,var(--purple) 7%,transparent);border:1px solid color-mix(in srgb,var(--purple) 18%,transparent);
   border-radius:var(--radius-sm);padding:13px 15px;font-size:.8rem;color:var(--muted);
   line-height:1.6;margin-bottom:15px;
 }
-.recomp-note strong{color:#b57bff}
+.recomp-note strong{color:var(--purple)}
 .muscle-macro-bar{height:13px;border-radius:7px;overflow:hidden;display:flex;margin-bottom:7px}
 .muscle-macro-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;margin-bottom:15px}
 .muscle-macro-card{border-top-width:3px}
@@ -1624,7 +1642,7 @@ body{
 .mt-header>div,.mt-col,.mt-label-col{padding:10px 9px}
 .mt-row{display:grid;grid-template-columns:140px repeat(4,1fr);border-bottom:1px solid var(--border);align-items:center}
 .mt-row:last-child{border-bottom:none}
-.mt-row-rec{background:rgba(79,255,176,.09)}
+.mt-row-rec{background:color-mix(in srgb,var(--green) 9%,transparent)}
 .mt-label-col{font-size:.8rem;padding:10px 9px;border-right:1px solid var(--border)}
 .mt-col{padding:10px 7px;text-align:center;border-right:1px solid var(--border)}
 .mt-col:last-child{border-right:none}
@@ -1632,7 +1650,7 @@ body{
 .mt-unit{font-size:.7rem;color:var(--muted)}
 .mt-rec-badge{
   display:inline-block;margin-left:5px;
-  background:rgba(79,255,176,.13);border:1px solid rgba(79,255,176,.28);
+  background:color-mix(in srgb,var(--green) 13%,transparent);border:1px solid color-mix(in srgb,var(--green) 28%,transparent);
   color:var(--green);border-radius:4px;padding:1px 6px;
   font-size:.6rem;letter-spacing:.5px;text-transform:uppercase;
 }
@@ -1653,11 +1671,11 @@ body{
 /* ── Strength Tab ── */
 .str-hero{
   display:flex;align-items:flex-start;gap:13px;
-  background:rgba(79,195,247,.06);border:1px solid rgba(79,195,247,.18);
+  background:color-mix(in srgb,var(--blue) 6%,transparent);border:1px solid color-mix(in srgb,var(--blue) 18%,transparent);
   border-radius:var(--radius-sm);padding:16px;margin-bottom:16px;
 }
 .str-hero-icon{font-size:2rem;flex-shrink:0}
-.str-hero-title{font-family:'Sora',sans-serif;font-size:1.4rem;letter-spacing:2px;color:#4fc3f7;margin-bottom:3px}
+.str-hero-title{font-family:'Sora',sans-serif;font-size:1.4rem;letter-spacing:2px;color:var(--blue);margin-bottom:3px}
 .str-hero-sub{font-size:.81rem;color:var(--muted);line-height:1.5}
 .str-hero-sub strong{color:var(--text)}
 .str-stat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px}
@@ -1665,7 +1683,7 @@ body{
 .str-stat-val{font-family:'Sora',sans-serif;font-size:1.6rem;letter-spacing:.5px;line-height:1;margin-bottom:3px}
 .str-stat-lbl{font-size:.68rem;text-transform:uppercase;letter-spacing:.8px;color:var(--muted)}
 .str-compound-note{
-  background:rgba(255,204,68,.05);border:1px solid rgba(255,204,68,.18);
+  background:color-mix(in srgb,var(--yellow) 5%,transparent);border:1px solid color-mix(in srgb,var(--yellow) 18%,transparent);
   border-radius:var(--radius-sm);padding:12px 15px;font-size:.8rem;color:var(--muted);line-height:1.6;margin-bottom:15px;
 }
 .str-compound-note strong{color:var(--yellow)}.str-compound-note em{color:var(--text)}
@@ -1687,7 +1705,7 @@ body{
 
 /* ── Results summary ── */
 .results-summary-banner{
-  background:linear-gradient(135deg,rgba(8,220,224,.07),rgba(255,107,53,.04));
+  background:linear-gradient(135deg,rgba(8,220,224,.07),color-mix(in srgb,var(--orange) 4%,transparent));
   border:1px solid rgba(8,220,224,.18);border-radius:var(--radius-lg);
   padding:18px;margin-bottom:20px;
   display:grid;grid-template-columns:1fr 1fr;gap:10px;
@@ -1717,7 +1735,7 @@ body{
 .dash-greeting{font-family:'Sora',sans-serif;font-size:2rem;letter-spacing:3px;color:var(--text);text-align:center;margin-bottom:18px}
 .dash-streak{
   display:flex;align-items:center;justify-content:center;gap:8px;
-  background:linear-gradient(135deg,rgba(8,220,224,.08),rgba(255,107,53,.04));
+  background:linear-gradient(135deg,rgba(8,220,224,.08),color-mix(in srgb,var(--orange) 4%,transparent));
   border:1px solid rgba(8,220,224,.2);border-radius:var(--radius-lg);
   padding:14px;margin-bottom:18px;text-align:center;
 }
@@ -1752,7 +1770,7 @@ body{
 .dash-log-input:focus{border-color:var(--accent)}
 .dash-log-unit{font-size:.72rem;color:var(--muted);flex-shrink:0}
 .dash-today-workout{
-  background:rgba(79,195,247,.06);border:1px solid rgba(79,195,247,.18);
+  background:color-mix(in srgb,var(--blue) 6%,transparent);border:1px solid color-mix(in srgb,var(--blue) 18%,transparent);
   border-radius:var(--radius-sm);padding:14px;margin-bottom:14px;
 }
 .dash-nav{display:flex;gap:8px;margin-top:18px}
@@ -1846,11 +1864,11 @@ body{
 }
 .pc-load-btn:hover{background:rgba(8,220,224,.15)}
 .pc-del-btn{
-  padding:6px 10px;border-radius:8px;border:1.5px solid rgba(255,79,107,.25);
-  background:rgba(255,79,107,.05);color:var(--red);cursor:pointer;
+  padding:6px 10px;border-radius:8px;border:1.5px solid color-mix(in srgb,var(--red) 25%,transparent);
+  background:color-mix(in srgb,var(--red) 5%,transparent);color:var(--red);cursor:pointer;
   font-family:inherit;font-size:.75rem;transition:all .15s;
 }
-.pc-del-btn:hover{background:rgba(255,79,107,.1)}
+.pc-del-btn:hover{background:color-mix(in srgb,var(--red) 10%,transparent)}
 .save-indicator{
   display:inline-flex;align-items:center;gap:5px;
   font-size:.68rem;color:var(--green);letter-spacing:.5px;
@@ -1945,8 +1963,8 @@ body{
 
 /* ── Daily Check-In ── */
 .checkin-card{
-  background:linear-gradient(135deg,rgba(79,255,176,.05),rgba(8,220,224,.03));
-  border:1.5px solid rgba(79,255,176,.2);border-radius:var(--radius-lg);
+  background:linear-gradient(135deg,color-mix(in srgb,var(--green) 5%,transparent),rgba(8,220,224,.03));
+  border:1.5px solid color-mix(in srgb,var(--green) 20%,transparent);border-radius:var(--radius-lg);
   padding:18px;margin-bottom:16px;
 }
 .checkin-title{font-family:'Sora',sans-serif;font-size:1.2rem;letter-spacing:2px;color:var(--green);margin-bottom:4px}
@@ -2048,12 +2066,12 @@ body{
 .prof-name{font-weight:700;font-size:.95rem;color:var(--text);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .prof-meta{font-size:.74rem;color:var(--muted);line-height:1.4}
 .prof-del{
-  width:32px;height:32px;border-radius:8px;border:1px solid rgba(255,79,107,.2);
-  background:rgba(255,79,107,.05);color:var(--red);cursor:pointer;
+  width:32px;height:32px;border-radius:8px;border:1px solid color-mix(in srgb,var(--red) 20%,transparent);
+  background:color-mix(in srgb,var(--red) 5%,transparent);color:var(--red);cursor:pointer;
   font-size:.85rem;display:flex;align-items:center;justify-content:center;
   flex-shrink:0;transition:all .15s;-webkit-tap-highlight-color:transparent;
 }
-.prof-del:hover{background:rgba(255,79,107,.12);border-color:var(--red)}
+.prof-del:hover{background:color-mix(in srgb,var(--red) 12%,transparent);border-color:var(--red)}
 .prof-new-btn{
   width:100%;min-height:56px;border-radius:var(--radius-sm);
   border:2px dashed rgba(8,220,224,.3);background:rgba(8,220,224,.02);
@@ -2066,7 +2084,7 @@ body{
 .prof-save-badge{
   position:fixed;top:calc(12px + env(safe-area-inset-top,0px));right:12px;
   padding:6px 12px;border-radius:20px;
-  background:rgba(79,255,176,.12);border:1px solid rgba(79,255,176,.3);
+  background:color-mix(in srgb,var(--green) 12%,transparent);border:1px solid color-mix(in srgb,var(--green) 30%,transparent);
   color:var(--green);font-size:.7rem;font-weight:600;letter-spacing:.5px;
   /* Above every sheet/modal (they sit at 1500-2200) — the "Saved" confirmation
      was invisible while editing inside the Food & Calories sheet (S99, Kevin). */
@@ -2150,12 +2168,12 @@ function CustomExerciseCreator({ exerciseType, onAdd }) {
   return (
     <div className="my-2.5">
       <button
-        className={`w-full text-left px-3.5 py-3 rounded-lg border border-[rgba(181,123,255,.3)] bg-[rgba(181,123,255,.05)] text-[#b57bff] text-sm font-semibold cursor-pointer ${show ? "mb-2" : ""}`}
+        className={`w-full text-left px-3.5 py-3 rounded-lg border border-[color-mix(in_srgb,var(--purple)_30%,transparent)] bg-[color-mix(in_srgb,var(--purple)_5%,transparent)] text-[color:var(--purple)] text-sm font-semibold cursor-pointer ${show ? "mb-2" : ""}`}
         onClick={()=>setShow(v=>!v)}>
-        <span className="inline-flex items-center gap-2"><Icon name="star" size={15} color="#b57bff" />Create Custom {exerciseType === "cardio" ? "Cardio" : "Strength"} Exercise {show?"▲":"▼"}</span>
+        <span className="inline-flex items-center gap-2"><Icon name="star" size={15} color="var(--purple)" />Create Custom {exerciseType === "cardio" ? "Cardio" : "Strength"} Exercise {show?"▲":"▼"}</span>
       </button>
       {show && (
-        <div className="fu rounded-lg border border-[rgba(181,123,255,.25)] bg-bg p-3.5">
+        <div className="fu rounded-lg border border-[color-mix(in_srgb,var(--purple)_25%,transparent)] bg-bg p-3.5">
           <div className="mb-4">
             <label className={WZ.label}>Exercise Name</label>
             <input type="text" placeholder="e.g. Battle Ropes, TRX Row, Sled Push" value={name}
@@ -2166,8 +2184,8 @@ function CustomExerciseCreator({ exerciseType, onAdd }) {
             <div className="grid grid-cols-8 gap-1.5">
               {CUSTOM_EX_ICONS.map((n) => (
                 <button key={n} type="button" onClick={()=>setIconName(n)} title={n}
-                  className={`flex items-center justify-center min-h-[40px] rounded-md border cursor-pointer ${iconName===n ? "border-[#b57bff] bg-[rgba(181,123,255,.12)]" : "border-border bg-surface2"}`}>
-                  <Icon name={n} size={18} color={iconName===n ? "#b57bff" : "var(--color-muted,#7e9a9a)"} />
+                  className={`flex items-center justify-center min-h-[40px] rounded-md border cursor-pointer ${iconName===n ? "border-[color:var(--purple)] bg-[color-mix(in_srgb,var(--purple)_12%,transparent)]" : "border-border bg-surface2"}`}>
+                  <Icon name={n} size={18} color={iconName===n ? "var(--purple)" : "var(--color-muted,#7e9a9a)"} />
                 </button>
               ))}
             </div>
@@ -3434,7 +3452,7 @@ function SimulationSummary({ data, totalBurn, totalStrBurn = 0 }) {
   const big = { fontFamily: "'Sora',sans-serif", fontSize: "2.4rem", lineHeight: 1 };
   const lbl = { fontSize: ".66rem", letterSpacing: ".5px", textTransform: "uppercase", color: "var(--muted)", marginTop: 4 };
   return (
-    <div className="card" style={{ border: "1px solid rgba(181,123,255,.45)", background: "linear-gradient(180deg,rgba(181,123,255,.1),transparent)" }}>
+    <div className="card" style={{ border: "1px solid color-mix(in srgb,var(--purple) 45%,transparent)", background: "linear-gradient(180deg,color-mix(in srgb,var(--purple) 10%,transparent),transparent)" }}>
       <div style={{ fontSize: ".7rem", letterSpacing: "1.5px", textTransform: "uppercase", color: "var(--purple)", textAlign: "center", marginBottom: 10 }}>
         <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}><Icon name="flask" size={14} color="var(--purple)" />Simulated Results · what's possible</span>
       </div>
@@ -4187,7 +4205,7 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
                               onUpdateCardio(day, 0, "_replace", next);
                             }}
                             style={{marginTop:"8px",display:"inline-flex",alignItems:"center",gap:6,padding:"7px 12px",
-                              borderRadius:8,border:"1px solid var(--red)",background:"rgba(255,79,107,.06)",
+                              borderRadius:8,border:"1px solid var(--red)",background:"color-mix(in srgb,var(--red) 6%,transparent)",
                               color:"var(--red)",fontFamily:"inherit",fontSize:".76rem",fontWeight:700,cursor:"pointer"}}>
                             <Icon name="trash" size={13} color="var(--red)" />Remove this exercise
                           </button>
@@ -4384,11 +4402,11 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
           {(()=>{
             const hrMax = Math.round(208 - 0.7 * Number(age));
             const zones = [
-              { name:"Zone 1 — Warm Up",  range:[50,60], color:"#4fc3f7", desc:"Light activity, recovery walks, warm-up. Easy conversation pace." },
-              { name:"Zone 2 — Fat Burn",  range:[60,70], color:"#4fffb0", desc:"Peak fat-burning zone. Highest % of calories from fat. Sustainable for long durations. This is your ideal steady-state cardio zone.", highlight:true },
-              { name:"Zone 3 — Cardio",    range:[70,80], color:"#ffcc44", desc:"Aerobic endurance. Improves cardiovascular fitness. You can talk but not sing." },
-              { name:"Zone 4 — Hard",      range:[80,90], color:"#ff6b35", desc:"Threshold training. Builds speed and power. Conversation is difficult." },
-              { name:"Zone 5 — Max",       range:[90,100],color:"#ff4f6b", desc:"All-out effort. Sprint intervals. Cannot be sustained more than 1–2 minutes." },
+              { name:"Zone 1 — Warm Up",  range:[50,60], color:"var(--blue)", desc:"Light activity, recovery walks, warm-up. Easy conversation pace." },
+              { name:"Zone 2 — Fat Burn",  range:[60,70], color:"var(--green)", desc:"Peak fat-burning zone. Highest % of calories from fat. Sustainable for long durations. This is your ideal steady-state cardio zone.", highlight:true },
+              { name:"Zone 3 — Cardio",    range:[70,80], color:"var(--yellow)", desc:"Aerobic endurance. Improves cardiovascular fitness. You can talk but not sing." },
+              { name:"Zone 4 — Hard",      range:[80,90], color:"var(--orange)", desc:"Threshold training. Builds speed and power. Conversation is difficult." },
+              { name:"Zone 5 — Max",       range:[90,100],color:"var(--red)", desc:"All-out effort. Sprint intervals. Cannot be sustained more than 1–2 minutes." },
             ];
             return (
               <>
@@ -4402,8 +4420,8 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
                   const high = Math.round(hrMax * z.range[1]/100);
                   return (
                     <div key={z.name} style={{
-                      background: z.highlight ? "rgba(79,255,176,.04)" : "var(--surface)",
-                      border: `1.5px solid ${z.highlight ? "rgba(79,255,176,.25)" : "var(--border)"}`,
+                      background: z.highlight ? "color-mix(in srgb,var(--green) 4%,transparent)" : "var(--surface)",
+                      border: `1.5px solid ${z.highlight ? "color-mix(in srgb,var(--green) 25%,transparent)" : "var(--border)"}`,
                       borderRadius:"var(--radius-sm)",padding:"14px",marginBottom:"8px",
                     }}>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"4px"}}>
@@ -4427,7 +4445,7 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
           })()}
 
           {/* Disclaimer */}
-          <div style={{marginTop:"16px",padding:"14px",background:"rgba(255,204,68,.04)",border:"1px solid rgba(255,204,68,.15)",borderRadius:"var(--radius-sm)",fontSize:".75rem",color:"var(--muted)",lineHeight:1.6}}>
+          <div style={{marginTop:"16px",padding:"14px",background:"color-mix(in srgb,var(--yellow) 4%,transparent)",border:"1px solid color-mix(in srgb,var(--yellow) 15%,transparent)",borderRadius:"var(--radius-sm)",fontSize:".75rem",color:"var(--muted)",lineHeight:1.6}}>
             <strong style={{color:"var(--yellow)",display:"block",marginBottom:"4px"}}>Important Disclaimer</strong>
             All calorie targets, heart rate zones, macro calculations, body weight projections, muscle gain estimates, and timelines shown in Glidna are <strong style={{color:"var(--text)"}}>estimates based on established formulas and published research</strong> — they are not exact measurements. Individual results vary based on genetics, metabolism, sleep, stress, hydration, medication, and other factors. Heart rate zones are calculated from a formula and may differ from your actual physiological thresholds. These tools are intended for <strong style={{color:"var(--text)"}}>educational and coaching purposes only</strong> and should not replace advice from a physician, registered dietitian, or certified healthcare provider. Always consult a medical professional before starting any new diet or exercise program.
           </div>
@@ -4536,7 +4554,7 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
       </>)}
 
       {/* ─ Global Disclaimer ─ */}
-      <div style={{marginTop:"20px",padding:"14px",background:"rgba(255,204,68,.04)",border:"1px solid rgba(255,204,68,.15)",borderRadius:"var(--radius-sm)",fontSize:".73rem",color:"var(--muted)",lineHeight:1.6}}>
+      <div style={{marginTop:"20px",padding:"14px",background:"color-mix(in srgb,var(--yellow) 4%,transparent)",border:"1px solid color-mix(in srgb,var(--yellow) 15%,transparent)",borderRadius:"var(--radius-sm)",fontSize:".73rem",color:"var(--muted)",lineHeight:1.6}}>
         <strong style={{color:"var(--yellow)"}}>Disclaimer:</strong> All numbers in Glidna are <strong style={{color:"var(--text)"}}>estimates</strong> based on published formulas (Mifflin-St Jeor, Tanaka, Ainsworth MET Compendium). Individual results vary. These tools are for educational and coaching purposes — not medical advice. Consult a healthcare provider before starting any diet or exercise program.
       </div>
 
@@ -4660,8 +4678,8 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
       <div className="card" style={{padding:"14px 16px"}}>
         <Row label="Cardio days" value={`${activeDays}/7`} color="var(--orange)" />
         <Row label="Cardio burn" value={`${totalBurn.toLocaleString()} cal/wk`} color="var(--orange)" />
-        <Row label="Strength days" value={`${activeStrDays}/7`} color="#4fc3f7" />
-        <Row label="Strength burn" value={`${totalStrBurn.toLocaleString()} cal/wk`} color="#4fc3f7" />
+        <Row label="Strength days" value={`${activeStrDays}/7`} color="var(--blue)" />
+        <Row label="Strength burn" value={`${totalStrBurn.toLocaleString()} cal/wk`} color="var(--blue)" />
         <Row label="Combined weekly" value={`${(totalBurn + totalStrBurn).toLocaleString()} cal/wk`} color="var(--accent)" />
       </div>
 
@@ -4694,10 +4712,10 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
       <div className="sec-title">Macros (1 lb/wk deficit)</div>
       <div className="card" style={{padding:"14px 16px"}}>
         <Row label="Target calories" value={`${targetCals.toLocaleString()} cal`} color="var(--accent)" />
-        <Row label="Protein" value={`${proteinG}g`} color="#ff6b9d" />
-        <Row label="Carbs" value={`${carbG}g`} color="#ffcc44" />
-        <Row label="Fat" value={`${fatG}g`} color="#4fc3f7" />
-        <Row label="Water" value={`${waterOz} oz (~${(waterOz / 8).toFixed(1)} cups)`} color="#4fc3f7" />
+        <Row label="Protein" value={`${proteinG}g`} color="var(--pink)" />
+        <Row label="Carbs" value={`${carbG}g`} color="var(--yellow)" />
+        <Row label="Fat" value={`${fatG}g`} color="var(--blue)" />
+        <Row label="Water" value={`${waterOz} oz (~${(waterOz / 8).toFixed(1)} cups)`} color="var(--blue)" />
       </div>
 
       {/* Nutrition approach — how workout burn is spent: more food, or a
@@ -4832,7 +4850,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
     });
   }).length;
 
-  const rawColor = { "Horizontal Push":"#ff6b9d","Horizontal Pull":"#4fc3f7","Vertical Push":"#b57bff","Vertical Pull":"#4fffb0","Lower Push":"#ffcc44","Lower Pull":"#ff6b35","Carry":"#ff9444","Core":"#9090c0","Total Body":"#08dce0" };
+  const rawColor = { "Horizontal Push":"var(--pink)","Horizontal Pull":"var(--blue)","Vertical Push":"var(--purple)","Vertical Pull":"var(--green)","Lower Push":"var(--yellow)","Lower Pull":"var(--orange)","Carry":"var(--orange)","Core":"#9090c0","Total Body":"#08dce0" };
 
   return (
     <div className="fu">
@@ -5245,7 +5263,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
       {/* Training quality from Step 5 */}
       <div className="sec-title">Your Training Profile</div>
       {hasStrength ? (
-        <div className="str-hero" style={{borderColor:"rgba(79,255,176,.18)",background:"rgba(79,255,176,.04)"}}>
+        <div className="str-hero" style={{borderColor:"color-mix(in srgb,var(--green) 18%,transparent)",background:"color-mix(in srgb,var(--green) 4%,transparent)"}}>
           <div className="str-hero-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="dumbbell" size={30} color="var(--accent)" /></div>
           <div>
             <div className="str-hero-title" style={{color:"var(--green)"}}>
@@ -5259,7 +5277,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
           </div>
         </div>
       ) : (
-        <div className="str-hero" style={{borderColor:"rgba(255,204,68,.18)",background:"rgba(255,204,68,.04)"}}>
+        <div className="str-hero" style={{borderColor:"color-mix(in srgb,var(--yellow) 18%,transparent)",background:"color-mix(in srgb,var(--yellow) 4%,transparent)"}}>
           <div className="str-hero-icon"></div>
           <div>
             <div className="str-hero-title" style={{color:"var(--yellow)"}}>No Strength Training Set</div>
@@ -5312,7 +5330,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
               <strong>Your score: {(qualityFactor*100).toFixed(0)}%</strong> — your plan is <strong>{compoundPct}% compound</strong> movements.
               {qualityFactor >= 0.85 ? " Great exercise selection — mostly compound lifts." : qualityFactor >= 0.65 ? " Good mix. Adding more compound lifts (squats, presses, rows) would increase this." : " Consider swapping some isolation exercises for compound movements to boost muscle growth."}
             </div>
-            {customCount > 0 && <div style={{padding:"6px 10px",background:"rgba(181,123,255,.06)",borderRadius:"6px",fontSize:".75rem",color:"#b57bff",marginBottom:"6px"}}><Icon name="star" size={12} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{customCount} custom exercise(s) are scored at 65% since we can't verify their muscle-building stimulus.</div>}
+            {customCount > 0 && <div style={{padding:"6px 10px",background:"color-mix(in srgb,var(--purple) 6%,transparent)",borderRadius:"6px",fontSize:".75rem",color:"var(--purple)",marginBottom:"6px"}}><Icon name="star" size={12} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{customCount} custom exercise(s) are scored at 65% since we can't verify their muscle-building stimulus.</div>}
             <div style={{fontSize:".7rem",color:"var(--muted)",fontStyle:"italic"}}>Tap anywhere to close</div>
           </>)}
 
@@ -5377,9 +5395,9 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
       {/* Macros */}
       <div className="sec-title">Muscle-Building Macros</div>
       <div className="muscle-macro-bar">
-        <div style={{width:`${pctP}%`,background:"#ff6b9d",height:"100%"}}></div>
-        <div style={{width:`${pctC}%`,background:"#ffcc44",height:"100%"}}></div>
-        <div style={{width:`${pctF}%`,background:"#4fc3f7",height:"100%"}}></div>
+        <div style={{width:`${pctP}%`,background:"var(--pink)",height:"100%"}}></div>
+        <div style={{width:`${pctC}%`,background:"var(--yellow)",height:"100%"}}></div>
+        <div style={{width:`${pctF}%`,background:"var(--blue)",height:"100%"}}></div>
       </div>
       <div className="macro-bar-legend" style={{marginBottom:"12px"}}>
         <span><span className="macro-dot protein"></span>Protein {pctP}%</span>
@@ -5399,7 +5417,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
             note:`Daily minimum for gut health and satiety. High protein diets can cause constipation without adequate fibre.` },
         ].map(m => (
           <div key={m.name} className={`macro-card macro-${m.cls} muscle-macro-card`}>
-            <div className="mc-emoji"><span style={{display:"inline-block",width:13,height:13,borderRadius:999,background:({protein:"#ff6b9d",carbs:"var(--yellow)",fat:"var(--orange)",fibre:"var(--green)"})[m.cls]||"var(--accent)"}} /></div>
+            <div className="mc-emoji"><span style={{display:"inline-block",width:13,height:13,borderRadius:999,background:({protein:"var(--pink)",carbs:"var(--yellow)",fat:"var(--orange)",fibre:"var(--green)"})[m.cls]||"var(--accent)"}} /></div>
             <div className="mc-name">{m.name}</div>
             <div className="mc-grams">{m.g}<span>g</span></div>
             {m.cal && <div className="mc-cals">{m.cal} kcal</div>}
@@ -5545,16 +5563,16 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
       </p>
 
       {/* ── Prominent Muscle Disclaimer Dropdown ── */}
-      <div style={{marginTop:"14px",borderRadius:"var(--radius-sm)",overflow:"hidden",border:"2px solid var(--yellow)",background:"rgba(255,204,68,.06)"}}>
+      <div style={{marginTop:"14px",borderRadius:"var(--radius-sm)",overflow:"hidden",border:"2px solid var(--yellow)",background:"color-mix(in srgb,var(--yellow) 6%,transparent)"}}>
         <button onClick={()=>setShowMuscleDisclaimer(v=>!v)} style={{
           width:"100%",padding:"14px 16px",border:"none",cursor:"pointer",
-          background:"rgba(255,204,68,.1)",color:"var(--yellow)",
+          background:"color-mix(in srgb,var(--yellow) 10%,transparent)",color:"var(--yellow)",
           fontFamily:"'Sora',sans-serif",fontSize:"1.05rem",letterSpacing:"2px",
           display:"flex",alignItems:"center",justifyContent:"space-between",
           transition:"all .15s",
         }}>
           <span>DISCLAIMER — Muscle Gain Estimates</span>
-          <span style={{fontSize:".85rem",fontFamily:"DM Sans,sans-serif",fontWeight:600,padding:"4px 10px",borderRadius:"6px",background:showMuscleDisclaimer?"rgba(255,204,68,.15)":"rgba(255,204,68,.08)",border:"1px solid rgba(255,204,68,.3)"}}>
+          <span style={{fontSize:".85rem",fontFamily:"DM Sans,sans-serif",fontWeight:600,padding:"4px 10px",borderRadius:"6px",background:showMuscleDisclaimer?"color-mix(in srgb,var(--yellow) 15%,transparent)":"color-mix(in srgb,var(--yellow) 8%,transparent)",border:"1px solid color-mix(in srgb,var(--yellow) 30%,transparent)"}}>
             {showMuscleDisclaimer ? "Hide ▲" : "Read This ▼"}
           </span>
         </button>
@@ -5593,7 +5611,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
               • <strong style={{color:"var(--text)"}}>Training experience</strong> — beginners gain faster than advanced lifters<br/>
               • <strong style={{color:"var(--text)"}}>Workout frequency</strong> — more training days = more stimulus (Schoenfeld 2017)<br/>
               • <strong style={{color:"var(--text)"}}>Exercise selection quality</strong> — compound movements (squats, presses, rows) drive more growth than isolation exercises (curls, extensions)
-              {customCount > 0 && <><br/>• <strong style={{color:"#b57bff"}}>Custom exercises</strong> — assigned a moderate quality factor (0.65) since we cannot verify their muscle-building stimulus</>}
+              {customCount > 0 && <><br/>• <strong style={{color:"var(--purple)"}}>Custom exercises</strong> — assigned a moderate quality factor (0.65) since we cannot verify their muscle-building stimulus</>}
             </div>
 
             <div style={{fontSize:".92rem",fontWeight:700,color:"var(--green)",marginBottom:"8px"}}>What This Means for You</div>
@@ -5606,7 +5624,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
               <strong style={{color:"var(--text)"}}>Use these numbers as a directional guide, not a promise.</strong> Track your actual progress through regular check-ins, body measurements, progress photos, and strength improvements. If your real results differ significantly from projections, adjust your training and nutrition plan accordingly.
             </p>
 
-            <div style={{padding:"12px 14px",background:"rgba(255,204,68,.06)",borderRadius:"8px",border:"1px solid rgba(255,204,68,.2)",fontSize:".78rem",lineHeight:1.6}}>
+            <div style={{padding:"12px 14px",background:"color-mix(in srgb,var(--yellow) 6%,transparent)",borderRadius:"8px",border:"1px solid color-mix(in srgb,var(--yellow) 20%,transparent)",fontSize:".78rem",lineHeight:1.6}}>
               <strong style={{color:"var(--yellow)"}}>Not Medical or Professional Advice:</strong> All muscle gain projections, macro recommendations, supplement information, and training suggestions in Glidna are for <strong style={{color:"var(--text)"}}>educational and coaching purposes only</strong>. They are not a substitute for guidance from a certified personal trainer, registered dietitian, or physician. Always consult a qualified professional before making significant changes to your training or nutrition program.
             </div>
           </div>
@@ -6088,7 +6106,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
             why:"Supports digestion, blood sugar regulation, and satiety. Scaled to calorie intake — aim for this daily minimum." },
         ].map(m=>(
           <div key={m.name} className={`macro-card macro-${m.cls}`}>
-            <div className="mc-emoji"><span style={{display:"inline-block",width:13,height:13,borderRadius:999,background:({protein:"#ff6b9d",carbs:"var(--yellow)",fat:"var(--orange)",fibre:"var(--green)"})[m.cls]||"var(--accent)"}} /></div>
+            <div className="mc-emoji"><span style={{display:"inline-block",width:13,height:13,borderRadius:999,background:({protein:"var(--pink)",carbs:"var(--yellow)",fat:"var(--orange)",fibre:"var(--green)"})[m.cls]||"var(--accent)"}} /></div>
             <div className="mc-name">{m.name}</div>
             <div className="mc-grams">{m.g}<span>g</span></div>
             {m.cal && <div className="mc-cals">{m.cal} kcal</div>}
@@ -6100,7 +6118,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
 
       {/* Hydration */}
       <div className="nutr-hydration">
-        <span className="nutr-hydration-icon" style={{display:"flex",alignItems:"center"}}><Icon name="water" size={20} color="#4fc3f7" /></span>
+        <span className="nutr-hydration-icon" style={{display:"flex",alignItems:"center"}}><Icon name="water" size={20} color="var(--blue)" /></span>
         <div>
           <div className="nutr-hydration-title">Daily Water Target</div>
           <div className="nutr-hydration-val">{(weightLbs * 0.5 / 8).toFixed(1)} cups &nbsp;·&nbsp; ~{Math.round(weightLbs * 0.5)} oz &nbsp;·&nbsp; ~{(weightLbs * 0.5 * 29.574 / 1000).toFixed(1)}L</div>
@@ -6114,7 +6132,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
         Tap a category to see top food picks with approximate macros per serving. Build meals from these to hit your {targetCals.toLocaleString()} cal target.
       </p>
       {[
-        { id:"protein", label:"Protein Sources", color:"#ff6b9d", target:`${proteinG}g/day`, foods:[
+        { id:"protein", label:"Protein Sources", color:"var(--pink)", target:`${proteinG}g/day`, foods:[
           { name:"Chicken Breast (4oz)", cals:130, p:26, c:0, f:2 },
           { name:"Chicken Thigh, skinless (4oz)", cals:170, p:22, c:0, f:9 },
           { name:"Ground Turkey 93% (4oz)", cals:150, p:22, c:0, f:7 },
@@ -6151,7 +6169,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
           { name:"Smoked Salmon / Lox (3oz)", cals:100, p:16, c:0, f:4 },
           { name:"Bone Broth (1 cup)", cals:40, p:9, c:1, f:0 },
         ]},
-        { id:"carbs", label:"Carb Sources", color:"#ffcc44", target:`${carbG}g/day`, foods:[
+        { id:"carbs", label:"Carb Sources", color:"var(--yellow)", target:`${carbG}g/day`, foods:[
           { name:"White Rice, cooked (1 cup)", cals:200, p:4, c:45, f:0 },
           { name:"Brown Rice, cooked (1 cup)", cals:215, p:5, c:45, f:2 },
           { name:"Jasmine Rice, cooked (1 cup)", cals:210, p:4, c:46, f:0 },
@@ -6189,7 +6207,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
           { name:"Ezekiel Bread (2 slices)", cals:160, p:8, c:30, f:1 },
           { name:"Plantain, cooked (1 medium)", cals:220, p:2, c:58, f:0 },
         ]},
-        { id:"fats", label:"Healthy Fat Sources", color:"#4fc3f7", target:`${fatG}g/day`, foods:[
+        { id:"fats", label:"Healthy Fat Sources", color:"var(--blue)", target:`${fatG}g/day`, foods:[
           { name:"Avocado (1/2 medium)", cals:120, p:1, c:6, f:11 },
           { name:"Almonds (1oz / 23 nuts)", cals:165, p:6, c:6, f:14 },
           { name:"Walnuts (1oz / 14 halves)", cals:185, p:4, c:4, f:18 },
@@ -6239,13 +6257,13 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
           {openFoodCat===cat.id && (
             <div style={{padding:"10px 12px 14px",borderTop:"1px solid var(--border)"}}>
               <div style={{display:"grid",gridTemplateColumns:"1fr auto auto auto",gap:"0",fontSize:".72rem",color:"var(--muted)",fontWeight:700,letterSpacing:".5px",textTransform:"uppercase",padding:"0 0 8px",borderBottom:"1px solid var(--border)"}}>
-                <span>Food</span><span style={{textAlign:"right",minWidth:"42px"}}>Cal</span><span style={{textAlign:"right",minWidth:"32px",color:"#ff6b9d"}}>P</span><span style={{textAlign:"right",minWidth:"32px",color:cat.color}}>{cat.id==="protein"?"F":cat.id==="carbs"?"C":"F"}</span>
+                <span>Food</span><span style={{textAlign:"right",minWidth:"42px"}}>Cal</span><span style={{textAlign:"right",minWidth:"32px",color:"var(--pink)"}}>P</span><span style={{textAlign:"right",minWidth:"32px",color:cat.color}}>{cat.id==="protein"?"F":cat.id==="carbs"?"C":"F"}</span>
               </div>
               {cat.foods.map((f,i)=>(
                 <div key={i} style={{display:"grid",gridTemplateColumns:"1fr auto auto auto",gap:"0",padding:"8px 0",borderBottom:i<cat.foods.length-1?"1px solid var(--border)":"none",fontSize:".8rem",alignItems:"center"}}>
                   <span style={{color:"var(--text)",lineHeight:1.3,paddingRight:"8px"}}>{f.name}</span>
                   <span style={{textAlign:"right",fontFamily:"'Sora',sans-serif",fontSize:".9rem",color:"var(--muted)",minWidth:"42px"}}>{f.cals}</span>
-                  <span style={{textAlign:"right",fontFamily:"'Sora',sans-serif",fontSize:".9rem",color:"#ff6b9d",minWidth:"32px"}}>{f.p}g</span>
+                  <span style={{textAlign:"right",fontFamily:"'Sora',sans-serif",fontSize:".9rem",color:"var(--pink)",minWidth:"32px"}}>{f.p}g</span>
                   <span style={{textAlign:"right",fontFamily:"'Sora',sans-serif",fontSize:".9rem",color:cat.color,minWidth:"32px"}}>{cat.id==="protein"?f.f+"g":cat.id==="carbs"?f.c+"g":f.f+"g"}</span>
                 </div>
               ))}
@@ -6333,8 +6351,7 @@ function WeightChart({ current, goal, paces, totalBurn, maxWeeks, compliance=1, 
   const yScale  = wt => chartH - ((wt - yMin) / yRange) * chartH;
   const xToWeek = px => Math.max(0, Math.min(maxWeeks, (px / chartW) * maxWeeks));
 
-  const rawColor = { "var(--green)":"#4fffb0","var(--yellow)":"#ffcc44","var(--red)":"#ff4f6b" };
-  const rc = p => rawColor[p.color] || p.color;
+  const rc = p => cssVarColor(p.color);
 
   const scenarios = [
     { key:"diet",   weeklyDef: p => p.dietCutPerWeek * compliance,               dash:true,  opacity:0.45 },
@@ -6532,10 +6549,10 @@ function WeightChart({ current, goal, paces, totalBurn, maxWeeks, compliance=1, 
 }
 // Chart carousel scenarios
 const COMPLIANCE_SCENARIOS = [
-  { id:"full",    label:"100% On Plan",        subtitle:"Every day dialed in — no missed workouts or off-plan meals",       compliance:1.00, color:"#4fffb0", tagColor:"rgba(79,255,176,.15)",  tagBorder:"rgba(79,255,176,.35)"  },
-  { id:"mostly",  label:"60–80% Compliance",   subtitle:"A few slip-ups per week — most days on track, occasional off days", compliance:0.70, color:"#ffcc44", tagColor:"rgba(255,204,68,.1)",   tagBorder:"rgba(255,204,68,.3)"   },
-  { id:"partial", label:"30–50% Compliance",   subtitle:"On-and-off — following the plan roughly half the time",            compliance:0.40, color:"#ff9444", tagColor:"rgba(255,148,68,.1)",   tagBorder:"rgba(255,148,68,.3)"   },
-  { id:"low",     label:"0–40% Compliance",    subtitle:"Rarely following the plan — mostly off track",                     compliance:0.20, color:"#ff4f6b", tagColor:"rgba(255,79,107,.1)",   tagBorder:"rgba(255,79,107,.3)"   },
+  { id:"full",    label:"100% On Plan",        subtitle:"Every day dialed in — no missed workouts or off-plan meals",       compliance:1.00, color:"var(--green)",  tagColor:"color-mix(in srgb,var(--green) 15%,transparent)",  tagBorder:"color-mix(in srgb,var(--green) 35%,transparent)"  },
+  { id:"mostly",  label:"60–80% Compliance",   subtitle:"A few slip-ups per week — most days on track, occasional off days", compliance:0.70, color:"var(--yellow)", tagColor:"color-mix(in srgb,var(--yellow) 15%,transparent)", tagBorder:"color-mix(in srgb,var(--yellow) 35%,transparent)"   },
+  { id:"partial", label:"30–50% Compliance",   subtitle:"On-and-off — following the plan roughly half the time",            compliance:0.40, color:"var(--orange)", tagColor:"color-mix(in srgb,var(--orange) 15%,transparent)", tagBorder:"color-mix(in srgb,var(--orange) 35%,transparent)"   },
+  { id:"low",     label:"0–40% Compliance",    subtitle:"Rarely following the plan — mostly off track",                     compliance:0.20, color:"var(--red)",    tagColor:"color-mix(in srgb,var(--red) 15%,transparent)",    tagBorder:"color-mix(in srgb,var(--red) 35%,transparent)"   },
 ];
 
 function TimelineTab({ data, tdee, totalBurn }) {
@@ -6554,8 +6571,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
     { id:"two",  label:"2 lbs/wk", dietCutPerWeek:7000, color:"var(--red)",    textCls:"c-red" },
   ];
 
-  const rawColor = { "var(--green)":"#4fffb0","var(--yellow)":"#ffcc44","var(--red)":"#ff4f6b" };
-  const rc = p => rawColor[p.color] || p.color;
+  const rc = p => cssVarColor(p.color);
 
   const defDiet   = p => p.dietCutPerWeek;
   const defCardio = p => p.dietCutPerWeek + totalBurn;
@@ -6629,7 +6645,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
             <button key={s.id}
               className={`carousel-dot${i===chartIdx?" active":""}`}
               style={{background:i===chartIdx?s.color:"var(--border)",
-                      boxShadow:i===chartIdx?`0 0 8px ${s.color}60`:""}}
+                      boxShadow:i===chartIdx?`0 0 8px ${cssVarColor(s.color)}60`:""}}
               onClick={()=>setChartIdx(i)} aria-label={s.label}/>
           ))}
         </div>
@@ -6717,7 +6733,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
         </div>
 
         {comp < 1 && (
-          <div style={{marginTop:"10px",padding:"8px 10px",background:"rgba(255,107,53,.07)",border:"1px solid rgba(255,107,53,.18)",borderRadius:"8px",fontSize:".75rem",color:"var(--muted)",lineHeight:1.5}}>
+          <div style={{marginTop:"10px",padding:"8px 10px",background:"color-mix(in srgb,var(--orange) 7%,transparent)",border:"1px solid color-mix(in srgb,var(--orange) 18%,transparent)",borderRadius:"8px",fontSize:".75rem",color:"var(--muted)",lineHeight:1.5}}>
             At <strong style={{color:scenario.color}}>{Math.round(comp*100)}% compliance</strong>, effective weekly loss is reduced proportionally. Off-plan days are modeled at maintenance.
           </div>
         )}
@@ -6925,7 +6941,7 @@ const MICRO_GROUPS = [
   { g: "mineral",  label: "Minerals",               color: "#2fe0a8" }, // green
   { g: "fatvit",   label: "Fat-soluble vitamins",   color: "#fbbf24" }, // amber (A, D, E, K)
   { g: "bvit",     label: "B vitamins",             color: "#ff6b6b" }, // red
-  { g: "cvit",     label: "Vitamin C",              color: "#b57bff" }, // purple
+  { g: "cvit",     label: "Vitamin C",              color: "var(--purple)" }, // purple
   { g: "other",    label: "Other",                  color: "#9bb8b8" }, // muted
 ];
 const MICRO_GROUP_MAP = Object.fromEntries(MICRO_GROUPS.map((x) => [x.g, x]));
@@ -9308,7 +9324,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
 // A collapsible who-changed-what log for the plan. Cooperative tier (each side
 // records its own actions); a tamper-proof version arrives with Blaze.
 // Trainer vs client name colours so it's obvious who made a change.
-const histNameColor = (role) => (role === ROLES.CLIENT ? "#4fc3f7" : "var(--accent)");
+const histNameColor = (role) => (role === ROLES.CLIENT ? "var(--blue)" : "var(--accent)");
 
 function ActivityRow({ ev }) {
   return (
@@ -10764,7 +10780,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <div className="dash-cta-lbl">Workout Burn{burnFromTracker?" · tracker":""}</div>
         </div>
         <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="water"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="water"?null:"water")}>
-          <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="water" size={23} color="#4fc3f7" /></div>
+          <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="water" size={23} color="var(--blue)" /></div>
           <div className="dash-cta-val">{dailyLog.water || 0}</div>
           <div className="dash-cta-lbl">oz Water</div>
         </div>
@@ -11093,7 +11109,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                     </button>
                   ))}
                   <button onClick={e=>{e.stopPropagation();onLogUpdate("calories",0);}}
-                    style={{padding:"8px 12px",borderRadius:"8px",border:"1px solid var(--red)",background:"rgba(255,79,107,.06)",color:"var(--red)",cursor:"pointer",fontFamily:"inherit",fontSize:".75rem",fontWeight:600}}>
+                    style={{padding:"8px 12px",borderRadius:"8px",border:"1px solid var(--red)",background:"color-mix(in srgb,var(--red) 6%,transparent)",color:"var(--red)",cursor:"pointer",fontFamily:"inherit",fontSize:".75rem",fontWeight:600}}>
                     Reset
                   </button>
                 </div>
@@ -11110,9 +11126,9 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
       {showMacros && (
         <div style={{animation:"fadeUp .15s ease both"}}>
           <div className="dash-log-row">
-            <span className="dash-log-icon" style={{display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{width:12,height:12,borderRadius:"50%",background:"#ff6b9d"}} /></span>
+            <span className="dash-log-icon" style={{display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{width:12,height:12,borderRadius:"50%",background:"var(--pink)"}} /></span>
             <div className="dash-log-info">
-              <div className="dash-log-title" style={{color:"#ff6b9d"}}>Protein</div>
+              <div className="dash-log-title" style={{color:"var(--pink)"}}>Protein</div>
               <div className="dash-log-sub">Target: ~{proteinTarget}g*</div>
             </div>
             <input className="dash-log-input" type="number" inputMode="numeric" placeholder="0"
@@ -11122,9 +11138,9 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             <span className="dash-log-unit">g</span>
           </div>
           <div className="dash-log-row">
-            <span className="dash-log-icon" style={{display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{width:12,height:12,borderRadius:"50%",background:"#ffcc44"}} /></span>
+            <span className="dash-log-icon" style={{display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{width:12,height:12,borderRadius:"50%",background:"var(--yellow)"}} /></span>
             <div className="dash-log-info">
-              <div className="dash-log-title" style={{color:"#ffcc44"}}>Carbs</div>
+              <div className="dash-log-title" style={{color:"var(--yellow)"}}>Carbs</div>
               <div className="dash-log-sub">Target: ~{carbsTarget}g*</div>
             </div>
             <input className="dash-log-input" type="number" inputMode="numeric" placeholder="0"
@@ -11134,9 +11150,9 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
             <span className="dash-log-unit">g</span>
           </div>
           <div className="dash-log-row">
-            <span className="dash-log-icon" style={{display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{width:12,height:12,borderRadius:"50%",background:"#4fc3f7"}} /></span>
+            <span className="dash-log-icon" style={{display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{width:12,height:12,borderRadius:"50%",background:"var(--blue)"}} /></span>
             <div className="dash-log-info">
-              <div className="dash-log-title" style={{color:"#4fc3f7"}}>Fat</div>
+              <div className="dash-log-title" style={{color:"var(--blue)"}}>Fat</div>
               <div className="dash-log-sub">Target: ~{fatTarget}g*</div>
             </div>
             <input className="dash-log-input" type="number" inputMode="numeric" placeholder="0"
@@ -11156,7 +11172,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <span style={{display:"flex",alignItems:"center",gap:"8px",fontSize:".72rem",color:"var(--muted)",whiteSpace:"nowrap"}}>
             {!macroPanelOpen && (
               <span>
-                <span style={{color:"#ff6b9d",fontWeight:700}}>{dailyLog.protein||0}</span>/<span style={{color:"#ffcc44",fontWeight:700}}>{dailyLog.carbs||0}</span>/<span style={{color:"#4fc3f7",fontWeight:700}}>{dailyLog.fat||0}</span>g
+                <span style={{color:"var(--pink)",fontWeight:700}}>{dailyLog.protein||0}</span>/<span style={{color:"var(--yellow)",fontWeight:700}}>{dailyLog.carbs||0}</span>/<span style={{color:"var(--blue)",fontWeight:700}}>{dailyLog.fat||0}</span>g
               </span>
             )}
             <span style={{color:"var(--accent)",fontWeight:700}}>{macroPanelOpen ? "▾" : "▸"}</span>
@@ -11172,9 +11188,9 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           </div>
         )}
         {[
-          { label:"Protein", color:"#ff6b9d", val:dailyLog.protein||0, tgt:proteinTarget },
-          { label:"Carbs",   color:"#ffcc44", val:dailyLog.carbs||0,   tgt:carbsTarget },
-          { label:"Fat",     color:"#4fc3f7", val:dailyLog.fat||0,     tgt:fatTarget },
+          { label:"Protein", color:"var(--pink)", val:dailyLog.protein||0, tgt:proteinTarget },
+          { label:"Carbs",   color:"var(--yellow)", val:dailyLog.carbs||0,   tgt:carbsTarget },
+          { label:"Fat",     color:"var(--blue)", val:dailyLog.fat||0,     tgt:fatTarget },
         ].map((m) => {
           const fill = m.tgt > 0 ? Math.min(100, Math.round((m.val / m.tgt) * 100)) : 0;
           const over = m.tgt > 0 && m.val > m.tgt;
@@ -11207,7 +11223,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
         {/* Recommended/current split shown as % of calories (S94, part a). */}
         {target > 0 && (proteinTarget || carbsTarget || fatTarget) > 0 && (
           <div style={{fontSize:".65rem",color:"var(--muted)",marginTop:"3px",textAlign:"center"}}>
-            Split: <span style={{color:"#ff6b9d",fontWeight:700}}>{splitP}%</span> protein · <span style={{color:"#ffcc44",fontWeight:700}}>{splitC}%</span> carbs · <span style={{color:"#4fc3f7",fontWeight:700}}>{splitF}%</span> fat
+            Split: <span style={{color:"var(--pink)",fontWeight:700}}>{splitP}%</span> protein · <span style={{color:"var(--yellow)",fontWeight:700}}>{splitC}%</span> carbs · <span style={{color:"var(--blue)",fontWeight:700}}>{splitF}%</span> fat
           </div>
         )}
         {/* Protein basis — user choice for the AUTO target (custom targets override it). */}
@@ -11369,7 +11385,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 <Icon name={exerciseCategory(w.co, "cardio")} size={18} color="var(--accent)" />
                 <div style={{flex:1}}>
                   <div style={{fontSize:".84rem",fontWeight:600}}>{w.co?.label||"Unknown Exercise"} <span style={{fontSize:".72rem",color:"var(--muted)"}}>· {(todayCardio.workouts[i]||{}).duration||30}m</span></div>
-                  <div style={{fontSize:".65rem",color:"#4fc3f7",letterSpacing:".5px",textTransform:"uppercase",fontWeight:700}}>Cardio</div>
+                  <div style={{fontSize:".65rem",color:"var(--blue)",letterSpacing:".5px",textTransform:"uppercase",fontWeight:700}}>Cardio</div>
                 </div>
                 <span style={{color:"var(--orange)",fontFamily:"'Sora',sans-serif",fontSize:".95rem"}}>{w.burned} cal</span>
                 <span style={{color:"var(--accent)",fontSize:".7rem",fontWeight:700}}>{editingWorkout===`c${i}`?"▲":"TAP"}</span>
@@ -11403,7 +11419,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                       onClick={()=>setEditingWorkout(null)}>
                       Confirmed
                     </button>
-                    <button style={{padding:"10px 16px",borderRadius:"8px",border:"1.5px solid var(--red)",background:"rgba(255,79,107,.06)",color:"var(--red)",fontFamily:"'Sora',sans-serif",fontSize:".95rem",letterSpacing:"1px",cursor:"pointer"}}
+                    <button style={{padding:"10px 16px",borderRadius:"8px",border:"1.5px solid var(--red)",background:"color-mix(in srgb,var(--red) 6%,transparent)",color:"var(--red)",fontFamily:"'Sora',sans-serif",fontSize:".95rem",letterSpacing:"1px",cursor:"pointer"}}
                       onClick={()=>{
                         const sessions = Array.isArray(data.cardio[dayName]) ? [...data.cardio[dayName]] : [];
                         sessions.splice(i, 1);
@@ -11424,7 +11440,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 <Icon name={exerciseCategory(s.ex, "strength")} size={18} color="var(--accent)" />
                 <div style={{flex:1}}>
                   <div style={{fontSize:".84rem",fontWeight:600}}>{s.ex?.label||"Unknown Exercise"} <span style={{fontSize:".72rem",color:"var(--muted)"}}>· {s.duration||60}m</span></div>
-                  <div style={{fontSize:".65rem",color:"#ff6b9d",letterSpacing:".5px",textTransform:"uppercase",fontWeight:700}}>Strength · {s.ex?.cat||"Custom"}</div>
+                  <div style={{fontSize:".65rem",color:"var(--pink)",letterSpacing:".5px",textTransform:"uppercase",fontWeight:700}}>Strength · {s.ex?.cat||"Custom"}</div>
                 </div>
                 <span style={{color:"var(--orange)",fontFamily:"'Sora',sans-serif",fontSize:".95rem"}}>{s.burned} cal</span>
                 <span style={{color:"var(--accent)",fontSize:".7rem",fontWeight:700}}>{editingWorkout===`s${i}`?"▲":"TAP"}</span>
@@ -11441,7 +11457,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                       onClick={()=>setEditingWorkout(null)}>
                       Confirmed
                     </button>
-                    <button style={{padding:"10px 16px",borderRadius:"8px",border:"1.5px solid var(--red)",background:"rgba(255,79,107,.06)",color:"var(--red)",fontFamily:"'Sora',sans-serif",fontSize:".95rem",letterSpacing:"1px",cursor:"pointer"}}
+                    <button style={{padding:"10px 16px",borderRadius:"8px",border:"1.5px solid var(--red)",background:"color-mix(in srgb,var(--red) 6%,transparent)",color:"var(--red)",fontFamily:"'Sora',sans-serif",fontSize:".95rem",letterSpacing:"1px",cursor:"pointer"}}
                       onClick={()=>{
                         const sessions = Array.isArray(data.strength[dayName]) ? [...data.strength[dayName]] : [];
                         sessions.splice(i, 1);
@@ -11503,7 +11519,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 </div>
               )}
       <div style={{display:"flex",gap:"8px",marginBottom:"16px"}}>
-        <button className="quick-fill-toggle" style={{flex:1,marginBottom:0,borderStyle:"solid",fontSize:".8rem",padding:"10px 14px",borderColor:"rgba(79,195,247,.25)",color:"#4fc3f7",background:"rgba(79,195,247,.03)"}}
+        <button className="quick-fill-toggle" style={{flex:1,marginBottom:0,borderStyle:"solid",fontSize:".8rem",padding:"10px 14px",borderColor:"color-mix(in srgb,var(--blue) 25%,transparent)",color:"var(--blue)",background:"color-mix(in srgb,var(--blue) 3%,transparent)"}}
           onClick={()=>{
             const idx = (Array.isArray(data.cardio[dayName])?data.cardio[dayName]:[]).length;
             onUpdateCardio(dayName,idx,"type","outdoor_jog");
@@ -11511,7 +11527,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           }}>
           + Add Cardio
         </button>
-        <button className="quick-fill-toggle" style={{flex:1,marginBottom:0,borderStyle:"solid",fontSize:".8rem",padding:"10px 14px",borderColor:"rgba(255,107,157,.25)",color:"#ff6b9d",background:"rgba(255,107,157,.03)"}}
+        <button className="quick-fill-toggle" style={{flex:1,marginBottom:0,borderStyle:"solid",fontSize:".8rem",padding:"10px 14px",borderColor:"color-mix(in srgb,var(--pink) 25%,transparent)",color:"var(--pink)",background:"color-mix(in srgb,var(--pink) 3%,transparent)"}}
           onClick={()=>{
             const idx = (Array.isArray(data.strength[dayName])?data.strength[dayName]:[]).length;
             onUpdateStrength(dayName,idx,"type","bb_squat");
@@ -11532,7 +11548,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           )}
           {expandedStat === "water" && (
             <>
-              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"#4fc3f7",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="water" size={16} color="#4fc3f7" />Hydration</div>
+              <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"var(--blue)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="water" size={16} color="var(--blue)" />Hydration</div>
               <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
                 <span style={{color:"var(--muted)"}}>Logged</span>
                 <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{dailyLog.water || 0} oz</span>
@@ -11542,7 +11558,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{Math.round(Number(weightLbs)*0.5)} oz</span>
               </div>
               <div style={{height:"8px",borderRadius:"4px",background:"var(--border)",overflow:"hidden",marginTop:"8px"}}>
-                <div style={{height:"100%",borderRadius:"4px",background:"#4fc3f7",width:`${Math.min(100,((dailyLog.water||0)/(Number(weightLbs)*0.5))*100)}%`,transition:"width .3s"}}></div>
+                <div style={{height:"100%",borderRadius:"4px",background:"var(--blue)",width:`${Math.min(100,((dailyLog.water||0)/(Number(weightLbs)*0.5))*100)}%`,transition:"width .3s"}}></div>
               </div>
               <div style={{fontSize:".72rem",color:"var(--muted)",marginTop:"4px",textAlign:"center"}}>{Math.round(((dailyLog.water||0)/(Number(weightLbs)*0.5))*100)}% of daily goal</div>
               <div style={{marginTop:"10px"}}>
@@ -11551,19 +11567,19 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                   <input type="number" inputMode="numeric" placeholder="Set water oz" value={waterDraft} onClick={e=>e.stopPropagation()}
                     onChange={e=>{e.stopPropagation();setWaterDraft(e.target.value);}}
                     onKeyDown={e=>{ if(e.key==="Enter"){ e.stopPropagation(); commitWater(); } }}
-                    style={{flex:1,padding:"10px 12px",borderRadius:"8px",border:"1.5px solid #4fc3f7",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".88rem"}} />
+                    style={{flex:1,padding:"10px 12px",borderRadius:"8px",border:"1.5px solid var(--blue)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".88rem"}} />
                   <span style={{fontSize:".78rem",color:"var(--muted)"}}>oz</span>
                   <button onClick={e=>{e.stopPropagation();commitWater();}} style={logBtn}>Log</button>
                 </div>
                 <div style={{display:"flex",gap:"8px"}}>
                   {[8,16,32].map(v=>(
                     <button key={v} onClick={e=>{e.stopPropagation();onLogUpdate("water",(dailyLog.water||0)+v);}}
-                      style={{flex:1,padding:"8px",borderRadius:"8px",border:"1px solid var(--border)",background:"var(--s2)",color:"#4fc3f7",cursor:"pointer",fontFamily:"inherit",fontSize:".8rem",fontWeight:600}}>
+                      style={{flex:1,padding:"8px",borderRadius:"8px",border:"1px solid var(--border)",background:"var(--s2)",color:"var(--blue)",cursor:"pointer",fontFamily:"inherit",fontSize:".8rem",fontWeight:600}}>
                       +{v}oz
                     </button>
                   ))}
                   <button onClick={e=>{e.stopPropagation();onLogUpdate("water",0);}}
-                    style={{padding:"8px 12px",borderRadius:"8px",border:"1px solid var(--red)",background:"rgba(255,79,107,.06)",color:"var(--red)",cursor:"pointer",fontFamily:"inherit",fontSize:".75rem",fontWeight:600}}>
+                    style={{padding:"8px 12px",borderRadius:"8px",border:"1px solid var(--red)",background:"color-mix(in srgb,var(--red) 6%,transparent)",color:"var(--red)",cursor:"pointer",fontFamily:"inherit",fontSize:".75rem",fontWeight:600}}>
                     Reset
                   </button>
                 </div>
@@ -11624,9 +11640,9 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
             {[
               { label:"Calories", val:weekSummary.avgCal, tgt:target,        color:"var(--accent)", unit:"" },
-              { label:"Protein",  val:weekSummary.avgP,   tgt:proteinTarget, color:"#ff6b9d",       unit:"g" },
-              { label:"Carbs",    val:weekSummary.avgC,   tgt:carbsTarget,   color:"#ffcc44",       unit:"g" },
-              { label:"Fat",      val:weekSummary.avgF,   tgt:fatTarget,     color:"#4fc3f7",       unit:"g" },
+              { label:"Protein",  val:weekSummary.avgP,   tgt:proteinTarget, color:"var(--pink)",       unit:"g" },
+              { label:"Carbs",    val:weekSummary.avgC,   tgt:carbsTarget,   color:"var(--yellow)",       unit:"g" },
+              { label:"Fat",      val:weekSummary.avgF,   tgt:fatTarget,     color:"var(--blue)",       unit:"g" },
             ].map((s)=>(
               <div key={s.label} style={{flex:"1 1 calc(50% - 4px)",minWidth:"120px",padding:"8px 10px",borderRadius:"7px",background:"var(--bg)",border:"1px solid var(--border)"}}>
                 <div style={{fontSize:".64rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>{s.label}</div>
@@ -11710,7 +11726,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
                 <div style={{fontSize:".55rem",color:"var(--muted)",marginTop:"2px"}}>{burnFromTracker ? "Measured by your tracker" : "Est. calories from workouts*"}</div>
               </div>
               <div style={{padding:"10px",background:"var(--s2)",borderRadius:"8px",textAlign:"center"}}>
-                <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.3rem",color:"#4fc3f7"}}>{Math.round(Number(weightLbs)*0.5)} oz</div>
+                <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.3rem",color:"var(--blue)"}}>{Math.round(Number(weightLbs)*0.5)} oz</div>
                 <div style={{fontSize:".62rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>Water Goal</div>
                 <div style={{fontSize:".55rem",color:"var(--muted)",marginTop:"2px"}}>0.5 oz per lb bodyweight*</div>
               </div>
@@ -11807,7 +11823,7 @@ function CheckInCalendar({ checkIns, selected, onSelect }) {
               style={{ position: "relative", height: 34, borderRadius: 7, cursor: "pointer",
                 fontSize: ".78rem", fontWeight: isSel ? 800 : 500,
                 border: isToday && !isSel ? "1px solid var(--accent)" : "1px solid transparent",
-                background: isSel ? "var(--accent)" : has ? "rgba(79,255,176,.16)" : "transparent",
+                background: isSel ? "var(--accent)" : has ? "color-mix(in srgb,var(--green) 16%,transparent)" : "transparent",
                 color: isSel ? "#0b0b12" : "var(--text)" }}>
               {d}
               {has && !isSel && (
@@ -11902,7 +11918,7 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName }) {
         <CheckInCalendar checkIns={data.checkIns} selected={checkDate} onSelect={setCheckDate} />
       </div>
       {existingForDate && (
-        <div style={{fontSize:".78rem",color:"var(--green)",marginBottom:"10px",padding:"8px 10px",background:"rgba(79,255,176,.06)",borderRadius:"8px",border:"1px solid rgba(79,255,176,.15)"}}>
+        <div style={{fontSize:".78rem",color:"var(--green)",marginBottom:"10px",padding:"8px 10px",background:"color-mix(in srgb,var(--green) 6%,transparent)",borderRadius:"8px",border:"1px solid color-mix(in srgb,var(--green) 15%,transparent)"}}>
           Editing your existing entry for {checkDate}. Saving updates it (one entry per date).
         </div>
       )}
@@ -11971,7 +11987,7 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName }) {
       </div>
 
       <button className="checkin-submit" disabled={!canSave || saved} onClick={handleSave}
-        style={isFuture ? {background:"#b57bff"} : isPast ? {background:"var(--yellow)",color:"#0b0b12"} : {}}>
+        style={isFuture ? {background:"var(--purple)"} : isPast ? {background:"var(--yellow)",color:"#0b0b12"} : {}}>
         {saved ? "Saved!" : isFuture ? "Save Future Plan" : isPast ? "Log Past Day" : "Save Today's Check-In"}
       </button>
 
@@ -12247,7 +12263,7 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
         {hasBand && (
           <rect x={PAD.left} y={PAD.top + yScale(rHi)} width={chartW}
             height={Math.max(0, yScale(rLo) - yScale(rHi))}
-            fill="rgba(79,255,176,.10)" stroke="rgba(79,255,176,.25)" strokeWidth="1" />
+            fill="color-mix(in srgb,var(--green) 10%,transparent)" stroke="color-mix(in srgb,var(--green) 25%,transparent)" strokeWidth="1" />
         )}
 
         {/* Goal line (label is drawn last, below, so nothing covers it) */}
@@ -12257,11 +12273,11 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
         )}
 
         {/* Weight line */}
-        <path d={linePts} fill="none" stroke="#4fffb0" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+        <path d={linePts} fill="none" stroke={cssVarColor("var(--green)")} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
 
         {/* Dots */}
         {sorted.map((c, i) => (
-          <circle key={i} cx={PAD.left + xScale(i)} cy={PAD.top + yScale(c.weight)} r={showValues ? 5 : 4} fill="#4fffb0" stroke="#0d0d18" strokeWidth="2" />
+          <circle key={i} cx={PAD.left + xScale(i)} cy={PAD.top + yScale(c.weight)} r={showValues ? 5 : 4} fill={cssVarColor("var(--green)")} stroke="var(--surface)" strokeWidth="2" />
         ))}
 
         {/* Weight value labels at each dot (opt-in). Placed on the OUTSIDE of each
@@ -12997,17 +13013,17 @@ CLIENT PROFILE:
   };
 
   return (
-    <div className="card" style={{padding:"16px",marginBottom:"16px",borderColor: insights ? "rgba(181,123,255,.25)" : "var(--border)",background: insights ? "rgba(181,123,255,.03)" : "var(--surface)"}}>
+    <div className="card" style={{padding:"16px",marginBottom:"16px",borderColor: insights ? "color-mix(in srgb,var(--purple) 25%,transparent)" : "var(--border)",background: insights ? "color-mix(in srgb,var(--purple) 3%,transparent)" : "var(--surface)"}}>
       <div style={{display:"flex",alignItems:"center",gap:"10px",marginBottom: insights ? "14px" : "0"}}>
         <span style={{display:"flex",alignItems:"center"}}><Icon name="sparkle" size={20} color="var(--accent)" /></span>
         <div style={{flex:1}}>
-          <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",letterSpacing:"2px",color:"#b57bff"}}>AI Coaching Insights</div>
+          <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",letterSpacing:"2px",color:"var(--purple)"}}>AI Coaching Insights</div>
           <div style={{fontSize:".73rem",color:"var(--muted)"}}>Powered by Claude — analyzes {data.firstName || "your client"}'s complete profile</div>
         </div>
         {!insights && (
-          <button className="save-bar-btn" style={{flex:"0 0 auto",minHeight:"38px",padding:"0 16px",fontSize:".78rem",borderColor:"#b57bff",color:"#b57bff",background:"rgba(181,123,255,.06)"}}
+          <button className="save-bar-btn" style={{flex:"0 0 auto",minHeight:"38px",padding:"0 16px",fontSize:".78rem",borderColor:"var(--purple)",color:"var(--purple)",background:"color-mix(in srgb,var(--purple) 6%,transparent)"}}
             disabled={loading} onClick={generateInsights}>
-            {loading ? "Analyzing..." : <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}><Icon name="sparkle" variant="solid" size={14} color="#b57bff" />Generate</span>}
+            {loading ? "Analyzing..." : <span style={{display:"inline-flex",alignItems:"center",gap:"6px"}}><Icon name="sparkle" variant="solid" size={14} color="var(--purple)" />Generate</span>}
           </button>
         )}
       </div>
@@ -18008,18 +18024,18 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
     }
     const sim = !!p.isSimulation;
     return (
-      <div className={`flex items-center gap-3 p-3 rounded-[10px] border cursor-pointer transition-opacity ${dragId===p.id?"opacity-40":""} ${sim?"bg-[rgba(181,123,255,.06)] border-[rgba(181,123,255,.35)]":"bg-surface2 border-border"}`}
+      <div className={`flex items-center gap-3 p-3 rounded-[10px] border cursor-pointer transition-opacity ${dragId===p.id?"opacity-40":""} ${sim?"bg-[color-mix(in_srgb,var(--purple)_6%,transparent)] border-[color-mix(in_srgb,var(--purple)_35%,transparent)]":"bg-surface2 border-border"}`}
         draggable="true"
         onDragStart={e=>onDragStart(e,p.id,sim?"sim":"local")}
         onDragEnd={onDragEnd}
         onClick={()=>onSelect(p.id)}>
-        <div className={`flex-none w-10 h-10 rounded-full font-bold text-sm flex items-center justify-center ${sim?"bg-[rgba(181,123,255,.18)] text-[#b57bff]":"bg-primaryfill text-primaryfg"}`}>
+        <div className={`flex-none w-10 h-10 rounded-full font-bold text-sm flex items-center justify-center ${sim?"bg-[color-mix(in_srgb,var(--purple)_18%,transparent)] text-[color:var(--purple)]":"bg-primaryfill text-primaryfg"}`}>
           {(displayName||"?").slice(0,2).toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-[.92rem] text-fg truncate flex items-center gap-1.5">
             <span className="truncate">{displayName}</span>
-            {sim && <span className="flex-none text-[.55rem] font-bold tracking-wide px-1.5 py-0.5 rounded bg-[rgba(181,123,255,.18)] text-[#b57bff]">SANDBOX</span>}
+            {sim && <span className="flex-none text-[.55rem] font-bold tracking-wide px-1.5 py-0.5 rounded bg-[color-mix(in_srgb,var(--purple)_18%,transparent)] text-[color:var(--purple)]">SANDBOX</span>}
           </div>
           <div className="text-xs text-muted truncate">
             <span className="font-mono text-primary">#{refCode(p.id)}</span>
@@ -18937,7 +18953,7 @@ function AutomationsPanel({ open, onClose, role }) {
                     {confirmId === w.id ? (
                       <>
                         <button onClick={() => remove(w.id)} disabled={busyId === w.id}
-                          style={{ ...btnGhost, padding: "8px 12px", color: "#e5484d", borderColor: "rgba(229,72,77,.4)" }}>{busyId === w.id ? "…" : "Confirm delete"}</button>
+                          style={{ ...btnGhost, padding: "8px 12px", color: "var(--red)", borderColor: "color-mix(in srgb,var(--red) 40%,transparent)" }}>{busyId === w.id ? "…" : "Confirm delete"}</button>
                         <button onClick={() => setConfirmId("")} style={{ ...btnGhost, padding: "8px 12px" }}>Cancel</button>
                       </>
                     ) : (
@@ -20765,7 +20781,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
         )}
 
         <div style={{ flex: 1, minHeight: 12 }} />
-        <button style={{ ...item, color: "#e5484d", border: "1px solid rgba(229,72,77,.4)", background: "rgba(229,72,77,.08)", justifyContent: "center", marginTop: 8 }} onClick={() => signOut(auth)}><Icon name="signout" size={19} /> <span>Sign out</span></button>
+        <button style={{ ...item, color: "var(--red)", border: "1px solid color-mix(in srgb,var(--red) 40%,transparent)", background: "color-mix(in srgb,var(--red) 8%,transparent)", justifyContent: "center", marginTop: 8 }} onClick={() => signOut(auth)}><Icon name="signout" size={19} /> <span>Sign out</span></button>
         <div style={{ display: "flex", justifyContent: "center", gap: 14, marginTop: 10 }}>
           <a href="/terms.html" target="_blank" rel="noopener" style={{ fontSize: ".68rem", color: "var(--muted)", textDecoration: "none" }}>Terms of Service</a>
           <a href="/privacy.html" target="_blank" rel="noopener" style={{ fontSize: ".68rem", color: "var(--muted)", textDecoration: "none" }}>Privacy Policy</a>
@@ -22107,7 +22123,7 @@ export default function App() {
         <Icon name="bell" size={19} color="currentColor" />
         {unseenNotifs > 0 && (
           <span style={{ position: "absolute", top: -5, right: -5, minWidth: 17, height: 17, padding: "0 4px",
-            borderRadius: 999, background: "var(--accent,#08dce0)", color: "#05080a",
+            borderRadius: 999, background: "var(--accent-fill,#08dce0)", color: "#05080a",
             fontSize: ".62rem", fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>
             {unseenNotifs > 9 ? "9+" : unseenNotifs}
           </span>
@@ -22222,8 +22238,8 @@ export default function App() {
         </div>
         <div className="container">
           {activeIsSim && (
-            <div className="flex items-center gap-2 px-3.5 py-2.5 mb-3.5 rounded-[10px] bg-[rgba(181,123,255,.1)] border border-[rgba(181,123,255,.4)]">
-              <Icon name="flask" size={18} color="#b57bff" />
+            <div className="flex items-center gap-2 px-3.5 py-2.5 mb-3.5 rounded-[10px] bg-[color-mix(in_srgb,var(--purple)_10%,transparent)] border border-[color-mix(in_srgb,var(--purple)_40%,transparent)]">
+              <Icon name="flask" size={18} color="var(--purple)" />
               <span className="text-[.82rem] text-fg">
                 <strong>Simulation</strong> — a sandbox projection, not a real client plan.
               </span>
