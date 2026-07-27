@@ -2354,6 +2354,9 @@ async function runTool(name, input, ctx) {
       put("carbs", input.carbsTarget);
       put("fat", input.fatTarget);
       d.macroTargets = mt;
+      // Mark it as deliberately set so the 30-minute Trainerize sync stops
+      // re-stamping its nutritionGoal over the top (functions/trainerize.js).
+      d.macroTargetsEditedAt = Date.now();
     }
     if (input.goalWeightLbs != null) {
       const g = Math.round(Number(input.goalWeightLbs) * 10) / 10;

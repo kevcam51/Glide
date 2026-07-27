@@ -385,7 +385,16 @@ async function fetchRoster(auth) {
 // (targetUid=client, planId=their active plan) — see runImport's tz-links routing.
 async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDate, auth, days) {
   const wrap = (await kvGetJSON(db, targetUid, `caliq-${planId}`)) || { data: {}, step: 0 };
-  const d = { ...(wrap.data || {}), ...snap, trainerizeId: u.id };
+  const prev = wrap.data || {};
+  // Trainerize stays source of truth for the snapshot fields (weight, goal,
+  // stats — S86d, and the coach dashboards depend on that). Macro targets are
+  // the exception: they are something a coach or client deliberately SETS in
+  // Glidna, and this 30-minute sync used to re-stamp Trainerize's nutritionGoal
+  // over the top every run, so an edit silently reverted within the half hour.
+  // Once someone has set them here, Trainerize never touches that one field again.
+  const snapApply = { ...snap };
+  if (prev.macroTargetsEditedAt) delete snapApply.macroTargets;
+  const d = { ...prev, ...snapApply, trainerizeId: u.id };
   if (snap.weightLbs && lastStatDate) {
     const cis = Array.isArray(d.checkIns) ? d.checkIns : [];
     let ci = cis.find((c) => c && c.date === lastStatDate);

@@ -133,6 +133,17 @@ function todayLocal() {
   }
 }
 
+// Weekday name for the prompt. Changes once a day, exactly like the date it sits
+// beside, so it costs no extra prompt-cache churn — and without it the model was
+// resolving "last Monday" with no idea what day it currently is.
+function weekdayLocal() {
+  try {
+    return new Date().toLocaleDateString("en-US", { timeZone: "America/New_York", weekday: "long" });
+  } catch (e) {
+    return "";
+  }
+}
+
 // Current local clock time as 24h "HH:MM" (America/New_York) — passed into the
 // tool ctx as the default "when" stamped on a meal logged now (the AI omits the
 // time arg for "now"). Deliberately NOT injected into the cached system prompt:
@@ -211,9 +222,9 @@ function buildSystemPrompt(role, isTrainer) {
   const baseSystem = (role === "client") ? SYSTEM_CLIENT : SYSTEM_TRAINER;
   return `${baseSystem}
 
-Today's date is ${todayLocal()} (use it to resolve "today", "yesterday", "this week", etc.).
+Today's date is ${todayLocal()} (${weekdayLocal()}) — use it to resolve "today", "yesterday", "this week", etc.
 
-Dates: you can log to and review any PAST date. When the user names another day ("yesterday", "last Monday", "my Saturday weigh-in"), resolve it to YYYY-MM-DD and pass it as the date arg to log_meal/propose_meal/log_workout/log_weigh_in — don't assume today. For history ("what did I eat last week?") use get_nutrition_log with start/end dates. Confirm the date if ambiguous.
+Dates: DEFAULT TO TODAY. If the user does not name a day, OMIT the date argument entirely — the tools already default to the user's today, which is more reliable than a date you work out yourself. Only pass date when they explicitly name another day ("yesterday", "last Monday", "my Saturday weigh-in"); resolve that to YYYY-MM-DD. Never infer a date from earlier messages in this conversation — it may have been started on a different day. For history ("what did I eat last week?") use get_nutrition_log with start/end dates.
 
 Meal times: each meal carries the clock time eaten (a "time" field like "19:45"). When the user says WHEN they ate, pass it as the time arg; else it defaults to now. get_nutrition_log returns times, so you can spot time-of-day patterns (late-night snacking, skipped breakfasts).
 
@@ -231,7 +242,9 @@ TAKING ACTIONS — DO WHAT THE USER ASKED, FIRST TIME (Kevin, S102e): when someo
 - Notes: on "write this down / remember this / make a note / save a recap", use create_note (recaps → kind='recap'). A client's note is PRIVATE by default — only share (visible to trainer) if they clearly want that. A trainer using clientId writes a private about-note by default (shared=true puts it where the client sees it). Before re-recapping, call list_notes and UPDATE the existing note (update_note, append) instead of duplicating. Never reveal a client's private notes to anyone but that client.
 - Links/videos (Instagram, YouTube, TikTok, blogs): when the user shares a URL to USE ("add the exercises from this", "make a program from this", "log this recipe"), call fetch_link for its title + caption, then build changes with the normal tools (workouts: list_exercises → propose_workout, add_custom_exercise as needed; food: propose_meal). Summarize what you found first and map named moves to the closest real ids. If fetch_link returns little or errors (some posts are blocked), don't guess — ask the user to paste the caption text. Adapt the content to the user's goal/days/experience, don't copy blindly.
 ${isTrainer ? "- ONE specific person (cost — Kevin, S110d): when the user asks about a SINGLE named client, call find_client to resolve just that person's id, then use the data tools on THAT client only. Do NOT call list_clients (it loads EVERY client) or coach_summary (every client's full snapshot) for a single-person question — that wastes work and money searching people you don't need. A '#' code the user quotes comes in TWO forms — a 4-character ref like #KEM2, or a small number like #6 (the permanent number on the trainer's home screen) — and the home numbers CONNECTED CLIENTS AND THE TRAINER'S OWN LOCAL PLAN FILES from one shared counter, so a '#' code may be either. Try find_client first; if it finds nothing, check list_local_plans and match the code against a plan's `ref` or `num` before telling the user it doesn't exist. Both tools return `ref` and `num`. When you name someone back, prefer their NAME, and if you cite a code use the same form they used. Once you have the id it becomes the active subject; reuse it, don't look it up again. Use list_clients only to LIST the whole roster, and coach_summary only for genuinely across-all-clients questions.\n- SAME NAME (Kevin, S110e): if find_client returns MORE THAN ONE match (two people with the same/similar name), do NOT guess or pick the first — ASK the user which one, telling them apart by a HUMAN detail from the match (their short ID code, email, current weight, or last-log date), NEVER the raw internal id. Same for local plans: if two plans/sims share a name, distinguish them by their ref code, weight/goal, sim tag, or when they were last updated. Only after the user picks do you act on that id.\n- SHORT ID CODES: every client and plan shows a short code in the app (e.g. \"#7K2M\", the `ref` field). The user may identify someone by it — pass a code to find_client just like a name (it matches the code), and match a plan code against list_local_plans' `ref`. When you refer back to a specific person or plan and it could be ambiguous, include their #code so the user knows exactly which one you mean.\n- send_client_request: send a connected client a to-do (e.g. log food, weigh in); use find_client for the id, confirm before sending.\n- Proactive coaching: for cross-client questions ('who's stalled / needs attention / what should I change?' across everyone), call coach_summary ONCE (every client's status + adherence + weight trend — don't loop per-client tools), then call out who needs attention BY NAME with concrete recommendations and offer to send a to-do. You can do any action FOR a client via their clientId.\n- LOCAL PLAN FILES: trainers also keep local plan files (imported Trainerize clients, prep/template files, simulations) separate from client accounts. When the trainer refers to one, call list_local_plans and pass its localPlanId to the other tools (never with clientId); refer to them by NAME. All the same abilities work on them. IMPORTANT: if the trainer names a person find_client doesn't match, ALSO check list_local_plans before assuming they aren't in Glide — most of a trainer's people are local/imported/sim files, and read+edit (stats, targets, workouts, meals, weigh-ins) works FULLY on them. Never tell a trainer to 'connect' a plan you can manage locally. Only send_client_request (to-dos) and messaging truly need a connected client account — those can't reach a local/sim file because there's no login on the other end; say so plainly if asked." : ""}
-After any action, briefly confirm what you did — but only AFTER the tool call actually succeeded. A write only happens when you call the tool; text alone never changes any data, so never claim you did something you didn't actually call a tool for.
+After any action, briefly confirm what you did — but only AFTER the tool call actually succeeded. A write only happens when you call the tool; text alone never changes any data, so never claim you did something you didn't actually call a tool for. If a tool comes back with an error, SAY it failed and what you'll try instead — never report success for a call that errored. If you were mid-way through several actions and ran out of steps, say which ones you completed and which you did not.
+
+WHOSE ACCOUNT: a write with no clientId goes to YOUR OWN account. So when you are logging or editing on behalf of someone else, you MUST pass their clientId (or localPlanId for one of your own plan files) on EVERY such call — resolve it first with find_client if you don't have it. Saving a client's meal into your own diary looks like success and is silently wrong, so never guess: if you are not certain whose account is meant, ask before writing. When you confirm, name the person ("logged for Casey"), not just the action.
 
 Voice & tone: talk like a warm, knowledgeable coach texting someone they actually like — relaxed and human, never robotic or clipped. Sound like a person, not a form: it's fine to react naturally ("nice, that's a solid day"), reason out loud a little when it helps, and give a real answer when the question calls for one. Warmth comes from the words, not punctuation — keep exclamation points rare (usually none) and skip corporate filler and hype. Don't narrate your internal steps ("let me pull up the client list", "got the ID, logging now") — just quietly do the work and report the result plainly.
 
@@ -329,12 +342,21 @@ async function runToolRound(toolUses, toolCtx) {
     const inp = tu.input || {};
     if (inp.clientId) activeTarget = { clientId: String(inp.clientId) };
     else if (inp.localPlanId) activeTarget = { localPlanId: String(inp.localPlanId) };
+    let toolFailed = false;
     try { out = await runTool(tu.name, inp, toolCtx); }
-    catch (e) { console.error("aiChat tool error:", tu.name, e && e.message); out = { error: "That action failed." }; }
+    catch (e) {
+      console.error("aiChat tool error:", tu.name, e && e.message);
+      out = { error: "That action failed — nothing was saved." };
+      toolFailed = true;
+    }
+    // A tool returning {error} did NOT do the thing. Mark it, or the model reads
+    // an ordinary-looking result and tells the user it logged something it didn't.
+    if (out && out.error) toolFailed = true;
     if (["log_meal", "log_meals", "remove_meal", "log_workout", "log_weigh_in", "log_check_in", "log_measurements", "log_water", "set_targets", "set_workout_schedule", "set_personal_info", "create_plan", "switch_plan", "rename_plan", "set_notification_prefs", "add_custom_exercise"].includes(tu.name) && out && out.ok) wrote = true;
     if (tu.name === "propose_meal" && out && out.meal) proposal = out.meal;
     if (tu.name === "propose_workout" && out && out.workout) workoutProposal = out.workout;
-    results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(out).slice(0, 60000) });
+    results.push({ type: "tool_result", tool_use_id: tu.id, is_error: toolFailed || undefined,
+      content: JSON.stringify(out).slice(0, 60000) });
   }
   return { results, wrote, proposal, workoutProposal, activeTarget };
 }
@@ -401,7 +423,11 @@ exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], region: "us-central1", m
 
   // Budget counts full-price tokens (cache reads bill at ~10%, so excluded).
   const spent = agg.input + agg.output + agg.cacheWrite;
-  const text = (resp.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  let text = (resp.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  // If we stopped because we hit MAX_TOOL_ROUNDS while the model still wanted to
+  // call tools, those calls were DISCARDED — and its preamble ("logging all 8
+  // now…") would otherwise be returned as if the work had happened.
+  if (resp.stop_reason === "tool_use") text += "\n\n(I ran out of steps before finishing that — some of it may not have been saved. Please check, and ask me again for anything missing.)";
   const totalUsed = used + spent;
   return {
     reply: text,
@@ -541,6 +567,11 @@ exports.aiChatStream = onRequest(
           convo.push({ role: "assistant", content: msg.content });
           convo.push({ role: "user", content: r.results });
           continue; // next turn streams
+        }
+        // Still wanting tools but out of rounds: those calls are DISCARDED, and
+        // the text already streamed may claim work that never happened. Say so.
+        if (msg.stop_reason === "tool_use") {
+          sse("delta", { text: "\n\n(I ran out of steps before finishing that — some of it may not have been saved. Please check, and ask me again for anything missing.)" });
         }
         break;
       }

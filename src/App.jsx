@@ -22403,7 +22403,7 @@ export default function App() {
               onEditWorkouts={()=>{setNavFrom("dashboard");setStepAndSave(3);}}
               onLogUpdate={onLogUpdate} dailyLog={dailyLog} streak={streak}
               onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
-              onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; return n; })}
+              onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; n.macroTargetsEditedAt=Date.now(); return n; })}
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
               onSaveMeasurements={(vals)=>setDataAndSave(p=>{ const next={...p}; mergeMeasurements(next, vals, todayKey, activeRemoteUid ? "trainer" : "client"); return next; })}
