@@ -10302,13 +10302,20 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const today = viewDate ? new Date(viewDate + "T12:00:00") : new Date();
   const dayName = DAYS[today.getDay() === 0 ? 6 : today.getDay() - 1]; // Mon=0
   const dayIdx = DAYS.indexOf(dayName);
-  // The weigh-in recorded ON this day — NOT the plan's current weight. Showing
-  // the current weight on every past day made it look like they weighed the same
-  // all week (Kevin). Blank means "no weigh-in that day", which is the truth and
-  // is also the prompt to add one — including days they missed at the time.
-  const dayCheckIn = (Array.isArray(data.checkIns) ? data.checkIns : [])
-    .find((c) => c && c.date === (viewDate || "") && c.weight != null) || null;
-  const dayWeight = dayCheckIn ? Number(dayCheckIn.weight) : null;
+  // Weight AS OF this day. Most people don't weigh daily, so a blank tile on
+  // every unweighed day was worse than useless (Kevin) — but the plan's CURRENT
+  // weight on a past day is a lie. So: the most recent weigh-in ON OR BEFORE the
+  // day being viewed, and the label says whether it was measured that day or
+  // carried over. Crucially it never looks FORWARD: viewing Tuesday must not
+  // show Thursday's weigh-in, or history rewrites itself as you scroll back.
+  const weighIns = (Array.isArray(data.checkIns) ? data.checkIns : [])
+    .filter((c) => c && c.date && c.weight != null);
+  const dayCheckIn = weighIns.find((c) => c.date === (viewDate || "")) || null;
+  const carried = dayCheckIn ? null : weighIns
+    .filter((c) => !viewDate || c.date < viewDate)
+    .reduce((a, c) => (!a || c.date > a.date ? c : a), null);
+  const dayWeight = dayCheckIn ? Number(dayCheckIn.weight)
+    : (carried ? Number(carried.weight) : null);
 
   // Today's scheduled workouts
   const todayCardio = dayData[dayIdx] || { burned: 0, workouts: [] };
@@ -10830,7 +10837,9 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="scale" size={23} color="var(--muted)" /></div>
           <div className="dash-cta-val">{dayWeight?dayWeight.toFixed(1):"—"}<span style={{fontSize:".5em",color:"var(--muted)",marginLeft:"3px"}}>lbs</span></div>
           <div className="dash-cta-lbl">
-            {viewIsToday ? "Today's Weight" : (dayWeight != null ? "Weight that day" : "No weigh-in — add one")}
+            {dayCheckIn ? (viewIsToday ? "Today's Weight" : "Weighed that day")
+              : carried ? `Last weighed ${dayLabelFor(carried.date, todayKeyProp || "")}`
+              : "No weigh-in yet — add one"}
             {onSaveMeasurements?" ›":""}
           </div>
         </div>}
