@@ -114,7 +114,23 @@ const SCOPE_FOR_TOOL = {
 };
 // Tools that DELETE or overwrite user data — flagged so Claude shows a stronger
 // confirmation prompt before running them.
-const DESTRUCTIVE_TOOLS = new Set(["remove_meal", "set_workout_schedule", "switch_plan"]);
+// destructiveHint = "may OVERWRITE or delete data that is already there", as
+// opposed to adding a new entry. Claude shows a stronger confirmation for these,
+// so the line matters: mark an additive tool destructive and every meal log
+// nags; miss an overwriting one and it silently replaces a client's targets.
+// ADDITIVE (hint stays false): log_meal(s), log_water, log_workout, log_check_in,
+// log_measurements, log_weigh_in (merges into a same-day entry since S86),
+// create_note, create_plan, add_custom_exercise, send_client_request.
+const DESTRUCTIVE_TOOLS = new Set([
+  "remove_meal",            // deletes an entry outright
+  "set_workout_schedule",   // REPLACES the week for any category supplied
+  "switch_plan",            // changes which plan is active
+  "set_targets",            // overwrites existing macro/goal targets
+  "set_personal_info",      // overwrites profile fields (weight, goal, DOB…)
+  "rename_plan",            // overwrites the plan name
+  "update_note",            // overwrites the note body
+  "set_notification_prefs", // overwrites the existing preference set
+]);
 
 // Extra guidance appended to a tool's description for EXTERNAL models, which
 // have none of our in-app system prompt. Batching is the important one: logging
