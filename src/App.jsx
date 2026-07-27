@@ -10897,7 +10897,20 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           if (tzSync === "busy" || !onTrackerSync) return;
           setTzSync("busy");
           try { setTzSync(await onTrackerSync()); }
-          catch (e) { setTzSync({ ok: false, text: "Couldn't reach Trainerize — try again in a moment." }); }
+          catch (e) {
+            // Distinguish the failure modes — "couldn't reach Trainerize" sent us
+            // hunting the wrong thing once already (the API was fine; the CLIENT
+            // callable was timing out at 70s while the sync ran on).
+            const code = String((e && e.code) || "");
+            const text = /deadline|timeout/i.test(code)
+              ? "Sync is taking a while — it's still running. Check back in a minute."
+              : /permission-denied/.test(code)
+              ? "That account can't run the Trainerize sync."
+              : /unauthenticated/.test(code)
+              ? "Please sign in again, then retry the sync."
+              : `Sync failed${code ? ` (${code})` : ""} — try again in a moment.`;
+            setTzSync({ ok: false, text });
+          }
         };
         return (
           // Sync is PINNED top-right beside the Tracker heading (S97u, Kevin: it
@@ -15807,7 +15820,12 @@ const CARD_CONSENT_STASH = "glidna-card-consent";
 const callSetWorkout = httpsCallable(functions, "setWorkoutSchedule"); // workout Accept-card direct write (Session 75)
 const callTranscribe = httpsCallable(functions, "transcribeAudio"); // voice → text (Whisper, Session 79)
 const callSendInvite = httpsCallable(functions, "sendInvite"); // email invites (Option C)
-const callTrainerizeImport = httpsCallable(functions, "trainerizeImport"); // Trainerize roster importer (v1)
+// The callable SDK defaults to a 70s client timeout while the FUNCTION is allowed
+// 300s — so a full roster sync (per client: profile, body stats, goals, plus
+// nutrition/health/workout windows) blew the client deadline and surfaced as
+// "Couldn't reach Trainerize" even though the server was still working, and often
+// finished. Match the server's budget so the browser waits for the real answer.
+const callTrainerizeImport = httpsCallable(functions, "trainerizeImport", { timeout: 300000 }); // Trainerize roster importer (v1)
 const callPasskeyRegOptions = httpsCallable(functions, "passkeyRegisterOptions"); // Face ID setup (S87)
 const callPasskeyRegVerify = httpsCallable(functions, "passkeyRegisterVerify");
 // Scheduled AI automations (S93, workflow Phase 2 UI). Backend = functions/workflows.js.
