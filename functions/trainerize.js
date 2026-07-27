@@ -209,7 +209,15 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
     if (!r.ok) continue;
     for (const e of (r.json && r.json.healthData) || []) {
       if (!e || !/^\d{4}-\d{2}-\d{2}$/.test(e.date || "")) continue;
-      const w = (byDate[e.date] = byDate[e.date] || {});
+      // Trainerize returns entries from EVERY connected tracker for a date
+      // (Kevin has Apple Health and Garmin). This used to be one bucket per
+      // date with `w.source = e.source` last-write-wins, so an empty Apple
+      // Health entry could overwrite Garmin's real numbers — and label the day
+      // with the wrong tracker. Bucket per SOURCE, then pick the most active
+      // one below.
+      const src = e.source || "unknown";
+      const bySrc = (byDate[e.date] = byDate[e.date] || {});
+      const w = (bySrc[src] = bySrc[src] || { source: e.source || null });
       if (type === "calorieOut" && e.data) {
         w.active = r0(e.data.activeEnergy);
         w.resting = r0(e.data.restingEnergy);
@@ -218,18 +226,33 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
         w.steps = r0(e.data.steps);
         w.reported = true;
       }
-      if (e.source) w.source = e.source;
     }
   }
+  // Most-active-tracker wins per day (Kevin's call): the watch he actually wore
+  // is the one with real numbers on it, and a second connected app sitting at
+  // zero should never displace it. Compared per DATE, so a day Garmin missed can
+  // still be covered by another source instead of going blank.
+  const pickSource = (bySrc) => {
+    const cands = Object.values(bySrc || {}).filter((c) => c && c.reported);
+    if (!cands.length) return null;
+    cands.sort((a, b) =>
+      (Number(b.active || 0) - Number(a.active || 0))
+      || (Number(b.steps || 0) - Number(a.steps || 0))
+      || (Number(b.resting || 0) - Number(a.resting || 0)));
+    return cands[0];
+  };
+
   let written = 0;
-  for (const [date, w] of Object.entries(byDate)) {
+  for (const [date, bySrc] of Object.entries(byDate)) {
+    const w = pickSource(bySrc);
+    if (!w) continue;
     // Write any date the tracker actually REPORTED, including an explicit zero.
     // The old guard (!w.active && !w.steps) skipped a genuine 0-calorie day, so
     // today never got a wearable record and the dashboard kept showing the last
     // day that had one — i.e. yesterday's burn presented as today's, which no
     // amount of re-syncing could clear. It also discarded days with real resting
     // energy but no steps, since `resting` was never part of the test.
-    if (!w.reported) continue; // the tracker never reported this date at all
+
     const logKey = `caliq-log-${pid}-${date}`;
     const log = (await kvGetJSON(db, uid, logKey)) || { calories: 0, water: 0, weight: 0, meals: [] };
     log.wearable = w;
