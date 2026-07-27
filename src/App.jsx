@@ -15937,6 +15937,10 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   // Once the AI resolves a client/plan, we relay its id back each turn so it reuses
   // it instead of re-running list_clients every message. Reset when the chat changes.
   const activeTargetRef = useRef(null);
+  // Client picker for a pinned chat (trainers only — a client caller is forced to
+  // their own account server-side, so a pin would be meaningless for them).
+  const [pinPicker, setPinPicker] = useState(false);
+  const [pinRoster, setPinRoster] = useState(null);   // null = not loaded yet
   const [workout, setWorkout] = useState(null); // pending workout-program card {…, status}
   const [recording, setRecording] = useState(false);     // mic actively recording
   const [recSecs, setRecSecs] = useState(0);             // seconds recorded (60s cap countdown)
@@ -16021,6 +16025,15 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       ? (pin.clientId ? { clientId: pin.clientId } : { localPlanId: pin.localPlanId })
       : null;
   };
+  // What we relay to the server this turn. A pinned chat ALWAYS sends its pin —
+  // that is what survives a reload and stops mid-chat drift moving the subject.
+  const sendTarget = () => {
+    const pin = pinOf(activeChatId);
+    if (pin) return pin.clientId
+      ? { clientId: pin.clientId, pinned: true }
+      : { localPlanId: pin.localPlanId, pinned: true };
+    return activeTargetRef.current;
+  };
   const setPin = (id, pin) => setConvos((prev) => {
     const next = prev.map((c) => (c.id === id ? { ...c, pin } : c));
     writeIndex(activeChatId, next);
@@ -16047,6 +16060,10 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
           const act = index.chats.some((c) => c.id === index.active) ? index.active : index.chats[0].id;
           setConvos(index.chats); setActiveChatId(act);
           const t = await loadThread(act); if (t.length) setMessages(t);
+          // Re-arm the subject on RELOAD — without this a pinned chat lost its
+          // pin the moment the app restarted, and the AI went back to hunting
+          // for the client on the next message.
+          applyPin((index.chats.find((c) => c.id === act) || {}).pin || null);
           loadedRef.current = true; return;
         }
         // No index yet — adopt the pre-S90 single thread if one exists.
@@ -16078,12 +16095,17 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     } catch { /* best-effort */ }
   }, [busy, messages, activeChatId]);
   const resetThreadUi = () => { setProposal(null); setWorkout(null); setEditDraft(null); setError(""); setBoost(null); activeTargetRef.current = null; };
-  const newChat = () => {
+  const newChat = (pin) => {
     if (busy) return;
     const id = `c${Date.now()}`;
-    const c = { id, title: "New chat", updatedAt: Date.now() };
+    // A chat pinned at birth keeps its subject forever: every turn relays it, so
+    // the AI never spends a round rediscovering who this conversation is about.
+    const c = pin
+      ? { id, title: `About ${pin.name || "client"}`, titleLocked: true, updatedAt: Date.now(), pin }
+      : { id, title: "New chat", updatedAt: Date.now() };
     setConvos((prev) => { const next = [c, ...prev].slice(0, 30); writeIndex(id, next); return next; });
     setActiveChatId(id); setMessages([]); resetThreadUi(); setHistoryOpen(false);
+    applyPin(pin || null);   // AFTER resetThreadUi, which nulls the ref
   };
   const switchChat = async (id) => {
     if (busy || id === activeChatId) { setHistoryOpen(false); return; }
@@ -16380,7 +16402,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
         onProposal: (meal) => { gotEvent = true; setProposal({ ...meal, status: "pending" }); },
         onWorkoutProposal: (w) => { gotEvent = true; setWorkout({ ...w, status: "pending" }); },
         onDone: (p) => { done = p; },
-      }, activeTargetRef.current);
+      }, sendTarget());
       // Let the typewriter finish revealing — but NEVER block on a stalled rAF.
       // requestAnimationFrame pauses when the tab is backgrounded (or headless),
       // so race a timeout, then force-stop so a late frame can't revert the text.
@@ -16390,7 +16412,9 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       if (done && done.usage && done.usage.warn) setWarn(true);
       if (done && done.activeTarget) {
         activeTargetRef.current = done.activeTarget;
-        if (!pinOf(activeChatId)) setPin(activeChatId, done.activeTarget);
+        // Only auto-capture when there is no pin, or the existing one was itself
+        // auto-captured. A pin the user set explicitly is never overwritten.
+        { const cur = pinOf(activeChatId); if (!cur || cur.auto) setPin(activeChatId, { ...done.activeTarget, auto: true }); }
       }
       if (done && done.wrote && typeof onDataChanged === "function") onDataChanged();
     } catch (streamErr) {
@@ -16415,12 +16439,12 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       } else {
         // Streaming unavailable (network/CORS/server) → non-streaming callable.
         try {
-          const res = await callAiChat({ messages: apiMsgs, activeTarget: activeTargetRef.current });
+          const res = await callAiChat({ messages: apiMsgs, activeTarget: sendTarget() });
           const reply = (res.data && res.data.reply) || "";
           setMessages([...next, { role: "assistant", content: reply || "(no response)" }]);
           if (res.data && res.data.activeTarget) {
             activeTargetRef.current = res.data.activeTarget;
-            if (!pinOf(activeChatId)) setPin(activeChatId, res.data.activeTarget);
+            { const cur = pinOf(activeChatId); if (!cur || cur.auto) setPin(activeChatId, { ...res.data.activeTarget, auto: true }); }
           }
           if (res.data && res.data.usage && res.data.usage.warn) setWarn(true);
           if (res.data && res.data.proposal) setProposal({ ...res.data.proposal, status: "pending" });
@@ -16943,6 +16967,46 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                   <button onClick={() => setHistoryOpen(false)} aria-label="Close history"
                     className="ml-auto flex border-0 bg-transparent text-muted cursor-pointer"><Icon name="close" size={15} color="var(--muted)" /></button>
                 </div>
+                {isTrainer && (
+                  <button onClick={() => {
+                      setPinPicker(true);
+                      if (pinRoster === null) {
+                        getMyClients().then((cs) => setPinRoster(cs || [])).catch(() => setPinRoster([]));
+                      }
+                    }}
+                    className="mx-3 mt-3 flex items-center justify-center gap-1.5 rounded-xl border border-border bg-transparent px-3 py-2.5 text-[.8rem] font-bold text-fg cursor-pointer">
+                    <Icon name="clients" size={14} color="var(--accent)" />New chat about a client
+                  </button>
+                )}
+                {pinPicker && (
+                  <div className="mx-3 mt-2 rounded-xl border border-border bg-surface2 p-2.5">
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <div className="text-[.76rem] font-bold text-fg">Which client?</div>
+                      <button onClick={() => setPinPicker(false)} aria-label="Cancel"
+                        className="ml-auto border-0 bg-transparent text-muted cursor-pointer">
+                        <Icon name="close" size={14} color="currentColor" />
+                      </button>
+                    </div>
+                    {pinRoster === null && <div className="text-[.74rem] text-muted">Loading…</div>}
+                    {pinRoster && pinRoster.length === 0 && (
+                      <div className="text-[.74rem] text-muted leading-relaxed">No connected clients yet.</div>
+                    )}
+                    <div className="flex max-h-[190px] flex-col gap-1 overflow-y-auto">
+                      {(pinRoster || []).map((c) => {
+                        const nm = c.displayName || [c.firstName, c.lastName].filter(Boolean).join(" ") || c.email || "Client";
+                        return (
+                          <button key={c.uid} onClick={() => { setPinPicker(false); newChat({ clientId: c.uid, name: nm }); }}
+                            className="rounded-lg border border-border bg-transparent px-2.5 py-2 text-left text-[.78rem] text-fg cursor-pointer">
+                            {nm}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-1.5 text-[.66rem] leading-relaxed text-muted">
+                      Every message in that chat is about them — the assistant won't have to look them up.
+                    </div>
+                  </div>
+                )}
                 <button onClick={newChat}
                   className="mx-3 mt-3 flex items-center justify-center gap-1.5 rounded-xl border-none bg-primaryfill px-3 py-2.5 text-[.84rem] font-bold text-primaryfg cursor-pointer">
                   <Icon name="plus" size={14} color="var(--color-primaryfg)" />New chat
@@ -16955,7 +17019,15 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                         <div className="truncate text-[.82rem] font-semibold text-fg">{c.title || "New chat"}</div>
                         <div className="text-[.66rem] text-muted">
                           {timeAgo(c.updatedAt)}
-                          {c.pin && <> · <span className="text-primary">focused</span></>}
+                          {c.pin && (
+                            <> · <span className="text-primary">{c.pin.name ? `about ${c.pin.name}` : "focused"}</span>
+                              {!c.pin.auto && (
+                                <> · <span role="button" tabIndex={0}
+                                  onClick={(e) => { e.stopPropagation(); setPin(c.id, null); if (c.id === activeChatId) applyPin(null); }}
+                                  className="cursor-pointer underline">unpin</span></>
+                              )}
+                            </>
+                          )}
                         </div>
                       </div>
                       <button onClick={(e) => {

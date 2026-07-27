@@ -314,7 +314,10 @@ async function setupChat(uid, activeTarget) {
       ? `the CLIENT whose id is "${String(at.clientId).slice(0, 64)}" (pass it as clientId)`
       : `YOUR OWN local plan/sim whose id is "${String(at.localPlanId).slice(0, 64)}" (pass it as localPlanId)`;
     system.push({ type: "text", text:
-      `ACTIVE SUBJECT for THIS conversation: you are working with ${which}. Reuse this id directly for EVERY read, log, edit, and follow-up here — do NOT call find_client, list_clients, or list_local_plans again to re-find them. Only look up a different subject if the user clearly names another person/plan or asks to switch; then that becomes the new active subject.` });
+      `ACTIVE SUBJECT for THIS conversation: you are working with ${which}. Reuse this id directly for EVERY read, log, edit or removal in this conversation.`
+      + (at.pinned
+        ? ` This chat is PINNED to them: every request here is about this same person unless the user explicitly names someone else, so do NOT call find_client / list_clients / list_local_plans here — you already have the id.`
+        : ``) });
   }
   return {
     role, isTrainer, budget, usageRef, used, system,
