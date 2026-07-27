@@ -16072,6 +16072,17 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   // (S92) The "Precise food data" (search_food) Pro toggle was RETIRED — measured
   // no accuracy gain over the AI's own estimate at 2–2.5× tokens (docs/AI-ACCURACY.md).
   const scrollRef = useRef(null);
+  // "Stick to bottom" — but only while the reader IS at the bottom. Scrolling up
+  // mid-reply used to be futile: every streamed chunk yanked the view back down.
+  // Once they scroll away we stop following, and resume the moment they return.
+  const stickBottomRef = useRef(true);
+  const onChatScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // 40px of slack: "near the bottom" counts as at the bottom, so a stray pixel
+    // from an inline image or the auto-growing composer doesn't detach it.
+    stickBottomRef.current = (el.scrollHeight - el.scrollTop - el.clientHeight) < 40;
+  };
   const fileRef = useRef(null);
   const taRef = useRef(null);     // composer textarea (auto-grows with content)
   const recRef = useRef(null);    // MediaRecorder instance
@@ -16446,11 +16457,19 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     return () => { if (raf) cancelAnimationFrame(raf); if (ctx) { try { ctx.close(); } catch (e) { /* ignore */ } } };
   }, [recording]);
 
-  // Auto-scroll to the newest message whenever the thread or busy state changes.
+  // Follow the newest message only while the reader is parked at the bottom.
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && stickBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, busy, open]);
+  // Opening the panel (or switching chat) always lands at the bottom, and
+  // re-arms following — otherwise a chat left scrolled up would open detached.
+  useEffect(() => {
+    if (!open) return;
+    stickBottomRef.current = true;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [open, activeChatId]);
 
   // Auto-grow the composer like Claude's: the textarea height follows its content
   // (from one line up to a max, then it scrolls). Runs on every draft change and
@@ -16697,7 +16716,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
           ) : (<>
 
           {/* Message thread */}
-          <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-3 flex flex-col gap-2.5"
+          <div ref={scrollRef} onScroll={onChatScroll} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-3 flex flex-col gap-2.5"
             style={{ WebkitOverflowScrolling: "touch" }}>
             {messages.length === 0 ? (
               <div className="flex flex-col gap-3 py-2">
@@ -21595,6 +21614,7 @@ export default function App() {
 
   const selectProfile = async (id) => {
     resetPlanScopedState();   // same hazard as openClientPlan — imported clients are local profiles
+    setViewDate(todayKey);    // always open on TODAY
     let merged = {...EMPTY_DATA};
     let stp = 0;
     try {
@@ -21645,6 +21665,7 @@ export default function App() {
 
   const openClientPlan = async (clientUid, planId) => {
     resetPlanScopedState();   // BEFORE the awaits below, so nothing of the previous client survives
+    setViewDate(todayKey);    // always open on TODAY, not wherever the last plan was left
     let pid = planId;
     if (!pid) { const m = await readPlansManifest((k) => getForUser(clientUid, k)); pid = m.active; }
     try {
