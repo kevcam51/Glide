@@ -337,6 +337,18 @@ function refCode(id) {
   return s ? s.slice(-4).toUpperCase() : "----";
 }
 
+// The OTHER code the trainer can see. src/App.jsx assigns every connected client
+// and local plan a short permanent number (#1, #2, …) — `ensureIdNums`, stored in
+// the TRAINER'S OWN kv as caliq-idnums {next, map:{key -> n}} — and the trainer
+// home renders THAT, while All-clients renders refCode(). So a trainer reads "#6"
+// off their home screen, says "#6", and the AI only knew "KEM2". Read the map so
+// both forms resolve. Caller's own kv, so no new access surface (same as
+// caliq-index). Returns {} when the trainer has never loaded their home.
+async function idNumMap(db, callerUid) {
+  const doc = await kvGetJSON(db, callerUid, "caliq-idnums");
+  return (doc && doc.map) || {};
+}
+
 // The plan's custom exercises, as id sets (by type) + an id→label map, so the AI
 // can build programs that include them (valid ids) and label them on the card.
 function customExerciseSets(data) {
@@ -1324,7 +1336,7 @@ function buildTools(role, opts = {}) {
         "Resolve ONE specific person by name to their id. Returns just {clientId, name} for matches — NO activity, NO stats, NO per-client lookups, so it's far cheaper than list_clients (which loads every client) and coach_summary (every client's full snapshot). ALWAYS use this when the user asks about a SINGLE named client, then use the returned clientId with the data tools. Reserve list_clients for 'list everyone' and coach_summary for across-all-clients questions.",
       input_schema: {
         type: "object",
-        properties: { query: { type: "string", description: "Part of the client's name (or email) to match, case-insensitive." } },
+        properties: { query: { type: "string", description: "Part of the client's name or email (case-insensitive), OR their short code — either the 4-character ref like \"#KEM2\" or the small number shown on the trainer's home screen like \"#6\". An exact code match wins over a name match." } },
         required: ["query"],
       },
     });
@@ -1415,11 +1427,13 @@ async function runTool(name, input, ctx) {
   if (name === "list_local_plans") {
     if (!ctx.isTrainer) return { error: "Only trainers have local plan files." };
     const index = (await kvGetJSON(db, ctx.callerUid, "caliq-index")) || [];
+    const nums = await idNumMap(db, ctx.callerUid);
     const days = (ts) => ts ? Math.floor((Date.now() - ts) / 86400000) : null;
     return {
       plans: index.filter((p) => p && p.id).map((p) => ({
         localPlanId: p.id,
         ref: refCode(p.id),
+        num: nums[p.id] || null,   // the "#6" shown on the trainer's home
         name: p.customName || p.name || "(unnamed)",
         isSimulation: !!p.isSimulation,
         importedFromTrainerize: !!p.trainerizeId,
@@ -1469,6 +1483,7 @@ async function runTool(name, input, ctx) {
     // and write those clients — this just makes them DISCOVERABLE, which was
     // the missing half (S116).
     const trainerIds = [ctx.callerUid];
+    const nums = await idNumMap(db, ctx.callerUid);
     const viaName = {};
     if (input.includeTeam) {
       const subs = await db.collection("users")
@@ -1515,6 +1530,7 @@ async function runTool(name, input, ctx) {
       out.push({
         clientId: doc.id,
         ref: refCode(doc.id),
+        num: nums[doc.id] || null,   // the "#6" shown on the trainer's home
         name: p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Client",
         lastLogDate: last,
         daysSinceLastLog: daysSince,
@@ -1541,16 +1557,26 @@ async function runTool(name, input, ctx) {
     // Let the user reference a client by their SHORT ID code too (e.g. "#7K2M"),
     // not just the name — strip any leading "#" and compare case-insensitively.
     const qCode = q.replace(/[^a-z0-9]/g, "").toUpperCase();
-    const matches = [];
+    // A bare "#6" is the home screen's permanent number, not a refCode. Parse it
+    // tolerantly — "#6", "6", "client #6", "# 6" all mean the same thing.
+    const numMatch = /(?:^|[^0-9a-z])#\s*(\d{1,4})(?![0-9a-z])/.exec(q) || (/^\s*#?\s*(\d{1,4})\s*$/.exec(q));
+    const qNum = numMatch ? Number(numMatch[1]) : null;
+    const nums = await idNumMap(db, ctx.callerUid);
+    // An EXACT code hit must win. Otherwise a bare "6" also substring-matches
+    // every name/email containing a 6 and buries the one person actually meant.
+    const exact = [], fuzzy = [];
     for (const doc of snap.docs) {
       const p = doc.data();
       const nm = p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Client";
       const code = refCode(doc.id);
-      if (nm.toLowerCase().includes(q) || String(p.email || "").toLowerCase().includes(q) || (qCode && code === qCode)) {
-        matches.push({ clientId: doc.id, ref: code, name: nm, email: p.email || null });
-        if (matches.length >= 10) break;
+      const num = nums[doc.id] || null;
+      const row = { clientId: doc.id, ref: code, num, name: nm, email: p.email || null };
+      if ((qCode && code === qCode) || (qNum != null && num === qNum)) { exact.push(row); continue; }
+      if (nm.toLowerCase().includes(q) || String(p.email || "").toLowerCase().includes(q)) {
+        if (fuzzy.length < 10) fuzzy.push(row);
       }
     }
+    const matches = exact.length ? exact : fuzzy;
     // Same-name disambiguation (Kevin, S110e): when 2+ people match, enrich each
     // with current weight + last-log date so they can be told apart by a HUMAN
     // detail instead of the raw id. Only pay for these per-match reads when it's
@@ -1588,6 +1614,7 @@ async function runTool(name, input, ctx) {
     const start = new Date(endMs - (win - 1) * 86400000).toISOString().slice(0, 10);
     const round1 = (v) => Math.round(v * 10) / 10;
     const snap = await db.collection("users").where("assignedTrainerId", "==", ctx.callerUid).get();
+    const nums = await idNumMap(db, ctx.callerUid);
     const clients = [];
     const counts = { inactive: 0, stalled: 0, off_track: 0, on_track: 0, logging: 0 };
     const MAX = 60;
@@ -1640,7 +1667,7 @@ async function runTool(name, input, ctx) {
       else status = "logging";
       counts[status]++;
       clients.push({
-        clientId: uidC, name: cname, status,
+        clientId: uidC, ref: refCode(uidC), num: nums[uidC] || null, name: cname, status,
         daysLoggedInWindow: daysLogged, lastLogDate: lastLog, daysSinceLastLog: daysSince,
         avgCalories: calDays ? Math.round(calSum / calDays) : null, calorieTarget: targets.calorieTarget,
         avgProtein: protDays ? Math.round(protSum / protDays) : null, proteinTarget: targets.proteinTarget,
