@@ -81,10 +81,13 @@ elements, worst 1.12:1** — neon green text on a white card.
   Two "bugs" this session were that artifact. Re-read in a later call, or screenshot.
 
 ### ⏭️ Next up
-- **One loose thread:** the DailyDashboard's expanded macro rows (protein/carbs/fat) were
-  verified by COMPUTING contrast against the known surfaces, not clicked — that tile uses a
-  delegated handler on a nested div that won't open programmatically. Values are certain, the
-  render isn't eyeballed. Check it when next on that screen in light mode.
+- ~~loose thread: the expanded macro rows were computed, not clicked~~ **CLOSED — verified on
+  the real rendered surface in light:** Protein **6.80:1** (`--pink` #b0184f, was 2.11–2.68) ·
+  Carbs **5.93:1** (`--yellow` #a34a08, was 1.19–1.50) · Fat **5.93:1** (`--blue` #0369a1, was
+  1.58–2.00), 0 failures across the whole panel, hue identity intact. **How to open that tile:**
+  a bare `.click()` does nothing — it needs a full pointer sequence
+  (`pointerdown/mousedown/pointerup/mouseup/click`) dispatched at the element centre. Same for
+  the "Macros & Micros" disclosure inside it. Worth reusing for any `dash-cta` tile.
 - Connector Phase 4: directory submission (needs a Claude Team/Enterprise org), ChatGPT.
 - Legal: waiver, session-billing ToS, AI-connector privacy — all awaiting counsel.
 
