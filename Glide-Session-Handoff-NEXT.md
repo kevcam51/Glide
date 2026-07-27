@@ -1,5 +1,68 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S129–S133 (Jul 26–27): #ID fix · privacy published · AI opt-out ENFORCED · ChatGPT works
+_All pushed (@ `9bb56db`), functions deployed, tree clean. Frontend + functions; no rules change._
+
+### ✅ ChatGPT CONNECTS — Phase 4a is done, and it cost nothing
+Kevin connected `https://glidna.com/mcp` from ChatGPT and **verified with a real tool call**
+(asked about one of his clients, got real data back — exercising `read` AND `trainer` scope
+through `resolveTargetUid`, not just a handshake). One spec-compliant endpoint now serves Claude
+and ChatGPT with no per-platform integration.
+- **⚠️ DCR WORKS WITH CHATGPT — do NOT rebuild it as CIMD.** Reaching and clearing our consent
+  screen proves discovery → dynamic client registration → PKCE authorize → code exchange all
+  succeeded. Earlier notes (and my own advice) flagged CIMD as possibly required; it is not.
+  Anthropic recommends against DCR *for directory servers* — that is a listing concern only.
+- **ChatGPT steps are in the app** (S133): Settings → Security and login → **Developer mode**
+  (the step nobody finds), then Settings → **Plugins** → **+** → paste the URL *including* `/mcp`.
+  Plus/Pro can self-serve; Business/Enterprise admins enable it in workspace settings.
+- **Directory listing SKIPPED by Kevin's decision** — he sends invite links instead, so no Team
+  org and no $50/mo. The connector works fully without a listing; the directory is discovery only.
+  Consequently the DCR→CIMD switch and a reviewer test account are NOT needed.
+
+### 🔒 S131 — a client can switch AI off, and it is actually enforced
+Resolves the trainer→client consent gap S130 disclosed. Profile field **`aiOptOut`**, writable
+only by the account holder (firestore.rules already restricts user-doc writes to owner/admin, so
+a trainer can never re-enable it for their own client — **no rules change was needed**).
+- Enforced in **`resolveTargetUid`** — the chokepoint every client-targeting tool passes through,
+  in-app assistant and MCP connector alike — for every caller and all four grant paths.
+- **The roster tools BYPASS that chokepoint.** `list_clients` / `coach_summary` walk the roster
+  directly and would have leaked an opted-out client's weight and adherence anyway. They now skip
+  them BEFORE reading any plan or log data, listing the person by name with no data.
+- UI: side-menu row (renders for every role — ClientHome would never show it to Kevin).
+- Verified live: with AI off, "what is my current weight and calorie target?" →
+  *"AI features are currently switched off for your account."*
+- **Still open for counsel:** whether a default-ON setting is enough or signup needs an
+  affirmative checkbox; existing clients were defaulted ON with the policy update as notice.
+
+### 📄 S130 — the AI-connector privacy language is PUBLISHED (counsel to follow)
+Kevin's call: ship the accurate disclosure now, review later — the connector was already live and
+processing data with nothing describing it, so publishing REDUCED exposure. `public/privacy.html`
+§1/§3/§5 updated, "Last updated" Jul 26 2026. `docs/PRIVACY-AI-CONNECTOR-DRAFT.md` remains the
+attorney brief; publishing did NOT resolve its §5 questions.
+
+### 🔢 S129 — the AI understands the `#numbers` on the trainer's home
+Two code systems both rendered `#`: sequential `idNums` (home screen) vs `refCode` (All-clients +
+the AI). Casey was `#6` on screen but `KEM2` to the AI. `idNumMap()` reads `caliq-idnums` (caller's
+own kv) and `num` now rides alongside `ref`. Verified: "#6" → Casey; "#2" → Prospect Pat (a local
+plan). Exact code matches beat fuzzy name/email matching — a bare "6" used to substring-match every
+client with a 6 in their email and could push the real one past the 10-match cap.
+
+### 🎨 S128 / S132 — light theme + connector annotations
+Light theme: **30 AA failures → 0** in both themes; hardcoded literals 47 → 4. The trap:
+`rawColor` maps translating tokens BACK to dark hex (SVG attributes can't parse `var()`) — use
+**`cssVarColor()`**. Two token bugs found by measuring: `--yellow` 4.36:1 on `--s2` → `#a34a08`;
+`--blue` 3.23–4.1:1 → `#0369a1`. S132 completed `destructiveHint` (3 → 8 of 19 write tools).
+
+### ⏭️ Next up
+- **Phase 4b — reverse-direction MCP** (Glidna's AI consuming Whoop/Oura/calendar servers).
+  NOT started, and **needs Kevin to name the source**: Garmin already arrives via Trainerize
+  (S88c), so the obvious first candidate is partly solved. Don't guess at Whoop.
+- Exercise demo videos — **Kevin wants real video, and has his own YouTube library**. That beats
+  the Free Exercise DB photo pairs: his own content, no licensing, no storage cost. Parked.
+  ⚠️ Whatever the source, it is an ENRICHMENT layer — our 184 exercises carry the MET values that
+  drive the whole burn engine, and no third-party DB ships METs.
+- Legal: waiver, session-billing ToS, and the connector-privacy review — all awaiting counsel.
+
 ## ⚡⚡⚡ S127–S128 (Jul 26): S117–S125 VERIFIED LIVE · trainer-home roster bug · light-theme sweep
 _Both pushed to `origin/main` (@ `edf133f`), tree clean, **verified live on glidna.com by bundle
 CONTENT** (see the deploy gotcha below). Frontend only — no functions, no rules, no data model._
