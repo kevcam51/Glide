@@ -58,6 +58,65 @@ pencil with `titleLocked` so the auto-title can't overwrite it.
 - Phase 4b (reverse MCP) — parked: Trainerize already covers Apple Health/Fitbit/MFP/Withings/
   Garmin, and Whoop/Oura ship no MCP server today. Revisit when one exists or a native app lands.
 
+## ⚡⚡ S135–S139 (Jul 27): macro revert · AI accuracy · tracker source · CLIENT DATA BLEED
+_All pushed (@ `324c6d4`), functions deployed, tree clean._
+
+### 🔴 S139 — one client's data appeared under another, AND could be saved there
+Kevin reported it as a cosmetic glitch. It was not. **If you logged for client B
+before B's data finished loading, A's entire meal array and totals were written into
+B's account** (`onAddMeal` spreads the current `dailyLog`; `persistLog` routes by the
+current `activeRemoteUid`). Same for `appendHistory` → B's activity feed.
+- Cause: `openClientPlan` set IDENTITY synchronously (`data`, `activeRemoteUid`,
+  `activeId`) but left `dailyLog`, `history`/`historyRef`, `recentFoods`/
+  `recentFoodsRef`, `streak`, `weekSummary`, `recentWearable` at the PREVIOUS
+  client's values until an async read replaced them. The name renders from `data`,
+  the numbers from those — so B's first painted frame was guaranteed to be B's name
+  over A's data. Same shape as S127 (unloaded state rendered as current).
+- Why it stuck instead of flashing: the loader effect had no staleness guard, so a
+  slow loader for A could resolve after B's. streak/weekSummary/recentFoods/
+  recentWearable have NO onSnapshot to self-correct → wrong until reload.
+- Fixes: `resetPlanScopedState()` first in openClientPlan **and selectProfile and
+  createProfile** (imported Trainerize clients ARE local profiles); an `alive` guard
+  on every write in the loader — placed before the REF writes too, not just the
+  setStates — plus a cleanup that cancels on switch; `goBack` now clears
+  activeRemoteUid/activeId instead of leaving the old client active behind the roster.
+- ⚠️ **Possible bad data already persisted.** Any client logged-for immediately after
+  a switch may hold someone else's meals. Not auto-detectable — if Kevin reports an
+  odd meal, this is why.
+
+### S137 / S138 — the tracker card (two bugs, the second exposed by the first)
+- **S137:** `syncClientHealth` skipped days where active+steps were both 0, so a genuine
+  zero day wrote nothing and the dashboard kept showing the last day that HAD data —
+  yesterday's burn presented as today's, which no amount of re-syncing could clear
+  (Kevin hit exactly this). Now writes any day the tracker REPORTED, including 0, via
+  a `reported` flag. Also fixed: days with real resting energy but no steps were
+  discarded because `resting` was never in the test.
+- **S138:** with zero days now real, Kevin's card went blank and relabelled itself
+  "Apple Health". Older bug: one bucket per date with `w.source = e.source`
+  last-write-wins, and Trainerize returns entries from EVERY connected tracker — so an
+  empty Apple Health entry overwrote Garmin's numbers. Now buckets per date PER SOURCE
+  and picks the most active (active → steps → resting), compared per day so a day
+  Garmin missed can still be covered. Kevin confirmed the sync works after this.
+- **Lesson for future tracker work:** "which source" and "is there data" are separate
+  questions. Collapsing them caused both bugs.
+
+### S135 — macro targets reverting, and the AI reporting work it didn't do
+- **Macro revert:** `applySnapshotAndSyncs` (trainerize.js) shallow-merged the snapshot
+  OVER saved data and `mapSnapshot` re-emitted `macroTargets` every run, so the 30-min
+  auto-sync re-stamped every edit. The edit always saved; it was overwritten later.
+  Fix: `macroTargetsEditedAt` provenance stamp (written by the UI **and** the AI's
+  `set_targets`) honoured in the merge. Narrow by design — weight/goal/activity/height
+  stay Trainerize-source-of-truth (S86d). Plans edited BEFORE this revert once more.
+- **AI claiming false success — three defects:** (1) tool-round exhaustion discarded
+  pending calls and returned the model's own preamble as the answer; (2) failed tool
+  results carried no `is_error`, so a failure looked like a success; (3) **a trainer
+  omitting `clientId` writes to their OWN account** and gets ok — almost certainly the
+  real cause of "it said it logged but it didn't". Prompt now demands clientId on every
+  on-behalf write and to name the person when confirming.
+- **Wrong date:** the prompt said "don't assume today", and with only ~10 messages sent
+  but threads persisting across days a resumed chat re-anchored on yesterday. Now
+  defaults to today and OMITS the date unless the user names a day. Weekday injected.
+
 ## ⏭️ NEXT SESSION — START HERE: make every surface DATE-AWARE (Kevin, S138 close)
 _Nothing started, working tree clean. This is one coherent theme, not five asks._
 
