@@ -23,7 +23,7 @@
 <main>
   <div class="brand"><b>GLI</b>DNA</div>
   <h1>Privacy Policy</h1>
-  <div class="updated">Last updated: July 9, 2026</div>
+  <div class="updated">Last updated: July 26, 2026</div>
 
   <p>This policy explains what Glidna (operated by Smooth Training — "we," "us") collects, how
   it's used, and the choices you have. The short version: <strong>your fitness data is yours,
@@ -42,6 +42,10 @@
       card number, only your subscription status.</li>
     <li><strong>Basic technical data:</strong> device/browser type and app activity needed to
       keep Glidna working and secure.</li>
+    <li><strong>Connector activity:</strong> if you connect an outside AI assistant (see §3),
+      we record a per-day count of its requests to enforce fair-use limits, plus the standard
+      server logs above. <strong>We do not store the conversations you have with your
+      assistant.</strong></li>
   </ul>
 
   <h2>2. How we use it</h2>
@@ -62,8 +66,23 @@
   your fitness data — plans, logs, weigh-ins — and to message you. This is the point of the
   platform, but it's always your choice: unlinking (Home → Leave trainer) ends their access to
   future data. No other Glidna user can ever see your data.</p>
+  <p class="card"><strong>AI assistants you connect yourself.</strong> You can connect Glidna to
+  an outside AI assistant (such as Claude) so it can work with your Glidna data on your behalf.
+  This only happens if you start the connection and approve it on our permission screen, and you
+  choose what it may do — reading your data, and (where offered) logging entries for you.</p>
+  <p>When you connect an assistant, the information it requests is sent to <strong>that</strong>
+  provider, and from that point it is handled under <strong>your agreement with them and their
+  privacy policy, not ours</strong> — including how long they keep it and whether they use it to
+  improve their services. We cannot control or delete data once it is in your assistant's hands.
+  Please review your AI provider's privacy terms before connecting.</p>
+  <p>A connected assistant can never see more than you can. It uses the same permission rules as
+  the app: your own data, and — if you are a trainer — the clients already linked to your account.
+  It cannot reach anyone else's information. You can disconnect at any time in your AI assistant's
+  settings; disconnecting stops all future access immediately, but it does not retrieve data your
+  assistant already received.</p>
   <p><strong>Service providers</strong> that make Glidna work process data on our behalf:
-  Google Firebase (database, sign-in), Anthropic (AI responses), Groq/OpenAI (voice
+  Google Firebase (database, sign-in), Anthropic (AI responses generated inside Glidna),
+  Groq/OpenAI (voice
   transcription), Stripe (payments), Resend (invitation email), and Vercel (hosting). Each
   receives only what its job requires.</p>
   <p><strong>We do not sell your personal data</strong>, and we don't share it with advertisers.
@@ -82,6 +101,9 @@
       complete it within 30 days (an in-app deletion flow is planned).</li>
     <li><strong>Notifications:</strong> every notification type is a toggle in the app.</li>
     <li><strong>Unlink:</strong> leave your trainer at any time to end their access.</li>
+    <li><strong>Disconnecting an AI assistant:</strong> remove Glidna from your AI assistant's
+      connector settings. You can also ask us to revoke a connection at the address in §7 and
+      we'll invalidate the credentials so the assistant loses access.</li>
   </ul>
 
   <h2>6. Retention, children, changes</h2>

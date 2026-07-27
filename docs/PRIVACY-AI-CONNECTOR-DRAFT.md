@@ -1,4 +1,16 @@
-# Privacy Policy — AI Connector language (DRAFT for attorney review)
+# Privacy Policy — AI Connector language
+
+> **STATUS (S130, Jul 26 2026): §3a/3b/3c/3d are PUBLISHED LIVE** in
+> `public/privacy.html` (Last updated bumped to Jul 26, 2026). Kevin's decision: ship the
+> accurate disclosure now, counsel reviews after. Rationale: the connector is already live and
+> processing data, so having no policy describing it was the larger exposure — publishing an
+> accurate description is a net risk REDUCTION, not a corner cut.
+>
+> **This document remains the attorney brief.** §5's open questions are NOT resolved by
+> publishing — most importantly **Q3 (trainer→client)**: when a trainer reads client data through
+> their OWN external AI, the clients have consented to trainer access but not to that specific
+> onward flow. Publishing discloses it; it does not resolve it. Q1 (affirmative checkbox vs
+> links) is a cheap code change if counsel wants it.
 
 > **Status: DRAFT, not published.** Written Session 114 (Jul 2026) for Kevin to take to counsel
 > alongside the waiver and session-billing terms already in review
@@ -132,9 +144,9 @@ checkbox is a small change — see Q1.
 6. **Directory listing.** Anthropic's connector-directory submission requires a public privacy
    policy that reviewers assess. Anything to add specifically for that review?
 
-## 6. Implementation checklist (after counsel signs off)
+## 6. Implementation checklist
 
-- [ ] Merge §3a/3b/3c/3d into `public/privacy.html`; bump its "Last updated" date.
+- [x] **DONE (S130)** Merge §3a/3b/3c/3d into `public/privacy.html`; bump its "Last updated" date.
 - [ ] Decide checkbox vs links on the consent screen (Q1) — code change if checkbox.
 - [ ] Decide + implement the trainer/client notice question (Q3).
 - [ ] Decide + implement minor-account gating (Q4).
