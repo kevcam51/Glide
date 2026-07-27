@@ -20202,9 +20202,27 @@ function ConnectAIPanel({ onClose }) {
               <li>Paste the link above and confirm.</li>
               <li>Claude sends you back here to sign in and approve — that's it.</li>
             </ol>
+          </div>
+
+          {/* ChatGPT's flow is different enough to need its own steps — the
+              Developer-mode switch is the part nobody finds on their own, and
+              the old "Connectors" directory became "Plugins" in Jul 2026. */}
+          <div className={card}>
+            <div className="text-sm font-semibold mb-2">How to connect (ChatGPT)</div>
+            <ol className="text-sm text-muted leading-relaxed flex flex-col gap-1.5" style={{ paddingLeft: "1.1rem", listStyle: "decimal" }}>
+              <li>In ChatGPT, open <b className="text-fg">Settings → Security and login</b> and turn on <b className="text-fg">Developer mode</b>. (On a Business or Enterprise workspace an admin enables this in workspace settings instead.)</li>
+              <li>Go to <b className="text-fg">Settings → Plugins</b> and choose <b className="text-fg">+</b> to add a server.</li>
+              <li>Paste the link above — include the <b className="text-fg">/mcp</b> at the end.</li>
+              <li>Sign in here and approve, and your tools appear in ChatGPT.</li>
+            </ol>
             <div className="mt-2 text-[11px] text-muted leading-relaxed">
-              Works the same way in other assistants that support connectors (MCP).
+              Developer mode is the step people miss — without it there's no option to add a
+              server at all.
             </div>
+          </div>
+
+          <div className="text-[11px] text-muted leading-relaxed px-1">
+            Works the same way in any other assistant that supports connectors (MCP).
           </div>
 
           <div className={card}>
