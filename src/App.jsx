@@ -10824,6 +10824,13 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name={burnFromTracker?"watch":"flame"} size={23} color="var(--orange)" /></div>
           <div className="dash-cta-val">{burnShown.toLocaleString()}</div>
           <div className="dash-cta-lbl">Workout Burn{burnFromTracker?" · tracker":""}</div>
+          {/* Say what this number IS (Kevin). A scheduled-workout figure is a MET
+              estimate from bodyweight and duration, not a measurement — and a
+              tracker reading is the device's own estimate. Naming that on the tile
+              is more honest than burying it in a panel nobody opens. */}
+          <div style={{fontSize:".54rem",letterSpacing:".03em",color:"var(--muted)",marginTop:2}}>
+            {burnFromTracker ? "from your tracker" : "estimate"}
+          </div>
         </div>}
         {!tileHidden("water") && <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="water"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="water"?null:"water")}>
           <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="water" size={23} color="var(--blue)" /></div>
@@ -11452,6 +11459,17 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           )}
           {expandedStat === "burn" && (
             <>
+              {/* The fuller version, where someone who taps in deserves the real
+                  caveat rather than a marketing number. */}
+              <div style={{fontSize:".72rem",lineHeight:1.5,color:"var(--muted)",
+                background:"var(--s2)",border:"1px solid var(--border)",borderRadius:8,
+                padding:"8px 10px",marginBottom:10}}>
+                <b style={{color:"var(--text)"}}>These are estimates.</b> Scheduled workouts are
+                calculated from your bodyweight, the activity and how long you did it — not measured.
+                Real burn varies with intensity, fitness and conditions. A connected tracker is
+                usually closer, but it&rsquo;s still that device&rsquo;s own estimate. Use the trend
+                rather than any single day&rsquo;s number.
+              </div>
               <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"6px",color:"var(--orange)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="flame" size={16} color="var(--orange)" />Workout Burn Breakdown</div>
               {burnFromTracker && (
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",marginBottom:"8px",borderRadius:"8px",background:"rgba(8,220,224,.06)",border:"1px solid var(--border)"}}>
