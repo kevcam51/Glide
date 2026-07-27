@@ -1,5 +1,63 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S135–S136 (Jul 27): macro revert fixed · AI stops claiming work it didn't do · chat focus
+_Pushed (@ `bfbb02c`), **all functions DEPLOYED** — this supersedes the "NOT DEPLOYED" warning in
+the S136 commit message, which was written before Kevin re-authed._
+
+### 🐛 Macro targets reverted every 30 minutes (S135)
+`applySnapshotAndSyncs` (trainerize.js:388) shallow-merged the Trainerize snapshot OVER saved plan
+data, and `mapSnapshot` re-emitted `macroTargets` from Trainerize's `nutritionGoal` on EVERY run —
+so `trainerizeAutoSync` re-stamped whatever the user set. The edit always saved; it was overwritten
+minutes later, which is why it read as a "revert". The old `!d.macroTargets` guard only deduped
+within the snapshot being built and never consulted stored data.
+**Fix:** a `macroTargetsEditedAt` provenance stamp written by BOTH the UI path and the AI's
+`set_targets`, honoured in the merge. **Deliberately narrow** — weight/goal/activity/height stay
+Trainerize-source-of-truth (S86d) because the coach dashboards depend on it.
+⚠️ Plans edited BEFORE this shipped carry no stamp and revert once more until re-saved; a backfill
+can't distinguish a deliberate edit from an old sync value, so don't attempt one.
+
+### 🐛 "It said it logged but it didn't" — THREE separate causes (S135)
+1. **Silent wrong-account write — the likely main one.** `resolveTargetUid` (aitools.js:1396)
+   returns the CALLER's uid when a trainer omits `clientId`, so "log Casey's breakfast" saved into
+   the TRAINER's own diary and returned ok. Kevin would check the client, see nothing, and conclude
+   it lied — it had logged, to the wrong person. Prompt now requires `clientId` on every on-behalf
+   write, to ask when unsure, and to NAME the person when confirming.
+2. **Tool-round exhaustion.** The loop exits at `MAX_TOOL_ROUNDS` while the model still wants tools;
+   those calls were DISCARDED and its own preamble ("logging all 8 now…") was returned as the
+   answer. Both callable and stream paths now say they ran out of steps.
+3. **Failed tools looked like successes** — there was no `is_error` anywhere in functions/. Now set.
+
+### 🐛 Wrong DATE (S135/S136) — two independent causes
+- The prompt literally said **"don't assume today"**, inviting a date the model had to infer; and
+  only the last ~10 messages are sent while threads persist across days, so a resumed chat
+  re-anchored on yesterday. Now: default to today, OMIT the date arg unless the user names another
+  day, never infer one from earlier messages. Weekday injected (changes daily like the date beside
+  it, so no extra cache churn). All 8 tool date descriptions strengthened — that string is what the
+  model reads at call time and it sits in the already-cached prefix, so it's free.
+- **The MCP connector passed NO server `instructions`**, so an external Claude/ChatGPT never learned
+  the user's today and filled dates from its own clock — reliably a day out. `buildServer` now
+  states today + weekday, that omitting the date means today, and that writes need a `clientId`.
+  Matters more now that Kevin actually uses ChatGPT.
+
+### ✅ Chat focus + rename (S136) — frontend only
+The activeTarget subject was already relayed end-to-end; it was just EPHEMERAL (`resetThreadUi`
+nulls it on every switch/new/delete and on reload), so returning to a chat re-ran
+`find_client`/`list_clients`. Chats now carry an optional `pin` (no migration — `writeIndex`
+serialises whatever is in `convos`); `switchChat` re-arms the ref AFTER `resetThreadUi`; the first
+resolved subject **auto-pins**, which is where the token saving comes from. Rename via the drawer
+pencil with `titleLocked` so the auto-title can't overwrite it.
+
+### ⏭️ Next up
+- **App requests via AI** — Kevin's idea, NOT started: user asks the AI for a feature, it offers to
+  send it, admin reviews them in an "App requests" screen. One new tool + an admin surface.
+- **YouTube exercise videos** — Kevin has his OWN library, which beats the Free Exercise DB photo
+  pairs (own content, no licensing, no storage). ⚠️ Still an ENRICHMENT layer: our 184 exercises
+  carry the METs that drive the burn engine and no third-party DB ships them.
+- **Verify the two fixes live:** edit a macro target then force a Trainerize sync and confirm it
+  holds; ask the AI to log for a client and check it NAMES the person in its confirmation.
+- Phase 4b (reverse MCP) — parked: Trainerize already covers Apple Health/Fitbit/MFP/Withings/
+  Garmin, and Whoop/Oura ship no MCP server today. Revisit when one exists or a native app lands.
+
 ## ⚡⚡⚡ S129–S133 (Jul 26–27): #ID fix · privacy published · AI opt-out ENFORCED · ChatGPT works
 _All pushed (@ `9bb56db`), functions deployed, tree clean. Frontend + functions; no rules change._
 
