@@ -14210,11 +14210,22 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         readRequestsFor(c.uid, getForUser),
       ]);
       const cal = data ? computeClientCalories(data) : null;
+      // Show the LATEST WEIGH-IN, not data.weightLbs. weightLbs only advances
+      // when the entry is the newest (so back-dating can't rewrite the present),
+      // and the Trainerize sync can hold it back — so the card could sit on an
+      // old number while a newer weigh-in existed. The check-ins ARE the record
+      // of what was actually entered, so read the card from those.
+      const latestWeighIn = data && Array.isArray(data.checkIns)
+        ? data.checkIns
+            .filter((ci) => ci && ci.date && ci.weight != null && !ci.isFuturePlan)
+            .reduce((a, ci) => (!a || ci.date > a.date ? ci : a), null)
+        : null;
       const nm = data && (data.firstName || data.lastName)
         ? `${data.firstName || ""} ${data.lastName || ""}`.trim()
         : (c.displayName || c.email || "Client");
       return { uid: c.uid, name: nm, hasPlan: !!data,
-        weight: data ? data.weightLbs : "", goal: data ? data.goalWeight : "",
+        weight: latestWeighIn ? latestWeighIn.weight : (data ? data.weightLbs : ""),
+        goal: data ? data.goalWeight : "",
         target: cal ? cal.target : null, lastLogDate, requests,
         plans: manifest.plans, activePlanId: activeId };
     }));
