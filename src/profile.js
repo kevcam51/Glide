@@ -128,6 +128,22 @@ export async function setAiFoodDbEnabled(enabled, uid = auth.currentUser && auth
   await updateDoc(profileRef(uid), { aiFoodDbEnabled: !!enabled });
 }
 
+// AI processing consent. Default ON — the privacy policy discloses AI features,
+// and this is the switch that makes refusing them REAL rather than just stated.
+// Turning it off blocks the in-app assistant AND any AI a trainer has connected
+// to their own account from touching this person's data (enforced server-side in
+// functions/aitools.js resolveTargetUid + the roster tools, not just hidden in
+// the UI). Lives on the profile doc because the server reads it there.
+// firestore.rules already restricts user-doc writes to the owner (or admin), so
+// a trainer can never switch their own client's AI back on.
+export function aiEnabledFor(profile) {
+  return !profile || profile.aiOptOut !== true;
+}
+export async function setAiOptOut(optedOut, uid = auth.currentUser && auth.currentUser.uid) {
+  if (!uid) return;
+  await updateDoc(profileRef(uid), { aiOptOut: !!optedOut });
+}
+
 // True if the signed-in user has finished signup (has a profile).
 export async function hasProfile(uid = auth.currentUser && auth.currentUser.uid) {
   return (await getProfile(uid)) != null;

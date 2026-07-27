@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium } from "./profile.js";
+import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium, setAiOptOut } from "./profile.js";
 import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } from "./clientData.js";
 import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads } from "./messaging.js";
 import { pushStatus, enablePush, disablePush } from "./push.js";
@@ -20409,7 +20409,7 @@ function TeamPanel({ onClose }) {
   );
 }
 
-function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onEarnings, onNameSaved, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme }) {
+function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
@@ -20780,6 +20780,27 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
           </div>
         )}
 
+        {/* AI processing consent (S131). The privacy policy tells people their
+            data can go to an AI — including an assistant their TRAINER connects
+            to their own account, where it's handled under that provider's terms
+            rather than ours. This is the switch that makes saying "no" real: it
+            is enforced server-side (aitools.js resolveTargetUid + the roster
+            tools), not merely hidden here. Only the account holder can change
+            it — firestore.rules lets nobody else write a user's profile doc. */}
+        <button style={item} onClick={() => onSetAiOptOut && onSetAiOptOut(!aiOptOut)}>
+          <Icon name="sparkle" size={19} color="var(--accent)" />
+          <span>Use my data for AI features</span>
+          <span style={{ marginLeft: "auto", fontWeight: 800, fontSize: ".78rem",
+            color: aiOptOut ? "var(--muted)" : "var(--green,#2fe0a8)" }}>
+            {aiOptOut ? "OFF" : "ON"}
+          </span>
+        </button>
+        <div style={{ fontSize: ".72rem", color: "var(--muted)", padding: "0 4px 6px", lineHeight: 1.5 }}>
+          {aiOptOut
+            ? "AI is off for your account. Glidna's assistant can't read or change anything in it, and no AI your trainer has connected can reach your data. Everything else — logging, plans, messaging — works normally."
+            : <>Lets Glidna's assistant work with your data, and lets an AI assistant your trainer connects read it on their behalf. Turn this off and no AI can touch your account. See the <a href="/privacy.html" target="_blank" rel="noopener" style={{ color: "var(--accent)" }}>Privacy Policy</a>.</>}
+        </div>
+
         <div style={{ flex: 1, minHeight: 12 }} />
         <button style={{ ...item, color: "var(--red)", border: "1px solid color-mix(in srgb,var(--red) 40%,transparent)", background: "color-mix(in srgb,var(--red) 8%,transparent)", justifyContent: "center", marginTop: 8 }} onClick={() => signOut(auth)}><Icon name="signout" size={19} /> <span>Sign out</span></button>
         <div style={{ display: "flex", justifyContent: "center", gap: 14, marginTop: 10 }}>
@@ -20942,6 +20963,7 @@ export default function App() {
           setMePremium(isPremium(prof));
           setMeSubStatus(prof.subscriptionStatus || null);
           setMeBillingHold(prof.sessionBillingHold || null); // declined session charge → the home banner (S102b)
+          setMeAiOptOut(prof.aiOptOut === true);               // AI consent (S131) — default ON
         }
       } catch(e) {}
       try {
@@ -21048,6 +21070,14 @@ export default function App() {
   // stored in caliq-security-prefs {idleSignOut} — someone on a personal phone
   // can turn it off, and with Face ID login the re-entry is one glance anyway.
   const [idleSignOut, setIdleSignOut] = useState(true);
+  // AI consent lives on the PROFILE doc (users/{uid}.aiOptOut) because the
+  // server reads it there to enforce the opt-out; kv would be invisible to it.
+  const [meAiOptOut, setMeAiOptOut] = useState(false);
+  const onSetAiOptOut = async (optOut) => {
+    setMeAiOptOut(optOut);                       // optimistic
+    try { await setAiOptOut(optOut); }
+    catch (e) { console.warn("aiOptOut save failed", e); setMeAiOptOut(!optOut); }
+  };
   useEffect(() => {
     (async () => {
       try {
@@ -22142,6 +22172,7 @@ export default function App() {
           {cardNotice}
         </div>, document.body)}
       <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} role={role} meName={meName} meEmail={meEmail}
+        aiOptOut={meAiOptOut} onSetAiOptOut={onSetAiOptOut}
         idleSignOut={idleSignOut} onSetIdleSignOut={onSetIdleSignOut}
         isTrainer={isTrainerHome} trial={meTrial} subActive={meSubStatus === "active"}
         themePref={themePref} onSetTheme={setTheme}

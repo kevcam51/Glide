@@ -378,6 +378,7 @@ exports.mcp = onRequest({ cors: false, timeoutSeconds: 300 }, async (req, res) =
     callerUid: uid,
     role,
     isTrainer,
+    aiOptOut: profile.aiOptOut === true,
     callerName,
     today: todayLocal(),
     nowTime: nowTimeLocal(),

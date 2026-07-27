@@ -303,7 +303,8 @@ async function setupChat(uid, activeTarget) {
     role, isTrainer, budget, usageRef, used, system,
     trialExpired: trialExpiredFor(profile),
     tools: buildTools(role),
-    toolCtx: { callerUid: uid, role, isTrainer, today: todayLocal(), nowTime: nowTimeLocal(), callerName },
+    toolCtx: { callerUid: uid, role, isTrainer, aiOptOut: profile.aiOptOut === true,
+      today: todayLocal(), nowTime: nowTimeLocal(), callerName },
   };
 }
 

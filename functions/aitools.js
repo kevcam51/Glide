@@ -1377,15 +1377,30 @@ function buildTools(role, opts = {}) {
 }
 
 // ── access resolution: returns a uid string, or { error } the model sees ─────
+// A client may switch AI off for their account entirely (profile field
+// `aiOptOut`, set only by the client themselves — firestore.rules lets nobody
+// but the owner/admin write a user doc, so a trainer can never opt their own
+// client back IN). This is the enforcement half of the privacy disclosure: the
+// policy tells clients they can refuse AI processing, and refusing has to
+// actually stop it. Checked HERE because every client-targeting tool funnels
+// through resolveTargetUid — the in-app assistant AND the MCP connector alike.
+const AI_OPTED_OUT_SELF = "AI features are switched off for this account. The account holder can turn them back on in Glidna: the \u2261 menu, \"Use my data for AI features\".";
+const AI_OPTED_OUT_CLIENT = "This client has switched AI off for their account, so their data can't be used by an AI assistant. You can still view and edit their plan normally inside Glidna. Only they can change this.";
+
 async function resolveTargetUid(db, input, ctx) {
+  // Checked for EVERY caller, not just clients: "AI is off for my account" has
+  // to mean no assistant touches this account's data at all, whoever they are.
+  if (ctx.aiOptOut) return { error: AI_OPTED_OUT_SELF };
   if (!ctx.isTrainer) return ctx.callerUid; // clients: always themselves
   const clientId = input && input.clientId;
   if (!clientId || clientId === ctx.callerUid) return ctx.callerUid;
   const prof = (await db.doc(`users/${clientId}`).get()).data();
   if (!prof) return { error: "No client found with that id." };
-  if (ctx.role === "admin") return clientId;
+  if (ctx.role === "admin") return prof.aiOptOut ? { error: AI_OPTED_OUT_CLIENT } : clientId;
   // Direct client, or a trainer directly under me.
-  if (prof.assignedTrainerId === ctx.callerUid || prof.headTrainerId === ctx.callerUid) return clientId;
+  if (prof.assignedTrainerId === ctx.callerUid || prof.headTrainerId === ctx.callerUid) {
+    return prof.aiOptOut ? { error: AI_OPTED_OUT_CLIENT } : clientId;
+  }
   // HEAD-OF-CHAIN (S116): a head trainer also reaches the clients of their
   // sub-trainers. This walks the SAME path firestore.rules isHeadOfTrainer()
   // uses — client → their assigned trainer → that trainer's headTrainerId —
@@ -1395,7 +1410,9 @@ async function resolveTargetUid(db, input, ctx) {
   if (prof.assignedTrainerId) {
     try {
       const up = (await db.doc(`users/${prof.assignedTrainerId}`).get()).data();
-      if (up && up.headTrainerId === ctx.callerUid) return clientId;
+      if (up && up.headTrainerId === ctx.callerUid) {
+        return prof.aiOptOut ? { error: AI_OPTED_OUT_CLIENT } : clientId;
+      }
     } catch (e) { /* fall through to the denial below */ }
   }
   return { error: "You don't have access to that client." };
@@ -1509,6 +1526,15 @@ async function runTool(name, input, ctx) {
     const out = [];
     for (const doc of snap.docs) {
       const p = doc.data();
+      // Check BEFORE touching their plan or logs — don't read data we're not
+      // allowed to use. Listed by name so the trainer knows they're still there.
+      if (p.aiOptOut) {
+        out.push({ clientId: doc.id, ref: refCode(doc.id), num: nums[doc.id] || null,
+          name: p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Client",
+          aiOptOut: true,
+          note: "AI is switched off for this client's account — no data available to an assistant." });
+        continue;
+      }
       const id = await activePlanId(db, doc.id);
       // Latest logged date for the client's active plan — ONE doc via a
       // descending limit(1) query (this used to download every daily-log doc
@@ -1570,7 +1596,8 @@ async function runTool(name, input, ctx) {
       const nm = p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Client";
       const code = refCode(doc.id);
       const num = nums[doc.id] || null;
-      const row = { clientId: doc.id, ref: code, num, name: nm, email: p.email || null };
+      const row = { clientId: doc.id, ref: code, num, name: nm, email: p.email || null,
+        ...(p.aiOptOut ? { aiOptOut: true, note: "AI is off for this client's account — their data can't be read by an assistant." } : {}) };
       if ((qCode && code === qCode) || (qNum != null && num === qNum)) { exact.push(row); continue; }
       if (nm.toLowerCase().includes(q) || String(p.email || "").toLowerCase().includes(q)) {
         if (fuzzy.length < 10) fuzzy.push(row);
@@ -1624,6 +1651,16 @@ async function runTool(name, input, ctx) {
       const uidC = docSnap.id;
       const p = docSnap.data();
       const cname = p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Client";
+      // Roster tools bypass resolveTargetUid, so the opt-out has to be honoured
+      // here too — otherwise a client who switched AI off still has their weight
+      // and adherence read out to their trainer's assistant. Listed by NAME (so
+      // the trainer isn't left wondering where they went) but with NO data.
+      if (p.aiOptOut) {
+        clients.push({ clientId: uidC, ref: refCode(uidC), num: nums[uidC] || null, name: cname,
+          status: "ai_opted_out", aiOptOut: true,
+          note: "This client has switched AI off for their account. Their data is not available to an AI assistant — view it in Glidna instead. Only they can change this." });
+        continue;
+      }
       const { id: planId, data } = await activePlanData(db, uidC);
       const targets = nutritionTargets(data);
       const prefix = `caliq-log-${planId}-`;
