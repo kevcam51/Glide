@@ -21034,8 +21034,14 @@ export default function App() {
 
   const goBack = () => {
     if (showDash && step === 5) {
-      // On Dashboard → go back to Profile Selector
+      // On Dashboard → go back to Profile Selector. Clear the open plan/client
+      // too: leaving activeRemoteUid pointing at the client we just left kept
+      // their listeners subscribed and their data live in state while the roster
+      // was on screen — which is what made the next client inherit it.
       setScreen("profiles");
+      setActiveRemoteUid(null);
+      setActiveId(null);
+      resetPlanScopedState();
     } else if (step <= 4) {
       // On a Step → go back to where we came from
       if (navFrom === "results") {
@@ -21296,6 +21302,7 @@ export default function App() {
   const setStepAndSave = (s) => { setStep(s); autoSave(data, s); };
 
   const selectProfile = async (id) => {
+    resetPlanScopedState();   // same hazard as openClientPlan — imported clients are local profiles
     let merged = {...EMPTY_DATA};
     let stp = 0;
     try {
@@ -21326,7 +21333,26 @@ export default function App() {
   // Trainer opens a LINKED client's plan; edits route back to the client's
   // account via autoSave. A client may have several plans — open the given
   // planId, or the active one from their manifest (default "self"). (Session 21)
+  // Everything below is scoped to WHOSE plan is open. Switching client (or local
+  // plan) used to change only the identity — `data`, activeRemoteUid, activeId —
+  // and leave these at the previous person's values until an async network read
+  // replaced them. That painted client B's name over client A's meals, ring,
+  // streak and activity feed, and (far worse) `onAddMeal` spreads the CURRENT
+  // dailyLog while persistLog routes by the CURRENT activeRemoteUid — so logging
+  // for B before the read landed wrote A's whole meal array into B's account.
+  // Clear first, load second: an empty dashboard for a moment is honest, stale
+  // data attributed to the wrong person is not.
+  const resetPlanScopedState = () => {
+    setDailyLog({ calories: 0, water: 0, weight: 0, protein: 0, carbs: 0, fat: 0 });
+    setStreak(0);
+    setHistory([]);      historyRef.current = [];
+    setRecentFoods([]);  recentFoodsRef.current = [];
+    setWeekSummary(null);
+    setRecentWearable(null);
+  };
+
   const openClientPlan = async (clientUid, planId) => {
+    resetPlanScopedState();   // BEFORE the awaits below, so nothing of the previous client survives
     let pid = planId;
     if (!pid) { const m = await readPlansManifest((k) => getForUser(clientUid, k)); pid = m.active; }
     try {
@@ -21407,6 +21433,7 @@ export default function App() {
   };
 
   const createProfile = (folderId, opts) => {
+    resetPlanScopedState();   // a brand-new plan must not inherit the last one's log/streak/feed
     const id = `c${Date.now()}`;
     const np = { id, name:"", weight:"", goal:"", lastSaved:Date.now(), stepLabel:"Personal", folderId: folderId||null,
       isSimulation: !!(opts && opts.isSimulation) };
@@ -22100,6 +22127,7 @@ export default function App() {
     let hist = [];
     if (hv) { try { hist = JSON.parse(hv); } catch(e) {} }
     historyRef.current = hist;
+    if (!alive) return;
     setHistory(hist);
   };
 
@@ -22147,8 +22175,15 @@ export default function App() {
   // Load daily log when the active plan changes (own profile or a linked client)
   useEffect(() => {
     if (!activeId) return;
+    // Guard against out-of-order resolution: the streak walk below can take many
+    // sequential round-trips, so a loader started for a PREVIOUS client could
+    // finish after this one and clobber it. streak/weekSummary/recentFoods/
+    // recentWearable have no onSnapshot to self-correct, so that stuck until a
+    // full reload — which is exactly why the bug survived going back and forth.
+    let alive = true;
     (async () => {
       const v = await logRead(`caliq-log-${activeId}-${todayKey}`);
+      if (!alive) return;
       let parsed = {calories:0, water:0, weight:0, meals:[]};
       if (v) { try { parsed = JSON.parse(v); } catch(e) {} }
       setDailyLog(parsed);
@@ -22175,17 +22210,20 @@ export default function App() {
           ended = true; break;
         }
       }
+      if (!alive) return;
       setStreak(s);
       // Load this plan's edit history
       const hv = await logRead(`caliq-history-${activeId}`);
       let hist = [];
       if (hv) { try { hist = JSON.parse(hv); } catch(e) {} }
+      if (!alive) return;
       historyRef.current = hist;
       setHistory(hist);
       // Load recently-logged foods (for one-tap re-add in the meal log)
       const fv = await logRead(`caliq-foods-${activeId}`);
       let foods = [];
       if (fv) { try { foods = JSON.parse(fv) || []; } catch(e) {} }
+      if (!alive) return;
       recentFoodsRef.current = foods;
       setRecentFoods(foods);
       // Must run AFTER the recents load above — it diffs against that list, so
@@ -22214,6 +22252,7 @@ export default function App() {
           if ((pl.calories || 0) > 0) { days++; cal += pl.calories || 0; p += pl.protein || 0; c += pl.carbs || 0; f += pl.fat || 0; }
         } catch (e) { /* ignore */ }
       }
+      if (!alive) return;
       setWeekSummary(days > 0
         ? { days, avgCal: Math.round(cal / days), avgP: Math.round(p / days), avgC: Math.round(c / days), avgF: Math.round(f / days) }
         : { days: 0, avgCal: 0, avgP: 0, avgC: 0, avgF: 0 });
@@ -22231,8 +22270,11 @@ export default function App() {
           if (hasWearable(pl.wearable)) rw = { daysAgo: i, wearable: pl.wearable };
         } catch (e) { /* ignore */ }
       }
+      if (!alive) return;
       setRecentWearable(rw);
     })();
+    // Cancel this loader if the open plan/client changes before it finishes.
+    return () => { alive = false; };
     // todayKey: re-load at the midnight rollover so yesterday's totals aren't
     // carried into (and written onto) the new day's key.
   }, [activeId, activeRemoteUid, todayKey]);
