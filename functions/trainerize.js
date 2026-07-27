@@ -232,14 +232,25 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
   // is the one with real numbers on it, and a second connected app sitting at
   // zero should never displace it. Compared per DATE, so a day Garmin missed can
   // still be covered by another source instead of going blank.
+  // Merge per METRIC, not per source. Real example from Kevin's Jul 25: Apple
+  // Health reported calorieOut {active:0, resting:0} while Garmin reported 16,410
+  // steps and no calories. Picking one source wholesale kept that source's fields
+  // and discarded the other's — losing genuinely recorded data. Take the highest
+  // reported value for each metric independently, and attribute the day to
+  // whichever source supplied the calories, since that is the headline number.
   const pickSource = (bySrc) => {
     const cands = Object.values(bySrc || {}).filter((c) => c && c.reported);
     if (!cands.length) return null;
-    cands.sort((a, b) =>
-      (Number(b.active || 0) - Number(a.active || 0))
-      || (Number(b.steps || 0) - Number(a.steps || 0))
-      || (Number(b.resting || 0) - Number(a.resting || 0)));
-    return cands[0];
+    const best = (field) => cands.reduce((a, c) =>
+      (Number(c[field] || 0) > Number(a || 0) ? Number(c[field] || 0) : a), 0);
+    const active = best("active"), resting = best("resting"), steps = best("steps");
+    // Attribute the day to whoever supplied the WINNING energy figure (not merely
+    // the first source that reported any), else the winning step count.
+    const owner = (active > 0 && cands.find((c) => Number(c.active || 0) === active))
+      || (resting > 0 && cands.find((c) => Number(c.resting || 0) === resting))
+      || (steps > 0 && cands.find((c) => Number(c.steps || 0) === steps))
+      || cands[0];
+    return { active, resting, steps, reported: true, source: owner.source || null };
   };
 
   let written = 0;
@@ -437,8 +448,12 @@ async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDat
     const cis = Array.isArray(prev.checkIns) ? prev.checkIns : [];
     const newestLocal = cis.reduce((acc, c) =>
       (c && c.date && c.weight != null && (!acc || c.date > acc)) ? c.date : acc, null);
-    if (newestLocal && (!lastStatDate || newestLocal > lastStatDate)) {
-      delete snapApply.weightLbs;   // Glidna has the more recent weigh-in
+    // >= not >: when BOTH have a reading for the same day, the one entered here
+    // is the deliberate, later action — a trainer correcting a client's weight
+    // today should not be reverted by Trainerize's own stat for today, which is
+    // exactly the "I updated it and it went back" case.
+    if (newestLocal && (!lastStatDate || newestLocal >= lastStatDate)) {
+      delete snapApply.weightLbs;   // Glidna has an equally- or more-recent weigh-in
     }
   }
   const d = { ...prev, ...snapApply, trainerizeId: u.id };
