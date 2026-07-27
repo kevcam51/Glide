@@ -80,7 +80,45 @@ elements, worst 1.12:1** — neon green text on a white card.
 - Reading `innerText` immediately after a `.click()` returns the PRE-render DOM — React batches.
   Two "bugs" this session were that artifact. Re-read in a later call, or screenshot.
 
+### ✅ S109–S111 verification debt — swept (4 of 5 clean, 1 REAL BUG)
+Driven live as `trainer.uitest` on a 390px viewport. Casey's plan was restored after each test
+(age back to 30 / DOB blank; nothing logged — LOGGED SO FAR still 0).
+- **Body-comp charts (S109b–f) ✓** — Trends & Charts renders Bodyweight / Muscle / Fat / Lean
+  with real weigh-ins, timeframe chips, and the honest "Lee-2000 estimate (±~6 lb)" note.
+  **Tap-a-dot works**: tapping the Jun 27 point opened `Edit weigh-in · Sat, Jun 27, 2026` with
+  Save / Delete / Cancel bound to that entry. Cancelled — no data changed.
+- **DOB (S110g) ✓** — marked "optional — keeps your age up to date automatically". Entering
+  1990-01-15 derived **age 36** correctly; the age input became read-only "36 · from birthday"
+  with a "Clear & type age instead" escape hatch; blank DOB keeps age manually editable.
+- **Multi-photo (S110b/c) ✓** — genuinely ACCUMULATES: 1 photo → "Add another photo" +
+  "Estimate from 1 photo"; 2nd → "Estimate from 2 photos", 2 thumbnails; the × removes one and
+  drops it back to 1. (The AI estimate itself was deliberately not called — no tokens spent.)
+- **Food-form scroll-into-view (S110) ✓** — lands at y=778 in an 844px viewport, fully visible.
+  ⚠️ **I nearly filed this as a false bug**: measured 800ms after the tap it still read y=1541,
+  because the scroll is ANIMATED and hadn't finished. A screenshot caught it. Re-measure, or
+  screenshot, before calling a scroll-into-view broken.
+- **🔴 #ID codes (S110f) — BROKEN in the way that matters.** There are **TWO code systems, both
+  rendered with a `#`**, and only one works with the AI:
+  | system | source | shown on | AI knows it |
+  |---|---|---|---|
+  | `idNums` (S99) | sequential, trainer's own kv `caliq-idnums` `{next,map}` | **TrainerDashboard — the home screen** (`IdTag`, App.jsx:13842) | ❌ |
+  | `refCode(id)` (S110f) | last 4 alphanumerics of the id | ProfileSelector / All clients (App.jsx:18041,18080) | ✅ (`aitools.js refCode`) |
+  Casey is **`#6` on the home** but **`KEM2` to the AI**. Verified live: asked "which client or
+  plan has the code #6?" → *"I don't see anything matching code #6. The ref codes I have are:
+  KEM2 — Casey Client, 2848 — Test Client, 1191 — Prospect Pat…"*. So S110f's "shown on cards
+  and usable in AI search" is true on All-clients and FALSE on the screen Kevin actually lands
+  on. The two `refCode` implementations themselves agree perfectly — that is not the bug.
+  **Recommended fix (Kevin's call):** teach the AI the `idNums` map rather than dropping the
+  sequential numbers — `caliq-idnums` is the CALLER'S OWN kv, so `aitools.js` can read it with
+  no new access surface (same as it already reads `caliq-index`), surface it alongside `ref` in
+  `list_clients` / `list_local_plans` / `find_client`, and tell the prompt a `#N` may be either
+  form. That keeps Kevin's short human numbers (his S99 ask) AND makes them work. Needs the
+  usual all-four-AI-fns deploy. Alternative — render `refCode` on the home instead — is uglier
+  and throws away the friendlier numbers.
+
 ### ⏭️ Next up
+- **Fix the #ID mismatch above** (decision needed: teach the AI `idNums` — recommended — vs
+  swap the home to `refCode`).
 - ~~loose thread: the expanded macro rows were computed, not clicked~~ **CLOSED — verified on
   the real rendered surface in light:** Protein **6.80:1** (`--pink` #b0184f, was 2.11–2.68) ·
   Carbs **5.93:1** (`--yellow` #a34a08, was 1.19–1.50) · Fat **5.93:1** (`--blue` #0369a1, was
