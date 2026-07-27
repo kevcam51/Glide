@@ -213,15 +213,23 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
       if (type === "calorieOut" && e.data) {
         w.active = r0(e.data.activeEnergy);
         w.resting = r0(e.data.restingEnergy);
+        w.reported = true;   // the tracker HAS spoken for this date, even if it said 0
       } else if (type === "step" && e.data) {
         w.steps = r0(e.data.steps);
+        w.reported = true;
       }
       if (e.source) w.source = e.source;
     }
   }
   let written = 0;
   for (const [date, w] of Object.entries(byDate)) {
-    if (!w.active && !w.steps) continue; // nothing meaningful that day
+    // Write any date the tracker actually REPORTED, including an explicit zero.
+    // The old guard (!w.active && !w.steps) skipped a genuine 0-calorie day, so
+    // today never got a wearable record and the dashboard kept showing the last
+    // day that had one — i.e. yesterday's burn presented as today's, which no
+    // amount of re-syncing could clear. It also discarded days with real resting
+    // energy but no steps, since `resting` was never part of the test.
+    if (!w.reported) continue; // the tracker never reported this date at all
     const logKey = `caliq-log-${pid}-${date}`;
     const log = (await kvGetJSON(db, uid, logKey)) || { calories: 0, water: 0, weight: 0, meals: [] };
     log.wearable = w;

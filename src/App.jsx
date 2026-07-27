@@ -9983,7 +9983,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
           </div>
           {/* Wearable tracker for this date (Trainerize v3). With the tracker
               adjustment ON it also sets this day's target above. */}
-          {dayLog && dayLog.wearable && (dayLog.wearable.active || dayLog.wearable.steps) ? (
+          {dayLog && hasWearable(dayLog.wearable) ? (
             <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 8, fontSize: ".78rem", color: "var(--muted-light)" }}>
               <Icon name="watch" size={14} color="var(--accent)" />
               <span>Tracker{dayLog.wearable.source ? ` (${dayLog.wearable.source})` : ""}:</span>
@@ -10802,7 +10802,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
           Summary → Nutrition Approach), today's target above is derived from
           today's measured burn; otherwise it's display-only. */}
       {(() => {
-        const todayW = dailyLog.wearable && (dailyLog.wearable.active || dailyLog.wearable.steps) ? dailyLog.wearable : null;
+        const todayW = hasWearable(dailyLog.wearable) ? dailyLog.wearable : null;
         const fb = !todayW && recentWearable && recentWearable.daysAgo > 0 ? recentWearable : null;
         const w = todayW || (fb && fb.wearable);
         // With a sync button available the card also renders EMPTY — otherwise
@@ -13766,6 +13766,14 @@ const proteinBasisOf = (d) => (Number(d && d.proteinPerLb) === 0.7 ? 0.7 : 1.0);
 // would double-count.) Accelerate mode ignores the tracker by promise ("don't
 // eat the burn back"), and days without tracker data use the normal formulas.
 // Needs resting > 0 — active cal alone isn't the full burn picture.
+// Does this day have a tracker reading AT ALL? Truthiness is the wrong test:
+// a genuine zero-burn day (0 active, 0 steps) is real data, and treating it as
+// "nothing" made the dashboard fall back to the last non-zero day — showing
+// yesterday's burn as today's, unfixable by re-syncing. `reported` is stamped by
+// the Trainerize sync; the value checks keep older records working.
+const hasWearable = (w) => !!w && (w.reported === true
+  || Number(w.active) > 0 || Number(w.steps) > 0 || Number(w.resting) > 0);
+
 const wearableTdee = (d, log) => {
   if (!d || !d.wearableAdjust || !isEatback(d)) return null;
   const w = log && log.wearable;
@@ -22220,7 +22228,7 @@ export default function App() {
         if (!lv) continue;
         try {
           const pl = JSON.parse(lv);
-          if (pl.wearable && (pl.wearable.active || pl.wearable.steps)) rw = { daysAgo: i, wearable: pl.wearable };
+          if (hasWearable(pl.wearable)) rw = { daysAgo: i, wearable: pl.wearable };
         } catch (e) { /* ignore */ }
       }
       setRecentWearable(rw);
