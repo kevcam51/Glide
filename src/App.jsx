@@ -21856,7 +21856,12 @@ export default function App() {
   // arrived — without this the numbers wouldn't move until the next reload.
   const syncTrackerNow = async () => {
     const r = await importFromTrainerize({ mode: "sync" });
-    await reloadPlanLive();
+    // Refreshing the open plan is a CONVENIENCE after the sync, not part of it.
+    // It used to be awaited bare, so ANY hiccup here reported "sync failed" for a
+    // sync that had already succeeded server-side — which sent me hunting a
+    // Trainerize API that was returning 200 in under 3 seconds the whole time.
+    try { await reloadPlanLive(); }
+    catch (e) { console.warn("post-sync refresh failed (the sync itself succeeded)", e); }
     return r && r.nothingToSync
       ? { ok: false, text: "No imported or linked Trainerize clients yet." }
       : { ok: true, text: tzSyncSummary(r) };
