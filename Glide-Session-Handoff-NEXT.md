@@ -117,6 +117,96 @@ current `activeRemoteUid`). Same for `appendHistory` → B's activity feed.
   but threads persisting across days a resumed chat re-anchored on yesterday. Now
   defaults to today and OMITS the date unless the user names a day. Weekday injected.
 
+## ⚡⚡⚡ S140–S152 (Jul 27): CLIENT DATA BLEED · date-aware dashboard · AI logging faults
+_All pushed (@ `5527218`), functions deployed, tree clean._
+
+### 🔴 READ FIRST — possible bad data already written (S139)
+Switching client mid-session could write client A's meals into client B's account.
+`onAddMeal` spread the CURRENT `dailyLog` while `persistLog` routed by the CURRENT
+`activeRemoteUid`, so logging for B before B's read landed saved A's whole meal
+array into B's day log (and A's feed into B's history). **Not auto-detectable.** If
+Kevin ever reports a meal that belongs to someone else, this is why — it is fixed
+going forward but historic writes stand.
+- Cause: `openClientPlan` set identity synchronously but left dailyLog / history /
+  recentFoods / streak / weekSummary / recentWearable on the PREVIOUS client until
+  an async read replaced them. Name renders from `data` (sync), numbers from those
+  (async) → B's name over A's data, guaranteed on first paint.
+- Fixed: `resetPlanScopedState()` first in openClientPlan / selectProfile /
+  createProfile; an `alive` guard on every write in the loader (before the REF
+  writes too) + cleanup on switch; `goBack` clears activeRemoteUid/activeId.
+
+### 📅 The dashboard is now a DAY VIEW (S144–S146, S151)
+Kevin: "everything changes and goes in the past or present… a proper record."
+One `viewDate` in App keys the loader, the live subscription and every log
+read/write, so dailyLog, streak, week summary and tracker data all follow. Done
+atomically — a half migration would read one day and write another (the S139
+fault, in the same code).
+- Weekday/`dayIdx` derive from viewDate (they didn't — a Saturday showed TUESDAY's
+  scheduled workout, which is what made the burn tile look broken).
+- Weight tile = latest weigh-in ON OR BEFORE that day, labelled "Weighed that day"
+  vs "Last weighed Tuesday". **Never looks forward** or history rewrites itself.
+- Future dates allowed (programming ahead); a future weigh-in is `isFuturePlan`.
+- Back-dating can't rewrite the present: `weightLbs` only advances when the entry
+  is the NEWEST. **Consequence (S152):** roster cards must read the latest CHECK-IN,
+  not `weightLbs`, or they sit stale.
+- Plans always open on TODAY (viewDate survived plan switches).
+
+### 🤖 AI logging faults (S135, S141) — Kevin's transcript
+Asked for 6 items on Jul 27; got some on today and the 26th DOUBLED.
+- **Wrong day:** `log_meals` was the ONLY logging tool with no top-level `date`.
+  Handler read `it.date`, never `input.date`, so a batch date was silently dropped.
+  Now takes a batch date; per-item still overrides.
+- **Duplication:** the stream→callable fallback re-ran the whole turn. The server
+  reports `wrote:true` on a mid-turn error but the client discarded it, and the
+  "already streamed" guard keys on TEXT — a pure logging turn emits none. Trigger:
+  no `timeoutSeconds`, so both AI fns died at the v2 default of 60s. Both now 300s.
+- **Silent wrong-account writes:** a trainer omitting `clientId` resolves to their
+  OWN uid, so "log Casey's breakfast" landed in the trainer's diary and returned ok.
+  Prompt now demands clientId on every on-behalf write and names the person back.
+- Failed tool results carried no `is_error` (zero uses in functions/) — a failure
+  looked like a success. Now flagged, and exhaustion says so instead of returning
+  the model's own "logging all 8 now…" preamble as the answer.
+
+### ⌚ Trainerize (S137, S138, S147, S149, S150) — mostly NOT our bugs
+- **The sync was never broken.** Cloud Logging: every call 200 in 2–4s; a direct
+  API call returned the 11-client roster in 0.28s. `syncTrackerNow` awaited
+  `reloadPlanLive()` bare, so a refresh hiccup reported "sync failed".
+- **Kevin's missing Saturday is UPSTREAM.** Trainerize holds, for 2026-07-25:
+  calorieOut from appleHealthKit {0,0} and step from garmin {16,410}. Garmin sent
+  no calories before the 26th. Check the Garmin↔Trainerize link, not our code.
+- Tracker data is stored PER DATE (90-day window) — no nightly job is needed; the
+  dashboard simply only ever read today's log.
+- Metrics now merge PER FIELD across sources (picking one source wholesale threw
+  away the other's real data), attributed to whoever supplied the winning energy.
+- Weight tie: `>=` not `>` — Trainerize used to win when both had the SAME day, so
+  a weight corrected today was reverted by its own same-day stat.
+
+### 🧠 Other shipped
+S140 app requests via AI (**built, never live-tested** — idle timer). S142 pin a
+chat to a client (`sendTarget()`; prompt tells it not to call find_client).
+S143 hide/restore tiles (viewer's own kv). S148 burn disclaimers.
+
+### 🔑 Gotchas
+- **zsh reserves `UID`** read-only, exactly like the documented `GID` trap.
+- **`firebase functions:log` drops jsonPayload** (blank lines). The Cloud Logging
+  REST API via the firebase-tools refresh token shows status + latency and is what
+  actually diagnosed the sync.
+- The preview's **30-min idle sign-out blocked verification four times today** —
+  turn it off on the test account before a long session.
+- Scope errors the build cannot catch bit twice (`isTrainer` vs `isTrainerHome`,
+  `isTrainerRole`). Check the declaration is in the SAME component.
+
+### ⏭️ Next
+- **VO2max for burn accuracy: RESEARCHED, RECOMMEND AGAINST.** The accepted
+  correction uses RESTING VO2 (age/sex/height/weight — data we have); VO2max
+  explains only ~7–12% of variance in economy (Shaw 2015). It would be false
+  precision. The Keytel-with-VO2max question (HR cardio only) is UNRESOLVED — that
+  agent died mid-run. Tracking VO2max as a MEASUREMENT is still worth doing.
+- **Net vs gross METs — PARKED by Kevin.** Gross over-credits by 1/(MET−1): +40%
+  walking, +11% cycling, ≈54 kcal/day on a typical week. Garmin already reports
+  NET, so schedule and watch currently disagree about the same workout.
+- YouTube exercise videos (Kevin has his own library). Live-test app requests.
+
 ## ⏭️ NEXT SESSION — START HERE: make every surface DATE-AWARE (Kevin, S138 close)
 _Nothing started, working tree clean. This is one coherent theme, not five asks._
 
