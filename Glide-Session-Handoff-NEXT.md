@@ -97,7 +97,7 @@ Driven live as `trainer.uitest` on a 390px viewport. Casey's plan was restored a
   ⚠️ **I nearly filed this as a false bug**: measured 800ms after the tap it still read y=1541,
   because the scroll is ANIMATED and hadn't finished. A screenshot caught it. Re-measure, or
   screenshot, before calling a scroll-into-view broken.
-- **🔴 #ID codes (S110f) — BROKEN in the way that matters.** There are **TWO code systems, both
+- **~~🔴 #ID codes (S110f) — BROKEN~~ FIXED in S129 (see above).** Kept for the diagnosis: There are **TWO code systems, both
   rendered with a `#`**, and only one works with the AI:
   | system | source | shown on | AI knows it |
   |---|---|---|---|
@@ -116,9 +116,33 @@ Driven live as `trainer.uitest` on a 390px viewport. Casey's plan was restored a
   usual all-four-AI-fns deploy. Alternative — render `refCode` on the home instead — is uglier
   and throws away the friendlier numbers.
 
+### ✅ S129 (`18e163a`) — the #ID mismatch is FIXED (Kevin chose: teach the AI `idNums`)
+`idNumMap(db, callerUid)` reads `caliq-idnums` (the CALLER'S OWN kv — no new access surface) and
+`num` now rides alongside `ref` in `list_local_plans`, `list_clients`, `coach_summary` and
+`find_client`. Verified live: **"#6" → "That's Casey Client — she's #6"**; **"#2" → "That's
+Prospect Pat — they're #2 in your local plans."**
+- A 3-lens adversarial review before deploy caught 5 issues, all fixed. Two mattered:
+  (1) **exact code hits must beat fuzzy name/email matching** — a bare "6" substring-matched every
+  client with a 6 in their email, tripping same-name disambiguation on an unambiguous code and,
+  worse, able to push the real client past the 10-match cap and drop it entirely. `exact` and
+  `fuzzy` are now separate arrays, exact wins, exact is uncapped. (2) **the home counter numbers
+  clients AND local plans from one shared sequence**, so a `#` code may be either — the prompt now
+  tries `find_client` then falls back to `list_local_plans`.
+- `find_client` parses "#6" / "6" / "client #6" / "# 6" / "#6." — 16 unit cases incl. the negatives
+  (`client6`, `user6@x.com`, `#kem2`, `#12345` all correctly reject).
+- The code forms are documented in find_client's **SCHEMA description**, not just the prompt,
+  because the MCP connector sees only tool descriptions — that is what holds AI↔connector parity.
+
+### 🔑 ⚠️ THE "DEPLOY ALL FOUR AI FNS" RULE IS OUT OF DATE
+It predates the MCP connector. The real dependency graph:
+`aitools.js` ← required by **`aichat.js` AND `mcp.js`** · `aichat.js` ← required by **`index.js`
+AND `workflows.js`**. So an `aitools.js` change must deploy **six**: `aiChat`, `aiChatStream`,
+`logMeal`, `setWorkoutSchedule`, **`mcp`** (or the connector silently runs old tool code, breaking
+the parity rule) and **`runDueWorkflows`**. Verify with
+`grep -ln "require(.*aitools" functions/*.js`. Also: the first deploy attempt failed with
+`Failed to validate secret versions … ANTHROPIC_API_KEY` — transient, an immediate retry succeeded.
+
 ### ⏭️ Next up
-- **Fix the #ID mismatch above** (decision needed: teach the AI `idNums` — recommended — vs
-  swap the home to `refCode`).
 - ~~loose thread: the expanded macro rows were computed, not clicked~~ **CLOSED — verified on
   the real rendered surface in light:** Protein **6.80:1** (`--pink` #b0184f, was 2.11–2.68) ·
   Carbs **5.93:1** (`--yellow` #a34a08, was 1.19–1.50) · Fat **5.93:1** (`--blue` #0369a1, was
