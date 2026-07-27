@@ -15701,6 +15701,8 @@ async function openBillingPortal() {
 }
 const callRequestBoost = httpsCallable(functions, "requestBudgetBoost"); // Max-tier same-day allowance boost (S90)
 const callSendTrainerRequest = httpsCallable(functions, "sendTrainerRequest"); // client → trainer inbox (S90)
+const callListAppRequests = httpsCallable(functions, "listAppRequests");        // S140 admin
+const callSetAppRequestStatus = httpsCallable(functions, "setAppRequestStatus"); // S140 admin
 const callAdminOverview = httpsCallable(functions, "adminOverview"); // admin all-users dashboard (S90)
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
 // Trainer teams (S116): head trainer ↔ sub-trainers. Server-side because the
@@ -19979,6 +19981,79 @@ function NotifFeed({ items, onClose }) {
 // Admin-only (server re-verifies by UID). Read-only: who's on the app, role,
 // subscription/trial state, today's AI usage, and boost-request flags — the
 // "flag, don't punish" visibility for chronic ceiling-hitters.
+// App requests (S140) — feature ideas users sent through the AI, with the context
+// of what they were doing when they hit the gap. Admin-only; the callables refuse
+// anyone else server-side, so this is a convenience surface, not the gate.
+function AppRequestsPanel({ onClose }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(false);
+  const [busy, setBusy] = useState("");
+  const load = () => callListAppRequests()
+    .then((r) => setData(r.data)).catch(() => setErr(true));
+  useEffect(() => { load(); }, []);
+  const setStatus = async (id, status) => {
+    setBusy(id);
+    try { await callSetAppRequestStatus({ id, status }); await load(); }
+    catch (e) { setErr(true); } finally { setBusy(""); }
+  };
+  const rows = (data && data.requests) || [];
+  const chip = (r) => {
+    const map = { new: "text-primary", reviewed: "text-muted", planned: "text-success", declined: "text-muted" };
+    return <span className={`text-[.62rem] uppercase tracking-wide font-bold ${map[r.status] || "text-muted"}`}>{r.status}</span>;
+  };
+  return createPortal(
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2400, background: "rgba(0,0,0,.8)",
+      display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 16, overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card"
+        style={{ maxWidth: 560, width: "100%", padding: 18, marginTop: 24 }}>
+        <div className="relative flex items-center justify-center gap-2 mb-3">
+          <button onClick={onClose} aria-label="Back"
+            className="absolute left-0 top-1/2 -translate-y-1/2 bg-transparent border-0 cursor-pointer text-muted">
+            <Icon name="back" size={20} color="currentColor" />
+          </button>
+          <Icon name="sparkle" size={18} color="var(--accent)" />
+          <div className="font-display font-bold text-fg" style={{ fontSize: "1.05rem" }}>App requests</div>
+          {data && data.newCount > 0 && (
+            <span className="rounded-full bg-primaryfill px-2 text-[.7rem] font-bold text-primaryfg">{data.newCount}</span>
+          )}
+        </div>
+        {err && <div className="text-danger text-[.82rem]">Couldn't load (admin only).</div>}
+        {!data && !err && <div className="text-muted text-[.84rem]">Loading requests…</div>}
+        {data && rows.length === 0 && (
+          <div className="text-muted text-[.84rem] leading-relaxed">
+            Nothing yet. When someone tells the assistant they wish Glidna did something, it offers to send it
+            here — with what they were doing at the time.
+          </div>
+        )}
+        <div className="flex flex-col gap-2.5">
+          {rows.map((r) => (
+            <div key={r.id} className="rounded-xl border border-border bg-surface2 p-3">
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-[.84rem] font-bold text-fg">{r.name || r.email || "Someone"}</span>
+                <span className="text-[.66rem] text-muted">{r.role || ""}</span>
+                <span className="ml-auto">{chip(r)}</span>
+              </div>
+              <div className="mt-1.5 text-[.88rem] leading-relaxed text-fg">{r.request}</div>
+              {r.context && <div className="mt-1 text-[.78rem] leading-relaxed text-muted">{r.context}</div>}
+              <div className="mt-1 text-[.66rem] text-muted">{fmtStamp(r.createdAt)}</div>
+              <div className="mt-2 flex gap-2 flex-wrap">
+                {["reviewed", "planned", "declined"].map((st) => (
+                  <button key={st} disabled={busy === r.id || r.status === st}
+                    onClick={() => setStatus(r.id, st)}
+                    className="px-2.5 py-1.5 rounded-md text-[.72rem] font-bold border border-border bg-transparent text-muted cursor-pointer disabled:opacity-40">
+                    {st}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function AdminDashboard({ onClose }) {
   useBodyScrollLock(true);
   const [data, setData] = useState(null);
@@ -20548,6 +20623,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
   const [upgradeBusy, setUpgradeBusy] = useState(false); // Stripe portal redirect in flight (S89)
   const [showPicker, setShowPicker] = useState(false);   // S89c plan picker (Upgrade → choose plan → Checkout)
   const [showAdmin, setShowAdmin] = useState(false);      // S90 admin all-users dashboard
+  const [showAppReqs, setShowAppReqs] = useState(false);  // S140 app requests (admin)
   const [showMyNotes, setShowMyNotes] = useState(false);  // S91 trainer general notes
   const [showTeam, setShowTeam] = useState(false);        // S116 head trainer <-> sub-trainers
   const [showConnectAI, setShowConnectAI] = useState(false); // S118 MCP connector how-to
@@ -20731,7 +20807,13 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
             <Icon name="clients" size={19} color="var(--accent)" /> <span>Admin — all users</span>
           </button>
         )}
+        {isAdminUid && (
+          <button style={item} onClick={() => setShowAppReqs(true)}>
+            <Icon name="sparkle" size={19} color="var(--accent)" /> <span>App requests</span>
+          </button>
+        )}
         {showAdmin && <AdminDashboard onClose={() => setShowAdmin(false)} />}
+        {showAppReqs && <AppRequestsPanel onClose={() => setShowAppReqs(false)} />}
 
         {/* Navigation */}
         <button style={item} onClick={() => go(onHome)}><Icon name="home" size={19} color="var(--accent)" /> <span>Home</span></button>

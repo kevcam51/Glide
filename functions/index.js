@@ -171,6 +171,38 @@ exports.listTeam = require("./team").listTeam;
 // whose end time has passed. That stamp is what Sunday billing will bill from.
 exports.sessionsMarkCompleted = require("./sessions").sessionsMarkCompleted;
 
+// ── appRequests (S140): feature requests users sent through the AI ──────────
+// Admin-only, Admin-SDK reads/writes (top-level `appRequests`, no client rules —
+// same shape as `workflows`). The AI writes them via the send_app_request tool.
+exports.listAppRequests = onCall(async (request) => {
+  const callerUid = request.auth && request.auth.uid;
+  if (!callerUid || !ADMIN_UIDS.includes(callerUid)) {
+    throw new HttpsError("permission-denied", "Admin only.");
+  }
+  const db = admin.firestore();
+  const snap = await db.collection("appRequests").orderBy("createdAt", "desc").limit(200).get();
+  const rows = [];
+  snap.forEach((d) => rows.push({ id: d.id, ...d.data() }));
+  return { requests: rows, newCount: rows.filter((r) => r.status === "new").length };
+});
+
+// Triage: "reviewed" (read it) or "planned"/"declined". Kept as free-form status
+// so the workflow can evolve without a schema migration.
+exports.setAppRequestStatus = onCall(async (request) => {
+  const callerUid = request.auth && request.auth.uid;
+  if (!callerUid || !ADMIN_UIDS.includes(callerUid)) {
+    throw new HttpsError("permission-denied", "Admin only.");
+  }
+  const id = String((request.data && request.data.id) || "");
+  const status = String((request.data && request.data.status) || "");
+  if (!id || !["new", "reviewed", "planned", "declined"].includes(status)) {
+    throw new HttpsError("invalid-argument", "id and a valid status are required.");
+  }
+  await admin.firestore().doc(`appRequests/${id}`).set(
+    { status, reviewedAt: Date.now(), reviewedBy: callerUid }, { merge: true });
+  return { ok: true, id, status };
+});
+
 // ── adminOverview (S90, Kevin's ask): every user at a glance ────────────────
 // Admin-only. Server-side Admin SDK reads (no rules change needed): profile +
 // subscription/trial state + today's AI usage + boost-request flags. Read-only.

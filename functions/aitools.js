@@ -1285,6 +1285,27 @@ function buildTools(role, opts = {}) {
       },
     },
     {
+      // Feature requests straight from the person hitting the gap (Kevin, S140).
+      // The value is the CONTEXT: it arrives with what they were trying to do,
+      // which a support email never has.
+      name: "send_app_request",
+      description:
+        "Send the Glidna team a feature request or product suggestion from this user. Use when they wish the "
+        + "app did something it doesn't, or hit a limitation and want it changed — e.g. \"I wish I could log "
+        + "recipes\", \"why can't I see last month's totals?\". ALWAYS ask first (\"want me to send that to the "
+        + "Glidna team?\") and only call this once they say yes. Summarise their request clearly in your own "
+        + "words, and put what they were doing when it came up in context. Do NOT use for bug reports about "
+        + "data being wrong — check their data first. Do NOT send the same request twice in one conversation.",
+      input_schema: {
+        type: "object",
+        properties: {
+          request: { type: "string", description: "The feature they want, in one or two clear sentences." },
+          context: { type: "string", description: "What they were doing when it came up, and why it matters to them." },
+        },
+        required: ["request"],
+      },
+    },
+    {
       name: "fetch_link",
       description:
         "Read a web/video LINK the user shares (YouTube/Instagram/TikTok workout or recipe, blog, article) and get "
@@ -1429,6 +1450,35 @@ async function runTool(name, input, ctx) {
     for (const e of STRENGTH) { (byCat[e.cat] = byCat[e.cat] || []).push({ id: e.id, label: e.label }); }
     return { days: DAYS, cardio: CARDIO, strength: byCat,
       note: "Use these EXACT ids in set_workout_schedule (type field). duration is in minutes." };
+  }
+
+  if (name === "send_app_request") {
+    // Top-level collection, Admin-SDK only (no client rules) — same shape as
+    // `workflows` (S92). Nobody but the admin screen ever reads these.
+    const text = String(input.request || "").trim().slice(0, 1200);
+    if (!text) return { error: "Nothing to send — ask them what they'd like changed first." };
+    const prof = (await db.doc(`users/${ctx.callerUid}`).get()).data() || {};
+    // Cheap spam guard: cap per user per day. A runaway model loop shouldn't be
+    // able to fill the admin screen.
+    const day = ctx.today || new Date().toISOString().slice(0, 10);
+    const dayRef = db.doc(`users/${ctx.callerUid}/appRequestUsage/${day}`);
+    const sentToday = ((await dayRef.get()).data() || {}).count || 0;
+    if (sentToday >= 5) {
+      return { error: "They've already sent several requests today — thank them and say the team has them." };
+    }
+    await db.collection("appRequests").add({
+      uid: ctx.callerUid,
+      name: prof.displayName || [prof.firstName, prof.lastName].filter(Boolean).join(" ") || null,
+      email: prof.email || null,
+      role: ctx.role || null,
+      request: text,
+      context: String(input.context || "").trim().slice(0, 1200) || null,
+      status: "new",
+      createdAt: Date.now(),
+    });
+    await dayRef.set({ count: sentToday + 1, updatedAt: Date.now() }, { merge: true });
+    return { ok: true, sent: true,
+      note: "Sent to the Glidna team. Confirm it's been passed on — don't promise it will be built." };
   }
 
   if (name === "fetch_link") {
