@@ -10108,7 +10108,8 @@ function WeightDayLogger({ date, existing, onSave }) {
   );
 }
 
-function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
+function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
+  data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood,
   savedFoods, onToggleSaveFood, onRemoveSavedFood, weekSummary, recentWearable, history, onRefresh, isRemote,
@@ -10201,6 +10202,8 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
     return () => { alive = false; };
   }, [onReadDay, dashToday, dailyLog && dailyLog.calories]);
   const [expandedStat, setExpandedStat] = useState(null);
+  const [tileEdit, setTileEdit] = useState(false);
+  const tileHidden = (k) => hiddenTiles.includes(k);
   const [expandedSnap, setExpandedSnap] = useState(false);
   const [showMacros, setShowMacros] = useState(false);
   const [editMacros, setEditMacros] = useState(false); // macro-target editor open
@@ -10756,7 +10759,7 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
 
       {/* Quick stats — tappable */}
       <div className="dash-cta-grid">
-        <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="target"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="target"?null:"target")}>
+        {!tileHidden("target") && <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="target"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="target"?null:"target")}>
           <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="target" size={23} color="var(--accent)" /></div>
           <div className="dash-cta-val">{target.toLocaleString()}</div>
           <div className="dash-cta-lbl">Today's Target</div>
@@ -10768,31 +10771,63 @@ function DailyDashboard({ data, step, tdee, dayData, strengthDayData, avgBurnPer
               {eatbackOn ? "incl. workout burn" : "excl. workout burn"}
             </div>
           )}
-        </div>
-        <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="logged"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="logged"?null:"logged")}>
+        </div>}
+        {!tileHidden("logged") && <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="logged"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="logged"?null:"logged")}>
           <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="meal" size={23} color="var(--accent)" /></div>
           <div className="dash-cta-val">{logged.toLocaleString()}</div>
           <div className="dash-cta-lbl">Logged So Far</div>
-        </div>
-        <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="burn"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="burn"?null:"burn")}>
+        </div>}
+        {!tileHidden("burn") && <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="burn"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="burn"?null:"burn")}>
           <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name={burnFromTracker?"watch":"flame"} size={23} color="var(--orange)" /></div>
           <div className="dash-cta-val">{burnShown.toLocaleString()}</div>
           <div className="dash-cta-lbl">Workout Burn{burnFromTracker?" · tracker":""}</div>
-        </div>
-        <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="water"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="water"?null:"water")}>
+        </div>}
+        {!tileHidden("water") && <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="water"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="water"?null:"water")}>
           <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="water" size={23} color="var(--blue)" /></div>
           <div className="dash-cta-val">{dailyLog.water || 0}</div>
           <div className="dash-cta-lbl">oz Water</div>
-        </div>
+        </div>}
         {/* Today's Weight — full-width tile (moved from Quick Log); opens the
             body-fat & measurements hub (weight, body fat %, tape). */}
-        <div className="dash-cta" style={{gridColumn:"1 / -1",cursor:onSaveMeasurements?"pointer":"default",borderColor:"var(--border)"}}
+        {!tileHidden("weight") && <div className="dash-cta" style={{gridColumn:"1 / -1",cursor:onSaveMeasurements?"pointer":"default",borderColor:"var(--border)"}}
           onClick={onSaveMeasurements?()=>setShowMeasure(true):undefined}>
           <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="scale" size={23} color="var(--muted)" /></div>
           <div className="dash-cta-val">{weightLbs?Number(weightLbs).toFixed(1):"—"}<span style={{fontSize:".5em",color:"var(--muted)",marginLeft:"3px"}}>lbs</span></div>
           <div className="dash-cta-lbl">Today's Weight{onSaveMeasurements?" ›":""}</div>
-        </div>
+        </div>}
       </div>
+      {/* One place to hide AND bring back tiles (Kevin, S143). Stored on the
+          VIEWER's own account: hiding a tile while looking at a client's
+          dashboard is how *you* want to read it, not something imposed on them. */}
+      {onSetHiddenTiles && (
+        <div style={{marginTop:-6, marginBottom:16}}>
+          <button onClick={()=>setTileEdit(v=>!v)}
+            style={{background:"transparent",border:"none",color:"var(--muted)",fontSize:".72rem",
+              cursor:"pointer",padding:"4px 2px",textDecoration:"underline"}}>
+            {tileEdit ? "Done" : (hiddenTiles.length ? `Show tiles (${hiddenTiles.length} hidden)` : "Customise tiles")}
+          </button>
+          {tileEdit && (
+            <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:6}}>
+              {["target","logged","burn","water","weight"].map((k)=>{
+                const on = !tileHidden(k);
+                const label = k==="weight" ? "Today's Weight"
+                  : k==="water" ? "oz Water"
+                  : (STAT_SHEET_META[k] ? STAT_SHEET_META[k][0] : k);
+                return (
+                  <button key={k} onClick={()=>onSetHiddenTiles(
+                      on ? [...hiddenTiles, k] : hiddenTiles.filter((h)=>h!==k))}
+                    style={{padding:"6px 10px",borderRadius:8,fontSize:".72rem",fontWeight:700,cursor:"pointer",
+                      border:`1px solid ${on?"var(--accent)":"var(--border)"}`,
+                      background: on ? "color-mix(in srgb,var(--accent) 12%,transparent)" : "transparent",
+                      color: on ? "var(--accent)" : "var(--muted)"}}>
+                    {on ? "" : "+ "}{label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Wearable tracker (Trainerize v3): real burn + steps from the client's
           connected watch. Prefers TODAY's data; when today hasn't synced yet
@@ -21369,6 +21404,15 @@ export default function App() {
   // AI consent lives on the PROFILE doc (users/{uid}.aiOptOut) because the
   // server reads it there to enforce the opt-out; kv would be invisible to it.
   const [meAiOptOut, setMeAiOptOut] = useState(false);
+  // Which dashboard tiles this VIEWER has hidden. Deliberately their own kv, not
+  // the plan's: a trainer hiding a tile is choosing how they read the screen, not
+  // editing the client's setup.
+  const [hiddenTiles, setHiddenTiles] = useState([]);
+  const onSetHiddenTiles = async (next) => {
+    setHiddenTiles(next);
+    try { await window.storage.set("caliq-dash-prefs", JSON.stringify({ hiddenTiles: next })); }
+    catch (e) { console.warn("dash prefs save failed", e); }
+  };
   // null = profile not loaded yet (never prompt on an unknown state); false =
   // loaded and they have never chosen → show the one-time prompt.
   const [meAiChose, setMeAiChose] = useState(null);
@@ -21384,6 +21428,11 @@ export default function App() {
         const r = await window.storage.get("caliq-security-prefs");
         if (r && r.value) setIdleSignOut(JSON.parse(r.value).idleSignOut !== false);
       } catch(e) { /* none saved → default ON */ }
+      try {
+        const d = await window.storage.get("caliq-dash-prefs");
+        const ht = d && d.value ? (JSON.parse(d.value) || {}).hiddenTiles : null;
+        if (Array.isArray(ht)) setHiddenTiles(ht);
+      } catch(e) { /* none saved → nothing hidden */ }
     })();
   }, []);
   const onSetIdleSignOut = async (on) => {
@@ -22647,7 +22696,7 @@ export default function App() {
           {step===3 && <StepCardio     data={data} onChange={update} onBack={()=>setStepAndSave(2)} onNext={()=>setStepAndSave(4)}/>}
           {step===4 && <StepStrength   data={data} onChange={update} onBack={()=>setStepAndSave(3)} onNext={()=>setStepAndSave(5)}/>}
           {step===5 && showDash && (
-            <DailyDashboard
+            <DailyDashboard hiddenTiles={hiddenTiles} onSetHiddenTiles={onSetHiddenTiles}
               data={data} step={step} tdee={computedTdee}
               dayData={computedDayData} strengthDayData={computedStrDayData}
               avgBurnPerDay={computedAvgBurn}
