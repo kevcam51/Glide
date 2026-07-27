@@ -141,7 +141,16 @@ export function aiEnabledFor(profile) {
 }
 export async function setAiOptOut(optedOut, uid = auth.currentUser && auth.currentUser.uid) {
   if (!uid) return;
-  await updateDoc(profileRef(uid), { aiOptOut: !!optedOut });
+  // Any deliberate change also counts as having decided, so the one-time
+  // prompt never reappears for someone who has already made a choice.
+  await updateDoc(profileRef(uid), { aiOptOut: !!optedOut, aiChoiceAt: Date.now() });
+}
+
+// Has this person ACTIVELY chosen, rather than been defaulted? Absence means we
+// have never asked. Kept separate from `aiOptOut` because "off" and "never asked"
+// are different states: only the second one should raise the prompt.
+export function aiChoiceMade(profile) {
+  return !!(profile && profile.aiChoiceAt);
 }
 
 // True if the signed-in user has finished signup (has a profile).

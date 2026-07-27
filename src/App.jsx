@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium, setAiOptOut } from "./profile.js";
+import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium, setAiOptOut, aiChoiceMade } from "./profile.js";
 import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } from "./clientData.js";
 import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads } from "./messaging.js";
 import { pushStatus, enablePush, disablePush } from "./push.js";
@@ -20427,6 +20427,67 @@ function TeamPanel({ onClose }) {
   );
 }
 
+// One-time AI decision (S134). Defaulting people ON and calling the policy
+// update their notice is the weaker position — especially for a trainer's
+// clients, whose data can travel to an AI the TRAINER connected. So we ask
+// once, plainly, and nobody is defaulted into it silently. Two buttons, no
+// dismiss: it's a single tap either way, and "closed the box" is not a choice.
+// Reversible forever afterwards from the ≡ menu, which the copy says outright.
+function AiConsentPrompt({ isTrainer, onChoose }) {
+  const [busy, setBusy] = useState("");
+  const pick = async (optOut) => {
+    setBusy(optOut ? "off" : "on");
+    try { await onChoose(optOut); } finally { setBusy(""); }
+  };
+  return createPortal(
+    <div style={{ position: "fixed", inset: 0, zIndex: 2200, background: "rgba(0,0,0,.72)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 18 }}>
+      <div style={{ maxWidth: 460, width: "100%", maxHeight: "88vh", overflowY: "auto",
+        background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 16, padding: "22px 20px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 10 }}>
+          <Icon name="sparkle" size={22} color="var(--accent)" />
+          <div style={{ fontFamily: "'Sora',sans-serif", fontSize: "1.15rem", fontWeight: 700, color: "var(--text)" }}>
+            Your data and AI
+          </div>
+        </div>
+        <div style={{ fontSize: ".9rem", lineHeight: 1.6, color: "var(--text-secondary)" }}>
+          <p style={{ margin: "0 0 10px" }}>
+            Glidna has an AI assistant that can read your logs and plans to answer questions, and
+            log things for you. Using it means that information is sent to an AI provider to
+            generate the answer.
+          </p>
+          <p style={{ margin: "0 0 10px" }}>
+            {isTrainer
+              ? <>You can also connect your own AI assistant — like Claude or ChatGPT — to Glidna. If you do, what it reads is handled under <b style={{ color: "var(--text)" }}>your agreement with that provider, not ours</b>. Your clients each make their own choice about this, and you can't change it for them.</>
+              : <>If your trainer connects their own AI assistant, it can read the data they can already see. From that point it's handled under <b style={{ color: "var(--text)" }}>their agreement with that provider, not ours</b>.</>}
+          </p>
+          <p style={{ margin: "0 0 16px" }}>
+            Turning this off costs you nothing else — logging, plans, messaging and everything else
+            work exactly the same.
+          </p>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+          <button onClick={() => pick(false)} disabled={!!busy}
+            style={{ minHeight: 46, borderRadius: 10, border: "none", cursor: "pointer",
+              background: "var(--accent-fill,#08dce0)", color: "#05080a", fontWeight: 800, fontSize: ".92rem" }}>
+            {busy === "on" ? "Saving…" : "Yes — use my data for AI"}
+          </button>
+          <button onClick={() => pick(true)} disabled={!!busy}
+            style={{ minHeight: 46, borderRadius: 10, cursor: "pointer", background: "transparent",
+              border: "1px solid var(--border-light,var(--border))", color: "var(--text)", fontWeight: 700, fontSize: ".92rem" }}>
+            {busy === "off" ? "Saving…" : "No — keep AI off for me"}
+          </button>
+        </div>
+        <div style={{ fontSize: ".72rem", color: "var(--muted)", marginTop: 12, lineHeight: 1.5, textAlign: "center" }}>
+          You can change this whenever you like in the ≡ menu.{" "}
+          <a href="/privacy.html" target="_blank" rel="noopener" style={{ color: "var(--accent)" }}>Privacy Policy</a>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
@@ -20981,7 +21042,8 @@ export default function App() {
           setMePremium(isPremium(prof));
           setMeSubStatus(prof.subscriptionStatus || null);
           setMeBillingHold(prof.sessionBillingHold || null); // declined session charge → the home banner (S102b)
-          setMeAiOptOut(prof.aiOptOut === true);               // AI consent (S131) — default ON
+          setMeAiOptOut(prof.aiOptOut === true);               // AI consent (S131)
+          setMeAiChose(aiChoiceMade(prof));                    // asked yet? (S134)
         }
       } catch(e) {}
       try {
@@ -21091,8 +21153,12 @@ export default function App() {
   // AI consent lives on the PROFILE doc (users/{uid}.aiOptOut) because the
   // server reads it there to enforce the opt-out; kv would be invisible to it.
   const [meAiOptOut, setMeAiOptOut] = useState(false);
+  // null = profile not loaded yet (never prompt on an unknown state); false =
+  // loaded and they have never chosen → show the one-time prompt.
+  const [meAiChose, setMeAiChose] = useState(null);
   const onSetAiOptOut = async (optOut) => {
     setMeAiOptOut(optOut);                       // optimistic
+    setMeAiChose(true);                          // deciding here counts as deciding
     try { await setAiOptOut(optOut); }
     catch (e) { console.warn("aiOptOut save failed", e); setMeAiOptOut(!optOut); }
   };
@@ -22152,6 +22218,10 @@ export default function App() {
   const isTrainerHome = role === ROLES.HEAD_TRAINER || role === ROLES.SUB_TRAINER;
   const chrome = (
     <>
+      {/* Ask once, before anything else, if they have never chosen (S134). */}
+      {meAiChose === false && (
+        <AiConsentPrompt isTrainer={isTrainerHome} onChoose={onSetAiOptOut} />
+      )}
       <button onClick={() => setMenuOpen(true)} aria-label="Open menu"
         style={{ position: "fixed", top: "calc(17px + env(safe-area-inset-top,0px))", left: 10, zIndex: 1390,
           width: 40, height: 40, borderRadius: 10, border: "1px solid var(--border,#2e2e4a)",
