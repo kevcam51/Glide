@@ -1,16 +1,103 @@
 # Glide — Next-Session Handoff (start here)
 
+## ⚡⚡⚡ S127–S128 (Jul 26): S117–S125 VERIFIED LIVE · trainer-home roster bug · light-theme sweep
+_Both pushed to `origin/main` (@ `edf133f`), tree clean, **verified live on glidna.com by bundle
+CONTENT** (see the deploy gotcha below). Frontend only — no functions, no rules, no data model._
+
+### ✅ The S112–S125 verification debt is CLEARED
+All six build-verified-only features were driven live as `trainer.uitest` and work:
+**Manage ▾** collapse + the S119 renames (Assign a different plan / Save a copy to my files /
+Take plan back) · **Local Plans drawer** · **My team** (`listTeam` resolves; a bogus code gives
+"That code didn't match any trainer.") · **Connect your AI** (Copy verified by patching
+`navigator.clipboard.writeText` — it writes exactly `https://glidna.com/mcp`) · **compliance
+tracker** on DailyDashboard with a clean zero-data state · **Show more detail** (visible at 0
+logged days, and from a saved `simple` pref it lands in Detailed *without* overwriting the
+stored preference — a peek, not a permanent switch).
+
+### 🔴 S127 (`b4b7065`) — the trainer home told trainers they had no clients
+`clients.length === 0` was doing double duty as "no clients" and "roster hasn't loaded".
+Reproduced with a MutationObserver: navigating ≡ → All clients → Home showed
+**"No clients connected yet · Invite your first client" for 285ms**, with the Local Plans
+drawer expanding then collapsing. Worse, `loadClients` bails on error without recording the
+attempt, so a failed wake-fetch left that message up **permanently** — the S98 bug, fixed at
+the data layer then reintroduced at the view layer.
+- **`rosterState: "loading" | "ready" | "error"`** replaces the overloaded length check. A
+  boolean was NOT enough: "loaded with 0 clients" after a failed fetch is the same lie. `error`
+  has its own copy; `loading` renders `SkeletonCard` (as TrainerAnalytics/TrainerEarnings do).
+- **`plansOpen` is now the single source of truth** for the drawer at all four render sites,
+  seeded once by a `useRef`-guarded effect from a genuinely `ready && empty` roster. The old
+  `plansOpen || clients.length === 0` made Show/Hide a **dead control** for 0-client trainers —
+  the OR stayed true no matter what the toggle did.
+- **"Asks From Clients" hoisted** out of the roster card: it reads the trainer's own kv, so
+  nesting it under `clients.length > 0` made a pending ask unreachable once a client left.
+- Verified by re-running the same trace: empty-state frames 2 → 0, drawer flash 2 → 0, toggle
+  `Hide/true → Show/false → Hide/true` with `aria-expanded` tracking.
+
+### 🎨 S128 (`edf133f`) — light theme: 30 AA failures → 0 (both themes)
+S117 retuned the tokens and fixed the two screens it critiqued; the in-plan surfaces it never
+looked at still hardcoded dark-theme colour. Measured on Results in light: **30 failing
+elements, worst 1.12:1** — neon green text on a white card.
+- **⚠️ THE TRAP — do not reintroduce it.** Two chart components carried
+  `const rawColor = { "var(--green)":"#4fffb0", ... }` — a map translating tokens BACK into
+  hex, almost certainly because **SVG presentation attributes can't parse `var()`**. Replaced
+  with module-level **`cssVarColor(expr)`**, which resolves `var(--x)` against the live theme
+  (`themePref` is React state, so a theme switch re-renders and it re-reads). One change fixed
+  all 17 call sites. **If a chart needs a real colour value, call `cssVarColor` — never
+  hardcode.** (Note: `var()` DOES work in fill/stroke attributes in practice — `Icon` relies on
+  it — but `cssVarColor` is also needed wherever an alpha suffix is concatenated, e.g.
+  `` `${c}60` ``.)
+- Also: compliance scenarios + tints → tokens/`color-mix`; **HR zone names render as TEXT in
+  the zone colour** → tokens; weight-chart line/dots → token, and its dot halo was the fixed
+  dark page colour (a black ring on light) → `var(--surface)`; full purple sweep; macro palette
+  → `--yellow`/`--blue`/new **`--pink`**; **bell badge** was filling with `--accent` (the
+  DARKENED text accent) under near-black text at 3.61:1 → `--accent-fill`, which exists for
+  exactly this; sign-out red → `var(--red)`.
+- **Two token bugs found by MEASURING, not assuming:** `--yellow`/`--color-warn` `#b45309` was
+  4.36:1 on `--s2` (it passes on white, but the cards aren't white) → **`#a34a08`**; `--blue`
+  `#0284c7` was 3.23–4.1:1 as text, failing on every light surface → **`#0369a1`**.
+- Hardcoded literals **47 → 4** (3 token definitions + the filled purple button, kept
+  deliberately: bright fill under near-black text reads in both themes, same as `--accent-fill`).
+
+### 🔑 Gotchas worth keeping
+- **⚠️ BUNDLE-HASH DEPLOY CHECKS DON'T WORK HERE.** Vercel inlines `VITE_USDA_API_KEY` (set in
+  prod, unavailable locally), so the local and live bundle hashes NEVER match even on a correct
+  deploy. The recipe repeated in older entries is misleading. Watch for the live hash to
+  **change**, then verify by CONTENT:
+  `curl -s https://glidna.com/assets/<bundle>.js -o live.js && LC_ALL=C grep -c '<newvalue>' live.js`
+  (`LC_ALL=C` matters — grep chokes on the minified bundle otherwise).
+- **Do NOT run Workflow subagents against this repo while signed into the app.** They drove the
+  same browser tab as me (causing phantom reloads and a viewport change) inside a signed-in
+  trainer account with "Take plan back" and "Delete" one click away — the same class of accident
+  that already cost `trainer.uitest` a plan and a sim. They also wrote probe files into the repo
+  root (`__probe.html`) and the scratchpad. Give them read-only tooling or a worktree.
+- **The preview's 30-min idle auto sign-out is what keeps logging the test session out**
+  mid-verification (≡ → "Auto sign-out when idle"). Turn it OFF on the test account before a
+  long verification run.
+- Timer-based polling (`setInterval`) is throttled to ~6 samples/3s in the headless preview —
+  useless for catching sub-second UI transitions. **Use a MutationObserver**, and install it and
+  trigger the navigation in the SAME `javascript_exec` call (each tool call is a round-trip, so
+  a separately-installed sampler is already dead by the time you navigate).
+- Reading `innerText` immediately after a `.click()` returns the PRE-render DOM — React batches.
+  Two "bugs" this session were that artifact. Re-read in a later call, or screenshot.
+
+### ⏭️ Next up
+- **One loose thread:** the DailyDashboard's expanded macro rows (protein/carbs/fat) were
+  verified by COMPUTING contrast against the known surfaces, not clicked — that tile uses a
+  delegated handler on a nested div that won't open programmatically. Values are certain, the
+  render isn't eyeballed. Check it when next on that screen in light mode.
+- Connector Phase 4: directory submission (needs a Claude Team/Enterprise org), ChatGPT.
+- Legal: waiver, session-billing ToS, AI-connector privacy — all awaiting counsel.
+
 ## ⚡⚡⚡ S112–S125 (Jul 25–26): MCP CONNECTOR SHIPPED · Impeccable design pass · trainer teams
 _All pushed to `origin/main` (@ `b34794f`), tree clean, functions deployed, rules PUBLISHED
 (167/167 emulator tests). Firebase `calorieiq-29762`; model `claude-sonnet-4-6`; admin UID
 `G7QUZ8Kat1fgyoMjdGKz4DYoVHi1`. 22 commits — the biggest arc since the AI layer._
 
 ### 🔴 READ FIRST — verification debt + one standing gotcha
-- **Most S117–S125 UI is BUILD-VERIFIED ONLY.** The preview's test session logged out
-  repeatedly and I do not type login passwords, so there was no visual click-through for:
-  the trainer-home critique fixes, the Local Plans drawer, the team panel, Connect-your-AI,
-  the compliance tracker, and the Show-more-detail doorway. **Ask Kevin to sign the preview
-  into `trainer.uitest@calorieiq-test.com` / `TestPass123`, then verify these.**
+- ~~**Most S117–S125 UI is BUILD-VERIFIED ONLY.**~~ **RESOLVED in S127 — all six were driven
+  live and work; the verification also found 4 real defects, now fixed. See the S127–S128
+  section at the top.** (Kevin signs the preview into `trainer.uitest@calorieiq-test.com` /
+  `TestPass123` — I do not type passwords.)
 - **Kevin repeatedly could not find features that render only for `role === client`.** He is
   a trainer/admin — ClientHome NEVER renders for him. When building on ClientHome, say so, or
   put it on DailyDashboard too (which trainers see when they open a client's plan).
@@ -96,7 +183,7 @@ stop re-flagging them (raw calorie quick-add STAYS; amber grace band, never red 
   through their own external AI, is existing trainer-access consent enough?
 
 ### ⏭️ Next up
-- **Verify the S117–S125 UI live** (see verification debt above) — biggest outstanding risk.
+- ~~**Verify the S117–S125 UI live**~~ **DONE — S127** (see the top section; 4 defects found + fixed).
 - ~~Timeline only for weight-loss goals~~ **DECIDED (S126): correct as-is.** Muscle gain is
   too unpredictable to project honestly and maintenance is just holding a range, so neither
   gets a goal-date projection. Recorded in PRODUCT.md — do not re-flag or "fix" it.
