@@ -419,7 +419,14 @@ async function privTxnJSON(db, uid, key, fn) {
   });
   return out;
 }
-function randId(p) { return `${p}${Date.now()}${Math.floor(Math.random() * 1000)}`; }
+let __idSeq = 0;
+function randId(p) {
+  // Date.now()+random(1000) collided for items built in the same millisecond —
+  // and the app deletes meals by id with .filter(), so two colliding ids meant
+  // deleting one removed BOTH while subtracting only one meal's calories.
+  __idSeq = (__idSeq + 1) % 100000;
+  return `${p}${Date.now()}${__idSeq}${Math.floor(Math.random() * 1000)}`;
+}
 
 // Normalize a clock time the user/AI gives for when a meal was eaten into a
 // canonical 24h "HH:MM" string (same format the frontend stores), so the AI can
@@ -1000,6 +1007,10 @@ function buildTools(role, opts = {}) {
               required: ["name", "mealType", "calories"],
             },
           },
+          date: { type: "string", description:
+            "YYYY-MM-DD for the WHOLE batch — use this when the user names one day for everything "
+            + "(\"log all of this for July 27th\"). Omit for today. A date on an individual item "
+            + "overrides this, so a mixed-day batch still works." },
           ...clientIdProp, ...localPlanProp,
         },
         required: ["meals"],
@@ -2264,9 +2275,13 @@ async function runTool(name, input, ctx) {
     const { id: planId } = await activePlanData(db, uid, planOverride);
     // Build meal objects and group by date (usually just today) so each day's log
     // is one transactional write with all its meals.
+    // Batch-level date: previously only `it.date` was read, so a model passing a
+    // single date for the whole list had it silently discarded and every item
+    // landed on today — while the reply confidently named the intended day.
+    const batchDate = /^\d{4}-\d{2}-\d{2}$/.test(String(input.date || "")) ? input.date : null;
     const byDate = {};
     for (const it of items) {
-      const date = re.test(it.date || "") ? it.date : ctx.today;
+      const date = re.test(it.date || "") ? it.date : (batchDate || ctx.today);
       const mealType = ["breakfast", "lunch", "dinner", "snack"].includes(it.mealType) ? it.mealType : "";
       const meal = { id: randId("m"), name: String(it.name || "").slice(0, 120), type: mealType,
         calories: Math.max(0, Math.round(Number(it.calories) || 0)),

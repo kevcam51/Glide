@@ -224,6 +224,8 @@ function buildSystemPrompt(role, isTrainer) {
 
 Today's date is ${todayLocal()} (${weekdayLocal()}) — use it to resolve "today", "yesterday", "this week", etc.
 
+log_meals takes ONE date for the whole batch (its top-level date arg) — use that when the user names a single day for everything; a date on an individual item overrides it for that item only.
+
 Dates: DEFAULT TO TODAY. If the user does not name a day, OMIT the date argument entirely — the tools already default to the user's today, which is more reliable than a date you work out yourself. Only pass date when they explicitly name another day ("yesterday", "last Monday", "my Saturday weigh-in"); resolve that to YYYY-MM-DD. Never infer a date from earlier messages in this conversation — it may have been started on a different day. For history ("what did I eat last week?") use get_nutrition_log with start/end dates.
 
 Meal times: each meal carries the clock time eaten (a "time" field like "19:45"). When the user says WHEN they ate, pass it as the time arg; else it defaults to now. get_nutrition_log returns times, so you can spot time-of-day patterns (late-night snacking, skipped breakfasts).
@@ -363,7 +365,8 @@ async function runToolRound(toolUses, toolCtx) {
   return { results, wrote, proposal, workoutProposal, activeTarget };
 }
 
-exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], region: "us-central1", maxInstances: 10 }, async (request) => {
+exports.aiChat = onCall({ secrets: [ANTHROPIC_API_KEY], region: "us-central1", maxInstances: 10,
+  timeoutSeconds: 300 }, async (request) => {
   const uid = request.auth && request.auth.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Please sign in to use the AI assistant.");
 
@@ -492,7 +495,8 @@ exports.isAdminUid = isAdminUid;
 // onRequest must do it manually). The frontend uses this first and falls back to
 // the callable (aiChat) if streaming fails.
 exports.aiChatStream = onRequest(
-  { secrets: [ANTHROPIC_API_KEY], region: "us-central1", maxInstances: 10, cors: true },
+  { secrets: [ANTHROPIC_API_KEY], region: "us-central1", maxInstances: 10, cors: true,
+    timeoutSeconds: 300 },
   async (req, res) => {
     if (req.method !== "POST") { res.status(405).json({ error: "Use POST." }); return; }
 

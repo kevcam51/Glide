@@ -425,6 +425,22 @@ async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDat
   // Once someone has set them here, Trainerize never touches that one field again.
   const snapApply = { ...snap };
   if (prev.macroTargetsEditedAt) delete snapApply.macroTargets;
+  // Weight: NEWEST MEASUREMENT WINS, whichever side it came from. This used to
+  // overwrite unconditionally, so a weigh-in logged in Glidna today was reverted
+  // to Trainerize's older stat within 30 minutes — and because the sync only
+  // re-stamps the check-in dated lastStatDate, the Glidna check-in kept the new
+  // number while data.weightLbs went back to the old one. The client home reads
+  // weightLbs, so it showed the stale weight (Kevin: logged 200, still saw 202).
+  // Comparing dates keeps Trainerize authoritative for genuinely newer stats
+  // without discarding a fresher reading someone took here.
+  if (snapApply.weightLbs != null) {
+    const cis = Array.isArray(prev.checkIns) ? prev.checkIns : [];
+    const newestLocal = cis.reduce((acc, c) =>
+      (c && c.date && c.weight != null && (!acc || c.date > acc)) ? c.date : acc, null);
+    if (newestLocal && (!lastStatDate || newestLocal > lastStatDate)) {
+      delete snapApply.weightLbs;   // Glidna has the more recent weigh-in
+    }
+  }
   const d = { ...prev, ...snapApply, trainerizeId: u.id };
   if (snap.weightLbs && lastStatDate) {
     const cis = Array.isArray(d.checkIns) ? d.checkIns : [];

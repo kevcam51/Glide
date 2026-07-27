@@ -15799,7 +15799,7 @@ async function streamAiChat(apiMsgs, { onDelta, onDone, onProposal, onWorkoutPro
       else if (event === "proposal") { if (onProposal) onProposal(payload); }
       else if (event === "workoutProposal") { if (onWorkoutProposal) onWorkoutProposal(payload); }
       else if (event === "done") onDone(payload || {});
-      else if (event === "error") throw { code: payload.code || "internal", message: payload.message };
+      else if (event === "error") throw { code: payload.code || "internal", wrote: !!(payload && payload.wrote), message: payload.message };
     }
   }
 }
@@ -16401,7 +16401,12 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       } else if (sc.includes("resource-exhausted")) {
         setError("You've reached today's AI usage limit. It resets tomorrow.");
         if (canBoost) setBoost("offer");
-      } else if (streamed || gotEvent) {
+      } else if (streamed || gotEvent || (streamErr && streamErr.wrote)) {
+        // streamErr.wrote: a pure LOGGING turn emits no text at all (the prompt
+        // tells it not to narrate), so `streamed`/`gotEvent` stay empty and the
+        // old guard fell through to a full re-send — re-running log_meals and
+        // writing the whole batch a second time. The server already told us a
+        // write landed; believe it and never re-send.
         // The stream STARTED then broke — don't re-send (tools may have written).
         // Keep whatever arrived, refresh in case a write landed, and say so.
         setMessages([...next, { role: "assistant", content: streamed || "(connection dropped)" }]);
