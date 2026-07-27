@@ -260,7 +260,19 @@ function unauthorized(req, res) {
 function buildServer(ctx, profile, db, scopes) {
   const server = new McpServer(
     { name: "glidna", version: "1.0.0" },
-    { capabilities: { tools: {} } },
+    {
+      capabilities: { tools: {} },
+      // Without this the external model has NO idea what day it is for this
+      // user and fills date arguments from its own clock — reliably a day out.
+      // The in-app assistant gets the same fact via its system prompt.
+      instructions:
+        `Glidna is ${ctx.callerName ? ctx.callerName + "'s" : "the user's"} fitness and nutrition app. `
+        + `Today is ${ctx.today} (${ctx.weekday || "today"}) in the user's timezone. `
+        + `When logging or reading, OMIT any date argument to mean today — only pass an explicit `
+        + `date when the user names a different day, and say the date back to them when you do. `
+        + `Writes go to the signed-in account unless you pass a clientId, so when acting on behalf `
+        + `of a client always pass theirs.`,
+    },
   );
 
   const plan = planFor(profile);
@@ -397,6 +409,7 @@ exports.mcp = onRequest({ cors: false, timeoutSeconds: 300 }, async (req, res) =
     aiOptOut: profile.aiOptOut === true,
     callerName,
     today: todayLocal(),
+    weekday: weekdayLocal(),
     nowTime: nowTimeLocal(),
   };
 
@@ -422,6 +435,12 @@ exports.mcp = onRequest({ cors: false, timeoutSeconds: 300 }, async (req, res) =
 
 // Local date/time in the app's timezone — mirrors aichat.js so "today" means
 // the same day the app's local-date log keys use.
+function weekdayLocal() {
+  try {
+    return new Date().toLocaleDateString("en-US", { timeZone: "America/New_York", weekday: "long" });
+  } catch (e) { return ""; }
+}
+
 function todayLocal() {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 }

@@ -16000,6 +16000,30 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const loadThread = async (id) => {
     try { const r = await window.storage.get(threadKey(id)); const t = r && r.value ? JSON.parse(r.value) : []; return Array.isArray(t) ? t : []; } catch { return []; }
   };
+  // A chat's pinned subject (S136). The AI already accepts an activeTarget per
+  // turn; it was just EPHEMERAL — wiped on every switch/reload, so returning to
+  // a chat made it re-run find_client/list_clients to rediscover who it was
+  // talking about. Storing it on the chat makes the focus survive, which is the
+  // whole token saving Kevin asked for.
+  const pinOf = (id) => ((convos.find((c) => c.id === id) || {}).pin) || null;
+  const applyPin = (pin) => {
+    activeTargetRef.current = pin
+      ? (pin.clientId ? { clientId: pin.clientId } : { localPlanId: pin.localPlanId })
+      : null;
+  };
+  const setPin = (id, pin) => setConvos((prev) => {
+    const next = prev.map((c) => (c.id === id ? { ...c, pin } : c));
+    writeIndex(activeChatId, next);
+    return next;
+  });
+  const renameChat = (id, title) => setConvos((prev) => {
+    const t = String(title || "").trim().slice(0, 60);
+    if (!t) return prev;
+    const next = prev.map((c) => (c.id === id ? { ...c, title: t, titleLocked: true } : c));
+    writeIndex(activeChatId, next);
+    return next;
+  });
+
   const writeIndex = (active, chats) => {
     try { window.storage.set(CHATS_INDEX_KEY, JSON.stringify({ active, chats })); } catch { /* best-effort */ }
   };
@@ -16036,7 +16060,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       window.storage.set(threadKey(activeChatId), JSON.stringify(slim));
       setConvos((prev) => {
         const next = prev.map((c) => c.id === activeChatId
-          ? { ...c, title: !c.title || c.title === "New chat" ? chatTitle(slim) : c.title, updatedAt: Date.now() }
+          ? { ...c, title: (!c.titleLocked && (!c.title || c.title === "New chat")) ? chatTitle(slim) : c.title, updatedAt: Date.now() }
           : c);
         writeIndex(activeChatId, next);
         return next;
@@ -16055,6 +16079,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     if (busy || id === activeChatId) { setHistoryOpen(false); return; }
     const t = await loadThread(id);
     setActiveChatId(id); setMessages(t); resetThreadUi(); setHistoryOpen(false);
+    applyPin(pinOf(id));   // re-arm the subject AFTER resetThreadUi has nulled it
     setConvos((prev) => { writeIndex(id, prev); return prev; });
   };
   const deleteChat = async (id) => {
@@ -16353,7 +16378,10 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       smoother.stop();
       setMessages([...next, { role: "assistant", content: streamed || "(no response)" }]);
       if (done && done.usage && done.usage.warn) setWarn(true);
-      if (done && done.activeTarget) activeTargetRef.current = done.activeTarget;
+      if (done && done.activeTarget) {
+        activeTargetRef.current = done.activeTarget;
+        if (!pinOf(activeChatId)) setPin(activeChatId, done.activeTarget);
+      }
       if (done && done.wrote && typeof onDataChanged === "function") onDataChanged();
     } catch (streamErr) {
       smoother.stop(); // cancel the RAF loop; the branches below set the final text
@@ -16375,7 +16403,10 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
           const res = await callAiChat({ messages: apiMsgs, activeTarget: activeTargetRef.current });
           const reply = (res.data && res.data.reply) || "";
           setMessages([...next, { role: "assistant", content: reply || "(no response)" }]);
-          if (res.data && res.data.activeTarget) activeTargetRef.current = res.data.activeTarget;
+          if (res.data && res.data.activeTarget) {
+            activeTargetRef.current = res.data.activeTarget;
+            if (!pinOf(activeChatId)) setPin(activeChatId, res.data.activeTarget);
+          }
           if (res.data && res.data.usage && res.data.usage.warn) setWarn(true);
           if (res.data && res.data.proposal) setProposal({ ...res.data.proposal, status: "pending" });
           if (res.data && res.data.workoutProposal) setWorkout({ ...res.data.workoutProposal, status: "pending" });
@@ -16907,8 +16938,20 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                       className={`mb-1.5 flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 ${c.id === activeChatId ? "border-primary bg-[rgba(8,220,224,.06)]" : "border-border bg-surface2"}`}>
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-[.82rem] font-semibold text-fg">{c.title || "New chat"}</div>
-                        <div className="text-[.66rem] text-muted">{timeAgo(c.updatedAt)}</div>
+                        <div className="text-[.66rem] text-muted">
+                          {timeAgo(c.updatedAt)}
+                          {c.pin && <> · <span className="text-primary">focused</span></>}
+                        </div>
                       </div>
+                      <button onClick={(e) => {
+                          e.stopPropagation();
+                          const t = window.prompt("Name this chat", c.title || "");
+                          if (t !== null) renameChat(c.id, t);
+                        }}
+                        aria-label="Rename chat" title="Rename chat"
+                        className="shrink-0 border-0 bg-transparent text-muted cursor-pointer hover:text-fg">
+                        <Icon name="edit" size={14} color="currentColor" />
+                      </button>
                       {convos.length > 1 && (
                         <button onClick={(e) => { e.stopPropagation(); deleteChat(c.id); }} aria-label="Delete chat" title="Delete chat"
                           className="shrink-0 border-0 bg-transparent text-muted cursor-pointer hover:text-danger"><Icon name="close" size={13} color="currentColor" /></button>

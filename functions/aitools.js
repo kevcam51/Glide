@@ -942,7 +942,7 @@ function buildTools(role, opts = {}) {
           carbs: { type: "number", description: "Carb grams (0 if unknown)" },
           fat: { type: "number", description: "Fat grams (0 if unknown)" },
           micros: MICRO_SCHEMA,
-          date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
+          date: { type: "string", description: "Date YYYY-MM-DD. OMIT for today — only pass this when the user explicitly named a different day." },
           time: { type: "string", description: "Clock time eaten, e.g. '8:30am' or '19:45'. Set when the user mentions when they ate; omit for now." },
           ...clientIdProp, ...localPlanProp,
         },
@@ -966,7 +966,7 @@ function buildTools(role, opts = {}) {
           carbs: { type: "number", description: "Carb grams (0 if unknown)" },
           fat: { type: "number", description: "Fat grams (0 if unknown)" },
           micros: MICRO_SCHEMA,
-          date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
+          date: { type: "string", description: "Date YYYY-MM-DD. OMIT for today — only pass this when the user explicitly named a different day." },
           time: { type: "string", description: "Clock time eaten, e.g. '8:30am' or '19:45'. Set when the user mentions when they ate; omit for now." },
           ...clientIdProp, ...localPlanProp,
         },
@@ -1015,7 +1015,7 @@ function buildTools(role, opts = {}) {
         type: "object",
         properties: {
           name: { type: "string", description: "The logged food/meal name to remove (matches case-insensitively; the most recent match on the date is removed)" },
-          date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
+          date: { type: "string", description: "Date YYYY-MM-DD. OMIT for today — only pass this when the user explicitly named a different day." },
           ...clientIdProp, ...localPlanProp,
         },
         required: ["name"],
@@ -1030,7 +1030,7 @@ function buildTools(role, opts = {}) {
         type: "object",
         properties: {
           note: { type: "string", description: "Optional note, e.g. 'Push day — felt strong'" },
-          date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
+          date: { type: "string", description: "Date YYYY-MM-DD. OMIT for today — only pass this when the user explicitly named a different day." },
           ...clientIdProp, ...localPlanProp,
         },
       },
@@ -1044,7 +1044,7 @@ function buildTools(role, opts = {}) {
         type: "object",
         properties: {
           weightLbs: { type: "number", description: "Body weight in pounds" },
-          date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
+          date: { type: "string", description: "Date YYYY-MM-DD. OMIT for today — only pass this when the user explicitly named a different day." },
           ...clientIdProp, ...localPlanProp,
         },
         required: ["weightLbs"],
@@ -1058,7 +1058,7 @@ function buildTools(role, opts = {}) {
       input_schema: {
         type: "object",
         properties: {
-          date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
+          date: { type: "string", description: "Date YYYY-MM-DD. OMIT for today — only pass this when the user explicitly named a different day." },
           mood: { type: "number", description: "Energy/mood 1 (drained) to 5 (fired up)" },
           bodyFatPct: { type: "number", description: "Body-fat % measured that day" },
           hitCalorieTarget: { type: "boolean", description: "Did they hit their calorie target that day?" },
@@ -1084,7 +1084,7 @@ function buildTools(role, opts = {}) {
           calf: { type: "number", description: "Calf at the widest point, inches" },
           forearm: { type: "number", description: "Forearm at the widest point, inches" },
           wrist: { type: "number", description: "Wrist at the narrowest point, inches" },
-          date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
+          date: { type: "string", description: "Date YYYY-MM-DD. OMIT for today — only pass this when the user explicitly named a different day." },
           ...clientIdProp, ...localPlanProp,
         },
       },
@@ -1112,7 +1112,7 @@ function buildTools(role, opts = {}) {
         properties: {
           ounces: { type: "number", description: "Water in fluid ounces" },
           mode: { type: "string", enum: ["add", "set"], description: "add (default) or set the day's total" },
-          date: { type: "string", description: "Date YYYY-MM-DD. Omit for today." },
+          date: { type: "string", description: "Date YYYY-MM-DD. OMIT for today — only pass this when the user explicitly named a different day." },
           ...clientIdProp, ...localPlanProp,
         },
         required: ["ounces"],
