@@ -207,6 +207,28 @@ S143 hide/restore tiles (viewer's own kv). S148 burn disclaimers.
   NET, so schedule and watch currently disagree about the same workout.
 - YouTube exercise videos (Kevin has his own library). Live-test app requests.
 
+## ⚡ S140–S157 (Jul 27) — see git log for detail; the load-bearing ones:
+- **S139 CLIENT DATA BLEED (worst of the session):** switching client showed A's
+  data under B's name AND could SAVE it there — `onAddMeal` spread the stale
+  dailyLog while persistLog routed by the new uid. Fixed by resetting plan-scoped
+  state on switch + an `alive` guard on the loader. ⚠️ **Data written before this
+  may be wrong** — if a client has meals they never logged, that is why.
+- **S144–S146 date-aware dashboard:** tiles/weekday/weight follow the VIEWED day.
+  Weight shows the last weigh-in as of that day, labelled, and never looks forward.
+- **S147 the sync "failure" was ours:** Trainerize was healthy (200 in 0.28s). The
+  callable SDK's 70s CLIENT timeout killed a 300s function. Client now matches.
+- **S150 tracker:** merge per METRIC across sources, not per source. Kevin's Jul 25
+  had Apple calorieOut 0 + Garmin 16,410 steps; picking one wholesale discarded the
+  other. His missing Saturday burn is UPSTREAM — Garmin sent no calorieOut that day.
+- **S135 AI accuracy:** log_meals had no top-level date (batch date silently
+  dropped → everything on today); a stream failure re-sent a turn that had already
+  written (duplicates); failed tools carried no is_error; a trainer omitting
+  clientId writes to their OWN account.
+- **S131/S134 AI consent:** enforced opt-out at resolveTargetUid + roster tools,
+  and a one-time choice instead of defaulting people in.
+- **S140 app requests** (live-verified), **S153** back buttons, **S155/S156** food
+  library delete + Keep/Delete confirm, **S157** AI now READS notes before advising.
+
 ## 🐞 OPEN BUG — food library delete does nothing (S155, NOT fixed)
 Kevin: in the food library ("previously logged"), he typed a filter, then hit the
 trashcan on what looked like duplicates. The confirm appears, he taps Delete?, and
