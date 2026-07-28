@@ -1,5 +1,61 @@
 # Glide — Next-Session Handoff (start here)
 
+## ✅ STATE @ `10f6509` — everything pushed, deployed, tree clean (Jul 27, late)
+Firebase `calorieiq-29762` · model `claude-sonnet-4-6` · admin UID
+`G7QUZ8Kat1fgyoMjdGKz4DYoVHi1` · live on **glidna.com**.
+
+**⚠️ READ THIS ORDERING NOTE FIRST.** Four sections below cover Jul 27 and were
+written at different points in one very long session, so they overlap and one
+contradicts itself. Trust this block and **`## ⚡ S140–S157`** (the last one
+written); treat the earlier S135–S136 / S135–S139 / S140–S152 headings as history.
+The **"NEXT SESSION — START HERE: make every surface DATE-AWARE"** section is
+**DONE** (S144–S146) — do not rebuild it.
+
+### 🔴 The one thing a fresh session cannot rediscover from the code
+**S139 client-data bleed may have already written bad data.** Before the fix,
+logging for client B before B's data loaded wrote client A's whole meal array into
+B's account. Fixed, but nothing repairs what already landed. If a client shows
+meals they never logged, that is the cause — do not treat it as a new bug.
+
+### ⏭️ Genuinely open (in the order Kevin last implied)
+1. **Food-library delete in ClientHome's calendar is read-only** — `CalendarView`'s
+   `<MealLog>` never receives `onRemoveRecentFood` (App.jsx ~10022), so the trash is
+   inert there. The dashboard path works (S155). Deliberately NOT fixed: verify the
+   prop exists at that call site before wiring, rather than guessing.
+2. **YouTube exercise videos** — Kevin has his OWN library, which beats the Free
+   Exercise DB photo pairs (no licensing, no storage). ⚠️ ENRICHMENT ONLY: our 184
+   exercises carry the MET values the whole burn engine runs on, and no third-party
+   source ships METs. Never swap the catalog.
+3. **App requests** are live and verified; "planned + copy" hands one to a developer
+   with its context. Nothing else pending there.
+
+### 🅿️ Parked by decision (do not re-litigate)
+- **Net vs gross METs** — real (~+25% over-credit at 5 METs, and the Garmin already
+  reports net so the two disagree), but Kevin parked it as the smallest item.
+- **VO₂max for burn accuracy — recommended AGAINST**, on verified primary sources:
+  the accepted correction uses RESTING VO₂ (data we already hold), and VO₂max
+  explains only ~7–12% of variance in economy. Tracking it as a MEASUREMENT is
+  still worthwhile; wiring it into burn would be false precision.
+- **Connector directory listing** — skipped; Kevin sends invite links, so no Team
+  org and no $50/mo. Consequently **DCR must NOT be rebuilt as CIMD** — DCR is
+  proven working with both Claude and ChatGPT.
+
+### 🔑 Gotchas that cost real time tonight
+- **Bundle-hash deploy checks are meaningless here** — Vercel inlines
+  `VITE_USDA_API_KEY`, so local and live hashes never match. Watch the live hash
+  CHANGE, then verify by content with `LC_ALL=C grep`.
+- **The callable SDK's client timeout is 70s** regardless of the function's
+  `timeoutSeconds`. That, not Trainerize, caused "Couldn't reach Trainerize".
+- **Do not run Workflow subagents against this repo while signed into the app** —
+  they drove the same browser and wrote probe files into the repo root.
+- `setInterval` is throttled to ~6 samples/3s in the headless preview; use a
+  MutationObserver, installed in the SAME `javascript_exec` as the navigation.
+- Reading `innerText` right after a `.click()` returns the PRE-render DOM.
+- zsh: `UID` and `GID` are read-only — name shell vars something else.
+- Kevin is trainer/admin: **ClientHome never renders for him.** Put anything he
+  needs to see on DailyDashboard too.
+
+
 ## ⚡⚡⚡ S135–S136 (Jul 27): macro revert fixed · AI stops claiming work it didn't do · chat focus
 _Pushed (@ `bfbb02c`), **all functions DEPLOYED** — this supersedes the "NOT DEPLOYED" warning in
 the S136 commit message, which was written before Kevin re-authed._
@@ -259,7 +315,7 @@ the row stays. Reproduced by him more than once.
 Fastest repro: open the library, type a filter, tap the trash on a duplicate, and
 log `recentFoodsRef.current.length` before/after alongside the computed key.
 
-## ⏭️ NEXT SESSION — START HERE: make every surface DATE-AWARE (Kevin, S138 close)
+## ✅ DONE (S144–S146) — was "NEXT SESSION: make every surface DATE-AWARE"
 _Nothing started, working tree clean. This is one coherent theme, not five asks._
 
 ### The bug that makes it urgent (verified, exact lines)
