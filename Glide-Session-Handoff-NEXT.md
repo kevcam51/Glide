@@ -18,10 +18,14 @@ B's account. Fixed, but nothing repairs what already landed. If a client shows
 meals they never logged, that is the cause — do not treat it as a new bug.
 
 ### ⏭️ Genuinely open (in the order Kevin last implied)
-1. **Food-library delete in ClientHome's calendar is read-only** — `CalendarView`'s
-   `<MealLog>` never receives `onRemoveRecentFood` (App.jsx ~10022), so the trash is
-   inert there. The dashboard path works (S155). Deliberately NOT fixed: verify the
-   prop exists at that call site before wiring, rather than guessing.
+1. ~~**Food-library delete in ClientHome's calendar**~~ **FIXED — S158** (`4028a1b`).
+   ⚠️ The diagnosis above was wrong and cost a detour: `CalendarView`'s `<MealLog>`
+   **does** pass `onRemoveRecentFood`. The gap was one level UP — `ClientHome`
+   renders its own `<CalendarView>` and passed only `recentFoods`. It also wasn't
+   "read-only": FoodLibrary's food row called the handlers unguarded, so the click
+   **threw** and the confirm sat there. Fixed both, plus a second gap found while
+   there: food logged FROM the calendar never joined the library (`onLogFoods`).
+   Fold rules now live in one pure `foldRecentFoods`.
 2. **YouTube exercise videos** — Kevin has his OWN library, which beats the Free
    Exercise DB photo pairs (no licensing, no storage). ⚠️ ENRICHMENT ONLY: our 184
    exercises carry the MET values the whole burn engine runs on, and no third-party
@@ -285,7 +289,12 @@ S143 hide/restore tiles (viewer's own kv). S148 burn disclaimers.
 - **S140 app requests** (live-verified), **S153** back buttons, **S155/S156** food
   library delete + Keep/Delete confirm, **S157** AI now READS notes before advising.
 
-## 🐞 OPEN BUG — food library delete does nothing (S155, NOT fixed)
+## ✅ CLOSED (S158) — food library delete does nothing
+_Root cause was NOT in the "NOT yet checked" list below — it was the missing
+handlers at `ClientHome`'s own `<CalendarView>`, and an unguarded call that threw.
+The ruled-out notes below stayed correct and saved time; keep them if it recurs._
+
+## 🐞 (historic) OPEN BUG — food library delete does nothing (S155)
 Kevin: in the food library ("previously logged"), he typed a filter, then hit the
 trashcan on what looked like duplicates. The confirm appears, he taps Delete?, and
 the row stays. Reproduced by him more than once.
