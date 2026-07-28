@@ -207,6 +207,36 @@ S143 hide/restore tiles (viewer's own kv). S148 burn disclaimers.
   NET, so schedule and watch currently disagree about the same workout.
 - YouTube exercise videos (Kevin has his own library). Live-test app requests.
 
+## 🐞 OPEN BUG — food library delete does nothing (S155, NOT fixed)
+Kevin: in the food library ("previously logged"), he typed a filter, then hit the
+trashcan on what looked like duplicates. The confirm appears, he taps Delete?, and
+the row stays. Reproduced by him more than once.
+
+**RULED OUT (proved, do not re-check):**
+- The list is NOT derived from logged meals — `FoodLibrary` renders `recentFoods`
+  filtered in place (App.jsx:8005-8007), so a successful filter WOULD remove the row.
+- The delete already passes the right shape. I "fixed" it to normalise the type via
+  `effType(f)` the way the SAVE button does (App.jsx:8089) — that is WRONG and was
+  reverted. A typeless legacy food is stored keyed `name|other`; with a meal filter
+  active `effType` yields `name|breakfast`, which matches nothing. Raw `f.type` is
+  correct. Verified by hand-running the key maths — do not repeat this mistake.
+
+**NOT yet checked (start here):**
+- `onRemoveRecentFood` (App.jsx:22359) opens with `if (!activeId) return;` — a
+  silent bail. Confirm activeId is set when the library is opened from the meal log.
+- `recentFoodsRef.current` vs the `recentFoods` STATE. The handler filters the REF
+  and writes that back. S139 added `resetPlanScopedState()` which clears both, and
+  the loader repopulates them — if the ref were empty while state had rows, the
+  filter would produce [] . Worth logging both at click time.
+- Whether `baseFoodName()` strips something (brand/serving) so two visually
+  identical rows share ONE key — which would make one delete look like a no-op
+  while actually removing the other. This also fits "duplicates" being the trigger.
+- The SAVED tab path (`onRemoveSaved`) may behave differently — Kevin was in
+  "previously logged", so test that one first.
+
+Fastest repro: open the library, type a filter, tap the trash on a duplicate, and
+log `recentFoodsRef.current.length` before/after alongside the computed key.
+
 ## ⏭️ NEXT SESSION — START HERE: make every surface DATE-AWARE (Kevin, S138 close)
 _Nothing started, working tree clean. This is one coherent theme, not five asks._
 
