@@ -20214,8 +20214,26 @@ function AppRequestsPanel({ onClose }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(false);
   const [busy, setBusy] = useState("");
+  const [copied, setCopied] = useState("");
   const load = () => callListAppRequests()
     .then((r) => setData(r.data)).catch(() => setErr(true));
+  // "Planned" is the moment you decide to build it, so that is where the handoff
+  // belongs: it marks the request AND puts the whole thing on the clipboard —
+  // who asked, their role, and the context of what they were doing when they hit
+  // the gap. The context is the part worth keeping; retyping it loses exactly
+  // what a support email never captures.
+  const planAndCopy = async (r) => {
+    const text = [
+      `Glidna app request — from ${r.name || r.email || "a user"}${r.role ? ` (${r.role})` : ""}`,
+      r.createdAt ? `Sent ${fmtStamp(r.createdAt)}` : "",
+      "",
+      r.request,
+      r.context ? `\nContext: ${r.context}` : "",
+    ].filter(Boolean).join("\n");
+    try { await navigator.clipboard.writeText(text); setCopied(r.id); setTimeout(() => setCopied(""), 2000); }
+    catch (e) { console.warn("clipboard blocked", e); }
+    await setStatus(r.id, "planned");
+  };
   useEffect(() => { load(); }, []);
   const setStatus = async (id, status) => {
     setBusy(id);
@@ -20264,10 +20282,11 @@ function AppRequestsPanel({ onClose }) {
               <div className="mt-1 text-[.66rem] text-muted">{fmtStamp(r.createdAt)}</div>
               <div className="mt-2 flex gap-2 flex-wrap">
                 {["reviewed", "planned", "declined"].map((st) => (
-                  <button key={st} disabled={busy === r.id || r.status === st}
-                    onClick={() => setStatus(r.id, st)}
+                  <button key={st} disabled={busy === r.id || (r.status === st && st !== "planned")}
+                    onClick={() => (st === "planned" ? planAndCopy(r) : setStatus(r.id, st))}
+                    title={st === "planned" ? "Mark planned and copy the request to paste to a developer" : ""}
                     className="px-2.5 py-1.5 rounded-md text-[.72rem] font-bold border border-border bg-transparent text-muted cursor-pointer disabled:opacity-40">
-                    {st}
+                    {st === "planned" ? (copied === r.id ? "copied ✓" : "planned + copy") : st}
                   </button>
                 ))}
               </div>
