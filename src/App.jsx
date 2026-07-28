@@ -8090,8 +8090,15 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
           <Icon name="star" size={17} color={inSavedTab ? "var(--yellow)" : "var(--muted)"} variant={inSavedTab ? "solid" : "outline"} />
         </button>
         {confirmDel === key ? (
-          <button onClick={() => { (inSavedTab ? onRemoveSaved : onRemoveRecent)(f); setConfirmDel(""); }}
-            style={{ ...iconBtn, padding: "10px 12px", color: "var(--red)", fontSize: ".72rem", fontWeight: 700 }}>Delete?</button>
+          // Ask, and give a way OUT (Kevin). "Delete?" alone had no cancel — once
+          // armed the only escape was tapping another row, so a mis-tap felt like
+          // a trap. Keep is listed first and styled neutral; delete is the red one.
+          <span style={{ display: "inline-flex", gap: 4 }}>
+            <button onClick={() => setConfirmDel("")}
+              style={{ ...iconBtn, padding: "10px 12px", color: "var(--muted)", fontSize: ".72rem", fontWeight: 700 }}>Keep</button>
+            <button onClick={() => { (inSavedTab ? onRemoveSaved : onRemoveRecent)(f); setConfirmDel(""); }}
+              style={{ ...iconBtn, padding: "10px 12px", color: "var(--red)", fontSize: ".72rem", fontWeight: 700 }}>Delete</button>
+          </span>
         ) : (
           <button onClick={() => setConfirmDel(key)} title="Delete" style={iconBtn}>
             <Icon name="trash" size={16} color="var(--muted)" />
