@@ -9531,7 +9531,7 @@ const fmtClock = (t) => {
 // calendar renders IN-FLOW (it *is* the page, which must scroll normally); a
 // lock here froze the whole page on Android. ClientHome's portal-overlay usage
 // locks from the caller instead (useBodyScrollLock(showCalendar) there).
-function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods, savedFoods, onToggleSaveFood, onRemoveSavedFood, meUid }) {
+function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods, savedFoods, onToggleSaveFood, onRemoveRecentFood, onRemoveSavedFood, meUid }) {
   // Booked training sessions (S100) — shown alongside the logging data so the
   // calendar answers "when am I training?" as well as "what did I eat?".
   const [calSessions, setCalSessions] = useState([]);
@@ -10019,7 +10019,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             </div>
           </div>
           <div style={{ marginTop: 12 }}>
-            <MealLog meals={(dayLog && dayLog.meals) || []} onAddMeal={addMeal} onAddMeals={addMeals} onRemoveMeal={removeMeal} onEditMeal={editMeal} recentFoods={recentFoods} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={sel} />
+            <MealLog meals={(dayLog && dayLog.meals) || []} onAddMeal={addMeal} onAddMeals={addMeals} onRemoveMeal={removeMeal} onEditMeal={editMeal} recentFoods={recentFoods} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveRecentFood={onRemoveRecentFood} onRemoveSavedFood={onRemoveSavedFood} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={sel} />
           </div>
         </div>
 
@@ -10494,7 +10494,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         <CalendarView data={data} tdee={tdee} onClose={() => setShowCalendar(false)}
           onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
           onSaveCheckIn={onSaveCheckIn} onDeleteCheckIn={onDeleteCheckIn} recentFoods={recentFoods}
-          savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood}
+          savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveRecentFood={onRemoveRecentFood} onRemoveSavedFood={onRemoveSavedFood}
           meUid={dashMeUid} />
       </div>
     );
