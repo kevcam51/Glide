@@ -7345,6 +7345,39 @@ const baseFoodName = (name) => {
 // Dedup key: base food name + meal type.
 const recentFoodKey = (name, type) => baseFoodName(name).toLowerCase() + "|" + recentMealKey(type);
 
+// Fold newly logged foods into a recents list — the ONE implementation of the
+// "remember what I logged" rules, so every logging surface behaves identically:
+// newest first, one entry per food+meal (the LAST amount wins), legacy typeless
+// entries for the same food retired, capped at RECENT_FOODS_CAP. Pure: returns a
+// new list, or null when nothing named was worth remembering.
+const RECENT_FOODS_CAP = 400; // ~50KB of JSON — old foods still autocomplete
+const foldRecentFoods = (current, meals) => {
+  const arr = Array.isArray(meals) ? meals : [meals];
+  const add = [];
+  const keys = new Set();
+  for (const m of arr) {
+    const raw = ((m && m.name) || "").trim();
+    if (!raw) continue;
+    const base = baseFoodName(raw) || raw;
+    const tkey = recentMealKey(m.type);
+    const key = base.toLowerCase() + "|" + tkey;
+    if (keys.has(key)) continue;  // same food twice in one batch → keep the first
+    keys.add(key);
+    add.push({ name: base, type: tkey, brand: m.brand || "",
+      calories: m.calories || 0, protein: m.protein || 0, carbs: m.carbs || 0, fat: m.fat || 0,
+      grams: m.grams != null ? Number(m.grams) : null, unit: m.unit || null,
+      ...(m.micros ? { micros: m.micros } : {}), ts: Date.now() });
+  }
+  if (!add.length) return null;
+  const bases = new Set(add.map((f) => f.name.toLowerCase()));
+  const kept = (current || []).filter((f) => {
+    if (keys.has(recentFoodKey(f.name, f.type))) return false;       // superseded
+    if (f.type == null && bases.has(baseFoodName(f.name || "").toLowerCase())) return false; // legacy
+    return true;
+  });
+  return [...add, ...kept].slice(0, RECENT_FOODS_CAP);
+};
+
 // ── Saved food library (S95) ────────────────────────────────────────────────
 // Foods the user DELIBERATELY keeps, as opposed to `caliq-foods-{planId}` which
 // just remembers whatever was logged lately and rolls over. Stored on the
@@ -8086,10 +8119,16 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
         <span style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, fontSize: "1rem", color: "var(--accent)", whiteSpace: "nowrap", padding: "0 2px" }}>
           {(f.calories || 0).toLocaleString()}<span style={{ fontSize: ".6rem", color: "var(--muted)", fontWeight: 600 }}> cal</span>
         </span>
-        <button onClick={() => onToggleSave({ ...f, type: effType(f) })} title={inSavedTab ? "Remove from your library" : "Save to your library"} style={iconBtn}>
-          <Icon name="star" size={17} color={inSavedTab ? "var(--yellow)" : "var(--muted)"} variant={inSavedTab ? "solid" : "outline"} />
-        </button>
-        {confirmDel === key ? (
+        {/* A caller that doesn't supply the handler gets NO button rather than a
+            dead one — an unguarded call threw, so the confirm appeared and
+            "Delete" silently did nothing (S158). The meal row below already
+            guarded its callbacks this way. */}
+        {onToggleSave && (
+          <button onClick={() => onToggleSave({ ...f, type: effType(f) })} title={inSavedTab ? "Remove from your library" : "Save to your library"} style={iconBtn}>
+            <Icon name="star" size={17} color={inSavedTab ? "var(--yellow)" : "var(--muted)"} variant={inSavedTab ? "solid" : "outline"} />
+          </button>
+        )}
+        {!(inSavedTab ? onRemoveSaved : onRemoveRecent) ? null : confirmDel === key ? (
           // Ask, and give a way OUT (Kevin). "Delete?" alone had no cancel — once
           // armed the only escape was tapping another row, so a mis-tap felt like
           // a trap. Keep is listed first and styled neutral; delete is the red one.
@@ -9538,7 +9577,7 @@ const fmtClock = (t) => {
 // calendar renders IN-FLOW (it *is* the page, which must scroll normally); a
 // lock here froze the whole page on Android. ClientHome's portal-overlay usage
 // locks from the caller instead (useBodyScrollLock(showCalendar) there).
-function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods, savedFoods, onToggleSaveFood, onRemoveRecentFood, onRemoveSavedFood, meUid }) {
+function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods, savedFoods, onToggleSaveFood, onRemoveRecentFood, onRemoveSavedFood, onLogFoods, meUid }) {
   // Booked training sessions (S100) — shown alongside the logging data so the
   // calendar answers "when am I training?" as well as "what did I eat?".
   const [calSessions, setCalSessions] = useState([]);
@@ -9642,6 +9681,10 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   const addMeal = (meal) => {
     const m = { id: `m${Date.now()}${Math.floor(Math.random() * 1000)}`, name: meal.name || "", type: meal.type || "",
       calories: Number(meal.calories) || 0, protein: Number(meal.protein) || 0, carbs: Number(meal.carbs) || 0, fat: Number(meal.fat) || 0 };
+    // Food logged from the calendar joins the food library too (S158) — it used
+    // to be remembered only when logged from the dashboard, so back-dating a meal
+    // left it un-re-addable.
+    if (onLogFoods) onLogFoods([{ ...meal, ...m }]);
     const d = dayLog || {};
     writeDay({ ...d, meals: [...(d.meals || []), m], calories: (d.calories || 0) + m.calories,
       protein: (d.protein || 0) + m.protein, carbs: (d.carbs || 0) + m.carbs, fat: (d.fat || 0) + m.fat });
@@ -9654,6 +9697,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   const editMeal = (id, fields) => {
     const d = dayLog || {}; const old = (d.meals || []).find((x) => x.id === id); if (!old) return;
     const nm = { ...old, ...fields, calories: Number(fields.calories) || 0, protein: Number(fields.protein) || 0, carbs: Number(fields.carbs) || 0, fat: Number(fields.fat) || 0 };
+    if (onLogFoods) onLogFoods([nm]); // corrected amount becomes the remembered one
     writeDay({ ...d, meals: (d.meals || []).map((x) => x.id === id ? nm : x),
       calories: Math.max(0, (d.calories || 0) - old.calories + nm.calories),
       protein: Math.max(0, (d.protein || 0) - old.protein + nm.protein),
@@ -9670,6 +9714,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
       ...(meal.grams != null ? { grams: Number(meal.grams), unit: meal.unit || "g" } : {}),
       ...(meal.micros ? { micros: meal.micros } : {}) }));
     if (!arr.length) return;
+    if (onLogFoods) onLogFoods(arr);
     const d = dayLog || {}; const sum = (f) => arr.reduce((s, m) => s + (m[f] || 0), 0);
     writeDay({ ...d, meals: [...(d.meals || []), ...arr], calories: (d.calories || 0) + sum("calories"),
       protein: (d.protein || 0) + sum("protein"), carbs: (d.carbs || 0) + sum("carbs"), fat: (d.fat || 0) + sum("fat") });
@@ -10120,7 +10165,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood,
-  savedFoods, onToggleSaveFood, onRemoveSavedFood, weekSummary, recentWearable, history, onRefresh, isRemote,
+  savedFoods, onToggleSaveFood, onRemoveSavedFood, onLogFoods, weekSummary, recentWearable, history, onRefresh, isRemote,
   savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
   onSaveMeasurements, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise,
@@ -10502,6 +10547,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
           onSaveCheckIn={onSaveCheckIn} onDeleteCheckIn={onDeleteCheckIn} recentFoods={recentFoods}
           savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveRecentFood={onRemoveRecentFood} onRemoveSavedFood={onRemoveSavedFood}
+          onLogFoods={onLogFoods}
           meUid={dashMeUid} />
       </div>
     );
@@ -17247,6 +17293,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   const [showCalendar, setShowCalendar] = useState(false); // full calendar (back-dating) overlay
   useBodyScrollLock(showCalendar); // ClientHome's calendar is a portal OVERLAY (scrolls internally) — lock the page behind it
   const [recentFoods, setRecentFoods] = useState([]); // recent foods for the calendar's quick re-add chips
+  const [savedFoods, setSavedFoods] = useState([]);   // the client's own starred library (account-level, all plans)
   const [signupYmd, setSignupYmd] = useState(null); // the client's signup date (profile.createdAt) → plan start date
   const [msg, setMsg] = useState("");              // calorie-log message
   const [wtMsg, setWtMsg] = useState("");          // weight-log message
@@ -17363,11 +17410,60 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       const r = await get(`caliq-foods-${active}`);
       setRecentFoods(r && r.value ? (JSON.parse(r.value) || []) : []);
     } catch { setRecentFoods([]); }
+    // The starred library is account-level (not per plan), so it doesn't move
+    // when the active plan does — but it loads here so the calendar's food
+    // library has a Saved tab at all.
+    try {
+      const r = await get(SAVED_FOODS_KEY);
+      setSavedFoods(r && r.value ? (JSON.parse(r.value) || []) : []);
+    } catch { setSavedFoods([]); }
   };
   useEffect(() => { load(); }, []);
   // Swipe-down to refresh (S104, Kevin: "all pages that are not popups"). Pulls
   // the active plan + today's log fresh from Firestore.
   const pullIndicator = usePullToRefresh(() => load(activePlanId));
+
+  // ── Food library upkeep from the calendar (S158) ─────────────────────────
+  // The calendar's meal log opens the same FoodLibrary the dashboard does, so it
+  // needs the same handlers. Without them the star and the trashcan were dead
+  // buttons here — the confirm appeared and Delete did nothing. Identity is the
+  // shared `recentFoodKey` (base name + meal type), matching App's handlers, so a
+  // food deleted here is the same food the dashboard would delete.
+  const writeRecentFoods = (next) => {
+    setRecentFoods(next);
+    try { set(`caliq-foods-${activePlanId}`, JSON.stringify(next)); } catch (e) { /* best-effort */ }
+  };
+  const writeSavedFoods = (next) => {
+    setSavedFoods(next);
+    try { set(SAVED_FOODS_KEY, JSON.stringify(next)); } catch (e) { /* best-effort */ }
+  };
+  const onRemoveRecentFood = (food) => {
+    const key = recentFoodKey(food.name, food.type);
+    writeRecentFoods(recentFoods.filter((f) => recentFoodKey(f.name, f.type) !== key));
+  };
+  const onRemoveSavedFood = (food) => {
+    const key = recentFoodKey(food.name, food.type);
+    writeSavedFoods(savedFoods.filter((f) => recentFoodKey(f.name, f.type) !== key));
+  };
+  // Food logged from the calendar is remembered, same as logging from the
+  // dashboard — shared fold rules, so both surfaces produce identical lists.
+  const onLogFoods = (meals) => {
+    const next = foldRecentFoods(recentFoods, meals);
+    if (next) writeRecentFoods(next);
+  };
+  const onToggleSaveFood = (food) => {
+    const key = recentFoodKey(food.name, food.type);
+    if (savedFoods.some((f) => recentFoodKey(f.name, f.type) === key)) {
+      writeSavedFoods(savedFoods.filter((f) => recentFoodKey(f.name, f.type) !== key));
+      return;
+    }
+    const entry = { name: baseFoodName(food.name) || food.name, type: recentMealKey(food.type),
+      brand: food.brand || "", calories: food.calories || 0, protein: food.protein || 0,
+      carbs: food.carbs || 0, fat: food.fat || 0,
+      grams: food.grams != null ? Number(food.grams) : null, unit: food.unit || null,
+      ...(food.micros ? { micros: food.micros } : {}), savedAt: Date.now() };
+    writeSavedFoods([entry, ...savedFoods].slice(0, 500));
+  };
 
   // The client's start date = when they signed up (profile.createdAt). Read it
   // once so we can stamp it onto the plan (below) and gate the calendar.
@@ -18207,6 +18303,9 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
             <CalendarView data={planData || {}} tdee={target} onClose={() => setShowCalendar(false)}
               onReadDay={calReadDay} onWriteDay={calWriteDay} onListLoggedDays={calListLoggedDays}
               onSaveCheckIn={calSaveCheckIn} onDeleteCheckIn={calDeleteCheckIn} recentFoods={recentFoods}
+              savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood}
+              onRemoveRecentFood={onRemoveRecentFood} onRemoveSavedFood={onRemoveSavedFood}
+              onLogFoods={onLogFoods}
               meUid={meUid} />
           </div>
         </div>,
@@ -22265,6 +22364,11 @@ export default function App() {
     logWrite(`caliq-foods-${activeId}`, JSON.stringify(next));
   };
 
+  // Back-dated logging from the calendar remembers foods too (S158). The
+  // load-time `syncRecentsFromMeals` only ever sees TODAY's log, so a meal added
+  // to a past date used to never reach the food library.
+  const onLogFoodsFromCalendar = (meals) => (meals || []).forEach(upsertRecentFood);
+
   const upsertRecentFood = (m) => {
     const raw = (m.name || "").trim();
     if (!raw || !activeId) return;
@@ -22272,18 +22376,11 @@ export default function App() {
     const tkey = recentMealKey(m.type);         // "breakfast" | … | "other"
     const key = base.toLowerCase() + "|" + tkey;
     // Remember the SERVING (grams + unit) too, so re-logging reproduces the last
-    // amount (MyFitnessPal-style "log again"). Newest first, kept as a LARGE
-    // history so foods saved long ago still autocomplete (~400 ≈ 50KB JSON).
-    const entry = { name: base, type: tkey, brand: m.brand || "", calories: m.calories||0, protein: m.protein||0, carbs: m.carbs||0, fat: m.fat||0,
-      grams: m.grams != null ? Number(m.grams) : null, unit: m.unit || null,
-      ...(m.micros ? { micros: m.micros } : {}), ts: Date.now() };
-    const next = [entry, ...recentFoodsRef.current.filter((f) => {
-      // Drop the previous entry for this SAME food + meal type (last amount wins).
-      if (recentFoodKey(f.name, f.type) === key) return false;
-      // Retire a legacy (typeless) entry for this same food — it's now meal-scoped.
-      if (f.type == null && baseFoodName(f.name || "").toLowerCase() === base.toLowerCase()) return false;
-      return true;
-    })].slice(0, 400);
+    // amount (MyFitnessPal-style "log again"). The fold rules live in
+    // `foldRecentFoods` so the calendar's logging surfaces behave identically.
+    const next = foldRecentFoods(recentFoodsRef.current, m);
+    if (!next) return;
+    const entry = next[0];
     recentFoodsRef.current = next;
     setRecentFoods(next);
     logWrite(`caliq-foods-${activeId}`, JSON.stringify(next));
@@ -22871,7 +22968,7 @@ export default function App() {
               onOpenPlan={()=>{setNavFrom("dashboard");setStepAndSave(0);}} onOpenResults={()=>{setNavFrom("dashboard");setShowDash(false);}}
               onEditWorkouts={()=>{setNavFrom("dashboard");setStepAndSave(3);}}
               onLogUpdate={onLogUpdate} dailyLog={dailyLog} streak={streak}
-              onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
+              onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} onLogFoods={onLogFoodsFromCalendar} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
               onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; n.macroTargetsEditedAt=Date.now(); return n; })}
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
