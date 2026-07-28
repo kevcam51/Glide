@@ -19323,7 +19323,7 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
   const timeOf = (ts) => { try { return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch { return ""; } };
   return createPortal(
     <div className="bg-bg text-fg" style={{ position: "fixed", inset: 0, zIndex: 2300, display: "flex", flexDirection: "column", fontFamily: "var(--font-sans)" }}>
-      <div className="flex items-center gap-2 border-b border-border bg-surface2 px-3" style={{ paddingTop: "calc(10px + env(safe-area-inset-top,0px))", paddingBottom: "10px" }}>
+      <div className="relative justify-center px-[92px] flex items-center gap-2 border-b border-border bg-surface2 px-3" style={{ paddingTop: "calc(10px + env(safe-area-inset-top,0px))", paddingBottom: "10px" }}>
         <Icon name="person" size={18} color="var(--accent)" />
         <div className="min-w-0 flex-1">
           <div className="truncate font-display text-[.95rem] font-bold text-fg">{otherName || "Messages"}</div>
@@ -20095,7 +20095,7 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
       display: "flex", justifyContent: "center", padding: "14px", paddingTop: "calc(14px + env(safe-area-inset-top,0px))", overflowY: "auto" }}>
       <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card"
         style={{ width: "min(94vw,460px)", padding: "18px 16px", margin: "auto 0", maxHeight: "86vh", display: "flex", flexDirection: "column", gap: "10px" }}>
-        <div className="flex items-center gap-2">
+        <div className="relative justify-center px-[92px] flex items-center gap-2">
           <Icon name="file" size={18} color="var(--accent)" />
           <div className="font-display font-bold text-fg" style={{ fontSize: "1.02rem" }}>{heading}</div>
           <button onClick={onClose} aria-label="Back" className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
@@ -20179,7 +20179,7 @@ function NotifFeed({ items, onClose }) {
       <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card"
         style={{ width: "min(94vw,420px)", padding: "18px 16px", margin: "auto 0", maxHeight: "80vh",
           display: "flex", flexDirection: "column", gap: "10px" }}>
-        <div className="flex items-center gap-2">
+        <div className="relative justify-center px-[92px] flex items-center gap-2">
           <Icon name="bell" size={18} color="var(--accent)" />
           <div className="font-display font-bold text-fg" style={{ fontSize: "1.02rem" }}>Notifications</div>
           <button onClick={onClose} aria-label="Back" className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
@@ -20308,7 +20308,7 @@ function AdminDashboard({ onClose }) {
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2400, background: "rgba(0,0,0,.8)", display: "flex", justifyContent: "center", padding: "16px", paddingTop: "calc(16px + env(safe-area-inset-top,0px))", overflowY: "auto" }}>
       <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card" style={{ width: "min(96vw,640px)", padding: "18px 16px", margin: "auto 0", display: "flex", flexDirection: "column", gap: "12px" }}>
-        <div className="flex items-center gap-2">
+        <div className="relative justify-center px-[92px] flex items-center gap-2">
           <Icon name="dashboard" size={18} color="var(--accent)" />
           <div className="font-display font-bold text-fg" style={{ fontSize: "1.05rem" }}>Admin — all users</div>
           <button onClick={onClose} aria-label="Back" className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
