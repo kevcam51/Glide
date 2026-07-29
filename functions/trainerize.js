@@ -266,6 +266,25 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
 
     const logKey = `caliq-log-${pid}-${date}`;
     const log = (await kvGetJSON(db, uid, logKey)) || { calories: 0, water: 0, weight: 0, meals: [] };
+    // A hand-entered burn (S159) is a deliberate edit and outranks the sync for
+    // that date — same rule as macroTargetsEditedAt and newest-weight-wins above.
+    // Without this, someone who types today's burn because the watch hasn't
+    // reached Trainerize yet loses it within 30 minutes: this runs on a schedule
+    // over a 14-day window, and a second connected app reporting all zeros (real
+    // case — Kevin's Apple Health) counts as "reported", so it would replace a
+    // real typed figure with nothing. Clearing the entry drops the `manual` flag,
+    // which hands the date back to the tracker.
+    const prev = log.wearable;
+    if (prev && prev.manual) {
+      // Steps are never part of a typed calorie figure, so folding them in adds
+      // data without touching the number the person entered.
+      if (Number(w.steps) > 0 && !(Number(prev.steps) > 0)) {
+        log.wearable = { ...prev, steps: w.steps };
+        await kvSetJSON(db, uid, logKey, log);
+        written++;
+      }
+      continue;
+    }
     log.wearable = w;
     await kvSetJSON(db, uid, logKey, log);
     written++;

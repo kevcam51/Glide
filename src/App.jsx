@@ -9278,7 +9278,12 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
             </span>
           ) : "Meals & Food Today"}
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:"8px", marginLeft:"auto", flexShrink:0 }}>
+        {/* No margin-left:auto (S160, Kevin): on a phone this row wraps, and an
+            auto margin kept shoving the controls flush right on their own line —
+            a ~150px gap on the left with the count, Library and View all hanging
+            off the edge. Without it the wrapped line starts at the left, under
+            the title, while space-between still separates them on a wide row. */}
+        <div style={{ display:"flex", alignItems:"center", gap:"8px", flexShrink:0 }}>
           {list.length > 0 && (
             <span style={{ fontSize:".78rem", color:"var(--muted)", whiteSpace:"nowrap" }}>
               {loggedTotal.toLocaleString()} cal · {list.length} item{list.length!==1?"s":""}
@@ -13006,10 +13011,15 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
       className="fixed inset-0 z-[1500] flex items-center justify-center bg-black/60 px-4">
       <div onClick={(e) => e.stopPropagation()}
         className="w-full max-w-[640px] max-h-[85vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
-        <div className="mb-3 relative flex items-center justify-center px-[92px] gap-2.5">
-          <div className="text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="ruler" size={17} color="var(--accent)" />{showBF ? "Body measurements" : "Measurements"}</div>
+        {/* Title gets its OWN row (S160, Kevin). It used to sit centred between
+            92px of padding on each side, but at phone width that slot is ~125px
+            and the title needs ~155px — so it overlapped the absolutely-placed
+            Back button and read as badly centred. On its own row it is genuinely
+            centred at every width, and the ruler has room to be legible. */}
+        <div className="mb-3">
           <button onClick={handleClose} aria-label="Back"
-            className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+            className="mb-2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+          <div className="text-[1.05rem] font-extrabold flex items-center justify-center gap-2.5"><Icon name="ruler" size={22} color="var(--accent)" />{showBF ? "Body Measurements" : "Measurements"}</div>
         </div>
 
         {/* Optional: estimate body fat % from the tape numbers, or just track them. */}
