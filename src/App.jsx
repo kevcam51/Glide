@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium, setAiOptOut, aiChoiceMade } from "./profile.js";
 import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } from "./clientData.js";
@@ -3672,7 +3672,7 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   );
 }
 
-function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, defaultView = "detailed", onSetPlanViewDefault }) {
+function Results({ data, isSimulation, meUid, meName, logAdherence, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, defaultView = "detailed", onSetPlanViewDefault }) {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
   // Simple (plain-English) vs Detailed plan view — a display pref, remembered
@@ -3914,12 +3914,13 @@ function Results({ data, isSimulation, meUid, meName, onReset, onEdit, onUpdateC
       {/* ── Pro Mode: Daily Check-In, Progress, AI ── */}
       {viewMode === "pro" && (
         <>
-          <StreakBadges checkIns={data.checkIns || []} />
+          <StreakBadges checkIns={data.checkIns || []} logAdherence={logAdherence} />
           <DailyCheckIn data={data} onSaveCheckIn={onSaveCheckIn} meUid={meUid} meName={meName} />
           {(data.checkIns || []).length >= 1 && (
             <div onClick={() => setShowWeightModal(true)} style={{ cursor: "pointer" }}
               title="Tap to manage weigh-ins">
               <ProgressChart checkIns={data.checkIns} goalWeight={data.goalWeight} currentWeight={data.weightLbs}
+                logAdherence={logAdherence}
                 rangeLow={data.goalRangeLow} rangeHigh={data.goalRangeHigh} showValues pxPerPoint={64} />
               <div style={{ textAlign: "center", fontSize: ".72rem", color: "var(--muted)", marginTop: -6 }}>
                 Tap chart to add / remove weigh-ins
@@ -12087,7 +12088,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               const first = sorted[0]?.weight;
               const last = sorted[sorted.length-1]?.weight;
               const diff = first - last;
-              const adherence = adherenceOf(data.checkIns);
+              const adherence = logAdherence ? logAdherence.pct : adherenceOf(data.checkIns);
               return (
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px",marginBottom:"10px"}}>
                   <div style={{padding:"10px",background:"var(--s2)",borderRadius:"8px",textAlign:"center"}}>
@@ -12404,7 +12405,7 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName }) {
 
 // ─── Streak & Badge Tracker ──────────────────────────────────────────────────
 
-function StreakBadges({ checkIns }) {
+function StreakBadges({ checkIns, logAdherence }) {
   // Calculate streak from check-ins
   const sorted = [...(checkIns || [])].sort((a, b) => b.timestamp - a.timestamp);
   let streak = 0;
@@ -12421,7 +12422,9 @@ function StreakBadges({ checkIns }) {
   }
 
   const totalCheckIns = checkIns?.length || 0;
-  const adherencePct = adherenceOf(checkIns);   // null when nothing was answered
+  // Prefer adherence measured from what was actually LOGGED; fall back to the
+  // answered-check-in measure for plans with no calorie target.
+  const adherencePct = logAdherence ? logAdherence.pct : adherenceOf(checkIns);
 
   const BADGES = [
     { id: "first", label: "First Check-In", iconName: "star", earned: totalCheckIns >= 1 },
@@ -12449,7 +12452,14 @@ function StreakBadges({ checkIns }) {
           </div>
           <div style={{marginLeft:"auto",textAlign:"right"}}>
             <div style={{fontSize:".85rem",fontWeight:700,color:"var(--text)"}}>{totalCheckIns} {totalCheckIns === 1 ? "check-in" : "check-ins"}</div>
-            <div style={{fontSize:".72rem",color: adherencePct == null ? "var(--muted)" : adherencePct >= 80 ? "var(--green)" : adherencePct >= 50 ? "var(--yellow)" : "var(--red)"}}>{adherencePct == null ? "adherence — not tracked" : `${adherencePct}% adherence`}</div>
+            <div title={logAdherence
+              ? `${logAdherence.pct}% of the ${logAdherence.days} day${logAdherence.days === 1 ? "" : "s"} you logged in the last ${logAdherence.windowDays} came in at or under your calorie target.`
+              : "Adherence comes from check-ins that answered \u201cdid you hit your target?\u201d"}
+              style={{fontSize:".72rem",color: adherencePct == null ? "var(--muted)" : adherencePct >= 80 ? "var(--green)" : adherencePct >= 50 ? "var(--yellow)" : "var(--red)"}}>
+              {adherencePct == null ? "adherence — not tracked"
+                : logAdherence ? `${adherencePct}% on target · ${logAdherence.days}d logged`
+                : `${adherencePct}% adherence`}
+            </div>
           </div>
         </div>
       )}
@@ -12528,7 +12538,7 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
 
 // ─── Progress Chart (from check-in history) ──────────────────────────────────
 
-function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerPoint, rangeLow, rangeHigh, surfaceless,
+function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, showValues, pxPerPoint, rangeLow, rangeHigh, surfaceless,
   unit = "lbs", label = "Weight Trend", pointNoun = "weigh-in", hideAdherence = false }) {
   // unit/label/pointNoun/hideAdherence generalize the chart for non-weight
   // series (tape measurements / body-fat %) — pass points as {date, timestamp,
@@ -12579,8 +12589,8 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
   const trend = diff > 0.5 ? "losing" : diff < -0.5 ? "gaining" : "maintaining";
   const trendColor = trend === "losing" ? "var(--green)" : trend === "gaining" ? "var(--orange)" : "var(--accent)";
 
-  // Adherence from check-ins that actually answered the question (see adherenceOf).
-  const adherence = adherenceOf(checkIns);
+  // Prefer adherence measured from the daily logs; fall back to answered check-ins.
+  const adherence = logAdherence ? logAdherence.pct : adherenceOf(checkIns);
 
   return (
     <div className="card" style={{padding:"16px",marginBottom:"16px",...cardStyle}}>
@@ -21711,6 +21721,20 @@ export default function App() {
   const [savedMeals, setSavedMeals] = useState([]);
   const savedMealsRef = useRef([]);
   const [weekSummary, setWeekSummary] = useState(null); // last-7-day nutrition averages
+  // Calories for each LOGGED day in the last 30 (newest first) — the raw input
+  // for the adherence memo below.
+  const [recentDayCals, setRecentDayCals] = useState([]);
+  // Adherence measured from what was actually LOGGED (S160, Kevin's call): the
+  // share of logged days in the last 30 that came in at or under the calorie
+  // target. Same rule as the calendar's green/amber day tint (over =
+  // >target×1.05) so the two screens agree. null when there's no target or
+  // nothing logged — the UI then falls back to the answered-check-in measure.
+  const logAdherence = useMemo(() => {
+    const target = (computeClientCalories(data) || {}).target;
+    if (!(target > 0) || !recentDayCals.length) return null;
+    const onTarget = recentDayCals.filter((kc) => kc <= target * 1.05).length;
+    return { pct: Math.round((onTarget / recentDayCals.length) * 100), days: recentDayCals.length, windowDays: 30 };
+  }, [recentDayCals, data]);
   const [recentWearable, setRecentWearable] = useState(null); // latest day (≤3 back) with tracker data — {daysAgo, wearable}
   const [meName, setMeName] = useState("");   // current user's display name
   const [meUid, setMeUid] = useState("");     // current user's uid
@@ -22092,6 +22116,7 @@ export default function App() {
     setHistory([]);      historyRef.current = [];
     setRecentFoods([]);  recentFoodsRef.current = [];
     setWeekSummary(null);
+    setRecentDayCals([]);
     setRecentWearable(null);
   };
 
@@ -23022,6 +23047,26 @@ export default function App() {
       setWeekSummary(days > 0
         ? { days, avgCal: Math.round(cal / days), avgP: Math.round(p / days), avgC: Math.round(c / days), avgF: Math.round(f / days) }
         : { days: 0, avgCal: 0, avgP: 0, avgC: 0, avgF: 0 });
+      // REAL adherence (S160, Kevin's call): the share of LOGGED days over the
+      // last 30 where calories landed at/under target. Replaces the old
+      // check-in `hitTarget` measure, which only the manual check-in form ever
+      // set — so logging by any other route scored 0%. Deliberately the SAME
+      // rule as the calendar's green/amber day tint (over = >target×1.05), so
+      // the two screens can never disagree about what a good day was. Reuses
+      // readDayCached, so the first 7 days cost nothing extra.
+      // Collect the CALORIES only — scoring them against the target happens in a
+      // memo below. This effect doesn't depend on `data`, so a target read here
+      // could be a stale closure value; keeping the two apart also means changing
+      // your calorie goal re-scores immediately instead of after a reload.
+      const cals = [];
+      for (let i = 0; i < 30; i++) {
+        const lv = await readDayCached(keyFor(i));
+        if (!lv) continue;
+        try { const kc = (JSON.parse(lv).calories) || 0; if (kc > 0) cals.push(kc); }
+        catch (e) { /* ignore */ }
+      }
+      if (!alive) return;
+      setRecentDayCals(cals);
       // Most recent day (within the last 3) that has WEARABLE data. The tracker
       // card used to render only TODAY's wearable — but Garmin→Trainerize lags
       // ~a day, so every midnight rollover made the card vanish until the next
@@ -23317,7 +23362,7 @@ export default function App() {
             <div style={{marginBottom:"12px"}}>
               <button className="dash-nav-btn" style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:"7px"}} onClick={()=>setShowDash(true)}><Icon name="dashboard" size={16} color="var(--accent)" />Back to Dashboard</button>
             </div>
-            <Results data={data} isSimulation={activeIsSim} meUid={meUid} meName={meName} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
+            <Results data={data} isSimulation={activeIsSim} meUid={meUid} meName={meName} logAdherence={logAdherence} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
             defaultView={role === ROLES.CLIENT ? (data.planViewDefault || "simple") : "detailed"}
             onSetPlanViewDefault={activeRemoteUid ? (v)=>setDataAndSave(p=>({...p, planViewDefault: v})) : undefined}
             onSetFitnessGoal={(g)=>setDataAndSave(p=>({...p, fitnessGoal: g}))}
