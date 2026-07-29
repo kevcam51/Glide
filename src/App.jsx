@@ -8406,7 +8406,7 @@ function dayLabelFor(key, todayKey) {
   return new Date(q[0], q[1] - 1, q[2]).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
-function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, savedFoods, onToggleSaveFood, onRemoveSavedFood, savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onReadDay, onListLoggedDays, dateKey, hideMicros, onDayStep, dayLabel, canGoNext }) {
+function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, savedFoods, onToggleSaveFood, onRemoveSavedFood, savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onReadDay, onListLoggedDays, dateKey, hideMicros, onDayStep, dayLabel, canGoNext, planned, onSetPlanned, onPlanDays, onEatPlanned }) {
   const [name, setName] = useState("");
   const [brand, setBrand] = useState(""); // brand of a picked food (e.g. "Kirkland Signature") — shown under the name
   const [cals, setCals] = useState("");
@@ -8418,6 +8418,16 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   // "other", or null (none open).
   const [addingTo, setAddingTo] = useState(null);
   const [editingId, setEditingId] = useState(null); // set when editing an existing entry
+  // Plan-ahead mode (S160, Kevin): the same add-form writes to planned[] instead
+  // of logging. Deliberately a switch on the existing form rather than a separate
+  // planner screen — planning a meal IS entering a meal, just for a later date.
+  const [planMode, setPlanMode] = useState(false);
+  const [planDows, setPlanDows] = useState([]);   // weekday numbers to repeat on; empty = just this day
+  const [planWeeks, setPlanWeeks] = useState(4);
+  const [planTime, setPlanTime] = useState("");
+  const [planPlace, setPlanPlace] = useState(""); // restaurant / where
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planMsg, setPlanMsg] = useState("");
   // View mode: null = collapsed (just the meal pills, cleanest), a section name
   // ("Breakfast"/…/"other") = that ONE meal open on its own, or "all" = every
   // section expanded together. Tapping a pill opens just that meal; tapping the
@@ -8784,16 +8794,49 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
     setEditingId(m.id);
     setAddingTo(m.type || "other");
   };
-  const submit = () => {
+  const submit = async () => {
     const c = parseInt(cals);
     if (!c || c <= 0) return; // calories are the one required field
     const payload = { name: name.trim(), type: addingTo === "other" ? "" : addingTo, calories: c,
       protein: parseInt(protein) || 0, carbs: parseInt(carbs) || 0, fat: parseInt(fat) || 0 };
     if (brand.trim()) payload.brand = brand.trim();
     if (servingSel && servingSel.grams > 0) { payload.grams = servingSel.grams; payload.unit = servingSel.unit || "g"; }
+    // PLAN instead of log (S160). Same payload, written to the target days'
+    // planned[] — so planning inherits search, the library, AI estimate and
+    // serving sizes rather than duplicating any of that in a separate screen.
+    if (planMode && onPlanDays) {
+      if (planTime.trim()) payload.time = planTime.trim();
+      if (planPlace.trim()) payload.place = planPlace.trim();
+      const dates = planDates();
+      if (!dates.length) return;
+      setPlanBusy(true);
+      const n = await onPlanDays(dates, [payload]);
+      setPlanBusy(false);
+      setPlanMsg(`Planned for ${n} day${n === 1 ? "" : "s"}`);
+      setTimeout(() => setPlanMsg(""), 2600);
+      closeForm();
+      return;
+    }
     if (editingId) onEditMeal(editingId, payload);
     else onAddMeal(payload);
     closeForm();
+  };
+
+  // Which dates a plan lands on: the viewed day, or — when weekdays are picked —
+  // every one of those weekdays for N weeks starting from that day.
+  const planDates = () => {
+    const base = dateKey || ymdLocal();
+    if (!planDows.length) return [base];
+    const out = [];
+    const start = new Date(base + "T12:00:00");
+    for (let w = 0; w < planWeeks; w++) {
+      for (let d = 0; d < 7; d++) {
+        const dt = new Date(start.getTime());
+        dt.setDate(dt.getDate() + w * 7 + d);
+        if (planDows.includes(dt.getDay())) out.push(ymdLocal(dt));
+      }
+    }
+    return [...new Set(out)];
   };
 
   const inp = { padding:"9px 11px", fontSize:".85rem", borderRadius:"8px",
@@ -9158,10 +9201,51 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
         </div>
       )}
       <div style={{ display:"flex", gap:"6px" }}>
-        <button onClick={submit}
+        {!editingId && onPlanDays && (
+          <div style={{ width:"100%", marginBottom:"8px", padding:"8px 10px", borderRadius:"8px",
+            background: planMode ? "rgba(8,220,224,.06)" : "var(--s2)", border:"1px solid var(--border)" }}>
+            <label style={{ display:"flex", alignItems:"center", gap:"8px", cursor:"pointer", fontSize:".78rem", color:"var(--text)" }}>
+              <input type="checkbox" checked={planMode} onChange={(e) => setPlanMode(e.target.checked)} />
+              <span>Plan this for later instead of logging it now</span>
+            </label>
+            {planMode && (
+              <div style={{ marginTop:"8px", display:"flex", flexDirection:"column", gap:"8px" }}>
+                <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+                  <input value={planTime} onChange={(e) => setPlanTime(e.target.value)} placeholder="Time (e.g. 12:30)"
+                    style={{ ...inp, flex:"1 1 110px" }} />
+                  <input value={planPlace} onChange={(e) => setPlanPlace(e.target.value)} placeholder="Where (e.g. Chipotle)"
+                    style={{ ...inp, flex:"1 1 130px" }} />
+                </div>
+                <div>
+                  <div style={{ fontSize:".7rem", color:"var(--muted)", marginBottom:"4px" }}>Repeat on (leave blank for just this day)</div>
+                  <div style={{ display:"flex", gap:"4px", flexWrap:"wrap" }}>
+                    {["S","M","T","W","T","F","S"].map((d, i) => (
+                      <button key={i} onClick={() => setPlanDows((v) => v.includes(i) ? v.filter((x) => x !== i) : [...v, i])}
+                        style={{ width:"32px", height:"32px", borderRadius:"999px", fontSize:".74rem", fontWeight:700,
+                          cursor:"pointer", fontFamily:"inherit",
+                          border: planDows.includes(i) ? "1px solid var(--accent)" : "1px solid var(--border)",
+                          background: planDows.includes(i) ? "rgba(8,220,224,.14)" : "transparent",
+                          color: planDows.includes(i) ? "var(--accent)" : "var(--muted)" }}>{d}</button>
+                    ))}
+                  </div>
+                </div>
+                {planDows.length > 0 && (
+                  <div style={{ display:"flex", alignItems:"center", gap:"8px", fontSize:".76rem", color:"var(--text)" }}>
+                    <span>for</span>
+                    <input type="number" min="1" max="26" value={planWeeks}
+                      onChange={(e) => setPlanWeeks(Math.max(1, Math.min(26, parseInt(e.target.value) || 1)))}
+                      style={{ ...inp, width:"64px" }} />
+                    <span>week{planWeeks === 1 ? "" : "s"} · {planDates().length} day{planDates().length === 1 ? "" : "s"}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        <button onClick={submit} disabled={planBusy}
           style={{ padding:"8px 16px", fontSize:".82rem", fontWeight:700, borderRadius:"8px",
-            border:"none", background:"var(--accent-fill)", color:"#0b0b12", cursor:"pointer" }}>
-          {editingId ? "Save changes" : "Add"}
+            border:"none", background:"var(--accent-fill)", color:"#0b0b12", cursor: planBusy ? "default" : "pointer", opacity: planBusy ? .6 : 1 }}>
+          {planBusy ? "Planning…" : editingId ? "Save changes" : planMode ? "Add to plan" : "Add"}
         </button>
         <button onClick={closeForm}
           style={{ padding:"8px 12px", fontSize:".82rem", borderRadius:"8px",
@@ -9358,6 +9442,61 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
           </span>
         </div>
       </div>
+
+      {/* Today's plan (S160). Only renders when something was planned, so a day
+          with no plan looks exactly as it did before — the feature stays out of
+          the way until someone opts into it. Ticking an item LOGS it through the
+          normal onAddMeal path, so a followed plan and a hand-logged day are the
+          same data downstream. */}
+      {(planned || []).length > 0 && (
+        <div style={{ marginTop:"10px", padding:"10px", borderRadius:"8px",
+          background:"var(--s2)", border:"1px solid var(--border)" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:"6px", marginBottom:"8px" }}>
+            <Icon name="clipboard" size={14} color="var(--accent)" />
+            <span style={{ fontSize:".78rem", fontWeight:700, color:"var(--text-secondary)" }}>Planned</span>
+            <span style={{ fontSize:".7rem", color:"var(--muted)" }}>
+              {(planned || []).filter((x) => x.done).length}/{(planned || []).length} eaten
+            </span>
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:"6px" }}>
+            {(planned || []).map((it) => (
+              <div key={it.id} style={{ display:"flex", alignItems:"center", gap:"9px",
+                padding:"8px 9px", borderRadius:"7px", background:"var(--surface)",
+                border:"1px solid var(--border)", opacity: it.done ? .6 : 1 }}>
+                <button
+                  onClick={() => { if (onEatPlanned) onEatPlanned(it.id); }}
+                  disabled={!onEatPlanned}
+                  aria-label={it.done ? "Mark as not eaten" : "Mark as eaten"}
+                  style={{ width:"24px", height:"24px", flexShrink:0, borderRadius:"6px", cursor:"pointer",
+                    border: it.done ? "1.5px solid var(--green)" : "1.5px solid var(--border)",
+                    background: it.done ? "var(--green)" : "transparent",
+                    display:"flex", alignItems:"center", justifyContent:"center", padding:0 }}>
+                  {it.done ? <Icon name="check" size={14} color="#04191a" /> : null}
+                </button>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:".82rem", color:"var(--text)", textDecoration: it.done ? "line-through" : "none" }}>
+                    {it.name || "Planned food"}
+                  </div>
+                  <div style={{ fontSize:".68rem", color:"var(--muted)" }}>
+                    {[it.type, it.time, it.place].filter(Boolean).join(" · ")}
+                  </div>
+                </div>
+                <span style={{ fontFamily:"'Sora',sans-serif", fontSize:".82rem", color:"var(--muted)" }}>{it.calories} cal</span>
+                {onSetPlanned && (
+                  <button onClick={() => onSetPlanned((planned || []).filter((x) => x.id !== it.id))}
+                    aria-label="Remove from plan"
+                    style={{ border:"none", background:"transparent", color:"var(--muted)", cursor:"pointer", padding:"4px" }}>
+                    <Icon name="close" size={13} color="var(--muted)" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {planMsg && (
+        <div style={{ marginTop:"8px", fontSize:".74rem", color:"var(--green)", fontWeight:700 }}>{planMsg}</div>
+      )}
 
       {/* Meal pills — tap one to open JUST that meal (its own view); tap the
           header above to see them all together. Clean by default. */}
@@ -10223,7 +10362,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood,
   savedFoods, onToggleSaveFood, onRemoveSavedFood, onLogFoods, weekSummary, recentWearable, history, onRefresh, isRemote,
-  savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal,
+  savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onSetPlanned, onPlanDays, onEatPlanned,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
   onSaveMeasurements, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise,
   onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetHideCompliance, meUid: dashMeUid }) {
@@ -11580,6 +11719,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood} savedMeals={savedMeals} onToggleSaveMeal={onToggleSaveMeal} onRemoveSavedMeal={onRemoveSavedMeal}
         onLogMeal={mealIsToday ? onLogMeal : undefined} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays}
         dateKey={mealDate} hideMicros
+        planned={mealIsToday ? (dailyLog.planned || []) : ((mealDayLog && mealDayLog.planned) || [])}
+        onSetPlanned={mealIsToday ? onSetPlanned : undefined} onPlanDays={onPlanDays} onEatPlanned={mealIsToday ? onEatPlanned : undefined}
         onDayStep={shiftMealDate} dayLabel={dayLabelFor(mealDate, dashToday)} canGoNext />
               {/* Quick Add sits BELOW the real logging (Kevin, S160): naming the
                   food is the path that feeds macros, the food library and the
@@ -22978,6 +23119,77 @@ export default function App() {
     if (m.calories > 0) setStreak(s => ((dailyLog.calories || 0) > 0 ? Math.max(s, 1) : s + 1));
   };
 
+  // ── Meal planning (S160, Kevin) ──────────────────────────────────────────
+  // Planned meals live INSIDE the day log as `planned[]`, not in a new store.
+  // That buys remote-awareness (a trainer plans into the client's account), the
+  // calendar Day view, and the lifetime query — all for free — and keeps the
+  // feature out of the way: a day with no plan is byte-identical to before.
+  // A planned item is a meal entry plus `time`, `place` and `done`, so checking
+  // it off can hand it straight to onAddMeal with no translation.
+  const onSetPlanned = (next) => {
+    const updated = { ...dailyLog, planned: next };
+    setDailyLog(updated);
+    persistLog(updated);
+  };
+  // Tick a planned meal off. ONE state update, deliberately: doing this as
+  // onAddMeal(...) followed by onSetPlanned(...) raced on the stale dailyLog
+  // closure — the second call rebuilt the day from the pre-add snapshot and
+  // silently dropped the meal, so the item showed "eaten" while the calories
+  // never moved. Same trap onAddMeals documents for looping onAddMeal.
+  const onEatPlanned = (id) => {
+    const list = dailyLog.planned || [];
+    const it = list.find((x) => x.id === id);
+    if (!it) return;
+    const nextPlanned = list.map((x) => (x.id === id ? { ...x, done: !x.done } : x));
+    // Un-ticking only clears the mark. The logged food stays — removing it here
+    // would delete something the person actually ate on a mis-tap; they can
+    // delete it from the meal list itself, where deletion is explicit.
+    if (it.done) {
+      const cleared = { ...dailyLog, planned: nextPlanned };
+      setDailyLog(cleared); persistLog(cleared); return;
+    }
+    const m = { id: `m${Date.now()}${Math.floor(Math.random() * 1000)}`,
+      name: it.name || "", type: it.type || "", calories: Number(it.calories) || 0,
+      protein: Number(it.protein) || 0, carbs: Number(it.carbs) || 0, fat: Number(it.fat) || 0,
+      time: it.time || hhmmLocal(),
+      ...(it.brand ? { brand: it.brand } : {}),
+      ...(it.grams != null ? { grams: Number(it.grams), unit: it.unit || "g" } : {}),
+      ...(it.micros ? { micros: it.micros } : {}) };
+    const updated = {
+      ...dailyLog,
+      planned: nextPlanned,
+      meals: [...(dailyLog.meals || []), m],
+      calories: (dailyLog.calories || 0) + m.calories,
+      protein: (dailyLog.protein || 0) + m.protein,
+      carbs: (dailyLog.carbs || 0) + m.carbs,
+      fat: (dailyLog.fat || 0) + m.fat,
+    };
+    setDailyLog(updated);
+    persistLog(updated);
+    upsertRecentFood(m);
+    appendHistory([`ate a planned ${m.type || "meal"}${m.name ? `: ${m.name}` : ""} (${m.calories} cal)`]);
+  };
+
+  // Write planned items across many dates (the "every Mon/Wed/Fri for 6 weeks"
+  // case). Reads each day first so planning never clobbers what's already there.
+  const onPlanDays = async (dates, items) => {
+    if (!activeId || !dates.length || !items.length) return 0;
+    let written = 0;
+    for (const d of dates) {
+      const key = `caliq-log-${activeId}-${d}`;
+      let day = { calories: 0, water: 0, weight: 0, meals: [] };
+      try { const v = await logRead(key); if (v) day = JSON.parse(v); } catch (e) { /* new day */ }
+      const add = items.map((it, i) => ({
+        ...it, id: `p${Date.now()}${i}${Math.floor(Math.random() * 1000)}`, done: false }));
+      day.planned = [...(day.planned || []), ...add];
+      try { await logWrite(key, JSON.stringify(day)); written++; } catch (e) { /* keep going */ }
+      // Keep the open day in sync without a reload.
+      if (d === viewDate) { setDailyLog(day); }
+    }
+    appendHistory([`planned ${items.length} meal${items.length === 1 ? "" : "s"} across ${written} day${written === 1 ? "" : "s"}`]);
+    return written;
+  };
+
   // Batch-add several foods at once (copy-a-previous-meal, S94). One state update
   // + one persist — calling onAddMeal in a loop would race on the stale dailyLog
   // closure (only the last add would survive).
@@ -23457,7 +23669,7 @@ export default function App() {
               onOpenPlan={()=>{setNavFrom("dashboard");setStepAndSave(0);}} onOpenResults={()=>{setNavFrom("dashboard");setShowDash(false);}}
               onEditWorkouts={()=>{setNavFrom("dashboard");setStepAndSave(3);}}
               onLogUpdate={onLogUpdate} dailyLog={dailyLog} streak={streak}
-              onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} onLogFoods={onLogFoodsFromCalendar} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
+              onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} onLogFoods={onLogFoodsFromCalendar} onSetPlanned={onSetPlanned} onPlanDays={onPlanDays} onEatPlanned={onEatPlanned} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
               onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; n.macroTargetsEditedAt=Date.now(); return n; })}
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
