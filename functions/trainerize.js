@@ -681,7 +681,10 @@ exports.trainerizeAutoSync = onSchedule(
     const auth = Buffer.from(`${TRAINERIZE_GROUP_ID.value()}:${TRAINERIZE_API_TOKEN.value()}`).toString("base64");
     try {
       const r = await runImport(db, uid, auth, { clientIds: ids, nutritionDays: 14 });
-      console.log("trainerizeAutoSync", JSON.stringify({ synced: r.total, updated: r.updated, mealDays: r.mealDaysTotal, workoutDays: r.workoutDaysTotal }));
+      // healthDays included (S160): for a watch-only link it is the ONLY number
+      // that moves — meals/workouts are 0 by design — so leaving it out made a
+      // working tracker sync and a silently broken one log identically.
+      console.log("trainerizeAutoSync", JSON.stringify({ synced: r.total, updated: r.updated, mealDays: r.mealDaysTotal, healthDays: r.healthDaysTotal, workoutDays: r.workoutDaysTotal }));
     } catch (e) {
       console.error("trainerizeAutoSync failed:", e && e.message);
     }
