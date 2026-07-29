@@ -574,8 +574,13 @@ async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTR
         let clientPlanId = "self";
         try { const mf = (await kvGetJSON(db, linkedUid, "caliq-plans")) || {}; if (mf.active) clientPlanId = mf.active; } catch (e) { /* default self */ }
         if (healthOnly) {
+          // Write into the plan the user PICKED. Falling back to caliq-plans.active
+          // (the client-account convention) would drop a trainer's own watch data
+          // into a "self" plan they never open — invisible, and indistinguishable
+          // from the sync not working at all.
+          const healthPlanId = (link && link.planId) || clientPlanId;
           let healthDays = 0;
-          try { healthDays = await syncClientHealth(db, linkedUid, clientPlanId, u.id, auth, nutritionDays); }
+          try { healthDays = await syncClientHealth(db, linkedUid, healthPlanId, u.id, auth, nutritionDays); }
           catch (e) { console.error("health sync failed for", u.id, e && e.message); }
           results.push({ name, status: u.status || "", linked: true, healthOnly: true,
             mealDays: 0, healthDays, workoutDays: 0 });

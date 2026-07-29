@@ -14375,7 +14375,8 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // healthOnly:true}; the sync reads the account's ACTIVE plan each run, so a
   // future phase inherits it without setting anything up again.
   const [tzMe, setTzMe] = useState(null);        // my Trainerize id, or null when off
-  const [tzMePick, setTzMePick] = useState(null); // roster rows while choosing
+  const [tzMePick, setTzMePick] = useState(null); // roster rows while choosing WHO
+  const [tzMePlanFor, setTzMePlanFor] = useState(null); // chosen tz id, while choosing WHICH PLAN
   const [tzMeBusy, setTzMeBusy] = useState(false);
   useEffect(() => {
     if (!tzIsOwner) return;
@@ -14402,12 +14403,17 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     } catch (e) { setTzMsg({ ok: false, text: tzErrText(e) }); }
     setTzMeBusy(false);
   };
-  const setMyTracker = async (tzId) => {
+  // Choosing WHO is only half of it — the sync also needs to know WHICH plan to
+  // write into. Without this it falls back to the client-account convention
+  // (caliq-plans.active, default "self"), which is not where a trainer tracking
+  // in their own local plan file would ever look — the data would land in a plan
+  // they never open, i.e. the exact "my workout never showed up" symptom.
+  const setMyTracker = async (tzId, planId) => {
     setTzMeBusy(true);
     try {
-      await writeTzLinks((links) => { links[tzId] = { uid: meUid, healthOnly: true }; });
-      setTzMe(Number(tzId)); setTzMePick(null);
-      setTzMsg({ ok: true, text: "Watch data on — your tracker's calories will appear on the next sync." });
+      await writeTzLinks((links) => { links[tzId] = { uid: meUid, healthOnly: true, planId }; });
+      setTzMe(Number(tzId)); setTzMePick(null); setTzMePlanFor(null);
+      setTzMsg({ ok: true, text: "Watch data on — your tracker's calories land in that plan on the next sync." });
     } catch { setTzMsg({ ok: false, text: "Couldn't save that — try again." }); }
     setTzMeBusy(false);
   };
@@ -14415,7 +14421,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     setTzMeBusy(true);
     try {
       await writeTzLinks((links) => { delete links[tzMe]; });
-      setTzMe(null);
+      setTzMe(null); setTzMePlanFor(null);
       setTzMsg({ ok: true, text: "Watch data off. Nothing already logged was removed." });
     } catch { setTzMsg({ ok: false, text: "Couldn't save that — try again." }); }
     setTzMeBusy(false);
@@ -15368,7 +15374,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                   <div className="mb-1.5 text-xs text-muted">Which one is you? Only your watch calories &amp; steps get pulled in — nothing else changes.</div>
                   <div className="flex flex-col gap-1 max-h-[240px] overflow-auto">
                     {tzMePick.map((c) => (
-                      <button key={c.id} onClick={() => setMyTracker(c.id)} disabled={tzMeBusy}
+                      <button key={c.id} onClick={() => { setTzMePlanFor(c.id); setTzMePick(null); }} disabled={tzMeBusy}
                         className="flex items-center justify-between rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
                         <span>{c.name || c.email || `Client ${c.id}`}</span>
                         <span className="text-primary font-bold">Use this</span>
@@ -15376,6 +15382,28 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     ))}
                   </div>
                   <button onClick={() => setTzMePick(null)} className="mt-1.5 bg-transparent border-0 p-0 text-xs text-muted cursor-pointer">Cancel</button>
+                </div>
+              )}
+              {tzMePlanFor && (
+                <div className="w-full rounded-lg border border-border bg-surface2 p-2.5">
+                  <div className="mb-1.5 text-xs text-muted">Which plan should the watch data go into? Pick the one you actually track in.</div>
+                  <div className="flex flex-col gap-1 max-h-[240px] overflow-auto">
+                    {(profiles || []).filter((pf) => pf && !pf.isSimulation).map((pf) => (
+                      <button key={pf.id} onClick={() => setMyTracker(tzMePlanFor, pf.id)} disabled={tzMeBusy}
+                        className="flex items-center justify-between rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
+                        <span>{pf.customName || pf.name || pf.id}</span>
+                        <span className="text-primary font-bold">Use this</span>
+                      </button>
+                    ))}
+                    {/* The personal-plan convention, for an account that tracks
+                        the way a client does rather than in a local file. */}
+                    <button onClick={() => setMyTracker(tzMePlanFor, "self")} disabled={tzMeBusy}
+                      className="flex items-center justify-between rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
+                      <span>My own plan <span className="text-muted">(if you log as a client)</span></span>
+                      <span className="text-primary font-bold">Use this</span>
+                    </button>
+                  </div>
+                  <button onClick={() => setTzMePlanFor(null)} className="mt-1.5 bg-transparent border-0 p-0 text-xs text-muted cursor-pointer">Cancel</button>
                 </div>
               )}
               {/* Manual refresh — pulls the same data as the 30-min tick, on demand. */}
