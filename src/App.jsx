@@ -10333,6 +10333,10 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // Typing the number off the watch is the reliable path, and it lands in the
   // SAME `wearable` block the sync writes, so every downstream surface (burn
   // tile, calendar, tracker-adjusted target) treats it identically.
+  // Dashboard check-in (S160): mood + note, the only parts the app can't infer.
+  const [ciMood, setCiMood] = useState(null);
+  const [ciNote, setCiNote] = useState("");
+  const [ciSaved, setCiSaved] = useState(false);
   const [burnDraft, setBurnDraft] = useState("");
   const [burnKind, setBurnKind] = useState("active"); // "active" | "total"
   // burnKind decides what the NEXT save writes, so it has to follow the stored
@@ -11966,6 +11970,83 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           <Icon name="check" size={16} color="var(--green)" /><span>{toast.msg}</span>
         </div>, document.body)}
 
+
+      {/* Close out the day (S160, Kevin: the check-in lives three levels deep in
+          Full Plan → Detailed → Pro Tracking, and most people never find it).
+          Now that logging IS the check-in, that form mostly asks for things the
+          app already knows — so the dashboard version shows those back and asks
+          only for what it can't infer: how the day felt, and anything to note.
+          The full form stays where it is for back-dating and corrections. */}
+      {onSaveCheckIn && (() => {
+        const existing = (data.checkIns || []).find(c => c.date === viewDate) || null;
+        const known = [];
+        if ((dailyLog.calories || 0) > 0) known.push(`${Number(dailyLog.calories).toLocaleString()} cal logged`);
+        // Only a RECORDED workout counts. The nearby todayTotalBurn is the
+        // SCHEDULED burn for this weekday — having one on the plan is not
+        // evidence it happened, and claiming it would put words in the user's
+        // mouth. A synced Trainerize/Garmin workout arrives as existing.workedOut.
+        if (existing && existing.workedOut) known.push("workout done");
+        if (existing && existing.weight) known.push(`${existing.weight} lbs`);
+        const saveCheckIn = () => {
+          // MERGE over any existing entry for this date — onSaveCheckIn replaces
+          // the whole record, so building it fresh would wipe a weigh-in or the
+          // workout flag the Trainerize sync wrote.
+          const base = existing || { date: viewDate, timestamp: new Date(viewDate + "T12:00:00").getTime(),
+            weight: null, calories: null, hitTarget: null, workedOut: null, mood: null, notes: "",
+            bodyFat: null, loggedBy: "client", isFuturePlan: false };
+          const target = (computeClientCalories(data) || {}).target;
+          const kc = dailyLog.calories || 0;
+          onSaveCheckIn({
+            ...base,
+            calories: base.calories != null ? base.calories : (kc > 0 ? kc : null),
+            // Same rule as adherence and the calendar tint. Never overwrites an answer.
+            hitTarget: base.hitTarget != null ? base.hitTarget : (kc > 0 && target > 0 ? kc <= target * 1.05 : null),
+            workedOut: base.workedOut ?? null,
+            mood: ciMood != null ? ciMood : (base.mood ?? null),
+            notes: ciNote.trim() ? ciNote.trim() : (base.notes || ""),
+          });
+          setCiSaved(true);
+          setToast({ msg: "Checked in" });
+          setTimeout(() => setCiSaved(false), 2200);
+        };
+        const already = existing && (existing.mood != null || (existing.notes || "").trim());
+        return (
+          <div className="card" style={{ padding:"14px", marginBottom:"14px" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:"8px", marginBottom:"4px" }}>
+              <Icon name="check" size={17} color="var(--accent)" />
+              <span style={{ fontFamily:"'Sora',sans-serif", fontSize:".95rem", color:"var(--text-secondary)" }}>
+                {viewIsToday ? "Close out today" : "Close out this day"}
+              </span>
+              {already ? <span style={{ marginLeft:"auto", fontSize:".7rem", color:"var(--green)", fontWeight:700 }}>Checked in</span> : null}
+            </div>
+            <div style={{ fontSize:".72rem", color:"var(--muted)", marginBottom:"10px" }}>
+              {known.length
+                ? `Saved automatically: ${known.join(" · ")}. Just add how it felt.`
+                : "Log some food or a workout and it fills in here automatically."}
+            </div>
+            <div className="checkin-field" style={{ marginBottom:"10px" }}>
+              <label>Energy / Mood</label>
+              <div className="checkin-mood">
+                {[1,2,3,4,5].map((n,i) => (
+                  <button key={i} className={`mood-btn${(ciMood != null ? ciMood : (existing && existing.mood)) === i ? " active" : ""}`}
+                    onClick={() => setCiMood(i)} style={{ fontWeight:800, fontSize:"1rem" }}>{n}</button>
+                ))}
+              </div>
+              <div style={{ fontSize:".64rem", color:"var(--muted)", marginTop:4, display:"flex", justifyContent:"space-between" }}><span>Low</span><span>High</span></div>
+            </div>
+            <input value={ciNote} onChange={(e) => setCiNote(e.target.value)}
+              placeholder={(existing && existing.notes) || "Anything worth noting? (optional)"}
+              style={{ width:"100%", padding:"9px 10px", borderRadius:"7px", border:"1.5px solid var(--border)",
+                background:"var(--surface)", color:"var(--text)", fontSize:".85rem", fontFamily:"inherit", marginBottom:"10px" }} />
+            <button onClick={saveCheckIn} disabled={ciSaved}
+              style={{ width:"100%", padding:"11px", borderRadius:"8px", border:"none", fontFamily:"inherit",
+                fontSize:".85rem", fontWeight:700, cursor: ciSaved ? "default" : "pointer",
+                background: ciSaved ? "var(--s3)" : "var(--accent)", color: ciSaved ? "var(--muted)" : "#04191a" }}>
+              {ciSaved ? "Saved" : already ? "Update check-in" : "Check in"}
+            </button>
+          </div>
+        );
+      })()}
 
       {/* ── Progress & insights (display, not entry) ── */}
       <div className="sec-title" style={{ display:"flex", alignItems:"center", gap:"8px" }}><Icon name="chart" size={17} color="var(--accent)" />Progress &amp; Insights</div>
