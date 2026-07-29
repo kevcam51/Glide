@@ -360,7 +360,7 @@ async function runToolRound(toolUses, toolCtx) {
     // A tool returning {error} did NOT do the thing. Mark it, or the model reads
     // an ordinary-looking result and tells the user it logged something it didn't.
     if (out && out.error) toolFailed = true;
-    if (["log_meal", "log_meals", "remove_meal", "log_workout", "log_weigh_in", "log_check_in", "log_measurements", "log_water", "set_targets", "set_workout_schedule", "set_personal_info", "create_plan", "switch_plan", "rename_plan", "set_notification_prefs", "add_custom_exercise"].includes(tu.name) && out && out.ok) wrote = true;
+    if (["log_meal", "log_meals", "plan_meals", "remove_meal", "log_workout", "log_weigh_in", "log_check_in", "log_measurements", "log_water", "set_targets", "set_workout_schedule", "set_personal_info", "create_plan", "switch_plan", "rename_plan", "set_notification_prefs", "add_custom_exercise"].includes(tu.name) && out && out.ok) wrote = true;
     if (tu.name === "propose_meal" && out && out.meal) proposal = out.meal;
     if (tu.name === "propose_workout" && out && out.workout) workoutProposal = out.workout;
     results.push({ type: "tool_result", tool_use_id: tu.id, is_error: toolFailed || undefined,

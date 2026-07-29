@@ -981,6 +981,47 @@ function buildTools(role, opts = {}) {
       },
     },
     {
+      name: "plan_meals",
+      description:
+        "PLAN meals for future days (a meal plan), rather than logging them as eaten. The person then ticks each "
+        + "item off as they eat it. Use when asked to 'make me a meal plan', 'plan my week', 'set up my meals for "
+        + "the next 4 weeks'. Specify per meal: name, mealType, calories, macros, and optionally the TIME and the "
+        + "PLACE (a restaurant, or 'home'). Repeat across days with weekdays + weeks (e.g. weekdays [1,3,5] and "
+        + "weeks 4 = every Mon/Wed/Fri for four weeks), or pass explicit dates. Planning does NOT change any "
+        + "calorie totals — nothing counts until it is ticked off. "
+        + (isTrainer ? "Pass clientId to plan for a client; omit for yourself." : "Plans for YOU."),
+      input_schema: {
+        type: "object",
+        properties: {
+          meals: {
+            type: "array",
+            description: "The meals to plan. Each is one entry the person ticks off.",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string", description: "What to eat, e.g. 'Chipotle chicken burrito bowl'" },
+                mealType: { type: "string", enum: ["breakfast", "lunch", "dinner", "snack"] },
+                calories: { type: "number" },
+                protein: { type: "number" }, carbs: { type: "number" }, fat: { type: "number" },
+                time: { type: "string", description: "Clock time, e.g. '12:30'" },
+                place: { type: "string", description: "Restaurant or location, e.g. 'Chipotle', 'home'" },
+                grams: { type: "number", description: "Serving size in grams, when specified" },
+              },
+              required: ["name", "calories"],
+            },
+          },
+          startDate: { type: "string", description: "YYYY-MM-DD; defaults to today" },
+          weekdays: { type: "array", items: { type: "number" },
+            description: "Days of week to repeat on: 0=Sunday … 6=Saturday. Omit to plan only startDate." },
+          weeks: { type: "number", description: "How many weeks to repeat (default 1, max 26)" },
+          dates: { type: "array", items: { type: "string" }, description: "Explicit YYYY-MM-DD dates, instead of weekdays/weeks" },
+          ...clientIdProp,
+          ...localPlanProp,
+        },
+        required: ["meals"],
+      },
+    },
+    {
       name: "log_meals",
       description:
         "Log MULTIPLE foods/meals AT ONCE in ONE call — the PREFERRED way to log a list of foods (e.g. a whole breakfast of 8 items). Put EVERY item in the meals array; they all save together in one shot, no cards, no per-item taps. Use this instead of calling log_meal repeatedly. "
@@ -2266,6 +2307,77 @@ async function runTool(name, input, ctx) {
       logged: { date, mealType, ...meal },
       dayTotals: { calories: updated.calories, protein: updated.protein, carbs: updated.carbs, fat: updated.fat },
     };
+  }
+
+  if (name === "plan_meals") {
+    const items = Array.isArray(input.meals) ? input.meals.slice(0, 20) : [];
+    if (!items.length) return { ok: false, error: "No meals to plan." };
+    const re = /^\d{4}-\d{2}-\d{2}$/;
+    const { id: planId } = await activePlanData(db, uid, planOverride);
+    // Work out the target dates. Explicit `dates` wins; otherwise startDate plus
+    // an optional weekday repeat. Capped so a bad weeks value can't fan out into
+    // hundreds of writes.
+    let dates = [];
+    if (Array.isArray(input.dates) && input.dates.length) {
+      dates = input.dates.filter((d) => re.test(String(d || ""))).slice(0, 120);
+    } else {
+      const start = re.test(String(input.startDate || "")) ? input.startDate : ctx.today;
+      const dows = Array.isArray(input.weekdays)
+        ? input.weekdays.map(Number).filter((n) => n >= 0 && n <= 6) : [];
+      if (!dows.length) dates = [start];
+      else {
+        const weeks = Math.max(1, Math.min(26, Math.round(Number(input.weeks) || 1)));
+        const s0 = new Date(start + "T12:00:00");
+        for (let w = 0; w < weeks; w++) {
+          for (let d = 0; d < 7; d++) {
+            const dt = new Date(s0.getTime());
+            dt.setDate(dt.getDate() + w * 7 + d);
+            if (dows.includes(dt.getDay())) {
+              dt.setHours(12, 0, 0, 0);
+              dates.push(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`);
+            }
+          }
+        }
+        dates = [...new Set(dates)].slice(0, 120);
+      }
+    }
+    if (!dates.length) return { ok: false, error: "No valid dates to plan for." };
+    // Same shape the app's own planner writes, so a plan made by chat and one
+    // made by hand are indistinguishable to the UI.
+    const build = () => items.map((it, i) => {
+      const mealType = ["breakfast", "lunch", "dinner", "snack"].includes(it.mealType) ? it.mealType : "";
+      const o = { id: randId("p") + i, name: String(it.name || "").slice(0, 120), type: mealType,
+        calories: Math.max(0, Math.round(Number(it.calories) || 0)),
+        protein: Math.max(0, Math.round(Number(it.protein) || 0)),
+        carbs: Math.max(0, Math.round(Number(it.carbs) || 0)),
+        fat: Math.max(0, Math.round(Number(it.fat) || 0)),
+        done: false };
+      if (it.time) o.time = String(it.time).slice(0, 12);
+      if (it.place) o.place = String(it.place).slice(0, 80);
+      if (Number(it.grams) > 0) { o.grams = Math.round(Number(it.grams)); o.unit = "g"; }
+      return o;
+    });
+    let planned = 0;
+    for (const date of dates) {
+      const logKey = `caliq-log-${planId}-${date}`;
+      // Transactional append — planning must never overwrite a day's existing
+      // meals, totals or an earlier plan.
+      await kvTxnJSON(db, uid, logKey, (log0) => {
+        const log = log0 || {};
+        return { ...log, planned: [...(Array.isArray(log.planned) ? log.planned : []), ...build()] };
+      });
+      planned++;
+    }
+    try {
+      const histKey = `caliq-history-${planId}`;
+      const ev = { id: randId("e"), uid: ctx.callerUid, role: ctx.role, name: ctx.callerName || "AI assistant",
+        action: `planned ${items.length} meal${items.length === 1 ? "" : "s"} across ${planned} day${planned === 1 ? "" : "s"}`.slice(0, 300), ts: Date.now() };
+      await kvTxnJSON(db, uid, histKey, (hist) => [ev, ...(Array.isArray(hist) ? hist : [])].slice(0, 250));
+    } catch (e) { /* best-effort */ }
+    if (planOverride) await touchLocalIndex(db, uid, planOverride);
+    return { ok: true, days: planned, mealsPerDay: items.length,
+      firstDate: dates[0], lastDate: dates[dates.length - 1],
+      note: "Planned only — nothing counts toward the day's totals until it is ticked off in the app." };
   }
 
   if (name === "log_meals") {
