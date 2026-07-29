@@ -14480,9 +14480,15 @@ function tzSyncSummary(r) {
   if (r.healthDaysTotal) bits.push(`${r.healthDaysTotal} day${r.healthDaysTotal === 1 ? "" : "s"} of tracker data${tzHealthRange(r)}`);
   if (r.workoutDaysTotal) bits.push(`${r.workoutDaysTotal} workout day${r.workoutDaysTotal === 1 ? "" : "s"}`);
   const who = `${r.total || 0} client${r.total === 1 ? "" : "s"}`;
-  return bits.length
-    ? `Synced ${who} — ${bits.join(" · ")}.`
-    : `Checked ${who} — nothing new in Trainerize yet. Watch data usually lands a few hours after your workout.`;
+  if (bits.length) return `Synced ${who} — ${bits.join(" · ")}.`;
+  // Wrote nothing, but the tracker DID report days → everything already matches.
+  // Unchanged days are skipped now (S161), so this is the normal state of a
+  // second sync; calling it "nothing new in Trainerize yet" made a healthy,
+  // fully-synced account read like a failure.
+  if (r.healthSeenTotal) {
+    return `Checked ${who} — already up to date (${r.healthSeenTotal} day${r.healthSeenTotal === 1 ? "" : "s"} of tracker data on file).`;
+  }
+  return `Checked ${who} — nothing new in Trainerize yet. Watch data usually lands a few hours after your workout.`;
 }
 
 // ─── Stable ID numbers (S99, Kevin) ─────────────────────────────────────────

@@ -260,10 +260,16 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
     return { active, resting, steps, reported: true, source: owner.source || null };
   };
 
-  let written = 0, firstDate = null, lastDate = null;
+  // `seen` counts dates the tracker reported in the window; `written` counts the
+  // ones that actually changed. Distinguishing them is what lets the UI say
+  // "already up to date" instead of the alarming "nothing new in Trainerize yet"
+  // on every repeat sync — which, now that unchanged days are skipped, is what
+  // every sync after the first would otherwise report.
+  let written = 0, seen = 0, firstDate = null, lastDate = null;
   for (const [date, bySrc] of Object.entries(byDate)) {
     const w = pickSource(bySrc);
     if (!w) continue;
+    seen++;
     // Write any date the tracker actually REPORTED, including an explicit zero.
     // The old guard (!w.active && !w.steps) skipped a genuine 0-calorie day, so
     // today never got a wearable record and the dashboard kept showing the last
@@ -308,7 +314,7 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
   }
   // Dates, not just a count: "15 days of tracker data" with no range left Kevin
   // assuming it meant today.
-  return { days: written, firstDate, lastDate };
+  return { days: written, seen, firstDate, lastDate };
 }
 
 // ── v2: completed workouts → Glide check-ins ────────────────────────────────
@@ -516,12 +522,12 @@ async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDat
   let mealDays = 0, healthDays = 0, workoutDays = 0;
   try { mealDays = await syncClientNutrition(db, targetUid, planId, u.id, auth, days); }
   catch (e) { console.error("nutrition sync failed for", u.id, e && e.message); }
-  let healthRange = null;
-  try { const hr = await syncClientHealth(db, targetUid, planId, u.id, auth, days); healthDays = hr.days; healthRange = hr; }
+  let healthRange = null, healthSeen = 0;
+  try { const hr = await syncClientHealth(db, targetUid, planId, u.id, auth, days); healthDays = hr.days; healthSeen = hr.seen; healthRange = hr; }
   catch (e) { console.error("health sync failed for", u.id, e && e.message); }
   try { workoutDays = await syncClientWorkouts(db, targetUid, planId, u.id, auth, days); }
   catch (e) { console.error("workout sync failed for", u.id, e && e.message); }
-  return { d, step, mealDays, healthDays, healthRange, workoutDays };
+  return { d, step, mealDays, healthDays, healthSeen, healthRange, workoutDays };
 }
 
 // Every Trainerize client we should keep in sync = imported LOCAL profiles
@@ -599,18 +605,18 @@ async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTR
           // into a "self" plan they never open — invisible, and indistinguishable
           // from the sync not working at all.
           const healthPlanId = (link && link.planId) || clientPlanId;
-          let healthDays = 0, healthFrom = null, healthTo = null;
+          let healthDays = 0, healthSeen = 0, healthFrom = null, healthTo = null;
           try {
             const hr = await syncClientHealth(db, linkedUid, healthPlanId, u.id, auth, nutritionDays);
-            healthDays = hr.days; healthFrom = hr.firstDate; healthTo = hr.lastDate;
+            healthDays = hr.days; healthSeen = hr.seen; healthFrom = hr.firstDate; healthTo = hr.lastDate;
           } catch (e) { console.error("health sync failed for", u.id, e && e.message); }
           results.push({ name, status: u.status || "", linked: true, healthOnly: true,
-            mealDays: 0, healthDays, healthFrom, healthTo, workoutDays: 0 });
+            mealDays: 0, healthDays, healthSeen, healthFrom, healthTo, workoutDays: 0 });
           continue;
         }
         const r = await applySnapshotAndSyncs(db, linkedUid, clientPlanId, u, snap, lastStatDate, auth, nutritionDays);
         results.push({ name, weight: r.d.weightLbs || "", goal: r.d.goalWeight || "", status: u.status || "",
-          linked: true, mealDays: r.mealDays, healthDays: r.healthDays,
+          linked: true, mealDays: r.mealDays, healthDays: r.healthDays, healthSeen: r.healthSeen,
           healthFrom: r.healthRange && r.healthRange.firstDate, healthTo: r.healthRange && r.healthRange.lastDate,
           workoutDays: r.workoutDays });
         continue;
@@ -629,13 +635,16 @@ async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTR
       if (existing) { Object.assign(existing, entry); updated++; }
       else { index.push(entry); created++; }
       results.push({ name, weight: entry.weight, goal: entry.goal, status: u.status || "",
-        mealDays: r.mealDays, healthDays: r.healthDays, workoutDays: r.workoutDays });
+        mealDays: r.mealDays, healthDays: r.healthDays, healthSeen: r.healthSeen,
+        healthFrom: r.healthRange && r.healthRange.firstDate, healthTo: r.healthRange && r.healthRange.lastDate,
+        workoutDays: r.workoutDays });
     }
     await kvSetJSON(db, uid, "caliq-index", index);
     const mealDaysTotal = results.reduce((s, r) => s + (r.mealDays || 0), 0);
     const healthDaysTotal = results.reduce((s, r) => s + (r.healthDays || 0), 0);
+    const healthSeenTotal = results.reduce((s, r) => s + (r.healthSeen || 0), 0);
     const workoutDaysTotal = results.reduce((s, r) => s + (r.workoutDays || 0), 0);
-    return { ok: true, total: roster.length, created, updated, mealDaysTotal, healthDaysTotal, workoutDaysTotal, clients: results };
+    return { ok: true, total: roster.length, created, updated, mealDaysTotal, healthDaysTotal, healthSeenTotal, workoutDaysTotal, clients: results };
 }
 
 exports.trainerizeImport = onCall(
