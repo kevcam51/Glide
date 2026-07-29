@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium, setAiOptOut, aiChoiceMade } from "./profile.js";
-import { getForUser, setForUser, deleteForUser, listForUser, subscribeForUser } from "./clientData.js";
+import { getForUser, setForUser, deleteForUser, listForUser, listEntriesForUser, subscribeForUser } from "./clientData.js";
 import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads } from "./messaging.js";
 import { pushStatus, enablePush, disablePush } from "./push.js";
 import { privGet, privSet, privSubscribe } from "./privateStore.js";
@@ -3672,7 +3672,7 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   );
 }
 
-function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDays30, loggingStreak, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, defaultView = "detailed", onSetPlanViewDefault }) {
+function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTotal, loggingStreak, dayCalsAll, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, defaultView = "detailed", onSetPlanViewDefault }) {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
   // Simple (plain-English) vs Detailed plan view — a display pref, remembered
@@ -3914,8 +3914,8 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDays30
       {/* ── Pro Mode: Daily Check-In, Progress, AI ── */}
       {viewMode === "pro" && (
         <>
-          <StreakBadges checkIns={data.checkIns || []} logAdherence={logAdherence} loggedDays30={loggedDays30} loggingStreak={loggingStreak} />
-          <DailyCheckIn data={data} onSaveCheckIn={onSaveCheckIn} meUid={meUid} meName={meName} />
+          <StreakBadges checkIns={data.checkIns || []} logAdherence={logAdherence} loggedDaysTotal={loggedDaysTotal} loggingStreak={loggingStreak} />
+          <DailyCheckIn data={data} onSaveCheckIn={onSaveCheckIn} meUid={meUid} meName={meName} dayCalsAll={dayCalsAll} />
           {(data.checkIns || []).length >= 1 && (
             <div onClick={() => setShowWeightModal(true)} style={{ cursor: "pointer" }}
               title="Tap to manage weigh-ins">
@@ -12194,7 +12194,7 @@ function CheckInCalendar({ checkIns, selected, onSelect }) {
   );
 }
 
-function DailyCheckIn({ data, onSaveCheckIn, meUid, meName }) {
+function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll }) {
   const [notesOpen, setNotesOpen] = useState(false);   // expanded editor
   const [noteSaveMsg, setNoteSaveMsg] = useState("");
   const [checkDate, setCheckDate] = useState(ymdLocal());
@@ -12229,7 +12229,20 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName }) {
       setCalories(""); setHitTarget(null); setWorkedOut(null); setMood(null);
       setNotes(""); setBodyFatLog("");
     }
-  }, [checkDate]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Auto-answer "did you hit your calorie target?" from what was actually
+    // logged that day (S160, Kevin — the workout answer already arrives
+    // pre-filled from the Trainerize sync, so the calorie one looked broken by
+    // comparison). Same rule as adherence and the calendar tint: at or under
+    // target ×1.05. Only fills a BLANK answer — a saved yes/no is never
+    // overwritten — and it pre-fills the calories box so the number is visible
+    // rather than asserted. Both stay editable.
+    const loggedCals = dayCalsAll && dayCalsAll[checkDate];
+    if (loggedCals > 0 && (!ex || ex.hitTarget == null)) {
+      const target = (computeClientCalories(data) || {}).target;
+      if (target > 0) setHitTarget(loggedCals <= target * 1.05);
+      if (!ex || ex.calories == null) setCalories(String(loggedCals));
+    }
+  }, [checkDate, dayCalsAll]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = () => {
     const checkin = {
@@ -12405,14 +12418,14 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName }) {
 
 // ─── Streak & Badge Tracker ──────────────────────────────────────────────────
 
-function StreakBadges({ checkIns, logAdherence, loggedDays30, loggingStreak }) {
+function StreakBadges({ checkIns, logAdherence, loggedDaysTotal, loggingStreak }) {
   // A CHECK-IN IS A DAY YOU LOGGED (S160, Kevin). It used to mean a row in
   // data.checkIns — created by weigh-ins, workout marks, the Trainerize sync and
   // the manual form — which counted days you never opened the app and, because
   // those rows only exist on weigh-in/workout days, produced a "streak" of 4
   // against the dashboard's 15. Same definition as the dashboard now, so the two
   // numbers agree by construction rather than by relabelling.
-  const useLogging = loggingStreak != null && loggedDays30 != null;
+  const useLogging = loggingStreak != null && loggedDaysTotal != null;
   // Legacy fallback: consecutive dates holding a check-in record.
   let ciStreak = 0;
   if (!useLogging) {
@@ -12425,7 +12438,7 @@ function StreakBadges({ checkIns, logAdherence, loggedDays30, loggingStreak }) {
     }
   }
   const streak = useLogging ? loggingStreak : ciStreak;
-  const totalCheckIns = useLogging ? loggedDays30 : (checkIns?.length || 0);
+  const totalCheckIns = useLogging ? loggedDaysTotal : (checkIns?.length || 0);
   // Prefer adherence measured from what was actually LOGGED; fall back to the
   // answered-check-in measure for plans with no calorie target.
   const adherencePct = logAdherence ? logAdherence.pct : adherenceOf(checkIns);
@@ -12435,10 +12448,7 @@ function StreakBadges({ checkIns, logAdherence, loggedDays30, loggingStreak }) {
     { id: "week", label: "7-Day Streak", iconName: "flame", earned: streak >= 7 },
     { id: "month", label: "30-Day Streak", iconName: "sparkle", earned: streak >= 30 },
     { id: "ten", label: useLogging ? "10 Days Logged" : "10 Check-Ins", iconName: "chart", earned: totalCheckIns >= 10 },
-    // The logging count is a 30-DAY window, so it tops out at 30 — a 50 target
-    // would be unreachable. "Most of the month" is the equivalent milestone.
-    { id: "fifty", label: useLogging ? "25 Days This Month" : "50 Check-Ins", iconName: "target",
-      earned: totalCheckIns >= (useLogging ? 25 : 50) },
+    { id: "fifty", label: useLogging ? "50 Days Logged" : "50 Check-Ins", iconName: "target", earned: totalCheckIns >= 50 },
     { id: "adherence", label: "80%+ Adherence", iconName: "check", earned: totalCheckIns >= 7 && adherencePct != null && adherencePct >= 80 },
     { id: "perfect", label: "Perfect Week", iconName: "bolt", earned: streak >= 7 && adherencePct === 100 },
   ];
@@ -12459,11 +12469,11 @@ function StreakBadges({ checkIns, logAdherence, loggedDays30, loggingStreak }) {
           </div>
           <div style={{marginLeft:"auto",textAlign:"right"}}>
             <div style={{fontSize:".85rem",fontWeight:700,color:"var(--text)"}}
-              title={useLogging ? "Days you logged anything in the last 30" : "Recorded check-ins"}>
-              {useLogging ? `${totalCheckIns}/30 days logged` : `${totalCheckIns} ${totalCheckIns === 1 ? "check-in" : "check-ins"}`}
+              title={useLogging ? "Every day you logged anything — food, water, a weigh-in or a meal" : "Recorded check-ins"}>
+              {useLogging ? `${totalCheckIns} ${totalCheckIns === 1 ? "day" : "days"} logged` : `${totalCheckIns} ${totalCheckIns === 1 ? "check-in" : "check-ins"}`}
             </div>
             <div title={logAdherence
-              ? `${logAdherence.pct}% of the ${logAdherence.days} day${logAdherence.days === 1 ? "" : "s"} you logged in the last ${logAdherence.windowDays} came in at or under your calorie target.`
+              ? `${logAdherence.pct}% of the ${logAdherence.days} day${logAdherence.days === 1 ? "" : "s"} you logged came in at or under your calorie target. Days you didn't log aren't counted, and back-filling one later counts normally.`
               : "Adherence comes from check-ins that answered \u201cdid you hit your target?\u201d"}
               style={{fontSize:".72rem",color: adherencePct == null ? "var(--muted)" : adherencePct >= 80 ? "var(--green)" : adherencePct >= 50 ? "var(--yellow)" : "var(--red)"}}>
               {adherencePct == null ? "adherence — not tracked"
@@ -21733,20 +21743,24 @@ export default function App() {
   const [weekSummary, setWeekSummary] = useState(null); // last-7-day nutrition averages
   // Calories for each LOGGED day in the last 30 (newest first) — the raw input
   // for the adherence memo below.
-  const [recentDayCals, setRecentDayCals] = useState([]);
-  // Days in the last 30 with ANY logging — the new "check-in" count.
-  const [loggedDays30, setLoggedDays30] = useState(null);
+  // date -> calories, for EVERY day this plan has ever logged. Feeds lifetime
+  // adherence and the check-in form's auto-answer.
+  const [dayCalsAll, setDayCalsAll] = useState({});
+  // Total days with ANY logging, lifetime — the "check-in" count.
+  const [loggedDaysTotal, setLoggedDaysTotal] = useState(null);
   // Adherence measured from what was actually LOGGED (S160, Kevin's call): the
-  // share of logged days in the last 30 that came in at or under the calorie
-  // target. Same rule as the calendar's green/amber day tint (over =
+  // share of ALL logged days that came in at or under the calorie target. Days
+  // you never logged are simply absent, so missing a week costs nothing — and
+  // back-filling it later counts normally. Same rule as the calendar's green/amber day tint (over =
   // >target×1.05) so the two screens agree. null when there's no target or
   // nothing logged — the UI then falls back to the answered-check-in measure.
   const logAdherence = useMemo(() => {
     const target = (computeClientCalories(data) || {}).target;
-    if (!(target > 0) || !recentDayCals.length) return null;
-    const onTarget = recentDayCals.filter((kc) => kc <= target * 1.05).length;
-    return { pct: Math.round((onTarget / recentDayCals.length) * 100), days: recentDayCals.length, windowDays: 30 };
-  }, [recentDayCals, data]);
+    const cals = Object.values(dayCalsAll);
+    if (!(target > 0) || !cals.length) return null;
+    const onTarget = cals.filter((kc) => kc <= target * 1.05).length;
+    return { pct: Math.round((onTarget / cals.length) * 100), days: cals.length };
+  }, [dayCalsAll, data]);
   const [recentWearable, setRecentWearable] = useState(null); // latest day (≤3 back) with tracker data — {daysAgo, wearable}
   const [meName, setMeName] = useState("");   // current user's display name
   const [meUid, setMeUid] = useState("");     // current user's uid
@@ -22128,8 +22142,8 @@ export default function App() {
     setHistory([]);      historyRef.current = [];
     setRecentFoods([]);  recentFoodsRef.current = [];
     setWeekSummary(null);
-    setRecentDayCals([]);
-    setLoggedDays30(null);
+    setDayCalsAll({});
+    setLoggedDaysTotal(null);
     setRecentWearable(null);
   };
 
@@ -22588,6 +22602,14 @@ export default function App() {
     try {
       if (activeRemoteUid) { const r = await listForUser(activeRemoteUid, prefix); return r.keys || []; }
       const r = await window.storage.list(prefix); return r.keys || [];
+    } catch (e) { return []; }
+  };
+  // Remote-aware listing WITH values — one range query returns every daily log
+  // for the plan, which is what the lifetime stats are built from.
+  const logListEntries = async (prefix) => {
+    try {
+      if (activeRemoteUid) { const r = await listEntriesForUser(activeRemoteUid, prefix); return r.entries || []; }
+      const r = await window.storage.listEntries(prefix); return r.entries || [];
     } catch (e) { return []; }
   };
   const persistLog = (logObj) => {
@@ -23071,24 +23093,32 @@ export default function App() {
       // memo below. This effect doesn't depend on `data`, so a target read here
       // could be a stale closure value; keeping the two apart also means changing
       // your calorie goal re-scores immediately instead of after a reload.
-      const cals = [];
-      let activeDays = 0;
-      for (let i = 0; i < 30; i++) {
-        const lv = await readDayCached(keyFor(i));
-        if (!lv) continue;
-        try {
-          const pl = JSON.parse(lv);
-          const kc = pl.calories || 0;
-          if (kc > 0) cals.push(kc);
-          // A CHECK-IN is now simply a day you used the app (S160, Kevin) — food,
-          // water, a weigh-in or a meal all count, not just the manual check-in
-          // form. Read from the same day doc, so it costs nothing extra.
-          if (kc > 0 || (pl.water || 0) > 0 || (pl.weight || 0) > 0 || ((pl.meals || []).length > 0)) activeDays++;
-        } catch (e) { /* ignore */ }
-      }
+      // LIFETIME logging stats from ONE range query (Kevin: lifetime, not a
+      // 30-day window). This replaces 30 individual gets — the query reads the
+      // same documents Firestore was already billing for and hands back their
+      // values, so it is cheaper AND covers every day the plan has ever had.
+      // Back-dating is handled for free: a day filled in later is just a day doc
+      // with calories in it, indistinguishable from one logged on the day, so
+      // catching up on a missed week counts exactly as if it were never missed.
+      const prefix = `caliq-log-${activeId}-`;
+      const entries = await logListEntries(prefix);
       if (!alive) return;
-      setRecentDayCals(cals);
-      setLoggedDays30(activeDays);
+      const calsByDate = {};
+      let activeDays = 0;
+      for (const e of entries) {
+        const date = (e.k || "").slice(prefix.length);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !e.value) continue;
+        try {
+          const pl = JSON.parse(e.value);
+          const kc = pl.calories || 0;
+          if (kc > 0) calsByDate[date] = kc;
+          // A CHECK-IN is a day you used the app: food, water, a weigh-in or a
+          // meal all count — not just the manual check-in form.
+          if (kc > 0 || (pl.water || 0) > 0 || (pl.weight || 0) > 0 || ((pl.meals || []).length > 0)) activeDays++;
+        } catch (e2) { /* skip unparseable day */ }
+      }
+      setDayCalsAll(calsByDate);
+      setLoggedDaysTotal(activeDays);
       // Most recent day (within the last 3) that has WEARABLE data. The tracker
       // card used to render only TODAY's wearable — but Garmin→Trainerize lags
       // ~a day, so every midnight rollover made the card vanish until the next
@@ -23384,7 +23414,7 @@ export default function App() {
             <div style={{marginBottom:"12px"}}>
               <button className="dash-nav-btn" style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:"7px"}} onClick={()=>setShowDash(true)}><Icon name="dashboard" size={16} color="var(--accent)" />Back to Dashboard</button>
             </div>
-            <Results data={data} isSimulation={activeIsSim} meUid={meUid} meName={meName} logAdherence={logAdherence} loggedDays30={loggedDays30} loggingStreak={streak} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
+            <Results data={data} isSimulation={activeIsSim} meUid={meUid} meName={meName} logAdherence={logAdherence} loggedDaysTotal={loggedDaysTotal} loggingStreak={streak} dayCalsAll={dayCalsAll} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
             defaultView={role === ROLES.CLIENT ? (data.planViewDefault || "simple") : "detailed"}
             onSetPlanViewDefault={activeRemoteUid ? (v)=>setDataAndSave(p=>({...p, planViewDefault: v})) : undefined}
             onSetFitnessGoal={(g)=>setDataAndSave(p=>({...p, fitnessGoal: g}))}

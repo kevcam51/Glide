@@ -80,6 +80,26 @@ const firestoreStorage = {
     });
     return { keys, prefix, shared: false };
   },
+
+  // Same range query as list(), but returns each doc's VALUE too. getDocs()
+  // already transfers (and bills for) the full documents — list() just discards
+  // the values — so reading them here is free, and it turns "one range query per
+  // prefix" into enough data to compute lifetime stats without a get() per day.
+  async listEntries(prefix) {
+    await ready;
+    const uid = requireUid();
+    const snap = await getDocs(
+      prefix
+        ? query(kvCol(uid), where("k", ">=", prefix), where("k", "<=", prefix + "\uf8ff"))
+        : kvCol(uid)
+    );
+    const entries = [];
+    snap.forEach((d) => {
+      const row = d.data();
+      if (!prefix || (row.k && row.k.startsWith(prefix))) entries.push({ k: row.k, value: row.value });
+    });
+    return { entries, prefix };
+  },
 };
 
 window.storage = firestoreStorage;

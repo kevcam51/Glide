@@ -76,3 +76,20 @@ export async function listForUser(uid, prefix) {
   });
   return { keys, prefix };
 }
+
+// listForUser + values. Same reasoning as storage.listEntries: getDocs already
+// pulls the whole document, so returning `value` costs nothing extra.
+export async function listEntriesForUser(uid, prefix) {
+  if (!uid) throw new Error("listEntriesForUser: missing uid");
+  const snap = await getDocs(
+    prefix
+      ? query(kvCol(uid), where("k", ">=", prefix), where("k", "<=", prefix + "\uf8ff"))
+      : kvCol(uid)
+  );
+  const entries = [];
+  snap.forEach((d) => {
+    const row = d.data();
+    if (!prefix || (row.k && row.k.startsWith(prefix))) entries.push({ k: row.k, value: row.value });
+  });
+  return { entries, prefix };
+}
