@@ -7257,11 +7257,31 @@ async function fetchUsdaPortion(fdcId) {
 // primary sources come up short — this both cuts junk results and is why the
 // pineapple pastry no longer surfaces. FatSecret's free tier is 5,000 calls/
 // day with no per-call overage, so primary use is effectively free at our scale.
+// Shops people BUY food at, which the food databases don't index by (S160,
+// Kevin: searched a protein powder plus "whole foods" and it struggled). The
+// libraries key on BRAND — "Whole Foods" is where you bought it, not what's on
+// the tub — so those words match nothing on the real product, dilute the
+// per-word coverage score, and drag in noise ("whole" hits whole wheat, whole
+// milk). Recognised here so the search can retry without them.
+const RETAILER_WORDS = ["whole foods market", "whole foods", "trader joe's", "trader joes",
+  "sam's club", "sams club", "costco", "walmart", "kroger", "publix", "aldi", "safeway",
+  "wegmans", "sprouts", "meijer", "h-e-b", "albertsons", "food lion", "giant eagle"];
+const stripRetailer = (q) => {
+  let out = ` ${q} `;
+  for (const r of RETAILER_WORDS) {
+    out = out.replace(new RegExp(`\\s${r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s`, "gi"), " ");
+  }
+  return out.replace(/\s+/g, " ").trim();
+};
+
 async function searchFoods(query, onPartial) {
   const q = query.toLowerCase().trim();
   const cached = _foodSearchCache.get(q);
   if (cached) { if (onPartial) onPartial(cached); return cached; }
   const esc = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Results from a retailer-stripped retry must be scored against the STRIPPED
+  // query, or the very words that caused the miss would penalise the rescue.
+  let scoreQ = q;
   const rank = (list) => {
     const seen = new Set(); const out = [];
     for (const f of list) {
@@ -7269,7 +7289,7 @@ async function searchFoods(query, onPartial) {
       if (seen.has(k)) continue;
       seen.add(k); out.push(f);
     }
-    out.sort((a, b) => _foodScore(b, q) - _foodScore(a, q));
+    out.sort((a, b) => _foodScore(b, scoreQ) - _foodScore(a, scoreQ));
     return out.slice(0, 12);
   };
   // Accumulate results from each source as it resolves and re-emit the ranked
@@ -7285,18 +7305,34 @@ async function searchFoods(query, onPartial) {
   // few results, or none that actually match the query well.
   const primary = [...fatsecret, ...usda];
   const strong = primary.some((f) => { const n = (f.name || "").toLowerCase(); return n === q || n.split(",")[0].trim() === q || n.startsWith(q) || new RegExp(`\\b${esc}\\b`).test(n); });
+  // RETAILER RETRY — run BEFORE the OFF fallback, since dropping the shop name
+  // usually finds the product in the good libraries rather than the crowd-sourced
+  // one. Both result sets are merged, so naming the shop can only ever help.
+  const stripped = stripRetailer(q);
+  let retry = [];
+  if ((primary.length < 5 || !strong) && stripped !== q && stripped.length >= 3) {
+    const [f2, u2] = await Promise.allSettled([
+      searchFatSecret(stripped).catch(() => []),
+      searchUSDA(stripped).catch(() => []),
+    ]);
+    retry = [
+      ...(f2.status === "fulfilled" ? f2.value || [] : []),
+      ...(u2.status === "fulfilled" ? u2.value || [] : []),
+    ];
+    if (retry.length) { scoreQ = stripped; emit(retry); }
+  }
   let off = [];
-  if (primary.length < 5 || !strong) {
+  if (primary.length + retry.length < 5 || (!strong && !retry.length)) {
     off = await searchOFF(query).catch(() => []);
     emit(off);
   }
-  if (!fatsecret.length && !usda.length && !off.length) {
+  if (!fatsecret.length && !usda.length && !retry.length && !off.length) {
     const limited = uRes.status === "rejected" && uRes.reason && uRes.reason.message === "limit";
     throw new Error(limited
       ? "Food search limit reached — try again in a bit (or add a free USDA API key)."
       : "Food search is temporarily unavailable — try again in a moment.");
   }
-  const out = rank([...fatsecret, ...usda, ...off]);
+  const out = rank([...fatsecret, ...usda, ...retry, ...off]);
   _foodSearchCache.set(q, out);
   if (_foodSearchCache.size > 80) _foodSearchCache.delete(_foodSearchCache.keys().next().value); // bound memory
   return out;
@@ -14202,6 +14238,58 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     try { await window.storage.set("caliq-tz-autosync", JSON.stringify({ enabled: next })); }
     catch { setTzAuto(!next); }
   };
+  // "My watch data" (S160, Kevin): pull the tracker's calories + steps into the
+  // plan he ALREADY tracks in — no imported profile, no new plan, and none of
+  // the rest of the sync (weight, goals, MACRO TARGETS, meals, workouts), which
+  // is what he disliked. Stored as caliq-tz-links[trainerizeId] = {uid,
+  // healthOnly:true}; the sync reads the account's ACTIVE plan each run, so a
+  // future phase inherits it without setting anything up again.
+  const [tzMe, setTzMe] = useState(null);        // my Trainerize id, or null when off
+  const [tzMePick, setTzMePick] = useState(null); // roster rows while choosing
+  const [tzMeBusy, setTzMeBusy] = useState(false);
+  useEffect(() => {
+    if (!tzIsOwner) return;
+    (async () => {
+      try {
+        const r = await window.storage.get("caliq-tz-links");
+        const links = r && r.value ? JSON.parse(r.value) : {};
+        const mine = Object.entries(links).find(([, v]) => v && typeof v === "object" && v.healthOnly && v.uid === meUid);
+        if (mine) setTzMe(Number(mine[0]));
+      } catch { /* none yet */ }
+    })();
+  }, [tzIsOwner, meUid]);
+  const writeTzLinks = async (mutate) => {
+    const r = await window.storage.get("caliq-tz-links");
+    const links = r && r.value ? (JSON.parse(r.value) || {}) : {};
+    mutate(links);
+    await window.storage.set("caliq-tz-links", JSON.stringify(links));
+  };
+  const chooseMyTracker = async () => {
+    setTzMeBusy(true);
+    try {
+      const res = await callTrainerizeImport({ mode: "list" });
+      setTzMePick((res.data && res.data.clients) || []);
+    } catch (e) { setTzMsg({ ok: false, text: tzErrText(e) }); }
+    setTzMeBusy(false);
+  };
+  const setMyTracker = async (tzId) => {
+    setTzMeBusy(true);
+    try {
+      await writeTzLinks((links) => { links[tzId] = { uid: meUid, healthOnly: true }; });
+      setTzMe(Number(tzId)); setTzMePick(null);
+      setTzMsg({ ok: true, text: "Watch data on — your tracker's calories will appear on the next sync." });
+    } catch { setTzMsg({ ok: false, text: "Couldn't save that — try again." }); }
+    setTzMeBusy(false);
+  };
+  const clearMyTracker = async () => {
+    setTzMeBusy(true);
+    try {
+      await writeTzLinks((links) => { delete links[tzMe]; });
+      setTzMe(null);
+      setTzMsg({ ok: true, text: "Watch data off. Nothing already logged was removed." });
+    } catch { setTzMsg({ ok: false, text: "Couldn't save that — try again." }); }
+    setTzMeBusy(false);
+  };
   const tzErrText = (e) => {
     const code = e && e.code ? String(e.code) : "";
     return code.includes("permission-denied")
@@ -15128,6 +15216,32 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                 </span>
                 <span className="text-muted"> — every 30 min for imported & linked clients · tap to {tzAuto ? "pause" : "resume"}</span>
               </button>
+              {/* My own watch data — calories + steps only, into the plan I'm
+                  already using. Deliberately separate from the client importer:
+                  it creates no profile and writes nothing but the tracker block. */}
+              <button onClick={tzMe ? clearMyTracker : chooseMyTracker} disabled={tzMeBusy}
+                className={`bg-transparent border-0 p-0 text-xs text-left inline-flex items-center gap-1.5 flex-wrap ${tzMeBusy ? "opacity-60 cursor-default" : "cursor-pointer"}`}>
+                <Icon name="watch" size={13} color={tzMe ? "var(--color-success)" : "var(--color-muted)"} />
+                <span className={tzMe ? "text-success" : "text-muted"}>My watch data: {tzMe ? "On" : "Off"}</span>
+                <span className="text-muted"> — {tzMe
+                  ? "calories & steps only, into your active plan · tap to turn off"
+                  : "pull your tracker's calories into the plan you already use"}</span>
+              </button>
+              {tzMePick && (
+                <div className="w-full rounded-lg border border-border bg-surface2 p-2.5">
+                  <div className="mb-1.5 text-xs text-muted">Which one is you? Only your watch calories &amp; steps get pulled in — nothing else changes.</div>
+                  <div className="flex flex-col gap-1 max-h-[240px] overflow-auto">
+                    {tzMePick.map((c) => (
+                      <button key={c.id} onClick={() => setMyTracker(c.id)} disabled={tzMeBusy}
+                        className="flex items-center justify-between rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
+                        <span>{c.name || c.email || `Client ${c.id}`}</span>
+                        <span className="text-primary font-bold">Use this</span>
+                      </button>
+                    ))}
+                  </div>
+                  <button onClick={() => setTzMePick(null)} className="mt-1.5 bg-transparent border-0 p-0 text-xs text-muted cursor-pointer">Cancel</button>
+                </div>
+              )}
               {/* Manual refresh — pulls the same data as the 30-min tick, on demand. */}
               <button onClick={syncTzNow} disabled={tzSyncing}
                 className={`bg-transparent border-0 p-0 text-xs font-bold text-left inline-flex items-center gap-1.5 ${tzSyncing ? "opacity-60 cursor-default text-muted" : "cursor-pointer text-primary"}`}>

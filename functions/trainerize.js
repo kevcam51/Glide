@@ -561,10 +561,26 @@ async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTR
       // LINKED to a real Glide account → sync straight into THAT client's account
       // (their active plan), so their watch/meals/workouts flow to where they log
       // in. No local profile / index entry for a linked client.
-      const linkedUid = tzLinks[u.id];
+      // A link is either a bare uid (full sync — the client flow) or
+      // { uid, healthOnly:true }: pull the WATCH DATA ONLY and leave everything
+      // else alone. Kevin's case — he wants his Garmin calories in the plan he
+      // already tracks in, but the full sync also re-stamps weight, goals, macro
+      // targets, meals and workouts from Trainerize, which is not what he asked
+      // the tracker for. Watch-only writes nothing but `log.wearable` per date.
+      const link = tzLinks[u.id];
+      const linkedUid = typeof link === "string" ? link : ((link && link.uid) || null);
+      const healthOnly = !!(link && typeof link === "object" && link.healthOnly);
       if (linkedUid) {
         let clientPlanId = "self";
         try { const mf = (await kvGetJSON(db, linkedUid, "caliq-plans")) || {}; if (mf.active) clientPlanId = mf.active; } catch (e) { /* default self */ }
+        if (healthOnly) {
+          let healthDays = 0;
+          try { healthDays = await syncClientHealth(db, linkedUid, clientPlanId, u.id, auth, nutritionDays); }
+          catch (e) { console.error("health sync failed for", u.id, e && e.message); }
+          results.push({ name, status: u.status || "", linked: true, healthOnly: true,
+            mealDays: 0, healthDays, workoutDays: 0 });
+          continue;
+        }
         const r = await applySnapshotAndSyncs(db, linkedUid, clientPlanId, u, snap, lastStatDate, auth, nutritionDays);
         results.push({ name, weight: r.d.weightLbs || "", goal: r.d.goalWeight || "", status: u.status || "",
           linked: true, mealDays: r.mealDays, healthDays: r.healthDays, workoutDays: r.workoutDays });
