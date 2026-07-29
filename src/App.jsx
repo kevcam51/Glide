@@ -10279,6 +10279,19 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // tile, calendar, tracker-adjusted target) treats it identically.
   const [burnDraft, setBurnDraft] = useState("");
   const [burnKind, setBurnKind] = useState("active"); // "active" | "total"
+  // burnKind decides what the NEXT save writes, so it has to follow the stored
+  // record. Left at its "active" default it would show "Whole-day burn you
+  // entered — 2,900" with the toggle sitting on Active/workout; saving an update
+  // then wrote `active` and dropped `total`, converting a measured TDEE into
+  // add-on burn — the exact double-count the two modes exist to prevent. Keyed
+  // on the SAVED value, so it re-derives on load and on day switch but never
+  // fights a toggle the user is mid-way through changing.
+  const savedBurnKind = (() => {
+    const w = dailyLog && dailyLog.wearable;
+    if (!w || !w.manual) return "";
+    return Number(w.total) > 0 ? "total" : (Number(w.active) > 0 ? "active" : "");
+  })();
+  useEffect(() => { if (savedBurnKind) setBurnKind(savedBurnKind); }, [savedBurnKind]);
   // Log-confirmation feedback (Kevin): after a quick-log the input clears, the Log
   // button greys to "Logged ✓" for a beat, and a toast confirms it — so you know
   // it saved without scrolling up to check the number.
@@ -10998,10 +11011,17 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
             <div style={{display:"flex",alignItems:"flex-start",gap:"8px"}}>
               <div style={{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap"}}>
                 <Icon name="watch" size={16} color="var(--accent)" />
-                <span style={{color:"var(--muted)"}}>Tracker{w && w.source ? ` (${w.source})` : ""}{dayLabel ? ` · ${dayLabel}` : ""}:</span>
+                <span style={{color:"var(--muted)"}}>{w && w.manual ? "Entered by hand" : `Tracker${w && w.source ? ` (${w.source})` : ""}`}{dayLabel ? ` · ${dayLabel}` : ""}:</span>
                 {w && w.active ? <span style={{fontFamily:"'Sora',sans-serif"}}>{Number(w.active).toLocaleString()} cal active</span> : null}
+                {/* A hand-entered whole-day total counts as data for hasWearable,
+                    so without this the card printed a label and no number. */}
+                {w && w.total ? <span style={{fontFamily:"'Sora',sans-serif"}}>{Number(w.total).toLocaleString()} cal whole day</span> : null}
                 {w && w.steps ? <span style={{fontFamily:"'Sora',sans-serif"}}>· {Number(w.steps).toLocaleString()} steps</span> : null}
                 {!w ? <span style={{color:"var(--muted)"}}>no watch data yet</span> : null}
+                {/* A record can be "reported" with every figure at zero (a genuine
+                    rest day, or an all-zero reading from a second connected app).
+                    Say so rather than leaving a bare "Tracker:" hanging. */}
+                {w && !w.active && !w.total && !w.steps ? <span style={{color:"var(--muted)"}}>nothing recorded</span> : null}
               </div>
               {onTrackerSync && (
                 <button onClick={syncNow} disabled={tzSync === "busy"} title="Pull the latest data from Trainerize"
