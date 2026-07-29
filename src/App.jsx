@@ -11281,28 +11281,6 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                 </div>
                 );
               })()}
-              <div style={{marginTop:"10px"}}>
-                <div style={{fontSize:".72rem",color:"var(--muted)",fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",marginBottom:"6px"}}>Quick Add</div>
-                <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
-                  <input type="number" inputMode="numeric" placeholder="Add calories" onClick={e=>e.stopPropagation()}
-                    onKeyDown={e=>{if(e.key==="Enter"){const v=parseInt(e.target.value);if(v>0){onLogUpdate("calories",(dailyLog.calories||0)+v);e.target.value="";}}}}
-                    onBlur={e=>{const v=parseInt(e.target.value);if(v>0){onLogUpdate("calories",(dailyLog.calories||0)+v);e.target.value="";}}}
-                    style={{flex:1,padding:"10px 12px",borderRadius:"8px",border:"1.5px solid var(--accent)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".88rem"}} />
-                  <span style={{fontSize:".78rem",color:"var(--muted)"}}>cal</span>
-                </div>
-                <div style={{display:"flex",gap:"8px",marginTop:"8px"}}>
-                  {[100,250,500].map(v=>(
-                    <button key={v} onClick={e=>{e.stopPropagation();onLogUpdate("calories",(dailyLog.calories||0)+v);}}
-                      style={{flex:1,padding:"8px",borderRadius:"8px",border:"1px solid var(--border)",background:"var(--s2)",color:"var(--accent)",cursor:"pointer",fontFamily:"inherit",fontSize:".8rem",fontWeight:600}}>
-                      +{v}
-                    </button>
-                  ))}
-                  <button onClick={e=>{e.stopPropagation();onLogUpdate("calories",0);}}
-                    style={{padding:"8px 12px",borderRadius:"8px",border:"1px solid var(--red)",background:"color-mix(in srgb,var(--red) 6%,transparent)",color:"var(--red)",cursor:"pointer",fontFamily:"inherit",fontSize:".75rem",fontWeight:600}}>
-                    Reset
-                  </button>
-                </div>
-              </div>
               {/* Add macros manually (moved from Quick Log) */}
               <div style={{marginTop:"12px"}}>
                 <button onClick={()=>setShowMacros(v=>!v)}
@@ -11541,6 +11519,32 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         onLogMeal={mealIsToday ? onLogMeal : undefined} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays}
         dateKey={mealDate} hideMicros
         onDayStep={shiftMealDate} dayLabel={dayLabelFor(mealDate, dashToday)} canGoNext />
+              {/* Quick Add sits BELOW the real logging (Kevin, S160): naming the
+                  food is the path that feeds macros, the food library and the
+                  weekly averages, so it leads. A bare calorie number is the
+                  fallback for when you're in a hurry, so it waits at the end. */}
+              <div style={{marginTop:"14px"}}>
+                <div style={{fontSize:".72rem",color:"var(--muted)",fontWeight:600,textTransform:"uppercase",letterSpacing:".5px",marginBottom:"6px"}}>Quick Add</div>
+                <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
+                  <input type="number" inputMode="numeric" placeholder="Add calories" onClick={e=>e.stopPropagation()}
+                    onKeyDown={e=>{if(e.key==="Enter"){const v=parseInt(e.target.value);if(v>0){onLogUpdate("calories",(dailyLog.calories||0)+v);e.target.value="";}}}}
+                    onBlur={e=>{const v=parseInt(e.target.value);if(v>0){onLogUpdate("calories",(dailyLog.calories||0)+v);e.target.value="";}}}
+                    style={{flex:1,padding:"10px 12px",borderRadius:"8px",border:"1.5px solid var(--accent)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".88rem"}} />
+                  <span style={{fontSize:".78rem",color:"var(--muted)"}}>cal</span>
+                </div>
+                <div style={{display:"flex",gap:"8px",marginTop:"8px"}}>
+                  {[100,250,500].map(v=>(
+                    <button key={v} onClick={e=>{e.stopPropagation();onLogUpdate("calories",(dailyLog.calories||0)+v);}}
+                      style={{flex:1,padding:"8px",borderRadius:"8px",border:"1px solid var(--border)",background:"var(--s2)",color:"var(--accent)",cursor:"pointer",fontFamily:"inherit",fontSize:".8rem",fontWeight:600}}>
+                      +{v}
+                    </button>
+                  ))}
+                  <button onClick={e=>{e.stopPropagation();onLogUpdate("calories",0);}}
+                    style={{padding:"8px 12px",borderRadius:"8px",border:"1px solid var(--red)",background:"color-mix(in srgb,var(--red) 6%,transparent)",color:"var(--red)",cursor:"pointer",fontFamily:"inherit",fontSize:".75rem",fontWeight:600}}>
+                    Reset
+                  </button>
+                </div>
+              </div>
             </>
           )}
           {expandedStat === "burn" && (
