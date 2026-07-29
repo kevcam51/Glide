@@ -24,7 +24,14 @@ const isOAuthConsent = (() => {
   try { return window.location.pathname.replace(/\/+$/, '') === '/oauth/authorize' } catch { return false }
 })()
 
-createRoot(document.getElementById('root')).render(
+// Reuse the root across hot reloads. Vite re-evaluates this module on HMR, and
+// calling createRoot() again on the same container makes React warn ("already
+// been passed to createRoot") and throw away the mounted tree. Dev-only noise —
+// production evaluates this once — but it clutters the console during exactly
+// the work where you're reading it.
+const container = document.getElementById('root')
+const root = (globalThis.__glidnaRoot ||= createRoot(container))
+root.render(
   <StrictMode>
     {isShowcase ? (
       <Suspense fallback={null}><Showcase /></Suspense>

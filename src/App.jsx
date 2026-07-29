@@ -21822,10 +21822,8 @@ export default function App() {
   const [savedMeals, setSavedMeals] = useState([]);
   const savedMealsRef = useRef([]);
   const [weekSummary, setWeekSummary] = useState(null); // last-7-day nutrition averages
-  // Calories for each LOGGED day in the last 30 (newest first) — the raw input
-  // for the adherence memo below.
-  // date -> calories, for EVERY day this plan has ever logged. Feeds lifetime
-  // adherence and the check-in form's auto-answer.
+  // date -> calories for EVERY day this plan has logged — the raw input for the
+  // adherence memo below and for the check-in form's auto-answer.
   const [dayCalsAll, setDayCalsAll] = useState({});
   // Total days with ANY logging, lifetime — the "check-in" count.
   const [loggedDaysTotal, setLoggedDaysTotal] = useState(null);
@@ -23092,33 +23090,45 @@ export default function App() {
       let parsed = {calories:0, water:0, weight:0, meals:[]};
       if (v) { try { parsed = JSON.parse(v); } catch(e) {} }
       setDailyLog(parsed);
-      // Simple streak: count consecutive days with logged calories. Days are
-      // read in parallel batches of 7 (they were one awaited round-trip per
-      // day, so a long streak took seconds to load) and cached so the week
-      // summary below reuses the first 7 instead of re-reading them.
-      const dayVals = {};
+      // ONE range query feeds every day-derived stat in this effect: the streak,
+      // the 7-day nutrition summary, lifetime logging totals and the most recent
+      // tracker reading. It replaces a day-by-day walk (batched gets until the
+      // streak broke) plus separate 30-, 7- and 3-day loops — dozens of round
+      // trips became one, and the documents were being read either way.
+      const prefix = `caliq-log-${activeId}-`;
+      const entries = await logListEntries(prefix);
+      if (!alive) return;
+      const byDate = {};
+      for (const e of entries) {
+        const date = (e.k || "").slice(prefix.length);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !e.value) continue;
+        try { byDate[date] = JSON.parse(e.value); } catch (e2) { /* skip an unparseable day */ }
+      }
       // Anchor on the day being VIEWED: a streak or week average shown for a past
       // day must describe that day, not today.
       const keyFor = (i) => { const d = new Date(viewDate + "T12:00:00"); d.setDate(d.getDate() - i); return ymdLocal(d); };
-      const readDayCached = async (dk) => {
-        if (!(dk in dayVals)) dayVals[dk] = await logRead(`caliq-log-${activeId}-${dk}`);
-        return dayVals[dk];
-      };
-      let s = 0, ended = false;
-      for (let base = 0; base < 365 && !ended; base += 7) {
-        const batch = Array.from({ length: Math.min(7, 365 - base) }, (_, j) => keyFor(base + j));
-        const vals = await Promise.all(batch.map(readDayCached));
-        for (let j = 0; j < vals.length; j++) {
-          const i = base + j;
-          let logged = false;
-          if (vals[j]) { try { logged = (JSON.parse(vals[j]).calories || 0) > 0; } catch(e) {} }
-          if (logged) { s++; continue; }
-          if (i === 0) continue; // today might not have logs yet
-          ended = true; break;
-        }
+      // Consecutive days with logged calories, walking back from the viewed day.
+      let s = 0;
+      for (let i = 0; i < 366; i++) {
+        const pl = byDate[keyFor(i)];
+        if (pl && (pl.calories || 0) > 0) { s++; continue; }
+        if (i === 0) continue;   // today might not be logged yet — that doesn't break it
+        break;
       }
-      if (!alive) return;
       setStreak(s);
+      // Lifetime logging stats + the date→calories map behind adherence and the
+      // check-in auto-answer. Back-dating needs no special handling: a day filled
+      // in later is just a day doc with calories in it.
+      const calsByDate = {};
+      let activeDays = 0;
+      for (const [date, pl] of Object.entries(byDate)) {
+        const kc = pl.calories || 0;
+        if (kc > 0) calsByDate[date] = kc;
+        // A CHECK-IN is a day you used the app: food, water, a weigh-in or a meal.
+        if (kc > 0 || (pl.water || 0) > 0 || (pl.weight || 0) > 0 || ((pl.meals || []).length > 0)) activeDays++;
+      }
+      setDayCalsAll(calsByDate);
+      setLoggedDaysTotal(activeDays);
       // Load this plan's edit history
       const hv = await logRead(`caliq-history-${activeId}`);
       let hist = [];
@@ -23148,71 +23158,27 @@ export default function App() {
         savedMealsRef.current = sm;
         setSavedMeals(sm);
       } catch (e) { /* library is a nicety — never block the dashboard on it */ }
-      // Last-7-day nutrition summary (averaged over the days that were logged).
-      // Reuses the streak loop's cached reads — its first batch is these 7 days.
+      // Last-7-day nutrition summary (averaged over the days that were logged),
+      // straight from the map above — no further reads.
       let days = 0, cal = 0, p = 0, c = 0, f = 0;
       for (let i = 0; i < 7; i++) {
-        const lv = await readDayCached(keyFor(i));
-        if (!lv) continue;
-        try {
-          const pl = JSON.parse(lv);
-          if ((pl.calories || 0) > 0) { days++; cal += pl.calories || 0; p += pl.protein || 0; c += pl.carbs || 0; f += pl.fat || 0; }
-        } catch (e) { /* ignore */ }
+        const pl = byDate[keyFor(i)];
+        if (!pl || (pl.calories || 0) <= 0) continue;
+        days++; cal += pl.calories || 0; p += pl.protein || 0; c += pl.carbs || 0; f += pl.fat || 0;
       }
       if (!alive) return;
       setWeekSummary(days > 0
         ? { days, avgCal: Math.round(cal / days), avgP: Math.round(p / days), avgC: Math.round(c / days), avgF: Math.round(f / days) }
         : { days: 0, avgCal: 0, avgP: 0, avgC: 0, avgF: 0 });
-      // REAL adherence (S160, Kevin's call): the share of LOGGED days over the
-      // last 30 where calories landed at/under target. Replaces the old
-      // check-in `hitTarget` measure, which only the manual check-in form ever
-      // set — so logging by any other route scored 0%. Deliberately the SAME
-      // rule as the calendar's green/amber day tint (over = >target×1.05), so
-      // the two screens can never disagree about what a good day was. Reuses
-      // readDayCached, so the first 7 days cost nothing extra.
-      // Collect the CALORIES only — scoring them against the target happens in a
-      // memo below. This effect doesn't depend on `data`, so a target read here
-      // could be a stale closure value; keeping the two apart also means changing
-      // your calorie goal re-scores immediately instead of after a reload.
-      // LIFETIME logging stats from ONE range query (Kevin: lifetime, not a
-      // 30-day window). This replaces 30 individual gets — the query reads the
-      // same documents Firestore was already billing for and hands back their
-      // values, so it is cheaper AND covers every day the plan has ever had.
-      // Back-dating is handled for free: a day filled in later is just a day doc
-      // with calories in it, indistinguishable from one logged on the day, so
-      // catching up on a missed week counts exactly as if it were never missed.
-      const prefix = `caliq-log-${activeId}-`;
-      const entries = await logListEntries(prefix);
-      if (!alive) return;
-      const calsByDate = {};
-      let activeDays = 0;
-      for (const e of entries) {
-        const date = (e.k || "").slice(prefix.length);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !e.value) continue;
-        try {
-          const pl = JSON.parse(e.value);
-          const kc = pl.calories || 0;
-          if (kc > 0) calsByDate[date] = kc;
-          // A CHECK-IN is a day you used the app: food, water, a weigh-in or a
-          // meal all count — not just the manual check-in form.
-          if (kc > 0 || (pl.water || 0) > 0 || (pl.weight || 0) > 0 || ((pl.meals || []).length > 0)) activeDays++;
-        } catch (e2) { /* skip unparseable day */ }
-      }
-      setDayCalsAll(calsByDate);
-      setLoggedDaysTotal(activeDays);
       // Most recent day (within the last 3) that has WEARABLE data. The tracker
       // card used to render only TODAY's wearable — but Garmin→Trainerize lags
       // ~a day, so every midnight rollover made the card vanish until the next
-      // sync landed ("it disappears after a certain period of time"). Reuses
-      // the streak loop's cached reads (no extra Firestore round-trips).
+      // sync landed ("it disappears after a certain period of time"). Read from
+      // the same map — no extra Firestore round-trips.
       let rw = null;
       for (let i = 0; i <= 3 && !rw; i++) {
-        const lv = await readDayCached(keyFor(i));
-        if (!lv) continue;
-        try {
-          const pl = JSON.parse(lv);
-          if (hasWearable(pl.wearable)) rw = { daysAgo: i, wearable: pl.wearable };
-        } catch (e) { /* ignore */ }
+        const pl = byDate[keyFor(i)];
+        if (pl && hasWearable(pl.wearable)) rw = { daysAgo: i, wearable: pl.wearable };
       }
       if (!alive) return;
       setRecentWearable(rw);
