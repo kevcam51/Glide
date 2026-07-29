@@ -281,17 +281,33 @@ export async function joinTrainer(input) {
 }
 
 // Trainer: get my direct clients (clients whose assignedTrainerId is me).
-export async function getMyClients(trainerUid = auth.currentUser && auth.currentUser.uid) {
-  if (!trainerUid) return [];
-  const q = query(collection(db, "users"), where("assignedTrainerId", "==", trainerUid));
+// Firebase restores a session ASYNCHRONOUSLY, so on a cold open auth.currentUser
+// is still null for the first moments. The roster loaders run on mount, and
+// defaulting to `auth.currentUser?.uid` meant they saw no uid and returned [] —
+// indistinguishable from "this trainer has no clients". The trainer home then
+// latched onto that (it seeds the Local Plans drawer open ONCE when the roster
+// resolves empty), so a cold start showed no Connected Clients and an expanded
+// plans list until a manual refresh. Waiting for auth to settle first removes
+// the race for every caller.
+async function signedInUid() {
+  if (auth.currentUser) return auth.currentUser.uid;
+  try { await auth.authStateReady(); } catch { /* older SDK — fall through */ }
+  return auth.currentUser ? auth.currentUser.uid : null;
+}
+
+export async function getMyClients(trainerUid) {
+  const uid = trainerUid || (await signedInUid());
+  if (!uid) return [];
+  const q = query(collection(db, "users"), where("assignedTrainerId", "==", uid));
   const snap = await getDocs(q);
   return snap.docs.map((d) => d.data());
 }
 
 // Head: get my sub-trainers (users whose headTrainerId is me and role is sub_trainer).
-export async function getMySubTrainers(headUid = auth.currentUser && auth.currentUser.uid) {
-  if (!headUid) return [];
-  const q = query(collection(db, "users"), where("headTrainerId", "==", headUid));
+export async function getMySubTrainers(headUid) {
+  const uid = headUid || (await signedInUid());   // same cold-start race as getMyClients
+  if (!uid) return [];
+  const q = query(collection(db, "users"), where("headTrainerId", "==", uid));
   const snap = await getDocs(q);
   return snap.docs.map((d) => d.data()).filter((p) => p.role === ROLES.SUB_TRAINER);
 }

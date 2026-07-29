@@ -7378,6 +7378,20 @@ const baseFoodName = (name) => {
   if (stripped) s = stripped; // never strip down to empty
   return s;
 };
+// Adherence = share of check-ins where "did you hit your target?" was actually
+// ANSWERED (S160, Kevin: 79 check-ins, 0% adherence, while tracking every day).
+// Only the manual check-in form ever sets `hitTarget`; every other path that
+// creates a check-in — dashboard weigh-ins, workout marks, AI logging, the
+// Trainerize sync — leaves it null. Dividing hits by ALL check-ins therefore
+// counted "never asked" as "missed", so the harder someone tracked by any other
+// route, the worse their adherence looked. Returns null when nothing has been
+// answered, so the UI can say why instead of printing a 0% that isn't true.
+const adherenceOf = (checkIns) => {
+  const answered = (checkIns || []).filter((c) => c && c.hitTarget != null);
+  if (!answered.length) return null;
+  return Math.round((answered.filter((c) => c.hitTarget).length / answered.length) * 100);
+};
+
 // Dedup key: base food name + meal type.
 const recentFoodKey = (name, type) => baseFoodName(name).toLowerCase() + "|" + recentMealKey(type);
 
@@ -10672,7 +10686,9 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
       <div className="dash-streak">
         <div>
           <div className="dash-streak-num" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"7px"}}><Icon name="flame" size={24} color="var(--orange)" />{streak}</div>
-          <div className="dash-streak-lbl">day streak</div>
+          {/* Consecutive days with food logged — see the check-in streak note
+              in StreakBadges for why these two are named apart. */}
+          <div className="dash-streak-lbl">day streak · logging</div>
         </div>
         {hasGoal && toLose > 0 && (
           <div style={{borderLeft:"1px solid var(--border)",paddingLeft:"14px",marginLeft:"6px"}}>
@@ -12071,7 +12087,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               const first = sorted[0]?.weight;
               const last = sorted[sorted.length-1]?.weight;
               const diff = first - last;
-              const adherence = data.checkIns.length > 0 ? Math.round((data.checkIns.filter(c=>c.hitTarget).length / data.checkIns.length)*100) : 0;
+              const adherence = adherenceOf(data.checkIns);
               return (
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"8px",marginBottom:"10px"}}>
                   <div style={{padding:"10px",background:"var(--s2)",borderRadius:"8px",textAlign:"center"}}>
@@ -12079,7 +12095,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                     <div style={{fontSize:".62rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>lbs Change</div>
                   </div>
                   <div style={{padding:"10px",background:"var(--s2)",borderRadius:"8px",textAlign:"center"}}>
-                    <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.2rem",color:adherence>=80?"var(--green)":adherence>=50?"var(--yellow)":"var(--red)"}}>{adherence}%</div>
+                    <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.2rem",color:adherence==null?"var(--muted)":adherence>=80?"var(--green)":adherence>=50?"var(--yellow)":"var(--red)"}}>{adherence==null?"—":`${adherence}%`}</div>
                     <div style={{fontSize:".62rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>Adherence</div>
                   </div>
                   <div style={{padding:"10px",background:"var(--s2)",borderRadius:"8px",textAlign:"center"}}>
@@ -12405,8 +12421,7 @@ function StreakBadges({ checkIns }) {
   }
 
   const totalCheckIns = checkIns?.length || 0;
-  const hitDays = (checkIns || []).filter(c => c.hitTarget).length;
-  const adherencePct = totalCheckIns > 0 ? Math.round((hitDays / totalCheckIns) * 100) : 0;
+  const adherencePct = adherenceOf(checkIns);   // null when nothing was answered
 
   const BADGES = [
     { id: "first", label: "First Check-In", iconName: "star", earned: totalCheckIns >= 1 },
@@ -12414,7 +12429,7 @@ function StreakBadges({ checkIns }) {
     { id: "month", label: "30-Day Streak", iconName: "sparkle", earned: streak >= 30 },
     { id: "ten", label: "10 Check-Ins", iconName: "chart", earned: totalCheckIns >= 10 },
     { id: "fifty", label: "50 Check-Ins", iconName: "target", earned: totalCheckIns >= 50 },
-    { id: "adherence", label: "80%+ Adherence", iconName: "check", earned: totalCheckIns >= 7 && adherencePct >= 80 },
+    { id: "adherence", label: "80%+ Adherence", iconName: "check", earned: totalCheckIns >= 7 && adherencePct != null && adherencePct >= 80 },
     { id: "perfect", label: "Perfect Week", iconName: "bolt", earned: streak >= 7 && adherencePct === 100 },
   ];
 
@@ -12425,11 +12440,16 @@ function StreakBadges({ checkIns }) {
           <span className="streak-fire" style={{display:"flex",alignItems:"center"}}><Icon name="flame" size={22} color="var(--orange)" /></span>
           <div>
             <div className="streak-num">{streak}</div>
-            <div className="streak-lbl">day streak</div>
+            {/* "check-in streak", NOT "day streak" (S160, Kevin: this read 4
+                while the dashboard read 15). Both were right and both were
+                labelled the same: the dashboard counts consecutive days with
+                FOOD LOGGED, this counts consecutive days with a CHECK-IN
+                record, which only exists on weigh-in / workout days. */}
+            <div className="streak-lbl">check-in streak</div>
           </div>
           <div style={{marginLeft:"auto",textAlign:"right"}}>
             <div style={{fontSize:".85rem",fontWeight:700,color:"var(--text)"}}>{totalCheckIns} {totalCheckIns === 1 ? "check-in" : "check-ins"}</div>
-            <div style={{fontSize:".72rem",color: adherencePct >= 80 ? "var(--green)" : adherencePct >= 50 ? "var(--yellow)" : "var(--red)"}}>{adherencePct}% adherence</div>
+            <div style={{fontSize:".72rem",color: adherencePct == null ? "var(--muted)" : adherencePct >= 80 ? "var(--green)" : adherencePct >= 50 ? "var(--yellow)" : "var(--red)"}}>{adherencePct == null ? "adherence — not tracked" : `${adherencePct}% adherence`}</div>
           </div>
         </div>
       )}
@@ -12559,9 +12579,8 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
   const trend = diff > 0.5 ? "losing" : diff < -0.5 ? "gaining" : "maintaining";
   const trendColor = trend === "losing" ? "var(--green)" : trend === "gaining" ? "var(--orange)" : "var(--accent)";
 
-  // Adherence from check-ins
-  const hitDays = (checkIns || []).filter(c => c.hitTarget).length;
-  const adherence = checkIns.length > 0 ? Math.round((hitDays / checkIns.length) * 100) : 0;
+  // Adherence from check-ins that actually answered the question (see adherenceOf).
+  const adherence = adherenceOf(checkIns);
 
   return (
     <div className="card" style={{padding:"16px",marginBottom:"16px",...cardStyle}}>
@@ -12673,7 +12692,7 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, showValues, pxPerP
         </div>
         {!hideAdherence && (
         <div style={{textAlign:"center"}}>
-          <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.2rem",color: adherence >= 80 ? "var(--green)" : adherence >= 50 ? "var(--yellow)" : "var(--red)"}}>{adherence}%</div>
+          <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.2rem",color: adherence == null ? "var(--muted)" : adherence >= 80 ? "var(--green)" : adherence >= 50 ? "var(--yellow)" : "var(--red)"}}>{adherence == null ? "—" : `${adherence}%`}</div>
           <div style={{fontSize:".65rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>Adherence</div>
         </div>
         )}
@@ -13315,7 +13334,7 @@ function AICoach({ data, tdee, totalBurn, totalStrBurn, activeDays, activeStrDay
       // which used to make this narrate "null lbs" or a stale "most recent".
       const recent = checkIns.filter(c => c && c.weight)
         .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).slice(-14);
-      const adherence = checkIns.length > 0 ? Math.round((checkIns.filter(c => c.hitTarget).length / checkIns.length) * 100) : null;
+      const adherence = adherenceOf(checkIns);
       const weightTrend = recent.length >= 2
         ? `Started at ${recent[0].weight} lbs, most recent ${recent[recent.length-1].weight} lbs (${(recent[0].weight - recent[recent.length-1].weight).toFixed(1)} lbs change over ${recent.length} check-ins)`
         : "No check-in history yet";
@@ -14411,8 +14430,14 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const seededPlansOpen = useRef(false);
   useEffect(() => {
     if (seededPlansOpen.current || rosterState !== "ready") return;
+    // Only a roster that resolved EMPTY should open the drawer. Marking the
+    // decision made when clients exist (without opening) keeps the seed from
+    // firing later, while never latching "open" onto a roster that merely
+    // hadn't arrived yet — the cold-start case that showed a trainer with
+    // clients the no-clients layout until they refreshed.
+    if (clients.length > 0) { seededPlansOpen.current = true; return; }
     seededPlansOpen.current = true;              // decide once, then leave it alone
-    if (clients.length === 0) setPlansOpen(true);
+    setPlansOpen(true);
   }, [rosterState, clients.length]);
   const [linkBusy, setLinkBusy] = useState(false);
   const [cMsg, setCMsg] = useState("");
