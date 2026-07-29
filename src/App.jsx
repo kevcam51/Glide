@@ -9798,6 +9798,13 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   const [dayLog, setDayLog] = useState(null);             // selected day's log
   const [dayCals, setDayCals] = useState({});             // date -> logged calories (month view tinting)
   const [dayProt, setDayProt] = useState({});             // date -> logged protein g (week macro adherence)
+  const [dayWear, setDayWear] = useState({});             // date -> {active,steps,total,source,manual} | null
+  // date -> did the person actually EAT that day. A day document exists for any
+  // reason at all — a weigh-in, or a tracker sync writing 90 days of watch data —
+  // so "a doc exists" is not "food was logged". Once the 90-day wearable backfill
+  // landed, that distinction became the difference between a truthful calendar
+  // and ~76 days falsely marked as eaten.
+  const [dayAte, setDayAte] = useState({});
   const [calQuick, setCalQuick] = useState("");           // quick calorie entry (type a number)
   const [calQuickType, setCalQuickType] = useState("");   // optional meal type for the typed amount
   const [waterDraft, setWaterDraft] = useState("");       // water (oz) typed entry for the selected day
@@ -9827,11 +9834,20 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
     const need = keys.filter((k) => loggedDays.includes(k) && !(k in dayCals));
     if (need.length === 0) return;
     const entries = await Promise.all(need.map(async (k) => {
-      try { const d = await onReadDay(k); return [k, d && d.calories ? d.calories : 0, d && d.protein ? d.protein : 0]; }
-      catch { return [k, 0, 0]; }
+      try {
+        const d = await onReadDay(k);
+        // The tracker block rides along: this read already fetched the whole day.
+        const w = d && hasWearable(d.wearable) ? d.wearable : null;
+        return [k, d && d.calories ? d.calories : 0, d && d.protein ? d.protein : 0,
+          w ? { active: Number(w.active) || 0, steps: Number(w.steps) || 0, total: Number(w.total) || 0, source: w.source || null, manual: !!w.manual } : null,
+          !!(d && ((d.calories || 0) > 0 || (d.meals || []).length > 0))];
+      }
+      catch { return [k, 0, 0, null, false]; }
     }));
     setDayCals((prev) => { const next = { ...prev }; entries.forEach(([k, v]) => { next[k] = v; }); return next; });
     setDayProt((prev) => { const next = { ...prev }; entries.forEach(([k, , p]) => { next[k] = p; }); return next; });
+    setDayWear((prev) => { const next = { ...prev }; entries.forEach(([k, , , w]) => { next[k] = w; }); return next; });
+    setDayAte((prev) => { const next = { ...prev }; entries.forEach(([k, , , , ate]) => { next[k] = ate; }); return next; });
   };
   // Visible-month logged days (bounded ≤31). Loaded regardless of whether a
   // calorie target exists: the totals feed the week-view numbers + roll-ups and
@@ -9866,8 +9882,12 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   // Indicator dots for a day cell.
   const dots = (k) => {
     const ci = ciByDate[k];
-    return { food: loggedDays.includes(k), weight: !!(ci && ci.weight), workout: !!(ci && ci.workedOut),
-      sched: scheduledFor(k) > 0, session: !!(sessionsOnDay[k] && sessionsOnDay[k].length) };
+    // Prefer the loaded truth (did calories/meals exist); fall back to "a document
+    // exists" only until this month's days have loaded, so dots don't flicker in.
+    const food = k in dayAte ? dayAte[k] : loggedDays.includes(k);
+    return { food, weight: !!(ci && ci.weight), workout: !!(ci && ci.workedOut),
+      sched: scheduledFor(k) > 0, session: !!(sessionsOnDay[k] && sessionsOnDay[k].length),
+      tracker: !!dayWear[k] };
   };
 
   // ── Day-detail back-dated logging ──
@@ -9950,6 +9970,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
         <span><span style={{ color: "var(--blue)" }}>●</span> weigh-in</span>
         <span><span style={{ color: "var(--orange)" }}>●</span> workout</span>
         <span><span style={{ color: "var(--muted)" }}>◦</span> scheduled</span>
+        <span><span style={{ color: "var(--accent)", opacity: .7 }}>◦</span> tracker</span>
       </div>
       {calTarget && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center", fontSize: ".68rem", color: "var(--muted)", marginTop: 6 }}>
@@ -9971,6 +9992,10 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
         {!d.workout && d.sched && <span style={{ width: 5, height: 5, borderRadius: 3, border: "1px solid var(--muted)" }} />}
         {/* A booked session with the trainer (S100) — cyan, the brand accent. */}
         {d.session && <span style={{ width: 5, height: 5, borderRadius: 3, background: "var(--accent)" }} />}
+        {/* Tracker data for that day (S161). Deliberately a hollow marker: with a
+            90-day watch backfill this is true on almost every day, so a sixth
+            solid dot would read as noise rather than information. */}
+        {d.tracker && <span style={{ width: 5, height: 5, borderRadius: 3, border: "1px solid var(--accent)", opacity: .55 }} />}
       </div>
     );
   };
@@ -10063,7 +10088,18 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                   {isStart && <span style={{ color: "var(--green)", fontWeight: 700 }}><Icon name="target" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />start date</span>}
                   {cal != null && cal > 0 && <span style={{ color: over ? "var(--yellow)" : "var(--green)", fontWeight: 700 }}>{cal.toLocaleString()} cal</span>}
                   {dayProt[k] > 0 && <span style={{ color: protTarget && dayProt[k] >= protTarget ? "var(--green)" : "var(--muted)" }}><Icon name="meal" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{dayProt[k]}g{protTarget ? `/${protTarget}` : ""}</span>}
-                  {loggedDays.includes(k) && !(cal > 0) && <span style={{ color: "var(--green)" }}><Icon name="meal" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />logged</span>}
+                  {(k in dayAte ? dayAte[k] : loggedDays.includes(k)) && !(cal > 0) && <span style={{ color: "var(--green)" }}><Icon name="meal" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />logged</span>}
+                  {/* What the watch recorded that day (S161) — this is where a
+                      90-day tracker backfill actually becomes visible. */}
+                  {dayWear[k] && (dayWear[k].active > 0 || dayWear[k].total > 0 || dayWear[k].steps > 0) && (
+                    <span style={{ color: "var(--accent)" }} title={dayWear[k].manual ? "Entered by hand" : `Tracker${dayWear[k].source ? ` (${dayWear[k].source})` : ""}`}>
+                      <Icon name="watch" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />
+                      {dayWear[k].total > 0
+                        ? `${dayWear[k].total.toLocaleString()} cal`
+                        : dayWear[k].active > 0 ? `${dayWear[k].active.toLocaleString()} cal` : ""}
+                      {dayWear[k].steps > 0 ? `${(dayWear[k].active > 0 || dayWear[k].total > 0) ? " · " : ""}${dayWear[k].steps.toLocaleString()} steps` : ""}
+                    </span>
+                  )}
                   {ci && ci.weight && <span style={{ color: "var(--blue)" }}><Icon name="scale" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{ci.weight}</span>}
                   {ci && ci.workedOut && <span style={{ color: "var(--orange)" }}><Icon name="dumbbell" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />done</span>}
                   {scheduledFor(k) > 0 && !(ci && ci.workedOut) && (
@@ -10110,6 +10146,32 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
               <span style={{ fontSize: ".82rem", fontWeight: 700 }}>
                 avg <span style={{ color: met ? "var(--green)" : "var(--accent)" }}>{avgProt}g</span>
                 {protTarget ? <span style={{ color: "var(--muted)", fontWeight: 400 }}>/day · target {protTarget}g</span> : <span style={{ color: "var(--muted)", fontWeight: 400 }}>/day</span>}
+              </span>
+            </div>
+          );
+        })()}
+        {/* Weekly TRACKER roll-up (S161) — the week's measured burn and steps, so
+            a synced watch history is readable a week at a time rather than one
+            day at a time. Averages over days the tracker actually reported;
+            days it said nothing are not counted as zeros. */}
+        {(() => {
+          const rows = days.filter((k) => !beforeStart(k) && dayWear[k]);
+          const burnDays = rows.filter((k) => dayWear[k].active > 0 || dayWear[k].total > 0);
+          const stepDays = rows.filter((k) => dayWear[k].steps > 0);
+          if (!burnDays.length && !stepDays.length) return null;
+          const avgBurn = burnDays.length
+            ? Math.round(burnDays.reduce((s, k) => s + (dayWear[k].total > 0 ? dayWear[k].total : dayWear[k].active), 0) / burnDays.length)
+            : 0;
+          const avgSteps = stepDays.length
+            ? Math.round(stepDays.reduce((s, k) => s + dayWear[k].steps, 0) / stepDays.length) : 0;
+          return (
+            <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 10, background: "var(--s2)", border: "1px solid var(--border)",
+              display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+              <span style={{ fontSize: ".74rem", color: "var(--muted)" }}><Icon name="watch" size={12} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Tracker</span>
+              <span style={{ fontSize: ".82rem", fontWeight: 700 }}>
+                {avgBurn > 0 ? <>avg <span style={{ color: "var(--accent)" }}>{avgBurn.toLocaleString()} cal</span></> : null}
+                {avgSteps > 0 ? <>{avgBurn > 0 ? <span style={{ color: "var(--muted)", fontWeight: 400 }}> · </span> : null}avg <span style={{ color: "var(--accent)" }}>{avgSteps.toLocaleString()} steps</span></> : null}
+                <span style={{ color: "var(--muted)", fontWeight: 400 }}>/day · {rows.length} day{rows.length === 1 ? "" : "s"} reported</span>
               </span>
             </div>
           );
