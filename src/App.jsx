@@ -14065,6 +14065,11 @@ const hasWearable = (w) => !!w && (w.reported === true
   || Number(w.active) > 0 || Number(w.steps) > 0 || Number(w.resting) > 0
   || Number(w.total) > 0);
 
+// How much of a day's baseline burn must be reported before a watch reading is
+// treated as a whole day. 0.8 ≈ the last few hours of the day — high enough that
+// a mid-day reading can't drag the target down, low enough that trackers running
+// a little under the Mifflin estimate still count.
+const PARTIAL_DAY_MIN = 0.8;
 const wearableTdee = (d, log) => {
   if (!d || !d.wearableAdjust || !isEatback(d)) return null;
   const w = log && log.wearable;
@@ -14077,6 +14082,15 @@ const wearableTdee = (d, log) => {
   const resting = Number(w.resting) || 0;
   const active = Number(w.active) || 0;
   if (resting <= 0) return null;
+  // A watch reports energy CUMULATIVELY, so mid-day it has only counted part of
+  // the day's resting burn — Kevin's Garmin read 165 at 5am against 2,337 for a
+  // full day. Taken as the measured TDEE that collapsed the target to the 1,200
+  // floor each morning and let it climb all day, which is worse than no
+  // adjustment at all. A real day's resting burn is close to BMR, so anything
+  // far below it is a day still in progress (or a half-finished sync) and the
+  // estimate is the honest answer until it fills in.
+  const bmr = calcBMR(d.gender, Number(d.weightLbs), Number(d.heightFt), Number(d.heightIn), effectiveAge(d));
+  if (bmr && isFinite(bmr) && resting < bmr * PARTIAL_DAY_MIN) return null;
   return Math.round(resting + active);
 };
 
