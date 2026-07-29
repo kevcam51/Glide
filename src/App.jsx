@@ -10038,8 +10038,9 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
           {dayLog && hasWearable(dayLog.wearable) ? (
             <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 8, fontSize: ".78rem", color: "var(--muted-light)" }}>
               <Icon name="watch" size={14} color="var(--accent)" />
-              <span>Tracker{dayLog.wearable.source ? ` (${dayLog.wearable.source})` : ""}:</span>
+              <span>{dayLog.wearable.manual ? "Entered by hand" : `Tracker${dayLog.wearable.source ? ` (${dayLog.wearable.source})` : ""}`}:</span>
               {dayLog.wearable.active ? <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--text)" }}>{Number(dayLog.wearable.active).toLocaleString()} cal active</span> : null}
+              {dayLog.wearable.total ? <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--text)" }}>{Number(dayLog.wearable.total).toLocaleString()} cal whole day</span> : null}
               {dayLog.wearable.steps ? <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--text)" }}>· {Number(dayLog.wearable.steps).toLocaleString()} steps</span> : null}
               {dayTrackerTdee ? <span style={{ width: "100%", fontSize: ".7rem", fontWeight: 700, color: "var(--accent)" }}>This day's target is based on the tracker's measured burn</span> : null}
             </div>
@@ -10270,6 +10271,14 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const [waterDraft, setWaterDraft] = useState("");
   const [weightDraft, setWeightDraft] = useState("");
   const [calDraft, setCalDraft] = useState("");
+  // Manual tracker burn (S159, Kevin): watch data only reaches Glide for
+  // Trainerize-IMPORTED profiles, so anyone on a hand-made plan — Kevin included
+  // — can do a real workout their watch recorded and still see nothing here.
+  // Typing the number off the watch is the reliable path, and it lands in the
+  // SAME `wearable` block the sync writes, so every downstream surface (burn
+  // tile, calendar, tracker-adjusted target) treats it identically.
+  const [burnDraft, setBurnDraft] = useState("");
+  const [burnKind, setBurnKind] = useState("active"); // "active" | "total"
   // Log-confirmation feedback (Kevin): after a quick-log the input clears, the Log
   // button greys to "Logged ✓" for a beat, and a toast confirms it — so you know
   // it saved without scrolling up to check the number.
@@ -10383,6 +10392,10 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
     ? Math.round(Number(dailyLog.wearable.active)) : null;
   const burnShown = trackerActiveBurn != null ? trackerActiveBurn : todayTotalBurn;
   const burnFromTracker = trackerActiveBurn != null;
+  // Hand-entered numbers must not be labelled "from your tracker" — it's the
+  // user's own reading, and the tiles say where a number came from on purpose.
+  const burnManual = burnFromTracker && !!(dailyLog.wearable && dailyLog.wearable.manual);
+  const burnSourceLbl = burnManual ? "you entered" : "from your tracker";
 
   // Calorie target (1 lb/wk deficit). Eat-back mode adds TODAY's scheduled
   // burn on top (training days earn more food); accelerate mode holds the
@@ -10792,7 +10805,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         )}
         {canChooseBurnMode && <div style={{fontSize:".8rem",color:"var(--muted)",lineHeight:1.5,marginBottom:"12px"}}>
           {scheduledBurn > 0 ? (
-            <>You burned <strong style={{color:"var(--orange)"}}>{scheduledBurn.toLocaleString()} cal</strong>{burnFromTracker?" (from your tracker)":""} today.
+            <>You burned <strong style={{color:"var(--orange)"}}>{scheduledBurn.toLocaleString()} cal</strong>{burnFromTracker?` (${burnSourceLbl})`:""} today.
             Choose whether that earns you more food, or speeds up your goal instead. Your pick becomes the default.</>
           ) : (
             <>No exercise logged yet today, so both targets match right now. Your pick becomes the default and
@@ -10876,13 +10889,13 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         {!tileHidden("burn") && <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="burn"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="burn"?null:"burn")}>
           <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name={burnFromTracker?"watch":"flame"} size={23} color="var(--orange)" /></div>
           <div className="dash-cta-val">{burnShown.toLocaleString()}</div>
-          <div className="dash-cta-lbl">Workout Burn{burnFromTracker?" · tracker":""}</div>
+          <div className="dash-cta-lbl">Workout Burn{burnFromTracker?(burnManual?" · entered":" · tracker"):""}</div>
           {/* Say what this number IS (Kevin). A scheduled-workout figure is a MET
               estimate from bodyweight and duration, not a measurement — and a
               tracker reading is the device's own estimate. Naming that on the tile
               is more honest than burying it in a panel nobody opens. */}
           <div style={{fontSize:".54rem",letterSpacing:".03em",color:"var(--muted)",marginTop:2}}>
-            {burnFromTracker ? "from your tracker" : "estimate"}
+            {burnFromTracker ? burnSourceLbl : "estimate"}
           </div>
         </div>}
         {!tileHidden("water") && <div className="dash-cta" style={{cursor:"pointer",borderColor:expandedStat==="water"?"var(--accent)":"var(--border)"}} onClick={()=>setExpandedStat(expandedStat==="water"?null:"water")}>
@@ -11526,14 +11539,19 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"6px",color:"var(--orange)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="flame" size={16} color="var(--orange)" />Workout Burn Breakdown</div>
               {burnFromTracker && (
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",marginBottom:"8px",borderRadius:"8px",background:"rgba(8,220,224,.06)",border:"1px solid var(--border)"}}>
-                  <span style={{display:"inline-flex",alignItems:"center",gap:"6px",fontSize:".82rem",color:"var(--text)"}}><Icon name="watch" size={15} color="var(--accent)" />Tracker measured active burn{dailyLog.wearable&&dailyLog.wearable.source?` (${dailyLog.wearable.source})`:""}</span>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:"6px",fontSize:".82rem",color:"var(--text)"}}><Icon name="watch" size={15} color="var(--accent)" />{dailyLog.wearable&&dailyLog.wearable.manual
+                    ? "Active burn you entered"
+                    : `Tracker measured active burn${dailyLog.wearable&&dailyLog.wearable.source?` (${dailyLog.wearable.source})`:""}`}</span>
                   <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--accent)"}}>{burnShown.toLocaleString()} cal</span>
                 </div>
               )}
               {/* Today's watch data lags (Garmin→Trainerize is usually hours). The
                   tile above stays today-only so it never misreports today's effort —
                   but show the last real reading here for reference. */}
-              {!burnFromTracker && recentWearable && recentWearable.wearable && recentWearable.wearable.active > 0 && (
+              {/* daysAgo > 0: with a whole-day total entered, today HAS wearable
+                  data but no `active`, so this fallback used to show today's own
+                  reading captioned "today hasn't synced" — 0 days ago. */}
+              {!burnFromTracker && recentWearable && recentWearable.daysAgo > 0 && recentWearable.wearable && recentWearable.wearable.active > 0 && (
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",marginBottom:"8px",borderRadius:"8px",background:"var(--s2)",border:"1px solid var(--border)"}}>
                   <span style={{display:"inline-flex",alignItems:"center",gap:"6px",fontSize:".82rem",color:"var(--muted)"}}>
                     <Icon name="watch" size={15} color="var(--muted)" />
@@ -11542,6 +11560,91 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                   <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:"var(--muted)"}}>{Number(recentWearable.wearable.active).toLocaleString()} cal</span>
                 </div>
               )}
+              {/* Type it off the watch. The sync only feeds Trainerize-imported
+                  profiles, so for everyone else this is the ONLY way a real
+                  measured burn reaches Glide. Writes the same `wearable` block
+                  the sync writes, so nothing downstream needs to know. */}
+              {(() => {
+                const w = (dailyLog.wearable && typeof dailyLog.wearable === "object") ? dailyLog.wearable : {};
+                const manualTotal = w.manual && Number(w.total) > 0 ? Math.round(Number(w.total)) : null;
+                const saveBurn = () => {
+                  const v = parseInt(burnDraft, 10);
+                  if (!(v > 0) || v > 20000) return;
+                  const next = { ...w, source: "Manual", manual: true, reported: true };
+                  if (burnKind === "total") { next.total = v; delete next.active; }
+                  else { next.active = v; delete next.total; }
+                  onLogUpdate("wearable", next);
+                  setBurnDraft("");
+                  confirmLogged("burn", `Saved — ${v.toLocaleString()} cal`);
+                };
+                const clearBurn = () => {
+                  const rest = { ...w };
+                  delete rest.active; delete rest.total; delete rest.manual; delete rest.source;
+                  onLogUpdate("wearable", Number(rest.steps) > 0 ? { ...rest, reported: true } : null);
+                  setBurnDraft("");
+                };
+                return (
+                  <div style={{padding:"10px",marginBottom:"10px",borderRadius:"8px",
+                    background:"var(--s2)",border:"1px solid var(--border)"}}>
+                    {manualTotal != null && (
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px"}}>
+                        <span style={{display:"inline-flex",alignItems:"center",gap:"6px",fontSize:".82rem",color:"var(--text)"}}>
+                          <Icon name="watch" size={15} color="var(--accent)" />Whole-day burn you entered
+                        </span>
+                        <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--accent)"}}>{manualTotal.toLocaleString()} cal</span>
+                      </div>
+                    )}
+                    <div style={{fontSize:".78rem",fontWeight:600,color:"var(--text)",marginBottom:"3px"}}>
+                      {w.manual ? "Update your watch's number" : "Watch shows a different number?"}
+                    </div>
+                    <div style={{fontSize:".68rem",color:"var(--muted)",marginBottom:"8px",lineHeight:1.45}}>
+                      Read it off your tracker and type it in — no connection needed.
+                    </div>
+                    <div style={{display:"flex",gap:"6px",marginBottom:"7px"}}>
+                      {[["active","Active / workout"],["total","Whole day total"]].map(([k,label])=>(
+                        <button key={k} onClick={()=>setBurnKind(k)}
+                          style={{flex:1,padding:"7px 6px",borderRadius:"7px",fontSize:".7rem",fontWeight:700,cursor:"pointer",
+                            border:burnKind===k?"1.5px solid var(--accent)":"1.5px solid var(--border)",
+                            background:burnKind===k?"rgba(8,220,224,.08)":"var(--surface)",
+                            color:burnKind===k?"var(--accent)":"var(--muted)"}}>{label}</button>
+                      ))}
+                    </div>
+                    <div style={{display:"flex",gap:"6px"}}>
+                      <input type="number" inputMode="numeric" value={burnDraft} placeholder="e.g. 620"
+                        onChange={e=>setBurnDraft(e.target.value)}
+                        onKeyDown={e=>{if(e.key==="Enter")saveBurn();}}
+                        style={{flex:1,minWidth:0,padding:"9px 10px",borderRadius:"7px",border:"1.5px solid var(--border)",
+                          background:"var(--surface)",color:"var(--text)",fontSize:".9rem",fontFamily:"'Sora',sans-serif"}} />
+                      <button onClick={saveBurn} disabled={!(parseInt(burnDraft,10)>0)}
+                        style={{padding:"9px 16px",borderRadius:"7px",border:"none",fontSize:".8rem",fontWeight:700,
+                          cursor:parseInt(burnDraft,10)>0?"pointer":"default",
+                          background:parseInt(burnDraft,10)>0?"var(--accent)":"var(--s3)",
+                          color:parseInt(burnDraft,10)>0?"#04191a":"var(--muted)"}}>Save</button>
+                      {w.manual && (
+                        <button onClick={clearBurn}
+                          style={{padding:"9px 12px",borderRadius:"7px",border:"1.5px solid var(--border)",fontSize:".8rem",
+                            cursor:"pointer",background:"transparent",color:"var(--muted)"}}>Clear</button>
+                      )}
+                    </div>
+                    <div style={{fontSize:".66rem",color:"var(--muted)",marginTop:"7px",lineHeight:1.45}}>
+                      {burnKind === "active"
+                        ? "Active (or “exercise”) calories — what you burned on top of simply being alive. This replaces the estimate above."
+                        : "The whole day's total, resting calories included. Used as your measured burn for the day rather than added on top of it."}
+                    </div>
+                    {/* A whole-day total only becomes the day's TDEE when the
+                        tracker adjustment is on — otherwise it saves and changes
+                        nothing, which reads as the app ignoring you. Say it. */}
+                    {burnKind === "total" && !data.wearableAdjust && (
+                      <div style={{fontSize:".66rem",color:"var(--yellow)",marginTop:"6px",lineHeight:1.45}}>
+                        Heads up — your target won&rsquo;t change from this. A whole-day total only
+                        replaces the estimate when &ldquo;Use my tracker&rsquo;s real burn&rdquo; is
+                        switched on in Full Plan → Summary → Nutrition approach. Enter an
+                        active/workout number instead if you want today&rsquo;s target to move.
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               <div style={{fontSize:".7rem",color:"var(--muted)",marginBottom:"8px"}}>{burnFromTracker?"Your scheduled workouts (estimate — the tracker number above is used):":"Tap any exercise to edit or remove it"}</div>
       {((todayCardio.workouts||[]).length > 0 || (todayStrength.sessions||[]).length > 0) ? (
         <div className="dash-today-workout">
@@ -11858,7 +11961,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           <div className="share-stat">
             <div className="share-stat-val" style={{color:"var(--orange)"}}>{burnShown}</div>
             <div className="share-stat-lbl">Today's Burn</div>
-            <div style={{fontSize:".58rem",color:"var(--muted)",marginTop:"3px",lineHeight:1.3}}>{burnFromTracker ? "Tracker active calories" : "Workout calories"}</div>
+            <div style={{fontSize:".58rem",color:"var(--muted)",marginTop:"3px",lineHeight:1.3}}>{burnFromTracker ? (burnManual ? "Active calories you entered" : "Tracker active calories") : "Workout calories"}</div>
           </div>
           <div className="share-stat">
             <div className="share-stat-val" style={{color:"var(--green)"}}>{hasGoal ? ((tdee - target + Math.round(todayTotalBurn * 0.15)) / 500).toFixed(1) : "—"}</div>
@@ -13939,12 +14042,18 @@ const proteinBasisOf = (d) => (Number(d && d.proteinPerLb) === 0.7 ? 0.7 : 1.0);
 // yesterday's burn as today's, unfixable by re-syncing. `reported` is stamped by
 // the Trainerize sync; the value checks keep older records working.
 const hasWearable = (w) => !!w && (w.reported === true
-  || Number(w.active) > 0 || Number(w.steps) > 0 || Number(w.resting) > 0);
+  || Number(w.active) > 0 || Number(w.steps) > 0 || Number(w.resting) > 0
+  || Number(w.total) > 0);
 
 const wearableTdee = (d, log) => {
   if (!d || !d.wearableAdjust || !isEatback(d)) return null;
   const w = log && log.wearable;
   if (!w) return null;
+  // A hand-entered WHOLE-DAY total (S159) is already the measured TDEE — that's
+  // the entire meaning of the number on the watch face — so it stands on its own
+  // without a separate resting reading.
+  const total = Number(w.total) || 0;
+  if (total > 0) return Math.round(total);
   const resting = Number(w.resting) || 0;
   const active = Number(w.active) || 0;
   if (resting <= 0) return null;
