@@ -12034,8 +12034,17 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               </div>
               <div style={{ fontSize:".64rem", color:"var(--muted)", marginTop:4, display:"flex", justifyContent:"space-between" }}><span>Low</span><span>High</span></div>
             </div>
+            {/* A saved note is shown as TEXT, never as the placeholder (S160,
+                Kevin: a synced "Trainerize: General 33M" workout note was
+                rendering as ghost hint text and read as gibberish). Placeholder
+                stays a plain, static label. */}
+            {existing && (existing.notes || "").trim() ? (
+              <div style={{ fontSize:".72rem", color:"var(--muted)", marginBottom:"6px" }}>
+                Saved note: <span style={{ color:"var(--text-secondary)" }}>{existing.notes}</span>
+              </div>
+            ) : null}
             <input value={ciNote} onChange={(e) => setCiNote(e.target.value)}
-              placeholder={(existing && existing.notes) || "Anything worth noting? (optional)"}
+              placeholder="Notes (optional)"
               style={{ width:"100%", padding:"9px 10px", borderRadius:"7px", border:"1.5px solid var(--border)",
                 background:"var(--surface)", color:"var(--text)", fontSize:".85rem", fontFamily:"inherit", marginBottom:"10px" }} />
             <button onClick={saveCheckIn} disabled={ciSaved}
@@ -15320,6 +15329,84 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           </div>
         )}
 
+        {/* Trainerize / watch data — its OWN card, above Local Plans.
+            These lived inside the Local Plans body, which is collapsed by
+            default, so "My watch data" was invisible until you happened to
+            tap Show (S160, Kevin: "I don't know where my watch data is"). */}
+        {onTrainerizeImport && tzIsOwner && (
+          <div className={cardCls}>
+            <div className={`${sectionTitleCls} whitespace-nowrap flex items-center gap-2 mb-1`}>
+              <Icon name="watch" size={18} color="var(--accent)" />Tracker &amp; sync
+            </div>
+            {onTrainerizeImport && tzIsOwner && (
+              <div className="mt-1.5 flex flex-col gap-1.5 items-start">
+                <button onClick={toggleTzAuto}
+                  className="bg-transparent border-0 p-0 text-xs cursor-pointer text-left inline-flex items-center gap-1.5 flex-wrap">
+                  <Icon name={tzAuto ? "sync" : "pause"} size={13} color={tzAuto ? "var(--color-success)" : "var(--color-muted)"} />
+                  <span className={tzAuto ? "text-success" : "text-muted"}>
+                    Trainerize auto-sync: {tzAuto ? "On" : "Off"}
+                  </span>
+                  <span className="text-muted"> — every 30 min for imported & linked clients · tap to {tzAuto ? "pause" : "resume"}</span>
+                </button>
+                {/* My own watch data — calories + steps only, into the plan I'm
+                    already using. Deliberately separate from the client importer:
+                    it creates no profile and writes nothing but the tracker block. */}
+                <button onClick={tzMe ? clearMyTracker : chooseMyTracker} disabled={tzMeBusy}
+                  className={`bg-transparent border-0 p-0 text-xs text-left inline-flex items-center gap-1.5 flex-wrap ${tzMeBusy ? "opacity-60 cursor-default" : "cursor-pointer"}`}>
+                  <Icon name="watch" size={13} color={tzMe ? "var(--color-success)" : "var(--color-muted)"} />
+                  <span className={tzMe ? "text-success" : "text-muted"}>My watch data: {tzMe ? "On" : "Off"}</span>
+                  <span className="text-muted"> — {tzMe
+                    ? "calories & steps only, into your active plan · tap to turn off"
+                    : "pull your tracker's calories into the plan you already use"}</span>
+                </button>
+                {tzMePick && (
+                  <div className="w-full rounded-lg border border-border bg-surface2 p-2.5">
+                    <div className="mb-1.5 text-xs text-muted">Which one is you? Only your watch calories &amp; steps get pulled in — nothing else changes.</div>
+                    <div className="flex flex-col gap-1 max-h-[240px] overflow-auto">
+                      {tzMePick.map((c) => (
+                        <button key={c.id} onClick={() => { setTzMePlanFor(c.id); setTzMePick(null); }} disabled={tzMeBusy}
+                          className="flex items-center justify-between rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
+                          <span>{c.name || c.email || `Client ${c.id}`}</span>
+                          <span className="text-primary font-bold">Use this</span>
+                        </button>
+                      ))}
+                    </div>
+                    <button onClick={() => setTzMePick(null)} className="mt-1.5 bg-transparent border-0 p-0 text-xs text-muted cursor-pointer">Cancel</button>
+                  </div>
+                )}
+                {tzMePlanFor && (
+                  <div className="w-full rounded-lg border border-border bg-surface2 p-2.5">
+                    <div className="mb-1.5 text-xs text-muted">Which plan should the watch data go into? Pick the one you actually track in.</div>
+                    <div className="flex flex-col gap-1 max-h-[240px] overflow-auto">
+                      {(profiles || []).filter((pf) => pf && !pf.isSimulation).map((pf) => (
+                        <button key={pf.id} onClick={() => setMyTracker(tzMePlanFor, pf.id)} disabled={tzMeBusy}
+                          className="flex items-center justify-between rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
+                          <span>{pf.customName || pf.name || pf.id}</span>
+                          <span className="text-primary font-bold">Use this</span>
+                        </button>
+                      ))}
+                      {/* The personal-plan convention, for an account that tracks
+                          the way a client does rather than in a local file. */}
+                      <button onClick={() => setMyTracker(tzMePlanFor, "self")} disabled={tzMeBusy}
+                        className="flex items-center justify-between rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
+                        <span>My own plan <span className="text-muted">(if you log as a client)</span></span>
+                        <span className="text-primary font-bold">Use this</span>
+                      </button>
+                    </div>
+                    <button onClick={() => setTzMePlanFor(null)} className="mt-1.5 bg-transparent border-0 p-0 text-xs text-muted cursor-pointer">Cancel</button>
+                  </div>
+                )}
+                {/* Manual refresh — pulls the same data as the 30-min tick, on demand. */}
+                <button onClick={syncTzNow} disabled={tzSyncing}
+                  className={`bg-transparent border-0 p-0 text-xs font-bold text-left inline-flex items-center gap-1.5 ${tzSyncing ? "opacity-60 cursor-default text-muted" : "cursor-pointer text-primary"}`}>
+                  <Icon name="sync" size={13} color={tzSyncing ? "var(--color-muted)" : "var(--color-primary)"} />
+                  {tzSyncing ? "Syncing from Trainerize…" : "Sync from Trainerize now"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className={cardCls}>
           <button onClick={() => setPlansOpen((v) => !v)} aria-expanded={plansOpen}
             className="w-full flex items-center gap-2 bg-transparent border-0 p-0 cursor-pointer text-left"
@@ -15348,72 +15435,6 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
               </button>
             )}
           </div>
-          {onTrainerizeImport && tzIsOwner && (
-            <div className="mt-1.5 flex flex-col gap-1.5 items-start">
-              <button onClick={toggleTzAuto}
-                className="bg-transparent border-0 p-0 text-xs cursor-pointer text-left inline-flex items-center gap-1.5 flex-wrap">
-                <Icon name={tzAuto ? "sync" : "pause"} size={13} color={tzAuto ? "var(--color-success)" : "var(--color-muted)"} />
-                <span className={tzAuto ? "text-success" : "text-muted"}>
-                  Trainerize auto-sync: {tzAuto ? "On" : "Off"}
-                </span>
-                <span className="text-muted"> — every 30 min for imported & linked clients · tap to {tzAuto ? "pause" : "resume"}</span>
-              </button>
-              {/* My own watch data — calories + steps only, into the plan I'm
-                  already using. Deliberately separate from the client importer:
-                  it creates no profile and writes nothing but the tracker block. */}
-              <button onClick={tzMe ? clearMyTracker : chooseMyTracker} disabled={tzMeBusy}
-                className={`bg-transparent border-0 p-0 text-xs text-left inline-flex items-center gap-1.5 flex-wrap ${tzMeBusy ? "opacity-60 cursor-default" : "cursor-pointer"}`}>
-                <Icon name="watch" size={13} color={tzMe ? "var(--color-success)" : "var(--color-muted)"} />
-                <span className={tzMe ? "text-success" : "text-muted"}>My watch data: {tzMe ? "On" : "Off"}</span>
-                <span className="text-muted"> — {tzMe
-                  ? "calories & steps only, into your active plan · tap to turn off"
-                  : "pull your tracker's calories into the plan you already use"}</span>
-              </button>
-              {tzMePick && (
-                <div className="w-full rounded-lg border border-border bg-surface2 p-2.5">
-                  <div className="mb-1.5 text-xs text-muted">Which one is you? Only your watch calories &amp; steps get pulled in — nothing else changes.</div>
-                  <div className="flex flex-col gap-1 max-h-[240px] overflow-auto">
-                    {tzMePick.map((c) => (
-                      <button key={c.id} onClick={() => { setTzMePlanFor(c.id); setTzMePick(null); }} disabled={tzMeBusy}
-                        className="flex items-center justify-between rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
-                        <span>{c.name || c.email || `Client ${c.id}`}</span>
-                        <span className="text-primary font-bold">Use this</span>
-                      </button>
-                    ))}
-                  </div>
-                  <button onClick={() => setTzMePick(null)} className="mt-1.5 bg-transparent border-0 p-0 text-xs text-muted cursor-pointer">Cancel</button>
-                </div>
-              )}
-              {tzMePlanFor && (
-                <div className="w-full rounded-lg border border-border bg-surface2 p-2.5">
-                  <div className="mb-1.5 text-xs text-muted">Which plan should the watch data go into? Pick the one you actually track in.</div>
-                  <div className="flex flex-col gap-1 max-h-[240px] overflow-auto">
-                    {(profiles || []).filter((pf) => pf && !pf.isSimulation).map((pf) => (
-                      <button key={pf.id} onClick={() => setMyTracker(tzMePlanFor, pf.id)} disabled={tzMeBusy}
-                        className="flex items-center justify-between rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
-                        <span>{pf.customName || pf.name || pf.id}</span>
-                        <span className="text-primary font-bold">Use this</span>
-                      </button>
-                    ))}
-                    {/* The personal-plan convention, for an account that tracks
-                        the way a client does rather than in a local file. */}
-                    <button onClick={() => setMyTracker(tzMePlanFor, "self")} disabled={tzMeBusy}
-                      className="flex items-center justify-between rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
-                      <span>My own plan <span className="text-muted">(if you log as a client)</span></span>
-                      <span className="text-primary font-bold">Use this</span>
-                    </button>
-                  </div>
-                  <button onClick={() => setTzMePlanFor(null)} className="mt-1.5 bg-transparent border-0 p-0 text-xs text-muted cursor-pointer">Cancel</button>
-                </div>
-              )}
-              {/* Manual refresh — pulls the same data as the 30-min tick, on demand. */}
-              <button onClick={syncTzNow} disabled={tzSyncing}
-                className={`bg-transparent border-0 p-0 text-xs font-bold text-left inline-flex items-center gap-1.5 ${tzSyncing ? "opacity-60 cursor-default text-muted" : "cursor-pointer text-primary"}`}>
-                <Icon name="sync" size={13} color={tzSyncing ? "var(--color-muted)" : "var(--color-primary)"} />
-                {tzSyncing ? "Syncing from Trainerize…" : "Sync from Trainerize now"}
-              </button>
-            </div>
-          )}
           {tzMsg && (
             <div className={`text-xs mt-1.5 ${tzMsg.ok ? "text-success" : "text-danger"}`}>{tzMsg.text}</div>
           )}
