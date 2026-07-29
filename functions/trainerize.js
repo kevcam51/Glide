@@ -200,7 +200,14 @@ function glideMealsFromEntry(entry, detail) {
 // for now (it does NOT change the calorie target; that's a later product call).
 const HEALTH_DAYS_MAX = 90; // wearables write one doc per day — cap the backfill
 async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
-  const span = Math.min(days, HEALTH_DAYS_MAX);
+  // The tracker window is deliberately INDEPENDENT of the nutrition window
+  // (S161, Kevin). "Sync from Trainerize now" passes 14 days for nutrition —
+  // per-day detail calls are the expensive part — and health silently inherited
+  // it, so a first-time link pulled a fortnight and quietly left months of watch
+  // history behind (Kevin had 91 days available and got 15). Health is two API
+  // calls for the whole range regardless of span, and the unchanged-day skip
+  // below keeps repeat runs cheap, so always reach back the full cap.
+  const span = HEALTH_DAYS_MAX;
   const startDate = new Date(Date.now() - span * 86400000).toISOString().slice(0, 10);
   const endDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   const byDate = {};
@@ -253,7 +260,7 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
     return { active, resting, steps, reported: true, source: owner.source || null };
   };
 
-  let written = 0;
+  let written = 0, firstDate = null, lastDate = null;
   for (const [date, bySrc] of Object.entries(byDate)) {
     const w = pickSource(bySrc);
     if (!w) continue;
@@ -275,6 +282,14 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
     // real typed figure with nothing. Clearing the entry drops the `manual` flag,
     // which hands the date back to the tracker.
     const prev = log.wearable;
+    // Unchanged day → no write. This is what makes a 90-day window affordable on
+    // a 30-minute schedule: past days never change, so after the first pass only
+    // today (and any corrected day) costs a write instead of ~90 every run.
+    if (prev && !prev.manual
+      && Number(prev.active || 0) === Number(w.active || 0)
+      && Number(prev.resting || 0) === Number(w.resting || 0)
+      && Number(prev.steps || 0) === Number(w.steps || 0)
+      && (prev.source || null) === (w.source || null)) continue;
     if (prev && prev.manual) {
       // Steps are never part of a typed calorie figure, so folding them in adds
       // data without touching the number the person entered.
@@ -288,8 +303,12 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
     log.wearable = w;
     await kvSetJSON(db, uid, logKey, log);
     written++;
+    if (!firstDate || date < firstDate) firstDate = date;
+    if (!lastDate || date > lastDate) lastDate = date;
   }
-  return written;
+  // Dates, not just a count: "15 days of tracker data" with no range left Kevin
+  // assuming it meant today.
+  return { days: written, firstDate, lastDate };
 }
 
 // ── v2: completed workouts → Glide check-ins ────────────────────────────────
@@ -497,11 +516,12 @@ async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDat
   let mealDays = 0, healthDays = 0, workoutDays = 0;
   try { mealDays = await syncClientNutrition(db, targetUid, planId, u.id, auth, days); }
   catch (e) { console.error("nutrition sync failed for", u.id, e && e.message); }
-  try { healthDays = await syncClientHealth(db, targetUid, planId, u.id, auth, days); }
+  let healthRange = null;
+  try { const hr = await syncClientHealth(db, targetUid, planId, u.id, auth, days); healthDays = hr.days; healthRange = hr; }
   catch (e) { console.error("health sync failed for", u.id, e && e.message); }
   try { workoutDays = await syncClientWorkouts(db, targetUid, planId, u.id, auth, days); }
   catch (e) { console.error("workout sync failed for", u.id, e && e.message); }
-  return { d, step, mealDays, healthDays, workoutDays };
+  return { d, step, mealDays, healthDays, healthRange, workoutDays };
 }
 
 // Every Trainerize client we should keep in sync = imported LOCAL profiles
@@ -579,16 +599,20 @@ async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTR
           // into a "self" plan they never open — invisible, and indistinguishable
           // from the sync not working at all.
           const healthPlanId = (link && link.planId) || clientPlanId;
-          let healthDays = 0;
-          try { healthDays = await syncClientHealth(db, linkedUid, healthPlanId, u.id, auth, nutritionDays); }
-          catch (e) { console.error("health sync failed for", u.id, e && e.message); }
+          let healthDays = 0, healthFrom = null, healthTo = null;
+          try {
+            const hr = await syncClientHealth(db, linkedUid, healthPlanId, u.id, auth, nutritionDays);
+            healthDays = hr.days; healthFrom = hr.firstDate; healthTo = hr.lastDate;
+          } catch (e) { console.error("health sync failed for", u.id, e && e.message); }
           results.push({ name, status: u.status || "", linked: true, healthOnly: true,
-            mealDays: 0, healthDays, workoutDays: 0 });
+            mealDays: 0, healthDays, healthFrom, healthTo, workoutDays: 0 });
           continue;
         }
         const r = await applySnapshotAndSyncs(db, linkedUid, clientPlanId, u, snap, lastStatDate, auth, nutritionDays);
         results.push({ name, weight: r.d.weightLbs || "", goal: r.d.goalWeight || "", status: u.status || "",
-          linked: true, mealDays: r.mealDays, healthDays: r.healthDays, workoutDays: r.workoutDays });
+          linked: true, mealDays: r.mealDays, healthDays: r.healthDays,
+          healthFrom: r.healthRange && r.healthRange.firstDate, healthTo: r.healthRange && r.healthRange.lastDate,
+          workoutDays: r.workoutDays });
         continue;
       }
 

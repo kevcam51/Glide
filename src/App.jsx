@@ -14460,11 +14460,24 @@ const OWNER_UID = "G7QUZ8Kat1fgyoMjdGKz4DYoVHi1";
 // nothing NEW arrived: Glide can only pull what Trainerize already has, and a
 // watch that hasn't pushed today's data yet is the common case — saying "synced"
 // with no numbers would read as a failure.
+// "15 days of tracker data" with no dates left Kevin assuming it meant today,
+// when it was actually a fortnight of backfill. Show the span whenever the
+// clients report one.
+function tzHealthRange(r) {
+  const rows = (r && r.clients) || [];
+  const from = rows.map((c) => c && c.healthFrom).filter(Boolean).sort()[0];
+  const to = rows.map((c) => c && c.healthTo).filter(Boolean).sort().pop();
+  if (!from || !to) return "";
+  const pretty = (d) => { const [y, m, dd] = d.split("-").map(Number);
+    return new Date(y, m - 1, dd).toLocaleDateString(undefined, { month: "short", day: "numeric" }); };
+  return from === to ? ` (${pretty(from)})` : ` (${pretty(from)} – ${pretty(to)})`;
+}
+
 function tzSyncSummary(r) {
   if (!r) return "Synced.";
   const bits = [];
   if (r.mealDaysTotal) bits.push(`${r.mealDaysTotal} day${r.mealDaysTotal === 1 ? "" : "s"} of meals`);
-  if (r.healthDaysTotal) bits.push(`${r.healthDaysTotal} day${r.healthDaysTotal === 1 ? "" : "s"} of tracker data`);
+  if (r.healthDaysTotal) bits.push(`${r.healthDaysTotal} day${r.healthDaysTotal === 1 ? "" : "s"} of tracker data${tzHealthRange(r)}`);
   if (r.workoutDaysTotal) bits.push(`${r.workoutDaysTotal} workout day${r.workoutDaysTotal === 1 ? "" : "s"}`);
   const who = `${r.total || 0} client${r.total === 1 ? "" : "s"}`;
   return bits.length
@@ -14630,7 +14643,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     try {
       const r = await onTrainerizeImport({ clientIds: ids });
       const meals = r.mealDaysTotal ? ` · ${r.mealDaysTotal} day${r.mealDaysTotal === 1 ? "" : "s"} of meals` : "";
-      const health = r.healthDaysTotal ? ` · ${r.healthDaysTotal} day${r.healthDaysTotal === 1 ? "" : "s"} of tracker data` : "";
+      const health = r.healthDaysTotal ? ` · ${r.healthDaysTotal} day${r.healthDaysTotal === 1 ? "" : "s"} of tracker data${tzHealthRange(r)}` : "";
       const workouts = r.workoutDaysTotal ? ` · ${r.workoutDaysTotal} workout day${r.workoutDaysTotal === 1 ? "" : "s"}` : "";
       setTzMsg({ ok: true, text: `Imported ${r.total} client${r.total === 1 ? "" : "s"} (${r.created} new · ${r.updated} updated${meals}${health}${workouts}) — filed under the “Trainerize” folder in All clients.` });
       setTzPick(null);
