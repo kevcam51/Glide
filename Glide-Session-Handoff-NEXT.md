@@ -2275,40 +2275,74 @@ prompt, **notch/safe-area** header fix, taller header so the menu button clears 
 
 ---
 
-## NEXT UP — voice routing: pick the destination BEFORE sending (design agreed with Kevin, S163)
+## Voice routing — SHIPPED (S164). Items 1–4 of the S163 design are all live.
 
-**The problem this solves.** A closed-mic voice message currently posts into whatever chat was last
-open, and that chat may already carry an "active subject" (a client the AI resolved earlier, see
-`activeTargetRef`). So "log 2 eggs" can silently attach to the WRONG client's account. Silent
-mis-writes to client data are the worst failure mode in this app — the fix is about making the
-destination visible, not about better guessing.
+Built on top of the S163e default. What a closed-mic voice note now does:
 
-**Agreed behaviour** (Kevin's synthesis; he chose the pre-send list over an after-the-fact echo,
-because it turns a correction into a choice and never requires opening the chat):
+- **Default is still a new, unpinned chat**, and the bar now SAYS so: a
+  `Sending to [New chat ▾]` line sits above Send and is always visible (item 4).
+- **Names in the transcript surface as chips** — `Heard a name — send to [Casey
+  Client] [Prospect Pat · plan file]`. One tap sends there, into a new chat pinned
+  to that subject. Matching is whole-word only (module-level `matchVoiceSubjects` /
+  `wordIn`, unit-tested: "pathway" does not offer "Pat", single names under 3
+  characters never match alone) and also matches a spoken/pasted id. Trainers only —
+  a client caller is forced to their own account server-side, so the roster is never
+  fetched for them (item 2).
+- **`Send to ▾` opens the full picker** — New chat plus every existing chat, each row
+  showing **who that chat writes to** (`about Casey Client`), resolved through
+  `pinName()` because auto-captured pins store an id with no name. A visible control,
+  not a long-press (item 3).
+- **After it goes, a receipt** above the launcher: `✓ Sent to X` (+ `about Y` on its
+  own line, so a long chat title can't truncate away the part that can be wrong).
+- The launcher **hides while the voice bar is up** — it sits on a higher layer and was
+  covering the bar's own Edit and Discard buttons.
 
-1. ~~**Default = NEW chat.**~~ **DONE — S163e, shipped & live.** A voice send calls `newChat()`
-   first, which clears the pinned subject, so it cannot inherit a stale client. NOTE: `send()` gained
-   a `fresh` option for this — `newChat()` resets `messages` but the send closure still holds the old
-   array, so calling them in sequence without it carries the previous conversation (and its client)
-   into the "new" chat. Anything else that starts a chat and sends in one go must pass `fresh`.
-   **The remaining items below are additive convenience on top of a default that is already safe.**
-2. **Name / id detected in the transcript → show the candidates at the bottom of the voice bar**
-   before it sends. Tap one to send there. Matches on client name AND user/plan id, so "log this
-   for Casey" or an id both narrow the list.
-3. **"Send to ▾" next to Send** → full picker (all chats + New chat). Deliberately a visible
-   control, NOT a hidden long-press — nobody discovers a 2-second hold. Long-press can stay as an
-   accelerator on top, never as the only route.
-4. **Always state the destination** in the confirmation, whichever route was taken.
+**Two real routing bugs fixed underneath (this is the part worth knowing):**
+`send()` read THREE things from chat state that a same-tick chat switch never reaches.
+S163e fixed one of them (`messages`, via `fresh`). The other two were live:
+- **The pin leaked.** `sendTarget()` read `pinOf(activeChatId)` from the send closure —
+  still the PREVIOUS chat — so a voice note into a "new" chat was relayed with the old
+  chat's pinned client. Verified: pre-fix that meant Casey; now `send()` takes an
+  explicit `target`, and the same probe answers **"Nobody."**
+- **A chosen pin was downgraded to an auto one.** The reply's auto-capture looked the
+  new chat up in a stale `convos`, found nothing, and overwrote the explicit pin with
+  `{auto:true}` (which a later turn is then free to move). `send()` now takes the
+  launch `pin`.
+`send(text, opts)` accepts `{fresh, base, chatId, target, pin}`. **Anything that
+switches chats and sends in the same tick must pass them** — state won't have landed.
+`activeChatIdRef` + `goActiveChat()` keep the index's `active` from being rewound.
 
-**Then (separate, build after the above):** one voice message naming several clients and several
-actions. Mechanically fine — the tools already take a per-call `clientId`, so it's N calls with
-different targets — but it MUST show all destinations before committing, or it's the silent
-mis-write risk multiplied by N.
+**Verified live** (trainer.uitest, real AI calls, driving the actual app): all three
+routes — default New chat (**"Nobody."**), candidate chip (new chat titled *About Casey
+Client*, explicit pin with its name intact, AI answered **"Casey"**), and picker → an
+existing Casey-pinned chat (**"Casey Client"**, and the thread CONTINUED rather than
+restarting). Typed sends unchanged. Build passes; test chats cleaned up.
+⚠️ The mic itself can't be exercised headlessly — the transcript path was driven
+through a temporary hook (removed). Real capture is unchanged from S162e.
 
-**Where the code is:** voice bar + preview in `AIChatPanel` (`micOnly` / `voicePreview` / `send()`
-takes an override string). Chat list = `caliq-ai-chats` index; per-chat thread = `caliq-ai-chat-{id}`.
-Read markers already persist per chat id in localStorage `glidna-chat-seen` (S163c) — the history
-drawer can reuse that for a per-chat unread dot, which Kevin also wants.
+**Still to do here:** the multi-client / multi-action voice note (below). And the
+history drawer's own rows could reuse `pinName()` — today they show "focused" for an
+auto pin, while the voice picker names the client.
+
+## NEXT UP — one voice message, several clients and actions (S163 design, part 2)
+
+**Items 1–4 of the S163 design are DONE (S163e + S164) — see the section above.** What is left is
+the last paragraph of that design: **one voice message naming several clients and several actions**
+("log Casey's breakfast and send Pat a weigh-in reminder"). Mechanically fine — the tools already
+take a per-call `clientId`, so it is N calls with different targets — but it MUST show ALL
+destinations before committing, or it is the silent mis-write risk multiplied by N. The pre-send
+bar is now the natural place for that list: it already renders one destination and a candidate row.
+
+**Why this matters at all (the original framing, still true).** A voice note is sent with the chat
+CLOSED, so nothing on screen says which client it lands on. Silent mis-writes to client data are
+the worst failure mode in this app — every part of this design is about making the destination
+visible, never about guessing better.
+
+**Where the code is:** voice bar + preview in `AIChatPanel` (`micOnly` / `voicePreview` /
+`voiceDest` / `voiceCands` / `sendVoiceTo()`; `send()` takes `{fresh, base, chatId, target, pin}`).
+Chat list = `caliq-ai-chats` index; per-chat thread = `caliq-ai-chat-{id}`. Read markers already
+persist per chat id in localStorage `glidna-chat-seen` (S163c) — the history drawer can reuse that
+for a per-chat unread dot, which Kevin also wants.
 
 **Confirmed working, don't re-litigate:** mic capture quality + the 10s pause window + 2-min ceiling
 were device-tested by Kevin (S162e) and are good. Leave the OPEN chat's voice UI as it is (his call).

@@ -17096,6 +17096,38 @@ function blobToBase64(blob) {
   });
 }
 
+// Does `hay` contain `needle` as a whole word? Substring matching would offer
+// "Pat" for "pathway" and "Ann" for "planned", and a wrong destination chip in
+// front of a voice note is worse than no chip at all.
+function wordIn(hay, needle) {
+  const esc = String(needle).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  try { return new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`, "i").test(hay); }
+  catch { return false; }
+}
+// Which of the caller's own subjects (connected clients, local plan files) does
+// this transcript name? Voice notes are the one place the destination is easy to
+// get silently wrong — the chat is closed, so nothing on screen says which
+// client "log 2 eggs" is about (S163). This only OFFERS candidates; the default
+// stays a new, unpinned chat, so a false match costs a glance, never a write.
+// Matches a full name, a distinctive single name, or a spoken/pasted id.
+function matchVoiceSubjects(text, subjects) {
+  const t = String(text || "").toLowerCase();
+  if (!t.trim()) return [];
+  const out = [];
+  for (const s of subjects || []) {
+    const id = String(s.clientId || s.localPlanId || "").toLowerCase();
+    // Ids are long and opaque — a hit is unambiguous, so it ranks first.
+    if (id.length >= 6 && t.includes(id)) { out.push({ ...s, why: "id" }); continue; }
+    const name = String(s.name || "").trim().toLowerCase();
+    if (!name) continue;
+    // Single names of 3+ characters only: "Al" or "Jo" would match far too much.
+    const parts = name.split(/\s+/).filter((p) => p.length >= 3);
+    if (wordIn(t, name) || parts.some((p) => wordIn(t, p))) out.push({ ...s, why: "name" });
+  }
+  // Ids before names, and never more than a row's worth of chips.
+  return out.sort((a, b) => (a.why === "id" ? -1 : 0) - (b.why === "id" ? -1 : 0)).slice(0, 4);
+}
+
 // The chat lives inside each screen's tree, so navigating unmounts it and a fresh
 // one mounts on the next screen — which dropped the docked chat mid-conversation
 // (S162b, Kevin: "the dock button is meant to be there even if someone goes to
@@ -17231,6 +17263,15 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const [micOnly, setMicOnly] = useState(false);      // bar is active, panel closed
   const micOnlyRef = useRef(false);                    // read inside recorder callbacks
   const [voicePreview, setVoicePreview] = useState(""); // transcript awaiting confirmation
+  // Where a voice note is about to go (S163). A closed-mic message has no chat on
+  // screen to reveal its destination, so the destination is chosen and SHOWN
+  // before it sends rather than inferred after.
+  const [voiceDest, setVoiceDest] = useState(null);   // null = a new, unpinned chat
+  const [voiceCands, setVoiceCands] = useState([]);   // subjects named in the transcript
+  const [destPicker, setDestPicker] = useState(false); // "Send to ▾" — every chat + New chat
+  const [sentTo, setSentTo] = useState(null);          // {label, about} — brief "Sent to X" after it goes
+  const subjectsRef = useRef(null);                    // clients + local plans, once resolved
+  const subjectsLoadRef = useRef(null);                // the in-flight load, so two callers share one fetch
   const [unread, setUnread] = useState(false);          // a reply arrived while closed
   const sheetUp = useAnySheetOpen();                    // shrink the launcher over sheets
   const silenceAtRef = useRef(0);    // when the current pause began (ms)
@@ -17299,6 +17340,11 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const chatTitle = (msgs) => { const m = (msgs || []).find((x) => x.role === "user" && (x.content || "").trim()); return m ? m.content.trim().slice(0, 44) : "New chat"; };
   const [convos, setConvos] = useState([]);         // [{id, title, updatedAt}]
   const [activeChatId, setActiveChatId] = useState(null);
+  // Mirrored in a ref, and written synchronously — code that runs in the same
+  // tick as a chat switch (a voice note that opens its own chat, then sends)
+  // needs the NEW id immediately; state wouldn't land until the next render.
+  const activeChatIdRef = useRef(null);
+  const goActiveChat = (id) => { activeChatIdRef.current = id; setActiveChatId(id); };
   // Persisted PER CHAT (S163c, Kevin: read it, refreshed, and it announced the
   // same answer again). An in-memory marker resets to 0 on reload while the
   // messages are restored from storage, so every refresh re-discovered the same
@@ -17329,6 +17375,11 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   // talking about. Storing it on the chat makes the focus survive, which is the
   // whole token saving Kevin asked for.
   const pinOf = (id) => ((convos.find((c) => c.id === id) || {}).pin) || null;
+  // What a pin looks like on the wire. `pinned` tells the server this subject was
+  // chosen, not guessed, so it stays put for the whole turn.
+  const targetOf = (pin) => (pin
+    ? (pin.clientId ? { clientId: pin.clientId, pinned: true } : { localPlanId: pin.localPlanId, pinned: true })
+    : null);
   const applyPin = (pin) => {
     activeTargetRef.current = pin
       ? (pin.clientId ? { clientId: pin.clientId } : { localPlanId: pin.localPlanId })
@@ -17336,23 +17387,21 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   };
   // What we relay to the server this turn. A pinned chat ALWAYS sends its pin —
   // that is what survives a reload and stops mid-chat drift moving the subject.
-  const sendTarget = () => {
-    const pin = pinOf(activeChatId);
-    if (pin) return pin.clientId
-      ? { clientId: pin.clientId, pinned: true }
-      : { localPlanId: pin.localPlanId, pinned: true };
-    return activeTargetRef.current;
-  };
+  const sendTarget = () => targetOf(pinOf(activeChatId)) || activeTargetRef.current;
+  // These two also run from inside send(), whose closure holds the chat that was
+  // active when it was CALLED — which, for a voice note that opens its own chat,
+  // is the previous one. The ref is written the moment the chat changes, so the
+  // index's `active` can't be rewound to a chat we already left.
   const setPin = (id, pin) => setConvos((prev) => {
     const next = prev.map((c) => (c.id === id ? { ...c, pin } : c));
-    writeIndex(activeChatId, next);
+    writeIndex(activeChatIdRef.current || activeChatId, next);
     return next;
   });
   const renameChat = (id, title) => setConvos((prev) => {
     const t = String(title || "").trim().slice(0, 60);
     if (!t) return prev;
     const next = prev.map((c) => (c.id === id ? { ...c, title: t, titleLocked: true } : c));
-    writeIndex(activeChatId, next);
+    writeIndex(activeChatIdRef.current || activeChatId, next);
     return next;
   });
 
@@ -17367,7 +17416,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
         catch (e) { if (!/not found/i.test((e && e.message) || "")) return; } // offline blip → keep saving disabled
         if (index && Array.isArray(index.chats) && index.chats.length) {
           const act = index.chats.some((c) => c.id === index.active) ? index.active : index.chats[0].id;
-          setConvos(index.chats); setActiveChatId(act);
+          setConvos(index.chats); goActiveChat(act);
           const t = await loadThread(act); if (t.length) setMessages(t);
           // Re-arm the subject on RELOAD — without this a pinned chat lost its
           // pin the moment the app restarted, and the AI went back to hunting
@@ -17381,7 +17430,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
         catch (e) { if (!/not found/i.test((e && e.message) || "")) return; }
         const hasLegacy = Array.isArray(legacy) && legacy.length > 0;
         const first = { id: hasLegacy ? "legacy" : `c${Date.now()}`, title: chatTitle(legacy), updatedAt: Date.now() };
-        setConvos([first]); setActiveChatId(first.id);
+        setConvos([first]); goActiveChat(first.id);
         if (hasLegacy) setMessages(legacy);
         loadedRef.current = true;
       } catch { /* leave saving disabled rather than risk clobbering */ }
@@ -17404,8 +17453,10 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     } catch { /* best-effort */ }
   }, [busy, messages, activeChatId]);
   const resetThreadUi = () => { setProposal(null); setWorkout(null); setEditDraft(null); setError(""); setBoost(null); activeTargetRef.current = null; };
+  // Returns the new chat's id — a caller that sends into it right away can't read
+  // it back from state in the same tick.
   const newChat = (pin) => {
-    if (busy) return;
+    if (busy) return null;
     const id = `c${Date.now()}`;
     // A chat pinned at birth keeps its subject forever: every turn relays it, so
     // the AI never spends a round rediscovering who this conversation is about.
@@ -17413,13 +17464,14 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       ? { id, title: `About ${pin.name || "client"}`, titleLocked: true, updatedAt: Date.now(), pin }
       : { id, title: "New chat", updatedAt: Date.now() };
     setConvos((prev) => { const next = [c, ...prev].slice(0, 30); writeIndex(id, next); return next; });
-    setActiveChatId(id); setMessages([]); resetThreadUi(); setHistoryOpen(false);
+    goActiveChat(id); setMessages([]); resetThreadUi(); setHistoryOpen(false);
     applyPin(pin || null);   // AFTER resetThreadUi, which nulls the ref
+    return id;
   };
   const switchChat = async (id) => {
     if (busy || id === activeChatId) { setHistoryOpen(false); return; }
     const t = await loadThread(id);
-    setActiveChatId(id); setMessages(t); resetThreadUi(); setHistoryOpen(false);
+    goActiveChat(id); setMessages(t); resetThreadUi(); setHistoryOpen(false);
     applyPin(pinOf(id));   // re-arm the subject AFTER resetThreadUi has nulled it
     setConvos((prev) => { writeIndex(id, prev); return prev; });
   };
@@ -17429,12 +17481,91 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     try { await window.storage.delete(threadKey(id)); } catch { /* best-effort */ }
     let act = activeChatId;
     if (id === activeChatId) {
-      if (next.length) { act = next[0].id; const t = await loadThread(act); setActiveChatId(act); setMessages(t); }
-      else { act = `c${Date.now()}`; next.push({ id: act, title: "New chat", updatedAt: Date.now() }); setActiveChatId(act); setMessages([]); }
+      if (next.length) { act = next[0].id; const t = await loadThread(act); goActiveChat(act); setMessages(t); }
+      else { act = `c${Date.now()}`; next.push({ id: act, title: "New chat", updatedAt: Date.now() }); goActiveChat(act); setMessages([]); }
       resetThreadUi();
     }
     setConvos(next); writeIndex(act, next);
   };
+
+  // ── Where a voice note goes (S163) ──────────────────────────────────────
+  // Everyone a voice note could be addressed to: connected clients, plus a
+  // trainer's own local plan files. Loaded once, when the mic opens, so the
+  // candidates are already there the moment the transcript lands.
+  const loadVoiceSubjects = () => {
+    if (subjectsLoadRef.current) return subjectsLoadRef.current;   // shared, so a transcript
+    subjectsLoadRef.current = (async () => {                        // that lands mid-load waits
+      const subs = [];                                             // rather than matching nothing
+      // Trainers only: a client caller is forced to their own account
+      // server-side, so their voice note has nowhere else it could go wrong to.
+      if (isTrainer) {
+        try {
+          for (const c of (await getMyClients()) || []) {
+            const name = c.displayName || [c.firstName, c.lastName].filter(Boolean).join(" ") || c.email || "";
+            if (name) subs.push({ kind: "client", clientId: c.uid, name });
+          }
+        } catch { /* offline or no roster — names just won't match */ }
+        try {
+          const r = await window.storage.get(STORAGE_INDEX);
+          const list = r && r.value ? JSON.parse(r.value) : [];
+          for (const p of Array.isArray(list) ? list : []) {
+            const name = p.customName || p.name || "";
+            if (name) subs.push({ kind: "plan", localPlanId: p.id, name });
+          }
+        } catch { /* best-effort */ }
+      }
+      subjectsRef.current = subs;
+      return subs;
+    })();
+    return subjectsLoadRef.current;
+  };
+  const clearVoiceRouting = () => { setVoicePreview(""); setVoiceCands([]); setVoiceDest(null); setDestPicker(false); setError(""); };
+  const closeVoiceBar = () => { clearVoiceRouting(); setMicOnly(false); micOnlyRef.current = false; };
+  const destLabel = (d) => (!d ? "New chat" : d.kind === "chat" ? (d.title || "that chat") : d.name);
+  // Who a chat writes to. Auto-captured pins carry an id but no name, and a chat
+  // title says nothing about its subject — so without this lookup the picker
+  // could offer a destination that quietly logs to someone else's account.
+  const pinName = (pin) => {
+    if (!pin) return "";
+    if (pin.name) return pin.name;
+    const id = pin.clientId || pin.localPlanId;
+    const s = (subjectsRef.current || []).find((x) => (x.clientId || x.localPlanId) === id);
+    return s ? s.name : (pin.clientId ? "a client" : "a plan file");
+  };
+  // Send the pending voice note to a chosen destination — and then say where it
+  // went. newChat()/the chat switch don't reach send()'s closure, so the thread,
+  // the chat id and the subject all travel as explicit arguments.
+  const sendVoiceTo = async (dest) => {
+    const t = (voicePreview || "").trim();
+    if (!t) return;
+    // The mic can be opened while a reply is still streaming. Say so rather than
+    // let Send do nothing — and keep the transcript, which is the expensive part.
+    if (busy) { setError("Still finishing the last answer — try again in a moment."); return; }
+    if (dest && dest.kind === "chat") {
+      const thread = await loadThread(dest.id);
+      const pin = pinOf(dest.id);
+      closeVoiceBar();
+      goActiveChat(dest.id); setMessages(thread); resetThreadUi(); applyPin(pin);
+      setConvos((prev) => { writeIndex(dest.id, prev); return prev; });
+      setSentTo({ label: destLabel(dest), about: dest.about });
+      send(t, { base: thread, chatId: dest.id, target: targetOf(pin), pin });
+      return;
+    }
+    const pin = dest
+      ? (dest.kind === "plan" ? { localPlanId: dest.localPlanId, name: dest.name } : { clientId: dest.clientId, name: dest.name })
+      : null;
+    const id = newChat(pin);
+    if (!id) { setError("Still finishing the last answer — try again in a moment."); return; }
+    closeVoiceBar();
+    setSentTo({ label: destLabel(dest) });   // a new chat's label IS its subject
+    send(t, { fresh: true, chatId: id, target: targetOf(pin), pin });
+  };
+  // The "sent to X" line is a receipt, not a status — it retires on its own.
+  useEffect(() => {
+    if (!sentTo) return;
+    const t = setTimeout(() => setSentTo(null), 5000);
+    return () => clearTimeout(t);
+  }, [sentTo]);
 
   // Accept a proposed meal → save it directly (no extra AI call) via logMeal.
   const acceptMeal = async (meal) => {
@@ -17572,7 +17703,12 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
           const b64 = await blobToBase64(blob);
           const res = await callTranscribe({ audio: b64, mimeType: blob.type });
           const text = (res.data && res.data.text) || "";
-          if (text && micOnlyRef.current) setVoicePreview(text);
+          if (text && micOnlyRef.current) {
+            setVoicePreview(text);
+            // Offer, never assume: the default destination stays a new chat.
+            setVoiceDest(null);
+            loadVoiceSubjects().then((subs) => { if (micOnlyRef.current) setVoiceCands(matchVoiceSubjects(text, subs)); });
+          }
           else if (text) setDraft((d) => (d ? d.trim() + " " : "") + text);
           else if (micOnlyRef.current) { setMicOnly(false); micOnlyRef.current = false; setError("Didn't catch that — try again."); }
           else setError("Didn't catch that — try again.");
@@ -17708,13 +17844,26 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     // resets that state, but this closure still holds the PREVIOUS array — so a
     // send fired straight after it would carry the old conversation (and its
     // client context) into the new chat, which is the whole thing we're avoiding.
+    // base/chatId/target are the same problem for the other three things a send
+    // reads from chat state: the thread it continues, the chat its reply is filed
+    // under, and the client the turn is relayed with. A voice note routed to a
+    // chat other than the open one passes all of them explicitly.
     const fresh = !!(opts && opts.fresh);
+    const base = opts && Array.isArray(opts.base) ? opts.base : (fresh ? [] : messages);
+    const chatId = (opts && opts.chatId) || activeChatId;
+    const target = opts && "target" in opts ? opts.target : sendTarget();
+    // The pin this send was launched with. A chat created moments ago isn't in
+    // this closure's `convos`, so looking it up would come back empty and the
+    // reply's auto-capture would overwrite a subject the user CHOSE with an
+    // auto one — which a later turn is then free to move.
+    const launchPin = opts && "pin" in opts ? opts.pin : undefined;
+    const pinAt = (id) => (launchPin !== undefined ? launchPin : pinOf(id));
     if (!premium) return; // trial expired — the lock panel is showing; server enforces too
     if ((!text && !imgs.length) || busy) return;
     setError("");
     setBoost((b) => (b === "granted" || b === "already" ? null : b)); // clear settled boost cards on the next send
     setUltraOffer(false); // clear any Ultra upsell on the next send
-    const next = [...(fresh ? [] : messages), { role: "user", content: text, images: imgs.length ? imgs : undefined }];
+    const next = [...base, { role: "user", content: text, images: imgs.length ? imgs : undefined }];
     setMessages(next);
     if (!isOverride) setDraft("");
     setPendingImages([]);
@@ -17752,7 +17901,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
         onProposal: (meal) => { gotEvent = true; setProposal({ ...meal, status: "pending" }); },
         onWorkoutProposal: (w) => { gotEvent = true; setWorkout({ ...w, status: "pending" }); },
         onDone: (p) => { done = p; },
-      }, sendTarget());
+      }, target);
       // Let the typewriter finish revealing — but NEVER block on a stalled rAF.
       // requestAnimationFrame pauses when the tab is backgrounded (or headless),
       // so race a timeout, then force-stop so a late frame can't revert the text.
@@ -17764,7 +17913,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
         activeTargetRef.current = done.activeTarget;
         // Only auto-capture when there is no pin, or the existing one was itself
         // auto-captured. A pin the user set explicitly is never overwritten.
-        { const cur = pinOf(activeChatId); if (!cur || cur.auto) setPin(activeChatId, { ...done.activeTarget, auto: true }); }
+        { const cur = pinAt(chatId); if (!cur || cur.auto) setPin(chatId, { ...done.activeTarget, auto: true }); }
       }
       if (done && done.wrote && typeof onDataChanged === "function") onDataChanged();
     } catch (streamErr) {
@@ -17789,12 +17938,12 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       } else {
         // Streaming unavailable (network/CORS/server) → non-streaming callable.
         try {
-          const res = await callAiChat({ messages: apiMsgs, activeTarget: sendTarget() });
+          const res = await callAiChat({ messages: apiMsgs, activeTarget: target });
           const reply = (res.data && res.data.reply) || "";
           setMessages([...next, { role: "assistant", content: reply || "(no response)" }]);
           if (res.data && res.data.activeTarget) {
             activeTargetRef.current = res.data.activeTarget;
-            { const cur = pinOf(activeChatId); if (!cur || cur.auto) setPin(activeChatId, { ...res.data.activeTarget, auto: true }); }
+            { const cur = pinAt(chatId); if (!cur || cur.auto) setPin(chatId, { ...res.data.activeTarget, auto: true }); }
           }
           if (res.data && res.data.usage && res.data.usage.warn) setWarn(true);
           if (res.data && res.data.proposal) setProposal({ ...res.data.proposal, status: "pending" });
@@ -17844,6 +17993,29 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
         // "Food & calories" (or any sheet) hid it entirely and you couldn't ask
         // about the very thing you had just opened.
         <div style={{ position: "fixed", inset: 0, zIndex: 1650, pointerEvents: "none" }}>
+          {/* Say where the last voice note went. Tapping through a candidate chip
+              sends in one motion, so without this the destination would only ever
+              have been visible for the instant before it was chosen. */}
+          {sentTo && !micOnly ? (
+            <div style={{ position: "absolute", pointerEvents: "none",
+              right: "calc(16px + env(safe-area-inset-right,0px))", bottom: "calc(70px + env(safe-area-inset-bottom,0px))" }}>
+              <span className="flex max-w-[72vw] items-start gap-1.5 rounded-2xl border border-border bg-surface px-3 py-1.5 text-[.74rem] text-fg shadow-lg"
+                style={{ animation: "fadeUp .2s ease both" }}>
+                <Icon name="check" size={12} color="var(--accent)" />
+                <span className="min-w-0">
+                  <span className="block truncate">Sent to <b>{sentTo.label}</b></span>
+                  {/* Whose account it writes to survives even when a long chat
+                      title doesn't — it's the part that can be wrong. */}
+                  {sentTo.about ? <span className="block truncate text-primary">about {sentTo.about}</span> : null}
+                </span>
+              </span>
+            </div>
+          ) : null}
+          {/* Stand down while the voice bar is up: the launcher sits on a higher
+              layer, so it covered the bar's own Edit and Discard controls. Its
+              two jobs — start talking, open the chat — are both already on
+              screen there. */}
+          {!micOnly && (
           <div style={{ position: "absolute", pointerEvents: "auto", display: "flex", alignItems: "center", gap: 8,
             right: "calc(16px + env(safe-area-inset-right,0px))", bottom: "calc(18px + env(safe-area-inset-bottom,0px))" }}>
             {/* Talk without covering the page (S162, Kevin): opens DOCKED and
@@ -17853,7 +18025,8 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
             <button
               onClick={() => {
                 if (!premium) { setOpen(true); return; }   // locked → show the upgrade card
-                micOnlyRef.current = true; setMicOnly(true); setVoicePreview("");
+                micOnlyRef.current = true; setMicOnly(true); clearVoiceRouting();
+                loadVoiceSubjects();   // ready by the time there's a transcript to match
                 setTimeout(() => startRecording(), 60);
               }}
               aria-label="Talk to Glidna" title="Talk to Glidna — keeps the page visible"
@@ -17890,6 +18063,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               ) : null}
             </button>
           </div>
+          )}
         </div>
       )}
 
@@ -17904,22 +18078,72 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
             <>
               <div className="mb-2 text-[.72rem] text-muted">Send this to Glidna?</div>
               <div className="mb-2.5 max-h-[26vh] overflow-y-auto text-[.92rem] leading-relaxed text-fg">{voicePreview}</div>
+              {/* A name in the transcript → offer that subject before it sends.
+                  One tap goes there; ignoring the row keeps the safe default. */}
+              {voiceCands.length > 0 && !destPicker && (
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[.7rem] text-muted">Heard a name — send to</span>
+                  {voiceCands.map((c) => (
+                    <button key={`${c.kind}:${c.clientId || c.localPlanId}`} onClick={() => sendVoiceTo(c)}
+                      className="flex items-center gap-1 rounded-full border border-primary bg-[rgba(8,220,224,.08)] px-2.5 py-1 text-[.74rem] font-bold text-fg cursor-pointer">
+                      <Icon name={c.kind === "plan" ? "file" : "person"} size={12} color="var(--accent)" />
+                      {c.name}{c.kind === "plan" ? <span className="font-normal text-muted">· plan file</span> : null}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {/* The destination is always on screen before Send — a voice note
+                  has no open chat to reveal where it landed (S163). */}
+              <div className="mb-2.5 flex flex-wrap items-center gap-1.5 text-[.72rem]">
+                <span className="text-muted">Sending to</span>
+                <button onClick={() => setDestPicker((v) => !v)}
+                  aria-expanded={destPicker} aria-label="Choose where to send this"
+                  className="flex items-center gap-1.5 rounded-full border border-border bg-surface2 px-2.5 py-1 text-[.74rem] font-bold text-fg cursor-pointer">
+                  {destLabel(voiceDest)}
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
+                    className={`h-[11px] w-[11px] text-muted transition-transform ${destPicker ? "rotate-180" : ""}`}>
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+                {/* A chat's title says nothing about whose account it writes to. */}
+                {voiceDest && voiceDest.about ? <span className="text-primary">about {voiceDest.about}</span> : null}
+              </div>
+              {destPicker && (
+                <div className="mb-2.5 flex max-h-[30vh] flex-col gap-1 overflow-y-auto rounded-xl border border-border bg-surface2 p-2">
+                  <button onClick={() => { setVoiceDest(null); setDestPicker(false); }}
+                    className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-left text-[.78rem] font-semibold cursor-pointer ${!voiceDest ? "border-primary bg-[rgba(8,220,224,.06)] text-fg" : "border-border bg-transparent text-fg"}`}>
+                    <Icon name="plus" size={12} color="var(--accent)" />New chat
+                    <span className="ml-auto text-[.66rem] font-normal text-muted">nothing carried over</span>
+                  </button>
+                  {[...convos].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).map((c) => (
+                    <button key={c.id} onClick={() => { setVoiceDest({ kind: "chat", id: c.id, title: c.title, about: pinName(c.pin) }); setDestPicker(false); }}
+                      className={`rounded-lg border px-2.5 py-2 text-left text-[.78rem] cursor-pointer ${voiceDest && voiceDest.id === c.id ? "border-primary bg-[rgba(8,220,224,.06)]" : "border-border bg-transparent"}`}>
+                      <span className="block truncate font-semibold text-fg">{c.title || "New chat"}</span>
+                      {/* A chat's pinned client IS the destination — show it, or
+                          picking a chat by title alone hides who it writes to. */}
+                      <span className="block text-[.66rem] text-muted">
+                        {c.pin ? <span className="text-primary">about {pinName(c.pin)} · </span> : null}{timeAgo(c.updatedAt)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="flex items-center gap-2">
-                {/* A voice note always starts a NEW chat (S163e). Sending it into
-                    whatever chat happened to be open meant inheriting that chat's
-                    pinned client — so "log 2 eggs" could land on the wrong
-                    person's account with nothing on screen to reveal it. */}
-                <button onClick={() => { const t = voicePreview; setVoicePreview(""); setMicOnly(false); micOnlyRef.current = false; newChat(); send(t, { fresh: true }); }}
+                {/* Default = a NEW chat (S163e). Sending into whatever chat was
+                    last open meant inheriting that chat's pinned client — so
+                    "log 2 eggs" could land on the wrong person's account with
+                    nothing on screen to reveal it. */}
+                <button onClick={() => sendVoiceTo(voiceDest)}
                   className="rounded-xl border-none bg-primaryfill px-5 py-2.5 text-[.85rem] font-bold text-primaryfg cursor-pointer">Send</button>
-                <button onClick={() => { setVoicePreview(""); micOnlyRef.current = true; setTimeout(() => startRecording(), 40); }}
+                <button onClick={() => { clearVoiceRouting(); micOnlyRef.current = true; setTimeout(() => startRecording(), 40); }}
                   className="rounded-xl border border-border bg-surface2 px-4 py-2.5 text-[.8rem] font-bold text-fg cursor-pointer">Redo</button>
                 {/* Keep the words rather than lose them — hands off to the full chat. */}
-                <button onClick={() => { setDraft(voicePreview); setVoicePreview(""); setMicOnly(false); micOnlyRef.current = false; setOpen(true); }}
+                <button onClick={() => { setDraft(voicePreview); closeVoiceBar(); setOpen(true); }}
                   className="rounded-xl border border-border bg-surface2 px-4 py-2.5 text-[.8rem] font-bold text-fg cursor-pointer">Edit</button>
                 {/* Was a rounded-rect that read as oblong and got lost against the
                     other controls. An actual circle at a fixed size, with the word
                     next to it, so leaving is as obvious as sending. */}
-                <button onClick={() => { setVoicePreview(""); setMicOnly(false); micOnlyRef.current = false; }}
+                <button onClick={closeVoiceBar}
                   aria-label="Discard recording" title="Discard"
                   className="ml-auto flex items-center gap-1.5 text-[.78rem] font-bold text-muted cursor-pointer bg-transparent border-0">
                   <span className="flex items-center justify-center rounded-full border border-border bg-surface2 text-fg"
@@ -17940,7 +18164,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               </span>
               <canvas ref={waveRef} width={220} height={28} className="h-[28px] flex-1 min-w-0" />
               <span className="shrink-0 text-[.76rem] text-muted">{transcribing ? "Transcribing…" : "Listening…"}</span>
-              <button onClick={() => { if (recording) stopRecording(); else { setMicOnly(false); micOnlyRef.current = false; } }}
+              <button onClick={() => { if (recording) stopRecording(); else closeVoiceBar(); }}
                 className="shrink-0 rounded-xl border-none bg-primaryfill px-4 py-2 text-[.8rem] font-bold text-primaryfg cursor-pointer">
                 {transcribing ? "…" : "Stop"}
               </button>
@@ -18455,8 +18679,9 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 {isTrainer && (
                   <button onClick={() => {
                       setPinPicker(true);
+                      // Same roster the voice bar matches names against — loaded once.
                       if (pinRoster === null) {
-                        getMyClients().then((cs) => setPinRoster(cs || [])).catch(() => setPinRoster([]));
+                        loadVoiceSubjects().then((s) => setPinRoster(s.filter((x) => x.kind === "client"))).catch(() => setPinRoster([]));
                       }
                     }}
                     className="mx-3 mt-3 flex items-center justify-center gap-1.5 rounded-xl border border-border bg-transparent px-3 py-2.5 text-[.8rem] font-bold text-fg cursor-pointer">
@@ -18477,15 +18702,12 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                       <div className="text-[.74rem] text-muted leading-relaxed">No connected clients yet.</div>
                     )}
                     <div className="flex max-h-[190px] flex-col gap-1 overflow-y-auto">
-                      {(pinRoster || []).map((c) => {
-                        const nm = c.displayName || [c.firstName, c.lastName].filter(Boolean).join(" ") || c.email || "Client";
-                        return (
-                          <button key={c.uid} onClick={() => { setPinPicker(false); newChat({ clientId: c.uid, name: nm }); }}
-                            className="rounded-lg border border-border bg-transparent px-2.5 py-2 text-left text-[.78rem] text-fg cursor-pointer">
-                            {nm}
-                          </button>
-                        );
-                      })}
+                      {(pinRoster || []).map((c) => (
+                        <button key={c.clientId} onClick={() => { setPinPicker(false); newChat({ clientId: c.clientId, name: c.name }); }}
+                          className="rounded-lg border border-border bg-transparent px-2.5 py-2 text-left text-[.78rem] text-fg cursor-pointer">
+                          {c.name}
+                        </button>
+                      ))}
                     </div>
                     <div className="mt-1.5 text-[.66rem] leading-relaxed text-muted">
                       Every message in that chat is about them — the assistant won't have to look them up.
