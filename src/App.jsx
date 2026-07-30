@@ -17131,13 +17131,6 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   // "unread" has to mean NEW, not merely "the last message is the AI's". Keyed on
   // the message count seen while open, otherwise simply closing the chat after
   // reading re-marked it unread and the badge could never be cleared.
-  const seenCountRef = useRef(0);
-  useEffect(() => {
-    if (open) { seenCountRef.current = messages.length; setUnread(false); return; }
-    if (busy || messages.length <= seenCountRef.current) return;
-    const last = messages[messages.length - 1];
-    if (last && last.role === "assistant") setUnread(true);
-  }, [busy, messages, open]);
   useEffect(() => {
     chatUiState.size = size;
     try { localStorage.setItem("glidna-chat-size", size); } catch { /* private mode */ }
@@ -17301,6 +17294,26 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const chatTitle = (msgs) => { const m = (msgs || []).find((x) => x.role === "user" && (x.content || "").trim()); return m ? m.content.trim().slice(0, 44) : "New chat"; };
   const [convos, setConvos] = useState([]);         // [{id, title, updatedAt}]
   const [activeChatId, setActiveChatId] = useState(null);
+  // Persisted PER CHAT (S163c, Kevin: read it, refreshed, and it announced the
+  // same answer again). An in-memory marker resets to 0 on reload while the
+  // messages are restored from storage, so every refresh re-discovered the same
+  // reply as new. Keyed by chat id, so reading one conversation doesn't silence a
+  // genuinely unread reply in another.
+  const SEEN_KEY = "glidna-chat-seen";
+  const readSeen = () => { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || "{}") || {}; } catch { return {}; } };
+  const markSeen = (id, n) => {
+    if (!id) return;
+    try { const m = readSeen(); m[id] = n; localStorage.setItem(SEEN_KEY, JSON.stringify(m)); } catch { /* private mode */ }
+  };
+  useEffect(() => {
+    const id = activeChatId || "legacy";
+    if (open) { markSeen(id, messages.length); setUnread(false); return; }
+    if (busy || !messages.length) return;
+    const seen = readSeen()[id] || 0;
+    if (messages.length <= seen) { setUnread(false); return; }
+    const last = messages[messages.length - 1];
+    if (last && last.role === "assistant") setUnread(true);
+  }, [busy, messages, open, activeChatId]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const loadThread = async (id) => {
     try { const r = await window.storage.get(threadKey(id)); const t = r && r.value ? JSON.parse(r.value) : []; return Array.isArray(t) ? t : []; } catch { return []; }
