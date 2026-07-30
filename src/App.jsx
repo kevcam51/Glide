@@ -717,6 +717,7 @@ html{
   scroll-behavior:smooth;
   height:auto;
 }
+@keyframes aiDot{0%,80%,100%{opacity:.35;transform:translateY(0)}40%{opacity:1;transform:translateY(-2px)}}
 body{
   background:var(--bg);
   color:var(--text);
@@ -17106,6 +17107,17 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
     chatUiState.size || localStorage.getItem("glidna-chat-size") || "compact"); // "compact" | "bar" docked | "full"
   // Mirror to module scope (survives a screen change) + storage (survives a reload).
   useEffect(() => { chatUiState.open = open; }, [open]);
+  // A reply that arrives while the chat is closed shouldn't vanish unseen — but
+  // "unread" has to mean NEW, not merely "the last message is the AI's". Keyed on
+  // the message count seen while open, otherwise simply closing the chat after
+  // reading re-marked it unread and the badge could never be cleared.
+  const seenCountRef = useRef(0);
+  useEffect(() => {
+    if (open) { seenCountRef.current = messages.length; setUnread(false); return; }
+    if (busy || messages.length <= seenCountRef.current) return;
+    const last = messages[messages.length - 1];
+    if (last && last.role === "assistant") setUnread(true);
+  }, [busy, messages, open]);
   useEffect(() => {
     chatUiState.size = size;
     try { localStorage.setItem("glidna-chat-size", size); } catch { /* private mode */ }
@@ -17189,6 +17201,13 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const streamRef = useRef(null); // mic MediaStream (to stop tracks after)
   const waveRef = useRef(null);   // <canvas> for the live level meter
   const spokeRef = useRef(false);    // has any speech been heard this take?
+  // Voice WITHOUT opening the chat (S162d): a slim bar, a preview to confirm, and
+  // the answer waiting behind the launcher. The point is to ask about what is on
+  // screen without the screen being covered to do it.
+  const [micOnly, setMicOnly] = useState(false);      // bar is active, panel closed
+  const micOnlyRef = useRef(false);                    // read inside recorder callbacks
+  const [voicePreview, setVoicePreview] = useState(""); // transcript awaiting confirmation
+  const [unread, setUnread] = useState(false);          // a reply arrived while closed
   const silenceAtRef = useRef(0);    // when the current pause began (ms)
   const recognitionRef = useRef(null); // browser SpeechRecognition (live interim words)
 
@@ -17508,7 +17527,9 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
           const b64 = await blobToBase64(blob);
           const res = await callTranscribe({ audio: b64, mimeType: blob.type });
           const text = (res.data && res.data.text) || "";
-          if (text) setDraft((d) => (d ? d.trim() + " " : "") + text);
+          if (text && micOnlyRef.current) setVoicePreview(text);
+          else if (text) setDraft((d) => (d ? d.trim() + " " : "") + text);
+          else if (micOnlyRef.current) { setMicOnly(false); micOnlyRef.current = false; setError("Didn't catch that — try again."); }
           else setError("Didn't catch that — try again.");
         } catch (err) {
           const code = (err && err.code) || "";
@@ -17777,7 +17798,11 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 screen while you ask it. Premium-gated like the rest of the AI —
                 a locked account gets the panel (and its upgrade card) instead. */}
             <button
-              onClick={() => { setOpen(true); setSize("bar"); if (premium) setTimeout(() => startRecording(), 60); }}
+              onClick={() => {
+                if (!premium) { setOpen(true); return; }   // locked → show the upgrade card
+                micOnlyRef.current = true; setMicOnly(true); setVoicePreview("");
+                setTimeout(() => startRecording(), 60);
+              }}
               aria-label="Talk to Glidna" title="Talk to Glidna — keeps the page visible"
               className="flex items-center justify-center rounded-full border-none bg-surface2 text-primary shadow-lg cursor-pointer"
               style={{ width: 44, height: 44, border: "1px solid var(--color-border)" }}>
@@ -17787,12 +17812,73 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 <line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" />
               </svg>
             </button>
-            <button onClick={() => setOpen(true)} aria-label="Open AI assistant"
-              className="flex items-center gap-1.5 rounded-full border-none bg-primaryfill px-3 py-2.5 font-bold text-primaryfg shadow-lg cursor-pointer">
-              <Icon name="sparkle" variant="solid" size={16} />
-              <span className="text-[.82rem]">Ask Glidna</span>
+            <button onClick={() => setOpen(true)}
+              aria-label={busy ? "Glidna is thinking" : unread ? "Reply ready" : "Open AI assistant"}
+              className="relative flex items-center gap-1.5 rounded-full border-none bg-primaryfill px-3 py-2.5 font-bold text-primaryfg shadow-lg cursor-pointer">
+              {/* Working / answer-waiting states (S162d): after sending by voice
+                  the chat is closed, so the launcher itself has to carry the
+                  progress — otherwise the reply happens invisibly. */}
+              {busy ? (
+                <span className="flex items-center gap-[3px] px-0.5" aria-hidden="true">
+                  {[0, 1, 2].map((i) => (
+                    <span key={i} className="inline-block h-[5px] w-[5px] rounded-full bg-primaryfg"
+                      style={{ animation: "aiDot 1s ease-in-out infinite", animationDelay: `${i * 0.16}s` }} />
+                  ))}
+                </span>
+              ) : (
+                <Icon name="sparkle" variant="solid" size={16} />
+              )}
+              <span className="text-[.82rem]">{busy ? "Thinking" : unread ? "Answer ready" : "Ask Glidna"}</span>
+              {unread && !busy ? (
+                <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-surface bg-danger" />
+              ) : null}
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Voice bar — mic tapped with the chat CLOSED. Deliberately minimal: a
+          level meter while you talk, then the transcript to confirm before it
+          sends. No transcript history, no controls; the page stays readable. */}
+      {micOnly && !open && (
+        <div className="fixed z-[1396] rounded-card border border-border bg-surface text-fg shadow-2xl"
+          style={{ left: "8px", right: "8px", maxWidth: 640, margin: "0 auto",
+            bottom: "calc(12px + env(safe-area-inset-bottom,0px))", padding: "10px 12px" }}>
+          {voicePreview ? (
+            <>
+              <div className="mb-2 text-[.72rem] text-muted">Send this to Glidna?</div>
+              <div className="mb-2.5 max-h-[26vh] overflow-y-auto text-[.92rem] leading-relaxed text-fg">{voicePreview}</div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => { const t = voicePreview; setVoicePreview(""); setMicOnly(false); micOnlyRef.current = false; send(t); }}
+                  className="rounded-xl border-none bg-primaryfill px-5 py-2.5 text-[.85rem] font-bold text-primaryfg cursor-pointer">Send</button>
+                <button onClick={() => { setVoicePreview(""); micOnlyRef.current = true; setTimeout(() => startRecording(), 40); }}
+                  className="rounded-xl border border-border bg-surface2 px-4 py-2.5 text-[.8rem] font-bold text-fg cursor-pointer">Redo</button>
+                {/* Keep the words rather than lose them — hands off to the full chat. */}
+                <button onClick={() => { setDraft(voicePreview); setVoicePreview(""); setMicOnly(false); micOnlyRef.current = false; setOpen(true); }}
+                  className="rounded-xl border border-border bg-surface2 px-4 py-2.5 text-[.8rem] font-bold text-fg cursor-pointer">Edit</button>
+                <button onClick={() => { setVoicePreview(""); setMicOnly(false); micOnlyRef.current = false; }}
+                  aria-label="Discard" className="ml-auto rounded-lg border border-border bg-surface p-2 text-muted cursor-pointer">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-[16px] h-[16px]">
+                    <line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" />
+                  </svg>
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-3 w-3 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-danger opacity-60" />
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-danger" />
+              </span>
+              <canvas ref={waveRef} width={220} height={28} className="h-[28px] flex-1 min-w-0" />
+              <span className="shrink-0 text-[.76rem] text-muted">{transcribing ? "Transcribing…" : "Listening…"}</span>
+              <button onClick={() => { if (recording) stopRecording(); else { setMicOnly(false); micOnlyRef.current = false; } }}
+                className="shrink-0 rounded-xl border-none bg-primaryfill px-4 py-2 text-[.8rem] font-bold text-primaryfg cursor-pointer">
+                {transcribing ? "…" : "Stop"}
+              </button>
+            </div>
+          )}
+          {error ? <div className="mt-1.5 text-[.72rem] text-danger">{error}</div> : null}
         </div>
       )}
 
