@@ -332,6 +332,17 @@ function weekWithLabels(week, labelMap) {
 // e.g. "how's #7K2M" — to pick a specific one when names collide. Deterministic:
 // the app and the AI compute the SAME code from the same id. MUST match
 // src/App.jsx refCode().
+// Meal type, accepted the way people and models actually write it (S165).
+// Every call site compared with strict equality against the lowercase list, so
+// "Breakfast" or " lunch " silently became NO meal type — the entry logged, but
+// it dropped out of the per-meal grouping on the dashboard. Fail-soft to "" is
+// still the fallback for genuine nonsense; this just stops case costing data.
+const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack"];
+function mealTypeOf(v, fallback) {
+  const t = String(v == null ? "" : v).trim().toLowerCase();
+  return MEAL_TYPES.includes(t) ? t : (fallback === undefined ? "" : fallback);
+}
+
 function refCode(id) {
   const s = String(id || "").replace(/[^a-zA-Z0-9]/g, "");
   return s ? s.slice(-4).toUpperCase() : "----";
@@ -2321,7 +2332,7 @@ async function runTool(name, input, ctx) {
     const re = /^\d{4}-\d{2}-\d{2}$/;
     const meal = {
       name: String(input.name || "").slice(0, 120),
-      mealType: ["breakfast", "lunch", "dinner", "snack"].includes(input.mealType) ? input.mealType : "snack",
+      mealType: mealTypeOf(input.mealType, "snack"),
       calories: Math.max(0, Math.round(Number(input.calories) || 0)),
       protein: Math.max(0, Math.round(Number(input.protein) || 0)),
       carbs: Math.max(0, Math.round(Number(input.carbs) || 0)),
@@ -2375,7 +2386,7 @@ async function runTool(name, input, ctx) {
   if (name === "log_meal") {
     const re = /^\d{4}-\d{2}-\d{2}$/;
     const date = re.test(input.date || "") ? input.date : ctx.today;
-    const mealType = ["breakfast", "lunch", "dinner", "snack"].includes(input.mealType) ? input.mealType : "";
+    const mealType = mealTypeOf(input.mealType);
     const meal = {
       id: randId("m"),
       name: String(input.name || "").slice(0, 120),
@@ -2462,7 +2473,7 @@ async function runTool(name, input, ctx) {
     // Same shape the app's own planner writes, so a plan made by chat and one
     // made by hand are indistinguishable to the UI.
     const build = () => items.map((it, i) => {
-      const mealType = ["breakfast", "lunch", "dinner", "snack"].includes(it.mealType) ? it.mealType : "";
+      const mealType = mealTypeOf(it.mealType);
       const o = { id: randId("p") + i, name: String(it.name || "").slice(0, 120), type: mealType,
         calories: Math.max(0, Math.round(Number(it.calories) || 0)),
         protein: Math.max(0, Math.round(Number(it.protein) || 0)),
@@ -2511,7 +2522,7 @@ async function runTool(name, input, ctx) {
     const byDate = {};
     for (const it of items) {
       const date = re.test(it.date || "") ? it.date : (batchDate || ctx.today);
-      const mealType = ["breakfast", "lunch", "dinner", "snack"].includes(it.mealType) ? it.mealType : "";
+      const mealType = mealTypeOf(it.mealType);
       const meal = { id: randId("m"), name: String(it.name || "").slice(0, 120), type: mealType,
         calories: Math.max(0, Math.round(Number(it.calories) || 0)),
         protein: Math.max(0, Math.round(Number(it.protein) || 0)),

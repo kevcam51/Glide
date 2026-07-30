@@ -36,7 +36,15 @@ const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const { StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/server/streamableHttp.js");
 const { z } = require("zod");
 const { buildTools, runTool } = require("./aitools");
+const { defineSecret } = require("firebase-functions/params");
 const { verifyAccessToken, RESOURCE_URL, CANONICAL_BASE } = require("./mcpauth");
+
+// search_food_db reaches FatSecret through the same proxy the app uses. The
+// secrets must be bound to THIS function too: unbound, process.env is simply
+// empty and the tool fails at runtime while looking perfectly correct in review
+// (the exact trap noted on aichat.js).
+const FATSECRET_PROXY_URL = defineSecret("FATSECRET_PROXY_URL");
+const FATSECRET_PROXY_SECRET = defineSecret("FATSECRET_PROXY_SECRET");
 
 // Origins allowed to reach this endpoint. Anthropic connects from its own
 // cloud (no Origin header on server-to-server calls), so a MISSING Origin is
@@ -65,9 +73,13 @@ const READ_TOOLS = new Set([
   "list_plans",
   "list_exercises",
   "list_notes",
-  // NOTE: search_food is deliberately RETIRED in buildTools (S92 — no accuracy
-  // gain at 2–2.5× the tokens), so it never reaches this set. Listed nowhere on
-  // purpose; if it's ever re-enabled for the app, add it here too (parity rule).
+  "search_food_db",   // live FatSecret label data (S165 — see the note below)
+  "fetch_link",       // reads a public URL server-side; SSRF-guarded in aitools
+  // NOTE: the RETIRED tool is `search_food` (S92 — the old USDA/Open Food Facts
+  // lookup, no accuracy gain at 2–2.5× the tokens); buildTools filters it out, so
+  // it never reaches this set. `search_food_db` is the LIVE FatSecret replacement
+  // and is very much exposed — the two names are one character apart and the old
+  // wording here read as though the whole food database were retired (S165).
   // trainer-only reads (buildTools already omits these for clients)
   "list_clients",
   "find_client",
@@ -92,6 +104,7 @@ const SCOPE_FOR_TOOL = {
   // write:logs — day-to-day diary entries
   log_meal: "write:logs",
   log_meals: "write:logs",
+  plan_meals: "write:logs",   // writes to FUTURE days, so not destructive (S165)
   remove_meal: "write:logs",
   log_workout: "write:logs",
   log_weigh_in: "write:logs",
@@ -111,6 +124,11 @@ const SCOPE_FOR_TOOL = {
   set_notification_prefs: "write:plan",
   // trainer — acting on a connected client
   send_client_request: "trainer",
+  // Feedback to the Glidna team, not user data. Scoped to write:logs simply
+  // because it is a write; a connector user who can log can also tell us what
+  // is missing — which is the whole value, since it arrives with the context of
+  // the moment they hit the limitation.
+  send_app_request: "write:logs",
 };
 // Tools that DELETE or overwrite user data — flagged so Claude shows a stronger
 // confirmation prompt before running them.
@@ -140,7 +158,48 @@ const MCP_DESCRIPTION_EXTRA = {
   log_meals: " Always prefer this over repeated log_meal calls; it saves the entire list in a single operation.",
   set_workout_schedule: " This REPLACES the schedule for any category you provide. Confirm with the user before calling.",
   remove_meal: " This permanently deletes the entry. Confirm with the user first.",
+  plan_meals: " These are PLANNED meals for future days, not food already eaten — they do not count"
+    + " toward any day's totals until the person ticks each one off. To record food someone HAS"
+    + " eaten, use log_meals instead.",
 };
+
+// JSON Schema → Zod, recursively (S165). The old mapper was flat: it collapsed
+// every array to z.array(z.any()) and every object to z.record(z.any()), and its
+// `default:` arm swallowed enums into a bare string. That erased exactly the
+// parts an external model needs most and failed SILENTLY on both ends —
+// `log_meals.meals` arrived shapeless so Claude guessed the item keys (`food`,
+// `kcal`) and runTool coerced the misses to empty, while a perfectly reasonable
+// mealType "Breakfast" failed runTool's exact-match check and filed a meal with
+// no meal type at all. The in-app model never saw either, because it gets the
+// real JSON Schema — which is precisely the drift the parity rule forbids.
+function toZod(spec) {
+  const s = spec || {};
+  // An enum is the strongest signal there is: hand the model the exact values
+  // rather than a string it has to guess the casing of.
+  if (Array.isArray(s.enum) && s.enum.length && s.enum.every((v) => typeof v === "string")) {
+    return z.enum(s.enum);
+  }
+  switch (s.type) {
+    case "number":
+    case "integer": return z.number();
+    case "boolean": return z.boolean();
+    case "array": return z.array(s.items ? toZod(s.items) : z.any());
+    case "object": {
+      const props = s.properties || {};
+      const keys = Object.keys(props);
+      if (!keys.length) return z.record(z.any());   // free-form map (e.g. micros passthrough)
+      const req = new Set(s.required || []);
+      const shape = {};
+      for (const [k, v] of Object.entries(props)) {
+        let zt = toZod(v);
+        if (v && v.description) zt = zt.describe(v.description);
+        shape[k] = req.has(k) ? zt : zt.optional();
+      }
+      return z.object(shape);
+    }
+    default: return z.string();
+  }
+}
 
 // Daily call caps. These are ABUSE BACKSTOPS, not a revenue lever — measured
 // cost is ~0.0013¢ per typical call (S112 costing, verified rates below), so
@@ -270,8 +329,12 @@ function buildServer(ctx, profile, db, scopes) {
         + `Today is ${ctx.today} (${ctx.weekday || "today"}) in the user's timezone. `
         + `When logging or reading, OMIT any date argument to mean today — only pass an explicit `
         + `date when the user names a different day, and say the date back to them when you do. `
-        + `Writes go to the signed-in account unless you pass a clientId, so when acting on behalf `
-        + `of a client always pass theirs.`,
+        + `Writes go to the signed-in account unless you target someone else, so when acting on `
+        + `behalf of a client always pass their id. A trainer's people live in TWO places: connected `
+        + `accounts (pass clientId) and the trainer's own plan files (pass localPlanId, never both at `
+        + `once) — a plan file is usually a real client who simply has no app account, and every read `
+        + `and write works the same on them. find_client searches both in one call and tells you which `
+        + `kind each match is.`,
     },
   );
 
@@ -286,22 +349,12 @@ function buildServer(ctx, profile, db, scopes) {
   });
 
   for (const def of defs) {
-    // The MCP SDK wants a Zod shape; our tools carry JSON Schema. Phase 1's
-    // read tools take simple scalar params, so we map them generically and
-    // let runTool do its own validation (it already hardens every input).
+    // The MCP SDK wants a Zod shape; our tools carry JSON Schema.
     const props = (def.input_schema && def.input_schema.properties) || {};
     const required = new Set((def.input_schema && def.input_schema.required) || []);
     const shape = {};
     for (const [key, spec] of Object.entries(props)) {
-      let zt;
-      switch (spec && spec.type) {
-        case "number":
-        case "integer": zt = z.number(); break;
-        case "boolean": zt = z.boolean(); break;
-        case "array": zt = z.array(z.any()); break;
-        case "object": zt = z.record(z.any()); break;
-        default: zt = z.string();
-      }
+      let zt = toZod(spec);
       if (spec && spec.description) zt = zt.describe(spec.description);
       shape[key] = required.has(key) ? zt : zt.optional();
     }
@@ -365,7 +418,8 @@ function buildServer(ctx, profile, db, scopes) {
   return server;
 }
 
-exports.mcp = onRequest({ cors: false, timeoutSeconds: 300 }, async (req, res) => {
+exports.mcp = onRequest({ cors: false, timeoutSeconds: 300,
+  secrets: [FATSECRET_PROXY_URL, FATSECRET_PROXY_SECRET] }, async (req, res) => {
   // Spec: validate Origin and reject a present-but-unknown one.
   const origin = req.get("origin");
   if (!originOk(origin)) {
