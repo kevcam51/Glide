@@ -17109,14 +17109,19 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
 
   // Lock the page behind the chat while it's open so swiping scrolls the CHAT,
   // not the background (mobile fix). Restored on close/unmount.
+  // EXCEPT when docked (S162): that mode exists precisely so you can read and
+  // scroll the page you're asking about while you type or talk to it. Locking
+  // the body there would leave the panel looking right and the whole feature
+  // pointless — you'd be staring at a page you can't move.
+  const lockPage = open && size !== "bar";
   useEffect(() => {
-    if (!open) return;
+    if (!lockPage) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = prev; };
-  }, [open]);
+  }, [lockPage]);
   useBackClose(open, () => setOpen(false));   // phone Back closes the chat
-  useBodyScrollLock(open); // iOS: don't let swipes scroll the page behind the chat
+  useBodyScrollLock(lockPage); // iOS: don't let swipes scroll the page behind the chat
   // Load boost eligibility when the chat opens.
   useEffect(() => {
     if (!open) return;
@@ -17643,13 +17648,29 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
           reliably, and an absolute child of a non-moving parent can't drift. */}
       {!open && (
         <div style={{ position: "fixed", inset: 0, zIndex: 1000, pointerEvents: "none" }}>
-          <button onClick={() => setOpen(true)} aria-label="Open AI assistant"
-            className="flex items-center gap-1.5 rounded-full border-none bg-primaryfill px-3 py-2.5 font-bold text-primaryfg shadow-lg cursor-pointer"
-            style={{ position: "absolute", pointerEvents: "auto",
-              right: "calc(16px + env(safe-area-inset-right,0px))", bottom: "calc(18px + env(safe-area-inset-bottom,0px))" }}>
-            <Icon name="sparkle" variant="solid" size={16} />
-            <span className="text-[.82rem]">Ask Glidna</span>
-          </button>
+          <div style={{ position: "absolute", pointerEvents: "auto", display: "flex", alignItems: "center", gap: 8,
+            right: "calc(16px + env(safe-area-inset-right,0px))", bottom: "calc(18px + env(safe-area-inset-bottom,0px))" }}>
+            {/* Talk without covering the page (S162, Kevin): opens DOCKED and
+                starts listening, so the question you're asking about is still on
+                screen while you ask it. Premium-gated like the rest of the AI —
+                a locked account gets the panel (and its upgrade card) instead. */}
+            <button
+              onClick={() => { setOpen(true); setSize("bar"); if (premium) setTimeout(() => startRecording(), 60); }}
+              aria-label="Talk to Glidna" title="Talk to Glidna — keeps the page visible"
+              className="flex items-center justify-center rounded-full border-none bg-surface2 text-primary shadow-lg cursor-pointer"
+              style={{ width: 44, height: 44, border: "1px solid var(--color-border)" }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[19px] h-[19px]">
+                <rect x="9" y="2" width="6" height="11" rx="3" />
+                <path d="M5 10v1a7 7 0 0 0 14 0v-1" />
+                <line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+            </button>
+            <button onClick={() => setOpen(true)} aria-label="Open AI assistant"
+              className="flex items-center gap-1.5 rounded-full border-none bg-primaryfill px-3 py-2.5 font-bold text-primaryfg shadow-lg cursor-pointer">
+              <Icon name="sparkle" variant="solid" size={16} />
+              <span className="text-[.82rem]">Ask Glidna</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -17664,6 +17685,15 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
             bottom: "calc(10px + env(safe-area-inset-bottom,0px))",
             left: "10px", right: "10px",
             maxWidth: 900, margin: "0 auto",
+          } : size === "bar" ? {
+            // Docked composer (S162, Kevin): the panel stops covering the screen
+            // so you can read and scroll the page you're asking ABOUT while you
+            // type or talk. Height is driven by content and capped at a third of
+            // the viewport — past that the transcript scrolls inside.
+            left: "8px", right: "8px",
+            bottom: "calc(8px + env(safe-area-inset-bottom,0px))",
+            maxWidth: 900, margin: "0 auto",
+            maxHeight: "33vh",
           } : {
             right: "calc(12px + env(safe-area-inset-right,0px))",
             bottom: "calc(12px + env(safe-area-inset-bottom,0px))",
@@ -17674,7 +17704,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
           }}>
           {/* Header — symmetric 3 columns (icon | centered title | controls) so
               the title/subtitle sit in the middle of the bar. Sides are equal width. */}
-          <div className="flex items-center border-b border-border bg-surface2 px-3 py-3">
+          <div className={`flex items-center border-b border-border bg-surface2 px-3 ${size === "bar" ? "py-1.5" : "py-3"}`}>
             <div className="flex w-[72px] shrink-0 items-center">
               {premium && (
                 <button onClick={() => setHistoryOpen(true)} disabled={busy} aria-label="Past chats" title="Past chats"
@@ -17690,7 +17720,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               <span className="flex items-center gap-1.5 font-display text-sm uppercase tracking-wide text-primary">
                 <Icon name="sparkle" variant="solid" size={16} color="var(--accent)" />Glidna AI
               </span>
-              <span className="max-w-full truncate text-[.68rem] text-muted">Nutrition &amp; fitness assistant</span>
+              {size !== "bar" && <span className="max-w-full truncate text-[.68rem] text-muted">Nutrition &amp; fitness assistant</span>}
             </div>
             <div className="flex w-[72px] shrink-0 items-center justify-end gap-2">
             <button onClick={() => setSize(size === "full" ? "compact" : "full")}
@@ -17701,6 +17731,17 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 {size === "full"
                   ? <><path d="M9 3H5a2 2 0 0 0-2 2v4" /><path d="M15 3h4a2 2 0 0 1 2 2v4" /><path d="M9 21H5a2 2 0 0 1-2-2v-4" /><path d="M15 21h4a2 2 0 0 0 2-2v-4" /></>
                   : <><path d="M3 9V5a2 2 0 0 1 2-2h4" /><path d="M21 9V5a2 2 0 0 0-2-2h-4" /><path d="M3 15v4a2 2 0 0 0 2 2h4" /><path d="M21 15v4a2 2 0 0 1-2 2h-4" /></>}
+              </svg>
+            </button>
+            {/* Dock to the bottom — keeps the chat usable while the page stays
+                readable behind it. */}
+            <button onClick={() => setSize(size === "bar" ? "compact" : "bar")}
+              aria-label={size === "bar" ? "Undock chat" : "Dock chat to bottom"}
+              title={size === "bar" ? "Back to the card" : "Dock to bottom — keep reading the page"}
+              className="flex items-center justify-center rounded-lg border border-border bg-surface p-1.5 text-primary cursor-pointer hover:bg-surface2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[18px] h-[18px]">
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                {size === "bar" ? <path d="M3 10h18" /> : <path d="M3 15h18" />}
               </svg>
             </button>
             <button onClick={() => setOpen(false)} aria-label="Back" className="flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
@@ -18025,7 +18066,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 {busy ? "…" : "Send"}
               </button>
             </div>
-            <div className="mt-1.5 text-[.66rem] text-muted">Speak or snap a meal. AI estimates can be off — confirm important numbers.</div>
+            {size !== "bar" && <div className="mt-1.5 text-[.66rem] text-muted">Speak or snap a meal. AI estimates can be off — confirm important numbers.</div>}
           </div>
           {/* Paste-from-AI import overlay (works-with-your-AI, phase 1) */}
           {pasteOpen && (
