@@ -9786,7 +9786,7 @@ const fmtClock = (t) => {
 // calendar renders IN-FLOW (it *is* the page, which must scroll normally); a
 // lock here froze the whole page on Android. ClientHome's portal-overlay usage
 // locks from the caller instead (useBodyScrollLock(showCalendar) there).
-function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods, savedFoods, onToggleSaveFood, onRemoveRecentFood, onRemoveSavedFood, onLogFoods, meUid }) {
+function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods, savedFoods, onToggleSaveFood, onRemoveRecentFood, onRemoveSavedFood, onLogFoods, onSaveMeasurementsFor, meUid }) {
   // Booked training sessions (S100) — shown alongside the logging data so the
   // calendar answers "when am I training?" as well as "what did I eat?".
   const [calSessions, setCalSessions] = useState([]);
@@ -9814,6 +9814,11 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   const [dayProt, setDayProt] = useState({});             // date -> logged protein g (week macro adherence)
   const [dayWear, setDayWear] = useState({});             // date -> {active,steps,total,source,manual} | null
   const [measOpen, setMeasOpen] = useState(false);        // day view: measurements drawer
+  const [measDraft, setMeasDraft] = useState({});         // day view: in-progress tape values
+  const [measMetric, setMeasMetric] = useState(null);     // day view: which site the trend shows
+  // Drop half-typed tape values when the selected day changes, so a number meant
+  // for Monday can't appear pre-filled under Tuesday and be saved to it on blur.
+  useEffect(() => { setMeasDraft({}); }, [sel]);
   // date -> did the person actually EAT that day. A day document exists for any
   // reason at all — a weigh-in, or a tracker sync writing 90 days of watch data —
   // so "a doc exists" is not "food was logged". Once the 90-day wearable backfill
@@ -10418,6 +10423,77 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                   calories: null, hitTarget: null, workedOut: ci.workedOut ?? null, mood: ci.mood ?? null,
                   notes: ci.notes || "", bodyFat: ci.bodyFat ?? null, loggedBy: "calendar", isFuturePlan: sel > todayKey });
               }} />
+              {/* Tape measurements for THIS date + a trend for whichever site you
+                  pick (S161, Kevin). mergeMeasurements is already date-keyed and
+                  merges into any existing entry, so logging a single site here
+                  can't wipe the others recorded that day. */}
+              {onSaveMeasurementsFor && (() => {
+                const entries = [...(data.measurements || [])]
+                  .filter((e) => e && e.date).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                const dayEntry = entries.find((e) => e.date === sel) || {};
+                // Takes the value from the EVENT, not from measDraft. Reading
+                // component state here made the save depend on a re-render having
+                // landed before the handler ran — a number typed and then blurred
+                // was silently dropped. The input already holds the truth.
+                const commit = (f, raw) => {
+                  const str = (raw ?? "").toString().trim();
+                  if (str === "") return;
+                  const v = parseFloat(str);
+                  if (!(v > 0)) return;
+                  onSaveMeasurementsFor(sel, { [f]: v });
+                  setMeasDraft((prev) => { const n = { ...prev }; delete n[f]; return n; });
+                };
+                // Only offer a trend for sites with enough history to be a line.
+                const chartable = MEASUREMENT_FIELDS.filter((f) => entries.filter((e) => Number(e[f]) > 0).length >= 2);
+                const active = chartable.includes(measMetric) ? measMetric : chartable[0] || null;
+                const points = active
+                  ? entries.filter((e) => Number(e[active]) > 0)
+                      .map((e) => ({ date: e.date, timestamp: e.timestamp, weight: Number(e[active]) }))
+                  : [];
+                return (
+                  <div style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
+                    <div style={{ fontSize: ".72rem", fontWeight: 700, textTransform: "uppercase",
+                      letterSpacing: ".5px", color: "var(--muted)", marginBottom: 8 }}>Body measurements (in)</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(96px,1fr))", gap: 8 }}>
+                      {MEASUREMENT_FIELDS.map((f) => {
+                        const saved = Number(dayEntry[f]) > 0 ? String(dayEntry[f]) : "";
+                        const val = measDraft[f] !== undefined ? measDraft[f] : saved;
+                        return (
+                          <div key={f}>
+                            <div style={{ fontSize: ".66rem", color: "var(--muted)", marginBottom: 3 }}>{MEASUREMENT_LABELS[f]}</div>
+                            <input value={val} inputMode="decimal" placeholder="—"
+                              onChange={(e) => setMeasDraft((prev) => ({ ...prev, [f]: e.target.value }))}
+                              onBlur={(e) => commit(f, e.target.value)}
+                              onKeyDown={(e) => { if (e.key === "Enter") commit(f, e.target.value); }}
+                              style={{ width: "100%", padding: "8px 9px", borderRadius: 7, border: "1px solid var(--border)",
+                                background: "var(--s2)", color: "var(--text)", fontSize: ".88rem",
+                                fontFamily: "'Sora',sans-serif" }} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ fontSize: ".66rem", color: "var(--muted)", marginTop: 6 }}>Saves as you leave each box, or on Enter.</div>
+                    {chartable.length > 0 && (
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                          {chartable.map((f) => (
+                            <button key={f} onClick={() => setMeasMetric(f)}
+                              style={{ padding: "5px 10px", borderRadius: 999, fontSize: ".72rem", fontWeight: 700,
+                                cursor: "pointer", fontFamily: "inherit",
+                                border: active === f ? "1px solid var(--accent)" : "1px solid var(--border)",
+                                background: active === f ? "rgba(8,220,224,.12)" : "transparent",
+                                color: active === f ? "var(--accent)" : "var(--muted)" }}>
+                              {MEASUREMENT_LABELS[f]}
+                            </button>
+                          ))}
+                        </div>
+                        <ProgressChart checkIns={points} showValues pxPerPoint={64} surfaceless hideAdherence
+                          unit="in" pointNoun="entry" label={`${MEASUREMENT_LABELS[active]} Trend`} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -10487,7 +10563,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   savedFoods, onToggleSaveFood, onRemoveSavedFood, onLogFoods, weekSummary, recentWearable, history, onRefresh, isRemote,
   savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onSetPlanned, onPlanDays, onEatPlanned,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
-  onSaveMeasurements, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise,
+  onSaveMeasurements, onSaveMeasurementsFor, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise,
   onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetHideCompliance, meUid: dashMeUid }) {
 
   // Swipe-down to refresh the daily view (S104) — reuses the existing onRefresh
@@ -10896,6 +10972,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           onSaveCheckIn={onSaveCheckIn} onDeleteCheckIn={onDeleteCheckIn} recentFoods={recentFoods}
           savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveRecentFood={onRemoveRecentFood} onRemoveSavedFood={onRemoveSavedFood}
           onLogFoods={onLogFoods}
+          onSaveMeasurementsFor={onSaveMeasurementsFor}
           meUid={dashMeUid} />
       </div>
     );
@@ -23864,6 +23941,7 @@ export default function App() {
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
               onSaveMeasurements={(vals)=>setDataAndSave(p=>{ const next={...p}; mergeMeasurements(next, vals, viewDate, activeRemoteUid ? "trainer" : "client"); return next; })}
+              onSaveMeasurementsFor={(dateKey, vals)=>setDataAndSave(p=>{ const next={...p}; mergeMeasurements(next, vals, dateKey, activeRemoteUid ? "trainer" : "client"); return next; })}
               onDeleteMeasurement={(ts)=>setDataAndSave(p=>({...p, measurements:(p.measurements||[]).filter(e=>e && e.timestamp!==ts)}))}
               onToggleBodyFat={(show)=>setDataAndSave(p=>({...p, hideBodyFat: !show}))}
               onSetGoalWeight={(lbs)=>setDataAndSave(p=>({...p, goalWeight: lbs}))}
