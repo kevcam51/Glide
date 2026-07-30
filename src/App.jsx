@@ -407,6 +407,25 @@ function projectedLoss(weeks, weeklyDeficitCal) {
 // Formulas verified + documented in docs/METRICS-PLAN.md; the server mirrors
 // these in functions/aitools.js (keep in sync). All measurements in INCHES.
 const MEASUREMENT_FIELDS = ["waist", "hips", "neck", "thigh", "calf", "forearm", "wrist"];
+// Grouped by WHAT MOVES, not by what the body-fat formula needs (S161, Kevin:
+// neck read as clutter next to waist). Deliberately not split "body-fat inputs
+// vs the rest" — that set is gender-dependent (for women thigh and calf feed the
+// Bailey formula), so such a split would mislabel half of them. Circumference of
+// neck, forearm and wrist barely changes with body composition; they're there so
+// the tape can produce a body-fat % without calipers. Which ones your own
+// estimate uses is marked per-field by bfFieldsFor().
+const MEASUREMENT_GROUPS = [
+  { key: "progress", label: "Track your progress", fields: ["waist", "hips", "thigh", "calf"],
+    hint: "" },
+  { key: "frame", label: "Frame", fields: ["neck", "forearm", "wrist"],
+    hint: "These barely move — they feed the tape body-fat estimate." },
+];
+// Which tape sites the body-fat estimate actually uses, by gender. Shared by the
+// measurements hub and the calendar drawer so the two can never disagree.
+const bfFieldsFor = (gender) => new Set(
+  gender === "male" ? ["waist", "hips", "neck", "forearm", "wrist"]
+  : gender === "female" ? ["waist", "hips", "neck", "thigh", "calf", "wrist"]
+  : []);
 const MEASUREMENT_LABELS = { waist: "Waist", hips: "Hips", neck: "Neck",
   thigh: "Thigh", calf: "Calf", forearm: "Forearm", wrist: "Wrist" };
 // Skinfold CALIPER sites (mm) for the Jackson-Pollock 3-site method — chest/
@@ -10444,7 +10463,11 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                   setMeasDraft((prev) => { const n = { ...prev }; delete n[f]; return n; });
                 };
                 // Only offer a trend for sites with enough history to be a line.
-                const chartable = MEASUREMENT_FIELDS.filter((f) => entries.filter((e) => Number(e[f]) > 0).length >= 2);
+                const bfFields = bfFieldsFor(data.gender);
+                // Chips follow the grouped order, so the sites worth charting come
+                // first instead of neck sitting third.
+                const chartOrder = MEASUREMENT_GROUPS.flatMap((g) => g.fields);
+                const chartable = chartOrder.filter((f) => entries.filter((e) => Number(e[f]) > 0).length >= 2);
                 const active = chartable.includes(measMetric) ? measMetric : chartable[0] || null;
                 const points = active
                   ? entries.filter((e) => Number(e[active]) > 0)
@@ -10454,25 +10477,39 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                   <div style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
                     <div style={{ fontSize: ".72rem", fontWeight: 700, textTransform: "uppercase",
                       letterSpacing: ".5px", color: "var(--muted)", marginBottom: 8 }}>Body measurements (in)</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(96px,1fr))", gap: 8 }}>
-                      {MEASUREMENT_FIELDS.map((f) => {
-                        const saved = Number(dayEntry[f]) > 0 ? String(dayEntry[f]) : "";
-                        const val = measDraft[f] !== undefined ? measDraft[f] : saved;
-                        return (
-                          <div key={f}>
-                            <div style={{ fontSize: ".66rem", color: "var(--muted)", marginBottom: 3 }}>{MEASUREMENT_LABELS[f]}</div>
-                            <input value={val} inputMode="decimal" placeholder="—"
-                              onChange={(e) => setMeasDraft((prev) => ({ ...prev, [f]: e.target.value }))}
-                              onBlur={(e) => commit(f, e.target.value)}
-                              onKeyDown={(e) => { if (e.key === "Enter") commit(f, e.target.value); }}
-                              style={{ width: "100%", padding: "8px 9px", borderRadius: 7, border: "1px solid var(--border)",
-                                background: "var(--s2)", color: "var(--text)", fontSize: ".88rem",
-                                fontFamily: "'Sora',sans-serif" }} />
-                          </div>
-                        );
-                      })}
+                    {MEASUREMENT_GROUPS.map((g, gi) => (
+                      <div key={g.key} style={{ marginTop: gi ? 12 : 0 }}>
+                        <div style={{ fontSize: ".68rem", fontWeight: 700, color: "var(--text-secondary)", marginBottom: 2 }}>{g.label}</div>
+                        {g.hint ? <div style={{ fontSize: ".64rem", color: "var(--muted)", marginBottom: 6 }}>{g.hint}</div> : null}
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(96px,1fr))", gap: 8 }}>
+                          {g.fields.map((f) => {
+                            const saved = Number(dayEntry[f]) > 0 ? String(dayEntry[f]) : "";
+                            const val = measDraft[f] !== undefined ? measDraft[f] : saved;
+                            return (
+                              <div key={f}>
+                                <div style={{ fontSize: ".66rem", color: "var(--muted)", marginBottom: 3 }}>
+                                  {MEASUREMENT_LABELS[f]}
+                                  {/* Same asterisk the measurements hub uses, from the
+                                      same gender-aware set — so the two agree. */}
+                                  {bfFields.has(f) ? <span style={{ color: "var(--accent)", fontWeight: 700 }}>*</span> : null}
+                                </div>
+                                <input value={val} inputMode="decimal" placeholder="—"
+                                  onChange={(e) => setMeasDraft((prev) => ({ ...prev, [f]: e.target.value }))}
+                                  onBlur={(e) => commit(f, e.target.value)}
+                                  onKeyDown={(e) => { if (e.key === "Enter") commit(f, e.target.value); }}
+                                  style={{ width: "100%", padding: "8px 9px", borderRadius: 7, border: "1px solid var(--border)",
+                                    background: "var(--s2)", color: "var(--text)", fontSize: ".88rem",
+                                    fontFamily: "'Sora',sans-serif" }} />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    <div style={{ fontSize: ".66rem", color: "var(--muted)", marginTop: 8 }}>
+                      Saves as you leave each box, or on Enter.
+                      {bfFields.size > 0 ? <> <span style={{ color: "var(--accent)", fontWeight: 700 }}>*</span> used in your body-fat estimate.</> : null}
                     </div>
-                    <div style={{ fontSize: ".66rem", color: "var(--muted)", marginTop: 6 }}>Saves as you leave each box, or on Enter.</div>
                     {chartable.length > 0 && (
                       <div style={{ marginTop: 12 }}>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
@@ -13523,10 +13560,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   // The union of fields either formula uses, per gender — starred in the grid
   // (S99, Kevin: mark which measurements the body-fat % actually needs; the
   // sets differ by gender, so the asterisks follow the plan's gender).
-  const bfNeededFields = new Set(
-    d.gender === "male" ? ["waist", "hips", "neck", "forearm", "wrist"]
-    : d.gender === "female" ? ["waist", "hips", "neck", "thigh", "calf", "wrist"]
-    : []);
+  const bfNeededFields = bfFieldsFor(d.gender);
 
   const save = () => {
     // Also commit a typed-but-unlogged weight, so tapping "Save" never drops it.
