@@ -7943,9 +7943,10 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
     </div>, document.body);
 }
 
-// Copy a whole meal from a PREVIOUS day into the current day's same section
-// (MyFitnessPal-style — for foods you eat over and over). Lists the recent days
-// that logged something in this section; tap one to copy all its foods in.
+// Copy a whole meal into the section you're standing in (MyFitnessPal-style —
+// for foods you eat over and over). Pick the source MEAL TYPE and the DAY: any
+// type, any day, including TODAY — so today's breakfast can become today's
+// lunch, and yesterday's lunch can become tonight's dinner (S166, Kevin).
 // Works wherever MealLog renders: today (dashboard) or any date (calendar Day
 // view), so you can also paste onto a FUTURE day.
 function CopyMealModal({ sectionLabel, targetType, dateKey, onReadDay, onListLoggedDays, onCopy, onClose }) {
@@ -7961,7 +7962,11 @@ function CopyMealModal({ sectionLabel, targetType, dateKey, onReadDay, onListLog
     let cancelled = false;
     (async () => {
       try {
-        const keys = ((await onListLoggedDays()) || []).filter((k) => k && k !== dateKey);
+        // Today is INCLUDED now (it used to be filtered out), because copying
+        // breakfast into lunch on the same day is the common case. The one
+        // combination that makes no sense — the very section being added to —
+        // is dropped in `days` below, where the browsed type is known.
+        const keys = ((await onListLoggedDays()) || []).filter(Boolean);
         const cand = keys.sort().reverse().slice(0, 24); // newest-first, bounded reads
         const logs = await Promise.all(cand.map((k) => onReadDay(k).then((log) => ({ k, log })).catch(() => null)));
         const out = [];
@@ -7983,6 +7988,8 @@ function CopyMealModal({ sectionLabel, targetType, dateKey, onReadDay, onListLog
   const days = (() => {
     const out = [];
     for (const d of rawDays) {
+      // Don't offer to copy a section onto itself.
+      if (d.date === dateKey && viewKey === initKey) continue;
       const foods = d.meals.filter(typeMatch);
       if (foods.length) out.push({ date: d.date, foods, cals: foods.reduce((s, m) => s + (m.calories || 0), 0) });
       if (out.length >= 14) break;
@@ -8016,12 +8023,18 @@ function CopyMealModal({ sectionLabel, targetType, dateKey, onReadDay, onListLog
           display: "flex", flexDirection: "column", gap: "12px" }}>
         <div style={{ display: "flex", justifyContent: "center", position: "relative", paddingLeft: 92, paddingRight: 92, alignItems: "center", gap: "10px" }}>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text)" }}>Copy a previous meal</div>
+            <div style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text)" }}>Copy a meal</div>
             <div style={{ fontSize: ".7rem", color: "var(--accent)", fontWeight: 700, marginTop: "2px" }}>adds to {sectionLabel}</div>
           </div>
           <button onClick={onClose} aria-label="Back" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display:"flex", alignItems:"center", gap:6, border:"1px solid var(--border)", background:"var(--surface)", color:"var(--text)", borderRadius:999, padding:"6px 12px 6px 9px", cursor:"pointer", fontSize:".8rem", fontWeight:700, fontFamily:"inherit", flexShrink:0 }}><Icon name="back" size={16} color="var(--accent)" />Back</button>
         </div>
-        {/* Meal-type toggles — browse any type; the copy still lands in {sectionLabel}. */}
+        {/* Meal-type toggles — browse any type; the copy still lands in
+            {sectionLabel}. Labelled since S166: unlabelled chips read as a
+            filter, so Kevin reasonably assumed dinner could only come from
+            another dinner. */}
+        <div style={{ fontSize: ".7rem", color: "var(--muted)", fontWeight: 700, marginBottom: -4 }}>
+          Copy from which meal?
+        </div>
         <div style={{ display: "flex", gap: 5, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
           {COPY_TYPES.map(([k, label]) => (
             <button key={k} onClick={() => setViewKey(k)}
@@ -8035,7 +8048,7 @@ function CopyMealModal({ sectionLabel, targetType, dateKey, onReadDay, onListLog
         {loading ? (
           <div style={{ fontSize: ".82rem", color: "var(--muted)", padding: "10px 0" }}>Looking through your recent days…</div>
         ) : days.length === 0 ? (
-          <div style={{ fontSize: ".82rem", color: "var(--muted)", padding: "10px 0" }}>No previous {viewLabel.toLowerCase()} entries to copy yet — log one and it'll show up here.</div>
+          <div style={{ fontSize: ".82rem", color: "var(--muted)", padding: "10px 0" }}>No {viewLabel.toLowerCase()} entries to copy yet — log one and it'll show up here.</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             {days.map(({ date, foods, cals }) => (
@@ -9379,7 +9392,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
             <button style={addBtn} onClick={() => openForm(t)}>+ Add food to {t}</button>
             {canCopy && (
               <button onClick={() => setCopySection({ label: t, type: t })} style={copyLink}>
-                <Icon name="copy" size={12} /> Copy a previous meal
+                <Icon name="copy" size={12} /> Copy from another meal
               </button>
             )}
           </div>
@@ -9400,7 +9413,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
           <button style={addBtn} onClick={() => openForm("other")}>+ Add a quick entry</button>
           {canCopy && (
             <button onClick={() => setCopySection({ label: "Other", type: "" })} style={copyLink}>
-              <Icon name="copy" size={12} /> Copy a previous meal
+              <Icon name="copy" size={12} /> Copy from another meal
             </button>
           )}
         </div>
