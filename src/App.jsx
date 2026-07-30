@@ -10728,6 +10728,13 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const [ciMood, setCiMood] = useState(null);
   const [ciNote, setCiNote] = useState("");
   const [ciSaved, setCiSaved] = useState(false);
+  // A day already checked in collapses to a summary; this re-opens it for edits.
+  const [ciEditing, setCiEditing] = useState(false);
+  // Notes grow with the text rather than scrolling inside two fixed lines.
+  const ciGrow = (el) => { if (!el) return; el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 220) + "px"; };
+  // Switching days must not carry a half-written note (or an open editor) across
+  // to another date — it would look pre-filled and save to the wrong day.
+  useEffect(() => { setCiEditing(false); setCiNote(""); setCiMood(null); setCiSaved(false); }, [viewDate]);
   const [burnDraft, setBurnDraft] = useState("");
   const [burnKind, setBurnKind] = useState("active"); // "active" | "total"
   // burnKind decides what the NEXT save writes, so it has to follow the stored
@@ -12448,10 +12455,37 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
             notes: ciNote.trim() ? ciNote.trim() : (base.notes || ""),
           });
           setCiSaved(true);
+          setCiEditing(false);   // collapse back to the summary
           setToast({ msg: "Checked in" });
           setTimeout(() => setCiSaved(false), 2200);
         };
         const already = existing && (existing.mood != null || (existing.notes || "").trim());
+        // Once a day is closed out it collapses to a one-line summary — the job is
+        // done, and a filled-in form sitting open invites re-doing it. Tapping
+        // Edit re-opens it seeded with what was saved.
+        if (already && !ciEditing) {
+          const savedNote = (existing.notes || "").trim();
+          return (
+            <div className="card" style={{ padding:"12px 14px", marginBottom:"14px",
+              display:"flex", alignItems:"center", gap:"10px" }}>
+              <Icon name="check" size={17} color="var(--green)" />
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:".84rem", color:"var(--text)", fontWeight:700 }}>
+                  Checked in{viewIsToday ? " today" : ` · ${dayLabelFor(viewDate, todayKeyProp || "")}`}
+                  {existing.mood != null ? <span style={{ color:"var(--muted)", fontWeight:400 }}> · energy {existing.mood + 1}/5</span> : null}
+                </div>
+                {savedNote ? (
+                  <div style={{ fontSize:".74rem", color:"var(--muted)", marginTop:2,
+                    overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{savedNote}</div>
+                ) : null}
+              </div>
+              <button onClick={() => { setCiEditing(true); setCiNote(savedNote); setCiMood(existing.mood ?? null); }}
+                style={{ flexShrink:0, background:"transparent", border:"1px solid var(--border)", borderRadius:999,
+                  padding:"6px 12px", fontSize:".74rem", fontWeight:700, fontFamily:"inherit",
+                  color:"var(--accent)", cursor:"pointer" }}>Edit</button>
+            </div>
+          );
+        }
         return (
           <div className="card" style={{ padding:"14px", marginBottom:"14px" }}>
             <div style={{ display:"flex", alignItems:"center", gap:"8px", marginBottom:"4px" }}>
@@ -12485,10 +12519,12 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                 Saved note: <span style={{ color:"var(--text-secondary)" }}>{existing.notes}</span>
               </div>
             ) : null}
-            <input value={ciNote} onChange={(e) => setCiNote(e.target.value)}
+            <textarea value={ciNote} rows={2} ref={ciGrow}
+              onChange={(e) => { setCiNote(e.target.value); ciGrow(e.target); }}
               placeholder="Notes (optional)"
               style={{ width:"100%", padding:"9px 10px", borderRadius:"7px", border:"1.5px solid var(--border)",
-                background:"var(--surface)", color:"var(--text)", fontSize:".85rem", fontFamily:"inherit", marginBottom:"10px" }} />
+                background:"var(--surface)", color:"var(--text)", fontSize:".85rem", fontFamily:"inherit",
+                marginBottom:"10px", resize:"none", overflowY:"auto", display:"block", lineHeight:1.45 }} />
             <button onClick={saveCheckIn} disabled={ciSaved}
               style={{ width:"100%", padding:"11px", borderRadius:"8px", border:"none", fontFamily:"inherit",
                 fontSize:".85rem", fontWeight:700, cursor: ciSaved ? "default" : "pointer",
