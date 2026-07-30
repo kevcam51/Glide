@@ -2272,3 +2272,38 @@ prompt, **notch/safe-area** header fix, taller header so the menu button clears 
   `main` auto-deploys Vercel; **Cloud Functions need explicit `firebase deploy`** (NOT via push).
 - Test accounts: trainer `trainer.uitest@calorieiq-test.com` / client `client.uitest@…` (Casey),
   `TestPass123`. Drive the preview signed-in for callables/AI.
+
+---
+
+## NEXT UP — voice routing: pick the destination BEFORE sending (design agreed with Kevin, S163)
+
+**The problem this solves.** A closed-mic voice message currently posts into whatever chat was last
+open, and that chat may already carry an "active subject" (a client the AI resolved earlier, see
+`activeTargetRef`). So "log 2 eggs" can silently attach to the WRONG client's account. Silent
+mis-writes to client data are the worst failure mode in this app — the fix is about making the
+destination visible, not about better guessing.
+
+**Agreed behaviour** (Kevin's synthesis; he chose the pre-send list over an after-the-fact echo,
+because it turns a correction into a choice and never requires opening the chat):
+
+1. **Default = NEW chat.** Structurally cannot inherit a stale client context. No friction.
+2. **Name / id detected in the transcript → show the candidates at the bottom of the voice bar**
+   before it sends. Tap one to send there. Matches on client name AND user/plan id, so "log this
+   for Casey" or an id both narrow the list.
+3. **"Send to ▾" next to Send** → full picker (all chats + New chat). Deliberately a visible
+   control, NOT a hidden long-press — nobody discovers a 2-second hold. Long-press can stay as an
+   accelerator on top, never as the only route.
+4. **Always state the destination** in the confirmation, whichever route was taken.
+
+**Then (separate, build after the above):** one voice message naming several clients and several
+actions. Mechanically fine — the tools already take a per-call `clientId`, so it's N calls with
+different targets — but it MUST show all destinations before committing, or it's the silent
+mis-write risk multiplied by N.
+
+**Where the code is:** voice bar + preview in `AIChatPanel` (`micOnly` / `voicePreview` / `send()`
+takes an override string). Chat list = `caliq-ai-chats` index; per-chat thread = `caliq-ai-chat-{id}`.
+Read markers already persist per chat id in localStorage `glidna-chat-seen` (S163c) — the history
+drawer can reuse that for a per-chat unread dot, which Kevin also wants.
+
+**Confirmed working, don't re-litigate:** mic capture quality + the 10s pause window + 2-min ceiling
+were device-tested by Kevin (S162e) and are good. Leave the OPEN chat's voice UI as it is (his call).
