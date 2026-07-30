@@ -17698,18 +17698,23 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   };
   useEffect(() => { autoGrowTextarea(); }, [draft, open]);
 
-  const send = async (overrideText) => {
+  const send = async (overrideText, opts) => {
     // overrideText is a string only for programmatic sends (e.g. paste-from-AI
     // import). When called as an onClick handler the arg is an event — ignore it.
     const isOverride = typeof overrideText === "string";
     const text = (isOverride ? overrideText : draft).trim();
     const imgs = isOverride ? [] : pendingImages;
+    // fresh: start the thread from empty rather than from `messages`. newChat()
+    // resets that state, but this closure still holds the PREVIOUS array — so a
+    // send fired straight after it would carry the old conversation (and its
+    // client context) into the new chat, which is the whole thing we're avoiding.
+    const fresh = !!(opts && opts.fresh);
     if (!premium) return; // trial expired — the lock panel is showing; server enforces too
     if ((!text && !imgs.length) || busy) return;
     setError("");
     setBoost((b) => (b === "granted" || b === "already" ? null : b)); // clear settled boost cards on the next send
     setUltraOffer(false); // clear any Ultra upsell on the next send
-    const next = [...messages, { role: "user", content: text, images: imgs.length ? imgs : undefined }];
+    const next = [...(fresh ? [] : messages), { role: "user", content: text, images: imgs.length ? imgs : undefined }];
     setMessages(next);
     if (!isOverride) setDraft("");
     setPendingImages([]);
@@ -17900,7 +17905,11 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               <div className="mb-2 text-[.72rem] text-muted">Send this to Glidna?</div>
               <div className="mb-2.5 max-h-[26vh] overflow-y-auto text-[.92rem] leading-relaxed text-fg">{voicePreview}</div>
               <div className="flex items-center gap-2">
-                <button onClick={() => { const t = voicePreview; setVoicePreview(""); setMicOnly(false); micOnlyRef.current = false; send(t); }}
+                {/* A voice note always starts a NEW chat (S163e). Sending it into
+                    whatever chat happened to be open meant inheriting that chat's
+                    pinned client — so "log 2 eggs" could land on the wrong
+                    person's account with nothing on screen to reveal it. */}
+                <button onClick={() => { const t = voicePreview; setVoicePreview(""); setMicOnly(false); micOnlyRef.current = false; newChat(); send(t, { fresh: true }); }}
                   className="rounded-xl border-none bg-primaryfill px-5 py-2.5 text-[.85rem] font-bold text-primaryfg cursor-pointer">Send</button>
                 <button onClick={() => { setVoicePreview(""); micOnlyRef.current = true; setTimeout(() => startRecording(), 40); }}
                   className="rounded-xl border border-border bg-surface2 px-4 py-2.5 text-[.8rem] font-bold text-fg cursor-pointer">Redo</button>
