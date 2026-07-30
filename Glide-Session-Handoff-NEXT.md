@@ -2275,7 +2275,41 @@ prompt, **notch/safe-area** header fix, taller header so the menu button clears 
 
 ---
 
-## Unconnected plans ARE clients (S165) — code done, ⚠️ NOT DEPLOYED YET
+## Unconnected plans ARE clients (S165) — DEPLOYED & PUSHED (`1f1e4ad`)
+
+**Deployed:** aiChat, aiChatStream, logMeal, setWorkoutSchedule, **mcp** — all five updated
+cleanly. Frontend pushed to `main` (Vercel). ⚠️ **The "deploy all 4 AI fns when aitools.js
+changes" rule is now FIVE: `mcp.js` requires aitools too.**
+
+**Verification status, stated honestly:** the tool logic is unit-verified against a
+Firestore stub (see below) and the frontend paths were driven live in the browser. The
+**deployed** find_client / coach_summary changes were NOT exercised by a live AI call —
+`trainer.uitest` hit its 100k daily token budget during this session's testing. Kevin's own
+account has an unlimited budget, so the quickest confirmation is to ask it *"find everyone
+called <a name that exists as BOTH a client and a plan file>"* and check it lists both kinds.
+
+### S165b — what the MCP connector was silently dropping (same commit set)
+Found by the same audit, fixed on Kevin's go-ahead:
+- **The JSON-Schema→Zod mapper was flat.** Arrays became `array(any)`, objects
+  `record(any)`, and the `default:` arm swallowed every **enum**. So `log_meals.meals`
+  reached an external model shapeless (it guessed `food`/`kcal`, runTool coerced the misses
+  to empty) and a reasonable `mealType:"Breakfast"` failed the strict check and filed a meal
+  with **no meal type**. Now recursive, enums included — verified by round-tripping the real
+  schemas: a valid item parses, a wrong-case mealType is rejected *naming the four valid
+  values*, and a nameless item is rejected.
+- **`mealTypeOf()`** now normalises case/whitespace at every call site, so tolerance no
+  longer depends on which surface the call arrived from.
+- **`plan_meals` was exposed nowhere**, so an external AI asked to plan next week fell back
+  to `log_meals` and recorded future meals as *already eaten*. Now behind `write:logs`, with
+  a description saying planned meals don't count until ticked off. Not destructive.
+- **`search_food_db`, `fetch_link`, `send_app_request` were missing entirely** —
+  `search_food_db` also needed the FatSecret secrets bound to the `mcp` function (unbound,
+  `process.env` is just empty and it fails at runtime while reading fine). A stale comment
+  claimed the food database was retired; that was `search_food`, one character away.
+- The connector's `instructions` named only `clientId` — now names `localPlanId` and says
+  those people are clients too.
+- Confirmed: the only tools NOT on the MCP surface are `propose_meal` / `propose_workout`,
+  which is deliberate and documented (they render the in-app Accept cards).
 
 Kevin's rule, stated 2026-07-30: **a local plan or simulation is often a REAL, paying
 client — one who just won't install the app.** Being "connected" isn't what makes someone a
@@ -2333,21 +2367,10 @@ it). `npm run build` + `node --check` on both function files pass.
 catch it** — the frontend build never compiles `functions/`. **Always `node --check
 functions/<file>.js` after editing a prompt string.**
 
-⚠️ **DEPLOY (pending Kevin's go-ahead).** `aitools.js` changed, so the standing "deploy all
-4 AI fns" note is now **FIVE — `mcp` requires aitools too** (and the connector inherits
-these fixes, keeping AI↔connector parity):
+**The deploy command for next time** (five, not four):
 ```bash
 firebase deploy --only functions:aiChat,functions:aiChatStream,functions:logMeal,functions:setWorkoutSchedule,functions:mcp --project calorieiq-29762
 ```
-Frontend changes ride the normal `main` push.
-
-**Adjacent defects found by the audit, NOT fixed (not what Kevin asked for — worth a
-decision):** `plan_meals` is missing from the MCP allowlist, so an external AI falls back
-to `log_meals` and writes future meals as *already eaten*; the MCP JSON-Schema→Zod mapper
-**drops `enum`s** (an external model sending `mealType:"Breakfast"` gets a meal filed with
-no meal type) and **erases nested `items`/`properties`** (`log_meals.meals` and all 30
-`micros` keys arrive shapeless); `search_food_db`, `fetch_link` and `send_app_request`
-aren't exposed via MCP at all.
 
 ## Voice routing — SHIPPED (S164). Items 1–4 of the S163 design are all live.
 
