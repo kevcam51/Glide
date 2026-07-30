@@ -17108,33 +17108,41 @@ function blobToBase64(blob) {
   });
 }
 
-// Does `hay` contain `needle` as a whole word? Substring matching would offer
-// "Pat" for "pathway" and "Ann" for "planned", and a wrong destination chip in
-// front of a voice note is worse than no chip at all.
-function wordIn(hay, needle) {
-  const esc = String(needle).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  try { return new RegExp(`(^|[^a-z0-9])${esc}([^a-z0-9]|$)`, "i").test(hay); }
-  catch { return false; }
+// Normalise for matching: lowercase, strip accents, and treat everything that
+// isn't a letter or digit as a separator. "Renée's" and "Renee" should be the
+// same word to us.
+function nameTokens(str) {
+  return String(str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 }
 // Which of the caller's own subjects (connected clients, local plan files) does
 // this transcript name? Voice notes are the one place the destination is easy to
 // get silently wrong — the chat is closed, so nothing on screen says which
 // client "log 2 eggs" is about (S163). This only OFFERS candidates; the default
 // stays a new, unpinned chat, so a false match costs a glance, never a write.
-// Matches a full name, a distinctive single name, or a spoken/pasted id.
+//
+// Matching is deliberately a little generous (S166, Kevin: named a client and
+// got offered nobody). Speech-to-text mangles proper nouns, and people say the
+// short form of a name — so a spoken word also matches a name it PREFIXES
+// ("Jon" → "Jonathan") or one that prefixes it ("Caseys" → "Casey"). Whole
+// tokens only: no substring matching, or "pathway" offers "Pat".
 function matchVoiceSubjects(text, subjects) {
-  const t = String(text || "").toLowerCase();
-  if (!t.trim()) return [];
+  const words = nameTokens(text);
+  if (!words.length) return [];
+  const raw = String(text || "").toLowerCase();
+  const hit = (part) => words.some((w) =>
+    w === part
+    || (w.length >= 3 && part.startsWith(w))
+    || (part.length >= 4 && w.startsWith(part)));
   const out = [];
   for (const s of subjects || []) {
     const id = String(s.clientId || s.localPlanId || "").toLowerCase();
     // Ids are long and opaque — a hit is unambiguous, so it ranks first.
-    if (id.length >= 6 && t.includes(id)) { out.push({ ...s, why: "id" }); continue; }
-    const name = String(s.name || "").trim().toLowerCase();
-    if (!name) continue;
-    // Single names of 3+ characters only: "Al" or "Jo" would match far too much.
-    const parts = name.split(/\s+/).filter((p) => p.length >= 3);
-    if (wordIn(t, name) || parts.some((p) => wordIn(t, p))) out.push({ ...s, why: "name" });
+    if (id.length >= 6 && raw.includes(id)) { out.push({ ...s, why: "id" }); continue; }
+    // matchName is the REAL name; `name` may be a placeholder like "Unnamed
+    // client", which must never match the spoken word "unnamed".
+    const parts = nameTokens(s.matchName != null ? s.matchName : s.name).filter((p) => p.length >= 3);
+    if (parts.length && parts.some(hit)) out.push({ ...s, why: "name" });
   }
   // Ids before names, and never more than a row's worth of chips.
   return out.sort((a, b) => (a.why === "id" ? -1 : 0) - (b.why === "id" ? -1 : 0)).slice(0, 4);
@@ -17283,6 +17291,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
   const [destPicker, setDestPicker] = useState(false); // "Send to ▾" — every chat + New chat
   const [sentTo, setSentTo] = useState(null);          // {label, about} — brief "Sent to X" after it goes
   const subjectsRef = useRef(null);                    // clients + local plans, once resolved
+  const [subjects, setSubjects] = useState([]);        // …and in state, so the picker re-renders when they land
   const subjectsLoadRef = useRef(null);                // the in-flight load, so two callers share one fetch
   const [unread, setUnread] = useState(false);          // a reply arrived while closed
   const sheetUp = useAnySheetOpen();                    // shrink the launcher over sheets
@@ -17537,16 +17546,20 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
           const r = await window.storage.get(STORAGE_INDEX);
           const list = r && r.value ? JSON.parse(r.value) : [];
           for (const p of Array.isArray(list) ? list : []) {
-            const name = p.customName || p.name || "";
-            // isSimulation rides along: a sandbox and a real prospect file can
-            // share a name, and logging a real meal into a projection (or the
-            // reverse) is exactly the mix-up the purple SANDBOX identity exists
-            // to prevent everywhere else in the app.
-            if (name) subs.push({ kind: "plan", localPlanId: p.id, name, isSimulation: !!p.isSimulation });
+            const real = p.customName || p.name || "";
+            // A plan with no name set was skipped entirely, so it could never be
+            // matched OR picked — while its card on screen says "Unnamed client"
+            // (S166). Label it the way the card does so it is at least
+            // selectable, and keep the REAL name separate so the placeholder
+            // can't match the spoken word "unnamed".
+            subs.push({ kind: "plan", localPlanId: p.id, isSimulation: !!p.isSimulation,
+              name: real || (p.isSimulation ? "Untitled simulation" : "Unnamed client"),
+              matchName: real });
           }
         } catch { /* best-effort */ }
       }
       subjectsRef.current = subs;
+      setSubjects(subs);
       return subs;
     })();
     return subjectsLoadRef.current;
@@ -18163,7 +18176,31 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                 {voiceDest && voiceDest.about ? <span className="text-primary">about {voiceDest.about}</span> : null}
               </div>
               {destPicker && (
-                <div className="mb-2.5 flex max-h-[30vh] flex-col gap-1 overflow-y-auto rounded-xl border border-border bg-surface2 p-2">
+                <div className="mb-2.5 flex max-h-[34vh] flex-col gap-1 overflow-y-auto rounded-xl border border-border bg-surface2 p-2">
+                  {/* People come FIRST, and are always here — not only when a name
+                      was heard in the transcript (S166, Kevin: named a client and
+                      was offered nobody). Speech-to-text mangles names; this route
+                      doesn't depend on it. */}
+                  {subjects.length > 0 && (
+                    <div className="px-1 pb-0.5 pt-0.5 text-[.64rem] font-bold uppercase tracking-wide text-muted">New chat about someone</div>
+                  )}
+                  {subjects.map((sj) => (
+                    <button key={`s:${sj.kind}:${sj.clientId || sj.localPlanId}`}
+                      onClick={() => { setVoiceDest(sj); setDestPicker(false); }}
+                      className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-left text-[.78rem] cursor-pointer ${
+                        voiceDest && (voiceDest.clientId || voiceDest.localPlanId) === (sj.clientId || sj.localPlanId)
+                          ? "border-primary bg-[rgba(8,220,224,.06)]" : "border-border bg-transparent"}`}>
+                      <Icon name={sj.isSimulation ? "flask" : sj.kind === "plan" ? "file" : "person"} size={12}
+                        color={sj.isSimulation ? "var(--color-sim)" : "var(--accent)"} />
+                      <span className="min-w-0 flex-1 truncate text-fg">{sj.name}</span>
+                      {sj.isSimulation
+                        ? <span className="shrink-0 text-[.6rem] font-bold tracking-wide text-[color:var(--color-sim)]">SANDBOX</span>
+                        : sj.kind === "plan" ? <span className="shrink-0 text-[.62rem] text-muted">plan file</span> : null}
+                    </button>
+                  ))}
+                  {subjects.length > 0 && (
+                    <div className="mt-1 px-1 pt-1 text-[.64rem] font-bold uppercase tracking-wide text-muted">Or a chat</div>
+                  )}
                   <button onClick={() => { setVoiceDest(null); setDestPicker(false); }}
                     className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-left text-[.78rem] font-semibold cursor-pointer ${!voiceDest ? "border-primary bg-[rgba(8,220,224,.06)] text-fg" : "border-border bg-transparent text-fg"}`}>
                     <Icon name="plus" size={12} color="var(--accent)" />New chat
