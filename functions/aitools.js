@@ -1326,8 +1326,9 @@ function buildTools(role, opts = {}) {
         "List the user's saved NOTES (title, body, storage location, and ids for update_note). Call before updating "
         + "so you edit the right note instead of duplicating (especially recaps — re-recapping should UPDATE the "
         + "existing recap note). A trainer passing clientId sees the client's SHARED notes plus the trainer's own "
-        + "private notes about that client — a client's PRIVATE notes are never visible to anyone else.",
-      input_schema: { type: "object", properties: { ...clientIdProp } },
+        + "private notes about that client — a client's PRIVATE notes are never visible to anyone else. "
+        + "Pass localPlanId instead for notes about one of your own plan files (those people are clients too).",
+      input_schema: { type: "object", properties: { ...clientIdProp, ...localPlanProp } },
     },
     {
       name: "create_note",
@@ -1336,7 +1337,8 @@ function buildTools(role, opts = {}) {
         + "(kind='recap' — a conversation summary or client snapshot). For a CLIENT the note is PRIVATE by default "
         + "(shared=true makes it visible to their trainer — ask before sharing). For a TRAINER with clientId: "
         + "private-to-the-trainer by default; shared=true puts it in the client's notes where they can see it. "
-        + "Title optional (auto from first line).",
+        + "For a LOCAL PLAN (localPlanId) the note is filed against that person in your own account — there is no "
+        + "login on their end, so shared has no meaning there. Title optional (auto from first line).",
       input_schema: {
         type: "object",
         properties: {
@@ -1344,7 +1346,7 @@ function buildTools(role, opts = {}) {
           title: { type: "string", description: "Optional title; defaults to the first line" },
           shared: { type: "boolean", description: "true = visible to the other side (client↔trainer). Default false (private)." },
           kind: { type: "string", enum: ["note", "recap"], description: "'recap' for conversation summaries / client snapshots (gets a recap badge)" },
-          ...clientIdProp,
+          ...clientIdProp, ...localPlanProp,
         },
         required: ["body"],
       },
@@ -1361,7 +1363,7 @@ function buildTools(role, opts = {}) {
           appendBody: { type: "string", description: "Text to ADD to the end of the note" },
           body: { type: "string", description: "REPLACE the whole body with this" },
           title: { type: "string", description: "New title" },
-          ...clientIdProp,
+          ...clientIdProp, ...localPlanProp,
         },
         required: ["noteId"],
       },
@@ -1950,15 +1952,41 @@ async function runTool(name, input, ctx) {
   if (name === "list_notes" || name === "create_note" || name === "update_note") {
     const isSelf = uid === ctx.callerUid;
     const cap = (arr) => [...arr].slice(0, 100);
+    // Notes about one of the caller's OWN plan files (S166). That person is a
+    // client who simply never made an account, so they get notes like anyone
+    // else — filed in the caller's own store against the plan id, since there is
+    // no second account to put them in. Validated against the caller's own index,
+    // exactly like every other localPlanId use, so it can't widen access.
+    let aboutPlan = "";
+    if (ctx.isTrainer && input.localPlanId != null && input.localPlanId !== "") {
+      if (input.clientId) return { error: "Use clientId OR localPlanId, not both." };
+      const want = String(input.localPlanId);
+      const idx = (await kvGetJSON(db, ctx.callerUid, "caliq-index")) || [];
+      if (!idx.some((p) => p && p.id === want)) {
+        return { error: "No local plan with that id — call list_local_plans for current ids." };
+      }
+      aboutPlan = want;
+    }
     if (name === "list_notes") {
-      const shared = (await kvGetJSON(db, uid, "caliq-notes")) || [];
+      const own = (await kvGetJSON(db, uid, "caliq-notes")) || [];
+      if (aboutPlan) {
+        const rows = own.filter((n) => n && n.aboutPlanId === aboutPlan)
+          .map((n) => ({ id: n.id, title: n.title || "Untitled", body: String(n.body || "").slice(0, 1000),
+            storedAs: "private-to-you-about-this-plan", kind: n.kind || "note",
+            author: n.authorName || null, updatedAt: n.updatedAt || n.createdAt || null }))
+          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 30);
+        return { count: rows.length, notes: rows };
+      }
+      const shared = own;
       const priv = isSelf ? (await privGetJSON(db, ctx.callerUid, "caliq-notes")) || [] : [];
       const about = !isSelf
         ? ((await kvGetJSON(db, ctx.callerUid, "caliq-notes")) || []).filter((n) => n && n.aboutUid === uid)
         : [];
       const fmt = (n, where) => ({ id: n.id, title: n.title || "Untitled", body: String(n.body || "").slice(0, 1000),
         storedAs: where, kind: n.kind || "note", author: n.authorName || null,
-        aboutClient: n.aboutUid ? true : undefined, updatedAt: n.updatedAt || n.createdAt || null });
+        aboutClient: n.aboutUid ? true : undefined,
+        aboutLocalPlanId: n.aboutPlanId || undefined,
+        updatedAt: n.updatedAt || n.createdAt || null });
       const notes = [
         ...priv.map((n) => fmt(n, "private")),
         ...shared.map((n) => fmt(n, isSelf ? (ctx.isTrainer ? "my-notes" : "shared-with-trainer") : "shared-with-client")),
@@ -1978,6 +2006,13 @@ async function runTool(name, input, ctx) {
         createdAt: now, updatedAt: now,
       };
       let storedAs;
+      if (aboutPlan) {
+        note.aboutPlanId = aboutPlan;
+        await kvTxnJSON(db, ctx.callerUid, "caliq-notes", (arr) => cap([note, ...(Array.isArray(arr) ? arr : [])]));
+        storedAs = "private-to-you-about-this-plan";
+        return { ok: true, id: note.id, title: note.title, storedAs,
+          ...(input.shared === true ? { note: "There is no account on their end, so nothing was shared — the note is filed against that plan in your own notes." } : {}) };
+      }
       if (isSelf) {
         if (!ctx.isTrainer && input.shared !== true) {
           await privTxnJSON(db, ctx.callerUid, "caliq-notes", (arr) => cap([note, ...(Array.isArray(arr) ? arr : [])]));

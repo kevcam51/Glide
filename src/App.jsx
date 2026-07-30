@@ -15143,6 +15143,10 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // client (one threads listener; badges gated by the messages notif pref).
   const [msgFor, setMsgFor] = useState(null); // client object | null
   const [notesFor, setNotesFor] = useState(null); // client object | null — Notes panel (S91)
+  // Same panel, for one of the trainer's OWN plan files (S166). Those people are
+  // clients too; they just never made an account, so they get notes like anyone
+  // else. {id, name} | null.
+  const [planNotesFor, setPlanNotesFor] = useState(null);
   const [msgUnread, setMsgUnread] = useState({}); // clientUid -> my unread count
   const msgBadgesOn = np.master && np.messages !== false;
   useEffect(() => {
@@ -15985,6 +15989,10 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
             <NotesPanel mode="trainer-client" meUid={meUid} meName={meName}
               clientUid={notesFor.uid} clientName={notesFor.name} onClose={() => setNotesFor(null)} />
           )}
+          {planNotesFor && (
+            <NotesPanel mode="trainer-plan" meUid={meUid} meName={meName}
+              planId={planNotesFor.id} planName={planNotesFor.name} onClose={() => setPlanNotesFor(null)} />
+          )}
           {tzPick && (
             <div className="mt-2 p-3 rounded-[10px] bg-surface2 border border-border">
               {tzPick.loading ? (
@@ -16129,8 +16137,12 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         <span className={`inline-flex items-center gap-1.5${ds != null && ds >= 5 ? " text-warn font-semibold" : ""}`}><Icon name="clock" size={15} />{ds === null ? "no logs yet" : ds === 0 ? "active today" : ds === 1 ? "1 day ago" : `${ds} days ago`}{ds != null && ds >= 5 ? " · quiet" : ""}</span>
                       </div>
                     )}
-                    {/* Actions: convert (sims) + delete (all) */}
+                    {/* Actions: notes (all) + convert (sims) + delete (all) */}
                     <div className="flex flex-wrap gap-2 mt-2.5" onClick={(e) => e.stopPropagation()}>
+                      <button className={`${mBtnCls} inline-flex items-center gap-1.5`}
+                        onClick={() => setPlanNotesFor({ id: p.id, name: p.customName || p.name || "This plan" })}>
+                        <Icon name="file" size={16} color="var(--accent)" />Notes
+                      </button>
                       {sim && (convertSimFor === p.id ? (
                         <span className="inline-flex gap-1.5 items-center">
                           <button onClick={() => { onConvertSimulation(p.id); setConvertSimFor(null); }}
@@ -21079,7 +21091,12 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
 //   mode="client"          my notes: PRIVATE (privkv — rules: owner-only) + shared (my kv)
 //   mode="trainer-client"  notes about a client: my private about-notes (my kv,
 //                          aboutUid) + the client's SHARED notes (their kv)
-//   mode="trainer-self"    my general notes (my kv, no aboutUid)
+//   mode="trainer-self"    my general notes (my kv, no aboutUid/aboutPlanId)
+//   mode="trainer-plan"    notes about one of MY OWN plan files (my kv,
+//                          aboutPlanId). That person is a client too — they just
+//                          never made an account — so they get the same notes a
+//                          connected client does. There is nobody to share WITH,
+//                          so this mode has no shared option (S166).
 // Auto-title from the first line (Notes-app behavior); sparkle badge = AI recap.
 const NOTES_KEY = "caliq-notes";
 const parseNotes = (val) => { try { const a = val ? JSON.parse(val) : []; return Array.isArray(a) ? a : []; } catch { return []; } };
@@ -21658,7 +21675,7 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
     </div>, document.body);
 }
 
-function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
+function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planName, onClose }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);
   const uid = meUid || (auth.currentUser && auth.currentUser.uid);
@@ -21702,7 +21719,12 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
         ...clientKvNotes.map((n) => ({ ...n, _store: "clientShared" })),
       ].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     }
-    return ownKvNotes.filter((n) => !n.aboutUid).map((n) => ({ ...n, _store: "self" }))
+    if (mode === "trainer-plan") {
+      return ownKvNotes.filter((n) => n.aboutPlanId === planId).map((n) => ({ ...n, _store: "aboutPlan" }))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    }
+    // "My Notes" = genuinely mine: not about a client, not about a plan file.
+    return ownKvNotes.filter((n) => !n.aboutUid && !n.aboutPlanId).map((n) => ({ ...n, _store: "self" }))
       .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   })();
 
@@ -21723,6 +21745,7 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
   const storeForNew = () => {
     if (mode === "client") return dShared ? "sharedOwn" : "priv";
     if (mode === "trainer-client") return dShared ? "clientShared" : "aboutClient";
+    if (mode === "trainer-plan") return "aboutPlan";   // no account to share with
     return "self";
   };
 
@@ -21740,8 +21763,9 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
         const store = storeForNew();
         const note = { id: `nt${now}${Math.floor(Math.random() * 1e4)}`, title, body,
           authorUid: uid, authorName: meName || "Me",
-          visibility: store === "priv" || store === "aboutClient" || store === "self" ? "private" : "shared",
-          ...(store === "aboutClient" ? { aboutUid: clientUid } : {}), kind: "note",
+          visibility: store === "clientShared" || store === "sharedOwn" ? "shared" : "private",
+          ...(store === "aboutClient" ? { aboutUid: clientUid } : {}),
+          ...(store === "aboutPlan" ? { aboutPlanId: planId } : {}), kind: "note",
           createdAt: now, updatedAt: now };
         const arr = await readStore(store);
         await writeStore(store, [note, ...arr]);
@@ -21781,10 +21805,13 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
   const badge = (n) => {
     if (n._store === "priv") return { icon: "fingerprint", label: "Private" };
     if (n._store === "aboutClient") return { icon: "fingerprint", label: "Private to you" };
+    if (n._store === "aboutPlan") return { icon: "fingerprint", label: "Private to you" };
     if (n._store === "self") return { icon: "file", label: "My note" };
     return { icon: "clients", label: mode === "trainer-client" ? `Shared with ${clientName || "client"}` : "Shared with trainer" };
   };
-  const heading = mode === "trainer-client" ? `Notes — ${clientName || "Client"}` : mode === "trainer-self" ? "My Notes" : "My Notes";
+  const heading = mode === "trainer-client" ? `Notes — ${clientName || "Client"}`
+    : mode === "trainer-plan" ? `Notes — ${planName || "Plan"}`
+    : "My Notes";
   const shareLabel = mode === "trainer-client" ? `Visible to ${clientName || "the client"}` : "Visible to my trainer";
 
   return createPortal(
@@ -21792,9 +21819,15 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
       display: "flex", justifyContent: "center", padding: "14px", paddingTop: "calc(14px + env(safe-area-inset-top,0px))", overflowY: "auto" }}>
       <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card"
         style={{ width: "min(94vw,460px)", padding: "18px 16px", margin: "auto 0", maxHeight: "86vh", display: "flex", flexDirection: "column", gap: "10px" }}>
-        <div className="relative justify-center px-[92px] flex items-center gap-2">
+        {/* Left padding clears the absolutely-positioned Back button; the right
+            side only ever held matching padding for symmetry, which cost the
+            title 92px it needed once names appeared in it. Near-centred and
+            readable beats exactly centred and cut off. */}
+        <div className="relative justify-center pl-[92px] pr-[14px] flex items-center gap-2">
           <Icon name="file" size={18} color="var(--accent)" />
-          <div className="font-display font-bold text-fg" style={{ fontSize: "1.02rem" }}>{heading}</div>
+          {/* One line, ellipsised: a long name used to wrap and collide with the
+              Back button (visible as soon as plan files got notes, S166). */}
+          <div className="min-w-0 truncate font-display font-bold text-fg" style={{ fontSize: "1.02rem" }} title={heading}>{heading}</div>
           <button onClick={onClose} aria-label="Back" className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
 
@@ -21807,7 +21840,7 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
             <div className="flex flex-col gap-1.5 overflow-y-auto">
               {notes.length === 0 && (
                 <div className="py-7 text-center text-[.82rem] text-muted">
-                  No notes yet. Jot to-dos, questions for {mode === "trainer-client" ? "sessions" : "your trainer"}, or ask the AI to save a recap here.
+                  No notes yet. Jot to-dos, questions for {mode === "trainer-client" || mode === "trainer-plan" ? "sessions" : "your trainer"}, or ask the AI to save a recap here.
                 </div>
               )}
               {notes.map((n) => { const b = badge(n); return (
@@ -21834,7 +21867,7 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, onClose }) {
             <textarea value={dBody} onChange={(e) => setDBody(e.target.value)} rows={9} placeholder="Write anything…"
               style={{ fontFamily: "var(--font-sans)" }}
               className="min-h-[160px] flex-1 resize-none rounded-lg border border-border bg-surface2 px-3 py-2.5 text-[.88rem] leading-relaxed text-fg outline-none placeholder:text-muted" />
-            {mode !== "trainer-self" && (
+            {mode !== "trainer-self" && mode !== "trainer-plan" && (
               <button onClick={() => setDShared((v) => !v)}
                 className="flex items-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-2 text-left text-[.8rem] cursor-pointer">
                 <Icon name={dShared ? "clients" : "fingerprint"} size={15} color="var(--accent)" />

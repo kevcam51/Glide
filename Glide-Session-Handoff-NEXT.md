@@ -2372,6 +2372,37 @@ functions/<file>.js` after editing a prompt string.**
 firebase deploy --only functions:aiChat,functions:aiChatStream,functions:logMeal,functions:setWorkoutSchedule,functions:mcp --project calorieiq-29762
 ```
 
+## Notes for plan-file clients (S166) — the last piece of "they're real clients"
+
+A trainer could keep coaching notes on a connected client but had nowhere to put them for
+one of their own plan files — the very people Kevin says make up most of a roster. Notes are
+person-scoped by design (one flat `caliq-notes` array per account, with `aboutUid` marking
+notes about a connected client), so this mirrors that exactly rather than inventing a store:
+
+- **`aboutPlanId`** — a note in the TRAINER's own `caliq-notes` marking who it's about, the
+  direct analogue of `aboutUid`. No new key, no rules change (owner writing their own kv).
+- **NotesPanel gains `mode="trainer-plan"`** (`planId`/`planName`), reached from a **Notes**
+  action on every Local Plans card — the same affordance connected clients already had. No
+  share toggle there: there is no login on the other end to share with, so offering it would
+  be a lie.
+- **`trainer-self` ("My Notes") now excludes `aboutPlanId` too**, or per-person notes would
+  pile into the trainer's own list. It already excluded `aboutUid`.
+- **AI:** `list_notes` / `create_note` / `update_note` accept `localPlanId` (trainer-only,
+  validated against the caller's own index like every other use). `list_notes` scoped to a
+  plan returns only that plan's notes; the unscoped listing tags them `aboutLocalPlanId` so
+  the model can tell them apart. `shared:true` with a plan id is answered honestly rather
+  than silently ignored.
+
+**The S77 dead-data check was run explicitly** (custom exercises were written for sessions
+before anything read them): a note created by the AI lands exactly where the panel reads it,
+and a note created in the panel is what the AI lists back. Verified both directions against a
+stub, then live in the browser — created from the UI, stored with `aboutPlanId` + private
+visibility, shown under that plan, and **absent from My Notes**.
+
+Also fixed while there: the panel header reserved 92px of right padding purely for symmetry,
+so once names appeared in the title "Notes — Test Client" truncated to "Notes — Te…" (and
+before that, wrapped into the Back button). Long connected-client names had the same problem.
+
 ## Voice bar — stopping is now possible (S166, from Kevin's device test)
 
 Kevin: *"there is no stop button for the mic once it starts. I was done talking and I could
