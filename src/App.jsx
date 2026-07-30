@@ -17717,7 +17717,16 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
         if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
         const blob = new Blob(chunksRef.current, { type: rec.mimeType || mime || "audio/webm" });
         chunksRef.current = [];
-        if (!blob.size) { setLiveText(""); return; }
+        if (!blob.size) {
+          // Nothing captured — stopped before any audio arrived, a muted mic, a
+          // codec hiccup. This used to just `return`, leaving the closed-mic bar
+          // on screen still pulsing red with a Stop button, so it looked like it
+          // was STILL recording and the tap had done nothing (Kevin, S166).
+          setLiveText("");
+          if (micOnlyRef.current) { setMicOnly(false); micOnlyRef.current = false; }
+          setError("Didn't catch that — try again.");
+          return;
+        }
         setTranscribing(true);
         try {
           const b64 = await blobToBase64(blob);
@@ -17992,6 +18001,13 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
     send("I pasted this from another AI assistant (like ChatGPT or Claude). Pull out every meal, workout, and weigh-in you can find in it, then help me log them into Glidna — briefly summarize what you found, and log after I confirm:\n\n" + t);
   };
 
+  // Recording clock. The ceiling is MAX_TAKE_MS — the old UI hard-coded 60,
+  // so the countdown hit 0:00 with a full minute of recording still to run and
+  // the button tooltip promised a limit that wasn't the real one (S166).
+  const clockOf = (s) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.max(0, s) % 60).padStart(2, "0")}`;
+  const recCap = Math.round(MAX_TAKE_MS / 1000);
+  const recRemain = Math.max(0, recCap - recSecs);
+
   const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
   const suggestions = isTrainer
     ? ["Which clients need attention?", "Turn this workout video into a program: (paste a link)"]
@@ -18183,16 +18199,39 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
               </div>
             </>
           ) : (
-            <div className="flex items-center gap-3">
+            // Stopping is the ONE thing you urgently need here, so it gets the
+            // room (Kevin, S166: "I was done talking and I could not stop it").
+            // It used to be a small pill at the end of a four-item row, sitting
+            // exactly where the launcher covered it. Now: a real 44px target,
+            // labelled, with the meter shrunk to give it space.
+            <div className="flex items-center gap-2.5">
+              {/* Calm once the mic is off: a dot still pulsing red through
+                  transcription reads as "it never stopped". */}
               <span className="relative flex h-3 w-3 shrink-0">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-danger opacity-60" />
-                <span className="relative inline-flex h-3 w-3 rounded-full bg-danger" />
+                {recording && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-danger opacity-60" />}
+                <span className={`relative inline-flex h-3 w-3 rounded-full ${recording ? "bg-danger" : "bg-muted"}`} />
               </span>
-              <canvas ref={waveRef} width={220} height={28} className="h-[28px] flex-1 min-w-0" />
-              <span className="shrink-0 text-[.76rem] text-muted">{transcribing ? "Transcribing…" : "Listening…"}</span>
+              <canvas ref={waveRef} width={220} height={26} className="h-[26px] min-w-0 flex-1" />
+              {transcribing ? (
+                <span className="shrink-0 text-[.76rem] text-muted">Transcribing…</span>
+              ) : (
+                // Elapsed, so you can see it IS running — turning into a red
+                // countdown only in the last 20s, when the cap starts to matter.
+                <span className={`shrink-0 text-[.76rem] font-bold tabular-nums ${recRemain <= 20 ? "text-danger" : "text-muted"}`}>
+                  {recRemain <= 20 ? `−${clockOf(recRemain)}` : clockOf(recSecs)}
+                </span>
+              )}
+              {/* Never disabled: whatever state this lands in, there is always a
+                  way out of the bar. */}
               <button onClick={() => { if (recording) stopRecording(); else closeVoiceBar(); }}
-                className="shrink-0 rounded-xl border-none bg-primaryfill px-4 py-2 text-[.8rem] font-bold text-primaryfg cursor-pointer">
-                {transcribing ? "…" : "Stop"}
+                aria-label={recording ? "Stop recording" : "Cancel"}
+                className={`flex shrink-0 items-center gap-1.5 rounded-xl border-none px-4 text-[.85rem] font-bold cursor-pointer ${
+                  recording ? "bg-primaryfill text-primaryfg" : "border border-border bg-surface2 text-fg"}`}
+                style={{ minHeight: 44 }}>
+                {recording ? (<>
+                  <svg viewBox="0 0 24 24" fill="currentColor" className="h-[13px] w-[13px]"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
+                  Stop
+                </>) : "Cancel"}
               </button>
             </div>
           )}
@@ -18569,8 +18608,8 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                   {liveText || (transcribing ? "Transcribing…" : "Listening… tap ⏹ when done")}
                 </span>
                 {recording && (
-                  <span className={`shrink-0 text-[.78rem] font-bold tabular-nums ${recSecs >= 50 ? "text-danger" : "text-muted"}`}>
-                    0:{String(Math.max(0, 60 - recSecs)).padStart(2, "0")}
+                  <span className={`shrink-0 text-[.78rem] font-bold tabular-nums ${recRemain <= 20 ? "text-danger" : "text-muted"}`}>
+                    {recRemain <= 20 ? `−${clockOf(recRemain)}` : clockOf(recSecs)}
                   </span>
                 )}
               </div>
@@ -18590,7 +18629,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                 </svg></button>
               <button onClick={toggleMic} disabled={busy || transcribing}
                 aria-label={recording ? "Stop recording" : "Record a voice message"}
-                title={recording ? "Tap to stop" : "Speak to Glidna (up to 60 sec)"}
+                title={recording ? "Tap to stop" : "Speak to Glidna (up to 2 min)"}
                 className={`flex items-center justify-center rounded-xl border px-3 py-2.5 cursor-pointer disabled:opacity-50 ${recording ? "border-danger bg-danger text-white animate-pulse" : "border-border bg-surface2 text-fg hover:text-primary"}`}>
                 {transcribing ? (
                   <span className="text-[1.05rem] leading-none">…</span>

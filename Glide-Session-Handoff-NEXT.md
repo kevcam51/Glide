@@ -2372,6 +2372,31 @@ functions/<file>.js` after editing a prompt string.**
 firebase deploy --only functions:aiChat,functions:aiChatStream,functions:logMeal,functions:setWorkoutSchedule,functions:mcp --project calorieiq-29762
 ```
 
+## Voice bar — stopping is now possible (S166, from Kevin's device test)
+
+Kevin: *"there is no stop button for the mic once it starts. I was done talking and I could
+not stop it."* Three causes, all fixed:
+
+1. **The launcher covered the Stop button.** Already fixed in S164 (the mic + "Ask Glidna"
+   buttons hide while the bar is up) — Kevin hit this on the pre-push build.
+2. **Stop was a small pill at the far right** of a four-item row — exactly where the
+   launcher sat. Now a labelled 81×44 button with a stop-square icon, meter shrunk to give
+   it room. The row is `[● dot] [meter] [clock] [■ Stop]`.
+3. **An empty recording was a dead end.** `rec.onstop` did `if (!blob.size) return;` without
+   clearing `micOnly`, so a take that captured nothing left the bar on screen still pulsing
+   red with a Stop button — you tapped Stop and it looked like nothing happened. It now
+   closes the bar and says "Didn't catch that".
+
+Also: the dot goes calm once the mic is off (it used to keep pulsing red through
+transcription, reading as "still recording"), the button is **never disabled** — it becomes
+"Cancel" so there is always a way out — and the countdown was fixed: it counted down from
+**60** while `MAX_TAKE_MS` is **120000**, so it hit 0:00 with a full minute still to run.
+Now elapsed time, flipping to a red countdown in the last 20s, in both the closed-mic bar
+and the in-chat row. The mic tooltip no longer promises "up to 60 sec".
+
+⚠️ Verified by forcing the recording state through a temporary hook (removed) — the headless
+preview has no microphone, so **real mic capture is still Kevin's device test**.
+
 ## Voice routing — SHIPPED (S164). Items 1–4 of the S163 design are all live.
 
 Built on top of the S163e default. What a closed-mic voice note now does:
