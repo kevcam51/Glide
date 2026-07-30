@@ -2286,7 +2286,12 @@ destination visible, not about better guessing.
 **Agreed behaviour** (Kevin's synthesis; he chose the pre-send list over an after-the-fact echo,
 because it turns a correction into a choice and never requires opening the chat):
 
-1. **Default = NEW chat.** Structurally cannot inherit a stale client context. No friction.
+1. ~~**Default = NEW chat.**~~ **DONE — S163e, shipped & live.** A voice send calls `newChat()`
+   first, which clears the pinned subject, so it cannot inherit a stale client. NOTE: `send()` gained
+   a `fresh` option for this — `newChat()` resets `messages` but the send closure still holds the old
+   array, so calling them in sequence without it carries the previous conversation (and its client)
+   into the "new" chat. Anything else that starts a chat and sends in one go must pass `fresh`.
+   **The remaining items below are additive convenience on top of a default that is already safe.**
 2. **Name / id detected in the transcript → show the candidates at the bottom of the voice bar**
    before it sends. Tap one to send there. Matches on client name AND user/plan id, so "log this
    for Casey" or an id both narrow the list.
