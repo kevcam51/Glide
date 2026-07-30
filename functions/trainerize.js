@@ -347,7 +347,12 @@ function mergeTzNote(existingNotes, tzNote) {
 }
 
 async function syncClientWorkouts(db, uid, pid, tzUserId, auth, days) {
-  const span = Math.min(days, WORKOUT_DAYS_MAX);
+  // Independent of the nutrition window, for the same reason as syncClientHealth
+  // (S161): calendar/getList returns the whole range in ONE call, the loop below
+  // skips days already in sync, and the plan wrapper is written once only if
+  // something changed — so reaching back the full cap costs nothing on a repeat
+  // run, while inheriting nutrition's 14 days silently truncated the backfill.
+  const span = WORKOUT_DAYS_MAX;
   const startDate = new Date(Date.now() - span * 86400000).toISOString().slice(0, 10);
   const endDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   const r = await tz("calendar/getList",
@@ -610,8 +615,18 @@ async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTR
             const hr = await syncClientHealth(db, linkedUid, healthPlanId, u.id, auth, nutritionDays);
             healthDays = hr.days; healthSeen = hr.seen; healthFrom = hr.firstDate; healthTo = hr.lastDate;
           } catch (e) { console.error("health sync failed for", u.id, e && e.message); }
+          // COMPLETED WORKOUTS ride along with watch-only (S161, Kevin: "I do not
+          // see the workouts from my watch"). They were excluded because
+          // "watch-only" was built to avoid the parts of a full sync he disliked —
+          // but that was macro targets, goals and weight being re-stamped. A
+          // workout the watch recorded is activity data, exactly like the calories
+          // and steps beside it, and it only ever merges workedOut + a replaceable
+          // "Trainerize: …" note into that date's check-in. Nothing else is touched.
+          let workoutDays = 0;
+          try { workoutDays = await syncClientWorkouts(db, linkedUid, healthPlanId, u.id, auth, nutritionDays); }
+          catch (e) { console.error("workout sync failed for", u.id, e && e.message); }
           results.push({ name, status: u.status || "", linked: true, healthOnly: true,
-            mealDays: 0, healthDays, healthSeen, healthFrom, healthTo, workoutDays: 0 });
+            mealDays: 0, healthDays, healthSeen, healthFrom, healthTo, workoutDays });
           continue;
         }
         const r = await applySnapshotAndSyncs(db, linkedUid, clientPlanId, u, snap, lastStatDate, auth, nutritionDays);

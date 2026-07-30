@@ -9799,6 +9799,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   const [dayCals, setDayCals] = useState({});             // date -> logged calories (month view tinting)
   const [dayProt, setDayProt] = useState({});             // date -> logged protein g (week macro adherence)
   const [dayWear, setDayWear] = useState({});             // date -> {active,steps,total,source,manual} | null
+  const [measOpen, setMeasOpen] = useState(false);        // day view: measurements drawer
   // date -> did the person actually EAT that day. A day document exists for any
   // reason at all — a weigh-in, or a tracker sync writing 90 days of watch data —
   // so "a doc exists" is not "food was logged". Once the 90-day wearable backfill
@@ -10333,6 +10334,74 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
           </div>
         </div>
 
+        {/* Workout — directly under food (S161, Kevin's ordering) */}
+        <div style={card}>
+          <div style={lbl}><Icon name="dumbbell" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Workout</div>
+          {/* What the WATCH recorded for this day — the burn and the session names
+              the Trainerize sync writes into the check-in note. Kevin went looking
+              for these in the workout block rather than in the tracker line at the
+              top of the day, which is the sensible place for them to be. */}
+          {(() => {
+            const w = dayLog && hasWearable(dayLog.wearable) ? dayLog.wearable : null;
+            const burn = w ? (Number(w.total) > 0 ? Number(w.total) : Number(w.active) || 0) : 0;
+            const steps = w ? Number(w.steps) || 0 : 0;
+            const m = /Trainerize:\s*(.+)$/.exec((ci.notes || "").trim());
+            const tzNames = m ? m[1].trim() : "";
+            if (!burn && !steps && !tzNames) return null;
+            return (
+              <div style={{ marginBottom: 10, padding: "8px 10px", borderRadius: 8,
+                background: "rgba(8,220,224,.06)", border: "1px solid var(--border)" }}>
+                {tzNames ? (
+                  <div style={{ fontSize: ".82rem", color: "var(--text)", fontWeight: 700, marginBottom: burn || steps ? 4 : 0 }}>
+                    <Icon name="watch" size={12} color="var(--accent)" style={{display:"inline-block",verticalAlign:"middle",marginRight:4}} />{tzNames}
+                  </div>
+                ) : null}
+                {(burn || steps) ? (
+                  <div style={{ fontSize: ".78rem", color: "var(--muted)", display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    {!tzNames ? <Icon name="watch" size={12} color="var(--accent)" style={{display:"inline-block",verticalAlign:"middle"}} /> : null}
+                    {burn ? <span><span style={{ color: "var(--accent)", fontWeight: 700, fontFamily: "'Sora',sans-serif" }}>{burn.toLocaleString()}</span> cal burned{w && w.manual ? " (entered)" : w && w.source ? ` (${w.source})` : ""}</span> : null}
+                    {steps ? <span><span style={{ color: "var(--accent)", fontWeight: 700, fontFamily: "'Sora',sans-serif" }}>{steps.toLocaleString()}</span> steps</span> : null}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })()}
+          {(cardio.length + strength.length) > 0 ? (
+            <div style={{ fontSize: ".82rem", color: "var(--text-secondary)", marginBottom: 10 }}>
+              Scheduled for {dn}: {[...cardio.map((x) => x.type || "cardio"), ...strength.map((x) => x.type || "strength")].join(", ")}
+            </div>
+          ) : (
+            <div style={{ fontSize: ".82rem", color: "var(--muted)", marginBottom: 10 }}>No workout scheduled for {dn}.</div>
+          )}
+          <button onClick={() => onSaveCheckIn({ date: sel, timestamp: new Date(sel + "T12:00:00Z").getTime(),
+            weight: ci.weight ?? null, calories: null, hitTarget: null, workedOut: !ci.workedOut, mood: ci.mood ?? null,
+            notes: ci.notes || "", bodyFat: ci.bodyFat ?? null, loggedBy: "calendar", isFuturePlan: sel > todayKey })}
+            style={{ padding: "9px 14px", fontSize: ".84rem", fontWeight: 700, borderRadius: 9, cursor: "pointer", border: "none",
+              background: ci.workedOut ? "var(--orange)" : "var(--accent)", color: "#0b0b12" }}>
+            {ci.workedOut ? "Worked out — tap to undo" : "Mark workout done"}
+          </button>
+        </div>
+        {/* Measurements (S161, Kevin) — renamed from "Weight" and collapsed by
+            default, so the day view leads with what gets logged most. */}
+        <div style={card}>
+          <button onClick={() => setMeasOpen((v) => !v)}
+            style={{ width: "100%", display: "flex", alignItems: "center", gap: 6, background: "transparent",
+              border: 0, padding: 0, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
+            <span style={lbl}><Icon name="ruler" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Measurements</span>
+            {ci.weight ? <span style={{ fontSize: ".8rem", color: "var(--text)", fontWeight: 700, fontFamily: "'Sora',sans-serif" }}>{ci.weight} lbs</span> : null}
+            <span style={{ marginLeft: "auto", fontSize: ".72rem", color: "var(--muted)" }}>{measOpen ? "Hide" : ci.weight ? "Edit" : "Add"}</span>
+          </button>
+          {measOpen && (
+            <div style={{ marginTop: 10 }}>
+              <WeightDayLogger date={sel} existing={ci.weight} onSave={(w) => {
+                onSaveCheckIn({ date: sel, timestamp: new Date(sel + "T12:00:00Z").getTime(), weight: w,
+                  calories: null, hitTarget: null, workedOut: ci.workedOut ?? null, mood: ci.mood ?? null,
+                  notes: ci.notes || "", bodyFat: ci.bodyFat ?? null, loggedBy: "calendar", isFuturePlan: sel > todayKey });
+              }} />
+            </div>
+          )}
+        </div>
+
         {/* Water */}
         {(() => {
           const water = dayLog ? (dayLog.water || 0) : 0;
@@ -10359,34 +10428,6 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
           );
         })()}
 
-        {/* Weight */}
-        <div style={card}>
-          <div style={lbl}><Icon name="scale" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Weight</div>
-          <WeightDayLogger date={sel} existing={ci.weight} onSave={(w) => {
-            onSaveCheckIn({ date: sel, timestamp: new Date(sel + "T12:00:00Z").getTime(), weight: w,
-              calories: null, hitTarget: null, workedOut: ci.workedOut ?? null, mood: ci.mood ?? null,
-              notes: ci.notes || "", bodyFat: ci.bodyFat ?? null, loggedBy: "calendar", isFuturePlan: sel > todayKey });
-          }} />
-        </div>
-
-        {/* Workout */}
-        <div style={card}>
-          <div style={lbl}><Icon name="dumbbell" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Workout</div>
-          {(cardio.length + strength.length) > 0 ? (
-            <div style={{ fontSize: ".82rem", color: "var(--text-secondary)", marginBottom: 10 }}>
-              Scheduled for {dn}: {[...cardio.map((x) => x.type || "cardio"), ...strength.map((x) => x.type || "strength")].join(", ")}
-            </div>
-          ) : (
-            <div style={{ fontSize: ".82rem", color: "var(--muted)", marginBottom: 10 }}>No workout scheduled for {dn}.</div>
-          )}
-          <button onClick={() => onSaveCheckIn({ date: sel, timestamp: new Date(sel + "T12:00:00Z").getTime(),
-            weight: ci.weight ?? null, calories: null, hitTarget: null, workedOut: !ci.workedOut, mood: ci.mood ?? null,
-            notes: ci.notes || "", bodyFat: ci.bodyFat ?? null, loggedBy: "calendar", isFuturePlan: sel > todayKey })}
-            style={{ padding: "9px 14px", fontSize: ".84rem", fontWeight: 700, borderRadius: 9, cursor: "pointer", border: "none",
-              background: ci.workedOut ? "var(--orange)" : "var(--accent)", color: "#0b0b12" }}>
-            {ci.workedOut ? "Worked out — tap to undo" : "Mark workout done"}
-          </button>
-        </div>
       </>
     );
   };
@@ -11826,6 +11867,47 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                 rather than any single day&rsquo;s number.
               </div>
               <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"6px",color:"var(--orange)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="flame" size={16} color="var(--orange)" />Workout Burn Breakdown</div>
+              {/* Step back through past days without leaving the sheet (S161,
+                  Kevin). Reads the day the same way the meal section does —
+                  today from dailyLog, any other day via onReadDay — so it can
+                  never show today's burn under yesterday's date. */}
+              {onStepDay && (() => {
+                const burnDayLog = mealIsToday ? dailyLog : (mealDayLog || {});
+                const w = burnDayLog && hasWearable(burnDayLog.wearable) ? burnDayLog.wearable : null;
+                const burn = w ? (Number(w.total) > 0 ? Number(w.total) : Number(w.active) || 0) : 0;
+                const steps = w ? Number(w.steps) || 0 : 0;
+                const dayCi = (data.checkIns || []).find((c) => c && c.date === mealDate) || null;
+                const m = /Trainerize:\s*(.+)$/.exec(((dayCi && dayCi.notes) || "").trim());
+                const tzNames = m ? m[1].trim() : "";
+                return (
+                  <div style={{marginBottom:"10px",padding:"8px 10px",borderRadius:"8px",
+                    background:"var(--s2)",border:"1px solid var(--border)"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:"6px",marginBottom: (burn||steps||tzNames||dayCi) ? 6 : 0}}>
+                      <button onClick={() => shiftMealDate(-1)} aria-label="Previous day" style={dayNavBtn}>‹</button>
+                      <span style={{flex:1,textAlign:"center",fontSize:".8rem",fontWeight:700,
+                        color: mealIsToday ? "var(--text-secondary)" : "var(--accent)"}}>{dayLabelFor(mealDate, dashToday)}</span>
+                      <button onClick={() => shiftMealDate(1)} aria-label="Next day" style={dayNavBtn}>›</button>
+                    </div>
+                    {tzNames ? (
+                      <div style={{fontSize:".8rem",color:"var(--text)",fontWeight:700,marginBottom:4}}>
+                        <Icon name="watch" size={12} color="var(--accent)" style={{display:"inline-block",verticalAlign:"middle",marginRight:4}} />{tzNames}
+                      </div>
+                    ) : dayCi && dayCi.workedOut ? (
+                      <div style={{fontSize:".8rem",color:"var(--green)",fontWeight:700,marginBottom:4}}>
+                        <Icon name="check" size={12} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:4}} />Workout completed
+                      </div>
+                    ) : null}
+                    {(burn || steps) ? (
+                      <div style={{fontSize:".78rem",color:"var(--muted)",display:"flex",gap:10,flexWrap:"wrap"}}>
+                        {burn ? <span><span style={{color:"var(--accent)",fontWeight:700,fontFamily:"'Sora',sans-serif"}}>{burn.toLocaleString()}</span> cal burned{w && w.manual ? " (entered)" : w && w.source ? ` (${w.source})` : ""}</span> : null}
+                        {steps ? <span><span style={{color:"var(--accent)",fontWeight:700,fontFamily:"'Sora',sans-serif"}}>{steps.toLocaleString()}</span> steps</span> : null}
+                      </div>
+                    ) : (!tzNames && !(dayCi && dayCi.workedOut))
+                      ? <div style={{fontSize:".74rem",color:"var(--muted)"}}>No tracker data or workout recorded for this day.</div>
+                      : null}
+                  </div>
+                );
+              })()}
               {burnFromTracker && (
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",marginBottom:"8px",borderRadius:"8px",background:"rgba(8,220,224,.06)",border:"1px solid var(--border)"}}>
                   <span style={{display:"inline-flex",alignItems:"center",gap:"6px",fontSize:".82rem",color:"var(--text)"}}><Icon name="watch" size={15} color="var(--accent)" />{dailyLog.wearable&&dailyLog.wearable.manual
