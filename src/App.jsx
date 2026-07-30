@@ -10259,7 +10259,8 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
       setCalQuick("");
     };
     const card = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 16, marginBottom: 12 };
-    const lbl = { fontFamily: "'Sora',sans-serif", fontSize: "1.1rem", letterSpacing: 1.5, color: "var(--accent)", marginBottom: 10 };
+    const lbl = { fontFamily: "'Sora',sans-serif", fontSize: "1.1rem", letterSpacing: 1.5, color: "var(--accent)",
+      marginBottom: 12, display: "inline-flex", alignItems: "center", gap: 8, lineHeight: 1.35 };
     const quick = { padding: "6px 10px", fontSize: ".78rem", fontWeight: 700, borderRadius: 7, cursor: "pointer", border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)" };
     return (
       <>
@@ -10287,7 +10288,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
 
         {/* Food */}
         <div style={card}>
-          <div style={lbl}><Icon name="meal" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Food</div>
+          <div style={lbl}><Icon name="meal" size={18} color="currentColor" style={{flexShrink:0}} />Food</div>
           <div style={{ fontSize: "1.6rem", fontWeight: 800, fontFamily: "'Sora',sans-serif" }}>
             {cals.toLocaleString()}{target ? <span style={{ fontSize: ".9rem", color: "var(--muted)", fontWeight: 400 }}> / {target.toLocaleString()} cal</span> : " cal"}
           </div>
@@ -10336,7 +10337,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
 
         {/* Workout — directly under food (S161, Kevin's ordering) */}
         <div style={card}>
-          <div style={lbl}><Icon name="dumbbell" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Workout</div>
+          <div style={lbl}><Icon name="dumbbell" size={18} color="currentColor" style={{flexShrink:0}} />Workout</div>
           {/* What the WATCH recorded for this day — the burn and the session names
               the Trainerize sync writes into the check-in note. Kevin went looking
               for these in the workout block rather than in the tracker line at the
@@ -10387,7 +10388,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
           <button onClick={() => setMeasOpen((v) => !v)}
             style={{ width: "100%", display: "flex", alignItems: "center", gap: 6, background: "transparent",
               border: 0, padding: 0, cursor: "pointer", textAlign: "left", fontFamily: "inherit" }}>
-            <span style={lbl}><Icon name="ruler" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Measurements</span>
+            <span style={lbl}><Icon name="ruler" size={18} color="currentColor" style={{flexShrink:0}} />Measurements</span>
             {ci.weight ? <span style={{ fontSize: ".8rem", color: "var(--text)", fontWeight: 700, fontFamily: "'Sora',sans-serif" }}>{ci.weight} lbs</span> : null}
             <span style={{ marginLeft: "auto", fontSize: ".72rem", color: "var(--muted)" }}>{measOpen ? "Hide" : ci.weight ? "Edit" : "Add"}</span>
           </button>
@@ -10409,7 +10410,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
           const commitWater = () => { const v = parseInt(waterDraft, 10); setWater(isNaN(v) ? 0 : v); };
           return (
             <div style={card}>
-              <div style={lbl}><Icon name="water" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Water</div>
+              <div style={lbl}><Icon name="water" size={18} color="currentColor" style={{flexShrink:0}} />Water</div>
               <div style={{ fontSize: "1.6rem", fontWeight: 800, fontFamily: "'Sora',sans-serif" }}>
                 {water}<span style={{ fontSize: ".9rem", color: "var(--muted)", fontWeight: 400 }}> oz</span>
               </div>
