@@ -160,7 +160,15 @@ exports.foodSearch = onCall(
 
     const q = String((request.data && request.data.query) || "").trim().slice(0, 80);
     if (q.length < 2) return { foods: [] };
+    return await runFoodSearch(q, proxyUrl, proxySecret);
+  }
+);
 
+// The search path, callable from anywhere on the server (S163: the AI's
+// search_food_db tool uses it, so a database-backed AI log and a hand-typed
+// search resolve against exactly the same entries and can never disagree).
+async function runFoodSearch(q, proxyUrl, proxySecret) {
+  {
     const url = `${proxyUrl.replace(/\/+$/, "")}/search?q=${encodeURIComponent(q)}`;
     let j;
     const ctl = new AbortController();
@@ -194,4 +202,5 @@ exports.foodSearch = onCall(
     }
     return { foods: out };
   }
-);
+}
+exports._runFoodSearch = runFoodSearch;

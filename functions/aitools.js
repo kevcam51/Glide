@@ -934,6 +934,25 @@ function buildTools(role, opts = {}) {
       },
     },
     {
+      name: "search_food_db",
+      description:
+        "Look a food up in the FOOD DATABASE (FatSecret) and get its real per-serving "
+        + "calories and macros. Use this ONLY when the user explicitly asks for the food "
+        + "database — e.g. \"look it up\", \"use the database\", \"find the real numbers\". "
+        + "Otherwise estimate as normal; your estimates are good and cost the user less. "
+        + "Returns up to 8 candidates with brand and serving. Pick the closest match, scale it "
+        + "to the amount the user actually ate, and log it with source:\"database\" so the entry "
+        + "records where the numbers came from. If nothing matches well, say so and fall back "
+        + "to your own estimate rather than forcing a bad match.",
+      input_schema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Food to look up, e.g. \"Chobani greek yogurt\" or \"chicken breast\"" },
+        },
+        required: ["query"],
+      },
+    },
+    {
       name: "propose_meal",
       description:
         "PREFERRED way to log food: estimate a meal's macros (from description or photo), then call propose_meal to "
@@ -2198,6 +2217,28 @@ async function runTool(name, input, ctx) {
     return { ok: true, date, waterOz: updated.water };
   }
 
+  if (name === "search_food_db") {
+    const q = String((input && input.query) || "").trim().slice(0, 80);
+    if (q.length < 2) return { error: "Give me a food to look up." };
+    const url = process.env.FATSECRET_PROXY_URL || "";
+    const secret = process.env.FATSECRET_PROXY_SECRET || "";
+    if (!url || !secret || /placeholder/i.test(url)) {
+      return { error: "The food database isn't available right now — estimate instead and say so." };
+    }
+    try {
+      const { _runFoodSearch } = require("./foodsearch");
+      const r = await _runFoodSearch(q, url, secret);
+      const foods = (r && r.foods ? r.foods : []).slice(0, 8).map((f) => ({
+        name: f.name, brand: f.brand || "", calories: f.kcal, protein: f.p, carbs: f.c, fat: f.f,
+        serving: f.servingText || f.servingLabel || "", unit: f.unit || "g",
+      }));
+      if (!foods.length) return { foods: [], note: "Nothing matched — estimate it instead and tell the user." };
+      return { foods, note: "Per the serving shown. Scale to what they actually ate before logging." };
+    } catch (e) {
+      console.error("search_food_db", e && e.message);
+      return { error: "Food database lookup failed — estimate instead and say so." };
+    }
+  }
   if (name === "propose_meal") {
     // No write — normalize the meal and echo it back so the client renders an
     // Accept/Edit card. The actual save happens via the logMeal callable (Accept).
