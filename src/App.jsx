@@ -7629,8 +7629,13 @@ function BottomSheet({ open, onClose, title, icon, children }) {
             <Icon name="back" size={17} color="var(--accent)" />Back
           </button>
         </div>
+        {/* Extra bottom room for the floating AI + mic buttons (S163d, Kevin):
+            they now sit ABOVE sheets so they're reachable everywhere, which means
+            they also cover the last ~70px of a sheet's content. Reserving the
+            space keeps the buttons out of the way of whatever you're reading or
+            tapping, instead of moving the sheet and making it jump. */}
         <div style={{ overflowY: "auto", WebkitOverflowScrolling: "touch",
-          padding: "14px 16px calc(20px + env(safe-area-inset-bottom,0px))" }}>
+          padding: "14px 16px calc(84px + env(safe-area-inset-bottom,0px))" }}>
           {children}
         </div>
       </div>
