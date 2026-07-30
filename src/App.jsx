@@ -245,6 +245,20 @@ function calcBMR(gender, weightLbs, heightFt, heightIn, age) {
     ? 10*kg + 6.25*cm - 5*age + 5
     : 10*kg + 6.25*cm - 5*age - 161;
 }
+// A day's TRACKED Trainerize sessions, expressed as an estimated burn (S161).
+// Trainerize records duration but no calories, and on days whose connected
+// tracker reports zero energy (Apple Health gives steps only) there is otherwise
+// no burn figure at all — a day with four recorded sessions showed nothing but a
+// step count. MET 6.0 = moderate general cardio, which is what those untyped
+// "General" sessions are; always shown as an estimate, never as measured.
+const TZ_SESSION_MET = 6.0;
+function tzSessionBurn(ci, weightLbs) {
+  const mins = ci && Number(ci.tzMinutes) || 0;
+  const w = Number(weightLbs) || 0;
+  if (!(mins > 0) || !(w > 0)) return 0;
+  return calcBurn(TZ_SESSION_MET, w, mins);
+}
+
 function calcBurn(met, weightLbs, minutes) {
   if (!met || !minutes) return 0;
   return Math.round(met * weightLbs * 0.453592 * (minutes / 60));
@@ -10348,19 +10362,24 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             const steps = w ? Number(w.steps) || 0 : 0;
             const m = /Trainerize:\s*(.+)$/.exec((ci.notes || "").trim());
             const tzNames = m ? m[1].trim() : "";
-            if (!burn && !steps && !tzNames) return null;
+            // No measured burn? Fall back to what the recorded SESSIONS are worth.
+            const tzMins = Number(ci.tzMinutes) || 0;
+            const estBurn = burn ? 0 : tzSessionBurn(ci, data.weightLbs);
+            if (!burn && !steps && !tzNames && !tzMins) return null;
             return (
               <div style={{ marginBottom: 10, padding: "8px 10px", borderRadius: 8,
                 background: "rgba(8,220,224,.06)", border: "1px solid var(--border)" }}>
                 {tzNames ? (
-                  <div style={{ fontSize: ".82rem", color: "var(--text)", fontWeight: 700, marginBottom: burn || steps ? 4 : 0 }}>
+                  <div style={{ fontSize: ".82rem", color: "var(--text)", fontWeight: 700, marginBottom: (burn || steps || estBurn || tzMins) ? 4 : 0 }}>
                     <Icon name="watch" size={12} color="var(--accent)" style={{display:"inline-block",verticalAlign:"middle",marginRight:4}} />{tzNames}
                   </div>
                 ) : null}
-                {(burn || steps) ? (
+                {(burn || steps || estBurn || tzMins) ? (
                   <div style={{ fontSize: ".78rem", color: "var(--muted)", display: "flex", gap: 10, flexWrap: "wrap" }}>
                     {!tzNames ? <Icon name="watch" size={12} color="var(--accent)" style={{display:"inline-block",verticalAlign:"middle"}} /> : null}
                     {burn ? <span><span style={{ color: "var(--accent)", fontWeight: 700, fontFamily: "'Sora',sans-serif" }}>{burn.toLocaleString()}</span> cal burned{w && w.manual ? " (entered)" : w && w.source ? ` (${w.source})` : ""}</span> : null}
+                    {!burn && estBurn ? <span><span style={{ color: "var(--accent)", fontWeight: 700, fontFamily: "'Sora',sans-serif" }}>~{estBurn.toLocaleString()}</span> cal estimated</span> : null}
+                    {tzMins ? <span><span style={{ color: "var(--text-secondary)", fontWeight: 700, fontFamily: "'Sora',sans-serif" }}>{tzMins}</span> min recorded</span> : null}
                     {steps ? <span><span style={{ color: "var(--accent)", fontWeight: 700, fontFamily: "'Sora',sans-serif" }}>{steps.toLocaleString()}</span> steps</span> : null}
                   </div>
                 ) : null}
@@ -11880,6 +11899,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                 const dayCi = (data.checkIns || []).find((c) => c && c.date === mealDate) || null;
                 const m = /Trainerize:\s*(.+)$/.exec(((dayCi && dayCi.notes) || "").trim());
                 const tzNames = m ? m[1].trim() : "";
+                const tzMins = Number(dayCi && dayCi.tzMinutes) || 0;
+                const estBurn = burn ? 0 : tzSessionBurn(dayCi, data.weightLbs);
                 return (
                   <div style={{marginBottom:"10px",padding:"8px 10px",borderRadius:"8px",
                     background:"var(--s2)",border:"1px solid var(--border)"}}>
@@ -11898,9 +11919,14 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                         <Icon name="check" size={12} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:4}} />Workout completed
                       </div>
                     ) : null}
-                    {(burn || steps) ? (
+                    {(burn || steps || estBurn || tzMins) ? (
                       <div style={{fontSize:".78rem",color:"var(--muted)",display:"flex",gap:10,flexWrap:"wrap"}}>
                         {burn ? <span><span style={{color:"var(--accent)",fontWeight:700,fontFamily:"'Sora',sans-serif"}}>{burn.toLocaleString()}</span> cal burned{w && w.manual ? " (entered)" : w && w.source ? ` (${w.source})` : ""}</span> : null}
+                        {/* Recorded sessions with no measured energy — the Apple
+                            Health case. Estimated from real duration, labelled as
+                            an estimate, never presented as a tracker reading. */}
+                        {!burn && estBurn ? <span><span style={{color:"var(--accent)",fontWeight:700,fontFamily:"'Sora',sans-serif"}}>~{estBurn.toLocaleString()}</span> cal estimated</span> : null}
+                        {tzMins ? <span><span style={{color:"var(--text-secondary)",fontWeight:700,fontFamily:"'Sora',sans-serif"}}>{tzMins}</span> min recorded{dayCi && dayCi.tzSessions > 1 ? ` · ${dayCi.tzSessions} sessions` : ""}</span> : null}
                         {steps ? <span><span style={{color:"var(--accent)",fontWeight:700,fontFamily:"'Sora',sans-serif"}}>{steps.toLocaleString()}</span> steps</span> : null}
                       </div>
                     ) : (!tzNames && !(dayCi && dayCi.workedOut))

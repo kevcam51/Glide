@@ -359,12 +359,21 @@ async function syncClientWorkouts(db, uid, pid, tzUserId, auth, days) {
     { userID: tzUserId, startDate, endDate, unitDistance: "miles", unitWeight: "lbs" }, auth);
   if (!r.ok) return 0;
   // date → tracked workout names (cardio + strength/video/interval sessions)
+  // plus the RECORDED MINUTES. Trainerize's workout items carry no calorie field
+  // at all — only detail.time in seconds (verified against the live API, S161) —
+  // so on a day where the connected tracker reported no energy (Apple Health
+  // reports steps but zero calories through Trainerize) the duration is the only
+  // real signal of effort available. Kevin hit exactly this on Jul 25: four
+  // tracked sessions, 7,420s between them, and no burn figure anywhere.
   const byDate = {};
+  const minsByDate = {};
   for (const day of (r.json && r.json.calendar) || []) {
     if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day.date || "")) continue;
     for (const it of Array.isArray(day.items) ? day.items : []) {
       if (!it || it.status !== "tracked" || !WORKOUT_TYPES.has(it.type)) continue;
       (byDate[day.date] = byDate[day.date] || []).push(workoutItemName(it));
+      const secs = Number(it.detail && it.detail.time) || 0;
+      if (secs > 0) minsByDate[day.date] = (minsByDate[day.date] || 0) + secs / 60;
     }
   }
   const dates = Object.keys(byDate);
@@ -388,9 +397,15 @@ async function syncClientWorkouts(db, uid, pid, tzUserId, auth, days) {
       cis.push(ci);
     }
     const nextNotes = mergeTzNote(ci.notes, tzNote);
-    if (ci.workedOut === true && ci.notes === nextNotes) continue; // already in sync
+    const mins = Math.round(minsByDate[date] || 0);
+    const sessions = names.length;
+    // Skip only when EVERYTHING already matches, minutes included.
+    if (ci.workedOut === true && ci.notes === nextNotes
+      && (ci.tzMinutes || 0) === mins && (ci.tzSessions || 0) === sessions) continue;
     ci.workedOut = true; // only ever set true — absence of items ≠ a missed day
     ci.notes = nextNotes;
+    if (mins > 0) ci.tzMinutes = mins; else delete ci.tzMinutes;
+    if (sessions > 0) ci.tzSessions = sessions; else delete ci.tzSessions;
     marked++;
   }
   if (!marked) return 0;
