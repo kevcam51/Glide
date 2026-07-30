@@ -2275,6 +2275,80 @@ prompt, **notch/safe-area** header fix, taller header so the menu button clears 
 
 ---
 
+## Unconnected plans ARE clients (S165) — code done, ⚠️ NOT DEPLOYED YET
+
+Kevin's rule, stated 2026-07-30: **a local plan or simulation is often a REAL, paying
+client — one who just won't install the app.** Being "connected" isn't what makes someone a
+client. The AI must reach them exactly like connected clients. (Saved to memory as
+`local-plans-are-real-clients`.)
+
+A 4-surface audit (22 verifier agents) found S87's `localPlanId` plumbing is sound —
+all 18 plan-data tools carry it, and the MCP connector inherits it automatically from the
+shared schema, so there is **no parameter-level drift**. What was broken was everything
+around it:
+
+- **`find_client` searched only connected accounts** — the headline bug. Ask for "Pat",
+  have a "Patricia" on the roster, and the single fuzzy hit read as *resolved*: the meal
+  went into Patricia's real diary, confirmed as success. Now it searches BOTH pools in one
+  call and each match carries `kind` ("client" → clientId, "local_plan" → localPlanId),
+  `ref`/`num` codes, weight and last-log date. Cross-pool matches get an explicit
+  "these span both — ask, because writing to the wrong one is invisible" note; a lone
+  sim match warns before anything is written. Match caps are **per pool**, so a crowd of
+  same-named clients can't hide the plan files. Fixing it in the TOOL (not the prompt)
+  means the ambiguity is a fact in the result, not something the model must remember to
+  go looking for.
+- **`coach_summary` ignored them entirely** — "who needs attention?" silently covered
+  only connected accounts, i.e. a confident, incomplete answer. Now both pools, via one
+  extracted `snapshot()` so the maths can never drift. New `never_logged` status (sorted
+  LAST — a template or sandbox nobody logs to isn't someone who went quiet).
+- **The prompt framed local plans as a fallback** ("if find_client finds nothing, ALSO
+  check…") and as artifacts. Rewritten: two-source lookup, and a "LOCAL PLAN FILES ARE
+  PEOPLE" rule in Kevin's own terms.
+- **The pin picker ("New chat about a client") could only aim at connected clients** —
+  now every person, with plan files marked and sims carrying the purple SANDBOX identity.
+- **The in-plan chat had no subject at all**: standing inside a plan, "log this" wrote to
+  the TRAINER's own diary. It now carries the open plan as an ambient subject and *says
+  so* above the composer ("Working on Test Client — the plan you have open"). Ambient
+  loses to a resolved subject, which loses to a pin — and it is deliberately NOT sent as
+  `pinned`, or "log this for Casey" while viewing Pat would land on Pat.
+- **The wire carried an id but no NAME** — the AI literally answered "I don't have a name
+  for the local plan file we're working with" while holding that person's plan. `name`
+  now rides the target (sanitised into the prompt) and survives the server's echo
+  (`keepName`).
+- Fixed in passing: `find_client`'s last-log query used `prefix + ""` as its range upper
+  bound instead of ``, so it silently matched nothing (the S85 gotcha, live again).
+  **`coach_summary` line ~1824 still has the same empty-string bound** — benign only
+  because log keys end exactly at the date; fix it if that ever changes.
+
+**Verified:** two-pool resolution unit-tested against a Firestore stub (cross-pool "Pat"
+returns all three with the warning; local-only names and `#num` codes resolve; sim tagged;
+client-role denied; crowding can't starve). coach_summary tested across both pools —
+a local-plan client returns real adherence, trend and target. Prompt text rendered and
+read back. Live in the browser: the picker shows client / plan file / SANDBOX rows, a
+local-plan pin round-trips and the AI answered "Test Client", and the in-plan chip appears
+and routes the turn to that plan (it auto-pinned to the plan's id, proving the server used
+it). `npm run build` + `node --check` on both function files pass.
+
+⚠️ **A backtick inside a template literal broke `aichat.js` and `npm run build` did NOT
+catch it** — the frontend build never compiles `functions/`. **Always `node --check
+functions/<file>.js` after editing a prompt string.**
+
+⚠️ **DEPLOY (pending Kevin's go-ahead).** `aitools.js` changed, so the standing "deploy all
+4 AI fns" note is now **FIVE — `mcp` requires aitools too** (and the connector inherits
+these fixes, keeping AI↔connector parity):
+```bash
+firebase deploy --only functions:aiChat,functions:aiChatStream,functions:logMeal,functions:setWorkoutSchedule,functions:mcp --project calorieiq-29762
+```
+Frontend changes ride the normal `main` push.
+
+**Adjacent defects found by the audit, NOT fixed (not what Kevin asked for — worth a
+decision):** `plan_meals` is missing from the MCP allowlist, so an external AI falls back
+to `log_meals` and writes future meals as *already eaten*; the MCP JSON-Schema→Zod mapper
+**drops `enum`s** (an external model sending `mealType:"Breakfast"` gets a meal filed with
+no meal type) and **erases nested `items`/`properties`** (`log_meals.meals` and all 30
+`micros` keys arrive shapeless); `search_food_db`, `fetch_link` and `send_app_request`
+aren't exposed via MCP at all.
+
 ## Voice routing — SHIPPED (S164). Items 1–4 of the S163 design are all live.
 
 Built on top of the S163e default. What a closed-mic voice note now does:

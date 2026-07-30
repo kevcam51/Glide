@@ -1425,7 +1425,10 @@ function buildTools(role, opts = {}) {
     tools.push({
       name: "find_client",
       description:
-        "Resolve ONE specific person by name to their id. Returns just {clientId, name} for matches — NO activity, NO stats, NO per-client lookups, so it's far cheaper than list_clients (which loads every client) and coach_summary (every client's full snapshot). ALWAYS use this when the user asks about a SINGLE named client, then use the returned clientId with the data tools. Reserve list_clients for 'list everyone' and coach_summary for across-all-clients questions.",
+        "Resolve ONE specific person by name to their id — searches ALL of this trainer's people in one call: connected client accounts AND the trainer's own local plan files (imported, prep and sandbox files). "
+        + "Each match carries `kind`: \"client\" (use its `clientId`) or \"local_plan\" (use its `localPlanId`) — a local plan is usually a REAL client who simply never made an app account. "
+        + "Returns names and ids only — NO activity, NO stats — so it is far cheaper than list_clients or coach_summary. ALWAYS use this when the user asks about a SINGLE named person; you do NOT need a second lookup call to cover local files. "
+        + "Reserve list_clients for 'list everyone', list_local_plans for 'list my own files', and coach_summary for across-all-clients questions.",
       input_schema: {
         type: "object",
         properties: { query: { type: "string", description: "Part of the client's name or email (case-insensitive), OR their short code — either the 4-character ref like \"#KEM2\" or the small number shown on the trainer's home screen like \"#6\". An exact code match wins over a name match." } },
@@ -1435,8 +1438,10 @@ function buildTools(role, opts = {}) {
     tools.push({
       name: "coach_summary",
       description:
-        "Proactive coaching snapshot across ALL your clients in ONE call — for 'who's stalled?', 'who needs "
-        + "attention?', 'what should I change?'. Per client returns: days logged in the window, days since last log, "
+        "Proactive coaching snapshot across ALL your people in ONE call — for 'who's stalled?', 'who needs "
+        + "attention?', 'what should I change?'. Covers connected client accounts AND your own local plan files "
+        + "(each row's `kind` says which), because a plan file is usually a real client without an app account. "
+        + "Per person returns: days logged in the window, days since last log, "
         + "calorie & protein adherence (avg vs target), latest weigh-in, weight trend (lbs/week), on-track status, "
         + "open requests, and a status (inactive / stalled / off_track / on_track / logging). Use instead of the "
         + "per-client tools one by one, then give specific recommendations.",
@@ -1696,6 +1701,15 @@ async function runTool(name, input, ctx) {
     // list_clients/coach_summary it does NO per-client sub-reads and returns a
     // tiny result, so focusing on one client is cheap. One roster query, matched
     // in memory by name/email.
+    //
+    // S165 — searches BOTH pools. A trainer's people live in two places: connected
+    // accounts AND their own local plan files. A local plan is very often a REAL
+    // client who just won't install the app (Kevin), so resolving only accounts
+    // was a wrong-account write waiting to happen: ask for "Pat", have a
+    // "Patricia" on the roster, and the single fuzzy hit reads as settled — the
+    // meal lands in Patricia's real diary. Searching both here (rather than
+    // telling the model to make a second call) means the ambiguity is a FACT in
+    // the result, not something the model has to remember to go looking for.
     if (!ctx.isTrainer) return { error: "Only trainers can find clients." };
     const q = String(input.query || "").trim().toLowerCase();
     if (!q) return { error: "Provide part of the client's name to search for." };
@@ -1712,17 +1726,35 @@ async function runTool(name, input, ctx) {
     // An EXACT code hit must win. Otherwise a bare "6" also substring-matches
     // every name/email containing a 6 and buries the one person actually meant.
     const exact = [], fuzzy = [];
+    // Capped PER POOL, not overall: a shared cap would let a trainer with many
+    // similarly-named connected clients crowd their own plan files out of the
+    // result entirely — and an omission here reads to the model as "that person
+    // doesn't exist", which is how the wrong Pat gets written to.
+    const seen = { client: 0, local_plan: 0 };
+    const consider = (row, hay) => {
+      if ((qCode && row.ref === qCode) || (qNum != null && row.num === qNum)) { exact.push(row); return; }
+      if (!hay.some((h) => String(h || "").toLowerCase().includes(q))) return;
+      if (seen[row.kind] >= 8) return;
+      seen[row.kind]++; fuzzy.push(row);
+    };
     for (const doc of snap.docs) {
       const p = doc.data();
       const nm = p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Client";
-      const code = refCode(doc.id);
-      const num = nums[doc.id] || null;
-      const row = { clientId: doc.id, ref: code, num, name: nm, email: p.email || null,
+      const row = { kind: "client", clientId: doc.id, ref: refCode(doc.id), num: nums[doc.id] || null,
+        name: nm, email: p.email || null,
         ...(p.aiOptOut ? { aiOptOut: true, note: "AI is off for this client's account — their data can't be read by an assistant." } : {}) };
-      if ((qCode && code === qCode) || (qNum != null && num === qNum)) { exact.push(row); continue; }
-      if (nm.toLowerCase().includes(q) || String(p.email || "").toLowerCase().includes(q)) {
-        if (fuzzy.length < 10) fuzzy.push(row);
-      }
+      consider(row, [nm, p.email]);
+    }
+    // ...and the caller's OWN plan files, in the same pass. These people are
+    // every bit as much clients — they just never made an account.
+    const ownIndex = (await kvGetJSON(db, ctx.callerUid, "caliq-index")) || [];
+    for (const p of Array.isArray(ownIndex) ? ownIndex : []) {
+      if (!p || !p.id) continue;
+      const nm = p.customName || p.name || "(unnamed)";
+      const row = { kind: "local_plan", localPlanId: p.id, ref: refCode(p.id), num: nums[p.id] || null,
+        name: nm, isSimulation: !!p.isSimulation, importedFromTrainerize: !!p.trainerizeId,
+        ...(p.weight ? { currentWeightLbs: Math.round(Number(p.weight)) } : {}) };
+      consider(row, [nm]);
     }
     const matches = exact.length ? exact : fuzzy;
     // Same-name disambiguation (Kevin, S110e): when 2+ people match, enrich each
@@ -1732,25 +1764,37 @@ async function runTool(name, input, ctx) {
     if (matches.length > 1) {
       for (const m of matches) {
         try {
-          const pid = await activePlanId(db, m.clientId);
-          const wrap = await kvGetJSON(db, m.clientId, `caliq-${pid}`);
-          const w = wrap && wrap.data && wrap.data.weightLbs;
-          if (w) m.currentWeightLbs = Math.round(Number(w));
+          // A local plan lives in the CALLER's own kv under its own id; a
+          // connected client's data lives in theirs under their active plan.
+          const ownerUid = m.kind === "local_plan" ? ctx.callerUid : m.clientId;
+          const pid = m.kind === "local_plan" ? m.localPlanId : await activePlanId(db, m.clientId);
+          if (m.currentWeightLbs == null) {
+            const wrap = await kvGetJSON(db, ownerUid, `caliq-${pid}`);
+            const w = wrap && wrap.data && wrap.data.weightLbs;
+            if (w) m.currentWeightLbs = Math.round(Number(w));
+          }
           const prefix = `caliq-log-${pid}-`;
-          const logs = await db.collection(`users/${m.clientId}/kv`)
-            .where("k", ">=", prefix).where("k", "<=", prefix + "")
+          // , not "" — an empty upper bound makes the range match only a
+          // key equal to the prefix, so this quietly returned nothing and the
+          // last-log date never appeared (the S85 gotcha, live again here).
+          const logs = await db.collection(`users/${ownerUid}/kv`)
+            .where("k", ">=", prefix).where("k", "<=", prefix + "")
             .orderBy("k", "desc").limit(1).get();
           logs.forEach((l) => { m.lastLogDate = (l.data().k || "").slice(-10); });
         } catch (e) { /* best-effort disambiguation */ }
       }
     }
+    const kinds = new Set(matches.map((m) => m.kind));
     return {
       matches, count: matches.length,
       note: matches.length === 0
-        ? "No connected client matched. Most of a trainer's people are LOCAL files — check list_local_plans (imported/sim/template plans) before assuming they aren't in Glide."
+        ? "Nobody matched — neither a connected client nor one of your own plan files. Don't assume they aren't in Glidna on a partial name; try a different spelling, or list_clients / list_local_plans to see everyone."
         : matches.length > 1
-          ? "Several people match that name. Ask the user which one, describing them by a human detail (email, current weight, or last-log date) — NEVER the raw id. Then use that clientId."
-          : undefined,
+          ? "Several people match. Ask the user which one, describing them by a human detail (email, current weight, or last-log date) — NEVER the raw id."
+            + (kinds.size > 1 ? " NOTE: these span BOTH a connected account and one of the trainer's own plan files — that is exactly the case to ask about, because writing to the wrong one is invisible to them." : "")
+          : matches[0].isSimulation
+            ? "Heads up: the only match is a SIMULATION (a sandbox projection, not a real logged plan). Say so before writing anything into it."
+            : undefined,
     };
   }
 
@@ -1764,9 +1808,64 @@ async function runTool(name, input, ctx) {
     const snap = await db.collection("users").where("assignedTrainerId", "==", ctx.callerUid).get();
     const nums = await idNumMap(db, ctx.callerUid);
     const clients = [];
-    const counts = { inactive: 0, stalled: 0, off_track: 0, on_track: 0, logging: 0 };
+    const counts = { inactive: 0, never_logged: 0, stalled: 0, off_track: 0, on_track: 0, logging: 0 };
     const MAX = 60;
     let truncated = false;
+    // One person's coaching snapshot. Identical maths either way — only WHERE
+    // the data lives differs: a connected client's in their own account, a local
+    // plan's in the trainer's. Extracted so the two pools can never drift.
+    const snapshot = async ({ ownerUid, planId, data, head, withRequests }) => {
+      const targets = nutritionTargets(data);
+      const prefix = `caliq-log-${planId}-`;
+      let daysLogged = 0, calSum = 0, calDays = 0, protSum = 0, protDays = 0;
+      try {
+        const logs = await db.collection(`users/${ownerUid}/kv`)
+          .where("k", ">=", prefix + start).where("k", "<=", prefix + end + "\uf8ff").get();
+        logs.forEach((l) => {
+          let lg = {}; try { lg = JSON.parse(l.data().value || "{}") || {}; } catch (e) { lg = {}; }
+          if ((Number(lg.calories) || 0) > 0) { daysLogged++; calSum += Number(lg.calories) || 0; calDays++; }
+          if ((Number(lg.protein) || 0) > 0) { protSum += Number(lg.protein); protDays++; }
+        });
+      } catch (e) { /* ignore */ }
+      // true latest log date (one cheap desc/limit-1 query) → days since
+      let lastLog = null;
+      try {
+        const ls = await db.collection(`users/${ownerUid}/kv`)
+          .where("k", ">=", prefix).where("k", "<=", prefix + "\uf8ff").orderBy("k", "desc").limit(1).get();
+        ls.forEach((l) => { lastLog = (l.data().k || "").slice(-10); });
+      } catch (e) { /* ignore */ }
+      const daysSince = lastLog
+        ? Math.round((endMs - new Date(lastLog + "T00:00:00Z").getTime()) / 86400000) : null;
+      const cur = Number(data.weightLbs) || null;
+      const goal = Number(data.goalWeight) || null;
+      const trend = weightTrend(data.checkIns);
+      const rate = trend ? round1(trend.ratePerWeek) : null;
+      const onTrack = (trend && cur && goal && goal !== cur) ? (etaWeeks(cur, goal, trend.ratePerWeek) != null) : null;
+      let openReqs = 0;
+      if (withRequests) {
+        try {
+          const reqs = await kvGetJSON(db, ownerUid, "caliq-requests");
+          if (Array.isArray(reqs)) openReqs = reqs.filter((r) => r && r.status !== "done").length;
+        } catch (e) { /* ignore */ }
+      }
+      let status;
+      if (!lastLog) status = "never_logged";       // a file nobody has ever logged to
+      else if (daysLogged === 0) status = "inactive";
+      else if (onTrack === true) status = "on_track";
+      else if (rate != null && goal && Math.abs(rate) < 0.15) status = "stalled";
+      else if (onTrack === false) status = "off_track";
+      else status = "logging";
+      counts[status] = (counts[status] || 0) + 1;
+      return {
+        ...head, status,
+        daysLoggedInWindow: daysLogged, lastLogDate: lastLog, daysSinceLastLog: daysSince,
+        avgCalories: calDays ? Math.round(calSum / calDays) : null, calorieTarget: targets.calorieTarget,
+        avgProtein: protDays ? Math.round(protSum / protDays) : null, proteinTarget: targets.proteinTarget,
+        currentWeightLbs: cur, goalWeightLbs: goal,
+        weightRatePerWeek: rate, onTrack,
+        ...(withRequests ? { openRequests: openReqs } : {}),
+      };
+    };
     for (const docSnap of snap.docs) {
       if (clients.length >= MAX) { truncated = true; break; }
       const uidC = docSnap.id;
@@ -1783,60 +1882,37 @@ async function runTool(name, input, ctx) {
         continue;
       }
       const { id: planId, data } = await activePlanData(db, uidC);
-      const targets = nutritionTargets(data);
-      const prefix = `caliq-log-${planId}-`;
-      // adherence within the window
-      let daysLogged = 0, calSum = 0, calDays = 0, protSum = 0, protDays = 0;
-      try {
-        const logs = await db.collection(`users/${uidC}/kv`)
-          .where("k", ">=", prefix + start).where("k", "<=", prefix + end + "").get();
-        logs.forEach((l) => {
-          let lg = {}; try { lg = JSON.parse(l.data().value || "{}") || {}; } catch (e) { lg = {}; }
-          if ((Number(lg.calories) || 0) > 0) { daysLogged++; calSum += Number(lg.calories) || 0; calDays++; }
-          if ((Number(lg.protein) || 0) > 0) { protSum += Number(lg.protein); protDays++; }
-        });
-      } catch (e) { /* ignore */ }
-      // true latest log date (one cheap desc/limit-1 query) → days since
-      let lastLog = null;
-      try {
-        const ls = await db.collection(`users/${uidC}/kv`)
-          .where("k", ">=", prefix).where("k", "<=", prefix + "\uf8ff").orderBy("k", "desc").limit(1).get();
-        ls.forEach((l) => { lastLog = (l.data().k || "").slice(-10); });
-      } catch (e) { /* ignore */ }
-      const daysSince = lastLog
-        ? Math.round((endMs - new Date(lastLog + "T00:00:00Z").getTime()) / 86400000) : null;
-      // weight trend + on-track
-      const cur = Number(data.weightLbs) || null;
-      const goal = Number(data.goalWeight) || null;
-      const trend = weightTrend(data.checkIns);
-      const rate = trend ? round1(trend.ratePerWeek) : null;
-      const onTrack = (trend && cur && goal && goal !== cur) ? (etaWeeks(cur, goal, trend.ratePerWeek) != null) : null;
-      // open requests
-      let openReqs = 0;
-      try {
-        const reqs = await kvGetJSON(db, uidC, "caliq-requests");
-        if (Array.isArray(reqs)) openReqs = reqs.filter((r) => r && r.status !== "done").length;
-      } catch (e) { /* ignore */ }
-      let status;
-      if (daysLogged === 0) status = "inactive";
-      else if (onTrack === true) status = "on_track";
-      else if (rate != null && goal && Math.abs(rate) < 0.15) status = "stalled";
-      else if (onTrack === false) status = "off_track";
-      else status = "logging";
-      counts[status]++;
-      clients.push({
-        clientId: uidC, ref: refCode(uidC), num: nums[uidC] || null, name: cname, status,
-        daysLoggedInWindow: daysLogged, lastLogDate: lastLog, daysSinceLastLog: daysSince,
-        avgCalories: calDays ? Math.round(calSum / calDays) : null, calorieTarget: targets.calorieTarget,
-        avgProtein: protDays ? Math.round(protSum / protDays) : null, proteinTarget: targets.proteinTarget,
-        currentWeightLbs: cur, goalWeightLbs: goal,
-        weightRatePerWeek: rate, onTrack, openRequests: openReqs,
-      });
+      clients.push(await snapshot({ ownerUid: uidC, planId, data, withRequests: true,
+        head: { kind: "client", clientId: uidC, ref: refCode(uidC), num: nums[uidC] || null, name: cname } }));
     }
-    // surface the most concerning first (inactive → off_track → stalled → others)
-    const rank = { inactive: 0, off_track: 1, stalled: 2, logging: 3, on_track: 4 };
+
+    // ...and the trainer's OWN plan files (S165). These are clients too — they
+    // just never made an account — so a roster answer that silently skipped them
+    // ("nobody needs attention") was confidently incomplete, which is worse than
+    // no answer at all. Their data sits in the CALLER's own kv under the plan id.
+    const ownIndex = (await kvGetJSON(db, ctx.callerUid, "caliq-index")) || [];
+    for (const p of Array.isArray(ownIndex) ? ownIndex : []) {
+      if (!p || !p.id) continue;
+      if (clients.length >= MAX) { truncated = true; break; }
+      const wrap = await kvGetJSON(db, ctx.callerUid, `caliq-${p.id}`);
+      clients.push(await snapshot({
+        ownerUid: ctx.callerUid, planId: p.id, data: (wrap && wrap.data) || {},
+        withRequests: false,   // no login on the other end to receive a to-do
+        head: { kind: "local_plan", localPlanId: p.id, ref: refCode(p.id), num: nums[p.id] || null,
+          name: p.customName || p.name || "(unnamed)",
+          ...(p.isSimulation ? { isSimulation: true } : {}),
+          ...(p.trainerizeId ? { importedFromTrainerize: true } : {}) },
+      }));
+    }
+    // Most concerning first. `never_logged` sorts LAST on purpose: a file nobody
+    // has ever logged to is usually a template or a sandbox, not a person who
+    // has gone quiet — putting those at the top would bury the ones who have.
+    const rank = { inactive: 0, off_track: 1, stalled: 2, logging: 3, on_track: 4, never_logged: 5 };
     clients.sort((a, b) => (rank[a.status] - rank[b.status]) || ((b.daysSinceLastLog ?? -1) - (a.daysSinceLastLog ?? -1)));
-    return { windowDays: win, range: { start, end }, clientCount: clients.length, counts, clients, truncated };
+    return { windowDays: win, range: { start, end }, clientCount: clients.length, counts, clients, truncated,
+      note: "Covers EVERYONE this trainer coaches: connected accounts (`clientId`) and their own plan files (`localPlanId`), "
+        + "which are usually real clients without an app account. `never_logged` means nothing has ever been logged for that person — "
+        + "for a template or a sandbox (`isSimulation`) that is normal, not a problem to raise. To-dos can only be sent to a connected account." };
   }
 
   if (name === "set_notification_prefs") {

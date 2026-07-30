@@ -17136,7 +17136,7 @@ function matchVoiceSubjects(text, subjects) {
 // preference, not a per-visit accident.
 let chatUiState = { open: false, size: null };
 
-function AIChatPanel({ role, onDataChanged, premium = true }) {
+function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
   const [open, setOpen] = useState(chatUiState.open);
   const [messages, setMessages] = useState([]); // {role:'user'|'assistant', content, image?}
   const [draft, setDraft] = useState("");
@@ -17378,7 +17378,9 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   // What a pin looks like on the wire. `pinned` tells the server this subject was
   // chosen, not guessed, so it stays put for the whole turn.
   const targetOf = (pin) => (pin
-    ? (pin.clientId ? { clientId: pin.clientId, pinned: true } : { localPlanId: pin.localPlanId, pinned: true })
+    ? (pin.clientId
+        ? { clientId: pin.clientId, pinned: true, ...(pin.name ? { name: pin.name } : {}) }
+        : { localPlanId: pin.localPlanId, pinned: true, ...(pin.name ? { name: pin.name } : {}) })
     : null);
   const applyPin = (pin) => {
     activeTargetRef.current = pin
@@ -17387,7 +17389,21 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   };
   // What we relay to the server this turn. A pinned chat ALWAYS sends its pin —
   // that is what survives a reload and stops mid-chat drift moving the subject.
-  const sendTarget = () => targetOf(pinOf(activeChatId)) || activeTargetRef.current;
+  // The plan on screen, as a target. Deliberately NOT `pinned` — a pin tells the
+  // server this subject was chosen and stops the model looking anyone else up,
+  // which would make "log this for Casey" land on the plan you happen to have
+  // open. Ambient context should lose to an explicit name, every time.
+  const screenTarget = () => (subject
+    ? (subject.clientId
+        ? { clientId: subject.clientId, ...(subject.name ? { name: subject.name } : {}) }
+        : { localPlanId: subject.localPlanId, ...(subject.name ? { name: subject.name } : {}) })
+    : null);
+  // Weakest to strongest: the plan on screen is ambient, the subject this
+  // conversation already resolved beats it, and a pin the user set beats both.
+  const sendTarget = () => targetOf(pinOf(activeChatId)) || activeTargetRef.current || screenTarget();
+  // True when the on-screen plan is what a write would actually land on — i.e.
+  // nothing stronger is in play. Only then may the UI claim it.
+  const subjectInUse = () => !!subject && !pinOf(activeChatId) && !activeTargetRef.current;
   // These two also run from inside send(), whose closure holds the chat that was
   // active when it was CALLED — which, for a voice note that opens its own chat,
   // is the previous one. The ref is written the moment the chat changes, so the
@@ -17510,7 +17526,11 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
           const list = r && r.value ? JSON.parse(r.value) : [];
           for (const p of Array.isArray(list) ? list : []) {
             const name = p.customName || p.name || "";
-            if (name) subs.push({ kind: "plan", localPlanId: p.id, name });
+            // isSimulation rides along: a sandbox and a real prospect file can
+            // share a name, and logging a real meal into a projection (or the
+            // reverse) is exactly the mix-up the purple SANDBOX identity exists
+            // to prevent everywhere else in the app.
+            if (name) subs.push({ kind: "plan", localPlanId: p.id, name, isSimulation: !!p.isSimulation });
           }
         } catch { /* best-effort */ }
       }
@@ -18085,9 +18105,15 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                   <span className="text-[.7rem] text-muted">Heard a name — send to</span>
                   {voiceCands.map((c) => (
                     <button key={`${c.kind}:${c.clientId || c.localPlanId}`} onClick={() => sendVoiceTo(c)}
-                      className="flex items-center gap-1 rounded-full border border-primary bg-[rgba(8,220,224,.08)] px-2.5 py-1 text-[.74rem] font-bold text-fg cursor-pointer">
-                      <Icon name={c.kind === "plan" ? "file" : "person"} size={12} color="var(--accent)" />
-                      {c.name}{c.kind === "plan" ? <span className="font-normal text-muted">· plan file</span> : null}
+                      className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-[.74rem] font-bold text-fg cursor-pointer ${
+                        c.isSimulation ? "border-[color:var(--color-sim)] bg-[color-mix(in_srgb,var(--color-sim)_12%,transparent)]"
+                          : "border-primary bg-[rgba(8,220,224,.08)]"}`}>
+                      <Icon name={c.isSimulation ? "flask" : c.kind === "plan" ? "file" : "person"} size={12}
+                        color={c.isSimulation ? "var(--color-sim)" : "var(--accent)"} />
+                      {c.name}
+                      {c.isSimulation
+                        ? <span className="font-bold text-[.62rem] tracking-wide text-[color:var(--color-sim)]">SANDBOX</span>
+                        : c.kind === "plan" ? <span className="font-normal text-muted">· plan file</span> : null}
                     </button>
                   ))}
                 </div>
@@ -18508,6 +18534,16 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
 
           {/* Composer */}
           <div className="border-t border-border bg-surface px-3 py-3">
+            {/* Say whose plan a write would land on (S165). Only shown when the
+                open plan really IS the target — a pin or a subject this chat
+                already resolved outranks it, and claiming otherwise would be
+                worse than saying nothing. */}
+            {subjectInUse() && (
+              <div className="mb-2 flex items-center gap-1.5 text-[.72rem] text-muted">
+                <Icon name={subject.clientId ? "person" : "file"} size={12} color="var(--accent)" />
+                <span className="min-w-0 truncate">Working on <b className="text-fg">{subject.name}</b> — the plan you have open</span>
+              </div>
+            )}
             {pendingImages.length > 0 && (
               <div className="mb-2 flex items-center gap-2 flex-wrap">
                 {pendingImages.map((im, ix) => (
@@ -18679,19 +18715,22 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 {isTrainer && (
                   <button onClick={() => {
                       setPinPicker(true);
-                      // Same roster the voice bar matches names against — loaded once.
+                      // The SAME roster the voice bar matches names against —
+                      // everyone, connected or not (S165). It used to be filtered
+                      // to `kind === "client"`, which quietly meant most of a
+                      // trainer's people couldn't be chosen here at all.
                       if (pinRoster === null) {
-                        loadVoiceSubjects().then((s) => setPinRoster(s.filter((x) => x.kind === "client"))).catch(() => setPinRoster([]));
+                        loadVoiceSubjects().then((s) => setPinRoster(s)).catch(() => setPinRoster([]));
                       }
                     }}
                     className="mx-3 mt-3 flex items-center justify-center gap-1.5 rounded-xl border border-border bg-transparent px-3 py-2.5 text-[.8rem] font-bold text-fg cursor-pointer">
-                    <Icon name="clients" size={14} color="var(--accent)" />New chat about a client
+                    <Icon name="clients" size={14} color="var(--accent)" />New chat about someone
                   </button>
                 )}
                 {pinPicker && (
                   <div className="mx-3 mt-2 rounded-xl border border-border bg-surface2 p-2.5">
                     <div className="mb-1.5 flex items-center gap-2">
-                      <div className="text-[.76rem] font-bold text-fg">Which client?</div>
+                      <div className="text-[.76rem] font-bold text-fg">Who is it about?</div>
                       <button onClick={() => setPinPicker(false)} aria-label="Cancel"
                         className="ml-auto border-0 bg-transparent text-muted cursor-pointer">
                         <Icon name="close" size={14} color="currentColor" />
@@ -18699,13 +18738,21 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                     </div>
                     {pinRoster === null && <div className="text-[.74rem] text-muted">Loading…</div>}
                     {pinRoster && pinRoster.length === 0 && (
-                      <div className="text-[.74rem] text-muted leading-relaxed">No connected clients yet.</div>
+                      <div className="text-[.74rem] text-muted leading-relaxed">No clients or plan files yet.</div>
                     )}
                     <div className="flex max-h-[190px] flex-col gap-1 overflow-y-auto">
                       {(pinRoster || []).map((c) => (
-                        <button key={c.clientId} onClick={() => { setPinPicker(false); newChat({ clientId: c.clientId, name: c.name }); }}
-                          className="rounded-lg border border-border bg-transparent px-2.5 py-2 text-left text-[.78rem] text-fg cursor-pointer">
-                          {c.name}
+                        <button key={`${c.kind}:${c.clientId || c.localPlanId}`}
+                          onClick={() => { setPinPicker(false); newChat(c.kind === "plan"
+                            ? { localPlanId: c.localPlanId, name: c.name }
+                            : { clientId: c.clientId, name: c.name }); }}
+                          className="flex items-center gap-1.5 rounded-lg border border-border bg-transparent px-2.5 py-2 text-left text-[.78rem] text-fg cursor-pointer">
+                          <Icon name={c.isSimulation ? "flask" : c.kind === "plan" ? "file" : "person"} size={12}
+                            color={c.isSimulation ? "var(--color-sim)" : "var(--accent)"} />
+                          <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                          {c.isSimulation
+                            ? <span className="shrink-0 text-[.6rem] font-bold tracking-wide text-[color:var(--color-sim)]">SANDBOX</span>
+                            : c.kind === "plan" ? <span className="shrink-0 text-[.62rem] text-muted">plan file</span> : null}
                         </button>
                       ))}
                     </div>
@@ -24179,6 +24226,20 @@ export default function App() {
     appendHistory([`edited ${upd.name || "a food"}${upd.type ? ` in ${upd.type}` : ""} (${upd.calories} cal)`]);
   };
 
+  // Who the in-plan AI chat is about (S165). The person whose plan is open —
+  // a connected client, or one of the trainer's own plan files, which is just as
+  // likely to be a real client who never made an account. A client caller gets
+  // null: the server pins them to their own account regardless.
+  const inPlanSubject = (() => {
+    if (!(role === "head_trainer" || role === "sub_trainer" || role === "admin")) return null;
+    if (activeRemoteUid) return { clientId: activeRemoteUid, name: fullName(data) || "this client" };
+    // "self" is the caller's own plan, not an index entry — the server would
+    // (correctly) reject it as a localPlanId.
+    if (!activeId || activeId === "self") return null;
+    const entry = profiles.find((p) => p && p.id === activeId) || {};
+    return { localPlanId: activeId, name: entry.customName || fullName(data) || entry.name || "this plan" };
+  })();
+
   // Pull the latest plan structure + daily log + history for the active plan on
   // demand. A trainer's view of a remote client is now live-synced (the effect
   // below), so this is mostly a manual fallback and the path the client's own
@@ -24686,10 +24747,13 @@ export default function App() {
       {/* AI chat available IN the plan view (step 5 — DailyDashboard & Results;
           the wizard steps 0–4 have the fixed BottomNav, so it's gated to step 5).
           onDataChanged re-pulls the plan so an AI change appears live without
-          leaving the screen. NOTE: for a CLIENT this targets their own plan; a
-          trainer viewing a client should name the client (or the open plan
-          live-syncs the change via the S70 listeners). */}
-      {step === 5 && <AIChatPanel role={role} premium={mePremium} onDataChanged={reloadPlanLive} />}
+          leaving the screen.
+          `subject` (S165): standing inside someone's plan, "log this" has to mean
+          THIS plan. Without it the write went to the trainer's own diary —
+          silently, and looking like success. A CLIENT needs none: the server
+          forces their own account either way. */}
+      {step === 5 && <AIChatPanel role={role} premium={mePremium} onDataChanged={reloadPlanLive}
+        subject={inPlanSubject} />}
     </>
   );
 }
