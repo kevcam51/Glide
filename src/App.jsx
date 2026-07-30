@@ -17200,6 +17200,12 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const chunksRef = useRef([]);   // recorded audio chunks
   const streamRef = useRef(null); // mic MediaStream (to stop tracks after)
   const waveRef = useRef(null);   // <canvas> for the live level meter
+  // How long a pause may run before the take ends, and the hard ceiling on one
+  // recording (S162e, Kevin: 2s ended sentences he was still in the middle of).
+  // 10s is long enough to think mid-thought without the mic quietly closing;
+  // the ceiling only matters if you genuinely talk for two minutes straight.
+  const SILENCE_STOP_MS = 10000;
+  const MAX_TAKE_MS = 120000;
   const spokeRef = useRef(false);    // has any speech been heard this take?
   // Voice WITHOUT opening the chat (S162d): a slim bar, a preview to confirm, and
   // the answer waiting behind the launcher. The point is to ask about what is on
@@ -17543,7 +17549,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       // Auto-stop at 60s, with a visible countdown so the limit is clear.
       setRecSecs(0);
       recTickRef.current = setInterval(() => setRecSecs((s) => s + 1), 1000);
-      maxRecTimerRef.current = setTimeout(() => { stopRecording(); }, 60000);
+      maxRecTimerRef.current = setTimeout(() => { stopRecording(); }, MAX_TAKE_MS);
       startLiveCaption();
       setRecording(true);
     } catch (err) {
@@ -17602,7 +17608,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
         if (level > 12) { spokeRef.current = true; silenceAtRef.current = 0; }
         else if (spokeRef.current) {
           if (!silenceAtRef.current) silenceAtRef.current = now;
-          else if (now - silenceAtRef.current > 2000) { silenceAtRef.current = 0; stopRecording(); return; }
+          else if (now - silenceAtRef.current > SILENCE_STOP_MS) { silenceAtRef.current = 0; stopRecording(); return; }
         }
         const cv = waveRef.current; if (!cv) return;
         const c = cv.getContext("2d"); const W = cv.width, H = cv.height;
@@ -17856,11 +17862,19 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 {/* Keep the words rather than lose them — hands off to the full chat. */}
                 <button onClick={() => { setDraft(voicePreview); setVoicePreview(""); setMicOnly(false); micOnlyRef.current = false; setOpen(true); }}
                   className="rounded-xl border border-border bg-surface2 px-4 py-2.5 text-[.8rem] font-bold text-fg cursor-pointer">Edit</button>
+                {/* Was a rounded-rect that read as oblong and got lost against the
+                    other controls. An actual circle at a fixed size, with the word
+                    next to it, so leaving is as obvious as sending. */}
                 <button onClick={() => { setVoicePreview(""); setMicOnly(false); micOnlyRef.current = false; }}
-                  aria-label="Discard" className="ml-auto rounded-lg border border-border bg-surface p-2 text-muted cursor-pointer">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-[16px] h-[16px]">
-                    <line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" />
-                  </svg>
+                  aria-label="Discard recording" title="Discard"
+                  className="ml-auto flex items-center gap-1.5 text-[.78rem] font-bold text-muted cursor-pointer bg-transparent border-0">
+                  <span className="flex items-center justify-center rounded-full border border-border bg-surface2 text-fg"
+                    style={{ width: 32, height: 32, flex: "0 0 32px", lineHeight: 0 }}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className="w-[15px] h-[15px]">
+                      <line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" />
+                    </svg>
+                  </span>
+                  Discard
                 </button>
               </div>
             </>
