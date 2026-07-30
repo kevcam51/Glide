@@ -724,6 +724,12 @@ body{
   font-weight:400;
   line-height:1.5;
   min-height:100vh;
+  /* Reserve room for the docked chat (S162c, Kevin): the dock is fixed over the
+     bottom of the page, so without this the last stretch of every screen sits
+     permanently underneath it and cannot be scrolled into view. Tracks the dock's
+     live height, so growing it pushes the reachable bottom down with it, and it
+     is 0px whenever nothing is docked. */
+  padding-bottom:var(--glidna-dock-h, 0px);
   /* clip (NOT hidden): clips sideways overflow WITHOUT making body a scroll
      container. html/body used to both carry overflow-y:auto, which made body a
      scroller that never scrolls — every swipe only worked by CHAINING up to the
@@ -7578,7 +7584,12 @@ function BottomSheet({ open, onClose, title, icon, children }) {
       <div onClick={(e) => e.stopPropagation()} data-sheet
         style={{ background: "var(--bg)", color: "var(--text)", borderTopLeftRadius: 20, borderTopRightRadius: 20,
           borderTop: "1px solid var(--border)", boxShadow: "0 -10px 40px rgba(0,0,0,.4)",
-          maxHeight: "88vh", display: "flex", flexDirection: "column", animation: "sheetUp .26s cubic-bezier(.25,.9,.3,1) both" }}>
+          // Relative to the WRAPPER, which already stops at the dock — so the
+          // sheet always fits the space above it and keeps the same peek of page
+          // as before. Deliberately no vh: a viewport height of 0 during layout
+          // would collapse the sheet to nothing, the same trap that produced a
+          // 2px chat and a drag that shrank when pulled up.
+          maxHeight: "88%", display: "flex", flexDirection: "column", animation: "sheetUp .26s cubic-bezier(.25,.9,.3,1) both" }}>
         {/* Grab handle + header: title left, back arrow top-right (Kevin). */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 8 }}>
           <div style={{ width: 38, height: 4, borderRadius: 999, background: "var(--border)", marginBottom: 6 }} />
@@ -17177,6 +17188,8 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const chunksRef = useRef([]);   // recorded audio chunks
   const streamRef = useRef(null); // mic MediaStream (to stop tracks after)
   const waveRef = useRef(null);   // <canvas> for the live level meter
+  const spokeRef = useRef(false);    // has any speech been heard this take?
+  const silenceAtRef = useRef(0);    // when the current pause began (ms)
   const recognitionRef = useRef(null); // browser SpeechRecognition (live interim words)
 
   // Lock the page behind the chat while it's open so swiping scrolls the CHAT,
@@ -17466,10 +17479,23 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) { mime = m; break; }
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Ask the browser's own DSP to clean the signal before it ever reaches
+      // Whisper (S162c, Kevin: "make the mic quality good like Claude/ChatGPT").
+      // This was plain `{audio:true}`, which takes the raw mic — room echo, hiss
+      // and a quiet speaker all intact. Echo cancellation, noise suppression and
+      // auto gain are the same three the big voice UIs rely on; mono at 48k is
+      // what the speech models want, and 128kbps stops the codec from smearing
+      // consonants, which is where transcription errors come from.
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+          channelCount: 1, sampleRate: 48000,
+        },
+      });
       streamRef.current = stream;
       chunksRef.current = [];
-      const rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      const recOpts = mime ? { mimeType: mime, audioBitsPerSecond: 128000 } : { audioBitsPerSecond: 128000 };
+      const rec = new MediaRecorder(stream, recOpts);
       recRef.current = rec;
       rec.ondataavailable = (e) => { if (e.data && e.data.size) chunksRef.current.push(e.data); };
       rec.onstop = async () => {
@@ -17541,10 +17567,23 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
       src.connect(analyser);
       const bins = analyser.frequencyBinCount;
       const data = new Uint8Array(bins);
+      spokeRef.current = false; silenceAtRef.current = 0;
       const draw = () => {
         raf = requestAnimationFrame(draw);
-        const cv = waveRef.current; if (!cv) return;
         analyser.getByteFrequencyData(data);
+        // Free-flowing voice (S162c): stop on a natural pause instead of making
+        // the user reach back for the button, which is what breaks the flow of
+        // talking while you read. Only arms AFTER speech is detected, so silence
+        // before you start never ends the take.
+        let sum = 0; for (let i = 0; i < bins; i++) sum += data[i];
+        const level = sum / bins;
+        const now = performance.now();
+        if (level > 12) { spokeRef.current = true; silenceAtRef.current = 0; }
+        else if (spokeRef.current) {
+          if (!silenceAtRef.current) silenceAtRef.current = now;
+          else if (now - silenceAtRef.current > 2000) { silenceAtRef.current = 0; stopRecording(); return; }
+        }
+        const cv = waveRef.current; if (!cv) return;
         const c = cv.getContext("2d"); const W = cv.width, H = cv.height;
         c.clearRect(0, 0, W, H);
         const bw = W / bins;
