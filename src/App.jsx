@@ -7569,9 +7569,29 @@ const deriveBasisFromMeal = (m) => {
 // top-RIGHT (Kevin's placement) for an obvious, consistent way back. Portaled to
 // body so it escapes the page-transition transform trap (S27/S30); back-button
 // + body-scroll-lock via the shared hooks. `icon` is an <Icon> name.
+// How many bottom sheets are currently up. The AI launcher shrinks while one is,
+// so it stays reachable without covering the sheet's content (S163b, Kevin).
+let sheetCount = 0;
+const sheetSubs = new Set();
+function useAnySheetOpen() {
+  const [n, setN] = useState(sheetCount);
+  useEffect(() => {
+    const fn = () => setN(sheetCount);
+    sheetSubs.add(fn);
+    fn();
+    return () => { sheetSubs.delete(fn); };
+  }, []);
+  return n > 0;
+}
+
 function BottomSheet({ open, onClose, title, icon, children }) {
   useBackClose(open, onClose);
   useBodyScrollLock(open);
+  useEffect(() => {
+    if (!open) return;
+    sheetCount++; sheetSubs.forEach((fn) => fn());
+    return () => { sheetCount = Math.max(0, sheetCount - 1); sheetSubs.forEach((fn) => fn()); };
+  }, [open]);
   if (!open) return null;
   return createPortal(
     <div onClick={onClose}
@@ -17214,6 +17234,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const micOnlyRef = useRef(false);                    // read inside recorder callbacks
   const [voicePreview, setVoicePreview] = useState(""); // transcript awaiting confirmation
   const [unread, setUnread] = useState(false);          // a reply arrived while closed
+  const sheetUp = useAnySheetOpen();                    // shrink the launcher over sheets
   const silenceAtRef = useRef(0);    // when the current pause began (ms)
   const recognitionRef = useRef(null); // browser SpeechRecognition (live interim words)
 
@@ -17796,7 +17817,10 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
           Safari mishandles for fixed children of body. One fixed layer pins
           reliably, and an absolute child of a non-moving parent can't drift. */}
       {!open && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 1000, pointerEvents: "none" }}>
+        // Above bottom sheets (1600) — the launcher was on 1000, so opening
+        // "Food & calories" (or any sheet) hid it entirely and you couldn't ask
+        // about the very thing you had just opened.
+        <div style={{ position: "fixed", inset: 0, zIndex: 1650, pointerEvents: "none" }}>
           <div style={{ position: "absolute", pointerEvents: "auto", display: "flex", alignItems: "center", gap: 8,
             right: "calc(16px + env(safe-area-inset-right,0px))", bottom: "calc(18px + env(safe-area-inset-bottom,0px))" }}>
             {/* Talk without covering the page (S162, Kevin): opens DOCKED and
@@ -17810,6 +17834,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 setTimeout(() => startRecording(), 60);
               }}
               aria-label="Talk to Glidna" title="Talk to Glidna — keeps the page visible"
+              hidden={sheetUp}
               className="flex items-center justify-center rounded-full border-none bg-surface2 text-primary shadow-lg cursor-pointer"
               style={{ width: 44, height: 44, border: "1px solid var(--color-border)" }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[19px] h-[19px]">
@@ -17820,7 +17845,9 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
             </button>
             <button onClick={() => setOpen(true)}
               aria-label={busy ? "Glidna is thinking" : unread ? "Reply ready" : "Open AI assistant"}
-              className="relative flex items-center gap-1.5 rounded-full border-none bg-primaryfill px-3 py-2.5 font-bold text-primaryfg shadow-lg cursor-pointer">
+              title={sheetUp ? "Ask Glidna" : undefined}
+              className={`relative flex items-center justify-center gap-1.5 rounded-full border-none bg-primaryfill font-bold text-primaryfg shadow-lg cursor-pointer ${sheetUp ? "" : "px-3 py-2.5"}`}
+              style={sheetUp ? { width: 44, height: 44, opacity: .92 } : undefined}>
               {/* Working / answer-waiting states (S162d): after sending by voice
                   the chat is closed, so the launcher itself has to carry the
                   progress — otherwise the reply happens invisibly. */}
@@ -17834,7 +17861,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               ) : (
                 <Icon name="sparkle" variant="solid" size={16} />
               )}
-              <span className="text-[.82rem]">{busy ? "Thinking" : unread ? "Answer ready" : "Ask Glidna"}</span>
+              {!sheetUp && <span className="text-[.82rem]">{busy ? "Thinking" : unread ? "Answer ready" : "Ask Glidna"}</span>}
               {unread && !busy ? (
                 <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-surface bg-danger" />
               ) : null}
