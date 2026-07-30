@@ -668,6 +668,12 @@ exports.estimateFood = onCall(
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
     const desc = String((request.data && request.data.food) || "").trim().slice(0, 200);
+    // Free-text context alongside a photo (S161, Kevin): what's in it, where it
+    // came from, anything the camera can't show — cooking oil, a restaurant's
+    // known portioning, "half of this was my kid's". Kept separate from `food` so
+    // the logged entry keeps a short clean NAME while the model still gets the
+    // detail. Longer cap than the name: this is prose, not a label.
+    const notes = String((request.data && request.data.notes) || "").trim().slice(0, 600);
     // Optional meal PHOTO (S99): a base64 data URL. Validated through the same
     // rules as the chat's photo logging (sanitizeContent) — never store it, it
     // goes straight to the model and is discarded with the request.
@@ -675,7 +681,7 @@ exports.estimateFood = onCall(
       ? request.data.images : [(request.data && request.data.image) || ""];
     const imgBlocks = rawImgs.slice(0, 20).map(sanitizeImageDataUrl).filter(Boolean);
     const imgBlock = imgBlocks.length > 0; // legacy truthiness for the checks below
-    if (!desc && !imgBlock) throw new HttpsError("invalid-argument", "Describe the food or add a photo first.");
+    if (!desc && !notes && !imgBlock) throw new HttpsError("invalid-argument", "Describe the food or add a photo first.");
     const db = admin.firestore();
     const profile = (await db.doc(`users/${uid}`).get()).data() || {};
     if (trialExpiredFor(profile)) {
@@ -706,12 +712,22 @@ exports.estimateFood = onCall(
             + ". Identify what is on the plate and "
             + "estimate the portion from visual size cues (plate/bowl/utensil scale). Set `assumed` to "
             + "what you saw and the portion you judged (e.g. \"chicken breast + rice, ~1.5 cups\"). "
-            + "Include invisible cooking fats/oils and dressings in the calorie estimate." : ""),
+            + "Include invisible cooking fats/oils and dressings in the calorie estimate." : "")
+          // The user's own note outranks the photo wherever the two disagree:
+          // they know the restaurant, the recipe and what they actually ate.
+          // A photo cannot show cooking oil, a protein scoop, or that half the
+          // plate went uneaten — that is exactly what the note is for.
+          + (notes ? " The user also wrote a description of this meal. TRUST IT over what the "
+            + "image appears to show wherever they conflict — they know what was in it, where it "
+            + "came from and how much they actually ate. Use it for anything not visible "
+            + "(oils, sauces, brands, restaurant portions, leftovers) and reflect it in `assumed`." : ""),
         messages: [{
           role: "user",
           content: imgBlock
-            ? [...imgBlocks, { type: "text", text: desc ? `Estimate this meal. The user says it is: ${desc}` : "Estimate this meal." }]
-            : `Estimate: ${desc}`,
+            ? [...imgBlocks, { type: "text", text: "Estimate this meal."
+                + (desc ? ` The user says it is: ${desc}` : "")
+                + (notes ? `\nTheir description: ${notes}` : "") }]
+            : `Estimate: ${desc}${notes ? `\nDetails: ${notes}` : ""}`,
         }],
       });
     } catch (e) {

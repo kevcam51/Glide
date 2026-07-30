@@ -8494,6 +8494,11 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   const [aiBusy, setAiBusy] = useState(false);
   const [aiMode, setAiMode] = useState(null); // 'text' | 'photo' — which estimate is running (S102 bug: both buttons showed "Estimating…")
   const [aiPhotos, setAiPhotos] = useState([]); // the photos behind a running/finished photo estimate (tap → full view)
+  // Free-text context for a photo estimate (S161, Kevin): what's in it, where
+  // it's from, anything the camera can't show. Sent WITH the image so the
+  // estimate uses both — and so logging a photographed meal never has to detour
+  // through Ask Glidna, which would then have to be told who and when to log for.
+  const [aiNotes, setAiNotes] = useState("");
   const [mlViewPhoto, setMlViewPhoto] = useState(null);
   const [aiNote, setAiNote] = useState("");
   const [aiErr, setAiErr] = useState("");
@@ -8553,7 +8558,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   );
 
   const resetSearch = () => { setSearchOpen(false); setSearchQ(""); setResults([]); setSearching(false); setSearchErr(""); setPicked(null); setGrams("100"); setUnit("g"); setServingText(""); setServingSel(null); };
-  const resetFields = () => { setName(""); setBrand(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); resetSearch(); setAiBusy(false); setAiNote(""); setAiErr(""); setAiBase(null); setAiQty(1); setAiPhotos([]); setMlViewPhoto(null); };
+  const resetFields = () => { setName(""); setBrand(""); setCals(""); setProtein(""); setCarbs(""); setFat(""); setShowMacros(false); resetSearch(); setAiBusy(false); setAiNote(""); setAiErr(""); setAiBase(null); setAiQty(1); setAiPhotos([]); setAiNotes(""); setMlViewPhoto(null); };
   // AI estimate: uses whatever the user typed (food name field, falling back
   // to the search box), fills the form, and reports the serving it assumed.
   // Budget + trial-expiry are enforced server-side (estimateFood callable).
@@ -8562,10 +8567,13 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
     const q = (name || searchQ).trim();
     if (aiBusy) return;
     // With a photo the description is optional — it just adds context.
-    if (!q && !imgs.length) { setAiErr("Type the food first — e.g. \"chicken burrito\" or \"2 eggs and toast\"."); return; }
+    if (!q && !imgs.length && !aiNotes.trim()) { setAiErr("Type the food first — e.g. \"chicken burrito\" or \"2 eggs and toast\"."); return; }
     setAiBusy(true); setAiMode(imgs.length ? "photo" : "text"); setAiErr(""); setAiNote("");
     try {
-      const r = await callEstimateFood(imgs.length ? { food: q, images: imgs } : { food: q });
+      const note = aiNotes.trim();
+      const r = await callEstimateFood(imgs.length
+        ? { food: q, images: imgs, ...(note ? { notes: note } : {}) }
+        : { food: q, ...(note ? { notes: note } : {}) });
       const d = r.data || {};
       // A photo estimate names the food itself (the user may have typed nothing).
       const label = q || String(d.name || "").trim() || "Meal";
@@ -9057,6 +9065,14 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
                         lineHeight:"18px", padding:0, display:"flex", alignItems:"center", justifyContent:"center" }}>×</button>
                   </div>
                 ))}
+              </div>
+              <textarea value={aiNotes} onChange={(e) => setAiNotes(e.target.value)} rows={2} maxLength={600}
+                placeholder="What's in it, where it's from, anything else — e.g. “chicken burrito bowl from Chipotle, double chicken, no rice, ate about half”"
+                style={{ width:"100%", marginTop:"8px", padding:"8px 10px", borderRadius:8,
+                  border:"1px solid var(--border)", background:"var(--s2)", color:"var(--text)",
+                  fontSize:".82rem", fontFamily:"inherit", resize:"vertical" }} />
+              <div style={{ fontSize:".66rem", color:"var(--muted)", marginTop:"3px" }}>
+                Optional — the estimate uses your description as well as the photo, and trusts it for anything the camera can’t show.
               </div>
               <button onClick={() => runAiEstimate(aiPhotos)} disabled={aiBusy}
                 style={{ marginTop:"8px", display:"inline-flex", alignItems:"center", gap:"6px",
