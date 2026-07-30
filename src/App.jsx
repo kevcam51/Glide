@@ -18104,7 +18104,6 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                 setTimeout(() => startRecording(), 60);
               }}
               aria-label="Talk to Glidna" title="Talk to Glidna — keeps the page visible"
-              hidden={sheetUp}
               className="flex items-center justify-center rounded-full border-none bg-surface2 text-primary shadow-lg cursor-pointer"
               style={{ width: 44, height: 44, border: "1px solid var(--color-border)" }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[19px] h-[19px]">
@@ -18145,7 +18144,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
           level meter while you talk, then the transcript to confirm before it
           sends. No transcript history, no controls; the page stays readable. */}
       {micOnly && !open && (
-        <div className="fixed z-[1396] rounded-card border border-border bg-surface text-fg shadow-2xl"
+        <div className={`fixed ${sheetUp ? "z-[1655]" : "z-[1396]"} rounded-card border border-border bg-surface text-fg shadow-2xl`}
           style={{ left: "8px", right: "8px", maxWidth: 640, margin: "0 auto",
             bottom: "calc(12px + env(safe-area-inset-bottom,0px))", padding: "10px 12px" }}>
           {voicePreview ? (
@@ -18306,7 +18305,13 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
       {open && (
         // z above the fixed hamburger (1390) so it doesn't overlap the chat in
         // full-screen mode, but below the side menu (1400).
-        <div className="fixed z-[1395] flex flex-col overflow-hidden rounded-card border border-border bg-surface text-fg shadow-2xl"
+        // z (S166, Kevin: "I tried to click on the AI button and it
+        // disappeared"): sheets sit at 1600 and the chat at 1395, so over an
+        // open sheet the launcher hid itself (it always does once the chat is
+        // open) and the panel rendered BEHIND the sheet — the button vanished
+        // and nothing came back. Raised above sheets only while one is up, so
+        // the normal stack (side menu 1400 wins over the chat) is untouched.
+        <div className={`fixed ${sheetUp ? "z-[1660]" : "z-[1395]"} flex flex-col overflow-hidden rounded-card border border-border bg-surface text-fg shadow-2xl`}
           style={size === "full" ? {
             top: "calc(10px + env(safe-area-inset-top,0px))",
             bottom: "calc(10px + env(safe-area-inset-bottom,0px))",

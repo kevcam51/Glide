@@ -2372,6 +2372,35 @@ functions/<file>.js` after editing a prompt string.**
 firebase deploy --only functions:aiChat,functions:aiChatStream,functions:logMeal,functions:setWorkoutSchedule,functions:mcp --project calorieiq-29762
 ```
 
+## Three device-test fixes (S166c/d/e, from Kevin)
+
+**1. A voice note named a client and offered nobody.** Two causes, plus one design
+correction: a plan with **no name set** was skipped entirely by the subject loader (so it
+could never be matched OR picked) while its card reads "Unnamed client"; and matching was
+strict whole-word, which speech-to-text and short forms defeat. Names now carry a display
+label separate from the real name (so "Unnamed client" can't itself match the word
+"unnamed"), and a spoken word matches a name it prefixes ("Jon"→Jonathan) or that prefixes
+it ("Caseys"), accents folded — still whole tokens, so "pathway" never offers "Pat".
+**The reliable fix**: the "Sending to ▾" picker now lists **PEOPLE first** — every client
+and plan file, always, not only what was heard. The S165 audit raised this and I judged it
+optional; a real device disagreed. Guessing from a transcript will always miss sometimes.
+
+**2. Copy a meal from the same day.** Cross-TYPE copying already worked (S99) — but the
+chips had no label, so they read as a filter and "copy dinner" looked like it could only
+come from another dinner. They now sit under **"Copy from which meal?"**, and the wording
+dropped "previous" everywhere. Same-DAY copying genuinely didn't work: the day list
+filtered out the current date. Today is included now, minus the one nonsensical case (the
+section you're adding to, which would copy a list onto itself).
+
+**3. The AI button "disappeared" over a pop-up — a layering bug, not a styling one.**
+Bottom sheets are **z-1600**; the chat panel was **z-1395**. So over an open sheet, tapping
+the launcher hid it (it always hides once the chat is open) and rendered the panel BEHIND
+the sheet: the button vanished and nothing came back. The panel now rises above sheets
+**only while one is open** (1660), leaving the normal stack untouched — the side menu
+(1400) still wins over the chat when no sheet is up. The voice bar got the same treatment
+(1655), and the **mic is no longer hidden over sheets** at all: voice is the fastest way to
+act on the thing you're looking at, so it should be more available there, not less.
+
 ## Notes for plan-file clients (S166) — the last piece of "they're real clients"
 
 A trainer could keep coaching notes on a connected client but had nowhere to put them for
