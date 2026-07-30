@@ -7568,7 +7568,11 @@ function BottomSheet({ open, onClose, title, icon, children }) {
   if (!open) return null;
   return createPortal(
     <div onClick={onClose}
-      style={{ position: "fixed", inset: 0, zIndex: 1600, display: "flex", flexDirection: "column",
+      // Bottom edge stops at the docked chat (S162b): a sheet that covered it
+      // would bury the chat mid-conversation, and the sheet's own scrollable
+      // list would sit under it. 0px when nothing is docked.
+      style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: "var(--glidna-dock-h, 0px)",
+        zIndex: 1600, display: "flex", flexDirection: "column",
         justifyContent: "flex-end", background: "rgba(0,0,0,.55)", animation: "fadeIn .18s ease both",
         fontFamily: "var(--font-sans)" }}>
       <div onClick={(e) => e.stopPropagation()} data-sheet
@@ -17055,8 +17059,16 @@ function blobToBase64(blob) {
   });
 }
 
+// The chat lives inside each screen's tree, so navigating unmounts it and a fresh
+// one mounts on the next screen — which dropped the docked chat mid-conversation
+// (S162b, Kevin: "the dock button is meant to be there even if someone goes to
+// another screen"). Module scope carries open/size across those remounts for the
+// session; `size` is also persisted, since a layout someone settles on is a
+// preference, not a per-visit accident.
+let chatUiState = { open: false, size: null };
+
 function AIChatPanel({ role, onDataChanged, premium = true }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(chatUiState.open);
   const [messages, setMessages] = useState([]); // {role:'user'|'assistant', content, image?}
   const [draft, setDraft] = useState("");
   const [pendingImages, setPendingImages] = useState([]); // dataURLs of photos to send (≤20, S110b)
@@ -17079,7 +17091,67 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   const [recSecs, setRecSecs] = useState(0);             // seconds recorded (60s cap countdown)
   const [transcribing, setTranscribing] = useState(false); // sending audio → text
   const [liveText, setLiveText] = useState("");          // interim words (browser speech) while recording
-  const [size, setSize] = useState("compact");           // "compact" corner card | "full" near-fullscreen
+  const [size, setSize] = useState(() =>
+    chatUiState.size || localStorage.getItem("glidna-chat-size") || "compact"); // "compact" | "bar" docked | "full"
+  // Mirror to module scope (survives a screen change) + storage (survives a reload).
+  useEffect(() => { chatUiState.open = open; }, [open]);
+  useEffect(() => {
+    chatUiState.size = size;
+    try { localStorage.setItem("glidna-chat-size", size); } catch { /* private mode */ }
+  }, [size]);
+  // Heights are the USER'S, remembered across screens and sessions — someone who
+  // finds a layout that works shouldn't have to rebuild it every time (S162b).
+  const [barH, setBarH] = useState(() => parseInt(localStorage.getItem("glidna-chat-barh") || "", 10) || 0);
+  const [cardH, setCardH] = useState(() => parseInt(localStorage.getItem("glidna-chat-cardh") || "", 10) || 0);
+  // Resolve a stored height at RENDER time, never at mount. window.innerHeight
+  // can be 0 while the app is still laying out, and a fraction of 0 is 0 — which
+  // rendered a 2px chat and then saved that as the user's preferred size. A
+  // stored value is honoured; anything unusable falls back and is clamped.
+  const safeH = (stored, frac) => {
+    const H = window.innerHeight || 720;
+    const n = Number(stored) > 0 ? Number(stored) : Math.round(H * frac);
+    return Math.max(160, Math.min(n, Math.round(H * 0.9)));
+  };
+  const dragRef = useRef(null);   // {startY, startH, mode}
+  // Drag the top edge: up grows, down shrinks. Clamped so it can neither vanish
+  // nor swallow the page it exists to keep visible.
+  const onResizeStart = (mode) => (e) => {
+    const y = e.touches ? e.touches[0].clientY : e.clientY;
+    dragRef.current = { startY: y, startH: mode === "bar" ? safeH(barH, 0.33) : safeH(cardH, 0.68), mode };
+    e.preventDefault();
+  };
+  useEffect(() => {
+    const move = (e) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const y = e.touches ? e.touches[0].clientY : e.clientY;
+      // Same innerHeight guard as safeH — a raw 0 here made Math.min collapse
+      // every drag to the floor, so dragging UP shrank the panel.
+      const H = window.innerHeight || 720;
+      const next = Math.round(Math.max(160, Math.min(H * 0.85, d.startH + (d.startY - y))));
+      if (d.mode === "bar") setBarH(next); else setCardH(next);
+      e.preventDefault();
+    };
+    const up = () => {
+      const d = dragRef.current;
+      if (!d) return;
+      dragRef.current = null;
+      try {
+        if (d.mode === "bar") localStorage.setItem("glidna-chat-barh", String(barH));
+        else localStorage.setItem("glidna-chat-cardh", String(cardH));
+      } catch { /* private mode — size just won't persist */ }
+    };
+    window.addEventListener("mousemove", move, { passive: false });
+    window.addEventListener("touchmove", move, { passive: false });
+    window.addEventListener("mouseup", up);
+    window.addEventListener("touchend", up);
+    return () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("touchmove", move);
+      window.removeEventListener("mouseup", up);
+      window.removeEventListener("touchend", up);
+    };
+  }, [barH, cardH]);
   const [pasteOpen, setPasteOpen] = useState(false);     // "Paste from AI" import box open
   const [pasteText, setPasteText] = useState("");        // pasted text from another AI
   const [showPlans, setShowPlans] = useState(false);      // S89c plan picker (trial-expired lock → choose plan → Checkout)
@@ -17113,7 +17185,18 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
   // scroll the page you're asking about while you type or talk to it. Locking
   // the body there would leave the panel looking right and the whole feature
   // pointless — you'd be staring at a page you can't move.
-  const lockPage = open && size !== "bar";
+  // Only FULL locks the page now (S162b, Kevin): docked and the corner card both
+  // exist so you can keep reading and scrolling the app while the chat is up.
+  const lockPage = open && size === "full";
+  // Publish the docked height as a CSS variable. Bottom sheets read it so they
+  // stop where the dock starts instead of covering it — tapping "logged so far"
+  // with the chat docked must not bury the chat, and the sheet's own list must
+  // stay scrollable above it.
+  useEffect(() => {
+    const px = open && size === "bar" ? `${safeH(barH, 0.33) + 12}px` : "0px";
+    document.documentElement.style.setProperty("--glidna-dock-h", px);
+    return () => document.documentElement.style.setProperty("--glidna-dock-h", "0px");
+  }, [open, size, barH]);
   useEffect(() => {
     if (!lockPage) return;
     const prev = document.body.style.overflow;
@@ -17693,19 +17776,29 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
             left: "8px", right: "8px",
             bottom: "calc(8px + env(safe-area-inset-bottom,0px))",
             maxWidth: 900, margin: "0 auto",
-            maxHeight: "33vh",
+            height: safeH(barH, 0.33),
           } : {
             right: "calc(12px + env(safe-area-inset-right,0px))",
             bottom: "calc(12px + env(safe-area-inset-bottom,0px))",
             width: "min(440px, calc(100vw - 20px))",
-            // Deliberately a partial-height sheet (not near-full-screen), so it's
-            // clearly minimizable and the Expand button has an obvious purpose.
-            height: "min(620px, 68vh)",
+            height: safeH(cardH, 0.68),
           }}>
+          {/* Drag the top edge to resize. Sits above the header so the whole strip
+              is grabbable, and is deliberately absent in full-screen (nothing to
+              resize there). touch-action:none so a drag doesn't scroll the page. */}
+          {size !== "full" && (
+            <div onMouseDown={onResizeStart(size === "bar" ? "bar" : "card")}
+              onTouchStart={onResizeStart(size === "bar" ? "bar" : "card")}
+              title="Drag to resize" aria-label="Resize chat"
+              style={{ cursor: "ns-resize", touchAction: "none", padding: "6px 0 2px",
+                display: "flex", justifyContent: "center", flexShrink: 0, background: "var(--color-surface2)" }}>
+              <div style={{ width: 40, height: 4, borderRadius: 999, background: "var(--color-border)" }} />
+            </div>
+          )}
           {/* Header — symmetric 3 columns (icon | centered title | controls) so
               the title/subtitle sit in the middle of the bar. Sides are equal width. */}
           <div className={`flex items-center border-b border-border bg-surface2 px-3 ${size === "bar" ? "py-1.5" : "py-3"}`}>
-            <div className="flex w-[72px] shrink-0 items-center">
+            <div className="flex w-[112px] shrink-0 items-center">
               {premium && (
                 <button onClick={() => setHistoryOpen(true)} disabled={busy} aria-label="Past chats" title="Past chats"
                   className="flex items-center gap-1 rounded-lg border border-border bg-surface px-2 py-1.5 text-primary cursor-pointer hover:bg-surface2 disabled:opacity-50">
@@ -17722,7 +17815,7 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
               </span>
               {size !== "bar" && <span className="max-w-full truncate text-[.68rem] text-muted">Nutrition &amp; fitness assistant</span>}
             </div>
-            <div className="flex w-[72px] shrink-0 items-center justify-end gap-2">
+            <div className="flex w-[112px] shrink-0 items-center justify-end gap-1.5 pr-0.5">
             <button onClick={() => setSize(size === "full" ? "compact" : "full")}
               aria-label={size === "full" ? "Shrink to corner" : "Expand to full screen"}
               title={size === "full" ? "Shrink" : "Expand"}
@@ -17744,7 +17837,13 @@ function AIChatPanel({ role, onDataChanged, premium = true }) {
                 {size === "bar" ? <path d="M3 10h18" /> : <path d="M3 15h18" />}
               </svg>
             </button>
-            <button onClick={() => setOpen(false)} aria-label="Back" className="flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+            {/* An X, not "Back" — the word crowded the control cluster (S162b). */}
+            <button onClick={() => setOpen(false)} aria-label="Close chat" title="Close"
+              className="flex items-center justify-center rounded-lg border border-border bg-surface p-1.5 text-fg cursor-pointer hover:bg-surface2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="w-[18px] h-[18px]">
+                <line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" />
+              </svg>
+            </button>
             </div>
           </div>
 
