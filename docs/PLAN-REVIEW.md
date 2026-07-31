@@ -1,15 +1,13 @@
 # Plan & pricing review — working doc
 
-Built S169 to support the "Choose your plan" rework: a free tier, re-tiering, and a
-tooltip per feature. Each feature below carries a one-sentence plain-English description
-written to become that tooltip, plus what the code ACTUALLY gates today.
+Built S169 for the "Choose your plan" rework: a free tier, re-tiering, and a tooltip per
+feature. Every feature below carries a one-sentence plain-English description written to
+become that tooltip, plus the gate the CODE actually applies today.
 
-**Read the reconciliation first.** The inventory is useful; the mismatches are urgent.
-They are places the pricing page makes a promise the code does not keep, or the reverse.
+**Read the reconciliation first.** The inventory is useful; the mismatches are urgent —
+they are places the pricing page promises something the code does not keep, or the reverse.
 
-Status: nutrition / coaching / platform complete. AI + training re-running (both dropped
-on connection errors first pass).
-
+Coverage: 109 features across ai, coaching, nutrition, platform. AI reconcile + the training area still outstanding.
 
 ---
 
@@ -71,57 +69,46 @@ Legacy accounts (no `trialStartedAt`) are treated as unlocked forever. Intention
 time; worth deciding whether it stays true once real money is involved.
 
 
+
 ---
 
 ## Reconciliation — page vs code
 
-### nutrition (30 features)
+### nutrition (32 features)
 
-**Mismatched — page and code disagree** (6)
+**Mismatched — page and code disagree** (3)
 
-- GRANDFATHERED ACCOUNTS GET THE ENTIRE PAID AI NUTRITION SECTION FREE, PERMANENTLY. Matrix: every AI row is Free=false, e.g. `["Log meals by chat — just describe them", false, true, true]` and `["Photo meal logging — snap your plate", false, true, true]` (src/App.jsx:16746-16748). Code: functions/aichat.js:286 `if (!startMs) return false; // pre-trial account — grandfathered` inside trialExpiredFor() — any profile with no `trialStartedAt` never expires, so chat meal logging, photo logging, estimateFood and voice are unlocked forever. Mirrored in functions/transcribe.js:22-30 and src/profile.js:115 `isPremium` -> `return !t || !t.expired`. This is deliberate (S89) but it is a standing, unpriced free tier that the pricing page states does not exist.
+- TRAINER ROW OVERSTATES THE PAYWALL — the matrix implies a restriction the code does not enforce. MATRIX: `["Log meals / weigh-ins / workouts FOR clients", false, true, true]` (src/App.jsx:16776), listed under section "AI assistant — everything in Free, plus:" with a dash in the Free column. CODE: logging for a client manually is completely free — `const logRead = async (key) => { if (activeRemoteUid) { const r = await getForUser(activeRemoteUid, key); ... } }` and the matching `logWrite` (src/App.jsx:24185-24191) route a trainer's edits into the CLIENT's account with no premium/trial check, the dashboard is mounted with `isRemote={!!activeRemoteUid}` (:25017), and `function MealLog({ meals, onAddMeal, ... })` (:8496) takes no `premium` prop at all. Its sibling rows say "by chat" ("Build client programs by chat" :16775, "Set targets & manage client plans by chat" :16777); this one does not, so it reads as a capability gate on behalf-logging that no code enforces. Fix the label ("…FOR clients by chat") or it invites a refund argument.
 
-- THE PUBLISHED PREMIUM AI ALLOWANCE IS ONE NUMBER OVER TWO DIFFERENT REAL ALLOWANCES, AND BOTH CAN BE SMALLER THAN THE FREE TRIAL. Matrix: `["AI conversations per day", "—", "~15", "~100"]` (src/App.jsx:16755). Code, functions/aichat.js tierFor(): line 85 `if (profile && profile.assignedTrainerId) return "assisted";` else line 86 `return "client";` — and BUDGETS at line 51 is `{ trial: 50000, client: 25000, assisted: 40000, ... }`. So a paying $14.99 Premium client linked to a trainer gets 40,000 tokens/day while an identical unlinked subscriber gets 25,000 — a 60% spread at the same price, published as a single "~15". Worse, line 84 `if (profile && profile.subscriptionStatus === "trial") return "trial";` gives the TRIAL 50,000 — so converting from trial to paid Premium HALVES the allowance (docs/PRICING.md:262 itself reads "client 25k/day ~= ~16 exchanges/day", i.e. the trial is ~32).
+- GRANDFATHERED ACCOUNTS GET EVERY PAID NUTRITION AI FEATURE FOREVER. MATRIX: `["AI food estimates in the tracker", false, true, true]` and `["Photo meal logging — snap your plate", false, true, true]` (src/App.jsx:16748, :16746) — dash in Free. CODE: the only gate is `if (trialExpiredFor(profile)) { throw new HttpsError("permission-denied", TRIAL_EXPIRED_MSG, { reason: "trial-expired" }); }` (functions/aichat.js:700), and `trialExpiredFor` ends with `const t = profile.trialStartedAt; ... if (!startMs) return false; // pre-trial account — grandfathered` (functions/aichat.js:278-287, mirrored in src/profile.js isPremium and functions/transcribe.js:25). Any profile without `trialStartedAt` is permanently treated as paid — free tracker AI estimates, free photo estimates, free voice, free chat logging. Deliberate for legacy/test accounts, but it is an unbounded, self-perpetuating free tier the pricing page says does not exist; any future account-creation path that forgets to stamp `trialStartedAt` silently mints a free-forever Premium user.
 
-- SAME INVERSION ON THE COACH SIDE. Matrix: `["AI conversations per day", "—", "~40", "~100"]` (src/App.jsx:16783), with Coach Elite's section promising "Our biggest AI allowance" (:16786). Code: functions/aichat.js:75 `if (profile && profile.subscriptionStatus === "trial") return "trainerTrial";` vs :76 `return "trainer";`, and BUDGETS `trainerTrial: 200000` equals `trainerMax: 200000` while paying Coach is `trainer: 100000`. A trainer on the free trial is already on the full $79 Coach Elite allowance and drops to half of it the moment they pay $49 — the matrix presents that move as a pure upgrade.
-
-- PAID TRACKER AI IS ENFORCED ON THE SERVER BUT ADVERTISED TO FREE USERS IN THE UI. Matrix: `["AI food estimates in the tracker", false, true, true]` and `["Photo meal logging — snap your plate", false, true, true]` (src/App.jsx:16748-16750). Code: `function MealLog({ meals, onAddMeal, ... })` (src/App.jsx:8496) takes NO `premium` prop — the "AI estimate" button (:9089) and "Add a photo" (:9095) render for everyone; the only feedback is after the tap, at :8650 `if (code.includes("permission-denied")) setAiErr("Your free trial has ended — upgrade to keep AI estimates.");`. Compare the chat, which DOES gate in the UI: src/App.jsx:18458 `{!premium ? (` swaps in the upgrade card, and :18156 `if (!premium) { setOpen(true); return; }`. No revenue leaks (functions/aichat.js:700-702 rejects), but an expired user's first contact with the paid feature is a dead-end error with no Upgrade button on that path.
-
-- A DOCUMENTED PAID FOOD GATE THAT NOTHING ENFORCES AND THE MATRIX NEVER SELLS. src/profile.js:100-107: "The AI 'precise food data' feature (real database values instead of estimates) is gated on this. Keep this in sync with functions/aichat.js isProUser()." -> `export function isProUser(profile) { return profile.subscriptionStatus === "active" || (profile.entitlements && profile.entitlements.foodAccuracy === true); }`. There is no `isProUser` in functions/aichat.js, nothing in src/ imports `isProUser` or `aiFoodDbEnabled`, and the search_food_db handler (functions/aitools.js:2342) runs for any AI-enabled caller with no subscription check. So the feature is free to all AI users while the code claims it is paid — and note the dead check keys on `subscriptionStatus === "active"`, which would have excluded TRIAL users, so re-enabling it as written would silently take live FatSecret lookups away from every trial account.
-
-- Adjacent, flagged for consistency rather than as a defect: the Elite/Coach Elite sections end with `["Hit the ceiling? Tell us — we raise it", false, false, true]` (src/App.jsx:16759, :16787), but the chat surfaces a real paid tier that is absent from the pricing page — src/App.jsx:18573 `Upgrade to ${isTrainer ? "Coach Apex — $129/mo" : "Apex — $49.99/mo"}`, with the code comment at :18556-18557 saying it is "data-triggered; it's not on the public page". Intentional, but a Max buyer who bought on the "tell us and we raise it" promise and then meets a $49.99/$129 upsell may read it as bait-and-switch.
+- PAID TRACKER FEATURES ARE PRESENTED AS FREE IN-PRODUCT (enforcement is right, the UI is not). MATRIX: AI estimates and photo logging are dashed out of Free (:16746, :16748). CODE: inside the meal tracker both buttons render unconditionally — `<button onClick={() => runAiEstimate()} disabled={aiBusy}>` … `AI estimate` (src/App.jsx:9086-9090) and `<button onClick={() => photoInputRef.current && photoInputRef.current.click()}` … `Add a photo` (:9095-9101) — because MealLog never receives the `premium` flag (:8496). A free user taps, waits, and gets a red error string: `if (code.includes("permission-denied")) setAiErr("Your free trial has ended — upgrade to keep AI estimates.");` (:8650) with no upgrade button. Contrast AIChatPanel, which does it properly: `function AIChatPanel({ role, onDataChanged, premium = true, ... })` (:17227) → `{!premium ? (` renders the lock card with a Checkout CTA (:18458). Same paywall, two very different conversion outcomes; the tracker path burns the moment of intent. Related copy risk: "Photo meal logging — snap your plate" sits inside the "AI coach" section, so buyers may not realise it also lives in the manual tracker.
 
 
-**Missing — shipped but never advertised** (11)
+**Missing — shipped but never advertised** (9)
 
-- Micronutrient tracking is entirely absent from both grids. The only nutrient row is client free-section "Food, calorie & macro tracking" (src/App.jsx:16737) — nothing anywhere says vitamins, minerals, fibre, sugar or sodium. The code ships 30+ tracked nutrients with RDA progress bars per food AND a daily roll-up (src/App.jsx:6989 MICRO_DEFS, :7061 MicroBars, per-food panel :7908, daily roll-up :12008), free to everyone (no gate found in the whole 7000-12800 range). This is the single biggest un-advertised giveaway in the area.
+- MICRONUTRIENT TRACKING (~30 nutrients w/ progress bars) — src/App.jsx:11997 (Macros & Micros panel) + :7061 (bars). The matrix's closest row is `["Food, calorie & macro tracking", true, true, true]` (src/App.jsx:16736), which stops at MACROS. Nowhere in PLAN_FEATURES does the string "micro", "fibre/fiber", "sodium", or "vitamin" appear. Micros come free from the food DB/barcode path (foodsearch micros + _offMicros at src/App.jsx:~8820) with no gate — MyFitnessPal charges for this. Biggest unadvertised giveaway in the area.
 
-- Food library and meal reuse — the retention feature — has no row at all. Free in code: recent + starred foods (src/App.jsx:8092 FoodLibrary, "Library" button :9535), saved WHOLE meals re-logged in one tap (:8289-8318, star at :9377), and copy-a-meal-from-another-day (:7952 CopyMealModal, link at :9395). Nothing in the free section implies any of it.
+- MEAL PLANNING AHEAD (future days + repeat every Mon/Wed/Fri for weeks, then tick off as eaten) — src/App.jsx:9309 (plan-ahead mode), :9554 (today's planned list), :24501 (`onPlanDays` multi-day writer, ungated). No row in either the client or trainer matrix mentions planning, prepping, or future days. `["Calendar, streaks, check-ins & water", true, true, true]` (:16740) reads as retrospective logging only.
 
-- Plan-meals-ahead is unlisted on BOTH sides of the ladder. Manual planning is free and real (src/App.jsx:8508 plan mode in MealLog, planned list :9554, multi-day/recurring writer :24499 with weekday repeats, weeks, time and place, tick-to-log). Its paid AI counterpart plan_meals (functions/aitools.js:1014, handler :2475) is also missing from the client AI section, which lists only "Log meals by chat — just describe them" (src/App.jsx:16746). Glidna sells the logging but not the planning.
+- FOOD & MEAL REUSE SUITE — all free, none named: saved/starred foods library (src/App.jsx:8092), previously-logged foods per meal (:8092 + opened at :9062), saved & previous WHOLE meals (:8202, :8394), copy a meal from another day (CopyMealModal :7952, button :9394), move a logged food between meals (:9016). The only adjacent row is `["Food database search + barcode scanner", true, true, true]` (:16737) — search is not the same as a personal library, saved meals, or copy-from-another-day (a paid feature at MFP).
 
-- The whole coach-grade target-control cluster — all free, none advertised: editable macro targets in grams or % of calories with 1g/0.7g-per-lb protein basis chips (src/App.jsx:11864, editor :11926, chips :11912), a user-set calorie target overriding the calculation (:11700), the weight-loss pace picker with a 1,200-cal floor warning (:11647, RATE_OPTS :328), the eat-back vs accelerate Nutrition Approach card (:4765), and the "How your target is calculated" breakdown (:11589). The grid's free rows never hint that targets are adjustable at all.
+- THE CALORIE-TARGET ENGINE — pace picker with a safe-floor warning (src/App.jsx:11646), "Set your own target" override (:11700), eat-back vs accelerate chooser (:11344 and Full Plan → Summary :4778), daily goal direction deficit/maintain/surplus (:11213). All ungated, none named. `["Food, calorie & macro tracking", ...]` (:16736) advertises TRACKING; nothing advertises that Glidna computes, explains, and lets you override the target — and eat-back vs accelerate has no competitor equivalent.
 
-- Tracker-adjusted daily calories — arguably the clearest differentiator vs MyFitnessPal — is nowhere in either grid. Code: "Use my tracker's real burn" toggle at src/App.jsx:4800, calculation wearableTdee at :14791, which rebuilds the day's target from the watch's measured burn instead of an estimate. Free.
+- CUSTOM MACRO TARGETS + PROTEIN BASIS — set your own P/C/F in grams or % of calories with recommended splits (src/App.jsx:11930), and choose 1 g vs 0.7 g protein per lb (:11912). Free. The matrix never distinguishes custom targets from automatic ones; "macro tracking" (:16736) implies neither.
 
-- Adherence and compliance reporting has no row. Free in code: weekly calorie roll-up (src/App.jsx:10226), protein roll-up (:10245), workout roll-up (:10288), This Week nutrition averages vs target (:12608), and the on-track compliance card with a 10% grace band (:22443, maths :22432). The nearest matrix row, "Calendar, streaks, check-ins & water" (:16741), implies none of this.
+- NUTRITION INSIGHT / ADHERENCE SURFACES — "This Week" 7-day averages vs target (src/App.jsx:12602), on-track consistency % feeding a realistic goal date (ComplianceTracker :22443), calendar green/amber adherence tinting + weekly calorie & protein roll-ups (:9938-9960). Free. The matrix only offers `["Calendar, streaks, check-ins & water", true, true, true]` (:16740) and `["Weight, progress charts & goal timeline", true, true, true]` (:16738) — "streaks" is checked (StreakBadges :13043 is genuinely covered) but nutrition reporting/adherence analytics are not.
 
-- Back-dated logging (src/App.jsx:9503 day arrows, :10412 full day editor in CalendarView) and the serving-size picker with g/oz/cup/ml/servings conversion (:7659 FoodServingModal) are both free and unmentioned. "Food database search + barcode scanner" (:16738) does not imply either.
+- NUTRIENTS GUIDE IN THE FULL PLAN (macro targets at several deficit levels, bodyweight-based water target, micronutrient reference with food sources, food picks to hit macros) — src/App.jsx:5882 (NutrientsTab, no `premium` prop). And the PLAIN-ENGLISH DAILY CHECKLIST / Simple view (protein in palm-sized portions, cups of water, the one number that matters) — src/App.jsx:3534 (SimplePlanView). Neither is mentioned; both are exactly the "is this app for beginners?" objection-handlers a pricing page should sell.
 
-- The built-in Nutrients reference guide (src/App.jsx:5882 NutrientsTab, tab at :3852 — macros, hydration, food sources per macro, what each vitamin and mineral does) has no row.
+- SERVING SIZE & UNIT PICKER (g / oz / cups / ml / "1 serving", live rescale of calories + macros + micros) — src/App.jsx:7659 (FoodServingModal). Free, and the practical reason the free food search is actually usable. Folded silently into `["Food database search + barcode scanner", ...]` (:16737).
 
-- THE TRAINER GRID CONTAINS ZERO NUTRITION ROWS. PLAN_FEATURES.trainer's free section (src/App.jsx:16766-16772) is: connected clients, coaching analytics, to-dos/nudges, Invite Hub, local plans/simulations. A coach evaluating the $49 Coach tier is never told the food database, barcode scanner, micronutrients, meal tracker, target controls, calendar adherence and back-dated logging come with it — even though every one of those inventory items is marked audience "both" and the trainer reaches them through the same DailyDashboard/MealLog code.
-
-- Four paid AI nutrition tools are shipped but unlisted in the AI sections: bulk log_meals (functions/aitools.js:1055), remove_meal (:1091), log_water (:1188), and search_food_db — live FatSecret label lookup from inside the chat (:948, handler :2342). The client AI section advertises only "Log meals by chat", "Photo meal logging" and "AI food estimates in the tracker".
-
-- Trainerize nutrition history import (functions/trainerize.js:420 syncClientNutrition, a year of meal-by-meal history) is correctly absent from the trainer grid because it is admin-locked — functions/trainerize.js:67 `if (!ADMIN_UIDS.includes(uid)) {`, enforced at :684 and :763. Listed here only so it is not mistaken for a shippable Coach-tier migration feature.
+- TRAINER SIDE: the entire trainer free section (src/App.jsx:16765-16771) never mentions food or nutrition at all — its five rows are clients, analytics, to-dos, Invite Hub, local plans. A coach on Free gets the complete tracker for their own plan AND for every connected client (remote-aware log I/O at src/App.jsx:24185; DailyDashboard mounted with `isRemote` at :25017; MealLog takes no `premium` prop, :8496). Nothing tells a prospective coach the nutrition tooling is included.
 
 
-**Phantom — advertised but not real** (2)
+**Phantom — advertised but not real** (1)
 
-- No phantoms. Every nutrition-relevant row in PLAN_FEATURES maps to shipped code: "Food, calorie & macro tracking" -> MealLog src/App.jsx:8496; "Food database search + barcode scanner" -> :7318 searchFoods + :8807 lookupBarcode + :8827 live scanner; "Calendar, streaks, check-ins & water" -> :9878 CalendarView + :12408 hydration; "Log meals by chat" -> functions/aitools.js:990 log_meal; "Photo meal logging" -> src/App.jsx:9095 -> :8658 -> functions/aichat.js:690; "AI food estimates in the tracker" -> functions/aichat.js:678 estimateFood; "Voice logging" -> functions/transcribe.js; "Import from ChatGPT / Claude" -> src/App.jsx:18086-18094 and the composer button :18768; "Turn TikTok / IG / YouTube links into workouts & meals" -> the fetch_link tool; trainer "Log meals / weigh-ins / workouts FOR clients" and "Photo & voice meal logging" -> the same tools with clientId.
-
-- One wording risk worth fixing, not a phantom: "Voice logging — speak instead of type" (src/App.jsx:16749) exists ONLY in the AI chat composer. MealLog (src/App.jsx:8496) has no mic — its signature carries no recording state and a scan of lines 8496-9700 finds no MediaRecorder/transcribe path. A reader of the row next to "AI food estimates in the tracker" will reasonably expect to dictate into the food log and will not find it.
+- CLEAN — no phantom nutrition rows. Every nutrition-related row in PLAN_FEATURES resolves to shipped code: `["Food database search + barcode scanner", ...]` (:16737) → functions/foodsearch.js `exports.foodSearch` + src/App.jsx:8807 Open Food Facts barcode lookup; `["Log meals by chat — just describe them", ...]` (:16745) → functions/aitools.js log_meal/propose_meal/log_meals; `["Photo meal logging — snap your plate", ...]` (:16746) → src/App.jsx:8663/9095 tracker photos + chat vision; `["Voice logging — speak instead of type", ...]` (:16747) → functions/transcribe.js (trial gate at :95); `["AI food estimates in the tracker", ...]` (:16748) → functions/aichat.js `exports.estimateFood` (:678); `["Turn TikTok / IG / YouTube links into workouts & meals", ...]` (:16750) → functions/aitools.js fetch_link (tool def :1393, handler :1573); `["Import from ChatGPT / Claude", ...]` (:16751) → src/App.jsx:18086/18497 paste-from-AI. Trainer equivalents (:16776, :16778, :16779) hit the same code.
 
 
 
@@ -215,48 +202,64 @@ time; worth deciding whether it stays true once real money is involved.
 
 
 
+### ai (35 features)
+
+**Mismatched — page and code disagree** (0)
+
+
+**Missing — shipped but never advertised** (0)
+
+
+**Phantom — advertised but not real** (0)
+
+
+_Not yet reconciled against PLAN_FEATURES._
+
+
 ---
 
 ## Feature inventory (tooltip copy + current gating)
 
 ### nutrition
 
-| Feature | What it does (tooltip) | Gated today | Audience |
+| Feature | What it does (tooltip copy) | Gated today | For |
 |---|---|---|---|
-| Meal-by-meal food log | Log everything eaten under Breakfast, Lunch, Dinner, Snack or a quick entry, and see each meal's calorie subtotal and the day's running total. | `free` | both |
-| Food database search | Type a food name and pull real calories and macros straight from a large food library, so nothing has to be typed in by hand. | `free` | both |
-| Barcode scanner | Point the phone camera at a packaged food's barcode and the product's nutrition fills in automatically. | `free` | both |
-| Serving-size picker | Adjust a food to the amount actually eaten — grams, ounces, cups, millilitres or number of servings — and the calories and macros rescale instantly. | `free` | both |
-| AI food estimate from a description | For any food the database doesn't have, describe it in plain words and the AI fills in the calories and macros along with the serving it assumed. | `premium-or-trial` | both |
-| AI food estimate from meal photos | Snap up to twenty photos of a plate and the AI reads them, names the food and estimates the calories and macros — photos are never stored. | `premium-or-trial` | both |
-| Micronutrient tracking | See the vitamins, minerals, fibre, sugar, sodium and fats in each food and across the whole day, with bars showing how close each one is to a normal daily amount. | `free` | both |
-| Daily macro totals and progress bars | Watch protein, carbs and fat add up through the day against each one's target, with bars that flag when a macro is met or gone over. | `free` | both |
-| Editable macro targets | Set a client's protein, carb and fat targets yourself — in grams or as a percentage of their calories — or pick 1 g or 0.7 g of protein per pound, and reset to the automatic numbers any time. | `free` | both |
-| Set your own calorie target | Override the calculated daily calorie number with one you choose, and the macros adjust to it — or switch back to the calculated figure. | `free` | both |
-| Weight-loss pace picker | Choose maintenance, half a pound, one pound or two pounds a week and see the actual calories each pace means, with an honest warning if a pace would drop below the 1,200-calorie floor. | `free` | both |
-| Nutrition approach: eat back or go faster | Decide whether workout calories get added to the daily target for an easier diet, or kept back so the goal arrives sooner — each option shows its calories and its goal date. | `free` | both |
-| Tracker-adjusted daily calories | On days a connected watch reports what was really burned, the daily calorie target is built from that measured burn instead of an estimate. | `free` | both |
-| How your target is calculated | An open breakdown showing daily burn, the deficit and workout calories adding up to today's number, so the target never feels like a black box. | `free` | both |
-| Food library — recent and starred foods | Every food logged before is kept and searchable, and anything eaten often can be starred so it's one tap to log again. | `free` | both |
-| Saved and previously logged whole meals | Save a complete meal — every food in it — and re-log the whole thing in one tap, or pull back any meal eaten in the last two weeks. | `free` | both |
-| Copy a meal from another day | Copy any recent breakfast, lunch, dinner or snack straight into today's meal instead of re-entering it. | `free` | both |
-| Quick add calories | Add a bare calorie number in a hurry — typed or with +100/+250/+500 buttons — when there's no time to name the food. | `free` | both |
-| Water tracking | Log water in ounces with quick +8/+16/+32 buttons and see the day's hydration as a percentage of the recommended amount. | `free` | both |
-| This Week nutrition averages | A single card showing average daily calories, protein, carbs and fat over the last seven logged days, each next to its target. | `free` | both |
-| Calendar with month, week and day views | See the whole month at a glance with each day shaded green or amber by whether calories landed under target, then drill into a week or a single day. | `free` | both |
-| Weekly adherence roll-ups | Per week, see how many days were logged, the average calories and protein against target, and how many scheduled workouts actually got done. | `free` | both |
-| Back-dated food logging | Step back to any past day — from the dashboard arrows or the calendar — and log or fix the food, water and weight for that date. | `free` | both |
-| Plan meals ahead | Plan meals for future days — optionally repeating on chosen weekdays for weeks at a time, with a time and place — then tick each one off as it's eaten and it logs itself. | `free` | both |
-| Edit, move or delete a logged food | Tap any logged food to fix its serving or macros, move it to a different meal, or delete it with a single confirm. | `free` | both |
-| On-track calorie compliance card | Shows what share of logged days actually landed at or under the calorie target, with a 10% grace band so a rounding error never reads as a failure. | `free` | both |
-| Nutrients reference guide | A built-in guide to daily macros, hydration, food sources for hitting each macro, and what every key vitamin and mineral does. | `free` | both |
-| Log meals by chatting with the AI | Describe a meal, speak it, or send a photo in the chat and the AI works out the numbers, shows a card to accept or edit, and files it into the right meal on the right day. | `premium-or-trial` | both |
-| AI meal plans by chat | Ask the AI to plan meals for the week ahead and it writes them onto the right days for the client to tick off as they eat. | `premium-or-trial` | both |
-| Trainerize nutrition history import | Pulls a year of a client's existing food logs across from Trainerize, meal by meal, so their history isn't lost when they move over. | `admin-only` | trainer |
+| Meal & food logging | Log what you eat into Breakfast, Lunch, Dinner or Snack, with calories and protein, carbs and fat for each item, and edit or delete anything you logged. | `free` | both |
+| Food database search | Search a database of hundreds of thousands of foods — brand-name products and whole foods — and the calories and macros fill in for you. | `free` | both |
+| Barcode scanner | Point your phone camera at a product's barcode and the food, calories and macros are looked up and filled in automatically. | `free` | both |
+| Serving size & unit picker | Set exactly how much you ate — grams, ounces, cups, millilitres or "1 serving" — and the calories and macros rescale instantly. | `free` | both |
+| AI food estimate from a description | Type a meal in plain words — "chicken burrito with rice and beans" — and get an instant calorie and macro estimate for anything the database doesn't have. | `premium-or-trial` | both |
+| Photo meal estimate | Snap a photo of the plate (or several angles, plus a note about anything the camera can't see) and get calories and macros back without typing the food out. | `premium-or-trial` | both |
+| Micronutrient tracking | See the day's fibre, sodium, iron, calcium, vitamins and 25 other nutrients from the foods you logged, each as a bar filling toward a normal daily amount. | `free` | both |
+| Macro targets with progress bars | Protein, carbs and fat each get a daily target and a progress bar, so you can see at a glance what's still left to eat. | `free` | both |
+| Custom macro targets | Set your own protein, carb and fat targets in grams or as a percentage of calories, with one-tap recommended splits — or reset back to the automatic ones. | `free` | both |
+| Protein target basis | Choose whether protein is set at 1 gram or 0.7 grams per pound of bodyweight, and the daily target updates. | `free` | both |
+| Daily calorie target with pace picker | Pick how fast you want to lose weight and see the exact calories you'd eat each day for that pace, with an honest warning if it would drop below a safe floor. | `free` | both |
+| Set your own calorie target | Override the calculated number with whatever daily calorie target you or your coach prefer, and the macros adjust to match. | `free` | both |
+| Count workout burn toward eating (eat-back vs. accelerate) | Decide whether a workout earns you extra food that day or instead speeds up your goal date, and see both real numbers before you choose. | `free` | both |
+| Daily goal direction (deficit / maintain / surplus) | Set whether today should be under, at, or over maintenance calories, and the ring tells you whether the day matched. | `free` | both |
+| Saved foods library | Star the foods you eat all the time so they're always one tap away, kept forever and across every plan. | `free` | both |
+| Previously logged foods | Everything you've logged lately is remembered per meal, so re-adding yesterday's breakfast takes one tap instead of retyping it. | `free` | both |
+| Saved & previous whole meals | Save a whole combination of foods as one meal and log the entire thing again in a single tap. | `free` | both |
+| Copy a meal from another day or meal | Browse your recent days and copy any past breakfast, lunch or dinner straight into today's meal. | `free` | both |
+| Move a logged food between meals | Logged something under the wrong meal? Move it from dinner to lunch without re-entering it. | `free` | both |
+| Plan meals ahead | Plan meals for future days — including repeating them every Monday, Wednesday and Friday for weeks — then tick each one off as you actually eat it. | `free` | both |
+| Quick Add calories | In a hurry? Punch in a bare calorie number, or tap +100 / +250 / +500, without naming the food. | `free` | both |
+| Water tracking | Log water in ounces against a daily hydration goal based on bodyweight, with a progress bar and quick-add buttons. | `free` | both |
+| Calendar with back-dated logging | Flip through your food history by month, week or day and add or fix meals on any past date — no more "I forgot to log Tuesday". | `free` | both |
+| Calendar adherence colouring & weekly roll-ups | Days are shaded green or amber depending on whether calories landed under or over target, with weekly averages for calories and protein. | `free` | both |
+| Step back a day on the meal card | Arrows on the meal card walk back through recent days so you can log yesterday's dinner without opening the calendar. | `free` | both |
+| This Week nutrition averages | See average daily calories, protein, carbs and fat over the last seven logged days, each next to its target. | `free` | both |
+| On-track consistency tracker | Shows what percentage of your logged days actually hit the calorie goal, and what that consistency means for your realistic goal date. | `free` | both |
+| Logging streak & badges | A running streak of consecutive days logged, plus milestone badges for 7 and 30 day streaks, 10 and 50 days logged, and 80%+ adherence. | `free` | both |
+| Nutrients guide in the full plan | A full nutrition breakdown for the plan — macro targets at different deficits, a daily water target, a micronutrient reference with food sources, and food picks to hit the macros. | `free` | both |
+| Plain-English daily checklist | A jargon-free version of the plan: the one calorie number that matters, protein in palm-sized portions, cups of water, and workout days. | `free` | both |
+| Log food by chat, voice or photo with Ask Glidna | Describe, speak or photograph a meal in the assistant and it works out the macros, shows a tap-to-accept card, and saves it to the right day and meal. | `premium-or-trial` | both |
+| Log food on a client's behalf | Open any connected client's day and log or fix their meals, macros, water and targets for them — everything you change appears on their phone straight away. | `trainer-only` | trainer |
 
 ### coaching
 
-| Feature | What it does (tooltip) | Gated today | Audience |
+| Feature | What it does (tooltip copy) | Gated today | For |
 |---|---|---|---|
 | Connected client roster | See every client linked to you on one screen — their current weight, goal, daily calorie target and how long since they last logged — and tap any card to open their plan. | `trainer-only` | trainer |
 | Coaching Dashboard | A single overview of your whole roster: who trained this week, who has gone quiet, what you have asked people for, and how much weight each client has actually lost. | `trainer-only` | trainer |
@@ -281,7 +284,7 @@ time; worth deciding whether it stays true once real money is involved.
 
 ### platform
 
-| Feature | What it does (tooltip) | Gated today | Audience |
+| Feature | What it does (tooltip copy) | Gated today | For |
 |---|---|---|---|
 | Import clients from Trainerize | Pick clients from your Trainerize roster and bring their stats, goals and history into Glidna without retyping anything. | `admin-only` | trainer |
 | Trainerize auto-sync (every 30 minutes) | Once a client is imported, their new weigh-ins, meals, workouts and watch data keep flowing into Glidna on their own, about every half hour. | `admin-only` | trainer |
@@ -305,3 +308,43 @@ time; worth deciding whether it stays true once real money is involved.
 | Back up and move your data | Download a full backup of every client and plan, or copy it across to another device, and load it back in without overwriting anything. | `trainer-only` | trainer |
 | Admin dashboard (all users) | A private overview of everyone on the platform — their plan, trial status and AI usage — with a tap-through to any one person's spend history. | `admin-only` | trainer |
 | App requests inbox | A private list of feature ideas users sent in through the AI, with the context of what they were trying to do at the time. | `admin-only` | trainer |
+
+### ai
+
+| Feature | What it does (tooltip copy) | Gated today | For |
+|---|---|---|---|
+| Ask Glidna (AI chat) | Chat with a coach that already knows your numbers, and see the answer appear word by word as it's written. | `premium-or-trial` | both |
+| Log a meal by describing it | Say what you ate in plain words and it works out the calories and macros and saves it to the food diary. | `premium-or-trial` | both |
+| Tap-to-confirm meal card | Every meal the assistant estimates comes back as a card you can accept or correct before anything is saved. | `premium-or-trial` | both |
+| Log a whole day of food in one go | List everything you ate and it saves the entire list at once instead of one item at a time. | `premium-or-trial` | both |
+| Photo meal logging in chat | Snap up to twenty photos of a plate and it identifies the food, estimates the portion, and logs it. | `premium-or-trial` | both |
+| Voice logging (speak instead of type) | Hold the mic and talk — it turns your speech into text so you can log a meal or ask a question without typing. | `premium-or-trial` | both |
+| Hands-free "Talk to Glidna" | Tap once to talk while the page you're looking at stays on screen, then confirm who the note is about before it sends. | `premium-or-trial` | both |
+| AI food estimate in the food tracker | Type any food the database doesn't have and the assistant fills in the calories and macros for you, right inside the normal logging form. | `premium-or-trial` | both |
+| Photo estimate in the food tracker | Add photos of your meal in the normal logging form and it reads the plate and fills in the numbers. | `premium-or-trial` | both |
+| Ask questions about your own logged data | Ask what you ate this week or whether you're hitting your protein, and it answers from your real logs and targets, not guesses. | `premium-or-trial` | both |
+| Log workouts, weigh-ins, water and measurements by chat | Mention a workout, a weight, how much water you drank or your tape measurements and it records them on the right day. | `premium-or-trial` | both |
+| Log for a past day | Say "yesterday" or name a date and it files the meal, workout or weigh-in on that day instead of today. | `premium-or-trial` | both |
+| Meal planning for future days | Ask for a meal plan and it fills in the days ahead with meals to tick off, without those meals counting against any day until you eat them. | `premium-or-trial` | both |
+| Food-database lookup on request | Ask it to "look that up" and it pulls the real label numbers from the food database instead of estimating. | `premium-or-trial` | both |
+| Set up a plan by conversation | Answer a few questions in chat — height, age, weight, goal, how active you are — and it fills in the plan and works out your daily targets. | `premium-or-trial` | both |
+| AI workout program builder | Describe the week you want and it drafts a real training program as a card you approve with one tap. | `premium-or-trial` | both |
+| Custom exercises by chat | Name a movement that isn't in the exercise library and it creates it, with a calorie burn, ready to put in a program. | `premium-or-trial` | both |
+| Start and switch training phases by chat | Say "start a cut" and it creates a new plan with your details carried over, and can switch or rename plans later. | `premium-or-trial` | both |
+| Notes and session recaps by chat | Tell it to write something down or save a recap and it files a note you can read later, kept private unless you share it. | `premium-or-trial` | both |
+| Read a shared link | Paste a YouTube, Instagram, TikTok or recipe link and it reads the content and turns it into a workout or a logged meal. | `premium-or-trial` | both |
+| Paste from another AI | Already asked ChatGPT or Claude about your meals? Paste its reply and Glidna turns it into real logged entries. | `premium-or-trial` | both |
+| Past chats | Your conversations are saved, so you can jump back into an old one, rename it, or start a fresh one any time. | `premium-or-trial` | both |
+| Pin a chat to one client | Start a conversation about a specific client so everything you log or change in it goes to their file, never yours by mistake. | `trainer-only` | trainer |
+| Ask about any of your clients by name | Name a client and it finds them — whether they have an app login or are just a plan file you keep — and works on their numbers. | `trainer-only` | trainer |
+| "Who needs attention?" roster review | Ask who's stalled or off track and it reviews every client at once — days logged, calorie and protein adherence, weight trend — and tells you who to chase and what to change. | `trainer-only` | trainer |
+| Send a client a to-do from the chat | Ask it to nudge a client and the to-do lands on that client's home screen without you leaving the conversation. | `trainer-only` | trainer |
+| Change your reminder settings by chat | Tell it to turn a type of reminder on or off and it changes your notification settings for you. | `premium-or-trial` | both |
+| Send the team a feature request | Wish the app did something it doesn't? Tell the assistant and it passes the request to the Glidna team with the context of what you were doing. | `premium-or-trial` | both |
+| Daily AI allowance | Each plan comes with a daily amount of AI use, and it grows as you move up — you get a heads-up as you approach it and it resets the next day. | `premium-or-trial` | both |
+| Request more usage today (allowance boost) | On the top plans, if you run out of AI for the day you can ask for more and get it straight away. | `pro-entitlement` | both |
+| Automations (scheduled AI runs) | Set your AI coach to run on a schedule — a daily or weekly check-in on your real data that lands in your notifications without you opening the app. | `pro-entitlement` | both |
+| Connect your own AI (Claude, ChatGPT) | Link Glidna to the AI assistant you already use, so you can log meals, check progress and build workouts from inside it and it writes straight into your account. | `free` | both |
+| Choose what your outside AI may do | When you connect an outside assistant you approve exactly what it can do — read only, log for you, or change your plan — and you can disconnect any time. | `free` | both |
+| Turn AI off for your account | Switch off AI entirely and no assistant — yours or your trainer's — can touch your data, while everything else in the app keeps working. | `free` | both |
+| AI usage and spend dashboard | See every account's AI use and cost for the day, month and year in one place. | `admin-only` | trainer |
