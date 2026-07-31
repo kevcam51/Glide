@@ -16847,7 +16847,17 @@ function FeatureMatrix({ isTrainer }) {
 // and monthly vs annual. Portaled to <body> (page-transition transform trap).
 function PlanPicker({ role, onClose }) {
   useBodyScrollLock(true);
-  const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
+  const realIsTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
+  // Admin sees BOTH sides (S169, Kevin: "I can only see the coaching options").
+  // The picker keys off role, and admin counts as a trainer, so the client
+  // ladder was unreachable to the one person who most needs to review it.
+  // Preview only: checkout prices server-side from the caller's REAL role and
+  // never trusts what the client sends, so buying from the previewed side would
+  // charge the other side's price. The buttons say so rather than misleading.
+  const canPreview = role === "admin";
+  const [viewAs, setViewAs] = useState(realIsTrainer ? "trainer" : "client");
+  const isTrainer = canPreview ? viewAs === "trainer" : realIsTrainer;
+  const previewing = canPreview && (viewAs === "trainer") !== realIsTrainer;
   const plans = PLAN_MENU[isTrainer ? "trainer" : "client"];
   const [interval, setInterval_] = useState("month");
   const [busyTier, setBusyTier] = useState(null);
@@ -16868,6 +16878,20 @@ function PlanPicker({ role, onClose }) {
           <div className="font-display font-bold text-fg" style={{ fontSize:"1.08rem" }}>Choose your plan</div>
           <button onClick={onClose} aria-label="Back" className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
         </div>
+        {canPreview && (
+          <div>
+            <div className="mb-1 text-[.64rem] uppercase tracking-wide text-muted">Viewing as (admin)</div>
+            <div className="flex rounded-[10px] border border-border overflow-hidden">
+              {[["trainer", "Coach plans"], ["client", "Client plans"]].map(([v, l]) => (
+                <button key={v} onClick={() => setViewAs(v)}
+                  className={viewAs === v ? "bg-primary text-primaryfg" : "bg-transparent text-muted"}
+                  style={{ flex: 1, padding: "8px 0", border: "none", cursor: "pointer", fontWeight: 800, fontSize: ".78rem" }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {/* Monthly / Annual toggle */}
         <div className="flex rounded-[10px] border border-border overflow-hidden">
           {[["month","Monthly"],["year","Annual"]].map(([v,l]) => (
@@ -16879,7 +16903,7 @@ function PlanPicker({ role, onClose }) {
           ))}
         </div>
         {plans.map((p) => (
-          <button key={p.tier} onClick={() => choose(p.tier)} disabled={!!busyTier}
+          <button key={p.tier} onClick={() => { if (!previewing) choose(p.tier); }} disabled={!!busyTier || previewing}
             className="text-left bg-surface2 border rounded-card"
             style={{ padding:"14px 16px", cursor:"pointer", display:"flex", flexDirection:"column", gap:"4px",
               borderColor: p.tier === "base" ? "var(--color-primary)" : "var(--color-border)",
@@ -16894,7 +16918,7 @@ function PlanPicker({ role, onClose }) {
             {interval === "year" && <div className="text-primary" style={{ fontSize:".72rem", fontWeight:700 }}>{p.yearNote}</div>}
             <div className="text-muted" style={{ fontSize:".78rem", lineHeight:1.45 }}>{p.blurb}</div>
             <div className="text-primary" style={{ fontSize:".78rem", fontWeight:800, marginTop:"4px" }}>
-              {busyTier === p.tier ? "Opening checkout…" : "Choose →"}
+              {previewing ? "Preview — checkout prices by your own role" : busyTier === p.tier ? "Opening checkout…" : "Choose →"}
             </div>
           </button>
         ))}
