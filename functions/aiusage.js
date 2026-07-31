@@ -59,6 +59,20 @@ const yearKey = (d) => `y-${localYMD(d).slice(0, 4)}`;   // y-2026
 // the daily budget check reads it. Everything else is additive, so old day docs
 // (which only have `tokens`) still work; they just report no cost.
 async function recordUsage(db, uid, agg, source) {
+  // This runs inside a `finally` on every AI path, so it must never throw: an
+  // exception here would REPLACE the reply the user is waiting on with an
+  // error. Accounting failing is bad; failing a good answer in order to report
+  // it is worse. (S167 shipped without this guard and a scope bug did exactly
+  // that — every chat turn errored after the reply had already been produced.)
+  try {
+    return await writeUsage(db, uid, agg, source);
+  } catch (e) {
+    console.error("recordUsage failed:", (e && e.stack) || e);
+    return null;
+  }
+}
+
+async function writeUsage(db, uid, agg, source) {
   const model = (agg && agg.model) || DEFAULT_MODEL;
   const budgetTokens = (agg.input || 0) + (agg.output || 0) + (agg.cacheWrite || 0);
   if (budgetTokens <= 0 && !(agg.cacheRead > 0)) return null;

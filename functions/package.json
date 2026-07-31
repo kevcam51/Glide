@@ -15,5 +15,8 @@
     "stripe": "^22.3.0",
     "web-push": "^3.6.7",
     "zod": "^4.4.3"
+  },
+  "scripts": {
+    "lint": "npx --yes eslint@9 ."
   }
 }

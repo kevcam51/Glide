@@ -451,7 +451,7 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
     // Record spend even when a later tool round throws — tokens from the
     // completed rounds were real (they used to go unbilled on any mid-turn
     // error). Best-effort: a failed usage write must not fail a good reply.
-    await aiusage.recordUsage(db, uid, { ...agg, model: MODEL }, "aiChat");
+    await aiusage.recordUsage(admin.firestore(), uid, { ...agg, model: MODEL }, "aiChat");
   }
 
   // Budget counts full-price tokens (cache reads bill at ~10%, so excluded).
@@ -502,7 +502,7 @@ async function runAssistantTurn(uid, userText) {
     console.error("runAssistantTurn error:", e && e.message);
     return { skipped: "error" };
   } finally {
-    await aiusage.recordUsage(db, uid, { ...agg, model: MODEL }, "workflow");
+    await aiusage.recordUsage(admin.firestore(), uid, { ...agg, model: MODEL }, "workflow");
   }
   const text = (resp.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
   return { reply: text, spent: agg.input + agg.output + agg.cacheWrite };
@@ -613,7 +613,7 @@ exports.aiChatStream = onRequest(
     } finally {
       // Record spend even on failure/disconnect — completed rounds were real
       // tokens (they used to go unbilled whenever a later round threw).
-      await aiusage.recordUsage(db, uid, { ...agg, model: MODEL }, "aiChatStream");
+      await aiusage.recordUsage(admin.firestore(), uid, { ...agg, model: MODEL }, "aiChatStream");
     }
     if (failed) { res.end(); return; }
     const spent = agg.input + agg.output + agg.cacheWrite;
@@ -749,7 +749,10 @@ exports.estimateFood = onCall(
     }
     // Bill against the daily budget exactly like the chat (input+output+cacheWrite).
     const u = msg.usage || {};
-    aiusage.recordUsage(db, uid, {
+    // Awaited, unlike the pre-S167 single write it replaces: a callable's
+    // instance can be frozen the moment it returns, and a fire-and-forget write
+    // that never lands is a call the user got for free. Costs ~50ms.
+    await aiusage.recordUsage(db, uid, {
       input: u.input_tokens || 0, output: u.output_tokens || 0,
       cacheWrite: u.cache_creation_input_tokens || 0, cacheRead: u.cache_read_input_tokens || 0,
       model: MODEL,
