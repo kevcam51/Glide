@@ -2372,14 +2372,27 @@ functions/<file>.js` after editing a prompt string.**
 firebase deploy --only functions:aiChat,functions:aiChatStream,functions:logMeal,functions:setWorkoutSchedule,functions:mcp --project calorieiq-29762
 ```
 
-## ⛔ BLOCKED ON DEPLOY — S167 AI cost tracking (committed `891056a`, NOT pushed)
+## S167 AI cost tracking — DEPLOYED & VERIFIED LIVE
 
-`firebase login --reauth --no-localhost` first, then:
-`firebase deploy --only functions:aiChat,functions:aiChatStream,functions:estimateFood,functions:adminOverview,functions:adminUserUsage`
-(`aiusage.js` is shared by the first three; `adminUserUsage` is NEW so it needs a create.)
-**Deploy BEFORE pushing the frontend** — the new admin UI calls `adminUserUsage`, which
-does not exist yet. It degrades gracefully (costs show "—", the detail view errors) but
-there is no reason to ship it broken.
+All seven functions deployed (`adminUserUsage` created fresh). Verified live: a real chat
+turn logged `{"model":"claude-sonnet-4-6","budgetTokens":18509,"costMicros":69187}` —
+$0.0692, which matches 371 input + 5 output + 18,133 cache-write by hand. No write-failed
+lines, so all four rollups landed.
+
+**⚠️ It shipped broken first and was live-broken for ~11 minutes (10:28–10:39Z).** `db` is
+not in scope in the aiChat / aiChatStream / workflow handlers — they carry a `usageRef`
+from `setupChat`, not a Firestore handle — so `recordUsage(db, …)` threw ReferenceError
+from a **`finally`**, which *replaces* the pending return: the reply was generated, then
+discarded in favour of an error. Fixed in `c2c2352` by (1) making `recordUsage` incapable
+of throwing, since it runs in a finally on every AI path, (2) passing `admin.firestore()`,
+and (3) adding **`npm run lint`** to `functions/` (eslint `no-undef`), which reproduces the
+bug as `454:31 error 'db' is not defined`. `node --check` cannot catch this and Cloud
+Functions code cannot be smoke-tested locally — **run `npm run lint` in `functions/`
+before every deploy.**
+
+Not redeployed, deliberately: `logMeal` / `setWorkoutSchedule` live in `aichat.js` but
+touch neither `todayKey` nor `recordUsage`, so they are unaffected and still run the
+pre-S167 bundle.
 
 **What changed and why.** Kevin read "AI today: 600" as a lifetime total. It was not — it
 reads a date-keyed doc that starts fresh daily — but the number *was* wrong twice over:
