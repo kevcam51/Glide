@@ -2372,6 +2372,47 @@ functions/<file>.js` after editing a prompt string.**
 firebase deploy --only functions:aiChat,functions:aiChatStream,functions:logMeal,functions:setWorkoutSchedule,functions:mcp --project calorieiq-29762
 ```
 
+## ⛔ BLOCKED ON DEPLOY — S167 AI cost tracking (committed `891056a`, NOT pushed)
+
+`firebase login --reauth --no-localhost` first, then:
+`firebase deploy --only functions:aiChat,functions:aiChatStream,functions:estimateFood,functions:adminOverview,functions:adminUserUsage`
+(`aiusage.js` is shared by the first three; `adminUserUsage` is NEW so it needs a create.)
+**Deploy BEFORE pushing the frontend** — the new admin UI calls `adminUserUsage`, which
+does not exist yet. It degrades gracefully (costs show "—", the detail view errors) but
+there is no reason to ship it broken.
+
+**What changed and why.** Kevin read "AI today: 600" as a lifetime total. It was not — it
+reads a date-keyed doc that starts fresh daily — but the number *was* wrong twice over:
+
+1. **The day was a UTC day.** In Eastern that ends at **8pm**, so "today" dropped
+   everything logged that evening and carried in the previous night's usage. The daily
+   AI **budget** reset at 8pm local for the same reason. `todayKey()` now returns the
+   local (America/New_York) day, matching every other date key since S45. **Behavior
+   change worth knowing: allowances now reset at the user's midnight, not 8pm.**
+2. **The stored number was never a token count.** `tokens` = input + output + cacheWrite —
+   the budget basis, deliberately excluding cache reads (they bill at ~10%). It therefore
+   under-reported real usage (a measured turn: 8,330 budget vs **22,238** actual tokens)
+   and could not be converted to money, since the four token kinds have four prices.
+
+New `functions/aiusage.js` records the full breakdown + cost per call into **four rollups**
+— day / month / year / lifetime — incrementing at write time so a year of spend is ONE
+document read, not 365. Cost is integer **micro-dollars** (floats drift in the cents over
+thousands of increments). Prices are per-model and applied at write time, so historical
+rows keep the rate that actually applied. Sanity check: the constants reproduce the S67
+measured batch to the cent ($0.0273 cached vs $0.0648 uncached, 58% saved).
+
+`adminOverview` now returns day/month/year/lifetime per user (4 reads/user, was 2); new
+`adminUserUsage` returns one user's 30 days + 12 months (the expensive read, so it runs
+only when a row is opened — note the month walk pins to the 1st before stepping back, or
+Jul 31 minus one month lands on July again and collapses 12 months into 7).
+
+Dashboard: tiles are filters (count and rows share one predicate so they can't disagree),
+rows open to per-day/per-month history, and totals spanning pre-S167 rows show the known
+part with a **"+"** rather than blanking or counting unknown rows as free.
+
+**Still worth doing:** the rollups only start filling from the deploy — old day docs have
+no breakdown, so their cost stays "—" forever. There is nothing to backfill from.
+
 ## Three device-test fixes (S166c/d/e, from Kevin)
 
 **1. A voice note named a client and offered nobody.** Two causes, plus one design
