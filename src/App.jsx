@@ -16898,6 +16898,7 @@ const callSendTrainerRequest = httpsCallable(functions, "sendTrainerRequest"); /
 const callListAppRequests = httpsCallable(functions, "listAppRequests");        // S140 admin
 const callSetAppRequestStatus = httpsCallable(functions, "setAppRequestStatus"); // S140 admin
 const callAdminOverview = httpsCallable(functions, "adminOverview"); // admin all-users dashboard (S90)
+const callAdminUserUsage = httpsCallable(functions, "adminUserUsage"); // one user's AI spend history (S167)
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
 // Trainer teams (S116): head trainer ↔ sub-trainers. Server-side because the
 // rules block a user changing their own role. See functions/team.js.
@@ -22084,15 +22085,143 @@ function AppRequestsPanel({ onClose }) {
   );
 }
 
+// Money, from integer micro-dollars (1e-6 USD). Admin AI spend spans four
+// orders of magnitude — a single estimate is a fraction of a cent, a month of a
+// heavy trainer is dollars — so the precision follows the size rather than
+// rounding small real numbers to a misleading "$0.00".
+function usdMicros(micros) {
+  if (micros == null) return "—";
+  const d = micros / 1e6;
+  if (d === 0) return "$0";
+  if (d >= 1) return `$${d.toFixed(2)}`;
+  if (d >= 0.01) return `$${d.toFixed(3)}`;
+  return `$${d.toFixed(4)}`;
+}
+const kTok = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n || 0));
+// Sum cost across rows, some of which may predate cost tracking. Blanking the
+// whole total because one old row is unknown hides real information; reporting
+// the known part with a "+" says "at least this much" without pretending the
+// unknown rows were free.
+function sumCost(rows) {
+  let micros = 0, unknown = 0;
+  for (const r of rows || []) {
+    if (r.costMicros == null) { if (r.tokens > 0) unknown++; } else micros += r.costMicros;
+  }
+  return { micros, unknown };
+}
+const usdSum = (t) => (t.unknown && !t.micros ? "—" : usdMicros(t.micros) + (t.unknown ? "+" : ""));
+
+// One user's AI spend over time (S167). The expensive read — a document per day
+// — so it runs only when a row is actually opened.
+function AdminUserUsage({ uid, name, onBack }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let live = true;
+    callAdminUserUsage({ uid, days: 30 })
+      .then((r) => { if (live) setD(r.data); })
+      .catch(() => { if (live) setErr(true); });
+    return () => { live = false; };
+  }, [uid]);
+  const sum = (rows, field) => rows.reduce((t, r) => t + (r[field] || 0), 0);
+  const win = (label, rows) => ({
+    label, tokens: sum(rows, "tokens"), calls: sum(rows, "calls"), cost: sumCost(rows),
+  });
+  const windows = d ? (() => {
+    const thisYear = String(new Date().getFullYear());
+    return [
+      win("Today", d.days.slice(0, 1)),
+      win("Last 7 days", d.days.slice(0, 7)),
+      win("This month", d.months.slice(0, 1)),
+      win("This year", d.months.filter((m) => m.key.startsWith(thisYear))),
+    ];
+  })() : [];
+  return (
+    <>
+      <div className="flex items-center gap-2">
+        <button onClick={onBack}
+          className="flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer">
+          <Icon name="back" size={15} color="var(--accent)" />All users
+        </button>
+        <span className="truncate text-[.9rem] font-semibold text-fg">{name}</span>
+      </div>
+      {err && <div className="text-danger text-[.82rem]">Couldn't load this user's usage.</div>}
+      {!d && !err && <div className="text-muted text-[.84rem]">Loading usage…</div>}
+      {d && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            {windows.map((w) => (
+              <div key={w.label} className="rounded-xl border border-border bg-surface2 px-3 py-2">
+                <div className="text-[.62rem] uppercase tracking-wide text-muted">{w.label}</div>
+                <div className="font-display text-[1.15rem] font-bold text-primary">{usdSum(w.cost)}</div>
+                <div className="text-[.66rem] text-muted">{kTok(w.tokens)} tokens · {w.calls} call{w.calls === 1 ? "" : "s"}</div>
+              </div>
+            ))}
+          </div>
+          <div className="text-[.68rem] font-bold uppercase tracking-wide text-muted">Last 30 days</div>
+          <div className="flex flex-col gap-1">
+            {d.days.filter((x) => x.tokens > 0 || x.calls > 0).length === 0 && (
+              <div className="text-muted text-[.8rem]">No AI usage in the last 30 days.</div>
+            )}
+            {d.days.filter((x) => x.tokens > 0 || x.calls > 0).map((x) => (
+              <div key={x.key} className="flex items-baseline gap-2 rounded-lg border border-border bg-surface2 px-2.5 py-1.5 text-[.72rem]">
+                <span className="text-fg font-semibold">{x.key}</span>
+                <span className="text-muted">{x.calls} call{x.calls === 1 ? "" : "s"}</span>
+                <span className="text-muted">{kTok(x.tokens)} tok</span>
+                {x.cacheRead > 0 && <span className="text-muted">{kTok(x.cacheRead)} cached</span>}
+                <span className="ml-auto font-bold text-primary">{usdMicros(x.costMicros)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="text-[.68rem] font-bold uppercase tracking-wide text-muted">By month</div>
+          <div className="flex flex-col gap-1">
+            {d.months.filter((x) => x.tokens > 0 || x.calls > 0).length === 0 && (
+              <div className="text-muted text-[.8rem]">No AI usage on record.</div>
+            )}
+            {d.months.filter((x) => x.tokens > 0 || x.calls > 0).map((x) => (
+              <div key={x.key} className="flex items-baseline gap-2 rounded-lg border border-border bg-surface2 px-2.5 py-1.5 text-[.72rem]">
+                <span className="text-fg font-semibold">{x.key}</span>
+                <span className="text-muted">{x.calls} call{x.calls === 1 ? "" : "s"}</span>
+                <span className="text-muted">{kTok(x.tokens)} tok</span>
+                <span className="ml-auto font-bold text-primary">{usdMicros(x.costMicros)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 function AdminDashboard({ onClose }) {
   useBodyScrollLock(true);
   const [data, setData] = useState(null);
   const [err, setErr] = useState(false);
+  const [filter, setFilter] = useState(null);   // which tile is filtering the list
+  const [detail, setDetail] = useState(null);   // {uid, name} — one user's spend history
   useEffect(() => {
     callAdminOverview().then((r) => setData(r.data)).catch(() => setErr(true));
   }, []);
-  const users = data ? [...data.users].sort((a, b) => (b.aiTokensToday || 0) - (a.aiTokensToday || 0)) : [];
   const now = Date.now();
+  const onTrial = (u) => u.trialStartedAt
+    && u.trialStartedAt + (u.trialLengthDays || 30) * 86400000 > now
+    && u.subscriptionStatus !== "active";
+  // Each tile is a filter: the count it shows and the rows it reveals come from
+  // the same predicate, so a tile can never disagree with the list under it.
+  const FILTERS = [
+    { key: "all", label: "Users", test: () => true },
+    { key: "trainers", label: "Trainers", test: (u) => u.role === "head_trainer" || u.role === "sub_trainer" },
+    { key: "paid", label: "Paid", test: (u) => u.subscriptionStatus === "active" },
+    { key: "trial", label: "On trial", test: onTrial },
+    { key: "aiToday", label: "AI active today", test: (u) => u.aiTokensToday > 0 },
+    { key: "boosted", label: "Boosted", test: (u) => (u.boostCount || 0) > 0 },
+  ];
+  const all = data ? data.users : [];
+  const active = FILTERS.find((f) => f.key === filter);
+  const users = [...(active ? all.filter(active.test) : all)]
+    .sort((a, b) => (b.aiTokensToday || 0) - (a.aiTokensToday || 0));
+  const spend = (u, win) => ((u.usage && u.usage[win]) || {});
+  const totalCost = (win) => sumCost(all.map((u) => spend(u, win)));
   const subLabel = (u) => {
     if (u.subscriptionStatus === "active") return { txt: u.subscriptionTier ? `paid · ${u.subscriptionTier}` : "paid", cls: "text-success" };
     if (u.subscriptionStatus === "canceled") return { txt: "canceled", cls: "text-danger" };
@@ -22102,13 +22231,6 @@ function AdminDashboard({ onClose }) {
     }
     return { txt: "free (legacy)", cls: "text-muted" };
   };
-  const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n || 0));
-  const tile = (label, val) => (
-    <div className="rounded-xl border border-border bg-surface2 px-3 py-2 text-center">
-      <div className="font-display text-[1.15rem] font-bold text-primary">{val}</div>
-      <div className="text-[.62rem] uppercase tracking-wide text-muted">{label}</div>
-    </div>
-  );
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2400, background: "rgba(0,0,0,.8)", display: "flex", justifyContent: "center", padding: "16px", paddingTop: "calc(16px + env(safe-area-inset-top,0px))", overflowY: "auto" }}>
       <div onClick={(e) => e.stopPropagation()} className="bg-surface border border-border rounded-card" style={{ width: "min(96vw,640px)", padding: "18px 16px", margin: "auto 0", display: "flex", flexDirection: "column", gap: "12px" }}>
@@ -22119,22 +22241,41 @@ function AdminDashboard({ onClose }) {
         </div>
         {err && <div className="text-danger text-[.82rem]">Couldn't load (admin only). Try again.</div>}
         {!data && !err && <div className="text-muted text-[.84rem]">Loading users…</div>}
-        {data && (
+        {data && detail && (
+          <AdminUserUsage uid={detail.uid} name={detail.name} onBack={() => setDetail(null)} />
+        )}
+        {data && !detail && (
           <>
             <div className="grid grid-cols-3 gap-2">
-              {tile("Users", users.length)}
-              {tile("Trainers", users.filter((u) => u.role === "head_trainer" || u.role === "sub_trainer").length)}
-              {tile("Paid", users.filter((u) => u.subscriptionStatus === "active").length)}
-              {tile("On trial", users.filter((u) => u.trialStartedAt && u.trialStartedAt + (u.trialLengthDays || 30) * 86400000 > now && u.subscriptionStatus !== "active").length)}
-              {tile("AI active today", users.filter((u) => u.aiTokensToday > 0).length)}
-              {tile("Boosts (all-time)", users.reduce((s, u) => s + (u.boostCount || 0), 0))}
+              {FILTERS.map((f) => {
+                const on = (filter || "all") === f.key;
+                return (
+                  <button key={f.key} onClick={() => setFilter(f.key === "all" ? null : f.key)}
+                    aria-pressed={on}
+                    className={`rounded-xl border px-3 py-2 text-center cursor-pointer ${on ? "border-primary bg-[rgba(8,220,224,.08)]" : "border-border bg-surface2"}`}>
+                    <div className="font-display text-[1.15rem] font-bold text-primary">{all.filter(f.test).length}</div>
+                    <div className="text-[.62rem] uppercase tracking-wide text-muted">{f.label}</div>
+                  </button>
+                );
+              })}
+            </div>
+            {/* What everyone cost, over the three windows the rollups make cheap. */}
+            <div className="grid grid-cols-3 gap-2">
+              {[["Today", "day"], ["This month", "month"], ["This year", "year"]].map(([label, win]) => (
+                <div key={win} className="rounded-xl border border-border bg-bg px-3 py-2 text-center">
+                  <div className="font-display text-[1.05rem] font-bold text-fg">{usdSum(totalCost(win))}</div>
+                  <div className="text-[.62rem] uppercase tracking-wide text-muted">AI spend · {label}</div>
+                </div>
+              ))}
             </div>
             <div className="flex flex-col gap-1.5">
+              {users.length === 0 && <div className="text-muted text-[.82rem]">No users match that filter.</div>}
               {users.map((u) => {
                 const s = subLabel(u);
                 const flagged = (u.boostCount || 0) >= 3;
                 return (
-                  <div key={u.uid} className={`rounded-xl border px-3 py-2.5 ${flagged ? "border-warn bg-[rgba(251,191,36,.06)]" : "border-border bg-surface2"}`}>
+                  <button key={u.uid} onClick={() => setDetail({ uid: u.uid, name: u.name || u.email || u.uid.slice(0, 8) })}
+                    className={`w-full rounded-xl border px-3 py-2.5 text-left cursor-pointer ${flagged ? "border-warn bg-[rgba(251,191,36,.06)]" : "border-border bg-surface2"}`}>
                     <div className="flex items-baseline gap-2">
                       <span className="truncate text-[.86rem] font-semibold text-fg">{u.name || u.email || u.uid.slice(0, 8)}</span>
                       <span className="text-[.66rem] uppercase tracking-wide text-muted">{u.role.replace("_", " ")}</span>
@@ -22142,16 +22283,22 @@ function AdminDashboard({ onClose }) {
                     </div>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[.68rem] text-muted">
                       {u.email && <span className="truncate">{u.email}</span>}
-                      <span>AI today: <span className="text-fg font-semibold">{k(u.aiTokensToday)}</span>{u.boostToday ? " (+boosted)" : ""}</span>
+                      <span>Today: <span className="text-fg font-semibold">{kTok(u.aiTokensToday)}</span> tok · <span className="text-primary font-semibold">{usdMicros(spend(u, "day").costMicros)}</span>{u.boostToday ? " (+boosted)" : ""}</span>
+                      <span>Month: <span className="text-primary font-semibold">{usdMicros(spend(u, "month").costMicros)}</span></span>
                       {u.boostCount > 0 && <span className={flagged ? "text-warn font-bold" : ""}>{flagged ? "! " : ""}boosts: {u.boostCount}</span>}
-                      {u.createdAt && <span>joined {new Date(u.createdAt).toLocaleDateString()}</span>}
                     </div>
-                  </div>
+                    <div className="mt-0.5 text-[.62rem] text-primary">Tap for daily & monthly spend →</div>
+                  </button>
                 );
               })}
             </div>
             <div className="text-muted" style={{ fontSize: ".64rem", lineHeight: 1.5 }}>
-              ! = 3+ allowance-boost requests (visibility only — nothing is auto-restricted). AI usage is today's tokens vs each tier's daily budget.
+              ! = 3+ allowance-boost requests (visibility only — nothing is auto-restricted).
+              Days run on Eastern time, so "today" is the same day the person had.
+              Cost is computed per call from {data.model || "the model"}'s published rates
+              (input / output / cache-write / cache-read priced separately). "—" means the row
+              predates cost tracking, so its spend is unknown rather than zero; a trailing "+"
+              on a total means it covers only the rows whose cost is known.
             </div>
           </>
         )}

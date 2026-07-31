@@ -12,6 +12,7 @@
 const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
+const aiusage = require("./aiusage");
 const Anthropic = require("@anthropic-ai/sdk");
 const { buildTools, runTool } = require("./aitools");
 const { GLIDNA_KNOWLEDGE } = require("./knowledge");
@@ -123,10 +124,13 @@ If asked something outside scope, redirect: "I can help you with client nutritio
 
 Formatting: replies render in a narrow mobile chat, so write like a person texting — natural prose in short paragraphs. Match your length to the question: a quick lookup gets a sentence or two; a real coaching question (who's off track, what should I change) deserves a complete, useful answer — don't truncate real analysis to save space. Light markdown is fine — **bold** for the occasional label, and a dash list only when you're truly listing things. Skip big markdown tables, heading syntax (#), and code blocks; they render badly here. Write clean, properly-spaced prose: always put a normal space after periods, commas, colons, and every other punctuation mark, and never run one sentence into the next — write "Nice work. Keep it up.", never "Nice work.Keep it up." Hold yourself to the same polish, spacing, and correctness you'd expect from a top-tier writing assistant.`;
 
-// UTC YYYY-MM-DD key for the per-user daily usage doc.
+// YYYY-MM-DD key for the per-user daily usage doc, in the app's audience
+// timezone. This was UTC until S167 — which in Eastern rolls over at 8pm, so
+// the daily budget reset mid-evening and the admin dashboard's "today" silently
+// dropped everything logged after it. Every other date key in the app has been
+// local since S45.
 function todayKey() {
-  const d = new Date();
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  return aiusage.dayKey();
 }
 
 // Today's date in the app's audience timezone (Miami / Eastern), as YYYY-MM-DD,
@@ -447,13 +451,7 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
     // Record spend even when a later tool round throws — tokens from the
     // completed rounds were real (they used to go unbilled on any mid-turn
     // error). Best-effort: a failed usage write must not fail a good reply.
-    const spent = agg.input + agg.output + agg.cacheWrite;
-    if (spent > 0) {
-      console.log("aiUsage", JSON.stringify({ fn: "aiChat", ...agg, spent }));
-      await usageRef.set({ tokens: admin.firestore.FieldValue.increment(spent),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
-        .catch((err) => console.error("aiUsage write failed:", err && err.message));
-    }
+    await aiusage.recordUsage(db, uid, { ...agg, model: MODEL }, "aiChat");
   }
 
   // Budget counts full-price tokens (cache reads bill at ~10%, so excluded).
@@ -504,12 +502,7 @@ async function runAssistantTurn(uid, userText) {
     console.error("runAssistantTurn error:", e && e.message);
     return { skipped: "error" };
   } finally {
-    const spent = agg.input + agg.output + agg.cacheWrite;
-    if (spent > 0) {
-      console.log("aiUsage", JSON.stringify({ fn: "workflow", ...agg, spent }));
-      await usageRef.set({ tokens: admin.firestore.FieldValue.increment(spent),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true }).catch(() => {});
-    }
+    await aiusage.recordUsage(db, uid, { ...agg, model: MODEL }, "workflow");
   }
   const text = (resp.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
   return { reply: text, spent: agg.input + agg.output + agg.cacheWrite };
@@ -620,13 +613,7 @@ exports.aiChatStream = onRequest(
     } finally {
       // Record spend even on failure/disconnect — completed rounds were real
       // tokens (they used to go unbilled whenever a later round threw).
-      const spent = agg.input + agg.output + agg.cacheWrite;
-      if (spent > 0) {
-        console.log("aiUsage", JSON.stringify({ fn: "aiChatStream", ...agg, spent }));
-        await usageRef.set({ tokens: admin.firestore.FieldValue.increment(spent),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
-          .catch((err) => console.error("aiUsage write failed:", err && err.message));
-      }
+      await aiusage.recordUsage(db, uid, { ...agg, model: MODEL }, "aiChatStream");
     }
     if (failed) { res.end(); return; }
     const spent = agg.input + agg.output + agg.cacheWrite;
@@ -762,10 +749,11 @@ exports.estimateFood = onCall(
     }
     // Bill against the daily budget exactly like the chat (input+output+cacheWrite).
     const u = msg.usage || {};
-    const spent = (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_creation_input_tokens || 0);
-    usageRef.set({ tokens: admin.firestore.FieldValue.increment(spent),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true })
-      .catch((e) => console.error("estimateFood usage write failed:", e && e.message));
+    aiusage.recordUsage(db, uid, {
+      input: u.input_tokens || 0, output: u.output_tokens || 0,
+      cacheWrite: u.cache_creation_input_tokens || 0, cacheRead: u.cache_read_input_tokens || 0,
+      model: MODEL,
+    }, "estimateFood").catch((e) => console.error("estimateFood usage write failed:", e && e.message));
     const text = ((msg.content || []).find((b) => b.type === "text") || {}).text || "";
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     let out = null;

@@ -12,6 +12,7 @@ const { onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
+const aiusage = require("./aiusage");
 
 admin.initializeApp();
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
@@ -212,15 +213,22 @@ exports.adminOverview = onCall(async (request) => {
     throw new HttpsError("permission-denied", "Admin only.");
   }
   const db = admin.firestore();
-  // Same day key the AI budget uses (UTC — matches aichat.js todayKey).
-  const d = new Date();
-  const today = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+  // Same keys the AI budget uses — local (Eastern) day since S167, so "today"
+  // here means the same day the person had.
+  const today = aiusage.dayKey();
+  const month = aiusage.monthKey();
+  const year = aiusage.yearKey();
   const snap = await db.collection("users").limit(500).get();
   const toMs = (v) => (v && typeof v.toMillis === "function" ? v.toMillis() : (typeof v === "number" ? v : null));
   const users = await Promise.all(snap.docs.map(async (doc) => {
     const p = doc.data() || {};
-    const [u, m] = await Promise.all([
+    // Four reads per user: today, this month, this year, lifetime. Rollups are
+    // incremented at write time, so a year of spend costs ONE read rather than
+    // 365 — that is the whole reason the month/year docs exist.
+    const [u, mo, yr, m] = await Promise.all([
       db.doc(`users/${doc.id}/aiUsage/${today}`).get(),
+      db.doc(`users/${doc.id}/aiUsage/${month}`).get(),
+      db.doc(`users/${doc.id}/aiUsage/${year}`).get(),
       db.doc(`users/${doc.id}/aiUsage/meta`).get(),
     ]);
     const usage = u.data() || {};
@@ -240,7 +248,59 @@ exports.adminOverview = onCall(async (request) => {
       boostToday: usage.boost || 0,
       boostCount: meta.boostCount || 0,
       lastBoostAt: meta.lastBoostAt || null,
+      // Spend windows. `costMicros` is null on rows written before S167 — those
+      // day docs only ever stored the budget aggregate, so their cost is
+      // genuinely unknown rather than zero, and the UI says so.
+      usage: {
+        day: aiusage.readUsage(u),
+        month: aiusage.readUsage(mo),
+        year: aiusage.readUsage(yr),
+        life: aiusage.readUsage(m),
+      },
     };
   }));
-  return { users, today };
+  return { users, today, month, year, pricing: aiusage.PRICING[aiusage.DEFAULT_MODEL], model: aiusage.DEFAULT_MODEL };
+});
+
+// ── adminUserUsage (S167): one user's spend history, for the detail view ────
+// Kept separate from adminOverview because it is the expensive read (a day doc
+// per day, a month doc per month). Fetching this for every user on every
+// dashboard load is what the month/year rollups exist to avoid.
+exports.adminUserUsage = onCall(async (request) => {
+  const callerUid = request.auth && request.auth.uid;
+  if (!callerUid || !ADMIN_UIDS.includes(callerUid)) {
+    throw new HttpsError("permission-denied", "Admin only.");
+  }
+  const uid = String((request.data && request.data.uid) || "");
+  if (!uid) throw new HttpsError("invalid-argument", "Which user?");
+  const days = Math.min(90, Math.max(1, Number((request.data && request.data.days) || 30)));
+  const db = admin.firestore();
+  const col = db.collection(`users/${uid}/aiUsage`);
+
+  const dayIds = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    dayIds.push(aiusage.dayKey(d));
+  }
+  const monthIds = [];
+  for (let i = 0; i < 12; i++) {
+    const d = new Date();
+    d.setDate(1);                 // pin to the 1st BEFORE stepping months back,
+    d.setMonth(d.getMonth() - i); // or the 31st rolls into the wrong month
+    monthIds.push(aiusage.monthKey(d));
+  }
+  const [dayDocs, monthDocs, profDoc] = await Promise.all([
+    Promise.all(dayIds.map((id) => col.doc(id).get())),
+    Promise.all(monthIds.map((id) => col.doc(id).get())),
+    db.doc(`users/${uid}`).get(),
+  ]);
+  const p = profDoc.data() || {};
+  return {
+    uid,
+    name: p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || uid.slice(0, 8),
+    email: p.email || "",
+    days: dayIds.map((id, i) => ({ key: id, ...aiusage.readUsage(dayDocs[i]) })),
+    months: monthIds.map((id, i) => ({ key: id.slice(2), ...aiusage.readUsage(monthDocs[i]) })),
+  };
 });
