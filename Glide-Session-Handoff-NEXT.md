@@ -1765,7 +1765,49 @@ domain **glidna.com**; model `claude-sonnet-4-6`. Read the relevant docs/*.md fo
   Decision: **client-mgmt AI stays in Coach — rely on the cap** (heavy roster users route to Coach Elite).
   Memory: `ai-token-usage-tracking` (track real aiUsage → raise limits when paid users regularly cap).
 
-### Gotchas reaffirmed this session
+### Session 167–168 — AI cost tracking, admin search, one client ID (all LIVE)
+
+**S167 — what the AI actually costs, per user, per day.** The admin dashboard's "AI today" was
+genuinely today's, not lifetime (it reads a date-keyed doc that `increment`s per call) — but two things
+made it look wrong and made cost impossible. The day was a **UTC** day, which in Eastern ends at
+**8pm local**, so the number dropped that evening's usage and carried in the previous night's.
+And the only stored figure was `tokens` = input + output + cacheWrite: the BUDGET basis, which
+excludes cache reads (they bill at ~10%) and can't be turned into money, since the four token
+kinds cost four different amounts.
+
+`functions/aiusage.js` now records the full breakdown plus cost into four rollups — day (still
+the budget doc), month, year, lifetime — incremented at write time, so a year of spend is one
+read instead of 365. Day keys are Eastern-local, matching every other date key since S45.
+**This moves the daily budget reset from 8pm ET to local midnight** — better, and consistent, but
+it is a live behaviour change worth knowing. Cost math validated against S67's measured batch:
+$0.0273 cached vs $0.0648 uncached, 58% saving — matching what S67 recorded independently.
+`recordUsage` is wrapped so it can never throw: it runs in a `finally` on every AI path, and the
+first cut of it replaced a good reply with an error (scope bug on `db`) until that guard went in.
+
+**S168 — admin search + one client ID everywhere.** The six tiles were already filters; added
+search over name, email, role, the 4-char code, or a raw uid (leading `#` optional). Search runs
+BEFORE the tile so tile counts describe the current search — empty box = plain totals as before.
+Kevin confirmed it working against the real roster.
+
+Two ID schemes existed and each appeared on exactly ONE screen — home showed a sequential `#6`,
+All-clients showed `#KEM2` — so you could never quote the code the other screen (or the AI) knew
+someone by. One `IdBadge` now shows both on home cards, plan cards, All-clients and the admin
+roster, and **tapping copies the full id**; it stops propagation, so copying no longer opens the
+plan as a side effect.
+
+**S168b — the deploy-subset bug, caught again.** `aitools.js` had changed in S165/S166b but the
+S167 deploy named only 7 functions, leaving `logMeal`/`setWorkoutSchedule` (the Accept-card
+writers) on an older bundle — the exact S78 failure, and silent. Fixed, then verified properly:
+proposed a meal for the plan file *Prospect Pat*, tapped Log it, and checked STORAGE rather than
+asking the AI — it landed in `caliq-log-c1782072071191-<today>` and not in the trainer's own log,
+so `localPlanId` survives propose → Accept → write. Test meal removed after.
+The durable fix is `npm run deploy-set <file>` (see Gotchas) — the real set for `aitools.js` is
+**12** functions, including `mcp`.
+
+**Still on Kevin's side:** the mic on a real phone, and `find_client` against someone who exists
+as both a connected client and a plan file.
+
+## Gotchas reaffirmed this session
 - **Deploy ALL 4 AI fns when aitools.js changes** (aiChat/aiChatStream/logMeal/setWorkoutSchedule); the
   system prompt lives in aichat.js (only aiChat/aiChatStream). New fns this session: trialReminders,
   saveWorkflow/listWorkflows/toggleWorkflow/deleteWorkflow/runDueWorkflows.
@@ -2261,8 +2303,13 @@ prompt, **notch/safe-area** header fix, taller header so the menu button clears 
 
 ## Gotchas
 - **Background process also commits/pushes here** — `git fetch` + check `origin/main..HEAD` first.
-- **Deploy ALL 4 AI fns when `functions/aitools.js` changes** (aiChat, aiChatStream, logMeal,
-  setWorkoutSchedule). Other fns: sendInvite, transcribeAudio, trainerizeTest.
+- **Deploying a subset after a SHARED-file change is the recurring bug** (S78, then again S167→S168b).
+  Firebase ships every function from one source tree but only updates the ones you name, so the rest keep
+  running the old copy of that file and nothing looks wrong. Don't hand-maintain the list:
+  **`npm run deploy-set aitools.js`** prints the exact set and the ready-to-paste deploy command.
+  `aitools.js` is now **12** functions (the 4 AI ones + all 5 workflow fns + `mcp` + estimateFood +
+  requestBudgetBoost) — `mcp` matters especially, since the connector must stay at capability parity
+  with the in-app AI. Other fns: sendInvite, transcribeAudio, trainerizeTest.
 - **Firebase token expires** → `firebase login --reauth --no-localhost`. Set secrets via
   `printf 'val' | firebase functions:secrets:set NAME --project calorieiq-29762 --data-file=-` (masked
   prompt trips Kevin up). **Never `GID=` in zsh** (special var → "operation not permitted"); use another name.

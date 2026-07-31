@@ -10,7 +10,8 @@
     "gen:icons": "node scripts/gen-icons.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:rules": "firebase emulators:exec --only firestore --project calorieiq-rules-test \"node firestore.rules.test.js\""
+    "test:rules": "firebase emulators:exec --only firestore --project calorieiq-rules-test \"node firestore.rules.test.js\"",
+    "deploy-set": "node scripts/deploy-set.mjs"
   },
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",

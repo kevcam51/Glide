@@ -128,8 +128,9 @@ enabled (Blaze has no default spending cap).
 > - **Key gotchas:** `.page-transition` keeps a CSS transform → any fixed overlay must
 >   `createPortal(…, document.body)` (S27/S30). Local-date keys via `ymdLocal`/`useTodayKey` — never
 >   UTC "today" (S45/S85). kv range queries use the `""` ESCAPE (raw char breaks silently, S85).
->   When `functions/aitools.js` changes deploy ALL FOUR AI fns. Firebase CLI token expires —
->   `firebase login --reauth --no-localhost`.
+>   When a SHARED `functions/` file changes, run **`npm run deploy-set <file>`** and deploy exactly
+>   what it prints — a subset leaves the rest on the old copy, silently (S78, S168b; `aitools.js` is
+>   12 functions now, not 4). Firebase CLI token expires — `firebase login --reauth --no-localhost`.
 > - **Next up (Kevin's queue): Stripe LIVE-mode swap.** Pricing is DECIDED & BUILT (S89c): Premium
 >   $14.99/$119.99yr · Max $29.99/$299.99yr · Coach $49/$490yr · Coach Max $79/$790yr — all
 >   E2E-verified in test mode (CATALOG in billing.js, subscriptionTier→Max budgets, PlanPicker UI).
@@ -1707,8 +1708,9 @@ enabled (Blaze has no default spending cap).
   + `propose_workout` → card "Monday — Battle Ropes (~240 cal)" → Accept → Casey's Monday strength holds the custom id.
   **⚠️ DEPLOY GOTCHA (hit + fixed):** `aitools.js` is shared by `aiChat`, `aiChatStream`, `logMeal`, AND `setWorkoutSchedule`
   (the Accept callables). Deploying only `aiChat`/`aiChatStream` left `setWorkoutSchedule` on stale `aitools.js`, which
-  dropped the custom id on Accept (empty schedule, but "saved" shown). **When `aitools.js` changes, deploy ALL FOUR
-  functions.** Frontend + backend both pushed/deployed. `npm run build` passes. No `firestore.rules` change. Model
+  dropped the custom id on Accept (empty schedule, but "saved" shown). **When `aitools.js` changes, deploy every
+  function that bundles it** — four at the time of S78, twelve by S168b, so don't hand-maintain the list: run
+  `npm run deploy-set aitools.js`. Frontend + backend both pushed/deployed. `npm run build` passes. No `firestore.rules` change. Model
   `claude-sonnet-4-6`.
 - Session 79: **Voice input for the AI chat — speak instead of type (Whisper; OpenAI now, Groq-ready). DEPLOYED & LIVE.**
   A **🎤 mic button** in the chat composer records via the browser `MediaRecorder`, sends the audio to a new
