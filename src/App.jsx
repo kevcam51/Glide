@@ -14896,6 +14896,36 @@ async function ensureIdNums(keys) {
 // The little "#3" tag rendered next to a name.
 const IdTag = ({ n }) => (n ? <span style={{ fontSize: ".7rem", fontWeight: 700, color: "var(--muted)", marginLeft: 6 }}>#{n}</span> : null);
 
+// The identifier, shown the same way on every screen (S168, Kevin: "make it easy
+// to find client IDs"). Two codes already existed and each appeared on only ONE
+// screen — the trainer home showed a sequential "#6", All-clients showed the
+// 4-char "#KEM2" — so whichever screen you were looking at, you couldn't quote
+// the code the other screen (or the AI) knew you by. This shows both, and a tap
+// copies the FULL underlying id, which is what the AI tools and any support
+// question actually need. Plain span, not a button: it usually sits inside an
+// already-clickable row, and a nested button is invalid markup.
+const IdBadge = ({ id, n, className = "" }) => {
+  const [copied, setCopied] = useState(false);
+  if (!id) return null;
+  const copy = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    try {
+      navigator.clipboard.writeText(String(id));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch { /* clipboard blocked — the codes on screen are still readable */ }
+  };
+  return (
+    <span onClick={copy} title={`Tap to copy the full ID\n${id}`}
+      className={`inline-flex shrink-0 items-center gap-1 font-mono text-[.64rem] font-bold cursor-pointer ${className}`}>
+      {n ? <span className="text-muted">#{n}</span> : null}
+      <span className="text-primary">#{refCode(id)}</span>
+      {copied ? <span className="text-success">copied</span> : null}
+    </span>
+  );
+};
+
 function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, meUid, meName, meRole, notifPrefs, onSetNotifPrefs }) {
   const [details, setDetails] = useState({}); // id -> { tdee, target }
   // Trainerize import: the button opens a PICKER (roster preview, no writes)
@@ -15629,7 +15659,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     <div onClick={() => { if (c.hasPlan && onOpenClientPlan) onOpenClientPlan(c.uid); }}
                       className={c.hasPlan ? "cursor-pointer" : "cursor-default"}>
                       <div className="flex justify-between items-center mb-2">
-                        <span className="font-bold text-[.95rem]">{c.name}<IdTag n={idNums[c.uid]} /></span>
+                        <span className="font-bold text-[.95rem]">{c.name}<IdBadge id={c.uid} n={idNums[c.uid]} className="ml-1.5" /></span>
                         <span className="flex gap-2 items-center">
                           {reqsOn && openReqs.length > 0 && (
                             <span className="text-[.68rem] font-bold text-primaryfg bg-primaryfill rounded-[10px] px-2 py-0.5 inline-flex items-center gap-1">
@@ -16116,7 +16146,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                       <div className="flex justify-between items-center mb-2">
                         <span className="font-bold text-[.95rem]">
                           {p.customName || p.name || (sim ? "Untitled simulation" : "Unnamed client")}
-                          <IdTag n={idNums[p.id]} />
+                          <IdBadge id={p.id} n={idNums[p.id]} className="ml-1.5" />
                           {onRename && (
                             <button onClick={(e) => { e.stopPropagation(); setRenameDraft(p.customName || p.name || ""); setRenamingId(p.id); }}
                               title="Rename" aria-label="Rename" className="border-none bg-transparent text-muted cursor-pointer text-[.85rem] ml-1.5 p-2.5 -m-1.5"><Icon name="edit" size={14} color="currentColor" /></button>
@@ -20082,7 +20112,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
             {sim && <span className="flex-none text-[.55rem] font-bold tracking-wide px-1.5 py-0.5 rounded bg-[color-mix(in_srgb,var(--purple)_18%,transparent)] text-[color:var(--purple)]">SANDBOX</span>}
           </div>
           <div className="text-xs text-muted truncate">
-            <span className="font-mono text-primary">#{refCode(p.id)}</span>
+            <IdBadge id={p.id} />
             {" · "}{sim ? "Simulation" : "Local plan"}
             {p.weight ? ` · ${p.weight} lbs` : ""}
             {p.goal ? ` → ${p.goal} lbs` : ""}
@@ -20121,7 +20151,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
             <span className="flex-none text-[.55rem] font-bold tracking-wide px-1.5 py-0.5 rounded bg-[rgba(8,220,224,.15)] text-primary">CONNECTED</span>
           </div>
           <div className="text-xs text-muted truncate">
-            <span className="font-mono text-primary">#{refCode(c.uid)}</span>
+            <IdBadge id={c.uid} />
             {" · "}{c.email || "Linked client account"}
           </div>
         </div>
@@ -22198,6 +22228,7 @@ function AdminDashboard({ onClose }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(false);
   const [filter, setFilter] = useState(null);   // which tile is filtering the list
+  const [q, setQ] = useState("");               // free-text search, composes with the tile
   const [detail, setDetail] = useState(null);   // {uid, name} — one user's spend history
   useEffect(() => {
     callAdminOverview().then((r) => setData(r.data)).catch(() => setErr(true));
@@ -22216,9 +22247,26 @@ function AdminDashboard({ onClose }) {
     { key: "aiToday", label: "AI active today", test: (u) => u.aiTokensToday > 0 },
     { key: "boosted", label: "Boosted", test: (u) => (u.boostCount || 0) > 0 },
   ];
+  // Search matches anything you'd have on hand to look someone up with: their
+  // name, their email, the 4-char code the app shows them by, or the raw uid
+  // out of a log. A leading "#" is optional so a code read off a card can be
+  // pasted verbatim.
+  const matchesQuery = (u) => {
+    const t = q.trim().toLowerCase();
+    if (!t) return true;
+    const bare = t.replace(/^#/, "");
+    const has = (v) => String(v || "").toLowerCase().includes(t);
+    return has(u.name) || has(u.email) || has(u.uid) || has(u.role)
+      || refCode(u.uid).toLowerCase().includes(bare);
+  };
   const all = data ? data.users : [];
+  // Search first, then the tile. So the tile counts describe the CURRENT search
+  // — with an empty box they're the plain totals, and while searching they show
+  // how the matches break down, which keeps tapping a tile predictable instead
+  // of revealing rows the search had excluded.
+  const searched = all.filter(matchesQuery);
   const active = FILTERS.find((f) => f.key === filter);
-  const users = [...(active ? all.filter(active.test) : all)]
+  const users = [...(active ? searched.filter(active.test) : searched)]
     .sort((a, b) => (b.aiTokensToday || 0) - (a.aiTokensToday || 0));
   const spend = (u, win) => ((u.usage && u.usage[win]) || {});
   const totalCost = (win) => sumCost(all.map((u) => spend(u, win)));
@@ -22246,6 +22294,18 @@ function AdminDashboard({ onClose }) {
         )}
         {data && !detail && (
           <>
+            <div className="relative">
+              <input value={q} onChange={(e) => setQ(e.target.value)}
+                placeholder="Search name, email, #code or ID…"
+                aria-label="Search users"
+                className="w-full rounded-xl border border-border bg-surface2 py-2.5 pl-3 pr-9 text-[.86rem] text-fg outline-none placeholder:text-muted" />
+              {q && (
+                <button onClick={() => setQ("")} aria-label="Clear search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 flex border-0 bg-transparent text-muted cursor-pointer">
+                  <Icon name="close" size={14} color="currentColor" />
+                </button>
+              )}
+            </div>
             <div className="grid grid-cols-3 gap-2">
               {FILTERS.map((f) => {
                 const on = (filter || "all") === f.key;
@@ -22253,7 +22313,7 @@ function AdminDashboard({ onClose }) {
                   <button key={f.key} onClick={() => setFilter(f.key === "all" ? null : f.key)}
                     aria-pressed={on}
                     className={`rounded-xl border px-3 py-2 text-center cursor-pointer ${on ? "border-primary bg-[rgba(8,220,224,.08)]" : "border-border bg-surface2"}`}>
-                    <div className="font-display text-[1.15rem] font-bold text-primary">{all.filter(f.test).length}</div>
+                    <div className="font-display text-[1.15rem] font-bold text-primary">{searched.filter(f.test).length}</div>
                     <div className="text-[.62rem] uppercase tracking-wide text-muted">{f.label}</div>
                   </button>
                 );
@@ -22269,15 +22329,28 @@ function AdminDashboard({ onClose }) {
               ))}
             </div>
             <div className="flex flex-col gap-1.5">
-              {users.length === 0 && <div className="text-muted text-[.82rem]">No users match that filter.</div>}
+              {users.length === 0 && (
+                <div className="text-muted text-[.82rem]">
+                  {q.trim() ? `No users match “${q.trim()}”${active ? ` in ${active.label}` : ""}.` : "No users match that filter."}
+                </div>
+              )}
+              {users.length > 0 && (q.trim() || active) && (
+                <div className="text-[.66rem] text-muted">
+                  Showing {users.length} of {all.length}
+                  {active ? ` · ${active.label}` : ""}{q.trim() ? ` · “${q.trim()}”` : ""}
+                </div>
+              )}
               {users.map((u) => {
                 const s = subLabel(u);
                 const flagged = (u.boostCount || 0) >= 3;
                 return (
-                  <button key={u.uid} onClick={() => setDetail({ uid: u.uid, name: u.name || u.email || u.uid.slice(0, 8) })}
+                  <div key={u.uid} role="button" tabIndex={0}
+                    onClick={() => setDetail({ uid: u.uid, name: u.name || u.email || u.uid.slice(0, 8) })}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetail({ uid: u.uid, name: u.name || u.email || u.uid.slice(0, 8) }); } }}
                     className={`w-full rounded-xl border px-3 py-2.5 text-left cursor-pointer ${flagged ? "border-warn bg-[rgba(251,191,36,.06)]" : "border-border bg-surface2"}`}>
                     <div className="flex items-baseline gap-2">
                       <span className="truncate text-[.86rem] font-semibold text-fg">{u.name || u.email || u.uid.slice(0, 8)}</span>
+                      <IdBadge id={u.uid} />
                       <span className="text-[.66rem] uppercase tracking-wide text-muted">{u.role.replace("_", " ")}</span>
                       <span className={`ml-auto shrink-0 text-[.7rem] font-bold ${s.cls}`}>{s.txt}</span>
                     </div>
@@ -22287,8 +22360,8 @@ function AdminDashboard({ onClose }) {
                       <span>Month: <span className="text-primary font-semibold">{usdMicros(spend(u, "month").costMicros)}</span></span>
                       {u.boostCount > 0 && <span className={flagged ? "text-warn font-bold" : ""}>{flagged ? "! " : ""}boosts: {u.boostCount}</span>}
                     </div>
-                    <div className="mt-0.5 text-[.62rem] text-primary">Tap for daily & monthly spend →</div>
-                  </button>
+                    <div className="mt-0.5 text-[.62rem] text-primary">Tap for daily &amp; monthly spend →</div>
+                  </div>
                 );
               })}
             </div>
