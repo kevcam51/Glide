@@ -81,6 +81,27 @@ function stripe() {
 // existing subscribers keep their old price; new checkouts get the new one.
 // Cached per instance so repeat checkouts don't re-query Stripe.
 const priceCache = {};
+// Keep the Stripe PRODUCT name in step with CATALOG. Prices self-heal on an
+// amount change, but the product name never did — so the S92 tier rename
+// (Max → Elite) left live Stripe still saying "Glidna Max", which is the name
+// that shows on the customer's receipt, invoice and card statement. Caught with
+// zero subscribers; renaming after a sale would mean editing live records.
+// Never allowed to block a checkout: a cosmetic mismatch is worth far less than
+// a payment, so a failure here is logged and swallowed.
+const namedProducts = new Set();
+async function syncProductName(productId, want) {
+  if (!productId || !want || namedProducts.has(productId)) return;
+  namedProducts.add(productId);
+  try {
+    const prod = await stripe().products.retrieve(productId);
+    if (prod && prod.name !== want) {
+      await stripe().products.update(productId, { name: want });
+      console.log("stripe product renamed", JSON.stringify({ productId, from: prod.name, to: want }));
+    }
+  } catch (e) {
+    console.error("product name sync failed:", (e && e.message) || e);
+  }
+}
 const productOf = (price) => (typeof price.product === "string" ? price.product : price.product.id);
 async function ensurePrice(plan, interval) {
   const lk = `glide_${plan.key}_${interval === "year" ? "annual" : "monthly"}`;
@@ -89,6 +110,7 @@ async function ensurePrice(plan, interval) {
   const found = await stripe().prices.list({ lookup_keys: [lk], active: true, limit: 1 });
   if (found.data.length) {
     const p = found.data[0];
+    await syncProductName(productOf(p), plan.name);
     if (p.unit_amount === cents && p.recurring && p.recurring.interval === interval) {
       return (priceCache[lk] = p.id);
     }
