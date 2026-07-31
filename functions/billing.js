@@ -34,6 +34,9 @@
 const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
+// Admin identity is by UID, never by the profile's role field — the same source
+// of truth aichat.js uses. A role in a document can be written; a UID cannot.
+const { isAdminUid } = require("./aichat");
 
 const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
 const STRIPE_WEBHOOK_SECRET = defineSecret("STRIPE_WEBHOOK_SECRET");
@@ -152,7 +155,18 @@ exports.createCheckoutSession = onCall(
     const sel = (request.data && request.data.plan) || {};
     const level = sel.tier === "ultra" ? "ultra" : sel.tier === "max" ? "max" : "base";
     const interval = sel.interval === "year" ? "year" : "month";
-    const plan = planFor(profile.role, level);
+    // Which ladder to price from. Normally the caller's own role decides, and
+    // the client's opinion is ignored — that is what stops a client checking out
+    // at nobody's price. The one exception is ADMIN buying to test the other
+    // ladder: the picker lets admin preview client plans, and pricing off their
+    // trainer role would bill $49 for the $14.99 card they are looking at.
+    // Verified against the admin UID list server-side, so it cannot be spoofed
+    // by sending `audience` from an ordinary account.
+    const asked = request.data && request.data.audience;
+    const role = (isAdminUid(uid) && (asked === "client" || asked === "trainer"))
+      ? (asked === "client" ? "client" : "head_trainer")
+      : profile.role;
+    const plan = planFor(role, level);
     const origin = safeOrigin(String((request.data && request.data.origin) || ""));
     // Reverse trial (S92): if the user is still inside their free trial, don't
     // charge until it ends — honor the promised free days even when they add a

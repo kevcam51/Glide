@@ -16696,9 +16696,12 @@ const callCreatePortal = httpsCallable(functions, "createPortalSession");
 // so callers can show their own error state. `plan` = {tier:"base"|"max",
 // interval:"month"|"year"} — the server maps it to the caller's role and picks
 // the price (never trust the client with amounts).
-async function startCheckout(plan) {
+// `audience` is only honoured for admin, and only after the server re-checks the
+// admin UID — an ordinary account sending it is ignored and priced by its own role.
+async function startCheckout(plan, audience) {
   try {
-    const res = await callCreateCheckout({ origin: window.location.origin, plan: plan || {} });
+    const res = await callCreateCheckout({ origin: window.location.origin, plan: plan || {},
+      ...(audience ? { audience } : {}) });
     if (res.data && res.data.url) { window.location.href = res.data.url; return true; }
   } catch (e) { console.error("checkout failed:", e && e.message); }
   return false;
@@ -16865,7 +16868,9 @@ function PlanPicker({ role, onClose }) {
   const choose = async (tier) => {
     if (busyTier) return;
     setBusyTier(tier); setErr(false);
-    const ok = await startCheckout({ tier, interval });
+    // Admin previewing the other ladder buys AT that ladder's price; everyone
+    // else sends nothing and is priced by their own role.
+    const ok = await startCheckout({ tier, interval }, canPreview ? viewAs === "trainer" ? "trainer" : "client" : undefined);
     if (!ok) { setBusyTier(null); setErr(true); }
   };
   return createPortal(
@@ -16903,7 +16908,7 @@ function PlanPicker({ role, onClose }) {
           ))}
         </div>
         {plans.map((p) => (
-          <button key={p.tier} onClick={() => { if (!previewing) choose(p.tier); }} disabled={!!busyTier || previewing}
+          <button key={p.tier} onClick={() => choose(p.tier)} disabled={!!busyTier}
             className="text-left bg-surface2 border rounded-card"
             style={{ padding:"14px 16px", cursor:"pointer", display:"flex", flexDirection:"column", gap:"4px",
               borderColor: p.tier === "base" ? "var(--color-primary)" : "var(--color-border)",
@@ -16918,7 +16923,7 @@ function PlanPicker({ role, onClose }) {
             {interval === "year" && <div className="text-primary" style={{ fontSize:".72rem", fontWeight:700 }}>{p.yearNote}</div>}
             <div className="text-muted" style={{ fontSize:".78rem", lineHeight:1.45 }}>{p.blurb}</div>
             <div className="text-primary" style={{ fontSize:".78rem", fontWeight:800, marginTop:"4px" }}>
-              {previewing ? "Preview — checkout prices by your own role" : busyTier === p.tier ? "Opening checkout…" : "Choose →"}
+              {busyTier === p.tier ? "Opening checkout…" : previewing ? "Choose → (billed at this ladder's price)" : "Choose →"}
             </div>
           </button>
         ))}
