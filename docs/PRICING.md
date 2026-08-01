@@ -604,3 +604,22 @@ itself), boosts, and no dependence on a second subscription.
 Open numbers Kevin can veto line-by-line: the 25/day free taste, $7.99,
 $24.99, both annuals, and whether automations belong at Elite+ (they are
 currently Elite+ in code: WORKFLOW_CAP has no base-tier allowance).
+
+### S169i — fitness-market connector research (the recovered angle)
+
+Only ONE fitness platform has an official AI connector: **Strava** (June 2026) —
+read-only MCP, bundled free with its $11.99/mo subscription, free tier gets
+nothing; Strava also moved plain API access behind that same sub. Everyone else:
+**MyFitnessPal/Peloton/WW/AllTrails** ship free partner apps inside ChatGPT
+Health (Jan 2026, OpenAI's directory — a distribution channel to note for the
+roadmap); **Hevy** gates its API behind Pro $2.99/mo; **Whoop/Oura** gate theirs
+behind membership; **Trainerize** sells API access only at Studio $275+/mo;
+**Cronometer** has no purchasable API at all.
+
+What this changes: nothing in the numbers, everything in the positioning.
+Strava's model (bundle with sub, nothing on free) is the market's answer and
+matches the proposal. Glidna would still be FIRST in fitness on three counts:
+first read+WRITE connector (Strava's is read-only — theirs reports, ours logs
+meals and builds workouts), first connector-priced tier anywhere (Connect), and
+first coaching-platform connector (Trainerize's closest thing costs $275/mo and
+isn't AI). Re-synthesis with fitness folded in kept $4.99 / $19.99 recommended.
