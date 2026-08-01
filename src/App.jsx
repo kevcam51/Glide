@@ -16720,7 +16720,7 @@ const PLAN_MENU = {
     { tier: "base", name: "Glidna Coach", month: "$49", year: "$490", yearNote: "2 months free",
       blurb: "The full coaching workspace + AI assistant. Unlimited clients, flat price." },
     { tier: "max", name: "Coach Elite", month: "$79", year: "$790", yearNote: "2 months free",
-      blurb: "The biggest AI allowance, coach-sized — around 100 AI conversations a day." },
+      blurb: "The biggest AI allowance, coach-sized — around 200 AI conversations a day." },
   ],
 };
 
@@ -16755,10 +16755,10 @@ const PLAN_FEATURES = {
       ["Set up your whole plan by conversation", false, true, true],
       ["Cut / bulk / maintenance phases by chat", false, true, true],
       ["Past chats — save, revisit & continue", false, true, true],
-      ["AI conversations per day", "—", "~15", "~100"],
+      ["AI conversations per day", "—", "~66", "~100"],
     ]},
     { section: "Elite — everything in Premium, plus:", rows: [
-      ["6× bigger daily AI allowance", false, false, true],
+      ["Half again the daily AI allowance", false, false, true],
       ["Around 100 AI conversations every day", false, false, true],
       ["Enough for photo-logging every meal + all-day coaching", false, false, true],
       ["Hit the ceiling? Tell us — we raise it", false, false, true],
@@ -16783,11 +16783,11 @@ const PLAN_FEATURES = {
       ["AI edits your local plans & simulations", false, true, true],
       ["Send client to-dos straight from chat", false, true, true],
       ["Past chats — save, revisit & continue", false, true, true],
-      ["AI conversations per day", "—", "~40", "~100"],
+      ["AI conversations per day", "—", "~133", "~200"],
     ]},
     { section: "Coach Elite — everything in Coach, plus:", rows: [
       ["Our biggest AI allowance — built for all-day use", false, false, true],
-      ["Around 100 AI conversations every day", false, false, true],
+      ["Around 200 AI conversations every day", false, false, true],
       ["Room to run AI across your whole roster daily", false, false, true],
       ["Hit the ceiling? Tell us — we raise it", false, false, true],
     ]},

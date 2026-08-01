@@ -456,3 +456,66 @@ solo trainers are (a) showing up and (b) worth a dedicated tier. Coach-count sca
 separate axis and IS in scope — see Glide Studio above. (Budget note: base Coach raised 60k→100k
 tokens/day this session so a heavy ~20-client trainer doesn't hit the cap on a normal heavy day;
 worst-case cost ≤$7/mo/heavy-trainer, ~70% margin held.)
+
+---
+
+## S169g — the "paying never shrinks the product" ladder (2026-08-01, LIVE)
+
+Kevin's rule: the trial shows the full product and paying keeps or grows it — the
+allowance must never drop on day 31. Enforced in `functions/aichat.js` BUDGETS.
+
+| Tier | $/mo | Tokens/day | ≈ conv/day |
+|---|---:|---:|---:|
+| Client trial (30d) | free | 100k | ~66 |
+| Premium | $14.99 | 100k | ~66 |
+| Client Elite | $29.99 | 150k | ~100 |
+| Client Apex | $49.99 | 250k | ~166 |
+| Coach trial (30d) | free | 100k | ~66 |
+| Coach | $49 | 200k | ~133 |
+| Coach Elite | $79 | 300k | ~200 |
+| Coach Apex | $129 | 400k | ~266 |
+
+`assisted` (trainer-linked client) rides at 100k — it used to sit ABOVE the solo
+client tier; leaving it at 40k would have inverted it to less than Premium.
+
+### Worst case: every tier maxed out every day of the month
+
+Basis: measured live cost $3.8–6.1 per 1M budget-tokens (avg ~$4.70), ~1,500
+budget-tokens ≈ one conversation ≈ 0.7¢. "Ceiling" = the cap burned all 30 days.
+
+| Tier | Revenue | Ceiling cost/day | Ceiling cost/mo | Margin at ceiling |
+|---|---:|---:|---:|---:|
+| Premium 100k | $14.99 | $0.47 | ~$14 | ≈ break-even |
+| Client Elite 150k | $29.99 | $0.71 | ~$21 | ~$9 |
+| Client Apex 250k | $49.99 | $1.18 | ~$35 | ~$15 |
+| Coach 200k | $49 | $0.94 | ~$28 | ~$21 |
+| Coach Elite 300k | $79 | $1.41 | ~$42 | ~$37 |
+| Coach Apex 400k | $129 | $1.88 | ~$56 | ~$73 |
+
+Premium at its ceiling is ≈ break-even BY DESIGN — the cap is the protection, and
+a client living at the cap daily is an Elite upsell (the boost flow already says
+so). Typical use is a small fraction of ceiling; margins in practice are wide.
+
+### Trainer roster scenarios (Kevin's ask)
+
+Assumes granular per-client conversations (worst case — coach_summary reads the
+whole roster in ONE conversation, and caching prices back-to-back use at the LOW
+end of the range, so real cost lands below these).
+
+| Roster | Conv/client/day | Conv/day | Tokens/day | Fits in | Cost/day | Cost/mo |
+|---:|---:|---:|---:|---|---:|---:|
+| 10 | 3 | 30 | 45k | Coach | $0.21 | ~$6 |
+| 10 | 6 | 60 | 90k | Coach | $0.42 | ~$13 |
+| 10 | 10 | 100 | 150k | Coach | $0.71 | ~$21 |
+| 20 | 3 | 60 | 90k | Coach | $0.42 | ~$13 |
+| 20 | 6 | 120 | 180k | Coach (90% of cap) | $0.85 | ~$25 |
+| 20 | 10 | 200 | 300k | Coach Elite (at cap) | $1.41 | ~$42 |
+| 30 | 3 | 90 | 135k | Coach | $0.63 | ~$19 |
+| 30 | 6 | 180 | 270k | Coach Elite | $1.27 | ~$38 |
+| 30 | 10 | 300 | 450k | Apex + a boost | $2.12 | ~$63 |
+
+Read: Coach ($49) comfortably carries a 10–20-client roster at realistic AI use.
+The tier ladder maps cleanly onto roster size — 20 clients used heavily lands on
+Elite, 30 used heavily lands on Apex — and every cell is profitable against its
+tier price. The 30×10 case exceeds even Apex's cap (450k > 400k): the cap + boost
+flow handles it, and at $63 cost against $129 it is fine to allow.

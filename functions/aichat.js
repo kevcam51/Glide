@@ -48,13 +48,19 @@ const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
 // doc. Anything gating on admin must go through here (matches firestore.rules
 // isAdmin()), which is also why it can't be self-assigned.
 function isAdminUid(uid) { return ADMIN_UIDS.includes(uid); }
-const BUDGETS = { trial: 50000, client: 25000, assisted: 40000, trainer: 100000,
-  // trainerTrial (S92): a trainer works with clients from day one, so their trial
-  // usage is heavy immediately (~180k/day for an active 20–30-client roster). Give
-  // the full Coach-Elite-level allowance during the trial so they never hit a wall
-  // and can fully experience client management before deciding to buy.
-  trainerTrial: 200000,
-  clientMax: 150000, trainerMax: 200000,
+// S169g client ladder (Kevin): trial and paid Premium are BOTH 100k — the trial
+// shows the full product, and paying keeps it (never shrinks it). `assisted`
+// (trainer-linked client) rides at the same 100k: it used to sit above the solo
+// client tier, and leaving it at 40k would have inverted it to LESS.
+const BUDGETS = { trial: 100000, client: 100000, assisted: 100000,
+  // S169g (Kevin): paying must never shrink the product. The trainer trial used
+  // to be 200k against a paid Coach of 100k — day 31 after paying $49, the
+  // allowance HALVED. Now the trial is a taste (100k ≈ 66 conversations) and
+  // paying doubles it (200k ≈ 133). Coach Elite moves to 300k so the $79 tier
+  // still buys headroom over base; Apex (400k) is unchanged above it.
+  trainer: 200000,
+  trainerTrial: 100000,
+  clientMax: 150000, trainerMax: 300000,
   // Ultra (S92): data-triggered heavy-user tiers, surfaced via the boost upsell.
   clientUltra: 250000, trainerUltra: 400000 };
 
