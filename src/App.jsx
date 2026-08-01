@@ -24691,18 +24691,52 @@ export default function App() {
     // full reload — which is exactly why the bug survived going back and forth.
     let alive = true;
     (async () => {
-      const v = await logRead(`caliq-log-${activeId}-${viewDate}`);
+      // Start every independent read AT ONCE. These used to run one after
+      // another, with the recent-foods list read LAST — behind the range query
+      // that fetches every logged day of the plan. That query grows with use,
+      // so as real logging accumulated, the "last logged" chips went from
+      // instant to seconds-late on a cold start (S169, Kevin). Nothing below
+      // depends on order across these five; each is awaited where its state is
+      // set, cheapest first, so the chips no longer wait on the big query.
+      const prefix = `caliq-log-${activeId}-`;
+      const pToday = logRead(`caliq-log-${activeId}-${viewDate}`);
+      const pFoods = logRead(`caliq-foods-${activeId}`);
+      const pHist  = logRead(`caliq-history-${activeId}`);
+      const pList  = logListEntries(prefix);
+      const v = await pToday;
       if (!alive) return;
       let parsed = {calories:0, water:0, weight:0, meals:[]};
       if (v) { try { parsed = JSON.parse(v); } catch(e) {} }
       setDailyLog(parsed);
+      // Recent foods next — small doc, and it's what the meal log's "last
+      // logged" chips render from.
+      {
+        const fv = await pFoods;
+        if (!alive) return;
+        let foods = [];
+        if (fv) { try { foods = JSON.parse(fv) || []; } catch(e) {} }
+        recentFoodsRef.current = foods;
+        setRecentFoods(foods);
+        // Diffs against the list just set — must stay after it.
+        syncRecentsFromMeals(parsed.meals);
+      }
+      // Saved library — user-level, also small, also independent.
+      try {
+        const sv = await window.storage.get(SAVED_FOODS_KEY);
+        const sf = sv && sv.value ? (JSON.parse(sv.value) || []) : [];
+        savedFoodsRef.current = sf;
+        setSavedFoods(sf);
+        const svm = await window.storage.get(SAVED_MEALS_KEY);
+        const sm = svm && svm.value ? (JSON.parse(svm.value) || []) : [];
+        savedMealsRef.current = sm;
+        setSavedMeals(sm);
+      } catch (e) { /* library is a nicety — never block the dashboard on it */ }
       // ONE range query feeds every day-derived stat in this effect: the streak,
       // the 7-day nutrition summary, lifetime logging totals and the most recent
       // tracker reading. It replaces a day-by-day walk (batched gets until the
       // streak broke) plus separate 30-, 7- and 3-day loops — dozens of round
       // trips became one, and the documents were being read either way.
-      const prefix = `caliq-log-${activeId}-`;
-      const entries = await logListEntries(prefix);
+      const entries = await pList;
       if (!alive) return;
       const byDate = {};
       for (const e of entries) {
@@ -24736,34 +24770,12 @@ export default function App() {
       setDayCalsAll(calsByDate);
       setLoggedDaysTotal(activeDays);
       // Load this plan's edit history
-      const hv = await logRead(`caliq-history-${activeId}`);
+      const hv = await pHist;
       let hist = [];
       if (hv) { try { hist = JSON.parse(hv); } catch(e) {} }
       if (!alive) return;
       historyRef.current = hist;
       setHistory(hist);
-      // Load recently-logged foods (for one-tap re-add in the meal log)
-      const fv = await logRead(`caliq-foods-${activeId}`);
-      let foods = [];
-      if (fv) { try { foods = JSON.parse(fv) || []; } catch(e) {} }
-      if (!alive) return;
-      recentFoodsRef.current = foods;
-      setRecentFoods(foods);
-      // Must run AFTER the recents load above — it diffs against that list, so
-      // calling it earlier would compare against a stale one and be overwritten.
-      syncRecentsFromMeals(parsed.meals);
-      // Saved library — read from the USER's own account (not the plan, not the
-      // client's), so it's the same library whichever plan is open.
-      try {
-        const sv = await window.storage.get(SAVED_FOODS_KEY);
-        const sf = sv && sv.value ? (JSON.parse(sv.value) || []) : [];
-        savedFoodsRef.current = sf;
-        setSavedFoods(sf);
-        const svm = await window.storage.get(SAVED_MEALS_KEY);
-        const sm = svm && svm.value ? (JSON.parse(svm.value) || []) : [];
-        savedMealsRef.current = sm;
-        setSavedMeals(sm);
-      } catch (e) { /* library is a nicety — never block the dashboard on it */ }
       // Last-7-day nutrition summary (averaged over the days that were logged),
       // straight from the map above — no further reads.
       let days = 0, cal = 0, p = 0, c = 0, f = 0;
