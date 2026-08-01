@@ -519,3 +519,88 @@ The tier ladder maps cleanly onto roster size — 20 clients used heavily lands 
 Elite, 30 used heavily lands on Apex — and every cell is profitable against its
 tier price. The 30×10 case exceeds even Apex's cap (450k > 400k): the cap + boost
 flow handles it, and at $63 cost against $129 it is fine to allow.
+
+---
+
+## S169h — PROPOSED full ladder with Connect tiers (awaiting Kevin's decision)
+
+The rule this ladder is built on, in Kevin's words: **the 30-day trial is the
+whole product, free**. When it ends, nobody is thrown out — they land on Free
+and keep their data and every manual feature. Paying is a choice between three
+kinds of value: *bring your own AI* (Connect), *our AI in the app*
+(Premium/Coach), or *heavy use* (Elite, and Apex above it).
+
+### The trial (both audiences, 30 days)
+
+Everything unlocked: full in-app AI at the paid-tier allowance (100k/day),
+full plugin speed, every feature. Card added early? Billing still starts only
+when the trial ends (reverse trial, S92 — already built). The trial never
+gives MORE than the tier below it any more (S169g fixed that inversion).
+
+### Client ladder
+
+| | Free (post-trial) | Connect $7.99 | Premium $14.99 | Elite $29.99 | Apex $49.99† |
+|---|---|---|---|---|---|
+| All manual tracking* | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Trainer connection, to-dos, DMs | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Plugin (their Claude/ChatGPT) | taste: 25 calls/day | **2,000/day** | 2,000/day | 2,000/day | 2,000/day |
+| In-app AI (chat/photo/voice) | — | — | 100k/day ≈ 66 conv | 150k ≈ 100 | 250k ≈ 166 |
+| Scheduled AI automations | — | — | — | 1/day | 3/day |
+| Allowance boosts on request | — | — | — | ✔ | ✔ |
+| Annual (2 months free) | — | $79.99 | $119.99 | $299.99 | $499.99 |
+
+*The audit's full list: food log, database search, barcode, servings, macros &
+micros, targets, water, weight, measurements, calendar, streaks, progress
+charts, plans/phases, workout builder, custom exercises — all 60+ non-AI
+features stay free forever.
+†Apex stays data-triggered (boost upsell), not on the public grid.
+
+### Trainer ladder
+
+| | Free (post-trial) | Coach Connect $24.99 | Coach $49 | Coach Elite $79 | Coach Apex $129† |
+|---|---|---|---|---|---|
+| Full coaching platform* | ✔ | ✔ | ✔ | ✔ | ✔ |
+| Plugin (their Claude/ChatGPT) | taste: 25 calls/day | **2,000/day** | 2,000/day | 2,000/day | 2,000/day |
+| In-app AI | — | — | 200k/day ≈ 133 conv | 300k ≈ 200 | 400k ≈ 266 |
+| Scheduled AI automations | — | — | — | 2/day | 5/day |
+| Allowance boosts on request | — | — | — | ✔ | ✔ |
+| Annual (2 months free) | — | $249 | $490 | $790 | $1,290 |
+
+*Dashboards, analytics, unlimited connected clients, to-dos, DMs, Invite Hub,
+local plans & sims, sessions/booking/earnings, Trainerize import — free forever.
+
+### Why Connect doesn't eat Coach
+
+A Coach Connect trainer's true monthly spend is $24.99 + ~$20 (their own
+Claude/ChatGPT) ≈ $45 — nearly Coach's $49. Connect captures people already
+paying another AI company who won't switch interfaces; it does not undercut
+the all-in-one tier. Coach keeps real exclusives: in-app chat/photo/voice on
+the phone, automations (run on OUR key — a Connect user's AI can't schedule
+itself), boosts, and no dependence on a second subscription.
+
+### Cost & margin at the ceiling (every day maxed, 30 days)
+
+| Tier | Revenue | Ceiling cost | Margin |
+|---|---:|---:|---:|
+| Client Connect | $7.99 | ~5¢ | ~$7.94 (~99%) |
+| Coach Connect | $24.99 | ~7¢ | ~$24.92 (~99%) |
+| Premium | $14.99 | ~$14 | ≈ break-even (cap = protection) |
+| Elite / Coach / Coach Elite / Apex | — | — | see S169g table above |
+
+### What changes on approval (the build list)
+
+1. `functions/mcp.js` — DAILY_CALLS becomes {free: 25, connect: 2000,
+   paid: 2000}; tier read from subscriptionTier; trial counts as paid. This
+   CLOSES the current hole where expired-trial accounts keep 200 plugin
+   calls/day for free.
+2. `functions/billing.js` — CATALOG + planFor gain connect / coach_connect;
+   Stripe products auto-create by lookup_key on first checkout (no manual
+   dashboard work, same as every existing tier).
+3. `PLAN_MENU` + `PLAN_FEATURES` — Connect column + plugin rows in both grids;
+   picker copy.
+4. Webhook — no change (tier rides metadata already).
+5. docs/PRICING.md — mark this section DECIDED.
+
+Open numbers Kevin can veto line-by-line: the 25/day free taste, $7.99,
+$24.99, both annuals, and whether automations belong at Elite+ (they are
+currently Elite+ in code: WORKFLOW_CAP has no base-tier allowance).
