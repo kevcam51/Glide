@@ -224,20 +224,34 @@ function toZod(spec) {
 // ~200 calls/day), so the coach tiers get proportionally more headroom than a
 // solo client on the same price level. Tier ids come from billing.js CATALOG:
 // premium | max | ultra | coach | coach_max | coach_ultra.
-// S171: Free drops 200 -> 25. It was never a decision — 200/day is a working
-// allowance, so an expired trial kept full plugin access for free indefinitely.
-// 25 is a taste: enough to see your own AI logging into Glidna, not enough to
-// live on. Every PAID tier gets the same 2,000, including the Connect tiers
-// whose whole product IS the plugin.
+// The free allowance is a TASTE, sized so the habit forms and daily reliance
+// still needs a paid tier. It was 200 for everyone — never a decision, just a
+// default — which let an expired trial keep a full working allowance forever.
+//
+// Split by role (S172, Kevin): one number cannot serve both. A client tracks
+// one person, so 50/day is ~5-15 real conversations — plenty to feel it. A
+// trainer serves a roster, and 50 is barely one client's worth, so they get
+// 200. The asymmetry is deliberate: 200 would cannibalise client Connect
+// ($4.99), but a 20-client roster burns 200 before lunch, so Coach Connect
+// ($19.99) stays worth buying.
+//
+// The TRIAL is untouched and maximally generous — trial users resolve to
+// "premium" below and get the full 2,000/day, which is what builds the habit
+// this taste is designed to leave them missing.
 const DAILY_CALLS = {
-  free: 25,
+  free: 50,
+  free_trainer: 200,
   connect: 2000,
   premium: 2000,
   coach: 5000,
   max: 10000,
   ultra: 25000,
 };
+const TRAINER_ROLES = ["head_trainer", "sub_trainer", "admin"];
 function planFor(profile) {
+  // Role decides only which FREE allowance applies; every paid tier is the same
+  // for both audiences.
+  const freeTier = profile && TRAINER_ROLES.includes(profile.role) ? "free_trainer" : "free";
   if (!profile) return "free";
   if (profile.role === "admin") return "ultra";
   if (profile.entitlements && profile.entitlements.premium === true) return "premium";
@@ -260,7 +274,7 @@ function planFor(profile) {
     : typeof t === "number" ? t : null;
   if (!startMs) return "premium"; // pre-trial/grandfathered account
   const expired = Date.now() >= startMs + (profile.trialLengthDays || 30) * 86400000;
-  return expired ? "free" : "premium";
+  return expired ? freeTier : "premium";
 }
 
 function utcDayKey() {

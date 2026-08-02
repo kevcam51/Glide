@@ -675,8 +675,18 @@ Kevin approved the ladder. Shipped: Connect tiers, Apex 450k, plugin gating.
 † data-triggered, not on the public grid. Trial (30d, both): in-app AI 100k/day
 + full plugin, then Free — never a locked account.
 
-**The free-plugin hole is closed.** DAILY_CALLS.free was 200/day — a working
-allowance, so an expired trial kept full plugin access forever. Now 25/day.
+**The free-plugin hole is closed, and the free allowance splits by role
+(S172).** DAILY_CALLS.free was 200/day for everyone — never a decision, just a
+default — so an expired trial kept a full working allowance forever. Now:
+**client 50/day, trainer 200/day.** One number could not serve both: a client
+tracks one person (50 ≈ 5-15 real conversations, plenty to feel it), a trainer
+serves a roster (50 is barely one client's worth). The asymmetry is deliberate
+— 200 would cannibalise client Connect at $4.99, but a 20-client roster burns
+200 before lunch, so Coach Connect at $19.99 stays worth buying.
+
+**The TRIAL is deliberately maximal**: trial users resolve to "premium" and get
+the full **2,000/day**. That is what builds the habit the free taste is designed
+to leave them missing — Kevin's conversion thesis, implemented.
 
 **Substring hazard, recorded:** mcp.js planFor() must test `connect` BEFORE
 `coach`, because "coach_connect" contains "coach" and would otherwise inherit
