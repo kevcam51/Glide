@@ -623,3 +623,29 @@ first read+WRITE connector (Strava's is read-only — theirs reports, ours logs
 meals and builds workouts), first connector-priced tier anywhere (Connect), and
 first coaching-platform connector (Trainerize's closest thing costs $275/mo and
 isn't AI). Re-synthesis with fitness folded in kept $4.99 / $19.99 recommended.
+
+### S170 — client-comp verification (Aug 2, 2026, live sources)
+
+**MyFitnessPal ACQUIRED Cal AI** (closed Dec 2025, announced Mar 2, 2026 —
+globenewswire/TechCrunch). Cal AI: 15M downloads, ~$30M ARR, built by two
+teenagers; keeps running standalone, now wired to MFP's 20M-food database. MFP
+also bought meal-planner Intent and is a first-party ChatGPT Health partner.
+The client market is consolidating around one owner.
+
+**Cal AI** ($9.99/mo, ~$29.99/yr, dynamic paywall down to $2.99/wk): photo
+scanning + basic search/barcode on free. No AI chat, no coach platform, no
+connector. **MacroFactor** ($11.99/mo, $71.99/yr ≈ $5.99/mo): excellent
+algorithmic coaching, AI photo + describe-to-log, 1.36M-food DB. No AI chat
+coach, no trainer side, no connector/API.
+
+**Read-through for the decided ladder:**
+- Monthly holds everywhere: Free ≥ Cal AI's free; Connect $4.99 undercuts both
+  ($9.99/$11.99); Premium $14.99 sits $5 under MFP with a writable AI none of
+  the three has at any price. No monthly change recommended.
+- **Annual is the honest sore spot**: Glidna $119.99 vs MFP $79.99, MacroFactor
+  $71.99, Cal AI ~$29.99 — the most expensive annual in the set. Hold list
+  price; if annual conversion lags at launch, the lever is a first-year promo
+  (~$79–89), not a list cut (S90's conclusion, now with two more data points).
+- Post-acquisition, differentiation cannot be price or photo-scanning (MFP owns
+  that lane end to end). It is the two-sided trainer platform + the writable
+  connector — which MFP does not offer even after buying everyone.
