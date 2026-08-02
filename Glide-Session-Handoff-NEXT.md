@@ -20,9 +20,25 @@ Full table in `docs/PRICING.md` under "S171 — DECIDED & LIVE".
 | Trainer | $0 | $19.99 | $49 | $79 | $129 |
 
 **Connect** = platform + MCP plugin, NO in-app AI — for people already living in
-Claude/ChatGPT. ~100% margin (their AI provider pays for inference). Trial (30d,
-both audiences) = in-app AI 100k/day + full plugin, then Free. **No account ever
-locks.** Coach Apex is 450k tokens/day so every trainer step is +50%.
+Claude/ChatGPT. ~100% margin (their AI provider pays for inference). Coach Apex
+is 450k tokens/day so every trainer step is +50%.
+
+**The connector allowance ladder (S172)** — the conversion engine, three steps:
+trial **2,000/day** (maximal, builds the habit) → free **50/day client, 200/day
+trainer** (a taste; one number could not serve both) → Connect **2,000/day**
+(pay to get it back). Trial (30d, both audiences) also includes in-app AI at
+100k/day, then drops to Free. **No account ever locks.**
+
+### 🔴 ONE COMMAND OWED (S172) — code is committed, NOT deployed
+Firebase auth expired mid-deploy. `functions/mcp.js` on the server still has the
+OLD single free allowance. Run:
+```
+firebase login --reauth --no-localhost
+firebase deploy --only functions:mcp --project calorieiq-29762
+```
+Until then, the free connector allowance in production is 25/day for everyone
+instead of client 50 / trainer 200. Frontend grids already say 50 and 200, so
+the page and the server disagree until this runs.
 
 ### NOT done — pick up here
 1. **Free-tier design + per-feature ⓘ tooltips.** The rest of the plan rework.
