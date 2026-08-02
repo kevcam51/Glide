@@ -224,8 +224,14 @@ function toZod(spec) {
 // ~200 calls/day), so the coach tiers get proportionally more headroom than a
 // solo client on the same price level. Tier ids come from billing.js CATALOG:
 // premium | max | ultra | coach | coach_max | coach_ultra.
+// S171: Free drops 200 -> 25. It was never a decision — 200/day is a working
+// allowance, so an expired trial kept full plugin access for free indefinitely.
+// 25 is a taste: enough to see your own AI logging into Glidna, not enough to
+// live on. Every PAID tier gets the same 2,000, including the Connect tiers
+// whose whole product IS the plugin.
 const DAILY_CALLS = {
-  free: 200,
+  free: 25,
+  connect: 2000,
   premium: 2000,
   coach: 5000,
   max: 10000,
@@ -240,6 +246,9 @@ function planFor(profile) {
     // are named coach_max / coach_ultra. (A plain "includes(max)" test used to
     // drop ultra/coach_ultra — the TOP tiers — down to the premium cap.)
     const t = String(profile.subscriptionTier || "").toLowerCase();
+    // Connect first: "coach_connect" contains "coach", and Connect is a plugin
+    // tier — it must not inherit the coach AI-tier cap by substring accident.
+    if (t.includes("connect")) return "connect";
     if (t.includes("ultra")) return "ultra";
     if (t.includes("max")) return "max";
     if (t.includes("coach")) return "coach";

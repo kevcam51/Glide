@@ -16833,12 +16833,16 @@ async function startCheckout(plan, audience) {
 // functions/billing.js CATALOG; keep the two in sync when prices change).
 const PLAN_MENU = {
   client: [
+    { tier: "connect", name: "Glidna Connect", month: "$4.99", year: "$49.99", yearNote: "2 months free",
+      blurb: "Already live in Claude or ChatGPT? Connect Glidna to it — your own AI logs your meals and reads your data. No in-app AI." },
     { tier: "base", name: "Glidna Premium", month: "$14.99", year: "$119.99", yearNote: "33% off",
       blurb: "The AI coach: chat, photo & voice logging, AI meal estimates — a generous daily allowance." },
     { tier: "max", name: "Glidna Elite", month: "$29.99", year: "$299.99", yearNote: "2 months free",
       blurb: "Our biggest allowance — around 100 AI conversations a day. Ever hit the ceiling? Tell us and we'll raise it." },
   ],
   trainer: [
+    { tier: "connect", name: "Coach Connect", month: "$19.99", year: "$199", yearNote: "2 months free",
+      blurb: "Already live in Claude or ChatGPT? Run your whole roster from it — your own AI reads and writes every client's plan. No in-app AI." },
     { tier: "base", name: "Glidna Coach", month: "$49", year: "$490", yearNote: "2 months free",
       blurb: "The full coaching workspace + AI assistant. Unlimited clients, flat price." },
     { tier: "max", name: "Coach Elite", month: "$79", year: "$790", yearNote: "2 months free",
@@ -16858,70 +16862,84 @@ const PLAN_MENU = {
 const PLAN_FEATURES = {
   client: [
     { section: "The basics — free forever", rows: [
-      ["Food, calorie & macro tracking", true, true, true],
-      ["Food database search + barcode scanner", true, true, true],
-      ["Weight, progress charts & goal timeline", true, true, true],
-      ["Workout plans + custom exercises", true, true, true],
-      ["Calendar, streaks, check-ins & water", true, true, true],
-      ["Trainer connection, app install & Face ID", true, true, true],
+      ["Food, calorie & macro tracking", true, true, true, true],
+      ["Food database search + barcode scanner", true, true, true, true],
+      ["Weight, progress charts & goal timeline", true, true, true, true],
+      ["Workout plans + custom exercises", true, true, true, true],
+      ["Calendar, streaks, check-ins & water", true, true, true, true],
+      ["Trainer connection, app install & Face ID", true, true, true, true],
+      ["Connect your own Claude / ChatGPT", "25/day", "full", "full", "full"],
+    ]},
+    { section: "Connect — for people who already live in Claude or ChatGPT", rows: [
+      ["Your own AI logs meals & reads your data", false, true, true, true],
+      ["Everything in Free, plus the full plugin", false, true, true, true],
+      ["No in-app AI — you bring your own", false, true, true, true],
     ]},
     { section: "AI coach — everything in Free, plus:", rows: [
-      ["24/7 AI coach chat (knows YOUR data)", false, true, true],
-      ["Log meals by chat — just describe them", false, true, true],
-      ["Photo meal logging — snap your plate", false, true, true],
-      ["Voice logging — speak instead of type", false, true, true],
-      ["AI food estimates in the tracker", false, true, true],
-      ["AI builds your workout program", false, true, true],
-      ["Turn TikTok / IG / YouTube links into workouts & meals", false, true, true],
-      ["Import from ChatGPT / Claude", false, true, true],
-      ["Set up your whole plan by conversation", false, true, true],
-      ["Cut / bulk / maintenance phases by chat", false, true, true],
-      ["Past chats — save, revisit & continue", false, true, true],
-      ["AI conversations per day", "—", "~66", "~100"],
+      ["24/7 AI coach chat (knows YOUR data)", false, false, true, true],
+      ["Log meals by chat — just describe them", false, false, true, true],
+      ["Photo meal logging — snap your plate", false, false, true, true],
+      ["Voice logging — speak instead of type", false, false, true, true],
+      ["AI food estimates in the tracker", false, false, true, true],
+      ["AI builds your workout program", false, false, true, true],
+      ["Turn TikTok / IG / YouTube links into workouts & meals", false, false, true, true],
+      ["Import from ChatGPT / Claude", false, false, true, true],
+      ["Set up your whole plan by conversation", false, false, true, true],
+      ["Cut / bulk / maintenance phases by chat", false, false, true, true],
+      ["Past chats — save, revisit & continue", false, false, true, true],
+      ["AI conversations per day", "—", "—", "~66", "~100"],
     ]},
     { section: "Elite — everything in Premium, plus:", rows: [
-      ["Half again the daily AI allowance", false, false, true],
-      ["Around 100 AI conversations every day", false, false, true],
-      ["Enough for photo-logging every meal + all-day coaching", false, false, true],
-      ["Hit the ceiling? Tell us — we raise it", false, false, true],
+      ["Half again the daily AI allowance", false, false, false, true],
+      ["Around 100 AI conversations every day", false, false, false, true],
+      ["Enough for photo-logging every meal + all-day coaching", false, false, false, true],
+      ["Hit the ceiling? Tell us — we raise it", false, false, false, true],
     ]},
   ],
   trainer: [
     { section: "The basics — free forever", rows: [
-      ["Unlimited connected clients + live dashboards", true, true, true],
-      ["Coaching analytics — who needs attention", true, true, true],
-      ["To-dos, nudges & shared plan editing", true, true, true],
-      ["Invite Hub — link, QR, email invites, referrals", true, true, true],
-      ["Local plans, templates & sales simulations", true, true, true],
+      ["Unlimited connected clients + live dashboards", true, true, true, true],
+      ["Coaching analytics — who needs attention", true, true, true, true],
+      ["To-dos, nudges & shared plan editing", true, true, true, true],
+      ["Invite Hub — link, QR, email invites, referrals", true, true, true, true],
+      ["Local plans, templates & sales simulations", true, true, true, true],
+      ["Connect your own Claude / ChatGPT", "25/day", "full", "full", "full"],
+    ]},
+    { section: "Coach Connect — for coaches who already live in Claude or ChatGPT", rows: [
+      ["Your own AI reads & writes every client's plan", false, true, true, true],
+      ["Whole roster from your AI — no in-app AI needed", false, true, true, true],
+      ["Everything in Free, plus the full plugin", false, true, true, true],
     ]},
     { section: "AI assistant — everything in Free, plus:", rows: [
-      ["24/7 AI assistant (knows your clients' data)", false, true, true],
-      ["Whole-roster check: \"who's stalled this week?\"", false, true, true],
-      ["Build client programs by chat", false, true, true],
-      ["Log meals / weigh-ins / workouts FOR clients", false, true, true],
-      ["Set targets & manage client plans by chat", false, true, true],
-      ["Photo & voice meal logging", false, true, true],
-      ["Turn TikTok / IG / YouTube links into programs", false, true, true],
-      ["AI edits your local plans & simulations", false, true, true],
-      ["Send client to-dos straight from chat", false, true, true],
-      ["Past chats — save, revisit & continue", false, true, true],
-      ["AI conversations per day", "—", "~133", "~200"],
+      ["24/7 AI assistant (knows your clients' data)", false, false, true, true],
+      ["Whole-roster check: \"who's stalled this week?\"", false, false, true, true],
+      ["Build client programs by chat", false, false, true, true],
+      ["Log meals / weigh-ins / workouts FOR clients", false, false, true, true],
+      ["Set targets & manage client plans by chat", false, false, true, true],
+      ["Photo & voice meal logging", false, false, true, true],
+      ["Turn TikTok / IG / YouTube links into programs", false, false, true, true],
+      ["AI edits your local plans & simulations", false, false, true, true],
+      ["Send client to-dos straight from chat", false, false, true, true],
+      ["Past chats — save, revisit & continue", false, false, true, true],
+      ["AI conversations per day", "—", "—", "~133", "~200"],
     ]},
     { section: "Coach Elite — everything in Coach, plus:", rows: [
-      ["Our biggest AI allowance — built for all-day use", false, false, true],
-      ["Around 200 AI conversations every day", false, false, true],
-      ["Room to run AI across your whole roster daily", false, false, true],
-      ["Hit the ceiling? Tell us — we raise it", false, false, true],
+      ["Our biggest AI allowance — built for all-day use", false, false, false, true],
+      ["Around 200 AI conversations every day", false, false, false, true],
+      ["Room to run AI across your whole roster daily", false, false, false, true],
+      ["Hit the ceiling? Tell us — we raise it", false, false, false, true],
     ]},
   ],
 };
 
 function FeatureMatrix({ isTrainer }) {
   const groups = PLAN_FEATURES[isTrainer ? "trainer" : "client"];
-  const tiers = ["Free", isTrainer ? "Coach" : "Premium", isTrainer ? "Coach Elite" : "Elite"];
+  // Four columns since S171 — Connect sits between Free and the AI tiers.
+  // Narrower cells so four fit a phone without the label column collapsing.
+  const tiers = ["Free", "Connect", isTrainer ? "Coach" : "Premium", isTrainer ? "Coach Elite" : "Elite"];
   const [whatsManual, setWhatsManual] = useState(false); // ⓘ "what counts as manual logging"
   const cell = (v, i) => (
-    <div key={i} className="flex items-center justify-center" style={{ width: "52px", flexShrink: 0 }}>
+    <div key={i} className="flex items-center justify-center" style={{ width: "46px", flexShrink: 0 }}>
       {v === true ? <Icon name="check" size={14} color="var(--color-primary)" />
         : v === false ? <span className="text-muted" style={{ fontSize: ".72rem", opacity: .5 }}>—</span>
         : <span className={i === 0 ? "text-muted" : "text-fg"} style={{ fontSize: ".68rem", fontWeight: 700 }}>{v}</span>}
@@ -16933,7 +16951,7 @@ function FeatureMatrix({ isTrainer }) {
         <div className="flex-1 font-display font-bold text-fg" style={{ fontSize: ".78rem" }}>Compare plans</div>
         {tiers.map((t, i) => (
           <div key={t} className={i === 0 ? "text-muted" : "text-primary"}
-            style={{ width: "52px", flexShrink: 0, textAlign: "center", fontSize: ".64rem", fontWeight: 800, lineHeight: 1.2 }}>{t}</div>
+            style={{ width: "46px", flexShrink: 0, textAlign: "center", fontSize: ".6rem", fontWeight: 800, lineHeight: 1.2 }}>{t}</div>
         ))}
       </div>
       {groups.map((g) => (

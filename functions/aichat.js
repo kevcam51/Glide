@@ -62,7 +62,7 @@ const BUDGETS = { trial: 100000, client: 100000, assisted: 100000,
   trainerTrial: 100000,
   clientMax: 150000, trainerMax: 300000,
   // Ultra (S92): data-triggered heavy-user tiers, surfaced via the boost upsell.
-  clientUltra: 250000, trainerUltra: 400000 };
+  clientUltra: 250000, trainerUltra: 450000 };   // S171: Apex 400k->450k (every trainer step is now +50%)
 
 function tierFor(profile) {
   const role = (profile && profile.role) || "client";

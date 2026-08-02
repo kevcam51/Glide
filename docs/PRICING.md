@@ -522,7 +522,7 @@ flow handles it, and at $63 cost against $129 it is fine to allow.
 
 ---
 
-## S169h — PROPOSED full ladder with Connect tiers (awaiting Kevin's decision)
+## S169h — the full ladder with Connect tiers — **DECIDED & SHIPPED S171 (Aug 2, 2026)**
 
 The rule this ladder is built on, in Kevin's words: **the 30-day trial is the
 whole product, free**. When it ends, nobody is thrown out — they land on Free
@@ -649,3 +649,45 @@ coach, no trainer side, no connector/API.
 - Post-acquisition, differentiation cannot be price or photo-scanning (MFP owns
   that lane end to end). It is the two-sided trainer platform + the writable
   connector — which MFP does not offer even after buying everyone.
+
+---
+
+## S171 — DECIDED & LIVE (Aug 2, 2026)
+
+Kevin approved the ladder. Shipped: Connect tiers, Apex 450k, plugin gating.
+
+| Client | $/mo | $/yr | In-app AI | Plugin |
+|---|---:|---:|---|---|
+| Free | 0 | — | — | 25/day |
+| **Connect** | **4.99** | 49.99 | — | 2,000/day |
+| Premium | 14.99 | 119.99 | 100k ≈ 66 conv | 2,000/day |
+| Elite | 29.99 | 299.99 | 150k ≈ 100 | 2,000/day |
+| Apex† | 49.99 | 499.99 | 250k ≈ 166 | 2,000/day |
+
+| Trainer | $/mo | $/yr | In-app AI | Plugin |
+|---|---:|---:|---|---|
+| Free | 0 | — | — | 25/day |
+| **Coach Connect** | **19.99** | 199 | — | 2,000/day |
+| Coach | 49 | 490 | 200k ≈ 133 conv | 2,000/day |
+| Coach Elite | 79 | 790 | 300k ≈ 200 | 2,000/day |
+| Coach Apex† | 129 | 1,290 | **450k ≈ 300** | 2,000/day |
+
+† data-triggered, not on the public grid. Trial (30d, both): in-app AI 100k/day
++ full plugin, then Free — never a locked account.
+
+**The free-plugin hole is closed.** DAILY_CALLS.free was 200/day — a working
+allowance, so an expired trial kept full plugin access forever. Now 25/day.
+
+**Substring hazard, recorded:** mcp.js planFor() must test `connect` BEFORE
+`coach`, because "coach_connect" contains "coach" and would otherwise inherit
+the 5,000-call coach cap. Same class of bug as the S90 ultra/max ordering.
+
+**Ceiling economics** (measured ~$4.70/1M budget-tokens): Apex 450k ≈ $63/mo
+worst case against $129. Connect tiers ~100% margin — the user's own AI pays
+for inference. Every tier profitable at its cap.
+
+**Open:** annual is the weak spot (119.99 vs MFP 79.99 / MacroFactor 71.99).
+Lever is a first-year promo, not a list cut. FatSecret barcode needs a
+`/barcode` route on the proxy (verified missing). Free-tier feature depth and
+per-feature ⓘ tooltips still to design — docs/PLAN-REVIEW.md has all 109
+features with tooltip copy ready.

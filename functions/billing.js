@@ -57,6 +57,11 @@ const safeOrigin = (o) => (ALLOWED_ORIGINS.includes(o) ? o : ALLOWED_ORIGINS[0])
 // `tier` is what the webhook stores on profile.subscriptionTier (the *Max
 // budget in aichat.js keys off it). Amounts in cents.
 const CATALOG = {
+  // Connect (S171): the platform plus the MCP plugin, no in-app AI — for people
+  // who already live in Claude/ChatGPT and bring their own. ~100% margin: their
+  // AI provider pays for the inference, we serve data.
+  connect:       { key: "connect",       tier: "connect",       name: "Glidna Connect",       month: 499,  year: 4999 },
+  coach_connect: { key: "coach_connect", tier: "coach_connect", name: "Glidna Coach Connect", month: 1999, year: 19900 },
   premium:     { key: "premium",     tier: "premium",     name: "Glidna Premium",     month: 1499,  year: 11999 },
   max:         { key: "max",         tier: "max",         name: "Glidna Elite",         month: 2999,  year: 29999 },
   ultra:       { key: "ultra",       tier: "ultra",       name: "Glidna Apex",       month: 4999,  year: 49999 },
@@ -67,8 +72,14 @@ const CATALOG = {
 // Role + which level ("base"|"max"|"ultra") → plan. Trainers buy coach plans; clients premium.
 function planFor(role, level) {
   const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
-  if (isTrainer) return level === "ultra" ? CATALOG.coach_ultra : level === "max" ? CATALOG.coach_max : CATALOG.coach;
-  return level === "ultra" ? CATALOG.ultra : level === "max" ? CATALOG.max : CATALOG.premium;
+  if (isTrainer) {
+    return level === "connect" ? CATALOG.coach_connect
+      : level === "ultra" ? CATALOG.coach_ultra
+      : level === "max" ? CATALOG.coach_max : CATALOG.coach;
+  }
+  return level === "connect" ? CATALOG.connect
+    : level === "ultra" ? CATALOG.ultra
+    : level === "max" ? CATALOG.max : CATALOG.premium;
 }
 
 // Lazy Stripe client (the secret only exists at runtime).
@@ -153,7 +164,8 @@ exports.createCheckoutSession = onCall(
     // billing interval — never the price. Anything unexpected falls back to
     // the base monthly plan.
     const sel = (request.data && request.data.plan) || {};
-    const level = sel.tier === "ultra" ? "ultra" : sel.tier === "max" ? "max" : "base";
+    const level = sel.tier === "connect" ? "connect"
+      : sel.tier === "ultra" ? "ultra" : sel.tier === "max" ? "max" : "base";
     const interval = sel.interval === "year" ? "year" : "month";
     // Which ladder to price from. Normally the caller's own role decides, and
     // the client's opinion is ignored — that is what stops a client checking out
