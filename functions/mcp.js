@@ -224,23 +224,19 @@ function toZod(spec) {
 // ~200 calls/day), so the coach tiers get proportionally more headroom than a
 // solo client on the same price level. Tier ids come from billing.js CATALOG:
 // premium | max | ultra | coach | coach_max | coach_ultra.
-// The free allowance is a TASTE, sized so the habit forms and daily reliance
-// still needs a paid tier. It was 200 for everyone — never a decision, just a
-// default — which let an expired trial keep a full working allowance forever.
+// Free gets ZERO connector calls (S173, Kevin's call, replacing the 50/200
+// taste). The AI layer — in-app and connector alike — is what you pay for; free
+// is the whole manual product, which is genuinely most of the app.
 //
-// Split by role (S172, Kevin): one number cannot serve both. A client tracks
-// one person, so 50/day is ~5-15 real conversations — plenty to feel it. A
-// trainer serves a roster, and 50 is barely one client's worth, so they get
-// 200. The asymmetry is deliberate: 200 would cannibalise client Connect
-// ($4.99), but a 20-client roster burns 200 before lunch, so Coach Connect
-// ($19.99) stays worth buying.
+// The trial does the selling instead: 30 days at the full 2,000/day, so the
+// habit forms at full speed and then stops. Losing it entirely is a sharper
+// prompt than having it narrowed, and "AI features are paid" is one sentence on
+// a pricing page where two taste allowances were three.
 //
-// The TRIAL is untouched and maximally generous — trial users resolve to
-// "premium" below and get the full 2,000/day, which is what builds the habit
-// this taste is designed to leave them missing.
+// Kept as a named 0 rather than special-cased at the call site so every cap
+// lives in one table.
 const DAILY_CALLS = {
-  free: 50,
-  free_trainer: 200,
+  free: 0,
   connect: 2000,
   premium: 2000,
   coach: 5000,
@@ -249,9 +245,6 @@ const DAILY_CALLS = {
 };
 const TRAINER_ROLES = ["head_trainer", "sub_trainer", "admin"];
 function planFor(profile) {
-  // Role decides only which FREE allowance applies; every paid tier is the same
-  // for both audiences.
-  const freeTier = profile && TRAINER_ROLES.includes(profile.role) ? "free_trainer" : "free";
   if (!profile) return "free";
   if (profile.role === "admin") return "ultra";
   if (profile.entitlements && profile.entitlements.premium === true) return "premium";
@@ -274,7 +267,7 @@ function planFor(profile) {
     : typeof t === "number" ? t : null;
   if (!startMs) return "premium"; // pre-trial/grandfathered account
   const expired = Date.now() >= startMs + (profile.trialLengthDays || 30) * 86400000;
-  return expired ? freeTier : "premium";
+  return expired ? "free" : "premium";
 }
 
 function utcDayKey() {
@@ -416,12 +409,21 @@ function buildServer(ctx, profile, db, scopes) {
         }
         const charge = await chargeCall(db, ctx.callerUid, plan);
         if (!charge.ok) {
-          return {
-            isError: true,
-            content: [{ type: "text", text:
-              `Daily Glidna connector limit reached (${charge.cap} calls on the ${plan} plan). `
-              + `It resets at midnight UTC. Upgrade in the app for a higher limit.` }],
-          };
+          // Two different failures wearing one message before S173. A paid user
+          // who ran out today resets tonight; a free user never does, and
+          // telling them to wait for midnight would be a lie they act on. The
+          // free case is also the moment the whole trial was building toward,
+          // so it names the price instead of saying "upgrade".
+          const isTrainer = !!ctx.isTrainer;
+          const text = charge.cap === 0
+            ? `Your Glidna free trial has ended, so the connector is switched off. `
+              + `Everything you have logged is safe, and manual tracking in the app stays free forever. `
+              + `To keep using Glidna from ${isTrainer ? "your AI across your whole roster" : "your own AI"}, `
+              + `open the app and choose ${isTrainer ? "Coach Connect ($19.99/mo)" : "Connect ($4.99/mo)"} `
+              + `— or any plan above it, which all include the connector.`
+            : `Daily Glidna connector limit reached (${charge.cap} calls on the ${plan} plan). `
+              + `It resets at midnight UTC. Upgrade in the app for a higher limit.`;
+          return { isError: true, content: [{ type: "text", text }] };
         }
         const result = await runTool(def.name, args || {}, ctx);
         // Keep well under Claude's ~150,000-char tool-result ceiling.

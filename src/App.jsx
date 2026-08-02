@@ -16868,7 +16868,7 @@ const PLAN_FEATURES = {
       ["Workout plans + custom exercises", true, true, true, true],
       ["Calendar, streaks, check-ins & water", true, true, true, true],
       ["Trainer connection, app install & Face ID", true, true, true, true],
-      ["Connect your own Claude / ChatGPT", "50/day", "full", "full", "full"],
+      ["Connect your own Claude / ChatGPT", false, true, true, true],
     ]},
     { section: "Connect — for people who already live in Claude or ChatGPT", rows: [
       ["Your own AI logs meals & reads your data", false, true, true, true],
@@ -16903,7 +16903,7 @@ const PLAN_FEATURES = {
       ["To-dos, nudges & shared plan editing", true, true, true, true],
       ["Invite Hub — link, QR, email invites, referrals", true, true, true, true],
       ["Local plans, templates & sales simulations", true, true, true, true],
-      ["Connect your own Claude / ChatGPT", "200/day", "full", "full", "full"],
+      ["Connect your own Claude / ChatGPT", false, true, true, true],
     ]},
     { section: "Coach Connect — for coaches who already live in Claude or ChatGPT", rows: [
       ["Your own AI reads & writes every client's plan", false, true, true, true],
