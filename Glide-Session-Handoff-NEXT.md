@@ -1,4 +1,81 @@
-# Glide — Next-Session Handoff (start here)
+# Glidna — Next-Session Handoff (start here)
+
+## ⭐ S171 (Aug 2, 2026) — READ THIS BLOCK FIRST
+Everything below this block is older history, kept for reference. Firebase
+`calorieiq-29762` · model `claude-sonnet-4-6` · live on **glidna.com** · tree
+clean, all pushed and deployed.
+
+### Billing is LIVE and proven with real money
+Kevin bought Premium with a real card and cancelled it. Verified end to end:
+$14.99 charged → webhook signature verified → profile flipped to `premium` →
+cancel → active through Aug 31, then downgrades on the already-proven path.
+Payouts: **daily, 2-day delay**, to Smooth Training LLC; Stripe takes 2.9%+30c.
+
+### The pricing ladder is DECIDED and shipped
+Full table in `docs/PRICING.md` under "S171 — DECIDED & LIVE".
+
+| | Free | Connect | Base | Elite | Apex (hidden) |
+|---|---|---|---|---|---|
+| Client | $0 | $4.99 | $14.99 | $29.99 | $49.99 |
+| Trainer | $0 | $19.99 | $49 | $79 | $129 |
+
+**Connect** = platform + MCP plugin, NO in-app AI — for people already living in
+Claude/ChatGPT. ~100% margin (their AI provider pays for inference). Trial (30d,
+both audiences) = in-app AI 100k/day + full plugin, then Free. **No account ever
+locks.** Coach Apex is 450k tokens/day so every trainer step is +50%.
+
+### NOT done — pick up here
+1. **Free-tier design + per-feature ⓘ tooltips.** The rest of the plan rework.
+   `docs/PLAN-REVIEW.md` already has **109 features** with plain-English tooltip
+   copy and the gate the code really applies. Kevin wants to walk it **one at a
+   time in small batches** — do not dump the list at him. Two areas were never
+   catalogued (training partially, AI reconcile) — agents kept dying on oversized
+   responses; cap output hard if you retry.
+2. **Annual is the weak spot** — $119.99 vs MyFitnessPal $79.99, MacroFactor
+   $71.99. Decision on record: hold list price; if conversion lags use a
+   **first-year promo (~$79-89)**, not a list cut.
+3. **FatSecret barcode** — Kevin wants their full DB (strongest for US branded
+   food). Blocked on HIS proxy: it exposes `/search` and `/food?id=` only,
+   `/barcode` 404s (verified). Needs a route calling `food.find_id_for_barcode`.
+4. **Barcode scanner on a real Android** — S170b rewrote the camera request
+   (1080p, continuous autofocus, EAN/UPC-only hints, torch, landscape box).
+   Cannot be verified headless; Kevin must test. If still flaky, next lever is
+   the native `BarcodeDetector` API on Android with zxing as the iOS fallback.
+5. **Push-notification delivery (FCM)** — still queued, untouched.
+
+### Hazards worth not rediscovering
+- **`mcp.js` planFor() tests `connect` BEFORE `coach`** — "coach_connect"
+  contains "coach" and would otherwise inherit the 5,000-call coach cap. Same
+  class as the S90 ultra/max ordering bug.
+- **Compute the deploy set, never recall it**: `npm run deploy-set <file>`.
+  `aichat.js` reaches **15** functions now. A partial deploy silently leaves the
+  rest on a stale bundle (the S78 bug class, hit again this session).
+- **Rollout lag != broken code.** After `firebase deploy` returns, a revision can
+  still be taking traffic for ~60s; a test in that window runs the OLD code.
+  Check the audit log's `updateTime` before diagnosing.
+- **`recordUsage` must never throw** — it runs in a `finally` on every AI path,
+  so an exception there replaces the user's reply with an error (S167 did this).
+- **Barcode: USDA stores the same UPC at 12, 13 AND 14 digits.** Exact-string
+  lookup misses real matches; try every normalization and only accept a result
+  whose `gtinUpc` equals the scanned code.
+- **Research/inventory agents die on big outputs.** Every multi-area workflow
+  this session lost agents to "Connection closed mid-response". Cap `maxItems`
+  and string lengths in the schema; keep prompts narrow.
+
+### Verified facts (don't re-derive)
+- **AI cost ~$4.70 per 1M budget-tokens** (measured live); ~1,500 tokens ≈ one
+  conversation ≈ 0.7c. Every tier profitable at its absolute ceiling.
+- **Nobody sells an MCP connector as a separate SKU** — all 11 SaaS platforms
+  checked bundle it. **Strava is the only fitness precedent** and its connector
+  is **read-only**, bundled with its $11.99 sub. Glidna's writes.
+- **MyFitnessPal acquired Cal AI** (Dec 2025, announced Mar 2026). MFP now owns
+  the $19.99 everything-app AND the $9.99 photo app, and is in ChatGPT Health.
+  Differentiation cannot be price or photo scanning — it is the two-sided
+  trainer platform and the writable connector.
+- MacroFactor $11.99/mo ($71.99/yr): strong tracker, no AI chat, no coach side,
+  no connector, no free tier.
+
+---
 
 ## ✅ STATE @ `10f6509` — everything pushed, deployed, tree clean (Jul 27, late)
 Firebase `calorieiq-29762` · model `claude-sonnet-4-6` · admin UID
