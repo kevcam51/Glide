@@ -8572,6 +8572,9 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   };
   const videoRef = useRef(null);              // <video> preview for live scanning
   const scanCtlRef = useRef(null);            // zxing scanner controls (to stop)
+  const torchTrackRef = useRef(null);         // video track, when it supports a torch
+  const [canTorch, setCanTorch] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
   const searchInputRef = useRef(null);        // food-search box — auto-focused when a meal form opens
   const photoInputRef = useRef(null);         // hidden file input for the photo estimate
   const formRef = useRef(null);               // the add-food form — scrolled up into view when opened (S110)
@@ -8824,6 +8827,13 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   };
   const openScan = () => { setScanErr(""); setScanOpen(true); };
   const closeScan = () => { setScanOpen(false); };
+  const toggleTorch = async () => {
+    const track = torchTrackRef.current;
+    if (!track) return;
+    const next = !torchOn;
+    try { await track.applyConstraints({ advanced: [{ torch: next }] }); setTorchOn(next); }
+    catch { setCanTorch(false); }   // device lied about supporting it
+  };
   // Run the live scanner while the modal is open; auto-detect → look up → close.
   useEffect(() => {
     if (!scanOpen) return;
@@ -8832,9 +8842,27 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
     (async () => {
       try {
         const { BrowserMultiFormatReader } = await import("@zxing/browser");
-        const reader = new BrowserMultiFormatReader();
+        const { DecodeHintType, BarcodeFormat } = await import("@zxing/library");
+        // Only the formats food packaging actually uses (S170, Kevin: "most of
+        // the time it does not work" on Android). Unhinted, zxing tries every
+        // 2D format too — QR, Data Matrix, Aztec, PDF417 — on every frame, so
+        // each frame spends most of its budget looking for symbologies that
+        // will never be on a cereal box. Narrowing it means more decode
+        // attempts per second on the ones that will.
+        const hints = new Map([[DecodeHintType.POSSIBLE_FORMATS, [
+          BarcodeFormat.EAN_13, BarcodeFormat.EAN_8,
+          BarcodeFormat.UPC_A, BarcodeFormat.UPC_E, BarcodeFormat.CODE_128,
+        ]], [DecodeHintType.TRY_HARDER, true]]);
+        const reader = new BrowserMultiFormatReader(hints);
         const controls = await reader.decodeFromConstraints(
-          { video: { facingMode: { ideal: "environment" } } },
+          // Ask for a real sensor resolution. The old constraint said only
+          // "rear camera", so browsers were free to hand back 640x480 — at that
+          // size the thin bars of an EAN-13 blur together and never resolve,
+          // which is exactly the out-of-focus look Kevin described.
+          { video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1920 }, height: { ideal: 1080 },
+          } },
           videoRef.current,
           (result, err, ctl) => {
             if (result && !cancelled) {
@@ -8847,6 +8875,26 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
         );
         scanCtlRef.current = controls;
         if (cancelled) { try { controls.stop(); } catch { /* ignore */ } }
+        // Continuous autofocus, applied AFTER the stream exists. Android Chrome
+        // supports focusMode as an "advanced" constraint but many devices sit
+        // at a fixed focus until asked, which is the other half of the blur.
+        // Everything here is capability-gated and best-effort: an unsupported
+        // constraint throws, and a scanner that works is worth more than a
+        // scanner with a torch button.
+        try {
+          const track = (videoRef.current && videoRef.current.srcObject
+            && videoRef.current.srcObject.getVideoTracks
+            && videoRef.current.srcObject.getVideoTracks()[0]) || null;
+          if (track && track.getCapabilities) {
+            const caps = track.getCapabilities() || {};
+            const adv = [];
+            if (Array.isArray(caps.focusMode) && caps.focusMode.includes("continuous")) adv.push({ focusMode: "continuous" });
+            if (adv.length) await track.applyConstraints({ advanced: adv });
+            setTorchOn(false);
+            setCanTorch(!!caps.torch);   // low light is the other common failure
+            torchTrackRef.current = caps.torch ? track : null;
+          }
+        } catch { /* focus/torch unsupported — scanning still works */ }
         setScanning(false);
       } catch (e) {
         if (cancelled) return;
@@ -8860,6 +8908,8 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
       cancelled = true;
       try { scanCtlRef.current && scanCtlRef.current.stop(); } catch { /* ignore */ }
       scanCtlRef.current = null;
+      torchTrackRef.current = null;
+      setCanTorch(false); setTorchOn(false);
     };
   }, [scanOpen]);
   useBackClose(scanOpen, closeScan);   // phone Back closes the scanner camera
@@ -9148,9 +9198,20 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
               <div onClick={(e) => e.stopPropagation()} style={{ position:"relative", width:"min(90vw,420px)", aspectRatio:"1",
                 borderRadius:16, overflow:"hidden", background:"#000", border:"2px solid var(--accent)" }}>
                 <video ref={videoRef} playsInline muted autoPlay style={{ width:"100%", height:"100%", objectFit:"cover" }} />
-                <div style={{ position:"absolute", inset:"22%", border:"2px solid rgba(255,255,255,.75)", borderRadius:10, pointerEvents:"none" }} />
+                <div style={{ position:"absolute", left:"8%", right:"8%", top:"36%", bottom:"36%",
+                  border:"2px solid rgba(255,255,255,.75)", borderRadius:10, pointerEvents:"none" }} />
               </div>
-              <div style={{ color:"var(--muted)", fontSize:".82rem" }}>{scanning ? "Starting camera…" : "Hold steady — it scans automatically"}</div>
+              <div style={{ color:"var(--muted)", fontSize:".82rem", textAlign:"center", lineHeight:1.5 }}>
+                {scanning ? "Starting camera…" : "Fill the box with the barcode, about 6 inches away"}
+              </div>
+              {canTorch && (
+                <button onClick={(e) => { e.stopPropagation(); toggleTorch(); }}
+                  style={{ padding:"9px 20px", borderRadius:10, border:"1px solid var(--border)",
+                    background: torchOn ? "var(--accent-fill)" : "var(--surface)",
+                    color: torchOn ? "#0b0b12" : "var(--text)", fontWeight:700, fontSize:".84rem", cursor:"pointer" }}>
+                  {torchOn ? "Light on" : "Turn on light"}
+                </button>
+              )}
               <button onClick={closeScan} style={{ padding:"11px 26px", borderRadius:10, border:"1px solid var(--border)",
                 background:"var(--surface)", color:"var(--text)", fontWeight:700, fontSize:".9rem", cursor:"pointer" }}>Cancel</button>
             </div>, document.body)}
