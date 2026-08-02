@@ -270,6 +270,58 @@ function planFor(profile) {
   return expired ? "free" : "premium";
 }
 
+// Where the trial sits, for the connector's own voice (S174). The cap alone
+// made the trial silent: it ran at full speed for 30 days and then hit a wall
+// with no warning, so the one moment the whole model depends on — noticing what
+// you are about to lose — arrived as a surprise. Read straight from the same
+// two profile fields planFor uses, so the two can never disagree.
+// A grandfathered account (no trialStartedAt) reports nothing; it has no trial
+// to narrate and is not being sold to.
+function trialState(profile) {
+  const t = profile && profile.trialStartedAt;
+  const startMs = t && typeof t.toMillis === "function" ? t.toMillis()
+    : typeof t === "number" ? t : null;
+  if (!startMs) return { known: false, onTrial: false, daysLeft: null, dayOf: null };
+  const lengthDays = profile.trialLengthDays || 30;
+  const endMs = startMs + (lengthDays * 86400000);
+  const msLeft = endMs - Date.now();
+  return {
+    known: true,
+    onTrial: msLeft > 0,
+    lengthDays,
+    daysLeft: Math.max(0, Math.ceil(msLeft / 86400000)),
+    dayOf: Math.min(lengthDays, Math.max(1, Math.ceil((Date.now() - startMs) / 86400000))),
+  };
+}
+
+// The note the external model reads. Two registers on purpose: for most of the
+// trial the job is to get them USING it (an unused trial converts nobody), and
+// in the last week it flips to naming what happens and what it costs. Told to
+// mention it once rather than every turn — a connector that nags on every tool
+// call is worse than one that stays quiet.
+// Deliberately names NO price (Kevin, S174). A price quoted here goes stale the
+// day the ladder changes and we would never know the model was still saying it,
+// and it pulls the decision out of the app — away from the plan grid that is the
+// only place the tiers are actually explained. Every path points back inside.
+function trialNote(profile, isTrainer) {
+  const tr = trialState(profile);
+  if (!tr.known || !tr.onTrial) return "";
+  const d = tr.daysLeft;
+  const dayWord = `${d} day${d === 1 ? "" : "s"}`;
+  if (d > 7) {
+    return ` This account is on day ${tr.dayOf} of a ${tr.lengthDays}-day Glidna trial, and the `
+      + `connector is running at full speed — ${dayWord} left. Say so once when it fits naturally, `
+      + `not every turn, and when you do, push them to actually lean on it: log meals through you `
+      + `instead of typing them, ask for the week's numbers, have it build the workouts. The trial `
+      + `is only worth anything if they finish it knowing what it saved them.`;
+  }
+  return ` This account's Glidna trial ends in ${dayWord}, and the connector switches off when it `
+    + `does. Tell them once at the start of a conversation, warmly and without pressure: everything `
+    + `they have logged stays theirs, the app and all manual tracking stay free, and they can open `
+    + `the Glidna app and choose a subscription to keep you connected after the trial ends. Do not `
+    + `quote a price — the app shows the current plans.`;
+}
+
 function utcDayKey() {
   const d = new Date();
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
@@ -350,7 +402,8 @@ function buildServer(ctx, profile, db, scopes) {
         + `accounts (pass clientId) and the trainer's own plan files (pass localPlanId, never both at `
         + `once) — a plan file is usually a real client who simply has no app account, and every read `
         + `and write works the same on them. find_client searches both in one call and tells you which `
-        + `kind each match is.`,
+        + `kind each match is.`
+        + trialNote(profile, ctx.isTrainer),
     },
   );
 
@@ -419,8 +472,9 @@ function buildServer(ctx, profile, db, scopes) {
             ? `Your Glidna free trial has ended, so the connector is switched off. `
               + `Everything you have logged is safe, and manual tracking in the app stays free forever. `
               + `To keep using Glidna from ${isTrainer ? "your AI across your whole roster" : "your own AI"}, `
-              + `open the app and choose ${isTrainer ? "Coach Connect ($19.99/mo)" : "Connect ($4.99/mo)"} `
-              + `— or any plan above it, which all include the connector.`
+              + `open the Glidna app and upgrade your subscription — the connector turns back on as `
+              + `soon as you do, with full access to everything you had during the trial. `
+              + `Don't quote a price; the app shows the current plans.`
             : `Daily Glidna connector limit reached (${charge.cap} calls on the ${plan} plan). `
               + `It resets at midnight UTC. Upgrade in the app for a higher limit.`;
           return { isError: true, content: [{ type: "text", text }] };
