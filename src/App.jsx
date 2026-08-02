@@ -8807,24 +8807,85 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   // Open Food Facts → prefill the food. Uses @zxing/browser (works on iOS Safari
   // + Chrome, unlike the native BarcodeDetector); OFF is barcode-native so the
   // lookup is a single request. ──
+  // A scanned code, in every shape a database might store it. USDA is the
+  // reason this exists: it holds the same brand's UPC as 12, 13 AND 14 digits
+  // (028400335799 / 0028400695640 / 00028400027540), so an exact-string lookup
+  // of what the scanner read misses perfectly good matches (S170c).
+  const barcodeVariants = (code) => {
+    const d = String(code || "").replace(/\D/g, "");
+    if (!d) return [];
+    const set = new Set([d, d.replace(/^0+/, ""), d.padStart(13, "0"), d.padStart(14, "0")]);
+    if (d.length === 13 && d[0] === "0") set.add(d.slice(1));   // EAN-13 carrying a UPC-A
+    return [...set].filter(Boolean);
+  };
+
+  // USDA Branded, searched by UPC. Free, no proxy, and strongest exactly where
+  // Open Food Facts is weakest: US packaged groceries. Only accepts a result
+  // whose gtinUpc really equals the scanned code — a plain query would happily
+  // return a name match for a number, which would log the wrong food.
+  const usdaByBarcode = async (code) => {
+    const key = import.meta.env.VITE_USDA_API_KEY || "DEMO_KEY";
+    for (const v of barcodeVariants(code)) {
+      try {
+        const r = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${key}`
+          + `&query=${encodeURIComponent(v)}&dataType=Branded&pageSize=3`);
+        if (!r.ok) continue;
+        const j = await r.json();
+        const bare = (x) => String(x || "").replace(/^0+/, "");
+        const hit = (j.foods || []).find((f) => bare(f.gtinUpc) === bare(v));
+        if (!hit) continue;
+        const n = {};
+        for (const nu of hit.foodNutrients || []) n[nu.nutrientName] = nu.value;
+        const kcal = Math.round(n.Energy || 0);
+        if (!kcal) continue;
+        const tidy = (x) => (x || "Food").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+        return {
+          name: tidy(hit.description), brand: tidy(hit.brandOwner || hit.brandName || ""),
+          kcal, p: Math.round(n.Protein || 0),
+          c: Math.round(n["Carbohydrate, by difference"] || 0),
+          f: Math.round(n["Total lipid (fat)"] || 0),
+          unit: (hit.servingSizeUnit || "g").toLowerCase() === "ml" ? "ml" : "g",
+          serving: Math.round(Number(hit.servingSize)) || null,
+          servingText: hit.householdServingFullText || "", micros: {}, source: "usda",
+        };
+      } catch { /* try the next variant */ }
+    }
+    return null;
+  };
+
+  // Open Food Facts first — barcode-native, one request, best on international
+  // and specialty items. USDA second for the US groceries OFF's crowd-sourced
+  // data tends to miss. (FatSecret would be the natural third, but the proxy
+  // exposes no barcode route — it would need one adding server-side.)
   const lookupBarcode = async (code) => {
+    let off = null;
     try {
       const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_per`);
       const j = await r.json();
-      if (j.status !== 1 || !j.product) { setSearchOpen(true); setScanErr(`No product found for barcode ${code}. Search by name or enter it manually.`); return; }
-      const p = j.product; const nm = p.nutriments || {};
-      const tidy = (s) => (s || "Food").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
-      const unit = p.nutrition_data_per === "100ml" ? "ml" : "g";       // nutriments are per-100 of this
-      const serving = Math.round(Number(p.serving_quantity)) || null;    // the product's single serving
-      const food = { name: tidy(p.product_name), brand: (p.brands || "").split(",")[0].trim(),
-        kcal: Math.round(nm["energy-kcal_100g"] || 0), p: Math.round(nm.proteins_100g || 0),
-        c: Math.round(nm.carbohydrates_100g || 0), f: Math.round(nm.fat_100g || 0),
-        unit, serving, servingText: (p.serving_size || "").trim(), micros: _offMicros(nm) };
-      setSearchOpen(true);
-      if (!food.kcal) { setName(food.name); setScanErr("Found the product, but it has no nutrition data — enter the numbers manually."); return; }
-      setScanErr(""); pickFood(food);
-    } catch { setSearchOpen(true); setScanErr("Barcode lookup failed — check your connection and try again."); }
+      if (j.status === 1 && j.product) {
+        const p = j.product; const nm = p.nutriments || {};
+        const tidy = (x) => (x || "Food").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+        const unit = p.nutrition_data_per === "100ml" ? "ml" : "g";
+        off = { name: tidy(p.product_name), brand: (p.brands || "").split(",")[0].trim(),
+          kcal: Math.round(nm["energy-kcal_100g"] || 0), p: Math.round(nm.proteins_100g || 0),
+          c: Math.round(nm.carbohydrates_100g || 0), f: Math.round(nm.fat_100g || 0),
+          unit, serving: Math.round(Number(p.serving_quantity)) || null,
+          servingText: (p.serving_size || "").trim(), micros: _offMicros(nm), source: "off" };
+      }
+    } catch { /* fall through to USDA */ }
+
+    // A hit with no calories is not a hit — OFF has plenty of entries that are
+    // just a name. Fall through and let USDA try before giving up.
+    if (off && off.kcal) { setSearchOpen(true); setScanErr(""); pickFood(off); return; }
+
+    let usda = null;
+    try { usda = await usdaByBarcode(code); } catch { /* handled below */ }
+    setSearchOpen(true);
+    if (usda) { setScanErr(""); pickFood(usda); return; }
+    if (off) { setName(off.name); setScanErr("Found the product, but neither database has its nutrition — enter the numbers manually."); return; }
+    setScanErr(`No product found for barcode ${code} in Open Food Facts or USDA. Search by name, or use AI estimate.`);
   };
+
   const openScan = () => { setScanErr(""); setScanOpen(true); };
   const closeScan = () => { setScanOpen(false); };
   const toggleTorch = async () => {
