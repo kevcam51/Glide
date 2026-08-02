@@ -23,22 +23,18 @@ Full table in `docs/PRICING.md` under "S171 — DECIDED & LIVE".
 Claude/ChatGPT. ~100% margin (their AI provider pays for inference). Coach Apex
 is 450k tokens/day so every trainer step is +50%.
 
-**The connector allowance ladder (S172)** — the conversion engine, three steps:
-trial **2,000/day** (maximal, builds the habit) → free **50/day client, 200/day
-trainer** (a taste; one number could not serve both) → Connect **2,000/day**
-(pay to get it back). Trial (30d, both audiences) also includes in-app AI at
-100k/day, then drops to Free. **No account ever locks.**
+**The connector ladder (S173, FINAL)** — the conversion engine, two states:
+trial **2,000/day** for 30 days → then **ZERO**. Free has no AI at all, in-app
+or connector; it is the whole manual product. Pay to get the connector back
+(Connect $4.99 / Coach Connect $19.99, and every tier above includes it).
+Kevin's reasoning: 30 days at full speed sells better than a permanent trickle.
+An S172 50/200 taste was built and deliberately replaced — do not reintroduce
+it. Accounts still never lock; all logged data stays.
 
-### 🔴 ONE COMMAND OWED (S172) — code is committed, NOT deployed
-Firebase auth expired mid-deploy. `functions/mcp.js` on the server still has the
-OLD single free allowance. Run:
-```
-firebase login --reauth --no-localhost
-firebase deploy --only functions:mcp --project calorieiq-29762
-```
-Until then, the free connector allowance in production is 25/day for everyone
-instead of client 50 / trainer 200. Frontend grids already say 50 and 200, so
-the page and the server disagree until this runs.
+**The denial message is the conversion moment.** A free user is told the trial
+ended, their data is safe, manual tracking stays free, and the actual price —
+NOT "resets at midnight UTC", which is true only for paid users who ran out
+today and would make a free user wait instead of upgrade.
 
 ### NOT done — pick up here
 1. **Free-tier design + per-feature ⓘ tooltips.** The rest of the plan rework.
