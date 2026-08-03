@@ -830,7 +830,32 @@ more valuable than the AI (98 free features, incl. a MET burn engine no
 third-party source can supply). The tight spot is that ALL of it is free and
 the paywall sits only on the one thing the industry is racing to commoditise.
 
-### ⛔ The transaction cut was RETRACTED the same session — do not revive it
+### ⚖️ REFINED minutes later — the fee depends on WHICH population (Kevin, S176c)
+
+The retraction below is right for INDEPENDENT trainers and wrong as a blanket
+rule. Two different populations, two different answers:
+
+| Population | Fee | Why |
+|---|---|---|
+| **Independent trainer** (runs own business, may also use Trainerize; Glidna is an add-on) | **0% — pass-through** | Stripe already moves their money. A cut is rent for nothing, and it makes us their competitor. |
+| **Trainer inside a TREE** (Smooth Training's own trainers; other companies running their own trees) | **split fee is legitimate** — the roadmap's sub 75% / head 10% / platform 15%, 2 levels max | One payment splits across three parties with tree structure, permissions and accounting behind it. That work has no alternative. The sub-trainer is not choosing Glidna over Trainerize — they are choosing to work for that company, so we compete with nobody for them. |
+
+This was always Kevin's design — the two-level tree with those exact
+percentages predates this session (see CLAUDE.md roadmap). The S176 error was
+applying it to the add-on population, not the fee itself.
+
+**Also resolves the "mirror" tension below:** the full trainer workspace exists
+because Smooth Training RUNS on it (dogfooding), with access opened to others
+after. Glidna therefore has two deliberate faces — an **add-on** for
+independent coaches (AI layer, connector, aggregation, 0% fees) and a **full
+platform** for organizations running trainer trees (splits, seats). Not
+contradictory, as long as add-on users are never charged platform fees.
+
+**Build consequence:** Stripe Connect is back on the roadmap with a real
+purpose — tree splits — but is still 0% for solo/independent trainers. It is
+NOT needed until the first sub-trainer actually takes payments.
+
+### ⛔ The flat transaction cut was RETRACTED — do not revive it for solo trainers
 
 It was recommended above and Kevin **rejected it, correctly**, minutes later.
 Recording both so nobody re-proposes it:
