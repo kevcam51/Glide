@@ -510,3 +510,29 @@ S169g/S171 — current published numbers match BUDGETS. No action.
 GRANDFATHERING DECIDED (Kevin): keep legacy accounts unlocked as an earned
 courtesy, but FENCE it — BUILD LIST: any account missing trialStartedAt gets one
 stamped at first login going forward, closing the free-forever minting hazard.
+
+### Batch 15 — final rows (confirmed — CATALOGUE COMPLETE, 109/109)
+| Feature | Tier | Note |
+|---|---|---|
+| Allowance boost | ELITE+ | matches ladder |
+| Automations (scheduled AI) | ELITE+ | 1/3 client, 2/5 trainer per day |
+| Connect your own AI | **CONNECT+** | inventory said `free` — STALE post-S173 (free = 0 calls). Tooltip updated to "on any paid plan". |
+| Choose what your outside AI may do | CONNECT+ | rides the connector |
+| Turn AI off for your account | FREE | duplicate of the consent switch (batch 13) — dedupe to one grid row |
+
+**FINAL SCOREBOARD:** ~75 free (whole manual product + coaching workspace +
+notifications + privacy) · 28 Premium+ (AI layer) · 2 Connect+ · boosts &
+automations Elite+ · 7 admin-only off-page · session-billing trio allowlisted.
+
+**CONSOLIDATED BUILD LIST** (from the whole review): 1) AI-coached client
+limits 15/25/35 (see PRICING.md S175) · 2) session-billing admin allowlist ·
+3) trialStartedAt fence at first login · 4) client-facing data export ·
+5) coach_summary 60-cap fix · 6) tracker AI-buttons upsell card for free users ·
+7) the grid/tooltip work itself: 109 ⓘ tooltips + new named rows (target
+engine, eat-back/accelerate, meal planning, DMs both ladders, wearable target,
+notifications, AI consent switch, micros, session booking) + copy fixes
+("…by chat", "asks both ways", trainer basics get install/Face ID, Coach blurb
+rewrite) + Connect-row gating notes.
+
+Training area sweep: running (S175) — was never catalogued (agents died on
+output size); results append below when decided.
