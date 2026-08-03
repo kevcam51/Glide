@@ -206,5 +206,43 @@ console.log("\n8. real 0 active + real resting still writes");
   check("resting 2337 recorded", w.resting === 2337);
 }
 
+// ── 9. self-heal days an earlier build already polluted with phantom zeros ──
+// Kevin's Jul 31 - Aug 2 were written as {active:0, resting:0} before empty
+// records were rejected. Nothing in a later run supplies a calorie value for
+// those dates, so unless the stored zeros are actively dropped they freeze the
+// days at 0 burn forever — the fix would look like it did nothing.
+console.log("\n9. previously stored phantom zeros are cleaned up");
+{
+  const db = fakeDb();
+  const key = `caliq-log-${PID}-${D}`;
+  db.store.set(logKey(UID, PID, D), { k: key, value: JSON.stringify({
+    calories: 0, water: 0, weight: 0, meals: [],
+    wearable: { active: 0, resting: 0, steps: 6839, reported: true, source: "appleHealthKit" },
+  }) });
+  stubFetch({ calorieOut: [cal(D, "appleHealthKit", 0, 0)], step: [step(D, "garmin", 6839)] });
+  const r = await sync(db, UID, PID, TZID, AUTH, 14);
+  const w = readWearable(db, UID, PID, D);
+  check("stored zero is dropped", w.active === undefined && w.resting === undefined, JSON.stringify(w));
+  check("steps survive the cleanup", w.steps === 6839, JSON.stringify(w));
+  check("the cleanup counts as a write", r.days === 1, `days=${r.days}`);
+
+  // Idempotent: a second identical run must not rewrite the same day.
+  const r2 = await sync(db, UID, PID, TZID, AUTH, 14);
+  check("second run writes nothing", r2.days === 0, `days=${r2.days}`);
+}
+
+// ── 10. a real stored reading is NOT cleaned up ─────────────────────────────
+console.log("\n10. real stored calories survive a silent run");
+{
+  const db = fakeDb();
+  stubFetch({ calorieOut: [cal(D, "garmin", 607, 2337)], step: [step(D, "garmin", 10201)] });
+  await sync(db, UID, PID, TZID, AUTH, 14);
+  stubFetch({ calorieOut: [cal(D, "appleHealthKit", 0, 0)], step: [step(D, "garmin", 10201)] });
+  await sync(db, UID, PID, TZID, AUTH, 14);
+  const w = readWearable(db, UID, PID, D);
+  check("garmin's 607 survives", w.active === 607, `got ${w.active}`);
+  check("garmin's resting survives", w.resting === 2337, `got ${w.resting}`);
+}
+
 console.log(`\n${fail === 0 ? "PASS" : "FAIL"} — ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

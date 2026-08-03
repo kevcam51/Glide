@@ -331,9 +331,15 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
     // day. Only a value the tracker actually reported — including a real 0 —
     // replaces what is there.
     const keep = (v, p) => (v == null ? (p == null ? undefined : p) : v);
+    // Only MEANINGFUL stored calories are worth preserving. A stored {0,0} is a
+    // phantom written by an earlier run (before we learned to reject empty
+    // tracker records) — keeping it would freeze those days at 0 burn forever,
+    // since no future run supplies a calorie value to replace it. Dropping it
+    // makes the next run self-heal the days already polluted.
+    const prevHasCal = !!prev && (Number(prev.active) > 0 || Number(prev.resting) > 0);
     const next = {
-      active: keep(w.active, prev && prev.active),
-      resting: keep(w.resting, prev && prev.resting),
+      active: keep(w.active, prevHasCal ? prev.active : null),
+      resting: keep(w.resting, prevHasCal ? prev.resting : null),
       steps: keep(w.steps, prev && prev.steps),
       reported: true,
       source: w.source || (prev && prev.source) || null,
