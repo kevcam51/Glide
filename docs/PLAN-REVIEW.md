@@ -536,3 +536,27 @@ rewrite) + Connect-row gating notes.
 
 Training area sweep: running (S175) — was never catalogued (agents died on
 output size); results append below when decided.
+
+### Batches 16–17 — training area (confirmed — CATALOGUE FULLY COMPLETE, 132/132)
+Training area swept S175 (two capped agents — the output-cap fix worked; the
+full 23-feature tables with tooltip copy live in the S175 session transcript
+and below in compact form). ALL 23 FREE — manual, non-AI, habit/workspace.
+
+Building (13, all free): weekly cardio planner · weekly strength planner ·
+Quick Fill · movement combos · exercise library (50+ cardio/130+ strength) ·
+search picker · custom exercises · MET burn estimates · heart-rate cardio
+sessions · heart-rate zones · weekly burn totals · EPOC afterburn · edit
+workouts from plan.
+
+Progress (10, all free): daily check-ins · weight chart · goal range ·
+start weight & lbs lost · time-to-goal projection · measurements & body-fat ·
+body-composition timeline · workout-done tracking · IBW card · share card.
+
+Decisions on top: THREE new differentiator grid rows — heart-rate training
+(sessions + zones; no consumer tracker plans cardio by bpm), EPOC afterburn,
+body-composition timeline ("dropping fat or losing muscle?"). Body measurements
++ body-comp timeline ADDED to the banked Insights bundle (now: micros + weekly
+averages + consistency + body comp — meaty enough to be a real module).
+
+**FINAL: 132/132 features decided.** ~98 free · 28 Premium+ · 2 Connect+ ·
+boosts/automations Elite+ · 7 admin-only · session-billing trio allowlisted.
