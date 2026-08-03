@@ -373,3 +373,14 @@ AI-only paywalls are a structural risk (a user could bring their own AI instead)
 | Macro targets with progress bars | FREE | table stakes everywhere |
 | Custom macro targets (g or %) | FREE (lever #3 — weak) | MFP paywalls gram-level goals, but trainers set these on client plans — gating client-side while coaches set them is confusing. |
 | Protein target basis (1g/0.7g per lb) | FREE | preference toggle, too small to sell |
+
+### Batch 3 — calorie-target engine (confirmed)
+| Feature | Tier | Note |
+|---|---|---|
+| Daily calorie target + pace picker | FREE | MacroFactor's whole $11.99/mo product; ours feeds the AI upsell. ADD NAMED GRID ROW. |
+| Set your own calorie target | FREE | trainer-entangled like custom macros |
+| Eat-back vs accelerate | FREE | NO competitor equivalent at any price; too wired-in to ever gate → its only value is marketing. ADD NAMED GRID ROW ("nobody else has it"). |
+| Daily goal direction (deficit/maintain/surplus) | FREE | same engine |
+
+Grid action from this batch: the target engine gets named rows — today the only
+nutrition row is "Food, calorie & macro tracking", which sells none of it.
