@@ -480,3 +480,11 @@ auto-charge, earnings) — ships with the client-limit work.
 | Tracker readings on dashboard | FREE | — |
 | Type in watch's burn | FREE | manual on-ramp |
 | Use my tracker's real burn | FREE + **named grid row** | headline differentiator, unadvertised; too wired-in to gate — "Your watch sets your calorie target" |
+
+### Batch 12 — notification cluster (confirmed)
+All six FREE (Notification Center, push delivery, bell, auto logging/weigh-in
+reminders, message & to-do alerts, home-screen nudges). Verdict: notifications
+are the DELIVERY SYSTEM for the free habit mechanics — gating delivery breaks
+retention. Trainerize charging for reminder automations = our ammunition, not a
+model. Grid: one named row per ladder — client "Phone reminders & nudges";
+trainer "Your clients get automatic logging reminders".
