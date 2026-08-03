@@ -16927,6 +16927,12 @@ const PLAN_FEATURES = {
       ["Food database search + barcode scanner", true, true, true, true],
       ["Weight, progress charts & goal timeline", true, true, true, true],
       ["Workout plans + custom exercises", true, true, true, true],
+      // S176: the three differentiator rows from the free-tier review (docs/
+      // PLAN-REVIEW.md batches 16-17) — real shipped features nobody else has,
+      // advertised for the first time. All free forever, like their neighbours.
+      ["Heart-rate cardio & training zones", true, true, true, true],
+      ["Afterburn (EPOC) counted in your burn totals", true, true, true, true],
+      ["Body-composition timeline — fat vs. muscle", true, true, true, true],
       ["Calendar, streaks, check-ins & water", true, true, true, true],
       ["Trainer connection, app install & Face ID", true, true, true, true],
       ["Connect your own Claude / ChatGPT", false, true, true, true],
