@@ -397,3 +397,12 @@ nutrition row is "Food, calorie & macro tracking", which sells none of it.
 Principle made explicit this batch (Kevin confirmed): HABIT features (anything that
 increases logging frequency) stay free — logging frequency keeps people in the app
 long enough to want AI. ANALYSIS features (micros) are the levers.
+
+### Batch 5 — planning, quick add, water, calendar (confirmed)
+| Feature | Tier | Note |
+|---|---|---|
+| Plan meals ahead | FREE **(banked lever #5 — moderate)** | market prices planning premium (MFP Premium+ $24.99, bought Intent; Everfit $24-39 add-on). ADD GRID ROW. |
+| Quick Add calories | FREE | habit feature (MFP paywalls quick-add-with-macros; not worth imitating) |
+| Water tracking | FREE | free everywhere |
+| Calendar + back-dated logging | FREE | fixing your history = data ownership, per ToS promise |
+| Adherence colouring & roll-ups | FREE | analysis-adjacent but it's the streak payoff; deeper analysis surfaces are the better candidates |
