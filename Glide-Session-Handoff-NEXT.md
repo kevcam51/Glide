@@ -1,5 +1,45 @@
 # Glidna — Next-Session Handoff (start here)
 
+## ⭐⭐ S175 pricing thread (Aug 2, 2026, with Kevin live) — READ THIS FIRST
+The free-tier design + feature review from S171's "NOT done" item 1 is DONE.
+Every decision is in `docs/PLAN-REVIEW.md` ("Decisions — free-tier review",
+batches 1–17) and `docs/PRICING.md` (S175 client-limits section). Highlights:
+
+- **Free connector = ZERO post-trial** (S173, concurrent session — beware:
+  another session was committing DURING this one; S172→S173 landed mid-talk).
+  S174 (deployed, functions:mcp): the connector now narrates the trial via MCP
+  instructions — day count early, switch-off warning inside 7 days. NAMES NO
+  PRICE anywhere the AI speaks (Kevin's rule) — always point into the app.
+- **AI-coached client limits DECIDED, NOT BUILT: Coach 15 / Elite 25 / Apex 35,
+  Connect tiers inherit their sibling's.** Limits distinct clients the AI works
+  on per UTC month (c_<uid> / p_<planId>), NOT the roster — the free
+  unlimited-clients promise stays. Enforcement = ONE check inside runTool
+  (aitools.js:1532) covers in-app + Accept callables + connector. Full verified
+  build notes in PRICING.md S175 (notes-tools early branch, roster tools
+  exempt, txn on the counter).
+- **132/132 features tiered** (~98 free · 28 Premium+ · 2 Connect+ · boosts/
+  automations Elite+ · 7 admin-only). Tooltip copy confirmed batch by batch.
+  Non-AI levers BANKED, not pulled: Insights bundle (micros + weekly averages +
+  consistency + body comp) is the strongest; then meal planning, Studio tier
+  (teams), barcode (new-accounts-only if ever), per-transaction session cut.
+- **🔴 Session-billing liability (batch 9):** the payment path has no plan
+  check AND no Connect transfer — an outside trainer's session money would land
+  in Kevin's Stripe with no payout path. DECIDED: admin-allowlist card-on-file/
+  auto-charge/earnings until Stripe Connect; monetize sessions later by
+  transaction cut (~15%), never subscription.
+
+**BUILD LIST (next session starts here):** 1) client limits · 2) session-
+billing allowlist · 3) trialStartedAt fence at first login (grandfathering
+kept but fenced) · 4) client-facing data export (backs the footer promise;
+Kevin chose build over reword) · 5) coach_summary 60-cap fix · 6) tracker
+AI-buttons upsell card · 7) the grid/tooltip work — 132 ⓘ tooltips + new named
+rows + copy fixes, all enumerated at the end of PLAN-REVIEW.md.
+
+Scale answers Kevin has on record (don't recompute): no roster size can make
+any tier lose money (token caps bound cost); Coach realistically serves ~33
+clients at 4 conv/client/day; connector calls have 10× headroom, tokens have
+none — appease big trainers with calls, never tokens.
+
 ## ⭐ S171 (Aug 2, 2026) — READ THIS BLOCK FIRST
 Everything below this block is older history, kept for reference. Firebase
 `calorieiq-29762` · model `claude-sonnet-4-6` · live on **glidna.com** · tree
