@@ -423,3 +423,16 @@ long enough to want AI. ANALYSIS features (micros) are the levers.
 + This Week + consistency as an "Insights" bundle) · #5 meal planning ahead
 (moderate) · #1 barcode (proven but backlash-prone; new accounts only) ·
 #3 custom macros (weak, trainer-entangled) · #4 copy-from-day (weakest).
+
+### Batch 7 — roster core (confirmed; coaching area framing set)
+Area framing (Kevin re-confirmed): whole coaching platform stays the free wedge
+for now — trainers are the acquisition channel. TrueCoach charges $26-137/mo for
+less. Coach $49 blurb ("full coaching workspace + AI assistant") must be fixed to
+match: it sells the workspace the grid gives away.
+| Feature | Tier | Note |
+|---|---|---|
+| Connected client roster | FREE | the wedge itself |
+| Coaching Dashboard | FREE **(trainer-side analysis lever)** | TrueCoach's equivalent is $58+; same shape as client Insights bundle |
+| Nudge a quiet client | FREE | client-habit mechanic |
+| Send a client a to-do | FREE | already a grid row |
+| Requests from clients (inbox) | FREE | unadvertised — grid row copy: "to-dos, nudges & asks BOTH WAYS" |
