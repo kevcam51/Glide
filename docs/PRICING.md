@@ -830,16 +830,49 @@ more valuable than the AI (98 free features, incl. a MET burn engine no
 third-party source can supply). The tight spot is that ALL of it is free and
 the paywall sits only on the one thing the industry is racing to commoditise.
 
-Therefore: **monetise the platform, not the intelligence.** Three legs, in
-order of durability —
-1. **Session transaction cut** (batch 9, decided-but-unbuilt). A trainer
-   running $3k/mo at ~15% = **$450/mo from one trainer** — 9 Coach subs, from
-   someone who may pay $0 in subscription. Scales with THEIR success, immune to
-   AI getting cheaper. This is the "big money" Kevin worries about missing, and
-   it is not in higher subscription tiers. Caveat: 15% is aggressive vs
-   Trainerize/TrueCoach passing Stripe through — expect to defend or tune.
-2. **AI subscriptions** (today's ladder) — on a commoditisation clock.
-3. **Studio / agency seats** — the teams capability currently given away.
+### ⛔ The transaction cut was RETRACTED the same session — do not revive it
+
+It was recommended above and Kevin **rejected it, correctly**, minutes later.
+Recording both so nobody re-proposes it:
+
+- 15% is above market for a less-polished product, and **Trainerize/TrueCoach
+  pass Stripe through** — there is no norm to lean on.
+- Charging rent on a trainer's session income **makes us their competitor**.
+- Decisive: it **contradicts the recorded north star** in `docs/ECOSYSTEM.md` —
+  *"be the layer that makes other tools better, not the tool that replaces
+  everything."* A platform fee requires being the platform of record, i.e.
+  displacing Trainerize instead of improving it. The recommendation was made
+  without consulting that doc; check it before proposing revenue models.
+
+**Consequence:** Stripe Connect, if built, is **pure pass-through (0% platform
+fee)** — a liability fix + feature-enabler for outside trainers, never a
+revenue line. It drops well down the build list. Batch 9's admin allowlist
+stands as the interim control.
+
+### So where durable revenue comes from instead (the add-on identity)
+
+**What commoditises is the MODEL, not the SYSTEM.** Cheap AI reasons well; it
+still has no access to a client's Trainerize history, their Garmin burn, their
+measurement trend, a 185-exercise MET table nobody publishes, or the ability to
+WRITE BACK into a coach's roster. The moat is **aggregation + domain math**,
+and it strengthens with every platform imported — perfectly consistent with
+being an add-on: the more tools a trainer already runs, the more valuable the
+layer that unifies them.
+
+Non-AI levers that fit the identity (all banked in PLAN-REVIEW batches):
+1. **Insights bundle** (micros, weekly averages, consistency, body comp) —
+   analysis over data from anywhere; add-on-native.
+2. **More importers** (TrueCoach, Everfit, My PT Hub) — each is a migration
+   hook AND a reason the aggregation is worth paying for.
+3. **Studio / agency seats** — charging for team scale needs no payment rails.
+4. **AI subscriptions** (today's ladder) — still the engine, just not the
+   whole moat.
+
+⚠️ **Tension to decide deliberately if it comes up:** Glidna already ships a
+full trainer workspace (roster, dashboards, plans, booking) — Trainerize-shaped.
+It reads as complementary only because the Trainerize import makes it a MIRROR,
+not a replacement. Adding booking-plus-payments for outside trainers would
+quietly make us the thing Kevin says he does not want to be.
 
 **Connect is a WEDGE, not an annuity.** Expect a major (MyFitnessPal is already
 a first-party ChatGPT Health partner) to bundle a connector free within ~18–24

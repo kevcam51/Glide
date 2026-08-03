@@ -25,8 +25,15 @@ batches 1–17) and `docs/PRICING.md` (S175 client-limits section). Highlights:
 - **🔴 Session-billing liability (batch 9):** the payment path has no plan
   check AND no Connect transfer — an outside trainer's session money would land
   in Kevin's Stripe with no payout path. DECIDED: admin-allowlist card-on-file/
-  auto-charge/earnings until Stripe Connect; monetize sessions later by
-  transaction cut (~15%), never subscription.
+  auto-charge/earnings.
+  ⛔ **The transaction cut that originally justified Connect was RETRACTED
+  (S176, Kevin).** No platform fees, ever — it would make Glidna a Trainerize
+  COMPETITOR, and `docs/ECOSYSTEM.md` says be the layer that makes other tools
+  better. Stripe Connect, if built, is **0% pass-through** — a liability fix
+  only, well down the build list. Durable revenue instead = **aggregation +
+  domain math** (the moat is the system, not the model): Insights bundle, more
+  platform importers, Studio/agency seats, AI ladder. **Read ECOSYSTEM.md
+  before proposing any revenue model.**
 
 **⚠️ S176 REVISED THE CLIENT LIMITS — read `docs/PRICING.md` "S176 — TWO
 REVISIONS" BEFORE building item 1.** Two changes: (a) **Coach Connect has NO
