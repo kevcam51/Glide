@@ -10913,6 +10913,11 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   useEffect(() => { setCiEditing(false); setCiNote(""); setCiMood(null); setCiSaved(false); }, [viewDate]);
   const [burnDraft, setBurnDraft] = useState("");
   const [burnKind, setBurnKind] = useState("active"); // "active" | "total"
+  // Holds the pending value while we ask "are you sure?" — overriding a day the
+  // tracker already reported is a deliberate act (Kevin, S175): the tracker is
+  // the default for every day, and a typed number wins only for the day it was
+  // typed on, after an explicit confirm.
+  const [burnConfirm, setBurnConfirm] = useState(null); // { v, date } | null
   // burnKind decides what the NEXT save writes, so it has to follow the stored
   // record. Left at its "active" default it would show "Whole-day burn you
   // entered — 2,900" with the toggle sitting on Active/workout; saving an update
@@ -10926,6 +10931,10 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
     return Number(w.total) > 0 ? "total" : (Number(w.active) > 0 ? "active" : "");
   })();
   useEffect(() => { if (savedBurnKind) setBurnKind(savedBurnKind); }, [savedBurnKind]);
+  // A pending "are you sure?" belongs to the date it was raised on. Derived
+  // rather than cleared in an effect, so stepping to another day can never leave
+  // a confirm on screen that would write the number to the wrong log.
+  const pendingBurn = burnConfirm && burnConfirm.date === mealDate ? burnConfirm.v : null;
   // Log-confirmation feedback (Kevin): after a quick-log the input clears, the Log
   // button greys to "Logged ✓" for a beat, and a toast confirms it — so you know
   // it saved without scrolling up to check the number.
@@ -12278,21 +12287,31 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               {(() => {
                 const w = (dailyLog.wearable && typeof dailyLog.wearable === "object") ? dailyLog.wearable : {};
                 const manualTotal = w.manual && Number(w.total) > 0 ? Math.round(Number(w.total)) : null;
-                const saveBurn = () => {
-                  const v = parseInt(burnDraft, 10);
-                  if (!(v > 0) || v > 20000) return;
+                // Does the tracker already own this day? Only then is saving an
+                // override — replacing a real reading rather than filling a gap.
+                const trackerOwnsDay = !w.manual && w.reported === true
+                  && (Number(w.active) > 0 || Number(w.resting) > 0 || Number(w.total) > 0);
+                const writeBurn = (v) => {
                   const next = { ...w, source: "Manual", manual: true, reported: true };
                   if (burnKind === "total") { next.total = v; delete next.active; }
                   else { next.active = v; delete next.total; }
                   onLogUpdate("wearable", next);
                   setBurnDraft("");
+                  setBurnConfirm(null);
                   confirmLogged("burn", `Saved — ${v.toLocaleString()} cal`);
+                };
+                const saveBurn = () => {
+                  const v = parseInt(burnDraft, 10);
+                  if (!(v > 0) || v > 20000) return;
+                  if (trackerOwnsDay) { setBurnConfirm({ v, date: mealDate }); return; }
+                  writeBurn(v);
                 };
                 const clearBurn = () => {
                   const rest = { ...w };
                   delete rest.active; delete rest.total; delete rest.manual; delete rest.source;
                   onLogUpdate("wearable", Number(rest.steps) > 0 ? { ...rest, reported: true } : null);
                   setBurnDraft("");
+                  setBurnConfirm(null);
                 };
                 return (
                   <div style={{padding:"10px",marginBottom:"10px",borderRadius:"8px",
@@ -12320,6 +12339,39 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                             color:burnKind===k?"var(--accent)":"var(--muted)"}}>{label}</button>
                       ))}
                     </div>
+                    {/* Overriding a day the tracker already reported asks first,
+                        and says exactly what it costs: this date stops following
+                        the watch until you clear it. Every other date is
+                        untouched — the tracker stays the default. */}
+                    {pendingBurn != null ? (
+                      <div style={{padding:"10px",borderRadius:"7px",border:"1.5px solid var(--yellow)",
+                        background:"rgba(251,191,36,.07)"}}>
+                        <div style={{fontSize:".78rem",fontWeight:700,color:"var(--text)",marginBottom:"4px"}}>
+                          Replace your tracker&rsquo;s number for this day?
+                        </div>
+                        <div style={{fontSize:".7rem",color:"var(--muted)",marginBottom:"9px",lineHeight:1.45}}>
+                          Your tracker recorded{" "}
+                          <strong style={{color:"var(--text)"}}>
+                            {Number(w.active) > 0
+                              ? `${Math.round(Number(w.active)).toLocaleString()} cal active`
+                              : `${Math.round(Number(w.total) || Number(w.resting) || 0).toLocaleString()} cal`}
+                          </strong>{" "}
+                          for this day. Saving <strong style={{color:"var(--text)"}}>{pendingBurn.toLocaleString()} cal</strong>{" "}
+                          makes your number the correct one for <strong style={{color:"var(--text)"}}>this day only</strong> —
+                          it won&rsquo;t be overwritten again until you tap Clear. Other days keep following your tracker.
+                        </div>
+                        <div style={{display:"flex",gap:"6px"}}>
+                          <button onClick={()=>writeBurn(pendingBurn)}
+                            style={{flex:1,padding:"9px 12px",borderRadius:"7px",border:"none",fontSize:".8rem",
+                              fontWeight:700,cursor:"pointer",background:"var(--accent)",color:"#04191a"}}>
+                            Yes, use my number
+                          </button>
+                          <button onClick={()=>setBurnConfirm(null)}
+                            style={{padding:"9px 14px",borderRadius:"7px",border:"1.5px solid var(--border)",fontSize:".8rem",
+                              cursor:"pointer",background:"transparent",color:"var(--muted)"}}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
                     <div style={{display:"flex",gap:"6px"}}>
                       <input type="number" inputMode="numeric" value={burnDraft} placeholder="e.g. 620"
                         onChange={e=>setBurnDraft(e.target.value)}
@@ -12337,6 +12389,15 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                             cursor:"pointer",background:"transparent",color:"var(--muted)"}}>Clear</button>
                       )}
                     </div>
+                    )}
+                    {/* A pinned day looked identical to a synced one, so "it stopped
+                        pulling" was indistinguishable from "you told it not to". */}
+                    {w.manual && pendingBurn == null && (
+                      <div style={{fontSize:".66rem",color:"var(--yellow)",marginTop:"7px",lineHeight:1.45}}>
+                        This day uses your number instead of your tracker&rsquo;s. Tap <strong>Clear</strong> to
+                        hand it back to the tracker. Only this day is affected.
+                      </div>
+                    )}
                     <div style={{fontSize:".66rem",color:"var(--muted)",marginTop:"7px",lineHeight:1.45}}>
                       {burnKind === "active"
                         ? "Active (or “exercise”) calories — what you burned on top of simply being alive. This replaces the estimate above."
@@ -24933,10 +24994,16 @@ export default function App() {
       // ~a day, so every midnight rollover made the card vanish until the next
       // sync landed ("it disappears after a certain period of time"). Read from
       // the same map — no extra Firestore round-trips.
+      // Skip hand-entered days (S175). Both places this feeds label it "Tracker",
+      // so an override on Monday was being shown on Tuesday as a tracker reading —
+      // which is precisely what "the burn stopped syncing when I typed it in"
+      // looked like: the number never moved again because it was your own.
+      // Today's own manual entry is unaffected; it renders from dailyLog.wearable
+      // and is labelled "Active burn you entered".
       let rw = null;
       for (let i = 0; i <= 3 && !rw; i++) {
         const pl = byDate[keyFor(i)];
-        if (pl && hasWearable(pl.wearable)) rw = { daysAgo: i, wearable: pl.wearable };
+        if (pl && hasWearable(pl.wearable) && !pl.wearable.manual) rw = { daysAgo: i, wearable: pl.wearable };
       }
       if (!alive) return;
       setRecentWearable(rw);

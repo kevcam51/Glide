@@ -211,9 +211,22 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
   const startDate = new Date(Date.now() - span * 86400000).toISOString().slice(0, 10);
   const endDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   const byDate = {};
+  // Which metrics we actually GOT this run. A 15s timeout or a 5xx makes tz()
+  // return {ok:false} rather than throw (see tz above), and the old code just
+  // `continue`d — dropping the whole calorieOut window. pickSource then filled
+  // `active` with 0 from the step-only buckets, so ONE slow call overwrote 90
+  // days of real burn numbers with zeros, and the next good run put them back:
+  // exactly the "it pulls sometimes" flapping. Never write a metric we failed
+  // to fetch — leave whatever is already stored alone.
+  const failed = [];
   for (const type of ["calorieOut", "step"]) {
     const r = await tz("healthData/getList", { userID: tzUserId, type, startDate, endDate }, auth);
-    if (!r.ok) continue;
+    if (!r.ok) {
+      failed.push(type);
+      console.error("healthData/getList failed", type, "user", tzUserId,
+        "status", r.status, JSON.stringify(r.json && r.json.error ? r.json.error : r.json).slice(0, 200));
+      continue;
+    }
     for (const e of (r.json && r.json.healthData) || []) {
       if (!e || !/^\d{4}-\d{2}-\d{2}$/.test(e.date || "")) continue;
       // Trainerize returns entries from EVERY connected tracker for a date
@@ -225,12 +238,18 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
       const src = e.source || "unknown";
       const bySrc = (byDate[e.date] = byDate[e.date] || {});
       const w = (bySrc[src] = bySrc[src] || { source: e.source || null });
+      // hasCal / hasSteps record that this source SPOKE for the metric, which is
+      // not the same as the value being non-zero (S137: a zero-calorie day is
+      // real data). Everything downstream distinguishes "reported 0" from
+      // "no reading" using these flags rather than the numbers.
       if (type === "calorieOut" && e.data) {
         w.active = r0(e.data.activeEnergy);
         w.resting = r0(e.data.restingEnergy);
+        w.hasCal = true;
         w.reported = true;   // the tracker HAS spoken for this date, even if it said 0
       } else if (type === "step" && e.data) {
         w.steps = r0(e.data.steps);
+        w.hasSteps = true;
         w.reported = true;
       }
     }
@@ -248,14 +267,23 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
   const pickSource = (bySrc) => {
     const cands = Object.values(bySrc || {}).filter((c) => c && c.reported);
     if (!cands.length) return null;
-    const best = (field) => cands.reduce((a, c) =>
-      (Number(c[field] || 0) > Number(a || 0) ? Number(c[field] || 0) : a), 0);
-    const active = best("active"), resting = best("resting"), steps = best("steps");
+    // null, NOT 0, when no source reported this metric for this date. Returning 0
+    // is what let a step-only run (or a failed calorieOut fetch) erase real burn
+    // numbers — the caller keeps whatever is already stored for a null metric.
+    const best = (field, flag) => {
+      const spoke = cands.filter((c) => c[flag]);
+      if (!spoke.length) return null;
+      return spoke.reduce((a, c) => Math.max(a, Number(c[field]) || 0), 0);
+    };
+    const active = best("active", "hasCal");
+    const resting = best("resting", "hasCal");
+    const steps = best("steps", "hasSteps");
+    if (active == null && resting == null && steps == null) return null;
     // Attribute the day to whoever supplied the WINNING energy figure (not merely
     // the first source that reported any), else the winning step count.
-    const owner = (active > 0 && cands.find((c) => Number(c.active || 0) === active))
-      || (resting > 0 && cands.find((c) => Number(c.resting || 0) === resting))
-      || (steps > 0 && cands.find((c) => Number(c.steps || 0) === steps))
+    const owner = (active > 0 && cands.find((c) => c.hasCal && Number(c.active || 0) === active))
+      || (resting > 0 && cands.find((c) => c.hasCal && Number(c.resting || 0) === resting))
+      || (steps > 0 && cands.find((c) => c.hasSteps && Number(c.steps || 0) === steps))
       || cands[0];
     return { active, resting, steps, reported: true, source: owner.source || null };
   };
@@ -288,15 +316,29 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
     // real typed figure with nothing. Clearing the entry drops the `manual` flag,
     // which hands the date back to the tracker.
     const prev = log.wearable;
+    // A metric this run did not receive keeps whatever is already stored, so a
+    // partial pull (one metric fetched, the other timed out) can never blank a
+    // day. Only a value the tracker actually reported — including a real 0 —
+    // replaces what is there.
+    const keep = (v, p) => (v == null ? (p == null ? undefined : p) : v);
+    const next = {
+      active: keep(w.active, prev && prev.active),
+      resting: keep(w.resting, prev && prev.resting),
+      steps: keep(w.steps, prev && prev.steps),
+      reported: true,
+      source: w.source || (prev && prev.source) || null,
+    };
     // Unchanged day → no write. This is what makes a 90-day window affordable on
     // a 30-minute schedule: past days never change, so after the first pass only
     // today (and any corrected day) costs a write instead of ~90 every run.
     if (prev && !prev.manual
-      && Number(prev.active || 0) === Number(w.active || 0)
-      && Number(prev.resting || 0) === Number(w.resting || 0)
-      && Number(prev.steps || 0) === Number(w.steps || 0)
-      && (prev.source || null) === (w.source || null)) continue;
+      && Number(prev.active || 0) === Number(next.active || 0)
+      && Number(prev.resting || 0) === Number(next.resting || 0)
+      && Number(prev.steps || 0) === Number(next.steps || 0)
+      && (prev.source || null) === (next.source || null)) continue;
     if (prev && prev.manual) {
+      // The day was deliberately overridden by hand, so the typed calories stand
+      // for THAT DATE ONLY (Kevin, S175) — every other date stays tracker-first.
       // Steps are never part of a typed calorie figure, so folding them in adds
       // data without touching the number the person entered.
       if (Number(w.steps) > 0 && !(Number(prev.steps) > 0)) {
@@ -306,7 +348,7 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
       }
       continue;
     }
-    log.wearable = w;
+    log.wearable = next;
     await kvSetJSON(db, uid, logKey, log);
     written++;
     if (!firstDate || date < firstDate) firstDate = date;
@@ -314,8 +356,17 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
   }
   // Dates, not just a count: "15 days of tracker data" with no range left Kevin
   // assuming it meant today.
-  return { days: written, seen, firstDate, lastDate };
+  // `failed` names any metric Trainerize would not give us this run. Surfacing it
+  // matters: "0 days written" because nothing changed and "0 days written"
+  // because the fetch died look identical otherwise, which is how a silently
+  // flapping sync went unnoticed.
+  return { days: written, seen, firstDate, lastDate, failed };
 }
+
+// Test-only handle. Not a Cloud Function (index.js never re-exports it), so it
+// changes nothing about what deploys — it just lets the sync be exercised with a
+// stubbed fetch + db. See scripts/test-health-sync.mjs.
+exports._syncClientHealth = syncClientHealth;
 
 // ── v2: completed workouts → Glide check-ins ────────────────────────────────
 // calendar/getList (one call per client, {userID, startDate, endDate}) returns
