@@ -446,3 +446,21 @@ match: it sells the workspace the grid gives away.
 | Invite link / share / QR | FREE | acquisition engine — never tax |
 | Email invitations | FREE | same |
 | Referral stats | FREE | same |
+
+### Batch 9 — the money cluster (confirmed — TWO MOVES, one is a liability fix)
+| Feature | Tier | Note |
+|---|---|---|
+| Session booking | FREE | scheduling = workspace; Acuity charges $16+/mo for this alone — grid row material |
+| Cancellation policy | FREE | only matters attached to billing |
+| Card on file for sessions | **ADMIN-ALLOWLIST until Stripe Connect** | liability control, not revenue |
+| Automatic session charging | **ADMIN-ALLOWLIST until Stripe Connect** | payment path has NO plan check AND no transfer_data/application_fee — an outside trainer's client money would land in Kevin's Stripe account, Kevin eats the fees and owes a manual payout with no mechanism. Invisible today only because Kevin is the sole real trainer. |
+| Earnings | **ADMIN-ALLOWLIST until Stripe Connect** | rides the same gate |
+
+DECIDED (Kevin): session billing is NEVER subscription-gated. Long-term
+monetization = per-transaction cut via Stripe Connect (roadmap splits ~15%
+platform) — scales with trainer success, pays the Stripe fees, and makes
+FREE-tier trainers revenue-positive: the second revenue leg, the structural
+answer to "we can't only sell AI".
+
+BUILD LIST addition: admin allowlist on the session-billing trio (card save,
+auto-charge, earnings) — ships with the client-limit work.
