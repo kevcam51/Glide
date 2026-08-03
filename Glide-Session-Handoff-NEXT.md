@@ -38,7 +38,26 @@ rows + copy fixes, all enumerated at the end of PLAN-REVIEW.md.
 Scale answers Kevin has on record (don't recompute): no roster size can make
 any tier lose money (token caps bound cost); Coach realistically serves ~33
 clients at 4 conv/client/day; connector calls have 10× headroom, tokens have
-none — appease big trainers with calls, never tokens.
+none — appease big trainers with calls, never tokens. Client limits are a
+SECOND margin guard under the realistic model (spend = clients × ~6 conv):
+they bank ~$9/$11/$19 per maxed Coach/Elite/Apex vs the cap-only worst case.
+Plan-shuffling is already defeated by design — the counter is a MONTHLY set of
+distinct targets touched; slots never free mid-month; clients' own plans are
+uncounted (their token budget bounds them). Plugin call caps ALREADY scale
+(2k/5k/10k/25k — the public "2,000/day" is a docs simplification); leave them
+as abuse backstops, the client limit is what tiers sell.
+
+**Later ideas (Kevin, S176):** 1) cap-hit message adds "or connect your own
+Claude/ChatGPT (included in your plan) to keep going" — turns our costliest
+moment into a ~free one (maxed Apex in-app $63/mo vs ~$0.30 via plugin);
+relief valve only, never the primary pitch (Premium nets ~$10 vs Connect
+$4.55). 2) Connector CHART IMAGES — a get_progress_chart tool returning a
+server-rendered PNG via the existing resvg pipeline (api/og.js); MCP image
+results render in Claude, VERIFY ChatGPT's handling when scoping. 3) Overage
+"client packs" saved for later (also in PRICING.md S175). 4) OWED: a
+plain-English walkthrough of every batch decision — Kevin flagged he
+confirmed some without fully understanding; review before the grid build
+treats them as final.
 
 ## ⭐ S171 (Aug 2, 2026) — READ THIS BLOCK FIRST
 Everything below this block is older history, kept for reference. Firebase
