@@ -365,3 +365,11 @@ AI-only paywalls are a structural risk (a user could bring their own AI instead)
 | Barcode scanner | FREE **(banked lever #1)** | MFP's famous Premium gate. If ever gated: NEW accounts only, never a take-away. NOT promised free forever — deliberately unbanked. |
 | Serving size & unit picker | FREE | part of search, not a separate feature |
 | AI food estimate (description) | PREMIUM+ | correctly enforced today; UI bug: button shows for free users and errors instead of upselling — build list |
+
+### Batch 2 — targets & macros (confirmed)
+| Feature | Tier | Note |
+|---|---|---|
+| Micronutrient tracking (~30 nutrients) | FREE **(banked lever #2 — strongest)** | MFP charges $19.99/mo for this; appeals to serious users (the ones who pay). Currently not even advertised — fix in grid work. |
+| Macro targets with progress bars | FREE | table stakes everywhere |
+| Custom macro targets (g or %) | FREE (lever #3 — weak) | MFP paywalls gram-level goals, but trainers set these on client plans — gating client-side while coaches set them is confusing. |
+| Protein target basis (1g/0.7g per lb) | FREE | preference toggle, too small to sell |
