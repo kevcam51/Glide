@@ -488,3 +488,15 @@ are the DELIVERY SYSTEM for the free habit mechanics — gating delivery breaks
 retention. Trainerize charging for reminder automations = our ammunition, not a
 model. Grid: one named row per ladder — client "Phone reminders & nudges";
 trainer "Your clients get automatic logging reminders".
+
+### Batch 13 — account, device & privacy (confirmed — PLATFORM AREA COMPLETE, 22/22)
+| Feature | Tier | Note |
+|---|---|---|
+| Install to home screen | FREE | + add to TRAINER basics row (currently client-only row) |
+| Face ID / Touch ID | FREE | security is never paid; add to trainer row too |
+| Auto sign-out when idle | FREE | same principle |
+| AI data consent switch | FREE + **named row BOTH ladders** | server-side enforced, covers even the trainer's connector; "your data, your switch" — a trust argument nobody in fitness makes |
+| Light/Dark/Auto | FREE | — |
+| Customise dashboard tiles | FREE | — |
+| Back up & move your data (trainer) | FREE | trust feature. BUILD LIST: client-facing JSON export to back the footer promise ("you keep every bit of your data") — Kevin chose BUILD over reword, attorney review pending |
+| Admin dashboard / App requests inbox | ADMIN-ONLY, off page | stamps |
