@@ -464,3 +464,11 @@ answer to "we can't only sell AI".
 
 BUILD LIST addition: admin allowlist on the session-billing trio (card save,
 auto-charge, earnings) — ships with the client-limit work.
+
+### Batch 10 — teams & organization (confirmed — COACHING AREA COMPLETE, 20/20)
+| Feature | Tier | Note |
+|---|---|---|
+| Team of sub-trainers | FREE **(banked: Studio-tier anchor — strongest trainer lever)** | multi-seat agency capability; My PT Hub charges $215/mo partly for 5 seats. Future Studio tier = teams + big connector rosters + Connect revenue splits (head 10%/platform 15%). Build when the first real agency arrives. |
+| Assign & manage client plans | FREE | core workspace |
+| Folders | FREE | organization is never worth gating |
+| Trainerize import & sync | ADMIN-ONLY, stays off the page | runs on Kevin's personal token; review says do not "fix". Coach blurb rewrite (batch 7) covers the adjacency. |
