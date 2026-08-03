@@ -166,5 +166,45 @@ console.log("\n6. manual override is per-date");
   check("the next day is not flagged manual", !wO.manual);
 }
 
+// ── 7. an empty tracker record must not read as a zero-calorie day ──────────
+// Kevin's real data, Aug 2026: Trainerize returns ONE calorie record per date —
+// garmin's on the days Garmin reported, an empty appleHealthKit {0,0} on the
+// rest — while garmin supplies steps every day. Those phantom zeros were being
+// stored as real readings, which is what showed 0 burn.
+console.log("\n7. empty {0,0} tracker record is not data");
+{
+  const GARMIN = "2026-07-30", PHANTOM = "2026-07-31";
+  const db = fakeDb();
+  stubFetch({
+    calorieOut: [cal(GARMIN, "garmin", 607, 2337), cal(PHANTOM, "appleHealthKit", 0, 0)],
+    step: [step(GARMIN, "garmin", 10201), step(PHANTOM, "garmin", 6839)],
+  });
+  await sync(db, UID, PID, TZID, AUTH, 14);
+  const g = readWearable(db, UID, PID, GARMIN), p = readWearable(db, UID, PID, PHANTOM);
+  check("garmin day keeps its calories", g.active === 607 && g.resting === 2337, JSON.stringify(g));
+  check("phantom day records NO calories", p.active === undefined && p.resting === undefined, JSON.stringify(p));
+  check("phantom day still keeps garmin's steps", p.steps === 6839, JSON.stringify(p));
+
+  // And a later phantom must not erase a real reading already stored.
+  stubFetch({
+    calorieOut: [cal(GARMIN, "appleHealthKit", 0, 0)],
+    step: [step(GARMIN, "garmin", 10201)],
+  });
+  await sync(db, UID, PID, TZID, AUTH, 14);
+  const g2 = readWearable(db, UID, PID, GARMIN);
+  check("a later phantom cannot erase garmin's number", g2.active === 607, `got ${g2.active}`);
+}
+
+// ── 8. a real 0-active day with resting still counts (S137 must survive) ────
+console.log("\n8. real 0 active + real resting still writes");
+{
+  const db = fakeDb();
+  stubFetch({ calorieOut: [cal(D, "garmin", 0, 2337)], step: [step(D, "garmin", 400)] });
+  await sync(db, UID, PID, TZID, AUTH, 14);
+  const w = readWearable(db, UID, PID, D);
+  check("active 0 recorded", w.active === 0, JSON.stringify(w));
+  check("resting 2337 recorded", w.resting === 2337);
+}
+
 console.log(`\n${fail === 0 ? "PASS" : "FAIL"} — ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

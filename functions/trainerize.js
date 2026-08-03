@@ -243,10 +243,20 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
       // real data). Everything downstream distinguishes "reported 0" from
       // "no reading" using these flags rather than the numbers.
       if (type === "calorieOut" && e.data) {
-        w.active = r0(e.data.activeEnergy);
-        w.resting = r0(e.data.restingEnergy);
-        w.hasCal = true;
-        w.reported = true;   // the tracker HAS spoken for this date, even if it said 0
+        const active = r0(e.data.activeEnergy), resting = r0(e.data.restingEnergy);
+        // {active:0, resting:0} is NOT "a zero-calorie day" — a living person
+        // always burns resting energy, so an all-zero record is a connected but
+        // empty tracker holding the slot. Real case (Kevin, Aug 2026): Trainerize
+        // returns ONE calorie record per date, garmin's on the 3 days Garmin
+        // reported and an empty appleHealthKit one on the other 13. Writing those
+        // as genuine zeros is what showed 0 burn and read as "the sync stopped".
+        // A real 0 active with real resting still counts — that was the S137 case.
+        if (active > 0 || resting > 0) {
+          w.active = active;
+          w.resting = resting;
+          w.hasCal = true;
+          w.reported = true; // the tracker HAS spoken for this date, even if active is 0
+        }
       } else if (type === "step" && e.data) {
         w.steps = r0(e.data.steps);
         w.hasSteps = true;
