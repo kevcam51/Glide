@@ -500,3 +500,13 @@ trainer "Your clients get automatic logging reminders".
 | Customise dashboard tiles | FREE | — |
 | Back up & move your data (trainer) | FREE | trust feature. BUILD LIST: client-facing JSON export to back the footer promise ("you keep every bit of your data") — Kevin chose BUILD over reword, attorney review pending |
 | Admin dashboard / App requests inbox | ADMIN-ONLY, off page | stamps |
+
+### Batch 14 — the premium-or-trial block (confirmed)
+All 28 premium-or-trial AI rows CONFIRMED at Premium+ (4 of them also
+trainer-role-gated), tooltips as drafted. Verified: the urgent-list allowance
+mismatches (trial>paid inversion, ~15 vs two budgets, 2.5x vs 2x) were fixed by
+S169g/S171 — current published numbers match BUDGETS. No action.
+
+GRANDFATHERING DECIDED (Kevin): keep legacy accounts unlocked as an earned
+courtesy, but FENCE it — BUILD LIST: any account missing trialStartedAt gets one
+stamped at first login going forward, closing the free-forever minting hazard.
