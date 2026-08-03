@@ -472,3 +472,11 @@ auto-charge, earnings) — ships with the client-limit work.
 | Assign & manage client plans | FREE | core workspace |
 | Folders | FREE | organization is never worth gating |
 | Trainerize import & sync | ADMIN-ONLY, stays off the page | runs on Kevin's personal token; review says do not "fix". Coach blurb rewrite (batch 7) covers the adjacency. |
+
+### Batch 11 — wearables + admin rows (confirmed)
+| Feature | Tier | Note |
+|---|---|---|
+| Trainerize import / auto-sync / sync-now / My watch data (4 rows) | ADMIN-ONLY, off the page | ride Kevin's personal token |
+| Tracker readings on dashboard | FREE | — |
+| Type in watch's burn | FREE | manual on-ramp |
+| Use my tracker's real burn | FREE + **named grid row** | headline differentiator, unadvertised; too wired-in to gate — "Your watch sets your calorie target" |
