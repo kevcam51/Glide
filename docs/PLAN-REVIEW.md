@@ -384,3 +384,16 @@ AI-only paywalls are a structural risk (a user could bring their own AI instead)
 
 Grid action from this batch: the target engine gets named rows — today the only
 nutrition row is "Food, calorie & macro tracking", which sells none of it.
+
+### Batch 4 — food reuse suite (confirmed)
+| Feature | Tier | Note |
+|---|---|---|
+| Saved foods library | FREE | retention mechanic |
+| Previously logged foods | FREE | friction removal |
+| Saved & previous whole meals | FREE | same cluster |
+| Copy a meal from another day | FREE (lever #4 — weakest) | paid at MFP, but overlaps 3 free reuse paths — wouldn't bite as a gate |
+| Move a food between meals | FREE | charging to fix a mistake is hostile |
+
+Principle made explicit this batch (Kevin confirmed): HABIT features (anything that
+increases logging frequency) stay free — logging frequency keeps people in the app
+long enough to want AI. ANALYSIS features (micros) are the levers.
