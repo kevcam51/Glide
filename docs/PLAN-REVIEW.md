@@ -348,3 +348,20 @@ _Not yet reconciled against PLAN_FEATURES._
 | Choose what your outside AI may do | When you connect an outside assistant you approve exactly what it can do — read only, log for you, or change your plan — and you can disconnect any time. | `free` | both |
 | Turn AI off for your account | Switch off AI entirely and no assistant — yours or your trainer's — can touch your data, while everything else in the app keeps working. | `free` | both |
 | AI usage and spend dashboard | See every account's AI use and cost for the day, month and year in one place. | `admin-only` | trainer |
+
+---
+
+## Decisions — free-tier review with Kevin (S175, Aug 2 2026)
+
+Standing rule (Kevin): free = every non-AI feature; the AI layer (in-app + connector)
+is what you pay for. Non-AI paid levers are being scouted per batch for LATER use —
+AI-only paywalls are a structural risk (a user could bring their own AI instead).
+
+### Batch 1 — food-logging core (confirmed)
+| Feature | Tier | Note |
+|---|---|---|
+| Meal & food logging | FREE | front door, non-negotiable |
+| Food database search | FREE | unusable tracker = no trial starts |
+| Barcode scanner | FREE **(banked lever #1)** | MFP's famous Premium gate. If ever gated: NEW accounts only, never a take-away. NOT promised free forever — deliberately unbanked. |
+| Serving size & unit picker | FREE | part of search, not a separate feature |
+| AI food estimate (description) | PREMIUM+ | correctly enforced today; UI bug: button shows for free users and errors instead of upselling — build list |
