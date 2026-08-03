@@ -700,3 +700,65 @@ Lever is a first-year promo, not a list cut. FatSecret barcode needs a
 `/barcode` route on the proxy (verified missing). Free-tier feature depth and
 per-feature ⓘ tooltips still to design — docs/PLAN-REVIEW.md has all 109
 features with tooltip copy ready.
+
+---
+
+## S175 — AI-coached client limits per trainer tier — DECIDED (Aug 2, 2026; build queued)
+
+Kevin's call, made with the competitive research on record. **Not built yet** —
+deliberately queued behind the free-tier feature review so it ships in the same
+pricing update as whatever that surfaces.
+
+| Trainer tier | AI-coached clients / month |
+|---|---:|
+| Free | 0 (no AI) |
+| Coach Connect $19.99 | **15** (inherits Coach) |
+| Coach $49 | **15** |
+| Coach Elite $79 | **25** |
+| Coach Apex $129 | **35** |
+
+**What is limited:** distinct clients the AI works on per UTC month — connected
+accounts AND local plan files (Trainerize imports are local plans; they count).
+**What is NOT limited:** the platform roster. "Unlimited connected clients —
+free forever" stays true; dashboards/to-dos/DMs are untouched. Client #16
+connects fine — the wall appears only when the AI is asked to work on them,
+which is the upgrade moment.
+
+**Why (honest version):** the limits do NOT change worst-case cost — the token
+caps already bound that. They price big rosters proportionally (the market
+standard: TrueCoach $58/20 · $137/50, PTDistinction $59.90/25 · $89.90/50,
+FitBudd $79/20, Trainerize slider to ~$225/200 — verified Aug 2, 2026, official
+pages) and they guarantee headroom inside a tier: 15 clients x 6 conv/day =
+135k tokens, leaving a Coach trainer ~43 conversations of personal use under
+the 200k cap. Kevin chose 15/25/35 over the market-anchored 15/30/50 for
+stronger upgrade pressure; revisit if side-by-side shopping ever bites.
+
+**Connector loophole: closed by architecture, not policy.** Every surface —
+in-app chat/stream, both Accept callables (logMeal, setWorkoutSchedule), and
+the MCP connector — funnels through `runTool` (functions/aitools.js:1532). One
+check there covers everything; Coach Connect at $19.99 hits the same wall as
+Coach at $49. This also satisfies the standing AI↔connector-parity rule.
+
+**Build notes (from the S175 code inspection — trust these, they were verified
+against the source):**
+- Charge INSIDE `runTool`, keyed `c_<uid>` (connected) / `p_<planId>` (local
+  plan). Keying on resolved uid alone is WRONG — `resolveTargetUid` maps every
+  localPlanId to callerUid, which would collapse all plan files into one slot.
+- The notes tools validate `localPlanId` in their own early branch
+  (aitools.js ~:1961) and return before the shared planOverride block (~:2066)
+  — either charge there too or hoist the planOverride block above notes.
+- Roster-overview tools (`list_clients`, `find_client`, `coach_summary`) have
+  no per-client target and stay EXEMPT — otherwise one coach_summary burns the
+  month.
+- Storage: `users/{uid}/aiClients/{YYYY-MM}` `{ targets: {key: ts}, count,
+  plan }` — existing key = allow with no write; new key = transaction
+  (count < cap) then merge. Idempotent across propose/Accept re-calls.
+- Use a transaction, unlike mcpUsage's read-then-write, or accept 1–2 overshoot
+  from parallel tool calls.
+- Grid: keep the unlimited-roster row; add "AI-coached clients" row per tier.
+  Denial copy points at the app's plan grid, names no price (S174 rule).
+- Open detail (default, flag to Kevin at build time): trial = no client limit,
+  consistent with "the trial is the whole product".
+
+**Client packs** (PTDistinction-style +$/client overage) noted as a proven
+later mechanism for 100-client connector rosters; not in scope now.
