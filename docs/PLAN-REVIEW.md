@@ -406,3 +406,20 @@ long enough to want AI. ANALYSIS features (micros) are the levers.
 | Water tracking | FREE | free everywhere |
 | Calendar + back-dated logging | FREE | fixing your history = data ownership, per ToS promise |
 | Adherence colouring & roll-ups | FREE | analysis-adjacent but it's the streak payoff; deeper analysis surfaces are the better candidates |
+
+### Batch 6 — insights & guidance (confirmed — NUTRITION AREA COMPLETE, 32/32)
+| Feature | Tier | Note |
+|---|---|---|
+| Step back a day on meal card | FREE | habit |
+| This Week averages | FREE **(Insights bundle lever)** | with micros + consistency = a coherent future premium module (MFP "Reports" is Premium-only) |
+| On-track consistency tracker | FREE (Insights bundle, gate LAST) | the realistic goal date does conversion work where it sits |
+| Logging streak & badges | FREE — never gate | purest habit mechanic; (streak REPAIR noted as a cute future micro-lever) |
+| Nutrients guide in full plan | FREE | reference content, beginner objection-handler |
+| Plain-English daily checklist | FREE | signup argument, not a paid feature |
+| Log food by chat/voice/photo (Ask Glidna) | PREMIUM+ | the AI rule |
+| Log food on a client's behalf (manual) | FREE trainer capability | GRID FIX: row must say "…by chat" — manual behalf-logging is free and ungated |
+
+**Banked non-AI levers after nutrition (strength order):** #2 micros (strongest,
++ This Week + consistency as an "Insights" bundle) · #5 meal planning ahead
+(moderate) · #1 barcode (proven but backlash-prone; new accounts only) ·
+#3 custom macros (weak, trainer-entangled) · #4 copy-from-day (weakest).
