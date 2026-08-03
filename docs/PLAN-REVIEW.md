@@ -436,3 +436,13 @@ match: it sells the workspace the grid gives away.
 | Nudge a quiet client | FREE | client-habit mechanic |
 | Send a client a to-do | FREE | already a grid row |
 | Requests from clients (inbox) | FREE | unadvertised — grid row copy: "to-dos, nudges & asks BOTH WAYS" |
+
+### Batch 8 — communication & invites (confirmed)
+| Feature | Tier | Note |
+|---|---|---|
+| Direct messages with clients | FREE | biggest omission on the page — ADD NAMED ROW, BOTH ladders. Retention moat. |
+| Client notes (private/shared) | FREE | workspace basics |
+| Personal notebook | FREE | grid footnote at most |
+| Invite link / share / QR | FREE | acquisition engine — never tax |
+| Email invitations | FREE | same |
+| Referral stats | FREE | same |
