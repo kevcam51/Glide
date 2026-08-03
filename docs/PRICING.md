@@ -762,3 +762,94 @@ against the source):**
 
 **Client packs** (PTDistinction-style +$/client overage) noted as a proven
 later mechanism for 100-client connector rosters; not in scope now.
+
+---
+
+## S176 — TWO REVISIONS to the above (Aug 2, 2026, Kevin) — read before building
+
+### 1. Coach Connect has NO client limit. The rule is: limit only what we pay for.
+
+Supersedes the "Coach Connect $19.99 → 15 (inherits Coach)" row above.
+
+| | What it sells | AI-coached client limit |
+|---|---|---|
+| Coach / Elite / Apex | **We provide the AI** (chat, photo, voice, in-app) | 15 / 25 / 35 |
+| Coach Connect | **They bring the AI** (their Claude, their bill) | **none** |
+
+Kevin's two objections, both correct and both fatal to the old row:
+- **It reads as a scam.** The client limit exists because in-app AI costs us
+  money. On Connect it costs us ~nothing. A restriction with no cost behind it
+  is arbitrary, and customers work that out.
+- **A Connect ladder cannibalises UPWARD.** A hypothetical "Coach Connect 100"
+  would strictly dominate Coach Elite ($79, 25 clients) — the proposal would
+  have undercut the tiers it existed to protect. Scrapped.
+
+The new rule — *we limit what we pay for* — is printable on the pricing page,
+defensible to anyone, and makes Connect vs Coach a choice of AXIS (whose AI is
+this?) rather than rungs on one ladder. Consequence accepted: a 100-client
+solo trainer can sit on Connect at $19.99 (~99% margin, ~$19 profit). That is
+fine — they were never going to buy Coach Elite, and their 100 clients are a
+distribution channel into the app.
+
+### 2. Seat model — how a slot is consumed (fixes a real flaw in the monthly-touch design)
+
+The original design would have let an accidental connection lock a slot for up
+to 30 days. Kevin flagged it as business-damaging; he is right. Revised:
+
+**A slot is consumed the first time the AI actually DOES something for that
+person in a calendar month — not when the switch is flipped.**
+
+| Situation | Result |
+|---|---|
+| Connect the wrong person, notice, disconnect | **free** — the AI never ran |
+| Full at 15, need to swap someone in | remove → slot frees **immediately**, add now |
+| Remove someone, want them back this month | **free** — already in the month's set |
+| Shuffle AI across 25 plans to dodge the limit | blocked at the 16th DIFFERENT person |
+
+So every genuine coaching move is instant and free; only reaching a 16th
+distinct person in one month is refused. Nobody ever waits out a cooldown.
+
+**Seat UX (build list):**
+- Confirm on enable: "Turn on AI coaching for Sarah? This uses 1 of your 15 AI
+  client slots."
+- **AI Clients screen**: "12 of 15 slots used" + the list + add/remove.
+- Denial copy points into the app's plan grid, names no price (S174 rule).
+
+**Trainerize's active/basic split — mechanic adopted, stinginess rejected.**
+Their "basic" clients lose everything but messaging/calendar. Every Glidna
+client stays a FULL client (tracking, plans, charts, DMs — the 98 free
+features); the seat gates AI coaching only. Familiar mechanic, none of the
+resentment, and consistent with "unlimited connected clients, free forever".
+
+### Strategic frame recorded (Kevin, S176) — the reason this matters
+
+Kevin: *"the only way to make the tiers worth it is to make the app more
+valuable than the AI alone. Because the AI is the driving force we are in a
+tight spot."* The diagnosis is right, with one correction: the app IS already
+more valuable than the AI (98 free features, incl. a MET burn engine no
+third-party source can supply). The tight spot is that ALL of it is free and
+the paywall sits only on the one thing the industry is racing to commoditise.
+
+Therefore: **monetise the platform, not the intelligence.** Three legs, in
+order of durability —
+1. **Session transaction cut** (batch 9, decided-but-unbuilt). A trainer
+   running $3k/mo at ~15% = **$450/mo from one trainer** — 9 Coach subs, from
+   someone who may pay $0 in subscription. Scales with THEIR success, immune to
+   AI getting cheaper. This is the "big money" Kevin worries about missing, and
+   it is not in higher subscription tiers. Caveat: 15% is aggressive vs
+   Trainerize/TrueCoach passing Stripe through — expect to defend or tune.
+2. **AI subscriptions** (today's ladder) — on a commoditisation clock.
+3. **Studio / agency seats** — the teams capability currently given away.
+
+**Connect is a WEDGE, not an annuity.** Expect a major (MyFitnessPal is already
+a first-party ChatGPT Health partner) to bundle a connector free within ~18–24
+months. Qualifier: what goes free will be READ access — Strava's is read-only,
+MFP's health integration is the same shape. Glidna's WRITES, which needs the
+platform underneath, so the window is longer than it looks but is still a
+window. Price Connect to spread, not to milk. **Lock early Connect subscribers'
+rate for life** (Kevin's instinct, endorsed): costs nothing now, real loyalty
+asset when the price falls.
+
+**The metric that tells you if Connect is working:** not revenue per Connect
+user — whether Connect trainers' CLIENTS end up in the app. If they do, it is a
+growth engine. If they don't, it is a leak.

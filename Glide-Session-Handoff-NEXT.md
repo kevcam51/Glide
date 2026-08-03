@@ -28,7 +28,19 @@ batches 1–17) and `docs/PRICING.md` (S175 client-limits section). Highlights:
   auto-charge/earnings until Stripe Connect; monetize sessions later by
   transaction cut (~15%), never subscription.
 
-**BUILD LIST (next session starts here):** 1) client limits · 2) session-
+**⚠️ S176 REVISED THE CLIENT LIMITS — read `docs/PRICING.md` "S176 — TWO
+REVISIONS" BEFORE building item 1.** Two changes: (a) **Coach Connect has NO
+client limit** — the rule is now *limit only what we pay for*; a Connect ladder
+was scrapped because it reads as a scam (restriction with no cost behind it)
+and cannibalises upward (a "Connect 100" would dominate Coach Elite). (b) **A
+seat is consumed on first AI USE, not on enable** — so a mis-connect costs
+nothing, removing frees the slot instantly, re-adding the same person that
+month is free, and only a 16th DISTINCT person is refused. Plus seat UX:
+confirm-on-enable + an "AI Clients — 12 of 15 slots" screen. Trainerize's
+active/basic mechanic adopted; its stinginess rejected (every client stays a
+FULL client, the seat gates AI only).
+
+**BUILD LIST (next session starts here):** 1) client limits + seat UX · 2) session-
 billing allowlist · 3) trialStartedAt fence at first login (grandfathering
 kept but fenced) · 4) client-facing data export (backs the footer promise;
 Kevin chose build over reword) · 5) coach_summary 60-cap fix · 6) tracker
