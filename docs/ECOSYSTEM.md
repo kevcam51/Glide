@@ -63,6 +63,21 @@ pricing, growth trajectories — via a web-research pass.
 
 ---
 
+## ⚠️ Kevin's refinement (S176e, Aug 2 2026) — read before using the surfaces below
+
+**The bridge is coexistence, not connectivity.** Kevin: the other platforms do
+NOT need to connect to Glidna. The value is that a trainer or client benefits
+from having their existing platform AND Glidna side by side — what we built
+works hand-in-hand with whatever they already run, as a **sidekick** to it.
+Connectivity comes "way down the road, once our brand becomes a clear benefit
+to all of these other companies."
+
+Practical meaning: pitch and design for *"keep what you use, add Glidna
+beside it"* — never *"integrates with"*. The surfaces below are the future
+accelerants, not the strategy; nothing in the sidekick play requires a single
+one of them. (Paste-from-AI and type-in-your-watch's-burn are the pattern:
+zero-integration bridges that already ship.)
+
 ## Verified integration surfaces (S176, Aug 2 2026 — web-researched, per-platform confidence noted)
 
 _This is the "verified, cited report" the line above asked for. Openings ranked by how real they are today._
