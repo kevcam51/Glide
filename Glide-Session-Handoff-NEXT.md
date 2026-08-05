@@ -51,7 +51,21 @@ confirm-on-enable + an "AI Clients — 12 of 15 slots" screen. Trainerize's
 active/basic mechanic adopted; its stinginess rejected (every client stays a
 FULL client, the seat gates AI only).
 
-**BUILD LIST (next session starts here):** 1) client limits + seat UX · 2) session-
+**✅ ITEM 1 IS DONE — S177 (deployed + live-verified).** AI-client seats shipped:
+Coach 20 / Elite 30 / Apex 50, trial 15, Connect + admin uncapped. Gate lives
+INSIDE `runTool` (aitools.js) so chat, both Accept callables, automations and
+the MCP connector share one check; seats are a grow-only monthly set at
+`users/{uid}/aiClients/{YYYY-MM}` keyed `c_<uid>` / `p_<planId>`, charged by
+transaction on FIRST USE behind a confirm (`confirm_ai_client` tool).
+Automations auto-consume, bounded 2/run. UI: "AI Clients This Month" card on
+the trainer home + grid row. Live-verified in prod: ask→asks first→confirm→
+answers→`used:1` labelled "Casey Client"→no re-ask; local-plan files gate the
+same way; self-targeted work never charges. ⚠️ Three review-caught bugs are
+FIXED, don't reintroduce: confirm_ai_client must stay in mcp.js READ_TOOLS
+(else connector trainers dead-end all month), seatCapFor checks active subs
+BEFORE entitlements.premium, and seatAutoConfirm is a COUNTER not a boolean.
+
+**BUILD LIST (remaining):** 1) ~~client limits + seat UX~~ DONE S177 · 2) session-
 billing allowlist · 3) trialStartedAt fence at first login (grandfathering
 kept but fenced) · 4) client-facing data export (backs the footer promise;
 Kevin chose build over reword) · 5) coach_summary 60-cap fix · 6) tracker
