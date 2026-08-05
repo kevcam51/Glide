@@ -35,7 +35,7 @@ const admin = require("firebase-admin");
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const { StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/server/streamableHttp.js");
 const { z } = require("zod");
-const { buildTools, runTool } = require("./aitools");
+const { buildTools, runTool, seatCapFor } = require("./aitools");
 const { defineSecret } = require("firebase-functions/params");
 const { verifyAccessToken, RESOURCE_URL, CANONICAL_BASE } = require("./mcpauth");
 
@@ -86,6 +86,12 @@ const READ_TOOLS = new Set([
   "coach_summary",
   "list_local_plans",
   "list_sub_trainers",   // head trainer's team (S116)
+  // Seat confirmation (S176f). Classified as a READ deliberately: the seat
+  // gate fires on READS of an unseated client too, so a read-only connection
+  // must still be able to confirm a slot — otherwise a capped trainer on the
+  // connector dead-ends all month (the review catch that added this line). It
+  // spends a slot from the caller's own allowance but touches no user data.
+  "confirm_ai_client",
 ]);
 
 // ── Phase 3 (S115): WRITE tools, each behind an OAuth scope ────────────────
@@ -244,6 +250,10 @@ const DAILY_CALLS = {
   ultra: 25000,
 };
 const TRAINER_ROLES = ["head_trainer", "sub_trainer", "admin"];
+// Admin by UID (matches functions/index.js + firestore.rules isAdmin()) — a
+// real profile doc never carries role "admin", so anything admin-gated must
+// check the UID, not the role.
+const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
 function planFor(profile) {
   if (!profile) return "free";
   if (profile.role === "admin") return "ultra";
@@ -403,6 +413,14 @@ function buildServer(ctx, profile, db, scopes) {
         + `once) — a plan file is usually a real client who simply has no app account, and every read `
         + `and write works the same on them. find_client searches both in one call and tells you which `
         + `kind each match is.`
+        + (ctx.isTrainer && ctx.seatCap !== null
+          ? ` Paid plans include a monthly allowance of distinct people the AI works on. If a tool `
+            + `refuses because someone "isn't one of this month's AI clients yet", tell the user it `
+            + `will use one of their monthly slots, get their explicit yes, call confirm_ai_client `
+            + `with the same id, then retry. Never confirm silently. If the monthly limit is reached, `
+            + `say so plainly — manual features and existing AI clients keep working — and point to `
+            + `Plans & pricing in the Glidna app without quoting a price.`
+          : ``)
         + trialNote(profile, ctx.isTrainer),
     },
   );
@@ -428,7 +446,10 @@ function buildServer(ctx, profile, db, scopes) {
       shape[key] = required.has(key) ? zt : zt.optional();
     }
 
-    const isRead = READ_TOOLS.has(def.name);
+    // confirm_ai_client rides READ_TOOLS for EXPOSURE (read-only connections
+    // must be able to seat someone) but is not annotated read-only — it spends
+    // a slot, and the hint should be honest.
+    const isRead = READ_TOOLS.has(def.name) && def.name !== "confirm_ai_client";
     const needScope = SCOPE_FOR_TOOL[def.name] || null;
     server.registerTool(
       def.name,
@@ -544,6 +565,10 @@ exports.mcp = onRequest({ cors: false, timeoutSeconds: 300,
     today: todayLocal(),
     weekday: weekdayLocal(),
     nowTime: nowTimeLocal(),
+    // AI-client seat cap (S176f) — same profile-derived cap the in-app chat
+    // attaches, so runTool's seat gate treats both surfaces identically. Admin
+    // by UID: the profile role is never "admin" on a real doc.
+    seatCap: ADMIN_UIDS.includes(uid) ? null : seatCapFor(profile),
   };
 
   let server, transport;

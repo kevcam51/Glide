@@ -15111,6 +15111,19 @@ const IdBadge = ({ id, n, className = "" }) => {
 
 function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, meUid, meName, meRole, notifPrefs, onSetNotifPrefs }) {
   const [details, setDetails] = useState({}); // id -> { tdee, target }
+  // AI-client seats (S176f): who the AI has worked on this month vs the plan's
+  // monthly allowance. Read-only view of users/{me}/aiClients/{month} via the
+  // aiSeats callable (no rules change). Quiet on any failure — the card simply
+  // doesn't render.
+  const [aiSeats, setAiSeats] = useState(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await callAiSeats({});
+        if (r && r.data && r.data.trainer) setAiSeats(r.data);
+      } catch { /* card stays hidden */ }
+    })();
+  }, []);
   // Trainerize import: the button opens a PICKER (roster preview, no writes)
   // so Kevin chooses exactly which clients to bring in; already-imported ones
   // show a tag and are unchecked by default (checking = refresh their data).
@@ -15800,6 +15813,37 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                 onClick={() => writeInbox(inbox.filter((r) => r.status !== "done"))}>
                 Clear {inbox.filter((r) => r.status === "done").length} completed
               </button>
+            )}
+          </div>
+        )}
+
+        {/* AI clients this month (S176f) — the seat system, visible. Hidden for
+            free/expired trainers (cap 0: the AI layer is locked anyway) and on
+            any load failure. Chips carry the label stored at confirm time. */}
+        {aiSeats && (aiSeats.cap === null || aiSeats.cap > 0) && (
+          <div className={cardCls}>
+            <div className={`${sectionTitleCls} flex items-center gap-2`}><Icon name="sparkle" size={19} color="var(--accent)" />AI Clients This Month</div>
+            {aiSeats.cap === null ? (
+              <div className={`${subCls} mt-1`}>
+                No monthly limit on your plan — the AI can work with your whole roster.
+              </div>
+            ) : (
+              <>
+                <div className={`${subCls} mt-1`}>
+                  <b className="text-fg">{aiSeats.used} of {aiSeats.cap}</b> AI-client slots used — resets on the 1st.
+                  The first time the AI works on someone new each month it checks with you and uses one slot.
+                  Dashboards, messaging and manual tracking never use slots.
+                </div>
+                {aiSeats.targets.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {aiSeats.targets.map((t) => (
+                      <span key={t.key} className="px-2 py-1 rounded-md text-xs font-bold border border-border text-fg bg-bg">
+                        {t.label || (t.key.startsWith("p_") ? "Plan file" : "Client")}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -16989,6 +17033,11 @@ const PLAN_FEATURES = {
       ["Send client to-dos straight from chat", false, false, true, true],
       ["Past chats — save, revisit & continue", false, false, true, true],
       ["AI conversations per day", "—", "—", "~133", "~200"],
+      // S176f seats: distinct people the AI works on per month. Connect is
+      // deliberately "No limit" — their own AI pays for inference (the "we
+      // limit what we pay for" rule), and the roster itself is unlimited on
+      // every tier; this row only counts AI-coached people.
+      ["AI-coached clients each month", "—", "No limit", "20", "30"],
     ]},
     { section: "Coach Elite — everything in Coach, plus:", rows: [
       ["Our biggest AI allowance — built for all-day use", false, false, false, true],
@@ -17166,6 +17215,7 @@ const callSetAppRequestStatus = httpsCallable(functions, "setAppRequestStatus");
 const callAdminOverview = httpsCallable(functions, "adminOverview"); // admin all-users dashboard (S90)
 const callAdminUserUsage = httpsCallable(functions, "adminUserUsage"); // one user's AI spend history (S167)
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
+const callAiSeats = httpsCallable(functions, "aiSeats"); // AI-client seats view (S176f)
 // Trainer teams (S116): head trainer ↔ sub-trainers. Server-side because the
 // rules block a user changing their own role. See functions/team.js.
 const callJoinTeam = httpsCallable(functions, "joinTeam");

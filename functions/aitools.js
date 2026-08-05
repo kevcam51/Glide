@@ -1466,6 +1466,21 @@ function buildTools(role, opts = {}) {
       },
     });
     tools.push({
+      name: "confirm_ai_client",
+      description:
+        "Confirm using one monthly AI-client slot for a person the AI hasn't worked on yet this month. "
+        + "Call this ONLY after another tool refused with 'isn't one of this month's AI clients yet' AND the "
+        + "user explicitly said yes to using a slot — never silently. Then retry the original action. "
+        + "Re-confirming someone already in this month's set is free and uses no new slot.",
+      input_schema: {
+        type: "object",
+        properties: {
+          clientId: { type: "string", description: "The connected client's id — same id the refused tool call used." },
+          localPlanId: { type: "string", description: "The local plan file's id — same id the refused tool call used. Never with clientId." },
+        },
+      },
+    });
+    tools.push({
       name: "send_client_request",
       description:
         "Send a connected client a short to-do that appears on their home screen (e.g. log food, weigh in, record a workout). Confirm the message before sending.",
@@ -1527,6 +1542,63 @@ async function resolveTargetUid(db, input, ctx) {
   }
   return { error: "You don't have access to that client." };
 }
+
+// ── AI-client seats (S176f: 20/30/50, trial 15, Connect & admin uncapped) ────
+// A trainer's paid tiers include a monthly allowance of DISTINCT people the AI
+// works on — connected clients (c_<uid>) and local plan files (p_<planId>)
+// both count, because a plan file is usually a real client. The month set only
+// grows (that is the anti-shuffle property: rotating 25 plans still hits the
+// wall at the tier's Nth distinct person), and a seat is consumed on FIRST
+// ACTUAL AI USE — never by flipping a switch — behind an explicit confirm, so
+// a mis-click can't burn a slot (Kevin's S176 requirement). Enforced HERE in
+// runTool so the in-app chat, both Accept callables and the MCP connector all
+// hit the same check. Roster-overview tools (list_clients, find_client,
+// coach_summary, list_local_plans, list_sub_trainers) never reach this point
+// and stay exempt — one coach_summary must not burn the month.
+function seatMonthKey() {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+// null = uncapped. Mirrors mcp.js planFor's tier resolution (substring hazards
+// and all): connect BEFORE coach ("coach_connect" contains "coach"), ultra
+// before max before coach. Grandfathered accounts (no trialStartedAt) are
+// treated as Coach — consistent with how every other gate treats them as paid.
+function seatCapFor(profile) {
+  if (!profile) return 0;
+  if (profile.role === "admin") return null;
+  if (profile.subscriptionStatus === "active") {
+    const t = String(profile.subscriptionTier || "").toLowerCase();
+    if (t.includes("connect")) return null; // we limit what we pay for — their AI pays
+    if (t.includes("ultra")) return 50;     // Apex
+    if (t.includes("max")) return 30;       // Elite
+    return 20;                              // Coach (and any other active sub)
+  }
+  // Comped premium (admin-granted entitlement) acts as a FLOOR when there is no
+  // active sub — checked AFTER the sub branch so a comped account that later
+  // buys Elite/Apex/Connect gets the bigger cap, not a silent 20 (review catch).
+  if (profile.entitlements && profile.entitlements.premium === true) return 20;
+  const t = profile.trialStartedAt;
+  const startMs = t && typeof t.toMillis === "function" ? t.toMillis()
+    : typeof t === "number" ? t : null;
+  if (!startMs) return 20; // grandfathered — treated as Coach
+  const expired = Date.now() >= startMs + (profile.trialLengthDays || 30) * 86400000;
+  return expired ? 0 : 15; // expired free tier never reaches here (AI gated upstream)
+}
+// Resolve the caller's cap once per runTool call. Entry points attach
+// ctx.seatCap; if one ever forgets, we load the profile ourselves rather than
+// silently not enforcing (belt and braces — a missed entry point must fail
+// CLOSED, not open).
+async function seatCapForCtx(db, ctx) {
+  if (ctx.seatCap !== undefined) return ctx.seatCap;
+  const prof = (await db.doc(`users/${ctx.callerUid}`).get()).data() || {};
+  ctx.seatCap = seatCapFor(prof);
+  return ctx.seatCap;
+}
+const SEAT_LIMIT_MSG = (used, cap) =>
+  `Monthly AI-client limit reached (${used} of ${cap} this month). The AI can keep working with `
+  + `this month's existing AI clients, and every manual feature works for everyone. The allowance `
+  + `resets on the 1st (UTC). For more AI clients each month, open Glidna and see Plans & pricing — `
+  + `don't quote a price, the app shows the current plans.`;
 
 // ── tool execution ──────────────────────────────────────────────────────────
 async function runTool(name, input, ctx) {
@@ -1945,6 +2017,119 @@ async function runTool(name, input, ctx) {
   const uid = await resolveTargetUid(db, input, ctx);
   if (uid && uid.error) return uid; // { error }
 
+  // Local-plan targeting (S87, trainers): localPlanId points a tool at one of
+  // the CALLER's OWN local plan files/simulations (from list_local_plans)
+  // instead of an account's manifest-active plan. Validated against the
+  // caller's own index, and only ever applied to uid === callerUid — so it
+  // can't widen access to anyone else's data. HOISTED above the notes tools
+  // (S176f) so the seat gate below sees every target shape exactly once; the
+  // notes tools' aboutPlan derives from this same validation now instead of
+  // keeping its own copy (the old early-return branch the S175 inspection
+  // flagged as a charge-point gap).
+  let planOverride = null;
+  if (ctx.isTrainer && input.localPlanId != null && input.localPlanId !== "") {
+    if (input.clientId) return { error: "Use clientId OR localPlanId, not both." };
+    const wantedPid = String(input.localPlanId);
+    const localIndex = (await kvGetJSON(db, ctx.callerUid, "caliq-index")) || [];
+    if (!localIndex.some((p) => p && p.id === wantedPid)) {
+      return { error: "No local plan with that id — call list_local_plans to see the trainer's local files." };
+    }
+    planOverride = wantedPid;
+  }
+
+  // ── AI-client seat gate (S176f: 20/30/50, trial 15, Connect/admin uncapped) ─
+  // Charged per DISTINCT target per UTC month, on first actual use, behind an
+  // explicit confirm. seatKey is the target's identity: p_<planId> for a local
+  // plan file (NEVER the resolved uid — resolveTargetUid maps every plan file
+  // to callerUid, which would collapse all of them into one slot), c_<uid> for
+  // a connected client. Self-work (a trainer's own body/plan) is never charged.
+  const seatKey = planOverride ? `p_${planOverride}`
+    : (ctx.isTrainer && uid !== ctx.callerUid ? `c_${uid}` : null);
+  if (ctx.isTrainer && (seatKey || name === "confirm_ai_client")) {
+    const cap = await seatCapForCtx(db, ctx);
+    if (cap === null) { // uncapped (Connect tiers, admin) — no doc, no writes
+      if (name === "confirm_ai_client") {
+        return { ok: true, unlimited: true,
+          note: "This plan has no monthly AI-client limit — nothing to confirm. Just retry the original action." };
+      }
+    } else {
+      // Charge = a transaction (not read-then-write like mcpUsage): parallel
+      // tool calls must not overshoot the cap. Idempotent — charging an
+      // existing seat is free, which also makes propose→Accept re-runs safe.
+      // The label is stored at charge time so the app's AI Clients screen
+      // needs no joins later.
+      const chargeSeat = async () => {
+        let label = null;
+        if (planOverride) {
+          const idx = (await kvGetJSON(db, ctx.callerUid, "caliq-index")) || [];
+          const row = idx.find((p) => p && p.id === planOverride);
+          label = row ? (row.customName || row.name || null) : null;
+        } else {
+          const prof = (await db.doc(`users/${uid}`).get()).data() || {};
+          label = prof.displayName
+            || [prof.firstName, prof.lastName].filter(Boolean).join(" ") || prof.email || null;
+        }
+        const mref = db.doc(`users/${ctx.callerUid}/aiClients/${seatMonthKey()}`);
+        return await db.runTransaction(async (tx) => {
+          const snap = await tx.get(mref);
+          const cur = snap.data() || {};
+          const targets = cur.targets || {};
+          const used = cur.count || Object.keys(targets).length;
+          if (targets[seatKey]) return { used, already: true };
+          if (used >= cap) return { full: true, used };
+          tx.set(mref, {
+            targets: { ...targets, [seatKey]: { ts: Date.now(), label } },
+            count: used + 1, cap, updatedAt: Date.now(),
+          }, { merge: true });
+          return { used: used + 1 };
+        });
+      };
+      if (name === "confirm_ai_client") {
+        if (!seatKey) {
+          return { error: "Say which person to confirm — pass their clientId (or localPlanId for a plan file)." };
+        }
+        const res = await chargeSeat();
+        if (res.full) return { error: SEAT_LIMIT_MSG(res.used, cap) };
+        return { ok: true, seatsUsed: res.used, seatCap: cap,
+          note: res.already
+            ? "They were already one of this month's AI clients — no new slot used. Retry the original action."
+            : "Confirmed — one monthly AI-client slot used. Now retry the original action." };
+      }
+      // Every other target-scoped tool: the target must already hold a seat.
+      const cur = (await db.doc(`users/${ctx.callerUid}/aiClients/${seatMonthKey()}`).get()).data() || {};
+      const targets = cur.targets || {};
+      if (!targets[seatKey]) {
+        const used = cur.count || Object.keys(targets).length;
+        if (used >= cap) return { error: SEAT_LIMIT_MSG(used, cap) };
+        // Scheduled automations run headless — nobody is there to answer a
+        // confirm, and the user consented by configuring an automation that
+        // names its people. Only that path sets seatAutoConfirm — BUT bounded
+        // (review catch): the prompt is free text, so a broad "check everyone"
+        // must not burn the whole month unattended. Each run may auto-consume
+        // at most 2 NEW seats (seatAutoConfirm starts at 2 and counts down);
+        // past that it falls through to the normal ask-first refusal, which
+        // lands in the automation's feed result.
+        if (ctx.seatAutoConfirm > 0) {
+          const res = await chargeSeat();
+          if (res.full) return { error: SEAT_LIMIT_MSG(res.used, cap) };
+          if (!res.already) ctx.seatAutoConfirm--;
+        } else {
+          return {
+            error: `This person isn't one of this month's AI clients yet. Working on them will use 1 of `
+              + `the ${cap} monthly AI-client slots on this plan (${used} used so far this month). Ask the `
+              + `user to confirm first, then call confirm_ai_client with the same `
+              + `${planOverride ? "localPlanId" : "clientId"}, then retry this action.`,
+            needsSeatConfirm: true,
+          };
+        }
+      }
+    }
+  }
+  if (name === "confirm_ai_client") {
+    // Trainer with no target reached the gate above; a client lands here.
+    return { error: "Nothing to confirm — AI-client slots only apply to trainers working on a client or plan file." };
+  }
+
   // ── Notes tools (S91, docs/NOTES-PLAN.md) ─────────────────────────────────
   // Privacy invariant enforced HERE, not by the model: the privkv (private)
   // store is only ever touched when the target IS the caller. A trainer with
@@ -1955,18 +2140,9 @@ async function runTool(name, input, ctx) {
     // Notes about one of the caller's OWN plan files (S166). That person is a
     // client who simply never made an account, so they get notes like anyone
     // else — filed in the caller's own store against the plan id, since there is
-    // no second account to put them in. Validated against the caller's own index,
-    // exactly like every other localPlanId use, so it can't widen access.
-    let aboutPlan = "";
-    if (ctx.isTrainer && input.localPlanId != null && input.localPlanId !== "") {
-      if (input.clientId) return { error: "Use clientId OR localPlanId, not both." };
-      const want = String(input.localPlanId);
-      const idx = (await kvGetJSON(db, ctx.callerUid, "caliq-index")) || [];
-      if (!idx.some((p) => p && p.id === want)) {
-        return { error: "No local plan with that id — call list_local_plans for current ids." };
-      }
-      aboutPlan = want;
-    }
+    // no second account to put them in. Validation now lives in the hoisted
+    // planOverride block above (S176f) — one copy, and the seat gate covers it.
+    const aboutPlan = planOverride || "";
     if (name === "list_notes") {
       const own = (await kvGetJSON(db, uid, "caliq-notes")) || [];
       if (aboutPlan) {
@@ -2058,21 +2234,7 @@ async function runTool(name, input, ctx) {
     return { error: "Note not found — call list_notes for current ids." };
   }
 
-  // Local-plan targeting (S87, trainers): localPlanId points a tool at one of
-  // the CALLER's OWN local plan files/simulations (from list_local_plans)
-  // instead of an account's manifest-active plan. Validated against the
-  // caller's own index, and only ever applied to uid === callerUid — so it
-  // can't widen access to anyone else's data.
-  let planOverride = null;
-  if (ctx.isTrainer && input.localPlanId != null && input.localPlanId !== "") {
-    if (input.clientId) return { error: "Use clientId OR localPlanId, not both." };
-    const wantedPid = String(input.localPlanId);
-    const localIndex = (await kvGetJSON(db, ctx.callerUid, "caliq-index")) || [];
-    if (!localIndex.some((p) => p && p.id === wantedPid)) {
-      return { error: "No local plan with that id — call list_local_plans to see the trainer's local files." };
-    }
-    planOverride = wantedPid;
-  }
+  // (planOverride is resolved in the hoisted block above the seat gate — S176f.)
 
   if (name === "get_nutrition_targets") {
     const { data } = await activePlanData(db, uid, planOverride);
@@ -2828,4 +2990,4 @@ async function runTool(name, input, ctx) {
   return { error: "Unknown tool." };
 }
 
-module.exports = { buildTools, runTool, nutritionTargets, fetchLinkMeta };
+module.exports = { buildTools, runTool, nutritionTargets, fetchLinkMeta, seatCapFor, seatMonthKey };

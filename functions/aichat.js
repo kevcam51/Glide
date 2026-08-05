@@ -14,7 +14,7 @@ const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const aiusage = require("./aiusage");
 const Anthropic = require("@anthropic-ai/sdk");
-const { buildTools, runTool } = require("./aitools");
+const { buildTools, runTool, seatCapFor, seatMonthKey } = require("./aitools");
 const { GLIDNA_KNOWLEDGE } = require("./knowledge");
 
 const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
@@ -263,6 +263,7 @@ TAKING ACTIONS — DO WHAT THE USER ASKED, FIRST TIME (Kevin, S102e): when someo
 - Notes: on "write this down / remember this / make a note / save a recap", use create_note (recaps → kind='recap'). A client's note is PRIVATE by default — only share (visible to trainer) if they clearly want that. A trainer using clientId writes a private about-note by default (shared=true puts it where the client sees it). Before re-recapping, call list_notes and UPDATE the existing note (update_note, append) instead of duplicating. Never reveal a client's private notes to anyone but that client.
 - Links/videos (Instagram, YouTube, TikTok, blogs): when the user shares a URL to USE ("add the exercises from this", "make a program from this", "log this recipe"), call fetch_link for its title + caption, then build changes with the normal tools (workouts: list_exercises → propose_workout, add_custom_exercise as needed; food: propose_meal). Summarize what you found first and map named moves to the closest real ids. If fetch_link returns little or errors (some posts are blocked), don't guess — ask the user to paste the caption text. Adapt the content to the user's goal/days/experience, don't copy blindly.
 ${isTrainer ? "- ONE specific person (cost — Kevin, S110d): when the user asks about a SINGLE named client, call find_client to resolve just that person's id, then use the data tools on THAT client only. Do NOT call list_clients (it loads EVERY client) or coach_summary (every client's full snapshot) for a single-person question — that wastes work and money searching people you don't need. A '#' code the user quotes comes in TWO forms — a 4-character ref like #KEM2, or a small number like #6 (the permanent number on the trainer's home screen) — and the home numbers CONNECTED CLIENTS AND THE TRAINER'S OWN LOCAL PLAN FILES from one shared counter, so a '#' code may be either. find_client searches BOTH pools in ONE call — connected accounts AND the trainer's own plan files — matching names, emails and both code forms, so you never need a second lookup to 'also check' the local files. Each match says which it is: `kind:\"client\"` → use `clientId`, `kind:\"local_plan\"` → use `localPlanId`. Both carry `ref` and `num`. When you name someone back, prefer their NAME, and if you cite a code use the same form they used. Once you have the id it becomes the active subject; reuse it, don't look it up again. Use list_clients only to LIST the whole roster, and coach_summary only for genuinely across-all-clients questions.\n- SAME NAME (Kevin, S110e): if find_client returns MORE THAN ONE match (two people with the same/similar name), do NOT guess or pick the first — ASK the user which one, telling them apart by a HUMAN detail from the match (their short ID code, email, current weight, or last-log date), NEVER the raw internal id. Same for local plans: if two plans/sims share a name, distinguish them by their ref code, weight/goal, sim tag, or when they were last updated. Only after the user picks do you act on that id.\n- SHORT ID CODES: every client and plan shows a short code in the app (e.g. \"#7K2M\", the `ref` field). The user may identify someone by it — pass a code to find_client just like a name (it matches the code), and match a plan code against list_local_plans' `ref`. When you refer back to a specific person or plan and it could be ambiguous, include their #code so the user knows exactly which one you mean.\n- send_client_request: send a connected client a to-do (e.g. log food, weigh in); use find_client for the id, confirm before sending.\n- Proactive coaching: for cross-client questions ('who's stalled / needs attention / what should I change?' across everyone), call coach_summary ONCE (every client's status + adherence + weight trend — don't loop per-client tools), then call out who needs attention BY NAME with concrete recommendations and offer to send a to-do. You can do any action FOR a client via their clientId.\n- LOCAL PLAN FILES ARE PEOPLE: a trainer's local plan file (imported Trainerize client, prep file, even a sim) is usually a REAL, paying client — one who simply doesn't want to install the app or make a login. Being 'connected' is not what makes someone a client. Most of a trainer's people are these files. So treat a `local_plan` match exactly like a client: pass its localPlanId (never together with clientId) to any tool, refer to them by NAME, and never suggest 'connecting' or 'inviting' them as though the plan were a lesser thing — read and edit (stats, targets, workouts, meals, weigh-ins, measurements, water, check-ins) all work FULLY on them. Use list_local_plans to LIST these files; find_client already covers them for one named person. Two real limits, worth stating plainly if asked: send_client_request (to-dos) and messaging need a real login on the other end, so they can't reach a local file. And if a match is flagged `isSimulation`, it's a sandbox projection rather than someone's live plan — say so before writing into it." : ""}
+${isTrainer ? `- AI-CLIENT SLOTS (S176f): paid plans include a monthly allowance of distinct people the AI works on (connected clients AND plan files both count; your own data never does). When a tool refuses with "isn't one of this month's AI clients yet", relay it plainly: working on this person uses one of the monthly slots (the error says how many are used). Get the user's explicit yes, call confirm_ai_client with the SAME id, then retry the original action — never confirm silently, and never call confirm_ai_client unprompted. Someone already in this month's set never re-asks. If the limit is reached, say the AI has hit this month's client allowance, that everything manual still works for everyone and existing AI clients keep working, and that Plans & pricing in the app shows the options — do NOT quote prices.` : ""}
 After any action, briefly confirm what you did — but only AFTER the tool call actually succeeded. A write only happens when you call the tool; text alone never changes any data, so never claim you did something you didn't actually call a tool for. If a tool comes back with an error, SAY it failed and what you'll try instead — never report success for a call that errored. If you were mid-way through several actions and ran out of steps, say which ones you completed and which you did not.
 
 FEATURE REQUESTS: if they wish Glidna did something it doesn't, or hit a limit they want changed, offer once to pass it to the team ("want me to send that to the Glidna team?") and call send_app_request only if they say yes. Summarise it clearly and include what they were doing when it came up. Confirm it was passed on — never promise it will be built, and never imply a timeline. If they're reporting that DATA looks wrong, that's not a feature request: check their actual data first.
@@ -361,7 +362,8 @@ async function setupChat(uid, activeTarget) {
     trialExpired: trialExpiredFor(profile),
     tools: buildTools(role),
     toolCtx: { callerUid: uid, role, isTrainer, aiOptOut: profile.aiOptOut === true,
-      today: todayLocal(), nowTime: nowTimeLocal(), callerName },
+      today: todayLocal(), nowTime: nowTimeLocal(), callerName,
+      seatCap: isAdminUid(uid) ? null : seatCapFor(profile) },
   };
 }
 
@@ -485,6 +487,11 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
 // Callers must bind the ANTHROPIC_API_KEY secret.
 async function runAssistantTurn(uid, userText) {
   const { system, tools, toolCtx, budget, usageRef, used, trialExpired } = await setupChat(uid);
+  // Headless run: nobody can answer a seat confirm, and configuring an
+  // automation that names its people IS the consent — so new AI-client seats
+  // auto-consume here, bounded to 2 new seats per run so a broad prompt can't
+  // burn the month unattended (still refused at the cap; S176f).
+  toolCtx.seatAutoConfirm = 2;
   if (trialExpired) return { skipped: "trial-expired" };
   if (used >= budget) return { skipped: "budget" };
   const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
@@ -644,7 +651,8 @@ exports.logMeal = onCall({ region: "us-central1", maxInstances: 10 }, async (req
   const callerName = profile.displayName
     || [profile.firstName, profile.lastName].filter(Boolean).join(" ")
     || profile.email || (isTrainer ? "Coach" : "Client");
-  const ctx = { callerUid: uid, role, isTrainer, today: todayLocal(), nowTime: nowTimeLocal(), callerName };
+  const ctx = { callerUid: uid, role, isTrainer, today: todayLocal(), nowTime: nowTimeLocal(), callerName,
+    seatCap: isAdminUid(uid) ? null : seatCapFor(profile) };
   let out;
   try { out = await runTool("log_meal", request.data || {}, ctx); }
   catch (e) { console.error("logMeal error:", e && e.message); throw new HttpsError("internal", "Couldn't save the meal."); }
@@ -667,12 +675,34 @@ exports.setWorkoutSchedule = onCall({ region: "us-central1", maxInstances: 10 },
   const callerName = profile.displayName
     || [profile.firstName, profile.lastName].filter(Boolean).join(" ")
     || profile.email || (isTrainer ? "Coach" : "Client");
-  const ctx = { callerUid: uid, role, isTrainer, today: todayLocal(), nowTime: nowTimeLocal(), callerName };
+  const ctx = { callerUid: uid, role, isTrainer, today: todayLocal(), nowTime: nowTimeLocal(), callerName,
+    seatCap: isAdminUid(uid) ? null : seatCapFor(profile) };
   let out;
   try { out = await runTool("set_workout_schedule", request.data || {}, ctx); }
   catch (e) { console.error("setWorkoutSchedule error:", e && e.message); throw new HttpsError("internal", "Couldn't save the program."); }
   if (out && out.error) throw new HttpsError("failed-precondition", out.error);
   return out; // { ok, replaced, updated, strengthDays, cardioDays }
+});
+
+// AI-client seats for the app's "AI clients this month" view (S176f). Reads the
+// caller's own month doc + cap — Firestore only, no secret, no rules change
+// (Admin SDK). Trainers only; clients have no seats to see.
+exports.aiSeats = onCall({ region: "us-central1", maxInstances: 10 }, async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
+  const db = admin.firestore();
+  const profile = (await db.doc(`users/${uid}`).get()).data() || {};
+  const role = profile.role || "client";
+  if (!(role === "head_trainer" || role === "sub_trainer" || role === "admin" || isAdminUid(uid))) {
+    return { trainer: false };
+  }
+  const cap = isAdminUid(uid) ? null : seatCapFor(profile);
+  const month = seatMonthKey();
+  const cur = (await db.doc(`users/${uid}/aiClients/${month}`).get()).data() || {};
+  const targets = Object.entries(cur.targets || {})
+    .map(([key, v]) => ({ key, label: (v && v.label) || null, ts: (v && v.ts) || null }))
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return { trainer: true, month, cap, used: cur.count || targets.length, targets };
 });
 
 // AI food estimate for the MANUAL meal tracker (S89c, Kevin's ask): the user
