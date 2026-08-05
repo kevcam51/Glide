@@ -10,8 +10,8 @@ batches 1–17) and `docs/PRICING.md` (S175 client-limits section). Highlights:
   S174 (deployed, functions:mcp): the connector now narrates the trial via MCP
   instructions — day count early, switch-off warning inside 7 days. NAMES NO
   PRICE anywhere the AI speaks (Kevin's rule) — always point into the app.
-- **AI-coached client limits DECIDED, NOT BUILT: Coach 15 / Elite 25 / Apex 35,
-  Connect tiers inherit their sibling's.** Limits distinct clients the AI works
+- **AI-coached client limits DECIDED, NOT BUILT: Coach 20 / Elite 30 / Apex 50
+  (S176f market-matched, supersedes 15/25/35); Coach Connect UNCAPPED (S176).** Limits distinct clients the AI works
   on per UTC month (c_<uid> / p_<planId>), NOT the roster — the free
   unlimited-clients promise stays. Enforcement = ONE check inside runTool
   (aitools.js:1532) covers in-app + Accept callables + connector. Full verified
@@ -35,8 +35,12 @@ batches 1–17) and `docs/PRICING.md` (S175 client-limits section). Highlights:
   platform importers, Studio/agency seats, AI ladder. **Read ECOSYSTEM.md
   before proposing any revenue model.**
 
-**⚠️ S176 REVISED THE CLIENT LIMITS — read `docs/PRICING.md` "S176 — TWO
-REVISIONS" BEFORE building item 1.** Two changes: (a) **Coach Connect has NO
+**⚠️ S176/S176f REVISED THE CLIENT LIMITS — read `docs/PRICING.md` "S176 — TWO
+REVISIONS" AND "S176f" BEFORE building item 1. Numbers are now 20/30/50 with a
+15-client trial cap; roster stays unlimited (coach_summary fix = PAGING, not a
+cap); session-billing trio = Coach+ when public; teams = Coach+ ~5 seats; free
+trainer local plans capped 2–3 NEW ACCOUNTS ONLY; Family & Friends tier and the
+trainer-referral program are banked in PRICING.md S176f.** Two changes: (a) **Coach Connect has NO
 client limit** — the rule is now *limit only what we pay for*; a Connect ladder
 was scrapped because it reads as a scam (restriction with no cost behind it)
 and cannibalises upward (a "Connect 100" would dominate Coach Elite). (b) **A

@@ -560,3 +560,15 @@ averages + consistency + body comp — meaty enough to be a real module).
 
 **FINAL: 132/132 features decided.** ~98 free · 28 Premium+ · 2 Connect+ ·
 boosts/automations Elite+ · 7 admin-only · session-billing trio allowlisted.
+
+### S176f — Kevin's full-response pass (see PRICING.md S176f for the whole record)
+Walkthrough read end-to-end; batches 1,2,7,8 reconfirmed as-is. Amendments:
+seats 20/30/50 (+15-client trial cap) · session-billing trio = Coach+ when it
+opens to the public (booking calendar stays free; admin-only until perfected on
+Smooth Training) · sub-trainer teams = Coach+ (~5 seats base) · free-trainer
+local plans capped 2–3 (new accounts only) · nudges/to-dos stay free · roster
+stays unlimited, coach_summary fix = paging · trial stays 30 days · second
+principle recorded: health & data free, money-making tools paid · banked:
+Family & Friends tier, trainer-referral program (fake-discount variant
+rejected as deceptive) · grandfathering: count accounts, courtesy window, then
+free-Connect-for-life.
