@@ -911,3 +911,72 @@ asset when the price falls.
 **The metric that tells you if Connect is working:** not revenue per Connect
 user — whether Connect trainers' CLIENTS end up in the app. If they do, it is a
 growth engine. If they don't, it is a leak.
+
+---
+
+## S176f — Kevin's full-response pass (Aug 2, 2026) — the walkthrough came back
+
+Kevin read the whole walkthrough and responded point by point. Everything below
+is DECIDED unless marked "banked". Supersedes conflicting details above.
+
+### Seat numbers: 20 / 30 / 50 (supersedes 15/25/35)
+Match the market instead of undercutting it on count. Coach $49/20 beats
+TrueCoach $58/20 (no AI); Apex $129/50 beats TrueCoach Pro $137/50. Worst-case
+cost unchanged (token caps bind); realistic model adds $2–6/mo per maxed
+trainer. Trial gets a 15-AI-client cap. Connect stays UNCAPPED (S176 rule:
+limit what we pay for).
+
+### The second principle (joins "we limit what we pay for")
+**Your health and your data are free; tools that make you money are paid.**
+Non-AI COGS is pennies/user/mo (verified S176f) — so non-AI gates are for
+VALUE, and only business tooling qualifies:
+- **Session billing trio** (card-on-file / auto-charge / earnings) = **Coach+**
+  when it opens to the public. Kevin perfects it on Smooth Training first
+  (admin-only until then). The booking CALENDAR stays free. No transaction
+  fees for independents, ever (S176b/c stand).
+- **Sub-trainer teams = Coach+**, ~5 seats at base, scaling by tier. Subs carry
+  their own AI (own account, or head's-connector-covers-3-to-5 bundles later).
+  Design waits for the first real agency; My PT Hub $215/5-seats and Everfit
+  Studio $105–430 are the anchors.
+- **Local plan caps**: free trainer = 2–3 plan files, more needs a paid tier.
+  NEW ACCOUNTS ONLY (the barcode principle — never a take-away).
+- Nudges & to-dos STAY FREE (trainer-side habit loop that keeps clients
+  logging; gating them costs more engagement than it earns).
+
+### Roster stays unlimited — Kevin confirmed against his own floated caps
+"Unlimited connected clients" is on the live page and the whole-roster
+sidekick is the growth engine; connected clients cost pennies. Fix
+`coach_summary` by PAGING through any roster size, not by capping it. Upgrade
+pressure comes from AI seats + plan caps + billing + teams instead.
+
+### Trial: 30 days confirmed (7-day + extension idea rejected)
+Habit products need 2–3 weeks; worst-case trial cost ~$14 and reality far
+less; card-upfront reverse trial (S92) already bounds abuse. Add the
+15-AI-client trial cap.
+
+### New tier concept, banked: "Family & Friends" (~$9.99–11.99/mo)
+5–10 plan files for the non-trainer who manages family/friends' nutrition.
+GUARDRAIL: must exclude business features (scaled invites, sessions, teams) or
+it becomes a $9.99 Coach Connect. Naming/pricing when it's built.
+
+### Referral program, banked — the "recommend it like a supplement" model
+Trainer's code → client gets a real discount, trainer gets a monthly cut.
+Invite Hub referral tracking (S83) is the foundation; build = Stripe coupon +
+attribution. ⛔ The raise-prices-then-fake-discount variant is REJECTED —
+deceptive reference pricing (FTC exposure, trust damage). Genuine promos only.
+
+### Grandfathering: count first, then a courtesy window
+Next build session: count accounts missing trialStartedAt (likely <20). Then:
+~12-month courtesy window on in-app AI, announced → after it, **free Connect
+for life** (Kevin's idea — costs ~nothing, reads as a gift) + lifetime
+discount offer on in-app tiers.
+
+### Connector-sharing abuse (Kevin's 100-client-trainer worry): structural + levers
+One account = one body's data, so client-side sharing self-defeats (mixed
+diaries). Trainer-login sharing = ordinary seat-sharing → the pitch for team
+seats. Levers when needed, not built now: cap simultaneous OAuth grants per
+account, concurrent-session caps; the 2,000/day call cap already bounds damage.
+
+### Standing decision filter (record alongside the ECOSYSTEM.md refinement)
+Every pricing/feature decision asks: does this help the user's OTHER platforms
+too? Sidekick first; platforms come in with their specialties; users first.
