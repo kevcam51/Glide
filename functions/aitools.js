@@ -1568,24 +1568,31 @@ function seatCapFor(profile) {
   if (profile.role === "admin") return null;
   if (profile.subscriptionStatus === "active") {
     const t = String(profile.subscriptionTier || "").toLowerCase();
-    // Connect: their own Claude/ChatGPT pays for the inference, so this is NOT
-    // a cost cap — it is a generous abuse ceiling (S178, Kevin). 50 never
-    // touches a working trainer (Apex's own cap is 50) but closes the
-    // one-login-serves-200-clients edge case. If it ever bites a real coach,
-    // raising it is a one-line change.
-    if (t.includes("connect")) return 50;
-    if (t.includes("ultra")) return 50;     // Apex
-    if (t.includes("max")) return 30;       // Elite
-    return 20;                              // Coach (and any other active sub)
+    // The ladder (S178b, Kevin). ONE number per tier, deliberately: a seat is
+    // "a person the AI worked on this month" tracked once across every surface,
+    // so a separate, higher connector allowance could not work — the bigger cap
+    // would simply win (seat someone via Claude and they are seated everywhere),
+    // and genuinely separate pools would let anyone with a connector seat their
+    // 21st person through Claude and then work on them in-app for free. Kevin's
+    // "20 in-app + 25 connector" intent is delivered by setting the single
+    // number at the connector figure.
+    //
+    // Connect standalone sits BELOW Coach on purpose. It is the entry rung, and
+    // this is what stops a big roster from rationally buying the cheapest tier
+    // (the cannibalisation Kevin flagged three times).
+    if (t.includes("connect")) return 15;   // Connect / Coach Connect
+    if (t.includes("ultra")) return 55;     // Apex
+    if (t.includes("max")) return 35;       // Elite
+    return 25;                              // Coach (and any other active sub)
   }
   // Comped premium (admin-granted entitlement) acts as a FLOOR when there is no
   // active sub — checked AFTER the sub branch so a comped account that later
   // buys Elite/Apex/Connect gets the bigger cap, not a silent 20 (review catch).
-  if (profile.entitlements && profile.entitlements.premium === true) return 20;
+  if (profile.entitlements && profile.entitlements.premium === true) return 25;
   const t = profile.trialStartedAt;
   const startMs = t && typeof t.toMillis === "function" ? t.toMillis()
     : typeof t === "number" ? t : null;
-  if (!startMs) return 20; // grandfathered — treated as Coach
+  if (!startMs) return 25; // grandfathered — treated as Coach
   const expired = Date.now() >= startMs + (profile.trialLengthDays || 30) * 86400000;
   return expired ? 0 : 15; // expired free tier never reaches here (AI gated upstream)
 }

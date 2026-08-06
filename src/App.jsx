@@ -17044,10 +17044,12 @@ const PLAN_FEATURES = {
       ["AI conversations per day", "—", "—", "~133", "~200"],
       // S176f seats: distinct people the AI works on per month. The roster
       // itself stays unlimited on every tier — this row counts only AI-coached
-      // people. Connect's 50 is NOT a cost cap (their own AI pays for the
-      // inference); it is a generous abuse ceiling added S178, set so it never
-      // touches a working trainer.
-      ["AI-coached clients each month", "—", "50", "20", "30"],
+      // people. ONE number per tier (S178b): seats are tracked once across
+      // every surface, so a separate connector allowance would either collapse
+      // into the bigger number or leak. Connect sits BELOW Coach on purpose —
+      // it is the entry rung, which is what stops a big roster from rationally
+      // buying the cheapest tier.
+      ["AI-coached clients each month", "—", "15", "25", "35"],
     ]},
     { section: "Coach Elite — everything in Coach, plus:", rows: [
       ["Our biggest AI allowance — built for all-day use", false, false, false, true],

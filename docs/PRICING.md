@@ -980,3 +980,35 @@ account, concurrent-session caps; the 2,000/day call cap already bounds damage.
 ### Standing decision filter (record alongside the ECOSYSTEM.md refinement)
 Every pricing/feature decision asks: does this help the user's OTHER platforms
 too? Sidekick first; platforms come in with their specialties; users first.
+
+## S178b — the seat ladder, final (Aug 6, 2026, Kevin)
+
+| | Connect | Coach | Elite | Apex |
+|---|---:|---:|---:|---:|
+| **AI-coached clients/month** | **15** | **25** | **35** | **55** |
+
+Trial 15 · grandfathered 25 (treated as Coach) · admin uncapped · expired 0.
+Supersedes S176f's 20/30/50 and S178's flat 50.
+
+**Kevin's idea and why it became one number.** He proposed a second, higher
+allowance on the connector (Coach = 20 in-app + 25 connector, and so on),
+reasoning that connector work costs us nothing so it should reward upgrading.
+The intent was right and is now delivered — by setting the SINGLE number at the
+connector figure. Two numbers could not work:
+- A seat is "a person the AI worked on this month", tracked ONCE across every
+  surface. So a higher connector cap simply wins: seat 25 people through
+  Claude and all 25 are seated in-app too. "20 + 25" collapses to 25.
+- Genuinely separate pools leak the in-app cap: anyone with a connector seats
+  their 21st person via Claude, then works on them in-app for free. Closing
+  that requires the same person to hold a seat in EACH pool — which means
+  Claude re-asks about someone you worked with in the app that morning, and a
+  counter people stop trusting.
+
+**Connect sits BELOW Coach on purpose.** This is what finally answers the
+cannibalisation Kevin raised three times: a big roster can no longer rationally
+buy the cheapest tier. Connect is the entry rung — bring your own AI, 15 people
+— and every upgrade buys more. (It also retires the S176 "Connect uncapped"
+position, which lived for about an hour.)
+
+Cost note: unchanged. Seats were never the cost control — the daily token caps
+are. Seats shape roster economics and upgrade pressure.
