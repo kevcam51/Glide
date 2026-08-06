@@ -1084,3 +1084,30 @@ looks like the rule failed. Test a DIFFERENT uid.
 ⚠️ **Deploy ordering, deliberate:** frontend pushed FIRST, rules published only
 after the new bundle was confirmed live. Reversed, anyone on a cached old bundle
 would have had joins fail — the old code wrote the field directly.
+
+
+## S179c — free roster raised 8 → 15 (Kevin, Aug 6 2026)
+
+**The number is set by what sits BEHIND the wall.** A free trainer who wants a
+9th client could only buy Connect (a plugin for their own Claude) or Coach (an
+in-app AI assistant) — neither of which is "more clients". A low cap therefore
+walls off a trainer who doesn't want AI and offers them nothing they asked for:
+they buy a plugin they never open and churn, or they leave. Same mistake class
+as the old $49 blurb — selling someone something they didn't want.
+
+**It does not undercut Connect.** Connect's buyer is defined by already living
+in Claude/ChatGPT; for them the plugin IS the product, and where the free roster
+stops is irrelevant. The only person a tight cap converts is someone buying
+Connect purely to escape it — a bad-fit purchase that churns.
+
+**15 still catches who's worth converting:** a full-time coach (30–60 people)
+hits it and is a real business; a part-timer (10–20) is no longer punished for
+not wanting AI. Cost was never the factor — clients and plan files are pennies.
+
+**Consequence, accepted:** there is now no non-AI upgrade trigger. Kevin's
+standing worry about selling only AI stands — but the 8-cap wasn't really one
+either, since the wall led only to AI products. If a roster lever is wanted
+later, the honest answer is a cheap "more clients, no AI" tier, not a tighter
+free cap.
+
+Grid row is now "Clients & plan files": Free 15 / Unlimited ×3.

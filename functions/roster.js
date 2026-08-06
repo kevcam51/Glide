@@ -1,5 +1,5 @@
-// Glidna — the free roster cap (S179). Free trainers may connect 8 clients;
-// every paid tier is unlimited.
+// Glidna — the free roster cap (S179). Free trainers may manage 15 people
+// (connected clients + plan files); every paid tier is unlimited.
 //
 // WHY THIS HAS TO BE A FUNCTION, which is the non-obvious part. The CLIENT
 // writes the link — joinTrainer ends with the client updating their own
@@ -25,12 +25,27 @@ const admin = require("firebase-admin");
 const REGION = "us-central1";
 const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
 
-// Free-tier roster size. Chosen over the market's 5 (Everfit) because free
-// trainers are also the distribution engine — every client they bring is a
-// potential paying CLIENT subscriber, so a tight cap buys trainer conversions
-// at the cost of client inflow. 8 is the most generous free tier in the
-// category (Trainerize free = 1).
-const FREE_ROSTER_CAP = 8;
+// Free-tier roster size (S179c, Kevin — raised from 8).
+//
+// The number is set by what sits BEHIND the wall, not by generosity. A free
+// trainer who wants a 9th client can only buy Connect (a plugin for their own
+// Claude) or Coach (an in-app AI assistant) — neither of which is "more
+// clients". So a low cap walls off a trainer who doesn't want AI and offers
+// them nothing they asked for: they buy a plugin they never open and churn, or
+// they leave. The wall only works when the thing behind it is what they were
+// after, and today it isn't.
+//
+// 15 still catches the trainer worth converting — a full-time coach with 30–60
+// people hits it and is a real business — while a part-timer with 10–20 is no
+// longer punished for not wanting an AI plugin. It does NOT undercut Connect:
+// Connect's buyer is defined by already living in Claude/ChatGPT, and for them
+// the plugin is the product regardless of where the free roster stops.
+//
+// Cost is not a factor either way — connected clients and plan files are
+// pennies. This was always a revenue lever, never a cost control.
+//
+// Market, for reference: Trainerize free = 1 client, Everfit free = 5.
+const FREE_ROSTER_CAP = 15;
 
 // S179b (Kevin): the cap counts PEOPLE THE TRAINER MANAGES, not just connected
 // accounts. Counting only connections left the door wide open — a trainer can

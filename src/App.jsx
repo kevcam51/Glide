@@ -17119,7 +17119,7 @@ const PLAN_FEATURES = {
   ],
   trainer: [
     { section: "The basics — free forever", rows: [
-      ["Connected clients + live dashboards", "8", "Unlimited", "Unlimited", "Unlimited"],
+      ["Clients & plan files", "15", "Unlimited", "Unlimited", "Unlimited"],
       ["Coaching analytics — who needs attention", true, true, true, true],
       ["To-dos, nudges & requests — both ways", true, true, true, true],
       ["Invite Hub — link, QR, email invites, referrals", true, true, true, true],
@@ -17274,8 +17274,8 @@ const PLAN_TIPS = {
     "If you genuinely run out, ask and we lift it \u2014 usually the same day. We'd rather raise the number than have you ration it.",
 
   // ── Trainer: always free ─────────────────────────────────────────────────
-  "Connected clients + live dashboards":
-    "Every client gets a live dashboard you can both see, and there is never a per-client fee. Free connects up to 8; every paid plan is unlimited. Clients already connected to a free account before this stay connected \u2014 nothing is taken away.",
+  "Clients & plan files":
+    "Every client gets a live dashboard you can both see, and there is never a per-client fee. Free covers 15 people \u2014 connected clients and your own plan files together; sales simulations don't count. Every paid plan is unlimited, and anyone already connected before this stays connected.",
   "Coaching analytics \u2014 who needs attention":
     "One screen showing who has gone quiet, who's off track and who's progressing, sorted so the people who need you are at the top.",
   "To-dos, nudges & requests \u2014 both ways":
@@ -17491,7 +17491,7 @@ function PlanPicker({ role, onClose }) {
           </div>
           <div className="text-muted" style={{ fontSize: ".78rem", lineHeight: 1.45 }}>
             {isTrainer
-              ? "The whole coaching platform for up to 8 connected clients: dashboards, analytics, messaging, to-dos, session booking, invites, plan templates and simulations."
+              ? "The whole coaching platform for up to 15 clients: dashboards, analytics, messaging, to-dos, session booking, invites, plan templates and simulations."
               : "Everything you track yourself: food, calories, macros and micronutrients, weight and body composition, workouts, the calendar, progress charts — and your trainer."}
           </div>
           <div className="text-muted" style={{ fontSize: ".74rem", lineHeight: 1.45, marginTop: "2px" }}>
