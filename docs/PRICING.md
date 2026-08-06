@@ -1111,3 +1111,36 @@ later, the honest answer is a cheap "more clients, no AI" tier, not a tighter
 free cap.
 
 Grid row is now "Clients & plan files": Free 15 / Unlimited ×3.
+
+## S179d — free-tier client counts across the market (verified Aug 6, 2026)
+
+| Platform | Permanent free tier? | Free clients | Cheapest paid |
+|---|---|---:|---|
+| **Glidna** | **yes — full platform minus AI** | **15** | Coach Connect $19.99 |
+| Trainerize | yes (basic features) | 1 | $9/mo → 2 clients |
+| Everfit | yes (no automation/payments/meal plans) | 5 | $16/mo → 5 clients |
+| TrainHeroic | athletes only; coach side unverified | ? | ~$9.99/mo |
+| Momence | $0 + 5% transaction fee (studio booking, weak comp) | unverified | $60/mo |
+| TrueCoach | **no** — 14-day trial | — | $29.98/mo → 5 clients |
+| PT Distinction | **no** — 1-month trial | — | $19.90/mo → 3 clients |
+| My PT Hub | **no** — 30-day trial | — | $40/mo → 3 clients |
+| FitBudd | **no** — 30-day trial | — | $15/mo → 2 clients |
+| PTminder | **no** — 14-day trial | — | $59/mo → 50 clients |
+| Kahunas | **no** — 14-day trial | — | $35/mo → 25 clients |
+
+Read-through: MOST of the market has no permanent free tier at all. Of the two
+real ones, the caps are 1 and 5 — and both strip features (Trainerize free is
+basics-only; Everfit free excludes automation, payments and meal plans). Glidna
+free = 15 people with the whole platform, stripping only AI. A 15-client roster
+costs $40–60/mo everywhere else — Glidna gives away what the market bills
+~$500+/yr for.
+
+**The structural point (why competitors can't follow):** per-seat SaaS cannot
+give seats away — seats ARE their product. Glidna monetizes AI (and client-side
+subscriptions), so free seats cost pennies and feed the funnel. The free tier
+is copy-proof for the same reason Connect is ~100% margin: the business model
+underneath is different.
+
+Confidence: Trainerize/Everfit/PTD/FitBudd/PTminder from official pages;
+TrueCoach/My PT Hub/Kahunas from secondary sources (medium); TrainHeroic and
+Momence caps unverified.
