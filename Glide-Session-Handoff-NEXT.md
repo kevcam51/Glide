@@ -86,9 +86,14 @@ as abuse backstops, the client limit is what tiers sell.
 
 **Later ideas (Kevin, S176):** 1) cap-hit message adds "or connect your own
 Claude/ChatGPT (included in your plan) to keep going" — turns our costliest
-moment into a ~free one (maxed Apex in-app $63/mo vs ~$0.30 via plugin);
-relief valve only, never the primary pitch (Premium nets ~$10 vs Connect
-$4.55). 2) Connector CHART IMAGES — a get_progress_chart tool returning a
+moment into a ~free one (maxed Apex in-app $63/mo vs ~$0.30 via plugin).
+⚠️ FIRE ONLY AT USERS WHO ACTUALLY HIT THE CAP, never general messaging
+(Kevin, S178c). The old cannibalisation worry is mostly SOLVED for trainers:
+Connect is capped at 15 AI-clients (S178b), so a coach needing 25 people can't
+drop to Connect to save money — the cap justifies the nudge. For CLIENTS seats
+never bind (a solo user only works on themselves), so there the differentiator
+is the in-app experience — photo, voice, chat on the phone — and a client happy
+in Claude was always a Connect customer. 2) Connector CHART IMAGES — a get_progress_chart tool returning a
 server-rendered PNG via the existing resvg pipeline (api/og.js); MCP image
 results render in Claude, VERIFY ChatGPT's handling when scoping. 3) Overage
 "client packs" saved for later (also in PRICING.md S175). 4) OWED: a

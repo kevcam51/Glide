@@ -8,7 +8,7 @@
 // Custom claims can ONLY be set by this trusted Admin-SDK code — never the
 // client — which is what makes role enforcement tamper-proof.
 
-const { onDocumentWritten } = require("firebase-functions/v2/firestore");
+const { onDocumentWritten, onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
@@ -65,6 +65,47 @@ exports.syncRoleClaims = onDocumentWritten("users/{uid}", async (event) => {
   const result = await applyClaims(uid, after);
   if (result === "set") console.log("syncRoleClaims: updated claims for", uid);
   else if (result === "missing") console.warn("syncRoleClaims: no auth user for", uid);
+});
+
+// ─── The trial fence (S178d) ───────────────────────────────────────────────
+// A profile with no `trialStartedAt` is treated as GRANDFATHERED everywhere —
+// permanently unlocked, full paid AI, free forever (trialExpiredFor in
+// aichat.js, isPremium in src/profile.js, seatCapFor in aitools.js all agree).
+// That was a deliberate courtesy to Kevin's earliest accounts, but it is also a
+// hazard: any future sign-up path that forgets to stamp the field silently
+// mints another free-forever paid account, and nobody would notice.
+//
+// createProfile (src/profile.js) does stamp it today — this is the backstop for
+// when it doesn't. onDocumentCreated fires ONLY for genuinely new profile docs,
+// so every pre-existing grandfathered account is untouched by construction:
+// their doc was created long ago and will never fire this. That is exactly the
+// line Kevin drew — fence the hazard, keep the courtesy (docs/PRICING.md S176f).
+//
+// The Admin SDK bypasses the S85 rules lock that stops owners writing these
+// fields, which is why this has to live server-side at all.
+exports.fenceNewAccountTrial = onDocumentCreated("users/{uid}", async (event) => {
+  const uid = event.params.uid;
+  const snap = event.data;
+  if (!snap || !snap.exists) return;
+  const d = snap.data() || {};
+  // Already stamped by createProfile (the normal path) — nothing to do. Also
+  // leave paid/comped accounts alone: they don't need a trial.
+  if (d.trialStartedAt || d.subscriptionStatus === "active"
+      || (d.entitlements && d.entitlements.premium === true)) return;
+  try {
+    await snap.ref.set({
+      trialStartedAt: admin.firestore.FieldValue.serverTimestamp(),
+      trialLengthDays: 30,
+      subscriptionStatus: "trial",
+      trialStampedBy: "fence",   // so a later audit can tell these apart
+    }, { merge: true });
+    console.warn("fenceNewAccountTrial: stamped a trial on", uid,
+      "— a creation path skipped it; find and fix that path.");
+  } catch (e) {
+    // Never throw: a failure here must not break account creation. The account
+    // simply stays grandfathered, which is the pre-S178d behaviour.
+    console.error("fenceNewAccountTrial: failed for", uid, e && e.message);
+  }
 });
 
 // One-off backfill so every EXISTING user gets claims. Admin-only. Invoke once
@@ -260,7 +301,20 @@ exports.adminOverview = onCall(async (request) => {
       },
     };
   }));
-  return { users, today, month, year, pricing: aiusage.PRICING[aiusage.DEFAULT_MODEL], model: aiusage.DEFAULT_MODEL };
+  // Grandfathered tally (S178d). An account with no trialStartedAt is treated
+  // as permanently unlocked everywhere, so Kevin needs the real number before
+  // deciding the courtesy window (docs/PRICING.md S176f: count first, then a
+  // ~12-month window, then free Connect for life). Computed from rows already
+  // read — no extra Firestore cost. `fenced` counts accounts the S178d trigger
+  // had to stamp: any non-zero value means a creation path is skipping the
+  // stamp and should be found.
+  const grandfathered = users
+    .filter((u) => !u.trialStartedAt && u.subscriptionStatus !== "active")
+    .map((u) => ({ uid: u.uid, name: u.name, email: u.email, role: u.role, createdAt: u.createdAt }));
+  const fenced = snap.docs.filter((d) => (d.data() || {}).trialStampedBy === "fence").length;
+
+  return { users, today, month, year, pricing: aiusage.PRICING[aiusage.DEFAULT_MODEL], model: aiusage.DEFAULT_MODEL,
+    grandfathered: { count: grandfathered.length, accounts: grandfathered.slice(0, 100) }, fenced };
 });
 
 // ── adminUserUsage (S167): one user's spend history, for the detail view ────

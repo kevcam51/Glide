@@ -1457,11 +1457,12 @@ function buildTools(role, opts = {}) {
         + "Per person returns: days logged in the window, days since last log, "
         + "calorie & protein adherence (avg vs target), latest weigh-in, weight trend (lbs/week), on-track status, "
         + "open requests, and a status (inactive / stalled / off_track / on_track / logging). Use instead of the "
-        + "per-client tools one by one, then give specific recommendations.",
+        + "per-client tools one by one, then give specific recommendations. A very large roster comes back one page at a time — `clientCount` is always the TRUE total, and `nextOffset` (when present) fetches the rest.",
       input_schema: {
         type: "object",
         properties: {
           days: { type: "number", description: "Window for activity/adherence, in days (default 7, max 31)." },
+          offset: { type: "number", description: "Skip this many people. Only needed for a roster bigger than one page — the reply's `nextOffset` tells you the value to pass; omit it otherwise." },
         },
       },
     });
@@ -1902,12 +1903,27 @@ async function runTool(name, input, ctx) {
     const endMs = new Date(end + "T00:00:00Z").getTime();
     const start = new Date(endMs - (win - 1) * 86400000).toISOString().slice(0, 10);
     const round1 = (v) => Math.round(v * 10) / 10;
-    const snap = await db.collection("users").where("assignedTrainerId", "==", ctx.callerUid).get();
+    const snap = await db.collection("users").where("assignedTrainerId", "==", ctx.callerUid).limit(500).get();
     const nums = await idNumMap(db, ctx.callerUid);
     const clients = [];
     const counts = { inactive: 0, never_logged: 0, stalled: 0, off_track: 0, on_track: 0, logging: 0 };
-    const MAX = 60;
-    let truncated = false;
+    // S178d — PAGE, not a silent cap. Three things were wrong with MAX=60:
+    //  1. The break happened BEFORE the concern-sort, so past 60 people you got
+    //     an arbitrary 60 in user-id order and then sorted THOSE — someone who
+    //     had gone quiet could be missing entirely from a "who needs attention?"
+    //     answer. Confidently incomplete is worse than no answer (the same
+    //     lesson the S165 comment below records about local plans).
+    //  2. clientCount reported the TRUNCATED length, so the model was told a
+    //     300-client trainer had 60 clients. That is the actual silent lie.
+    //  3. The cap was shared across both pools and connected clients ran first,
+    //     so a trainer with 60+ connected accounts saw NONE of their local plan
+    //     files — contradicting the S165 comment sitting directly below.
+    // Fixed by building ONE ordered candidate list across both pools first
+    // (identity only, cheap), then snapshotting just the requested page. The
+    // page bound is about RESPONSE SIZE — reads are ~$0.0000006 each, but every
+    // snapshot lands in the model's context — so it stays modest and pages.
+    const PAGE = 60;
+    const offset = Math.max(0, Math.round(Number(input.offset) || 0));
     // One person's coaching snapshot. Identical maths either way — only WHERE
     // the data lives differs: a connected client's in their own account, a local
     // plan's in the trainer's. Extracted so the two pools can never drift.
@@ -1963,51 +1979,70 @@ async function runTool(name, input, ctx) {
         ...(withRequests ? { openRequests: openReqs } : {}),
       };
     };
-    for (const docSnap of snap.docs) {
-      if (clients.length >= MAX) { truncated = true; break; }
-      const uidC = docSnap.id;
-      const p = docSnap.data();
-      const cname = p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Client";
-      // Roster tools bypass resolveTargetUid, so the opt-out has to be honoured
-      // here too — otherwise a client who switched AI off still has their weight
-      // and adherence read out to their trainer's assistant. Listed by NAME (so
-      // the trainer isn't left wondering where they went) but with NO data.
-      if (p.aiOptOut) {
-        clients.push({ clientId: uidC, ref: refCode(uidC), num: nums[uidC] || null, name: cname,
-          status: "ai_opted_out", aiOptOut: true,
-          note: "This client has switched AI off for their account. Their data is not available to an AI assistant — view it in Glidna instead. Only they can change this." });
-        continue;
-      }
-      const { id: planId, data } = await activePlanData(db, uidC);
-      clients.push(await snapshot({ ownerUid: uidC, planId, data, withRequests: true,
-        head: { kind: "client", clientId: uidC, ref: refCode(uidC), num: nums[uidC] || null, name: cname } }));
-    }
-
-    // ...and the trainer's OWN plan files (S165). These are clients too — they
-    // just never made an account — so a roster answer that silently skipped them
-    // ("nobody needs attention") was confidently incomplete, which is worse than
-    // no answer at all. Their data sits in the CALLER's own kv under the plan id.
+    // ONE candidate list across BOTH pools, identity only — no per-person reads
+    // yet, so building it costs nothing and the page can span both. Connected
+    // accounts first, then the trainer's OWN plan files (S165): those are
+    // clients too, they just never made an account, so a roster answer that
+    // silently skipped them ("nobody needs attention") was confidently
+    // incomplete — which is worse than no answer at all.
     const ownIndex = (await kvGetJSON(db, ctx.callerUid, "caliq-index")) || [];
+    const candidates = [];
+    for (const docSnap of snap.docs) candidates.push({ kind: "client", docSnap });
     for (const p of Array.isArray(ownIndex) ? ownIndex : []) {
-      if (!p || !p.id) continue;
-      if (clients.length >= MAX) { truncated = true; break; }
-      const wrap = await kvGetJSON(db, ctx.callerUid, `caliq-${p.id}`);
-      clients.push(await snapshot({
-        ownerUid: ctx.callerUid, planId: p.id, data: (wrap && wrap.data) || {},
-        withRequests: false,   // no login on the other end to receive a to-do
-        head: { kind: "local_plan", localPlanId: p.id, ref: refCode(p.id), num: nums[p.id] || null,
-          name: p.customName || p.name || "(unnamed)",
-          ...(p.isSimulation ? { isSimulation: true } : {}),
-          ...(p.trainerizeId ? { importedFromTrainerize: true } : {}) },
-      }));
+      if (p && p.id) candidates.push({ kind: "local_plan", p });
+    }
+    const total = candidates.length;
+    const pageItems = candidates.slice(offset, offset + PAGE);
+    const nextOffset = offset + pageItems.length < total ? offset + pageItems.length : null;
+
+    for (const c of pageItems) {
+      if (c.kind === "client") {
+        const uidC = c.docSnap.id;
+        const p = c.docSnap.data();
+        const cname = p.displayName || [p.firstName, p.lastName].filter(Boolean).join(" ") || p.email || "Client";
+        // Roster tools bypass resolveTargetUid, so the opt-out has to be honoured
+        // here too — otherwise a client who switched AI off still has their weight
+        // and adherence read out to their trainer's assistant. Listed by NAME (so
+        // the trainer isn't left wondering where they went) but with NO data.
+        if (p.aiOptOut) {
+          clients.push({ clientId: uidC, ref: refCode(uidC), num: nums[uidC] || null, name: cname,
+            status: "ai_opted_out", aiOptOut: true,
+            note: "This client has switched AI off for their account. Their data is not available to an AI assistant — view it in Glidna instead. Only they can change this." });
+          continue;
+        }
+        const { id: planId, data } = await activePlanData(db, uidC);
+        clients.push(await snapshot({ ownerUid: uidC, planId, data, withRequests: true,
+          head: { kind: "client", clientId: uidC, ref: refCode(uidC), num: nums[uidC] || null, name: cname } }));
+      } else {
+        const p = c.p;
+        const wrap = await kvGetJSON(db, ctx.callerUid, `caliq-${p.id}`);
+        clients.push(await snapshot({
+          ownerUid: ctx.callerUid, planId: p.id, data: (wrap && wrap.data) || {},
+          withRequests: false,   // no login on the other end to receive a to-do
+          head: { kind: "local_plan", localPlanId: p.id, ref: refCode(p.id), num: nums[p.id] || null,
+            name: p.customName || p.name || "(unnamed)",
+            ...(p.isSimulation ? { isSimulation: true } : {}),
+            ...(p.trainerizeId ? { importedFromTrainerize: true } : {}) },
+        }));
+      }
     }
     // Most concerning first. `never_logged` sorts LAST on purpose: a file nobody
     // has ever logged to is usually a template or a sandbox, not a person who
     // has gone quiet — putting those at the top would bury the ones who have.
     const rank = { inactive: 0, off_track: 1, stalled: 2, logging: 3, on_track: 4, never_logged: 5 };
     clients.sort((a, b) => (rank[a.status] - rank[b.status]) || ((b.daysSinceLastLog ?? -1) - (a.daysSinceLastLog ?? -1)));
-    return { windowDays: win, range: { start, end }, clientCount: clients.length, counts, clients, truncated,
-      note: "Covers EVERYONE this trainer coaches: connected accounts (`clientId`) and their own plan files (`localPlanId`), "
+    return { windowDays: win, range: { start, end },
+      // clientCount is the TRUE roster size, always — `returned` is how many of
+      // them this page carries. Reporting the truncated length here is what used
+      // to tell a 300-client trainer they had 60.
+      clientCount: total, returned: clients.length, offset,
+      ...(nextOffset != null ? { nextOffset } : {}),
+      truncated: nextOffset != null,
+      counts, clients,
+      note: (nextOffset != null
+        ? `Showing ${clients.length} of ${total} people (offset ${offset}); \`counts\` covers THIS PAGE only. Most concerning first within the page — call again with offset=${nextOffset} for the rest before concluding who needs attention most. `
+        : "")
+        + "Covers EVERYONE this trainer coaches: connected accounts (`clientId`) and their own plan files (`localPlanId`), "
         + "which are usually real clients without an app account. `never_logged` means nothing has ever been logged for that person — "
         + "for a template or a sandbox (`isSimulation`) that is normal, not a problem to raise. To-dos can only be sent to a connected account." };
   }
