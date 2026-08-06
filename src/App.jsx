@@ -8493,7 +8493,7 @@ function dayLabelFor(key, todayKey) {
   return new Date(q[0], q[1] - 1, q[2]).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
-function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, savedFoods, onToggleSaveFood, onRemoveSavedFood, savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onReadDay, onListLoggedDays, dateKey, hideMicros, onDayStep, dayLabel, canGoNext, planned, onSetPlanned, onPlanDays, onEatPlanned }) {
+function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, savedFoods, onToggleSaveFood, onRemoveSavedFood, savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onReadDay, onListLoggedDays, dateKey, hideMicros, onDayStep, dayLabel, canGoNext, planned, onSetPlanned, onPlanDays, onEatPlanned, premium = true, role }) {
   const [name, setName] = useState("");
   const [brand, setBrand] = useState(""); // brand of a picked food (e.g. "Kirkland Signature") — shown under the name
   const [cals, setCals] = useState("");
@@ -8556,6 +8556,13 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   const [mlViewPhoto, setMlViewPhoto] = useState(null);
   const [aiNote, setAiNote] = useState("");
   const [aiErr, setAiErr] = useState("");
+  // S178g — the tracker's own upsell. Free users used to tap "AI estimate",
+  // wait for a round trip, and get a red error with no way out; the chat panel
+  // has always done this properly with a lock card. `aiLocked` shows that card
+  // INSTEAD of calling the server, so the moment of intent converts rather than
+  // dead-ends. Nothing about the server gate changes — it is still the real one.
+  const [aiLocked, setAiLocked] = useState(false);
+  const [aiPlans, setAiPlans] = useState(false);
   // After an AI estimate we keep the per-1-serving values so a servings stepper
   // can rescale calories + macros without another AI call.
   const [aiBase, setAiBase] = useState(null); // { calories, protein, carbs, fat, assumed }
@@ -8620,6 +8627,10 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   // to the search box), fills the form, and reports the serving it assumed.
   // Budget + trial-expiry are enforced server-side (estimateFood callable).
   const runAiEstimate = async (images) => {
+    // One guard for every path into the estimator (text, photo, retry). Show
+    // the upgrade card rather than spending a round trip on a call the server
+    // will refuse.
+    if (!premium) { setAiLocked(true); return; }
     const imgs = Array.isArray(images) ? images : (images ? [images] : []);
     const q = (name || searchQ).trim();
     if (aiBusy) return;
@@ -9203,7 +9214,10 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
             </button>
             {/* Photo estimate — snap the plate instead of typing it. The photo is
                 sent to the model and discarded; nothing is stored. */}
-            <button onClick={() => photoInputRef.current && photoInputRef.current.click()}
+            <button onClick={() => {
+                if (!premium) { setAiLocked(true); return; }   // don't open the camera for a call we can't make
+                if (photoInputRef.current) photoInputRef.current.click();
+              }}
               disabled={aiBusy || aiPhotos.length >= MAX_MEAL_PHOTOS}
               style={{ border:"none", background:"transparent", color:"var(--accent)", cursor:"pointer",
                 fontSize:".74rem", fontWeight:700, padding:"0", textAlign:"left",
@@ -9409,6 +9423,41 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
         </div>
       )}
       {aiErr && <div style={{ fontSize:".74rem", color:"var(--red)" }}>{aiErr}</div>}
+
+      {/* Locked-AI upsell (S178g). Sits exactly where the dead red error used
+          to, so the pitch arrives at the moment of intent — the person has
+          already typed their food and reached for the AI. Says what stays free,
+          because the honest version converts better than a wall and it is the
+          promise on the pricing page. */}
+      {aiLocked && (
+        <div style={{ marginTop:"8px", border:"1px solid var(--accent)", borderRadius:"12px",
+          background:"rgba(8,220,224,.07)", padding:"12px 13px" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:"7px" }}>
+            <Icon name="sparkle" variant="solid" size={15} color="var(--accent)" />
+            <div style={{ fontWeight:800, fontSize:".88rem", color:"var(--text)" }}>
+              Let the AI do this bit
+            </div>
+          </div>
+          <div style={{ marginTop:"5px", fontSize:".79rem", lineHeight:1.5, color:"var(--muted)" }}>
+            Describe a meal or snap a photo and it fills in the calories and macros for you.
+            <span style={{ color:"var(--text)", fontWeight:600 }}> Searching foods, the barcode scanner
+            and typing it in yourself stay free — always.</span>
+          </div>
+          <div style={{ display:"flex", gap:"8px", marginTop:"10px", flexWrap:"wrap" }}>
+            <button onClick={() => setAiPlans(true)}
+              style={{ border:"none", borderRadius:"10px", background:"var(--accent)", color:"#04212a",
+                fontWeight:800, fontSize:".82rem", padding:"9px 15px", cursor:"pointer", minHeight:40 }}>
+              See plans
+            </button>
+            <button onClick={() => setAiLocked(false)}
+              style={{ border:"1px solid var(--border)", borderRadius:"10px", background:"transparent",
+                color:"var(--muted)", fontSize:".82rem", padding:"9px 13px", cursor:"pointer", minHeight:40 }}>
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
+      {aiPlans && <PlanPicker role={role} onClose={() => { setAiPlans(false); setAiLocked(false); }} />}
       <button onClick={() => setShowMacros((s) => !s)}
         style={{ border:"none", background:"transparent", color:"var(--muted)", cursor:"pointer",
           fontSize:".72rem", textDecoration:"underline", padding:"0", textAlign:"left" }}>
@@ -9997,7 +10046,7 @@ const fmtClock = (t) => {
 // calendar renders IN-FLOW (it *is* the page, which must scroll normally); a
 // lock here froze the whole page on Android. ClientHome's portal-overlay usage
 // locks from the caller instead (useBodyScrollLock(showCalendar) there).
-function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods, savedFoods, onToggleSaveFood, onRemoveRecentFood, onRemoveSavedFood, onLogFoods, onSaveMeasurementsFor, meUid }) {
+function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods, savedFoods, onToggleSaveFood, onRemoveRecentFood, onRemoveSavedFood, onLogFoods, onSaveMeasurementsFor, meUid, premium = true, role }) {
   // Booked training sessions (S100) — shown alongside the logging data so the
   // calendar answers "when am I training?" as well as "what did I eat?".
   const [calSessions, setCalSessions] = useState([]);
@@ -10561,7 +10610,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             </div>
           </div>
           <div style={{ marginTop: 12 }}>
-            <MealLog meals={(dayLog && dayLog.meals) || []} onAddMeal={addMeal} onAddMeals={addMeals} onRemoveMeal={removeMeal} onEditMeal={editMeal} recentFoods={recentFoods} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveRecentFood={onRemoveRecentFood} onRemoveSavedFood={onRemoveSavedFood} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={sel} />
+            <MealLog meals={(dayLog && dayLog.meals) || []} onAddMeal={addMeal} onAddMeals={addMeals} onRemoveMeal={removeMeal} onEditMeal={editMeal} recentFoods={recentFoods} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveRecentFood={onRemoveRecentFood} onRemoveSavedFood={onRemoveSavedFood} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={sel} premium={premium} role={role} />
           </div>
         </div>
 
@@ -10793,7 +10842,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onSetPlanned, onPlanDays, onEatPlanned,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
   onSaveMeasurements, onSaveMeasurementsFor, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise,
-  onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetHideCompliance, meUid: dashMeUid }) {
+  onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetHideCompliance, meUid: dashMeUid,
+  premium = true, role }) {
 
   // Swipe-down to refresh the daily view (S104) — reuses the existing onRefresh
   // (reloadPlanLive), which re-pulls the plan + today's log.
@@ -11218,7 +11268,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveRecentFood={onRemoveRecentFood} onRemoveSavedFood={onRemoveSavedFood}
           onLogFoods={onLogFoods}
           onSaveMeasurementsFor={onSaveMeasurementsFor}
-          meUid={dashMeUid} />
+          meUid={dashMeUid} premium={premium} role={role} />
       </div>
     );
   }
@@ -12163,7 +12213,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         onRemoveMeal={mealIsToday ? onRemoveMeal : pastRemoveMeal} onEditMeal={mealIsToday ? onEditMeal : pastEditMeal}
         recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood} savedMeals={savedMeals} onToggleSaveMeal={onToggleSaveMeal} onRemoveSavedMeal={onRemoveSavedMeal}
         onLogMeal={mealIsToday ? onLogMeal : undefined} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays}
-        dateKey={mealDate} hideMicros
+        dateKey={mealDate} hideMicros premium={premium} role={role}
         planned={mealIsToday ? (dailyLog.planned || []) : ((mealDayLog && mealDayLog.planned) || [])}
         onSetPlanned={mealIsToday ? onSetPlanned : undefined} onPlanDays={onPlanDays} onEatPlanned={mealIsToday ? onEatPlanned : undefined}
         onDayStep={shiftMealDate} dayLabel={dayLabelFor(mealDate, dashToday)} canGoNext />
@@ -20293,7 +20343,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
               savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood}
               onRemoveRecentFood={onRemoveRecentFood} onRemoveSavedFood={onRemoveSavedFood}
               onLogFoods={onLogFoods}
-              meUid={meUid} />
+              meUid={meUid} premium={premium} role={role} />
           </div>
         </div>,
         document.body
@@ -25421,7 +25471,7 @@ export default function App() {
               onOpenPlan={()=>{setNavFrom("dashboard");setStepAndSave(0);}} onOpenResults={()=>{setNavFrom("dashboard");setShowDash(false);}}
               onEditWorkouts={()=>{setNavFrom("dashboard");setStepAndSave(3);}}
               onLogUpdate={onLogUpdate} dailyLog={dailyLog} streak={streak}
-              onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} onLogFoods={onLogFoodsFromCalendar} onSetPlanned={onSetPlanned} onPlanDays={onPlanDays} onEatPlanned={onEatPlanned} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid}
+              onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} onLogFoods={onLogFoodsFromCalendar} onSetPlanned={onSetPlanned} onPlanDays={onPlanDays} onEatPlanned={onEatPlanned} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid} premium={mePremium} role={role}
               onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; n.macroTargetsEditedAt=Date.now(); return n; })}
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
