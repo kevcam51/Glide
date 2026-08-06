@@ -1568,7 +1568,12 @@ function seatCapFor(profile) {
   if (profile.role === "admin") return null;
   if (profile.subscriptionStatus === "active") {
     const t = String(profile.subscriptionTier || "").toLowerCase();
-    if (t.includes("connect")) return null; // we limit what we pay for — their AI pays
+    // Connect: their own Claude/ChatGPT pays for the inference, so this is NOT
+    // a cost cap — it is a generous abuse ceiling (S178, Kevin). 50 never
+    // touches a working trainer (Apex's own cap is 50) but closes the
+    // one-login-serves-200-clients edge case. If it ever bites a real coach,
+    // raising it is a one-line change.
+    if (t.includes("connect")) return 50;
     if (t.includes("ultra")) return 50;     // Apex
     if (t.includes("max")) return 30;       // Elite
     return 20;                              // Coach (and any other active sub)

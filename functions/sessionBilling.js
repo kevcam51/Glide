@@ -36,6 +36,8 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 
+const { canBillSessions, BILLING_UNAVAILABLE_MSG } = require("./sessionBillingGate");
+
 const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
 const STRIPE_TEST_SECRET_KEY = defineSecret("STRIPE_TEST_SECRET_KEY");
 const REGION = "us-central1";
@@ -116,6 +118,13 @@ exports.createSessionSetupIntent = onCall(
       throw new HttpsError("permission-denied", "You're not linked to that trainer.");
     }
 
+    // Safety interlock (S178): no Connect yet, so a non-allowlisted trainer's
+    // client money would land in the platform account with no payout path.
+    // Checked BEFORE any Stripe object is created, so nothing is left dangling.
+    if (!canBillSessions(trainerUid)) {
+      throw new HttpsError("failed-precondition", BILLING_UNAVAILABLE_MSG, { reason: "session-billing-unavailable" });
+    }
+
     const stripe = stripeClient(profile);
     const customerId = await ensureCustomer(db, uid, profile, stripe);
     const origin = safeOrigin(String((request.rawRequest && request.rawRequest.headers && request.rawRequest.headers.origin) || ""));
@@ -162,6 +171,14 @@ exports.recordSessionConsent = onCall(
     const profile = (await db.doc(`users/${uid}`).get()).data() || {};
     if (!(await isTrainerOfClient(db, trainerUid, profile))) {
       throw new HttpsError("permission-denied", "You're not linked to that trainer.");
+    }
+
+    // Same interlock as the setup call. Belt and braces: the setup intent can
+    // only exist if the trainer was allowlisted when it was created, but a
+    // trainer could be de-listed between the two calls, and storing a card
+    // pointer we can never legitimately charge would be the worst outcome.
+    if (!canBillSessions(trainerUid)) {
+      throw new HttpsError("failed-precondition", BILLING_UNAVAILABLE_MSG, { reason: "session-billing-unavailable" });
     }
 
     const stripe = stripeClient(profile);

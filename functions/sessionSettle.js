@@ -41,6 +41,7 @@ const STRIPE_TEST_SECRET_KEY = defineSecret("STRIPE_TEST_SECRET_KEY");
 const VAPID_PRIVATE_KEY = defineSecret("VAPID_PRIVATE_KEY");
 const REGION = "us-central1";
 const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
+const { canBillSessions } = require("./sessionBillingGate");
 // For the ON-session pay-now retry: Stripe requires a return_url on a confirmed
 // intent that could need a redirect (e.g. a 3DS card check), so we pass the
 // caller's validated origin. (The off_session sweep never redirects, so it needs
@@ -155,6 +156,13 @@ async function settleGroup(db, items, { now, weeklyWindow, dryRun }) {
   ]);
   const trainer = trainerDoc.exists ? trainerDoc.data() : {};
   const client = clientDoc.exists ? clientDoc.data() : {};
+
+  // Safety interlock (S178) — the single chokepoint for ALL automatic charging.
+  // Every charge lands on the platform Stripe account (no Connect yet), so a
+  // non-allowlisted trainer's sweep must never create a PaymentIntent: the money
+  // would be ours to hold with no way to pay them. Checked FIRST, before mode or
+  // hold, so the skip reason is unambiguous in the logs.
+  if (!canBillSessions(trainerUid)) return { outcome: "skipped", why: "billing-not-enabled" };
 
   const trainerPolicy = policyOf(trainer.sessionPolicy);
   if (trainerPolicy.billingMode === "manual") return { outcome: "skipped", why: "manual-mode" };

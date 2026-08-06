@@ -15027,6 +15027,15 @@ function computeClientCalories(d) {
 // (requireAdmin / ADMIN_UIDS in functions/). Mirrors firestore.rules isAdmin().
 const OWNER_UID = "G7QUZ8Kat1fgyoMjdGKz4DYoVHi1";
 
+// May this trainer take money for sessions? (S178 — mirrors
+// functions/sessionBillingGate.js, which is the REAL gate; this only hides
+// entry points so nobody walks into a wall.) Session billing has no Stripe
+// Connect yet, so every charge lands on the platform account — an outside
+// trainer's client money would be ours to hold with no payout path. BOOKING
+// and the cancellation policy stay free for everyone; only card-on-file,
+// automatic charging and earnings are behind this.
+const canBillSessions = (uid) => uid === OWNER_UID;
+
 // Friendly one-liner for a manual "sync now" result. Deliberately reports when
 // nothing NEW arrived: Glide can only pull what Trainerize already has, and a
 // watch that hasn't pushed today's data yet is the common case — saying "synced"
@@ -17033,11 +17042,12 @@ const PLAN_FEATURES = {
       ["Send client to-dos straight from chat", false, false, true, true],
       ["Past chats — save, revisit & continue", false, false, true, true],
       ["AI conversations per day", "—", "—", "~133", "~200"],
-      // S176f seats: distinct people the AI works on per month. Connect is
-      // deliberately "No limit" — their own AI pays for inference (the "we
-      // limit what we pay for" rule), and the roster itself is unlimited on
-      // every tier; this row only counts AI-coached people.
-      ["AI-coached clients each month", "—", "No limit", "20", "30"],
+      // S176f seats: distinct people the AI works on per month. The roster
+      // itself stays unlimited on every tier — this row counts only AI-coached
+      // people. Connect's 50 is NOT a cost cap (their own AI pays for the
+      // inference); it is a generous abuse ceiling added S178, set so it never
+      // touches a working trainer.
+      ["AI-coached clients each month", "—", "50", "20", "30"],
     ]},
     { section: "Coach Elite — everything in Coach, plus:", rows: [
       ["Our biggest AI allowance — built for all-day use", false, false, false, true],
@@ -21780,7 +21790,10 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
             research says the record must show. Card entry happens on Stripe's
             hosted page; Glidna never sees the number.
             TRAINER: a read-only "card on file" indicator for this client. */}
-        {!isTrainer && (
+        {/* S178: only offer to save a card when this trainer may actually take
+            money. Otherwise the client would hand over a card that can never be
+            charged. Booking above stays available either way. */}
+        {!isTrainer && canBillSessions(trainerUid) && (
           <div className="mb-3 rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", background: "var(--s2)" }}>
             <div className="text-[11px] font-bold uppercase tracking-wide text-muted mb-1">Payment method</div>
             {myCard ? (
@@ -21832,7 +21845,9 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
             )}
           </div>
         )}
-        {isTrainer && (
+        {/* S178: the card indicator is a billing surface too — a trainer who
+            cannot charge has no business seeing a client's card state. */}
+        {isTrainer && canBillSessions(trainerUid) && (
           <div className="mb-3 flex flex-col gap-1.5 px-1">
             <div className="flex items-center gap-2 text-[.76rem] text-muted">
               <Icon name="card" size={14} color={clientCard ? "var(--accent)" : "var(--muted)"} />
@@ -21910,7 +21925,12 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
               </div>
             )}
 
-            {/* WHEN money is taken — Kevin wants a variety of ways to charge. */}
+            {/* WHEN money is taken — Kevin wants a variety of ways to charge.
+                S178: hidden unless this trainer may actually bill. A trainer
+                without it keeps the cancellation policy above (free for all)
+                and settles up with clients directly; the server forces the
+                same outcome regardless of what this control shows. */}
+            {canBillSessions(trainerUid) && (<>
             <div className={lbl}>How you get paid</div>
             <div className="mb-2 flex flex-col gap-1.5">
               {Object.entries(BILLING_MODES).map(([k, label]) => (
@@ -21944,6 +21964,7 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
                 </div>
               );
             })()}
+            </>)}
 
             <div className="mb-2">
               <div className={lbl}>In your own words (optional)</div>
@@ -23355,7 +23376,12 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
         <button style={item} onClick={() => go(onHome)}><Icon name="home" size={19} color="var(--accent)" /> <span>Home</span></button>
         {isTrainer && <button style={item} onClick={() => go(onDashboard)}><Icon name="dashboard" size={19} color="var(--accent)" /> <span>Dashboard</span></button>}
         {isTrainer && <button style={item} onClick={() => go(onClients)}><Icon name="clients" size={19} color="var(--accent)" /> <span>All clients</span></button>}
-        {isTrainer && onEarnings && <button style={item} onClick={() => go(onEarnings)}><Icon name="receipt" size={19} color="var(--accent)" /> <span>Earnings</span></button>}
+        {/* Earnings is a BILLING surface — hidden unless this trainer may
+            actually take money (S178). Booking stays free and visible. */}
+        {/* Earnings is a BILLING surface — hidden unless this trainer may
+            actually take money (S178; isAdminUid is already meUid===OWNER_UID,
+            the same test canBillSessions makes). Booking stays free. */}
+        {isTrainer && onEarnings && isAdminUid && <button style={item} onClick={() => go(onEarnings)}><Icon name="receipt" size={19} color="var(--accent)" /> <span>Earnings</span></button>}
 
         {/* Notification Center (Session 76) — master on/off + per-type toggles.
             One notification type today (trainer to-dos); more slot in as features
