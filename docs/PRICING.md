@@ -1029,3 +1029,41 @@ skipping the trial stamp.
 
 If a real grandfathered user somehow surfaces later, the generous options are
 still on the table — but do not build for a population that does not exist.
+
+## S179 — Glidna Free gets a roster cap: 8 connected clients (Kevin, Aug 6 2026)
+
+**Decision.** Free trainers may connect **8 clients**. Every paid tier (Connect
+and up) stays unlimited. Trial stays unlimited — the trial is the whole product.
+
+**Why, in Kevin's words:** "if there's no client limits then that might not be
+fair for all the other tiers above." It is also the answer to the worry he has
+raised all session — that AI is the only thing we sell. A free roster cap is a
+genuine NON-AI upgrade trigger, and the first one in the product.
+
+**Market check (verified S175):** Trainerize free = 1 client · Everfit free = 5
+· PT Distinction has no free tier (3 clients at $19.90). At 8, Glidna has the
+most generous free tier in the category — chosen over 5 deliberately, because
+free trainers are also the distribution engine: every client they bring in is a
+potential paying CLIENT subscriber, and a tight cap slows that inflow to buy
+trainer conversions.
+
+**GRANDFATHERED — new accounts only.** "Unlimited connected clients — free
+forever" is on the live page today, so existing free trainers keep unlimited
+(Kevin's own barcode rule: never a take-away). The cap applies from a cutoff
+forward. Do NOT retro-apply it.
+
+**Enforcement must be server-side, and this is the non-obvious part.** The
+CLIENT writes the link (`joinTrainer` ends with the client updating their own
+`assignedTrainerId`), and a client cannot count a trainer's roster — the S59
+scoped-read rules deliberately stop them reading other profiles. So the cap
+cannot be checked where the join happens. It needs:
+  1. a callable that counts the roster with the Admin SDK and writes the link,
+  2. a `firestore.rules` change so a client can no longer write
+     `assignedTrainerId` directly (else the callable is decorative),
+  3. emulator tests incl. attack cases, then a rules PUBLISH.
+`getMyClients` (where assignedTrainerId == me) must keep working — a wrong list
+rule silently returns nothing and breaks every trainer dashboard.
+
+**Copy to update when it ships:** the "Unlimited connected clients + live
+dashboards" row becomes 8 / unlimited / unlimited / unlimited, its tooltip, and
+the Glidna Free card (which currently says "unlimited clients").
