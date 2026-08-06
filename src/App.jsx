@@ -17000,9 +17000,9 @@ const PLAN_MENU = {
     { tier: "connect", name: "Glidna Connect", month: "$4.99", year: "$49.99", yearNote: "2 months free",
       blurb: "Already live in Claude or ChatGPT? Connect Glidna to it — your own AI logs your meals and reads your data. No in-app AI." },
     { tier: "base", name: "Glidna Premium", month: "$14.99", year: "$119.99", yearNote: "33% off",
-      blurb: "The AI coach: chat, photo & voice logging, AI meal estimates — a generous daily allowance. All your tracking stays free either way." },
+      blurb: "The AI coach: chat, photo & voice logging, AI meal estimates — a generous daily allowance. Includes everything in Connect. All your tracking stays free either way." },
     { tier: "max", name: "Glidna Elite", month: "$29.99", year: "$299.99", yearNote: "2 months free",
-      blurb: "Our biggest allowance — around 100 AI conversations a day. Ever hit the ceiling? Tell us and we'll raise it." },
+      blurb: "Our biggest allowance — around 100 AI conversations a day, and photo-logging you never have to ration. Includes everything in Connect. Ever hit the ceiling? Tell us and we'll raise it." },
   ],
   trainer: [
     { tier: "connect", name: "Coach Connect", month: "$19.99", year: "$199", yearNote: "2 months free",
@@ -17012,9 +17012,9 @@ const PLAN_MENU = {
       // grid directly beneath it, where the whole workspace reads "free forever",
       // and the code sides with the grid (the ONLY subscription gate is the AI
       // layer). Selling what you already give away is how refund arguments start.
-      blurb: "The AI assistant for your roster: build programs, set targets and log for clients by chat. Up to 25 AI-coached clients a month — the coaching workspace itself stays free." },
+      blurb: "The AI assistant for your roster: build programs, set targets and log for clients by chat. Up to 25 AI-coached clients a month, and everything in Coach Connect. The coaching workspace itself stays free." },
     { tier: "max", name: "Coach Elite", month: "$79", year: "$790", yearNote: "2 months free",
-      blurb: "The biggest AI allowance, coach-sized — around 200 conversations a day, and up to 35 AI-coached clients a month." },
+      blurb: "Room to run the AI across your whole roster every day — around 200 conversations, up to 35 AI-coached clients a month, and everything in Coach Connect." },
   ],
 };
 
@@ -17413,7 +17413,7 @@ function PlanPicker({ role, onClose }) {
             rather than reading as one more feature. */}
         <div className="text-center text-muted" style={{ fontSize: ".76rem", lineHeight: 1.5, marginTop: "-4px" }}>
           Works <span className="text-fg font-semibold">alongside</span> whatever you already use
-          {isTrainer ? " — Trainerize, TrueCoach, your own calendar." : " — MyFitnessPal, your watch, your own AI."}
+          {isTrainer ? " — your coaching platform, your calendar, your own AI." : " — your favourite tracker, your watch, your own AI."}
           {" "}Nothing to connect, nothing to switch.
         </div>
         {canPreview && (
@@ -17439,6 +17439,34 @@ function PlanPicker({ role, onClose }) {
               {l}{v === "year" ? " · save" : ""}
             </button>
           ))}
+        </div>
+        {/* Free, stated up front (S178k, Kevin). Not a purchase — no Choose CTA,
+            no border highlight — so it reads as "where you already are" rather
+            than a fourth thing to buy. Says what you GET and what you DON'T,
+            because a free tier described only by its gaps sounds like a trial,
+            and one described only by its features sounds like a bait. */}
+        <div className="bg-surface2 border border-border rounded-card"
+          style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: "4px" }}>
+          <div className="flex items-baseline justify-between gap-2 flex-wrap">
+            <span className="font-display font-bold text-fg" style={{ fontSize: ".95rem" }}>Glidna Free</span>
+            <span className="font-display font-extrabold text-fg" style={{ fontSize: "1.15rem" }}>
+              $0<span className="text-muted" style={{ fontSize: ".72rem", fontWeight: 600 }}>/forever</span>
+            </span>
+          </div>
+          <div className="text-muted" style={{ fontSize: ".78rem", lineHeight: 1.45 }}>
+            {isTrainer
+              ? "The whole coaching platform: unlimited clients, dashboards, analytics, messaging, to-dos, session booking, invites, plan templates and simulations."
+              : "Everything you track yourself: food, calories, macros and micronutrients, weight and body composition, workouts, the calendar, progress charts — and your trainer."}
+          </div>
+          <div className="text-muted" style={{ fontSize: ".74rem", lineHeight: 1.45, marginTop: "2px" }}>
+            <span className="text-fg font-semibold">Not included:</span>{" "}
+            {isTrainer
+              ? "the AI assistant, and connecting your own Claude or ChatGPT."
+              : "the AI coach — chat, photo and voice logging — and connecting your own Claude or ChatGPT."}
+          </div>
+          <div className="text-muted" style={{ fontSize: ".72rem", fontWeight: 700, marginTop: "4px" }}>
+            No card needed — this is where you land when a trial ends.
+          </div>
         </div>
         {plans.map((p) => (
           <button key={p.tier} onClick={() => choose(p.tier)} disabled={!!busyTier}
