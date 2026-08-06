@@ -5,7 +5,7 @@
 // helpers just read/write the shapes the rules expect.
 import { db } from "./firebase";
 import {
-  doc, getDoc, setDoc, updateDoc, collection, addDoc,
+  doc, getDoc, setDoc, updateDoc, collection, addDoc, getDocs,
   query, where, orderBy, limitToLast, onSnapshot, increment,
 } from "firebase/firestore";
 
@@ -71,4 +71,26 @@ export function subscribeThread(tid, cb) {
 export function subscribeMyThreads(uid, cb) {
   const q = query(collection(db, "threads"), where("participants", "array-contains", uid));
   return onSnapshot(q, (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => {});
+}
+
+// Every message this user can see, flattened for "Download my data" (S178f).
+// Conversations are half the record of a coaching relationship, so an export
+// that skipped them would not be the "every bit of your data" the pricing page
+// promises. Reads only threads the rules already let this user read.
+export async function exportMyThreads(uid) {
+  if (!uid) return [];
+  const tq = await getDocs(query(collection(db, "threads"), where("participants", "array-contains", uid)));
+  const out = [];
+  for (const t of tq.docs) {
+    const msgs = await getDocs(query(collection(db, "threads", t.id, "msgs"), orderBy("ts", "asc")));
+    out.push({
+      threadId: t.id,
+      with: ((t.data() || {}).participants || []).filter((u) => u !== uid),
+      messages: msgs.docs.map((m) => {
+        const d = m.data() || {};
+        return { from: d.from === uid ? "me" : "them", text: d.text || "", at: d.ts || null };
+      }),
+    });
+  }
+  return out;
 }

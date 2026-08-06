@@ -2,9 +2,9 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium, setAiOptOut, aiChoiceMade } from "./profile.js";
 import { getForUser, setForUser, deleteForUser, listForUser, listEntriesForUser, subscribeForUser } from "./clientData.js";
-import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads } from "./messaging.js";
+import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads, exportMyThreads } from "./messaging.js";
 import { pushStatus, enablePush, disablePush } from "./push.js";
-import { privGet, privSet, privSubscribe } from "./privateStore.js";
+import { privGet, privSet, privSubscribe, privListEntries } from "./privateStore.js";
 import { bookSession, updateSession, cancelSession, subscribeMySessions, sessionsByDay, isPastSession, sessionEndMs, SESSION_DEFAULT_MIN,
   policyOf, packsOf, describePolicy, isLateCancel, lateCancelFeeCents, saveSessionPolicy, saveSessionPacks,
   CANCEL_WINDOW_PRESETS, STARTER_PACKS, DEFAULT_SESSION_POLICY,
@@ -23173,6 +23173,89 @@ function AiConsentPrompt({ isTrainer, onChoose }) {
   );
 }
 
+// ── Download everything this account owns (S178f) ──────────────────────────
+// The pricing page promises "even if you cancel, you keep your account and
+// every bit of your data". Until now that was only true for trainers — export
+// lived solely in the trainer's profile manager, so a CLIENT had no way to get
+// their own data out at all. This is the promise, in code.
+//
+// Deliberately a FULL kv scan (listEntries with no prefix) rather than a
+// curated list of keys: a hand-picked export silently goes stale the moment a
+// feature adds a key, and "every bit of your data" then quietly becomes a lie.
+// Everything the account owns comes out, including keys added after this was
+// written. Values are stored as JSON strings, so each is parsed back where
+// possible and passed through untouched when it isn't.
+async function exportMyData({ meName, meEmail, role }) {
+  const { entries } = await window.storage.listEntries("");
+  const data = {};
+  for (const e of entries || []) {
+    if (!e || !e.k) continue;
+    try { data[e.k] = JSON.parse(e.value); }
+    catch (err) { data[e.k] = e.value; }   // not JSON — keep it verbatim
+  }
+
+  // A person's data is NOT all in kv, and an export that quietly stopped there
+  // would be false in the places people care about most. Private notes live in
+  // privkv (owner-only by rules) and messages live in top-level threads. Each
+  // is best-effort: a failure on one must not cost someone the rest of their
+  // export, so it degrades to a noted omission instead of an error.
+  let privateNotes = null, messages = null, notesError = null, messagesError = null;
+  try {
+    const rows = await privListEntries();
+    privateNotes = {};
+    for (const r of rows) {
+      try { privateNotes[r.k] = JSON.parse(r.value); }
+      catch (err) { privateNotes[r.k] = r.value; }
+    }
+  } catch (e) { notesError = "Private notes could not be included."; }
+
+  try {
+    const me = auth.currentUser && auth.currentUser.uid;
+    if (me) messages = await exportMyThreads(me);
+  } catch (e) { messagesError = "Messages could not be included."; }
+
+  const bundle = {
+    format: "glidna-account-export",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    account: { name: meName || null, email: meEmail || null, role: role || null },
+    // What the reader needs to make sense of it without our source code.
+    keyGuide: {
+      "caliq-plans": "Your plans and which one is active",
+      "caliq-{planId}": "A plan: your stats, goals, targets, workout schedule, check-ins",
+      "caliq-log-{planId}-{YYYY-MM-DD}": "One day: meals, calories, macros, water, tracker data",
+      "caliq-history-{planId}": "Activity feed for that plan",
+      "caliq-measurements": "Body measurements and body-fat readings",
+      "caliq-foods": "Your saved food library",
+      "caliq-requests": "To-dos from your trainer",
+      "caliq-notes": "Your notes",
+    },
+    entryCount: Object.keys(data).length,
+    data,
+    ...(privateNotes ? { privateNotes } : {}),
+    ...(messages ? { messages } : {}),
+    // Say plainly what is NOT here, rather than letting silence imply
+    // completeness. Session records and billing history are deliberately out:
+    // those are shared records between two people and belong to the trainer's
+    // account as much as yours.
+    omitted: [
+      ...(notesError ? [notesError] : []),
+      ...(messagesError ? [messagesError] : []),
+      "Session bookings and payment records are shared with your trainer and aren't included here.",
+    ],
+  };
+  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Glidna-My-Data-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  return bundle.entryCount;
+}
+
 function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
@@ -23193,6 +23276,8 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
   // Face ID / Touch ID passkey setup (S87). pkDone = a passkey was registered
   // from this device (local hint — the credential itself lives server-side).
   const [pkBusy, setPkBusy] = useState(false);
+  const [dlBusy, setDlBusy] = useState(false);   // "Download my data" (S178f)
+  const [dlMsg, setDlMsg] = useState(null);
   // Push delivery for THIS device (S90): "on" | "off" | "blocked" | "unsupported".
   const [pushState, setPushState] = useState("off");
   const [pushBusy, setPushBusy] = useState(false);
@@ -23539,6 +23624,25 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
           {pkDone && <Icon name="check" size={16} color="var(--green,#2fe0a8)" style={{ marginLeft: "auto" }} />}
         </button>
         {pkMsg && <div style={{ fontSize: ".74rem", color: pkMsg.ok ? "var(--green,#2fe0a8)" : "#f87171", padding: "0 4px 4px" }}>{pkMsg.text}</div>}
+
+        {/* Download my data (S178f) — the "you keep every bit of your data"
+            promise, reachable by EVERYONE. Trainers already had an export in
+            the profile manager; clients had none, so the promise was only half
+            true. Runs entirely in the browser off the user's own kv. */}
+        <button style={item} onClick={async () => {
+          if (dlBusy) return;
+          setDlBusy(true); setDlMsg(null);
+          try {
+            const n = await exportMyData({ meName, meEmail, role });
+            setDlMsg({ ok: true, text: `Downloaded — ${n} item${n === 1 ? "" : "s"} saved to your device.` });
+          } catch (e) {
+            setDlMsg({ ok: false, text: "Couldn't build the file. Check your connection and try again." });
+          } finally { setDlBusy(false); }
+        }}>
+          <Icon name="download" size={19} color="var(--accent)" />
+          <span>{dlBusy ? "Preparing your file…" : "Download my data"}</span>
+        </button>
+        {dlMsg && <div style={{ fontSize: ".74rem", color: dlMsg.ok ? "var(--green,#2fe0a8)" : "#f87171", padding: "0 4px 4px" }}>{dlMsg.text}</div>}
 
         {/* Idle auto sign-out — user choice (S88): security default ON, but on a
             personal device someone can keep their session alive indefinitely. */}

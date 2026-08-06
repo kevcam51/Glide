@@ -5,7 +5,7 @@
 // (whose interface is frozen) and from clientData.js (which is about reading
 // OTHER users — privkv has no cross-user access by design).
 import { auth, db } from "./firebase";
-import { doc, getDoc, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
+import { doc, collection, getDoc, getDocs, setDoc, deleteDoc, onSnapshot } from "firebase/firestore";
 
 function ref(key) {
   const uid = auth.currentUser && auth.currentUser.uid;
@@ -32,4 +32,17 @@ export function privSubscribe(key, cb) {
   try {
     return onSnapshot(ref(key), (s) => cb(s.exists() ? s.data().value : null), () => {});
   } catch { return () => {}; }
+}
+
+// Every private doc this account owns, for "Download my data" (S178f). Private
+// notes are the one store a kv-only export would silently miss — and missing
+// them would make the promise on the pricing page false in exactly the place
+// people care most about.
+export async function privListEntries() {
+  const uid = auth.currentUser && auth.currentUser.uid;
+  if (!uid) return [];
+  const snap = await getDocs(collection(db, "users", uid, "privkv"));
+  const out = [];
+  snap.forEach((d) => { const r = d.data() || {}; out.push({ k: r.k || d.id, value: r.value }); });
+  return out;
 }
