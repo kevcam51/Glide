@@ -16084,7 +16084,8 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         <button className={`${mBtnCls} inline-flex items-center gap-1.5`} onClick={() => setNotesFor(c)}>
                           <Icon name="file" size={16} color="var(--accent)" />Notes
                         </button>
-                        <button className={`${mBtnCls} inline-flex items-center gap-1.5`} onClick={() => setSessionsFor(c)}>
+                        <button className={`${mBtnCls} inline-flex items-center gap-1.5`}
+                          onClick={() => ((rosterCap && rosterCap.capped) ? setRosterPlans(true) : setSessionsFor(c))}>
                           <Icon name="calendar" size={16} color="var(--accent)" />Sessions
                           {(sessionCounts[c.uid] || 0) > 0 && (
                             <span className="rounded-full bg-primaryfill px-1.5 text-[.66rem] font-bold text-primaryfg">{sessionCounts[c.uid]}</span>
@@ -17042,7 +17043,7 @@ const PLAN_MENU = {
   ],
   trainer: [
     { tier: "connect", name: "Coach Connect", month: "$19.99", year: "$199", yearNote: "2 months free",
-      blurb: "Already live in Claude or ChatGPT? Run your roster from it — your own AI reads and writes every client's plan. Up to 15 AI-coached clients a month. No in-app AI." },
+      blurb: "Already live in Claude or ChatGPT? Run your roster from it — your own AI reads and writes every client's plan. Up to 15 AI-coached clients a month, plus session booking, teams and unlimited clients. No in-app AI." },
     { tier: "base", name: "Glidna Coach", month: "$49", year: "$490", yearNote: "2 months free",
       // Was "The full coaching workspace + AI assistant" — which contradicted the
       // grid directly beneath it, where the whole workspace reads "free forever",
@@ -17128,9 +17129,7 @@ const PLAN_FEATURES = {
       // found the trainer grid was missing outright (install + Face ID were
       // advertised to clients only, though trainers get them identically).
       ["Direct messages with every client", true, true, true, true],
-      ["Session booking & cancellation policy", true, true, true, true],
       ["Your clients get automatic logging reminders", true, true, true, true],
-      ["Build a team of sub-trainers", true, true, true, true],
       ["App install, Face ID & data export", true, true, true, true],
       ["Connect your own Claude / ChatGPT", false, true, true, true],
     ]},
@@ -17138,6 +17137,10 @@ const PLAN_FEATURES = {
       ["Your own AI reads & writes every client's plan", false, true, true, true],
       ["Whole roster from your AI — no in-app AI needed", false, true, true, true],
       ["Everything in Free, plus the full plugin", false, true, true, true],
+      // S179e (Kevin): business tooling is paid — "your health and your data
+      // are free; tools that make you money are paid." Any paid plan gets both.
+      ["Session booking & cancellation policy", false, true, true, true],
+      ["Build a team of sub-trainers", false, true, true, true],
     ]},
     { section: "AI assistant — everything in Free, plus:", rows: [
       ["24/7 AI assistant (knows your clients' data)", false, false, true, true],
@@ -17221,11 +17224,11 @@ const PLAN_TIPS = {
   "Direct messages with every client":
     "Private conversations with each client inside Glidna, with unread badges so nothing gets missed.",
   "Session booking & cancellation policy":
-    "Book, reschedule and cancel sessions with your clients, and publish a cancellation policy they see up front. Scheduling tools alone cost $16+/month elsewhere.",
+    "Book, reschedule and cancel sessions with your clients, and publish a cancellation policy they see up front. Included on every paid plan \u2014 scheduling tools alone cost $16+/month elsewhere.",
   "Your clients get automatic logging reminders":
     "Glidna nudges your clients when they haven't logged or haven't weighed in \u2014 so they stay consistent without you chasing them.",
   "Build a team of sub-trainers":
-    "Other trainers can join your team with your invite code, and you can see how many clients each carries. Included free \u2014 platforms that offer this at all usually charge for the seats.",
+    "Other trainers join your team with your invite code, and you can see how many clients each carries. Included on every paid plan; joining someone's team is always free for the sub-trainer.",
   "App install, Face ID & data export":
     "Install Glidna to your home screen, sign in with Face ID or a fingerprint, and export everything you have whenever you want.",
 
@@ -17491,7 +17494,7 @@ function PlanPicker({ role, onClose }) {
           </div>
           <div className="text-muted" style={{ fontSize: ".78rem", lineHeight: 1.45 }}>
             {isTrainer
-              ? "The whole coaching platform for up to 15 clients: dashboards, analytics, messaging, to-dos, session booking, invites, plan templates and simulations."
+              ? "The whole coaching platform for up to 15 clients: dashboards, analytics, messaging, to-dos, invites, plan templates and simulations."
               : "Everything you track yourself: food, calories, macros and micronutrients, weight and body composition, workouts, the calendar, progress charts — and your trainer."}
           </div>
           <div className="text-muted" style={{ fontSize: ".74rem", lineHeight: 1.45, marginTop: "2px" }}>
@@ -23586,7 +23589,7 @@ async function exportMyData({ meName, meEmail, role }) {
   return bundle.entryCount;
 }
 
-function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme }) {
+function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme, teamLocked }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
@@ -23897,11 +23900,16 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
             <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
           </button>
         )}
-        {/* My team (S116) — join a head trainer's team, or manage your sub-trainers */}
+        {/* My team (S116; gated S179e) — building a team is a paid capability
+            (any paid plan, Connect and up). Locked, the row goes to Plans &
+            pricing instead of pretending the panel works: the head's joinTeam
+            would be refused server-side anyway, so honesty beats a dead end. */}
         {isTrainer && (
-          <button style={item} onClick={() => setShowTeam(true)}>
+          <button style={item} onClick={() => (teamLocked ? setShowPicker(true) : setShowTeam(true))}>
             <Icon name="clients" size={19} color="var(--accent)" /> <span>My team</span>
-            <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
+            <span style={{ marginLeft: "auto", color: "var(--muted)", fontSize: teamLocked ? ".68rem" : undefined, fontWeight: teamLocked ? 800 : undefined }}>
+              {teamLocked ? "PAID PLANS" : "▸"}
+            </span>
           </button>
         )}
         {showTeam && <TeamPanel onClose={() => setShowTeam(false)} />}
@@ -25638,6 +25646,7 @@ export default function App() {
         aiOptOut={meAiOptOut} onSetAiOptOut={onSetAiOptOut}
         idleSignOut={idleSignOut} onSetIdleSignOut={onSetIdleSignOut}
         isTrainer={isTrainerHome} trial={meTrial} subActive={meSubStatus === "active"}
+        teamLocked={!!(rosterCap && rosterCap.capped)}
         themePref={themePref} onSetTheme={setTheme}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
         onHome={() => { if (isTrainerHome) setHomeTab("dashboard"); goToProfiles(); }}

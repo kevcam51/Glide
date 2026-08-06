@@ -1144,3 +1144,39 @@ underneath is different.
 Confidence: Trainerize/Everfit/PTD/FitBudd/PTminder from official pages;
 TrueCoach/My PT Hub/Kahunas from secondary sources (medium); TrainHeroic and
 Momence caps unverified.
+
+## S179e — booking & sub-trainer teams move to PAID (any plan, Connect+) — Kevin, Aug 6 2026
+
+Free count HOLDS at 15 (decided against reducing after the S179d market data —
+feature gates carry the upgrade incentive, the count carries distribution).
+
+**What moved:** Session booking + cancellation policy, and building a
+sub-trainer team, are now included on every PAID trainer plan (Connect $19.99
+and up). Card-charging (the billing trio) stays Coach+ and admin-only until
+Stripe Connect, unchanged. Joining someone's team stays free for the sub — the
+gate is on the HEAD, whose team it is.
+
+**Why:** Kevin's second principle — health and data are free; tools that make
+you money are paid. This also creates the NON-AI reason to pay at $19.99 that
+the free-15 decision had given up, closing that recorded gap.
+
+**Corrections this makes:** teams-as-free on the grid (S178i) contradicted the
+S176f teams=Coach+ decision — that was the grid pass's error, now fixed, with
+the tier landing at Connect+ rather than Coach+ by Kevin's choice today.
+Booking-free WAS the recorded decision (batch 9 / S176f); Kevin changed it
+deliberately.
+
+**Population & enforcement:** the gated population is exactly the roster-capped
+one — `capApplies()` from roster.js decides both, so the two can never drift.
+Pre-cutoff accounts, trials, and every paid tier keep both features
+(never-a-take-away). Server: joinTeam refuses when the head is free-capped
+(neutral message to the sub; joining is free for them). UI: "My team" shows
+PAID PLANS and opens the picker; the per-client Sessions button does the same.
+Grid: both rows moved from "free forever" into the Coach Connect section
+(— / ✔ / ✔ / ✔); free card no longer lists booking; Coach Connect card now
+names booking + teams + unlimited clients.
+
+**Soft edge, recorded:** raw session-doc writes by a capped trainer aren't
+rules-blocked (a calendar entry has no abuse value; rules-level plan checks
+need profile get()s + trial time math). The UI and the team callable are the
+real gates. Revisit only if it ever matters in practice.
