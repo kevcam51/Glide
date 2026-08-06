@@ -32,6 +32,12 @@ const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
 // category (Trainerize free = 1).
 const FREE_ROSTER_CAP = 8;
 
+// S179b (Kevin): the cap counts PEOPLE THE TRAINER MANAGES, not just connected
+// accounts. Counting only connections left the door wide open — a trainer can
+// create unlimited local plan files without connecting anyone, and Kevin's own
+// Trainerize imports ARE local plan files. So both count toward the 8.
+const INDEX_KEY = "caliq-index";
+
 // Accounts created BEFORE this keep unlimited, forever. Set to the S179 ship
 // date. A fixed constant rather than a deploy-time value so the boundary is
 // deterministic and auditable — re-deploying must never re-draw the line.
@@ -58,10 +64,47 @@ function capApplies(profile) {
   return true;
 }
 
+// Connected accounts + the trainer's own plan files. Both are "a person I
+// manage", and only counting one of them would be a cap in name only.
 async function countRoster(db, trainerUid) {
-  const snap = await db.collection("users")
-    .where("assignedTrainerId", "==", trainerUid).count().get();
-  return snap.data().count;
+  const [connSnap, idxSnap] = await Promise.all([
+    db.collection("users").where("assignedTrainerId", "==", trainerUid).count().get(),
+    db.doc(`users/${trainerUid}/kv/${encodeURIComponent(INDEX_KEY)}`).get(),
+  ]);
+  const connected = connSnap.data().count;
+  let plans = 0;
+  try {
+    const arr = JSON.parse((idxSnap.exists && idxSnap.data().value) || "[]");
+    // Simulations are sandbox projections, not people — they don't count.
+    if (Array.isArray(arr)) plans = arr.filter((p) => p && !p.isSimulation).length;
+  } catch (e) { /* unreadable index — count it as zero rather than block a join */ }
+  return { connected, plans, total: connected + plans };
+}
+
+// Tell the TRAINER when someone was turned away. Kevin's rule: the client must
+// never be the one handling the trainer's billing, so the client gets a neutral
+// message and the actionable one lands in the trainer's own inbox — the same
+// caliq-inbox their client asks already use, so it shows up with no new UI.
+async function notifyTrainerRosterFull(db, trainerUid, whoName) {
+  const ref = db.doc(`users/${trainerUid}/kv/${encodeURIComponent("caliq-inbox")}`);
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      let arr = [];
+      try { arr = JSON.parse((snap.exists && snap.data().value) || "[]"); } catch (e) { arr = []; }
+      if (!Array.isArray(arr)) arr = [];
+      // Don't stack duplicates if several people try in a row.
+      if (arr.some((r) => r && r.type === "roster-full" && r.status === "open")) return;
+      arr.unshift({
+        id: `r${Date.now()}${Math.floor(Math.random() * 1e4)}`,
+        fromUid: null, fromName: whoName || "Someone",
+        type: "roster-full",
+        prompt: `${whoName || "Someone"} tried to connect, but your free plan is full at ${FREE_ROSTER_CAP} clients and plans. Upgrade in Plans & pricing to take them on — they weren't told anything about your plan.`,
+        status: "open", createdAt: Date.now(), doneAt: null,
+      });
+      tx.set(ref, { k: "caliq-inbox", value: JSON.stringify(arr.slice(0, 100)) }, { merge: true });
+    });
+  } catch (e) { /* notification is best-effort — never block the join path on it */ }
 }
 
 // Resolve an invite code (or raw uid) to a trainer uid. Mirrors the client-side
@@ -107,13 +150,18 @@ exports.joinTrainerByCode = onCall({ region: REGION, maxInstances: 10 }, async (
   // free, with nothing to decrement).
   if (capApplies({ ...tProf, uid: trainerUid })) {
     const n = await countRoster(db, trainerUid);
-    if (n >= FREE_ROSTER_CAP) {
-      // Aimed at the CLIENT, who did nothing wrong and cannot fix it — so it
-      // never blames them and never asks them to pay for something that is
-      // their trainer's to sort out.
+    if (n.total >= FREE_ROSTER_CAP) {
+      // The client is told NOTHING about the trainer's plan or billing (Kevin):
+      // that is between us and the trainer, and a client should never be put in
+      // the position of chasing their coach about a subscription. They get a
+      // neutral "can't right now"; the actionable message goes to the trainer.
+      const me = (await db.doc(`users/${uid}`).get()).data() || {};
+      const myName = me.displayName || [me.firstName, me.lastName].filter(Boolean).join(" ")
+        || me.email || "Someone";
+      await notifyTrainerRosterFull(db, trainerUid, myName);
       throw new HttpsError("resource-exhausted",
-        "This trainer's free plan is full, so they can't take on new clients right now. "
-        + "Ask them to upgrade in Glidna and then try this code again — nothing else about your account is affected.",
+        "This trainer can't take on new connections right now. They've been let know you tried — "
+        + "check with them directly. Nothing else about your account is affected.",
         { reason: "trainer-roster-full" });
     }
   }
@@ -130,8 +178,13 @@ exports.myRosterStatus = onCall({ region: REGION, maxInstances: 10 }, async (req
   const db = admin.firestore();
   const prof = (await db.doc(`users/${uid}`).get()).data() || {};
   const capped = capApplies({ ...prof, uid });
-  const count = await countRoster(db, uid);
-  return { count, capped, cap: capped ? FREE_ROSTER_CAP : null, full: capped && count >= FREE_ROSTER_CAP };
+  const n = await countRoster(db, uid);
+  return {
+    count: n.total, connected: n.connected, plans: n.plans,
+    capped, cap: capped ? FREE_ROSTER_CAP : null,
+    full: capped && n.total >= FREE_ROSTER_CAP,
+    remaining: capped ? Math.max(0, FREE_ROSTER_CAP - n.total) : null,
+  };
 });
 
 module.exports.FREE_ROSTER_CAP = FREE_ROSTER_CAP;

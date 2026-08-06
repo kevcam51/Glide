@@ -15168,7 +15168,8 @@ const IdBadge = ({ id, n, className = "" }) => {
   );
 };
 
-function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, meUid, meName, meRole, notifPrefs, onSetNotifPrefs }) {
+function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, meUid, meName, meRole, notifPrefs, onSetNotifPrefs, rosterCap, rosterBlocked }) {
+  const [rosterPlans, setRosterPlans] = useState(false);   // plan picker from the roster banner (S179b)
   const [details, setDetails] = useState({}); // id -> { tdee, target }
   // AI-client seats (S176f): who the AI has worked on this month vs the plan's
   // monthly allowance. Read-only view of users/{me}/aiClients/{month} via the
@@ -15873,6 +15874,41 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                 Clear {inbox.filter((r) => r.status === "done").length} completed
               </button>
             )}
+          </div>
+        )}
+
+        {/* Free roster cap (S179b). The trainer learns it from HERE, not from a
+            client relaying it — Kevin's rule: a client is never put in the
+            position of chasing their coach about a subscription. Only renders
+            when a cap actually applies, so paid/grandfathered trainers and
+            everyone mid-trial never see it. */}
+        {rosterCap && rosterCap.capped && (
+          <div className={`${cardCls} ${rosterCap.full ? "border-[var(--yellow,#fbbf24)]" : ""}`}>
+            <div className={`${sectionTitleCls} flex items-center gap-2`}>
+              <Icon name="clients" size={19} color={rosterCap.full ? "var(--yellow,#fbbf24)" : "var(--accent)"} />
+              Clients &amp; Plans
+            </div>
+            <div className={`${subCls} mt-1`}>
+              <b className="text-fg">{rosterCap.count} of {rosterCap.cap}</b> used on the free plan
+              {rosterCap.connected > 0 || rosterCap.plans > 0
+                ? ` — ${rosterCap.connected} connected client${rosterCap.connected === 1 ? "" : "s"}, ${rosterCap.plans} plan file${rosterCap.plans === 1 ? "" : "s"}.`
+                : "."}
+              {rosterCap.full
+                ? " You're at the limit, so new clients can't connect and you can't add plan files. Simulations still work."
+                : ` Room for ${rosterCap.remaining} more.`}
+            </div>
+            {rosterCap.full && (
+              <button onClick={() => setRosterPlans(true)}
+                className="mt-2 rounded-lg border-none bg-primaryfill px-4 py-2.5 text-[.82rem] font-bold text-primaryfg cursor-pointer">
+                See plans
+              </button>
+            )}
+            {rosterBlocked && (
+              <div className="mt-2 rounded-lg border border-[var(--yellow,#fbbf24)] bg-[rgba(251,191,36,.08)] px-3 py-2 text-[.78rem] leading-relaxed text-fg">
+                You're at {rosterCap.cap} of {rosterCap.cap} — upgrade to add another plan file. Simulations don't count toward the limit.
+              </div>
+            )}
+            {rosterPlans && <PlanPicker role={meRole} onClose={() => setRosterPlans(false)} />}
           </div>
         )}
 
@@ -17521,6 +17557,7 @@ const callAdminOverview = httpsCallable(functions, "adminOverview"); // admin al
 const callAdminUserUsage = httpsCallable(functions, "adminUserUsage"); // one user's AI spend history (S167)
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
 const callAiSeats = httpsCallable(functions, "aiSeats"); // AI-client seats view (S176f)
+const callRosterStatus = httpsCallable(functions, "myRosterStatus"); // free roster cap (S179b)
 // Trainer teams (S116): head trainer ↔ sub-trainers. Server-side because the
 // rules block a user changing their own role. See functions/team.js.
 const callJoinTeam = httpsCallable(functions, "joinTeam");
@@ -23989,6 +24026,11 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
 export default function App() {
   const [screen, setScreen] = useState("profiles");
   const [profiles, setProfiles] = useState([]);
+  // Free roster cap (S179b): counts connected clients + plan files. Loaded from
+  // myRosterStatus, refreshed whenever the plan list changes so the banner and
+  // the create-gate stay honest. null = unknown/uncapped → never blocks.
+  const [rosterCap, setRosterCap] = useState(null);
+  const [rosterBlocked, setRosterBlocked] = useState(false);
   const [folders, setFolders] = useState([]);
   // Connected clients (linked accounts) + their folder assignments, so a trainer
   // can organize real clients on the All-clients page next to local plans + sims
@@ -24046,6 +24088,20 @@ export default function App() {
   const [recentWearable, setRecentWearable] = useState(null); // latest day (≤3 back) with tracker data — {daysAgo, wearable}
   const [meName, setMeName] = useState("");   // current user's display name
   const [meUid, setMeUid] = useState("");     // current user's uid
+
+  // Free roster cap (S179b). Placed AFTER meUid/role are declared on purpose:
+  // a dep array is evaluated during render, so referencing them from higher up
+  // the component body is a TDZ ReferenceError and a white screen — not a build
+  // error, since the bundler never checks it.
+  useEffect(() => {
+    let alive = true;
+    const amTrainer = role === ROLES.HEAD_TRAINER || role === ROLES.SUB_TRAINER;
+    if (!meUid || !amTrainer) { setRosterCap(null); return; }
+    callRosterStatus({})
+      .then((r) => { if (alive) setRosterCap((r && r.data) || null); })
+      .catch(() => { if (alive) setRosterCap(null); });  // never block on a failed read
+    return () => { alive = false; };
+  }, [meUid, role, profiles.length]);
   const [meEmail, setMeEmail] = useState(""); // current user's email (for the menu)
   const [meTrial, setMeTrial] = useState(null); // trial countdown state (or null)
   const [meBillingHold, setMeBillingHold] = useState(null); // unpaid session balance after a declined charge (S102b)
@@ -24512,6 +24568,16 @@ export default function App() {
   };
 
   const createProfile = (folderId, opts) => {
+    // S179b — the free cap counts PEOPLE YOU MANAGE: connected clients AND plan
+    // files. Capping only connections would have been a cap in name only, since
+    // a trainer can make plan files all day without connecting anyone (and the
+    // Trainerize importer creates plan files, not connections).
+    // Simulations are exempt — they're sandbox projections, not people.
+    if (!(opts && opts.isSimulation) && rosterCap && rosterCap.full) {
+      setRosterBlocked(true);
+      window.setTimeout(() => setRosterBlocked(false), 8000);
+      return;
+    }
     resetPlanScopedState();   // a brand-new plan must not inherit the last one's log/streak/feed
     const id = `c${Date.now()}`;
     const np = { id, name:"", weight:"", goal:"", lastSaved:Date.now(), stepLabel:"Personal", folderId: folderId||null,
@@ -25621,7 +25687,7 @@ export default function App() {
         onConvertSimulation={convertSimulation}
         onDeletePlan={removeLocalProfileById}
         onTrainerizeImport={importFromTrainerize}
-        meUid={meUid} meName={meName} meRole={role}
+        meUid={meUid} meName={meName} meRole={role} rosterCap={rosterCap} rosterBlocked={rosterBlocked}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
       /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
     }
