@@ -1012,3 +1012,20 @@ position, which lived for about an hour.)
 
 Cost note: unchanged. Seats were never the cost control — the daily token caps
 are. Seats shape roster economics and upgrade pressure.
+
+
+## S178e — grandfathering is MOOT (measured, Aug 6 2026)
+
+Ran the count the S176f plan called for. **3 grandfathered accounts, all
+internal:** Kevin's own admin account, `trainer.uitest`, and a temp sub-trainer
+test account. **Zero real users.**
+
+So the planned courtesy window (~12 months of in-app AI, then free Connect for
+life, plus a lifetime discount) protects nobody and is DROPPED. Nothing to
+announce, migrate or build. The S178d fence stops new grandfathered accounts
+from ever appearing, and `adminOverview.fenced` is the tripwire: it should read
+0 once the orphan test doc is removed, and any increase means a sign-up path is
+skipping the trial stamp.
+
+If a real grandfathered user somehow surfaces later, the generous options are
+still on the table — but do not build for a population that does not exist.
