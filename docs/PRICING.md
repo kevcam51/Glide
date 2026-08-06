@@ -1030,7 +1030,7 @@ skipping the trial stamp.
 If a real grandfathered user somehow surfaces later, the generous options are
 still on the table — but do not build for a population that does not exist.
 
-## S179 — Glidna Free gets a roster cap: 8 connected clients (Kevin, Aug 6 2026)
+## S179 — Glidna Free gets a roster cap: 8 connected clients — ✅ BUILT & LIVE (Aug 6 2026)
 
 **Decision.** Free trainers may connect **8 clients**. Every paid tier (Connect
 and up) stays unlimited. Trial stays unlimited — the trial is the whole product.
@@ -1067,3 +1067,20 @@ rule silently returns nothing and breaks every trainer dashboard.
 **Copy to update when it ships:** the "Unlimited connected clients + live
 dashboards" row becomes 8 / unlimited / unlimited / unlimited, its tooltip, and
 the Glidna Free card (which currently says "unlimited clients").
+
+
+### S179 — shipped, and verified against production
+Deployed, rules PUBLISHED, verified live (not just in the emulator):
+- client switching to a different trainer by direct write → **403 PERMISSION_DENIED**
+- client clearing their own link (leaving) → **200, still allowed**
+- `joinTrainerByCode` with a real invite code → linked, `{ok:true}`
+- pre-existing trainer → `capped:false` (grandfathering holds)
+- rules suite **173 passed / 0 failed** (was 167)
+
+⚠️ **Testing gotcha worth remembering:** writing the SAME trainer uid a client
+already has is an allowed no-op (the rule's "unchanged" branch), so a naive test
+looks like the rule failed. Test a DIFFERENT uid.
+
+⚠️ **Deploy ordering, deliberate:** frontend pushed FIRST, rules published only
+after the new bundle was confirmed live. Reversed, anyone on a cached old bundle
+would have had joins fail — the old code wrote the field directly.
