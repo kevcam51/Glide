@@ -17037,6 +17037,17 @@ const PLAN_FEATURES = {
       ["Afterburn (EPOC) counted in your burn totals", true, true, true, true],
       ["Body-composition timeline — fat vs. muscle", true, true, true, true],
       ["Calendar, streaks, check-ins & water", true, true, true, true],
+      // S178i — the free tier's best work, finally advertised. Every one of
+      // these shipped long ago and appeared NOWHERE on the pricing page, so
+      // people were being asked to judge Glidna without seeing most of it
+      // (docs/PLAN-REVIEW.md: "shipped but never advertised").
+      ["Your calorie target, explained in plain English", true, true, true, true],
+      ["Plan meals ahead & repeat them weekly", true, true, true, true],
+      ["Your watch sets your calorie target", true, true, true, true],
+      ["Message your trainer directly", true, true, true, true],
+      ["Reminders & nudges on your phone", true, true, true, true],
+      ["Turn AI off for your account entirely", true, true, true, true],
+      ["Download all your data, any time", true, true, true, true],
       ["Trainer connection, app install & Face ID", true, true, true, true],
       ["Connect your own Claude / ChatGPT", false, true, true, true],
     ]},
@@ -17073,6 +17084,14 @@ const PLAN_FEATURES = {
       ["To-dos, nudges & shared plan editing", true, true, true, true],
       ["Invite Hub — link, QR, email invites, referrals", true, true, true, true],
       ["Local plans, templates & sales simulations", true, true, true, true],
+      // S178i — same omission on the coach side, plus the two rows the review
+      // found the trainer grid was missing outright (install + Face ID were
+      // advertised to clients only, though trainers get them identically).
+      ["Direct messages with every client", true, true, true, true],
+      ["Session booking & cancellation policy", true, true, true, true],
+      ["Your clients get automatic logging reminders", true, true, true, true],
+      ["Build a team of sub-trainers", true, true, true, true],
+      ["App install, Face ID & data export", true, true, true, true],
       ["Connect your own Claude / ChatGPT", false, true, true, true],
     ]},
     { section: "Coach Connect — for coaches who already live in Claude or ChatGPT", rows: [
@@ -17142,6 +17161,33 @@ const PLAN_TIPS = {
     "Connect to a trainer, install Glidna to your home screen so it opens like a normal app, and sign in with Face ID or a fingerprint.",
   "Connect your own Claude / ChatGPT":
     "Use Glidna from inside the AI you already pay for: it can read your data and log for you, in your own chat. Included on every paid plan \u2014 the free tier doesn't include it.",
+
+  "Your calorie target, explained in plain English":
+    "Glidna works out your daily calories and shows you exactly how \u2014 then lets you change the pace, or set your own number. You also choose whether exercise earns you more food that day or just gets you there faster, which no other app offers.",
+  "Plan meals ahead & repeat them weekly":
+    "Plan food for days you haven't reached yet and repeat a day every Monday, Wednesday and Friday for weeks \u2014 then just tick things off as you eat them. Most apps charge for this.",
+  "Your watch sets your calorie target":
+    "If a tracker knows what you actually burned, your target for that day can be built from the real number instead of an estimate. No connected watch? Read it off yours and type it in \u2014 it works the same way.",
+  "Message your trainer directly":
+    "A private conversation with your trainer inside Glidna \u2014 no texting, no third app.",
+  "Reminders & nudges on your phone":
+    "Optional nudges when you haven't logged, when it's been a week since a weigh-in, or with a daily coaching tip \u2014 on your phone even when Glidna is closed. Every type can be switched off separately.",
+  "Turn AI off for your account entirely":
+    "One switch that stops any AI reading your data \u2014 Glidna's own, and any assistant your trainer connects. Enforced on our servers, not just hidden. Everything else keeps working.",
+  "Download all your data, any time":
+    "One tap gives you a file with everything: your plans, every day you logged, measurements, notes and messages. Yours whether you subscribe or not.",
+
+  // ── Trainer: newly advertised free rows (S178i) ──────────────────────────
+  "Direct messages with every client":
+    "Private conversations with each client inside Glidna, with unread badges so nothing gets missed.",
+  "Session booking & cancellation policy":
+    "Book, reschedule and cancel sessions with your clients, and publish a cancellation policy they see up front. Scheduling tools alone cost $16+/month elsewhere.",
+  "Your clients get automatic logging reminders":
+    "Glidna nudges your clients when they haven't logged or haven't weighed in \u2014 so they stay consistent without you chasing them.",
+  "Build a team of sub-trainers":
+    "Other trainers can join your team with your invite code, and you can see how many clients each carries. Included free \u2014 platforms that offer this at all usually charge for the seats.",
+  "App install, Face ID & data export":
+    "Install Glidna to your home screen, sign in with Face ID or a fingerprint, and export everything you have whenever you want.",
 
   // ── Connect ──────────────────────────────────────────────────────────────
   "Your own AI logs meals & reads your data":
@@ -17355,6 +17401,16 @@ function PlanPicker({ role, onClose }) {
         <div className="relative flex items-center justify-center px-[92px] gap-2.5">
           <div className="font-display font-bold text-fg" style={{ fontSize:"1.08rem" }}>Choose your plan</div>
           <button onClick={onClose} aria-label="Back" className="absolute left-[14px] top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer whitespace-nowrap"><Icon name="back" size={15} color="var(--accent)" />Back</button>
+        </div>
+        {/* The sidekick line (S178i, Kevin's coexistence thesis — docs/ECOSYSTEM.md).
+            Glidna's biggest value is that it works ALONGSIDE whatever someone
+            already uses, with nothing to connect — and the pricing page had
+            never said so. Sits under the title so it frames every tier below it
+            rather than reading as one more feature. */}
+        <div className="text-center text-muted" style={{ fontSize: ".76rem", lineHeight: 1.5, marginTop: "-4px" }}>
+          Works <span className="text-fg font-semibold">alongside</span> whatever you already use
+          {isTrainer ? " — Trainerize, TrueCoach, your own calendar." : " — MyFitnessPal, your watch, your own AI."}
+          {" "}Nothing to connect, nothing to switch.
         </div>
         {canPreview && (
           <div>
