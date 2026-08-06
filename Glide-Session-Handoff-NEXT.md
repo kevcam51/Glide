@@ -65,7 +65,22 @@ FIXED, don't reintroduce: confirm_ai_client must stay in mcp.js READ_TOOLS
 (else connector trainers dead-end all month), seatCapFor checks active subs
 BEFORE entitlements.premium, and seatAutoConfirm is a COUNTER not a boolean.
 
-**BUILD LIST (remaining):** 1) ~~client limits + seat UX~~ DONE S177 · 2) session-
+**✅ THE BUILD LIST IS COMPLETE (S177–S178j).** All seven items shipped,
+deployed and live-verified: AI-client seats (15/25/35/55) · session-billing
+allowlist · trialStartedAt fence · client data export · coach_summary paging ·
+tracker upsell card · the pricing grid (61 rows, 61 tooltips, 12 newly
+advertised free features, sidekick headline, all review copy fixes).
+
+Measured along the way, both of which REMOVED planned work: grandfathering
+protects nobody (3 accounts, all internal — courtesy window dropped), and
+coach_summary was lying about roster size rather than merely capping it.
+
+**Next up — nothing is queued.** Open threads if you want them: push
+notification DELIVERY (long-parked), the trainer-referral program and Family &
+Friends tier (banked in PRICING.md S176f), connector chart images, and the
+cap-hit "use your own AI" nudge (fire only at users who hit the cap).
+
+**OLD BUILD LIST (all done, kept for context):** 1) ~~client limits + seat UX~~ DONE S177 · 2) session-
 billing allowlist · 3) trialStartedAt fence at first login (grandfathering
 kept but fenced) · 4) client-facing data export (backs the footer promise;
 Kevin chose build over reword) · 5) coach_summary 60-cap fix · 6) tracker
