@@ -17084,7 +17084,7 @@ const PLAN_FEATURES = {
       ["24/7 AI assistant (knows your clients' data)", false, false, true, true],
       ["Whole-roster check: \"who's stalled this week?\"", false, false, true, true],
       ["Build client programs by chat", false, false, true, true],
-      ["Log meals / weigh-ins / workouts FOR clients", false, false, true, true],
+      ["Log meals / weigh-ins / workouts FOR clients by chat", false, false, true, true],
       ["Set targets & manage client plans by chat", false, false, true, true],
       ["Photo & voice meal logging", false, false, true, true],
       ["Turn TikTok / IG / YouTube links into programs", false, false, true, true],
@@ -17110,12 +17110,139 @@ const PLAN_FEATURES = {
   ],
 };
 
+// ⓘ copy for every row of the comparison grid (S178h). Kept as a lookup keyed
+// by the row's own label rather than a sixth array element, so the 54 rows stay
+// untouched and all the wording lives in one reviewable place. A row with no
+// entry here simply renders without an ⓘ — nothing breaks.
+//
+// Rules these are written to, from the plan review (docs/PLAN-REVIEW.md):
+//  • Plain English. Say what the person GETS, not how it is built.
+//  • Never promise more than the code enforces — a grid that oversells is a
+//    refund argument. Where free and paid differ, say which is which.
+//  • Where something is genuinely unusual, say so plainly rather than shouting.
+const PLAN_TIPS = {
+  // ── Always free ──────────────────────────────────────────────────────────
+  "Food, calorie & macro tracking":
+    "Log what you eat and see calories, protein, carbs and fat add up against your daily targets — plus around 30 micronutrients like fibre, sodium and vitamins, which most trackers charge for.",
+  "Food database search + barcode scanner":
+    "Search millions of foods or scan a barcode, then pick your serving in grams, ounces, cups or just \u201c1 serving\u201d and everything rescales.",
+  "Weight, progress charts & goal timeline":
+    "Every weigh-in plots on a chart with your goal line and healthy range. Your goal date is worked out from your real trend, not a guess \u2014 and it says so honestly when there isn't enough data yet.",
+  "Workout plans + custom exercises":
+    "Build a week of cardio and strength from 180+ exercises, or add your own with your calories-per-minute. Burn is estimated from published MET values scaled to your bodyweight.",
+  "Heart-rate cardio & training zones":
+    "Plan cardio by target heart rate instead of picking an exercise, and see your five training zones with exact bpm ranges. No mainstream tracker does this.",
+  "Afterburn (EPOC) counted in your burn totals":
+    "Strength sessions earn roughly 15% extra afterburn on top of the workout itself, based on published research \u2014 so lifting's real effect shows up in your weekly totals.",
+  "Body-composition timeline \u2014 fat vs. muscle":
+    "Log tape measurements or a smart-scale reading and see weight, body fat, fat mass, lean mass and muscle on one timeline \u2014 so you can tell whether the scale is dropping fat or muscle.",
+  "Calendar, streaks, check-ins & water":
+    "Log any day, past or present, on a calendar that shows how consistent you've been. Streaks, daily check-ins and water tracking are included.",
+  "Trainer connection, app install & Face ID":
+    "Connect to a trainer, install Glidna to your home screen so it opens like a normal app, and sign in with Face ID or a fingerprint.",
+  "Connect your own Claude / ChatGPT":
+    "Use Glidna from inside the AI you already pay for: it can read your data and log for you, in your own chat. Included on every paid plan \u2014 the free tier doesn't include it.",
+
+  // ── Connect ──────────────────────────────────────────────────────────────
+  "Your own AI logs meals & reads your data":
+    "Tell your own Claude or ChatGPT \u201clog my lunch\u201d and it writes straight into Glidna, then reads your week back to you. Most fitness connectors can only read \u2014 this one writes.",
+  "Everything in Free, plus the full plugin":
+    "Every free feature, plus your own AI connected to your Glidna data at full speed.",
+  "No in-app AI \u2014 you bring your own":
+    "Connect has no AI coach inside the Glidna app \u2014 your own AI subscription does that work. If you'd rather chat, log by photo and use voice inside Glidna, that's the tier above.",
+
+  // ── Client AI ────────────────────────────────────────────────────────────
+  "24/7 AI coach chat (knows YOUR data)":
+    "A coach that has actually read your logs \u2014 ask why the scale stalled, what to eat tonight, or how your week went, and the answers use your real numbers.",
+  "Log meals by chat \u2014 just describe them":
+    "Say \u201cchicken burrito and a coffee\u201d and it works out the calories and macros, shows you the breakdown, and logs it once you tap to confirm.",
+  "Photo meal logging \u2014 snap your plate":
+    "Take a picture of your food and it identifies what's there and estimates the macros. Approximate by nature \u2014 it tells you so, and you can edit before saving.",
+  "Voice logging \u2014 speak instead of type":
+    "Hold the mic and say what you ate. Handy with your hands full or when typing is slower than talking.",
+  "AI food estimates in the tracker":
+    "In the food tracker, type anything the database doesn't have \u2014 \u201cmy mum's lasagne\u201d \u2014 and the AI fills in calories and macros with the serving it assumed.",
+  "AI builds your workout program":
+    "Describe what you want and it drafts a real weekly program from the exercise library, shows it as a card, and saves it when you approve.",
+  "Turn TikTok / IG / YouTube links into workouts & meals":
+    "Paste a link and it reads the caption or description and turns the workout or recipe into something you can actually log or follow.",
+  "Import from ChatGPT / Claude":
+    "Paste whatever another AI wrote you \u2014 a meal plan, a day of food \u2014 and Glidna turns it into logged entries. Works with any assistant, no connection needed.",
+  "Set up your whole plan by conversation":
+    "Skip the setup forms: tell it your stats and goal in a sentence and it fills in your profile and works out your daily target.",
+  "Cut / bulk / maintenance phases by chat":
+    "Start a new phase by asking. It carries your details across, sets the new goal, and switches you over.",
+  "Past chats \u2014 save, revisit & continue":
+    "Your conversations are saved, so you can come back to one from last week and carry on where you left off.",
+  "AI conversations per day":
+    "A published fair-use allowance, not a hidden cap \u2014 roughly how many back-and-forth exchanges you can have each day. It resets daily, and everything non-AI stays unlimited.",
+
+  // ── Elite / Apex ─────────────────────────────────────────────────────────
+  "Half again the daily AI allowance":
+    "50% more AI every day than the tier below \u2014 for people who lean on the coach constantly rather than occasionally.",
+  "Around 100 AI conversations every day":
+    "Enough to photo-log every meal, plan your week and still have the coach on hand all day.",
+  "Enough for photo-logging every meal + all-day coaching":
+    "Sized so you stop thinking about the allowance at all.",
+  "Hit the ceiling? Tell us \u2014 we raise it":
+    "If you genuinely run out, ask and we lift it \u2014 usually the same day. We'd rather raise the number than have you ration it.",
+
+  // ── Trainer: always free ─────────────────────────────────────────────────
+  "Unlimited connected clients + live dashboards":
+    "Connect as many clients as you like \u2014 there's no cap and never a per-client fee. Each one gets a live dashboard you can both see.",
+  "Coaching analytics \u2014 who needs attention":
+    "One screen showing who has gone quiet, who's off track and who's progressing, sorted so the people who need you are at the top.",
+  "To-dos, nudges & shared plan editing":
+    "Send a client a to-do, nudge someone who's gone quiet, and edit their plan together \u2014 you both see the same thing.",
+  "Invite Hub \u2014 link, QR, email invites, referrals":
+    "Invite clients by link, QR code or email, and see who joined. Free \u2014 growing your roster is never something we charge for.",
+  "Local plans, templates & sales simulations":
+    "Build plans for people who don't have an account yet, keep reusable templates, and run \u201cwhat if\u201d projections to show a prospect what's possible.",
+
+  // ── Coach Connect ────────────────────────────────────────────────────────
+  "Your own AI reads & writes every client's plan":
+    "Run your roster from the AI you already use: ask who's stalled, log for a client, or build someone a program \u2014 without opening Glidna.",
+  "Whole roster from your AI \u2014 no in-app AI needed":
+    "Everything in the coaching platform stays free, and your own AI does the thinking. No second AI subscription from us.",
+
+  // ── Trainer AI ───────────────────────────────────────────────────────────
+  "24/7 AI assistant (knows your clients' data)":
+    "An assistant that has read your clients' logs \u2014 ask about any of them by name and get answers from their real numbers.",
+  "Whole-roster check: \"who's stalled this week?\"":
+    "One question, every client checked \u2014 who's logging, who's drifting, who's on track, with what to do about each.",
+  "Build client programs by chat":
+    "Describe what a client needs and it drafts the week, shows it as a card, and saves it to their plan when you approve.",
+  "Log meals / weigh-ins / workouts FOR clients by chat":
+    "Tell the assistant what a client did and it logs it for them. You can always do this by hand for free \u2014 this is the by-chat shortcut.",
+  "Set targets & manage client plans by chat":
+    "Change a client's calorie or macro targets, start them a new phase, or adjust their plan by asking.",
+  "Photo & voice meal logging":
+    "Snap or speak a meal \u2014 yours or a client's \u2014 instead of typing it.",
+  "Turn TikTok / IG / YouTube links into programs":
+    "Paste a link and it reads the caption and turns the workout into something you can assign.",
+  "AI edits your local plans & simulations":
+    "The assistant works on your own plan files too \u2014 the clients who never made an account \u2014 not just connected ones.",
+  "Send client to-dos straight from chat":
+    "Ask it to nudge someone and the to-do lands on that client's home screen.",
+  "AI-coached clients each month":
+    "How many different people the AI can work on in a month. Your roster stays unlimited on every plan \u2014 this counts only the people you actually put the AI to work on, and it resets on the 1st.",
+
+  // ── Coach Elite / Apex ───────────────────────────────────────────────────
+  "Our biggest AI allowance \u2014 built for all-day use":
+    "For coaches running the assistant across a full roster every day rather than dipping in.",
+  "Around 200 AI conversations every day":
+    "Enough to review every client, build programs and log on their behalf without watching the number.",
+  "Room to run AI across your whole roster daily":
+    "Sized for daily whole-roster reviews, not occasional spot checks.",
+};
+
 function FeatureMatrix({ isTrainer }) {
   const groups = PLAN_FEATURES[isTrainer ? "trainer" : "client"];
   // Four columns since S171 — Connect sits between Free and the AI tiers.
   // Narrower cells so four fit a phone without the label column collapsing.
   const tiers = ["Free", "Connect", isTrainer ? "Coach" : "Premium", isTrainer ? "Coach Elite" : "Elite"];
   const [whatsManual, setWhatsManual] = useState(false); // ⓘ "what counts as manual logging"
+  const [openTip, setOpenTip] = useState(null);  // \u24d8 per-row explainer (S178h), one at a time
   const cell = (v, i) => (
     <div key={i} className="flex items-center justify-center" style={{ width: "46px", flexShrink: 0 }}>
       {v === true ? <Icon name="check" size={14} color="var(--color-primary)" />
@@ -17135,12 +17262,40 @@ function FeatureMatrix({ isTrainer }) {
       {groups.map((g) => (
         <div key={g.section}>
           <div className="text-muted bg-surface2/50" style={{ padding: "7px 10px 4px", fontSize: ".64rem", fontWeight: 800, letterSpacing: ".08em", textTransform: "uppercase" }}>{g.section}</div>
-          {g.rows.map(([label, ...vals]) => (
-            <div key={label} className="flex items-center border-t border-border/50" style={{ padding: "6px 10px" }}>
-              <div className="flex-1 text-fg" style={{ fontSize: ".74rem", lineHeight: 1.35, paddingRight: "6px" }}>{label}</div>
-              {vals.map(cell)}
-            </div>
-          ))}
+          {g.rows.map(([label, ...vals]) => {
+            const tip = PLAN_TIPS[label];
+            const isOpen = openTip === label;
+            return (
+              <div key={label} className="border-t border-border/50">
+                <div className="flex items-center" style={{ padding: "6px 10px" }}>
+                  <div className="flex-1 text-fg" style={{ fontSize: ".74rem", lineHeight: 1.35, paddingRight: "6px" }}>
+                    {label}
+                    {/* \u24d8 opens a plain-English explainer. Tapping the row's own
+                        label would fight the horizontal scroll on a phone, so the
+                        target is the icon itself and it carries a real aria-label. */}
+                    {tip && (
+                      <button onClick={() => setOpenTip(isOpen ? null : label)}
+                        aria-label={`What is "${label}"?`} aria-expanded={isOpen}
+                        className={isOpen ? "text-fg" : "text-primary"}
+                        style={{ border: "none", background: "transparent", cursor: "pointer",
+                          padding: "0 4px", verticalAlign: "-2px", lineHeight: 0 }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                          strokeLinecap="round" strokeLinejoin="round" style={{ width: "12px", height: "12px" }}>
+                          <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                  {vals.map(cell)}
+                </div>
+                {isOpen && tip && (
+                  <div className="text-muted" style={{ padding: "0 10px 8px", fontSize: ".68rem", lineHeight: 1.55 }}>
+                    {tip}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       ))}
       <div className="text-muted border-t border-border" style={{ padding: "8px 10px", fontSize: ".64rem", lineHeight: 1.5 }}>
