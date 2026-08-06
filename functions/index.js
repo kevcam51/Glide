@@ -129,6 +129,11 @@ exports.backfillRoleClaims = onCall(async (request) => {
 // AI chat — defined in ./aichat.js. Required after initializeApp() above so it
 // shares the initialized Admin app. aiChat = callable (fallback); aiChatStream =
 // HTTP/SSE streaming endpoint (primary, replies appear word-by-word).
+// The free roster cap (S179) — see functions/roster.js for why the join has to
+// be server-side at all.
+exports.joinTrainerByCode = require("./roster").joinTrainerByCode;
+exports.myRosterStatus = require("./roster").myRosterStatus;
+
 exports.aiChat = require("./aichat").aiChat;
 exports.aiChatStream = require("./aichat").aiChatStream;
 exports.logMeal = require("./aichat").logMeal; // direct write for the meal Accept card

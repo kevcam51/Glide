@@ -134,7 +134,20 @@ await check("trainer CANNOT list another trainer's clients", assertFails(getDocs
 await check("client CANNOT list all users (unconstrained)", assertFails(getDocs(usersCol(c1))));
 
 console.log("\nPROFILE — update / delete:");
-await check("client sets own assignedTrainerId (joins a trainer)", assertSucceeds(updateDoc(prof(c3, C3), { assignedTrainerId: H })));
+// S179 free roster cap. Joining moved server-side (functions/roster.js
+// joinTrainerByCode): a client cannot count a trainer's roster, so the cap can
+// only be enforced with the Admin SDK — and if the client could still write the
+// field directly, that enforcement would be decorative. Leaving stays a client
+// self-write on purpose and must keep working.
+await check("client CANNOT set own assignedTrainerId directly (join is server-side)", assertFails(updateDoc(prof(c3, C3), { assignedTrainerId: H })));
+await check("client CAN clear own assignedTrainerId (leaving is never gated)", assertSucceeds(updateDoc(prof(c1, C1), { assignedTrainerId: null })));
+// Put C1 back on H immediately: the fixtures are shared and every messaging /
+// session test below depends on that link existing.
+await check("admin restores the C1 -> H link (fixture repair)", assertSucceeds(updateDoc(prof(admin, C1), { assignedTrainerId: H })));
+await check("client CANNOT switch trainers directly (null -> T2)", assertFails(updateDoc(prof(c1, C1), { assignedTrainerId: T2 })));
+await check("client CANNOT assign a trainer to SOMEONE ELSE", assertFails(updateDoc(prof(c3, C1), { assignedTrainerId: H })));
+await check("client can still update an unrelated own field", assertSucceeds(updateDoc(prof(c3, C3), { displayName: "Cee Three" })));
+await check("admin can still set assignedTrainerId (server/admin path)", assertSucceeds(updateDoc(prof(admin, C3), { assignedTrainerId: H })));
 await check("non-admin cannot delete a profile", assertFails(deleteDoc(prof(c1, C1))));
 await check("admin can change anyone's role", assertSucceeds(updateDoc(prof(admin, S), { role: "head_trainer" })));
 await check("admin can delete a profile", assertSucceeds(deleteDoc(prof(admin, C3))));

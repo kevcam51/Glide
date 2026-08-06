@@ -112,6 +112,18 @@ service cloud.firestore {
           && !request.resource.data.diff(resource.data).affectedKeys()
                .hasAny(['subscriptionStatus', 'entitlements', 'trialStartedAt', 'trialLengthDays',
                         'sessionCredits', 'sessionBillingHold', 'sessionPaymentMethod', 'sessionBillingTest'])
+          // JOINING a trainer is server-side only (S179 free roster cap): a
+          // client cannot count a trainer's roster — the scoped read rules stop
+          // them reading other profiles — so the cap has to be enforced in
+          // joinTrainerByCode, and this stops that being decorative.
+          // LEAVING stays a client self-write on purpose: setting the field to
+          // null is always allowed. Leaving your trainer should never need a
+          // server round trip, and should never be something we can refuse.
+          && (
+            request.resource.data.get('assignedTrainerId', null)
+              == resource.data.get('assignedTrainerId', null)
+            || request.resource.data.get('assignedTrainerId', null) == null
+          )
         );
 
       // DELETE: admin only.

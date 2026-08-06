@@ -17083,7 +17083,7 @@ const PLAN_FEATURES = {
   ],
   trainer: [
     { section: "The basics — free forever", rows: [
-      ["Unlimited connected clients + live dashboards", true, true, true, true],
+      ["Connected clients + live dashboards", "8", "Unlimited", "Unlimited", "Unlimited"],
       ["Coaching analytics — who needs attention", true, true, true, true],
       ["To-dos, nudges & requests — both ways", true, true, true, true],
       ["Invite Hub — link, QR, email invites, referrals", true, true, true, true],
@@ -17238,8 +17238,8 @@ const PLAN_TIPS = {
     "If you genuinely run out, ask and we lift it \u2014 usually the same day. We'd rather raise the number than have you ration it.",
 
   // ── Trainer: always free ─────────────────────────────────────────────────
-  "Unlimited connected clients + live dashboards":
-    "Connect as many clients as you like \u2014 there's no cap and never a per-client fee. Each one gets a live dashboard you can both see.",
+  "Connected clients + live dashboards":
+    "Every client gets a live dashboard you can both see, and there is never a per-client fee. Free connects up to 8; every paid plan is unlimited. Clients already connected to a free account before this stay connected \u2014 nothing is taken away.",
   "Coaching analytics \u2014 who needs attention":
     "One screen showing who has gone quiet, who's off track and who's progressing, sorted so the people who need you are at the top.",
   "To-dos, nudges & requests \u2014 both ways":
@@ -17275,7 +17275,7 @@ const PLAN_TIPS = {
   "Send client to-dos straight from chat":
     "Ask it to nudge someone and the to-do lands on that client's home screen.",
   "AI-coached clients each month":
-    "How many different people the AI can work on in a month. Your roster stays unlimited on every plan \u2014 this counts only the people you actually put the AI to work on, and it resets on the 1st.",
+    "How many different people the AI can work on in a month \u2014 separate from your roster, which is unlimited on every paid plan. This counts only the people you actually put the AI to work on, and it resets on the 1st.",
 
   // ── Coach Elite / Apex ───────────────────────────────────────────────────
   "Our biggest AI allowance \u2014 built for all-day use":
@@ -17455,7 +17455,7 @@ function PlanPicker({ role, onClose }) {
           </div>
           <div className="text-muted" style={{ fontSize: ".78rem", lineHeight: 1.45 }}>
             {isTrainer
-              ? "The whole coaching platform: unlimited clients, dashboards, analytics, messaging, to-dos, session booking, invites, plan templates and simulations."
+              ? "The whole coaching platform for up to 8 connected clients: dashboards, analytics, messaging, to-dos, session booking, invites, plan templates and simulations."
               : "Everything you track yourself: food, calories, macros and micronutrients, weight and body composition, workouts, the calendar, progress charts — and your trainer."}
           </div>
           <div className="text-muted" style={{ fontSize: ".74rem", lineHeight: 1.45, marginTop: "2px" }}>

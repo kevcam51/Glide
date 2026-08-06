@@ -1,5 +1,6 @@
 // profile.js — user profile + role management for Glidna
-import { auth, db } from "./firebase.js";
+import { auth, db, functions } from "./firebase.js";
+import { httpsCallable } from "firebase/functions";
 import {
   doc, getDoc, setDoc, updateDoc,
   collection, query, where, getDocs, serverTimestamp,
@@ -222,62 +223,28 @@ export async function ensureInviteCode(uid = auth.currentUser && auth.currentUse
 export async function joinTrainer(input) {
   const uid = auth.currentUser && auth.currentUser.uid;
   if (!uid) throw new Error("Not signed in");
-
   const raw = (input || "").trim();
   if (!raw) throw new Error("Enter your trainer's invite code first.");
 
-  let trainerUid = null;
-
-  // 1) Friendly-code lookup. Prefer the inviteCodes lookup collection (a single
-  // doc read — works even after profile-doc reads are locked down). Fall back to
-  // the legacy users query for any code not yet mirrored into the collection.
-  const normalized = normalizeCode(raw);
-  if (normalized.length === CODE_LEN) {
-    try {
-      const codeSnap = await getDoc(inviteCodeRef(normalized));
-      if (codeSnap.exists() && codeSnap.data().trainerUid) trainerUid = codeSnap.data().trainerUid;
-    } catch (e) { /* fall through to legacy query */ }
-    if (!trainerUid) {
-      // Legacy fallback for codes never mirrored into inviteCodes. Under the
-      // S59 scoped read rules this unconstrained query is usually DENIED and
-      // throws — guard it so a typo'd code gives the friendly "didn't match"
-      // error below instead of a raw permission crash.
-      try {
-        const snap = await getDocs(
-          query(collection(db, "users"), where("inviteCode", "==", normalized))
-        );
-        if (!snap.empty) trainerUid = snap.docs[0].id;
-      } catch (e) { /* denied — fall through to the friendly error */ }
-    }
+  // S179: joining is server-side now. A client cannot count a trainer's roster
+  // (the scoped read rules stop them reading other profiles), so the free
+  // 8-client cap can only be enforced with the Admin SDK — and firestore.rules
+  // no longer lets a client write assignedTrainerId to a value, so this is the
+  // only path that works. Code resolution moved with it, since the server has
+  // to resolve the code anyway to count the right roster.
+  // LEAVING is untouched: still a plain client self-write (see leaveTrainer).
+  try {
+    const call = httpsCallable(functions, "joinTrainerByCode");
+    const res = await call({ code: raw });
+    return (res && res.data && res.data.trainerUid) || null;
+  } catch (e) {
+    // Callable errors arrive as "functions/<code>" with the server's message,
+    // which is already written for the person reading it — pass it through
+    // rather than replacing it with something vaguer.
+    const msg = (e && e.message) || "";
+    if (msg && !/internal/i.test(msg)) throw new Error(msg.replace(/^functions\/[a-z-]+:?\s*/i, ""));
+    throw new Error("Couldn't link to that trainer just now — please try again.");
   }
-
-  // 2) Fallback: treat the input as a raw trainer uid. With profile reads now
-  // scoped, reading a non-trainer/unknown uid is denied (throws) — treat that as
-  // "not found" and fall through to the friendly error.
-  if (!trainerUid) {
-    try {
-      const tSnap = await getDoc(profileRef(raw));
-      if (tSnap.exists()) trainerUid = raw;
-    } catch (e) { /* denied/unknown — fall through */ }
-  }
-
-  if (!trainerUid) {
-    throw new Error("That code didn't match any trainer. Double-check it and try again.");
-  }
-  if (trainerUid === uid) {
-    throw new Error("You can't link to your own account.");
-  }
-
-  // Confirm the target is a trainer before linking. Trainer profiles are readable
-  // (the directory); a denied/failed read means it isn't a valid trainer.
-  let tProf = null;
-  try { tProf = (await getDoc(profileRef(trainerUid))).data(); } catch (e) { /* denied */ }
-  if (!tProf || (tProf.role !== ROLES.HEAD_TRAINER && tProf.role !== ROLES.SUB_TRAINER)) {
-    throw new Error("That code doesn't belong to a trainer account.");
-  }
-
-  await updateDoc(profileRef(uid), { assignedTrainerId: trainerUid });
-  return trainerUid;
 }
 
 // Trainer: get my direct clients (clients whose assignedTrainerId is me).
