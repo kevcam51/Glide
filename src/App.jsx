@@ -17000,17 +17000,21 @@ const PLAN_MENU = {
     { tier: "connect", name: "Glidna Connect", month: "$4.99", year: "$49.99", yearNote: "2 months free",
       blurb: "Already live in Claude or ChatGPT? Connect Glidna to it — your own AI logs your meals and reads your data. No in-app AI." },
     { tier: "base", name: "Glidna Premium", month: "$14.99", year: "$119.99", yearNote: "33% off",
-      blurb: "The AI coach: chat, photo & voice logging, AI meal estimates — a generous daily allowance." },
+      blurb: "The AI coach: chat, photo & voice logging, AI meal estimates — a generous daily allowance. All your tracking stays free either way." },
     { tier: "max", name: "Glidna Elite", month: "$29.99", year: "$299.99", yearNote: "2 months free",
       blurb: "Our biggest allowance — around 100 AI conversations a day. Ever hit the ceiling? Tell us and we'll raise it." },
   ],
   trainer: [
     { tier: "connect", name: "Coach Connect", month: "$19.99", year: "$199", yearNote: "2 months free",
-      blurb: "Already live in Claude or ChatGPT? Run your whole roster from it — your own AI reads and writes every client's plan. No in-app AI." },
+      blurb: "Already live in Claude or ChatGPT? Run your roster from it — your own AI reads and writes every client's plan. Up to 15 AI-coached clients a month. No in-app AI." },
     { tier: "base", name: "Glidna Coach", month: "$49", year: "$490", yearNote: "2 months free",
-      blurb: "The full coaching workspace + AI assistant. Unlimited clients, flat price." },
+      // Was "The full coaching workspace + AI assistant" — which contradicted the
+      // grid directly beneath it, where the whole workspace reads "free forever",
+      // and the code sides with the grid (the ONLY subscription gate is the AI
+      // layer). Selling what you already give away is how refund arguments start.
+      blurb: "The AI assistant for your roster: build programs, set targets and log for clients by chat. Up to 25 AI-coached clients a month — the coaching workspace itself stays free." },
     { tier: "max", name: "Coach Elite", month: "$79", year: "$790", yearNote: "2 months free",
-      blurb: "The biggest AI allowance, coach-sized — around 200 AI conversations a day." },
+      blurb: "The biggest AI allowance, coach-sized — around 200 conversations a day, and up to 35 AI-coached clients a month." },
   ],
 };
 
@@ -17081,7 +17085,7 @@ const PLAN_FEATURES = {
     { section: "The basics — free forever", rows: [
       ["Unlimited connected clients + live dashboards", true, true, true, true],
       ["Coaching analytics — who needs attention", true, true, true, true],
-      ["To-dos, nudges & shared plan editing", true, true, true, true],
+      ["To-dos, nudges & requests — both ways", true, true, true, true],
       ["Invite Hub — link, QR, email invites, referrals", true, true, true, true],
       ["Local plans, templates & sales simulations", true, true, true, true],
       // S178i — same omission on the coach side, plus the two rows the review
@@ -17238,8 +17242,8 @@ const PLAN_TIPS = {
     "Connect as many clients as you like \u2014 there's no cap and never a per-client fee. Each one gets a live dashboard you can both see.",
   "Coaching analytics \u2014 who needs attention":
     "One screen showing who has gone quiet, who's off track and who's progressing, sorted so the people who need you are at the top.",
-  "To-dos, nudges & shared plan editing":
-    "Send a client a to-do, nudge someone who's gone quiet, and edit their plan together \u2014 you both see the same thing.",
+  "To-dos, nudges & requests \u2014 both ways":
+    "Send a client a to-do, nudge someone who's gone quiet, and edit their plan together. Clients can ask YOU for things too \u2014 those land in your inbox.",
   "Invite Hub \u2014 link, QR, email invites, referrals":
     "Invite clients by link, QR code or email, and see who joined. Free \u2014 growing your roster is never something we charge for.",
   "Local plans, templates & sales simulations":

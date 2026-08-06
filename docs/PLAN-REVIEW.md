@@ -572,3 +572,16 @@ principle recorded: health & data free, money-making tools paid · banked:
 Family & Friends tier, trainer-referral program (fake-discount variant
 rejected as deceptive) · grandfathering: count accounts, courtesy window, then
 free-Connect-for-life.
+
+### S178h–i — the grid work SHIPPED (build-list item 7)
+61 rows, 61 ⓘ tooltips (verified 1:1, no gaps, no orphans). Twelve previously
+unadvertised free features added to the grid. Sidekick headline live on both
+ladders. Copy fixes applied: "…FOR clients by chat" (was implying a paywall on
+manual behalf-logging that no code enforces), "To-dos, nudges & requests — both
+ways" (the client→trainer inbox was unadvertised), and the Coach $49 blurb
+rewritten — it claimed "the full coaching workspace + AI assistant" while the
+grid beneath it gives the workspace away free and the code sides with the grid.
+Cards now name the seat allowance (15/25/35), which is the real difference
+between the coach tiers.
+
+**BUILD LIST COMPLETE — all 7 items shipped.**
