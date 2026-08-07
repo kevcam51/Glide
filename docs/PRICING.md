@@ -1332,3 +1332,26 @@ existing on the client side.
   referred users' spend. That is an affiliate program, not a credit — tax
   reporting (1099s), state rules and terms all apply. Do not build before
   counsel reviews it.
+
+### S180 — the referral math rule (Kevin: "we don't wanna lose money giving away months")
+
+Checked every combination. One fails:
+
+| Case | We give | We gain/mo | Payback |
+|---|---:|---:|---:|
+| Connect referrer → 3 Connect clients + 1 Connect trainer | $13.65 | $33.65 | 0.4mo |
+| Connect referrer → 3 Connect clients + 1 Coach trainer | $13.65 | $61.81 | 0.2mo |
+| Premium referrer → trainer signs Coach | $28.52 | $47.28 | 0.6mo |
+| **Premium referrer → 3 Connect clients only** | **$28.52** | **$14.24** | **2.0mo ⚠️** |
+| Premium referrer → 3 Premium clients | $28.52 | $43.37 | 0.7mo |
+
+**RULE, to enforce in the build: a reward may never exceed ONE MONTH of the net
+recurring revenue the referrals generate.** Compute the reward from what was
+actually referred, not from a fixed "2 or 3 months" promise. Then every case
+self-funds immediately and churn can't put us underwater.
+
+Practically: cap the granted credit at `net(sum of referred subs' monthly)`.
+The Connect referrer's 3-months case passes easily ($13.65 vs $33.65); the
+Premium/3-Connect case would grant ~1 month instead of 2. Say it on the page as
+"up to N months, depending on what your referrals subscribe to" rather than a
+flat promise we'd have to break.
