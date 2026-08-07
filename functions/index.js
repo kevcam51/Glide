@@ -136,6 +136,7 @@ exports.myReferralCode = require("./referrals").myReferralCode;
 exports.claimReferral = require("./referrals").claimReferral;
 exports.myReferrals = require("./referrals").myReferrals;
 exports.claimReferralCredit = require("./referrals").claimReferralCredit;
+exports.testVestReferral = require("./referrals").testVestReferral;  // admin-only rehearsal hook
 
 exports.joinTrainerByCode = require("./roster").joinTrainerByCode;
 exports.myRosterStatus = require("./roster").myRosterStatus;

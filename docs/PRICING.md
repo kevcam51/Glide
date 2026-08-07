@@ -1386,3 +1386,46 @@ referrer ($4.55 net/mo) bringing 3 clients + a trainer earns ~7 months of their
 own plan. Safe by the rule (one-month payback on $32.76/mo gained), but if it
 reads as too generous in practice, the lever is `MAX_CREDIT_PER_YEAR` ($300),
 not the rule.
+
+## S181b — reward CHOICE (credit or a complimentary upgrade) + how to rehearse it
+
+**The choice, per Kevin:** take the credit against your own plan, or spend it on
+a month of the next tier up. Presented together when a reward is available, with
+"this is just a thank you — nothing about your subscription changes."
+
+**The upgrade is OUR entitlement, never a Stripe subscription change.** This is
+the important design call. The obvious build is a Stripe subscription schedule
+that swaps the price for one cycle and swaps it back — rejected, because a
+revert that fails to fire silently charges someone the higher rate, which is
+the worst class of billing bug. Instead: `rewardTier` + `rewardTierUntil` on the
+profile, honoured by `tierFor()` (functions/aichat.js) and `isPremium()`
+(src/profile.js). **There is no downgrade to schedule, so no downgrade can
+fail** — it simply lapses. Priced at the DIFFERENCE between tiers, since we only
+forgo the gap, not the plan they already pay for.
+
+**Vesting stays 30 days, and Kevin's optional 60 is not needed.** At 30 days a
+referral has already paid ~one month, and the cap grants at most one month of
+their revenue — so we have always received at least what we give. Worst case is
+break-even, never a loss. Sixty days would only weaken the incentive to refer.
+
+### How to rehearse the whole chain (Kevin's question)
+1. **Stripe Test Clocks** for the billing half: create a clock, attach a test
+   customer, subscribe them through real Checkout with `?ref=CODE`, then advance
+   the clock 31 days — Stripe fires the genuine renewal webhooks.
+2. **`testVestReferral`** (admin-only, deployed) for our half: the vest check
+   uses OUR wall clock, so advancing Stripe's time does not move it. This
+   back-dates a referral's activation past the 30-day mark so the claim becomes
+   available immediately. The real rule is untouched.
+
+**Verified in production** (admin gate temporarily widened to the test trainer,
+then reverted and re-verified as "Admin only"): signup → vest → tracker shows
+`$14.26 available, 1 month covered, Casey Client vested` → both claim paths
+refuse cleanly for an account with no subscription. Test data removed.
+
+⚠️ **Caught by that test:** the upgrade refusal told a NON-SUBSCRIBER "you're
+already on the top plan", because `tierOf()` returns null for both cases. Now
+distinguished — a non-subscriber is told to start a plan first.
+
+**Still unexercised:** the actual Stripe balance-credit write and a live
+`rewardTier` grant, both of which need a real paid subscription. Everything up
+to that point is proven.

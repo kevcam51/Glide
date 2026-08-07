@@ -201,6 +201,10 @@ async function summarize(db, uid) {
       vested: people.filter((p) => p.status === "vested").length,
     },
     available, monthsCovered, ownMonth: money(ownMonth),
+    upgrade: (() => { const p = UPGRADE_PATHS[tierOf(me)];
+      return p ? { label: p.label, cost: p.cost, affordable: available >= p.cost } : null; })(),
+    rewardTier: me.rewardTier && me.rewardTierUntil && Date.now() < toMs(me.rewardTierUntil)
+      ? { tier: me.rewardTier, until: toMs(me.rewardTierUntil) } : null,
     alreadyGranted: money(ledger.granted || 0),
     vestDays: VEST_DAYS,
   };
@@ -217,18 +221,65 @@ exports.myReferrals = onCall({ region: REGION, maxInstances: 10 }, async (reques
 // Claim what has vested. Applies it as Stripe customer-balance credit, which
 // reduces upcoming invoices automatically — so it works whether they stay on
 // their plan or upgrade (an upgrade just consumes it faster).
+// The upgrade a reward can buy, per audience. Priced at the DIFFERENCE between
+// the tiers, because that is what we actually forgo by lifting someone for a
+// month — charging them the full higher price would be double-counting the
+// plan they are already paying for.
+const UPGRADE_PATHS = {
+  premium: { to: "max", label: "Elite", cost: money(NET_MONTHLY.max - NET_MONTHLY.premium) },
+  connect: { to: "premium", label: "Premium", cost: money(NET_MONTHLY.premium - NET_MONTHLY.connect) },
+  max: { to: "ultra", label: "Apex", cost: money(NET_MONTHLY.ultra - NET_MONTHLY.max) },
+  coach: { to: "coach_max", label: "Coach Elite", cost: money(NET_MONTHLY.coach_max - NET_MONTHLY.coach) },
+  coach_connect: { to: "coach", label: "Coach", cost: money(NET_MONTHLY.coach - NET_MONTHLY.coach_connect) },
+  coach_max: { to: "coach_ultra", label: "Coach Apex", cost: money(NET_MONTHLY.coach_ultra - NET_MONTHLY.coach_max) },
+};
+
 exports.claimReferralCredit = onCall({ region: REGION, secrets: ["STRIPE_SECRET_KEY"], maxInstances: 5 },
   async (request) => {
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
     const db = admin.firestore();
     const s = await summarize(db, uid);
+    const choice = String((request.data && request.data.choice) || "credit");
     if (s.available <= 0) {
       throw new HttpsError("failed-precondition",
         "Nothing to claim yet — credit unlocks once a referral has been subscribed for "
         + `${VEST_DAYS} days.`);
     }
     const me = (await db.doc(`users/${uid}`).get()).data() || {};
+
+    // ── Complimentary upgrade ────────────────────────────────────────────
+    // Granted as OUR entitlement with an expiry, deliberately NOT as a Stripe
+    // subscription schedule. A schedule would have to swap their price and
+    // swap it back, and a revert that fails to fire silently charges someone
+    // the higher rate — the worst kind of billing bug. This just lapses.
+    if (choice === "upgrade") {
+      const myTier = tierOf(me);
+      const path = myTier ? UPGRADE_PATHS[myTier] : null;
+      if (!path) {
+        // Two different situations wearing one message before this: someone on
+        // the top tier, and someone with no subscription at all. Telling a
+        // non-subscriber they're "on the top plan" is nonsense.
+        throw new HttpsError("failed-precondition", myTier
+          ? "You're already on the top plan — take the credit instead and it'll come off your next invoice."
+          : "Start a subscription first, then a reward can upgrade you for a month — or take it as credit once you're on a plan.");
+      }
+      if (s.available < path.cost) {
+        throw new HttpsError("failed-precondition",
+          `A month of ${path.label} needs $${path.cost.toFixed(2)} of credit — you have $${s.available.toFixed(2)}.`);
+      }
+      const until = Date.now() + 30 * 86400000;
+      await db.doc(`users/${uid}`).set({ rewardTier: path.to, rewardTierUntil: until }, { merge: true });
+      const yearNow = new Date().getUTCFullYear();
+      const prev0 = (await db.doc(`users/${uid}/referralLedger/summary`).get()).data() || {};
+      await db.doc(`users/${uid}/referralLedger/summary`).set({
+        granted: money((prev0.granted || 0) + path.cost),
+        grantedThisYear: money((prev0.year === yearNow ? (prev0.grantedThisYear || 0) : 0) + path.cost),
+        year: yearNow, lastGrantAt: Date.now(),
+      }, { merge: true });
+      return { ok: true, mode: "upgrade", tier: path.to, label: path.label, until, spent: path.cost };
+    }
+
     if (!me.stripeCustomerId) {
       throw new HttpsError("failed-precondition",
         "Start a subscription first — credit is applied against your own plan.");
@@ -254,3 +305,27 @@ exports.claimReferralCredit = onCall({ region: REGION, secrets: ["STRIPE_SECRET_
 module.exports.onSubscriptionChanged = onSubscriptionChanged;
 module.exports.NET_MONTHLY = NET_MONTHLY;
 module.exports.VEST_DAYS = VEST_DAYS;
+
+// ── Admin-only test hook (S181b) ────────────────────────────────────────────
+// The vest check uses OUR wall clock, so a Stripe test clock alone can't
+// rehearse the full chain — advancing Stripe's time doesn't move ours. This
+// back-dates a referral's activation so an admin can walk
+// signup → paying → vested → claim → Stripe credit in one sitting, in TEST
+// MODE, without touching the real 30-day rule.
+const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
+exports.testVestReferral = onCall({ region: REGION, maxInstances: 2 }, async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid || !ADMIN_UIDS.includes(uid)) throw new HttpsError("permission-denied", "Admin only.");
+  const target = String((request.data && request.data.referredUid) || "").trim();
+  if (!target) throw new HttpsError("invalid-argument", "referredUid is required.");
+  const db = admin.firestore();
+  const ref = db.doc(`referrals/${target}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new HttpsError("not-found", "No referral row for that user.");
+  await ref.set({
+    status: "paying",
+    tier: String((request.data && request.data.tier) || snap.data().tier || "premium"),
+    activatedAt: Date.now() - (VEST_DAYS + 1) * 86400000,   // back-dated past the vest
+  }, { merge: true });
+  return { ok: true, note: `Back-dated past the ${VEST_DAYS}-day vest — claim should now be available.` };
+});

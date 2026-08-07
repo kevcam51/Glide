@@ -113,9 +113,18 @@ export function isProUser(profile) {
 // pre-trial legacy accounts — all premium. Only an EXPIRED trial locks it;
 // basics (manual logging, viewing data) stay free either way. Keep in sync
 // with functions/aichat.js trialExpiredFor().
+// A complimentary tier from a referral reward (S181b). Ours, not Stripe's —
+// so it expires on its own and can never leave someone wrongly subscribed.
+export function rewardTierActive(profile) {
+  if (!profile || !profile.rewardTier || !profile.rewardTierUntil) return null;
+  const until = toMillis(profile.rewardTierUntil);
+  return until && Date.now() < until ? String(profile.rewardTier) : null;
+}
+
 export function isPremium(profile) {
   if (!profile) return true; // profile still loading — never flash a lock
   if (profile.entitlements && profile.entitlements.premium === true) return true;
+  if (rewardTierActive(profile)) return true;   // a live reward unlocks the AI layer
   const t = trialInfo(profile);
   return !t || !t.expired;
 }

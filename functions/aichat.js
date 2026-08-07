@@ -76,8 +76,28 @@ const BUDGETS = { trial: 45000, client: 45000, assisted: 45000,
   // Ultra (S92): data-triggered heavy-user tiers, surfaced via the boost upsell.
   clientUltra: 250000, trainerUltra: 450000 };   // S171: Apex 400k->450k (every trainer step is now +50%)
 
+// A complimentary tier granted as a referral reward (S181b) — OUR entitlement,
+// never a change to their Stripe subscription. That is the whole safety
+// property: there is no downgrade to schedule and therefore no downgrade that
+// can fail, so nobody can ever be silently billed at the higher price. It
+// simply lapses at rewardTierUntil.
+function rewardTier(profile) {
+  if (!profile || !profile.rewardTier || !profile.rewardTierUntil) return null;
+  const until = typeof profile.rewardTierUntil === "number" ? profile.rewardTierUntil
+    : (profile.rewardTierUntil.toMillis ? profile.rewardTierUntil.toMillis() : 0);
+  return Date.now() < until ? String(profile.rewardTier) : null;
+}
+
 function tierFor(profile) {
   const role = (profile && profile.role) || "client";
+  // A live reward tier stands in for the paid one while it lasts.
+  const rw = rewardTier(profile);
+  if (rw) {
+    if (role === "head_trainer" || role === "sub_trainer" || role === "admin") {
+      return /ultra/.test(rw) ? "trainerUltra" : /max/.test(rw) ? "trainerMax" : "trainer";
+    }
+    return /ultra/.test(rw) ? "clientUltra" : /max/.test(rw) ? "clientMax" : "client";
+  }
   // Paid high tiers (the Stripe webhook stamps subscriptionTier
   // "max"/"coach_max"/"ultra"/"coach_ultra") unlock the big budgets — only
   // while the sub is active. Ultra > Max.

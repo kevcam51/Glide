@@ -21521,11 +21521,16 @@ function ReferralPanel({ open, onClose, role }) {
       await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000);
     } catch (e) { /* user dismissed */ }
   };
-  const claim = async () => {
+  const claim = async (choice) => {
     if (busy) return; setBusy(true); setMsg(null);
     try {
-      const r = await callClaimCredit({});
-      setMsg({ ok: true, text: `$${r.data.credited.toFixed(2)} credited — it comes off your next invoice${r.data.monthsCovered >= 1 ? `, about ${r.data.monthsCovered} month${r.data.monthsCovered === 1 ? "" : "s"} of your plan` : ""}.` });
+      const r = await callClaimCredit({ choice });
+      if (r.data.mode === "upgrade") {
+        const until = new Date(r.data.until).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        setMsg({ ok: true, text: `You're on ${r.data.label} until ${until}. Nothing changes about your subscription — it simply goes back to your usual plan afterwards, with nothing to cancel.` });
+      } else {
+        setMsg({ ok: true, text: `$${r.data.credited.toFixed(2)} credited — it comes off your next invoice${r.data.monthsCovered >= 1 ? `, about ${r.data.monthsCovered} month${r.data.monthsCovered === 1 ? "" : "s"} of your plan` : ""}.` });
+      }
       load();
     } catch (e) {
       setMsg({ ok: false, text: (e && e.message) ? String(e.message).replace(/^functions\/[a-z-]+:?\s*/i, "") : "Couldn't apply that just now." });
@@ -21579,11 +21584,35 @@ function ReferralPanel({ open, onClose, role }) {
             {data.monthsCovered >= 1 && (
               <div className={WZ.sub}>That's about {data.monthsCovered} month{data.monthsCovered === 1 ? "" : "s"} of your plan covered.</div>
             )}
+            {data.rewardTier && (
+              <div className="mt-2 rounded-lg border border-[var(--green,#2fe0a8)] bg-[rgba(47,224,168,.08)] px-3 py-2.5 text-[.78rem] leading-relaxed text-fg">
+                Your complimentary upgrade is running until{" "}
+                {new Date(data.rewardTier.until).toLocaleDateString("en-US", { month: "short", day: "numeric" })}.
+                Your subscription is untouched — it goes back to your usual plan on its own.
+              </div>
+            )}
             {data.available > 0 ? (
-              <button onClick={claim} disabled={busy}
-                className="mt-2 w-full rounded-xl border-none bg-primaryfill px-4 py-3 text-[.88rem] font-bold text-primaryfg cursor-pointer disabled:opacity-60">
-                {busy ? "Applying…" : "Apply to my account"}
-              </button>
+              /* Kevin's choice, S181b: months of your own plan, or a month of the
+                 next one up. The upgrade is OUR entitlement with an expiry, not a
+                 Stripe schedule — so there is no downgrade that can fail. */
+              <div className="mt-2 flex flex-col gap-2">
+                <button onClick={() => claim("credit")} disabled={busy}
+                  className="w-full rounded-xl border-none bg-primaryfill px-4 py-3 text-[.88rem] font-bold text-primaryfg cursor-pointer disabled:opacity-60">
+                  {busy ? "Applying…" : `Take $${data.available.toFixed(2)} off my plan`}
+                </button>
+                {data.upgrade && (
+                  <button onClick={() => claim("upgrade")} disabled={busy || !data.upgrade.affordable}
+                    className="w-full rounded-xl border border-primary bg-transparent px-4 py-3 text-[.85rem] font-bold text-primary cursor-pointer disabled:opacity-40">
+                    {data.upgrade.affordable
+                      ? `Or try a month of ${data.upgrade.label} — free`
+                      : `A month of ${data.upgrade.label} needs $${data.upgrade.cost.toFixed(2)}`}
+                  </button>
+                )}
+                <div className="text-[.68rem] leading-relaxed text-muted">
+                  Either way this is just a thank you — nothing about your subscription changes, and
+                  there's nothing to cancel afterwards.
+                </div>
+              </div>
             ) : (
               <div className={WZ.sub}>
                 {data.counts.paying > 0
