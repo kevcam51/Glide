@@ -1,5 +1,98 @@
 # Glidna — Next-Session Handoff (start here)
 
+## ⭐⭐⭐ S177–S182 (Aug 6, 2026) — READ THIS FIRST
+Everything below this block is older history. Firebase `calorieiq-29762` ·
+model `claude-sonnet-4-6` · live on **glidna.com** · tree clean, all pushed,
+all deployed.
+
+### ⚠️ Two things Kevin owes, both small
+1. **Roll the Stripe TEST key** — it was pasted into a session transcript.
+   Stripe → Test mode → Developers → API keys → ⋯ → Roll key (expire
+   immediately), then re-run:
+   `printf 'sk_test_NEW' | firebase functions:secrets:set STRIPE_SECRET_KEY_TEST --data-file=- --project calorieiq-29762`
+   No financial risk (test keys can't touch real money) — hygiene only.
+2. **`STRIPE_WEBHOOK_SECRET_TEST` holds a placeholder** (`whsec_PLACEHOLDER_REPLACE_ME`,
+   set by Claude so the deploy could bind it). The test-mode webhook endpoint
+   was never created, so test events aren't delivered. Only needed to rehearse
+   the automatic "subscription activates → referral flips to paying" step.
+
+### What shipped this session (all live, all verified in production)
+- **AI-client seats** 15/25/35/55 (Connect/Coach/Elite/Apex), trial 15.
+  Confirm-before-spend, one gate inside `runTool` covering chat + Accept cards +
+  automations + connector. Verified: asks first → confirm → answers → seat
+  recorded → no re-ask; plan files gate identically; own data never charged.
+- **Session billing** locked to admin until Stripe Connect (liability fix).
+- **Trial fence** — new accounts can't mint free-forever access. Grandfathered
+  count measured: **3 accounts, all internal → the whole courtesy-window plan
+  was DELETED, not built.**
+- **Client data export** — everyone can download everything.
+- **`coach_summary` pages** instead of silently capping at 60 (it was
+  misreporting roster SIZE, worse than the review said).
+- **Tracker upsell card** replacing a dead red error.
+- **Pricing grid: 65 rows, 65 tooltips** (verified 1:1), 12 newly advertised
+  free features, sidekick headline, all review copy fixes incl. the $49 blurb
+  that sold a workspace the grid gives away.
+- **Free roster cap: 15 clients+plans**, server-enforced (`joinTrainerByCode` +
+  a rules change so clients can't write `assignedTrainerId` to a value; leaving
+  is still a client self-write, deliberately). **173 rules tests, 0 failed.**
+  Grandfathered pre-2026-08-07.
+- **Booking = Connect+, sub-trainer TEAMS = Coach+** (`teamsAllowed`).
+- **Client AI budget 45k/day** with boosts +15k → 60k → 75k; **trial matches at
+  45k** (S179h had re-created the pay-and-get-less inversion — fixed).
+  **Automations 2/4/6 client, 2/5/8 trainer**, with a warning before saving
+  because each run costs ~10 chat messages.
+- **Weekly Meal Planner** (S180) — build a week, apply on demand or auto-repeat,
+  trainers push templates onto clients. Premium+ / Coach+.
+- **Referral rewards** (S181) — share link, credit vests only on 30 days PAID,
+  reward capped at ONE MONTH of referred net revenue (the S180 rule), choice of
+  credit or a complimentary upgrade granted as OUR entitlement (never a Stripe
+  schedule, so no downgrade can fail).
+- **Dual-mode Stripe** (S182) — live + test coexist; webhook tries live
+  signature first. Checkout/portal stay live-only.
+
+### 🔴 One unexplained thing — start here if referrals misbehave
+A `referrals/{uid}` doc that had been created AND vested was absent from a
+later query; re-claiming created it fresh, so it was genuinely gone, not
+unreadable. **No delete path exists in the code.** If referral rows vanish in
+the wild, this is the lead.
+
+### Hazards worth not rediscovering
+- **`coach_connect` CONTAINS `coach`** — every tier predicate must test
+  `connect` FIRST. Hit three times now (mcp.js planFor, aiSeats, teamsAllowed).
+- **A React dep array is evaluated during render** — putting an effect above
+  the `const`s it references is a TDZ crash the bundler compiles happily.
+  Nearly shipped a white screen for every trainer this way.
+- **zsh: `UID` is read-only** — name shell vars something else.
+- **Writing the SAME value a rules-guarded field already holds is an allowed
+  no-op**, so a careless prod test reads as "the rule failed". Test a DIFFERENT
+  value.
+- **Deploy ordering for rules**: push the frontend FIRST, then publish rules —
+  the old bundle wrote the field directly, so the reverse order breaks joins
+  for cached clients.
+- **`npm run deploy-set <file>`** — never recall the deploy set.
+- Shared fixtures in `firestore.rules.test.js` are order-dependent; a test that
+  mutates one breaks every later test that depends on it.
+
+### Decision docs (read before proposing pricing changes)
+`docs/PRICING.md` — S176f (Kevin's full walkthrough response), S179c/e/f
+(roster + gates), S179i (budgets/automations), S180 (referral math rule), S182
+(dual-mode + the rehearsal). `docs/PLAN-REVIEW.md` — all 132 features tiered.
+`docs/ECOSYSTEM.md` — **the bridge is COEXISTENCE, not connectivity**; read it
+before proposing any revenue model. **No platform fees for independent
+trainers** (only trainer-TREE splits are legitimate).
+
+### Queue, nothing started
+1. Referral **notification** when a reward vests (Kevin wants the choice
+   surfaced there, not as a modal).
+2. Push-notification delivery (FCM) — oldest parked item.
+3. Family & Friends tier (~$9.99–11.99, 5–10 plan files) — guardrail: must
+   exclude business features or it undercuts Coach Connect.
+4. Connector chart images; cap-hit "use your own AI" nudge (fire only AT the
+   cap, never broadly).
+5. ⚖️ Referral CASH payouts — needs counsel first (affiliate program, 1099s).
+
+---
+
 ## ⭐⭐ S175 pricing thread (Aug 2, 2026, with Kevin live) — READ THIS FIRST
 The free-tier design + feature review from S171's "NOT done" item 1 is DONE.
 Every decision is in `docs/PLAN-REVIEW.md` ("Decisions — free-tier review",
