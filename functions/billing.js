@@ -285,6 +285,9 @@ exports.stripeWebhook = onRequest(
             stripeSubscriptionId: s.subscription || null,
           }, { merge: true });
           console.log("stripeWebhook: activated", uid, (s.metadata && s.metadata.tier) || "");
+          // S181: a referral only ever counts when money actually arrives.
+          await require("./referrals").onSubscriptionChanged(db, uid, true,
+            { subscriptionTier: (s.metadata && s.metadata.tier) || "premium" });
         }
       } else if (event.type === "customer.subscription.updated"
         || event.type === "customer.subscription.deleted") {
@@ -301,6 +304,10 @@ exports.stripeWebhook = onRequest(
           if (!keep) update.subscriptionTier = admin.firestore.FieldValue.delete();
           await db.doc(`users/${uid}`).set(update, { merge: true });
           console.log("stripeWebhook:", event.type, uid, "→", keep ? "active" : "canceled");
+          // S181: mark the referral paying, or lapsed if the sub ended. Never
+          // claws back credit already granted — only future rewards stop.
+          await require("./referrals").onSubscriptionChanged(db, uid, keep,
+            { subscriptionTier: (sub.metadata && sub.metadata.tier) || "" });
         } else {
           console.error("stripeWebhook: no uid for customer", sub.customer);
         }

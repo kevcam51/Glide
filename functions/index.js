@@ -131,6 +131,12 @@ exports.backfillRoleClaims = onCall(async (request) => {
 // HTTP/SSE streaming endpoint (primary, replies appear word-by-word).
 // The free roster cap (S179) — see functions/roster.js for why the join has to
 // be server-side at all.
+// Referral rewards (S181) — see functions/referrals.js for the solvency rule.
+exports.myReferralCode = require("./referrals").myReferralCode;
+exports.claimReferral = require("./referrals").claimReferral;
+exports.myReferrals = require("./referrals").myReferrals;
+exports.claimReferralCredit = require("./referrals").claimReferralCredit;
+
 exports.joinTrainerByCode = require("./roster").joinTrainerByCode;
 exports.myRosterStatus = require("./roster").myRosterStatus;
 

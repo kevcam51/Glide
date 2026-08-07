@@ -14317,6 +14317,22 @@ function getInviteNameFromUrl() {
   try { return (new URLSearchParams(window.location.search).get("n") || "").trim(); }
   catch { return ""; }
 }
+// Referral code from the URL (?ref=CODE), stashed so it survives the whole
+// signup flow — the code arrives before the account exists, and we can only
+// claim it once there's a signed-in uid to attach it to (S181).
+function getRefFromUrl() {
+  try { return (new URLSearchParams(window.location.search).get("ref") || "").trim(); }
+  catch { return ""; }
+}
+function stashRef() {
+  const r = getRefFromUrl();
+  if (r) { try { localStorage.setItem("glidna-ref", r); } catch (e) { /* private mode */ } }
+}
+function takeStashedRef() {
+  try { const r = localStorage.getItem("glidna-ref"); if (r) localStorage.removeItem("glidna-ref"); return r || ""; }
+  catch (e) { return ""; }
+}
+
 // Remove ?invite= (and the ?n= inviter name) from the URL without reloading, so
 // they can't re-fire on refresh.
 function clearInviteFromUrl() {
@@ -14324,6 +14340,7 @@ function clearInviteFromUrl() {
     const url = new URL(window.location.href);
     url.searchParams.delete("invite");
     url.searchParams.delete("n");
+    url.searchParams.delete("ref");
     window.history.replaceState({}, "", url.toString());
   } catch { /* ignore */ }
 }
@@ -14492,6 +14509,7 @@ function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
     // Auto-link from an invite link: if a client opened ?invite=CODE and isn't
     // already linked, link them to that trainer, then clean the code out of the
     // URL so it can't re-fire on refresh.
+    stashRef();                       // ?ref=CODE — survives the signup round trip
     const invite = getInviteFromUrl();
     if (p && p.role === ROLES.CLIENT && !p.assignedTrainerId && invite) {
       try {
@@ -17593,6 +17611,9 @@ const callAdminUserUsage = httpsCallable(functions, "adminUserUsage"); // one us
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
 const callAiSeats = httpsCallable(functions, "aiSeats"); // AI-client seats view (S176f)
 const callRosterStatus = httpsCallable(functions, "myRosterStatus"); // free roster cap (S179b)
+const callMyReferrals = httpsCallable(functions, "myReferrals");             // referral tracker (S181)
+const callClaimReferral = httpsCallable(functions, "claimReferral");
+const callClaimCredit = httpsCallable(functions, "claimReferralCredit");
 // Trainer teams (S116): head trainer ↔ sub-trainers. Server-side because the
 // rules block a user changing their own role. See functions/team.js.
 const callJoinTeam = httpsCallable(functions, "joinTeam");
@@ -21475,6 +21496,139 @@ function mpDates(week, startYmd, weeks){
   return out;
 }
 
+// ── Refer & earn (S181) ─────────────────────────────────────────────────────
+// The tracker is the product here: seeing "2 of 3 have paid" is what makes
+// someone follow up, which is the whole reason Kevin wanted this screen.
+// Everything it shows is computed server-side under the S180 solvency rule —
+// credit never exceeds one month of what the referrals actually earn us — so
+// the numbers on this page are the numbers we can afford to honour.
+function ReferralPanel({ open, onClose, role }) {
+  useBodyScrollLock(open);
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const load = () => callMyReferrals({}).then((r) => setData(r.data)).catch(() => setErr("Couldn't load your referrals just now."));
+  useEffect(() => { if (open) { setErr(""); load(); } }, [open]);
+  if (!open) return null;
+
+  const link = data && data.code ? `${window.location.origin}/?ref=${data.code}` : "";
+  const share = async () => {
+    const text = "I'm using Glidna to track my nutrition and training — it's free to start.";
+    try {
+      if (navigator.share) { await navigator.share({ title: "Glidna", text, url: link }); return; }
+      await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000);
+    } catch (e) { /* user dismissed */ }
+  };
+  const claim = async () => {
+    if (busy) return; setBusy(true); setMsg(null);
+    try {
+      const r = await callClaimCredit({});
+      setMsg({ ok: true, text: `$${r.data.credited.toFixed(2)} credited — it comes off your next invoice${r.data.monthsCovered >= 1 ? `, about ${r.data.monthsCovered} month${r.data.monthsCovered === 1 ? "" : "s"} of your plan` : ""}.` });
+      load();
+    } catch (e) {
+      setMsg({ ok: false, text: (e && e.message) ? String(e.message).replace(/^functions\/[a-z-]+:?\s*/i, "") : "Couldn't apply that just now." });
+    } finally { setBusy(false); }
+  };
+
+  const badge = (st) => st === "vested" ? { t: "Earned", c: "var(--green,#2fe0a8)" }
+    : st === "paying" ? { t: "Subscribed", c: "var(--accent)" }
+    : st === "lapsed" ? { t: "Ended", c: "var(--muted)" }
+    : { t: "Signed up", c: "var(--muted)" };
+
+  return createPortal(
+    <div data-theme="pro" className="fixed inset-0 z-[1520] overflow-y-auto bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
+      <div className="mx-auto max-w-[560px] px-4 pb-24" style={{ paddingTop: "calc(18px + env(safe-area-inset-top,0px))" }}>
+        <div className="mb-4 relative flex items-center justify-center px-[92px]">
+          <div className="font-display text-[1.15rem] font-extrabold flex items-center gap-2">
+            <Icon name="invite" size={18} color="var(--accent)" />Refer &amp; earn
+          </div>
+          <button onClick={onClose} aria-label="Back"
+            className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer">
+            <Icon name="back" size={15} color="var(--accent)" />Back
+          </button>
+        </div>
+
+        {err && <div className={WZ.card}><div className="text-[.84rem] text-[var(--red,#f87171)]">{err}</div></div>}
+        {!data && !err && <div className={WZ.card}><div className={WZ.sub}>Loading…</div></div>}
+
+        {data && (<>
+          <div className={WZ.card}>
+            <div className={WZ.title} style={{ fontSize: ".98rem" }}>Share Glidna, get credit</div>
+            <div className={WZ.sub}>
+              Send this to anyone — a friend, or a trainer you'd like to work with. When someone you
+              refer subscribes and stays{data.vestDays ? ` ${data.vestDays} days` : ""}, you earn credit
+              against your own plan. <b className="text-fg">Nothing is earned until they've actually paid.</b>
+            </div>
+            <div className="mt-2.5 flex gap-2">
+              <input readOnly value={link} onFocus={(e) => e.target.select()} className={WZ.input} style={{ flex: 1, marginBottom: 0, fontSize: ".76rem" }} />
+              <button onClick={share} className="rounded-lg border-none bg-primaryfill px-4 py-2 text-[.8rem] font-bold text-primaryfg cursor-pointer whitespace-nowrap">
+                {copied ? "Copied" : "Share"}
+              </button>
+            </div>
+          </div>
+
+          <div className={WZ.card}>
+            <div className="flex items-baseline gap-2">
+              <div className="font-display text-[1.6rem] font-extrabold text-fg" style={{ fontVariantNumeric: "tabular-nums" }}>
+                ${data.available.toFixed(2)}
+              </div>
+              <div className={WZ.sub} style={{ margin: 0 }}>ready to claim</div>
+            </div>
+            {data.monthsCovered >= 1 && (
+              <div className={WZ.sub}>That's about {data.monthsCovered} month{data.monthsCovered === 1 ? "" : "s"} of your plan covered.</div>
+            )}
+            {data.available > 0 ? (
+              <button onClick={claim} disabled={busy}
+                className="mt-2 w-full rounded-xl border-none bg-primaryfill px-4 py-3 text-[.88rem] font-bold text-primaryfg cursor-pointer disabled:opacity-60">
+                {busy ? "Applying…" : "Apply to my account"}
+              </button>
+            ) : (
+              <div className={WZ.sub}>
+                {data.counts.paying > 0
+                  ? `${data.counts.paying} subscription${data.counts.paying === 1 ? " is" : "s are"} still in the first ${data.vestDays} days — credit unlocks after that.`
+                  : "Nothing yet. Credit appears once someone you referred subscribes."}
+              </div>
+            )}
+            {msg && <div className={`mt-2 text-[.78rem] ${msg.ok ? "text-[var(--green,#2fe0a8)]" : "text-[var(--red,#f87171)]"}`}>{msg.text}</div>}
+            {data.alreadyGranted > 0 && (
+              <div className="mt-1.5 text-[.7rem] text-muted">${data.alreadyGranted.toFixed(2)} claimed so far.</div>
+            )}
+          </div>
+
+          <div className={WZ.card}>
+            <div className={WZ.label}>Your referrals</div>
+            {data.people.length === 0 ? (
+              <div className={WZ.sub} style={{ marginTop: 6 }}>Nobody yet — share your link to get started.</div>
+            ) : (<>
+              <div className="flex gap-3 mt-1.5 mb-1 text-[.72rem] text-muted">
+                <span><b className="text-fg">{data.counts.vested}</b> earned</span>
+                <span><b className="text-fg">{data.counts.paying}</b> subscribed</span>
+                <span><b className="text-fg">{data.counts.signedUp}</b> signed up</span>
+              </div>
+              {data.people.map((p, i) => { const b = badge(p.status); return (
+                <div key={i} className="flex items-center gap-2 border-t border-border py-2">
+                  <span className="text-[.86rem] text-fg">{p.name}</span>
+                  <span className="text-[.68rem] font-extrabold uppercase tracking-wide" style={{ color: b.c }}>{b.t}</span>
+                  <span className="ml-auto text-[.72rem] text-muted">
+                    {p.status === "vested" ? `$${p.net.toFixed(2)}/mo`
+                      : p.daysToVest ? `${p.daysToVest}d to go` : ""}
+                  </span>
+                </div>
+              ); })}
+            </>)}
+            <div className="mt-2.5 text-[.68rem] leading-relaxed text-muted">
+              Credit is capped at one month of what your referrals bring in, so it always reflects
+              real subscriptions. It applies to your next invoice — stay on your plan and it covers
+              months of it, or upgrade and it's used up faster.
+            </div>
+          </div>
+        </>)}
+      </div>
+    </div>, document.body);
+}
+
 function MealPlannerPanel({ open, onClose, role, locked, savedFoods, recentFoods, onPlanDays, isRemote }) {
   useBodyScrollLock(open);
   const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
@@ -23915,7 +24069,7 @@ async function exportMyData({ meName, meEmail, role }) {
   return bundle.entryCount;
 }
 
-function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme, teamLocked }) {
+function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme, teamLocked, onReferrals }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
@@ -24098,6 +24252,13 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
             <Icon name="card" size={19} color="var(--accent)" /> <span>{upgradeBusy ? "Opening…" : "Manage subscription"}</span>
           </button>
         )}
+
+        {/* Refer & earn (S181) — for EVERY role. The whole idea is that a client
+            can bring in a trainer or a friend, so this must not be trainer-only
+            the way the Invite Hub is. */}
+        <button style={item} onClick={() => { onClose(); setTimeout(() => onReferrals && onReferrals(), 0); }}>
+          <Icon name="invite" size={19} color="var(--accent)" /> <span>Refer &amp; earn</span>
+        </button>
 
         {/* Plans & pricing — always visible (S90, Kevin's ask): before this,
             pricing was only reachable from a trial banner or the AI lock, so
@@ -24437,8 +24598,19 @@ export default function App() {
     return () => { alive = false; };
   }, [meUid, role, profiles.length]);
 
+  // Claim a referral once (S181). Fire-and-forget: the server ignores unknown
+  // codes, self-referrals and anyone already attributed, so a bad link can
+  // never block a signup — and nothing here is worth surfacing to the user.
+  useEffect(() => {
+    if (!meUid) return;
+    const code = takeStashedRef();
+    if (!code) return;
+    callClaimReferral({ code }).catch(() => {});
+  }, [meUid]);
+
   // Weekly Meal Planner (S180): open/closed + the auto-apply standing order.
   const [showMealPlanner, setShowMealPlanner] = useState(false);
+  const [showReferrals, setShowReferrals] = useState(false);   // Refer & earn (S181)
   // Auto-apply: keep the next 14 days filled from the one template with
   // autoApply on. OWN account only (never fires while a trainer is inside a
   // client's plan), idempotent via the appliedThrough high-water mark, and
@@ -26010,11 +26182,15 @@ export default function App() {
           boxShadow: "0 6px 24px rgba(0,0,0,.45)" }}>
           {cardNotice}
         </div>, document.body)}
+      {/* Refer & earn (S181) — lives in chrome so it opens from any screen,
+          for every role, exactly like the side menu that launches it. */}
+      <ReferralPanel open={showReferrals} onClose={() => setShowReferrals(false)} role={role} />
       <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} role={role} meName={meName} meEmail={meEmail}
         aiOptOut={meAiOptOut} onSetAiOptOut={onSetAiOptOut}
         idleSignOut={idleSignOut} onSetIdleSignOut={onSetIdleSignOut}
         isTrainer={isTrainerHome} trial={meTrial} subActive={meSubStatus === "active"}
         teamLocked={!!(rosterCap && rosterCap.teamsLocked)}
+        onReferrals={() => setShowReferrals(true)}
         themePref={themePref} onSetTheme={setTheme}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
         onHome={() => { if (isTrainerHome) setHomeTab("dashboard"); goToProfiles(); }}
