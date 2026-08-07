@@ -52,7 +52,13 @@ function isAdminUid(uid) { return ADMIN_UIDS.includes(uid); }
 // shows the full product, and paying keeps it (never shrinks it). `assisted`
 // (trainer-linked client) rides at the same 100k: it used to sit above the solo
 // client tier, and leaving it at 40k would have inverted it to LESS.
-const BUDGETS = { trial: 100000, client: 100000, assisted: 100000,
+// S179h: client/assisted dropped 100k -> 85k. At 100k the CEILING was
+// underwater — 100k x 30 x $4.70/1M = $14.10 of AI against $14.26 kept after
+// Stripe, and the plugin allowance pushed it to -$0.62/mo (annual: -$53/yr).
+// 85k restores the "every tier profitable at its cap" property with ~+$1.50 of
+// headroom. Still ~56 conversations/day — no normal user will ever feel it.
+// Trial stays 100k: it must never be beaten by the tier below it (S169g).
+const BUDGETS = { trial: 100000, client: 85000, assisted: 85000,
   // S169g (Kevin): paying must never shrink the product. The trainer trial used
   // to be 200k against a paid Coach of 100k — day 31 after paying $49, the
   // allowance HALVED. Now the trial is a taste (100k ≈ 66 conversations) and

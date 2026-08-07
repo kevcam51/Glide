@@ -17082,10 +17082,10 @@ const PLAN_FEATURES = {
       // these shipped long ago and appeared NOWHERE on the pricing page, so
       // people were being asked to judge Glidna without seeing most of it
       // (docs/PLAN-REVIEW.md: "shipped but never advertised").
-      ["Your calorie target, explained in plain English", true, true, true, true],
+      ["Your calorie target, explained — nobody else does this", true, true, true, true],
       ["Plan meals ahead & repeat them weekly", true, true, true, true],
       ["Your watch sets your calorie target", true, true, true, true],
-      ["Message your trainer directly", true, true, true, true],
+      ["A real human coach, in the app", true, true, true, true],
       ["Reminders & nudges on your phone", true, true, true, true],
       ["Turn AI off for your account entirely", true, true, true, true],
       ["Download all your data, any time", true, true, true, true],
@@ -17109,10 +17109,12 @@ const PLAN_FEATURES = {
       ["Set up your whole plan by conversation", false, false, true, true],
       ["Cut / bulk / maintenance phases by chat", false, false, true, true],
       ["Past chats — save, revisit & continue", false, false, true, true],
-      ["AI conversations per day", "—", "—", "~66", "~100"],
+      // S179h: automations move down to Premium (Elite/Apex keep more).
+      ["Scheduled AI automations — wake up to today's plan", false, false, true, true],
+      ["AI conversations per day", "—", "—", "~56", "~100"],
     ]},
     { section: "Elite — everything in Premium, plus:", rows: [
-      ["Half again the daily AI allowance", false, false, false, true],
+      ["Three automations a day, not one", false, false, false, true],
       ["Around 100 AI conversations every day", false, false, false, true],
       ["Enough for photo-logging every meal + all-day coaching", false, false, false, true],
       ["Hit the ceiling? Tell us — we raise it", false, false, false, true],
@@ -17156,6 +17158,7 @@ const PLAN_FEATURES = {
       ["AI edits your local plans & simulations", false, false, true, true],
       ["Send client to-dos straight from chat", false, false, true, true],
       ["Past chats — save, revisit & continue", false, false, true, true],
+      ["Scheduled AI automations — wake up to a roster summary", false, false, true, true],
       ["AI conversations per day", "—", "—", "~133", "~200"],
       // S176f seats: distinct people the AI works on per month. The roster
       // itself stays unlimited on every tier — this row counts only AI-coached
@@ -17169,7 +17172,7 @@ const PLAN_FEATURES = {
     { section: "Coach Elite — everything in Coach, plus:", rows: [
       ["Our biggest AI allowance — built for all-day use", false, false, false, true],
       ["Around 200 AI conversations every day", false, false, false, true],
-      ["Room to run AI across your whole roster daily", false, false, false, true],
+      ["Four automations a day, not one", false, false, false, true],
       ["Hit the ceiling? Tell us — we raise it", false, false, false, true],
     ]},
   ],
@@ -17208,14 +17211,14 @@ const PLAN_TIPS = {
   "Connect your own Claude / ChatGPT":
     "Use Glidna from inside the AI you already pay for: it can read your data and log for you, in your own chat. Included on every paid plan \u2014 the free tier doesn't include it.",
 
-  "Your calorie target, explained in plain English":
-    "Glidna works out your daily calories and shows you exactly how \u2014 then lets you change the pace, or set your own number. You also choose whether exercise earns you more food that day or just gets you there faster, which no other app offers.",
+  "Your calorie target, explained — nobody else does this":
+    "Glidna works out your daily calories and shows you exactly how, then lets you change the pace or set your own number. And you choose whether exercise earns you more food that day or just gets you to the goal sooner \u2014 no other tracker offers that choice at any price.",
   "Plan meals ahead & repeat them weekly":
     "Plan food for days you haven't reached yet and repeat a day every Monday, Wednesday and Friday for weeks \u2014 then just tick things off as you eat them. Most apps charge for this.",
   "Your watch sets your calorie target":
     "If a tracker knows what you actually burned, your target for that day can be built from the real number instead of an estimate. No connected watch? Read it off yours and type it in \u2014 it works the same way.",
-  "Message your trainer directly":
-    "A private conversation with your trainer inside Glidna \u2014 no texting, no third app.",
+  "A real human coach, in the app":
+    "Connect to a real trainer who sees your data, sets your plan and messages you inside Glidna. No other tracker has a coach attached at any price \u2014 and connecting is free, on every plan.",
   "Reminders & nudges on your phone":
     "Optional nudges when you haven't logged, when it's been a week since a weigh-in, or with a daily coaching tip \u2014 on your phone even when Glidna is closed. Every type can be switched off separately.",
   "Turn AI off for your account entirely":
@@ -17234,6 +17237,15 @@ const PLAN_TIPS = {
     "Other trainers join your team with your invite code, and you can see how many clients each carries. Included from Coach up; joining someone's team is always free for the sub-trainer.",
   "App install, Face ID & data export":
     "Install Glidna to your home screen, sign in with Face ID or a fingerprint, and export everything you have whenever you want.",
+
+  "Scheduled AI automations \u2014 wake up to today's plan":
+    "Set your AI coach to run on a schedule \u2014 a morning plan or a weekly review \u2014 and the result is waiting in your notifications without you opening the chat.",
+  "Scheduled AI automations \u2014 wake up to a roster summary":
+    "Set your AI assistant to run on a schedule \u2014 a daily roster check or a weekly progress sweep \u2014 and the result lands in your notifications before you start work.",
+  "Three automations a day, not one":
+    "Premium runs one scheduled automation a day; Elite runs three \u2014 enough for a morning plan, an evening check and a weekly review.",
+  "Four automations a day, not one":
+    "Coach runs one scheduled automation a day; Coach Elite runs four \u2014 enough to sweep your roster morning and evening and still run weekly reports.",
 
   // ── Connect ──────────────────────────────────────────────────────────────
   "Your own AI logs meals & reads your data":
@@ -17270,8 +17282,6 @@ const PLAN_TIPS = {
     "A published fair-use allowance, not a hidden cap \u2014 roughly how many back-and-forth exchanges you can have each day. It resets daily, and everything non-AI stays unlimited.",
 
   // ── Elite / Apex ─────────────────────────────────────────────────────────
-  "Half again the daily AI allowance":
-    "50% more AI every day than the tier below \u2014 for people who lean on the coach constantly rather than occasionally.",
   "Around 100 AI conversations every day":
     "Enough to photo-log every meal, plan your week and still have the coach on hand all day.",
   "Enough for photo-logging every meal + all-day coaching":
@@ -17324,8 +17334,6 @@ const PLAN_TIPS = {
     "For coaches running the assistant across a full roster every day rather than dipping in.",
   "Around 200 AI conversations every day":
     "Enough to review every client, build programs and log on their behalf without watching the number.",
-  "Room to run AI across your whole roster daily":
-    "Sized for daily whole-roster reviews, not occasional spot checks.",
 };
 
 function FeatureMatrix({ isTrainer }) {

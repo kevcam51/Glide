@@ -1231,3 +1231,47 @@ review assumed — MFP paywalls them but Cronometer gives away 80+ free at
 $8.99. Gating ~30 micros would be beaten on both count and price. Barcode is
 weaker still: only MFP paywalls it, and it cost them real reputational damage.
 The honest client-side upgrade story stays AI + the coach relationship.
+
+## S179h — Premium ceiling fixed, automations move down, differentiators promoted
+
+### Premium was UNDERWATER at its own cap (found by running the numbers)
+`docs/PRICING.md` has claimed "every tier profitable at its absolute ceiling"
+since S169g. That stopped being true for Premium when the trial-inversion fix
+raised it to 100k/day:
+
+| Premium $14.99 | keep after Stripe | ceiling cost | margin |
+|---|---:|---:|---:|
+| at 100k/day (66 conv) | $14.26 | $14.88 | **−$0.62** |
+| **at 85k/day (56 conv)** | $14.26 | $12.76 | **+$1.49** |
+
+Annual was worse: $119.99 at ceiling lost **$53.62/yr**. Fixed by dropping
+client/assisted 100k → 85k. Trial stays 100k (must never be beaten by the tier
+below it — S169g). Realistic use is unaffected: normal 8 conv/day still runs
+88% margin, heavy 20/day still 70%.
+
+### Automations move DOWN a tier, whole ladder shifts (Kevin)
+Client: Premium **1**/day · Elite **3** · Apex **5** (was —/1/3).
+Trainer: Coach **1**/day · Coach Elite **4** · Coach Apex **7** (was —/2/5).
+Costs nothing: a run draws on the user's EXISTING daily budget, so this hands
+Premium a headline feature with no new spend, and the tiers above keep a real
+edge (3x and 4x rather than losing the differentiator).
+
+### The two client differentiators are now sold, not buried
+Research (S179g) says free tracking wins nothing on the client side — everyone
+has it and Cronometer is cheaper with more micros. What no competitor has at
+any price: the target engine's **eat-back vs accelerate** choice, and **a real
+human coach inside the tracker**. Both were plain free rows; now they read
+"Your calorie target, explained — nobody else does this" and "A real human
+coach, in the app", with tooltips that say so plainly. Still free — this is
+marketing, not gating.
+
+### 80+ micronutrients — asked, and declined with reasons
+Adding definitions is trivial; getting VALUES is not. Whole foods from USDA
+carry ~150 nutrients, but branded/packaged foods legally list ~15 — there is no
+selenium on a cereal box, and no database invents it. Cronometer's 80+ is
+curated whole-food data with many blank cells on packaged items.
+Not worth doing: our 30 cover every nutrient with an actionable RDA; 80 adds
+boron, molybdenum and amino acids that matter to a precision-logging power user
+— Cronometer's home turf, at $8.99 with 80+ already free. Micros are a WEAK
+lever for us (S179g); tying on someone else's differentiator converts nobody.
+The 30 need to be more ACTIONABLE (the coaching layer), not more numerous.

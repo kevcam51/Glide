@@ -23,7 +23,16 @@ const { sendPushTo, VAPID_PRIVATE_KEY } = require("./push");
 // Workflows allowed per tier (Kevin S92): higher tiers only — each run is the
 // priciest usage pattern (a cold message), so it's gated to Elite+/Apex.
 // Keys are aichat.js tier names (clientMax=Elite, clientUltra=Apex, etc.).
-const WORKFLOW_CAP = { clientMax: 1, clientUltra: 3, trainerMax: 2, trainerUltra: 5 };
+// S179h (Kevin): automations move DOWN to Premium/Coach, and the whole ladder
+// shifts so the tiers above keep their edge. Costs nothing — a run draws on the
+// user's existing daily budget, so this gives Premium a headline feature for
+// free rather than adding spend.
+//   client:  Premium 1 · Elite 3 · Apex 5      (was — / 1 / 3)
+//   trainer: Coach   1 · Elite 4 · Apex 7      (was — / 2 / 5)
+const WORKFLOW_CAP = {
+  client: 1, assisted: 1, clientMax: 3, clientUltra: 5,
+  trainer: 1, trainerMax: 4, trainerUltra: 7,
+};
 // Admin is by UID (see aichat.isAdminUid) — a profile doc never carries
 // role:"admin", so the old `profile.role === "admin"` check here was dead and
 // left the admin account at cap 0, unable to open Automations at all.
