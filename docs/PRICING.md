@@ -1355,3 +1355,34 @@ The Connect referrer's 3-months case passes easily ($13.65 vs $33.65); the
 Premium/3-Connect case would grant ~1 month instead of 2. Say it on the page as
 "up to N months, depending on what your referrals subscribe to" rather than a
 flat promise we'd have to break.
+
+## S181 — referral rewards: BUILT & DEPLOYED (Aug 7, 2026)
+
+Functions live: `myReferralCode`, `claimReferral`, `myReferrals`,
+`claimReferralCredit`; `stripeWebhook` now reports subscription changes into
+the referral ledger. UI: "Refer & earn" in the side menu, **every role**.
+
+**Verified in production:** code generation · attribution via ?ref= ·
+self-referral refused (`{ok:false,reason:"invalid"}`) · a signup alone earns
+**$0.00** · claiming with nothing vested is refused with the 30-day message ·
+`referrals/*` is NOT client-readable (403) so nobody can forge their own status.
+
+**NOT yet exercised live:** the actual grant — webhook → paying → 30 days →
+claim → Stripe balance credit. It needs a real subscription and a real month,
+so it cannot be simulated end-to-end. The math itself is unit-verified and the
+refusal path is proven; watch the first real grant when one occurs.
+
+⚠️ **Deploy hazard hit again (S61 class):** the first deploy died mid-way on an
+expired token, which CREATED the functions without the public-invoker binding.
+The successful redeploy was then treated as an UPDATE, which never re-applies
+it — all four returned 401 at the Cloud Run edge while control functions
+returned 200. Fix: `firebase functions:delete` then deploy fresh. Note the
+freshly created functions ALSO 401 for ~30s while IAM propagates — poll, don't
+diagnose.
+
+**Known shape worth watching:** because the reward is measured against what the
+referrer pays, a low-tier referrer earns dramatic-sounding coverage — a Connect
+referrer ($4.55 net/mo) bringing 3 clients + a trainer earns ~7 months of their
+own plan. Safe by the rule (one-month payback on $32.76/mo gained), but if it
+reads as too generous in practice, the lever is `MAX_CREDIT_PER_YEAR` ($300),
+not the rule.
