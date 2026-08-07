@@ -29,9 +29,15 @@ const { sendPushTo, VAPID_PRIVATE_KEY } = require("./push");
 // free rather than adding spend.
 //   client:  Premium 1 · Elite 3 · Apex 5      (was — / 1 / 3)
 //   trainer: Coach   1 · Elite 4 · Apex 7      (was — / 2 / 5)
+// S179i (Kevin): one more per tier. Automations are DELIBERATELY expensive —
+// each cold run is ~15k tokens, about ten conversations — so two of them on the
+// 45k base is most of the day's allowance. That is the intended mechanic: heavy
+// automation users hit the wall, ask for a boost, and are exactly the people
+// who should hear about Elite. It is only fair if they are TOLD first, which is
+// why the automation editor warns before saving (S179i, AutomationsPanel).
 const WORKFLOW_CAP = {
-  client: 1, assisted: 1, clientMax: 3, clientUltra: 5,
-  trainer: 1, trainerMax: 4, trainerUltra: 7,
+  client: 2, assisted: 2, clientMax: 4, clientUltra: 6,
+  trainer: 2, trainerMax: 5, trainerUltra: 8,
 };
 // Admin is by UID (see aichat.isAdminUid) — a profile doc never carries
 // role:"admin", so the old `profile.role === "admin"` check here was dead and

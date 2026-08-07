@@ -1275,3 +1275,60 @@ boron, molybdenum and amino acids that matter to a precision-logging power user
 — Cronometer's home turf, at $8.99 with 80+ already free. Micros are a WEAK
 lever for us (S179g); tying on someone else's differentiator converts nobody.
 The 30 need to be more ACTIONABLE (the coaching layer), not more numerous.
+
+## S179i — client base 45k with a boost ladder, automations 2/4/6 (Kevin)
+
+| | base | 1st boost | 2nd boost (ceiling) |
+|---|---:|---:|---:|
+| Client budget | **45k** (~30 conv) | 60k (~40) | 75k (~50) |
+| Ceiling margin | **+$7.13** | +$5.02 | +$2.90 |
+
+**TRIAL = 45k, same as paid, and the two must MOVE TOGETHER forever.** S179h
+left trial at 100k against a paid 85k, re-creating the exact inversion S169g
+removed (pay, then get 15% less). Any future change to one is a change to both.
+
+**Automations +1 per tier:** client Premium **2** · Elite 4 · Apex 6; trainer
+Coach **2** · Elite 5 · Apex 8. Boosts extended to the BASE tiers (2/day,
+fixed +15k steps rather than +50%, so the ladder is predictable).
+
+**The mechanic, stated honestly (Kevin's design):** automations are expensive on
+purpose — a cold run is ~15k tokens, about ten chat messages — so two a day on
+a 45k base consumes most of the allowance. Heavy automation users therefore hit
+the wall, request a boost, and are precisely the people who should hear about
+Elite. This is only legitimate because they are TOLD BEFORE THEY COMMIT: the
+automation editor now warns, in plain language and without the word "tokens",
+that each run costs roughly ten chat messages and what to do if they run out.
+A lower base is defensible only while that warning and the boost path exist —
+if either is ever removed, raise the base back.
+
+**Rejected: gating existing meal plan-ahead.** Kevin was right — plan-ahead
+shares one form and one mental model with logging on a future date, so a
+paywall there reads as "Glidna won't let me put food on tomorrow". An
+unexplainable gate generates support tickets and refunds.
+
+**BANKED instead — a real Meal Planner (Kevin's idea, the better pattern):** a
+dedicated weekly meal planner shaped like the cardio/strength planners —
+pre-built breakfast/lunch/dinner/snack suggestions, planned Mon–Sun, repeatable.
+Gated to paid, fully available during the trial. This is ADDITIVE (build new
+value behind the wall) rather than SUBTRACTIVE (take away something free),
+which respects the never-a-take-away rule. Do this instead of gating anything
+existing on the client side.
+
+**BANKED — referral rewards v2 (extends the S176f trainer program):**
+- A CLIENT refers people, not just trainers. 3 clients on Connect → reward;
+  a trainer on Coach Connect → reward; a trainer on Coach → bigger reward
+  (roughly the coach fee applied against their own plan).
+- Connect referrer bringing 3 clients + 1 trainer → ~3 months covered;
+  a Premium referrer → ~2 months.
+- Rewards VEST ONLY ON PAID, ACTIVE subscriptions (Kevin: "if they send 15 and
+  two have paid, they wait for the third"). State this plainly up front.
+- Reward is a CHOICE: credit against the current plan, or a one-month upgrade.
+- Needs a referral tracker UI: sent / paid / how many more to the reward — the
+  visibility is itself the incentive to follow up.
+- Guards: vest after ~30 days paid; cap rewards per account per year.
+- Economics: every case pays back inside a month and then compounds (3 Connect
+  clients = ~$14.97/mo recurring against one month forgone).
+- ⚖️ FUTURE, NEEDS LEGAL RESEARCH FIRST: ongoing monthly PAYOUTS as a share of
+  referred users' spend. That is an affiliate program, not a credit — tax
+  reporting (1099s), state rules and terms all apply. Do not build before
+  counsel reviews it.

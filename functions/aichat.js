@@ -52,13 +52,19 @@ function isAdminUid(uid) { return ADMIN_UIDS.includes(uid); }
 // shows the full product, and paying keeps it (never shrinks it). `assisted`
 // (trainer-linked client) rides at the same 100k: it used to sit above the solo
 // client tier, and leaving it at 40k would have inverted it to LESS.
-// S179h: client/assisted dropped 100k -> 85k. At 100k the CEILING was
-// underwater — 100k x 30 x $4.70/1M = $14.10 of AI against $14.26 kept after
-// Stripe, and the plugin allowance pushed it to -$0.62/mo (annual: -$53/yr).
-// 85k restores the "every tier profitable at its cap" property with ~+$1.50 of
-// headroom. Still ~56 conversations/day — no normal user will ever feel it.
-// Trial stays 100k: it must never be beaten by the tier below it (S169g).
-const BUDGETS = { trial: 100000, client: 85000, assisted: 85000,
+// S179i (Kevin): client base drops to 45k, and the TRIAL MATCHES IT.
+//
+// The trial number is not generosity — it is the S169g rule: paying must never
+// shrink the product. S179h left trial at 100k against a paid 85k, which
+// re-created the exact inversion S169g removed (pay, then get 15% less). Trial
+// and paid client are now the same number and must MOVE TOGETHER forever.
+//
+// 45k ≈ 30 conversations/day, and the ceiling earns ~$7.13 against $14.26 kept
+// — the healthiest Premium has ever been. It is deliberately a base, not a
+// ceiling: boosts take a user to 60k then 75k on request (see BOOST_STEP), so
+// the wall is a conversation rather than a dead end, and a user who keeps
+// hitting it is exactly who should hear about Elite.
+const BUDGETS = { trial: 45000, client: 45000, assisted: 45000,
   // S169g (Kevin): paying must never shrink the product. The trainer trial used
   // to be 200k against a paid Coach of 100k — day 31 after paying $49, the
   // allowance HALVED. Now the trial is a taste (100k ≈ 66 conversations) and
@@ -827,12 +833,22 @@ exports.estimateFood = onCall(
 // boostDates feed the admin dashboard so chronic ceiling-hitters are VISIBLE
 // (flagged for awareness, never auto-punished — Kevin's call). Only granted
 // when genuinely near the cap (≥80% spent) so boosts can't be stockpiled.
+// S179i: fixed +15k steps for the client base instead of a flat percentage, so
+// the ladder is predictable and matches what Kevin specified: 45k base → 60k on
+// the first ask → 75k on the second, which is the ceiling. Higher tiers keep
+// the proportional +50% (a percentage of 150k/250k is the sensible unit there).
 const BOOST_FRACTION = 0.5;
+const BOOST_STEP_BASE = 15000;   // client/assisted/trial: 45k → 60k → 75k
 // Boosts per day by tier (Kevin, S90): Coach Max absorbs 2 boosts and stays
 // profitable at the absolute ceiling (~$68 worst-case vs $79); client Max
 // gets 1 (2 would put an every-day-maxer underwater vs $29.99). Chronic
 // hitters surface via the ⚑ flag → Kevin can raise a standing limit by hand.
-const BOOSTS_PER_DAY = { trainerMax: 2, clientMax: 1, trainerUltra: 2, clientUltra: 1 };
+// S179i: the base tiers get boosts too (previously Elite+ only). A lower base
+// only works if hitting it starts a conversation instead of ending the day.
+const BOOSTS_PER_DAY = {
+  client: 2, assisted: 2, trial: 2, trainer: 2,
+  trainerMax: 2, clientMax: 1, trainerUltra: 2, clientUltra: 1,
+};
 exports.requestBudgetBoost = onCall({ region: "us-central1", maxInstances: 10 }, async (request) => {
   const uid = request.auth && request.auth.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
@@ -853,7 +869,11 @@ exports.requestBudgetBoost = onCall({ region: "us-central1", maxInstances: 10 },
   // "Near the limit" is measured against the CURRENT effective cap (base +
   // any prior boost), so a second boost can't be banked early.
   if ((usage.tokens || 0) < (base + (usage.boost || 0)) * 0.8) return { granted: false, reason: "not-near-limit" };
-  const boost = (usage.boost || 0) + Math.round(base * BOOST_FRACTION);
+  // Base client tiers step by a fixed 15k (45→60→75); bigger tiers scale by %.
+  const step = (tier === "client" || tier === "assisted" || tier === "trial" || tier === "trainer")
+    ? BOOST_STEP_BASE
+    : Math.round(base * BOOST_FRACTION);
+  const boost = (usage.boost || 0) + step;
   await ref.set({ boost, boosts: boostsUsed + 1, boostAt: Date.now() }, { merge: true });
   // Cumulative boost counter (Kevin's Ultra-upsell trigger): a Max user who
   // keeps needing boosts is a heavy user who belongs on Ultra — prompt them on

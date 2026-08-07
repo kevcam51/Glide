@@ -17111,10 +17111,10 @@ const PLAN_FEATURES = {
       ["Past chats — save, revisit & continue", false, false, true, true],
       // S179h: automations move down to Premium (Elite/Apex keep more).
       ["Scheduled AI automations — wake up to today's plan", false, false, true, true],
-      ["AI conversations per day", "—", "—", "~56", "~100"],
+      ["AI conversations per day", "—", "—", "~30 (more on request)", "~100"],
     ]},
     { section: "Elite — everything in Premium, plus:", rows: [
-      ["Three automations a day, not one", false, false, false, true],
+      ["Four automations a day, not two", false, false, false, true],
       ["Around 100 AI conversations every day", false, false, false, true],
       ["Enough for photo-logging every meal + all-day coaching", false, false, false, true],
       ["Hit the ceiling? Tell us — we raise it", false, false, false, true],
@@ -17172,7 +17172,7 @@ const PLAN_FEATURES = {
     { section: "Coach Elite — everything in Coach, plus:", rows: [
       ["Our biggest AI allowance — built for all-day use", false, false, false, true],
       ["Around 200 AI conversations every day", false, false, false, true],
-      ["Four automations a day, not one", false, false, false, true],
+      ["Five automations a day, not two", false, false, false, true],
       ["Hit the ceiling? Tell us — we raise it", false, false, false, true],
     ]},
   ],
@@ -17239,13 +17239,13 @@ const PLAN_TIPS = {
     "Install Glidna to your home screen, sign in with Face ID or a fingerprint, and export everything you have whenever you want.",
 
   "Scheduled AI automations \u2014 wake up to today's plan":
-    "Set your AI coach to run on a schedule \u2014 a morning plan or a weekly review \u2014 and the result is waiting in your notifications without you opening the chat.",
+    "Set your AI coach to run on a schedule \u2014 a morning plan or a weekly review \u2014 and the result is waiting in your notifications without you opening the chat. Each run uses a good slice of your daily AI, so two a day is a real workload.",
   "Scheduled AI automations \u2014 wake up to a roster summary":
     "Set your AI assistant to run on a schedule \u2014 a daily roster check or a weekly progress sweep \u2014 and the result lands in your notifications before you start work.",
-  "Three automations a day, not one":
-    "Premium runs one scheduled automation a day; Elite runs three \u2014 enough for a morning plan, an evening check and a weekly review.",
-  "Four automations a day, not one":
-    "Coach runs one scheduled automation a day; Coach Elite runs four \u2014 enough to sweep your roster morning and evening and still run weekly reports.",
+  "Four automations a day, not two":
+    "Premium runs two scheduled automations a day; Elite runs four \u2014 and with a much bigger allowance behind them, so they don't eat your chat.",
+  "Five automations a day, not two":
+    "Coach runs two scheduled automations a day; Coach Elite runs five \u2014 and with a much bigger allowance behind them, so they don't eat into your chat.",
 
   // ── Connect ──────────────────────────────────────────────────────────────
   "Your own AI logs meals & reads your data":
@@ -21549,7 +21549,7 @@ function AutomationsPanel({ open, onClose, role }) {
             <div style={{ fontSize: ".86rem", color: "var(--muted)", margin: "8px auto 0", maxWidth: 400, lineHeight: 1.5 }}>
               Automations run your AI on a schedule — a daily or weekly check-in that uses your real data and lands in your notifications. {isTrainer ? "Wake up to a roster summary." : "Wake up to today's plan."}
             </div>
-            <div style={{ fontSize: ".78rem", color: "var(--muted)", marginTop: 10 }}>Available on the Elite and Apex plans.</div>
+            <div style={{ fontSize: ".78rem", color: "var(--muted)", marginTop: 10 }}>Included on every AI plan — more of them on the higher tiers.</div>
             <button onClick={() => setShowPicker(true)} style={{ ...btnPrimary, marginTop: 14, width: "100%", maxWidth: 300 }}>See plans</button>
           </div>
         ) : editing ? (
@@ -21609,6 +21609,21 @@ function AutomationsPanel({ open, onClose, role }) {
                 <div style={{ fontSize: ".72rem", color: "var(--muted)" }}>Turn off to pause without deleting.</div>
               </div>
               <Toggle on={editing.enabled} onClick={() => setEditing((p) => ({ ...p, enabled: !p.enabled }))} />
+            </div>
+
+            {/* S179i (Kevin): tell them BEFORE they commit. An automation is a
+                cold run — roughly ten chat messages' worth of the daily
+                allowance — so someone who sets two up and then finds their chat
+                cut short would rightly feel misled. Plain language: no "tokens",
+                just what it costs them and what to do about it. */}
+            <div style={{ display: "flex", gap: 9, alignItems: "flex-start", borderRadius: 10,
+              border: "1px solid var(--border)", background: "var(--s2,#1e2a2e)", padding: "10px 12px" }}>
+              <Icon name="bolt" size={16} color="var(--yellow,#fbbf24)" />
+              <div style={{ fontSize: ".76rem", lineHeight: 1.55, color: "var(--muted)" }}>
+                <b style={{ color: "var(--text)" }}>Heads up:</b> each run uses a good slice of your
+                daily AI — about what ten chat messages would. More automations means less left for
+                chatting, and if you run out you can ask for more right in the chat.
+              </div>
             </div>
 
             {saveErr && <div style={{ fontSize: ".8rem", color: "var(--red)" }}>{saveErr}</div>}
