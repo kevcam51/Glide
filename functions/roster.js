@@ -79,6 +79,33 @@ function capApplies(profile) {
   return true;
 }
 
+// Sub-trainer TEAMS are a Coach-tier capability (S179f, Kevin — raised from
+// Connect+). Managing people who work under you is an agency-scale thing, and
+// the market prices it that way (My PT Hub's $215 tier exists largely for 5
+// seats). It also gives the $49 jump a second thing to sell: Connect already
+// carries booking, unlimited clients and the plugin, so without this Coach was
+// only "+ in-app AI" for +$29.
+//
+// ⚠️ ORDER MATTERS: "coach_connect" CONTAINS "coach", so connect must be tested
+// FIRST or the Connect tiers inherit team access by substring accident. Same
+// bug class as the mcp.js planFor ordering hazard — see PRICING.md S171.
+function teamsAllowed(profile) {
+  if (!profile) return false;
+  if (profile.role === "admin" || ADMIN_UIDS.includes(profile.uid)) return true;
+  if (profile.subscriptionStatus === "active") {
+    const t = String(profile.subscriptionTier || "").toLowerCase();
+    if (t.includes("connect")) return false;   // Connect / Coach Connect — booking yes, teams no
+    return t.includes("coach");                // coach | coach_max | coach_ultra
+  }
+  // Trial = the whole product, and pre-cutoff accounts keep what they had
+  // (never a take-away) — both mirror capApplies() exactly.
+  const startMs = toMs(profile.trialStartedAt);
+  if (startMs && Date.now() < startMs + (profile.trialLengthDays || 30) * 86400000) return true;
+  const created = toMs(profile.createdAt);
+  if (created === null || created < CAP_FROM_MS) return true;
+  return false;
+}
+
 // Connected accounts + the trainer's own plan files. Both are "a person I
 // manage", and only counting one of them would be a cap in name only.
 async function countRoster(db, trainerUid) {
@@ -197,6 +224,7 @@ exports.myRosterStatus = onCall({ region: REGION, maxInstances: 10 }, async (req
   return {
     count: n.total, connected: n.connected, plans: n.plans,
     capped, cap: capped ? FREE_ROSTER_CAP : null,
+    teamsLocked: !teamsAllowed({ ...prof, uid }),
     full: capped && n.total >= FREE_ROSTER_CAP,
     remaining: capped ? Math.max(0, FREE_ROSTER_CAP - n.total) : null,
   };
@@ -204,3 +232,4 @@ exports.myRosterStatus = onCall({ region: REGION, maxInstances: 10 }, async (req
 
 module.exports.FREE_ROSTER_CAP = FREE_ROSTER_CAP;
 module.exports.capApplies = capApplies;
+module.exports.teamsAllowed = teamsAllowed;

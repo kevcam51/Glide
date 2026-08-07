@@ -62,13 +62,13 @@ exports.joinTeam = onCall(async (request) => {
 
   const headProf = (await db.doc(`users/${headUid}`).get()).data();
   if (!headProf) throw new HttpsError("not-found", "That trainer no longer exists.");
-  // S179e (Kevin): teams are a paid capability — any paid trainer plan
-  // (Connect and up), trial included, pre-cutoff accounts grandfathered.
+  // S179f (Kevin): teams are a COACH-tier capability — Coach $49 and up, not
+  // the Connect tiers. Trial included, pre-cutoff accounts grandfathered.
   // The check is on the HEAD (the team is theirs); the joining sub pays
   // nothing. capApplies() identifies exactly the free-capped population, so
   // the roster cap and the team gate can never drift apart.
-  const { capApplies } = require("./roster");
-  if (capApplies({ ...headProf, uid: headUid })) {
+  const { teamsAllowed } = require("./roster");
+  if (!teamsAllowed({ ...headProf, uid: headUid })) {
     throw new HttpsError("failed-precondition",
       "This trainer's plan doesn't include team seats yet. Ask them to upgrade in Glidna — joining costs you nothing once they do.");
   }

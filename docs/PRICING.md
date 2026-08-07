@@ -1180,3 +1180,54 @@ names booking + teams + unlimited clients.
 rules-blocked (a calendar entry has no abuse value; rules-level plan checks
 need profile get()s + trial time math). The UI and the team callable are the
 real gates. Revisit only if it ever matters in practice.
+
+## S179f — sub-trainer teams move Connect+ → COACH+ (Kevin, Aug 6 2026)
+
+Kevin: managing people who work under you is a more premium offer. Agreed, and
+it fixes the ladder's weakest gap — Connect already carried booking, unlimited
+clients and the plugin, so Coach was only "+ in-app AI" for +$29. Now it's
+"+ in-app AI AND teams".
+
+Booking STAYS at Connect+ (S179e). Joining a team is still free for the sub —
+the gate is on the HEAD, whose team it is.
+
+⚠️ **Substring hazard, hit again:** `teamsAllowed()` must test `connect` BEFORE
+`coach`, because "coach_connect" contains "coach" and would otherwise inherit
+team access. Third occurrence of this bug class (mcp.js planFor S171, aiSeats
+S177). Any new tier predicate: test connect first, always.
+
+Verified: 9 tier cases pass (Coach Connect NO, client Connect NO, Coach/Elite/
+Apex YES, free NO, trial YES, grandfathered YES, admin YES). One source of
+truth — `myRosterStatus` returns `teamsLocked`, so the menu row ("COACH+",
+opens the picker) can't drift from the server.
+
+## S179g — CLIENT-side free tiers, market comparison (verified Aug 6 2026)
+
+| App | Free tier? | Price | Barcode free? | Micros free? |
+|---|---|---|---|---|
+| **Glidna** | **yes — everything but AI** | $14.99 | **yes** | **yes (~30)** |
+| Cronometer | yes (ads) | $8.99/mo · $49.99/yr | yes | **yes (80+)** |
+| MyFitnessPal | yes (ads) | $19.99/mo · $79.99/yr | **NO — Premium** | limited |
+| Lose It! | yes | $9.99/mo · $39.99/yr | free (new accts unverified) | not really offered |
+| Yazio | yes | ~$47.90/yr | reported PRO-only | limited |
+| MacroFactor | **NO — 7-day trial** | $11.99/mo · $71.99/yr | paid | paid |
+| Carbon Diet Coach | **NO — 7-day trial** | $11.99/mo · $99.99/yr | paid | paid |
+| Noom | **NO — paid trial ~$0.50** | ~$70/mo | paid | paid |
+| Cal AI | limited (unverified) | ~$9.99/mo | unverified | paid |
+
+**Read-through, and it differs from the trainer side.** Consumer tracking has
+real free tiers — free is table stakes here, not a differentiator. Cronometer
+in particular gives away MORE than Glidna on micros (80+ vs ~30) at a LOWER
+price ($8.99). So "generous free tracker" wins nothing on this side of the
+ladder.
+
+Where Glidna is actually differentiated for clients: free barcode (MFP charges
+$19.99/mo for it), a coach attached to the tracker, the calorie-target engine
+with eat-back vs accelerate (no competitor equivalent), and the writable
+connector. NOT the tracking itself.
+
+**Implication for the banked levers:** micros are a WEAKER lever than the S175
+review assumed — MFP paywalls them but Cronometer gives away 80+ free at
+$8.99. Gating ~30 micros would be beaten on both count and price. Barcode is
+weaker still: only MFP paywalls it, and it cost them real reputational damage.
+The honest client-side upgrade story stays AI + the coach relationship.
