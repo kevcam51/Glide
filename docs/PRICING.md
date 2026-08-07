@@ -1429,3 +1429,51 @@ distinguished — a non-subscriber is told to start a plan first.
 **Still unexercised:** the actual Stripe balance-credit write and a live
 `rewardTier` grant, both of which need a real paid subscription. Everything up
 to that point is proven.
+
+## S182 — dual-mode Stripe, and the referral chain rehearsed end to end
+
+**Why:** test clocks exist only in Stripe TEST mode, and production runs a LIVE
+key. Rather than swap the live key (which would break real payments during the
+window), billing now supports both modes at once.
+
+**How it works:** `stripeWebhook` verifies against the LIVE signing secret
+first, then falls back to the TEST one. Each Stripe endpoint has its own
+secret, so a test delivery simply fails the live check — that is not an error,
+it is how the two are told apart, and live is tried first so production never
+pays for the fallback. Webhook reads use `stripeFor(event)`, keyed off Stripe's
+own `livemode` flag. Checkout and the portal stay LIVE-ONLY on purpose: a real
+purchase must never route to test mode.
+
+`STRIPE_SECRET_KEY_TEST` / `STRIPE_WEBHOOK_SECRET_TEST` are OPTIONAL — unset,
+everything behaves exactly as before, so this can't disturb live billing.
+
+**New profile field `stripeLivemode`,** stamped when the webhook first records a
+customer. Without it, claiming referral credit for a test customer would call
+LIVE Stripe and 404 — which reads as "customer missing" rather than "wrong
+mode". Defaults to live when absent, so existing accounts are unaffected.
+
+### The rehearsal (run S182, test mode, all artefacts deleted after)
+1. Test clock + customer + card + $14.99/mo subscription with `metadata.uid`
+2. Clock advanced 31 days → **renewal invoice paid $14.99** ✓
+3. Referral attributed via code → tracker showed `signed-up` ✓
+4. Vested via the admin hook → `$14.26 available, 1 month covered` ✓
+5. Claimed → **`-$14.26 "Glidna referral credit (1 referral)"` landed on the
+   Stripe customer, balance −$14.26** ✓ — the one line never previously proven
+6. Admin gate re-verified closed; test clock/customer/subscription deleted;
+   test wiring cleared from the test trainer's profile
+
+**Bug caught by testing:** the upgrade path told a user with NO subscription
+"you're already on the top plan" (both cases fell through one branch). Fixed —
+a non-subscriber is now told to start a plan first.
+
+⚠️ **UNEXPLAINED, worth watching:** a `referrals/{uid}` doc that had been
+created and vested was absent from a later query, and re-claiming created it
+fresh (so it was genuinely gone, not just unreadable). No delete path exists in
+the code. If referral rows vanish in the wild, this is a real bug — start here.
+
+⚠️ **Kevin must roll the test secret key** — it was pasted into a session
+transcript. Test keys carry no financial access, but rotate anyway:
+Stripe → test mode → Developers → API keys → ⋯ → Roll key, then re-set
+`STRIPE_SECRET_KEY_TEST`. `STRIPE_WEBHOOK_SECRET_TEST` still holds a
+placeholder — the test webhook endpoint was never created, so test-mode events
+aren't delivered yet. Not needed for what was proven above.

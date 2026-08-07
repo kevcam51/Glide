@@ -234,7 +234,7 @@ const UPGRADE_PATHS = {
   coach_max: { to: "coach_ultra", label: "Coach Apex", cost: money(NET_MONTHLY.coach_ultra - NET_MONTHLY.coach_max) },
 };
 
-exports.claimReferralCredit = onCall({ region: REGION, secrets: ["STRIPE_SECRET_KEY"], maxInstances: 5 },
+exports.claimReferralCredit = onCall({ region: REGION, secrets: ["STRIPE_SECRET_KEY", "STRIPE_SECRET_KEY_TEST"], maxInstances: 5 },
   async (request) => {
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
@@ -284,7 +284,13 @@ exports.claimReferralCredit = onCall({ region: REGION, secrets: ["STRIPE_SECRET_
       throw new HttpsError("failed-precondition",
         "Start a subscription first — credit is applied against your own plan.");
     }
-    const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+    // S182: use the key matching the customer's Stripe MODE. The webhook stamps
+    // stripeLivemode when it first records the customer; a test customer read
+    // with the live key 404s and reads as "customer missing", which is a
+    // genuinely confusing way to fail. Defaults to live when unstamped, so
+    // every existing account is unaffected.
+    const useTest = me.stripeLivemode === false && process.env.STRIPE_SECRET_KEY_TEST;
+    const stripe = require("stripe")(useTest ? process.env.STRIPE_SECRET_KEY_TEST : process.env.STRIPE_SECRET_KEY);
     // Negative balance = credit in Stripe's model.
     await stripe.customers.createBalanceTransaction(me.stripeCustomerId, {
       amount: -Math.round(s.available * 100),

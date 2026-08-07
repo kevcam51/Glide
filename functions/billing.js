@@ -40,6 +40,12 @@ const { isAdminUid } = require("./aichat");
 
 const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
 const STRIPE_WEBHOOK_SECRET = defineSecret("STRIPE_WEBHOOK_SECRET");
+// S182: optional TEST-mode twins so billing can be rehearsed against Stripe
+// test clocks without ever pointing production at a test key. Both are
+// optional — if they are unset, everything below behaves exactly as it did
+// before, so adding this can't disturb live billing.
+const STRIPE_SECRET_KEY_TEST = defineSecret("STRIPE_SECRET_KEY_TEST");
+const STRIPE_WEBHOOK_SECRET_TEST = defineSecret("STRIPE_WEBHOOK_SECRET_TEST");
 
 // Where Checkout/Portal may send the user back to — same allowlist idea as
 // functions/webauthn.js ALLOWED_ORIGINS. Add the custom domain here when it lands.
@@ -82,11 +88,28 @@ function planFor(role, level) {
     : level === "max" ? CATALOG.max : CATALOG.premium;
 }
 
-// Lazy Stripe client (the secret only exists at runtime).
+// Lazy Stripe clients (secrets only exist at runtime). Two of them since S182:
+// live is what production uses for everything, test exists only so a rehearsal
+// can drive Stripe test clocks. Nothing selects the test client except a
+// webhook event that Stripe itself marked livemode:false.
 let stripeClient = null;
+let stripeTestClient = null;
 function stripe() {
   if (!stripeClient) stripeClient = require("stripe")(STRIPE_SECRET_KEY.value());
   return stripeClient;
+}
+function safeSecret(sec) { try { return sec.value() || ""; } catch (e) { return ""; } }
+function stripeTest() {
+  const k = safeSecret(STRIPE_SECRET_KEY_TEST);
+  if (!k) return null;
+  if (!stripeTestClient) stripeTestClient = require("stripe")(k);
+  return stripeTestClient;
+}
+// The client that matches the event we are handling. A test-mode event MUST be
+// served by the test key: reading a test subscription with the live key 404s,
+// which would look like a missing customer rather than a mode mismatch.
+function stripeFor(event) {
+  return (event && event.livemode === false && stripeTest()) ? stripeTest() : stripe();
 }
 
 // Get-or-create the recurring price for a plan + interval, by lookup key.
@@ -259,16 +282,30 @@ async function uidForCustomer(db, customerId) {
 }
 
 exports.stripeWebhook = onRequest(
-  { secrets: [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET], region: "us-central1", maxInstances: 5 },
+  { secrets: [STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_SECRET_KEY_TEST, STRIPE_WEBHOOK_SECRET_TEST],
+    region: "us-central1", maxInstances: 5 },
   async (req, res) => {
-    let event;
+    // Verify against the LIVE signing secret first, then the test one (S182).
+    // Each Stripe endpoint has its own secret, so a test-mode delivery simply
+    // fails the live check — that is not an error, it is how we tell them
+    // apart. Live is tried first so production never pays for the fallback.
+    let event = null;
+    const sig = req.headers["stripe-signature"];
     try {
-      event = stripe().webhooks.constructEvent(
-        req.rawBody, req.headers["stripe-signature"], STRIPE_WEBHOOK_SECRET.value());
-    } catch (e) {
-      console.error("stripeWebhook bad signature:", e && e.message);
-      res.status(400).send("bad signature");
-      return;
+      event = stripe().webhooks.constructEvent(req.rawBody, sig, STRIPE_WEBHOOK_SECRET.value());
+    } catch (liveErr) {
+      const testSecret = safeSecret(STRIPE_WEBHOOK_SECRET_TEST);
+      const tc = stripeTest();
+      if (testSecret && tc) {
+        try { event = tc.webhooks.constructEvent(req.rawBody, sig, testSecret); }
+        catch (testErr) { /* neither matched — fall through to the 400 */ }
+      }
+      if (!event) {
+        console.error("stripeWebhook bad signature:", liveErr && liveErr.message);
+        res.status(400).send("bad signature");
+        return;
+      }
+      console.log("stripeWebhook: TEST-mode event", event.type);
     }
     const db = admin.firestore();
     try {
@@ -282,6 +319,11 @@ exports.stripeWebhook = onRequest(
             // tiers unlock the high AI budgets in aichat.js tierFor().
             subscriptionTier: (s.metadata && s.metadata.tier) || "premium",
             stripeCustomerId: s.customer || null,
+            // S182: which Stripe mode this customer belongs to. Without it a
+            // later API call (referral credit) would use the live key against a
+            // test customer and 404 — looking like a missing customer rather
+            // than a mode mismatch.
+            stripeLivemode: event.livemode !== false,
             stripeSubscriptionId: s.subscription || null,
           }, { merge: true });
           console.log("stripeWebhook: activated", uid, (s.metadata && s.metadata.tier) || "");
