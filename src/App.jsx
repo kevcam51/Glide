@@ -10843,7 +10843,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
   onSaveMeasurements, onSaveMeasurementsFor, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise,
   onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetHideCompliance, meUid: dashMeUid,
-  premium = true, role }) {
+  premium = true, role, onOpenMealPlanner }) {
 
   // Swipe-down to refresh the daily view (S104) — reuses the existing onRefresh
   // (reloadPlanLive), which re-pulls the plan + today's log.
@@ -11307,6 +11307,18 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           style={{background:"transparent",border:"1px solid var(--border)",borderRadius:9,width:34,height:34,
             color:"var(--text)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>›</button>
       </div>
+      {/* Weekly Meal Planner entry (S180) — beside the day nav so it reads as
+          part of the meal card, for clients and trainers alike. */}
+      {onOpenMealPlanner && (
+        <div style={{display:"flex",justifyContent:"center",marginBottom:6}}>
+          <button onClick={onOpenMealPlanner}
+            style={{background:"transparent",border:"1px solid var(--border)",borderRadius:999,
+              padding:"5px 14px",color:"var(--accent)",cursor:"pointer",fontSize:".74rem",fontWeight:700,
+              display:"inline-flex",alignItems:"center",gap:6}}>
+            <Icon name="calendar" size={13} color="var(--accent)" />Plan my week
+          </button>
+        </div>
+      )}
       {!viewIsToday && (
         <button onClick={()=>onGoToday&&onGoToday()}
           style={{display:"block",margin:"0 auto 8px",background:"transparent",border:"none",
@@ -17098,6 +17110,9 @@ const PLAN_FEATURES = {
       ["No in-app AI — you bring your own", false, true, true, true],
     ]},
     { section: "AI coach — everything in Free, plus:", rows: [
+      // S180: the Meal Planner — the additive paid feature (new value behind
+      // the wall, nothing free taken away). Trial gets it like everything else.
+      ["Weekly meal planner — plan meals like workouts", false, false, true, true],
       ["24/7 AI coach chat (knows YOUR data)", false, false, true, true],
       ["Log meals by chat — just describe them", false, false, true, true],
       ["Photo meal logging — snap your plate", false, false, true, true],
@@ -17148,6 +17163,7 @@ const PLAN_FEATURES = {
       // work under you is agency scale, and it gives the $49 jump a second
       // thing to sell beyond in-app AI.
       ["Build a team of sub-trainers", false, false, true, true],
+      ["Weekly meal planner for you & your clients", false, false, true, true],
       ["24/7 AI assistant (knows your clients' data)", false, false, true, true],
       ["Whole-roster check: \"who's stalled this week?\"", false, false, true, true],
       ["Build client programs by chat", false, false, true, true],
@@ -17246,6 +17262,11 @@ const PLAN_TIPS = {
     "Premium runs two scheduled automations a day; Elite runs four \u2014 and with a much bigger allowance behind them, so they don't eat your chat.",
   "Five automations a day, not two":
     "Coach runs two scheduled automations a day; Coach Elite runs five \u2014 and with a much bigger allowance behind them, so they don't eat into your chat.",
+
+  "Weekly meal planner — plan meals like workouts":
+    "Build a week of breakfasts, lunches, dinners and snacks once \u2014 real foods with macros, or quick notes \u2014 then push it onto your calendar and tick things off as you eat. Can repeat automatically every week.",
+  "Weekly meal planner for you & your clients":
+    "Build a week of meals once and push it onto your own days \u2014 or open a client's plan and put it straight onto theirs, where it shows up ready to tick off as eaten.",
 
   // ── Connect ──────────────────────────────────────────────────────────────
   "Your own AI logs meals & reads your data":
@@ -21423,6 +21444,285 @@ function wfScheduleText(s) {
 const WF_STATUS = { ok: "", budget: "Skipped — your AI budget for that day was used up.",
   "trial-expired": "Skipped — your AI trial had ended.", error: "Last run hit an error — it'll try again next time." };
 
+// ── Weekly Meal Planner (S180, Kevin's design) ───────────────────────────────
+// A sibling of the cardio/strength planners: pre-build breakfast/lunch/dinner/
+// snack for each weekday, save it as a named template, then push it onto real
+// days — where it lands as planned[] items that tick off as eaten (the S160
+// machinery; nothing new to learn downstream of this screen).
+//
+// PAID, open during trial: clients Premium+, trainers Coach+ (the same
+// teamsAllowed population, passed in as `locked` so the two gates can't
+// drift). This is the ADDITIVE pattern — new value behind the wall — chosen
+// over gating the existing plan-ahead, which shares a mental model with
+// "logging tomorrow" and would read as a taken-away free feature.
+//
+// Slots hold REAL FOODS (macros project properly) or NOTE-ONLY items (name,
+// no numbers) — Kevin's "both" call. Note items tick off without touching
+// day totals.
+const MP_KEY = "caliq-mealplans";
+const MP_TYPES = [["breakfast","Breakfast"],["lunch","Lunch"],["dinner","Dinner"],["snack","Snack"]];
+function mpReadStore(cb){ window.storage.get(MP_KEY).then(r=>{ try{ cb(JSON.parse(r.value)||{plans:[]}); }catch{ cb({plans:[]}); } }).catch(()=>cb({plans:[]})); }
+function mpWriteStore(store){ return window.storage.set(MP_KEY, JSON.stringify(store)); }
+// Dates a template covers from `startYmd` for `weeks` weeks — only weekdays
+// that actually have items. Mirrors planDates() (noon-anchored, tz-safe).
+function mpDates(week, startYmd, weeks){
+  const out=[]; const start=new Date(startYmd+"T12:00:00");
+  for(let i=0;i<weeks*7;i++){
+    const dt=new Date(start); dt.setDate(start.getDate()+i);
+    const dayName=DAYS[(dt.getDay()+6)%7];               // JS Sunday=0 → our Monday-first list
+    if((week[dayName]||[]).length) out.push({ymd:ymdLocal(dt), dayName});
+  }
+  return out;
+}
+
+function MealPlannerPanel({ open, onClose, role, locked, savedFoods, recentFoods, onPlanDays, isRemote }) {
+  useBodyScrollLock(open);
+  const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
+  const [store, setStore] = useState(null);          // {plans:[{id,name,week,autoApply,appliedThrough}]}
+  const [sel, setSel] = useState(null);              // selected template id
+  const [openDay, setOpenDay] = useState(null);
+  const [addTo, setAddTo] = useState(null);          // day currently showing the add form
+  const [draft, setDraft] = useState({ type:"breakfast", name:"", cals:"", p:"", c:"", f:"" });
+  const [copyFrom, setCopyFrom] = useState(null);    // quick-fill: source day
+  const [copyDays, setCopyDays] = useState([]);
+  const [applyWeeks, setApplyWeeks] = useState(2);
+  const [applyStart, setApplyStart] = useState("today");
+  const [applyMsg, setApplyMsg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [showPlans, setShowPlans] = useState(false);
+  useEffect(()=>{ if(open) mpReadStore(setStore); },[open]);
+  if (!open) return null;
+
+  const plans=(store&&store.plans)||[];
+  const plan=plans.find(x=>x.id===sel)||null;
+  const save=(next)=>{ setStore(next); mpWriteStore(next).catch(()=>{}); };
+  const patchPlan=(patch)=>{ if(!plan) return;
+    save({ ...store, plans: plans.map(x=>x.id===plan.id?{...x,...patch,updatedAt:Date.now()}:x) }); };
+  const newPlan=()=>{ const id=`mp${Date.now()}`;
+    save({ ...store, plans:[...plans,{id,name:"",week:{},autoApply:false,appliedThrough:null,updatedAt:Date.now()}] });
+    setSel(id); setOpenDay(DAYS[0]); };
+
+  const addItem=(day)=>{
+    const cals=parseInt(draft.cals,10);
+    if(!draft.name.trim()) return;
+    const item={ name:draft.name.trim(), type:MP_TYPES.find(t=>t[0]===draft.type)[1],
+      calories:isNaN(cals)?0:cals, protein:parseInt(draft.p,10)||0, carbs:parseInt(draft.c,10)||0,
+      fat:parseInt(draft.f,10)||0, ...(isNaN(cals)?{noteOnly:true}:{}) };
+    patchPlan({ week:{ ...plan.week, [day]:[...(plan.week[day]||[]), item] } });
+    setDraft({ type:draft.type, name:"", cals:"", p:"", c:"", f:"" });
+  };
+  const removeItem=(day,ix)=>patchPlan({ week:{ ...plan.week, [day]:(plan.week[day]||[]).filter((_,i)=>i!==ix) } });
+  const copyDay=()=>{ if(!copyFrom||!copyDays.length) return;
+    const src=plan.week[copyFrom]||[]; const week={...plan.week};
+    copyDays.forEach(d=>{ week[d]=src.map(x=>({...x})); });   // overwrite, like workout Quick Fill
+    patchPlan({week}); setCopyFrom(null); setCopyDays([]); };
+
+  const startYmd=()=>{ const now=new Date();
+    if(applyStart==="today") return ymdLocal(now);
+    const dt=new Date(now); const daysToMon=((8-dt.getDay())%7)||7; dt.setDate(dt.getDate()+daysToMon);
+    return ymdLocal(dt); };
+  const applyNow=async()=>{
+    if(!plan||busy) return; setBusy(true); setApplyMsg(null);
+    try{
+      const dates=mpDates(plan.week, startYmd(), applyWeeks);
+      let wrote=0;
+      // one onPlanDays call per weekday-group so each date gets ITS day's items
+      for(const {ymd,dayName} of dates){
+        const items=(plan.week[dayName]||[]).map(it=>({ ...it, tpl:plan.id }));
+        if(items.length) wrote += await onPlanDays([ymd], items) || 0;
+      }
+      patchPlan({ appliedThrough: dates.length?dates[dates.length-1].ymd:plan.appliedThrough });
+      setApplyMsg({ok:true,text:`Planned ${wrote} item${wrote===1?"":"s"} across ${dates.length} day${dates.length===1?"":"s"}. They'll show on each day, ready to tick off as eaten.`});
+    }catch(e){ setApplyMsg({ok:false,text:"Couldn't write the plan — check your connection and try again."}); }
+    finally{ setBusy(false); }
+  };
+  const toggleAuto=()=>{ if(!plan) return;
+    // only one template may auto-apply — the switch turns the others off
+    save({ ...store, plans: plans.map(x=> x.id===plan.id ? {...x,autoApply:!plan.autoApply} : {...x,autoApply:false}) }); };
+
+  const dayTotals=(day)=>{ const a=plan.week[day]||[];
+    return a.reduce((t,x)=>({c:t.c+(x.calories||0),p:t.p+(x.protein||0)}),{c:0,p:0}); };
+  const quickPicks=[...(savedFoods||[]).slice(0,6), ...(recentFoods||[]).slice(0,4)]
+    .filter((x,i,arr)=>x&&x.name&&arr.findIndex(y=>y.name===x.name)===i).slice(0,8);
+
+  return createPortal(
+    <div data-theme="pro" className="fixed inset-0 z-[1520] overflow-y-auto bg-bg text-fg" style={{fontFamily:"var(--font-sans)"}}>
+      <div className="mx-auto max-w-[640px] px-4 pb-24" style={{paddingTop:"calc(18px + env(safe-area-inset-top,0px))"}}>
+        <div className="mb-4 relative flex items-center justify-center px-[92px]">
+          <div className="font-display text-[1.15rem] font-extrabold flex items-center gap-2">
+            <Icon name="calendar" size={18} color="var(--accent)" />Meal Planner
+          </div>
+          <button onClick={onClose} aria-label="Back"
+            className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer">
+            <Icon name="back" size={15} color="var(--accent)" />Back
+          </button>
+        </div>
+
+        {locked ? (
+          <div className={WZ.card} style={{textAlign:"center"}}>
+            <Icon name="calendar" size={34} color="var(--accent)" />
+            <div className="font-display text-[1.1rem] font-bold mt-2">Plan your meals like your workouts</div>
+            <div className="text-[.84rem] text-muted mt-2 mx-auto max-w-[400px] leading-relaxed">
+              Build a week of breakfasts, lunches, dinners and snacks once — then push it onto your
+              calendar and tick things off as you eat them. Repeat it every week automatically if you like.
+            </div>
+            <div className="text-[.78rem] text-muted mt-2">{isTrainer ? "Included from Coach up." : "Included with Premium and up."}</div>
+            <button onClick={()=>setShowPlans(true)}
+              className="mt-3 w-full max-w-[300px] rounded-xl border-none bg-primaryfill px-6 py-3 text-[.9rem] font-bold text-primaryfg cursor-pointer">See plans</button>
+            {showPlans && <PlanPicker role={role} onClose={()=>setShowPlans(false)} />}
+          </div>
+        ) : !plan ? (
+          <div className={WZ.card}>
+            <div className={WZ.title}>Your meal plans</div>
+            <div className={WZ.sub}>Build a week once, use it for months. {isTrainer ? "Open a client's plan first to push a week onto their days." : ""}</div>
+            {plans.map(x=>(
+              <button key={x.id} onClick={()=>{setSel(x.id);setOpenDay(DAYS[0]);}}
+                className="mt-2 w-full text-left rounded-xl border border-border bg-surface2 px-3.5 py-3 cursor-pointer flex items-center gap-2">
+                <span className="font-bold text-[.9rem]">{x.name||"Untitled plan"}</span>
+                <span className="text-muted text-[.74rem]">{DAYS.filter(d=>(x.week[d]||[]).length).length} day{DAYS.filter(d=>(x.week[d]||[]).length).length===1?"":"s"}</span>
+                {x.autoApply && <span className="ml-auto rounded-full border border-primary px-2 py-0.5 text-[.62rem] font-extrabold text-primary">AUTO</span>}
+              </button>
+            ))}
+            <button onClick={newPlan} className="mt-3 w-full rounded-xl border-none bg-primaryfill px-4 py-3 text-[.88rem] font-bold text-primaryfg cursor-pointer">+ New meal plan</button>
+          </div>
+        ) : (
+          <>
+            <div className={WZ.card}>
+              <div className="flex items-center gap-2">
+                <button onClick={()=>setSel(null)} aria-label="All plans" className="rounded-md border border-border bg-surface2 px-2 py-1 text-[.72rem] font-bold text-fg cursor-pointer">‹ Plans</button>
+                <input className={WZ.input} style={{flex:1,marginBottom:0}} placeholder="Name this week — e.g. High-protein cut"
+                  value={plan.name} onChange={e=>patchPlan({name:e.target.value})} />
+                <button onClick={()=>{ save({...store,plans:plans.filter(x=>x.id!==plan.id)}); setSel(null); }}
+                  aria-label="Delete plan" className="rounded-md border border-border bg-surface2 px-2.5 py-1 text-[.72rem] font-bold text-[var(--red,#f87171)] cursor-pointer">✕</button>
+              </div>
+            </div>
+
+            {/* the week — same accordion pattern as the workout steps */}
+            {DAYS.map(day=>{ const items=plan.week[day]||[]; const t=dayTotals(day); const isOpen=openDay===day;
+              return (
+              <div key={day} className={WZW.dayCard}>
+                <button className={WZW.dayHeader} onClick={()=>setOpenDay(isOpen?null:day)}>
+                  <span className={WZW.dayChip}>{DAY_SHORT[DAYS.indexOf(day)]}</span>
+                  <span className="text-[.82rem] font-semibold">{items.length?`${items.length} item${items.length===1?"":"s"}`:<span className="text-muted">Empty</span>}</span>
+                  {t.c>0 && <span className="ml-auto text-[.74rem] text-muted">{t.c.toLocaleString()} cal · {t.p}g protein</span>}
+                </button>
+                {isOpen && (
+                  <div className={WZW.dayBody}>
+                    {MP_TYPES.map(([k,label])=>{ const rows=items.map((x,ix)=>[x,ix]).filter(([x])=>x.type===label);
+                      if(!rows.length) return null;
+                      return (
+                        <div key={k} className="mb-1.5">
+                          <div className="text-[.66rem] font-extrabold uppercase tracking-wider text-muted">{label}</div>
+                          {rows.map(([x,ix])=>(
+                            <div key={ix} className="flex items-center gap-2 py-1">
+                              <span className="text-[.84rem]">{x.name}</span>
+                              {x.noteOnly
+                                ? <span className="text-[.68rem] text-muted italic">note</span>
+                                : <span className="text-[.72rem] text-muted">{x.calories} cal{x.protein?` · ${x.protein}p`:""}</span>}
+                              <button onClick={()=>removeItem(day,ix)} aria-label={`Remove ${x.name}`}
+                                className="ml-auto bg-transparent border-none text-muted cursor-pointer text-[.8rem]">✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+                    {addTo===day ? (
+                      <div className="mt-2 rounded-xl border border-border bg-surface2 p-3">
+                        <div className="flex gap-2 mb-2">
+                          <select className={WZW.select} style={{flex:1}} value={draft.type} onChange={e=>setDraft({...draft,type:e.target.value})}>
+                            {MP_TYPES.map(([k,l])=><option key={k} value={k}>{l}</option>)}
+                          </select>
+                          <input className={WZ.input} style={{flex:2,marginBottom:0}} placeholder="Food — e.g. Chicken & rice"
+                            value={draft.name} onChange={e=>setDraft({...draft,name:e.target.value})} />
+                        </div>
+                        <div className="flex gap-2 mb-2">
+                          {[["cals","cal"],["p","P g"],["c","C g"],["f","F g"]].map(([k,ph])=>(
+                            <input key={k} className={WZ.input} style={{flex:1,marginBottom:0}} placeholder={ph} inputMode="numeric"
+                              value={draft[k]} onChange={e=>setDraft({...draft,[k]:e.target.value.replace(/[^0-9]/g,"")})} />
+                          ))}
+                        </div>
+                        {quickPicks.length>0 && (
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {quickPicks.map((f,i)=>(
+                              <button key={i} onClick={()=>setDraft({...draft,name:f.name,cals:String(f.calories||""),p:String(f.protein||""),c:String(f.carbs||""),f:String(f.fat||"")})}
+                                className="rounded-md border border-border bg-bg px-2 py-1 text-[.7rem] text-fg cursor-pointer">{f.name}</button>
+                            ))}
+                          </div>
+                        )}
+                        <div className="text-[.68rem] text-muted mb-2">Leave calories empty to save it as a note — it won't count toward the day's numbers.</div>
+                        <div className="flex gap-2">
+                          <button onClick={()=>addItem(day)} className="flex-1 rounded-lg border-none bg-primaryfill px-3 py-2 text-[.8rem] font-bold text-primaryfg cursor-pointer">Add to {DAY_SHORT[DAYS.indexOf(day)]}</button>
+                          <button onClick={()=>setAddTo(null)} className="rounded-lg border border-border bg-transparent px-3 py-2 text-[.8rem] text-muted cursor-pointer">Done</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button onClick={()=>{setAddTo(day);}} className="mt-1 w-full rounded-lg border border-primary bg-[rgba(8,220,224,.06)] px-3 py-2 text-[.8rem] font-bold text-primary cursor-pointer">＋ Add food or note</button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );})}
+
+            {/* copy a day across the week — the Quick Fill sibling */}
+            <div className={WZ.card}>
+              <div className={WZ.label}>Copy a day to other days</div>
+              <div className="flex gap-2 mt-1.5 mb-2">
+                <select className={WZW.select} style={{flex:1}} value={copyFrom||""} onChange={e=>setCopyFrom(e.target.value||null)}>
+                  <option value="">Copy from…</option>
+                  {DAYS.filter(d=>(plan.week[d]||[]).length).map(d=><option key={d} value={d}>{d}</option>)}
+                </select>
+              </div>
+              {copyFrom && (<>
+                <div className="grid grid-cols-7 gap-1.5 mb-2">
+                  {DAYS.map((d,i)=>(
+                    <button key={d} disabled={d===copyFrom} onClick={()=>setCopyDays(copyDays.includes(d)?copyDays.filter(x=>x!==d):[...copyDays,d])}
+                      className={wzFillDay(copyDays.includes(d))} style={d===copyFrom?{opacity:.35}:undefined}>{DAY_SHORT[i]}</button>
+                  ))}
+                </div>
+                <button onClick={copyDay} disabled={!copyDays.length}
+                  className="w-full rounded-lg border-none bg-primaryfill px-3 py-2.5 text-[.82rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50">
+                  Copy {copyFrom} to {copyDays.length} day{copyDays.length===1?"":"s"} (replaces them)
+                </button>
+              </>)}
+            </div>
+
+            {/* push it onto real days */}
+            <div className={WZ.card}>
+              <div className={WZ.title} style={{fontSize:".95rem"}}>Put it on the calendar</div>
+              <div className={WZ.sub}>{isRemote ? "You're viewing a client's plan — this writes onto THEIR days." : "Writes onto your days as planned meals you tick off as eaten."}</div>
+              <div className="flex gap-2 mt-2 mb-2">
+                <select className={WZW.select} style={{flex:1}} value={applyStart} onChange={e=>setApplyStart(e.target.value)}>
+                  <option value="today">Starting today</option>
+                  <option value="monday">From next Monday</option>
+                </select>
+                <select className={WZW.select} style={{flex:1}} value={applyWeeks} onChange={e=>setApplyWeeks(parseInt(e.target.value,10))}>
+                  {[1,2,4,8].map(w=><option key={w} value={w}>{w} week{w===1?"":"s"}</option>)}
+                </select>
+              </div>
+              <button onClick={applyNow} disabled={busy||!DAYS.some(d=>(plan.week[d]||[]).length)}
+                className="w-full rounded-xl border-none bg-primaryfill px-4 py-3 text-[.88rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50">
+                {busy?"Planning…":"Apply to my days"}
+              </button>
+              {applyMsg && <div className={`mt-2 text-[.78rem] ${applyMsg.ok?"text-[var(--green,#2fe0a8)]":"text-[var(--red,#f87171)]"}`}>{applyMsg.text}</div>}
+              {/* auto-apply — the standing-order switch (only one template at a time) */}
+              {!isRemote && (
+                <button onClick={toggleAuto} className="mt-3 w-full flex items-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-2.5 cursor-pointer text-left">
+                  <span className="text-[.8rem] font-semibold text-fg">Repeat this plan automatically every week</span>
+                  <span className={`ml-auto text-[.72rem] font-extrabold ${plan.autoApply?"text-[var(--green,#2fe0a8)]":"text-muted"}`}>{plan.autoApply?"ON":"OFF"}</span>
+                </button>
+              )}
+              {plan.autoApply && !isRemote && (
+                <div className="mt-1.5 text-[.7rem] text-muted leading-relaxed">
+                  Glidna keeps your next two weeks filled from this plan. Turning it on switches it off for any other plan.
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>, document.body);
+}
+
 function AutomationsPanel({ open, onClose, role }) {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -24136,6 +24436,48 @@ export default function App() {
       .catch(() => { if (alive) setRosterCap(null); });  // never block on a failed read
     return () => { alive = false; };
   }, [meUid, role, profiles.length]);
+
+  // Weekly Meal Planner (S180): open/closed + the auto-apply standing order.
+  const [showMealPlanner, setShowMealPlanner] = useState(false);
+  // Auto-apply: keep the next 14 days filled from the one template with
+  // autoApply on. OWN account only (never fires while a trainer is inside a
+  // client's plan), idempotent via the appliedThrough high-water mark, and
+  // silent on any failure — a planner convenience must never break login.
+  useEffect(() => {
+    if (!meUid) return;
+    let alive = true;
+    mpReadStore(async (store) => {
+      if (!alive) return;
+      const tpl = (store.plans || []).find((x) => x.autoApply);
+      if (!tpl) return;
+      try {
+        const today = ymdLocal(new Date());
+        const horizon = new Date(); horizon.setDate(horizon.getDate() + 13);
+        const from = tpl.appliedThrough && tpl.appliedThrough >= today ? (() => {
+          const d = new Date(tpl.appliedThrough + "T12:00:00"); d.setDate(d.getDate() + 1); return ymdLocal(d);
+        })() : today;
+        if (from > ymdLocal(horizon)) return;   // already filled ahead
+        const span = Math.round((horizon - new Date(from + "T12:00:00")) / 86400000) + 1;
+        const dates = mpDates(tpl.week, from, Math.ceil(span / 7)).filter((x) => x.ymd <= ymdLocal(horizon));
+        for (const { ymd, dayName } of dates) {
+          const items = (tpl.week[dayName] || []).map((it) => ({ ...it, tpl: tpl.id }));
+          if (!items.length) continue;
+          const key = `caliq-log-self-${ymd}`;   // own account, own main plan
+          let day = { calories: 0, water: 0, weight: null, meals: [] };
+          try { const r = await window.storage.get(key); day = JSON.parse(r.value) || day; } catch (e) { /* new day */ }
+          const have = new Set((day.planned || []).filter((x) => x.tpl === tpl.id).map((x) => x.name + x.type));
+          const fresh = items.filter((x) => !have.has(x.name + x.type))
+            .map((x, i) => ({ ...x, id: `p${Date.now()}${i}${Math.floor(Math.random() * 1e3)}`, done: false }));
+          if (fresh.length) await window.storage.set(key, JSON.stringify({ ...day, planned: [...(day.planned || []), ...fresh] }));
+        }
+        mpReadStore((s2) => {
+          const upd = { ...s2, plans: (s2.plans || []).map((x) => x.id === tpl.id ? { ...x, appliedThrough: ymdLocal(horizon) } : x) };
+          mpWriteStore(upd).catch(() => {});
+        });
+      } catch (e) { /* best-effort */ }
+    });
+    return () => { alive = false; };
+  }, [meUid]);
   const [meEmail, setMeEmail] = useState(""); // current user's email (for the menu)
   const [meTrial, setMeTrial] = useState(null); // trial countdown state (or null)
   const [meBillingHold, setMeBillingHold] = useState(null); // unpaid session balance after a declined charge (S102b)
@@ -25815,7 +26157,7 @@ export default function App() {
               onOpenPlan={()=>{setNavFrom("dashboard");setStepAndSave(0);}} onOpenResults={()=>{setNavFrom("dashboard");setShowDash(false);}}
               onEditWorkouts={()=>{setNavFrom("dashboard");setStepAndSave(3);}}
               onLogUpdate={onLogUpdate} dailyLog={dailyLog} streak={streak}
-              onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} onLogFoods={onLogFoodsFromCalendar} onSetPlanned={onSetPlanned} onPlanDays={onPlanDays} onEatPlanned={onEatPlanned} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid} premium={mePremium} role={role}
+              onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} onLogFoods={onLogFoodsFromCalendar} onSetPlanned={onSetPlanned} onPlanDays={onPlanDays} onEatPlanned={onEatPlanned} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid} premium={mePremium} role={role} onOpenMealPlanner={() => setShowMealPlanner(true)}
               onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; n.macroTargetsEditedAt=Date.now(); return n; })}
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
@@ -25931,6 +26273,15 @@ export default function App() {
           forces their own account either way. */}
       {step === 5 && <AIChatPanel role={role} premium={mePremium} onDataChanged={reloadPlanLive}
         subject={inPlanSubject} />}
+      {/* Weekly Meal Planner (S180). Gate: clients need Premium (mePremium);
+          trainers need Coach+ — the same teamsAllowed population the server
+          computes, delivered via rosterCap.teamsLocked so UI and backend can't
+          drift. isRemote tells the apply step it's writing onto a CLIENT's days
+          (onPlanDays is already remote-aware, so the write itself just works). */}
+      <MealPlannerPanel open={showMealPlanner} onClose={() => setShowMealPlanner(false)}
+        role={role} isRemote={!!activeRemoteUid}
+        locked={(role === "head_trainer" || role === "sub_trainer") ? !!(rosterCap && rosterCap.teamsLocked) : !mePremium}
+        savedFoods={savedFoods} recentFoods={recentFoods} onPlanDays={onPlanDays} />
     </>
   );
 }
