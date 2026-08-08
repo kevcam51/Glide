@@ -2184,7 +2184,7 @@ const CUSTOM_EX_ICONS = ["dumbbell","muscle","liftup","liftdown","pullup","pullr
 // People don't think in METs, so nobody is asked for one: the AI estimates it
 // from the name, and the manual fallback is calories/minute at THIS plan's
 // weight, converted on the way in.
-function CustomExerciseCreator({ exerciseType, onAdd, weightLbs }) {
+function CustomExerciseCreator({ exerciseType, onAdd, weightLbs, data }) {
   const [show, setShow] = useState(false);
   const [name, setName] = useState("");
   const [calPerMin, setCalPerMin] = useState("");
@@ -2197,13 +2197,17 @@ function CustomExerciseCreator({ exerciseType, onAdd, weightLbs }) {
   const [saved, setSaved] = useState(false);
 
   const refWeight = Number(weightLbs) > 0 ? Number(weightLbs) : 0;
-  const kg = refWeight * 0.453592;
-  // Whichever the user gave us, resolve to a MET.
+  // The SAME per-person resting rate every other burn uses (S183k). Using the
+  // old kg shortcut here made the preview disagree with the number the very
+  // next screen showed for the identical exercise — caught by testing the panel.
+  const restMin = restingKcalPerMin(data, refWeight);
+  // Whichever the user gave us, resolve to a MET — and convert through the same
+  // rate, so "10 cal/min" really does come back as 10 cal/min for this person.
   const effMet = met != null ? Number(met)
-    : (Number(calPerMin) > 0 && kg > 0 ? (Number(calPerMin) * 60) / kg : 0);
+    : (Number(calPerMin) > 0 && restMin > 0 ? Number(calPerMin) / restMin : 0);
   const canSave = !!name.trim() && effMet > 0;
-  const preview = effMet > 0 && refWeight > 0
-    ? Math.round(effMet * kg * 0.5)   // 30 minutes
+  const preview = effMet > 0 && restMin > 0
+    ? Math.round(effMet * restMin * 30)   // 30 minutes
     : null;
 
   const estimate = async () => {
@@ -3290,7 +3294,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
         })}
       </div>
 
-      <CustomExerciseCreator exerciseType="strength" weightLbs={data.weightLbs} onAdd={(ex)=>onChange("customExercises",[...(data.customExercises||[]),ex])} />
+      <CustomExerciseCreator exerciseType="strength" weightLbs={data.weightLbs} data={data} onAdd={(ex)=>onChange("customExercises",[...(data.customExercises||[]),ex])} />
 
       {DAYS.every(day => getSessions(day).length === 0) && (
         <div className={WZW.warn}>All 7 days are set to rest — no worries! Your results will still work. Adding even 1–2 strength days will unlock muscle gain projections and EPOC afterburn data.</div>
@@ -3561,7 +3565,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
         })}
       </div>
 
-      <CustomExerciseCreator exerciseType="cardio" weightLbs={data.weightLbs} onAdd={(ex)=>onChange("customExercises",[...(data.customExercises||[]),ex])} />
+      <CustomExerciseCreator exerciseType="cardio" weightLbs={data.weightLbs} data={data} onAdd={(ex)=>onChange("customExercises",[...(data.customExercises||[]),ex])} />
 
       {DAYS.every(day => !Array.isArray(data.cardio[day]) || data.cardio[day].length === 0) && (
         <div className={WZW.warn}>All 7 days are set to rest — that's totally fine! Your results will still calculate based on diet alone. But if you'd like to add even one cardio session, it'll speed things up.</div>
@@ -12749,8 +12753,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           Once added it appears in the Add Cardio / Add Strength pickers above. */}
       {onAddCustomExercise && (
         <div style={{marginBottom:"16px"}}>
-          <CustomExerciseCreator exerciseType="strength" weightLbs={(data||{}).weightLbs} onAdd={onAddCustomExercise} />
-          <CustomExerciseCreator exerciseType="cardio" weightLbs={(data||{}).weightLbs} onAdd={onAddCustomExercise} />
+          <CustomExerciseCreator exerciseType="strength" weightLbs={(data||{}).weightLbs} data={data} onAdd={onAddCustomExercise} />
+          <CustomExerciseCreator exerciseType="cardio" weightLbs={(data||{}).weightLbs} data={data} onAdd={onAddCustomExercise} />
         </div>
       )}
             </>
