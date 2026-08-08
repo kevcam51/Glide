@@ -137,6 +137,8 @@ exports.claimReferral = require("./referrals").claimReferral;
 exports.myReferrals = require("./referrals").myReferrals;
 exports.claimReferralCredit = require("./referrals").claimReferralCredit;
 exports.testVestReferral = require("./referrals").testVestReferral;  // admin-only rehearsal hook
+// Daily: tells a referrer their reward has vested, naming both ways to take it.
+exports.referralVestNotify = require("./referrals").referralVestNotify;
 
 exports.joinTrainerByCode = require("./roster").joinTrainerByCode;
 exports.myRosterStatus = require("./roster").myRosterStatus;

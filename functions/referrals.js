@@ -31,6 +31,7 @@
 // counsel before a line of it is written. See docs/PRICING.md S179i.
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 
 const REGION = "us-central1";
@@ -57,6 +58,44 @@ const norm = (s) => String(s || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "
 const toMs = (v) => (v && typeof v.toMillis === "function" ? v.toMillis()
   : typeof v === "number" ? v : (typeof v === "string" ? Date.parse(v) : null));
 const money = (n) => Math.round(n * 100) / 100;
+
+// ── saying what the money is FOR (S183, Kevin) ──────────────────────────────
+// "You've earned $28.82" on its own reads like cash. It isn't: it is credit
+// against their own subscription, and whether that lands next month or at an
+// annual renewal changes what they should expect. So every place we name an
+// amount names the plan it goes toward, and the annual case says the credit
+// waits on the account until the renewal charge rather than implying a refund
+// is coming. When the interval is unknown — accounts that subscribed before we
+// started recording it — the wording stays honestly vague instead of guessing.
+const fmtDay = (ms) => new Date(ms).toLocaleDateString("en-US",
+  { month: "short", day: "numeric", timeZone: "America/New_York" });
+// "toward your annual plan" / "toward your monthly plan" / "toward your subscription"
+function towardPhrase(interval) {
+  return interval === "year" ? "toward your annual plan"
+    : interval === "month" ? "toward your monthly plan" : "toward your subscription";
+}
+// When they'll actually feel it.
+function appliesPhrase(interval, renewsAt) {
+  if (interval === "year") {
+    return renewsAt && renewsAt > Date.now()
+      ? `It waits on your account and comes off your renewal on ${fmtDay(renewsAt)}.`
+      : "It waits on your account and comes off your next annual renewal.";
+  }
+  return "It comes off your next invoice.";
+}
+// The same thing said short enough for a push body, which appendFeed slices at
+// 140 characters. The long form above overran it for annual plans and the cut
+// landed inside "Or take a free month of Coach Ap…" — hiding half the offer,
+// which is the one thing this notification exists to show.
+const NOTIF_BODY_MAX = 140;
+function appliesPhraseShort(interval, renewsAt) {
+  if (interval === "year") {
+    return renewsAt && renewsAt > Date.now()
+      ? `held until your renewal on ${fmtDay(renewsAt)}`
+      : "held until your next renewal";
+  }
+  return "it comes off your next invoice";
+}
 
 function tierOf(profile) {
   const t = String((profile && profile.subscriptionTier) || "").toLowerCase();
@@ -201,6 +240,14 @@ async function summarize(db, uid) {
       vested: people.filter((p) => p.status === "vested").length,
     },
     available, monthsCovered, ownMonth: money(ownMonth),
+    // Kevin, S183: a dollar figure on its own is ambiguous — people need to be
+    // told it goes toward their SUBSCRIPTION, and monthly vs annual changes
+    // when they feel it. Null when we don't know yet (accounts that subscribed
+    // before we stamped the interval), and the copy stays vague rather than
+    // guessing wrong.
+    interval: me.subscriptionInterval === "year" ? "year"
+      : me.subscriptionInterval === "month" ? "month" : null,
+    renewsAt: typeof me.currentPeriodEnd === "number" ? me.currentPeriodEnd : null,
     upgrade: (() => { const p = UPGRADE_PATHS[tierOf(me)];
       return p ? { label: p.label, cost: p.cost, affordable: available >= p.cost } : null; })(),
     rewardTier: me.rewardTier && me.rewardTierUntil && Date.now() < toMs(me.rewardTierUntil)
@@ -305,9 +352,108 @@ exports.claimReferralCredit = onCall({ region: REGION, secrets: ["STRIPE_SECRET_
       year: yearNow,
       lastGrantAt: Date.now(),
     }, { merge: true });
-    return { ok: true, credited: s.available, monthsCovered: s.monthsCovered };
+    return { ok: true, credited: s.available, monthsCovered: s.monthsCovered,
+      // The panel echoes these back verbatim, so the confirmation says the same
+      // thing the notification promised rather than a second, vaguer version.
+      toward: towardPhrase(s.interval), applies: appliesPhrase(s.interval, s.renewsAt),
+      interval: s.interval };
   });
 
+// ── "your reward is ready" (S183) ───────────────────────────────────────────
+// Vesting happens on a clock, not on a click: a referral crosses 30 paid days
+// while nobody is looking, and until now the only way to find out was to open
+// Refer & earn and notice the number had moved. So the reward went unclaimed,
+// which is the one outcome that helps nobody — we owe the credit either way.
+//
+// Kevin's shape: tell them in a NOTIFICATION, and name the choice right there
+// rather than ambushing them with a modal next time they open the app. The
+// notification carries both options in its own words; tapping it opens Refer &
+// earn, where the two buttons already live. Nothing is decided for them and
+// nothing interrupts them.
+//
+// Fires once per referral: the row is stamped `vestNotifiedAt` whether or not
+// anything was worth saying, so a vest can never re-notify and a row can never
+// be re-examined forever. When a SECOND referral vests later the new row is
+// unstamped, so the reward growing does earn a fresh nudge.
+async function runVestNotifyPass(db) {
+  const { sendPushTo } = require("./push");
+  const cutoff = Date.now() - VEST_DAYS * 86400000;
+
+  // Single-field query (no composite index): everything currently paying,
+  // filtered in memory. `vestNotifiedAt` can't be part of the query — a
+  // missing field is not matchable in Firestore — and the paying set is the
+  // small one by construction, so this stays cheap for a long while.
+  const snap = await db.collection("referrals").where("status", "==", "paying").limit(1000).get();
+  const byReferrer = new Map();
+  snap.forEach((d) => {
+    const r = d.data();
+    if (r.vestNotifiedAt) return;
+    if (!r.activatedAt || r.activatedAt > cutoff) return;
+    if (!r.referrerUid) return;
+    const list = byReferrer.get(r.referrerUid) || [];
+    list.push({ ref: d.ref, name: r.referredName || "Someone you referred" });
+    byReferrer.set(r.referrerUid, list);
+  });
+
+  let notified = 0, quiet = 0;
+  for (const [uid, rows] of byReferrer) {
+    try {
+      const s = await summarize(db, uid);
+      if (s.available > 0) {
+        // Distinguishes the two reasons `upgrade` comes back null — already
+        // on the top plan vs. not subscribed at all. Promising a non-payer
+        // money "off your next invoice" would be a lie about an invoice that
+        // doesn't exist.
+        const me = (await db.doc(`users/${uid}`).get()).data() || {};
+        const onPaidPlan = !!tierOf(me);
+        // The name belongs in the TITLE, as the reason, and the money in the
+        // body, as the total. One sentence carrying both told a quiet lie:
+        // "2 of your referrals stuck with it — $75.80" when three of them were
+        // paying for that figure and only two were new this morning. Split
+        // like this each half stands on its own, however many rows vested in
+        // this pass and however many vested months ago.
+        const title = rows.length === 1
+          ? `${String(rows[0].name).slice(0, 40)} stuck with it — your reward is ready`
+          : "Your referral reward is ready";
+        const amount = `$${s.available.toFixed(2)}`;
+        // Names the plan the money goes toward, then when it lands, then the
+        // alternative. The annual variant deliberately says the credit is HELD
+        // — an annual subscriber told "off your next invoice" would reasonably
+        // expect something to happen this month, and nothing would.
+        const base = onPaidPlan
+          ? `You've earned ${amount} ${towardPhrase(s.interval)} — ${appliesPhraseShort(s.interval, s.renewsAt)}.`
+          : `You've earned ${amount} toward a subscription. Start a plan and it comes straight off your first bill.`;
+        // The upgrade alternative is the first thing to drop if a long name or
+        // a big number would push us into the cut. Losing the whole clause is
+        // recoverable — they still open the panel and see both buttons. Losing
+        // HALF of it reads as a broken promise.
+        const alt = (onPaidPlan && s.upgrade && s.upgrade.affordable)
+          ? ` Or a free month of ${s.upgrade.label}.` : "";
+        const body = (base + alt).length <= NOTIF_BODY_MAX ? base + alt : base;
+        await sendPushTo(db, uid, { title, body, tag: "referral-vested", url: "/" }, "referralRewards");
+        notified++;
+      } else { quiet++; }
+      // Stamped either way — the vest is a one-time event, and a row we had
+      // nothing to say about must not be re-read every morning forever.
+      const stampedAt = Date.now();
+      await Promise.all(rows.map((r) => r.ref.set({ vestNotifiedAt: stampedAt }, { merge: true })));
+    } catch (e) {
+      // One broken referrer must not stop the rest of the pass. Left
+      // unstamped on purpose: tomorrow's run retries it.
+      console.error("referralVestNotify", uid, e && e.message);
+    }
+  }
+  const result = { referrers: byReferrer.size, notified, quiet };
+  console.log("referralVestNotify", JSON.stringify(result));
+  return result;
+}
+
+exports.referralVestNotify = onSchedule(
+  { schedule: "0 10 * * *", timeZone: "America/New_York", region: REGION,
+    secrets: [require("./push").VAPID_PRIVATE_KEY], timeoutSeconds: 300, maxInstances: 1 },
+  async () => { await runVestNotifyPass(admin.firestore()); });
+
+module.exports.runVestNotifyPass = runVestNotifyPass;   // exported so the pass is testable off-schedule
 module.exports.onSubscriptionChanged = onSubscriptionChanged;
 module.exports.NET_MONTHLY = NET_MONTHLY;
 module.exports.VEST_DAYS = VEST_DAYS;
@@ -319,19 +465,29 @@ module.exports.VEST_DAYS = VEST_DAYS;
 // signup → paying → vested → claim → Stripe credit in one sitting, in TEST
 // MODE, without touching the real 30-day rule.
 const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
-exports.testVestReferral = onCall({ region: REGION, maxInstances: 2 }, async (request) => {
-  const uid = request.auth && request.auth.uid;
-  if (!uid || !ADMIN_UIDS.includes(uid)) throw new HttpsError("permission-denied", "Admin only.");
-  const target = String((request.data && request.data.referredUid) || "").trim();
-  if (!target) throw new HttpsError("invalid-argument", "referredUid is required.");
-  const db = admin.firestore();
-  const ref = db.doc(`referrals/${target}`);
-  const snap = await ref.get();
-  if (!snap.exists) throw new HttpsError("not-found", "No referral row for that user.");
-  await ref.set({
-    status: "paying",
-    tier: String((request.data && request.data.tier) || snap.data().tier || "premium"),
-    activatedAt: Date.now() - (VEST_DAYS + 1) * 86400000,   // back-dated past the vest
-  }, { merge: true });
-  return { ok: true, note: `Back-dated past the ${VEST_DAYS}-day vest — claim should now be available.` };
-});
+exports.testVestReferral = onCall(
+  { region: REGION, secrets: [require("./push").VAPID_PRIVATE_KEY], maxInstances: 2 },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid || !ADMIN_UIDS.includes(uid)) throw new HttpsError("permission-denied", "Admin only.");
+    const target = String((request.data && request.data.referredUid) || "").trim();
+    if (!target) throw new HttpsError("invalid-argument", "referredUid is required.");
+    const db = admin.firestore();
+    const ref = db.doc(`referrals/${target}`);
+    const snap = await ref.get();
+    if (!snap.exists) throw new HttpsError("not-found", "No referral row for that user.");
+    await ref.set({
+      status: "paying",
+      tier: String((request.data && request.data.tier) || snap.data().tier || "premium"),
+      activatedAt: Date.now() - (VEST_DAYS + 1) * 86400000,   // back-dated past the vest
+      // Cleared so the rehearsal can walk the notification too — otherwise a
+      // row that was notified once looks permanently spent to the pass.
+      vestNotifiedAt: admin.firestore.FieldValue.delete(),
+    }, { merge: true });
+    // S183: the notify pass is a daily schedule, so rehearsing it otherwise
+    // means waiting until 10am. `notify` runs the same code path immediately.
+    const pass = (request.data && request.data.notify)
+      ? await runVestNotifyPass(db) : null;
+    return { ok: true, pass,
+      note: `Back-dated past the ${VEST_DAYS}-day vest — claim should now be available.` };
+  });

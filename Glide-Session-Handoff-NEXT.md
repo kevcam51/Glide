@@ -1,6 +1,63 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ⭐⭐⭐ S177–S182 (Aug 6, 2026) — READ THIS FIRST
+## ⭐⭐⭐⭐ S183 (Aug 7, 2026) — READ THIS FIRST
+Queue item 1 is DONE and deployed. Everything below is older.
+
+**Referral vest notification.** A referral vests on a clock, so the only way to
+find out used to be opening Refer & earn and noticing the number had moved.
+Now a daily **10am ET `referralVestNotify`** finds newly-vested referrals and
+notifies the referrer, **naming both choices in the notification itself**
+(Kevin: surface the choice there, not as a modal). Tapping the bell row opens
+Refer & earn, where the two buttons already live. New pref type
+`referralRewards` in the Notification Center; feed rows with tag
+`referral-vested` are the only tappable ones (cyan border + "Claim →"),
+everything else stays inert history.
+
+**Kevin's rule, S183: never show a bare dollar figure.** Credit is always
+described as going toward their *subscription*, and monthly vs annual changes
+when they feel it — annual says the credit is HELD until the renewal (with the
+date when we know it) rather than "off your next invoice", which would have an
+annual payer expecting something this month. The Stripe mechanism already
+worked this way (a customer-balance credit applies to whatever the next invoice
+is); only the wording was missing.
+
+To say it we had to start recording the interval: `stripeWebhook` now stamps
+**`subscriptionInterval`** + **`currentPeriodEnd`** on the profile, read off the
+SUBSCRIPTION object (not our metadata) so it self-corrects for accounts created
+before this and for portal interval switches, and re-stamps each renewal.
+⚠️ **Existing subscribers have neither field until their next subscription
+webhook event** — copy degrades to the honest "toward your subscription" until
+then, by design. These two fields are display-only (no gate reads them), so
+they were deliberately NOT added to the S85 owner-write rules lock; revisit if
+anything ever gates on them.
+
+Hazards found the hard way this session:
+- **`appendFeed` slices bodies at 140 chars.** The first annual copy ran 152–155
+  and the cut landed inside "Or take a free month of Coach Ap…" — hiding half
+  the offer the notification exists to show. Bodies now build base + optional
+  upgrade clause and **drop the whole clause** if it wouldn't fit
+  (`NOTIF_BODY_MAX`). Keep that guard if you touch the copy.
+- **Name in the title, money in the body.** One sentence carrying both said
+  "2 of your referrals stuck with it — $75.80" when three were paying for that
+  figure and only two were new. Split, each half is true independently.
+- `testVestReferral` now takes **`{notify: true}`** and clears `vestNotifiedAt`,
+  so the whole chain (signup → paying → vested → notification → claim) can be
+  rehearsed in one sitting instead of waiting for 10am.
+- Rows are stamped `vestNotifiedAt` **even when there was nothing worth saying**,
+  or the pass re-reads them every morning forever.
+
+Deployed: the 9-function referrals+billing set (`npm run deploy-set`); frontend
+pushed. Note the deploy set drags in the three live Stripe functions — their
+code is unchanged, they just bundle `referrals.js`.
+
+**Queue now:** 2) push-notification delivery — ⚠️ *this line was stale, Web Push
+delivery already shipped in `functions/push.js` (S90b/S96); re-scope or drop
+it.* 3) Family & Friends tier. 4) connector chart images; cap-hit "use your own
+AI" nudge. 5) ⚖️ referral CASH payouts — counsel first.
+
+---
+
+## ⭐⭐⭐ S177–S182 (Aug 6, 2026)
 Everything below this block is older history. Firebase `calorieiq-29762` ·
 model `claude-sonnet-4-6` · live on **glidna.com** · tree clean, all pushed,
 all deployed.

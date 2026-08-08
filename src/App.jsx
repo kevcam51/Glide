@@ -21529,7 +21529,14 @@ function ReferralPanel({ open, onClose, role }) {
         const until = new Date(r.data.until).toLocaleDateString("en-US", { month: "short", day: "numeric" });
         setMsg({ ok: true, text: `You're on ${r.data.label} until ${until}. Nothing changes about your subscription — it simply goes back to your usual plan afterwards, with nothing to cancel.` });
       } else {
-        setMsg({ ok: true, text: `$${r.data.credited.toFixed(2)} credited — it comes off your next invoice${r.data.monthsCovered >= 1 ? `, about ${r.data.monthsCovered} month${r.data.monthsCovered === 1 ? "" : "s"} of your plan` : ""}.` });
+        // Echoes the server's own wording (S183) so the confirmation names the
+        // same plan and the same timing the notification promised. The
+        // "months covered" aside is monthly-only — telling an annual payer
+        // their credit is "about 2 months of your plan" describes a bill they
+        // don't get.
+        setMsg({ ok: true, text: `$${r.data.credited.toFixed(2)} applied ${r.data.toward || "toward your subscription"}. ${r.data.applies || ""}`
+          + (r.data.interval !== "year" && r.data.monthsCovered >= 1
+            ? ` That's about ${r.data.monthsCovered} month${r.data.monthsCovered === 1 ? "" : "s"} of your plan covered.` : "") });
       }
       load();
     } catch (e) {
@@ -21581,7 +21588,20 @@ function ReferralPanel({ open, onClose, role }) {
               </div>
               <div className={WZ.sub} style={{ margin: 0 }}>ready to claim</div>
             </div>
-            {data.monthsCovered >= 1 && (
+            {/* S183 (Kevin): never show a bare dollar figure. It is credit
+                against their own subscription, and an annual payer needs to
+                know it waits for the renewal charge rather than appearing this
+                month. */}
+            <div className={WZ.sub} style={{ marginTop: 2 }}>
+              {data.interval === "year" ? "Toward your annual plan"
+                : data.interval === "month" ? "Toward your monthly plan" : "Toward your subscription"}
+              {data.available > 0 && data.interval === "year" && (
+                <> — held on your account until your renewal
+                  {data.renewsAt ? ` on ${new Date(data.renewsAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}.</>
+              )}
+              {data.available > 0 && data.interval !== "year" && <> — it comes off your next invoice.</>}
+            </div>
+            {data.monthsCovered >= 1 && data.interval !== "year" && (
               <div className={WZ.sub}>That's about {data.monthsCovered} month{data.monthsCovered === 1 ? "" : "s"} of your plan covered.</div>
             )}
             {data.rewardTier && (
@@ -21598,7 +21618,9 @@ function ReferralPanel({ open, onClose, role }) {
               <div className="mt-2 flex flex-col gap-2">
                 <button onClick={() => claim("credit")} disabled={busy}
                   className="w-full rounded-xl border-none bg-primaryfill px-4 py-3 text-[.88rem] font-bold text-primaryfg cursor-pointer disabled:opacity-60">
-                  {busy ? "Applying…" : `Take $${data.available.toFixed(2)} off my plan`}
+                  {busy ? "Applying…"
+                    : data.interval === "year" ? `Put $${data.available.toFixed(2)} toward my annual plan`
+                    : `Take $${data.available.toFixed(2)} off my plan`}
                 </button>
                 {data.upgrade && (
                   <button onClick={() => claim("upgrade")} disabled={busy || !data.upgrade.affordable}
@@ -21649,8 +21671,10 @@ function ReferralPanel({ open, onClose, role }) {
             </>)}
             <div className="mt-2.5 text-[.68rem] leading-relaxed text-muted">
               Credit is capped at one month of what your referrals bring in, so it always reflects
-              real subscriptions. It applies to your next invoice — stay on your plan and it covers
-              months of it, or upgrade and it's used up faster.
+              real subscriptions. It's credit against your own subscription, not a payout
+              {data.interval === "year"
+                ? " — it sits on your account and comes off your next annual renewal."
+                : " — it comes off your next invoice, so staying on your plan lets it cover months of it."}
             </div>
           </div>
         </>)}
@@ -23134,11 +23158,16 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
 // messages, trainer to-dos, client requests. Entries are written server-side
 // by the same code that sends pushes (functions/push.js appendFeed), so the
 // bell and the phone can never disagree. Unseen = newer than seenTs.
-function NotifFeed({ items, onClose }) {
+function NotifFeed({ items, onClose, onOpenReferrals }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);
   const iconFor = (tag) => String(tag).startsWith("dm-") ? "inbox"
-    : tag === "trainer-todo" ? "mail" : tag === "client-request" ? "clients" : "bell";
+    : tag === "trainer-todo" ? "mail" : tag === "client-request" ? "clients"
+    : tag === "referral-vested" ? "invite" : "bell";
+  // A vested reward is the one notification with something to DO — the credit
+  // sits unclaimed until someone taps. Everything else here is history, so it
+  // stays inert rather than pretending each row is a link.
+  const actionFor = (tag) => (tag === "referral-vested" && onOpenReferrals) ? onOpenReferrals : null;
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2400,
       background: "rgba(0,0,0,.78)", display: "flex", justifyContent: "center",
@@ -23155,16 +23184,28 @@ function NotifFeed({ items, onClose }) {
           {items.length === 0 && (
             <div className="py-8 text-center text-[.84rem] text-muted">Nothing yet — messages, to-dos, and requests will show up here.</div>
           )}
-          {items.map((n) => (
-            <div key={n.id} className="flex items-start gap-2.5 rounded-xl border border-border bg-surface2 px-3 py-2.5">
-              <span className="mt-0.5 shrink-0"><Icon name={iconFor(n.tag)} size={16} color="var(--accent)" /></span>
-              <div className="min-w-0 flex-1">
-                <div className="text-[.84rem] font-semibold text-fg">{n.title}</div>
-                {n.body && <div className="truncate text-[.78rem] text-muted">{n.body}</div>}
-                <div className="mt-0.5 text-[.64rem] text-muted">{timeAgo(n.ts)}</div>
-              </div>
-            </div>
-          ))}
+          {items.map((n) => {
+            const act = actionFor(n.tag);
+            const Tag = act ? "button" : "div";
+            return (
+              <Tag key={n.id} onClick={act || undefined}
+                className={`flex w-full items-start gap-2.5 rounded-xl border bg-surface2 px-3 py-2.5 text-left ${
+                  act ? "border-primary cursor-pointer" : "border-border"}`}>
+                <span className="mt-0.5 shrink-0"><Icon name={iconFor(n.tag)} size={16} color="var(--accent)" /></span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[.84rem] font-semibold text-fg">{n.title}</div>
+                  {/* The reward body names both choices, so it must wrap rather
+                      than truncate — a clipped "or try a month of…" hides half
+                      the offer. */}
+                  {n.body && <div className={`text-[.78rem] text-muted ${act ? "leading-snug" : "truncate"}`}>{n.body}</div>}
+                  <div className="mt-0.5 flex items-center gap-2 text-[.64rem] text-muted">
+                    <span>{timeAgo(n.ts)}</span>
+                    {act && <span className="font-bold text-primary">Claim →</span>}
+                  </div>
+                </div>
+              </Tag>
+            );
+          })}
         </div>
       </div>
     </div>, document.body);
@@ -24332,6 +24373,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                 { key: "messages", label: "Message badges", desc: "Unread-message badges on client cards" },
                 { key: "clientRequests", label: "Client requests", desc: "When a client asks you for something" },
                 { key: "automations", label: "Automation results", desc: "When a scheduled automation finishes" },
+                { key: "referralRewards", label: "Referral rewards", desc: "When credit you've earned is ready to claim" },
               ]
             : [
                 { key: "trainerReminders", label: "Trainer to-do reminders", desc: "To-dos your trainer sends you" },
@@ -24340,6 +24382,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                 { key: "weighInReminders", label: "Weigh-in reminders", desc: "Nudge for a weekly weigh-in — in-app, and push if enabled below" },
                 { key: "coachingNudges", label: "AI coaching tips", desc: "Occasional tips from your AI coach" },
                 { key: "automations", label: "Automation results", desc: "When a scheduled automation finishes" },
+                { key: "referralRewards", label: "Referral rewards", desc: "When credit you've earned is ready to claim" },
               ];
           const Toggle = ({ on, disabled, onClick }) => (
             <button onClick={onClick} disabled={disabled} aria-pressed={on}
@@ -26199,7 +26242,8 @@ export default function App() {
           </span>
         )}
       </button>
-      {feedOpen && <NotifFeed items={notifFeed.items} onClose={() => setFeedOpen(false)} />}
+      {feedOpen && <NotifFeed items={notifFeed.items} onClose={() => setFeedOpen(false)}
+        onOpenReferrals={() => { setFeedOpen(false); setShowReferrals(true); }} />}
       {/* Card-setup outcome (S101) — the one moment the client returns from
           Stripe's hosted page with no panel open to report into. */}
       {cardNotice && createPortal(

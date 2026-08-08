@@ -227,8 +227,12 @@ exports.createCheckoutSession = onCall(
           : profile.email ? { customer_email: profile.email } : {}),
         // tier rides BOTH the session and the subscription so every webhook
         // event can stamp profile.subscriptionTier (drives the Max AI budget).
-        metadata: { uid, tier: plan.tier },
-        subscription_data: { metadata: { uid, tier: plan.tier },
+        // `interval` rides along too (S183): referral credit has to tell people
+        // what it is FOR, and "toward your annual plan, at your renewal" reads
+        // very differently from "off your next invoice". Nothing here reads it
+        // for pricing — the price is already fixed by `ensurePrice` above.
+        metadata: { uid, tier: plan.tier, interval },
+        subscription_data: { metadata: { uid, tier: plan.tier, interval },
           ...(trialEnd ? { trial_end: trialEnd } : {}) },
         allow_promotion_codes: true,
         success_url: `${origin}/?billing=success`,
@@ -325,6 +329,11 @@ exports.stripeWebhook = onRequest(
             // than a mode mismatch.
             stripeLivemode: event.livemode !== false,
             stripeSubscriptionId: s.subscription || null,
+            // S183: monthly vs annual, so referral credit can name what it is
+            // going toward. The subscription event below refines this and adds
+            // the renewal date; this is just the earliest we can know it.
+            ...(s.metadata && s.metadata.interval === "year" ? { subscriptionInterval: "year" }
+              : s.metadata && s.metadata.interval === "month" ? { subscriptionInterval: "month" } : {}),
           }, { merge: true });
           console.log("stripeWebhook: activated", uid, (s.metadata && s.metadata.tier) || "");
           // S181: a referral only ever counts when money actually arrives.
@@ -344,6 +353,25 @@ exports.stripeWebhook = onRequest(
           const update = { subscriptionStatus: keep ? "active" : "canceled" };
           if (keep && sub.metadata && sub.metadata.tier) update.subscriptionTier = sub.metadata.tier;
           if (!keep) update.subscriptionTier = admin.firestore.FieldValue.delete();
+          // S183: billing interval + when the next charge lands, so referral
+          // credit can say "toward your annual plan, at your renewal on Mar 3"
+          // instead of a bare dollar figure. Read off the SUBSCRIPTION rather
+          // than our own metadata — that keeps it right for accounts created
+          // before we started stamping it, and for anyone Stripe moved between
+          // intervals in the portal. This event also fires when a period rolls
+          // over, so the renewal date re-stamps itself each cycle.
+          if (keep) {
+            const iv = sub.items && sub.items.data && sub.items.data[0]
+              && sub.items.data[0].price && sub.items.data[0].price.recurring
+              && sub.items.data[0].price.recurring.interval;
+            if (iv === "year" || iv === "month") update.subscriptionInterval = iv;
+            if (typeof sub.current_period_end === "number") {
+              update.currentPeriodEnd = sub.current_period_end * 1000;
+            }
+          } else {
+            update.subscriptionInterval = admin.firestore.FieldValue.delete();
+            update.currentPeriodEnd = admin.firestore.FieldValue.delete();
+          }
           await db.doc(`users/${uid}`).set(update, { merge: true });
           console.log("stripeWebhook:", event.type, uid, "→", keep ? "active" : "canceled");
           // S181: mark the referral paying, or lapsed if the sub ended. Never
