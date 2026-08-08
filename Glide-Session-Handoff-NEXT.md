@@ -82,8 +82,30 @@ recall it). Live-verified in prod after deploy: the AI answered and honoured
 the new key — "turn off my referral reward notifications" wrote
 `referralRewards:false` (before this it silently did nothing).
 
-**Queue now:** 1) Family & Friends tier. 2) connector chart images; cap-hit
-"use your own AI" nudge. 3) ⚖️ referral CASH payouts — counsel first.
+### S183c — cap-hit "use your own AI" nudge (SHIPPED) + Family PARKED
+**Nudge is live.** Hit the daily token cap and you now get a card offering to
+connect your own Claude/ChatGPT. Fires ONLY from the two `resource-exhausted`
+branches (Kevin S178c: never general messaging) and renders BELOW the boost
+path — if more Glidna usage can be granted that's the better answer, so this is
+the fallback for tiers without boosts or a boost already spent today. The claim
+is always true for whoever sees it: connector is included from Premium up (free
+= 0 calls, but free is stopped at trial-expired long before the cap) and it
+runs on their own subscription. Verified both ways in prod: simulated cap →
+card → "Show me how" → connector setup; normal send → no card.
+
+**Family & Friends: scoped, then PARKED by Kevin.** Full reasoning is in
+`docs/PRICING.md` under the banked tier — read it before reviving. Short
+version: (1) $9.99 + in-app AI undercuts **Premium**, a bigger leak than the
+Coach Connect one the guardrail was written for; (2) AI cost was never the
+issue — the token budget is per ACCOUNT, so five plan files cost no more than
+one; (3) anyone who wants the app themselves can already open a **free**
+account, so the tier only ever sold ONE person the ability to manage others —
+a carer, not a household. If revived: client role + a `family` tier, never a
+trainer role (every business gate tests role, so staying `client` enforces the
+guardrail for free).
+
+**Queue now:** 1) connector chart images. 2) ⚖️ referral CASH payouts — counsel
+first. Nothing else outstanding.
 
 ---
 
