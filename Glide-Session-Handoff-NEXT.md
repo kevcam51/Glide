@@ -125,10 +125,13 @@ F30/186lb 464→362 · F55/160lb 399→299 · M65/210lb 524→396.
 **Incomplete profiles are byte-identical to the old formula** (verified), so
 unfinished plans see no change — that fallback must stay.
 
-Judgement call worth knowing: Compendium MET values are *defined* against the
-3.5 ml/kg/min standard, so anchoring to personal RMR is a deliberate refinement
-("corrected METs"), more accurate per individual. If Kevin ever wants the
-textbook numbers back, it is one function.
+**✅ DECIDED — Kevin, S183k: personal RMR stays. Do not revert this.** Compendium
+MET values are *defined* against the 3.5 ml/kg/min standard, so anchoring to a
+person's own RMR is a deliberate departure from the published tables. Kevin's
+call, stated plainly: "I want the personal RMR because I wanted it personalized
+per person and to be as accurate as possible." Accuracy for the individual beats
+matching the textbook. A future session that notices the divergence should leave
+it alone — it is a decision, not a bug.
 
 ### S183j — custom exercises now scale to the person (SHIPPED)
 Kevin asked for custom exercises with an AI burn estimate driven by the
