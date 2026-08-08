@@ -180,6 +180,7 @@ exports.passkeyLoginVerify = require("./webauthn").passkeyLoginVerify;
 // AI food estimate for the manual meal tracker (S89c) — cheap direct call,
 // same daily budget + trial gate as the chat. See functions/aichat.js.
 exports.estimateFood = require("./aichat").estimateFood;
+exports.estimateExercise = require("./aichat").estimateExercise; // MET estimate for a custom exercise (S183j)
 exports.aiSeats = require("./aichat").aiSeats; // AI-client seats view (S176f)
 // Stripe billing v1 (S89) — simple subscriptions; webhook is the only writer
 // of profile.subscriptionStatus. See functions/billing.js for setup steps.

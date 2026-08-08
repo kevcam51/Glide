@@ -2175,15 +2175,51 @@ const advanceOnEnter = (e) => {
 // pictogram family. Stored as iconName; exerciseCategory() honors it everywhere.
 const CUSTOM_EX_ICONS = ["dumbbell","muscle","liftup","liftdown","pullup","pullrow","core","legs","carry","run","walk","bike","swim","row","stairs","boxing","kick","jumprope","hike","basketball","soccer","tennis","volleyball","football","pingpong","dance","skate","yoga","bolt","flame","water"];
 
-function CustomExerciseCreator({ exerciseType, onAdd }) {
+// S183j: a custom exercise is stored as a MET (intensity per kilogram), not a
+// flat calories/minute. That is the whole difference between "this burns 300
+// cal for everyone" and "this burns what it should for the person doing it" —
+// a trainer defines the exercise once and it adapts across their whole roster,
+// using the same formula every built-in exercise uses.
+//
+// People don't think in METs, so nobody is asked for one: the AI estimates it
+// from the name, and the manual fallback is calories/minute at THIS plan's
+// weight, converted on the way in.
+function CustomExerciseCreator({ exerciseType, onAdd, weightLbs }) {
   const [show, setShow] = useState(false);
   const [name, setName] = useState("");
   const [calPerMin, setCalPerMin] = useState("");
+  const [met, setMet] = useState(null);          // set by the AI estimate
+  const [assumed, setAssumed] = useState("");
+  const [estimating, setEstimating] = useState(false);
+  const [estErr, setEstErr] = useState("");
   const [category, setCategory] = useState(exerciseType === "cardio" ? "Custom Cardio" : "Custom Strength");
   const [iconName, setIconName] = useState(exerciseType === "cardio" ? "bolt" : "dumbbell");
   const [saved, setSaved] = useState(false);
 
-  const canSave = name.trim() && calPerMin && Number(calPerMin) > 0;
+  const refWeight = Number(weightLbs) > 0 ? Number(weightLbs) : 0;
+  const kg = refWeight * 0.453592;
+  // Whichever the user gave us, resolve to a MET.
+  const effMet = met != null ? Number(met)
+    : (Number(calPerMin) > 0 && kg > 0 ? (Number(calPerMin) * 60) / kg : 0);
+  const canSave = !!name.trim() && effMet > 0;
+  const preview = effMet > 0 && refWeight > 0
+    ? Math.round(effMet * kg * 0.5)   // 30 minutes
+    : null;
+
+  const estimate = async () => {
+    if (!name.trim() || estimating) return;
+    setEstimating(true); setEstErr("");
+    try {
+      const r = await callEstimateExercise({ name: name.trim(), type: exerciseType });
+      const d = (r && r.data) || {};
+      if (d.met > 0) { setMet(d.met); setAssumed(d.assumed || ""); setCalPerMin(""); }
+      else setEstErr("Couldn't estimate that one — enter calories per minute instead.");
+    } catch (e) {
+      // AI can be off (trial ended, budget spent). The manual path still works,
+      // so this is a convenience that failed, not a dead end.
+      setEstErr("AI estimate unavailable — enter calories per minute instead.");
+    } finally { setEstimating(false); }
+  };
 
   const handleSave = () => {
     const ex = {
@@ -2191,17 +2227,19 @@ function CustomExerciseCreator({ exerciseType, onAdd }) {
       label: name.trim(),
       icon: "star",
       iconName,
-      met: 0,
-      calPerMin: Number(calPerMin),
+      // Stored as a MET so exBurn scales it per person. No calPerMin is written:
+      // exBurn checks met first, and leaving a stale flat rate behind would be a
+      // second source of truth waiting to disagree.
+      met: Math.max(1, Math.min(20, Math.round(effMet * 10) / 10)),
+      refWeightLbs: refWeight || null,   // what the estimate was framed against
       cat: category,
-      note: "Custom exercise — user-entered calorie estimate",
+      note: met != null ? "Custom exercise — AI-estimated intensity" : "Custom exercise — user-entered intensity",
       isCustom: true,
       type: exerciseType,
     };
     onAdd(ex);
     setSaved(true);
-    setName("");
-    setCalPerMin("");
+    setName(""); setCalPerMin(""); setMet(null); setAssumed(""); setEstErr("");
     setTimeout(() => { setSaved(false); setShow(false); }, 1500);
   };
 
@@ -2231,12 +2269,43 @@ function CustomExerciseCreator({ exerciseType, onAdd }) {
             </div>
           </div>
           <div className="mb-4">
-            <label className={WZ.label}>Estimated Calories Burned Per Minute <span className={WZ.hint}>your best estimate</span></label>
-            <input type="text" inputMode="decimal" placeholder="e.g. 8" value={calPerMin}
-              onChange={e=>setCalPerMin(e.target.value.replace(/[^0-9.]/g,""))} className={WZ.input} />
-            <div className="text-[.7rem] text-muted mt-1 leading-snug">
-              Reference: walking ≈ 4 cal/min, jogging ≈ 9 cal/min, intense HIIT ≈ 14 cal/min. If unsure, estimate conservatively.
+            <label className={WZ.label}>How hard is it? <span className={WZ.hint}>let the AI judge it, or enter it yourself</span></label>
+            <button onClick={estimate} disabled={!name.trim() || estimating}
+              className="w-full min-h-[42px] rounded-lg border border-primary bg-transparent text-primary font-bold text-[.86rem] cursor-pointer disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
+              <Icon name="sparkle" size={15} color="currentColor" />
+              {estimating ? "Estimating…" : met != null ? "Re-estimate with AI" : "Estimate with AI"}
+            </button>
+            {met != null && (
+              <div className="mt-2 rounded-lg px-3 py-2 text-[.78rem] leading-relaxed" style={{ background: "rgba(8,220,224,.08)" }}>
+                <b className="text-primary">Intensity {met}</b>
+                {assumed ? <span className="text-muted"> — assumed {assumed}</span> : null}
+              </div>
+            )}
+            {estErr && <div className="mt-1.5 text-[.72rem] text-[var(--yellow,#fbbf24)]">{estErr}</div>}
+            <div className="mt-2.5">
+              <label className={WZ.label} style={{ fontSize: ".72rem" }}>
+                Or enter calories per minute {refWeight ? <span className={WZ.hint}>at {refWeight} lbs</span> : null}
+              </label>
+              <input type="text" inputMode="decimal" placeholder="e.g. 8" value={calPerMin}
+                onChange={e=>{ setCalPerMin(e.target.value.replace(/[^0-9.]/g,"")); setMet(null); setAssumed(""); }}
+                className={WZ.input} />
+              <div className="text-[.7rem] text-muted mt-1 leading-snug">
+                Reference: walking ≈ 4 cal/min, jogging ≈ 9 cal/min, intense HIIT ≈ 14 cal/min. If unsure, estimate conservatively.
+              </div>
             </div>
+            {/* The point of the whole change, said plainly: this number follows
+                the person, it isn't fixed to whoever created the exercise. */}
+            {preview != null && (
+              <div className="mt-2 text-[.74rem] leading-relaxed text-muted">
+                ≈ <b className="text-fg">{preview} cal</b> for 30 min at {refWeight} lbs — and it scales automatically for anyone
+                else who does it, from their own weight.
+              </div>
+            )}
+            {!refWeight && effMet > 0 && (
+              <div className="mt-2 text-[.72rem] text-[var(--yellow,#fbbf24)]">
+                Add a bodyweight to this plan to see the calorie preview.
+              </div>
+            )}
           </div>
           <button
             className="w-full min-h-[42px] rounded-lg border-none bg-[#b57bff] text-[#0b0b12] font-bold text-[.9rem] cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed"
@@ -2244,7 +2313,7 @@ function CustomExerciseCreator({ exerciseType, onAdd }) {
             {saved ? "Added!" : `Save Custom Exercise`}
           </button>
           <div className="text-[.6rem] text-muted mt-1.5 italic text-center">
-            Custom exercises are labeled "User Estimate" to distinguish them from Glidna's library. Calorie values are your estimates, not validated.
+            Custom exercises are labeled "User Estimate" to distinguish them from Glidna's library. Intensity is an estimate, not a validated measurement.
           </div>
         </div>
       )}
@@ -2849,8 +2918,18 @@ function findStrengthEx(id, customExercises) {
 // Burn for any resolved exercise — custom uses calPerMin × minutes; standard uses MET.
 function exBurn(ex, weightLbs, minutes) {
   if (!ex || !minutes) return 0;
+  // MET FIRST (S183j). A MET is intensity per kilogram, so it produces the right
+  // burn for whoever is actually doing the exercise — the whole point of letting
+  // a trainer define one exercise and have it adapt across their roster.
+  //
+  // The calPerMin fallback is deliberate and must stay: custom exercises created
+  // before S183j were saved as a FLAT rate (met:0), and heart-rate cardio has no
+  // MET at all — cardioExFor synthesises calPerMin from the Keytel formula,
+  // which is already personalised. Reordering these two would silently zero
+  // every one of them.
+  if (Number(ex.met) > 0) return Math.round(Number(ex.met) * weightLbs * 0.453592 * (minutes / 60));
   if (ex.calPerMin) return Math.round(Number(ex.calPerMin) * minutes);
-  return Math.round((Number(ex.met) || 0) * weightLbs * 0.453592 * (minutes / 60));
+  return 0;
 }
 // A cardio session is EITHER a normal exercise ({type,duration}) OR a heart-rate
 // entry ({type:"hr", hr, duration}). This resolves either to the exercise-like
@@ -3185,7 +3264,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
         })}
       </div>
 
-      <CustomExerciseCreator exerciseType="strength" onAdd={(ex)=>onChange("customExercises",[...(data.customExercises||[]),ex])} />
+      <CustomExerciseCreator exerciseType="strength" weightLbs={data.weightLbs} onAdd={(ex)=>onChange("customExercises",[...(data.customExercises||[]),ex])} />
 
       {DAYS.every(day => getSessions(day).length === 0) && (
         <div className={WZW.warn}>All 7 days are set to rest — no worries! Your results will still work. Adding even 1–2 strength days will unlock muscle gain projections and EPOC afterburn data.</div>
@@ -3456,7 +3535,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
         })}
       </div>
 
-      <CustomExerciseCreator exerciseType="cardio" onAdd={(ex)=>onChange("customExercises",[...(data.customExercises||[]),ex])} />
+      <CustomExerciseCreator exerciseType="cardio" weightLbs={data.weightLbs} onAdd={(ex)=>onChange("customExercises",[...(data.customExercises||[]),ex])} />
 
       {DAYS.every(day => !Array.isArray(data.cardio[day]) || data.cardio[day].length === 0) && (
         <div className={WZW.warn}>All 7 days are set to rest — that's totally fine! Your results will still calculate based on diet alone. But if you'd like to add even one cardio session, it'll speed things up.</div>
@@ -12644,8 +12723,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           Once added it appears in the Add Cardio / Add Strength pickers above. */}
       {onAddCustomExercise && (
         <div style={{marginBottom:"16px"}}>
-          <CustomExerciseCreator exerciseType="strength" onAdd={onAddCustomExercise} />
-          <CustomExerciseCreator exerciseType="cardio" onAdd={onAddCustomExercise} />
+          <CustomExerciseCreator exerciseType="strength" weightLbs={(data||{}).weightLbs} onAdd={onAddCustomExercise} />
+          <CustomExerciseCreator exerciseType="cardio" weightLbs={(data||{}).weightLbs} onAdd={onAddCustomExercise} />
         </div>
       )}
             </>
@@ -17659,6 +17738,7 @@ const callListTeam = httpsCallable(functions, "listTeam");
 const callRemoveSubTrainer = httpsCallable(functions, "removeSubTrainer");
 const callEstimateFood = httpsCallable(functions, "estimateFood"); // AI macro estimate in the manual tracker (S89c)
 const callReviewMeal = httpsCallable(functions, "reviewMeal");     // trainer confirms/adjusts a tagged meal (S183g)
+const callEstimateExercise = httpsCallable(functions, "estimateExercise"); // MET estimate for a custom exercise (S183j)
 // Session card-on-file (S101): hosted Checkout in setup mode + the consent record.
 const callCreateCardSetup = httpsCallable(functions, "createSessionSetupIntent");
 const callRecordCardConsent = httpsCallable(functions, "recordSessionConsent");

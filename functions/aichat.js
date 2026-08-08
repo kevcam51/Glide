@@ -766,6 +766,73 @@ exports.aiSeats = onCall({ region: "us-central1", maxInstances: 10 }, async (req
 // then taps Add). No tools, no chat system prompt — a few hundred tokens per
 // call. Rides the SAME daily token budget + trial gate as the chat, so it
 // can't be farmed and it locks with the AI layer at trial expiry.
+// Estimate the INTENSITY of a made-up exercise, as a MET (S183j).
+//
+// Why a MET and not calories: a MET is intensity per kilogram, so the same
+// number produces the right burn for a 120 lb client and a 250 lb one through
+// the formula every built-in exercise already uses. Asking the model for
+// "calories per minute" would bake in one body and be wrong for everyone else —
+// which is exactly how custom exercises behaved before this.
+exports.estimateExercise = onCall(
+  { secrets: [ANTHROPIC_API_KEY], region: "us-central1", maxInstances: 10 },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
+    const name = String((request.data && request.data.name) || "").trim().slice(0, 80);
+    const type = (request.data && request.data.type) === "cardio" ? "cardio" : "strength";
+    const notes = String((request.data && request.data.notes) || "").trim().slice(0, 300);
+    if (!name) throw new HttpsError("invalid-argument", "Name the exercise first.");
+    const db = admin.firestore();
+    const profile = (await db.doc(`users/${uid}`).get()).data() || {};
+    if (trialExpiredFor(profile)) {
+      throw new HttpsError("permission-denied", TRIAL_EXPIRED_MSG, { reason: "trial-expired" });
+    }
+    const usageRef = db.doc(`users/${uid}/aiUsage/${todayKey()}`);
+    const usageDoc = (await usageRef.get()).data() || {};
+    const used = usageDoc.tokens || 0;
+    const budget = (BUDGETS[tierFor(profile)] || BUDGETS.client) + (usageDoc.boost || 0);
+    if (used >= budget) {
+      throw new HttpsError("resource-exhausted", "You've reached today's AI usage limit. It resets tomorrow.");
+    }
+    const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+    let msg;
+    try {
+      msg = await client.messages.create({
+        model: MODEL, max_tokens: 200,
+        system: "You estimate exercise intensity using the MET scale (Compendium of Physical Activities). "
+          + 'Reply with ONLY a JSON object, no prose: {"met":number,"assumed":"short description of the effort you assumed"}. '
+          + "MET is metabolic equivalent: 1 = sitting still, 3 = light effort, 6 = moderate, 8-10 = vigorous, "
+          + "12+ = very hard (sprint intervals, competitive sport). Reference points: walking 3mph = 3.5, "
+          + "weight training moderate = 5, cycling 14mph = 10, running 7mph = 11, burpees = 8, rowing hard = 12. "
+          + "Strength work is usually 3-6 unless it is circuit or explosive. Be realistic and slightly "
+          + "conservative — over-estimating burn makes someone eat more than they should. "
+          + "Range 1-20. `assumed` says what effort level you pictured, e.g. 'steady moderate pace'.",
+        messages: [{ role: "user", content: `${type} exercise: ${name}${notes ? `\nDetail: ${notes}` : ""}` }],
+      });
+    } catch (e) {
+      console.error("estimateExercise API error:", e && e.message);
+      throw new HttpsError("internal", "Couldn't estimate right now. Please try again.");
+    }
+    const u = msg.usage || {};
+    await aiusage.recordUsage(db, uid, {
+      input: u.input_tokens || 0, output: u.output_tokens || 0,
+      cacheWrite: u.cache_creation_input_tokens || 0, cacheRead: u.cache_read_input_tokens || 0,
+      model: MODEL,
+    }, "estimateExercise").catch((e) => console.error("estimateExercise usage write failed:", e && e.message));
+    const text = ((msg.content || []).find((b) => b.type === "text") || {}).text || "";
+    const m = text.match(/\{[\s\S]*\}/);
+    let out = null;
+    try { out = m && JSON.parse(m[0]); } catch { /* handled below */ }
+    const met = out && Number(out.met);
+    if (!Number.isFinite(met) || met <= 0) {
+      throw new HttpsError("internal", "Couldn't estimate that one — try describing it differently.");
+    }
+    return {
+      met: Math.min(20, Math.max(1, Math.round(met * 10) / 10)),
+      assumed: String((out && out.assumed) || "").slice(0, 120),
+    };
+  });
+
 exports.estimateFood = onCall(
   { secrets: [ANTHROPIC_API_KEY], region: "us-central1", maxInstances: 10 },
   async (request) => {

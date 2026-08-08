@@ -639,6 +639,10 @@ function weeklyPlanBurn(d) {
     if (!s || !s.duration) return 0;
     if (s.type === "hr") return Math.round(hrCalPerMin(s.hr, d.gender, d.weightLbs, effectiveAge(d)) * s.duration);
     const ce = custom[s.type];
+    // MET first, mirroring exBurn in src/App.jsx (S183j) — a custom exercise
+    // now scales with the person doing it. The flat calPerMin path stays for
+    // exercises created before that; dropping it would zero their burn.
+    if (ce && Number(ce.met) > 0) return Math.round(Number(ce.met) * w * 0.453592 * (s.duration / 60));
     if (ce && ce.calPerMin) return Math.round(Number(ce.calPerMin) * s.duration);
     return Math.round((MET[s.type] || 0) * w * 0.453592 * (s.duration / 60));
   };
@@ -1293,17 +1297,18 @@ function buildTools(role, opts = {}) {
       description:
         "Create a CUSTOM exercise for a movement not in the standard library (e.g. Sled Push, Battle Ropes). Returns its "
         + "id — use it in propose_workout/set_workout_schedule. Only use when nothing in list_exercises fits. "
-        + "Estimate calPerMin (calories/min: walking ~4, jogging ~9, intense HIIT ~14). "
+        + "Estimate its MET intensity (1 = rest, 3 = light, 6 = moderate, 8-10 = vigorous, 12+ = very hard; walking 3mph = 3.5, moderate weights = 5, running 7mph = 11). MET is per-kilogram, so the burn adapts to whoever does it. "
         + (isTrainer ? "Pass clientId to add it to a client's plan." : "Adds to YOUR plan."),
       input_schema: {
         type: "object",
         properties: {
           name: { type: "string", description: "Exercise name, e.g. 'Sled Push'" },
           type: { type: "string", enum: ["strength", "cardio"], description: "Whether it's strength or cardio" },
-          calPerMin: { type: "number", description: "Estimated calories burned per minute (1–30), used for its burn" },
+          met: { type: "number", description: "MET intensity 1-20. Preferred: scales with the person's bodyweight." },
+          calPerMin: { type: "number", description: "Legacy alternative to met - calories/min at THIS plan's weight; converted to a MET." },
           ...clientIdProp, ...localPlanProp,
         },
-        required: ["name", "type", "calPerMin"],
+        required: ["name", "type", "met"],
       },
     },
     {
@@ -3038,21 +3043,34 @@ async function runTool(name, input, ctx) {
     if (!exType) return { error: "type must be 'strength' or 'cardio'." };
     const label = String(input.name || "").trim().slice(0, 60);
     if (!label) return { error: "Provide an exercise name." };
-    const calPerMin = Math.max(1, Math.min(30, Math.round((Number(input.calPerMin) || 0) * 10) / 10));
-    if (!calPerMin) return { error: "Provide a calPerMin estimate (1–30)." };
+    // MET is preferred (it scales with bodyweight); calPerMin is still accepted
+    // so older callers keep working, and is converted using this plan's weight.
+    const wLbs = Number((await activePlanData(db, uid, planOverride)).data.weightLbs) || 0;
+    const rawMet = Number(input.met) || 0;
+    const rawCpm = Number(input.calPerMin) || 0;
+    let met = rawMet > 0 ? rawMet
+      : (rawCpm > 0 && wLbs > 0 ? (rawCpm * 60) / (wLbs * 0.453592) : 0);
+    met = Math.max(1, Math.min(20, Math.round(met * 10) / 10));
+    if (!rawMet && !rawCpm) {
+      return { error: "Provide a met (intensity, 1–20) — or calPerMin and I'll convert it." };
+    }
     const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
     const d = wrap.data;
     if (!Array.isArray(d.customExercises)) d.customExercises = [];
     // Dedupe by lowercased label + type — reuse the existing id if already there.
     const existing = d.customExercises.find((e) => e && e.type === exType && (e.label || "").toLowerCase() === label.toLowerCase());
     if (existing) return { ok: true, exercise: { id: existing.id, label: existing.label, type: exType }, note: "Already exists — reusing it." };
-    const ex = { id: randId("custom_"), label, icon: "⭐", met: 0, calPerMin,
+    const ex = { id: randId("custom_"), label, icon: "⭐", met,
       cat: exType === "cardio" ? "Custom Cardio" : "Custom Strength", note: "Custom exercise — AI-estimated", isCustom: true, type: exType };
     d.customExercises.push(ex);
     await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
     await appendHistory(db, uid, planId, ctx, `added a custom exercise: ${label}`);
     if (planOverride) await touchLocalIndex(db, uid, planOverride);
-    return { ok: true, exercise: { id: ex.id, label: ex.label, type: exType, calPerMin } };
+    // Report the burn for THIS plan so the answer is concrete ("~250 cal in
+    // 30 min") rather than a MET number nobody thinks in.
+    return { ok: true, exercise: { id: ex.id, label: ex.label, type: exType, met },
+      burnPer30min: wLbs > 0 ? Math.round(met * wLbs * 0.453592 * 0.5) : null,
+      note: "Intensity is stored as a MET, so the calorie burn adapts to whoever does it." };
   }
 
   if (name === "set_workout_schedule") {
