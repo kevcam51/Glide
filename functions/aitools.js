@@ -635,16 +635,28 @@ function weeklyPlanBurn(d) {
   const w = Number(d.weightLbs) || 0;
   const custom = {};
   (Array.isArray(d.customExercises) ? d.customExercises : []).forEach((e) => { if (e && e.id) custom[e.id] = e; });
+  // S183k: 1 MET = THIS person's resting rate, not the 1 kcal/kg/hr population
+  // shortcut. MUST match restingKcalPerMin in src/App.jsx — if the server and
+  // the app disagree the AI quotes a target no screen shows (the S86 lesson).
+  const restMin = (() => {
+    const wl = Number(d.weightLbs) || 0;
+    if (!wl) return 0;
+    const age = effectiveAge(d);
+    if (d.gender && Number(age) > 0 && Number(d.heightFt) > 0) {
+      const bmr = calcBMR(d.gender, wl, Number(d.heightFt), Number(d.heightIn) || 0, age);
+      if (bmr > 0 && isFinite(bmr)) return bmr / 1440;
+    }
+    return (wl * 0.453592) / 60;
+  })();
   const burnOf = (s) => {
     if (!s || !s.duration) return 0;
     if (s.type === "hr") return Math.round(hrCalPerMin(s.hr, d.gender, d.weightLbs, effectiveAge(d)) * s.duration);
     const ce = custom[s.type];
-    // MET first, mirroring exBurn in src/App.jsx (S183j) — a custom exercise
-    // now scales with the person doing it. The flat calPerMin path stays for
-    // exercises created before that; dropping it would zero their burn.
-    if (ce && Number(ce.met) > 0) return Math.round(Number(ce.met) * w * 0.453592 * (s.duration / 60));
+    // MET first, mirroring exBurn in src/App.jsx. The flat calPerMin path stays
+    // for exercises created before S183j; dropping it would zero their burn.
+    if (ce && Number(ce.met) > 0) return Math.round(Number(ce.met) * restMin * s.duration);
     if (ce && ce.calPerMin) return Math.round(Number(ce.calPerMin) * s.duration);
-    return Math.round((MET[s.type] || 0) * w * 0.453592 * (s.duration / 60));
+    return Math.round((MET[s.type] || 0) * restMin * s.duration);
   };
   let total = 0;
   for (const day of DAYS) {

@@ -259,9 +259,9 @@ function tzSessionBurn(ci, weightLbs) {
   return calcBurn(TZ_SESSION_MET, w, mins);
 }
 
-function calcBurn(met, weightLbs, minutes) {
+function calcBurn(met, weightLbs, minutes, data) {
   if (!met || !minutes) return 0;
-  return Math.round(met * weightLbs * 0.453592 * (minutes / 60));
+  return Math.round(met * restingKcalPerMin(data, weightLbs) * minutes);
 }
 
 // ─── Heart-rate-based calorie burn (Keytel et al., 2005) ────────────────────
@@ -2888,9 +2888,9 @@ const ST_DURATIONS = [20,30,45,60,75,90];
 const defaultStrength = Object.fromEntries(DAYS.map(d=>[d,[]]));
 const REST_ST = { id:"rest_st", label:"Rest Day", icon:"😴", met:0 };
 
-function calcStrengthBurn(met, weightLbs, minutes) {
+function calcStrengthBurn(met, weightLbs, minutes, data) {
   if (!met || !minutes) return 0;
-  return Math.round(met * weightLbs * 0.453592 * (minutes / 60));
+  return Math.round(met * restingKcalPerMin(data, weightLbs) * minutes);
 }
 
 // ── Custom-exercise support ─────────────────────────────────────────────────
@@ -2916,7 +2916,33 @@ function findStrengthEx(id, customExercises) {
     || REST_ST;
 }
 // Burn for any resolved exercise — custom uses calPerMin × minutes; standard uses MET.
-function exBurn(ex, weightLbs, minutes) {
+// ── One burn formula for EVERY exercise (S183k, Kevin) ──────────────────────
+// A MET is "how many times your RESTING metabolism this costs". The textbook
+// shortcut treats 1 MET as 1 kcal per kg per hour, which is really an average
+// young adult male — so the same shortcut over-states burn for women, for older
+// people, and for anyone whose resting rate is simply lower.
+//
+// We already ask for sex, age and height to compute BMR, so the honest version
+// costs nothing extra: anchor 1 MET to THIS person's own resting rate. Every
+// exercise, built-in or custom, then runs through the identical formula and
+// adapts to whoever is doing it.
+//
+// Falls back to the classic shortcut when a profile is incomplete, and that
+// fallback is arithmetically IDENTICAL to the old formula — an unfinished plan
+// sees no change at all.
+function restingKcalPerMin(data, weightLbs) {
+  const w = Number(weightLbs) || Number((data || {}).weightLbs) || 0;
+  if (!w) return 0;
+  const d = data || {};
+  const age = effectiveAge(d);
+  if (d.gender && Number(age) > 0 && Number(d.heightFt) > 0) {
+    const bmr = calcBMR(d.gender, w, Number(d.heightFt), Number(d.heightIn) || 0, age);
+    if (bmr > 0 && isFinite(bmr)) return bmr / 1440;   // kcal per minute at rest
+  }
+  return (w * 0.453592) / 60;   // 1 MET ≈ 1 kcal/kg/hr
+}
+
+function exBurn(ex, weightLbs, minutes, data) {
   if (!ex || !minutes) return 0;
   // MET FIRST (S183j). A MET is intensity per kilogram, so it produces the right
   // burn for whoever is actually doing the exercise — the whole point of letting
@@ -2927,7 +2953,7 @@ function exBurn(ex, weightLbs, minutes) {
   // MET at all — cardioExFor synthesises calPerMin from the Keytel formula,
   // which is already personalised. Reordering these two would silently zero
   // every one of them.
-  if (Number(ex.met) > 0) return Math.round(Number(ex.met) * weightLbs * 0.453592 * (minutes / 60));
+  if (Number(ex.met) > 0) return Math.round(Number(ex.met) * restingKcalPerMin(data, weightLbs) * minutes);
   if (ex.calPerMin) return Math.round(Number(ex.calPerMin) * minutes);
   return 0;
 }
@@ -3205,7 +3231,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
           const isRest = sessions.length === 0;
           const totalBurned = sessions.reduce((s,sess)=>{
             const ex = getEx(sess.type);
-            return s + exBurn(ex, Number(data.weightLbs), sess.duration);
+            return s + exBurn(ex, Number(data.weightLbs), sess.duration, data);
           }, 0);
           const isOpen = openDay === day;
           return (
@@ -3225,7 +3251,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
                 <div className={WZW.dayBody}>
                   {sessions.map((sess, idx) => {
                     const ex = getEx(sess.type);
-                    const burn = exBurn(ex, Number(data.weightLbs), sess.duration);
+                    const burn = exBurn(ex, Number(data.weightLbs), sess.duration, data);
                     return (
                       <div key={idx} className="py-2.5" style={{borderBottom:idx<sessions.length-1?"1px solid var(--color-border)":"none"}}>
                         {sessions.length > 1 && (
@@ -3454,7 +3480,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
           const isRest = sessions.length === 0;
           const totalBurned = sessions.reduce((s,sess)=>{
             const co = cardioExFor(sess, data);
-            return s + exBurn(co, Number(data.weightLbs), sess.duration);
+            return s + exBurn(co, Number(data.weightLbs), sess.duration, data);
           }, 0);
           const isOpen = openDay===day;
           return (
@@ -3474,7 +3500,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
                 <div className={WZW.dayBody}>
                   {sessions.map((sess, idx) => {
                     const co = cardioExFor(sess, data);
-                    const burn = exBurn(co, Number(data.weightLbs), sess.duration);
+                    const burn = exBurn(co, Number(data.weightLbs), sess.duration, data);
                     return (
                       <div key={idx} className="py-2.5" style={{borderBottom:idx<sessions.length-1?"1px solid var(--color-border)":"none"}}>
                         {sessions.length > 1 && (
@@ -3892,7 +3918,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
     const sessions = Array.isArray(cardio[day]) ? cardio[day] : [];
     const sessionData = sessions.filter(s=>s.type!=="rest").map(s=>{
       const co = cardioExFor(s, data);
-      return { co, duration:s.duration, burned:exBurn(co, Number(weightLbs), s.duration), type:s.type };
+      return { co, duration:s.duration, burned:exBurn(co, Number(weightLbs), s.duration, data), type:s.type };
     });
     const burned = sessionData.reduce((s,d)=>s+d.burned, 0);
     return { day, sessions:sessionData, burned, type:sessions.length>0?sessions[0].type:"rest",
@@ -3911,7 +3937,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
     const sessions = Array.isArray((data.strength||{})[day]) ? data.strength[day] : [];
     const sessionData = sessions.map(s=>{
       const ex = allStrEx.find(e=>e.id===s.type) || REST_ST;
-      return { ex, duration:s.duration, burned:exBurn(ex, Number(weightLbs), s.duration), type:s.type };
+      return { ex, duration:s.duration, burned:exBurn(ex, Number(weightLbs), s.duration, data), type:s.type };
     });
     const burned = sessionData.reduce((s,d)=>s+d.burned, 0);
     return { day, sessions:sessionData, burned, type:sessions.length>0?sessions[0].type:"rest_st",
@@ -4245,7 +4271,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
             const isRest = sessions.length === 0;
             const totalBurnDay = sessions.reduce((s,sess)=>{
               const c = cardioExFor(sess, data);
-              return s + exBurn(c, Number(weightLbs), sess.duration);
+              return s + exBurn(c, Number(weightLbs), sess.duration, data);
             },0);
             const isOpen = openResultDay === day;
             return (
@@ -4267,7 +4293,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
                   <div className="drc-edit-body">
                     {sessions.map((sess, idx)=>{
                       const co = cardioExFor(sess, data);
-                      const burn = exBurn(co, Number(weightLbs), sess.duration);
+                      const burn = exBurn(co, Number(weightLbs), sess.duration, data);
                       return (
                         <div key={idx} style={{padding:"10px 0",borderBottom:idx<sessions.length-1?"1px solid var(--border)":"none"}}>
                           {sessions.length > 1 && (
@@ -4425,7 +4451,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
                   <div className="drc-edit-body">
                     {allSessions.map((sess,idx)=>{
                       const co = cardioExFor(sess, data);
-                      const burn = exBurn(co, Number(weightLbs), sess.duration);
+                      const burn = exBurn(co, Number(weightLbs), sess.duration, data);
                       return (
                         <div key={idx} style={{padding:"10px 0",borderBottom:idx<allSessions.length-1?"1px solid var(--border)":"none"}}>
                           {allSessions.length>1 && <div style={{fontSize:".7rem",color:"var(--muted)",fontWeight:700,letterSpacing:"1px",textTransform:"uppercase",marginBottom:"6px"}}>Session {idx+1}</div>}
@@ -5112,7 +5138,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
               <div className="drc-edit-body">
                 {allSessions.map((sess,idx)=>{
                   const ex = getEx(sess.type);
-                  const burn = exBurn(ex, Number(weightLbs), sess.duration);
+                  const burn = exBurn(ex, Number(weightLbs), sess.duration, data);
                   const catColor = rawColor[ex.cat] || "var(--accent)";
                   return (
                     <div key={idx} style={{padding:"10px 0",borderBottom:idx<allSessions.length-1?"1px solid var(--border)":"none"}}>
@@ -15198,11 +15224,11 @@ function computeClientCalories(d) {
   DAYS.forEach((day) => {
     (Array.isArray((d.cardio || {})[day]) ? d.cardio[day] : []).forEach((s) => {
       const co = cardioExFor(s, d);
-      cardio += exBurn(co, w, s.duration);
+      cardio += exBurn(co, w, s.duration, d);
     });
     (Array.isArray((d.strength || {})[day]) ? d.strength[day] : []).forEach((s) => {
       const ex = allStrEx.find((e) => e.id === s.type) || REST_ST;
-      strength += exBurn(ex, w, s.duration);
+      strength += exBurn(ex, w, s.duration, d);
     });
   });
   const auto = Math.max(1200, Math.round(tdee - dailyDeficitOf(d) + (isEatback(d) ? (cardio + strength) / 7 : 0)));
@@ -26617,7 +26643,7 @@ export default function App() {
     const sessions = Array.isArray(raw) ? raw : [];
     const wkData = sessions.map(w => {
       const co = cardioExFor(w, data);
-      return { co, duration:w.duration, burned:exBurn(co, Number(data.weightLbs), w.duration), type:w.type, hr:w.hr };
+      return { co, duration:w.duration, burned:exBurn(co, Number(data.weightLbs), w.duration, data), type:w.type, hr:w.hr };
     });
     return { day, workouts:wkData, burned:wkData.reduce((s,w)=>s+w.burned,0) };
   });
@@ -26626,7 +26652,7 @@ export default function App() {
     const sessions = Array.isArray(raw) ? raw : [];
     const sData = sessions.map(w => {
       const ex = allStrEx.find(e=>e.id===w.type)||REST_ST;
-      return { ex, duration:w.duration, burned:exBurn(ex, Number(data.weightLbs), w.duration), type:w.type };
+      return { ex, duration:w.duration, burned:exBurn(ex, Number(data.weightLbs), w.duration, data), type:w.type };
     });
     return { day, sessions:sData, burned:sData.reduce((s,w)=>s+w.burned,0) };
   });
