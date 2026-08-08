@@ -139,8 +139,22 @@ So the composer and the trainer's confirm card both live in `MessageThread`.
   degrades to typing when AI is off, and a photo downscaled to ~15KB stored on
   the review row. New `reviewMeal` callable backs the trainer's card.
 
-**⏭ Left to do:** real push + the matching Notification Center toggle (deliberately
-not added yet — a toggle gating nothing is the S183b silent no-op).
+**✅ PUSH SHIPPED (S183h).** Both directions, plus the `mealReviews` toggle for
+both roles (it now gates something real, so it was safe to add).
+- The notifier is a TRIGGER, `onMealReviewWritten`, not the tools — **the chat
+  composer writes the review doc client-side with no function in the path**, so
+  a tool could never have notified for the main entry point. The trigger sees
+  both write paths and both directions (new pending → trainer; pending→done →
+  client). The tools deliberately no longer notify; don't re-add it there.
+- ⚠️ **DOUBLE-NOTIFY, one half pre-existing:** a pointer message is mirrored into
+  chat next to the kv write that is the real record, and that kv write has its
+  own trigger — so `onDmCreated` fired too and the trainer was buzzed TWICE per
+  tagged meal. **Every to-do had the same problem since S124.** `onDmCreated`
+  now returns early for `kind === "meal" || "todo"`. If a third pointer kind is
+  ever added, add it to that guard.
+- An adjusted review row used to keep the client's ORIGINAL numbers, so the
+  "is now N cal" message quoted the figure just replaced. Corrections land on
+  the row now, with the old values under `original`.
 
 ### 🐛 S183g — a pre-existing bug worth knowing about (FIXED)
 `MessageThread`, `SessionsPanel` and both `NotesPanel` overlays were nested
