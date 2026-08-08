@@ -13345,25 +13345,22 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll }) {
           {/* Tap to expand (S97v, Kevin: "it is just one pretty small box"). The
               popup gives real room and can also file the text as a Note —
               private, or shared with the trainer — using the existing notes
-              system. Once something is written the row collapses to a plain
-              "Completed" (S183p, Kevin) rather than a clipped one-line preview
-              that could never show the whole note anyway; the text itself is one
-              tap away, and a new day starts empty again. */}
+              system. The one-line preview stays as the at-a-glance summary
+              (S183p, Kevin: keep the text rather than a "Completed" label —
+              what you wrote is more use than the word for it); a written note
+              just tints the row green so a filled day still reads as done, and
+              a new day starts empty again. */}
           <div onClick={()=>setNotesOpen(true)}
             title={notesDone ? "Tap to review" : "Tap to write more"}
             style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",borderRadius:8,
               border:`1px solid ${notesDone?"color-mix(in srgb,var(--green) 30%,transparent)":"var(--border)"}`,
               background:notesDone?"color-mix(in srgb,var(--green) 7%,transparent)":"var(--s2)",
               cursor:"pointer",minHeight:"42px"}}>
-            {notesDone && <Icon name="check" size={15} color="var(--green)" />}
-            <span style={{flex:1,minWidth:0,fontSize:".86rem",fontWeight:notesDone?700:400,
-              color:notesDone?"var(--green)":"var(--muted)",
+            <span style={{flex:1,minWidth:0,fontSize:".86rem",color:notesDone?"var(--text)":"var(--muted)",
               overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-              {notesDone ? "Completed" : "How did today go?"}
+              {notes || "How did today go?"}
             </span>
-            {notesDone
-              ? <span style={{fontSize:".72rem",color:"var(--muted)",flexShrink:0}}>Review</span>
-              : <Icon name="edit" size={15} color="var(--accent)" />}
+            <Icon name={notesDone?"check":"edit"} size={15} color={notesDone?"var(--green)":"var(--accent)"} />
           </div>
         </div>
       </div>

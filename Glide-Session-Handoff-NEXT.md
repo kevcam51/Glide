@@ -39,8 +39,10 @@ Frontend: `acceptMeal` forwards the fields and the card shows the portion
   only probing the real component state showed `checkDate` hadn't moved.
 - **Textarea** grows downward as you type (capped at half the viewport) instead
   of `rows={9}` + `resize:vertical`, which could be dragged past the modal frame.
-- **Once filled the row collapses to a green ✓ "Completed · Review"**, reopens
-  with the text intact, and is empty again the next day.
+- **A written note keeps its one-line preview** and tints the row green with a
+  ✓, so a filled day reads as done without hiding what you wrote. It briefly
+  collapsed to the word "Completed" — Kevin reversed that on sight: the text is
+  more use than the label for it. Reopens with the note intact; empty next day.
 
 Deployed: the 18-function `aitools.js` set (`npm run deploy-set` — never recall
 it from memory; it drags in the three live Stripe functions unchanged). Frontend
