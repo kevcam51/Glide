@@ -104,6 +104,33 @@ a carer, not a household. If revived: client role + a `family` tier, never a
 trainer role (every business gate tests role, so staying `client` enforces the
 guardrail for free).
 
+### S183j — custom exercises now scale to the person (SHIPPED)
+Kevin asked for custom exercises with an AI burn estimate driven by the
+client's own data. The feature existed since S78 but had exactly that flaw:
+`CustomExerciseCreator` saved a FLAT `calPerMin` with `met: 0`, so a custom
+exercise burned the same for a 120 lb and a 250 lb client. Now stored as a
+**MET**, so one exercise a trainer defines is correct for every client.
+
+- New `estimateExercise` callable returns a MET + the effort it assumed.
+  **MET, not calories, on purpose** — calories bake in one body.
+- Users never see "MET": AI estimates it, manual fallback is cal/min at the
+  plan's weight, converted in. Live preview spells out that it scales.
+- ⚠️ **`exBurn` checks `met` FIRST but MUST keep the `calPerMin` branch** —
+  pre-S183j customs are flat rates, and heart-rate cardio has no MET at all
+  (`cardioExFor` synthesises calPerMin from Keytel). Dropping the fallback
+  silently zeroes both. Same order mirrored in server `weeklyPlanBurn`.
+- Verified: 265/408/531 cal at 130/200/260 lb; legacy flat at 300; HR
+  untouched; prod estimator gave sled push 8, sprints 14, stretching 2.3.
+- ⏭ **Not clicked through live:** the creator panel itself (build + pure-logic
+  + endpoint all verified). Worth one pass through the wizard's strength step.
+
+### S183i — body metrics can be back-dated (SHIPPED)
+The store was always date-keyed; the measurements hub hardcoded today, so
+catch-up entries were filed on the wrong day. Date picker added (defaults
+today, future blocked). The weight field follows the same date: a back-dated
+weigh-in does NOT touch today's daily log, and only claims "current weight"
+if no later weigh-in exists.
+
 ### S183f — meal review: client tags, trainer confirms (ENGINE SHIPPED, UI NEXT)
 Client tags a meal and sends it to their trainer; the trainer confirms, adjusts
 or rejects. **Deployed and live-verified in prod.**
