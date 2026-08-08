@@ -430,7 +430,10 @@ async function runVestNotifyPass(db) {
         const alt = (onPaidPlan && s.upgrade && s.upgrade.affordable)
           ? ` Or a free month of ${s.upgrade.label}.` : "";
         const body = (base + alt).length <= NOTIF_BODY_MAX ? base + alt : base;
-        await sendPushTo(db, uid, { title, body, tag: "referral-vested", url: "/" }, "referralRewards");
+        // Deep-links straight to the choice (S183). The bell row does the same
+        // in-app; a push that only opened the dashboard would make them hunt
+        // for the thing it just told them about.
+        await sendPushTo(db, uid, { title, body, tag: "referral-vested", url: "/?reward=1" }, "referralRewards");
         notified++;
       } else { quiet++; }
       // Stamped either way — the vest is a one-time event, and a row we had

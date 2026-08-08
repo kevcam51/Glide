@@ -24374,6 +24374,10 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                 { key: "clientRequests", label: "Client requests", desc: "When a client asks you for something" },
                 { key: "automations", label: "Automation results", desc: "When a scheduled automation finishes" },
                 { key: "referralRewards", label: "Referral rewards", desc: "When credit you've earned is ready to claim" },
+                // S183: these pushes have gone out since sessions shipped with
+                // no way to silence them short of the master switch — the one
+                // thing the Notification Center promises you can do.
+                { key: "sessionBilling", label: "Session billing", desc: "When a session is charged or a balance settles" },
               ]
             : [
                 { key: "trainerReminders", label: "Trainer to-do reminders", desc: "To-dos your trainer sends you" },
@@ -24383,6 +24387,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                 { key: "coachingNudges", label: "AI coaching tips", desc: "Occasional tips from your AI coach" },
                 { key: "automations", label: "Automation results", desc: "When a scheduled automation finishes" },
                 { key: "referralRewards", label: "Referral rewards", desc: "When credit you've earned is ready to claim" },
+                { key: "sessionBilling", label: "Session billing", desc: "When you're charged for a session" },
               ];
           const Toggle = ({ on, disabled, onClick }) => (
             <button onClick={onClick} disabled={disabled} aria-pressed={on}
@@ -24431,7 +24436,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                       <div style={{ fontSize: ".7rem", color: "var(--muted)" }}>
                         {pushState === "unsupported" ? "Not supported in this browser — on iPhone, install Glidna to the home screen first"
                           : pushState === "blocked" ? "Blocked — allow notifications for Glidna in your device settings"
-                          : "Messages & to-dos arrive even when Glidna is closed"}
+                          : "The types above arrive even when Glidna is closed"}
                       </div>
                       {pushMsg && <div style={{ fontSize: ".7rem", color: "var(--accent)", marginTop: 2 }}>{pushMsg}</div>}
                     </div>
@@ -24899,6 +24904,18 @@ export default function App() {
   // Returning from the card-save hosted page (?cardsetup=success): finish the
   // job by writing the consent record — the card is only "on file" once
   // recordSessionConsent has re-read it from Stripe and stored what was agreed.
+  // S183: a referral-reward push deep-links to ?reward=1 so the tap lands on
+  // the choice itself rather than the dashboard. Consumed once and stripped
+  // from the URL, so a reload or a shared link doesn't reopen the panel.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("reward") !== "1") return;
+    params.delete("reward");
+    const qs = params.toString();
+    window.history.replaceState({}, "", window.location.pathname + (qs ? "?" + qs : ""));
+    setShowReferrals(true);
+  }, []);
+
   const [cardNotice, setCardNotice] = useState("");
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

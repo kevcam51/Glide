@@ -108,13 +108,26 @@ self.addEventListener("push", (e) => {
   }));
 });
 
+// S183: every payload carries a `url`, but this used to focus an already-open
+// window and stop there — so the destination was silently dropped for anyone
+// who had Glidna open, which is most people most of the time. A push that says
+// "your reward is ready" then dumped them on the dashboard. Focus AND navigate,
+// and only skip the navigate when the tab is already on that exact URL (so a
+// tap doesn't reload the page out from under someone).
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
   const url = (e.notification.data && e.notification.data.url) || "/";
+  const target = new URL(url, self.location.origin).href;
   e.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
-      for (const c of list) { if ("focus" in c) return c.focus(); }
-      return self.clients.openWindow(url);
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (list) => {
+      for (const c of list) {
+        if (!("focus" in c)) continue;
+        // navigate() can reject (cross-origin, or a client that won't allow
+        // it); focusing is still the right outcome, so never let that throw.
+        if (c.url !== target && "navigate" in c) { try { await c.navigate(target); } catch { /* focus anyway */ } }
+        return c.focus();
+      }
+      return self.clients.openWindow(target);
     })
   );
 });

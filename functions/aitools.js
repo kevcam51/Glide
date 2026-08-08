@@ -1217,7 +1217,7 @@ function buildTools(role, opts = {}) {
     {
       name: "set_notification_prefs",
       description:
-        "Turn the CALLER'S OWN notification types on/off (never a client's — prefs are personal). Types: master (everything), messages, trainerReminders (client: trainer to-dos), foodReminders, weighInReminders, coachingNudges, sentReminders (trainer: sent to-do display), clientRequests (trainer). Only pass the keys the user asked to change.",
+        "Turn the CALLER'S OWN notification types on/off (never a client's — prefs are personal). Types: master (everything), messages, trainerReminders (client: trainer to-dos), foodReminders, weighInReminders, coachingNudges, sentReminders (trainer: sent to-do display), clientRequests (trainer), automations (scheduled automation results), referralRewards (referral credit ready to claim), sessionBilling (session charges and settlements). Only pass the keys the user asked to change.",
       input_schema: {
         type: "object",
         properties: {
@@ -1225,6 +1225,8 @@ function buildTools(role, opts = {}) {
           trainerReminders: { type: "boolean" }, foodReminders: { type: "boolean" },
           weighInReminders: { type: "boolean" }, coachingNudges: { type: "boolean" },
           sentReminders: { type: "boolean" }, clientRequests: { type: "boolean" },
+          automations: { type: "boolean" }, referralRewards: { type: "boolean" },
+          sessionBilling: { type: "boolean" },
         },
       },
     },
@@ -2050,8 +2052,12 @@ async function runTool(name, input, ctx) {
   if (name === "set_notification_prefs") {
     // CALLER ONLY — notification prefs are personal; clientId is deliberately
     // ignored (a trainer never silences a client's notifications).
+    // Keep in step with the Notification Center's type rows in SideMenu — a
+    // key missing here means "turn off my referral notifications" silently
+    // does nothing, which reads as the assistant ignoring you.
     const KEYS = ["master", "messages", "trainerReminders", "foodReminders",
-      "weighInReminders", "coachingNudges", "sentReminders", "clientRequests"];
+      "weighInReminders", "coachingNudges", "sentReminders", "clientRequests",
+      "automations", "referralRewards", "sessionBilling"];
     const patch = {};
     for (const k of KEYS) if (typeof input[k] === "boolean") patch[k] = input[k];
     if (!Object.keys(patch).length) return { error: "Say which notification type to turn on or off." };
