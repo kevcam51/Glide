@@ -23699,8 +23699,32 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
   const [dTitle, setDTitle] = useState("");
   const [dBody, setDBody] = useState("");
   const [dShared, setDShared] = useState(false);
+  const [dAiHidden, setDAiHidden] = useState(false); // this note is off-limits to the AI
+  const [aiNotes, setAiNotes] = useState(true);      // master: AI may read my notes at all
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+
+  // AI access to notes (S183t, Kevin) — opt-OUT, so nothing changes for anyone
+  // who never opens it. Lives in the note owner's OWN kv, which is why a trainer
+  // and a client each control their own notes independently.
+  // storage.get returns the raw kv doc and storage.set takes a STRING — parse and
+  // stringify like every other prefs reader here (caliq-notif-prefs), or the
+  // server's JSON.parse gets an object and silently falls back to defaults.
+  useEffect(() => { (async () => {
+    try {
+      const p = await window.storage.get("caliq-ai-prefs");
+      const v = p && p.value ? JSON.parse(p.value) : null;
+      setAiNotes(!v || v.notes !== false);
+    } catch (e) { /* none saved yet → default on */ }
+  })(); }, []);
+  const saveAiNotes = async (on) => {
+    setAiNotes(on);
+    try {
+      const p = await window.storage.get("caliq-ai-prefs");
+      const cur = (p && p.value ? JSON.parse(p.value) : null) || {};
+      await window.storage.set("caliq-ai-prefs", JSON.stringify({ ...cur, notes: on })); // merge — future AI prefs share this doc
+    } catch (e) { /* stays applied for this session */ }
+  };
 
   // Live sources per mode
   useEffect(() => {
@@ -23762,8 +23786,8 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
     return "self";
   };
 
-  const openNew = () => { setEditing("new"); setDTitle(""); setDBody(""); setDShared(false); setErr(""); };
-  const openNote = (n) => { setEditing(n); setDTitle(n.title || ""); setDBody(n.body || ""); setDShared(n._store === "sharedOwn" || n._store === "clientShared"); setErr(""); };
+  const openNew = () => { setEditing("new"); setDTitle(""); setDBody(""); setDShared(false); setDAiHidden(false); setErr(""); };
+  const openNote = (n) => { setEditing(n); setDTitle(n.title || ""); setDBody(n.body || ""); setDShared(n._store === "sharedOwn" || n._store === "clientShared"); setDAiHidden(n.aiHidden === true); setErr(""); };
 
   const saveNote = async () => {
     const body = dBody.trim();
@@ -23779,6 +23803,7 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
           visibility: store === "clientShared" || store === "sharedOwn" ? "shared" : "private",
           ...(store === "aboutClient" ? { aboutUid: clientUid } : {}),
           ...(store === "aboutPlan" ? { aboutPlanId: planId } : {}), kind: "note",
+          ...(dAiHidden ? { aiHidden: true } : {}),
           createdAt: now, updatedAt: now };
         const arr = await readStore(store);
         await writeStore(store, [note, ...arr]);
@@ -23789,7 +23814,7 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
           const from = await readStore(editing._store);
           await writeStore(editing._store, from.filter((n) => n.id !== editing.id));
           const { _store, ...clean } = editing;
-          const note = { ...clean, title, body, updatedAt: now,
+          const note = { ...clean, title, body, updatedAt: now, aiHidden: dAiHidden || undefined,
             visibility: wantStore === "priv" || wantStore === "aboutClient" ? "private" : "shared",
             ...(wantStore === "aboutClient" ? { aboutUid: clientUid } : {}) };
           if (wantStore !== "aboutClient") delete note.aboutUid;
@@ -23797,7 +23822,7 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
           await writeStore(wantStore, [note, ...to]);
         } else {
           const arr = await readStore(editing._store);
-          await writeStore(editing._store, arr.map((n) => n.id === editing.id ? { ...n, title, body, updatedAt: now } : n));
+          await writeStore(editing._store, arr.map((n) => n.id === editing.id ? { ...n, title, body, updatedAt: now, aiHidden: dAiHidden || undefined } : n));
         }
       }
       setEditing(null);
@@ -23850,6 +23875,23 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
               className="flex items-center justify-center gap-1.5 rounded-xl border-none bg-primaryfill px-3 py-2.5 text-[.86rem] font-bold text-primaryfg cursor-pointer">
               <Icon name="plus" size={14} color="var(--color-primaryfg)" />New note
             </button>
+            {/* Master AI access (S183t, Kevin: "one button for all notes, then
+                toggle off the specific ones"). Opt-out — on unless turned off. */}
+            <div className="flex items-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-2 text-[.8rem]">
+              <Icon name="sparkle" size={15} color="var(--accent)" />
+              <span className="flex-1 text-fg">
+                Let the AI read these notes
+                <span className="block text-[.7rem] text-muted">
+                  {aiNotes ? "It uses them for advice — hide any note individually when you open it."
+                           : "Your notes stay out of every AI answer."}
+                </span>
+              </span>
+              <button onClick={() => saveAiNotes(!aiNotes)} aria-pressed={aiNotes}
+                className={`rounded-md px-2.5 py-1 text-xs font-bold cursor-pointer ${
+                  aiNotes ? "bg-primaryfill text-primaryfg border-0" : "bg-transparent text-fg border border-border"}`}>
+                {aiNotes ? "On" : "Off"}
+              </button>
+            </div>
             <div className="flex flex-col gap-1.5 overflow-y-auto">
               {notes.length === 0 && (
                 <div className="py-7 text-center text-[.82rem] text-muted">
@@ -23867,6 +23909,7 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
                   <div className="mt-1 flex items-center gap-1.5 text-[.64rem] text-muted">
                     <Icon name={b.icon} size={11} color="var(--muted)" />{b.label}
                     {n.authorUid && n.authorUid !== uid && <span>· by {n.authorName || "them"}</span>}
+                    {(n.aiHidden === true || !aiNotes) && <span>· hidden from AI</span>}
                     <span className="ml-auto">{timeAgo(n.updatedAt || n.createdAt)}</span>
                   </div>
                 </button>
@@ -23888,6 +23931,18 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
                 <span className="text-[.68rem] font-bold text-primary">change</span>
               </button>
             )}
+            {/* Per-note AI access (S183t, Kevin) — the master switch lets the
+                assistant read your notes, this hides THIS one from it. Shown
+                greyed when the master is already off, so the state is never a
+                lie about what the AI can see. */}
+            <button onClick={() => setDAiHidden((v) => !v)} disabled={!aiNotes}
+              className="flex items-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-2 text-left text-[.8rem] cursor-pointer disabled:opacity-50">
+              <Icon name={dAiHidden || !aiNotes ? "bellOff" : "sparkle"} size={15} color="var(--accent)" />
+              <span className="flex-1 text-fg">
+                {!aiNotes ? "AI can't read any of your notes" : dAiHidden ? "Hidden from the AI" : "The AI can read this note"}
+              </span>
+              {aiNotes && <span className="text-[.68rem] font-bold text-primary">change</span>}
+            </button>
             {err && <div className="text-[.76rem] text-danger">{err}</div>}
             <div className="flex gap-2">
               <button onClick={saveNote} disabled={busy || !dBody.trim()}

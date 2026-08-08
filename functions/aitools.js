@@ -1410,6 +1410,10 @@ function buildTools(role, opts = {}) {
         + "so you edit the right note instead of duplicating (especially recaps — re-recapping should UPDATE the "
         + "existing recap note). A trainer passing clientId sees the client's SHARED notes plus the trainer's own "
         + "private notes about that client — a client's PRIVATE notes are never visible to anyone else. "
+        + "ALSO the place to find COACHING GUIDANCE: notes marked fromTrainer were written by this person's coach "
+        + "for them, so consult this before answering what they should train, eat or aim for, and follow that "
+        + "guidance over generic advice. Notes whose owner has hidden them from AI are omitted; withheldFromAI "
+        + "says how many. "
         + "Pass localPlanId instead for notes about one of your own plan files (those people are clients too).",
       input_schema: { type: "object", properties: { ...clientIdProp, ...localPlanProp } },
     },
@@ -2316,22 +2320,43 @@ async function runTool(name, input, ctx) {
     // planOverride block above (S176f) — one copy, and the seat gate covers it.
     const aboutPlan = planOverride || "";
     if (name === "list_notes") {
+      // Who may the AI read notes from (S183t, Kevin) — opt-OUT, per note, and
+      // the OWNER of each store decides for their own. A client hiding a note
+      // hides it from every AI; a trainer hiding an about-note hides it from
+      // theirs. Master off = that store contributes nothing. Default is on, so
+      // nothing changes for anyone who never touches it.
+      const aiPrefOf = async (owner) => {
+        const p = (await kvGetJSON(db, owner, "caliq-ai-prefs")) || {};
+        return p.notes !== false;
+      };
+      const visible = (arr) => (arr || []).filter((n) => n && n.aiHidden !== true);
+      let withheld = 0;
+      const gate = async (arr, owner) => {
+        const list = arr || [];
+        if (!(await aiPrefOf(owner))) { withheld += list.length; return []; }
+        const out = visible(list);
+        withheld += list.length - out.length;
+        return out;
+      };
       const own = (await kvGetJSON(db, uid, "caliq-notes")) || [];
       if (aboutPlan) {
-        const rows = own.filter((n) => n && n.aboutPlanId === aboutPlan)
+        const rows = (await gate(own.filter((n) => n && n.aboutPlanId === aboutPlan), uid))
           .map((n) => ({ id: n.id, title: n.title || "Untitled", body: String(n.body || "").slice(0, 1000),
             storedAs: "private-to-you-about-this-plan", kind: n.kind || "note",
             author: n.authorName || null, updatedAt: n.updatedAt || n.createdAt || null }))
           .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 30);
-        return { count: rows.length, notes: rows };
+        return { count: rows.length, notes: rows, ...(withheld ? { withheldFromAI: withheld } : {}) };
       }
-      const shared = own;
-      const priv = isSelf ? (await privGetJSON(db, ctx.callerUid, "caliq-notes")) || [] : [];
+      const shared = await gate(own, uid);
+      const priv = isSelf ? await gate((await privGetJSON(db, ctx.callerUid, "caliq-notes")) || [], ctx.callerUid) : [];
       const about = !isSelf
-        ? ((await kvGetJSON(db, ctx.callerUid, "caliq-notes")) || []).filter((n) => n && n.aboutUid === uid)
+        ? await gate(((await kvGetJSON(db, ctx.callerUid, "caliq-notes")) || []).filter((n) => n && n.aboutUid === uid), ctx.callerUid)
         : [];
+      // fromTrainer marks guidance written BY someone else (the coach) into this
+      // person's notes — the thing to follow when they ask what they should do.
       const fmt = (n, where) => ({ id: n.id, title: n.title || "Untitled", body: String(n.body || "").slice(0, 1000),
         storedAs: where, kind: n.kind || "note", author: n.authorName || null,
+        fromTrainer: (n.authorUid && n.authorUid !== uid) ? true : undefined,
         aboutClient: n.aboutUid ? true : undefined,
         aboutLocalPlanId: n.aboutPlanId || undefined,
         updatedAt: n.updatedAt || n.createdAt || null });
@@ -2340,7 +2365,11 @@ async function runTool(name, input, ctx) {
         ...shared.map((n) => fmt(n, isSelf ? (ctx.isTrainer ? "my-notes" : "shared-with-trainer") : "shared-with-client")),
         ...about.map((n) => fmt(n, "private-to-you-about-this-client")),
       ].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 30);
-      return { count: notes.length, notes };
+      return { count: notes.length, notes,
+        // Tell the model some exist but are off-limits, so it can say "some of
+        // your notes are hidden from me" instead of implying there are none.
+        ...(withheld ? { withheldFromAI: withheld,
+          note: "Some notes are hidden from AI by their owner. Don't guess at their contents; mention they're hidden if it matters." } : {}) };
     }
     if (name === "create_note") {
       const body = String(input.body || "").trim().slice(0, 4000);

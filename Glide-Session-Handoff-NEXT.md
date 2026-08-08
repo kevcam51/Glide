@@ -1,6 +1,45 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ⭐⭐⭐⭐⭐ S183r (Aug 8, 2026) — BODY-COMP TRENDS — READ THIS FIRST
+## ⭐⭐⭐⭐⭐ S183t (Aug 8, 2026) — AI READS COACHING NOTES — READ THIS FIRST
+The AI (in-app AND connector) now uses a person's notes as coaching context, and
+**notes carry per-note AI access that their owner controls.**
+
+**What was already true:** trainer-written SHARED notes live in the CLIENT's own
+`caliq-notes`, so `list_notes` already returned them to the client's AI. The
+trainer's PRIVATE about-notes live in the trainer's own kv and are still never
+visible to the client. Nothing about that wall changed.
+
+**What was missing:** the AI never thought to look. The prompt only told it to
+consult notes when a TRAINER asked about a client. Now, when anyone asks what
+they should train/eat/aim for, it calls `list_notes` on themselves first and
+treats `fromTrainer` notes as the plan of record — following the coach over
+textbook advice, saying when it is doing so, and flagging (not silently
+overriding) guidance it thinks is unsafe. Verified in prod: "Your coach Sam has
+already mapped this out… no overhead pressing" and it applied the shoulder
+restriction to the split it built.
+
+**Access control (Kevin's design — opt-OUT, not opt-in):** a master "Let the AI
+read these notes" switch at the top of the notes list, plus a per-note toggle in
+the editor, with a "hidden from AI" badge in the list. Stored as `aiHidden` on
+the note and `caliq-ai-prefs {notes}` in the note OWNER's kv — so a trainer and a
+client each govern their own notes independently, checked per store server-side.
+Default is on, so nothing changes for anyone who never opens it. When something
+is withheld the tool returns `withheldFromAI` and the AI SAYS a note is hidden
+rather than implying none exist — verified all three states in prod (visible /
+per-note hidden / master off), with no content leaking in the latter two.
+
+⚠️ **Trap that bit me twice:** `window.storage.get` returns the raw kv doc
+(`{key,value,shared}`) and `.set` takes a **JSON STRING**. Reading `p.notes`
+straight off the doc, or writing an object, silently stores something the
+server's `JSON.parse` rejects — and it fails as "no notes found", which looks
+exactly like a broken feature. Follow the `caliq-notif-prefs` pattern.
+
+**Still NOT built: web search.** Kevin asked the AI to also pull supporting info
+from the internet. There is only `fetch_link` (fetch a URL someone pasted) — no
+search. He deferred the vendor/cost decision (Brave/Tavily/Serper are roughly
+$3–5 per 1000 queries, would need a Secret Manager key and per-user limits).
+
+## ⭐⭐⭐⭐ S183r (Aug 8, 2026) — BODY-COMP TRENDS
 Kevin reported the trend deltas showing the wrong sign. **The sign code was
 never wrong.** Reproduced with controlled data: with ONE consistent body-fat
 method and everything rising, every chart signed correctly (+6 lbs, +7 fat,
