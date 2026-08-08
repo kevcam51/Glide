@@ -1,6 +1,44 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ⭐⭐⭐⭐⭐ S183q (Aug 8, 2026) — ACCENT COLOUR PICKER — READ THIS FIRST
+## ⭐⭐⭐⭐⭐ S183r (Aug 8, 2026) — BODY-COMP TRENDS — READ THIS FIRST
+Kevin reported the trend deltas showing the wrong sign. **The sign code was
+never wrong.** Reproduced with controlled data: with ONE consistent body-fat
+method and everything rising, every chart signed correctly (+6 lbs, +7 fat,
++3.2% BF). Adding a scale reading to only the NEWEST entry — identical tape
+numbers otherwise — flipped **fat mass +7 → −5 lbs, body fat +3.2% → −3.6%, and
+invented 11 lbs of lean mass.**
+
+**Root cause: the body-fat series mixed measurement METHODS.** Every entry
+collapsed to one blended `bodyFatPct` (precedence scale > calipers > tape), so an
+entry where you typed a scale number and an entry with only tape landed on the
+same line — the chart compared a scale reading to a tape estimate. Fat and lean
+mass inherit it through `carryBf`, and since lean = weight × (1 − bf), a phantom
+BF drop *raises* lean. That is exactly the reported pattern.
+
+**Fix:** `bfBySource` keeps `{scale, caliper, tape}` separate; each method with
+2+ readings gets its OWN chart (one method → just "Body fat %"). Fat/lean mass
+read ONE method for the whole history (`primaryBfSource`, most-direct first) and
+never fall back per entry. ⚠️ **Never reintroduce a blended body-fat series** —
+methods disagree by several percent on the same body and are only comparable to
+themselves.
+
+**Colour no longer judges.** Green-for-down / orange-for-up decided losing was
+good and gaining bad — wrong for lean mass and muscle, and wrong for anyone
+bulking. Deltas are now neutral `--text-secondary` with an explicit +/−, and
+ProgressChart's "losing/gaining/maintaining" became "up/down/no change".
+ProgressChart is SHARED across 4 call sites (main weight chart, measurement-site
+charts, calendar drawer) — all verified.
+
+**Also fixed the real confusion behind "my weight went up but it says minus":**
+the delta compares the FIRST to the LAST point of the visible timeframe, not
+your last reading. It now says **"since <date>"** so it can't be misread.
+
+⚠️ **Test-account note:** Casey's (`client.uitest`) weigh-ins were overwritten
+during reproduction and rebuilt from a screenshot (6 weigh-ins, correct dates
+and weights). The ~4 non-weight check-in flags (workedOut/mood) are gone. Test
+data only.
+
+## ⭐⭐⭐⭐ S183q (Aug 8, 2026) — ACCENT COLOUR PICKER
 Users can now pick the app's accent colour (≡ → Appearance → Accent colour):
 **Cyan (default) · Ice blue · Azure · Magenta · Lime · Slate.** Per-device
 (localStorage `glidna-accent`), like the theme.

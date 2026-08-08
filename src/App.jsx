@@ -13638,9 +13638,13 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
 
   const startW = sorted[0].weight;
   const endW = sorted[sorted.length - 1].weight;
+  // Direction, not a verdict (S183r, Kevin) — see the note in MetricLineChart.
+  // `diff` stays OLD−NEW because the rendering below and other readers rely on
+  // it; `change` is the plain-English direction of the value itself.
   const diff = startW - endW;
-  const trend = diff > 0.5 ? "losing" : diff < -0.5 ? "gaining" : "maintaining";
-  const trendColor = trend === "losing" ? "var(--green)" : trend === "gaining" ? "var(--orange)" : "var(--accent)";
+  const change = endW - startW;
+  const trend = change > 0.5 ? "up" : change < -0.5 ? "down" : "no change";
+  const trendColor = "var(--text-secondary)";
 
   // Prefer adherence measured from the daily logs; fall back to answered check-ins.
   const adherence = logAdherence ? logAdherence.pct : adherenceOf(checkIns);
@@ -13654,7 +13658,7 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.3rem",color:trendColor}}>
-            {diff > 0 ? `−${diff.toFixed(1)}` : diff < 0 ? `+${Math.abs(diff).toFixed(1)}` : "0"} {unit}
+            {change > 0 ? `+${change.toFixed(1)}` : change < 0 ? `−${Math.abs(change).toFixed(1)}` : "0"} {unit}
           </div>
           <div style={{fontSize:".68rem",color:trendColor,textTransform:"uppercase",letterSpacing:"1px"}}>{trend}</div>
         </div>
@@ -13866,14 +13870,25 @@ function MetricLineChart({ points, label, unit, color, onEditPoint }) {
   const path = data.map((p, i) => `${i ? "L" : "M"}${xAt(i).toFixed(1)},${yAt(p.v).toFixed(1)}`).join(" ");
   const fmtDate = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   const fmtYear = (t) => new Date(t).toLocaleDateString(undefined, { year: "2-digit" });
+  // Direction only — never a verdict (S183r, Kevin). Green-for-down / orange-for-up
+  // decided that losing was good and gaining was bad, which is wrong for half
+  // these metrics (gaining lean mass or muscle is the goal) and wrong for anyone
+  // in a bulk. The number states which way it moved and by how much; whether
+  // that is good is the person's business, not the chart's.
   const diff = Math.round((data[data.length - 1].v - data[0].v) * 10) / 10;
-  const diffColor = diff < 0 ? "var(--green)" : diff > 0 ? "var(--orange)" : "var(--muted)";
+  const sign = diff > 0 ? "+" : diff < 0 ? "−" : "";
+  const since = fmtDate(data[0].t);
   return (
     <div className="rounded-lg bg-surface2 p-3">
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <span style={{ fontFamily: "'Sora',sans-serif", letterSpacing: "1px", color, fontSize: ".92rem" }}>{label}</span>
-        <span className="text-[.7rem]" style={{ color: diffColor }}>
-          {diff > 0 ? `+${diff}` : diff}{unit === "%" ? "%" : ` ${unit}`}{onEditPoint ? " · tap a dot to edit" : ""}
+        <span className="text-[.7rem]" style={{ color: "var(--text-secondary)" }}>
+          {sign}{Math.abs(diff)}{unit === "%" ? "%" : ` ${unit}`}
+          {/* Say WHAT it is comparing. Without this the number reads as "since my
+              last reading" when it is actually the whole visible timeframe — the
+              single most confusing thing about this row. */}
+          <span style={{ color: "var(--muted)" }}> since {since}</span>
+          {onEditPoint ? <span style={{ color: "var(--muted)" }}> · tap a dot to edit</span> : null}
         </span>
       </div>
       <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
@@ -13909,7 +13924,17 @@ function MetricLineChart({ points, label, unit, color, onEditPoint }) {
 // (fat/lean null until a BF% reading exists), `bfReads` = [{ t, date, bf }].
 // onEditWeighIn(dateKey, weightOrNull) saves (weight>0) or deletes (null) that
 // date's weigh-in — every other chart recomputes from it.
-function BodyCompCharts({ weighIns, bfReads, onEditWeighIn }) {
+// Each body-fat METHOD gets its own chart — a scale, calipers and a tape can sit
+// several percent apart on the same body, so they only mean anything compared to
+// themselves. Someone who uses one method sees one chart (S183r, Kevin).
+const BF_METHODS = [
+  { key: "scale",   label: "Body fat % · scale",    color: "var(--yellow)" },
+  { key: "caliper", label: "Body fat % · calipers", color: "var(--orange)" },
+  { key: "tape",    label: "Body fat % · tape",     color: "var(--blue)" },
+];
+const BF_METHOD_NAME = { scale: "your scale", caliper: "your calipers", tape: "your tape measurements" };
+
+function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, onEditWeighIn }) {
   const [range, setRange] = useState("all");
   const [edit, setEdit] = useState(null); // { date, t, value } when editing a weigh-in
   const wAll = [...(weighIns || [])].filter((w) => w && w.t).sort((a, b) => a.t - b.t);
@@ -13926,12 +13951,21 @@ function BodyCompCharts({ weighIns, bfReads, onEditWeighIn }) {
   const maxT = Math.max(wAll.length ? wAll[wAll.length - 1].t : 0, bAll.length ? bAll[bAll.length - 1].t : 0);
   const inRange = (arr) => (spanDays ? arr.filter((x) => x.t >= maxT - spanDays * 86400000) : arr);
   const w = inRange(wAll), b = inRange(bAll);
+  // One body-fat chart per method actually used. Falls back to the old single
+  // series when a caller hasn't been updated to pass bfBySource.
+  const methods = BF_METHODS
+    .map((m) => ({ ...m, rows: inRange((bfBySource && bfBySource[m.key]) || []) }))
+    .filter((m) => m.rows.length >= 2);
+  const bfCharts = methods.length
+    ? methods.map((m) => ({ key: "bf", label: methods.length === 1 ? "Body fat %" : m.label,
+        unit: "%", color: m.color, src: m.rows, id: "bf-" + m.key }))
+    : [{ key: "bf", label: "Body fat %", unit: "%", color: "var(--yellow)", src: b, id: "bf" }];
   const CHARTS = [
     { key: "weight", label: "Bodyweight", unit: "lbs", color: "var(--accent)", src: w, editable: true },
     { key: "muscle", label: "Muscle mass", unit: "lbs", color: "var(--green)", src: w },
     { key: "fat", label: "Fat mass", unit: "lbs", color: "var(--orange)", src: w },
     { key: "lean", label: "Lean mass", unit: "lbs", color: "var(--purple)", src: w },
-    { key: "bf", label: "Body fat %", unit: "%", color: "var(--yellow)", src: b },
+    ...bfCharts,
   ];
   const seriesOf = (c) => c.src.map((r) => ({ t: r.t, date: r.date, v: r[c.key] != null ? r[c.key] : (c.key === "bf" ? r.bf : null) })).filter((p) => p.v != null);
   return (
@@ -13964,11 +13998,14 @@ function BodyCompCharts({ weighIns, bfReads, onEditWeighIn }) {
         </div>
       )}
       {CHARTS.map((c) => (
-        <MetricLineChart key={c.key} points={seriesOf(c)} label={c.label} unit={c.unit} color={c.color}
+        <MetricLineChart key={c.id || c.key} points={seriesOf(c)} label={c.label} unit={c.unit} color={c.color}
           onEditPoint={c.editable && onEditWeighIn ? (p) => setEdit({ date: p.date, t: p.t, value: String(p.v) }) : undefined} />
       ))}
       <div className="text-[10px] text-muted italic">
-        Muscle mass is a Lee-2000 estimate (±~6 lb). Fat &amp; lean mass use the nearest body-fat reading on or before each weigh-in.
+        Muscle mass is a Lee-2000 estimate (±~6 lb). Fat &amp; lean mass use{" "}
+        {primaryBfSource ? <>the readings from <b>{BF_METHOD_NAME[primaryBfSource]}</b> only</> : <>your body-fat readings</>}
+        {" "}— methods aren&apos;t mixed, because a scale, calipers and a tape can disagree by several percent on the same body.
+        {methods.length > 1 ? " Each method is charted separately for the same reason." : ""}
       </div>
     </div>
   );
@@ -14060,9 +14097,32 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         weight: Math.round(Number(c.weight) * 10) / 10,
       }))
       .filter((c) => c.t > 0 && c.date).sort((a, b) => a.t - b.t);
-    const bfReads = entries
-      .map((e) => ({ t: e.timestamp, date: e.date, bf: showBF ? measurementMetrics(d, e).bodyFatPct : null }))
-      .filter((e) => e.bf != null && e.t > 0).sort((a, b) => a.t - b.t);
+    // Body fat, kept SEPARATE PER METHOD (S183r, Kevin: "I wanna be able to use
+    // all three"). Previously every entry collapsed to one blended bodyFatPct
+    // with precedence scale > calipers > tape, so an entry where you typed a
+    // scale number and an entry with only tape landed on the SAME line — the
+    // chart silently compared a scale reading to a tape estimate. Measured: with
+    // identical rising tape numbers, adding a scale reading to the newest entry
+    // flipped fat mass from +7 to −5 lbs, body fat from +3.2% to −3.6%, and
+    // invented 11 lbs of lean mass. Different methods disagree by design (a
+    // scale and calipers can sit 5% apart on the same body) so they are only
+    // comparable to THEMSELVES over time.
+    const bfBySource = { scale: [], caliper: [], tape: [] };
+    if (showBF) for (const e of entries) {
+      if (!(e.timestamp > 0)) continue;
+      const mm = measurementMetrics(d, e);
+      const row = (bf) => ({ t: e.timestamp, date: e.date, bf });
+      if (mm.manualBF != null) bfBySource.scale.push(row(mm.manualBF));
+      if (mm.caliperBF != null) bfBySource.caliper.push(row(mm.caliperBF));
+      if (mm.tapeBF != null) bfBySource.tape.push(row(mm.tapeBF));
+    }
+    for (const k of Object.keys(bfBySource)) bfBySource[k].sort((a, b) => a.t - b.t);
+    // Fat & lean mass need ONE method, held constant across the whole history —
+    // that is exactly what was corrupting them. Pick the most direct method the
+    // person actually uses and read only its readings; never fall back per-entry.
+    const primaryBfSource = bfBySource.scale.length ? "scale"
+      : bfBySource.caliper.length ? "caliper" : bfBySource.tape.length ? "tape" : null;
+    const bfReads = primaryBfSource ? bfBySource[primaryBfSource] : [];
     const carryBf = (t) => { let v = null; for (const x of bfReads) { if (x.t <= t) v = x.bf; else break; } return v; };
     const wRows = weighIns.map((wi) => {
       const bf = carryBf(wi.t);
@@ -14073,7 +14133,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         lean: bf != null ? Math.round(wi.weight * (1 - bf / 100)) : null,
       };
     });
-    return { weighIns: wRows, bfReads };
+    return { weighIns: wRows, bfReads, bfBySource, primaryBfSource };
   })();
 
   // Which tape fields this person's body-fat formulas need (docs/METRICS-PLAN.md).
@@ -14379,7 +14439,9 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
               <Icon name="chart" size={16} color="var(--accent)" />
               <span style={{ fontFamily: "'Sora',sans-serif", letterSpacing: "1.5px", color: "var(--accent)", fontSize: ".95rem" }}>TRENDS &amp; CHARTS</span>
             </div>
-            <BodyCompCharts weighIns={bodyCompData.weighIns} bfReads={bodyCompData.bfReads} onEditWeighIn={onEditWeighIn} />
+            <BodyCompCharts weighIns={bodyCompData.weighIns} bfReads={bodyCompData.bfReads}
+              bfBySource={bodyCompData.bfBySource} primaryBfSource={bodyCompData.primaryBfSource}
+              onEditWeighIn={onEditWeighIn} />
             {/* Tape / caliper single-metric trend (inches + skinfold sites) */}
             {chartable.length > 0 && (
               <div className="mt-4 rounded-lg bg-surface2 p-3">
