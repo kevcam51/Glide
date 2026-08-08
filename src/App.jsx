@@ -12697,7 +12697,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
       {showMeasure && onSaveMeasurements && (
         <MeasurementsModal data={data} onSave={onSaveMeasurements} onDelete={onDeleteMeasurement}
           onSetGoalWeight={onSetGoalWeight} onToggleBodyFat={onToggleBodyFat}
-          onLogWeight={(v)=>onLogUpdate("weight", v)}
+          onLogWeight={(v)=>onLogUpdate("weight", v)}  /* in-plan: date handled by the plan editor */
           onEditWeighIn={(dateKey, weight)=>{
             const ex = (data.checkIns || []).find((c) => c.date === dateKey);
             if (weight == null) { if (ex && onDeleteCheckIn) onDeleteCheckIn(ex.timestamp); return; }
@@ -13819,10 +13819,16 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   const d = data || {};
   const [weightDraft, setWeightDraft] = useState("");
   const [weightMsg, setWeightMsg] = useState("");
+  // S183i: which day this entry belongs to. Body metrics are frequently caught
+  // up on later ("I measured Sunday, I'm entering it Tuesday"), and until now
+  // every save was stamped today, quietly filing it on the wrong date. The
+  // underlying store has always been date-keyed — only the UI assumed today.
+  const [entryDate, setEntryDate] = useState(() => ymdLocal());
+  const isBackdated = entryDate !== ymdLocal();
   const logWeight = () => {
     const v = Math.round(Number(weightDraft) * 10) / 10;
     if (!(v > 0)) return false;
-    onLogWeight(v); setWeightDraft(""); setWeightMsg(`Logged ${v} lbs`);
+    onLogWeight(v, entryDate); setWeightDraft(""); setWeightMsg(`Logged ${v} lbs`);
     setTimeout(() => setWeightMsg(""), 2200);
     return true;
   };
@@ -13932,8 +13938,8 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
       if (!wLogged) setMsg("Enter a weight, body-fat %, a caliper reading, or a tape measurement.");
       return;
     }
-    onSave(vals);
-    setDrafts({}); setMsg("Saved.");
+    onSave(vals, entryDate);
+    setDrafts({}); setMsg(isBackdated ? "Saved to " + entryDate + "." : "Saved.");
   };
 
   const summarize = (e) => {
@@ -14151,8 +14157,30 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
             <span className="text-xs text-muted">estimated body fat from your tape measurements{live.baileyBF != null && live.navyBF != null ? ` (Bailey ${live.baileyBF}% · Navy ${live.navyBF}%)` : ""} — saves when you tap Save</span>
           </div>
         )}
+        {/* S183i: which day these numbers are FOR. People catch up on
+            measurements days later; stamping everything "today" filed them on
+            the wrong date and skewed the body-comp trend. Future dates are
+            blocked — you can't have measured yourself tomorrow. */}
+        <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+          <label className="text-xs text-muted">Date of these readings</label>
+          <input type="date" value={entryDate} max={ymdLocal()}
+            onChange={(e) => setEntryDate(e.target.value || ymdLocal())}
+            className="rounded-lg border border-border bg-surface2 px-2 py-1.5 text-sm text-fg outline-none"
+            style={{ colorScheme: "dark" }} />
+          {isBackdated && (
+            <button onClick={() => setEntryDate(ymdLocal())}
+              className="rounded-md border border-border bg-transparent px-2 py-1 text-xs font-semibold text-fg cursor-pointer">Today</button>
+          )}
+        </div>
+        {isBackdated && (
+          <div className="mt-1 text-xs text-[var(--yellow,#fbbf24)]">
+            Saving to {entryDate} — a weight entered here counts as that day's weigh-in.
+          </div>
+        )}
         <button onClick={save}
-          className="mt-2.5 w-full rounded-lg bg-primaryfill px-4 py-2.5 text-sm font-bold text-primaryfg cursor-pointer">Save</button>
+          className="mt-2.5 w-full rounded-lg bg-primaryfill px-4 py-2.5 text-sm font-bold text-primaryfg cursor-pointer">
+          {isBackdated ? `Save to ${entryDate}` : "Save"}
+        </button>
         {msg ? <div className="mt-2 text-sm text-success">{msg}</div> : null}
 
         {/* History list with delete */}
@@ -20024,10 +20052,14 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   // Log today's weight: records it in the daily log AND updates the plan's
   // current weight (so the card, "lbs to go", and calorie target all reflect it).
   // The first weigh-in captures a starting baseline so we can show total change.
-  const logWeight = async (explicitVal) => {
+  const logWeight = async (explicitVal, explicitDate) => {
     const v = Number(explicitVal != null ? explicitVal : wtDraft);
     if (!v || v <= 0) { setWtDraft(""); return false; }
-    await writeLog({ ...log, weight: v });
+    // A back-dated weigh-in belongs on ITS day, not today: it must not touch
+    // today's log, and it only becomes "current weight" if it is the latest.
+    const dayKey = explicitDate || todayKey;
+    const backdated = dayKey !== todayKey;
+    if (!backdated) await writeLog({ ...log, weight: v });
     try {
       // Work from the in-memory plan (updated synchronously before the async
       // write) so rapid logs stay consistent instead of racing the network.
@@ -20036,23 +20068,26 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       const d = obj.data || (obj.data = {});
       const prev = Number(d.weightLbs) || v;
       // Confetti when this weigh-in CROSSES the goal (Kevin's pick #3).
-      if (crossedGoal(prev, v, d.goalWeight)) celebrate("goal");
+      if (!backdated && crossedGoal(prev, v, d.goalWeight)) celebrate("goal");
       if (d.startWeightLbs == null || d.startWeightLbs === "") d.startWeightLbs = prev;
-      d.weightLbs = v;
+      // Only a weigh-in that is the most recent one may claim "current weight".
+      const laterExists = (Array.isArray(d.checkIns) ? d.checkIns : [])
+        .some((c) => c && c.date && c.date > dayKey && Number(c.weight) > 0);
+      if (!laterExists) d.weightLbs = v;
       // Record in check-in history — the app's weight-history source (feeds the
       // progress chart + trainer view). One entry per day: MERGE into today's
       // existing check-in (a wholesale replace here used to wipe a same-day
       // workout/notes/body-fat — e.g. "did my workout" at 9am, weigh-in at 8pm
       // erased the workout dot), matching how markWorkoutToday merges.
       if (!Array.isArray(d.checkIns)) d.checkIns = [];
-      const sameDay = d.checkIns.find(c => c && c.date === todayKey);
-      const merged = { date: todayKey, timestamp: new Date(todayKey + "T12:00:00").getTime(),
+      const sameDay = d.checkIns.find(c => c && c.date === dayKey);
+      const merged = { date: dayKey, timestamp: new Date(dayKey + "T12:00:00").getTime(),
         weight: v, calories: null, hitTarget: null, workedOut: null, mood: null, notes: "",
         bodyFat: null, loggedBy: "client", isFuturePlan: false,
         ...(sameDay || {}), };
       merged.weight = v; // the new weigh-in always wins
-      merged.timestamp = new Date(todayKey + "T12:00:00").getTime();
-      d.checkIns = [...d.checkIns.filter(c => c && c.date !== todayKey), merged];
+      merged.timestamp = new Date(dayKey + "T12:00:00").getTime();
+      d.checkIns = [...d.checkIns.filter(c => c && c.date !== dayKey), merged];
       planWrapRef.current = obj;   // update memory FIRST so the next log is consistent
       setPlanData(d);
       { const _pw = JSON.stringify(obj); lastSelfDataWrite.current = _pw; await window.storage.set(planDataKey(activePlanId), _pw); }
@@ -20159,8 +20194,9 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   }, [activePlanId, todayKey, log.calories]);
 
   // Body measurements (tape) — merge into today's entry, echo-safe write path.
-  const saveMeasurements = async (vals) => {
-    await savePlanDataMutation((d) => { mergeMeasurements(d, vals, todayKey, "client"); });
+  const saveMeasurements = async (vals, dateKey) => {
+    const day = dateKey || todayKey;
+    await savePlanDataMutation((d) => { mergeMeasurements(d, vals, day, "client"); });
     await appendHistory(`logged measurements: ${Object.keys(vals).map((f) => `${f} ${vals[f]}"`).join(", ")}`);
   };
   const deleteMeasurement = (ts) => savePlanDataMutation((d) => {
@@ -20704,7 +20740,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       {showMeasure && (
         <MeasurementsModal data={planData || {}} onSave={saveMeasurements}
           onDelete={deleteMeasurement} onSetGoalWeight={setGoalFromLeanMass}
-          onToggleBodyFat={toggleBodyFat} onLogWeight={(v)=>logWeight(v)}
+          onToggleBodyFat={toggleBodyFat} onLogWeight={(v,dk)=>logWeight(v,dk)}
           onEditWeighIn={editWeighIn}
           onClose={() => setShowMeasure(false)} />
       )}
