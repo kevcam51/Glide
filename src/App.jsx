@@ -20388,6 +20388,42 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   const consumed = log.calories || 0;
   const target = cal ? cal.target : null;
   const remaining = target != null ? target - consumed : null;
+
+  // ── Daily metric tiles (S183n, Kevin) ──────────────────────────────────────
+  // The client home had nowhere to enter water and no view of workout burn —
+  // both were trainer-side only, so a client using Glidna on their own simply
+  // could not log half their day. Same five metrics the trainer sees in-plan,
+  // in the client's own layout rather than the coaching one.
+  const todayDayName = DAYS[(new Date().getDay() + 6) % 7];
+  const todaysBurn = (() => {
+    if (!planData) return 0;
+    const w0 = Number(planData.weightLbs) || 0;
+    const allStr = [...STRENGTH_EXERCISES, ...customOf(planData.customExercises, "strength")];
+    let total = 0;
+    (Array.isArray((planData.cardio || {})[todayDayName]) ? planData.cardio[todayDayName] : [])
+      .forEach((sess) => { total += exBurn(cardioExFor(sess, planData), w0, sess.duration, planData); });
+    (Array.isArray((planData.strength || {})[todayDayName]) ? planData.strength[todayDayName] : [])
+      .forEach((sess) => {
+        const ex = allStr.find((e) => e.id === sess.type);
+        if (ex) total += exBurn(ex, w0, sess.duration, planData);
+      });
+    return Math.round(total);
+  })();
+  const [waterDraftC, setWaterDraftC] = useState("");
+  const [tileOpen, setTileOpen] = useState(null);       // which tile's entry row is showing
+  const waterToday = Number(log.water) || 0;
+  const addWater = async (oz) => {
+    const next = Math.max(0, waterToday + oz);
+    await writeLog({ ...log, water: next });
+    await appendHistory(`logged water: ${next} oz`);
+  };
+  const setWater = async () => {
+    const v = Math.max(0, Math.round(Number(waterDraftC) || 0));
+    if (!waterDraftC) return;
+    await writeLog({ ...log, water: v });
+    setWaterDraftC("");
+    await appendHistory(`logged water: ${v} oz`);
+  };
   const firstName = (planData && planData.firstName) || (meName ? meName.split(" ")[0] : "");
 
   // Tailwind class strings (Session 26 redesign — brand theme via).
@@ -20796,6 +20832,62 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
               <ComplianceTracker data={planData || {}} target={target} days={compDays}
                 hidden={compHidden} onToggleHidden={setCompHidden} onOpenTimeline={onOpenTimeline} />
             )}
+
+            {/* Today's numbers at a glance (S183n) — the same five the trainer
+                sees in-plan, tappable so each is also where you enter it. Water
+                and workout burn had no home on this screen at all before, so a
+                client tracking on their own simply could not log half their day. */}
+            <div className={cardCls}>
+              <div className="font-display text-base tracking-wide text-primary uppercase mb-2 flex items-center gap-2"><Icon name="dashboard" size={18} color="var(--accent)" />Today&apos;s numbers</div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {[
+                  { k: "target", label: "Target", icon: "target", val: target != null ? target.toLocaleString() : "\u2014", unit: "cal", tap: false },
+                  { k: "logged", label: "Eaten", icon: "meal", val: consumed.toLocaleString(), unit: "cal", tap: true },
+                  { k: "burn", label: "Workout burn", icon: "flame", val: todaysBurn ? todaysBurn.toLocaleString() : "0", unit: "cal", tap: false },
+                  { k: "water", label: "Water", icon: "water", val: waterToday || 0, unit: "oz", tap: true },
+                  { k: "weight", label: "Weight", icon: "scale", val: w ? w : "\u2014", unit: "lbs", tap: true },
+                ].map((t) => (
+                  <button key={t.k} disabled={!t.tap}
+                    onClick={() => t.tap && setTileOpen(tileOpen === t.k ? null : t.k)}
+                    className={`rounded-xl border px-3 py-2.5 text-left ${
+                      tileOpen === t.k ? "border-primary bg-[rgba(8,220,224,.07)]" : "border-border bg-surface2"
+                    } ${t.tap ? "cursor-pointer" : "cursor-default"}`}>
+                    <div className="flex items-center gap-1.5 text-[.66rem] font-bold uppercase tracking-wide text-muted">
+                      <Icon name={t.icon} size={13} color="var(--accent)" />{t.label}
+                    </div>
+                    <div className="mt-0.5 font-display text-xl leading-none text-fg">
+                      {t.val}<span className="ml-1 text-[.66rem] font-normal text-muted">{t.unit}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {/* Water is the one metric with no other entry point on this screen. */}
+              {tileOpen === "water" && (
+                <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                  {[8, 16, 24].map((oz) => (
+                    <button key={oz} onClick={() => addWater(oz)} className={miniBtnCls}>+{oz} oz</button>
+                  ))}
+                  <input value={waterDraftC} onChange={(e) => setWaterDraftC(e.target.value.replace(/[^0-9]/g, ""))}
+                    onKeyDown={(e) => { if (e.key === "Enter") setWater(); }}
+                    inputMode="numeric" placeholder="Set total"
+                    className="w-24 rounded-lg border border-border bg-surface2 px-2.5 py-2 text-sm text-fg outline-none placeholder:text-muted" />
+                  <button onClick={setWater} disabled={!waterDraftC} className={primaryBtnCls}>Set</button>
+                  {waterToday > 0 && (
+                    <button onClick={() => addWater(-waterToday)} className={miniBtnCls}>Clear</button>
+                  )}
+                </div>
+              )}
+              {tileOpen === "logged" && (
+                <div className="mt-2.5 text-[.76rem] leading-relaxed text-muted">
+                  Add food in the <b className="text-fg">Today</b> card just below, or tell the AI what you ate.
+                </div>
+              )}
+              {tileOpen === "weight" && (
+                <div className="mt-2.5 text-[.76rem] leading-relaxed text-muted">
+                  Log today&apos;s weight in the <b className="text-fg">Weight &amp; goal</b> card above.
+                </div>
+              )}
+            </div>
 
             {/* Today's calories + quick-log */}
             <div className={cardCls}>
