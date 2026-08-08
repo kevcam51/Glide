@@ -30,8 +30,13 @@ ProgressChart is SHARED across 4 call sites (main weight chart, measurement-site
 charts, calendar drawer) — all verified.
 
 **Also fixed the real confusion behind "my weight went up but it says minus":**
-the delta compares the FIRST to the LAST point of the visible timeframe, not
-your last reading. It now says **"since <date>"** so it can't be misread.
+the delta compared the FIRST to the LAST point of the visible timeframe, not
+your last reading — so someone down long-term but up since last time saw a
+minus. It now **leads with the change since the previous reading** and shows the
+timeframe total after it, both dated: `+6 lbs since Jun 24 · −14 lbs since May
+10`. Keep BOTH — dropping the total would make the Timeframe chips meaningless,
+and dropping the step is what caused the original complaint. With only two
+readings they are the same number, so only one is shown.
 
 ⚠️ **Test-account note:** Casey's (`client.uitest`) weigh-ins were overwritten
 during reproduction and rebuilt from a screenshot (6 weigh-ins, correct dates

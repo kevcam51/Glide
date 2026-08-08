@@ -13661,6 +13661,13 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
             {change > 0 ? `+${change.toFixed(1)}` : change < 0 ? `−${Math.abs(change).toFixed(1)}` : "0"} {unit}
           </div>
           <div style={{fontSize:".68rem",color:trendColor,textTransform:"uppercase",letterSpacing:"1px"}}>{trend}</div>
+          {/* Name the period (S183r) — this is the total across every reading,
+              not the change since the last one. */}
+          {sorted.length > 1 && (
+            <div style={{fontSize:".62rem",color:"var(--muted)"}}>
+              since {new Date(sorted[0].timestamp).toLocaleDateString(undefined,{month:"short",day:"numeric"})}
+            </div>
+          )}
         </div>
       </div>
 
@@ -13875,19 +13882,29 @@ function MetricLineChart({ points, label, unit, color, onEditPoint }) {
   // these metrics (gaining lean mass or muscle is the goal) and wrong for anyone
   // in a bulk. The number states which way it moved and by how much; whether
   // that is good is the person's business, not the chart's.
-  const diff = Math.round((data[data.length - 1].v - data[0].v) * 10) / 10;
-  const sign = diff > 0 ? "+" : diff < 0 ? "−" : "";
-  const since = fmtDate(data[0].t);
+  // LEADS with the change since the PREVIOUS reading (S183r, Kevin) — that is
+  // what anyone reads this number as, and what a coach acts on. The total across
+  // the visible timeframe follows in muted text, because that is what the
+  // Timeframe chips control and dropping it would make them meaningless. With
+  // only two readings the two are the same number, so only one is shown.
+  const round1 = (n) => Math.round(n * 10) / 10;
+  const lastV = data[data.length - 1].v;
+  const step = round1(lastV - data[data.length - 2].v);
+  const total = round1(lastV - data[0].v);
+  const fmt = (n) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n)}${unit === "%" ? "%" : ` ${unit}`}`;
+  const showTotal = data.length > 2;
   return (
     <div className="rounded-lg bg-surface2 p-3">
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <span style={{ fontFamily: "'Sora',sans-serif", letterSpacing: "1px", color, fontSize: ".92rem" }}>{label}</span>
-        <span className="text-[.7rem]" style={{ color: "var(--text-secondary)" }}>
-          {sign}{Math.abs(diff)}{unit === "%" ? "%" : ` ${unit}`}
-          {/* Say WHAT it is comparing. Without this the number reads as "since my
-              last reading" when it is actually the whole visible timeframe — the
-              single most confusing thing about this row. */}
-          <span style={{ color: "var(--muted)" }}> since {since}</span>
+        <span className="text-[.7rem] text-right" style={{ color: "var(--text-secondary)" }}>
+          {fmt(step)}
+          {/* Always say WHAT is being compared — without it the number reads as
+              whichever period the reader has in mind. */}
+          <span style={{ color: "var(--muted)" }}> since {fmtDate(data[data.length - 2].t)}</span>
+          {showTotal && (
+            <span style={{ color: "var(--muted)" }}> · {fmt(total)} since {fmtDate(data[0].t)}</span>
+          )}
           {onEditPoint ? <span style={{ color: "var(--muted)" }}> · tap a dot to edit</span> : null}
         </span>
       </div>
