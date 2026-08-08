@@ -127,14 +127,30 @@ correction pass, not a gate. Don't "fix" this back.
   logMeal, mcp). **No pref toggle added on purpose** — a toggle gating nothing
   would be the same silent no-op fixed in S183b. Add the toggle WITH push.
 
-**⏭ STILL TO BUILD — the UI. The engine is only reachable by AI today:**
-1. **Client:** a "send to my trainer" control + meal-type tag in the meal-log
-   add form, and photo capture that writes `thumb` (a downscaled data URL —
-   reuse `downscaleImage` from AIChatPanel). The tool path deliberately can't
-   carry photos; base64 in a tool call would burn the token budget.
-2. **Trainer:** a review queue card (pending count, the photo, confirm/adjust/
-   reject) — the AI can already do all of it, this is the tap-to-do version.
-3. Then: real push + the matching Notification Center toggle.
+**✅ UI SHIPPED (S183g) — and the entry point moved.** Kevin clarified: the tag
+belongs on a **message the client sends their trainer**, not a form checkbox.
+So the composer and the trainer's confirm card both live in `MessageThread`.
+- `firestore.rules`: messages gain `kind:"meal"` + `reviewId`, mirroring the
+  S124 to-do pointer. **Only the CLIENT may send one** (a trainer tagging a meal
+  would be putting words in their mouth); neither pointer may ride a plain
+  message or be smuggled onto the other's kind. **186 tests pass, 0 failed**
+  (13 new). PUBLISHED.
+- Client composer: type chips, food, macros, an AI-estimate button that
+  degrades to typing when AI is off, and a photo downscaled to ~15KB stored on
+  the review row. New `reviewMeal` callable backs the trainer's card.
+
+**⏭ Left to do:** real push + the matching Notification Center toggle (deliberately
+not added yet — a toggle gating nothing is the S183b silent no-op).
+
+### 🐛 S183g — a pre-existing bug worth knowing about (FIXED)
+`MessageThread`, `SessionsPanel` and both `NotesPanel` overlays were nested
+INSIDE the `{plansOpen && …}` fragment in `TrainerDashboard`. So a trainer whose
+**"Local Plans" section was collapsed — the default — tapped Message, Sessions
+or Notes on a client card and NOTHING happened.** The state was set; nothing was
+mounted to render it. Confirmed against PRODUCTION before touching anything, so
+it had been broken for every trainer. All four now sit at the screen's top level.
+**Lesson: a full-screen overlay must never be rendered inside a collapsible
+section** — check this if any other panel "does nothing".
 
 ### S183e — connector charts SCRAPPED (Kevin, deliberate)
 Built in S183d, removed in full one turn later. **Kevin's call and the reason
