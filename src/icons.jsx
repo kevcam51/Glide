@@ -77,6 +77,8 @@ const GLYPHS = {
   // — S95: appearance / theme (moon already exists for dark) —
   sun: (<><circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.4" /><path d="M12 19.1v2.4" /><path d="M4.2 4.2l1.7 1.7" /><path d="M18.1 18.1l1.7 1.7" /><path d="M2.5 12h2.4" /><path d="M19.1 12h2.4" /><path d="M4.2 19.8l1.7-1.7" /><path d="M18.1 5.9l1.7-1.7" /></>),
   phone: (<><rect x="6.5" y="2.5" width="11" height="19" rx="2.4" /><path d="M10.5 5.5h3" /><path d="M11 18.5h2" /></>),
+  // — S183q: the accent-colour picker (painter's palette, four wells) —
+  palette: (<><path d="M12 3a9 9 0 0 0 0 18c1.2 0 1.9-.9 1.9-1.9 0-.5-.2-.9-.5-1.2a1.7 1.7 0 0 1 1.2-2.9H17A4.5 4.5 0 0 0 21 10c-.3-4-4.3-7-9-7z" /><circle cx="8" cy="11" r="1.1" /><circle cx="11.2" cy="7.4" r="1.1" /><circle cx="15.6" cy="8.3" r="1.1" /></>),
   // — S95: the food library (page icon, save-for-good star, delete) —
   book: (<><path d="M4 4.6A1.6 1.6 0 0 1 5.6 3H18a1 1 0 0 1 1 1v13H5.6A1.6 1.6 0 0 0 4 18.6z" /><path d="M4 18.6A1.6 1.6 0 0 1 5.6 17H19v4H5.6A1.6 1.6 0 0 1 4 19.4z" /><path d="M8 7.5h7" /><path d="M8 11h5" /></>),
   star: (<path d="m12 3.6 2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8L3.5 9.8l5.9-.9z" />),

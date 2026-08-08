@@ -1,6 +1,70 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ⭐⭐⭐⭐⭐ S183p (Aug 8, 2026) — READ THIS FIRST
+## ⭐⭐⭐⭐⭐ S183q (Aug 8, 2026) — ACCENT COLOUR PICKER — READ THIS FIRST
+Users can now pick the app's accent colour (≡ → Appearance → Accent colour):
+**Cyan (default) · Ice blue · Azure · Magenta · Lime · Slate.** Per-device
+(localStorage `glidna-accent`), like the theme.
+
+**Why only six, and why those.** Two tests, both applied honestly:
+- **AA contrast in BOTH themes.** Each accent ships SIX values, not one, because
+  light and dark invert which variant is bright — the same reason brand cyan
+  already shipped as `#08dce0` dark but `#087478` light. `primary` (text/icons/
+  borders, ≥4.5:1 on the worst surface), `fill` (large buttons), `fg` (text on
+  the fill).
+- **Perceptual distance from the SEMANTIC colours.** Floor is ΔE 33 (CIE Lab) —
+  exactly how far the shipping cyan sits from the success green, so nothing
+  offered is less distinguishable than what the app already used and Kevin was
+  happy with. **This is what killed the obvious choices:** amber is the *same
+  hue* as the over-target warning, coral and rose land on the danger red, and
+  violet erases the purple that means "sandbox, not a real client". The four
+  semantics sit at roughly 0°/43°/161°/266°, so they already own most of the
+  wheel — expect any future addition to be cool, pink, or neutral.
+
+**How it works (three places, keep them in step).**
+1. `src/themes.css` — the `[data-theme]` blocks still DECLARE `--color-primary`
+   etc. themselves, but their VALUE reads `var(--u-accent-d, …)`. ⚠️ **This is
+   load-bearing, not a style preference.** That selector is unprefixed so it
+   also matches the ~8 nested `data-theme="pro"` wrappers inside the app; a
+   literal there beats anything set on `:root` for that whole subtree. Declaring
+   per-theme but inheriting the value is what makes one setting reach every
+   nested wrapper. Verified live: a nested `pro` wrapper resolves the user's
+   colour, and a nested `light` wrapper resolves that colour's LIGHT variant
+   while the root is dark.
+2. `src/App.jsx` — `ACCENTS` + `applyAccent()`, and the legacy `:root` block
+   (`--accent`, `--accent-fill`) reads the same `--u-*`. **There are two whole
+   colour systems**; recolouring only the Tailwind one leaves every in-plan
+   screen cyan.
+3. `index.html` inline pre-paint script — mirrors the table. Without it every
+   cold start paints cyan then repaints. `sw.js` SHELL bumped to v3 because that
+   script lives in the cached navigation HTML.
+
+**The 165 literals are gone.** 142 lines of `rgba(8,220,224,…)` swept to
+`rgba(var(--accent-rgb),…)` — one mechanical sed, since every occurrence shared
+the exact spelling. Remaining `#08dce0` in App.jsx are only `var()` fallbacks,
+the ACCENTS table, and `"Total Body":"#08dce0"` — deliberately left, it's one of
+nine movement-pattern DATA colours, not chrome.
+
+**Canvas can't resolve `var()`.** New `cssVar()` helper: the confetti and the
+voice waveform paint with `fillStyle` and silently drop an unparseable value.
+(A `var(--blue)` was already sitting broken in the confetti array — fixed in
+passing.) Anything drawn on a canvas must resolve the token in JS.
+
+**Picking Cyan REMOVES the inline variables** rather than setting cyan, so an
+untouched account resolves through the CSS fallbacks and is byte-identical to
+the app before this existed. Verified.
+
+**Deliberate choices worth knowing:** the in-app GLI|DNA wordmark DOES recolour
+(it's the user's own chrome, and forcing it cyan beside a magenta app looks
+broken), but nothing a third party sees changes — the OG/invite card, the invite
+landing page, both outbound emails, the PWA icon and the browser theme-colour
+stay Glidna cyan permanently.
+
+**This is the first brand-token infrastructure for the white-label plan.** Same
+tokens, different owner of the choice. Whoever builds trainer branding decides
+whether a trainer's brand overrides a client's personal pick or merely sets the
+default — that question is now worth answering before it's retrofitted.
+
+## ⭐⭐⭐⭐ S183p (Aug 8, 2026)
 **Both S183o reports are BUILT, deployed and verified.** Everything below is older.
 
 **1. AI-logged meals now carry their serving.** Root cause was exactly as

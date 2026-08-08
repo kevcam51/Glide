@@ -9,7 +9,10 @@
 // therefore CANNOT serve a stale app, while navigations stay network-first, so a
 // deploy is picked up immediately and simply asks for the new hashed names.
 // Net effect: first launch downloads, every launch after reads from local disk.
-const SHELL = "glidna-shell-v2";
+// v3 (S183q): the cached navigation HTML carries the inline pre-paint script, so
+// any change to that script needs a new cache name or one launch runs the old
+// copy — which would mean a cold start ignoring the user's accent colour.
+const SHELL = "glidna-shell-v3";
 const ASSETS = "glidna-assets-v2";
 const ASSET_CAP = 60;   // trim old hashed files so the cache can't grow forever
 

@@ -9,6 +9,12 @@
  * a `--color-x: var(--c-x)` declared on :root resolves at :root and won't
  * re-resolve per descendant, so theme switching would silently fail.
  *
+ * The accent tokens (--color-primary / -fill / -fg) look like they break that
+ * rule but don't: each theme block still DECLARES them itself, it just reads the
+ * user's picked colour out of a --u-* variable that only ever lives on :root.
+ * Declaration stays per-theme (so switching works); only the value is inherited
+ * (so one setting reaches every nested wrapper). See the accent layer below.
+ *
  * These affect ONLY components that use the tokens (the Showcase for now); the
  * existing app keeps its own styling.
  * -------------------------------------------------------------------------- */
@@ -18,6 +24,26 @@
  * from showcase-fonts.css, imported ONLY by the dev Showcase — five families
  * were render-blocking every prod load for a dev-only screen. */
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap');
+
+/* ─── Accent layer (S183q) ────────────────────────────────────────────────────
+ * The accent is the ONE colour a user may change (≡ → Appearance → Accent
+ * colour). Everything else — the near-black surfaces, and especially the
+ * SEMANTIC colours — stays fixed, because green/amber/red/purple mean
+ * on-track / over-target / danger / sandbox and a personal preference must not
+ * be able to say something untrue.
+ *
+ * Set by applyAccent() in App.jsx and by the pre-paint script in index.html
+ * (keep all three in step). Each accent ships six values because the roles have
+ * different contrast jobs, and light/dark invert which one is bright:
+ *   --u-accent-*      text, icons, borders  → needs 4.5:1 on the surface
+ *   --u-accentfill-*  large filled buttons  → only needs to look right
+ *   --u-accentfg-*    text ON that fill
+ * --accent-rgb is the same colour as a bare "r, g, b" triplet, so the low-alpha
+ * tints scattered through App.jsx can say rgba(var(--accent-rgb), .06). It is
+ * deliberately NOT theme-split: those tints already use the bright cyan in both
+ * themes today, and keeping that identical makes the sweep a visual no-op for
+ * the default. */
+:root { --accent-rgb: var(--u-accentrgb, 8, 220, 224); }
 
 /* 1) Clean / Minimal — light, airy, restrained indigo accent. */
 [data-theme="clean"] {
@@ -96,9 +122,14 @@
   --color-border: #d6e0e2;
   --color-fg: #0d1418;
   --color-muted: #576b6f;       /* 4.9:1 on surface2 (was #5c7175 = 4.48 — hairline AA fail) */
-  --color-primary: #087478;     /* darkened cyan — 4.8:1 on surface2 (was #0a8f93 = 3.4–3.9, FAILED AA) */
-  --color-primaryfill: #08dce0; /* the bright brand cyan reads great as a FILL */
-  --color-primaryfg: #04201f;   /* near-black on cyan */
+  /* Accent is indirected through --u-* so the user's picked colour (S183q) can
+   * override it from :root. It MUST be an indirection here, not a literal: this
+   * selector is unprefixed, so it also matches the ~8 nested data-theme="pro"
+   * wrappers inside the app, and a literal there would beat anything set on
+   * :root for that whole subtree. The fallback is the brand default. */
+  --color-primary: var(--u-accent-l, #087478);     /* darkened cyan — 4.8:1 on surface2 (was #0a8f93 = 3.4–3.9, FAILED AA) */
+  --color-primaryfill: var(--u-accentfill-l, #08dce0); /* the bright brand cyan reads great as a FILL */
+  --color-primaryfg: var(--u-accentfg-l, #04201f);     /* near-black on cyan */
   --color-accent: #0284c7;
   --color-success: #0b7a55;     /* 4.6:1 on surface2 (was #0f9d6e = 3.0–3.5, FAILED AA normal text) */
   --color-warn: #a34a08;
@@ -119,9 +150,10 @@
   --color-border: #2e4241;      /* visible cyan-tinted hairline */
   --color-fg: #eafcfc;          /* near-white, faint cyan cast */
   --color-muted: #7e9a9a;       /* muted cyan-grey */
-  --color-primary: #08dce0;     /* Smooth Training cyan — bright accent (text, icons, borders) */
-  --color-primaryfill: #18afb3; /* calmer cyan for large filled buttons (less glare than #08dce0) */
-  --color-primaryfg: #04201f;   /* near-black text on cyan */
+  /* See the note in [data-theme="light"] — indirected for the accent picker. */
+  --color-primary: var(--u-accent-d, #08dce0);     /* Smooth Training cyan — bright accent (text, icons, borders) */
+  --color-primaryfill: var(--u-accentfill-d, #18afb3); /* calmer cyan for large filled buttons (less glare than #08dce0) */
+  --color-primaryfg: var(--u-accentfg-d, #04201f);     /* near-black text on cyan */
   --color-accent: #3bc9ff;      /* cool sky-blue, complements cyan without muddying green */
   --color-success: #2fe0a8;
   --color-warn: #fbbf24;

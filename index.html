@@ -29,6 +29,24 @@
           document.documentElement.setAttribute("data-theme", dark ? "pro" : "light");
           var m = document.querySelector('meta[name="theme-color"]');
           if (m) m.setAttribute("content", dark ? "#060809" : "#f4f7f8");
+          // Accent colour (S183q). Same reason as the theme: read from Firestore
+          // it would paint brand cyan and repaint on every cold start. "cyan" is
+          // the default and sets nothing, so untouched accounts resolve through
+          // the CSS fallbacks. Mirrors ACCENTS/applyAccent in App.jsx — keep in
+          // step; the six values per accent are contrast-checked per theme.
+          var A = {
+            ice:     ["#5cc8ff","#53a3cc","#04201f","#1a729e","#5cc8ff","#04201f","92, 200, 255"],
+            azure:   ["#7aa2ff","#6987cc","#04201f","#4468ba","#7aa2ff","#04201f","122, 162, 255"],
+            magenta: ["#f472b6","#c36295","#04201f","#b3407c","#f472b6","#04201f","244, 114, 182"],
+            lime:    ["#b6e34a","#94b644","#04201f","#557508","#b6e34a","#04201f","182, 227, 74"],
+            slate:   ["#a8bcc4","#88979d","#04201f","#5e6d74","#a8bcc4","#04201f","168, 188, 196"]
+          };
+          var v = A[localStorage.getItem("glidna-accent")];
+          if (v) {
+            var n = ["--u-accent-d","--u-accentfill-d","--u-accentfg-d",
+                     "--u-accent-l","--u-accentfill-l","--u-accentfg-l","--u-accentrgb"];
+            for (var i = 0; i < n.length; i++) document.documentElement.style.setProperty(n[i], v[i]);
+          }
         } catch (e) {
           document.documentElement.setAttribute("data-theme", "pro"); // private mode / storage blocked
         }

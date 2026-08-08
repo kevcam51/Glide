@@ -17,6 +17,18 @@ import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { Icon } from "./icons.jsx";
 
+// Read a CSS custom property as a real colour string. <canvas> (confetti, the
+// voice waveform) rasterises with fillStyle and cannot resolve var() — it
+// silently drops an unparseable value — so anything painted on a canvas has to
+// resolve the token in JS at draw time (S183q, needed once the accent became a
+// user setting).
+const cssVar = (name, fallback) => {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  } catch (e) { return fallback; }
+};
+
 // Milestone confetti (S97, Kevin's pick #3). Lazy-loaded like qrcode so it costs
 // nothing until a celebration actually fires. canvas-confetti draws on its OWN
 // fixed canvas appended to <body>, so it automatically escapes the
@@ -26,7 +38,9 @@ let _confettiMod = null;
 async function celebrate(kind = "goal") {
   try {
     if (!_confettiMod) _confettiMod = (await import("canvas-confetti")).default;
-    const brand = ["#08DCE0", "#2fe0a8", "#eafcfc", "var(--blue)"];
+    // Resolved, not var() — see cssVar above. ("var(--blue)" used to sit in this
+    // array and was silently ignored by canvas-confetti.)
+    const brand = [cssVar("--accent", "#08DCE0"), "#2fe0a8", "#eafcfc", cssVar("--blue", "#3bc9ff")];
     const base = { disableForReducedMotion: true, colors: brand, zIndex: 2000 };
     if (kind === "goal") {
       // The big one — reaching goal weight: two side cannons + a center burst.
@@ -620,10 +634,13 @@ const css = `
   --border:#2e4241;
   --border-light:#3a5250;
 
-  /* Brand colors */
-  --accent:#08dce0;
-  --accent-fill:#18afb3;
-  --accent-dim:rgba(8,220,224,.12);
+  /* Brand colors. The accent reads through --u-* so the user's picked colour
+     (S183q) reaches the in-plan screens too — these legacy vars are a whole
+     second colour system alongside the Tailwind tokens, and recolouring only
+     one of them would leave half the app cyan. Fallback = the brand default. */
+  --accent:var(--u-accent-d,#08dce0);
+  --accent-fill:var(--u-accentfill-d,#18afb3);
+  --accent-dim:rgba(var(--accent-rgb),.12);
   --orange:#ff6b35;
   --green:#2fe0a8;
   --yellow:#fbbf24;
@@ -681,9 +698,9 @@ const css = `
   --border:#d6e0e2;
   --border-light:#c2d0d3;
 
-  --accent:#087478;        /* text/icons/borders — darkened; 4.8:1 on the worst light surface (was #0a8f93 = 3.4–3.9, failed AA) */
-  --accent-fill:#08dce0;   /* filled buttons keep the bright brand cyan */
-  --accent-dim:rgba(8,116,120,.10);
+  --accent:var(--u-accent-l,#087478);        /* text/icons/borders — darkened; 4.8:1 on the worst light surface (was #0a8f93 = 3.4–3.9, failed AA) */
+  --accent-fill:var(--u-accentfill-l,#08dce0);   /* filled buttons keep the bright brand cyan */
+  --accent-dim:rgba(var(--accent-rgb),.10);
   --orange:#c2410c;
   --green:#0b7a55;
   --yellow:#a34a08;
@@ -756,7 +773,7 @@ body{
   padding:13px 52px;
   padding-top:calc(13px + env(safe-area-inset-top,0px));
   text-align:center;
-  background:linear-gradient(180deg,rgba(8,220,224,.04) 0%,transparent 100%);
+  background:linear-gradient(180deg,rgba(var(--accent-rgb),.04) 0%,transparent 100%);
   border-bottom:1px solid var(--border);
   margin-bottom:18px;
 }
@@ -801,7 +818,7 @@ body{
 }
 .step-dot.active{
   background:var(--accent-fill);
-  box-shadow:0 0 10px rgba(8,220,224,.5);
+  box-shadow:0 0 10px rgba(var(--accent-rgb),.5);
 }
 .step-dot.done{background:var(--accent-fill);opacity:.3}
 
@@ -826,12 +843,12 @@ body{
 
 /* ── Welcome banner ── */
 .welcome-banner{
-  background:linear-gradient(135deg,rgba(8,220,224,.07),color-mix(in srgb,var(--green) 4%,transparent));
-  border:1px solid rgba(8,220,224,.22);
+  background:linear-gradient(135deg,rgba(var(--accent-rgb),.07),color-mix(in srgb,var(--green) 4%,transparent));
+  border:1px solid rgba(var(--accent-rgb),.22);
   border-radius:var(--radius-lg);
   padding:18px;margin-bottom:16px;
   display:flex;align-items:flex-start;gap:14px;
-  box-shadow:0 0 0 1px rgba(8,220,224,.05);
+  box-shadow:0 0 0 1px rgba(var(--accent-rgb),.05);
 }
 .wb-emoji{font-size:2.2rem;flex-shrink:0;line-height:1;margin-top:2px}
 .wb-title{
@@ -866,7 +883,7 @@ body{
 }
 .field input:focus,.field select:focus{
   border-color:var(--accent);
-  box-shadow:0 0 0 3px rgba(8,220,224,.1);
+  box-shadow:0 0 0 3px rgba(var(--accent-rgb),.1);
 }
 .field input::placeholder{color:var(--muted);opacity:.7}
 .field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -897,8 +914,8 @@ body{
 }
 .gbtn.active{
   border-color:var(--accent);color:var(--accent);
-  background:rgba(8,220,224,.08);
-  box-shadow:0 0 0 1px rgba(8,220,224,.2);
+  background:rgba(var(--accent-rgb),.08);
+  box-shadow:0 0 0 1px rgba(var(--accent-rgb),.2);
 }
 .gbtn:active{transform:scale(.97)}
 
@@ -918,14 +935,14 @@ body{
 .abtn .ad{font-size:.76rem;color:var(--muted);line-height:1.4}
 .abtn.active{
   border-color:var(--accent);
-  background:rgba(8,220,224,.06);
-  box-shadow:0 0 0 1px rgba(8,220,224,.15);
+  background:rgba(var(--accent-rgb),.06);
+  box-shadow:0 0 0 1px rgba(var(--accent-rgb),.15);
 }
 .abtn.active .al{color:var(--accent)}
 .abtn-check{
   margin-left:auto;color:var(--accent);
   font-size:1.2rem;flex-shrink:0;
-  background:rgba(8,220,224,.15);
+  background:rgba(var(--accent-rgb),.15);
   width:28px;height:28px;border-radius:50%;
   display:flex;align-items:center;justify-content:center;
 }
@@ -954,7 +971,7 @@ body{
 }
 .btn-p{
   background:var(--accent-fill);color:#0b0b12;font-weight:700;
-  box-shadow:0 4px 18px rgba(8,220,224,.3);
+  box-shadow:0 4px 18px rgba(var(--accent-rgb),.3);
 }
 .btn-p:active{transform:scale(.97);box-shadow:none}
 .btn-p:disabled{background:var(--s2);color:var(--muted);border:1.5px solid var(--border);opacity:1;cursor:not-allowed;box-shadow:none}
@@ -996,7 +1013,7 @@ body{
 .hero::before{
   content:'';position:absolute;top:-60px;right:-60px;
   width:160px;height:160px;border-radius:50%;
-  background:radial-gradient(circle,rgba(8,220,224,.06) 0%,transparent 70%);
+  background:radial-gradient(circle,rgba(var(--accent-rgb),.06) 0%,transparent 70%);
   pointer-events:none;
 }
 .hero-lbl{font-size:.66rem;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
@@ -1037,7 +1054,7 @@ body{
 }
 .day-result-card.drc-open{
   border-color:var(--accent);
-  box-shadow:0 0 0 1px rgba(8,220,224,.15);
+  box-shadow:0 0 0 1px rgba(var(--accent-rgb),.15);
 }
 .day-result-card.drc-open .drc-header::after{opacity:0}
 .drc-header{
@@ -1053,8 +1070,8 @@ body{
 .drc-chevron.open{transform:rotate(180deg);color:var(--accent)}
 .drc-edit-body{
   padding:14px 16px;
-  border-top:1px solid rgba(8,220,224,.12);
-  background:rgba(8,220,224,.02);
+  border-top:1px solid rgba(var(--accent-rgb),.12);
+  background:rgba(var(--accent-rgb),.02);
   animation:fadeUp .18s ease both;
 }
 .drc-edit-body .field{margin-bottom:10px}
@@ -1089,7 +1106,7 @@ body{
 
 /* ── Cardio summary pill ── */
 .csumm{
-  background:rgba(8,220,224,.03);border:1px solid rgba(8,220,224,.12);
+  background:rgba(var(--accent-rgb),.03);border:1px solid rgba(var(--accent-rgb),.12);
   border-radius:var(--radius-sm);padding:14px;margin-bottom:16px;
   display:flex;gap:12px;align-items:flex-start;
 }
@@ -1147,7 +1164,7 @@ body{
 .ms-pace{font-size:.79rem;color:var(--muted)}
 .ms-loss{font-family:'Sora',sans-serif;font-size:1.15rem;letter-spacing:.5px}
 .ms-wt{font-size:.72rem;color:var(--muted);margin-top:1px}
-.ms-card-goal{border-color:rgba(8,220,224,.3);background:rgba(8,220,224,.025)}
+.ms-card-goal{border-color:rgba(var(--accent-rgb),.3);background:rgba(var(--accent-rgb),.025)}
 .ms-card-goal .ms-card-header{color:var(--accent)}
 .prog-bar-bg{height:5px;border-radius:3px;background:var(--border);overflow:hidden;margin-top:3px}
 .prog-bar-fill{height:100%;border-radius:3px;transition:width .5s}
@@ -1250,10 +1267,10 @@ body{
   font-family:'DM Sans',sans-serif;line-height:1;
   -webkit-tap-highlight-color:transparent;user-select:none;
 }
-.info-icon:hover,.info-icon.active{background:rgba(8,220,224,.16);border-color:var(--accent);color:var(--accent)}
+.info-icon:hover,.info-icon.active{background:rgba(var(--accent-rgb),.16);border-color:var(--accent);color:var(--accent)}
 .info-panel{
   padding:13px 14px;
-  background:rgba(8,220,224,.04);border-top:1px solid rgba(8,220,224,.1);
+  background:rgba(var(--accent-rgb),.04);border-top:1px solid rgba(var(--accent-rgb),.1);
   font-size:.8rem;color:var(--muted);line-height:1.6;
   animation:fadeUp .18s ease both;
 }
@@ -1307,7 +1324,7 @@ body{
   transition:all .15s;backdrop-filter:blur(6px);
   -webkit-tap-highlight-color:transparent;
 }
-.chart-overlay-arrow:hover:not(:disabled){background:rgba(8,220,224,.14);border-color:var(--accent);color:var(--accent)}
+.chart-overlay-arrow:hover:not(:disabled){background:rgba(var(--accent-rgb),.14);border-color:var(--accent);color:var(--accent)}
 .chart-overlay-arrow:disabled{opacity:.1;cursor:not-allowed;pointer-events:none}
 .pace-selector{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .pace-sel-btn{
@@ -1335,7 +1352,7 @@ body{
 
 /* ── Explainer box ── */
 .explainer-box{
-  background:rgba(8,220,224,.025);border:1px solid rgba(8,220,224,.1);
+  background:rgba(var(--accent-rgb),.025);border:1px solid rgba(var(--accent-rgb),.1);
   border-radius:var(--radius-sm);padding:17px;margin-bottom:14px;
 }
 .exp-title{font-weight:700;font-size:.92rem;margin-bottom:9px;color:var(--text)}
@@ -1382,13 +1399,13 @@ body{
 /* ── Quick fill ── */
 .quick-fill-toggle{
   width:100%;padding:13px 15px;border-radius:10px;
-  border:1.5px dashed rgba(8,220,224,.25);background:rgba(8,220,224,.025);
+  border:1.5px dashed rgba(var(--accent-rgb),.25);background:rgba(var(--accent-rgb),.025);
   color:var(--accent);cursor:pointer;font-family:inherit;
   font-size:.84rem;font-weight:600;text-align:left;
   margin-bottom:14px;transition:all .2s;
   -webkit-tap-highlight-color:transparent;
 }
-.quick-fill-toggle:hover{border-color:var(--accent);background:rgba(8,220,224,.05)}
+.quick-fill-toggle:hover{border-color:var(--accent);background:rgba(var(--accent-rgb),.05)}
 .quick-fill-panel{
   background:var(--s2);border:1px solid var(--border);
   border-radius:var(--radius-sm);padding:16px;margin-bottom:16px;
@@ -1533,7 +1550,7 @@ body{
   background:var(--surface);border:1px solid var(--border);
   border-radius:var(--radius-sm);margin-bottom:9px;overflow:hidden;transition:border-color .15s;
 }
-.micro-row.micro-open{border-color:rgba(8,220,224,.28)}
+.micro-row.micro-open{border-color:rgba(var(--accent-rgb),.28)}
 .micro-header{
   display:flex;align-items:center;gap:11px;padding:13px 15px;
   cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background .15s;
@@ -1545,7 +1562,7 @@ body{
 .micro-amount{font-size:.74rem;color:var(--orange);margin-top:2px}
 .micro-chevron{color:var(--muted);font-size:.65rem;transition:transform .2s;flex-shrink:0}
 .micro-chevron.open{transform:rotate(180deg);color:var(--accent)}
-.micro-detail{padding:13px 15px 15px;border-top:1px solid var(--border);background:rgba(8,220,224,.02)}
+.micro-detail{padding:13px 15px 15px;border-top:1px solid var(--border);background:rgba(var(--accent-rgb),.02)}
 .micro-why{font-size:.81rem;color:var(--muted);line-height:1.6;margin-bottom:11px}
 .micro-foods-label{font-size:.7rem;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:700;margin-bottom:7px}
 .micro-foods{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:11px}
@@ -1556,7 +1573,7 @@ body{
 }
 .micro-tip{
   font-size:.77rem;color:var(--muted);line-height:1.55;
-  padding:9px 11px;background:rgba(8,220,224,.04);
+  padding:9px 11px;background:rgba(var(--accent-rgb),.04);
   border-radius:var(--radius-sm);border:1px solid var(--border);
 }
 @media(min-width:640px){.macro-grid{grid-template-columns:repeat(4,1fr)}}
@@ -1610,7 +1627,7 @@ body{
 .sc-cardio-note{font-size:.65rem;color:var(--green);margin-top:5px;text-align:center}
 .sc-offset{font-size:.79rem;color:var(--green);line-height:1.4;margin-top:4px}
 .surplus-takeaway{
-  background:rgba(8,220,224,.04);border:1px solid rgba(8,220,224,.12);
+  background:rgba(var(--accent-rgb),.04);border:1px solid rgba(var(--accent-rgb),.12);
   border-radius:var(--radius-sm);padding:15px 16px;margin-bottom:14px;
   display:flex;gap:13px;align-items:flex-start;
 }
@@ -1745,8 +1762,8 @@ body{
 
 /* ── Results summary ── */
 .results-summary-banner{
-  background:linear-gradient(135deg,rgba(8,220,224,.07),color-mix(in srgb,var(--orange) 4%,transparent));
-  border:1px solid rgba(8,220,224,.18);border-radius:var(--radius-lg);
+  background:linear-gradient(135deg,rgba(var(--accent-rgb),.07),color-mix(in srgb,var(--orange) 4%,transparent));
+  border:1px solid rgba(var(--accent-rgb),.18);border-radius:var(--radius-lg);
   padding:18px;margin-bottom:20px;
   display:grid;grid-template-columns:1fr 1fr;gap:10px;
 }
@@ -1775,8 +1792,8 @@ body{
 .dash-greeting{font-family:'Sora',sans-serif;font-size:2rem;letter-spacing:3px;color:var(--text);text-align:center;margin-bottom:18px}
 .dash-streak{
   display:flex;align-items:center;justify-content:center;gap:8px;
-  background:linear-gradient(135deg,rgba(8,220,224,.08),color-mix(in srgb,var(--orange) 4%,transparent));
-  border:1px solid rgba(8,220,224,.2);border-radius:var(--radius-lg);
+  background:linear-gradient(135deg,rgba(var(--accent-rgb),.08),color-mix(in srgb,var(--orange) 4%,transparent));
+  border:1px solid rgba(var(--accent-rgb),.2);border-radius:var(--radius-lg);
   padding:14px;margin-bottom:18px;text-align:center;
 }
 .dash-streak-num{font-family:'Sora',sans-serif;font-size:2.4rem;color:var(--accent);line-height:1}
@@ -1823,7 +1840,7 @@ body{
 .dash-nav-btn:hover{border-color:var(--accent);color:var(--accent)}
 .share-card{
   background:linear-gradient(135deg,var(--surface),var(--s2));
-  border:1.5px solid rgba(8,220,224,.2);border-radius:var(--radius-lg);
+  border:1.5px solid rgba(var(--accent-rgb),.2);border-radius:var(--radius-lg);
   padding:24px 20px;text-align:center;margin-top:16px;
 }
 .share-card-name{font-family:'Sora',sans-serif;font-size:1.8rem;letter-spacing:3px;color:var(--accent);margin-bottom:4px}
@@ -1885,8 +1902,8 @@ body{
   margin-bottom:8px;cursor:pointer;transition:all .15s;
   -webkit-tap-highlight-color:transparent;
 }
-.profile-card:hover{border-color:var(--accent);background:rgba(8,220,224,.03)}
-.profile-card.pc-active{border-color:var(--accent);background:rgba(8,220,224,.06)}
+.profile-card:hover{border-color:var(--accent);background:rgba(var(--accent-rgb),.03)}
+.profile-card.pc-active{border-color:var(--accent);background:rgba(var(--accent-rgb),.06)}
 .pc-avatar{
   width:40px;height:40px;border-radius:50%;
   background:var(--s3);border:1px solid var(--border);
@@ -1902,7 +1919,7 @@ body{
   background:var(--accent-dim);color:var(--accent);cursor:pointer;
   font-family:inherit;font-size:.75rem;font-weight:600;transition:all .15s;
 }
-.pc-load-btn:hover{background:rgba(8,220,224,.15)}
+.pc-load-btn:hover{background:rgba(var(--accent-rgb),.15)}
 .pc-del-btn{
   padding:6px 10px;border-radius:8px;border:1.5px solid color-mix(in srgb,var(--red) 25%,transparent);
   background:color-mix(in srgb,var(--red) 5%,transparent);color:var(--red);cursor:pointer;
@@ -1927,7 +1944,7 @@ body{
   font-size:.84rem;font-weight:600;transition:all .15s;
   display:flex;align-items:center;justify-content:center;gap:6px;
 }
-.save-bar-btn:hover{background:rgba(8,220,224,.15)}
+.save-bar-btn:hover{background:rgba(var(--accent-rgb),.15)}
 .save-bar-btn:active{transform:scale(.97)}
 .save-bar-new{
   flex:0 0 auto;min-height:44px;padding:0 16px;border-radius:10px;
@@ -1943,7 +1960,7 @@ body{
   border-radius:var(--radius-sm);overflow:hidden;
   transition:border-color .2s;
 }
-.folder-section.drag-over{border-color:var(--accent);box-shadow:0 0 12px rgba(8,220,224,.15)}
+.folder-section.drag-over{border-color:var(--accent);box-shadow:0 0 12px rgba(var(--accent-rgb),.15)}
 .folder-header{
   display:flex;align-items:center;gap:10px;
   padding:14px 16px;background:var(--s2);
@@ -1975,11 +1992,11 @@ body{
 }
 .folder-new-btn{
   flex:1;min-height:40px;border-radius:10px;
-  border:1.5px dashed rgba(8,220,224,.25);background:rgba(8,220,224,.025);
+  border:1.5px dashed rgba(var(--accent-rgb),.25);background:rgba(var(--accent-rgb),.025);
   color:var(--accent);cursor:pointer;font-family:inherit;
   font-size:.8rem;font-weight:600;transition:all .15s;
 }
-.folder-new-btn:hover{border-color:var(--accent);background:rgba(8,220,224,.06)}
+.folder-new-btn:hover{border-color:var(--accent);background:rgba(var(--accent-rgb),.06)}
 .folder-input{
   width:100%;padding:10px 14px;border-radius:8px;
   border:1.5px solid var(--accent);background:var(--s2);
@@ -2003,7 +2020,7 @@ body{
 
 /* ── Daily Check-In ── */
 .checkin-card{
-  background:linear-gradient(135deg,color-mix(in srgb,var(--green) 5%,transparent),rgba(8,220,224,.03));
+  background:linear-gradient(135deg,color-mix(in srgb,var(--green) 5%,transparent),rgba(var(--accent-rgb),.03));
   border:1.5px solid color-mix(in srgb,var(--green) 20%,transparent);border-radius:var(--radius-lg);
   padding:18px;margin-bottom:16px;
 }
@@ -2035,7 +2052,7 @@ body{
 .streak-bar{
   display:flex;align-items:center;gap:10px;
   padding:12px 16px;border-radius:var(--radius-sm);
-  background:rgba(8,220,224,.04);border:1px solid rgba(8,220,224,.12);
+  background:rgba(var(--accent-rgb),.04);border:1px solid rgba(var(--accent-rgb),.12);
   margin-bottom:14px;
 }
 .streak-fire{font-size:1.4rem}
@@ -2059,7 +2076,7 @@ body{
 }
 .share-card::before{
   content:'';position:absolute;top:-40px;right:-40px;width:120px;height:120px;
-  border-radius:50%;background:radial-gradient(circle,rgba(8,220,224,.08) 0%,transparent 70%);
+  border-radius:50%;background:radial-gradient(circle,rgba(var(--accent-rgb),.08) 0%,transparent 70%);
 }
 .share-card-brand{font-family:'Sora',sans-serif;font-size:1rem;letter-spacing:3px;color:var(--accent);opacity:.6;margin-bottom:8px}
 .share-card-name{font-family:'Sora',sans-serif;font-size:1.8rem;color:var(--text);margin-bottom:4px}
@@ -2094,7 +2111,7 @@ body{
   transition:all .15s;-webkit-tap-highlight-color:transparent;
 }
 .prof-card:active{transform:scale(.98)}
-.prof-card:hover{border-color:var(--accent);background:rgba(8,220,224,.03)}
+.prof-card:hover{border-color:var(--accent);background:rgba(var(--accent-rgb),.03)}
 .prof-avatar{
   width:44px;height:44px;border-radius:50%;
   background:var(--accent-dim);border:2px solid var(--accent);
@@ -2114,12 +2131,12 @@ body{
 .prof-del:hover{background:color-mix(in srgb,var(--red) 12%,transparent);border-color:var(--red)}
 .prof-new-btn{
   width:100%;min-height:56px;border-radius:var(--radius-sm);
-  border:2px dashed rgba(8,220,224,.3);background:rgba(8,220,224,.02);
+  border:2px dashed rgba(var(--accent-rgb),.3);background:rgba(var(--accent-rgb),.02);
   color:var(--accent);cursor:pointer;font-family:'Sora',sans-serif;
   font-size:1.1rem;letter-spacing:2px;transition:all .15s;
   display:flex;align-items:center;justify-content:center;gap:10px;
 }
-.prof-new-btn:hover{border-color:var(--accent);background:rgba(8,220,224,.06)}
+.prof-new-btn:hover{border-color:var(--accent);background:rgba(var(--accent-rgb),.06)}
 .prof-new-btn:active{transform:scale(.98)}
 .prof-save-badge{
   position:fixed;top:calc(12px + env(safe-area-inset-top,0px));right:12px;
@@ -2280,7 +2297,7 @@ function CustomExerciseCreator({ exerciseType, onAdd, weightLbs, data }) {
               {estimating ? "Estimating…" : met != null ? "Re-estimate with AI" : "Estimate with AI"}
             </button>
             {met != null && (
-              <div className="mt-2 rounded-lg px-3 py-2 text-[.78rem] leading-relaxed" style={{ background: "rgba(8,220,224,.08)" }}>
+              <div className="mt-2 rounded-lg px-3 py-2 text-[.78rem] leading-relaxed" style={{ background: "rgba(var(--accent-rgb),.08)" }}>
                 <b className="text-primary">Intensity {met}</b>
                 {assumed ? <span className="text-muted"> — assumed {assumed}</span> : null}
               </div>
@@ -2338,9 +2355,9 @@ const WZ = {
   tip: "text-[.78rem] text-muted leading-relaxed px-3.5 py-3 mt-2.5 bg-surface2 rounded-lg border border-border",
 };
 // Big toggle button (gender, etc.) — cyan when active.
-const wzGbtn = (active) => `min-h-[48px] p-4 rounded-lg border-2 cursor-pointer font-semibold flex items-center justify-center gap-2 transition-colors ${active ? "border-primary text-primary bg-[rgba(8,220,224,.08)]" : "border-border text-muted bg-surface2"}`;
+const wzGbtn = (active) => `min-h-[48px] p-4 rounded-lg border-2 cursor-pointer font-semibold flex items-center justify-center gap-2 transition-colors ${active ? "border-primary text-primary bg-[rgba(var(--accent-rgb),.08)]" : "border-border text-muted bg-surface2"}`;
 // Large scannable selection row (activity levels, exercises) — cyan when active.
-const wzAbtn = (active) => `w-full min-h-[60px] px-4 py-3.5 rounded-lg border-2 cursor-pointer flex items-center gap-3.5 text-left transition-colors ${active ? "border-primary bg-[rgba(8,220,224,.06)]" : "border-border bg-surface2"}`;
+const wzAbtn = (active) => `w-full min-h-[60px] px-4 py-3.5 rounded-lg border-2 cursor-pointer flex items-center gap-3.5 text-left transition-colors ${active ? "border-primary bg-[rgba(var(--accent-rgb),.06)]" : "border-border bg-surface2"}`;
 // Shared widget classes for the workout steps (Strength + Cardio): quick-fill
 // panels, per-day cards, etc.
 const WZW = {
@@ -2349,14 +2366,14 @@ const WZW = {
   select: WZ.input + " appearance-none",
   dayCard: "rounded-lg border border-border bg-surface2 mb-2.5 overflow-hidden",
   dayHeader: "flex items-center gap-3 px-3 py-3 cursor-pointer",
-  dayChip: "shrink-0 min-w-[44px] text-center text-[.7rem] font-bold uppercase tracking-wide text-primary bg-[rgba(8,220,224,.1)] rounded-md py-1",
+  dayChip: "shrink-0 min-w-[44px] text-center text-[.7rem] font-bold uppercase tracking-wide text-primary bg-[rgba(var(--accent-rgb),.1)] rounded-md py-1",
   dayBody: "px-3 pb-3 border-t border-border",
   warn: "text-[.82rem] text-warn bg-[rgba(251,191,36,.08)] border border-[rgba(251,191,36,.3)] rounded-lg px-3.5 py-3 my-2 leading-relaxed",
   clearDay: "w-full mt-2 py-2.5 rounded-lg border border-border bg-transparent text-muted text-sm font-semibold cursor-pointer",
   primaryBtn: "min-h-[44px] rounded-lg bg-primaryfill text-primaryfg font-bold text-sm px-4 cursor-pointer disabled:bg-surface2 disabled:text-muted disabled:cursor-not-allowed",
   ghostBtn: "min-h-[44px] rounded-lg border border-border bg-surface2 text-fg font-semibold text-sm px-4 cursor-pointer",
 };
-const wzFillDay = (sel) => `min-h-[40px] rounded-md border text-sm font-semibold cursor-pointer ${sel ? "border-primary bg-[rgba(8,220,224,.12)] text-primary" : "border-border bg-surface2 text-fg"}`;
+const wzFillDay = (sel) => `min-h-[40px] rounded-md border text-sm font-semibold cursor-pointer ${sel ? "border-primary bg-[rgba(var(--accent-rgb),.12)] text-primary" : "border-border bg-surface2 text-fg"}`;
 const wzPreset = "px-2.5 py-1 rounded-md border border-border bg-surface2 text-fg text-[.72rem] cursor-pointer";
 
 function BottomNav({ onBack, onNext, nextLabel = "Next →", nextDisabled = false, showBack = true }) {
@@ -2406,7 +2423,7 @@ function StepPersonal({ data, onChange, onNext }) {
   return (
     <div className="fu text-fg">
       {/* Welcome banner */}
-      <div className="flex items-start gap-3.5 p-4 mb-4 rounded-card border border-primary bg-[rgba(8,220,224,.06)]">
+      <div className="flex items-start gap-3.5 p-4 mb-4 rounded-card border border-primary bg-[rgba(var(--accent-rgb),.06)]">
         <div className="shrink-0 mt-0.5"><Icon name="sparkle" size={30} color="var(--color-primary,#08DCE0)" /></div>
         <div>
           <div className="font-display text-xl tracking-wide text-primary mb-1">Welcome to Glidna</div>
@@ -2561,7 +2578,7 @@ function StepGoalWeight({ data, onChange, onBack, onNext }) {
           />
         </div>
         {toLose && (
-          <div className="text-center rounded-lg border border-primary bg-[rgba(8,220,224,.06)] py-3 mb-3">
+          <div className="text-center rounded-lg border border-primary bg-[rgba(var(--accent-rgb),.06)] py-3 mb-3">
             <div className="text-[.62rem] uppercase tracking-wide text-muted">Total to lose</div>
             <div className="font-display text-4xl text-primary leading-tight">{toLose.toFixed(1)}</div>
             <div className="text-[.62rem] text-muted">pounds — we'll map out exactly how to get there</div>
@@ -2699,13 +2716,13 @@ function StepActivity({ data, onChange, onBack, onNext }) {
               <button className={`${wzAbtn(active)} flex-1`} onClick={()=>{onChange("activityLevel",a.id);setActiveInfo(null);}}>
                 <Icon name={a.iconName} size={26} color="var(--color-primary,#08DCE0)" className="shrink-0" />
                 <div><div className={`font-bold text-[.97rem] ${active?"text-primary":"text-fg"}`}>{a.label}</div><div className="text-[.76rem] text-muted leading-snug">{a.desc}</div></div>
-                {active && <span className="ml-auto shrink-0 w-7 h-7 rounded-full bg-[rgba(8,220,224,.15)] text-primary flex items-center justify-center"><Icon name="check" size={15} color="currentColor" /></span>}
+                {active && <span className="ml-auto shrink-0 w-7 h-7 rounded-full bg-[rgba(var(--accent-rgb),.15)] text-primary flex items-center justify-center"><Icon name="check" size={15} color="currentColor" /></span>}
               </button>
-              <button className={`shrink-0 w-8 h-8 rounded-full border flex items-center justify-center text-sm cursor-pointer ${activeInfo===a.id?"border-primary text-primary bg-[rgba(8,220,224,.08)]":"border-border text-muted bg-surface2"}`}
+              <button className={`shrink-0 w-8 h-8 rounded-full border flex items-center justify-center text-sm cursor-pointer ${activeInfo===a.id?"border-primary text-primary bg-[rgba(var(--accent-rgb),.08)]":"border-border text-muted bg-surface2"}`}
                 onClick={(e)=>{e.stopPropagation();setActiveInfo(activeInfo===a.id?null:a.id);}}>i</button>
             </div>
             {activeInfo===a.id && (
-              <div onClick={e=>e.stopPropagation()} className="px-3.5 py-3 mt-2 rounded-lg bg-[rgba(8,220,224,.06)] border border-[rgba(8,220,224,.2)] text-[.82rem] text-fg leading-relaxed">
+              <div onClick={e=>e.stopPropagation()} className="px-3.5 py-3 mt-2 rounded-lg bg-[rgba(var(--accent-rgb),.06)] border border-[rgba(var(--accent-rgb),.2)] text-[.82rem] text-fg leading-relaxed">
                 {ACTIVITY_DETAILS[a.id]}
               </div>
             )}
@@ -3040,7 +3057,7 @@ function ExercisePicker({ kind, value, onChange, onPickHr, customExercises }) {
                   <button key={ex.id} type="button" onClick={() => pick(ex.id)}
                     style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 10px",
                       borderRadius: 9, border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left",
-                      background: active ? "rgba(8,220,224,.1)" : "transparent", color: "var(--text)", marginBottom: 2 }}>
+                      background: active ? "rgba(var(--accent-rgb),.1)" : "transparent", color: "var(--text)", marginBottom: 2 }}>
                     <Icon name={ex.isHr ? "heartRate" : exerciseCategory(ex, kind)} size={18} color={active ? "var(--accent)" : "var(--muted)"} />
                     <span style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ display: "block", fontSize: ".86rem", fontWeight: active ? 700 : 600,
@@ -3370,7 +3387,7 @@ function HeartRatePicker({ data, hr, duration = 30, onChange }) {
           <button key={m} onClick={() => emit(bpm, m)}
             style={{ padding: "6px 11px", borderRadius: 8, fontSize: ".82rem", fontWeight: 700, cursor: "pointer",
               border: `1px solid ${m === mins ? "var(--accent)" : "var(--border)"}`,
-              background: m === mins ? "rgba(8,220,224,.12)" : "transparent",
+              background: m === mins ? "rgba(var(--accent-rgb),.12)" : "transparent",
               color: m === mins ? "var(--accent)" : "var(--text)" }}>{m}m</button>
         ))}
       </div>
@@ -3697,7 +3714,7 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
               <button key={v} onClick={() => onSetFitnessGoal(v)}
                 style={{ flex: 1, padding: "9px 6px", borderRadius: 10, cursor: "pointer", fontFamily: "inherit", fontSize: ".78rem", fontWeight: 700, transition: "all .15s",
                   border: goalMode === v ? "1.5px solid var(--accent)" : "1px solid var(--border)",
-                  background: goalMode === v ? "rgba(8,220,224,.08)" : "var(--s2)",
+                  background: goalMode === v ? "rgba(var(--accent-rgb),.08)" : "var(--s2)",
                   color: goalMode === v ? "var(--accent)" : "var(--muted)" }}>{l}</button>
             ))}
           </div>
@@ -4032,7 +4049,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
                 title="What this client lands on first — until they pick their own view"
                 style={{padding:"4px 12px",fontSize:".7rem",fontWeight:700,borderRadius:"999px",cursor:"pointer",
                   border:"1px solid "+(active?"var(--accent)":"var(--border)"),
-                  background:active?"rgba(8,220,224,.12)":"transparent",
+                  background:active?"rgba(var(--accent-rgb),.12)":"transparent",
                   color:active?"var(--accent)":"var(--muted)"}}>
                 {l}
               </button>
@@ -4587,7 +4604,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
                     </div>
                   );
                 })}
-                <div style={{fontSize:".76rem",color:"var(--muted)",lineHeight:1.5,marginTop:"8px",padding:"10px 12px",background:"rgba(8,220,224,.03)",borderRadius:"8px",border:"1px solid var(--border)"}}>
+                <div style={{fontSize:".76rem",color:"var(--muted)",lineHeight:1.5,marginTop:"8px",padding:"10px 12px",background:"rgba(var(--accent-rgb),.03)",borderRadius:"8px",border:"1px solid var(--border)"}}>
                   <strong style={{color:"var(--text)"}}>Fat Burn vs. Total Burn:</strong> Zone 2 burns the highest <em>percentage</em> of calories from fat (~60–70%). But higher zones burn more <em>total</em> calories per minute. For fat loss, Zone 2 for longer sessions (45–60 min) or Zone 4–5 intervals (HIIT) are both effective — pick what you'll stick with consistently.
                 </div>
               </>
@@ -4888,7 +4905,7 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
               style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 8, padding: "12px 14px",
                 borderRadius: 10, cursor: onSetDeficitMode ? "pointer" : "default",
                 border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
-                background: active ? "rgba(8,220,224,.08)" : "var(--s2)", color: "var(--text)" }}>
+                background: active ? "rgba(var(--accent-rgb),.08)" : "var(--s2)", color: "var(--text)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <span style={{ fontWeight: 800, fontSize: ".9rem", display: "inline-flex", alignItems: "center", gap: 6 }}>
                   <Icon name={opt.iconName} size={15} color="var(--accent)" />{opt.title}
@@ -4913,7 +4930,7 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
                 style={{ display: "flex", width: "100%", textAlign: "left", alignItems: "center", gap: 10, padding: "12px 14px",
                   borderRadius: 10, cursor: onSetWearableAdjust ? "pointer" : "default",
                   border: wearOn ? "1px solid var(--accent)" : "1px solid var(--border)",
-                  background: wearOn ? "rgba(8,220,224,.08)" : "var(--s2)", color: "var(--text)" }}>
+                  background: wearOn ? "rgba(var(--accent-rgb),.08)" : "var(--s2)", color: "var(--text)" }}>
                 <Icon name="watch" size={18} color="var(--accent)" />
                 <span style={{ flex: 1 }}>
                   <span style={{ display: "block", fontWeight: 800, fontSize: ".88rem" }}>Use my tracker's real burn</span>
@@ -5197,7 +5214,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
 
       {/* Combined total with cardio */}
       {totalCardio > 0 && activeStrDays > 0 && (
-        <div className="csumm" style={{borderColor:"rgba(8,220,224,.2)",background:"rgba(8,220,224,.03)"}}>
+        <div className="csumm" style={{borderColor:"rgba(var(--accent-rgb),.2)",background:"rgba(var(--accent-rgb),.03)"}}>
           <div className="cs-icon" style={{display:"flex",alignItems:"center"}}><Icon name="bolt" size={22} color="var(--accent)" /></div>
           <div>
             <div className="cs-title">Combined Weekly Burn</div>
@@ -5459,7 +5476,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
 
       {/* Tile explanations */}
       {muscleInfo && (
-        <div style={{padding:"14px 16px",background:"rgba(8,220,224,.04)",border:"1.5px solid rgba(8,220,224,.18)",borderRadius:"var(--radius-sm)",marginBottom:"14px",fontSize:".82rem",color:"var(--text-secondary)",lineHeight:1.7,animation:"fadeUp .15s ease both"}}
+        <div style={{padding:"14px 16px",background:"rgba(var(--accent-rgb),.04)",border:"1.5px solid rgba(var(--accent-rgb),.18)",borderRadius:"var(--radius-sm)",marginBottom:"14px",fontSize:".82rem",color:"var(--text-secondary)",lineHeight:1.7,animation:"fadeUp .15s ease both"}}
           onClick={()=>setMuscleInfo(null)}>
           {muscleInfo === "freq" && (<>
             <strong style={{color:"var(--accent)",display:"block",marginBottom:"6px"}}>Frequency Factor — How Often You Train</strong>
@@ -6417,7 +6434,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
                   <span style={{textAlign:"right",fontFamily:"'Sora',sans-serif",fontSize:".9rem",color:cat.color,minWidth:"32px"}}>{cat.id==="protein"?f.f+"g":cat.id==="carbs"?f.c+"g":f.f+"g"}</span>
                 </div>
               ))}
-              <div style={{marginTop:"10px",fontSize:".75rem",color:"var(--muted)",lineHeight:1.5,padding:"8px 10px",background:"rgba(8,220,224,.04)",borderRadius:"8px",border:"1px solid var(--border)"}}>
+              <div style={{marginTop:"10px",fontSize:".75rem",color:"var(--muted)",lineHeight:1.5,padding:"8px 10px",background:"rgba(var(--accent-rgb),.04)",borderRadius:"8px",border:"1px solid var(--border)"}}>
                 {cat.id==="protein"
                   ? `Aim for 25–40g protein per meal across 3–5 meals to maximize muscle protein synthesis. Spread evenly — don't back-load all ${proteinG}g into dinner.`
                   : cat.id==="carbs"
@@ -6458,7 +6475,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
                   </div>
                   <div className="micro-tip">{m.tip}</div>
                   {m.personalNote && (
-                    <div style={{marginTop:"8px",padding:"9px 11px",background:"rgba(8,220,224,.06)",border:"1px solid rgba(8,220,224,.15)",borderRadius:"var(--radius-sm)",fontSize:".77rem",color:"var(--accent)",lineHeight:1.55}}>
+                    <div style={{marginTop:"8px",padding:"9px 11px",background:"rgba(var(--accent-rgb),.06)",border:"1px solid rgba(var(--accent-rgb),.15)",borderRadius:"var(--radius-sm)",fontSize:".77rem",color:"var(--accent)",lineHeight:1.55}}>
                       {m.personalNote}
                     </div>
                   )}
@@ -6585,7 +6602,7 @@ function WeightChart({ current, goal, paces, totalBurn, maxWeeks, compliance=1, 
       {yLabels.map(({wt,y},i)=>(
         <g key={i}>
           <line x1={PAD.left} y1={PAD.top+y} x2={PAD.left+chartW} y2={PAD.top+y}
-            style={{ stroke: i===0 ? "rgba(8,220,224,.25)" : "var(--tint-lg)" }} strokeWidth="1"/>
+            style={{ stroke: i===0 ? "rgba(var(--accent-rgb),.25)" : "var(--tint-lg)" }} strokeWidth="1"/>
           {/* BRIGHT, large Y labels */}
           <text x={PAD.left-14} y={PAD.top+y+5} textAnchor="end"
             fill="#ffffff" fontSize="13.5" fontWeight="700" fontFamily="DM Sans,sans-serif"
@@ -6600,11 +6617,11 @@ function WeightChart({ current, goal, paces, totalBurn, maxWeeks, compliance=1, 
       </text>
 
       {/* Goal band */}
-      <rect x={PAD.left} y={PAD.top+goalY-2} width={chartW} height={3} fill="rgba(8,220,224,.55)" rx="1.5"/>
-      <rect x={PAD.left} y={PAD.top+goalY} width={chartW} height={chartH-goalY} fill="rgba(8,220,224,.023)"/>
-      <rect x={PAD.left+chartW+6} y={PAD.top+goalY-12} width={60} height={22} rx="6" fill="rgba(8,220,224,.2)"/>
+      <rect x={PAD.left} y={PAD.top+goalY-2} width={chartW} height={3} fill="rgba(var(--accent-rgb),.55)" rx="1.5"/>
+      <rect x={PAD.left} y={PAD.top+goalY} width={chartW} height={chartH-goalY} fill="rgba(var(--accent-rgb),.023)"/>
+      <rect x={PAD.left+chartW+6} y={PAD.top+goalY-12} width={60} height={22} rx="6" fill="rgba(var(--accent-rgb),.2)"/>
       <text x={PAD.left+chartW+36} y={PAD.top+goalY+4} textAnchor="middle"
-        fill="#08dce0" fontSize="11.5" fontWeight="700" fontFamily="DM Sans,sans-serif">{goal} lbs</text>
+        fill="var(--accent)" fontSize="11.5" fontWeight="700" fontFamily="DM Sans,sans-serif">{goal} lbs</text>
 
       {/* Area fills */}
       {scenarios.filter(s=>!s.dash).flatMap(s=>
@@ -6936,7 +6953,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
               </div>
               {vals.map((v,i)=>(
                 <div key={i} className="cpt-col" style={{
-                  color: parseFloat(v) <= goal ? "#08dce0" : rc(paces[i]),
+                  color: parseFloat(v) <= goal ? "var(--accent)" : rc(paces[i]),
                   fontWeight: allAtGoal ? "700" : "600"
                 }}>
                   {parseFloat(v) <= goal ? <>{goal} <Icon name="check" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle"}} /></> : `${v} lbs`}
@@ -6944,7 +6961,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
               ))}
               {hasCardio && (
                 <div className="cpt-col" style={{
-                  color: parseFloat(cardioVal) <= goal ? "#08dce0" : "var(--orange)",
+                  color: parseFloat(cardioVal) <= goal ? "var(--accent)" : "var(--orange)",
                   fontWeight: allAtGoal ? "700" : "600"
                 }}>
                   {parseFloat(cardioVal) <= goal ? <>{goal} <Icon name="check" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle"}} /></> : `${cardioVal} lbs`}
@@ -7911,7 +7928,7 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
                       style={{ padding: "4px 10px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
                         fontSize: ".7rem", fontWeight: 700,
                         border: `1px solid ${on ? "var(--accent)" : "var(--border)"}`,
-                        background: on ? "rgba(8,220,224,.12)" : "transparent",
+                        background: on ? "rgba(var(--accent-rgb),.12)" : "transparent",
                         color: on ? "var(--accent)" : "var(--muted)" }}>{t || "Other"}</button>
                   );
                 })}
@@ -8150,7 +8167,7 @@ function CopyMealModal({ sectionLabel, targetType, dateKey, onReadDay, onListLog
               style={{ padding: "7px 13px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
                 fontSize: ".76rem", fontWeight: 700, whiteSpace: "nowrap", flexShrink: 0,
                 border: `1px solid ${viewKey === k ? "var(--accent)" : "var(--border)"}`,
-                background: viewKey === k ? "rgba(8,220,224,.12)" : "transparent",
+                background: viewKey === k ? "rgba(var(--accent-rgb),.12)" : "transparent",
                 color: viewKey === k ? "var(--accent)" : "var(--muted)" }}>{label}</button>
           ))}
         </div>
@@ -8448,7 +8465,7 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
                 style={{ padding: "6px 12px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
                   fontSize: ".74rem", fontWeight: 700,
                   border: `1px solid ${own ? "var(--accent)" : "var(--border)"}`,
-                  background: own ? "rgba(8,220,224,.12)" : "transparent",
+                  background: own ? "rgba(var(--accent-rgb),.12)" : "transparent",
                   color: own ? "var(--accent)" : "var(--text)" }}>{t}</button>
             );
           })}
@@ -8491,7 +8508,7 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
                 style={{ flex: 1, padding: "10px 8px", borderRadius: 10, cursor: "pointer", fontFamily: "inherit",
                   fontSize: ".84rem", fontWeight: 800,
                   border: `1.5px solid ${mode === k ? "var(--accent)" : "var(--border)"}`,
-                  background: mode === k ? "rgba(8,220,224,.12)" : "transparent",
+                  background: mode === k ? "rgba(var(--accent-rgb),.12)" : "transparent",
                   color: mode === k ? "var(--accent)" : "var(--muted)" }}>{label}</button>
             ))}
           </div>
@@ -8507,7 +8524,7 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
               style={{ flex: 1, padding: "9px 8px", borderRadius: 9, cursor: "pointer", fontFamily: "inherit",
                 fontSize: ".78rem", fontWeight: 700,
                 border: `1px solid ${tab === k ? "var(--accent)" : "var(--border)"}`,
-                background: tab === k ? "rgba(8,220,224,.1)" : "transparent",
+                background: tab === k ? "rgba(var(--accent-rgb),.1)" : "transparent",
                 color: tab === k ? "var(--accent)" : "var(--muted)" }}>{label}</button>
           ))}
         </div>
@@ -8521,7 +8538,7 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
                 style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
                   fontSize: ".74rem", fontWeight: 700,
                   border: `1px solid ${mealFilter === k ? "var(--accent)" : "var(--border)"}`,
-                  background: mealFilter === k ? "rgba(8,220,224,.1)" : "transparent",
+                  background: mealFilter === k ? "rgba(var(--accent-rgb),.1)" : "transparent",
                   color: mealFilter === k ? "var(--accent)" : "var(--muted)" }}>{label}</button>
             ))}
           </div>
@@ -9168,7 +9185,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
   const inp = { padding:"9px 11px", fontSize:".85rem", borderRadius:"8px",
     border:"1px solid var(--border)", background:"var(--s2)", color:"var(--text)", minWidth:0 };
   const addBtn = { marginTop:"4px", padding:"9px 12px", fontSize:".8rem", fontWeight:700,
-    borderRadius:"8px", border:"1px solid var(--accent)", background:"rgba(8,220,224,.08)",
+    borderRadius:"8px", border:"1px solid var(--accent)", background:"rgba(var(--accent-rgb),.08)",
     color:"var(--accent)", cursor:"pointer" };
   // "Copy a previous <meal>" is available only where MealLog got the date I/O.
   const canCopy = !!(onReadDay && onListLoggedDays && onAddMeals);
@@ -9248,7 +9265,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
           {SECTION_OPTS.filter(([, v]) => v.toLowerCase() !== curKey).map(([label, v]) => (
             <button key={label} onClick={() => moveMeal(m, v)}
               style={{ padding:"10px 14px", fontSize:".78rem", fontWeight:700, borderRadius:"999px", cursor:"pointer",
-                fontFamily:"inherit", border:"1px solid var(--accent)", background:"rgba(8,220,224,.08)", color:"var(--accent)" }}>{label}</button>
+                fontFamily:"inherit", border:"1px solid var(--accent)", background:"rgba(var(--accent-rgb),.08)", color:"var(--accent)" }}>{label}</button>
           ))}
           <button onClick={() => setMovingId(null)}
             style={{ padding:"10px 12px", fontSize:".78rem", borderRadius:"999px", cursor:"pointer", fontFamily:"inherit",
@@ -9420,7 +9437,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
                   <span>No matches — try a simpler term, or</span>
                   <button onClick={() => runAiEstimate()} disabled={aiBusy}
                     style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"5px 10px", borderRadius:"999px",
-                      cursor:"pointer", border:"1px solid var(--accent)", background:"rgba(8,220,224,.08)",
+                      cursor:"pointer", border:"1px solid var(--accent)", background:"rgba(var(--accent-rgb),.08)",
                       color:"var(--accent)", fontSize:".72rem", fontWeight:700, opacity: aiBusy ? .6 : 1 }}>
                     <Icon name="sparkle" variant="solid" size={12} />{aiBusy ? "Estimating…" : "Let AI estimate it"}
                   </button>
@@ -9435,7 +9452,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
                       style={{ display:"flex", flexDirection:"column", gap:"3px",
                         padding:"8px 10px", borderRadius:"6px", cursor:"pointer", textAlign:"left",
                         border:"1px solid " + (loadingRow ? "var(--accent)" : "var(--border)"),
-                        background: loadingRow ? "rgba(8,220,224,.08)" : "var(--s2)", color:"var(--text)",
+                        background: loadingRow ? "rgba(var(--accent-rgb),.08)" : "var(--s2)", color:"var(--text)",
                         opacity: pickingId && !loadingRow ? .55 : 1 }}>
                       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline", gap:"8px" }}>
                         <span style={{ display:"flex", alignItems:"center", gap:"6px", minWidth:0, flex:1 }}>
@@ -9519,7 +9536,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
       )}
       {aiBase && (
         <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap", padding:"6px 8px",
-          borderRadius:"8px", background:"rgba(8,220,224,.06)", border:"1px solid var(--border)" }}>
+          borderRadius:"8px", background:"rgba(var(--accent-rgb),.06)", border:"1px solid var(--border)" }}>
           <span style={{ fontSize:".76rem", fontWeight:700, color:"var(--text)" }}>Servings{aiBase.assumed ? <span style={{ fontWeight:400, color:"var(--muted)" }}>{` (${aiBase.assumed} each)`}</span> : null}</span>
           <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
             <button onClick={() => setAiServings(aiQty - 0.5)} aria-label="Fewer servings"
@@ -9540,7 +9557,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
           promise on the pricing page. */}
       {aiLocked && (
         <div style={{ marginTop:"8px", border:"1px solid var(--accent)", borderRadius:"12px",
-          background:"rgba(8,220,224,.07)", padding:"12px 13px" }}>
+          background:"rgba(var(--accent-rgb),.07)", padding:"12px 13px" }}>
           <div style={{ display:"flex", alignItems:"center", gap:"7px" }}>
             <Icon name="sparkle" variant="solid" size={15} color="var(--accent)" />
             <div style={{ fontWeight:800, fontSize:".88rem", color:"var(--text)" }}>
@@ -9586,7 +9603,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
       <div style={{ display:"flex", gap:"6px" }}>
         {!editingId && onPlanDays && (
           <div style={{ width:"100%", marginBottom:"8px", padding:"8px 10px", borderRadius:"8px",
-            background: planMode ? "rgba(8,220,224,.06)" : "var(--s2)", border:"1px solid var(--border)" }}>
+            background: planMode ? "rgba(var(--accent-rgb),.06)" : "var(--s2)", border:"1px solid var(--border)" }}>
             <label style={{ display:"flex", alignItems:"center", gap:"8px", cursor:"pointer", fontSize:".78rem", color:"var(--text)" }}>
               <input type="checkbox" checked={planMode} onChange={(e) => setPlanMode(e.target.checked)} />
               <span>Plan this for later instead of logging it now</span>
@@ -9607,7 +9624,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
                         style={{ width:"32px", height:"32px", borderRadius:"999px", fontSize:".74rem", fontWeight:700,
                           cursor:"pointer", fontFamily:"inherit",
                           border: planDows.includes(i) ? "1px solid var(--accent)" : "1px solid var(--border)",
-                          background: planDows.includes(i) ? "rgba(8,220,224,.14)" : "transparent",
+                          background: planDows.includes(i) ? "rgba(var(--accent-rgb),.14)" : "transparent",
                           color: planDows.includes(i) ? "var(--accent)" : "var(--muted)" }}>{d}</button>
                     ))}
                   </div>
@@ -9753,7 +9770,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
           <button key={t} onClick={() => setViewMode((v) => v === t ? null : t)}
             style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"7px 12px",
               borderRadius:"999px", border:"1px solid var(--accent)",
-              background: activeP ? "var(--accent)" : "rgba(8,220,224,.08)",
+              background: activeP ? "var(--accent)" : "rgba(var(--accent-rgb),.08)",
               color: activeP ? "#0b0b12" : "var(--accent)", fontSize:".76rem", fontWeight:700,
               cursor:"pointer", whiteSpace:"nowrap" }}>
             {pillLabel(t)}{n > 0 ? ` · ${n}` : ""}
@@ -9819,7 +9836,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
           {/* Header control: open ALL meals (or close). */}
           <span style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"6px 11px",
             borderRadius:"999px", border:"1px solid var(--accent)",
-            background: viewMode === "all" ? "transparent" : "rgba(8,220,224,.1)",
+            background: viewMode === "all" ? "transparent" : "rgba(var(--accent-rgb),.1)",
             color:"var(--accent)", fontSize:".76rem", fontWeight:700, whiteSpace:"nowrap" }}>
             {viewMode === "all" ? "▾ Close" : "View all"}
           </span>
@@ -10418,7 +10435,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             const cal = pre ? null : dayCals[k];
             const over = calTarget && cal != null && cal > 0 && cal > calTarget * 1.05;
             const onTrack = calTarget && cal != null && cal > 0 && !over;
-            const bg = k === sel ? "rgba(8,220,224,.12)"
+            const bg = k === sel ? "rgba(var(--accent-rgb),.12)"
               : over ? "rgba(251,191,36,.13)"
               : onTrack ? "rgba(47,224,168,.13)"
               : "var(--surface)";
@@ -10594,7 +10611,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
     if (!list.length) return null;
     return (
       <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 10,
-        background: "rgba(8,220,224,.07)", border: "1px solid var(--accent)" }}>
+        background: "rgba(var(--accent-rgb),.07)", border: "1px solid var(--accent)" }}>
         <div style={{ fontSize: ".72rem", fontWeight: 700, color: "var(--accent)", textTransform: "uppercase",
           letterSpacing: ".5px", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}>
           <Icon name="calendar" size={13} color="var(--accent)" />
@@ -10742,7 +10759,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             if (!burn && !steps && !tzNames && !tzMins) return null;
             return (
               <div style={{ marginBottom: 10, padding: "8px 10px", borderRadius: 8,
-                background: "rgba(8,220,224,.06)", border: "1px solid var(--border)" }}>
+                background: "rgba(var(--accent-rgb),.06)", border: "1px solid var(--border)" }}>
                 {tzNames ? (
                   <div style={{ fontSize: ".82rem", color: "var(--text)", fontWeight: 700, marginBottom: (burn || steps || estBurn || tzMins) ? 4 : 0 }}>
                     <Icon name="watch" size={12} color="var(--accent)" style={{display:"inline-block",verticalAlign:"middle",marginRight:4}} />{tzNames}
@@ -10868,7 +10885,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                               style={{ padding: "5px 10px", borderRadius: 999, fontSize: ".72rem", fontWeight: 700,
                                 cursor: "pointer", fontFamily: "inherit",
                                 border: active === f ? "1px solid var(--accent)" : "1px solid var(--border)",
-                                background: active === f ? "rgba(8,220,224,.12)" : "transparent",
+                                background: active === f ? "rgba(var(--accent-rgb),.12)" : "transparent",
                                 color: active === f ? "var(--accent)" : "var(--muted)" }}>
                               {MEASUREMENT_LABELS[f]}
                             </button>
@@ -11386,7 +11403,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
       {pullIndicator}
       {isRemote && (
         <div style={{ padding:"8px 12px", borderRadius:"8px", marginBottom:"10px",
-          background:"rgba(8,220,224,.08)", border:"1px solid var(--accent)",
+          background:"rgba(var(--accent-rgb),.08)", border:"1px solid var(--accent)",
           color:"var(--accent)", fontSize:".78rem", fontWeight:600,
           display:"flex", alignItems:"flex-start", gap:"8px" }}>
           <Icon name="link" size={16} color="var(--accent)" style={{ marginTop:1 }} />
@@ -11522,7 +11539,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                 <button key={v} onClick={()=>onSetCalorieGoal(v)}
                   style={{padding:"0 15px",minHeight:44,borderRadius:999,fontFamily:"inherit",fontSize:".78rem",fontWeight:700,cursor:"pointer",
                     border:on?"1.5px solid var(--accent)":"1px solid var(--border)",
-                    background:on?"rgba(8,220,224,.08)":"var(--s2)",
+                    background:on?"rgba(var(--accent-rgb),.08)":"var(--s2)",
                     color:on?"var(--accent)":"var(--muted)"}}>{l}</button>
               );
             })}
@@ -11656,7 +11673,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                 padding:"14px 14px",marginBottom:"10px",borderRadius:"12px",cursor:"pointer",
                 fontFamily:"inherit",
                 border:`1.5px solid ${active?"var(--accent)":"var(--border)"}`,
-                background:active?"rgba(8,220,224,.08)":"transparent"}}>
+                background:active?"rgba(var(--accent-rgb),.08)":"transparent"}}>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
                   {active && <Icon name="check" size={14} color="var(--accent)" />}
@@ -11881,7 +11898,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                     <button onClick={()=>{ onSetCalorieTarget(null); setEditTarget(false); }}
                       style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"7px",width:"100%",marginTop:"12px",
                         padding:"11px 12px",borderRadius:"9px",cursor:"pointer",fontFamily:"inherit",fontSize:".84rem",fontWeight:700,
-                        border:"1px solid var(--accent)",background:"rgba(8,220,224,.1)",color:"var(--accent)"}}>
+                        border:"1px solid var(--accent)",background:"rgba(var(--accent-rgb),.1)",color:"var(--accent)"}}>
                       <Icon name="target" size={16} color="var(--accent)" />Use Glidna's default target ({computedTargetForNote.toLocaleString()} cal)
                     </button>
                   )}
@@ -11958,7 +11975,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                           style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"10px",width:"100%",
                             padding:"11px 12px",borderRadius:"9px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",
                             border:`1.5px solid ${active?"var(--accent)":"var(--border)"}`,
-                            background:active?"var(--accent-dim,rgba(8,220,224,.12))":"transparent"}}>
+                            background:active?"var(--accent-dim,rgba(var(--accent-rgb),.12))":"transparent"}}>
                           <span style={{display:"flex",alignItems:"center",gap:"7px",minWidth:0}}>
                             {active && <Icon name="check" size={14} color="var(--accent)" />}
                             <span style={{fontSize:".84rem",fontWeight:active?700:600,color:active?"var(--accent)":"var(--text)"}}>{RATE_LABEL[r]}</span>
@@ -12101,7 +12118,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               {/* Add macros manually (moved from Quick Log) */}
               <div style={{marginTop:"12px"}}>
                 <button onClick={()=>setShowMacros(v=>!v)}
-                  style={{display:"flex",alignItems:"center",gap:"8px",width:"100%",padding:"10px 12px",borderRadius:"8px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",border:"1px solid var(--border)",background:showMacros?"rgba(8,220,224,.06)":"transparent"}}>
+                  style={{display:"flex",alignItems:"center",gap:"8px",width:"100%",padding:"10px 12px",borderRadius:"8px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",border:"1px solid var(--border)",background:showMacros?"rgba(var(--accent-rgb),.06)":"transparent"}}>
                   <Icon name="meal" size={15} color="var(--accent)" />
                   <span style={{flex:1,fontSize:".82rem",fontWeight:700,color:"var(--text)"}}>Add macros manually</span>
                   <span style={{fontSize:".72rem",color:"var(--accent)",fontWeight:700}}>{showMacros?"▲":"▼"}</span>
@@ -12218,7 +12235,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               <button key={v} onClick={()=>onSetProteinBasis(v)}
                 style={{padding:"4px 10px",fontSize:".7rem",fontWeight:700,borderRadius:"999px",cursor:"pointer",
                   border:"1px solid "+(proteinPerLb===v?"var(--accent)":"var(--border)"),
-                  background: proteinPerLb===v?"rgba(8,220,224,.12)":"transparent",
+                  background: proteinPerLb===v?"rgba(var(--accent-rgb),.12)":"transparent",
                   color: proteinPerLb===v?"var(--accent)":"var(--muted)"}}>
                 {l} · {Math.round(Number(weightLbs)*v)}g
               </button>
@@ -12429,7 +12446,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                 );
               })()}
               {burnFromTracker && (
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",marginBottom:"8px",borderRadius:"8px",background:"rgba(8,220,224,.06)",border:"1px solid var(--border)"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",marginBottom:"8px",borderRadius:"8px",background:"rgba(var(--accent-rgb),.06)",border:"1px solid var(--border)"}}>
                   <span style={{display:"inline-flex",alignItems:"center",gap:"6px",fontSize:".82rem",color:"var(--text)"}}><Icon name="watch" size={15} color="var(--accent)" />{dailyLog.wearable&&dailyLog.wearable.manual
                     ? "Active burn you entered"
                     : `Tracker measured active burn${dailyLog.wearable&&dailyLog.wearable.source?` (${dailyLog.wearable.source})`:""}`}</span>
@@ -12506,7 +12523,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                         <button key={k} onClick={()=>setBurnKind(k)}
                           style={{flex:1,padding:"7px 6px",borderRadius:"7px",fontSize:".7rem",fontWeight:700,cursor:"pointer",
                             border:burnKind===k?"1.5px solid var(--accent)":"1.5px solid var(--border)",
-                            background:burnKind===k?"rgba(8,220,224,.08)":"var(--surface)",
+                            background:burnKind===k?"rgba(var(--accent-rgb),.08)":"var(--surface)",
                             color:burnKind===k?"var(--accent)":"var(--muted)"}}>{label}</button>
                       ))}
                     </div>
@@ -12593,7 +12610,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         <div className="dash-today-workout">
           {(todayCardio.workouts||[]).map((w,i)=>(
             <div key={`c${i}`} id={`workout-c${i}`}>
-              <div style={{display:"flex",alignItems:"center",gap:"8px",padding:"12px 8px",marginBottom:"4px",borderRadius:"8px",border:editingWorkout===`c${i}`?"1.5px solid var(--accent)":"1.5px solid var(--border)",background:editingWorkout===`c${i}`?"rgba(8,220,224,.04)":"var(--s2)",cursor:"pointer",transition:"all .15s"}}
+              <div style={{display:"flex",alignItems:"center",gap:"8px",padding:"12px 8px",marginBottom:"4px",borderRadius:"8px",border:editingWorkout===`c${i}`?"1.5px solid var(--accent)":"1.5px solid var(--border)",background:editingWorkout===`c${i}`?"rgba(var(--accent-rgb),.04)":"var(--s2)",cursor:"pointer",transition:"all .15s"}}
                 onClick={()=>setEditingWorkout(editingWorkout===`c${i}`?null:`c${i}`)}>
                 <Icon name={exerciseCategory(w.co, "cardio")} size={18} color="var(--accent)" />
                 <div style={{flex:1}}>
@@ -12648,7 +12665,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           ))}
           {(todayStrength.sessions||[]).map((s,i)=>(
             <div key={`s${i}`} id={`workout-s${i}`}>
-              <div style={{display:"flex",alignItems:"center",gap:"8px",padding:"12px 8px",marginBottom:"4px",borderRadius:"8px",border:editingWorkout===`s${i}`?"1.5px solid var(--accent)":"1.5px solid var(--border)",background:editingWorkout===`s${i}`?"rgba(8,220,224,.04)":"var(--s2)",cursor:"pointer",transition:"all .15s"}}
+              <div style={{display:"flex",alignItems:"center",gap:"8px",padding:"12px 8px",marginBottom:"4px",borderRadius:"8px",border:editingWorkout===`s${i}`?"1.5px solid var(--accent)":"1.5px solid var(--border)",background:editingWorkout===`s${i}`?"rgba(var(--accent-rgb),.04)":"var(--s2)",cursor:"pointer",transition:"all .15s"}}
                 onClick={()=>setEditingWorkout(editingWorkout===`s${i}`?null:`s${i}`)}>
                 <Icon name={exerciseCategory(s.ex, "strength")} size={18} color="var(--accent)" />
                 <div style={{flex:1}}>
@@ -13415,7 +13432,7 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll }) {
                 onClick={async()=>{ const ok=await appendNote({body:notes,visibility:"shared",meUid,meName});
                   setNoteSaveMsg(ok?"Shared with your trainer":"Couldn't save that note"); }}
                 style={{flex:"1 1 150px",padding:"10px",borderRadius:9,border:"1px solid var(--accent)",
-                  background:"rgba(8,220,224,.1)",color:"var(--accent)",fontFamily:"inherit",
+                  background:"rgba(var(--accent-rgb),.1)",color:"var(--accent)",fontFamily:"inherit",
                   fontSize:".8rem",fontWeight:700,cursor:notes.trim()?"pointer":"default",opacity:notes.trim()?1:.55}}>
                 Share with trainer
               </button>
@@ -13669,7 +13686,7 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
         {/* Goal line (label is drawn last, below, so nothing covers it) */}
         {goal && (
           <line x1={PAD.left} y1={PAD.top + yScale(goal)} x2={PAD.left + chartW} y2={PAD.top + yScale(goal)}
-            stroke="rgba(8,220,224,.4)" strokeWidth="1.5" strokeDasharray="6 4" />
+            stroke="rgba(var(--accent-rgb),.4)" strokeWidth="1.5" strokeDasharray="6 4" />
         )}
 
         {/* Weight line */}
@@ -13723,7 +13740,7 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
             cover it; sits just left of the line's right end. */}
         {goal && (
           <text x={PAD.left + chartW + 8} y={PAD.top + yScale(goal) + 4}
-            fill="#08dce0" fontSize="11" fontWeight="700" fontFamily="DM Sans,sans-serif"
+            fill="var(--accent)" fontSize="11" fontWeight="700" fontFamily="DM Sans,sans-serif"
             stroke="#0d0d18" strokeWidth="3.5" paintOrder="stroke" strokeLinejoin="round">
             {goal}
           </text>
@@ -14257,7 +14274,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
             )}
             {/* Live "we do the math" preview — computed from what's typed now. */}
             {live && (live.caliperBF != null || live.manualBF != null) && (
-              <div className="mt-2 rounded-lg bg-primaryfill/10 px-3 py-2 text-sm flex items-center gap-2 flex-wrap" style={{ background: "rgba(8,220,224,.08)" }}>
+              <div className="mt-2 rounded-lg bg-primaryfill/10 px-3 py-2 text-sm flex items-center gap-2 flex-wrap" style={{ background: "rgba(var(--accent-rgb),.08)" }}>
                 <span className="font-display text-lg text-primary">{live.caliperBF != null ? live.caliperBF : live.manualBF}%</span>
                 <span className="text-xs text-muted">estimated body fat {live.caliperBF != null ? "from your calipers" : "from your scale"} — saves when you tap Save</span>
               </div>
@@ -14301,7 +14318,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         )}
         {/* Live tape body-fat preview (Bailey/Navy computed as you type). */}
         {live && live.tapeBF != null && (
-          <div className="mt-2 rounded-lg px-3 py-2 text-sm flex items-center gap-2 flex-wrap" style={{ background: "rgba(8,220,224,.08)" }}>
+          <div className="mt-2 rounded-lg px-3 py-2 text-sm flex items-center gap-2 flex-wrap" style={{ background: "rgba(var(--accent-rgb),.08)" }}>
             <span className="font-display text-lg text-primary">{live.tapeBF}%</span>
             <span className="text-xs text-muted">estimated body fat from your tape measurements{live.baileyBF != null && live.navyBF != null ? ` (Bailey ${live.baileyBF}% · Navy ${live.navyBF}%)` : ""} — saves when you tap Save</span>
           </div>
@@ -14844,7 +14861,7 @@ function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
                   <div className="mb-2 flex flex-wrap gap-1.5">
                     {[["log", "Log something for me"], ["question", "Question"], ["plan", "Adjust my plan"], ["custom", "Other"]].map(([v, l]) => (
                       <button key={v} onClick={() => setReqType(v)}
-                        className={`rounded-full border px-2.5 py-1 text-[.72rem] font-semibold cursor-pointer ${reqType === v ? "border-primary text-primary bg-[rgba(8,220,224,.08)]" : "border-border text-muted bg-transparent"}`}>{l}</button>
+                        className={`rounded-full border px-2.5 py-1 text-[.72rem] font-semibold cursor-pointer ${reqType === v ? "border-primary text-primary bg-[rgba(var(--accent-rgb),.08)]" : "border-border text-muted bg-transparent"}`}>{l}</button>
                     ))}
                   </div>
                   <textarea value={reqText} onChange={(e) => setReqText(e.target.value)} rows={2} maxLength={300}
@@ -14860,7 +14877,7 @@ function RolePanel({ onOpenClientPlan, onLinked, onCopyToLocal } = {}) {
                 </div>
               ) : (
                 <button onClick={() => { setReqOpen(true); setReqMsg(null); }}
-                  className="mt-2.5 mr-2 rounded-lg border border-primary/50 bg-[rgba(8,220,224,.06)] px-3.5 py-2.5 text-[.85rem] font-bold text-primary cursor-pointer inline-flex items-center gap-1.5">
+                  className="mt-2.5 mr-2 rounded-lg border border-primary/50 bg-[rgba(var(--accent-rgb),.06)] px-3.5 py-2.5 text-[.85rem] font-bold text-primary cursor-pointer inline-flex items-center gap-1.5">
                   <Icon name="mail" size={14} color="var(--accent)" />Ask your trainer
                 </button>
               )}
@@ -16571,7 +16588,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                   </div>
                   <div className="flex flex-col gap-1 max-h-64 overflow-y-auto">
                     {tzPick.clients.map((c) => (
-                      <label key={c.id} className="flex items-center gap-2.5 py-1.5 px-1 rounded cursor-pointer hover:bg-[rgba(8,220,224,.05)]">
+                      <label key={c.id} className="flex items-center gap-2.5 py-1.5 px-1 rounded cursor-pointer hover:bg-[rgba(var(--accent-rgb),.05)]">
                         <input type="checkbox" checked={!!tzPick.sel[c.id]}
                           onChange={(e) => setTzPick((p) => ({ ...p, sel: { ...p.sel, [c.id]: e.target.checked } }))}
                           className="w-4 h-4 accent-[color:var(--color-primary)]" />
@@ -16974,7 +16991,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
                       <button
                         onClick={(e) => { e.stopPropagation(); if (!nudged[c.uid] && nudgeBusy !== c.uid) sendNudge(c.uid); }}
                         disabled={nudgeBusy === c.uid || nudged[c.uid]}
-                        className={`shrink-0 px-2.5 py-1.5 rounded-md text-xs font-bold cursor-pointer whitespace-nowrap border ${nudged[c.uid] ? "border-success text-success bg-transparent" : "border-primary text-primary bg-[rgba(8,220,224,.08)]"} disabled:cursor-default`}>
+                        className={`shrink-0 px-2.5 py-1.5 rounded-md text-xs font-bold cursor-pointer whitespace-nowrap border ${nudged[c.uid] ? "border-success text-success bg-transparent" : "border-primary text-primary bg-[rgba(var(--accent-rgb),.08)]"} disabled:cursor-default`}>
                         {nudged[c.uid] ? "Nudged" : nudgeBusy === c.uid ? "…" : <span style={{display:"inline-flex",alignItems:"center",gap:"5px"}}><Icon name="invite" size={12} />Nudge</span>}
                       </button>
                     </div>
@@ -17862,6 +17879,60 @@ const applyTheme = (pref) => {
   const m = document.querySelector('meta[name="theme-color"]');
   if (m) m.setAttribute("content", dark ? THEME_DARK_BG : THEME_LIGHT_BG);
   return dark;
+};
+
+// ── Accent colour (S183q) ────────────────────────────────────────────────────
+// The one colour a user may change. Per-DEVICE like the theme (localStorage, no
+// Firestore read) so it can paint before first paint and so a phone and a laptop
+// can differ.
+//
+// Each accent carries SIX values, not one, because the roles have different
+// contrast jobs and light/dark invert which one is bright — the same reason the
+// brand cyan already ships as #08dce0 in dark but a darkened #087478 in light.
+//   primary  text/icons/borders  → measured >=4.5:1 on the worst surface (AA)
+//   fill     large filled buttons
+//   fg       the text ON that fill
+// Every option here was checked two ways: AA contrast in BOTH themes, and a
+// perceptual (CIE Lab deltaE) distance of >=33 from every semantic colour —
+// 33 being exactly how far the shipping cyan sits from the success green, so
+// nothing offered is less distinguishable than what the app already uses.
+// That test is why there is no amber (identical hue to the over-target warning),
+// no coral or rose (they land on the danger red) and no violet (it erases the
+// purple that means "sandbox, not a real client").
+const ACCENT_KEY = "glidna-accent";
+const ACCENTS = [
+  { id: "cyan",    label: "Cyan",     note: "Default",
+    d: ["#08dce0", "#18afb3", "#04201f"], l: ["#087478", "#08dce0", "#04201f"], rgb: "8, 220, 224" },
+  { id: "ice",     label: "Ice blue", note: "",
+    d: ["#5cc8ff", "#53a3cc", "#04201f"], l: ["#1a729e", "#5cc8ff", "#04201f"], rgb: "92, 200, 255" },
+  { id: "azure",   label: "Azure",    note: "",
+    d: ["#7aa2ff", "#6987cc", "#04201f"], l: ["#4468ba", "#7aa2ff", "#04201f"], rgb: "122, 162, 255" },
+  { id: "magenta", label: "Magenta",  note: "",
+    d: ["#f472b6", "#c36295", "#04201f"], l: ["#b3407c", "#f472b6", "#04201f"], rgb: "244, 114, 182" },
+  { id: "lime",    label: "Lime",     note: "",
+    d: ["#b6e34a", "#94b644", "#04201f"], l: ["#557508", "#b6e34a", "#04201f"], rgb: "182, 227, 74" },
+  { id: "slate",   label: "Slate",    note: "No colour",
+    d: ["#a8bcc4", "#88979d", "#04201f"], l: ["#5e6d74", "#a8bcc4", "#04201f"], rgb: "168, 188, 196" },
+];
+const DEFAULT_ACCENT = "cyan";
+const readAccentPref = () => {
+  try { return localStorage.getItem(ACCENT_KEY) || DEFAULT_ACCENT; } catch (e) { return DEFAULT_ACCENT; }
+};
+// Mirrors the inline script in index.html — keep the two in step.
+// The default deliberately CLEARS the variables rather than setting cyan, so an
+// untouched account resolves through the CSS fallbacks and is byte-identical to
+// the app before this feature existed.
+const ACCENT_VARS = ["--u-accent-d", "--u-accentfill-d", "--u-accentfg-d",
+                     "--u-accent-l", "--u-accentfill-l", "--u-accentfg-l", "--u-accentrgb"];
+const applyAccent = (id) => {
+  const s = document.documentElement.style;
+  const a = ACCENTS.find((x) => x.id === id);
+  if (!a || a.id === DEFAULT_ACCENT) { ACCENT_VARS.forEach((v) => s.removeProperty(v)); return DEFAULT_ACCENT; }
+  s.setProperty("--u-accent-d", a.d[0]);     s.setProperty("--u-accentfill-d", a.d[1]);
+  s.setProperty("--u-accentfg-d", a.d[2]);   s.setProperty("--u-accent-l", a.l[0]);
+  s.setProperty("--u-accentfill-l", a.l[1]); s.setProperty("--u-accentfg-l", a.l[2]);
+  s.setProperty("--u-accentrgb", a.rgb);
+  return a.id;
 };
 // Streaming endpoint (Session 66) — replies arrive word-by-word via SSE. We POST
 // with the Firebase ID token (EventSource can't set headers, so we fetch+stream).
@@ -18771,7 +18842,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
         const c = cv.getContext("2d"); const W = cv.width, H = cv.height;
         c.clearRect(0, 0, W, H);
         const bw = W / bins;
-        c.fillStyle = "#08DCE0";
+        c.fillStyle = cssVar("--accent", "#08DCE0"); // canvas can't resolve var()
         for (let i = 0; i < bins; i++) {
           const h = Math.max(2, (data[i] / 255) * H);
           c.fillRect(i * bw, (H - h) / 2, Math.max(1, bw * 0.6), h);
@@ -19077,7 +19148,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                     <button key={`${c.kind}:${c.clientId || c.localPlanId}`} onClick={() => sendVoiceTo(c)}
                       className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-[.74rem] font-bold text-fg cursor-pointer ${
                         c.isSimulation ? "border-[color:var(--color-sim)] bg-[color-mix(in_srgb,var(--color-sim)_12%,transparent)]"
-                          : "border-primary bg-[rgba(8,220,224,.08)]"}`}>
+                          : "border-primary bg-[rgba(var(--accent-rgb),.08)]"}`}>
                       <Icon name={c.isSimulation ? "flask" : c.kind === "plan" ? "file" : "person"} size={12}
                         color={c.isSimulation ? "var(--color-sim)" : "var(--accent)"} />
                       {c.name}
@@ -19118,7 +19189,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                       onClick={() => { setVoiceDest(sj); setDestPicker(false); }}
                       className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-left text-[.78rem] cursor-pointer ${
                         voiceDest && (voiceDest.clientId || voiceDest.localPlanId) === (sj.clientId || sj.localPlanId)
-                          ? "border-primary bg-[rgba(8,220,224,.06)]" : "border-border bg-transparent"}`}>
+                          ? "border-primary bg-[rgba(var(--accent-rgb),.06)]" : "border-border bg-transparent"}`}>
                       <Icon name={sj.isSimulation ? "flask" : sj.kind === "plan" ? "file" : "person"} size={12}
                         color={sj.isSimulation ? "var(--color-sim)" : "var(--accent)"} />
                       <span className="min-w-0 flex-1 truncate text-fg">{sj.name}</span>
@@ -19131,13 +19202,13 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                     <div className="mt-1 px-1 pt-1 text-[.64rem] font-bold uppercase tracking-wide text-muted">Or a chat</div>
                   )}
                   <button onClick={() => { setVoiceDest(null); setDestPicker(false); }}
-                    className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-left text-[.78rem] font-semibold cursor-pointer ${!voiceDest ? "border-primary bg-[rgba(8,220,224,.06)] text-fg" : "border-border bg-transparent text-fg"}`}>
+                    className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-left text-[.78rem] font-semibold cursor-pointer ${!voiceDest ? "border-primary bg-[rgba(var(--accent-rgb),.06)] text-fg" : "border-border bg-transparent text-fg"}`}>
                     <Icon name="plus" size={12} color="var(--accent)" />New chat
                     <span className="ml-auto text-[.66rem] font-normal text-muted">nothing carried over</span>
                   </button>
                   {[...convos].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).map((c) => (
                     <button key={c.id} onClick={() => { setVoiceDest({ kind: "chat", id: c.id, title: c.title, about: pinName(c.pin) }); setDestPicker(false); }}
-                      className={`rounded-lg border px-2.5 py-2 text-left text-[.78rem] cursor-pointer ${voiceDest && voiceDest.id === c.id ? "border-primary bg-[rgba(8,220,224,.06)]" : "border-border bg-transparent"}`}>
+                      className={`rounded-lg border px-2.5 py-2 text-left text-[.78rem] cursor-pointer ${voiceDest && voiceDest.id === c.id ? "border-primary bg-[rgba(var(--accent-rgb),.06)]" : "border-border bg-transparent"}`}>
                       <span className="block truncate font-semibold text-fg">{c.title || "New chat"}</span>
                       {/* A chat's pinned client IS the destination — show it, or
                           picking a chat by title alone hides who it writes to. */}
@@ -19355,7 +19426,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                 </div>
                 {/* Paste-from-AI import (works-with-your-AI, phase 1) */}
                 <button onClick={() => setPasteOpen(true)}
-                  className="mt-1 flex items-center gap-2 rounded-lg border border-primary/60 bg-[rgba(8,220,224,.06)] px-3 py-2.5 text-[.85rem] font-semibold text-primary cursor-pointer">
+                  className="mt-1 flex items-center gap-2 rounded-lg border border-primary/60 bg-[rgba(var(--accent-rgb),.06)] px-3 py-2.5 text-[.85rem] font-semibold text-primary cursor-pointer">
                   <Icon name="clipboard" size={16} color="var(--accent)" />Paste from another AI
                 </button>
                 <div className="-mt-1 text-[.72rem] text-muted">Use ChatGPT or Claude for your meals? Paste its reply and I'll log it into Glidna.</div>
@@ -19393,7 +19464,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
             {/* Max-tier ceiling boost (S90): the raise-on-request promise, honored
                 instantly in-app. Server re-verifies tier + near-limit + once/day. */}
             {boost === "offer" && (
-              <div className="self-stretch rounded-lg border border-primary/50 bg-[rgba(8,220,224,.07)] px-3 py-2.5">
+              <div className="self-stretch rounded-lg border border-primary/50 bg-[rgba(var(--accent-rgb),.07)] px-3 py-2.5">
                 <div className="text-[.82rem] font-semibold text-fg">Want to keep going today?</div>
                 <div className="mt-0.5 text-[.76rem] leading-relaxed text-muted">As a Max member you can request more usage — we told you we'd raise it.</div>
                 <div className="mt-2 flex gap-2">
@@ -19403,7 +19474,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
               </div>
             )}
             {boost === "sending" && (
-              <div className="self-stretch rounded-lg border border-primary/50 bg-[rgba(8,220,224,.07)] px-3 py-2.5 text-[.82rem] text-fg">Sending request…</div>
+              <div className="self-stretch rounded-lg border border-primary/50 bg-[rgba(var(--accent-rgb),.07)] px-3 py-2.5 text-[.82rem] text-fg">Sending request…</div>
             )}
             {boost === "granted" && (
               <div className="self-stretch rounded-lg border border-success/50 bg-[rgba(47,224,168,.08)] px-3 py-2.5">
@@ -19419,7 +19490,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
             {/* Ultra upsell (S92): a Max user who keeps needing boosts is a heavy
                 user — surface Ultra (data-triggered; it's not on the public page). */}
             {ultraOffer && (
-              <div className="self-stretch rounded-xl border border-primary/60 bg-[rgba(8,220,224,.08)] px-3 py-3">
+              <div className="self-stretch rounded-xl border border-primary/60 bg-[rgba(var(--accent-rgb),.08)] px-3 py-3">
                 <div className="flex items-center gap-2">
                   <Icon name="sparkle" size={16} color="var(--accent)" />
                   <div className="text-[.86rem] font-extrabold text-fg">You're a power user — meet {isTrainer ? "Coach Apex" : "Apex"}</div>
@@ -19446,7 +19517,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                 own Claude/ChatGPT subscription, so it genuinely doesn't touch
                 the Glidna allowance that just ran out. */}
             {capHit && boost !== "offer" && boost !== "sending" && boost !== "granted" && (
-              <div className="self-stretch rounded-xl border border-primary/50 bg-[rgba(8,220,224,.07)] px-3 py-3">
+              <div className="self-stretch rounded-xl border border-primary/50 bg-[rgba(var(--accent-rgb),.07)] px-3 py-3">
                 <div className="flex items-center gap-2">
                   <Icon name="sparkle" size={16} color="var(--accent)" />
                   <div className="text-[.84rem] font-extrabold text-fg">Keep going with your own AI</div>
@@ -19516,7 +19587,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
               ) : (
                 <div className="flex flex-col gap-2">
                   <div className="flex items-baseline gap-2">
-                    <span className="rounded-full bg-[rgba(8,220,224,.14)] px-2 py-0.5 text-[.68rem] uppercase tracking-[.5px] text-primary">
+                    <span className="rounded-full bg-[rgba(var(--accent-rgb),.14)] px-2 py-0.5 text-[.68rem] uppercase tracking-[.5px] text-primary">
                       {(proposal.mealType || "snack").replace(/^./, c => c.toUpperCase())}</span>
                     <span className="truncate text-[.9rem] font-semibold text-fg">{proposal.name}</span>
                   </div>
@@ -19534,7 +19605,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                       className="flex-1 rounded-lg bg-primaryfill px-3 py-2 text-[.88rem] font-bold text-primaryfg disabled:opacity-60">
                       {proposal.status === "saving" ? "Saving…" : "Log it"}</button>
                     <button disabled={proposal.status === "saving"} onClick={() => setEditDraft({ ...proposal })}
-                      className="rounded-lg border border-primary bg-[rgba(8,220,224,.12)] px-3 py-2 text-[.88rem] font-semibold text-primary disabled:opacity-60">Edit</button>
+                      className="rounded-lg border border-primary bg-[rgba(var(--accent-rgb),.12)] px-3 py-2 text-[.88rem] font-semibold text-primary disabled:opacity-60">Edit</button>
                     <button disabled={proposal.status === "saving"} onClick={() => setProposal(null)} aria-label="Dismiss"
                       className="rounded-lg border border-border px-2.5 py-2 text-[.88rem] text-muted disabled:opacity-60"><Icon name="close" size={15} color="currentColor" /></button>
                   </div>
@@ -19562,7 +19633,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                 ) : (
                   <div className="flex flex-col gap-2">
                     <div className="flex items-baseline gap-2">
-                      <span className="rounded-full bg-[rgba(8,220,224,.14)] px-2 py-0.5 text-[.68rem] uppercase tracking-[.5px] text-primary">Workout program</span>
+                      <span className="rounded-full bg-[rgba(var(--accent-rgb),.14)] px-2 py-0.5 text-[.68rem] uppercase tracking-[.5px] text-primary">Workout program</span>
                       <span className="text-[.8rem] text-muted">{totalDays} {totalDays === 1 ? "day" : "days"}/week</span>
                     </div>
                     <div className="max-h-44 overflow-y-auto flex flex-col gap-1.5">
@@ -19828,7 +19899,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                 <div className="mt-2 flex-1 overflow-y-auto px-3 pb-3">
                   {[...convos].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).map((c) => (
                     <div key={c.id} onClick={() => switchChat(c.id)}
-                      className={`mb-1.5 flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 ${c.id === activeChatId ? "border-primary bg-[rgba(8,220,224,.06)]" : "border-border bg-surface2"}`}>
+                      className={`mb-1.5 flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 ${c.id === activeChatId ? "border-primary bg-[rgba(var(--accent-rgb),.06)]" : "border-border bg-surface2"}`}>
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-[.82rem] font-semibold text-fg">{c.title || "New chat"}</div>
                         <div className="text-[.66rem] text-muted">
@@ -20583,7 +20654,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
         {nextSession && (
           <button onClick={() => setShowSessions(true)}
             className="mb-4 w-full text-left rounded-card border border-primary bg-surface p-3.5 cursor-pointer"
-            style={{ background: "rgba(8,220,224,.06)" }}>
+            style={{ background: "rgba(var(--accent-rgb),.06)" }}>
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <span className="font-display text-base tracking-wide text-primary uppercase inline-flex items-center gap-2">
                 <Icon name="calendar" size={17} color="var(--accent)" />Next session
@@ -20897,7 +20968,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
                   <button key={t.k} disabled={!t.tap}
                     onClick={() => t.tap && setTileOpen(tileOpen === t.k ? null : t.k)}
                     className={`rounded-xl border px-3 py-2.5 text-left ${
-                      tileOpen === t.k ? "border-primary bg-[rgba(8,220,224,.07)]" : "border-border bg-surface2"
+                      tileOpen === t.k ? "border-primary bg-[rgba(var(--accent-rgb),.07)]" : "border-border bg-surface2"
                     } ${t.tap ? "cursor-pointer" : "cursor-default"}`}>
                     <div className="flex items-center gap-1.5 text-[.66rem] font-bold uppercase tracking-wide text-muted">
                       <Icon name={t.icon} size={13} color="var(--accent)" />{t.label}
@@ -21160,7 +21231,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
   const ClientCard = ({ c }) => {
     const nm = c.name || c.email || "Client";
     return (
-      <div className={`flex items-center gap-3 p-3 rounded-[10px] border cursor-pointer transition-opacity bg-surface2 border-[rgba(8,220,224,.35)] ${dragId===c.uid?"opacity-40":""}`}
+      <div className={`flex items-center gap-3 p-3 rounded-[10px] border cursor-pointer transition-opacity bg-surface2 border-[rgba(var(--accent-rgb),.35)] ${dragId===c.uid?"opacity-40":""}`}
         draggable="true"
         onDragStart={e=>onDragStart(e,c.uid,"client")}
         onDragEnd={onDragEnd}
@@ -21171,7 +21242,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-[.92rem] text-fg truncate flex items-center gap-1.5">
             <span className="truncate">{nm}</span>
-            <span className="flex-none text-[.55rem] font-bold tracking-wide px-1.5 py-0.5 rounded bg-[rgba(8,220,224,.15)] text-primary">CONNECTED</span>
+            <span className="flex-none text-[.55rem] font-bold tracking-wide px-1.5 py-0.5 rounded bg-[rgba(var(--accent-rgb),.15)] text-primary">CONNECTED</span>
           </div>
           <div className="text-xs text-muted truncate">
             <IdBadge id={c.uid} />
@@ -21246,7 +21317,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
             const isDragOver = dragOverFolder === folder.id;
             return (
               <div key={folder.id}
-                className={`rounded-[10px] border mb-2.5 ${isDragOver?"border-primary bg-[rgba(8,220,224,.06)]":"border-border"}`}
+                className={`rounded-[10px] border mb-2.5 ${isDragOver?"border-primary bg-[rgba(var(--accent-rgb),.06)]":"border-border"}`}
                 onDragOver={e=>onFolderDragOver(e,folder.id)}
                 onDragLeave={onFolderDragLeave}
                 onDrop={e=>onFolderDrop(e,folder.id)}>
@@ -21291,7 +21362,7 @@ function ProfileSelector({ profiles, folders, onSelect, onNew, onDelete, loading
 
           {/* Unfiled clients */}
           {unfiled.length > 0 && (
-            <div className={`rounded-[10px] border mb-2.5 ${dragOverFolder==="unfiled"?"border-primary bg-[rgba(8,220,224,.06)]":"border-border"}`}
+            <div className={`rounded-[10px] border mb-2.5 ${dragOverFolder==="unfiled"?"border-primary bg-[rgba(var(--accent-rgb),.06)]":"border-border"}`}
               onDragOver={e=>onFolderDragOver(e,"unfiled")}
               onDragLeave={onFolderDragLeave}
               onDrop={e=>onFolderDrop(e,null)}>
@@ -21741,11 +21812,11 @@ function UpgradeCongrats({ isTrainer, onClose }) {
       <div onClick={(e) => e.stopPropagation()}
         className="rounded-card border bg-surface text-fg"
         style={{ maxWidth: 380, width: "100%", padding: "30px 24px", textAlign: "center",
-          borderColor: "var(--accent)", boxShadow: "0 0 70px rgba(8,220,224,.28)",
+          borderColor: "var(--accent)", boxShadow: "0 0 70px rgba(var(--accent-rgb),.28)",
           animation: "fadeUp .32s ease both" }}>
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
-          <span style={{ width: 64, height: 64, borderRadius: 999, background: "rgba(8,220,224,.13)",
-            border: "1px solid rgba(8,220,224,.35)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ width: 64, height: 64, borderRadius: 999, background: "rgba(var(--accent-rgb),.13)",
+            border: "1px solid rgba(var(--accent-rgb),.35)", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <Icon name="sparkle" variant="solid" size={30} color="var(--accent)" />
           </span>
         </div>
@@ -22202,7 +22273,7 @@ function MealPlannerPanel({ open, onClose, role, locked, savedFoods, recentFoods
                         </div>
                       </div>
                     ) : (
-                      <button onClick={()=>{setAddTo(day);}} className="mt-1 w-full rounded-lg border border-primary bg-[rgba(8,220,224,.06)] px-3 py-2 text-[.8rem] font-bold text-primary cursor-pointer">＋ Add food or note</button>
+                      <button onClick={()=>{setAddTo(day);}} className="mt-1 w-full rounded-lg border border-primary bg-[rgba(var(--accent-rgb),.06)] px-3 py-2 text-[.8rem] font-bold text-primary cursor-pointer">＋ Add food or note</button>
                     )}
                   </div>
                 )}
@@ -22850,7 +22921,7 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
             {["breakfast", "lunch", "dinner", "snack"].map((t) => (
               <button key={t} onClick={() => setMealDraft((m) => ({ ...m, type: t }))}
                 className={`flex-1 rounded-lg border px-2 py-2 text-[.72rem] font-bold capitalize cursor-pointer ${
-                  mealDraft.type === t ? "border-primary bg-[rgba(8,220,224,.12)] text-primary" : "border-border bg-surface2 text-muted"}`}>{t}</button>
+                  mealDraft.type === t ? "border-primary bg-[rgba(var(--accent-rgb),.12)] text-primary" : "border-border bg-surface2 text-muted"}`}>{t}</button>
             ))}
           </div>
           <input value={mealDraft.name} onChange={(e) => setMealDraft((m) => ({ ...m, name: e.target.value }))}
@@ -23271,7 +23342,7 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
                 </div>
                 <label className="flex items-start gap-2 cursor-pointer mb-1.5">
                   <input type="checkbox" checked={consentChecked} onChange={(e) => setConsentChecked(e.target.checked)}
-                    className="mt-0.5 w-4 h-4 accent-[#08dce0] shrink-0" />
+                    className="mt-0.5 w-4 h-4 accent-primary shrink-0" />
                   <span className="text-[.76rem] text-fg leading-snug">{consentLineFor(policy, otherName || "your trainer")}</span>
                 </label>
                 <div className="mb-2 text-[.7rem] text-muted leading-snug">
@@ -23332,7 +23403,7 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
                 <button key={k} onClick={() => setPolicyDraft((d) => ({ ...d, cancelType: k }))}
                   className={`rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold cursor-pointer ${
                     policyDraft.cancelType === k
-                      ? "bg-[rgba(8,220,224,.1)] text-primary border border-primary"
+                      ? "bg-[rgba(var(--accent-rgb),.1)] text-primary border border-primary"
                       : "bg-transparent text-fg border border-border"}`}>
                   {label}
                 </button>
@@ -23381,7 +23452,7 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
                 <button key={k} onClick={() => setPolicyDraft((d) => ({ ...d, billingMode: k }))}
                   className={`rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold cursor-pointer ${
                     policyDraft.billingMode === k
-                      ? "bg-[rgba(8,220,224,.1)] text-primary border border-primary"
+                      ? "bg-[rgba(var(--accent-rgb),.1)] text-primary border border-primary"
                       : "bg-transparent text-fg border border-border"}`}>
                   {label}
                 </button>
@@ -23416,7 +23487,7 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
                 value={policyDraft.policyNote}
                 onChange={(e) => setPolicyDraft((d) => ({ ...d, policyNote: e.target.value }))} className={inp} />
             </div>
-            <div className="mb-2 rounded-md px-2.5 py-1.5 text-[.74rem]" style={{ background: "rgba(8,220,224,.08)", color: "var(--text)" }}>
+            <div className="mb-2 rounded-md px-2.5 py-1.5 text-[.74rem]" style={{ background: "rgba(var(--accent-rgb),.08)", color: "var(--text)" }}>
               Clients will see: “{describePolicy(policyOf({ sessionPolicy: policyDraft }))}”
             </div>
             <div className="flex gap-1.5">
@@ -24080,7 +24151,7 @@ function AdminDashboard({ onClose }) {
                 return (
                   <button key={f.key} onClick={() => setFilter(f.key === "all" ? null : f.key)}
                     aria-pressed={on}
-                    className={`rounded-xl border px-3 py-2 text-center cursor-pointer ${on ? "border-primary bg-[rgba(8,220,224,.08)]" : "border-border bg-surface2"}`}>
+                    className={`rounded-xl border px-3 py-2 text-center cursor-pointer ${on ? "border-primary bg-[rgba(var(--accent-rgb),.08)]" : "border-border bg-surface2"}`}>
                     <div className="font-display text-[1.15rem] font-bold text-primary">{searched.filter(f.test).length}</div>
                     <div className="text-[.62rem] uppercase tracking-wide text-muted">{f.label}</div>
                   </button>
@@ -24714,7 +24785,7 @@ async function exportMyData({ meName, meEmail, role }) {
   return bundle.entryCount;
 }
 
-function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme, teamLocked, onReferrals }) {
+function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme, accentPref, onSetAccent, teamLocked, onReferrals }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
@@ -24859,7 +24930,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
             layer (basics stay free), and the banner is the upgrade entry point. */}
         {trial && (
           <div style={{ padding: "10px 12px", borderRadius: 10, marginBottom: 12,
-            background: trial.expired ? "rgba(248,113,113,.10)" : trial.daysLeft <= 5 ? "rgba(251,191,36,.10)" : "rgba(8,220,224,.08)",
+            background: trial.expired ? "rgba(248,113,113,.10)" : trial.daysLeft <= 5 ? "rgba(251,191,36,.10)" : "rgba(var(--accent-rgb),.08)",
             border: `1px solid ${trial.expired ? "var(--red)" : trial.daysLeft <= 5 ? "var(--yellow)" : "var(--accent)"}` }}>
             {trial.expired ? (
               <div style={{ fontSize: ".8rem", lineHeight: 1.4 }}>
@@ -25083,7 +25154,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                 style={{ padding: "7px 11px", borderRadius: 999, cursor: "pointer", fontFamily: "inherit",
                   fontSize: ".72rem", fontWeight: 700,
                   border: `1px solid ${themePref === v ? "var(--accent)" : "var(--border)"}`,
-                  background: themePref === v ? "var(--accent-dim,rgba(8,220,224,.12))" : "transparent",
+                  background: themePref === v ? "var(--accent-dim,rgba(var(--accent-rgb),.12))" : "transparent",
                   color: themePref === v ? "var(--accent)" : "var(--muted)" }}>{label}</button>
             ))}
           </div>
@@ -25093,6 +25164,38 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
             Following your device — it'll switch automatically when your phone does.
           </div>
         )}
+
+        {/* Accent colour (S183q, Kevin) — a curated range rather than a colour
+            wheel. Each swatch shows the colour it actually paints in the CURRENT
+            theme, so what you tap is what you get. Only the accent changes: the
+            semantic colours stay put, because green/amber/red/purple mean
+            on-track / over-target / danger / sandbox. */}
+        <div style={{ ...item, cursor: "default", flexWrap: "wrap", gap: 8 }}>
+          <Icon name="palette" size={19} color="var(--accent)" />
+          <span>Accent colour</span>
+          <div style={{ display: "flex", gap: 6, marginLeft: "auto", flexWrap: "wrap" }}>
+            {ACCENTS.map((a) => {
+              const on = accentPref === a.id;
+              const swatch = themePref === "light" ? a.l[0] : a.d[0];
+              return (
+                <button key={a.id} onClick={() => onSetAccent(a.id)}
+                  title={a.note ? `${a.label} — ${a.note.toLowerCase()}` : a.label}
+                  aria-label={a.label} aria-pressed={on}
+                  style={{ width: 30, height: 30, borderRadius: 999, cursor: "pointer", padding: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    border: `2px solid ${on ? "var(--accent)" : "transparent"}`,
+                    outline: on ? "none" : `1px solid var(--border)`, outlineOffset: -1,
+                    background: "transparent" }}>
+                  <span style={{ width: 20, height: 20, borderRadius: 999, background: swatch, display: "block" }} />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{ fontSize: ".72rem", color: "var(--muted)", padding: "0 4px 4px" }}>
+          {(ACCENTS.find((a) => a.id === accentPref) || ACCENTS[0]).label}
+          {accentPref === DEFAULT_ACCENT ? " — the Glidna brand colour" : " — just on this device"}
+        </div>
 
         {/* Face ID / Touch ID sign-in — registers a passkey for THIS device so
             future sign-ins (e.g. after the 30-min idle sign-out) are one glance
@@ -25310,6 +25413,7 @@ export default function App() {
   // Appearance (S95): the inline script in index.html already painted the theme
   // before first paint; this just mirrors the stored pref so the menu can show it.
   const [themePref, setThemePref] = useState(readThemePref);
+  const [accentPref, setAccentPref] = useState(readAccentPref);
   const [mePremium, setMePremium] = useState(true); // AI-layer access (locks on trial expiry)
   const [meSubStatus, setMeSubStatus] = useState(null); // "trial" | "active" | "canceled" (drives Manage subscription)
   const [upgradeCongrats, setUpgradeCongrats] = useState(false); // post-checkout celebration (S89c)
@@ -25898,6 +26002,12 @@ export default function App() {
     setThemePref(pref);
     try { localStorage.setItem(THEME_KEY, pref); } catch (e) { /* private mode — still applies for this session */ }
     applyTheme(pref);
+  };
+  // Accent colour (S183q): same per-device treatment as the theme.
+  const setAccent = (id) => {
+    setAccentPref(id);
+    try { localStorage.setItem(ACCENT_KEY, id); } catch (e) { /* private mode — still applies for this session */ }
+    applyAccent(id);
   };
   // On "Auto", follow the device live — flipping the phone to dark at sunset
   // should flip the app then and there, not on the next reload.
@@ -26859,6 +26969,7 @@ export default function App() {
         teamLocked={!!(rosterCap && rosterCap.teamsLocked)}
         onReferrals={() => setShowReferrals(true)}
         themePref={themePref} onSetTheme={setTheme}
+        accentPref={accentPref} onSetAccent={setAccent}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
         onHome={() => { if (isTrainerHome) setHomeTab("dashboard"); goToProfiles(); }}
         onDashboard={() => { setHomeTab("analytics"); goToProfiles(); }}

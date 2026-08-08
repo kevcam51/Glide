@@ -95,10 +95,16 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
-> _Last updated: Session 183p (Aug 8 — AI-logged meals now store their serving; Daily Check-In notes
-> roll over at midnight, grow downward, and collapse to "Completed"). **Read
-> `Glide-Session-Handoff-NEXT.md` first** (its S183p block is the current state); this digest below is
-> older (through S90)._
+> _Last updated: Session 183q (Aug 8 — user-selectable ACCENT COLOUR, 6 curated options; plus S183p:
+> AI-logged meals store their serving, Daily Check-In notes roll over at midnight). **Read
+> `Glide-Session-Handoff-NEXT.md` first** (its S183q + S183p blocks are the current state); this digest
+> below is older (through S90)._
+> - **Accent is now a user setting** (≡ → Appearance). Brand cyan is still the default and the
+>   fallback. Any new colour work must respect two rules: the SEMANTIC colours (green on-track /
+>   amber over-target / red danger / purple sandbox) never follow the accent, and there are TWO
+>   colour systems (Tailwind `--color-primary*` in themes.css AND legacy `--accent*` in App.jsx's
+>   css block) that must be changed together. New tints use `rgba(var(--accent-rgb), …)`, never a
+>   cyan literal. Canvas surfaces must resolve tokens via `cssVar()`.
 > - **App = GLIDNA** (S90: name DECIDED + full rename sweep; wordmark = GLI|DNA two-tone). Live on
 >   the custom domain **https://glidna.com** (+ www/.app 308-redirects; bought via Vercel, auto-DNS;
 >   passkeys re-register on the new domain). **STRIPE IS LIVE (real money)** — live prices/webhook/
