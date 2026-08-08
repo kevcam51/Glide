@@ -280,7 +280,13 @@ export default function AuthGate({ children }) {
           <>
             <button onClick={passkey} disabled={busy}
               style={{
-                ...(passkeyHinted ? { ...S.primary, background: "#0e7490" } : S.google),
+                // Follows the device's accent (S183q). It's readable here even
+                // pre-auth because the choice lives in localStorage, not the
+                // profile — index.html paints it before React mounts.
+                ...(passkeyHinted
+                  ? { ...S.primary, background: "var(--color-primaryfill, #0e7490)",
+                      color: "var(--color-primaryfg, #ffffff)" }
+                  : S.google),
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
               }}>
               <Icon name="fingerprint" size={17} /> Sign in with Face ID / Touch ID

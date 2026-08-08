@@ -141,7 +141,9 @@ export function Icon({ name, size = 20, variant = "outline", color = "currentCol
   const g = GLYPHS[name];
   if (!g) return null;
   const solid = variant === "solid" || ALWAYS_FILL.has(name);
-  const fill = solid ? color : (variant === "duotone" ? "rgba(8,220,224,.18)" : "none");
+  // Follows the user's accent (S183q) — a literal here left every duotone icon
+  // washed brand-cyan on a magenta or lime app.
+  const fill = solid ? color : (variant === "duotone" ? "rgba(var(--accent-rgb),.18)" : "none");
   const stroke = solid ? "none" : color;
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill={fill} stroke={stroke}

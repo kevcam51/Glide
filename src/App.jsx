@@ -21705,7 +21705,7 @@ function InviteHub({ open, onClose, meName }) {
   const card = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 16 };
   const label = { fontSize: ".72rem", letterSpacing: "1px", textTransform: "uppercase", color: "var(--accent)", fontWeight: 700, marginBottom: 8 };
   const fieldStyle = { width: "100%", boxSizing: "border-box", padding: "11px 12px", borderRadius: 9, background: "var(--s2)", border: "1px solid var(--border)", color: "var(--text)", fontSize: ".9rem", fontFamily: "inherit", outline: "none" };
-  const btnPrimary = { padding: "11px 14px", borderRadius: 9, border: "none", background: "var(--accent-fill)", color: "#04201f", fontWeight: 700, fontSize: ".85rem", cursor: "pointer" };
+  const btnPrimary = { padding: "11px 14px", borderRadius: 9, border: "none", background: "var(--accent-fill)", color: "var(--color-primaryfg)", fontWeight: 700, fontSize: ".85rem", cursor: "pointer" };
   const btnGhost = { padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "transparent", color: "var(--text)", fontWeight: 600, fontSize: ".82rem", cursor: "pointer" };
 
   return createPortal(
@@ -21746,7 +21746,7 @@ function InviteHub({ open, onClose, meName }) {
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={doShare} disabled={!shareLink} style={{ ...btnPrimary, flex: "1 1 140px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-              <Icon name="invite" size={15} color="#04201f" />{copied === "share" ? "Link copied" : "Share invite"}
+              <Icon name="invite" size={15} color="var(--color-primaryfg)" />{copied === "share" ? "Link copied" : "Share invite"}
             </button>
             <button onClick={() => setShowQr((v) => !v)} disabled={!shareLink} style={{ ...btnGhost, flex: "1 1 120px" }}>{showQr ? "Hide QR code" : "Show QR code"}</button>
           </div>
@@ -22425,7 +22425,7 @@ function AutomationsPanel({ open, onClose, role }) {
 
   const card = { background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 14, padding: 16 };
   const label = { fontSize: ".72rem", letterSpacing: "1px", textTransform: "uppercase", color: "var(--accent)", fontWeight: 700, marginBottom: 8 };
-  const btnPrimary = { padding: "11px 14px", borderRadius: 9, border: "none", background: "var(--accent-fill)", color: "#04201f", fontWeight: 700, fontSize: ".85rem", cursor: "pointer" };
+  const btnPrimary = { padding: "11px 14px", borderRadius: 9, border: "none", background: "var(--accent-fill)", color: "var(--color-primaryfg)", fontWeight: 700, fontSize: ".85rem", cursor: "pointer" };
   const btnGhost = { padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "transparent", color: "var(--text)", fontWeight: 600, fontSize: ".82rem", cursor: "pointer" };
   const inputCls = { width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)", fontSize: ".9rem", fontFamily: "inherit", boxSizing: "border-box" };
   const Toggle = ({ on, disabled, onClick }) => (
@@ -22614,7 +22614,7 @@ function AutomationsPanel({ open, onClose, role }) {
 
             {items.length < cap ? (
               <button onClick={startNew} style={{ ...btnPrimary, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                <Icon name="plus" size={17} color="#04201f" /> New automation
+                <Icon name="plus" size={17} color="var(--color-primaryfg)" /> New automation
               </button>
             ) : (
               <div style={{ fontSize: ".78rem", color: "var(--muted)", textAlign: "center", padding: "4px 0" }}>
@@ -24683,7 +24683,7 @@ function AiConsentPrompt({ isTrainer, onChoose }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
           <button onClick={() => pick(false)} disabled={!!busy}
             style={{ minHeight: 46, borderRadius: 10, border: "none", cursor: "pointer",
-              background: "var(--accent-fill,#08dce0)", color: "#05080a", fontWeight: 800, fontSize: ".92rem" }}>
+              background: "var(--accent-fill,#08dce0)", color: "var(--color-primaryfg)", fontWeight: 800, fontSize: ".92rem" }}>
             {busy === "on" ? "Saving…" : "Yes — use my data for AI"}
           </button>
           <button onClick={() => pick(true)} disabled={!!busy}
@@ -26940,7 +26940,7 @@ export default function App() {
         <Icon name="bell" size={19} color="currentColor" />
         {unseenNotifs > 0 && (
           <span style={{ position: "absolute", top: -5, right: -5, minWidth: 17, height: 17, padding: "0 4px",
-            borderRadius: 999, background: "var(--accent-fill,#08dce0)", color: "#05080a",
+            borderRadius: 999, background: "var(--accent-fill,#08dce0)", color: "var(--color-primaryfg)",
             fontSize: ".62rem", fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>
             {unseenNotifs > 9 ? "9+" : unseenNotifs}
           </span>
