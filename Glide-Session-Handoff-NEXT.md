@@ -104,8 +104,36 @@ a carer, not a household. If revived: client role + a `family` tier, never a
 trainer role (every business gate tests role, so staying `client` enforces the
 guardrail for free).
 
-**Queue now:** 1) connector chart images. 2) ⚖️ referral CASH payouts — counsel
-first. Nothing else outstanding.
+### S183d — connector chart images (SHIPPED)
+`get_progress_chart` (metric `weight` | `calories`) returns a PNG as a real MCP
+**image content block** plus a text summary. Ask your own Claude "how's my
+weight going?" and it draws it.
+
+- **`functions/chart.js` is hand-rolled on purpose.** @resvg/resvg-js (what the
+  OG cards use) is a NATIVE binary and `functions/` ships ONE bundle shared by
+  every function — adding it would slow cold starts for aiChat, the webhook and
+  every schedule to prettify one tool. This draws into a pixel buffer and
+  encodes with Node's built-in `zlib`; 5x7 bitmap font. ~4KB per chart.
+- **CONNECTOR ONLY**, via `buildTools(role, { charts: true })`. Never expose it
+  in-app: tool results are fed back to the model as TEXT, so a base64 PNG would
+  eat a whole daily token budget in one call.
+- Access is inherited, not reimplemented — it lives inside `runTool`, so seat
+  gating and `resolveTargetUid` apply, and a client's schema carries no
+  `clientId`, so they structurally cannot chart anyone else.
+- Gotchas already paid for: axis bounds must snap to round numbers
+  (`niceBounds`) or you get "3323.5" labels that look like a bug; unlogged days
+  must draw as GAPS, never zero-calorie bars; the calorie window is
+  inclusive-both-ends so it starts at `days - 1`; and the kv range query needs
+  the `` escape (written as the escape sequence, which is safer than the
+  raw char the docs warn about).
+- Verified: both charts rendered and visually inspected, empty-data paths
+  return a useful sentence, and the result shape validates against the SDK's
+  own `CallToolResultSchema` — the one thing not testable in prod without an
+  OAuth token. ⚠️ **Not yet seen inside a real Claude/ChatGPT connection** —
+  worth one live look next session.
+
+**Queue now:** ⚖️ referral CASH payouts — counsel first. Nothing else
+outstanding.
 
 ---
 
