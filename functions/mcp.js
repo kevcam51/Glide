@@ -86,6 +86,7 @@ const READ_TOOLS = new Set([
   "coach_summary",
   "list_local_plans",
   "list_sub_trainers",   // head trainer's team (S116)
+  "list_meal_reviews",   // meals clients tagged for checking (S183f)
   // Seat confirmation (S176f). Classified as a READ deliberately: the seat
   // gate fires on READS of an unseated client too, so a read-only connection
   // must still be able to confirm a slot — otherwise a capped trainer on the
@@ -130,6 +131,9 @@ const SCOPE_FOR_TOOL = {
   set_notification_prefs: "write:plan",
   // trainer — acting on a connected client
   send_client_request: "trainer",
+  // Corrects (or removes) a meal already in a client's log, so it is a write
+  // on someone else's data — the trainer scope, same as sending a to-do.
+  review_meal: "trainer",
   // Feedback to the Glidna team, not user data. Scoped to write:logs simply
   // because it is a write; a connector user who can log can also tell us what
   // is missing — which is the whole value, since it arrives with the context of
@@ -154,6 +158,7 @@ const DESTRUCTIVE_TOOLS = new Set([
   "rename_plan",            // overwrites the plan name
   "update_note",            // overwrites the note body
   "set_notification_prefs", // overwrites the existing preference set
+  "review_meal",            // can overwrite a client's logged meal, or delete it
 ]);
 
 // Extra guidance appended to a tool's description for EXTERNAL models, which

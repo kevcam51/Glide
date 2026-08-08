@@ -338,6 +338,36 @@ function weekWithLabels(week, labelMap) {
 // it dropped out of the per-meal grouping on the dashboard. Fail-soft to "" is
 // still the fallback for genuine nonsense; this just stops case costing data.
 const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack"];
+
+// ── meal reviews (S183f) ────────────────────────────────────────────────────
+// A client tags a meal and sends it to their trainer to check. Kevin's rule
+// (S183f): the meal is logged to the client's day IMMEDIATELY and flagged
+// awaiting review — it does NOT wait. A client who tags breakfast at 7am and
+// whose trainer looks at 6pm would otherwise stare at an empty dashboard, a
+// broken streak and wrong macro bars all day, which punishes exactly the
+// clients who bother to tag.
+//
+// The review row lives in the CLIENT's kv, like caliq-requests in the other
+// direction, so the existing trainer↔client kv access covers it and no rules
+// change is needed. It points at the meal by id rather than copying it —
+// the S124 lesson from to-dos: one source of truth, so a meal can never read
+// one way in the log and another in the review queue.
+const MEAL_REVIEW_KEY = "caliq-meal-reviews";
+const MEAL_REVIEW_CAP = 50;
+// A downscaled JPEG data URL the client's app attaches (~15KB). Firestore's
+// doc ceiling is 1MB and the whole array shares it, so this is bounded hard
+// and only the newest few keep their picture.
+const MEAL_REVIEW_THUMB_MAX = 60000;
+const MEAL_REVIEW_THUMBS_KEPT = 8;
+
+async function queueMealReview(db, clientUid, review) {
+  return kvTxnJSON(db, clientUid, MEAL_REVIEW_KEY, (cur) => {
+    const list = [review, ...(Array.isArray(cur) ? cur : [])].slice(0, MEAL_REVIEW_CAP);
+    // Strip pictures off older rows rather than the rows themselves: the
+    // decision history stays complete, the bytes don't accumulate.
+    return list.map((r, i) => (i >= MEAL_REVIEW_THUMBS_KEPT && r && r.thumb ? { ...r, thumb: null } : r));
+  });
+}
 function mealTypeOf(v, fallback) {
   const t = String(v == null ? "" : v).trim().toLowerCase();
   return MEAL_TYPES.includes(t) ? t : (fallback === undefined ? "" : fallback);
@@ -1005,6 +1035,10 @@ function buildTools(role, opts = {}) {
           micros: MICRO_SCHEMA,
           date: { type: "string", description: "Date YYYY-MM-DD. OMIT for today — only pass this when the user explicitly named a different day." },
           time: { type: "string", description: "Clock time eaten, e.g. '8:30am' or '19:45'. Set when the user mentions when they ate; omit for now." },
+          ...(isTrainer ? {} : {
+            forTrainerReview: { type: "boolean", description: "Set true when the user wants their trainer to check this meal (e.g. 'send this to my coach', 'ask my trainer if this is right'). The meal is logged either way — this just puts it in the trainer's review queue so they can confirm or correct it." },
+            reviewNote: { type: "string", description: "Optional message for the trainer alongside the meal, e.g. 'not sure about the portion size'." },
+          }),
           ...clientIdProp, ...localPlanProp,
         },
         required: ["name", "mealType", "calories"],
@@ -1495,6 +1529,44 @@ function buildTools(role, opts = {}) {
           type: { type: "string", enum: ["log_food", "weigh_in", "log_workout", "enter_info", "custom"], description: "Request type (drives the client's quick-action). Default custom." },
         },
         required: ["clientId", "message"],
+      },
+    });
+    // S183f — the meal review queue. Clients tag a meal and send it over; it is
+    // ALREADY in their log, so this is a correction pass, not an approval gate.
+    tools.push({
+      name: "list_meal_reviews",
+      description:
+        "Meals your clients have tagged and sent you to check. Use this when asked what's waiting, what needs reviewing, "
+        + "or to run through a client's tagged meals. IMPORTANT: each meal is already in that client's log — confirming "
+        + "changes nothing, adjusting corrects the numbers, rejecting removes it. Oldest first.",
+      input_schema: {
+        type: "object",
+        properties: {
+          clientId: { type: "string", description: "Limit to one client (id from list_clients). Omit for every client." },
+          status: { type: "string", enum: ["pending", "all"], description: "Default pending — only what still needs you." },
+        },
+      },
+    });
+    tools.push({
+      name: "review_meal",
+      description:
+        "Act on a tagged meal from list_meal_reviews. 'confirm' = the client's numbers were right, leave the log alone. "
+        + "'adjust' = correct it (pass any of name/calories/protein/carbs/fat; the day's totals are corrected by the "
+        + "difference). 'reject' = it wasn't eaten, take it off their log. The client is told either way. "
+        + "Confirm the specific change with the trainer before calling with 'adjust' or 'reject'.",
+      input_schema: {
+        type: "object",
+        properties: {
+          clientId: { type: "string", description: "The client's id from list_meal_reviews." },
+          reviewId: { type: "string", description: "The reviewId from list_meal_reviews." },
+          decision: { type: "string", enum: ["confirm", "adjust", "reject"], description: "What to do. Default confirm." },
+          name: { type: "string", description: "Corrected food name (adjust only)." },
+          calories: { type: "number", description: "Corrected calories (adjust only)." },
+          protein: { type: "number", description: "Corrected protein grams (adjust only)." },
+          carbs: { type: "number", description: "Corrected carb grams (adjust only)." },
+          fat: { type: "number", description: "Corrected fat grams (adjust only)." },
+        },
+        required: ["clientId", "reviewId"],
       },
     });
   }
@@ -2680,10 +2752,54 @@ async function runTool(name, input, ctx) {
         [ev, ...(Array.isArray(hist) ? hist : [])].slice(0, 250));
     } catch (e) { /* history is best-effort */ }
     if (planOverride) await touchLocalIndex(db, uid, planOverride);
+
+    // S183f: send it to the trainer to check. Only a CLIENT logging their OWN
+    // meal can queue a review — a trainer logging on someone's behalf has
+    // already made the call, so asking themselves to confirm it is noise.
+    let sentForReview = null;
+    if (input.forTrainerReview && !ctx.isTrainer && uid === ctx.callerUid) {
+      try {
+        const me = (await db.doc(`users/${uid}`).get()).data() || {};
+        const trainerUid = me.assignedTrainerId;
+        if (!trainerUid) {
+          sentForReview = { ok: false, reason: "You're not connected to a trainer, so there's nobody to send it to. It's still logged." };
+        } else {
+          await queueMealReview(db, uid, {
+            id: randId("rv"), mealId: meal.id, planId, date, mealType,
+            name: meal.name, calories: meal.calories, protein: meal.protein,
+            carbs: meal.carbs, fat: meal.fat,
+            note: String(input.reviewNote || "").slice(0, 300),
+            thumb: null,               // pictures ride the app path, not a tool call
+            status: "pending", createdAt: Date.now(),
+            reviewedAt: null, reviewedBy: null, decision: null,
+          });
+          // Bell + Notification Center only, deliberately: sending a real push
+          // needs the VAPID secret bound to every function that can reach this
+          // line (aiChat, aiChatStream, logMeal, mcp). appendFeed is the
+          // no-secret path push.js exposes for exactly this (S92 precedent).
+          try {
+            const { appendFeed } = require("./push");
+            await appendFeed(db, trainerUid, {
+              tag: "meal-review",
+              title: `${ctx.callerName || "A client"} tagged a ${mealType || "meal"}`,
+              body: `${meal.name || "Meal"} — ${meal.calories} cal. Logged to their day; confirm or adjust it.`,
+            });
+          } catch (e) { /* notification is best-effort; the review still queued */ }
+          sentForReview = { ok: true, trainerNotified: true };
+        }
+      } catch (e) {
+        // The meal is already safely logged — never fail the log because the
+        // review queue misbehaved.
+        console.error("log_meal forTrainerReview", e && e.message);
+        sentForReview = { ok: false, reason: "Logged, but couldn't reach your trainer's review queue just now." };
+      }
+    }
+
     return {
       ok: true,
       logged: { date, mealType, ...meal },
       dayTotals: { calories: updated.calories, protein: updated.protein, carbs: updated.carbs, fat: updated.fat },
+      ...(sentForReview ? { sentForReview } : {}),
     };
   }
 
@@ -2998,6 +3114,129 @@ async function runTool(name, input, ctx) {
         [ev, ...(Array.isArray(hist) ? hist : [])].slice(0, 250));
     } catch (e) { /* best-effort */ }
     return { ok: true, sentTo: clientId, message: msg, type };
+  }
+
+  if (name === "list_meal_reviews") {
+    if (!ctx.isTrainer) return { error: "Only trainers have a meal review queue." };
+    const wantPending = input.status !== "all";
+    const targets = [];
+    if (input.clientId) {
+      const one = await resolveTargetUid(db, { clientId: input.clientId }, ctx);
+      if (one && one.error) return one;
+      targets.push(one);
+    } else {
+      const snap = await db.collection("users")
+        .where("assignedTrainerId", "==", ctx.callerUid).limit(200).get();
+      snap.forEach((d) => { if (!d.data().aiOptOut) targets.push(d.id); });
+    }
+    const nums = await idNumMap(db, ctx.callerUid);
+    const out = [];
+    await Promise.all(targets.map(async (cuid) => {
+      const rows = await kvGetJSON(db, cuid, MEAL_REVIEW_KEY);
+      if (!Array.isArray(rows)) return;
+      const prof = (await db.doc(`users/${cuid}`).get()).data() || {};
+      const cname = prof.displayName || [prof.firstName, prof.lastName].filter(Boolean).join(" ") || "Client";
+      rows.filter((r) => r && (!wantPending || r.status === "pending")).forEach((r) => {
+        out.push({
+          reviewId: r.id, clientId: cuid, ref: refCode(cuid), num: nums[cuid] || null,
+          client: cname, date: r.date, mealType: r.mealType, name: r.name,
+          calories: r.calories, protein: r.protein, carbs: r.carbs, fat: r.fat,
+          note: r.note || "", hasPhoto: !!r.thumb, status: r.status,
+          // The image itself is deliberately NOT returned: it is for the app's
+          // review card. Base64 in a tool result would be unreadable to the
+          // model and would blow the token budget.
+          decision: r.decision || null, createdAt: r.createdAt,
+        });
+      });
+    }));
+    out.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));   // oldest first — clear the backlog
+    return {
+      reviews: out.slice(0, 100), pending: out.filter((r) => r.status === "pending").length,
+      note: out.length
+        ? "Each meal is ALREADY in the client's log. Confirming changes nothing; adjusting corrects the numbers; rejecting removes it."
+        : "Nothing waiting.",
+    };
+  }
+
+  if (name === "review_meal") {
+    if (!ctx.isTrainer) return { error: "Only trainers can review a client's meal." };
+    const clientUid = await resolveTargetUid(db, input, ctx);
+    if (clientUid && clientUid.error) return clientUid;
+    const reviewId = String(input.reviewId || "").trim();
+    if (!reviewId) return { error: "reviewId is required — get it from list_meal_reviews." };
+    const decision = ["confirm", "adjust", "reject"].includes(input.decision) ? input.decision : "confirm";
+
+    const rows = await kvGetJSON(db, clientUid, MEAL_REVIEW_KEY);
+    const row = (Array.isArray(rows) ? rows : []).find((r) => r && r.id === reviewId);
+    if (!row) return { error: "No meal review with that id." };
+    const PAST = { confirm: "confirmed", adjust: "adjusted", reject: "rejected" };
+    if (row.status !== "pending") return { error: `That one was already ${PAST[row.decision] || "handled"}.` };
+
+    const logKey = `caliq-log-${row.planId}-${row.date}`;
+    let applied = null;
+    if (decision !== "confirm") {
+      // Re-derive the day totals from the meal we are changing, by delta, so a
+      // concurrent write to the same day (the client logging lunch while the
+      // trainer adjusts breakfast) can't be clobbered.
+      const next = decision === "reject" ? null : {
+        name: input.name != null ? String(input.name).slice(0, 120) : row.name,
+        calories: Math.max(0, Math.round(Number(input.calories != null ? input.calories : row.calories) || 0)),
+        protein: Math.max(0, Math.round(Number(input.protein != null ? input.protein : row.protein) || 0)),
+        carbs: Math.max(0, Math.round(Number(input.carbs != null ? input.carbs : row.carbs) || 0)),
+        fat: Math.max(0, Math.round(Number(input.fat != null ? input.fat : row.fat) || 0)),
+      };
+      const updated = await kvTxnJSON(db, clientUid, logKey, (log0) => {
+        const log = log0 || {};
+        const meals = Array.isArray(log.meals) ? log.meals : [];
+        const idx = meals.findIndex((m) => m && m.id === row.mealId);
+        if (idx < 0) return log;                    // already deleted by the client
+        const old = meals[idx];
+        const d = (k) => (next ? next[k] : 0) - (Number(old[k]) || 0);
+        const nextMeals = next
+          ? meals.map((m, i) => (i === idx ? { ...m, ...next, adjustedBy: "trainer" } : m))
+          : meals.filter((_, i) => i !== idx);
+        return {
+          ...log, meals: nextMeals,
+          calories: Math.max(0, (Number(log.calories) || 0) + d("calories")),
+          protein: Math.max(0, (Number(log.protein) || 0) + d("protein")),
+          carbs: Math.max(0, (Number(log.carbs) || 0) + d("carbs")),
+          fat: Math.max(0, (Number(log.fat) || 0) + d("fat")),
+        };
+      });
+      applied = { dayTotals: { calories: updated.calories, protein: updated.protein, carbs: updated.carbs, fat: updated.fat } };
+    }
+
+    await kvTxnJSON(db, clientUid, MEAL_REVIEW_KEY, (cur) =>
+      (Array.isArray(cur) ? cur : []).map((r) => (r && r.id === reviewId
+        ? { ...r, status: "done", decision, reviewedAt: Date.now(), reviewedBy: ctx.callerUid,
+            // Once decided the picture has done its job; drop it so the queue
+            // doesn't carry images forever.
+            thumb: null,
+            ...(decision === "adjust" ? { adjusted: { name: input.name, calories: input.calories, protein: input.protein, carbs: input.carbs, fat: input.fat } } : {}) }
+        : r)));
+
+    // Tell the client what their coach did — silence after "sent for review"
+    // is the thing that would make them stop tagging.
+    try {
+      const { appendFeed } = require("./push");
+      const verb = decision === "confirm" ? "confirmed" : decision === "adjust" ? "adjusted" : "removed";
+      await appendFeed(db, clientUid, {
+        tag: "meal-review",
+        title: `${ctx.callerName || "Your trainer"} ${verb} your ${row.mealType || "meal"}`,
+        body: decision === "reject" ? `${row.name || "That meal"} was taken off your log.`
+          : decision === "adjust" ? `${row.name || "Meal"} is now ${input.calories != null ? input.calories : row.calories} cal.`
+          : `${row.name || "Meal"} looks good — no changes.`,
+      });
+    } catch (e) { /* best-effort */ }
+    try {
+      await kvTxnJSON(db, clientUid, `caliq-history-${row.planId}`, (hist) => [{
+        id: randId("e"), uid: ctx.callerUid, role: ctx.role, name: ctx.callerName || "Trainer",
+        action: `${decision === "confirm" ? "confirmed" : decision === "adjust" ? "adjusted" : "removed"} ${row.mealType || "a meal"}: ${row.name || ""}`.trim(),
+        ts: Date.now(),
+      }, ...(Array.isArray(hist) ? hist : [])].slice(0, 250));
+    } catch (e) { /* best-effort */ }
+
+    return { ok: true, decision, client: clientUid, ...(applied || {}) };
   }
 
   if (name === "get_nutrition_log") {
