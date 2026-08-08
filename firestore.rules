@@ -197,20 +197,42 @@ service cloud.firestore {
           // stored here on purpose: the kv request stays the single source of
           // truth, so a to-do can never read "open" in chat and "done" on the
           // home screen. Messages remain append-only.
-          && request.resource.data.keys().hasOnly(['from', 'text', 'ts', 'kind', 'todoId'])
+          // S183g: a second pointer kind — "meal", a meal the CLIENT tagged and
+          // sent for their trainer to check. Same discipline as todo: the
+          // message carries only the id, never the meal or its status. The
+          // meal lives in the client's day log and the review row in their kv,
+          // so chat can never disagree with the food log.
+          && request.resource.data.keys().hasOnly(['from', 'text', 'ts', 'kind', 'todoId', 'reviewId'])
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 2000
-          && (!('kind' in request.resource.data) || request.resource.data.kind == 'todo')
+          && (!('kind' in request.resource.data)
+              || request.resource.data.kind == 'todo' || request.resource.data.kind == 'meal')
           && (!('todoId' in request.resource.data)
               || (request.resource.data.todoId is string
                   && request.resource.data.todoId.size() > 0
                   && request.resource.data.todoId.size() <= 64))
+          && (!('reviewId' in request.resource.data)
+              || (request.resource.data.reviewId is string
+                  && request.resource.data.reviewId.size() > 0
+                  && request.resource.data.reviewId.size() <= 64))
           // kind:"todo" is only meaningful with an id, and only a TRAINER sends
           // to-dos (a client sending one would be a fake assignment).
-          && (!('kind' in request.resource.data)
+          && (!('kind' in request.resource.data) || request.resource.data.kind != 'todo'
               || ('todoId' in request.resource.data
-                  && request.auth.uid == threadData().trainerUid));
+                  && request.auth.uid == threadData().trainerUid))
+          // kind:"meal" is the mirror image — only the CLIENT tags their own
+          // meal. A trainer sending one would be putting words in the client's
+          // mouth about what they ate.
+          && (!('kind' in request.resource.data) || request.resource.data.kind != 'meal'
+              || ('reviewId' in request.resource.data
+                  && request.auth.uid != threadData().trainerUid))
+          // A bare pointer id with no matching kind is meaningless, and would
+          // let either field be smuggled onto an ordinary message.
+          && (!('todoId' in request.resource.data)
+              || ('kind' in request.resource.data && request.resource.data.kind == 'todo'))
+          && (!('reviewId' in request.resource.data)
+              || ('kind' in request.resource.data && request.resource.data.kind == 'meal'));
         allow update: if false; // append-only
         allow delete: if isAdmin();
       }

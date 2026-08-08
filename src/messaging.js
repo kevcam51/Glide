@@ -41,11 +41,18 @@ export async function ensureThread(trainerUid, clientUid, creatorUid) {
 // bubble becomes a tappable task card. The message stores only the POINTER —
 // status lives in the client's caliq-requests item, so chat and the client's
 // home can never disagree about whether a to-do is done (S124).
-export async function sendMessage(tid, fromUid, toUid, text, todoId = null) {
+// `reviewId` (optional, clients only) is the mirror: a MEAL the client tagged
+// and sent for their trainer to check (S183g). Same discipline — the message
+// holds only the pointer; the meal itself is already in the client's day log
+// and the review row carries its status, so chat can never disagree with the
+// food log. The two pointers are mutually exclusive; the rules enforce both
+// directions (a trainer can't tag a meal, a client can't assign a to-do).
+export async function sendMessage(tid, fromUid, toUid, text, todoId = null, reviewId = null) {
   const body = String(text || "").trim().slice(0, 2000);
   if (!body) return false;
   const msg = { from: fromUid, text: body, ts: Date.now() };
   if (todoId) { msg.kind = "todo"; msg.todoId = String(todoId).slice(0, 64); }
+  else if (reviewId) { msg.kind = "meal"; msg.reviewId = String(reviewId).slice(0, 64); }
   await addDoc(collection(db, "threads", tid, "msgs"), msg);
   await updateDoc(doc(db, "threads", tid), {
     lastMsg: body.slice(0, 80), lastFrom: fromUid, updatedAt: Date.now(),

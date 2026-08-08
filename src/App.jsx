@@ -14756,6 +14756,9 @@ const REQUEST_TEMPLATES = [
 // Resolve a request's custom icon name from its type (falls back to edit).
 const requestIconName = (type) => (REQUEST_TEMPLATES.find(t => t.type === type) || {}).iconName || "edit";
 const REQUEST_KEY = "caliq-requests";
+// Meals a client tagged for their trainer to check (S183g). Mirrors REQUEST_KEY
+// in the other direction; the server half lives in functions/aitools.js.
+const MEAL_REVIEW_KEY = "caliq-meal-reviews";
 
 // Read / write a user's request list (trainer reads a client's via getForUser;
 // the client reads their own via window.storage). Always newest-first, capped.
@@ -16373,22 +16376,6 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           {tzMsg && (
             <div className={`text-xs mt-1.5 ${tzMsg.ok ? "text-success" : "text-danger"}`}>{tzMsg.text}</div>
           )}
-          {msgFor && (
-            <MessageThread trainerUid={meUid} clientUid={msgFor.uid} meUid={meUid}
-              otherName={msgFor.name} onClose={() => setMsgFor(null)} />
-          )}
-          {sessionsFor && (
-            <SessionsPanel meUid={meUid} role={meRole} trainerUid={meUid} clientUid={sessionsFor.uid}
-              otherName={sessionsFor.name} onClose={() => setSessionsFor(null)} />
-          )}
-          {notesFor && (
-            <NotesPanel mode="trainer-client" meUid={meUid} meName={meName}
-              clientUid={notesFor.uid} clientName={notesFor.name} onClose={() => setNotesFor(null)} />
-          )}
-          {planNotesFor && (
-            <NotesPanel mode="trainer-plan" meUid={meUid} meName={meName}
-              planId={planNotesFor.id} planName={planNotesFor.name} onClose={() => setPlanNotesFor(null)} />
-          )}
           {tzPick && (
             <div className="mt-2 p-3 rounded-[10px] bg-surface2 border border-border">
               {tzPick.loading ? (
@@ -16568,6 +16555,28 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           </>)}
         </div>
       </div>
+      {/* S183g fix: these four full-screen overlays used to live INSIDE the
+          {plansOpen && …} fragment above, so a trainer whose "Local Plans"
+          section was collapsed — the default — could tap Message, Sessions or
+          Notes on a client card and nothing happened at all. The state was set;
+          there was simply nothing mounted to render it. They belong at the top
+          level of the screen, not inside a collapsible card. */}
+      {msgFor && (
+        <MessageThread trainerUid={meUid} clientUid={msgFor.uid} meUid={meUid}
+          otherName={msgFor.name} onClose={() => setMsgFor(null)} />
+      )}
+      {sessionsFor && (
+        <SessionsPanel meUid={meUid} role={meRole} trainerUid={meUid} clientUid={sessionsFor.uid}
+          otherName={sessionsFor.name} onClose={() => setSessionsFor(null)} />
+      )}
+      {notesFor && (
+        <NotesPanel mode="trainer-client" meUid={meUid} meName={meName}
+          clientUid={notesFor.uid} clientName={notesFor.name} onClose={() => setNotesFor(null)} />
+      )}
+      {planNotesFor && (
+        <NotesPanel mode="trainer-plan" meUid={meUid} meName={meName}
+          planId={planNotesFor.id} planName={planNotesFor.name} onClose={() => setPlanNotesFor(null)} />
+      )}
       {/* Invite Hub, reachable from the empty-roster CTA (S119 #4) */}
       <InviteHub open={dashHubOpen} onClose={() => setDashHubOpen(false)} meName={meName} />
     </div>
@@ -17621,6 +17630,7 @@ const callLeaveTeam = httpsCallable(functions, "leaveTeam");
 const callListTeam = httpsCallable(functions, "listTeam");
 const callRemoveSubTrainer = httpsCallable(functions, "removeSubTrainer");
 const callEstimateFood = httpsCallable(functions, "estimateFood"); // AI macro estimate in the manual tracker (S89c)
+const callReviewMeal = httpsCallable(functions, "reviewMeal");     // trainer confirms/adjusts a tagged meal (S183g)
 // Session card-on-file (S101): hosted Checkout in setup mode + the consent record.
 const callCreateCardSetup = httpsCallable(functions, "createSessionSetupIntent");
 const callRecordCardConsent = httpsCallable(functions, "recordSessionConsent");
@@ -22306,6 +22316,118 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
       setTodoStatus((m) => ({ ...m, [todoId]: "done" }));
     } catch { /* ignore — status will re-resolve on next open */ }
   };
+  // ── Meal tags (S183g) ─────────────────────────────────────────────────────
+  // The client tags a meal and sends it here. It is logged to their day
+  // IMMEDIATELY — the trainer confirming is a correction pass, never a gate,
+  // so a slow reply never leaves the client's dashboard wrong. Like to-dos, the
+  // message is only a pointer; the row in caliq-meal-reviews is the truth.
+  const [reviews, setReviews] = useState({});     // reviewId -> row
+  const [mealOpen, setMealOpen] = useState(false);
+  const [mealDraft, setMealDraft] = useState({ type: "lunch", name: "", calories: "", protein: "", carbs: "", fat: "" });
+  const [mealPhoto, setMealPhoto] = useState(null);
+  const [mealBusy, setMealBusy] = useState(false);
+  const [estimating, setEstimating] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState("");
+  const [adjustFor, setAdjustFor] = useState(null);   // reviewId being corrected
+  const [adjustDraft, setAdjustDraft] = useState({ calories: "", protein: "", carbs: "", fat: "" });
+  const mealFileRef = useRef(null);
+
+  const loadReviews = useCallback(async () => {
+    try {
+      const raw = iAmClient
+        ? await window.storage.get(MEAL_REVIEW_KEY)
+        : await getForUser(clientUid, MEAL_REVIEW_KEY);
+      const list = raw && raw.value ? (JSON.parse(raw.value) || []) : [];
+      const map = {};
+      for (const r of list) if (r && r.id) map[r.id] = r;
+      setReviews(map);
+    } catch { /* card falls back to the message text alone */ }
+  }, [clientUid, iAmClient]);
+  useEffect(() => { loadReviews(); }, [loadReviews]);
+
+  const estimateMeal = async () => {
+    const food = mealDraft.name.trim();
+    if (!food || estimating) return;
+    setEstimating(true);
+    try {
+      const r = await callEstimateFood({ description: food });
+      const d = (r && r.data) || {};
+      setMealDraft((m) => ({ ...m,
+        calories: d.calories != null ? String(Math.round(d.calories)) : m.calories,
+        protein: d.protein != null ? String(Math.round(d.protein)) : m.protein,
+        carbs: d.carbs != null ? String(Math.round(d.carbs)) : m.carbs,
+        fat: d.fat != null ? String(Math.round(d.fat)) : m.fat }));
+    } catch {
+      // AI may be off (trial ended, budget spent). Typing the numbers still
+      // works, so this is a convenience that failed, not a broken flow.
+      setErr(false);
+    } finally { setEstimating(false); }
+  };
+
+  const sendMealTag = async () => {
+    const cals = Math.max(0, Math.round(Number(mealDraft.calories) || 0));
+    const name = mealDraft.name.trim();
+    if (!name || mealBusy) return;
+    setMealBusy(true);
+    try {
+      const num = (v) => Math.max(0, Math.round(Number(v) || 0));
+      const today = ymdLocal();
+      const manRaw = await window.storage.get("caliq-plans").catch(() => null);
+      const man = manRaw && manRaw.value ? (JSON.parse(manRaw.value) || {}) : {};
+      const planId = man.active || "self";
+      const logKey = `caliq-log-${planId}-${today}`;
+      const logRaw = await window.storage.get(logKey).catch(() => null);
+      const log = logRaw && logRaw.value ? (JSON.parse(logRaw.value) || {}) : {};
+      const meal = { id: `m${Date.now()}${Math.floor(Math.random() * 1000)}`, name, type: mealDraft.type,
+        calories: cals, protein: num(mealDraft.protein), carbs: num(mealDraft.carbs), fat: num(mealDraft.fat) };
+      // 1. Log it. This happens first and on its own merits — if anything below
+      //    fails, the client's day is still correct.
+      await window.storage.set(logKey, JSON.stringify({ ...log,
+        meals: [...(Array.isArray(log.meals) ? log.meals : []), meal],
+        calories: (Number(log.calories) || 0) + meal.calories,
+        protein: (Number(log.protein) || 0) + meal.protein,
+        carbs: (Number(log.carbs) || 0) + meal.carbs,
+        fat: (Number(log.fat) || 0) + meal.fat }));
+      // 2. Queue it for the trainer, with the picture if there is one.
+      const reviewId = `rv${Date.now()}${Math.floor(Math.random() * 1000)}`;
+      const revRaw = await window.storage.get(MEAL_REVIEW_KEY).catch(() => null);
+      const prev = revRaw && revRaw.value ? (JSON.parse(revRaw.value) || []) : [];
+      const row = { id: reviewId, mealId: meal.id, planId, date: today, mealType: meal.type,
+        name: meal.name, calories: meal.calories, protein: meal.protein, carbs: meal.carbs, fat: meal.fat,
+        note: "", thumb: mealPhoto || null, status: "pending", createdAt: Date.now(),
+        reviewedAt: null, reviewedBy: null, decision: null };
+      await window.storage.set(MEAL_REVIEW_KEY, JSON.stringify(
+        [row, ...(Array.isArray(prev) ? prev : [])]
+          .slice(0, 50)
+          // Only the newest few keep their picture — the whole array shares one
+          // Firestore document and its 1MB ceiling.
+          .map((r, i) => (i >= 8 && r && r.thumb ? { ...r, thumb: null } : r))));
+      // 3. Post the pointer into the conversation.
+      const label = meal.type.charAt(0).toUpperCase() + meal.type.slice(1);
+      const okSend = await sendMessage(tid, meUid, otherUid,
+        `${label} — ${meal.name} (${meal.calories} cal)`, null, reviewId).catch(() => false);
+      if (!okSend) setErr(true);
+      setReviews((m) => ({ ...m, [reviewId]: row }));
+      setMealDraft({ type: "lunch", name: "", calories: "", protein: "", carbs: "", fat: "" });
+      setMealPhoto(null);
+      setMealOpen(false);
+    } catch {
+      setErr(true);
+    } finally { setMealBusy(false); }
+  };
+
+  const doReview = async (reviewId, decision, extra) => {
+    if (reviewBusy) return;
+    setReviewBusy(reviewId);
+    try {
+      await callReviewMeal({ clientId: clientUid, reviewId, decision, ...(extra || {}) });
+      setAdjustFor(null);
+      await loadReviews();
+    } catch (e) {
+      setErr(true);
+    } finally { setReviewBusy(""); }
+  };
+
   useEffect(() => {
     let unsub = null, dead = false;
     (async () => {
@@ -22349,7 +22471,25 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
           <div key={m.id} className={`mb-2 flex ${m.from === meUid ? "justify-end" : "justify-start"}`}>
             <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 ${m.kind === "todo"
               ? "bg-surface2 text-fg border-2 border-primary"
+              : m.kind === "meal" ? "bg-surface2 text-fg border-2 border-[var(--yellow,#fbbf24)]"
               : m.from === meUid ? "bg-primary text-primaryfg" : "bg-surface2 text-fg border border-border"}`}>
+              {m.kind === "meal" && (() => {
+                const r = reviews[m.reviewId];
+                const done = r && r.status === "done";
+                const decided = { confirm: "confirmed", adjust: "adjusted", reject: "removed" }[r && r.decision] || "";
+                return (
+                  <>
+                    <div className="mb-1 flex items-center gap-1.5 text-[.62rem] font-bold uppercase tracking-wide text-[var(--yellow,#fbbf24)]">
+                      <Icon name="meal" size={12} color="currentColor" />
+                      {r ? `${r.mealType || "meal"} · logged` : "meal"}
+                      {done && <span className="text-success">· {decided}</span>}
+                    </div>
+                    {r && r.thumb && (
+                      <img src={r.thumb} alt="" className="mb-1.5 max-h-40 w-full rounded-lg object-cover" />
+                    )}
+                  </>
+                );
+              })()}
               {m.kind === "todo" && (
                 <div className="mb-1 flex items-center gap-1.5 text-[.62rem] font-bold uppercase tracking-wide text-primary">
                   <Icon name="check" size={12} color="currentColor" />To-do
@@ -22362,6 +22502,50 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
                   className="mt-1.5 rounded-lg bg-primaryfill px-3 text-xs font-bold text-primaryfg cursor-pointer"
                   style={{ minHeight: 40 }}>Mark done</button>
               )}
+              {/* The trainer's correction pass. Wording is deliberate: the meal
+                  is already counted, so "Looks right" is a no-op and the buttons
+                  never imply the client is waiting on them. */}
+              {m.kind === "meal" && !iAmClient && reviews[m.reviewId] && reviews[m.reviewId].status !== "done" && (
+                adjustFor === m.reviewId ? (
+                  <div className="mt-2 flex flex-col gap-1.5">
+                    <div className="text-[.66rem] text-muted">Correct the numbers — their day updates by the difference.</div>
+                    <div className="flex gap-1.5">
+                      {[["calories", "cal"], ["protein", "P"], ["carbs", "C"], ["fat", "F"]].map(([k, lbl]) => (
+                        <input key={k} type="number" inputMode="numeric" placeholder={lbl}
+                          value={adjustDraft[k]} onChange={(e) => setAdjustDraft((d) => ({ ...d, [k]: e.target.value }))}
+                          className="w-full min-w-0 rounded-lg border border-border bg-surface px-2 py-1.5 text-[.8rem] text-fg outline-none" />
+                      ))}
+                    </div>
+                    <div className="flex gap-1.5">
+                      <button disabled={reviewBusy === m.reviewId}
+                        onClick={() => doReview(m.reviewId, "adjust", {
+                          ...(adjustDraft.calories !== "" ? { calories: Number(adjustDraft.calories) } : {}),
+                          ...(adjustDraft.protein !== "" ? { protein: Number(adjustDraft.protein) } : {}),
+                          ...(adjustDraft.carbs !== "" ? { carbs: Number(adjustDraft.carbs) } : {}),
+                          ...(adjustDraft.fat !== "" ? { fat: Number(adjustDraft.fat) } : {}) })}
+                        className="flex-1 rounded-lg border-none bg-primaryfill px-3 py-2 text-xs font-bold text-primaryfg cursor-pointer disabled:opacity-50">
+                        {reviewBusy === m.reviewId ? "Saving…" : "Save correction"}
+                      </button>
+                      <button onClick={() => setAdjustFor(null)}
+                        className="rounded-lg border border-border bg-transparent px-3 py-2 text-xs font-bold text-fg cursor-pointer">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <button disabled={!!reviewBusy} onClick={() => doReview(m.reviewId, "confirm")}
+                      className="rounded-lg border-none bg-primaryfill px-3 py-2 text-xs font-bold text-primaryfg cursor-pointer disabled:opacity-50">
+                      {reviewBusy === m.reviewId ? "…" : "Looks right"}
+                    </button>
+                    <button disabled={!!reviewBusy}
+                      onClick={() => { const r = reviews[m.reviewId];
+                        setAdjustDraft({ calories: String(r.calories ?? ""), protein: String(r.protein ?? ""), carbs: String(r.carbs ?? ""), fat: String(r.fat ?? "") });
+                        setAdjustFor(m.reviewId); }}
+                      className="rounded-lg border border-primary bg-transparent px-3 py-2 text-xs font-bold text-primary cursor-pointer disabled:opacity-50">Adjust</button>
+                    <button disabled={!!reviewBusy} onClick={() => doReview(m.reviewId, "reject")}
+                      className="rounded-lg border border-border bg-transparent px-3 py-2 text-xs font-bold text-muted cursor-pointer disabled:opacity-50">Not eaten</button>
+                  </div>
+                )
+              )}
               <div className={`mt-0.5 text-[.6rem] ${m.from === meUid ? "text-primaryfg/60" : "text-muted"}`}>{timeOf(m.ts)}</div>
             </div>
           </div>
@@ -22369,7 +22553,70 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
         <div ref={endRef} />
       </div>
       {err && <div className="px-3 pb-1 text-[.76rem] text-danger">Couldn't send/load — check your connection and try again.</div>}
+      {/* Tag a meal — clients only (the rules refuse a trainer tagging a meal
+          as the client, so there is nothing to show them here). */}
+      {iAmClient && mealOpen && (
+        <div className="border-t border-border bg-surface px-3 py-2.5">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-[.72rem] font-bold uppercase tracking-wide text-[var(--yellow,#fbbf24)]">Tag a meal</div>
+            <button onClick={() => { setMealOpen(false); setMealPhoto(null); }} className="text-[.72rem] text-muted cursor-pointer bg-transparent border-none">Close</button>
+          </div>
+          <div className="mb-2 flex gap-1.5">
+            {["breakfast", "lunch", "dinner", "snack"].map((t) => (
+              <button key={t} onClick={() => setMealDraft((m) => ({ ...m, type: t }))}
+                className={`flex-1 rounded-lg border px-2 py-2 text-[.72rem] font-bold capitalize cursor-pointer ${
+                  mealDraft.type === t ? "border-primary bg-[rgba(8,220,224,.12)] text-primary" : "border-border bg-surface2 text-muted"}`}>{t}</button>
+            ))}
+          </div>
+          <input value={mealDraft.name} onChange={(e) => setMealDraft((m) => ({ ...m, name: e.target.value }))}
+            placeholder="What did you eat?"
+            className="mb-2 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-[.88rem] text-fg outline-none placeholder:text-muted" />
+          <div className="mb-2 flex gap-1.5">
+            {[["calories", "cal"], ["protein", "P"], ["carbs", "C"], ["fat", "F"]].map(([k, lbl]) => (
+              <input key={k} type="number" inputMode="numeric" placeholder={lbl}
+                value={mealDraft[k]} onChange={(e) => setMealDraft((m) => ({ ...m, [k]: e.target.value }))}
+                className="w-full min-w-0 rounded-lg border border-border bg-surface2 px-2 py-2 text-[.82rem] text-fg outline-none placeholder:text-muted" />
+            ))}
+          </div>
+          {mealPhoto && (
+            <div className="mb-2 flex items-center gap-2">
+              <img src={mealPhoto} alt="" className="h-14 w-14 rounded-lg object-cover" />
+              <button onClick={() => setMealPhoto(null)} className="text-[.72rem] text-muted cursor-pointer bg-transparent border-none">Remove photo</button>
+            </div>
+          )}
+          <input ref={mealFileRef} type="file" accept="image/*" capture="environment" className="hidden"
+            onChange={async (e) => {
+              const f = e.target.files && e.target.files[0];
+              e.target.value = "";
+              if (!f) return;
+              // Small on purpose: this rides inside the review record, so it is
+              // sized to be recognisable, not archival.
+              try { setMealPhoto(await downscaleImage(f, 320, 0.6)); } catch { /* skip the photo */ }
+            }} />
+          <div className="flex gap-1.5">
+            <button onClick={() => mealFileRef.current && mealFileRef.current.click()}
+              className="rounded-xl border border-border bg-surface2 px-3 py-2.5 text-[.8rem] font-bold text-fg cursor-pointer">Photo</button>
+            <button onClick={estimateMeal} disabled={!mealDraft.name.trim() || estimating}
+              className="rounded-xl border border-primary bg-transparent px-3 py-2.5 text-[.8rem] font-bold text-primary cursor-pointer disabled:opacity-40">
+              {estimating ? "…" : "AI estimate"}
+            </button>
+            <button onClick={sendMealTag} disabled={!mealDraft.name.trim() || mealBusy}
+              className="flex-1 rounded-xl border-none bg-primaryfill px-3 py-2.5 text-[.84rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50">
+              {mealBusy ? "Sending…" : "Log & send"}
+            </button>
+          </div>
+          <div className="mt-1.5 text-[.66rem] leading-relaxed text-muted">
+            This goes straight into today's log — your coach can correct it after.
+          </div>
+        </div>
+      )}
       <div className="flex items-end gap-2 border-t border-border bg-surface2 px-3 pt-2" style={{ paddingBottom: "calc(10px + env(safe-area-inset-bottom,0px))" }}>
+        {iAmClient && !mealOpen && (
+          <button onClick={() => setMealOpen(true)} aria-label="Tag a meal"
+            className="flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-xl border border-border bg-surface cursor-pointer">
+            <Icon name="meal" size={18} color="var(--yellow,#fbbf24)" />
+          </button>
+        )}
         <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={1}
           placeholder="Message…" style={{ fontFamily: "var(--font-sans)" }}
           className="min-h-[42px] max-h-[120px] flex-1 resize-none rounded-xl border border-border bg-surface px-3 py-2.5 text-[.92rem] text-fg outline-none placeholder:text-muted"

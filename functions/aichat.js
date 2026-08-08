@@ -692,6 +692,29 @@ exports.logMeal = onCall({ region: "us-central1", maxInstances: 10 }, async (req
   return out; // { ok, logged, dayTotals }
 });
 
+// Trainer taps confirm/adjust/reject on a meal a client tagged (S183g). Same
+// pattern as logMeal: no Anthropic call, so it is instant and costs no tokens,
+// and it runs through runTool so the access checks, the delta arithmetic on the
+// day's totals and the client's notification are the ones already tested.
+exports.reviewMeal = onCall({ region: "us-central1", maxInstances: 10 }, async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
+  const db = admin.firestore();
+  const profile = (await db.doc(`users/${uid}`).get()).data() || {};
+  const role = profile.role || "client";
+  const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
+  const callerName = profile.displayName
+    || [profile.firstName, profile.lastName].filter(Boolean).join(" ")
+    || profile.email || "Coach";
+  const ctx = { callerUid: uid, role, isTrainer, today: todayLocal(), nowTime: nowTimeLocal(), callerName,
+    seatCap: isAdminUid(uid) ? null : seatCapFor(profile) };
+  let out;
+  try { out = await runTool("review_meal", request.data || {}, ctx); }
+  catch (e) { console.error("reviewMeal error:", e && e.message); throw new HttpsError("internal", "Couldn't save that review."); }
+  if (out && out.error) throw new HttpsError("failed-precondition", out.error);
+  return out; // { ok, decision, dayTotals? }
+});
+
 // Direct workout-program write for the Accept card (Session 75). The card holds
 // the validated program (from propose_workout); Accept writes it WITHOUT another
 // AI call. Reuses the same set_workout_schedule write + server-side access checks

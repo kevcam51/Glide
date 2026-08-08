@@ -226,6 +226,26 @@ await check("oversized todoId (65 chars) DENIED", assertFails(setDoc(doc(msgCol(
 await check("non-string todoId DENIED", assertFails(setDoc(doc(msgCol(head, H, C1), "td9"), { from: H, text: "x", ts: 18, kind: "todo", todoId: 42 })));
 await check("to-do message is still append-only (no update)", assertFails(updateDoc(doc(msgCol(head, H, C1), "td1"), { text: "changed" })));
 await check("non-participant sends a to-do DENIED", assertFails(setDoc(doc(msgCol(t2, H, C1), "td10"), { from: T2, text: "x", ts: 19, kind: "todo", todoId: "r_q" })));
+console.log("\nMEAL-TAG MESSAGES (S183g) — ALLOWED:");
+await check("client tags a meal for review", assertSucceeds(setDoc(doc(msgCol(c1, H, C1), "mv1"), { from: C1, text: "Lunch — chicken & rice", ts: 30, kind: "meal", reviewId: "rv_abc123" })));
+await check("client in the head's thread can tag a meal", assertSucceeds(setDoc(doc(msgCol(c2, H, C2), "mv2"), { from: C2, text: "Breakfast", ts: 31, kind: "meal", reviewId: "rv_x" })));
+
+console.log("\nMEAL-TAG MESSAGES (S183g) — DENIED (attack cases):");
+// The mirror of the to-do rule: a trainer must not be able to put words in a
+// client's mouth about what they ate.
+await check("TRAINER tags a meal as the client DENIED", assertFails(setDoc(doc(msgCol(head, H, C1), "mv3"), { from: H, text: "you ate cake", ts: 32, kind: "meal", reviewId: "rv_y" })));
+await check("kind:meal WITHOUT reviewId DENIED", assertFails(setDoc(doc(msgCol(c1, H, C1), "mv4"), { from: C1, text: "orphan meal", ts: 33, kind: "meal" })));
+await check("empty reviewId DENIED", assertFails(setDoc(doc(msgCol(c1, H, C1), "mv5"), { from: C1, text: "x", ts: 34, kind: "meal", reviewId: "" })));
+await check("oversized reviewId (65 chars) DENIED", assertFails(setDoc(doc(msgCol(c1, H, C1), "mv6"), { from: C1, text: "x", ts: 35, kind: "meal", reviewId: "z".repeat(65) })));
+await check("non-string reviewId DENIED", assertFails(setDoc(doc(msgCol(c1, H, C1), "mv7"), { from: C1, text: "x", ts: 36, kind: "meal", reviewId: 7 })));
+// Neither pointer may ride an ordinary message, in either direction.
+await check("reviewId on a PLAIN message (no kind) DENIED", assertFails(setDoc(doc(msgCol(c1, H, C1), "mv8"), { from: C1, text: "x", ts: 37, reviewId: "rv_z" })));
+await check("todoId on a PLAIN message (no kind) DENIED", assertFails(setDoc(doc(msgCol(head, H, C1), "mv9"), { from: H, text: "x", ts: 38, todoId: "r_z" })));
+await check("reviewId smuggled onto a kind:todo message DENIED", assertFails(setDoc(doc(msgCol(head, H, C1), "mv10"), { from: H, text: "x", ts: 39, kind: "todo", todoId: "r_a", reviewId: "rv_a" })));
+await check("todoId smuggled onto a kind:meal message DENIED", assertFails(setDoc(doc(msgCol(c1, H, C1), "mv11"), { from: C1, text: "x", ts: 40, kind: "meal", reviewId: "rv_b", todoId: "r_b" })));
+await check("non-participant tags a meal DENIED", assertFails(setDoc(doc(msgCol(t2, H, C1), "mv12"), { from: T2, text: "x", ts: 41, kind: "meal", reviewId: "rv_q" })));
+await check("meal message is append-only (no update)", assertFails(updateDoc(doc(msgCol(c1, H, C1), "mv1"), { text: "changed" })));
+
 await check("message EDIT denied (append-only)", assertFails(updateDoc(doc(msgCol(c1, H, C1), "m2"), { text: "edited" })));
 await check("message DELETE by participant denied", assertFails(deleteDoc(doc(msgCol(c1, H, C1), "m2"))));
 await check("signed-out reads a thread", assertFails(getDoc(threadDoc(anon, H, C1))));
