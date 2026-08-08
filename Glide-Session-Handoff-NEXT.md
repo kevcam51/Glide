@@ -104,6 +104,29 @@ a carer, not a household. If revived: client role + a `family` tier, never a
 trainer role (every business gate tests role, so staying `client` enforces the
 guardrail for free).
 
+### ⏭ NEXT UP — two Kevin reports, diagnosed but NOT built (S183o)
+
+**1. Daily Check-In notes (Results → Pro Tracking).** Three parts:
+- Notes from an earlier day persist when they should clear. The prefill effect
+  (`DailyCheckIn`, ~13193) DOES `setNotes("")` when a date has no check-in, so
+  the stale text is most likely state not resetting after a SAVE, not prefill —
+  check `handleSave`.
+- The expanded editor's textarea is `rows={9}` with `resize:"vertical"` inside a
+  `maxHeight:85vh` modal, so it can be dragged past the frame. Kevin wants it to
+  GROW DOWNWARD inside its card as you type, pushing content down.
+- The real ask: once filled, collapse to **"Completed"**, re-openable to review,
+  and reopening fresh the next day.
+
+**2. AI-logged meals have no serving unit — ROOT CAUSE CONFIRMED.** `log_meal`
+in aitools.js writes `{id, name, type, calories, protein, carbs, fat, time,
+micros}` — **no `grams`, no `unit`**. Yet `search_food_db` returns
+`serving`/`unit` (~aitools 2659) and `estimateFood` returns `grams`/`unit`: the
+data exists upstream and is dropped on write. That is exactly why a past
+AI-logged meal shows a serving you cannot change (nothing to rescale from),
+while the food-log path stores the unit and works. **Fix: persist `grams` +
+`unit` in `log_meal` and the propose/Accept path; the existing serving control
+should then work on AI meals too.**
+
 ### S183k — ONE burn formula, per-person (SHIPPED) ⚠️ moves real numbers
 Kevin: the MET formula must cover ALL exercises, pre-made included, driven by
 each user's own metrics. Pre-made ones were already MET-based and already
