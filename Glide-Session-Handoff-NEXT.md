@@ -104,6 +104,32 @@ a carer, not a household. If revived: client role + a `family` tier, never a
 trainer role (every business gate tests role, so staying `client` enforces the
 guardrail for free).
 
+### S183k — ONE burn formula, per-person (SHIPPED) ⚠️ moves real numbers
+Kevin: the MET formula must cover ALL exercises, pre-made included, driven by
+each user's own metrics. Pre-made ones were already MET-based and already
+scaled by weight — what they ignored was everything else we ask for. The
+textbook shortcut treats 1 MET as 1 kcal/kg/hr (an average young adult male),
+over-stating burn for women, older people, and anyone with a lower resting rate.
+
+**1 MET is now anchored to that person's own resting rate** (Mifflin-St Jeor
+BMR ÷ 1440). `restingKcalPerMin()` in src/App.jsx is the single definition, used
+by `exBurn` / `calcBurn` / `calcStrengthBurn` and **mirrored in the server's
+`weeklyPlanBurn`** — if those two ever drift, the AI quotes a target no screen
+shows (the S86 lesson).
+
+⚠️ **Completed profiles now read 14–25% LOWER for the same session**, and in
+eat-back mode that lowers the daily calorie target too. It is the more honest
+number, but clients WILL notice. Measured (MET 11, 30 min): M30/200lb 499→429 ·
+F30/186lb 464→362 · F55/160lb 399→299 · M65/210lb 524→396.
+
+**Incomplete profiles are byte-identical to the old formula** (verified), so
+unfinished plans see no change — that fallback must stay.
+
+Judgement call worth knowing: Compendium MET values are *defined* against the
+3.5 ml/kg/min standard, so anchoring to personal RMR is a deliberate refinement
+("corrected METs"), more accurate per individual. If Kevin ever wants the
+textbook numbers back, it is one function.
+
 ### S183j — custom exercises now scale to the person (SHIPPED)
 Kevin asked for custom exercises with an AI burn estimate driven by the
 client's own data. The feature existed since S78 but had exactly that flaw:
