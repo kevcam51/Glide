@@ -118,6 +118,17 @@ exports.onDmCreated = onDocumentCreated(
   async (event) => {
     const msg = event.data && event.data.data();
     if (!msg || !msg.from) return;
+    // S183h: a POINTER message (a tagged meal, a to-do) is mirrored into chat
+    // alongside the kv write that is the real record — and that kv write has
+    // its own trigger. Without this guard each one notifies TWICE for a single
+    // action. The dedicated notifier always says something more useful than a
+    // bare DM ("already in their log; confirm or correct it" vs the raw text),
+    // so it wins and this one stands down.
+    //
+    // The to-do half of this was pre-existing: onTrainerRequestWritten has
+    // buzzed for caliq-requests while this fired for the chat mirror ever since
+    // S124 put to-dos in the conversation.
+    if (msg.kind === "meal" || msg.kind === "todo") return;
     const db = admin.firestore();
     const thread = (await db.doc(`threads/${event.params.tid}`).get()).data();
     if (!thread || !Array.isArray(thread.participants)) return;
@@ -159,6 +170,73 @@ exports.onTrainerRequestWritten = onDocumentWritten(
         tag: "trainer-todo", url: "/" },
       "trainerReminders");
     console.log("onTrainerRequestWritten push", JSON.stringify({ uid, fresh: fresh.length, ...r }));
+  });
+
+// ── trigger: meal tagged for review, and the trainer's verdict (S183h) ──────
+// One trigger covers BOTH directions and, more importantly, both write paths:
+// the chat composer writes this doc straight from the client (no function
+// involved), while the AI writes it through log_meal. A trigger on the document
+// is the only place that sees both — which is why the notification lives here
+// rather than inside the tools, and why the tools no longer send it themselves.
+//   new pending row      → tell the CLIENT'S TRAINER there's something to check
+//   pending → done       → tell the CLIENT what their coach decided
+exports.onMealReviewWritten = onDocumentWritten(
+  { document: "users/{uid}/kv/caliq-meal-reviews", region: "us-central1", secrets: [VAPID_PRIVATE_KEY], maxInstances: 10 },
+  async (event) => {
+    const clientUid = event.params.uid;
+    const parse = (snap) => {
+      try {
+        const d = snap && snap.data();
+        const a = d && d.value ? JSON.parse(d.value) : [];
+        return Array.isArray(a) ? a : [];
+      } catch { return []; }
+    };
+    const before = parse(event.data && event.data.before);
+    const after = parse(event.data && event.data.after);
+    const wasById = new Map(before.filter((r) => r && r.id).map((r) => [r.id, r]));
+    const db = admin.firestore();
+
+    const fresh = after.filter((r) => r && r.status === "pending" && !wasById.has(r.id));
+    const decided = after.filter((r) => r && r.status === "done"
+      && wasById.get(r.id) && wasById.get(r.id).status === "pending");
+    if (!fresh.length && !decided.length) return;
+
+    const client = (await db.doc(`users/${clientUid}`).get()).data() || {};
+    const clientName = client.displayName
+      || [client.firstName, client.lastName].filter(Boolean).join(" ") || "A client";
+
+    if (fresh.length) {
+      const trainerUid = client.assignedTrainerId;
+      if (trainerUid) {
+        const first = fresh[0];
+        const r = await sendPushTo(db, trainerUid, {
+          title: fresh.length > 1
+            ? `${clientName} tagged ${fresh.length} meals`
+            : `${clientName} tagged a ${first.mealType || "meal"}`,
+          // Says plainly that nothing is blocked on them — the whole design is
+          // that the meal is already counted.
+          body: fresh.length > 1
+            ? "Already in their log — confirm or correct them."
+            : `${first.name || "Meal"} — ${first.calories || 0} cal. Already in their log; confirm or correct it.`,
+          tag: "meal-review", url: "/",
+        }, "mealReviews");
+        console.log("onMealReviewWritten → trainer", JSON.stringify({ trainerUid, fresh: fresh.length, ...r }));
+      }
+    }
+
+    if (decided.length) {
+      const d = decided[0];
+      const verb = d.decision === "confirm" ? "confirmed"
+        : d.decision === "adjust" ? "adjusted" : "removed";
+      const r = await sendPushTo(db, clientUid, {
+        title: `Your coach ${verb} your ${d.mealType || "meal"}`,
+        body: d.decision === "reject" ? `${d.name || "That meal"} was taken off your log.`
+          : d.decision === "adjust" ? `${d.name || "Meal"} is now ${d.calories || 0} cal.`
+          : `${d.name || "Meal"} looks good — no changes.`,
+        tag: "meal-review", url: "/",
+      }, "mealReviews");
+      console.log("onMealReviewWritten → client", JSON.stringify({ clientUid, decided: decided.length, ...r }));
+    }
   });
 
 // ── scheduled reminder pushes (S96) ─────────────────────────────────────────

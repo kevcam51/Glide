@@ -1251,7 +1251,7 @@ function buildTools(role, opts = {}) {
     {
       name: "set_notification_prefs",
       description:
-        "Turn the CALLER'S OWN notification types on/off (never a client's — prefs are personal). Types: master (everything), messages, trainerReminders (client: trainer to-dos), foodReminders, weighInReminders, coachingNudges, sentReminders (trainer: sent to-do display), clientRequests (trainer), automations (scheduled automation results), referralRewards (referral credit ready to claim), sessionBilling (session charges and settlements). Only pass the keys the user asked to change.",
+        "Turn the CALLER'S OWN notification types on/off (never a client's — prefs are personal). Types: master (everything), messages, trainerReminders (client: trainer to-dos), foodReminders, weighInReminders, coachingNudges, sentReminders (trainer: sent to-do display), clientRequests (trainer), automations (scheduled automation results), referralRewards (referral credit ready to claim), sessionBilling (session charges and settlements), mealReviews (meals tagged for a trainer to check, and their verdict). Only pass the keys the user asked to change.",
       input_schema: {
         type: "object",
         properties: {
@@ -1260,7 +1260,7 @@ function buildTools(role, opts = {}) {
           weighInReminders: { type: "boolean" }, coachingNudges: { type: "boolean" },
           sentReminders: { type: "boolean" }, clientRequests: { type: "boolean" },
           automations: { type: "boolean" }, referralRewards: { type: "boolean" },
-          sessionBilling: { type: "boolean" },
+          sessionBilling: { type: "boolean" }, mealReviews: { type: "boolean" },
         },
       },
     },
@@ -2129,7 +2129,7 @@ async function runTool(name, input, ctx) {
     // does nothing, which reads as the assistant ignoring you.
     const KEYS = ["master", "messages", "trainerReminders", "foodReminders",
       "weighInReminders", "coachingNudges", "sentReminders", "clientRequests",
-      "automations", "referralRewards", "sessionBilling"];
+      "automations", "referralRewards", "sessionBilling", "mealReviews"];
     const patch = {};
     for (const k of KEYS) if (typeof input[k] === "boolean") patch[k] = input[k];
     if (!Object.keys(patch).length) return { error: "Say which notification type to turn on or off." };
@@ -2773,18 +2773,11 @@ async function runTool(name, input, ctx) {
             status: "pending", createdAt: Date.now(),
             reviewedAt: null, reviewedBy: null, decision: null,
           });
-          // Bell + Notification Center only, deliberately: sending a real push
-          // needs the VAPID secret bound to every function that can reach this
-          // line (aiChat, aiChatStream, logMeal, mcp). appendFeed is the
-          // no-secret path push.js exposes for exactly this (S92 precedent).
-          try {
-            const { appendFeed } = require("./push");
-            await appendFeed(db, trainerUid, {
-              tag: "meal-review",
-              title: `${ctx.callerName || "A client"} tagged a ${mealType || "meal"}`,
-              body: `${meal.name || "Meal"} — ${meal.calories} cal. Logged to their day; confirm or adjust it.`,
-            });
-          } catch (e) { /* notification is best-effort; the review still queued */ }
+          // NOTE: no notification is sent from here. The onMealReviewWritten
+          // trigger (functions/push.js) fires on the doc we just wrote and
+          // handles bell + push. It has to live there because the chat composer
+          // writes this same doc straight from the client, with no function in
+          // the path — notifying from both places would double up (S183h).
           sentForReview = { ok: true, trainerNotified: true };
         }
       } catch (e) {
@@ -3174,11 +3167,15 @@ async function runTool(name, input, ctx) {
 
     const logKey = `caliq-log-${row.planId}-${row.date}`;
     let applied = null;
+    // Hoisted: the review row is stamped with these below, so the queue and the
+    // client's "is now N cal" notification quote the CORRECTED numbers rather
+    // than the ones the client originally guessed.
+    let next = null;
     if (decision !== "confirm") {
       // Re-derive the day totals from the meal we are changing, by delta, so a
       // concurrent write to the same day (the client logging lunch while the
       // trainer adjusts breakfast) can't be clobbered.
-      const next = decision === "reject" ? null : {
+      next = decision === "reject" ? null : {
         name: input.name != null ? String(input.name).slice(0, 120) : row.name,
         calories: Math.max(0, Math.round(Number(input.calories != null ? input.calories : row.calories) || 0)),
         protein: Math.max(0, Math.round(Number(input.protein != null ? input.protein : row.protein) || 0)),
@@ -3212,22 +3209,17 @@ async function runTool(name, input, ctx) {
             // Once decided the picture has done its job; drop it so the queue
             // doesn't carry images forever.
             thumb: null,
-            ...(decision === "adjust" ? { adjusted: { name: input.name, calories: input.calories, protein: input.protein, carbs: input.carbs, fat: input.fat } } : {}) }
+            // Corrected values land ON the row, so anything reading it later
+            // (the queue, the client's notification) sees what is actually in
+            // the log — not the estimate that was replaced.
+            ...(decision === "adjust" && next ? { ...next, original: { name: r.name, calories: r.calories, protein: r.protein, carbs: r.carbs, fat: r.fat } } : {}) }
         : r)));
 
-    // Tell the client what their coach did — silence after "sent for review"
-    // is the thing that would make them stop tagging.
-    try {
-      const { appendFeed } = require("./push");
-      const verb = decision === "confirm" ? "confirmed" : decision === "adjust" ? "adjusted" : "removed";
-      await appendFeed(db, clientUid, {
-        tag: "meal-review",
-        title: `${ctx.callerName || "Your trainer"} ${verb} your ${row.mealType || "meal"}`,
-        body: decision === "reject" ? `${row.name || "That meal"} was taken off your log.`
-          : decision === "adjust" ? `${row.name || "Meal"} is now ${input.calories != null ? input.calories : row.calories} cal.`
-          : `${row.name || "Meal"} looks good — no changes.`,
-      });
-    } catch (e) { /* best-effort */ }
+    // The client is told what their coach decided by the onMealReviewWritten
+    // trigger, which sees the status flip to "done" on the write above — one
+    // notifier for both directions and both write paths (S183h). Silence after
+    // "sent for review" is the thing that would stop them tagging, so this
+    // must not be dropped, only moved.
     try {
       await kvTxnJSON(db, clientUid, `caliq-history-${row.planId}`, (hist) => [{
         id: randId("e"), uid: ctx.callerUid, role: ctx.role, name: ctx.callerName || "Trainer",

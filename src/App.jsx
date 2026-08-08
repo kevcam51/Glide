@@ -24669,6 +24669,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                 // no way to silence them short of the master switch — the one
                 // thing the Notification Center promises you can do.
                 { key: "sessionBilling", label: "Session billing", desc: "When a session is charged or a balance settles" },
+                { key: "mealReviews", label: "Meals to check", desc: "When a client tags a meal and sends it over" },
               ]
             : [
                 { key: "trainerReminders", label: "Trainer to-do reminders", desc: "To-dos your trainer sends you" },
@@ -24679,6 +24680,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                 { key: "automations", label: "Automation results", desc: "When a scheduled automation finishes" },
                 { key: "referralRewards", label: "Referral rewards", desc: "When credit you've earned is ready to claim" },
                 { key: "sessionBilling", label: "Session billing", desc: "When you're charged for a session" },
+                { key: "mealReviews", label: "Meal check-backs", desc: "When your trainer confirms or corrects a meal you tagged" },
               ];
           const Toggle = ({ on, disabled, onClick }) => (
             <button onClick={onClick} disabled={disabled} aria-pressed={on}
