@@ -13173,7 +13173,8 @@ function CheckInCalendar({ checkIns, selected, onSelect }) {
 function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll }) {
   const [notesOpen, setNotesOpen] = useState(false);   // expanded editor
   const [noteSaveMsg, setNoteSaveMsg] = useState("");
-  const [checkDate, setCheckDate] = useState(ymdLocal());
+  const today = useTodayKey();                          // live — rolls over at midnight
+  const [checkDate, setCheckDate] = useState(today);
   const [weight, setWeight] = useState(data.weightLbs || "");
   const [calories, setCalories] = useState("");
   const [hitTarget, setHitTarget] = useState(null);
@@ -13183,14 +13184,31 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll }) {
   const [bodyFatLog, setBodyFatLog] = useState("");
   const [saved, setSaved] = useState(false);
 
-  const today = ymdLocal();
   const isFuture = checkDate > today;
   const isPast = checkDate < today;
   const canSave = weight && hitTarget !== null && checkDate;
 
+  // Follow the date over midnight (S183p, Kevin: "notes from an earlier day
+  // persist when they should clear"). `checkDate` used to be captured ONCE at
+  // mount, so a screen left open overnight — the normal case on a phone — kept
+  // yesterday selected: yesterday's notes still filled the box and a save wrote
+  // to yesterday. Only advance when they were parked on the OLD today; a date
+  // they deliberately picked is left exactly where they put it.
+  const lastToday = useRef(today);
+  useEffect(() => {
+    const prev = lastToday.current;
+    if (prev === today) return;
+    lastToday.current = today;
+    // `prev` is read into a local first: React runs the updater lazily, at the
+    // next render, by which point lastToday.current is already the NEW day and
+    // the comparison would never match.
+    setCheckDate((d) => (d === prev ? today : d));
+  }, [today]);
+
   // When the date changes, pre-fill the form from any existing entry for that
   // date (so saving edits it), or reset to a blank entry for a new date.
   useEffect(() => {
+    setNoteSaveMsg(""); // a "Shared with your trainer" confirmation belongs to the day it was for
     const ex = (data.checkIns || []).find(c => c.date === checkDate);
     if (ex) {
       setWeight(ex.weight != null ? String(ex.weight) : "");
@@ -13241,6 +13259,19 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll }) {
 
   // Check if this date already has a check-in
   const existingForDate = (data.checkIns || []).find(c => c.date === checkDate);
+  const notesDone = !!notes.trim();
+
+  // The expanded editor grows DOWNWARD as you type (S183p, Kevin) instead of
+  // being a fixed 9-row box with a drag handle that could be pulled straight
+  // past the modal frame. Capped at half the viewport so the Done button and
+  // the Note buttons below it always stay reachable; past the cap the textarea
+  // scrolls internally.
+  const growNotes = (el) => {
+    if (!el) return;
+    el.style.height = "auto"; // collapse first, so scrollHeight reflects the text
+    const cap = Math.max(140, Math.round(window.innerHeight * 0.5));
+    el.style.height = Math.min(el.scrollHeight, cap) + "px";
+  };
 
   return (
     <div className="checkin-card">
@@ -13312,17 +13343,27 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll }) {
         <div className="checkin-field">
           <label>Notes (optional)</label>
           {/* Tap to expand (S97v, Kevin: "it is just one pretty small box"). The
-              single line stays the at-a-glance summary; the popup gives real room
-              and can also file the text as a Note — private, or shared with the
-              trainer — using the existing notes system. */}
-          <div onClick={()=>setNotesOpen(true)} title="Tap to write more"
+              popup gives real room and can also file the text as a Note —
+              private, or shared with the trainer — using the existing notes
+              system. Once something is written the row collapses to a plain
+              "Completed" (S183p, Kevin) rather than a clipped one-line preview
+              that could never show the whole note anyway; the text itself is one
+              tap away, and a new day starts empty again. */}
+          <div onClick={()=>setNotesOpen(true)}
+            title={notesDone ? "Tap to review" : "Tap to write more"}
             style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",borderRadius:8,
-              border:"1px solid var(--border)",background:"var(--s2)",cursor:"pointer",minHeight:"42px"}}>
-            <span style={{flex:1,minWidth:0,fontSize:".86rem",color:notes?"var(--text)":"var(--muted)",
+              border:`1px solid ${notesDone?"color-mix(in srgb,var(--green) 30%,transparent)":"var(--border)"}`,
+              background:notesDone?"color-mix(in srgb,var(--green) 7%,transparent)":"var(--s2)",
+              cursor:"pointer",minHeight:"42px"}}>
+            {notesDone && <Icon name="check" size={15} color="var(--green)" />}
+            <span style={{flex:1,minWidth:0,fontSize:".86rem",fontWeight:notesDone?700:400,
+              color:notesDone?"var(--green)":"var(--muted)",
               overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-              {notes || "How did today go?"}
+              {notesDone ? "Completed" : "How did today go?"}
             </span>
-            <Icon name="edit" size={15} color="var(--accent)" />
+            {notesDone
+              ? <span style={{fontSize:".72rem",color:"var(--muted)",flexShrink:0}}>Review</span>
+              : <Icon name="edit" size={15} color="var(--accent)" />}
           </div>
         </div>
       </div>
@@ -13354,11 +13395,13 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll }) {
               </button>
               <div style={{fontFamily:"var(--font-display)",fontSize:"1.05rem",fontWeight:700}}>Notes for {checkDate}</div>
             </div>
-            <textarea value={notes} onChange={(e)=>setNotes(e.target.value)} autoFocus rows={9}
+            <textarea value={notes} autoFocus rows={4} ref={growNotes}
+              onChange={(e)=>{ setNotes(e.target.value); growNotes(e.target); }}
               placeholder="How did today go? Energy, soreness, cravings, what you'd change tomorrow…"
               style={{width:"100%",boxSizing:"border-box",padding:"12px",borderRadius:10,
                 border:"1px solid var(--border)",background:"var(--s2)",color:"var(--text)",
-                fontFamily:"inherit",fontSize:".9rem",lineHeight:1.5,resize:"vertical"}} />
+                fontFamily:"inherit",fontSize:".9rem",lineHeight:1.5,resize:"none",
+                overflowY:"auto",display:"block"}} />
             <div style={{fontSize:".72rem",color:"var(--muted)"}}>
               Saved with this check-in. You can also keep it in Notes:
             </div>
