@@ -1,6 +1,66 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ⭐⭐⭐⭐⭐ S183t (Aug 8, 2026) — AI READS COACHING NOTES — READ THIS FIRST
+## ⏭⏭⏭ NEXT UP — BUILD WEB SEARCH (Kevin approved, S183u) — START HERE
+
+**Kevin approved the build.** Read **`docs/WEB-SEARCH.md`** first — the whole
+design, cost model, integration traps and recommendation are there and are NOT
+duplicated here. This block only carries what he said when he approved it.
+
+**The correction that makes this small: we do NOT need a third-party API.**
+Anthropic ships web search as a **server-side tool** on the same Claude API
+`functions/aichat.js` already calls. Declare it in `tools`; Anthropic runs the
+searches. No vendor, no key, no Cloud Function, no result pipeline. $10 per
+1,000 searches (1¢ each), verified against the live docs on Aug 8.
+
+**His three requirements, in his words:**
+1. **Build it with the allowlist.** Not an open search.
+2. **"We are pretty much selling a nutrition product and we don't wanna give
+   users the wrong information."** Safety is the headline requirement, not a
+   hardening pass. The allowlist + "trainer guidance outranks the internet" +
+   mandatory citations are all load-bearing. Do not ship any of them as
+   follow-ups.
+3. **NEW — tell users searching costs more of their AI allowance.** Not in the
+   doc; it came with the approval. Users must understand *before* they trigger a
+   search that it draws down their daily allowance faster. Think: a line in the
+   chat UI when a search runs, wording in the Plans & pricing feature grid
+   (`PLAN_FEATURES` / `FeatureMatrix`), and the allowance copy that already
+   exists for the token budget. Kevin has consistently wanted honest allowance
+   copy — see the S90 "no bare dollar figures" and published-allowance decisions.
+
+**Two gates that must ship in the SAME change, not after:**
+- **The per-user daily SEARCH budget.** Max at ~100 msg/day works out ~$9/mo of
+  search against a $29.99 plan (~30% of revenue). A second counter beside the
+  token counter in `users/{uid}/aiUsage/{date}`, same warn/block shape;
+  accumulate `usage.server_tool_use.web_search_requests`. This is also what makes
+  requirement 3 truthful — you can't honestly tell someone search costs more
+  allowance if nothing is counting it.
+- **`max_uses: 3`** on the tool, plus `allowed_domains`.
+
+**Three integration traps we don't handle today** (detail in the doc): long
+search turns stop with `stop_reason: "pause_turn"` and need the paused message
+sent back; search errors arrive as **HTTP 200** with `content` as a single object
+instead of a list (a rate limit would read as a crash); results carry
+`encrypted_content` that must be passed back **unmodified** or follow-up turns
+400 — our chat history (`caliq-ai-chat-{id}`) stores text only, so **check that
+before enabling** or the second question about a search breaks.
+
+⚠️ It's a SERVER tool — it never goes through `runTool()`, so unlike the S183t
+notes work the **MCP connector does not inherit it**. Probably correct to leave
+it that way (someone connecting their own Claude already has search), but it's a
+decision, not an oversight.
+
+Deploy set when done: the 18-function `aitools.js`/`aichat.js` set — run
+`npm run deploy-set`, never recall it.
+
+### Everything below is DONE this session (S183p–S183u) — don't redo it
+- **S183p** AI meals store their serving; Daily Check-In notes roll over/grow/collapse
+- **S183q** Accent colour picker (6 curated) + full-app leak audit
+- **S183r** Body-fat charts stopped mixing measurement methods; neutral +/− deltas
+- **S183s** User picks which body-fat method drives fat/lean mass
+- **S183t** AI reads coaching notes, with per-note AI access control
+- **S183u** `docs/WEB-SEARCH.md` scoping (this item)
+
+## ⭐⭐⭐⭐ S183t (Aug 8, 2026) — AI READS COACHING NOTES
 The AI (in-app AND connector) now uses a person's notes as coaching context, and
 **notes carry per-note AI access that their owner controls.**
 

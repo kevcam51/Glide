@@ -124,6 +124,20 @@ Worth a line in `docs/LEGAL-SESSIONS.md` before launch.
   trial-expired; Premium up is where it belongs, with the tighter daily cap on
   Premium and the higher one on Max.
 
+## Kevin's approval (Aug 8, 2026) — added requirement
+
+Approved for build **with the allowlist**, with safety framed as the headline
+requirement: _"we are pretty much selling a nutrition product and we don't wanna
+give users the wrong information."_
+
+**New requirement not in the original scoping:** users must be told that running
+internet searches **draws down their AI allowance faster**. Surface it where they
+can act on it — a line in the chat when a search runs, and in the Plans & pricing
+feature grid alongside the published AI allowance. This depends on the daily
+search counter below: we cannot honestly tell someone search costs more allowance
+unless something is counting it, which is a second reason that counter ships in
+the same change rather than after.
+
 ## Recommendation
 
 Ship it, but not open. In order:
