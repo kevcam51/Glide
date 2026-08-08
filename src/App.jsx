@@ -24457,18 +24457,17 @@ function AiConsentPrompt({ isTrainer, onChoose }) {
         </div>
         <div style={{ fontSize: ".9rem", lineHeight: 1.6, color: "var(--text-secondary)" }}>
           <p style={{ margin: "0 0 10px" }}>
-            Glidna has an AI assistant that can read your logs and plans to answer questions, and
-            log things for you. Using it means that information is sent to an AI provider to
-            generate the answer.
+            Glidna&apos;s AI assistant can read your logs, notes and plan, so it can answer questions
+            and log things for you. To do that it sends what it needs to an AI provider.
           </p>
           <p style={{ margin: "0 0 10px" }}>
             {isTrainer
-              ? <>You can also connect your own AI assistant — like Claude or ChatGPT — to Glidna. If you do, what it reads is handled under <b style={{ color: "var(--text)" }}>your agreement with that provider, not ours</b>. Your clients each make their own choice about this, and you can't change it for them.</>
-              : <>If your trainer connects their own AI assistant, it can read the data they can already see. From that point it's handled under <b style={{ color: "var(--text)" }}>their agreement with that provider, not ours</b>.</>}
+              ? <>You can also connect your own AI, like Claude or ChatGPT. What it reads is then covered by <b style={{ color: "var(--text)" }}>your agreement with that provider, not ours</b>. Each client decides this for themselves, and you can&apos;t change it for them.</>
+              : <>If your trainer connects their own AI, it can see the same data they already can. What happens to it after that is covered by <b style={{ color: "var(--text)" }}>their agreement with that provider, not ours</b>.</>}
           </p>
           <p style={{ margin: "0 0 16px" }}>
-            Turning this off costs you nothing else — logging, plans, messaging and everything else
-            work exactly the same.
+            Say no and nothing else changes. Logging, plans, messaging and the rest all work the
+            same. You just won&apos;t have the AI features.
           </p>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
