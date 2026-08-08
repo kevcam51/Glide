@@ -150,8 +150,16 @@ exercise burned the same for a 120 lb and a 250 lb client. Now stored as a
   silently zeroes both. Same order mirrored in server `weeklyPlanBurn`.
 - Verified: 265/408/531 cal at 130/200/260 lb; legacy flat at 300; HR
   untouched; prod estimator gave sled push 8, sprints 14, stretching 2.3.
-- ⏭ **Not clicked through live:** the creator panel itself (build + pure-logic
-  + endpoint all verified). Worth one pass through the wizard's strength step.
+- ✅ **Panel click-tested (S183l)** — and it found a bug worth the trip: the
+  S183k formula change updated every burn EXCEPT the creator's own preview, so
+  the panel promised 350 cal while the schedule showed 273 for the same
+  intensity, and manual "10 cal/min" actually produced 234 for 30 min. Both now
+  use `restingKcalPerMin`. **Lesson: when the burn formula changes, the creator
+  preview is a separate call site — grep for every use of the rate.**
+  Reached via plan → **Edit Workouts** (the DailyDashboard copy only renders
+  when a session is scheduled that day).
+- Live-verified in one real plan: new `{met: 8.5, refWeightLbs: 186}` alongside
+  a pre-S183j `{calPerMin: 10, met: 0}` that still works — both paths proven.
 
 ### S183i — body metrics can be back-dated (SHIPPED)
 The store was always date-keyed; the measurements hub hardcoded today, so
