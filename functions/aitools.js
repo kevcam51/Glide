@@ -43,6 +43,33 @@ function sanitizeMicros(m) {
   return Object.keys(out).length ? out : null;
 }
 
+// ── Serving size on a logged meal (S183p) ────────────────────────────────────
+// The app's own food-log path stores `grams` + `unit` on every meal, and the
+// meal row's serving control rescales calories/macros from them
+// (deriveBasisFromMeal in src/App.jsx). AI-logged meals used to omit both, so a
+// past AI meal showed a serving you couldn't change — nothing to rescale from.
+// The portion is already known upstream (search_food_db returns a serving,
+// estimateFood returns grams/unit); it was simply dropped on write.
+// Units mirror FOOD_UNITS in src/App.jsx, plus "serving" for countable foods.
+const MEAL_UNITS = ["g", "oz", "lb", "kg", "ml", "cup", "tbsp", "tsp", "floz", "serving"];
+const SERVING_SCHEMA = {
+  grams: { type: "number", description:
+    "How much of it was eaten, as a NUMBER in the `unit` below — e.g. 180 with unit \"g\", or 2 with unit \"serving\". "
+    + "ALWAYS set this alongside the macros: it is what lets the person adjust the portion later and have the "
+    + "calories rescale. Use the weight when you know it, otherwise the count of servings/pieces." },
+  unit: { type: "string", enum: MEAL_UNITS, description:
+    "Unit for `grams`. Prefer \"g\" (or \"ml\" for drinks) when you estimated by weight; use \"serving\" for "
+    + "countable items (2 eggs, 1 burrito, 3 slices). Defaults to \"g\"." },
+};
+// A portion is only worth storing when there's a positive amount. An unknown or
+// unsupported unit falls back to grams, which is how the app reads it anyway.
+function sanitizeServing(input) {
+  const q = Number(input && input.grams);
+  if (!Number.isFinite(q) || q <= 0) return null;
+  const u = String((input && input.unit) || "g").trim().toLowerCase();
+  return { grams: Math.round(q * 100) / 100, unit: MEAL_UNITS.includes(u) ? u : "g" };
+}
+
 // id → display label (for rendering a proposed program on the confirmation card).
 const EX_LABEL = {};
 for (const e of CARDIO) EX_LABEL[e.id] = e.label;
@@ -279,7 +306,7 @@ async function searchFoodDb(query) {
   // Facts is crowd-sourced and drifts ±5% — so rank USDA ahead of OFF for precision.
   for (let i = 0; i < max; i++) { if (usda[i]) push(usda[i]); if (off[i]) push(off[i]); }
   if (!out.length) return { results: [], note: "No database match — estimate the macros instead, or ask the user for the label values." };
-  return { results: out.slice(0, 8), note: "Macros are PER 100 g. Scale to the portion the user ate, then use propose_meal / log_meal." };
+  return { results: out.slice(0, 8), note: "Macros are PER 100 g. Scale to the portion the user ate, then use propose_meal / log_meal — passing that portion as grams + unit so it stays adjustable." };
 }
 
 // Build one validated week ({day:[{type,duration}]}) from a provided day-keyed
@@ -1024,6 +1051,7 @@ function buildTools(role, opts = {}) {
           protein: { type: "number", description: "Protein grams (0 if unknown)" },
           carbs: { type: "number", description: "Carb grams (0 if unknown)" },
           fat: { type: "number", description: "Fat grams (0 if unknown)" },
+          ...SERVING_SCHEMA,
           micros: MICRO_SCHEMA,
           date: { type: "string", description: "Date YYYY-MM-DD. OMIT for today — only pass this when the user explicitly named a different day." },
           time: { type: "string", description: "Clock time eaten, e.g. '8:30am' or '19:45'. Set when the user mentions when they ate; omit for now." },
@@ -1048,6 +1076,7 @@ function buildTools(role, opts = {}) {
           protein: { type: "number", description: "Protein grams (0 if unknown)" },
           carbs: { type: "number", description: "Carb grams (0 if unknown)" },
           fat: { type: "number", description: "Fat grams (0 if unknown)" },
+          ...SERVING_SCHEMA,
           micros: MICRO_SCHEMA,
           date: { type: "string", description: "Date YYYY-MM-DD. OMIT for today — only pass this when the user explicitly named a different day." },
           time: { type: "string", description: "Clock time eaten, e.g. '8:30am' or '19:45'. Set when the user mentions when they ate; omit for now." },
@@ -1121,6 +1150,7 @@ function buildTools(role, opts = {}) {
                 protein: { type: "number", description: "grams (0 if unknown)" },
                 carbs: { type: "number", description: "grams (0 if unknown)" },
                 fat: { type: "number", description: "grams (0 if unknown)" },
+                ...SERVING_SCHEMA,
                 micros: MICRO_SCHEMA,
                 date: { type: "string", description: "YYYY-MM-DD; omit for today" },
                 time: { type: "string", description: "clock time eaten; omit for now" },
@@ -2659,7 +2689,7 @@ async function runTool(name, input, ctx) {
         serving: f.servingText || f.servingLabel || "", unit: f.unit || "g",
       }));
       if (!foods.length) return { foods: [], note: "Nothing matched — estimate it instead and tell the user." };
-      return { foods, note: "Per the serving shown. Scale to what they actually ate before logging." };
+      return { foods, note: "Per the serving shown. Scale to what they actually ate before logging, and pass that portion as grams + unit so it stays adjustable." };
     } catch (e) {
       console.error("search_food_db", e && e.message);
       return { error: "Food database lookup failed — estimate instead and say so." };
@@ -2679,6 +2709,8 @@ async function runTool(name, input, ctx) {
       date: re.test(input.date || "") ? input.date : ctx.today,
       time: normMealTime(input.time, ctx),
     };
+    const pServing = sanitizeServing(input);
+    if (pServing) Object.assign(meal, pServing); // carried through the Accept card → logMeal (S183p)
     const pMicros = sanitizeMicros(input.micros);
     if (pMicros) meal.micros = pMicros; // carried through the Accept card → logMeal
     if (ctx.isTrainer && input.clientId) {
@@ -2736,6 +2768,8 @@ async function runTool(name, input, ctx) {
       fat: Math.max(0, Math.round(Number(input.fat) || 0)),
       time: normMealTime(input.time, ctx),
     };
+    const lmServing = sanitizeServing(input);
+    if (lmServing) Object.assign(meal, lmServing); // so the portion stays adjustable (S183p)
     const lmMicros = sanitizeMicros(input.micros);
     if (lmMicros) meal.micros = lmMicros; // roll into the daily micronutrient bars
     const { id: planId } = await activePlanData(db, uid, planOverride);
@@ -2905,6 +2939,8 @@ async function runTool(name, input, ctx) {
         carbs: Math.max(0, Math.round(Number(it.carbs) || 0)),
         fat: Math.max(0, Math.round(Number(it.fat) || 0)),
         time: normMealTime(it.time, ctx) };
+      const itServing = sanitizeServing(it);
+      if (itServing) Object.assign(meal, itServing); // portion stays adjustable (S183p)
       const mMicros = sanitizeMicros(it.micros);
       if (mMicros) meal.micros = mMicros; // roll into the daily micronutrient bars
       (byDate[date] = byDate[date] || []).push(meal);

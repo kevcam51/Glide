@@ -18507,6 +18507,9 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
       const input = { name: p.name, mealType: p.mealType, calories: Number(p.calories) || 0,
         protein: Number(p.protein) || 0, carbs: Number(p.carbs) || 0, fat: Number(p.fat) || 0, date: p.date };
       if (p.micros && typeof p.micros === "object") input.micros = p.micros; // carry AI micro estimates through
+      // The serving the AI estimated (S183p) — without it the logged meal has
+      // nothing to rescale from, so its portion can't be edited afterwards.
+      if (Number(p.grams) > 0) { input.grams = Number(p.grams); input.unit = p.unit || "g"; }
       if (p.time) input.time = p.time;
       if (p.clientId) input.clientId = p.clientId;
       if (p.localPlanId) input.localPlanId = p.localPlanId; // trainer's own local plan file (S87)
@@ -19480,6 +19483,10 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                   <div className="flex items-baseline gap-2 text-fg">
                     <span className="font-display text-xl leading-none">{proposal.calories}</span>
                     <span className="text-[.8rem] text-muted">cal</span>
+                    {/* The portion those numbers are for (S183p) — visible before
+                        you accept, and stored so it stays adjustable after. */}
+                    {servingLabelOf(proposal)
+                      ? <span className="text-[.8rem] text-muted">· {servingLabelOf(proposal)}</span> : null}
                     <span className="ml-2 text-[.8rem] text-muted">{proposal.protein}g P · {proposal.carbs}g C · {proposal.fat}g F</span>
                   </div>
                   <div className="flex gap-2">
