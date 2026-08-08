@@ -50,10 +50,40 @@ Deployed: the 9-function referrals+billing set (`npm run deploy-set`); frontend
 pushed. Note the deploy set drags in the three live Stripe functions — their
 code is unchanged, they just bundle `referrals.js`.
 
-**Queue now:** 2) push-notification delivery — ⚠️ *this line was stale, Web Push
-delivery already shipped in `functions/push.js` (S90b/S96); re-scope or drop
-it.* 3) Family & Friends tier. 4) connector chart images; cap-hit "use your own
-AI" nudge. 5) ⚖️ referral CASH payouts — counsel first.
+### S183b — push notifications: the parked item was stale, the bug was real
+"Push-notification delivery (FCM)" has sat in this queue for ages. **It was
+already built** — Web Push/VAPID, SW handlers, subscription management, eight
+sending triggers (`functions/push.js`, S90b/S96). Don't re-scope it; it's done.
+
+What was actually broken is where a push LANDS. `notificationclick` focused an
+already-open window and stopped there, so **every payload's `url` was silently
+dropped for anyone who had Glidna open** — most people, most of the time. A
+push saying "your reward is ready" dumped them on the dashboard. Now it focuses
+AND navigates (skipping the navigate when the tab is already on that URL, so a
+tap doesn't reload the page under them). This fixes deep-linking for ALL push
+types, not just referrals. The referral push now targets `/?reward=1`, which
+opens Refer & earn and strips the param.
+
+Two Notification Center gaps closed while auditing:
+- **`sessionBilling` had no toggle.** Those pushes have gone to both trainer and
+  client since sessions shipped, silenceable only by the master switch — the
+  one thing the Center promises you don't have to do. Row added for both roles.
+- **`set_notification_prefs` was missing `automations`, `referralRewards`,
+  `sessionBilling`,** so asking the assistant to turn those off did nothing and
+  read as being ignored. ⚠️ **That KEYS list must stay in step with the type
+  rows in `SideMenu`** — nothing enforces it.
+
+Still true after the audit: **`coachingNudges` has a toggle but no push path** —
+it governs the S77 in-app card only. That's by design as far as anyone can
+tell; noting it so the next audit doesn't re-flag it as a bug.
+
+Deployed: the 22-function `aitools.js` set (run `npm run deploy-set`, never
+recall it). Live-verified in prod after deploy: the AI answered and honoured
+the new key — "turn off my referral reward notifications" wrote
+`referralRewards:false` (before this it silently did nothing).
+
+**Queue now:** 1) Family & Friends tier. 2) connector chart images; cap-hit
+"use your own AI" nudge. 3) ⚖️ referral CASH payouts — counsel first.
 
 ---
 
