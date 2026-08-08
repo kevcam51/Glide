@@ -3838,7 +3838,7 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   );
 }
 
-function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTotal, loggingStreak, dayCalsAll, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, defaultView = "detailed", onSetPlanViewDefault }) {
+function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTotal, loggingStreak, dayCalsAll, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, onSetBfSource, defaultView = "detailed", onSetPlanViewDefault }) {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
   // Simple (plain-English) vs Detailed plan view — a display pref, remembered
@@ -4121,7 +4121,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
           {showMeasureModal && (
             <MeasurementsModal data={data} onSave={onSaveMeasurements}
               onDelete={onDeleteMeasurement} onSetGoalWeight={onSetGoalWeight}
-              onToggleBodyFat={onToggleBodyFat}
+              onToggleBodyFat={onToggleBodyFat} onSetBfSource={onSetBfSource}
               onEditWeighIn={(dateKey, weight) => {
                 const ex = (data.checkIns || []).find((c) => c.date === dateKey);
                 if (weight == null) { if (ex && onDeleteCheckIn) onDeleteCheckIn(ex.timestamp); return; }
@@ -10967,7 +10967,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   savedFoods, onToggleSaveFood, onRemoveSavedFood, onLogFoods, weekSummary, recentWearable, history, onRefresh, isRemote,
   savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onSetPlanned, onPlanDays, onEatPlanned,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
-  onSaveMeasurements, onSaveMeasurementsFor, onDeleteMeasurement, onToggleBodyFat, onSetGoalWeight, onAddCustomExercise,
+  onSaveMeasurements, onSaveMeasurementsFor, onDeleteMeasurement, onToggleBodyFat, onSetBfSource, onSetGoalWeight, onAddCustomExercise,
   onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetHideCompliance, meUid: dashMeUid,
   premium = true, role, onOpenMealPlanner }) {
 
@@ -12822,7 +12822,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
 
       {showMeasure && onSaveMeasurements && (
         <MeasurementsModal data={data} onSave={onSaveMeasurements} onDelete={onDeleteMeasurement}
-          onSetGoalWeight={onSetGoalWeight} onToggleBodyFat={onToggleBodyFat}
+          onSetGoalWeight={onSetGoalWeight} onToggleBodyFat={onToggleBodyFat} onSetBfSource={onSetBfSource}
           onLogWeight={(v)=>onLogUpdate("weight", v)}  /* in-plan: date handled by the plan editor */
           onEditWeighIn={(dateKey, weight)=>{
             const ex = (data.checkIns || []).find((c) => c.date === dateKey);
@@ -13950,8 +13950,9 @@ const BF_METHODS = [
   { key: "tape",    label: "Body fat % · tape",     color: "var(--blue)" },
 ];
 const BF_METHOD_NAME = { scale: "your scale", caliper: "your calipers", tape: "your tape measurements" };
+const BF_METHOD_SHORT = { scale: "Scale", caliper: "Calipers", tape: "Tape" };
 
-function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, onEditWeighIn }) {
+function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, bfAvailable, onSetBfSource, onEditWeighIn }) {
   const [range, setRange] = useState("all");
   const [edit, setEdit] = useState(null); // { date, t, value } when editing a weigh-in
   const wAll = [...(weighIns || [])].filter((w) => w && w.t).sort((a, b) => a.t - b.t);
@@ -14018,6 +14019,24 @@ function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, onEdit
         <MetricLineChart key={c.id || c.key} points={seriesOf(c)} label={c.label} unit={c.unit} color={c.color}
           onEditPoint={c.editable && onEditWeighIn ? (p) => setEdit({ date: p.date, t: p.t, value: String(p.v) }) : undefined} />
       ))}
+      {/* Which method drives fat & lean mass is the person's choice (S183s,
+          Kevin) — a scale is easiest, calipers take more effort and are
+          generally more accurate. Only methods with readings are offered, and
+          the row is hidden entirely when there's only one (nothing to choose). */}
+      {onSetBfSource && (bfAvailable || []).length > 1 && (
+        <div className="rounded-lg bg-surface2 p-3 flex flex-wrap items-center gap-2">
+          <span className="text-[.7rem] font-bold uppercase tracking-wide text-muted">Fat &amp; lean mass from</span>
+          {(bfAvailable || []).map((k) => (
+            <button key={k} onClick={() => onSetBfSource(k)}
+              title={`Use ${BF_METHOD_NAME[k]} for fat & lean mass`}
+              className={`rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer ${
+                primaryBfSource === k ? "bg-primaryfill text-primaryfg border-0"
+                                      : "bg-transparent text-fg border border-border"}`}>
+              {BF_METHOD_SHORT[k]}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="text-[10px] text-muted italic">
         Muscle mass is a Lee-2000 estimate (±~6 lb). Fat &amp; lean mass use{" "}
         {primaryBfSource ? <>the readings from <b>{BF_METHOD_NAME[primaryBfSource]}</b> only</> : <>your body-fat readings</>}
@@ -14033,7 +14052,7 @@ function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, onEdit
 // height, trend any metric, delete mistakes, and (when weight + a goal body-fat
 // % exist) get the lean-mass-derived goal weight. docs/METRICS-PLAN.md is the
 // formula reference. Shared by ClientHome and Results (like WeightChartModal).
-function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBodyFat, onLogWeight, onEditWeighIn, onClose }) {
+function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBodyFat, onSetBfSource, onLogWeight, onEditWeighIn, onClose }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);
   const d = data || {};
@@ -14135,10 +14154,15 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
     }
     for (const k of Object.keys(bfBySource)) bfBySource[k].sort((a, b) => a.t - b.t);
     // Fat & lean mass need ONE method, held constant across the whole history —
-    // that is exactly what was corrupting them. Pick the most direct method the
-    // person actually uses and read only its readings; never fall back per-entry.
-    const primaryBfSource = bfBySource.scale.length ? "scale"
-      : bfBySource.caliper.length ? "caliper" : bfBySource.tape.length ? "tape" : null;
+    // that is exactly what was corrupting them. WHICH one is the person's call
+    // (S183s, Kevin): a scale is easiest, calipers take more effort and are
+    // generally more accurate, so the app shouldn't decide for them. The stored
+    // choice only counts if that method actually has readings, so deleting the
+    // last caliper entry can't strand fat/lean mass with nothing to read.
+    // Unset falls back to most-direct-available, i.e. exactly the old behaviour.
+    const bfAvailable = ["scale", "caliper", "tape"].filter((k) => bfBySource[k].length);
+    const bfPref = d.bfPrimarySource;
+    const primaryBfSource = (bfPref && bfAvailable.includes(bfPref)) ? bfPref : (bfAvailable[0] || null);
     const bfReads = primaryBfSource ? bfBySource[primaryBfSource] : [];
     const carryBf = (t) => { let v = null; for (const x of bfReads) { if (x.t <= t) v = x.bf; else break; } return v; };
     const wRows = weighIns.map((wi) => {
@@ -14150,7 +14174,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         lean: bf != null ? Math.round(wi.weight * (1 - bf / 100)) : null,
       };
     });
-    return { weighIns: wRows, bfReads, bfBySource, primaryBfSource };
+    return { weighIns: wRows, bfReads, bfBySource, primaryBfSource, bfAvailable };
   })();
 
   // Which tape fields this person's body-fat formulas need (docs/METRICS-PLAN.md).
@@ -14458,6 +14482,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
             </div>
             <BodyCompCharts weighIns={bodyCompData.weighIns} bfReads={bodyCompData.bfReads}
               bfBySource={bodyCompData.bfBySource} primaryBfSource={bodyCompData.primaryBfSource}
+              bfAvailable={bodyCompData.bfAvailable} onSetBfSource={onSetBfSource}
               onEditWeighIn={onEditWeighIn} />
             {/* Tape / caliper single-metric trend (inches + skinfold sites) */}
             {chartable.length > 0 && (
@@ -20534,6 +20559,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
     await appendHistory(`set goal weight to ${lbs} lbs (from lean mass)`);
   };
   const toggleBodyFat = (show) => savePlanDataMutation((d) => { d.hideBodyFat = !show; });
+  const setBfSource = (src) => savePlanDataMutation((d) => { d.bfPrimarySource = src; });
   const calSaveCheckIn = (checkin) => savePlanDataMutation((d) => {
     const others = (d.checkIns || []).filter((c) => c.date !== checkin.date);
     d.checkIns = [...others, checkin];
@@ -21139,7 +21165,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       {showMeasure && (
         <MeasurementsModal data={planData || {}} onSave={saveMeasurements}
           onDelete={deleteMeasurement} onSetGoalWeight={setGoalFromLeanMass}
-          onToggleBodyFat={toggleBodyFat} onLogWeight={(v,dk)=>logWeight(v,dk)}
+          onToggleBodyFat={toggleBodyFat} onSetBfSource={setBfSource} onLogWeight={(v,dk)=>logWeight(v,dk)}
           onEditWeighIn={editWeighIn}
           onClose={() => setShowMeasure(false)} />
       )}
@@ -27198,6 +27224,7 @@ export default function App() {
               onSaveMeasurementsFor={(dateKey, vals)=>setDataAndSave(p=>{ const next={...p}; mergeMeasurements(next, vals, dateKey, activeRemoteUid ? "trainer" : "client"); return next; })}
               onDeleteMeasurement={(ts)=>setDataAndSave(p=>({...p, measurements:(p.measurements||[]).filter(e=>e && e.timestamp!==ts)}))}
               onToggleBodyFat={(show)=>setDataAndSave(p=>({...p, hideBodyFat: !show}))}
+              onSetBfSource={(src)=>setDataAndSave(p=>({...p, bfPrimarySource: src}))}
               onSetGoalWeight={(lbs)=>setDataAndSave(p=>({...p, goalWeight: lbs}))}
               onTrackerSync={isOwnerUid ? syncTrackerNow : null}
               onSetWeeklyRate={(r)=>setDataAndSave(p=>({...p, weeklyRate: r}))}
@@ -27278,6 +27305,7 @@ export default function App() {
               measurements: (p.measurements||[]).filter(e => e && e.timestamp !== ts)}))}
             onSetGoalWeight={(lbs)=>setDataAndSave(p=>({...p, goalWeight: lbs}))}
             onToggleBodyFat={(show)=>setDataAndSave(p=>({...p, hideBodyFat: !show}))}
+            onSetBfSource={(src)=>setDataAndSave(p=>({...p, bfPrimarySource: src}))}
             onUpdateCardio={(day,idx,field,val)=>setDataAndSave(p=>{
               if (field==="_replace") return {...p, cardio:{...p.cardio,[day]:val}};
               const sessions = Array.isArray(p.cardio[day]) ? [...p.cardio[day]] : [];

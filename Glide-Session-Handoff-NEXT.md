@@ -17,10 +17,20 @@ BF drop *raises* lean. That is exactly the reported pattern.
 
 **Fix:** `bfBySource` keeps `{scale, caliper, tape}` separate; each method with
 2+ readings gets its OWN chart (one method → just "Body fat %"). Fat/lean mass
-read ONE method for the whole history (`primaryBfSource`, most-direct first) and
-never fall back per entry. ⚠️ **Never reintroduce a blended body-fat series** —
-methods disagree by several percent on the same body and are only comparable to
-themselves.
+read ONE method for the whole history and never fall back per entry.
+⚠️ **Never reintroduce a blended body-fat series** — methods disagree by several
+percent on the same body and are only comparable to themselves.
+
+**Which method drives fat/lean mass is the user's choice** (S183s, Kevin: a
+scale is easiest, calipers take more effort and are more accurate — so the app
+shouldn't decide). Stored per PLAN as `data.bfPrimarySource`, so the client or
+their trainer can set it and it rides the normal plan save. A "Fat & lean mass
+from" chip row appears under the charts, offering only methods that HAVE
+readings and hiding itself entirely when there's only one. Two safeguards worth
+keeping: an unset preference resolves to most-direct-available (byte-identical
+to the old behaviour), and a stored preference whose method has no readings is
+ignored rather than stranding fat/lean mass — verified by deleting the caliper
+data while the preference still said "caliper".
 
 **Colour no longer judges.** Green-for-down / orange-for-up decided losing was
 good and gaining bad — wrong for lean mass and muscle, and wrong for anyone
