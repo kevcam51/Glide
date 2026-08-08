@@ -1,6 +1,52 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ⭐⭐⭐⭐ S183 (Aug 7, 2026) — READ THIS FIRST
+## ⭐⭐⭐⭐⭐ S183p (Aug 8, 2026) — READ THIS FIRST
+**Both S183o reports are BUILT, deployed and verified.** Everything below is older.
+
+**1. AI-logged meals now carry their serving.** Root cause was exactly as
+diagnosed: `log_meal` wrote no `grams`/`unit`, so `deriveBasisFromMeal` fell back
+to a meaningless "1 serving" with nothing to rescale from. A shared
+`SERVING_SCHEMA` + `sanitizeServing` (top of `functions/aitools.js`) is now on
+**`propose_meal`, `log_meal` and `log_meals`**, persisted on the meal object and
+echoed through the proposal so the Accept card writes it too. Units mirror
+`FOOD_UNITS` in src/App.jsx plus `serving`; an unknown unit degrades to grams.
+The system prompt requires the serving in the same breath as the micros rule.
+Frontend: `acceptMeal` forwards the fields and the card shows the portion
+(`420 cal · 180 g`) so you see what the numbers are for before tapping.
+- **The MCP connector inherits this for free** — it builds its schemas from
+  `buildTools()` via `toZod`, so parity held with no separate change. Keep that
+  in mind before hand-editing anything connector-side.
+- **A meal with NO serving still behaves exactly as before** (per-serving basis,
+  qty 1). That fallback is what keeps every pre-S183p meal working — don't
+  remove it.
+- Verified in prod after deploy: the model picks the unit per food — "6 oz
+  chicken breast" → `6 oz`, "three scrambled eggs" → `3 serving`. A logged 180 g
+  meal opens the real serving control and rescales exactly (297 → 594 cal at
+  360 g). The manual tracker's own "AI estimate" button already stored the
+  serving correctly, which is why that path worked and this one didn't.
+
+**2. Daily Check-In notes (Results → Pro Tracking), all three parts.**
+- **Stale notes: it was the date, not the save.** `checkDate` was captured ONCE
+  at mount, so a screen left open overnight kept yesterday selected — yesterday's
+  notes in the box and a save writing to yesterday. It now follows
+  `useTodayKey()`, advancing only when you were parked on the OLD today; a date
+  you deliberately picked stays put. Same class of bug as the S45/S85 date fixes.
+- ⚠️ **Hazard, cost me a debugging cycle:** the first version read the "previous
+  today" ref *inside* the `setCheckDate` updater. React runs that updater lazily
+  at the next render, by which point the ref is already the NEW day, so the
+  comparison never matched. Capture the previous value in a local const first.
+  It looked like it worked because the notes cleared for an unrelated reason —
+  only probing the real component state showed `checkDate` hadn't moved.
+- **Textarea** grows downward as you type (capped at half the viewport) instead
+  of `rows={9}` + `resize:vertical`, which could be dragged past the modal frame.
+- **Once filled the row collapses to a green ✓ "Completed · Review"**, reopens
+  with the text intact, and is empty again the next day.
+
+Deployed: the 18-function `aitools.js` set (`npm run deploy-set` — never recall
+it from memory; it drags in the three live Stripe functions unchanged). Frontend
+pushed.
+
+## ⭐⭐⭐⭐ S183 (Aug 7, 2026)
 Queue item 1 is DONE and deployed. Everything below is older.
 
 **Referral vest notification.** A referral vests on a clock, so the only way to
@@ -104,28 +150,15 @@ a carer, not a household. If revived: client role + a `family` tier, never a
 trainer role (every business gate tests role, so staying `client` enforces the
 guardrail for free).
 
-### ⏭ NEXT UP — two Kevin reports, diagnosed but NOT built (S183o)
-
-**1. Daily Check-In notes (Results → Pro Tracking).** Three parts:
-- Notes from an earlier day persist when they should clear. The prefill effect
-  (`DailyCheckIn`, ~13193) DOES `setNotes("")` when a date has no check-in, so
-  the stale text is most likely state not resetting after a SAVE, not prefill —
-  check `handleSave`.
-- The expanded editor's textarea is `rows={9}` with `resize:"vertical"` inside a
-  `maxHeight:85vh` modal, so it can be dragged past the frame. Kevin wants it to
-  GROW DOWNWARD inside its card as you type, pushing content down.
-- The real ask: once filled, collapse to **"Completed"**, re-openable to review,
-  and reopening fresh the next day.
-
-**2. AI-logged meals have no serving unit — ROOT CAUSE CONFIRMED.** `log_meal`
-in aitools.js writes `{id, name, type, calories, protein, carbs, fat, time,
-micros}` — **no `grams`, no `unit`**. Yet `search_food_db` returns
-`serving`/`unit` (~aitools 2659) and `estimateFood` returns `grams`/`unit`: the
-data exists upstream and is dropped on write. That is exactly why a past
-AI-logged meal shows a serving you cannot change (nothing to rescale from),
-while the food-log path stores the unit and works. **Fix: persist `grams` +
-`unit` in `log_meal` and the propose/Accept path; the existing serving control
-should then work on AI meals too.**
+### S183o — two Kevin reports, diagnosed here, BUILT in S183p
+Both shipped — see the S183p block at the top of this file for what was done and
+the hazards found on the way. Kept for the diagnosis trail:
+1. Daily Check-In notes: stale text, a textarea draggable past the modal frame,
+   and the ask to collapse to "Completed". (The stale-text guess recorded here —
+   "state not resetting after a SAVE, check `handleSave`" — was **wrong**; the
+   cause was `checkDate` never rolling over at midnight.)
+2. AI-logged meals had no serving unit: `log_meal` wrote no `grams`/`unit` even
+   though `search_food_db` and `estimateFood` return them upstream.
 
 ### S183k — ONE burn formula, per-person (SHIPPED) ⚠️ moves real numbers
 Kevin: the MET formula must cover ALL exercises, pre-made included, driven by
