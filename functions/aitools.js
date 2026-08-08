@@ -1498,31 +1498,6 @@ function buildTools(role, opts = {}) {
       },
     });
   }
-  // Chart images (S183) — CONNECTOR ONLY, via opts.charts. Deliberately hidden
-  // from the in-app assistant: its tool results are fed straight back into the
-  // model as text, so a base64 PNG would burn a user's whole daily token
-  // budget in one call. Over the connector the image is a separate content
-  // block that Claude/ChatGPT renders directly, and the app already has real
-  // charts on screen.
-  if (opts.charts) {
-    tools.push({
-      name: "get_progress_chart",
-      description:
-        "Draw a chart image of progress over time and show it to the user. Use this whenever they ask how something is GOING or TRENDING "
-        + "(weight, calories) rather than asking for specific numbers — a picture answers a trend question far better than a list. "
-        + "metric 'weight' plots weigh-ins with the goal and goal range; metric 'calories' plots each day against the calorie target. "
-        + (isTrainer ? TRAINER_NOTE : CLIENT_NOTE),
-      input_schema: {
-        type: "object",
-        properties: {
-          metric: { type: "string", enum: ["weight", "calories"], description: "What to plot." },
-          days: { type: "number", description: "How far back to look, in days. Default 90 for weight, 30 for calories. Max 365." },
-          ...clientIdProp, ...localPlanProp,
-        },
-        required: ["metric"],
-      },
-    });
-  }
   // search_food RETIRED (S92) — measured no accuracy gain over the AI's own
   // estimate at 2–2.5× the tokens (docs/AI-ACCURACY.md). Never exposed now; the
   // tool def + runTool case are kept dead so re-enabling is a one-line change.
@@ -3023,90 +2998,6 @@ async function runTool(name, input, ctx) {
         [ev, ...(Array.isArray(hist) ? hist : [])].slice(0, 250));
     } catch (e) { /* best-effort */ }
     return { ok: true, sentTo: clientId, message: msg, type };
-  }
-
-  if (name === "get_progress_chart") {
-    // Renders a PNG and hands it back as base64. mcp.js turns `chartPng` into
-    // an image content block; the summary text rides alongside so the
-    // assistant can talk about the picture rather than just post it.
-    const { weightChart, caloriesChart } = require("./chart");
-    const metric = String(input.metric || "weight");
-    const days = Math.max(7, Math.min(365, Number(input.days) || (metric === "calories" ? 30 : 90)));
-    const { id, data } = await activePlanData(db, uid, planOverride);
-    const since = Date.now() - days * 86400000;
-    const who = input.clientId || input.localPlanId ? "" : "YOUR ";
-
-    if (metric === "weight") {
-      const pts = (Array.isArray(data.checkIns) ? data.checkIns : [])
-        .filter((c) => c && c.date && Number(c.weight) > 0)
-        .filter((c) => Date.parse(c.date + "T12:00:00Z") >= since)
-        .sort((a, b) => String(a.date).localeCompare(String(b.date)))
-        .map((c) => ({ date: c.date, weight: Number(c.weight) }));
-      if (pts.length < 2) {
-        return { error: `Not enough weigh-ins in the last ${days} days to draw a trend — there ${pts.length === 1 ? "is 1" : "are none"}. Ask for a longer range, or log a weigh-in.` };
-      }
-      // Rounded before it reaches the sentence: subtracting logged weights
-      // produces things like "186.70000000000002 lbs", which reads as a bug
-      // even though the chart above it is correct.
-      const r1 = (n) => Math.round(n * 10) / 10;
-      const first = r1(pts[0].weight), last = r1(pts[pts.length - 1].weight);
-      const png = weightChart(pts, {
-        goal: Number(data.goalWeight) || 0,
-        rangeLow: Number(data.goalRangeLow) || 0,
-        rangeHigh: Number(data.goalRangeHigh) || 0,
-        title: "WEIGHT",
-        subtitle: `LAST ${days} DAYS — ${pts.length} WEIGH-INS`,
-      });
-      return {
-        chartPng: png.toString("base64"), mimeType: "image/png",
-        summary: `${who}weight over the last ${days} days: ${pts.length} weigh-ins, `
-          + `${first} to ${last} lbs (${last > first ? "+" : ""}${r1(last - first)} lbs)`
-          + (Number(data.goalWeight) > 0 ? `, goal ${data.goalWeight} lbs.` : "."),
-      };
-    }
-
-    // calories: one range query over the daily logs, same shape as
-    // get_nutrition_log. Unlogged days stay in the list so the chart can show
-    // them as gaps rather than pretending they were zero-calorie days.
-    const end = new Date().toISOString().slice(0, 10);
-    // Both endpoints are inclusive, so the window starts days-1 back — off by
-    // one and "the last 30 days" reports "12 of 31 days logged".
-    const start = new Date(Date.now() - (days - 1) * 86400000).toISOString().slice(0, 10);
-    const prefix = `caliq-log-${id}-`;
-    const byDate = {};
-    try {
-      const snap = await db.collection(`users/${uid}/kv`)
-        .where("k", ">=", prefix + start)
-        .where("k", "<=", prefix + end + "").get();
-      snap.forEach((d) => {
-        let log = {};
-        try { log = JSON.parse(d.data().value || "{}") || {}; } catch (e) { log = {}; }
-        byDate[(d.data().k || "").slice(-10)] = Number(log.calories) || 0;
-      });
-    } catch (e) {
-      return { error: "Couldn't read the nutrition logs just now." };
-    }
-    const list = [];
-    for (let t = Date.parse(start + "T12:00:00Z"); t <= Date.parse(end + "T12:00:00Z"); t += 86400000) {
-      const k = new Date(t).toISOString().slice(0, 10);
-      list.push({ date: k, calories: byDate[k] || 0 });
-    }
-    const loggedDays = list.filter((d) => d.calories > 0);
-    if (!loggedDays.length) {
-      return { error: `Nothing logged in the last ${days} days, so there's no calorie chart to draw yet.` };
-    }
-    const targets = nutritionTargets(data);
-    const target = (targets && Number(targets.calorieTarget)) || 0;
-    const avg = Math.round(loggedDays.reduce((s, d) => s + d.calories, 0) / loggedDays.length);
-    const png = caloriesChart(list, {
-      target, title: "CALORIES",
-      subtitle: `LAST ${days} DAYS${target ? " VS TARGET" : ""}`,
-    });
-    return {
-      chartPng: png.toString("base64"), mimeType: "image/png",
-      summary: `${who}calories over the last ${days} days: ${loggedDays.length} of ${list.length} days logged, `
-        + `averaging ${avg} cal/day` + (target ? ` against a ${target} target.` : "."),
-    };
   }
 
   if (name === "get_nutrition_log") {

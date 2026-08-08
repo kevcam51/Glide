@@ -104,7 +104,26 @@ a carer, not a household. If revived: client role + a `family` tier, never a
 trainer role (every business gate tests role, so staying `client` enforces the
 guardrail for free).
 
-### S183d — connector chart images (SHIPPED)
+### S183e — connector charts SCRAPPED (Kevin, deliberate)
+Built in S183d, removed in full one turn later. **Kevin's call and the reason
+to keep:** if someone wants the juicy detail, they should be **in the app**.
+A chart rendered into somebody else's Claude hands over the most persuasive
+part of the product for free, and the connector's job is to be a useful
+sidekick — not a replacement for opening Glidna. Don't rebuild this without
+Kevin explicitly reversing that.
+
+`functions/chart.js` (the hand-rolled PNG renderer), the `get_progress_chart`
+tool, its `runTool` branch, the `opts.charts` gate and the mcp.js image
+content-block path are all gone — `aitools.js` and `mcp.js` are byte-identical
+to their pre-chart state. Recoverable from commit `ab8d486` if ever wanted.
+
+⚠️ **DEPLOY PENDING.** The Firebase CLI token expired before the removal could
+ship, so **production still advertises `get_progress_chart` on the connector**
+until this is run:
+`firebase login --reauth --no-localhost`, then the 16-function `npm run
+deploy-set aitools.js mcp.js` set.
+
+### S183d — connector chart images (REMOVED — see S183e above)
 `get_progress_chart` (metric `weight` | `calories`) returns a PNG as a real MCP
 **image content block** plus a text summary. Ask your own Claude "how's my
 weight going?" and it draws it.

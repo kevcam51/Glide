@@ -92,10 +92,6 @@ const READ_TOOLS = new Set([
   // connector dead-ends all month (the review catch that added this line). It
   // spends a slot from the caller's own allowance but touches no user data.
   "confirm_ai_client",
-  // Chart images (S183) — read-only, and connector-only: buildTools only emits
-  // it when we ask for charts, because a base64 PNG in an in-app tool result
-  // would eat a whole daily token budget.
-  "get_progress_chart",
 ]);
 
 // ── Phase 3 (S115): WRITE tools, each behind an OAuth scope ────────────────
@@ -433,7 +429,7 @@ function buildServer(ctx, profile, db, scopes) {
   const granted = new Set(Array.isArray(scopes) ? scopes : String(scopes || "read").split(/\s+/));
   // Two gates, in order: (1) buildTools role-filters, so a client never sees a
   // trainer tool; (2) the token's scopes decide which writes are exposed.
-  const defs = buildTools(ctx.role, { charts: true }).filter((t) => {
+  const defs = buildTools(ctx.role).filter((t) => {
     if (READ_TOOLS.has(t.name)) return granted.has("read");
     const need = SCOPE_FOR_TOOL[t.name];
     return need ? granted.has(need) : false; // unlisted tools are never exposed
@@ -505,19 +501,6 @@ function buildServer(ctx, profile, db, scopes) {
           return { isError: true, content: [{ type: "text", text }] };
         }
         const result = await runTool(def.name, args || {}, ctx);
-        // A chart comes back as base64 PNG. It must leave as an IMAGE content
-        // block — serialised into the JSON text below it would be an unreadable
-        // wall of base64 that also blows the size ceiling. The summary rides
-        // alongside as text so the assistant can discuss what it is showing.
-        if (result && result.chartPng) {
-          const { chartPng, mimeType, ...rest } = result;
-          return {
-            content: [
-              { type: "image", data: chartPng, mimeType: mimeType || "image/png" },
-              { type: "text", text: JSON.stringify(rest) },
-            ],
-          };
-        }
         // Keep well under Claude's ~150,000-char tool-result ceiling.
         let text = JSON.stringify(result);
         if (text.length > 120000) {
