@@ -959,6 +959,37 @@ less; card-upfront reverse trial (S92) already bounds abuse. Add the
 GUARDRAIL: must exclude business features (scaled invites, sessions, teams) or
 it becomes a $9.99 Coach Connect. Naming/pricing when it's built.
 
+**S183 — scoped, then PARKED by Kevin. Read this before picking it up again.**
+Three findings came out of scoping it, and the first two are why it stalled.
+
+1. **$9.99 + in-app AI undercuts PREMIUM, which is the bigger leak** — bigger
+   than the Coach Connect one the guardrail was written for. Family at $9.99
+   with plan files and the same AI is strictly better than Premium at $14.99,
+   so every Premium subscriber should rationally downgrade. Margin at the
+   ceiling: Premium nets $14.26 against ~$7.13 of AI; Family at $9.99 nets
+   ~$9.40 against the same $7.13 — ~$2.27 kept, and five people share one 45k
+   daily budget so they burn it far faster than one person. Any revival has to
+   price ABOVE Premium (~$19.99 for 5 ≈ $4/person, ~$12 kept worst case) or
+   drop AI on family plans.
+2. **AI cost is NOT the problem** — Kevin assumed it would need a big price
+   rise. It doesn't: the daily token budget is per ACCOUNT, so the AI touching
+   five plan files costs no more than one. Same reason no trainer roster size
+   can lose money. The price question is cannibalisation, not cost.
+3. **Anyone who wants the app themselves can already get a FREE account**, with
+   most of the product. So Family never sold "access for five people" — it sold
+   ONE person the ability to manage four others. That's a carer (a parent
+   tracking kids, someone managing a partner who won't use an app), not a
+   household. Narrower than it looked, which is what made parking it right.
+
+Build shape if revived: **client role + a `family` tier that unlocks the
+plan-files surface** — do NOT make them a trainer. Every business feature gates
+on `role === head_trainer|sub_trainer`, so keeping role `client` enforces the
+guardrail for free; a capped trainer role means re-gating each one by tier by
+hand and getting all of them right. ⚠️ Connected accounts are the expensive
+fork: `joinTrainerByCode` refuses any target that isn't a trainer, so
+connections require a trainer-shaped role, which puts them in the trainer
+directory and opens invites/messaging/requests.
+
 ### Referral program, banked — the "recommend it like a supplement" model
 Trainer's code → client gets a real discount, trainer gets a monthly cut.
 Invite Hub referral tracking (S83) is the foundation; build = Stripe coupon +

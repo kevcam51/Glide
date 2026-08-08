@@ -18063,6 +18063,15 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
   }, [open]);
   const [canBoost, setCanBoost] = useState(false);
   const [boost, setBoost] = useState(null); // null | "offer" | "sending" | "granted" | "already"
+  // S183: set ONLY when this user actually hit their daily cap — never a
+  // general upsell (Kevin, S178c). The cap is our most expensive moment and
+  // their most frustrating one; their own Claude/ChatGPT costs us a rounding
+  // error and costs them nothing extra, because every plan that can REACH the
+  // cap already includes connector calls (free is 0, but a free account is
+  // stopped at trial-expired long before the cap). So the offer is always true
+  // for whoever can see it.
+  const [capHit, setCapHit] = useState(false);
+  const [showConnect, setShowConnect] = useState(false);
   const [ultraOffer, setUltraOffer] = useState(false); // Max user who keeps boosting → suggest Ultra
   const [ultraBusy, setUltraBusy] = useState(false);
   const requestBoost = async () => {
@@ -18217,7 +18226,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
       });
     } catch { /* best-effort */ }
   }, [busy, messages, activeChatId]);
-  const resetThreadUi = () => { setProposal(null); setWorkout(null); setEditDraft(null); setError(""); setBoost(null); activeTargetRef.current = null; };
+  const resetThreadUi = () => { setProposal(null); setWorkout(null); setEditDraft(null); setError(""); setBoost(null); setCapHit(false); activeTargetRef.current = null; };
   // Returns the new chat's id — a caller that sends into it right away can't read
   // it back from state in the same tick.
   const newChat = (pin) => {
@@ -18645,6 +18654,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
     setError("");
     setBoost((b) => (b === "granted" || b === "already" ? null : b)); // clear settled boost cards on the next send
     setUltraOffer(false); // clear any Ultra upsell on the next send
+    setCapHit(false);     // re-set below only if this send hits the cap too
     const next = [...base, { role: "user", content: text, images: imgs.length ? imgs : undefined }];
     setMessages(next);
     if (!isOverride) setDraft("");
@@ -18705,6 +18715,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
         setError("Your free trial has ended — upgrade to keep using Glidna AI.");
       } else if (sc.includes("resource-exhausted")) {
         setError("You've reached today's AI usage limit. It resets tomorrow.");
+        setCapHit(true);
         if (canBoost) setBoost("offer");
       } else if (streamed || gotEvent || (streamErr && streamErr.wrote)) {
         // streamErr.wrote: a pure LOGGING turn emits no text at all (the prompt
@@ -18734,7 +18745,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
         } catch (e) {
           const code = (e && e.code) || "";
           if (code.includes("permission-denied") && ((e.details && e.details.reason === "trial-expired") || /trial/i.test(e.message || ""))) setError("Your free trial has ended — upgrade to keep using Glidna AI.");
-          else if (code.includes("resource-exhausted")) { setError("You've reached today's AI usage limit. It resets tomorrow."); if (canBoost) setBoost("offer"); }
+          else if (code.includes("resource-exhausted")) { setError("You've reached today's AI usage limit. It resets tomorrow."); setCapHit(true); if (canBoost) setBoost("offer"); }
           else if (code.includes("unauthenticated")) setError("Please sign in again to use the assistant.");
           else setError("The assistant is temporarily unavailable. Please try again.");
         }
@@ -19234,6 +19245,39 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                 </button>
               </div>
             )}
+            {/* "Use your own AI" (S183, Kevin S176/S178c) — shown ONLY to
+                someone who just hit their cap, never as general messaging.
+                Sits BELOW the boost path on purpose: if more Glidna usage can
+                be granted, that is the better answer and this is the fallback
+                for when it can't (no boost on this tier, or already used
+                today). Everything it claims is true for anyone who can see it:
+                the connector is included from Premium up, and it runs on their
+                own Claude/ChatGPT subscription, so it genuinely doesn't touch
+                the Glidna allowance that just ran out. */}
+            {capHit && boost !== "offer" && boost !== "sending" && boost !== "granted" && (
+              <div className="self-stretch rounded-xl border border-primary/50 bg-[rgba(8,220,224,.07)] px-3 py-3">
+                <div className="flex items-center gap-2">
+                  <Icon name="sparkle" size={16} color="var(--accent)" />
+                  <div className="text-[.84rem] font-extrabold text-fg">Keep going with your own AI</div>
+                </div>
+                <div className="mt-1 text-[.78rem] leading-relaxed text-muted">
+                  Your Glidna allowance is back tomorrow. Until then you can connect Claude or ChatGPT
+                  to Glidna — it's already included in your plan, it reads and updates the same data,
+                  and it doesn't use your Glidna allowance at all.
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <button onClick={() => setShowConnect(true)}
+                    className="flex-1 rounded-lg border-none bg-primaryfill px-3 py-2 text-[.8rem] font-bold text-primaryfg cursor-pointer">
+                    Show me how
+                  </button>
+                  <button onClick={() => setCapHit(false)}
+                    className="rounded-lg border border-border bg-transparent px-3 py-2 text-[.8rem] font-semibold text-muted cursor-pointer">
+                    Not now
+                  </button>
+                </div>
+              </div>
+            )}
+            {showConnect && <ConnectAIPanel onClose={() => setShowConnect(false)} />}
             {warn && !error && (
               <div className="self-stretch rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[.78rem] text-warn">
                 You're nearing today's AI usage limit.
