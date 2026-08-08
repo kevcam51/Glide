@@ -104,6 +104,38 @@ a carer, not a household. If revived: client role + a `family` tier, never a
 trainer role (every business gate tests role, so staying `client` enforces the
 guardrail for free).
 
+### S183f — meal review: client tags, trainer confirms (ENGINE SHIPPED, UI NEXT)
+Client tags a meal and sends it to their trainer; the trainer confirms, adjusts
+or rejects. **Deployed and live-verified in prod.**
+
+**The one departure from Kevin's original ask, which he approved:** the meal
+logs IMMEDIATELY and is flagged for review rather than waiting. Holding it
+would leave a client who tags breakfast at 7am with an empty dashboard, broken
+streak and wrong macro bars until their trainer looks. The trainer is a
+correction pass, not a gate. Don't "fix" this back.
+
+- Review rows live in the CLIENT's kv (`caliq-meal-reviews`) — existing
+  trainer↔client access, **no rules change**. Points at the meal by id rather
+  than copying it (the S124 to-do lesson: one source of truth).
+- `log_meal` + `forTrainerReview`/`reviewNote` (clients only). Trainer tools
+  `list_meal_reviews` / `review_meal` (confirm | adjust | reject). Adjust moves
+  day totals BY DELTA inside the existing txn, so concurrent writes are safe.
+- On both surfaces per the S111 parity rule. `review_meal` is flagged
+  DESTRUCTIVE — it can overwrite or delete a logged meal.
+- Notifications use `appendFeed` (bell), NOT push: real push needs the VAPID
+  secret bound to every function that can reach the line (aiChat, aiChatStream,
+  logMeal, mcp). **No pref toggle added on purpose** — a toggle gating nothing
+  would be the same silent no-op fixed in S183b. Add the toggle WITH push.
+
+**⏭ STILL TO BUILD — the UI. The engine is only reachable by AI today:**
+1. **Client:** a "send to my trainer" control + meal-type tag in the meal-log
+   add form, and photo capture that writes `thumb` (a downscaled data URL —
+   reuse `downscaleImage` from AIChatPanel). The tool path deliberately can't
+   carry photos; base64 in a tool call would burn the token budget.
+2. **Trainer:** a review queue card (pending count, the photo, confirm/adjust/
+   reject) — the AI can already do all of it, this is the tap-to-do version.
+3. Then: real push + the matching Notification Center toggle.
+
 ### S183e — connector charts SCRAPPED (Kevin, deliberate)
 Built in S183d, removed in full one turn later. **Kevin's call and the reason
 to keep:** if someone wants the juicy detail, they should be **in the app**.
