@@ -1,5 +1,40 @@
 # Glidna — Next-Session Handoff (start here)
 
+## ⏭⏭⏭ NEXT SESSION — TWO THINGS, IN THIS ORDER
+
+**1. DEPLOY. Prod is running the pre-fix build.** The CLI token expired mid-S184b,
+so everything after the first deploy is committed and pushed but NOT live. Run
+`firebase login --reauth --no-localhost`, then `npm run deploy-set aichat.js
+aiusage.js` and deploy exactly what it prints. What prod is missing right now:
+the ask-before-search gate, the dropped-stream disclosure, the paused-answer fix,
+the re-spend guard — and prod still HAS the per-message search cap that was
+reverted for charging the user ~44% of a Premium day in busted prompt cache.
+
+Then smoke-test the ask gate, which has NEVER been run against the live model
+(it is a prompt rule; it cannot be tested without deploying):
+- "what does the current research say about creatine timing?" → expect it to ASK
+  first and NOT search. Confirm `aiUsage/{today}.searches` did not move.
+- "yes" → expect the search, the footer, and cited sources.
+- "look up beta-alanine for endurance" → expect it to search IMMEDIATELY with no
+  second confirmation (asking IS consent; re-asking would breach S102e).
+- A follow-up on the same topic → expect no re-ask.
+- "how many calories in two eggs?" → expect no search and no offer.
+
+**2. KEVIN'S DECISION — Premium is refused a boost the app advertises.**
+Confirmed by two independent review lenses. `requestBudgetBoost`'s `isBoostable`
+allows only clientMax/trainerMax/clientUltra/trainerUltra, and the frontend
+`canBoost` (App.jsx ~18450) independently requires `/max/` — so a base Premium or
+$49 Coach user who hits their cap never even sees the offer. But FOUR other
+places say base tiers get boosts: `BOOSTS_PER_DAY` (`client: 2, assisted: 2,
+trial: 2, trainer: 2`), the `BOOST_STEP_BASE` ladder comment (45k→60k→75k), the
+S179i comment ("the base tiers get boosts too"), and the pricing grid, which
+sells Premium as **"~30 (more on request)"**.
+
+Either the gate is wrong or the copy is. NOT fixed here — it moves real spend, so
+it is Kevin's call. If the answer is "the copy is right", the fix is
+`const isBoostable = !!BOOSTS_PER_DAY[tier];` plus widening `canBoost`; both
+gates must change or the button still never appears.
+
 ## ⭐⭐⭐⭐ S184 (Aug 8, 2026) — WEB SEARCH IS LIVE AND VERIFIED IN PROD
 
 Deployed and smoke-tested end to end against the real Anthropic API. Verified in
