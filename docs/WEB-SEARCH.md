@@ -170,8 +170,20 @@ the estimates above, **this section is the one to trust.**
 Examine, JISSN, ASN, BJSM; NIH/ODS, CDC, FDA, USDA/FoodData, WHO, NHS, NICE,
 EFSA; Mayo Clinic, Harvard Health + Nutrition Source, AHA, ADA, the Academy of
 Nutrition and Dietetics, ACSM, NSCA; Stronger By Science), `user_location`
-US/Eastern, `response_inclusion: "excluded"`. Dynamic filtering is on by default
-at this version, so we do **not** declare `code_execution` ourselves.
+US/Eastern. Dynamic filtering is on by default at this version, so we do **not**
+declare `code_execution` ourselves.
+
+⚠️ **`response_inclusion: "excluded"` was tried and REMOVED — don't put it back
+without re-checking citations.** It reads like free money (we never echo raw
+search content, so why pay output tokens for the blocks?), but dropping the
+result blocks leaves nothing to cite *from*. Two live searches came back with
+good, current answers and an **empty source list both times**: citations
+reference result blocks that no longer existed, and dynamic filtering consumes
+results inside code execution without reliably attaching citation blocks either.
+Prose attribution ("a 2024 review says…") is not a source a reader can check,
+and citation was a headline requirement. `collectSources()` now reads citation
+blocks when present and falls back to the `web_search_result` entries
+themselves.
 
 The prompt block sits with the other action rules and carries all three safety
 requirements: search only when the answer genuinely depends on something current

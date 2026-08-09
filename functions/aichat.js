@@ -125,12 +125,19 @@ const SEARCH_BUDGETS = {
   trial: 12, client: 12, assisted: 12, clientMax: 25, clientUltra: 40,
   trainerTrial: 15, trainer: 30, trainerMax: 50, trainerUltra: 70,
 };
-// web_search_20260318: adds response_inclusion on top of 20260209's dynamic
-// filtering (Claude writes code that filters results BEFORE they enter the
-// context window — 4.6+ only, and this app runs sonnet-4-6). "excluded" drops
-// the raw search blocks from the response, which is right for us because we
-// never echo raw search content to the user; results from calls that PAUSED are
-// still returned in full so they can be sent back on the next turn.
+// web_search_20260318 with dynamic filtering (Claude writes code that filters
+// results BEFORE they enter the context window — 4.6+ only, and this app runs
+// sonnet-4-6).
+//
+// `response_inclusion: "excluded"` looked right at first — we never echo raw
+// search content, so why pay output tokens for it? Live testing said otherwise:
+// with the blocks dropped there is nothing to cite FROM. Two real searches
+// returned good, current answers and an empty source list both times, because
+// citations reference result blocks that no longer existed. Kevin made citation
+// a headline requirement, and prose attribution alone ("a 2024 review says…")
+// is not a source the reader can check. So the blocks come back, and
+// collectSources() reads the URLs straight off them. The extra tokens are the
+// price of the promise.
 function webSearchTool() {
   return {
     type: "web_search_20260318",
@@ -138,7 +145,6 @@ function webSearchTool() {
     max_uses: WEB_SEARCH_MAX_USES,
     allowed_domains: WEB_SEARCH_DOMAINS, // mutually exclusive with blocked_domains — sending both is a 400
     user_location: { type: "approximate", country: "US", timezone: "America/New_York" },
-    response_inclusion: "excluded",
   };
 }
 
@@ -643,13 +649,25 @@ function logSearchOutcome(content, fn) {
 // output is shown to end users, and cited_text/title/url are not billed — so
 // there is no reason not to. Deduped by URL, newest-first, capped.
 function collectSources(content, into) {
+  const add = (url, title) => {
+    if (!url || into.length >= 6 || into.some((s) => s.url === url)) return;
+    into.push({ url: String(url).slice(0, 300), title: String(title || url).slice(0, 160) });
+  };
   for (const b of content || []) {
-    if (b.type !== "text" || !Array.isArray(b.citations)) continue;
-    for (const c of b.citations) {
-      if (!c || c.type !== "web_search_result_location" || !c.url) continue;
-      if (into.some((s) => s.url === c.url)) continue;
-      if (into.length >= 6) return;
-      into.push({ url: String(c.url).slice(0, 300), title: String(c.title || c.url).slice(0, 160) });
+    if (!b || typeof b.type !== "string") continue;
+    // What Claude actually cited, when citation blocks are present.
+    if (b.type === "text" && Array.isArray(b.citations)) {
+      for (const c of b.citations) {
+        if (c && c.type === "web_search_result_location") add(c.url, c.title);
+      }
+    // Otherwise the results themselves. Dynamic filtering consumes results
+    // inside code execution and does not always attach citation blocks, so
+    // without this fallback the source list is empty on most searched replies —
+    // which is exactly what live testing showed.
+    } else if (b.type === "web_search_tool_result" && Array.isArray(b.content)) {
+      for (const r of b.content) {
+        if (r && r.type === "web_search_result") add(r.url, r.title);
+      }
     }
   }
 }
