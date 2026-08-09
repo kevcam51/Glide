@@ -18445,9 +18445,15 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
   useEffect(() => {
     if (!open) return;
     getProfile().then((p) => {
-      // Max tier (or admin, for testing) can request a same-day allowance boost
-      // at the ceiling — the server re-verifies, this only shows the offer UI.
-      setCanBoost((p && p.subscriptionStatus === "active" && /max/.test(String(p.subscriptionTier || ""))) || (p && p.role === "admin"));
+      // Any tier on the boost ladder can ask for a same-day allowance boost at
+      // the ceiling — base Premium/Coach included (S179i), not just Elite+. The
+      // server re-verifies; this only decides whether to show the offer. Keeping
+      // this in sync with the server's isBoostable matters: when the two
+      // disagreed, the offer the pricing grid sells ("~30 (more on request)")
+      // was unreachable, because this gate hid the button before the server was
+      // ever asked.
+      const sub = p && p.subscriptionStatus;
+      setCanBoost((sub === "active" || sub === "trial") || (p && p.role === "admin"));
     }).catch(() => {});
   }, [open]);
   const [canBoost, setCanBoost] = useState(false);

@@ -453,7 +453,8 @@ TAKING ACTIONS — DO WHAT THE USER ASKED, FIRST TIME (Kevin, S102e): when someo
 - Notes: on "write this down / remember this / make a note / save a recap", use create_note (recaps → kind='recap'). A client's note is PRIVATE by default — only share (visible to trainer) if they clearly want that. A trainer using clientId writes a private about-note by default (shared=true puts it where the client sees it). Before re-recapping, call list_notes and UPDATE the existing note (update_note, append) instead of duplicating. Never reveal a client's private notes to anyone but that client.
 - WEB SEARCH: you can search the internet, but only across a fixed allowlist of vetted health, nutrition and exercise-science sources (PubMed, Examine, NIH/ODS, CDC, USDA, Mayo Clinic, Harvard Health, WHO/NHS, ACSM/NSCA, the Academy of Nutrition and Dietetics, and similar). A search costs the person real money and eats their daily AI allowance faster than a normal reply, so treat it as spending THEIR money, not yours.
   ASK BEFORE YOU SEARCH. Do not call web_search on your own initiative. When a question genuinely needs current or specific information you should not state from memory — a recent study or guideline, a supplement's evidence base, a nutrient or drug-nutrient interaction, a product or standard that may have changed — do NOT search yet. Say what you'd need to look up, say plainly that searching the web uses more of their daily AI allowance than a normal reply, and ask whether they want you to. Then STOP and wait for their answer. Give them what you can from your own knowledge in the same message where it's useful, so the choice is "want me to check the current research too?" rather than a blank refusal.
-  THEIR YES IS THE GO-AHEAD, AND SO IS ASKING IN THE FIRST PLACE. If they already told you to search — "look it up", "search for it", "what does the current research say, check it", "find me a source" — that IS consent: search immediately, do not ask a second time. Once they have agreed to a search in this conversation, you may keep searching on that same topic without re-asking; ask again only when you're moving to a genuinely different subject. Never ask twice for the same thing, and never nag.
+  THEIR YES IS THE GO-AHEAD, AND SO IS ASKING IN THE FIRST PLACE. If they already told you to search — "look it up", "search for it", "what does the current research say, check it", "find me a source" — that IS consent: search immediately, do not ask a second time. Once they have agreed, you may keep searching THE SAME QUESTION without re-asking — following up a source, checking a second claim in the answer you're already giving.
+  WHEN IN DOUBT, ASK AGAIN. Consent covers the question they said yes to, not the rest of the conversation. If you are not confident their new message is still that same question, ask — an unnecessary question costs them two seconds, an unnecessary search costs them allowance they cannot get back, so the asymmetry says ask. Treat a new message as a new question unless it is plainly a continuation. What you must never do is ask twice inside one answer, ask again for something they just explicitly told you to look up, or keep offering after they said no — that is nagging, and it is its own kind of rude.
   DON'T SEARCH AT ALL for what you already know well: everyday macros and calories, portion estimates, training principles, how to structure a week, or anything answerable from the person's own logged data (use the read tools for that). Don't offer a search for those either — offering costs them attention, and taking them up on it costs them allowance.
   WHEN THE PERSON'S OWN COACH HAS SPOKEN, THE COACH OUTRANKS THE INTERNET: never use a search result to quietly override guidance in a fromTrainer note — if a source and their coach disagree, say so plainly and tell them to raise it with their trainer, rather than switching them to what you found.
   ALWAYS CITE: name the source in your reply ("per Examine's review…", "the NIH fact sheet says…") whenever you used a search, so the person can see where it came from; never present a searched claim as your own unattributed assertion. The allowlist is narrow on purpose — if it turns up nothing relevant, SAY the vetted sources did not cover it and answer from your own knowledge (flagged as such), rather than stretching a weak result. Never search for anything outside health, fitness and nutrition.
@@ -1296,11 +1297,18 @@ exports.requestBudgetBoost = onCall({ region: "us-central1", maxInstances: 10 },
   const db = admin.firestore();
   const profile = (await db.doc(`users/${uid}`).get()).data() || {};
   const tier = tierFor(profile);
-  const isBoostable = tier === "clientMax" || tier === "trainerMax"
-    || tier === "clientUltra" || tier === "trainerUltra";
+  // Every tier BOOSTS_PER_DAY knows about is boostable — one source of truth, so
+  // the eligibility gate can't drift from the ladder again. This was the missing
+  // half of S179i ("Boosts extended to base tiers with fixed steps"): the
+  // budgets, the +15k steps and the per-day counts all landed, but this gate
+  // still said Elite-and-up, so a paying Premium hit the wall and was told
+  // "resets tomorrow" while the pricing grid sold them "~30 (more on request)".
+  // Margins were computed for exactly this ladder: +$7.13 at 45k, +$5.02 at 60k,
+  // +$2.90 at 75k — all positive.
+  const isBoostable = !!BOOSTS_PER_DAY[tier];
   const isMaxTier = tier === "clientMax" || tier === "trainerMax"; // Max, not yet Ultra
   const isAdmin = isAdminUid(uid); // lets Kevin exercise the flow
-  if (!isBoostable && !isAdmin) return { granted: false, reason: "not-max" };
+  if (!isBoostable && !isAdmin) return { granted: false, reason: "not-eligible" };
   const base = BUDGETS[tier] || BUDGETS.client;
   const ref = db.doc(`users/${uid}/aiUsage/${todayKey()}`);
   const usage = (await ref.get()).data() || {};
