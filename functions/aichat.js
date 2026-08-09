@@ -573,8 +573,8 @@ async function setupChat(uid, activeTarget, noSearch) {
   // it can't invalidate the cached prefix.
   if (!searchAllowed) {
     system.push({ type: "text", text: noSearch
-      ? "WEB SEARCH IS UNAVAILABLE in this context — the tool is not loaded here. Answer from your own knowledge and the person's own data, and never say or imply that you looked anything up on the internet."
-      : "WEB SEARCH IS UNAVAILABLE for the rest of today: this person's daily web-search allowance is used up (it resets tomorrow). If they ask you to look something up or search the internet, say plainly that today's search allowance is used up, then answer from your own knowledge and flag it as such. Never imply you searched when you did not." });
+      ? "WEB SEARCH IS UNAVAILABLE in this context — the tool is not loaded here. This OVERRIDES the ask-before-you-search rule: do not offer to search, do not ask whether they want you to, and never say or imply that you looked anything up on the internet. Answer from your own knowledge and the person's own data."
+      : "WEB SEARCH IS UNAVAILABLE for the rest of today: this person's daily web-search allowance is used up (it resets tomorrow). This OVERRIDES the ask-before-you-search rule — do NOT offer a search or ask whether they want one, because you could not run it if they said yes; offering something you cannot deliver is worse than not offering. If they ask you to look something up, say plainly that today's search allowance is used up and resets tomorrow, then answer from your own knowledge and flag it as such. Never imply you searched when you did not." });
   }
   // The server search tool rides alongside the normal (client-side) tools. Note
   // this changes the `tools` prefix, which is what prompt caching keys on — but
