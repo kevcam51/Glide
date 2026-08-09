@@ -1,11 +1,17 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ⭐⭐⭐⭐ S184 (Aug 8, 2026) — WEB SEARCH IS BUILT (not deployed yet)
+## ⭐⭐⭐⭐ S184 (Aug 8, 2026) — WEB SEARCH IS LIVE AND VERIFIED IN PROD
 
-**Code is written, `npm run build` passes, functions lint clean and load clean.
-It has NOT been deployed and NO live AI call has been made against it** — the
-Anthropic key is in Secret Manager, so the only way to exercise it is to deploy.
-Kevin's go-ahead is the next step, then a live smoke test.
+Deployed and smoke-tested end to end against the real Anthropic API. Verified in
+the running app as `trainer.uitest`:
+- "latest evidence on creatine for strength" → a real Oct-2024 *Nutrients*
+  meta-analysis with effect sizes (WMD 4.43 kg, p<0.001), correctly cited.
+- "beta-alanine for endurance" → five DISTINCT papers across PubMed, PMC and
+  Examine, each linked under the reply.
+- "how many calories in two eggs and toast?" → **no search** (footer absent),
+  which is the behaviour the prompt is tuned for — searching that would be
+  spending the person's allowance on something the model already knows.
+- The disclosure footer renders on every searched reply and survives a reload.
 
 **Read `docs/WEB-SEARCH.md` → "What actually shipped"** — the full design,
 numbers, traps and deliberate omissions live there and are NOT duplicated here.
@@ -50,11 +56,27 @@ user turn after it.
 aichat.js aiusage.js`, never recall it): 17 functions, plus `adminOverview` and
 `adminUserUsage` which read the changed `aiusage.readUsage`.
 
-**Live smoke test after deploy:** (1) ask something that should search ("what
-does the research say about creatine timing?") → expect a cited answer + the
-footer; (2) ask something that should NOT ("how many calories in 2 eggs?") →
-expect no search; (3) confirm `users/{uid}/aiUsage/{today}.searches` incremented;
-(4) confirm an ordinary chat + a meal log still work (that's the 400-guard path).
+**Three things live testing changed, all committed:**
+1. **`response_inclusion: "excluded"` is GONE — don't put it back.** It looked
+   like free output tokens, but dropping the result blocks leaves nothing to
+   cite *from*: two searches returned good answers with an EMPTY source list.
+   Dynamic filtering doesn't reliably attach citation blocks either, so
+   `collectSources()` now reads citations when present and falls back to the
+   `web_search_result` entries.
+2. **Source dedupe is on normalised TITLE, not just URL.** One paper legitimately
+   arrives as `pubmed…/40093878`, `pmc…/PMC11906324` and
+   `www.ncbi…/pmc/articles/PMC11906324`, titled "… - PubMed" / "… - PMC" — three
+   entries, one study, whole list eaten.
+3. **`aiSearch` log line.** Search fails SOFTLY (HTTP 200, error inside the
+   result block), so a broken search used to be invisible — the model just
+   answered from memory and *guessed* at why ("hit the search limit"). Error
+   codes and result counts are now logged; watch them before tuning the
+   allowlist or the limits.
+
+**Still worth watching:** `searches` in the usage rollups for two weeks before
+loosening `max_uses` or widening the allowlist. A Terms-of-Service clause about
+cited third-party health content is still owed (see docs/WEB-SEARCH.md — it is
+NOT LEGAL-SESSIONS.md, which is about session packages).
 
 ### Everything below is DONE — don't redo it
 - **S183p** AI meals store their serving; Daily Check-In notes roll over/grow/collapse
