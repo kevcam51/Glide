@@ -654,7 +654,11 @@ function collectSources(content, into) {
   // articles/PMC11906324, www.ncbi.nlm.nih.gov/pmc/articles/PMC11906324 are all
   // one study), and URL-only dedupe filled the whole list with three papers
   // wearing six names.
-  const key = (t) => String(t || "").toLowerCase().replace(/\s+/g, " ").trim();
+  // Normalise away the site suffix search engines append, so "Title - PubMed"
+  // and "Title - PMC" are recognised as the one paper they are.
+  const key = (t) => String(t || "").toLowerCase()
+    .replace(/\s+[-–|]\s+[^-–|]{1,30}$/, "")
+    .replace(/\s+/g, " ").trim();
   const add = (url, title) => {
     if (!url || into.length >= 6) return;
     const k = key(title);
