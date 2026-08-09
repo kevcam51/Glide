@@ -96,8 +96,9 @@ enabled (Blaze has no default spending cap).
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
 > _Last updated: Session 184 (Aug 8 — AI WEB SEARCH: **live and verified in prod**. Anthropic's
-> server-side tool, allowlisted to 27 vetted health/science domains, a per-MESSAGE ceiling of 3 AND a
-> per-user DAILY search counter beside the token budget, and an in-chat "this searched the web and
+> server-side tool, allowlisted to 27 vetted health/science domains, a per-user DAILY search counter
+> beside the token budget (deliberately NO per-message cap — it would cost the user more in busted
+> prompt cache than it saves; see docs/WEB-SEARCH.md), and an in-chat "this searched the web and
 > costs more of your allowance" disclosure with real cited source links. Two traps worth knowing:
 > `max_uses` is per API REQUEST not per message, and `response_inclusion: "excluded"` silently kills
 > citations.) **Read

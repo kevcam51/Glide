@@ -27,12 +27,14 @@ The short version:
   `usage.server_tool_use.web_search_requests`). Premium 12/day → Coach Ultra
   70/day. Running out is SOFT: the tool stops being declared and the AI says so
   instead of pretending it searched.
-  ⚠️ **`max_uses: 3` is per API REQUEST, not per message** — a pre-deploy review
-  caught me assuming otherwise. One message makes up to 11 requests, so
-  unchecked it was 33 searches (33¢) a message and Premium went margin-negative.
-  `capTurnSearches()` is what makes the per-message number real; don't remove it,
-  and don't "simplify" it by withdrawing the tool while a `server_tool_use` is
-  still waiting for its result (that 400s).
+  ⚠️ **`max_uses: 3` is per API REQUEST, not per message** — a review caught me
+  assuming otherwise. One message makes up to 11 requests, so the tail case is 33
+  searches (33¢) a message. **We accept that on purpose — do not add a
+  per-message cap.** Withdrawing the tool mid-turn changes the `tools` array,
+  which invalidates the WHOLE prompt cache (tools serialise before system): a
+  measured ~19,700-token cacheWrite, which is ~44% of a Premium user's daily
+  allowance, to save us ~7¢. It was built, measured and reverted. The numbers are
+  in `docs/WEB-SEARCH.md`; read them before rebuilding it.
 - **Cost is now truthful end to end:** `aiusage` adds $0.01/search to
   `costMicros`, so the admin dashboard's spend stays right.
 - **Kevin's disclosure requirement, both halves:** a footer under every searched

@@ -199,33 +199,50 @@ Two independent limits, because either alone leaks:
 |---|---|---|---|---|---|---|---|
 | Searches/day | 12 | 25 | 40 | 15 | 30 | 50 | 70 |
 
-**`max_uses: 3` alone does NOT give you a per-message ceiling**, and assuming it
-did was the one real bug the pre-deploy review caught. `max_uses` is scoped to a
-single API *request*, and one user message drives up to `MAX_TOOL_ROUNDS + 1`
-= 11 requests (the model calls our tools, we answer, it goes again) — each with a
-fresh budget of 3. Unchecked that is 33 searches (33¢) for one message, and the
-daily allowance couldn't stop it either, because it is read once before the turn
-starts. Premium's worst case was ~$10/mo of search, not $3.60 — negative margin.
+**`max_uses: 3` is per API REQUEST, not per message** — assuming otherwise was
+the one real bug the pre-deploy review caught. One user message drives up to
+`MAX_TOOL_ROUNDS + 1` = 11 requests (the model calls our tools, we answer, it
+goes again), each with a fresh budget of 3. So the true worst case for a single
+message is 33 searches (33¢), not 3.
 
-`capTurnSearches()` closes it: after every round it withdraws the tool once the
-turn has used its 3, or once the daily allowance is spent. Two rules make that
-safe, and both matter:
+**We deliberately do NOT enforce a per-message cap — this is the part not to
+"fix" without reading the numbers below.** The obvious fix (withdraw the tool, or
+shrink `max_uses`, once a turn has searched enough) was written, measured and
+reverted: any change to the `tools` array invalidates the *entire* prompt cache,
+because tools serialise before system.
 
-- **Never withdraw while a server tool is waiting.** A `server_tool_use` block
-  with no matching result block in the same response means Anthropic runs it at
-  the start of the *next* request, and a request that no longer declares that
-  tool fails with a 400. `hasPendingServerTool()` is that check.
-- **If withdrawing is rejected anyway, put it back.** `retrySearchFix()` recovers
-  in either direction, once per request. So the cap can tighten spend but can
-  never break a turn — which is the whole reason it was safe to add to a path
-  that couldn't be tested against the live API first.
+Measured on this codebase — 40 tool schemas plus the system prompt:
+
+| | tokens |
+|---|---|
+| tool schemas (JSON, as sent) | ~12,900 |
+| system prompt + knowledge base | ~6,800 |
+| **cached prefix** | **~19,700** |
+
+Withdrawing the tool mid-turn forces one full `cacheWrite` of ~19,700 tokens for
+the rest of that turn. Two consequences, the second disqualifying:
+
+- **It barely saves us anything.** ~19,700 cacheWrite at $3.75/M is **$0.074**,
+  against the ~$0.08 of search it prevents. Break-even at best.
+- **The user pays for it, out of their own allowance.** The daily budget is
+  `spent = input + output + cacheWrite`, so that re-write is **~44% of a Premium
+  user's 45,000-token day** — spent on one message. It also fires on exactly the
+  turns that are already expensive: search, then a tool round.
+
+Charging someone nearly half a day's allowance to save ourselves seven cents is
+the wrong trade on a feature whose whole justification is user value. The daily
+counter stays the real ceiling: read once at the start of a turn, so it changes
+the tools array at most once a day per user, and one cache write a day is fair.
+
+If a pathological multi-search message ever shows up in the `aiSearch` logs, the
+cache-safe levers are `max_uses`, `MAX_TOOL_ROUNDS`, and the daily allowance —
+all decided *before* the turn starts.
 
 Admin (Kevin) is effectively uncapped, matching the token budget.
 
-With the per-message cap in place, Premium's worst case is back to ~$3.60/mo of
-search on top of the ~$7.13/mo token ceiling, against $14.26 kept — positive even
-if someone maxes both every day of a month, which nobody does (measured behaviour
-is ~15% of exchanges searching).
+Premium's realistic exposure is ~$3.60/mo of search on top of the ~$7.13/mo token
+ceiling against $14.26 kept; the 33-search message is a tail case the daily
+counter stops from repeating, since it blocks the very next message.
 
 The counter lives beside the token counter: `searches` on
 `users/{uid}/aiUsage/{date}`, incremented from

@@ -107,9 +107,9 @@ const WEB_SEARCH_DOMAINS = [
 // One message drives up to MAX_TOOL_ROUNDS + 1 requests (the model calls our
 // tools, we answer, it goes again), and each request gets a fresh max_uses
 // budget from Anthropic. So this alone would let one message run 3 x 11 = 33
-// searches (33¢) and blow straight through the daily allowance, which is only
-// read once at the start of a turn. capTurnSearches() below is what actually
-// makes "3 per message" true; this is only the per-request half.
+// searches in the pathological case. We accept that (see the note above
+// capTurnSearches' replacement below): the daily counter is the real ceiling,
+// and enforcing a per-message one costs the user more than it saves.
 const WEB_SEARCH_MAX_USES = 3;
 // Per-user DAILY search allowance, beside the token budget. Search bills $10
 // per 1,000 ($0.01 each) ON TOP of tokens, so an uncapped Max user could run
@@ -367,41 +367,26 @@ function setSearchTool(state, on) {
     ? [...state.tools, webSearchTool()]
     : state.tools.filter((t) => t.name !== "web_search");
 }
-// A response that left a server tool WAITING to run — a `server_tool_use` block
-// whose id has no matching result block in the same response. Anthropic runs it
-// at the start of the next request, and that request "no longer defines the
-// waiting server tool fails with a 400". So this is the exact state in which the
-// search tool must not be withdrawn, whatever else we'd like to do.
-function hasPendingServerTool(content) {
-  const called = [];
-  const answered = new Set();
-  for (const b of content || []) {
-    if (!b || typeof b.type !== "string") continue;
-    if (b.type === "server_tool_use") called.push(b.id);
-    else if (b.type.endsWith("_tool_result") && b.tool_use_id) answered.add(b.tool_use_id);
-  }
-  return called.some((id) => !answered.has(id));
-}
-// Enforce the per-MESSAGE search ceiling and the daily allowance mid-turn.
-// `max_uses` is per REQUEST, so without this a single message could search 3
-// times in each of 11 rounds. Withdrawing the tool is only safe when nothing is
-// waiting on it (above) — and if the withdrawal itself is somehow rejected,
-// callModel puts it back and retries, so this can tighten spend but can never
-// break a turn.
-function capTurnSearches(state, agg, content) {
-  if (!state.searchOn || agg.searches <= 0) return;
-  const overTurn = agg.searches >= WEB_SEARCH_MAX_USES;
-  const overDay = state.searchesUsed + agg.searches >= state.searchBudget;
-  if (!overTurn && !overDay) return;
-  if (hasPendingServerTool(content)) return; // finish the pending search first
-  setSearchTool(state, false);
-  state.searchCapped = true;
-}
-// Recover from a 400 that the search tool might be responsible for, in whichever
-// direction is available: drop it if it's declared (org switch off, unusable
-// tool version, a domain the org's own allowlist rejects), or put it back if we
-// withdrew it mid-turn and the API wanted it kept. One attempt per request, so
-// this can never loop.
+// NO mid-turn search cap — deliberately. It is tempting to withdraw the tool (or
+// shrink max_uses) once a turn has searched enough, and an earlier cut of S184
+// did exactly that. It is a net LOSS: any change to the `tools` array
+// invalidates the whole prompt cache, because tools render before system. So the
+// next request in that turn re-writes the entire ~12k-token prefix at cacheWrite
+// rates instead of reading it at ~10%, and `spent = input + output + cacheWrite`
+// means the USER pays that out of their daily token allowance — roughly a
+// quarter of a Premium day, to save us a few cents of search. It also fires on
+// exactly the turns that are already expensive (search, then a tool round).
+//
+// So the real per-message ceiling is max_uses x the number of requests the turn
+// makes, not max_uses. That is bounded in practice by the daily counter (checked
+// once per turn, which changes the tools array at most once a day per user) and
+// by how rarely the model searches at all. Say the true number in the docs
+// rather than enforcing a tidier one at the user's expense.
+// Recover from a 400 the search tool might be responsible for — the org-wide
+// switch is off, the tool version is unusable, the org's own allowlist rejects a
+// domain. Without this, one such 400 breaks chat for EVERY user on EVERY
+// message, so drop the tool and retry once. One attempt per request, so this can
+// never loop.
 function retrySearchFix(state, e) {
   if (state.retried || !isSearchToolRejection(e)) return false;
   state.retried = true;
@@ -409,12 +394,6 @@ function retrySearchFix(state, e) {
     console.error("aiChat: web search rejected, retrying without it —", e && e.message);
     setSearchTool(state, false);
     state.searchOff = true; // stay off for the rest of the turn
-    return true;
-  }
-  if (state.searchCapped && !state.searchOff) {
-    console.error("aiChat: search withdrawal rejected, restoring it —", e && e.message);
-    setSearchTool(state, true);
-    state.searchCapped = false;
     return true;
   }
   return false;
@@ -756,7 +735,6 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
     addUsage(agg, resp.usage);
     collectSources(resp.content, sources);
     logSearchOutcome(resp.content, "aiChat");
-    capTurnSearches(state, agg, resp.content);
     let rounds = 0;
     while ((resp.stop_reason === "tool_use" || resp.stop_reason === "pause_turn") && rounds < MAX_TOOL_ROUNDS) {
       rounds++;
@@ -771,7 +749,6 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
         addUsage(agg, resp.usage);
         collectSources(resp.content, sources);
         logSearchOutcome(resp.content, "aiChat");
-        capTurnSearches(state, agg, resp.content);
         continue;
       }
       const toolUses = (resp.content || []).filter((b) => b.type === "tool_use");
@@ -786,7 +763,6 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
       addUsage(agg, resp.usage);
       collectSources(resp.content, sources);
       logSearchOutcome(resp.content, "aiChat");
-      capTurnSearches(state, agg, resp.content);
     }
   } catch (e) {
     console.error("aiChat Anthropic error:", e && e.message);
@@ -956,7 +932,6 @@ exports.aiChatStream = onRequest(
         addUsage(agg, msg.usage);
         collectSources(msg.content, sources);
         logSearchOutcome(msg.content, "aiChatStream");
-        capTurnSearches(state, agg, msg.content);
         // Paused mid web search (S184): resume by sending the paused assistant
         // message back UNCHANGED, with no user turn after it, and keep streaming.
         if (msg.stop_reason === "pause_turn" && rounds < MAX_TOOL_ROUNDS) {
