@@ -990,7 +990,12 @@ exports.aiChatStream = onRequest(
       // Include `wrote` so a client can still refresh if a tool already saved
       // something before the failure (e.g. a logged meal on a dropped stream).
       failed = true;
-      try { sse("error", { code: "internal", wrote, message: "The AI assistant is temporarily unavailable. Please try again." }); } catch { /* socket gone */ }
+      // Searches that already ran were BILLED and counted against the daily
+      // allowance in the finally below, so they have to be disclosed even
+      // though the turn failed — otherwise a dropped stream is the one path
+      // where we spend someone's search allowance and never tell them.
+      try { sse("error", { code: "internal", wrote, searches: agg.searches, sources,
+        message: "The AI assistant is temporarily unavailable. Please try again." }); } catch { /* socket gone */ }
     } finally {
       // Record spend even on failure/disconnect — completed rounds were real
       // tokens (they used to go unbilled whenever a later round threw).

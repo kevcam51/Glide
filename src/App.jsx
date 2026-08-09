@@ -18098,7 +18098,11 @@ async function streamAiChat(apiMsgs, { onDelta, onDone, onProposal, onWorkoutPro
       else if (event === "proposal") { if (onProposal) onProposal(payload); }
       else if (event === "workoutProposal") { if (onWorkoutProposal) onWorkoutProposal(payload); }
       else if (event === "done") onDone(payload || {});
-      else if (event === "error") throw { code: payload.code || "internal", wrote: !!(payload && payload.wrote), message: payload.message };
+      // searches/sources ride the error frame too: a search that already ran was
+      // billed and counted, so the failed turn still owes the user the disclosure.
+      else if (event === "error") throw { code: payload.code || "internal", wrote: !!(payload && payload.wrote),
+        searches: (payload && payload.searches) || 0, sources: (payload && payload.sources) || undefined,
+        message: payload.message };
     }
   }
 }
@@ -19122,7 +19126,9 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
         // write landed; believe it and never re-send.
         // The stream STARTED then broke — don't re-send (tools may have written).
         // Keep whatever arrived, refresh in case a write landed, and say so.
-        setMessages([...next, { role: "assistant", content: streamed || "(connection dropped)" }]);
+        setMessages([...next, { role: "assistant", content: streamed || "(connection dropped)",
+          searches: (streamErr && streamErr.searches) || 0,
+          sources: (streamErr && streamErr.sources) || undefined }]);
         if (typeof onDataChanged === "function") onDataChanged();
         setError("Connection dropped — the reply was cut off. Check before re-asking: anything you asked it to log may already be saved.");
       } else {
