@@ -17453,7 +17453,7 @@ const PLAN_FEATURES = {
       // S184: web search. Advertised with its allowance cost attached, in the
       // same row group as the allowance itself — Kevin's requirement was that
       // people learn searching spends more BEFORE they trigger one.
-      ["Web search — answers backed by vetted health sources", false, false, true, true],
+      ["Web search — it asks first, then cites its sources", false, false, true, true],
       ["Import from ChatGPT / Claude", false, false, true, true],
       ["Set up your whole plan by conversation", false, false, true, true],
       ["Cut / bulk / maintenance phases by chat", false, false, true, true],
@@ -17506,7 +17506,7 @@ const PLAN_FEATURES = {
       ["Set targets & manage client plans by chat", false, false, true, true],
       ["Photo & voice meal logging", false, false, true, true],
       ["Turn TikTok / IG / YouTube links into programs", false, false, true, true],
-      ["Web search — answers backed by vetted health sources", false, false, true, true],
+      ["Web search — it asks first, then cites its sources", false, false, true, true],
       ["AI edits your local plans & simulations", false, false, true, true],
       ["Send client to-dos straight from chat", false, false, true, true],
       ["Past chats — save, revisit & continue", false, false, true, true],
@@ -17547,10 +17547,10 @@ const PLAN_TIPS = {
   // search was that people understand it draws their daily allowance down
   // faster BEFORE they trigger one — so it is stated here, on the pricing page,
   // as well as under every searched reply in the chat.
-  "Web search — answers backed by vetted health sources":
-    "When an answer depends on current research rather than general knowledge, the AI can look it up and tell you where it got it. It only searches a fixed list of sources a coach would accept — PubMed, Examine, the NIH, CDC, USDA, Mayo Clinic, Harvard Health, the WHO and the main sports-science bodies — never the open internet, so you don't get nutrition advice off a random blog. A coach's own guidance always outranks anything it finds — it flags a disagreement rather than quietly siding with the web. Searching costs more than a normal reply, so it uses up your daily AI allowance faster and has its own daily limit.",
+  "Web search — it asks first, then cites its sources":
+    "When an answer depends on current research rather than general knowledge, the AI can look it up and tell you where it got it. It only searches a fixed list of sources a coach would accept — PubMed, Examine, the NIH, CDC, USDA, Mayo Clinic, Harvard Health, the WHO and the main sports-science bodies — never the open internet, so you don't get nutrition advice off a random blog. A coach's own guidance always outranks anything it finds — it flags a disagreement rather than quietly siding with the web. Searching costs more than a normal reply, so it uses up your daily AI allowance faster and has its own daily limit — which is why the AI asks you first and only searches if you say yes.",
   "Web searches per day":
-    "Web searches cost us real money on top of the usual AI cost, so they're counted separately from your conversations. Every searched reply tells you it searched. If you run out, the AI keeps working normally — it just answers from what it already knows for the rest of the day.",
+    "Web searches cost us real money on top of the usual AI cost, so they're counted separately from your conversations. The AI asks before it searches and tells you it will use more of your allowance, so nothing is spent without your say-so, and every searched reply shows the sources it used. If you run out, the AI keeps working normally — it just answers from what it already knows for the rest of the day.",
 
   // ── Always free ──────────────────────────────────────────────────────────
   "Food, calorie & macro tracking":
