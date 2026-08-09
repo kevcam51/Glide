@@ -729,6 +729,7 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
   // recover if a request rejects the tool (see retrySearchFix).
   const state = { tools, searchOn: searchAllowed, searchesUsed, searchBudget };
   const agg = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, searches: 0 };
+  const paused = []; // text written before a pause_turn — same turn, kept (see below)
   let wrote = false; // a plan-changing write happened this turn → client should refresh
   let proposal = null; // a meal proposal to show as an Accept/Edit card
   let workoutProposal = null; // a workout-program proposal to show as an Accept card
@@ -749,6 +750,12 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
       // is not optional once a server tool is declared: without it the turn ends
       // silently mid-search and the user gets a truncated answer.
       if (resp.stop_reason === "pause_turn") {
+        // A pause CONTINUES the same assistant turn, so anything already written
+        // is the first half of one answer — the model does not repeat it. Keep
+        // it, or the reply comes back starting mid-thought with citations
+        // attached to text the user never saw. (Deliberately not done for the
+        // tool_use branch below, where a dropped preamble is what we want.)
+        paused.push(...(resp.content || []).filter((b) => b.type === "text").map((b) => b.text));
         convo.push({ role: "assistant", content: resp.content });
         resp = await callModel(client, state, { model: MODEL, max_tokens: MAX_TOKENS, system, messages: convo });
         addUsage(agg, resp.usage);
@@ -781,7 +788,8 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
 
   // Budget counts full-price tokens (cache reads bill at ~10%, so excluded).
   const spent = agg.input + agg.output + agg.cacheWrite;
-  let text = (resp.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  let text = [...paused, ...(resp.content || []).filter((b) => b.type === "text").map((b) => b.text)]
+    .filter(Boolean).join("\n");
   // If we stopped because we hit MAX_TOOL_ROUNDS while the model still wanted to
   // call tools, those calls were DISCARDED — and its preamble ("logging all 8
   // now…") would otherwise be returned as if the work had happened.

@@ -19118,7 +19118,12 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
         setError("You've reached today's AI usage limit. It resets tomorrow.");
         setCapHit(true);
         if (canBoost) setBoost("offer");
-      } else if (streamed || gotEvent || (streamErr && streamErr.wrote)) {
+      } else if (streamed || gotEvent || (streamErr && (streamErr.wrote || streamErr.searches > 0))) {
+        // streamErr.searches: a turn the user APPROVED a search for emits no text
+        // before searching, so `streamed`/`gotEvent` stay empty — and those
+        // searches were already run, billed, and counted against the daily
+        // allowance. Re-sending would silently spend them a second time. Same
+        // reasoning as `wrote` below: already-done work is never re-sent.
         // streamErr.wrote: a pure LOGGING turn emits no text at all (the prompt
         // tells it not to narrate), so `streamed`/`gotEvent` stay empty and the
         // old guard fell through to a full re-send — re-running log_meals and
