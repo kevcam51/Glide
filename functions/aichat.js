@@ -616,6 +616,28 @@ function addUsage(agg, u) {
   agg.searches += (u && u.server_tool_use && u.server_tool_use.web_search_requests) || 0;
 }
 
+// Web search fails SOFTLY: the API returns HTTP 200 and puts the failure inside
+// the result block, where `content` is a single error object instead of a list
+// of results (too_many_requests, max_uses_exceeded, query_too_long, unavailable,
+// …). Nothing throws, so without this a broken search is invisible on our side —
+// all anyone sees is the model quietly answering from memory and guessing at why.
+// Log the codes, and how many results actually came back, so the allowlist and
+// the limits can be tuned against evidence rather than vibes.
+function logSearchOutcome(content, fn) {
+  const errors = [];
+  let ok = 0, results = 0;
+  for (const b of content || []) {
+    if (!b || b.type !== "web_search_tool_result") continue;
+    const c = b.content;
+    if (Array.isArray(c)) { ok++; results += c.length; }
+    else if (c && c.error_code) errors.push(c.error_code);
+    else if (c && c.type === "web_search_tool_result_error") errors.push(c.error_code || "unknown");
+  }
+  if (errors.length || ok) {
+    console.log("aiSearch", JSON.stringify({ fn, ok, results, errors }));
+  }
+}
+
 // Pull the web-search citations off an assistant message so the app can show
 // where an answer came from. Anthropic's terms require citing sources when API
 // output is shown to end users, and cited_text/title/url are not billed — so
@@ -703,6 +725,7 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
     resp = await callModel(client, state, { model: MODEL, max_tokens: MAX_TOKENS, system, messages: convo });
     addUsage(agg, resp.usage);
     collectSources(resp.content, sources);
+    logSearchOutcome(resp.content, "aiChat");
     capTurnSearches(state, agg, resp.content);
     let rounds = 0;
     while ((resp.stop_reason === "tool_use" || resp.stop_reason === "pause_turn") && rounds < MAX_TOOL_ROUNDS) {
@@ -717,6 +740,7 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
         resp = await callModel(client, state, { model: MODEL, max_tokens: MAX_TOKENS, system, messages: convo });
         addUsage(agg, resp.usage);
         collectSources(resp.content, sources);
+        logSearchOutcome(resp.content, "aiChat");
         capTurnSearches(state, agg, resp.content);
         continue;
       }
@@ -731,6 +755,7 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
       resp = await callModel(client, state, { model: MODEL, max_tokens: MAX_TOKENS, system, messages: convo });
       addUsage(agg, resp.usage);
       collectSources(resp.content, sources);
+      logSearchOutcome(resp.content, "aiChat");
       capTurnSearches(state, agg, resp.content);
     }
   } catch (e) {
@@ -900,6 +925,7 @@ exports.aiChatStream = onRequest(
           (delta) => { if (delta) sse("delta", { text: delta }); });
         addUsage(agg, msg.usage);
         collectSources(msg.content, sources);
+        logSearchOutcome(msg.content, "aiChatStream");
         capTurnSearches(state, agg, msg.content);
         // Paused mid web search (S184): resume by sending the paused assistant
         // message back UNCHANGED, with no user turn after it, and keep streaming.
