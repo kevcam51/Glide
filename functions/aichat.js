@@ -76,6 +76,72 @@ const BUDGETS = { trial: 45000, client: 45000, assisted: 45000,
   // Ultra (S92): data-triggered heavy-user tiers, surfaced via the boost upsell.
   clientUltra: 250000, trainerUltra: 450000 };   // S171: Apex 400k->450k (every trainer step is now +50%)
 
+// ── Web search (S184) ────────────────────────────────────────────────────────
+// Anthropic ships web search as a SERVER-side tool on the same Messages API this
+// file already calls: we declare it in `tools` and Anthropic runs the searches
+// mid-turn. There is no vendor, no second key, no Cloud Function, no result
+// pipeline — see docs/WEB-SEARCH.md.
+//
+// It is deliberately NOT an open search. Glidna sells nutrition guidance, so an
+// assistant that can quote any page on the internet at someone with a medical
+// condition or an eating disorder is a different risk class from summarising a
+// link the user pasted themselves (fetch_link, S82). Three controls, all of
+// which are load-bearing and none of which are follow-ups (Kevin, S183u):
+//   1. allowed_domains — only sources a trainer would accept.
+//   2. The prompt makes a client's TRAINER outrank anything found on the web.
+//   3. Citations are mandatory (and cited_text/title/url are not billed).
+const WEB_SEARCH_DOMAINS = [
+  // Primary research + evidence reviews
+  "pubmed.ncbi.nlm.nih.gov", "ncbi.nlm.nih.gov", "cochranelibrary.com", "clinicaltrials.gov",
+  "examine.com", "jissn.biomedcentral.com", "nutrition.org", "bjsm.bmj.com",
+  // Government / public health
+  "nih.gov", "ods.od.nih.gov", "cdc.gov", "fda.gov", "usda.gov", "fdc.nal.usda.gov",
+  "who.int", "nhs.uk", "nice.org.uk", "efsa.europa.eu",
+  // Clinical + professional bodies
+  "mayoclinic.org", "health.harvard.edu", "nutritionsource.hsph.harvard.edu",
+  "heart.org", "diabetes.org", "eatright.org", "acsm.org", "nsca.com",
+  // Evidence-based training/nutrition practitioners
+  "strongerbyscience.com",
+];
+// Cap on searches per API REQUEST — which is NOT the same as per user message.
+// One message drives up to MAX_TOOL_ROUNDS + 1 requests (the model calls our
+// tools, we answer, it goes again), and each request gets a fresh max_uses
+// budget from Anthropic. So this alone would let one message run 3 x 11 = 33
+// searches (33¢) and blow straight through the daily allowance, which is only
+// read once at the start of a turn. capTurnSearches() below is what actually
+// makes "3 per message" true; this is only the per-request half.
+const WEB_SEARCH_MAX_USES = 3;
+// Per-user DAILY search allowance, beside the token budget. Search bills $10
+// per 1,000 ($0.01 each) ON TOP of tokens, so an uncapped Max user could run
+// ~$9/mo of search against a $29.99 plan — see docs/WEB-SEARCH.md. These are
+// ceilings, not expectations: measured behaviour is that ~15% of exchanges
+// search, so Premium's realistic day is ~9. Worst case at these numbers is
+// ~$3.60/mo on Premium, on top of the ~$7.13/mo token ceiling, against $14.26
+// kept — still positive even if someone maxes both every single day.
+// This counter is also what makes the "search costs more of your allowance"
+// wording in the app TRUE: you cannot honestly tell someone that if nothing is
+// counting it.
+const SEARCH_BUDGETS = {
+  trial: 12, client: 12, assisted: 12, clientMax: 25, clientUltra: 40,
+  trainerTrial: 15, trainer: 30, trainerMax: 50, trainerUltra: 70,
+};
+// web_search_20260318: adds response_inclusion on top of 20260209's dynamic
+// filtering (Claude writes code that filters results BEFORE they enter the
+// context window — 4.6+ only, and this app runs sonnet-4-6). "excluded" drops
+// the raw search blocks from the response, which is right for us because we
+// never echo raw search content to the user; results from calls that PAUSED are
+// still returned in full so they can be sent back on the next turn.
+function webSearchTool() {
+  return {
+    type: "web_search_20260318",
+    name: "web_search",
+    max_uses: WEB_SEARCH_MAX_USES,
+    allowed_domains: WEB_SEARCH_DOMAINS, // mutually exclusive with blocked_domains — sending both is a 400
+    user_location: { type: "approximate", country: "US", timezone: "America/New_York" },
+    response_inclusion: "excluded",
+  };
+}
+
 // A complimentary tier granted as a referral reward (S181b) — OUR entitlement,
 // never a change to their Stripe subscription. That is the whole safety
 // property: there is no downgrade to schedule and therefore no downgrade that
@@ -266,6 +332,113 @@ function capHistory(messages) {
 
 const MAX_TOOL_ROUNDS = 10; // headroom for bulk actions (e.g. logging a batch of meals at once)
 
+// ── Web search safety net (S184) ─────────────────────────────────────────────
+// Declaring the search tool is the one change here that can fail LOUDLY rather
+// than degrade: web search can be switched off for a whole organization in the
+// Claude Console, and a request that declares it then fails with a 400 —
+// not a soft error inside a search result. Same for a tool version an account
+// can't use, or a malformed domain in the allowlist. Any of those would take
+// the entire assistant down, for every user, on every message.
+//
+// So a 400 on a request that declared search drops the tool and retries ONCE.
+// The person gets their answer; they just don't get the internet. Search is an
+// enhancement — it must never be able to break chat, meal logging or coaching.
+function isSearchToolRejection(e) {
+  const status = (e && (e.status || e.statusCode)) || 0;
+  if (status !== 400) return false;
+  // The SDK JSON-stringifies the whole error body into .message, so the API's
+  // own wording ("web search is not enabled for this organization",
+  // "tools.N.type: Input tag 'web_search_20260318'…") is present here.
+  const msg = ((e && e.message) || "").toLowerCase();
+  return msg.includes("web_search") || msg.includes("web search")
+    || msg.includes("allowed_domains") || msg.includes("allowed_callers")
+    || msg.includes("response_inclusion");
+}
+function setSearchTool(state, on) {
+  if (on === state.searchOn) return;
+  state.searchOn = on;
+  state.tools = on
+    ? [...state.tools, webSearchTool()]
+    : state.tools.filter((t) => t.name !== "web_search");
+}
+// A response that left a server tool WAITING to run — a `server_tool_use` block
+// whose id has no matching result block in the same response. Anthropic runs it
+// at the start of the next request, and that request "no longer defines the
+// waiting server tool fails with a 400". So this is the exact state in which the
+// search tool must not be withdrawn, whatever else we'd like to do.
+function hasPendingServerTool(content) {
+  const called = [];
+  const answered = new Set();
+  for (const b of content || []) {
+    if (!b || typeof b.type !== "string") continue;
+    if (b.type === "server_tool_use") called.push(b.id);
+    else if (b.type.endsWith("_tool_result") && b.tool_use_id) answered.add(b.tool_use_id);
+  }
+  return called.some((id) => !answered.has(id));
+}
+// Enforce the per-MESSAGE search ceiling and the daily allowance mid-turn.
+// `max_uses` is per REQUEST, so without this a single message could search 3
+// times in each of 11 rounds. Withdrawing the tool is only safe when nothing is
+// waiting on it (above) — and if the withdrawal itself is somehow rejected,
+// callModel puts it back and retries, so this can tighten spend but can never
+// break a turn.
+function capTurnSearches(state, agg, content) {
+  if (!state.searchOn || agg.searches <= 0) return;
+  const overTurn = agg.searches >= WEB_SEARCH_MAX_USES;
+  const overDay = state.searchesUsed + agg.searches >= state.searchBudget;
+  if (!overTurn && !overDay) return;
+  if (hasPendingServerTool(content)) return; // finish the pending search first
+  setSearchTool(state, false);
+  state.searchCapped = true;
+}
+// Recover from a 400 that the search tool might be responsible for, in whichever
+// direction is available: drop it if it's declared (org switch off, unusable
+// tool version, a domain the org's own allowlist rejects), or put it back if we
+// withdrew it mid-turn and the API wanted it kept. One attempt per request, so
+// this can never loop.
+function retrySearchFix(state, e) {
+  if (state.retried || !isSearchToolRejection(e)) return false;
+  state.retried = true;
+  if (state.searchOn) {
+    console.error("aiChat: web search rejected, retrying without it —", e && e.message);
+    setSearchTool(state, false);
+    state.searchOff = true; // stay off for the rest of the turn
+    return true;
+  }
+  if (state.searchCapped && !state.searchOff) {
+    console.error("aiChat: search withdrawal rejected, restoring it —", e && e.message);
+    setSearchTool(state, true);
+    state.searchCapped = false;
+    return true;
+  }
+  return false;
+}
+// One request against the model, with the recovery above folded in.
+async function callModel(client, state, params) {
+  state.retried = false;
+  try {
+    return await client.messages.create({ ...params, tools: state.tools });
+  } catch (e) {
+    if (!retrySearchFix(state, e)) throw e;
+    return client.messages.create({ ...params, tools: state.tools });
+  }
+}
+// Streaming variant. A 400 arrives before any token is emitted, so the retry
+// can't duplicate text the user already saw.
+async function streamModel(client, state, params, onText) {
+  state.retried = false;
+  try {
+    const stream = client.messages.stream({ ...params, tools: state.tools });
+    stream.on("text", onText);
+    return await stream.finalMessage();
+  } catch (e) {
+    if (!retrySearchFix(state, e)) throw e;
+    const stream = client.messages.stream({ ...params, tools: state.tools });
+    stream.on("text", onText);
+    return stream.finalMessage();
+  }
+}
+
 // Build the role-aware system prompt (shared by the callable + the stream fn).
 function buildSystemPrompt(role, isTrainer) {
   const baseSystem = (role === "client") ? SYSTEM_CLIENT : SYSTEM_TRAINER;
@@ -293,6 +466,7 @@ TAKING ACTIONS — DO WHAT THE USER ASKED, FIRST TIME (Kevin, S102e): when someo
 - Workout PROGRAM: to create/edit a training program, call list_exercises FIRST for the real ids, design a balanced week, summarize it briefly, then call propose_workout (a tappable Accept card — don't also call set_workout_schedule for it). Adjust and re-propose on changes. Use set_workout_schedule directly only if they say to skip the card. Keep it realistic for their experience/days. For a movement not in list_exercises (e.g. Battle Ropes, Sled Push), call add_custom_exercise first (estimate cal/min) then use the returned id — but prefer standard exercises.
 - Notes are context, not just storage. Before advising on a SPECIFIC person — how to adjust their plan, why they are struggling, what to say to them — call list_notes for them first. THIS INCLUDES SOMEONE ASKING ABOUT THEMSELVES: when a client asks what they should be training, eating or aiming for, call list_notes for themselves BEFORE answering. Notes marked fromTrainer were written by their coach for them — treat that as the plan of record and build your answer on it rather than offering generic best-practice that contradicts it. If their coach's guidance and the textbook answer differ, follow the coach and say you are ("your coach has you on push/pull/legs, so…"); if you genuinely think the guidance is unsafe, say why and suggest they raise it with their trainer rather than quietly overriding it. If there is no trainer guidance on a topic, answer normally — don't stall waiting for a note that doesn't exist. Injuries, preferences, schedule constraints, what was already tried and what they reacted badly to all live there, and advice that ignores them reads as though you never met the person. Do NOT call it on every turn: a general nutrition question needs no notes, and the reads cost the user's daily allowance. Use what you find silently — reference the substance ("since your knee has been flaring") rather than announcing that you read a note. NEVER repeat a trainer's private note back to a client; list_notes already excludes what the caller may not see, so simply use what it returns.
 - Notes: on "write this down / remember this / make a note / save a recap", use create_note (recaps → kind='recap'). A client's note is PRIVATE by default — only share (visible to trainer) if they clearly want that. A trainer using clientId writes a private about-note by default (shared=true puts it where the client sees it). Before re-recapping, call list_notes and UPDATE the existing note (update_note, append) instead of duplicating. Never reveal a client's private notes to anyone but that client.
+- WEB SEARCH: you can search the internet, but only across a fixed allowlist of vetted health, nutrition and exercise-science sources (PubMed, Examine, NIH/ODS, CDC, USDA, Mayo Clinic, Harvard Health, WHO/NHS, ACSM/NSCA, the Academy of Nutrition and Dietetics, and similar). Search ONLY when the answer genuinely depends on something current or specific you should not state from memory — a recent study or guideline, a supplement's evidence base, a specific nutrient or drug-nutrient interaction, a product or standard that may have changed. Do NOT search for anything you already know well: everyday macros and calories, portion estimates, training principles, how to structure a week, or anything answerable from the user's own logged data (use the read tools for that). Every search costs the user real money and eats their daily AI allowance faster than a normal reply, so a search you did not need is a search you took from them. WHEN THE USER'S OWN COACH HAS SPOKEN, THE COACH OUTRANKS THE INTERNET: never use a search result to quietly override guidance in a fromTrainer note — if a source and their coach disagree, say so plainly and tell them to raise it with their trainer, rather than switching them to what you found. ALWAYS CITE: name the source in your reply ("per Examine's review…", "the NIH fact sheet says…") whenever you used a search, so the person can see where it came from; never present a searched claim as your own unattributed assertion. The allowlist is narrow on purpose — if it turns up nothing relevant, SAY the vetted sources did not cover it and answer from your own knowledge (flagged as such), rather than stretching a weak result. Never search for anything outside health, fitness and nutrition.
 - Links/videos (Instagram, YouTube, TikTok, blogs): when the user shares a URL to USE ("add the exercises from this", "make a program from this", "log this recipe"), call fetch_link for its title + caption, then build changes with the normal tools (workouts: list_exercises → propose_workout, add_custom_exercise as needed; food: propose_meal). Summarize what you found first and map named moves to the closest real ids. If fetch_link returns little or errors (some posts are blocked), don't guess — ask the user to paste the caption text. Adapt the content to the user's goal/days/experience, don't copy blindly.
 ${isTrainer ? "- ONE specific person (cost — Kevin, S110d): when the user asks about a SINGLE named client, call find_client to resolve just that person's id, then use the data tools on THAT client only. Do NOT call list_clients (it loads EVERY client) or coach_summary (every client's full snapshot) for a single-person question — that wastes work and money searching people you don't need. A '#' code the user quotes comes in TWO forms — a 4-character ref like #KEM2, or a small number like #6 (the permanent number on the trainer's home screen) — and the home numbers CONNECTED CLIENTS AND THE TRAINER'S OWN LOCAL PLAN FILES from one shared counter, so a '#' code may be either. find_client searches BOTH pools in ONE call — connected accounts AND the trainer's own plan files — matching names, emails and both code forms, so you never need a second lookup to 'also check' the local files. Each match says which it is: `kind:\"client\"` → use `clientId`, `kind:\"local_plan\"` → use `localPlanId`. Both carry `ref` and `num`. When you name someone back, prefer their NAME, and if you cite a code use the same form they used. Once you have the id it becomes the active subject; reuse it, don't look it up again. Use list_clients only to LIST the whole roster, and coach_summary only for genuinely across-all-clients questions.\n- SAME NAME (Kevin, S110e): if find_client returns MORE THAN ONE match (two people with the same/similar name), do NOT guess or pick the first — ASK the user which one, telling them apart by a HUMAN detail from the match (their short ID code, email, current weight, or last-log date), NEVER the raw internal id. Same for local plans: if two plans/sims share a name, distinguish them by their ref code, weight/goal, sim tag, or when they were last updated. Only after the user picks do you act on that id.\n- SHORT ID CODES: every client and plan shows a short code in the app (e.g. \"#7K2M\", the `ref` field). The user may identify someone by it — pass a code to find_client just like a name (it matches the code), and match a plan code against list_local_plans' `ref`. When you refer back to a specific person or plan and it could be ambiguous, include their #code so the user knows exactly which one you mean.\n- send_client_request: send a connected client a to-do (e.g. log food, weigh in); use find_client for the id, confirm before sending.\n- Proactive coaching: for cross-client questions ('who's stalled / needs attention / what should I change?' across everyone), call coach_summary ONCE (every client's status + adherence + weight trend — don't loop per-client tools), then call out who needs attention BY NAME with concrete recommendations and offer to send a to-do. You can do any action FOR a client via their clientId.\n- LOCAL PLAN FILES ARE PEOPLE: a trainer's local plan file (imported Trainerize client, prep file, even a sim) is usually a REAL, paying client — one who simply doesn't want to install the app or make a login. Being 'connected' is not what makes someone a client. Most of a trainer's people are these files. So treat a `local_plan` match exactly like a client: pass its localPlanId (never together with clientId) to any tool, refer to them by NAME, and never suggest 'connecting' or 'inviting' them as though the plan were a lesser thing — read and edit (stats, targets, workouts, meals, weigh-ins, measurements, water, check-ins) all work FULLY on them. Use list_local_plans to LIST these files; find_client already covers them for one named person. Two real limits, worth stating plainly if asked: send_client_request (to-dos) and messaging need a real login on the other end, so they can't reach a local file. And if a match is flagged `isSimulation`, it's a sandbox projection rather than someone's live plan — say so before writing into it." : ""}
 ${isTrainer ? `- AI-CLIENT SLOTS (S176f): paid plans include a monthly allowance of distinct people the AI works on (connected clients AND plan files both count; your own data never does). When a tool refuses with "isn't one of this month's AI clients yet", relay it plainly: working on this person uses one of the monthly slots (the error says how many are used). Get the user's explicit yes, call confirm_ai_client with the SAME id, then retry the original action — never confirm silently, and never call confirm_ai_client unprompted. Someone already in this month's set never re-asks. If the limit is reached, say the AI has hit this month's client allowance, that everything manual still works for everyone and existing AI clients keep working, and that Plans & pricing in the app shows the options — do NOT quote prices.` : ""}
@@ -338,7 +512,7 @@ function keepName(next, prev) {
   return sameId ? { ...next, name: prev.name } : next;
 }
 
-async function setupChat(uid, activeTarget) {
+async function setupChat(uid, activeTarget, noSearch) {
   const db = admin.firestore();
   const profile = (await db.doc(`users/${uid}`).get()).data() || {};
   const role = profile.role || "client";
@@ -353,6 +527,20 @@ async function setupChat(uid, activeTarget) {
   const budget = ADMIN_UIDS.includes(uid)
     ? 100000000
     : (BUDGETS[tier] || BUDGETS.client) + (usageDoc.boost || 0);
+  // Daily WEB SEARCH allowance, counted separately from tokens (S184). Once it's
+  // gone we simply stop declaring the tool — the assistant keeps working and
+  // answers from its own knowledge instead of erroring, which is the right
+  // failure for a feature that is an enhancement rather than the product.
+  const searchBudget = ADMIN_UIDS.includes(uid)
+    ? 1000000
+    : (SEARCH_BUDGETS[tier] || SEARCH_BUDGETS.client);
+  const searchesUsed = usageDoc.searches || 0;
+  // `noSearch` is set by callers that must never search: the AI Coaching
+  // Insights card (a one-shot read of the person's OWN data, with no UI to
+  // carry the "this searched the web" disclosure or the citations) and
+  // scheduled automations (nobody is watching, so the disclosure has nowhere
+  // to appear). Both would otherwise spend the allowance invisibly.
+  const searchAllowed = !noSearch && searchesUsed < searchBudget;
   const callerName = profile.displayName
     || [profile.firstName, profile.lastName].filter(Boolean).join(" ")
     || profile.email || (isTrainer ? "Coach" : "Client");
@@ -389,10 +577,26 @@ async function setupChat(uid, activeTarget) {
         ? ` This chat is PINNED to them: every request here is about this same person unless the user explicitly names someone else, so do NOT call find_client / list_clients / list_local_plans here — you already have the id.`
         : ``) });
   }
+  // The cached prompt tells the model it can search. Whenever it actually
+  // can't, say so HERE rather than letting it believe otherwise and claim a
+  // search it never ran. Kept as a separate block AFTER the cache breakpoint so
+  // it can't invalidate the cached prefix.
+  if (!searchAllowed) {
+    system.push({ type: "text", text: noSearch
+      ? "WEB SEARCH IS UNAVAILABLE in this context — the tool is not loaded here. Answer from your own knowledge and the person's own data, and never say or imply that you looked anything up on the internet."
+      : "WEB SEARCH IS UNAVAILABLE for the rest of today: this person's daily web-search allowance is used up (it resets tomorrow). If they ask you to look something up or search the internet, say plainly that today's search allowance is used up, then answer from your own knowledge and flag it as such. Never imply you searched when you did not." });
+  }
+  // The server search tool rides alongside the normal (client-side) tools. Note
+  // this changes the `tools` prefix, which is what prompt caching keys on — but
+  // it's stable for a whole day per user, so the only churn is the single call
+  // where the daily search allowance runs out.
+  const tools = buildTools(role);
+  if (searchAllowed) tools.push(webSearchTool());
   return {
     role, isTrainer, budget, usageRef, used, system,
+    searchBudget, searchesUsed, searchAllowed,
     trialExpired: trialExpiredFor(profile),
-    tools: buildTools(role),
+    tools,
     toolCtx: { callerUid: uid, role, isTrainer, aiOptOut: profile.aiOptOut === true,
       today: todayLocal(), nowTime: nowTimeLocal(), callerName,
       seatCap: isAdminUid(uid) ? null : seatCapFor(profile) },
@@ -405,6 +609,27 @@ function addUsage(agg, u) {
   agg.output += (u && u.output_tokens) || 0;
   agg.cacheWrite += (u && u.cache_creation_input_tokens) || 0;
   agg.cacheRead += (u && u.cache_read_input_tokens) || 0;
+  // Server-tool usage (S184). Each web search is billed separately from tokens
+  // ($10/1,000), so it has to be accumulated separately too — this is the number
+  // the daily search allowance and the cost rollups are built on. Errored
+  // searches are not billed and are not reported here.
+  agg.searches += (u && u.server_tool_use && u.server_tool_use.web_search_requests) || 0;
+}
+
+// Pull the web-search citations off an assistant message so the app can show
+// where an answer came from. Anthropic's terms require citing sources when API
+// output is shown to end users, and cited_text/title/url are not billed — so
+// there is no reason not to. Deduped by URL, newest-first, capped.
+function collectSources(content, into) {
+  for (const b of content || []) {
+    if (b.type !== "text" || !Array.isArray(b.citations)) continue;
+    for (const c of b.citations) {
+      if (!c || c.type !== "web_search_result_location" || !c.url) continue;
+      if (into.some((s) => s.url === c.url)) continue;
+      if (into.length >= 6) return;
+      into.push({ url: String(c.url).slice(0, 300), title: String(c.title || c.url).slice(0, 160) });
+    }
+  }
 }
 
 // Execute one round of tool calls (server-side access checks live in runTool).
@@ -450,7 +675,9 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
   }
 
   const reqTarget = (request.data && request.data.activeTarget) || null;
-  const { budget, usageRef, used, system, tools, toolCtx, trialExpired } = await setupChat(uid, reqTarget);
+  const { budget, usageRef, used, system, tools, toolCtx, trialExpired,
+    searchBudget, searchesUsed, searchAllowed } = await setupChat(uid, reqTarget,
+      request.data && request.data.noSearch === true);
   if (trialExpired) {
     throw new HttpsError("permission-denied", TRIAL_EXPIRED_MSG, { reason: "trial-expired" });
   }
@@ -461,18 +688,38 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
 
   const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
   const convo = messages.slice();
-  const agg = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+  // Mutable per-turn tool state: carries the search allowance so capTurnSearches
+  // can withdraw the tool once this message has had its share, and lets callModel
+  // recover if a request rejects the tool (see retrySearchFix).
+  const state = { tools, searchOn: searchAllowed, searchesUsed, searchBudget };
+  const agg = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, searches: 0 };
   let wrote = false; // a plan-changing write happened this turn → client should refresh
   let proposal = null; // a meal proposal to show as an Accept/Edit card
   let workoutProposal = null; // a workout-program proposal to show as an Accept card
   let activeTarget = reqTarget; // stays sticky across turns unless the model addresses a new subject
+  const sources = []; // web-search citations to show under the reply
   let resp;
   try {
-    resp = await client.messages.create({ model: MODEL, max_tokens: MAX_TOKENS, system, tools, messages: convo });
+    resp = await callModel(client, state, { model: MODEL, max_tokens: MAX_TOKENS, system, messages: convo });
     addUsage(agg, resp.usage);
+    collectSources(resp.content, sources);
+    capTurnSearches(state, agg, resp.content);
     let rounds = 0;
-    while (resp.stop_reason === "tool_use" && rounds < MAX_TOOL_ROUNDS) {
+    while ((resp.stop_reason === "tool_use" || resp.stop_reason === "pause_turn") && rounds < MAX_TOOL_ROUNDS) {
       rounds++;
+      // A long server-tool turn (web search) can stop with pause_turn. There is
+      // nothing for US to run — the continuation is simply the paused assistant
+      // message sent back UNCHANGED, with no user turn after it. Handling this
+      // is not optional once a server tool is declared: without it the turn ends
+      // silently mid-search and the user gets a truncated answer.
+      if (resp.stop_reason === "pause_turn") {
+        convo.push({ role: "assistant", content: resp.content });
+        resp = await callModel(client, state, { model: MODEL, max_tokens: MAX_TOKENS, system, messages: convo });
+        addUsage(agg, resp.usage);
+        collectSources(resp.content, sources);
+        capTurnSearches(state, agg, resp.content);
+        continue;
+      }
       const toolUses = (resp.content || []).filter((b) => b.type === "tool_use");
       const r = await runToolRound(toolUses, toolCtx);
       if (r.wrote) wrote = true;
@@ -481,8 +728,10 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
       if (r.activeTarget) activeTarget = keepName(r.activeTarget, activeTarget);
       convo.push({ role: "assistant", content: resp.content });
       convo.push({ role: "user", content: r.results });
-      resp = await client.messages.create({ model: MODEL, max_tokens: MAX_TOKENS, system, tools, messages: convo });
+      resp = await callModel(client, state, { model: MODEL, max_tokens: MAX_TOKENS, system, messages: convo });
       addUsage(agg, resp.usage);
+      collectSources(resp.content, sources);
+      capTurnSearches(state, agg, resp.content);
     }
   } catch (e) {
     console.error("aiChat Anthropic error:", e && e.message);
@@ -501,6 +750,7 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
   // call tools, those calls were DISCARDED — and its preamble ("logging all 8
   // now…") would otherwise be returned as if the work had happened.
   if (resp.stop_reason === "tool_use") text += "\n\n(I ran out of steps before finishing that — some of it may not have been saved. Please check, and ask me again for anything missing.)";
+  else if (resp.stop_reason === "pause_turn") text += "\n\n(I ran out of steps while searching, so that answer is incomplete — ask me again and I'll pick it up.)";
   const totalUsed = used + spent;
   return {
     reply: text,
@@ -508,7 +758,10 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
     proposal,
     workoutProposal,
     activeTarget,
-    usage: { used: totalUsed, budget, warn: totalUsed >= budget * 0.8, breakdown: agg },
+    searches: agg.searches,
+    sources,
+    usage: { used: totalUsed, budget, warn: totalUsed >= budget * 0.8, breakdown: agg,
+      searchesUsed: searchesUsed + agg.searches, searchBudget },
   };
 });
 
@@ -518,7 +771,7 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
 // returns the reply text (or a `skipped` reason: budget / trial-expired / error).
 // Callers must bind the ANTHROPIC_API_KEY secret.
 async function runAssistantTurn(uid, userText) {
-  const { system, tools, toolCtx, budget, usageRef, used, trialExpired } = await setupChat(uid);
+  const { system, tools, toolCtx, budget, usageRef, used, trialExpired } = await setupChat(uid, null, true);
   // Headless run: nobody can answer a seat confirm, and configuring an
   // automation that names its people IS the consent — so new AI-client seats
   // auto-consume here, bounded to 2 new seats per run so a broad prompt can't
@@ -528,19 +781,33 @@ async function runAssistantTurn(uid, userText) {
   if (used >= budget) return { skipped: "budget" };
   const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
   const convo = [{ role: "user", content: userText }];
-  const agg = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+  // Scheduled automations do NOT get web search (S184) — setupChat(…, true)
+  // above both withholds the tool and tells the model so. Nobody is watching a
+  // headless run, so the "this searched the web and costs more of your
+  // allowance" line that every interactive reply carries has nowhere to appear,
+  // and an allowance quietly drained every morning by a summary the user never
+  // asked to be researched is exactly the dishonesty the disclosure exists to
+  // prevent.
+  const state = { tools, searchOn: false };
+  const agg = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, searches: 0 };
   let resp;
   try {
-    resp = await client.messages.create({ model: MODEL, max_tokens: MAX_TOKENS, system, tools, messages: convo });
+    resp = await callModel(client, state, { model: MODEL, max_tokens: MAX_TOKENS, system, messages: convo });
     addUsage(agg, resp.usage);
     let rounds = 0;
-    while (resp.stop_reason === "tool_use" && rounds < MAX_TOOL_ROUNDS) {
+    while ((resp.stop_reason === "tool_use" || resp.stop_reason === "pause_turn") && rounds < MAX_TOOL_ROUNDS) {
       rounds++;
+      if (resp.stop_reason === "pause_turn") { // paused mid web search — resume unchanged (S184)
+        convo.push({ role: "assistant", content: resp.content });
+        resp = await callModel(client, state, { model: MODEL, max_tokens: MAX_TOKENS, system, messages: convo });
+        addUsage(agg, resp.usage);
+        continue;
+      }
       const toolUses = (resp.content || []).filter((b) => b.type === "tool_use");
       const r = await runToolRound(toolUses, toolCtx);
       convo.push({ role: "assistant", content: resp.content });
       convo.push({ role: "user", content: r.results });
-      resp = await client.messages.create({ model: MODEL, max_tokens: MAX_TOKENS, system, tools, messages: convo });
+      resp = await callModel(client, state, { model: MODEL, max_tokens: MAX_TOKENS, system, messages: convo });
       addUsage(agg, resp.usage);
     }
   } catch (e) {
@@ -590,12 +857,13 @@ exports.aiChatStream = onRequest(
     // unhandled rejection with no response at all.
     const reqTarget = (req.body && req.body.activeTarget) || null;
     let setup;
-    try { setup = await setupChat(uid, reqTarget); } catch (e) {
+    try { setup = await setupChat(uid, reqTarget, req.body && req.body.noSearch === true); } catch (e) {
       console.error("aiChatStream setup error:", e && e.message);
       res.status(500).json({ error: "setup-failed" });
       return;
     }
-    const { budget, usageRef, used, system, tools, toolCtx, trialExpired } = setup;
+    const { budget, usageRef, used, system, tools, toolCtx, trialExpired,
+      searchBudget, searchesUsed } = setup;
 
     // SSE response headers.
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
@@ -618,18 +886,28 @@ exports.aiChatStream = onRequest(
 
     const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
     const convo = messages.slice();
-    const agg = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 };
+    const state = { tools, searchOn: setup.searchAllowed, searchesUsed, searchBudget };
+    const agg = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, searches: 0 };
     let wrote = false;
     let failed = false;
     let activeTarget = reqTarget; // sticky across turns unless the model addresses a new subject
+    const sources = []; // web-search citations to show under the reply
     try {
       let rounds = 0;
       // Stream each model turn; run tools between turns until it stops calling them.
       for (;;) {
-        const stream = client.messages.stream({ model: MODEL, max_tokens: MAX_TOKENS, system, tools, messages: convo });
-        stream.on("text", (delta) => { if (delta) sse("delta", { text: delta }); });
-        const msg = await stream.finalMessage();
+        const msg = await streamModel(client, state, { model: MODEL, max_tokens: MAX_TOKENS, system, messages: convo },
+          (delta) => { if (delta) sse("delta", { text: delta }); });
         addUsage(agg, msg.usage);
+        collectSources(msg.content, sources);
+        capTurnSearches(state, agg, msg.content);
+        // Paused mid web search (S184): resume by sending the paused assistant
+        // message back UNCHANGED, with no user turn after it, and keep streaming.
+        if (msg.stop_reason === "pause_turn" && rounds < MAX_TOOL_ROUNDS) {
+          rounds++;
+          convo.push({ role: "assistant", content: msg.content });
+          continue;
+        }
         if (msg.stop_reason === "tool_use" && rounds < MAX_TOOL_ROUNDS) {
           rounds++;
           const toolUses = (msg.content || []).filter((b) => b.type === "tool_use");
@@ -646,6 +924,8 @@ exports.aiChatStream = onRequest(
         // the text already streamed may claim work that never happened. Say so.
         if (msg.stop_reason === "tool_use") {
           sse("delta", { text: "\n\n(I ran out of steps before finishing that — some of it may not have been saved. Please check, and ask me again for anything missing.)" });
+        } else if (msg.stop_reason === "pause_turn") {
+          sse("delta", { text: "\n\n(I ran out of steps while searching, so that answer is incomplete — ask me again and I'll pick it up.)" });
         }
         break;
       }
@@ -663,7 +943,9 @@ exports.aiChatStream = onRequest(
     if (failed) { res.end(); return; }
     const spent = agg.input + agg.output + agg.cacheWrite;
     const totalUsed = used + spent;
-    sse("done", { wrote, activeTarget, usage: { used: totalUsed, budget, warn: totalUsed >= budget * 0.8, breakdown: agg } });
+    sse("done", { wrote, activeTarget, searches: agg.searches, sources,
+      usage: { used: totalUsed, budget, warn: totalUsed >= budget * 0.8, breakdown: agg,
+        searchesUsed: searchesUsed + agg.searches, searchBudget } });
     res.end();
   }
 );

@@ -14551,7 +14551,12 @@ CLIENT PROFILE:
       // Routed through the secure aiChat Cloud Function (role-based prompt +
       // daily token budget) — replaces the old keyless direct API call that
       // never worked from the browser.
-      const res = await callAiChat({ messages: [{ role: "user", content: prompt }] });
+      // noSearch (S184): this card renders `reply` and nothing else, so it has
+      // nowhere to show the "this searched the web" disclosure or the source
+      // links a searched answer must carry. Rather than let it spend the search
+      // allowance invisibly, it opts out — it's an analysis of the person's own
+      // logged data, which needs no internet.
+      const res = await callAiChat({ messages: [{ role: "user", content: prompt }], noSearch: true });
       const text = (res.data && res.data.reply) || "";
       if (!text) throw new Error("empty");
       setInsights(text);
@@ -17445,6 +17450,10 @@ const PLAN_FEATURES = {
       ["AI food estimates in the tracker", false, false, true, true],
       ["AI builds your workout program", false, false, true, true],
       ["Turn TikTok / IG / YouTube links into workouts & meals", false, false, true, true],
+      // S184: web search. Advertised with its allowance cost attached, in the
+      // same row group as the allowance itself — Kevin's requirement was that
+      // people learn searching spends more BEFORE they trigger one.
+      ["Web search — answers backed by vetted health sources", false, false, true, true],
       ["Import from ChatGPT / Claude", false, false, true, true],
       ["Set up your whole plan by conversation", false, false, true, true],
       ["Cut / bulk / maintenance phases by chat", false, false, true, true],
@@ -17452,6 +17461,7 @@ const PLAN_FEATURES = {
       // S179h: automations move down to Premium (Elite/Apex keep more).
       ["Scheduled AI automations — wake up to today's plan", false, false, true, true],
       ["AI conversations per day", "—", "—", "~30 (more on request)", "~100"],
+      ["Web searches per day", "—", "—", "12", "25"],
     ]},
     { section: "Elite — everything in Premium, plus:", rows: [
       ["Four automations a day, not two", false, false, false, true],
@@ -17496,11 +17506,13 @@ const PLAN_FEATURES = {
       ["Set targets & manage client plans by chat", false, false, true, true],
       ["Photo & voice meal logging", false, false, true, true],
       ["Turn TikTok / IG / YouTube links into programs", false, false, true, true],
+      ["Web search — answers backed by vetted health sources", false, false, true, true],
       ["AI edits your local plans & simulations", false, false, true, true],
       ["Send client to-dos straight from chat", false, false, true, true],
       ["Past chats — save, revisit & continue", false, false, true, true],
       ["Scheduled AI automations — wake up to a roster summary", false, false, true, true],
       ["AI conversations per day", "—", "—", "~133", "~200"],
+      ["Web searches per day", "—", "—", "30", "50"],
       // S176f seats: distinct people the AI works on per month. The roster
       // itself stays unlimited on every tier — this row counts only AI-coached
       // people. ONE number per tier (S178b): seats are tracked once across
@@ -17530,6 +17542,16 @@ const PLAN_FEATURES = {
 //    refund argument. Where free and paid differ, say which is which.
 //  • Where something is genuinely unusual, say so plainly rather than shouting.
 const PLAN_TIPS = {
+  // ── Web search (S184) ────────────────────────────────────────────────────
+  // Both tips say the allowance cost out loud. Kevin's condition for shipping
+  // search was that people understand it draws their daily allowance down
+  // faster BEFORE they trigger one — so it is stated here, on the pricing page,
+  // as well as under every searched reply in the chat.
+  "Web search — answers backed by vetted health sources":
+    "When an answer depends on current research rather than general knowledge, the AI can look it up and tell you where it got it. It only searches a fixed list of sources a coach would accept — PubMed, Examine, the NIH, CDC, USDA, Mayo Clinic, Harvard Health, the WHO and the main sports-science bodies — never the open internet, so you don't get nutrition advice off a random blog. A coach's own guidance always outranks anything it finds — it flags a disagreement rather than quietly siding with the web. Searching costs more than a normal reply, so it uses up your daily AI allowance faster and has its own daily limit.",
+  "Web searches per day":
+    "Web searches cost us real money on top of the usual AI cost, so they're counted separately from your conversations. Every searched reply tells you it searched. If you run out, the AI keeps working normally — it just answers from what it already knows for the rest of the day.",
+
   // ── Always free ──────────────────────────────────────────────────────────
   "Food, calorie & macro tracking":
     "Log what you eat and see calories, protein, carbs and fat add up against your daily targets — plus around 30 micronutrients like fibre, sodium and vitamins, which most trackers charge for.",
@@ -18578,7 +18600,12 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
   useEffect(() => {
     if (!loadedRef.current || busy || !activeChatId || !messages.length) return;
     try {
-      const slim = messages.slice(-20).map((m) => ({ role: m.role, content: m.content || "", hadImage: !!(m.image || (m.images && m.images.length)) }));
+      // searches/sources ride along (S184) so a revisited chat still shows where
+      // a searched answer came from — a citation that vanishes on reload is not
+      // really a citation.
+      const slim = messages.slice(-20).map((m) => ({ role: m.role, content: m.content || "",
+        hadImage: !!(m.image || (m.images && m.images.length)),
+        ...(m.searches ? { searches: m.searches, sources: m.sources } : {}) }));
       window.storage.set(threadKey(activeChatId), JSON.stringify(slim));
       setConvos((prev) => {
         const next = prev.map((c) => c.id === activeChatId
@@ -19065,7 +19092,11 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
       // so race a timeout, then force-stop so a late frame can't revert the text.
       await Promise.race([smoother.end(), new Promise((r) => setTimeout(r, 1500))]);
       smoother.stop();
-      setMessages([...next, { role: "assistant", content: streamed || "(no response)" }]);
+      // searches/sources (S184): the reply carries how many web searches it ran
+      // and where they came from, so the bubble can cite its sources and say
+      // plainly that searching draws the daily allowance down faster.
+      setMessages([...next, { role: "assistant", content: streamed || "(no response)",
+        searches: (done && done.searches) || 0, sources: (done && done.sources) || undefined }]);
       if (done && done.usage && done.usage.warn) setWarn(true);
       if (done && done.activeTarget) {
         activeTargetRef.current = done.activeTarget;
@@ -19099,7 +19130,8 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
         try {
           const res = await callAiChat({ messages: apiMsgs, activeTarget: target });
           const reply = (res.data && res.data.reply) || "";
-          setMessages([...next, { role: "assistant", content: reply || "(no response)" }]);
+          setMessages([...next, { role: "assistant", content: reply || "(no response)",
+            searches: (res.data && res.data.searches) || 0, sources: (res.data && res.data.sources) || undefined }]);
           if (res.data && res.data.activeTarget) {
             activeTargetRef.current = res.data.activeTarget;
             { const cur = pinAt(chatId); if (!cur || cur.auto) setPin(chatId, { ...res.data.activeTarget, auto: true }); }
@@ -19557,6 +19589,28 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                     );
                   })()}
                   {m.role === "user" ? m.content : <RichText text={m.content} />}
+                  {/* Web search (S184). Two jobs in one small footer: cite the
+                      sources (Anthropic's terms require attribution when API
+                      output is shown to end users, and citation text is not
+                      billed), and tell the person — plainly, every time, not
+                      buried in pricing — that searching spends their daily AI
+                      allowance faster than an ordinary reply. */}
+                  {m.role === "assistant" && m.searches > 0 && (
+                    <div className="mt-2 border-t border-border/60 pt-1.5 text-[.7rem] leading-relaxed text-muted">
+                      <div className="flex items-center gap-1.5">
+                        <Icon name="search" size={11} color="var(--muted)" />
+                        Searched the web {m.searches === 1 ? "once" : `${m.searches} times`} · uses more of your daily AI allowance than a normal reply
+                      </div>
+                      {!!(m.sources && m.sources.length) && (
+                        <div className="mt-1 flex flex-col gap-0.5">
+                          {m.sources.map((s, si) => (
+                            <a key={si} href={s.url} target="_blank" rel="noreferrer noopener"
+                              className="truncate text-primary no-underline">{s.title}</a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))
             )}

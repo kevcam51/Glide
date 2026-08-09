@@ -1,7 +1,8 @@
 # Web search for the Glidna AI — scoping
 
-_Written S183u (Aug 8, 2026). Nothing built yet. Kevin deferred the decision; this
-is the paperwork so it can be made deliberately._
+_Written S183u (Aug 8, 2026) as scoping; **BUILT in S184 (Aug 8, 2026)** — see
+"What actually shipped" at the bottom for the numbers as implemented, which are
+the ones to trust where they differ from the estimates above._
 
 ## The short answer: no, we don't need a third-party API
 
@@ -153,3 +154,136 @@ Ship it, but not open. In order:
 
 Estimated build: small — the tool declaration and prompt are an afternoon; the
 budget counter and `pause_turn` handling are the real work.
+
+---
+
+## What actually shipped (S184, Aug 8 2026)
+
+Built as recommended, with the allowlist, the daily search counter and the
+allowance disclosure all in the same change. Where a number below differs from
+the estimates above, **this section is the one to trust.**
+
+### The tool
+
+`functions/aichat.js` → `webSearchTool()`. `web_search_20260318`, `max_uses: 3`,
+`allowed_domains` (27 domains covering ~22 vetted organisations — PubMed/PMC, Cochrane, ClinicalTrials,
+Examine, JISSN, ASN, BJSM; NIH/ODS, CDC, FDA, USDA/FoodData, WHO, NHS, NICE,
+EFSA; Mayo Clinic, Harvard Health + Nutrition Source, AHA, ADA, the Academy of
+Nutrition and Dietetics, ACSM, NSCA; Stronger By Science), `user_location`
+US/Eastern, `response_inclusion: "excluded"`. Dynamic filtering is on by default
+at this version, so we do **not** declare `code_execution` ourselves.
+
+The prompt block sits with the other action rules and carries all three safety
+requirements: search only when the answer genuinely depends on something current
+(never for macros, portions, training principles, or anything in the user's own
+logs), **a `fromTrainer` note outranks anything found on the web** — surface the
+disagreement, never quietly switch them — and **always name the source**.
+
+### Where the money is capped
+
+Two independent limits, because either alone leaks:
+
+| | Premium / trial | Elite | Ultra | Coach trial | Coach | Coach Elite | Coach Ultra |
+|---|---|---|---|---|---|---|---|
+| Searches/day | 12 | 25 | 40 | 15 | 30 | 50 | 70 |
+
+**`max_uses: 3` alone does NOT give you a per-message ceiling**, and assuming it
+did was the one real bug the pre-deploy review caught. `max_uses` is scoped to a
+single API *request*, and one user message drives up to `MAX_TOOL_ROUNDS + 1`
+= 11 requests (the model calls our tools, we answer, it goes again) — each with a
+fresh budget of 3. Unchecked that is 33 searches (33¢) for one message, and the
+daily allowance couldn't stop it either, because it is read once before the turn
+starts. Premium's worst case was ~$10/mo of search, not $3.60 — negative margin.
+
+`capTurnSearches()` closes it: after every round it withdraws the tool once the
+turn has used its 3, or once the daily allowance is spent. Two rules make that
+safe, and both matter:
+
+- **Never withdraw while a server tool is waiting.** A `server_tool_use` block
+  with no matching result block in the same response means Anthropic runs it at
+  the start of the *next* request, and a request that no longer declares that
+  tool fails with a 400. `hasPendingServerTool()` is that check.
+- **If withdrawing is rejected anyway, put it back.** `retrySearchFix()` recovers
+  in either direction, once per request. So the cap can tighten spend but can
+  never break a turn — which is the whole reason it was safe to add to a path
+  that couldn't be tested against the live API first.
+
+Admin (Kevin) is effectively uncapped, matching the token budget.
+
+With the per-message cap in place, Premium's worst case is back to ~$3.60/mo of
+search on top of the ~$7.13/mo token ceiling, against $14.26 kept — positive even
+if someone maxes both every day of a month, which nobody does (measured behaviour
+is ~15% of exchanges searching).
+
+The counter lives beside the token counter: `searches` on
+`users/{uid}/aiUsage/{date}`, incremented from
+`usage.server_tool_use.web_search_requests` by `aiusage.recordUsage`, which also
+adds $0.01/search to `costMicros` so the admin dashboard's spend stays true.
+Running out is a **soft** limit — the tool simply isn't declared for the rest of
+the day and the assistant answers from its own knowledge, with an uncached
+system block telling it to say so rather than pretend it searched.
+
+### Telling the user (Kevin's added requirement)
+
+- **In chat, every time:** a footer under any reply that searched — "Searched the
+  web N times · uses more of your daily AI allowance than a normal reply" — with
+  the actual sources beneath it as links. Citations are collected from the
+  `web_search_result_location` blocks on the reply, deduped, capped at 6, and
+  persisted with the thread so a revisited chat still shows them.
+- **Before they buy:** a "Web search — answers backed by vetted health sources"
+  row and a "Web searches per day" row in `PLAN_FEATURES`, both grids, each with
+  a `PLAN_TIPS` explainer that states the allowance cost in plain English.
+
+### Three things worth knowing before touching this again
+
+- **A rejected search tool must never break chat.** Web search can be switched
+  off for the whole organization in the Claude Console, and a request that
+  declares it then fails with a **400** — not a soft in-result error. Same for an
+  unusable tool version or a malformed domain. That would take the assistant down
+  for every user on every message, so `callModel`/`streamModel` drop the tool and
+  retry once on a 400 that mentions it. Keep that guard.
+- **`pause_turn` is handled** in `aiChat`, `aiChatStream` and `runAssistantTurn`:
+  push the paused assistant message back unchanged, with **no** user turn after
+  it, and continue. It shares the `MAX_TOOL_ROUNDS` budget.
+- **`encrypted_content` was a non-issue.** Within a turn we already push
+  `resp.content` back verbatim, and across turns `capHistory` keeps only text and
+  image blocks — so a search result is never sent back in a modified form. Don't
+  "helpfully" start persisting raw search blocks in `caliq-ai-chat-{id}`; that is
+  precisely what would start 400ing.
+
+### Two callers deliberately opt out
+
+`setupChat(uid, target, noSearch)` withholds the tool *and* tells the model it
+is withheld, so it can't claim a search it never ran:
+
+- **AI Coaching Insights** renders `reply` and nothing else — no place to put the
+  disclosure or the citations — so a search there would spend the allowance
+  invisibly. It analyses the person's own logged data anyway.
+- **Scheduled automations**, for the reason below.
+
+### Deliberately not done
+
+- **Scheduled automations don't search.** Nobody is watching a headless run, so
+  the disclosure has nowhere to appear — an allowance quietly drained every
+  morning by a summary the user never asked to be researched is the exact
+  dishonesty the disclosure exists to prevent.
+- **The MCP connector doesn't inherit it.** A server tool never passes through
+  `runTool()`, so this one genuinely cannot be mirrored — and someone running
+  Glidna from their own Claude already has that Claude's search. This is the one
+  place the [[ai-connector-parity]] rule doesn't hold, by nature rather than
+  neglect.
+- **No `blocked_domains` fallback** — it is mutually exclusive with
+  `allowed_domains` and sending both is a 400.
+
+### Next
+Watch `searches` in the usage rollups for two weeks before loosening `max_uses`
+or widening the allowlist, exactly as recommended above.
+
+The scoping section above says a line about this is owed in
+`docs/LEGAL-SESSIONS.md` — **that is the wrong file.** LEGAL-SESSIONS.md is about
+session packages, prepaid packs and the Florida Health Studio Act; it has nothing
+to do with AI-generated content. What is actually owed is a clause in the Terms
+of Service (`/terms.html`) covering third-party health information surfaced with
+citation: that Glidna quotes vetted sources but does not endorse or verify them,
+that nothing it surfaces is medical advice, and that a user's own coach and
+clinician outrank it.

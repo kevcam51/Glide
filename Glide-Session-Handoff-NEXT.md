@@ -1,64 +1,69 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ⏭⏭⏭ NEXT UP — BUILD WEB SEARCH (Kevin approved, S183u) — START HERE
+## ⭐⭐⭐⭐ S184 (Aug 8, 2026) — WEB SEARCH IS BUILT (not deployed yet)
 
-**Kevin approved the build.** Read **`docs/WEB-SEARCH.md`** first — the whole
-design, cost model, integration traps and recommendation are there and are NOT
-duplicated here. This block only carries what he said when he approved it.
+**Code is written, `npm run build` passes, functions lint clean and load clean.
+It has NOT been deployed and NO live AI call has been made against it** — the
+Anthropic key is in Secret Manager, so the only way to exercise it is to deploy.
+Kevin's go-ahead is the next step, then a live smoke test.
 
-**The correction that makes this small: we do NOT need a third-party API.**
-Anthropic ships web search as a **server-side tool** on the same Claude API
-`functions/aichat.js` already calls. Declare it in `tools`; Anthropic runs the
-searches. No vendor, no key, no Cloud Function, no result pipeline. $10 per
-1,000 searches (1¢ each), verified against the live docs on Aug 8.
+**Read `docs/WEB-SEARCH.md` → "What actually shipped"** — the full design,
+numbers, traps and deliberate omissions live there and are NOT duplicated here.
+The short version:
 
-**His three requirements, in his words:**
-1. **Build it with the allowlist.** Not an open search.
-2. **"We are pretty much selling a nutrition product and we don't wanna give
-   users the wrong information."** Safety is the headline requirement, not a
-   hardening pass. The allowlist + "trainer guidance outranks the internet" +
-   mandatory citations are all load-bearing. Do not ship any of them as
-   follow-ups.
-3. **NEW — tell users searching costs more of their AI allowance.** Not in the
-   doc; it came with the approval. Users must understand *before* they trigger a
-   search that it draws down their daily allowance faster. Think: a line in the
-   chat UI when a search runs, wording in the Plans & pricing feature grid
-   (`PLAN_FEATURES` / `FeatureMatrix`), and the allowance copy that already
-   exists for the token budget. Kevin has consistently wanted honest allowance
-   copy — see the S90 "no bare dollar figures" and published-allowance decisions.
+- **Tool:** `web_search_20260318`, `max_uses: 3`, 22 allowlisted health/science
+  domains, US/Eastern location, `response_inclusion: "excluded"`. Dynamic
+  filtering is on by default at that version — we do NOT declare `code_execution`
+  ourselves.
+- **Two caps, both shipped in the same change:** a per-MESSAGE ceiling of 3
+  searches and a per-user DAILY counter (`searches` on
+  `users/{uid}/aiUsage/{date}`, fed from
+  `usage.server_tool_use.web_search_requests`). Premium 12/day → Coach Ultra
+  70/day. Running out is SOFT: the tool stops being declared and the AI says so
+  instead of pretending it searched.
+  ⚠️ **`max_uses: 3` is per API REQUEST, not per message** — a pre-deploy review
+  caught me assuming otherwise. One message makes up to 11 requests, so
+  unchecked it was 33 searches (33¢) a message and Premium went margin-negative.
+  `capTurnSearches()` is what makes the per-message number real; don't remove it,
+  and don't "simplify" it by withdrawing the tool while a `server_tool_use` is
+  still waiting for its result (that 400s).
+- **Cost is now truthful end to end:** `aiusage` adds $0.01/search to
+  `costMicros`, so the admin dashboard's spend stays right.
+- **Kevin's disclosure requirement, both halves:** a footer under every searched
+  reply ("Searched the web N times · uses more of your daily AI allowance than a
+  normal reply") with the real source links under it, and two new rows +
+  explainers in the Plans & pricing grid so people learn it BEFORE they buy.
+- **Safety:** allowlist + "a `fromTrainer` note outranks the internet, surface
+  the disagreement" + mandatory citation, all in the prompt, none deferred.
 
-**Two gates that must ship in the SAME change, not after:**
-- **The per-user daily SEARCH budget.** Max at ~100 msg/day works out ~$9/mo of
-  search against a $29.99 plan (~30% of revenue). A second counter beside the
-  token counter in `users/{uid}/aiUsage/{date}`, same warn/block shape;
-  accumulate `usage.server_tool_use.web_search_requests`. This is also what makes
-  requirement 3 truthful — you can't honestly tell someone search costs more
-  allowance if nothing is counting it.
-- **`max_uses: 3`** on the tool, plus `allowed_domains`.
+⚠️ **The one thing to keep if you refactor this:** a declared search tool can
+fail with a **400** (org-level switch in the Claude Console, unusable tool
+version, bad domain) — that would break chat for EVERY user on EVERY message.
+`callModel` / `streamModel` drop the tool and retry once on such a 400. Do not
+remove that guard.
 
-**Three integration traps we don't handle today** (detail in the doc): long
-search turns stop with `stop_reason: "pause_turn"` and need the paused message
-sent back; search errors arrive as **HTTP 200** with `content` as a single object
-instead of a list (a rate limit would read as a crash); results carry
-`encrypted_content` that must be passed back **unmodified** or follow-up turns
-400 — our chat history (`caliq-ai-chat-{id}`) stores text only, so **check that
-before enabling** or the second question about a search breaks.
+⚠️ `pause_turn` is now handled in all three loops (`aiChat`, `aiChatStream`,
+`runAssistantTurn`): push the paused assistant message back UNCHANGED with no
+user turn after it.
 
-⚠️ It's a SERVER tool — it never goes through `runTool()`, so unlike the S183t
-notes work the **MCP connector does not inherit it**. Probably correct to leave
-it that way (someone connecting their own Claude already has search), but it's a
-decision, not an oversight.
+**Deploy set** (aichat.js + aiusage.js changed — run `npm run deploy-set
+aichat.js aiusage.js`, never recall it): 17 functions, plus `adminOverview` and
+`adminUserUsage` which read the changed `aiusage.readUsage`.
 
-Deploy set when done: the 18-function `aitools.js`/`aichat.js` set — run
-`npm run deploy-set`, never recall it.
+**Live smoke test after deploy:** (1) ask something that should search ("what
+does the research say about creatine timing?") → expect a cited answer + the
+footer; (2) ask something that should NOT ("how many calories in 2 eggs?") →
+expect no search; (3) confirm `users/{uid}/aiUsage/{today}.searches` incremented;
+(4) confirm an ordinary chat + a meal log still work (that's the 400-guard path).
 
-### Everything below is DONE this session (S183p–S183u) — don't redo it
+### Everything below is DONE — don't redo it
 - **S183p** AI meals store their serving; Daily Check-In notes roll over/grow/collapse
 - **S183q** Accent colour picker (6 curated) + full-app leak audit
 - **S183r** Body-fat charts stopped mixing measurement methods; neutral +/− deltas
 - **S183s** User picks which body-fat method drives fat/lean mass
 - **S183t** AI reads coaching notes, with per-note AI access control
-- **S183u** `docs/WEB-SEARCH.md` scoping (this item)
+- **S183u** `docs/WEB-SEARCH.md` scoping
+- **S184** web search BUILT (block above)
 
 ## ⭐⭐⭐⭐ S183t (Aug 8, 2026) — AI READS COACHING NOTES
 The AI (in-app AND connector) now uses a person's notes as coaching context, and

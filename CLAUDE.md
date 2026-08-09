@@ -95,10 +95,12 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
-> _Last updated: Session 183q (Aug 8 — user-selectable ACCENT COLOUR, 6 curated options; plus S183p:
-> AI-logged meals store their serving, Daily Check-In notes roll over at midnight). **Read
-> `Glide-Session-Handoff-NEXT.md` first** (its S183q + S183p blocks are the current state); this digest
-> below is older (through S90)._
+> _Last updated: Session 184 (Aug 8 — AI WEB SEARCH built: Anthropic's server-side tool, allowlisted to
+> ~22 vetted health/science domains, `max_uses: 3`, a per-user DAILY search counter beside the token
+> budget, and an in-chat "this searched the web and costs more of your allowance" disclosure with real
+> source links. **Written but NOT deployed — no live call has run against it yet.**) **Read
+> `Glide-Session-Handoff-NEXT.md` first** (its S184 block is the current state), and
+> `docs/WEB-SEARCH.md` for the search design; this digest below is older (through S90)._
 > - **Accent is now a user setting** (≡ → Appearance). Brand cyan is still the default and the
 >   fallback. Any new colour work must respect two rules: the SEMANTIC colours (green on-track /
 >   amber over-target / red danger / purple sandbox) never follow the accent, and there are TWO

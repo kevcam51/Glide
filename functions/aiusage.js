@@ -29,6 +29,13 @@ const PRICING = {
 };
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 
+// Anthropic's server-side web search bills $10 per 1,000 searches ON TOP of the
+// tokens the results cost (S184). It is not a token, so it can't ride the table
+// above — but it is real money and has to land in the same cost rollups, or the
+// admin dashboard would under-report spend the moment search sees any use.
+// Errored searches are not billed and are not reported in usage.
+const SEARCH_USD = 0.01;
+
 // Cost in MICRO-dollars (1e-6 USD), as an integer. Firestore increments are
 // floats; accumulating dollars across thousands of calls would drift in the
 // cents. Integers don't.
@@ -37,7 +44,8 @@ function costMicros(agg, model) {
   const usd = ((agg.input || 0) * p.input
     + (agg.output || 0) * p.output
     + (agg.cacheWrite || 0) * p.cacheWrite
-    + (agg.cacheRead || 0) * p.cacheRead) / 1e6;
+    + (agg.cacheRead || 0) * p.cacheRead) / 1e6
+    + (agg.searches || 0) * SEARCH_USD;
   return Math.round(usd * 1e6);
 }
 
@@ -75,10 +83,13 @@ async function recordUsage(db, uid, agg, source) {
 async function writeUsage(db, uid, agg, source) {
   const model = (agg && agg.model) || DEFAULT_MODEL;
   const budgetTokens = (agg.input || 0) + (agg.output || 0) + (agg.cacheWrite || 0);
-  if (budgetTokens <= 0 && !(agg.cacheRead > 0)) return null;
+  if (budgetTokens <= 0 && !(agg.cacheRead > 0) && !(agg.searches > 0)) return null;
   const inc = admin.firestore.FieldValue.increment;
   const patch = {
     tokens: inc(budgetTokens),
+    // The DAY doc's `searches` is what the per-user daily search allowance in
+    // aichat.js reads, exactly as `tokens` backs the token budget.
+    searches: inc(agg.searches || 0),
     input: inc(agg.input || 0),
     output: inc(agg.output || 0),
     cacheWrite: inc(agg.cacheWrite || 0),
@@ -121,6 +132,7 @@ function readUsage(snap) {
     cacheWrite: d.cacheWrite || 0,
     cacheRead: d.cacheRead || 0,
     calls: d.calls || 0,
+    searches: d.searches || 0,
     costMicros: hasBreakdown ? (d.costMicros || 0) : null,
     boost: d.boost || 0,
   };
