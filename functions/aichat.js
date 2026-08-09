@@ -649,8 +649,16 @@ function logSearchOutcome(content, fn) {
 // output is shown to end users, and cited_text/title/url are not billed — so
 // there is no reason not to. Deduped by URL, newest-first, capped.
 function collectSources(content, into) {
+  // Dedupe on TITLE as well as URL. The same paper legitimately comes back under
+  // several addresses (pubmed.ncbi.nlm.nih.gov/40093878, pmc.ncbi.nlm.nih.gov/
+  // articles/PMC11906324, www.ncbi.nlm.nih.gov/pmc/articles/PMC11906324 are all
+  // one study), and URL-only dedupe filled the whole list with three papers
+  // wearing six names.
+  const key = (t) => String(t || "").toLowerCase().replace(/\s+/g, " ").trim();
   const add = (url, title) => {
-    if (!url || into.length >= 6 || into.some((s) => s.url === url)) return;
+    if (!url || into.length >= 6) return;
+    const k = key(title);
+    if (into.some((s) => s.url === url || (k && key(s.title) === k))) return;
     into.push({ url: String(url).slice(0, 300), title: String(title || url).slice(0, 160) });
   };
   for (const b of content || []) {
