@@ -252,6 +252,33 @@ Running out is a **soft** limit — the tool simply isn't declared for the rest 
 the day and the assistant answers from its own knowledge, with an uncached
 system block telling it to say so rather than pretend it searched.
 
+### The assistant asks before it searches (Kevin, S184b)
+
+A search spends the person's allowance, so they decide, not the model. The rule
+lives in the CACHED system prompt: never call `web_search` on your own
+initiative — say what you'd need to look up, say plainly that searching uses more
+of their daily allowance than a normal reply, then wait. Answer what you can from
+your own knowledge in the same message, so the offer is "want me to check the
+current research too?" rather than a blank refusal.
+
+Two things stop it becoming a nag, and both matter:
+
+- **Asking IS consent.** "Look it up", "search for it", "find me a source" — that
+  is the go-ahead; search immediately. Re-confirming something the user just
+  asked for contradicts the app's standing rule (S102e) and is infuriating.
+- **Consent persists per topic, per conversation.** Once they have said yes, keep
+  searching that topic without re-asking; ask again only on a genuinely different
+  subject.
+
+**Why this is prompt-level and not a hard gate.** The obvious implementation —
+withhold the tool until approved, then declare it — is the same cache trap as the
+per-message cap: adding `web_search` to the `tools` array on the approved turn
+invalidates the whole ~19,700-token prefix, so one approved search would cost the
+user ~44% of a Premium day. A stable tool set with an instructed rule is the only
+cache-safe way to gate this. It trades a hard guarantee for a soft one — watch
+the `aiSearch` logs for searches that ran with no preceding ask.
+
+
 ### Telling the user (Kevin's added requirement)
 
 - **In chat, every time:** a footer under any reply that searched — "Searched the
