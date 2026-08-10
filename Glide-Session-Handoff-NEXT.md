@@ -1,39 +1,34 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ⏭⏭⏭ NEXT SESSION — TWO THINGS, IN THIS ORDER
+## ⏭⏭⏭ NEXT SESSION — ONE UNVERIFIED THING
 
-**1. DEPLOY. Prod is running the pre-fix build.** The CLI token expired mid-S184b,
-so everything after the first deploy is committed and pushed but NOT live. Run
-`firebase login --reauth --no-localhost`, then `npm run deploy-set aichat.js
-aiusage.js` and deploy exactly what it prints. What prod is missing right now:
-the ask-before-search gate, the dropped-stream disclosure, the paused-answer fix,
-the re-spend guard — and prod still HAS the per-message search cap that was
-reverted for charging the user ~44% of a Premium day in busted prompt cache.
+**Everything is deployed** (S184 + S184b + S184c; the 19-function set went out at
+16:31, the ask-gate precedence fix at ~17:40). Nothing is pending.
 
-Then smoke-test the ask gate, which has NEVER been run against the live model
-(it is a prompt rule; it cannot be tested without deploying):
-- "what does the current research say about creatine timing?" → expect it to ASK
-  first and NOT search. Confirm `aiUsage/{today}.searches` did not move.
-- "yes" → expect the search, the footer, and cited sources.
-- "look up beta-alanine for endurance" → expect it to search IMMEDIATELY with no
-  second confirmation (asking IS consent; re-asking would breach S102e).
-- A follow-up on the same topic → expect no re-ask.
-- "how many calories in two eggs?" → expect no search and no offer.
+**The one thing not verified live: the ask-gate precedence fix (S184c).** It is
+deployed but never exercised, because this machine's network to Google collapsed
+at the end of the session (`ERR_QUIC_PROTOCOL_ERROR`, `ERR_CONNECTION_RESET`;
+five deploy attempts failed on five different transient Google API errors, and
+chat requests stopped reaching the function entirely — no log entries after
+16:36). Nothing suggests a code problem; the same paths worked minutes earlier.
 
-**2. KEVIN'S DECISION — Premium is refused a boost the app advertises.**
-Confirmed by two independent review lenses. `requestBudgetBoost`'s `isBoostable`
-allows only clientMax/trainerMax/clientUltra/trainerUltra, and the frontend
-`canBoost` (App.jsx ~18450) independently requires `/max/` — so a base Premium or
-$49 Coach user who hits their cap never even sees the offer. But FOUR other
-places say base tiers get boosts: `BOOSTS_PER_DAY` (`client: 2, assisted: 2,
-trial: 2, trainer: 2`), the `BOOST_STEP_BASE` ladder comment (45k→60k→75k), the
-S179i comment ("the base tiers get boosts too"), and the pricing grid, which
-sells Premium as **"~30 (more on request)"**.
+**Verify in 30 seconds** — open the chat and send:
 
-Either the gate is wrong or the copy is. NOT fixed here — it moves real spend, so
-it is Kevin's call. If the answer is "the copy is right", the fix is
-`const isBoostable = !!BOOSTS_PER_DAY[tier];` plus widening `canBoost`; both
-gates must change or the button still never appears.
+> Look up the current evidence on beta-alanine dosing for endurance.
+
+Expect it to search IMMEDIATELY: cited sources plus the "Searched the web N
+times" footer, and **no** "want me to go ahead?" question. That question is the
+exact bug S184c fixes — before it, the model asked permission for a search the
+user had just explicitly requested, which breaches the S102e do-it-first-time
+rule. If it still asks, the fix did not take and the numbered rules in the WEB
+SEARCH block need strengthening again.
+
+Three cases already verified live at 16:33-16:36, all correct:
+- "What does current research say about creatine timing?" → did NOT search, and
+  said why ("the evidence is pretty settled here").
+- "Has the NIH updated its vitamin D guidance?" → ASKED first, naming the
+  allowance cost, and did not search.
+- "yes please" → searched, real NIH ODS numbers, footer + 6 cited sources.
 
 ## ⭐⭐⭐⭐ S184 (Aug 8, 2026) — WEB SEARCH IS LIVE AND VERIFIED IN PROD
 
