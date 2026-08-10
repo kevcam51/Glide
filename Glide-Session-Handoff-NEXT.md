@@ -1,34 +1,38 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ⏭⏭⏭ NEXT SESSION — ONE UNVERIFIED THING
+## ⏭⏭⏭ NEXT SESSION — WEB SEARCH IS DONE AND VERIFIED
 
-**Everything is deployed** (S184 + S184b + S184c; the 19-function set went out at
-16:31, the ask-gate precedence fix at ~17:40). Nothing is pending.
+Everything from S184 / S184b / S184c is deployed and confirmed live in prod. All
+four ask-gate behaviours were tested against the real model as `trainer.uitest`:
 
-**The one thing not verified live: the ask-gate precedence fix (S184c).** It is
-deployed but never exercised, because this machine's network to Google collapsed
-at the end of the session (`ERR_QUIC_PROTOCOL_ERROR`, `ERR_CONNECTION_RESET`;
-five deploy attempts failed on five different transient Google API errors, and
-chat requests stopped reaching the function entirely — no log entries after
-16:36). Nothing suggests a code problem; the same paths worked minutes earlier.
+| Prompt | Expected | Result |
+|---|---|---|
+| "What does current research say about creatine timing?" | don't search — it knows this | ✅ declined, and said why |
+| "Has the NIH updated its vitamin D guidance?" | ask first, name the cost | ✅ asked, did NOT search |
+| "yes please" | search now | ✅ searched, cited NIH ODS |
+| "**Look up** beta-alanine dosing for endurance" | search immediately, no asking | ✅ searched 3×, 5 cited papers, no permission question |
 
-**Verify in 30 seconds** — open the chat and send:
+The last row is the S184c fix. Before it, the model asked permission for a
+search the user had just explicitly requested — the numbered-rule precedence in
+the WEB SEARCH block is what fixes that, so don't flatten those rules back into
+prose.
 
-> Look up the current evidence on beta-alanine dosing for endurance.
+⚠️ **A searched reply takes ~80–90 SECONDS.** Do not read a bubble still showing
+"…" at 50–60s as a hung request — I made that mistake twice and wrongly concluded
+the requests weren't reaching the server (the logs showed `searches: 2`, no
+errors; they had arrived and were mid-search). If you are scripting a check,
+wait 100s+ before judging.
 
-Expect it to search IMMEDIATELY: cited sources plus the "Searched the web N
-times" footer, and **no** "want me to go ahead?" question. That question is the
-exact bug S184c fixes — before it, the model asked permission for a search the
-user had just explicitly requested, which breaches the S102e do-it-first-time
-rule. If it still asks, the fix did not take and the numbered rules in the WEB
-SEARCH block need strengthening again.
+**Open, and worth doing:** during a search the user watches "…" for a minute and
+a half with no sign anything is happening. The server knows when a search starts
+(that's where the `aiSearch` log line is written), so an SSE "searching" event →
+"Searching PubMed…" in the bubble is a small change and makes the wait read as
+intentional rather than broken. Kevin has not asked for it; raise it before
+building.
 
-Three cases already verified live at 16:33-16:36, all correct:
-- "What does current research say about creatine timing?" → did NOT search, and
-  said why ("the evidence is pretty settled here").
-- "Has the NIH updated its vitamin D guidance?" → ASKED first, naming the
-  allowance cost, and did not search.
-- "yes please" → searched, real NIH ODS numbers, footer + 6 cited sources.
+**Still Kevin's call:** whether web search earns its keep at all. Watch
+`searches` in the usage rollups for two weeks. Trigger rate is the number that
+decides it — under ~10% of exchanges it's a good feature, above that it's a tax.
 
 ## ⭐⭐⭐⭐ S184 (Aug 8, 2026) — WEB SEARCH IS LIVE AND VERIFIED IN PROD
 
