@@ -18067,7 +18067,7 @@ const AI_STREAM_URL = `https://us-central1-${import.meta.env.VITE_FIREBASE_PROJE
 // Stream the AI reply. Calls onDelta(text) as chunks arrive and onDone({wrote,
 // usage}) at the end. Throws { code, message } on failure so send() can fall
 // back to the non-streaming callable.
-async function streamAiChat(apiMsgs, { onDelta, onDone, onProposal, onWorkoutProposal }, activeTarget) {
+async function streamAiChat(apiMsgs, { onDelta, onDone, onProposal, onWorkoutProposal, onSearching }, activeTarget) {
   const user = auth.currentUser;
   if (!user) throw { code: "unauthenticated" };
   const token = await user.getIdToken();
@@ -18097,6 +18097,10 @@ async function streamAiChat(apiMsgs, { onDelta, onDone, onProposal, onWorkoutPro
       if (event === "delta") onDelta(payload.text || "");
       else if (event === "proposal") { if (onProposal) onProposal(payload); }
       else if (event === "workoutProposal") { if (onWorkoutProposal) onWorkoutProposal(payload); }
+      // A web search just started server-side. Purely a progress signal: a
+      // searched reply takes 80-90s, and without it the person watches a bare
+      // typing indicator for that long and reasonably concludes it has hung.
+      else if (event === "searching") { if (onSearching) onSearching(); }
       else if (event === "done") onDone(payload || {});
       // searches/sources ride the error frame too: a search that already ran was
       // billed and counted, so the failed turn still owes the user the disclosure.
@@ -18456,6 +18460,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
       setCanBoost((sub === "active" || sub === "trial") || (p && p.role === "admin"));
     }).catch(() => {});
   }, [open]);
+  const [searching, setSearching] = useState(false); // a web search is running server-side
   const [canBoost, setCanBoost] = useState(false);
   const [boost, setBoost] = useState(null); // null | "offer" | "sending" | "granted" | "already"
   // S183: set ONLY when this user actually hit their daily cap — never a
@@ -19058,6 +19063,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
     setBoost((b) => (b === "granted" || b === "already" ? null : b)); // clear settled boost cards on the next send
     setUltraOffer(false); // clear any Ultra upsell on the next send
     setCapHit(false);     // re-set below only if this send hits the cap too
+    setSearching(false);  // a previous turn's search indicator never carries over
     const next = [...base, { role: "user", content: text, images: imgs.length ? imgs : undefined }];
     setMessages(next);
     if (!isOverride) setDraft("");
@@ -19092,9 +19098,10 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
       // Stream the reply (word-by-word). Fall back to the callable on failure.
       let done = null;
       await streamAiChat(apiMsgs, {
-        onDelta: (t) => { gotEvent = true; streamed += t; smoother.push(t); },
+        onDelta: (t) => { gotEvent = true; setSearching(false); streamed += t; smoother.push(t); },
         onProposal: (meal) => { gotEvent = true; setProposal({ ...meal, status: "pending" }); },
         onWorkoutProposal: (w) => { gotEvent = true; setWorkout({ ...w, status: "pending" }); },
+        onSearching: () => { gotEvent = true; setSearching(true); },
         onDone: (p) => { done = p; },
       }, target);
       // Let the typewriter finish revealing — but NEVER block on a stalled rAF.
@@ -19167,6 +19174,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
       }
     }
     setBusy(false);
+    setSearching(false);
   };
 
   // Paste-from-AI import: the user pastes a reply from ChatGPT/Claude/etc, and
@@ -19631,7 +19639,18 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                 </div>
               ))
             )}
-            {busy && !(messages.length && messages[messages.length - 1].role === "assistant") &&
+            {/* A searched reply takes 80-90 seconds. Rendered independently of the
+                typing dots below, because a search can also start MID-reply,
+                once an assistant bubble already exists. Naming the sources is
+                deliberate: it reassures, and it reinforces that this is a vetted
+                list rather than the open web. */}
+            {busy && searching && (
+              <div className={bubbleAI + " flex items-center gap-2"} role="status" aria-live="polite">
+                <Icon name="search" size={13} color="var(--accent)" />
+                <span className="text-muted">Searching vetted health sources…</span>
+              </div>
+            )}
+            {busy && !searching && !(messages.length && messages[messages.length - 1].role === "assistant") &&
               <div className={bubbleAI} aria-label="Glidna is thinking" role="status">
                 <span className="glidna-typing"><span></span><span></span><span></span></span>
               </div>}

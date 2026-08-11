@@ -410,16 +410,34 @@ async function callModel(client, state, params) {
 }
 // Streaming variant. A 400 arrives before any token is emitted, so the retry
 // can't duplicate text the user already saw.
-async function streamModel(client, state, params, onText) {
+// Fire onSearch() the moment Anthropic starts a web search, so the UI can say so.
+// A searched reply takes 80-90s and without this the person watches a bare "..."
+// for a minute and a half with nothing to tell them anything is happening —
+// which reads as broken, not as working. The signal is a `server_tool_use`
+// content block opening mid-stream; its query arrives later as input_json
+// deltas, so we announce the search rather than wait to name it.
+function wireStream(stream, onText, onSearch) {
+  stream.on("text", onText);
+  if (onSearch) {
+    stream.on("streamEvent", (ev) => {
+      if (ev && ev.type === "content_block_start" && ev.content_block
+          && ev.content_block.type === "server_tool_use"
+          && ev.content_block.name === "web_search") {
+        try { onSearch(); } catch { /* never let the indicator break the turn */ }
+      }
+    });
+  }
+}
+async function streamModel(client, state, params, onText, onSearch) {
   state.retried = false;
   try {
     const stream = client.messages.stream({ ...params, tools: state.tools });
-    stream.on("text", onText);
+    wireStream(stream, onText, onSearch);
     return await stream.finalMessage();
   } catch (e) {
     if (!retrySearchFix(state, e)) throw e;
     const stream = client.messages.stream({ ...params, tools: state.tools });
-    stream.on("text", onText);
+    wireStream(stream, onText, onSearch);
     return stream.finalMessage();
   }
 }
@@ -942,7 +960,8 @@ exports.aiChatStream = onRequest(
       // Stream each model turn; run tools between turns until it stops calling them.
       for (;;) {
         const msg = await streamModel(client, state, { model: MODEL, max_tokens: MAX_TOKENS, system, messages: convo },
-          (delta) => { if (delta) sse("delta", { text: delta }); });
+          (delta) => { if (delta) sse("delta", { text: delta }); },
+          () => sse("searching", {}));
         addUsage(agg, msg.usage);
         collectSources(msg.content, sources);
         logSearchOutcome(msg.content, "aiChatStream");
