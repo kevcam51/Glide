@@ -1,5 +1,72 @@
 # Glidna — Next-Session Handoff (start here)
 
+## ⛔⛔⛔ NEXT SESSION — DO NOT TAKE SESSION AUTO-PAY LIVE YET (S185)
+
+**Kevin's plan was: skip the attorney, go straight to the live-key swap and a real-card smoke test.
+A pre-go-live review found 40 findings — 9 critical — and the answer changed to: fix first.**
+
+**Read `docs/SESSIONS-BILLING-REVIEW-S185.md`.** It opens with "The themes that matter", which is
+the part to act on; the 40 raw findings follow it.
+
+⚠️ **Those findings are RAW — the adversarial verify pass had not finished.** Verdicts (and the
+full agent transcripts) are in the run journal:
+`~/.claude/projects/-Users-ksmooth-Desktop-calorieiq/8bdcd0dd-4ff3-4ffe-a5d1-d9bb9709abe6/subagents/workflows/wf_3b27aad5-d20/journal.jsonl`
+Re-run or resume with `Workflow({scriptPath: ".../workflows/scripts/session-billing-preflight-wf_3b27aad5-d20.js", resumeFromRunId: "wf_3b27aad5-d20"})`.
+**Confirm before fixing** — the last three reviews each produced roughly one-third false alarms, and
+one *refutation* was itself wrong (measured numbers settled it; see docs/WEB-SEARCH.md).
+
+### What I learned that the checklists get wrong
+`docs/SESSIONS-GO-LIVE.md` lists a live-key swap and a live webhook as the engineering gate. **Both
+are already done or unnecessary:**
+- `STRIPE_SECRET_KEY` **is already a live key** (`sk_live_…`), and every client not flagged
+  `sessionBillingTest` already routes to it. There is nothing to swap.
+- **No webhook is needed for sessions.** Charges use `confirm: true` and are handled synchronously,
+  with `ledgerRef.id` as a stable idempotency key. The webhook item was inherited from subscription
+  billing, where Stripe Checkout genuinely is async.
+- 3DS on the Pay-now path is handled: a `pending` result routes the client to re-save their card
+  (SetupIntent, where authentication happens) and the un-actioned PaymentIntent never captures.
+  ⚠️ But a 3DS-required **off-session sweep** charge may be a dead end — that is finding #20-ish and
+  is NOT resolved.
+
+So the engineering gate was never the keys. It is the failure paths, which have never run because
+test mode with 4242-cards never fails.
+
+### The order I would take it
+1. **Triage the review** — confirm/refute, starting with the double-charge cluster
+   (`sessionSettle.js` ~:256-271), the missing `paySessionBalance` lock, and the `cancelledBy`
+   rules hole. Those three are money-out-the-door or free-training.
+2. **Fix, with rules tests** — several are `firestore.rules` changes, so
+   `npm run test:rules` must pass and rules must be PUBLISHED (156 tests today).
+3. **Then** the smoke test — and ⚠️ **rehearse on a THROWAWAY client, never a real one**: the
+   `sessionBillingTest` flag writes a TEST `cus_…` into the shared `stripeCustomerId` and poisons
+   that person's live charges afterwards.
+
+### Kevin's decisions this session (don't re-litigate)
+- **Skip the attorney review for now.** His call, stated plainly. I flagged one item that touches
+  what he is switching on — Fla. Stat. § 501.016(5)'s "monthly" wording vs weekly billing — and the
+  mitigation: **`billingMode: per_session` sidesteps it**, since charging right after each session
+  is pay-as-you-go rather than a contract for future services. Prepaid packs stay unreachable.
+- **Auto-pay before the calendar.** Revenue over convenience.
+
+### Also true, and easy to forget
+**Session auto-pay is hard-locked to Kevin's UID** (`functions/sessionBillingGate.js`,
+`SESSION_BILLING_UIDS`). No other trainer can save a card or be auto-charged, because
+`paymentIntents.create` carries no `transfer_data` and their clients' money would land in Kevin's
+Stripe balance. Opening it up is a Stripe Connect project, not a config flip. So this is
+"auto-pay for Smooth Training", not yet a platform feature.
+
+### The calendar (the other half of what Kevin asked about)
+Logging calendar is DONE. The gap is the **sessions layer**:
+- The **week view renders no appointments** at all (month dots + day block only) — small fix.
+- A **trainer sees no sessions on any calendar** (`src/App.jsx:27383` passes `meUid={null}` when
+  viewing a client, deliberately) — so there is no roster calendar anywhere. Product decision.
+- **Planned meals don't render** in the calendar Day view — its `MealLog` is missing seven props
+  the dashboard passes. Small.
+- Future dates: the calendar logs future food as EATEN while the dashboard treats it as PLANNING.
+- Acuity import: decided in S92, contract verified, **zero code**; native booking shipped instead in
+  S100, so that decision is stale. Client self-booking, recurring sessions and session reminders
+  don't exist.
+
 ## ⏭⏭⏭ NEXT SESSION — WEB SEARCH IS DONE AND VERIFIED
 
 Everything from S184 / S184b / S184c is deployed and confirmed live in prod. All
