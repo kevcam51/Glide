@@ -95,6 +95,12 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S185 (Aug 11): DO NOT take session auto-pay live — a pre-go-live review found 40 findings, 9
+> critical, incl. a successful charge being recorded as a decline and then double-charged. Read
+> `docs/SESSIONS-BILLING-REVIEW-S185.md` and the S185 block in the handoff BEFORE touching
+> functions/sessionSettle.js. The live Stripe key is already in place and no webhook is needed —
+> the gate is the failure paths, not the keys._
+>
 > _Last updated: Session 184 (Aug 8 — AI WEB SEARCH: **live and verified in prod**. Anthropic's
 > server-side tool, allowlisted to 27 vetted health/science domains, a per-user DAILY search counter
 > beside the token budget (deliberately NO per-message cap — it would cost the user more in busted
