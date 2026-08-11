@@ -54,12 +54,21 @@ contract — it is one bad contract *template* multiplied by the tenant count, i
 statutes Glide has not yet reviewed. Several states appear to make non-compliant contracts **void
 or unenforceable with attorney's-fee exposure** (see §3).
 
-### 🟠 RISK 3 — The current Terms of Service does not cover this model at all
+### ✅ RISK 3 — RESOLVED (2026-07-22): the Terms now cover this model
 
-`public/terms.html` is 118 lines and contains **no** card-on-file, auto-charge, off-session,
-recurring-billing, or late-cancellation-fee language. Under ROSCA the material terms must be
-disclosed *before* billing information is obtained, and express informed consent must be captured.
-Today there is nothing to consent to. This must be written before a single card is saved.
+**This risk is closed and the text below is kept only as the record of what it asked for.**
+`public/terms.html` §6 "Training sessions & payments" now carries the card-on-file,
+billed-after-sessions, weekly-total, cancellation and no-show-fee terms, and names Smooth Training
+LLC as the counterparty — added by `910f363` (S106) the day after this risk was written, along with
+the `recordSessionConsent` wiring that captures express consent before a card is saved.
+
+What remains is an attorney **review** of that language, not its authoring — tracked in
+`docs/SESSIONS-GO-LIVE.md`. Do not re-read this section as "there is nothing to consent to".
+
+_Original text:_ `public/terms.html` is 118 lines and contains **no** card-on-file, auto-charge,
+off-session, recurring-billing, or late-cancellation-fee language. Under ROSCA the material terms
+must be disclosed *before* billing information is obtained, and express informed consent must be
+captured. Today there is nothing to consent to. This must be written before a single card is saved.
 
 ### 🟡 RISK 4 — A late-cancellation fee is a hostile chargeback profile
 

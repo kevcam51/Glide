@@ -34,10 +34,15 @@ Legend: `[ ]` = to do · `[x]` = done · `[~]` = partially done · 🔒 = attorn
 ## #4 — Go live with session AUTO-BILLING (the closer one)
 
 ### 🔒 Attorney / counsel — the real gate
-- [ ] **Write real Terms of Service.** `public/terms.html` today has **no** card-on-file, auto-charge,
-      off-session, recurring-billing, or late-cancel-fee language. ROSCA requires these material terms
-      disclosed **before** a card is saved, with express informed consent. **Nothing may store a real
-      card until this exists.** → attorney Qs 9, 10, 14–18.
+- [x] ~~**Write real Terms of Service.**~~ **DONE — shipped the day after this line was written.**
+      `public/terms.html` §6 "Training sessions & payments" (line ~113) covers card on file, billed-
+      after-sessions, weekly totals, cancellation & no-show fees, and names Smooth Training LLC.
+      Added 2026-07-22 by `910f363` (S106), together with the consent wiring. This checklist was
+      never updated, so it kept reading as a blocker for weeks — **it is not one.**
+- [ ] **Attorney REVIEW of that ToS** (not the writing of it). ROSCA requires the material terms
+      disclosed **before** a card is saved, with express informed consent captured — §6 plus
+      `recordSessionConsent` are the implementation of that; counsel needs to confirm they are
+      sufficient. → attorney Qs 9, 10, 14–18.
 - [ ] **Merchant-of-record decision.** Charging other trainers' clients on *Glide's* Stripe account
       makes Glide liable for their disputes + dispute-rate exposure. Decide: Glide-as-MoR vs Stripe
       Connect direct charges (trainer as MoR). → attorney Qs 19–21. _(For Kevin's OWN clients only,
