@@ -110,6 +110,20 @@ about money or health. A leaked feed should be embarrassing, not harmful.
   subscribed calendars on its own schedule, often only every few hours.** Real-time Google sync
   would need OAuth + the Calendar API — a separate project, not a config flip.
 
+⚠️ **S187 OPEN — the reminder SEND path is not yet confirmed. Start here.**
+The scheduler is healthy (12 consecutive on-time 2-minute runs, no errors) and the burst-prevention
+path is confirmed in prod: a session booked 7 minutes out logged `{"sessions":1,"sent":0,"marked":1}`,
+correctly recording a stale lead without firing a false alert. But **no reminder was ever observed to
+send.** The numbers only fit if `notifPrefsOf` returned `{}` and `leadsOf` fell back to
+`DEFAULT_LEADS [60]` — the 60-minute lead was hours stale, so it was marked silently, and the 5-minute
+lead I had set in the UI was never seen. Ruled out already: `storage.set` writes the value verbatim
+(no double-encode), and the writer merges + persists the whole object correctly.
+**Check first:** read `users/{uid}/kv/caliq-notif-prefs` in the console and confirm
+`sessionReminderLeads` is actually stored, then book something ~8 minutes out with a 5-minute lead and
+watch `firebase functions:log --only sessionReminderPush` for `sent:1`.
+**Note the blast radius is small either way:** if prefs read empty, users still get the default
+1-hour reminder — the feature isn't inert, it would just be ignoring custom lead times.
+
 ### S186b — billing cadence + fee controls (Kevin's ask, DEPLOYED)
 - **`biweekly` billing mode added** — per-session / weekly / **every two weeks** / manual. The
   fortnight is derived from the CALENDAR (`Math.floor(daysSinceEpoch / 7) % 2`), never from a
