@@ -10183,6 +10183,9 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   // trainer saw no appointments anywhere. Filtering to the pair shows the
   // sessions that actually belong on this calendar. (S186)
   const [calSessions, setCalSessions] = useState([]);
+  const [bookForm, setBookForm] = useState(null);
+  const [bookBusy, setBookBusy] = useState(false);
+  const [bookErr, setBookErr] = useState("");
   useEffect(() => {
     if (!meUid) return;
     return subscribeMySessions(meUid, (all) => setCalSessions(all.filter((s) =>
@@ -10634,9 +10637,32 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
 
   // Booked sessions for the selected day — rendered at the TOP of the day view
   // (an appointment outranks the logging detail below it).
+  // A trainer looking at THIS client's calendar can book straight into the day
+  // they're already looking at. Before this, the in-plan calendar could only
+  // ever DISPLAY sessions — booking lived on a different screen entirely, which
+  // is not what "click the calendar" leads anyone to expect. (S186b)
+  const canBookHere = !!(meUid && peerUid && meUid !== peerUid);
+  const bookSubmit = async () => {
+    const startAt = new Date(bookForm.when).getTime();
+    if (!Number.isFinite(startAt)) { setBookErr("Pick a date and time."); return; }
+    const durationMin = Math.round(Number(bookForm.durationMin) || SESSION_DEFAULT_MIN);
+    if (durationMin < 1 || durationMin > 480) { setBookErr("Duration must be between 1 and 480 minutes."); return; }
+    setBookBusy(true); setBookErr("");
+    try {
+      await bookSeries(meUid, peerUid, {
+        startAt, durationMin, title: bookForm.title, location: bookForm.location,
+        priceCents: Math.round((Number(bookForm.price) || 0) * 100),
+      }, { repeat: bookForm.repeat, count: bookForm.count });
+      setBookForm(null);
+    } catch (e) {
+      console.error("in-plan session booking failed", e && (e.code || e.message), e);
+      setBookErr("Couldn't book that session.");
+    } finally { setBookBusy(false); }
+  };
+
   const sessionsBlock = (k) => {
     const list = sessionsOnDay[k] || [];
-    if (!list.length) return null;
+    if (!list.length && !canBookHere) return null;
     return (
       <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 10,
         background: "rgba(var(--accent-rgb),.07)", border: "1px solid var(--accent)" }}>
@@ -10658,6 +10684,21 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             </span>
           </div>
         ))}
+        {canBookHere && (
+          <button
+            onClick={() => {
+              const d = parseKey(k); const when = new Date(d.y, d.m, d.d, 9, 0, 0, 0);
+              setBookErr("");
+              setBookForm({ id: null, when: calToLocalInput(when.getTime()), durationMin: String(SESSION_DEFAULT_MIN),
+                title: "", location: "", price: "", repeat: "none", count: "8" });
+            }}
+            style={{ marginTop: list.length ? 8 : 0, width: "100%", padding: "8px 10px", borderRadius: 8,
+              border: "1px solid var(--accent)", background: "transparent", color: "var(--accent)",
+              fontSize: ".78rem", fontWeight: 700, cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            <Icon name="plus" size={13} color="currentColor" />Book a session on this day
+          </button>
+        )}
       </div>
     );
   };
@@ -10974,6 +11015,12 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
       {view === "month" && monthView()}
       {view === "week" && weekView()}
       {view === "day" && dayView()}
+      {bookForm && (
+        <CalBookingSheet form={bookForm} setForm={setBookForm}
+          clients={[{ uid: peerUid }]} busy={bookBusy} err={bookErr}
+          nameOf={() => [data.firstName, data.lastName].filter(Boolean).join(" ") || "your client"}
+          onClose={() => { setBookForm(null); setBookErr(""); }} onSubmit={bookSubmit} />
+      )}
     </div>
   );
 }
@@ -17295,6 +17342,13 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan }) {
   const [now, setNow] = useState(() => Date.now());
   const [detail, setDetail] = useState(null);               // session being viewed
   const [form, setForm] = useState(null);                   // booking/reschedule form
+  // The rules that govern every session on this page — cancellation stance,
+  // fees, and billing cadence. They live HERE rather than only inside a single
+  // client's Sessions panel because they aren't per-client: one policy governs
+  // the whole book, so the page that shows the whole book is where it belongs.
+  const [policy, setPolicy] = useState(DEFAULT_SESSION_POLICY);
+  const [policyDraft, setPolicyDraft] = useState(DEFAULT_SESSION_POLICY);
+  const [showSettings, setShowSettings] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
@@ -17302,6 +17356,24 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan }) {
 
   useEffect(() => { if (!meUid) return; return subscribeMySessions(meUid, setSessions); }, [meUid]);
   useEffect(() => { getMyClients().then((cs) => setClients(cs || [])).catch(() => {}); }, [meUid]);
+  useEffect(() => {
+    if (!meUid) return;
+    getProfile(meUid).then((p) => { const pol = policyOf(p); setPolicy(pol); setPolicyDraft(pol); }).catch(() => {});
+  }, [meUid]);
+
+  const savePolicy = async () => {
+    setBusy(true); setErr("");
+    try {
+      const clean = policyOf({ sessionPolicy: policyDraft });
+      await saveSessionPolicy(meUid, clean);
+      setPolicy(clean); setPolicyDraft(clean); setShowSettings(false);
+      setMsg("Session settings saved.");
+      setTimeout(() => setMsg(""), 2500);
+    } catch (e) {
+      console.error("saveSessionPolicy failed", e && e.message);
+      setErr("Couldn't save those settings.");
+    } finally { setBusy(false); }
+  };
   // The red line has to actually move, and "is this past" changes with it.
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 60000); return () => clearInterval(t); }, []);
 
@@ -17578,8 +17650,15 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan }) {
                   </button>
                 ))}
               </div>
-              <button onClick={() => setAnchor(new Date())}
-                className="px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer border border-border text-fg bg-transparent">Today</button>
+              <div className="flex gap-1.5">
+                <button onClick={() => setAnchor(new Date())}
+                  className="px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer border border-border text-fg bg-transparent">Today</button>
+                <button onClick={() => { setShowSettings((v) => !v); setPolicyDraft(policy); }}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer border inline-flex items-center gap-1.5 ${
+                    showSettings ? "border-primary text-primary bg-[rgba(var(--accent-rgb),.1)]" : "border-border text-fg bg-transparent"}`}>
+                  <Icon name="edit" size={12} color="currentColor" />Settings
+                </button>
+              </div>
             </div>
 
             <div className="flex items-center justify-between gap-2 mb-3">
@@ -17590,6 +17669,19 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan }) {
 
             {err && <div className="mb-2 text-xs text-danger">{err}</div>}
             {msg && <div className="mb-2 text-xs text-success">{msg}</div>}
+
+            {showSettings && (
+              <div className="mb-3">
+                <div className="mb-2 text-[.78rem] text-muted leading-snug">
+                  These apply to every client. Each client is charged under the terms they agreed to
+                  when they saved their card, so changing this affects new agreements — anyone already
+                  on file keeps their terms until they re-save their card.
+                </div>
+                <SessionPolicyEditor policyDraft={policyDraft} setPolicyDraft={setPolicyDraft}
+                  trainerUid={meUid} defaultPriceCents={lastPrice} busy={busy}
+                  onSave={savePolicy} onCancel={() => { setShowSettings(false); setPolicyDraft(policy); }} />
+              </div>
+            )}
 
             {view === "month" ? monthGrid() : timeGrid(days)}
 
@@ -23853,6 +23945,166 @@ const defaultSlot = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.
 
 // The panel a trainer opens from a client card ("Sessions"), and the same
 // component the client sees read-only from their home.
+// The trainer's session policy — cancellation stance, fees, and how they get
+// paid. Extracted (S186b) so the Sessions panel and the Calendar page edit the
+// SAME controls: duplicated money settings are exactly the thing that drifts
+// into a number shown that isn't the number charged.
+function SessionPolicyEditor({ policyDraft, setPolicyDraft, trainerUid, defaultPriceCents = 0, busy, onSave, onCancel }) {
+  const inp = "w-full min-w-0 bg-surface2 border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted";
+  const lbl = "mb-1 text-[11px] font-bold uppercase tracking-wide text-muted";
+  return (
+          <div className="mb-3 rounded-lg border border-border bg-surface2 p-3">
+            {/* One switch for the whole question "do I charge for cancellations
+                at all?". It was always possible to say no — pick "any time", or
+                set the percentage to 0 — but only if you already knew that.
+                A trainer who doesn't want a late fee should be able to see that
+                choice, not deduce it. Off maps to the existing `anytime` stance
+                rather than a new field, so the disclosure text, the consent
+                snapshot and the settle engine all keep working unchanged. */}
+            <div className={lbl}>Late-cancellation fee</div>
+            <div className="mb-2 flex items-center gap-2">
+              {[["on", "Charge a fee"], ["off", "No fee, ever"]].map(([v, label]) => {
+                const isOn = v === "on" ? policyDraft.cancelType !== "anytime" : policyDraft.cancelType === "anytime";
+                return (
+                  <button key={v}
+                    onClick={() => setPolicyDraft((d) => ({
+                      ...d,
+                      cancelType: v === "off" ? "anytime" : (d.cancelType === "anytime" ? "window" : d.cancelType),
+                    }))}
+                    className={`flex-1 rounded-lg px-2.5 py-2 text-xs font-bold cursor-pointer ${
+                      isOn ? "bg-[rgba(var(--accent-rgb),.1)] text-primary border border-primary"
+                        : "bg-transparent text-muted border border-border"}`}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {policyDraft.cancelType === "anytime" && (
+              <div className="mb-2 text-[11px] text-muted leading-snug">
+                Clients can cancel any time at no charge, and a no-show isn&apos;t charged either.
+              </div>
+            )}
+
+            {/* Cancellation STANCE — the window only matters for one of the
+                three, so asking for hours before the stance is backwards. */}
+            {policyDraft.cancelType !== "anytime" && (<>
+            <div className={lbl}>Cancellations</div>
+            <div className="mb-2 flex flex-col gap-1.5">
+              {Object.entries(CANCEL_TYPES).map(([k, label]) => (
+                <button key={k} onClick={() => setPolicyDraft((d) => ({ ...d, cancelType: k }))}
+                  className={`rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold cursor-pointer ${
+                    policyDraft.cancelType === k
+                      ? "bg-[rgba(var(--accent-rgb),.1)] text-primary border border-primary"
+                      : "bg-transparent text-fg border border-border"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            </>)}
+
+            {policyDraft.cancelType === "window" && (<>
+            <div className={lbl}>Free-cancellation notice</div>
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {CANCEL_WINDOW_PRESETS.map((h) => (
+                <button key={h} onClick={() => setPolicyDraft((d) => ({ ...d, cancelWindowHours: h }))}
+                  className={`rounded-full px-2.5 py-1 text-xs font-semibold cursor-pointer ${
+                    Number(policyDraft.cancelWindowHours) === h
+                      ? "bg-primaryfill text-primaryfg border-0"
+                      : "bg-transparent text-fg border border-border"}`}>
+                  {h % 24 === 0 && h >= 24 ? `${h / 24}d` : `${h}h`}
+                </button>
+              ))}
+              <input type="number" inputMode="numeric" min="0" max="336" placeholder="custom"
+                value={policyDraft.cancelWindowHours}
+                onChange={(e) => setPolicyDraft((d) => ({ ...d, cancelWindowHours: e.target.value }))}
+                className="w-[86px] bg-surface border border-border rounded-lg px-2 py-1 text-fg text-xs outline-none" />
+              <span className="self-center text-[11px] text-muted">hours</span>
+            </div>
+            </>)}
+
+            {policyDraft.cancelType !== "anytime" && (
+              <div className="mb-2">
+                <div className={lbl}>{policyDraft.cancelType === "never" ? "Cancellation charge" : "Late-cancel charge"} (% of the session)</div>
+                <input type="number" inputMode="numeric" min="0" max="100" value={policyDraft.lateCancelChargePct}
+                  onChange={(e) => setPolicyDraft((d) => ({ ...d, lateCancelChargePct: e.target.value }))}
+                  className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none" />
+                <span className="ml-2 text-[11px] text-muted">0 = never charge for a cancellation</span>
+              </div>
+            )}
+
+            {/* The no-show rate is now actually billed (S186), so it has to be
+                settable. It was disclosed to clients and frozen into their
+                consent long before anything could apply it. */}
+            {policyDraft.cancelType !== "anytime" && (
+              <div className="mb-2">
+                <div className={lbl}>No-show charge (% of the session)</div>
+                <input type="number" inputMode="numeric" min="0" max="100" value={policyDraft.noShowChargePct}
+                  onChange={(e) => setPolicyDraft((d) => ({ ...d, noShowChargePct: e.target.value }))}
+                  className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none" />
+                <span className="ml-2 text-[11px] text-muted">0 = never charge for a no-show</span>
+              </div>
+            )}
+
+            {/* WHEN money is taken — Kevin wants a variety of ways to charge.
+                S178: hidden unless this trainer may actually bill. A trainer
+                without it keeps the cancellation policy above (free for all)
+                and settles up with clients directly; the server forces the
+                same outcome regardless of what this control shows. */}
+            {canBillSessions(trainerUid) && (<>
+            <div className={lbl}>How you get paid</div>
+            <div className="mb-2 flex flex-col gap-1.5">
+              {Object.entries(BILLING_MODES).map(([k, label]) => (
+                <button key={k} onClick={() => setPolicyDraft((d) => ({ ...d, billingMode: k }))}
+                  className={`rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold cursor-pointer ${
+                    policyDraft.billingMode === k
+                      ? "bg-[rgba(var(--accent-rgb),.1)] text-primary border border-primary"
+                      : "bg-transparent text-fg border border-border"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="mb-2 text-[11px] text-muted leading-snug">
+              Prepaid credits are always used first — a card is only charged for sessions a package doesn't cover.
+            </div>
+
+            {/* Stripe's fixed per-transaction fee is what makes charging every
+                single session cost more than batching. Kevin: trainers "must be
+                aware of the Stripe fees adding up on them ... and need to price
+                accordingly". Shown with THEIR numbers, not a generic warning. */}
+            {policyDraft.billingMode === "per_session" && (() => {
+              const cmp = feeComparison(defaultPriceCents || 7500, 3);
+              if (!cmp) return null;
+              return (
+                <div className="mb-2 rounded-md px-2.5 py-2 text-[.74rem] leading-snug"
+                  style={{ background: "rgba(251,191,36,.09)", color: "var(--text)" }}>
+                  <b>Stripe fees add up in this mode.</b> Every session is its own transaction
+                  ({money(stripeFeeCents(defaultPriceCents || 7500))} on a {money(defaultPriceCents || 7500)} session).
+                  At 3 sessions/week that's {money(cmp.perSessionWeekly)}/week in fees vs {money(cmp.weeklyBatched)}/week
+                  if you charge weekly — about <b>{money(cmp.savingPerYear)}/year</b> more. Price accordingly.
+                </div>
+              );
+            })()}
+            </>)}
+
+            <div className="mb-2">
+              <div className={lbl}>In your own words (optional)</div>
+              <input placeholder="e.g. Life happens — text me and we'll work it out."
+                value={policyDraft.policyNote}
+                onChange={(e) => setPolicyDraft((d) => ({ ...d, policyNote: e.target.value }))} className={inp} />
+            </div>
+            <div className="mb-2 rounded-md px-2.5 py-1.5 text-[.74rem]" style={{ background: "rgba(var(--accent-rgb),.08)", color: "var(--text)" }}>
+              Clients will see: “{describePolicy(policyOf({ sessionPolicy: policyDraft }))}”
+            </div>
+            <div className="flex gap-1.5">
+              <button onClick={onSave} disabled={busy}
+                className="rounded-lg bg-primaryfill px-3.5 py-1.5 text-xs font-bold text-primaryfg cursor-pointer">Save policy</button>
+              <button onClick={onCancel}
+                className="rounded-lg border border-border bg-transparent px-3 py-1.5 text-xs text-muted cursor-pointer">Cancel</button>
+            </div>
+          </div>
+  );
+}
+
 function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultPriceCents = 0, onClose }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);
@@ -24299,155 +24551,9 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
         )}
 
         {isTrainer && editPolicy && (
-          <div className="mb-3 rounded-lg border border-border bg-surface2 p-3">
-            {/* One switch for the whole question "do I charge for cancellations
-                at all?". It was always possible to say no — pick "any time", or
-                set the percentage to 0 — but only if you already knew that.
-                A trainer who doesn't want a late fee should be able to see that
-                choice, not deduce it. Off maps to the existing `anytime` stance
-                rather than a new field, so the disclosure text, the consent
-                snapshot and the settle engine all keep working unchanged. */}
-            <div className={lbl}>Late-cancellation fee</div>
-            <div className="mb-2 flex items-center gap-2">
-              {[["on", "Charge a fee"], ["off", "No fee, ever"]].map(([v, label]) => {
-                const isOn = v === "on" ? policyDraft.cancelType !== "anytime" : policyDraft.cancelType === "anytime";
-                return (
-                  <button key={v}
-                    onClick={() => setPolicyDraft((d) => ({
-                      ...d,
-                      cancelType: v === "off" ? "anytime" : (d.cancelType === "anytime" ? "window" : d.cancelType),
-                    }))}
-                    className={`flex-1 rounded-lg px-2.5 py-2 text-xs font-bold cursor-pointer ${
-                      isOn ? "bg-[rgba(var(--accent-rgb),.1)] text-primary border border-primary"
-                        : "bg-transparent text-muted border border-border"}`}>
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-            {policyDraft.cancelType === "anytime" && (
-              <div className="mb-2 text-[11px] text-muted leading-snug">
-                Clients can cancel any time at no charge, and a no-show isn&apos;t charged either.
-              </div>
-            )}
-
-            {/* Cancellation STANCE — the window only matters for one of the
-                three, so asking for hours before the stance is backwards. */}
-            {policyDraft.cancelType !== "anytime" && (<>
-            <div className={lbl}>Cancellations</div>
-            <div className="mb-2 flex flex-col gap-1.5">
-              {Object.entries(CANCEL_TYPES).map(([k, label]) => (
-                <button key={k} onClick={() => setPolicyDraft((d) => ({ ...d, cancelType: k }))}
-                  className={`rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold cursor-pointer ${
-                    policyDraft.cancelType === k
-                      ? "bg-[rgba(var(--accent-rgb),.1)] text-primary border border-primary"
-                      : "bg-transparent text-fg border border-border"}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            </>)}
-
-            {policyDraft.cancelType === "window" && (<>
-            <div className={lbl}>Free-cancellation notice</div>
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {CANCEL_WINDOW_PRESETS.map((h) => (
-                <button key={h} onClick={() => setPolicyDraft((d) => ({ ...d, cancelWindowHours: h }))}
-                  className={`rounded-full px-2.5 py-1 text-xs font-semibold cursor-pointer ${
-                    Number(policyDraft.cancelWindowHours) === h
-                      ? "bg-primaryfill text-primaryfg border-0"
-                      : "bg-transparent text-fg border border-border"}`}>
-                  {h % 24 === 0 && h >= 24 ? `${h / 24}d` : `${h}h`}
-                </button>
-              ))}
-              <input type="number" inputMode="numeric" min="0" max="336" placeholder="custom"
-                value={policyDraft.cancelWindowHours}
-                onChange={(e) => setPolicyDraft((d) => ({ ...d, cancelWindowHours: e.target.value }))}
-                className="w-[86px] bg-surface border border-border rounded-lg px-2 py-1 text-fg text-xs outline-none" />
-              <span className="self-center text-[11px] text-muted">hours</span>
-            </div>
-            </>)}
-
-            {policyDraft.cancelType !== "anytime" && (
-              <div className="mb-2">
-                <div className={lbl}>{policyDraft.cancelType === "never" ? "Cancellation charge" : "Late-cancel charge"} (% of the session)</div>
-                <input type="number" inputMode="numeric" min="0" max="100" value={policyDraft.lateCancelChargePct}
-                  onChange={(e) => setPolicyDraft((d) => ({ ...d, lateCancelChargePct: e.target.value }))}
-                  className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none" />
-                <span className="ml-2 text-[11px] text-muted">0 = never charge for a cancellation</span>
-              </div>
-            )}
-
-            {/* The no-show rate is now actually billed (S186), so it has to be
-                settable. It was disclosed to clients and frozen into their
-                consent long before anything could apply it. */}
-            {policyDraft.cancelType !== "anytime" && (
-              <div className="mb-2">
-                <div className={lbl}>No-show charge (% of the session)</div>
-                <input type="number" inputMode="numeric" min="0" max="100" value={policyDraft.noShowChargePct}
-                  onChange={(e) => setPolicyDraft((d) => ({ ...d, noShowChargePct: e.target.value }))}
-                  className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none" />
-                <span className="ml-2 text-[11px] text-muted">0 = never charge for a no-show</span>
-              </div>
-            )}
-
-            {/* WHEN money is taken — Kevin wants a variety of ways to charge.
-                S178: hidden unless this trainer may actually bill. A trainer
-                without it keeps the cancellation policy above (free for all)
-                and settles up with clients directly; the server forces the
-                same outcome regardless of what this control shows. */}
-            {canBillSessions(trainerUid) && (<>
-            <div className={lbl}>How you get paid</div>
-            <div className="mb-2 flex flex-col gap-1.5">
-              {Object.entries(BILLING_MODES).map(([k, label]) => (
-                <button key={k} onClick={() => setPolicyDraft((d) => ({ ...d, billingMode: k }))}
-                  className={`rounded-lg px-2.5 py-1.5 text-left text-xs font-semibold cursor-pointer ${
-                    policyDraft.billingMode === k
-                      ? "bg-[rgba(var(--accent-rgb),.1)] text-primary border border-primary"
-                      : "bg-transparent text-fg border border-border"}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="mb-2 text-[11px] text-muted leading-snug">
-              Prepaid credits are always used first — a card is only charged for sessions a package doesn't cover.
-            </div>
-
-            {/* Stripe's fixed per-transaction fee is what makes charging every
-                single session cost more than batching. Kevin: trainers "must be
-                aware of the Stripe fees adding up on them ... and need to price
-                accordingly". Shown with THEIR numbers, not a generic warning. */}
-            {policyDraft.billingMode === "per_session" && (() => {
-              const cmp = feeComparison(defaultPriceCents || 7500, 3);
-              if (!cmp) return null;
-              return (
-                <div className="mb-2 rounded-md px-2.5 py-2 text-[.74rem] leading-snug"
-                  style={{ background: "rgba(251,191,36,.09)", color: "var(--text)" }}>
-                  <b>Stripe fees add up in this mode.</b> Every session is its own transaction
-                  ({money(stripeFeeCents(defaultPriceCents || 7500))} on a {money(defaultPriceCents || 7500)} session).
-                  At 3 sessions/week that's {money(cmp.perSessionWeekly)}/week in fees vs {money(cmp.weeklyBatched)}/week
-                  if you charge weekly — about <b>{money(cmp.savingPerYear)}/year</b> more. Price accordingly.
-                </div>
-              );
-            })()}
-            </>)}
-
-            <div className="mb-2">
-              <div className={lbl}>In your own words (optional)</div>
-              <input placeholder="e.g. Life happens — text me and we'll work it out."
-                value={policyDraft.policyNote}
-                onChange={(e) => setPolicyDraft((d) => ({ ...d, policyNote: e.target.value }))} className={inp} />
-            </div>
-            <div className="mb-2 rounded-md px-2.5 py-1.5 text-[.74rem]" style={{ background: "rgba(var(--accent-rgb),.08)", color: "var(--text)" }}>
-              Clients will see: “{describePolicy(policyOf({ sessionPolicy: policyDraft }))}”
-            </div>
-            <div className="flex gap-1.5">
-              <button onClick={savePolicy} disabled={busy}
-                className="rounded-lg bg-primaryfill px-3.5 py-1.5 text-xs font-bold text-primaryfg cursor-pointer">Save policy</button>
-              <button onClick={() => { setEditPolicy(false); setPolicyDraft(policy); }}
-                className="rounded-lg border border-border bg-transparent px-3 py-1.5 text-xs text-muted cursor-pointer">Cancel</button>
-            </div>
-          </div>
+          <SessionPolicyEditor policyDraft={policyDraft} setPolicyDraft={setPolicyDraft}
+            trainerUid={trainerUid} defaultPriceCents={defaultPriceCents} busy={busy}
+            onSave={savePolicy} onCancel={() => { setEditPolicy(false); setPolicyDraft(policy); }} />
         )}
 
         {isTrainer && !form && (
