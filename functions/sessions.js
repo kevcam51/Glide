@@ -44,6 +44,14 @@ async function markCompletedSessions(db, nowMs) {
     if (endMs > now) { skipped++; return; } // still in progress
     batch.update(docSnap.ref, {
       completedAt: endMs,        // when it ACTUALLY ended, not when we noticed
+      // Freeze the price at the moment the obligation was created. `priceCents`
+      // stays trainer-editable (they may need to fix a typo on an upcoming
+      // session), but in weekly mode up to seven days pass between delivery and
+      // the charge — and the sweep used to read the price live, so an edit in
+      // that window silently re-priced work the client had already received, or
+      // a cancellation fee they had already been quoted. This is the number
+      // that bills. (S186)
+      billableCents: Math.max(0, Number(s.priceCents) || 0),
       completedVia: "auto",
       updatedAt: now,
     });

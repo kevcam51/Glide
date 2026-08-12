@@ -75,14 +75,66 @@ async function isTrainerOfClient(db, trainerUid, clientProfile) {
 
 // Get-or-create the Stripe customer for a user, reusing the id billing.js
 // already stores so a client never ends up with two customer records.
-async function ensureCustomer(db, uid, profile, stripe) {
-  if (profile && profile.stripeCustomerId) return profile.stripeCustomerId;
+//
+// ⚠️ MODE MATTERS (S186). A Stripe customer belongs to exactly one mode: a test
+// `cus_…` does not exist to the live key. `stripeCustomerId` is SHARED with
+// subscription billing, so rehearsing session billing on a client flagged
+// `sessionBillingTest` used to mint a TEST customer into that shared field —
+// and once the flag came off, every live charge for that person threw
+// `resource_missing`. The old catch-all read that as a card decline, so the
+// client was told their (perfectly good) card was refused, put on a billing
+// hold, and their delivered training was never collected. It also broke their
+// subscription checkout, which passes the same id to the live key.
+//
+// So the mode is stamped alongside the id, and a mismatch mints a fresh
+// customer for the mode in use rather than reusing one that cannot work.
+// billing.js learned this exact lesson for referral credits (`stripeLivemode`);
+// the session path simply never adopted it.
+async function ensureCustomer(db, uid, profile, stripe, wantLive) {
+  const stored = profile && profile.stripeCustomerId;
+  if (stored) {
+    const storedLive = profile.stripeLivemode;
+    // Unknown mode (written before this stamp existed) is trusted only when it
+    // matches the live key — the historical default — and verified either way.
+    if (storedLive === undefined ? wantLive : storedLive === wantLive) {
+      try {
+        const cus = await stripe.customers.retrieve(stored);
+        if (cus && !cus.deleted) {
+          if (storedLive === undefined) await db.doc(`users/${uid}`).set({ stripeLivemode: wantLive }, { merge: true });
+          return stored;
+        }
+      } catch (e) {
+        // ⚠️ ONLY a customer that Stripe says is GONE may be replaced. Re-minting
+        // on a timeout or a 5xx would fork the customer for a reason that isn't
+        // real — and the duplicate-charge check (findIntentByLedger) is scoped to
+        // a customer, so a wrongly-forked id makes "has this ledger been charged?"
+        // answer a confident NO about the wrong account. That turns the guard
+        // against double-charging into the cause of one.
+        if (!(e && (e.code === "resource_missing" || (e.raw && e.raw.code === "resource_missing")))) {
+          console.error("could not verify stripeCustomerId — refusing to re-mint", uid, e && e.message);
+          throw e;
+        }
+        console.warn("stored stripeCustomerId no longer exists at Stripe, minting a fresh one", uid);
+      }
+    } else {
+      console.warn("stripeCustomerId belongs to the other Stripe mode — minting a fresh one", uid);
+    }
+  }
   const customer = await stripe.customers.create({
     email: profile && profile.email ? profile.email : undefined,
     name: profile && profile.displayName ? profile.displayName : undefined,
     metadata: { uid },
   });
-  await db.doc(`users/${uid}`).set({ stripeCustomerId: customer.id }, { merge: true });
+  // The saved card belonged to the OLD customer and cannot be charged on the new
+  // one, so clear the pointer rather than leave a payment method that will throw
+  // on every future sweep. Keep the old id so a charge made against it can still
+  // be found when reconciling.
+  const patch = { stripeCustomerId: customer.id, stripeLivemode: wantLive };
+  if (stored) {
+    patch.stripeCustomerIdPrev = admin.firestore.FieldValue.arrayUnion(stored);
+    patch.sessionPaymentMethod = admin.firestore.FieldValue.delete();
+  }
+  await db.doc(`users/${uid}`).set(patch, { merge: true });
   return customer.id;
 }
 
@@ -126,7 +178,7 @@ exports.createSessionSetupIntent = onCall(
     }
 
     const stripe = stripeClient(profile);
-    const customerId = await ensureCustomer(db, uid, profile, stripe);
+    const customerId = await ensureCustomer(db, uid, profile, stripe, profile.sessionBillingTest !== true);
     const origin = safeOrigin(String((request.rawRequest && request.rawRequest.headers && request.rawRequest.headers.origin) || ""));
     const session = await stripe.checkout.sessions.create({
       mode: "setup",
@@ -238,6 +290,15 @@ exports.recordSessionConsent = onCall(
 
     // The current card pointer, server-written (rules block the owner from
     // touching it — a client must not be able to fake having a card).
+    //
+    // `sessionConsentPolicy` mirrors the terms that now GOVERN this client's
+    // charges. The consent log itself is server-only and unreadable from the
+    // browser, which is why the cancel dialog used to price from the trainer's
+    // CURRENT policy while the sweep billed the frozen snapshot — so a client
+    // could be shown "no charge" and then billed the full session price, or the
+    // trainer silently paid $0 on a fee the client was told they owed. Mirroring
+    // it here lets the UI quote the exact terms that will be charged, without
+    // opening the append-only log to client reads. (S186)
     await db.doc(`users/${uid}`).set({
       sessionPaymentMethod: {
         id: pmId, brand: card.brand || null, last4: card.last4 || null,
@@ -245,6 +306,7 @@ exports.recordSessionConsent = onCall(
         billingState, billingCountry,
         savedAt: now, trainerUid,
       },
+      sessionConsentPolicy: { ...consent.policy, trainerUid, agreedAt: now, policyVersion: consent.policyVersion },
     }, { merge: true });
 
     return {

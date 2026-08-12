@@ -366,6 +366,81 @@ await check("client post-dates cancelledAt into the future", assertFails(updateD
 await check("honest client cancel at server time SUCCEEDS", assertSucceeds(updateDoc(sess(c1, "s9"),
   { status: "cancelled", cancelledBy: C1, cancelledAt: Date.now(), updatedAt: Date.now() })));
 
+// ---- S186: WHO cancelled decides who pays -----------------------------------
+// The settle engine treats a trainer cancellation as free and a client
+// cancellation as chargeable, so an unpinned `cancelledBy` was free training
+// for anyone willing to open a browser console — and, in reverse, let a trainer
+// bill a client for the trainer's own cancellation.
+console.log("\nCANCEL ATTRIBUTION — cancelledBy must be whoever is writing it:");
+await testEnv.withSecurityRulesDisabled(async (c) => {
+  await setDoc(doc(c.firestore(), "sessions", "s20"), booking({ startAt: Date.now() + 3600000 }));
+  await setDoc(doc(c.firestore(), "sessions", "s21"), booking({ startAt: Date.now() + 3600000 }));
+});
+await check("client blames the TRAINER for their own cancellation (free training)", assertFails(updateDoc(sess(c1, "s20"),
+  { status: "cancelled", cancelledBy: H, cancelledAt: Date.now(), updatedAt: Date.now() })));
+await check("trainer blames the CLIENT for the trainer's own cancellation (bogus fee)", assertFails(updateDoc(sess(head, "s20"),
+  { status: "cancelled", cancelledBy: C1, cancelledAt: Date.now(), updatedAt: Date.now() })));
+await check("client cancelling honestly still works", assertSucceeds(updateDoc(sess(c1, "s20"),
+  { status: "cancelled", cancelledBy: C1, cancelledAt: Date.now(), updatedAt: Date.now() })));
+await check("trainer cancelling honestly still works", assertSucceeds(updateDoc(sess(head, "s21"),
+  { status: "cancelled", cancelledBy: H, cancelledAt: Date.now(), updatedAt: Date.now() })));
+
+// ---- S186: a cancellation is about a session that hasn't happened yet -------
+// Cancelling after the fact turned a delivered, full-price session into a
+// reduced late fee or nothing at all, and produced dispute evidence reading
+// "-96.5h notice" — self-contradictory on the one record meant to defend it.
+console.log("\nRETROACTIVE CANCEL — a delivered session can no longer be cancelled:");
+await testEnv.withSecurityRulesDisabled(async (c) => {
+  await setDoc(doc(c.firestore(), "sessions", "s22"),
+    booking({ startAt: Date.now() - 2 * 3600000, completedAt: Date.now() - 3600000 }));
+  await setDoc(doc(c.firestore(), "sessions", "s23"), booking({ startAt: Date.now() - 600000 }));
+  await setDoc(doc(c.firestore(), "sessions", "s24"),
+    booking({ startAt: Date.now() - 2 * 3600000, completedAt: Date.now() - 3600000 }));
+});
+await check("client cancels a session that was DELIVERED", assertFails(updateDoc(sess(c1, "s22"),
+  { status: "cancelled", cancelledBy: C1, cancelledAt: Date.now(), updatedAt: Date.now() })));
+await check("client cancels a session already IN PROGRESS", assertFails(updateDoc(sess(c1, "s23"),
+  { status: "cancelled", cancelledBy: C1, cancelledAt: Date.now(), updatedAt: Date.now() })));
+await check("trainer cancels a session that was DELIVERED", assertFails(updateDoc(sess(head, "s22"),
+  { status: "cancelled", cancelledBy: H, cancelledAt: Date.now(), updatedAt: Date.now() })));
+
+// ---- S186: no-show + waive are the trainer's judgements ---------------------
+console.log("\nNO-SHOW / WAIVE — trainer only, and they can only reduce the charge:");
+await check("trainer marks a delivered session as a no-show", assertSucceeds(updateDoc(sess(head, "s22"),
+  { noShow: true, updatedAt: Date.now() })));
+await check("trainer waives a delivered session", assertSucceeds(updateDoc(sess(head, "s24"),
+  { waived: true, updatedAt: Date.now() })));
+await check("CLIENT marks their own session a no-show", assertFails(updateDoc(sess(c1, "s24"),
+  { noShow: true, updatedAt: Date.now() })));
+await check("CLIENT waives their own session", assertFails(updateDoc(sess(c1, "s24"),
+  { waived: true, updatedAt: Date.now() })));
+await check("booking cannot be created already marked no-show", assertFails(setDoc(sess(head, "bad20"), booking({ noShow: true }))));
+await check("booking cannot be created already waived", assertFails(setDoc(sess(head, "bad21"), booking({ waived: true }))));
+
+// ---- S186: the price of finished work is frozen -----------------------------
+// Weekly mode leaves up to seven days between the client's action and the
+// charge; re-pricing inside that window billed an amount nobody agreed to.
+console.log("\nPRICE FREEZE — a delivered or cancelled session can't be re-priced:");
+await check("trainer re-prices a DELIVERED session", assertFails(updateDoc(sess(head, "s22"),
+  { priceCents: 15000, updatedAt: Date.now() })));
+await check("trainer re-prices a CANCELLED session (fee already quoted)", assertFails(updateDoc(sess(head, "s21"),
+  { priceCents: 15000, updatedAt: Date.now() })));
+await testEnv.withSecurityRulesDisabled(async (c) => {
+  await setDoc(doc(c.firestore(), "sessions", "s25"), booking({ startAt: Date.now() + 86400000 }));
+});
+await check("trainer re-prices an UPCOMING session (still allowed)", assertSucceeds(updateDoc(sess(head, "s25"),
+  { priceCents: 15000, updatedAt: Date.now() })));
+await check("client cannot write billableCents (server-only, decides money)", assertFails(updateDoc(sess(c1, "s25"),
+  { billableCents: 0, updatedAt: Date.now() })));
+await check("trainer cannot write billableCents either", assertFails(updateDoc(sess(head, "s25"),
+  { billableCents: 0, updatedAt: Date.now() })));
+
+// ---- S186: recurring series bookkeeping -------------------------------------
+await check("trainer books a session as part of a repeating series", assertSucceeds(setDoc(sess(head, "s26"),
+  booking({ seriesId: "series_abc", seriesIndex: 3 }))));
+await check("client cannot re-point a session at another series", assertFails(updateDoc(sess(c1, "s26"),
+  { seriesId: "someone_elses", updatedAt: Date.now() })));
+
 // ---- S101c: charge ledger + test-mode flag ---------------------------------
 console.log("\nCHARGE LEDGER — participants read, nobody client-writes:");
 await testEnv.withSecurityRulesDisabled(async (c) => {

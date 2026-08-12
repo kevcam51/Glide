@@ -111,7 +111,11 @@ service cloud.firestore {
           && request.resource.data.role == resource.data.role
           && !request.resource.data.diff(resource.data).affectedKeys()
                .hasAny(['subscriptionStatus', 'entitlements', 'trialStartedAt', 'trialLengthDays',
-                        'sessionCredits', 'sessionBillingHold', 'sessionPaymentMethod', 'sessionBillingTest'])
+                        'sessionCredits', 'sessionBillingHold', 'sessionPaymentMethod', 'sessionBillingTest',
+                        // The terms that govern this client's charges, mirrored
+                        // from their signed consent. The UI quotes fees from it,
+                        // so a client who could edit it could quote themselves $0.
+                        'sessionConsentPolicy', 'stripeLivemode'])
           // JOINING a trainer is server-side only (S179 free roster cap): a
           // client cannot count a trainer's roster — the scoped read rules stop
           // them reading other profiles — so the cap has to be enforced in
@@ -255,7 +259,13 @@ service cloud.firestore {
         return ['participants', 'trainerUid', 'clientUid', 'startAt', 'durationMin',
                 'status', 'title', 'location', 'priceCents',
                 'createdBy', 'createdAt', 'updatedAt',
-                'cancelledBy', 'cancelledAt', 'cancelReason'];
+                'cancelledBy', 'cancelledAt', 'cancelReason',
+                // Trainer-only judgements on a DELIVERED session (S186). Both
+                // reduce or zero what is charged, never increase it, so the
+                // client is never exposed by them being writable here.
+                'noShow', 'waived',
+                // Recurrence bookkeeping — which series a session belongs to.
+                'seriesId', 'seriesIndex'];
       }
       // Fields a CLIENT is allowed to touch — cancelling their own session and
       // nothing else (they can't move it, re-price it, or un-cancel it).
@@ -275,11 +285,48 @@ service cloud.firestore {
       // (request.time) with ±5 min of slack for honest device-clock skew —
       // far too tight to fake the hours-scale backdating the fee turns on, and
       // it binds the TRAINER symmetrically so neither side can rewrite history.
+      // The ±5 min stays SYMMETRIC on purpose. A one-sided bound would reject
+      // the write outright from any device whose clock runs even a second fast,
+      // which means "you cannot cancel at all" — a worse failure than the one it
+      // fixes. The forward half does shift the fee boundary against the client
+      // by up to five minutes, so the SETTLE ENGINE forgives exactly this much
+      // notice when pricing a late cancel (SKEW_GRACE_MS in sessionSettle.js).
+      // Skew is absorbed where it can be made client-favourable, not where it
+      // can lock someone out. (S186)
       function cancelStampHonest() {
         return !changed().hasAny(['cancelledAt'])
           || (request.resource.data.cancelledAt is number
               && request.resource.data.cancelledAt >= request.time.toMillis() - 300000
               && request.resource.data.cancelledAt <= request.time.toMillis() + 300000);
+      }
+      // ⚠️ WHO cancelled decides who pays. `cancelledBy` was unguarded while
+      // `cancelledAt` was carefully pinned — so a client could write
+      // {status:'cancelled', cancelledBy:<trainerUid>} from the browser console
+      // and the settle engine, which treats a trainer cancellation as free,
+      // would never bill it. Every session, free, forever. It also worked in
+      // reverse: a trainer could stamp a client's uid on their OWN cancellation
+      // and bill the client for it, which terms.html §6 promises never happens.
+      // Whoever writes it must be who it names.
+      function cancelledByHonest() {
+        return !changed().hasAny(['cancelledBy'])
+          || request.resource.data.get('cancelledBy', '') == request.auth.uid;
+      }
+      // A cancellation is a statement about a session that HASN'T HAPPENED YET.
+      // Without this, a delivered session could be "cancelled" after the fact —
+      // turning a full-price charge into a late-cancel fee, or nothing at all —
+      // and the stored dispute evidence rendered a negative notice period
+      // ("-96.5h notice"), which would lose the chargeback on its own.
+      function stillCancellable() {
+        return !('completedAt' in resource.data)
+          && resource.data.get('startAt', 0) > request.time.toMillis();
+      }
+      // A delivered session's price is settled history. It stays editable while
+      // the session is still upcoming (typos happen); once it is delivered or
+      // cancelled, the amount is frozen — the server bills from `billableCents`,
+      // and the client has already been quoted a fee against this number.
+      function priceFrozenOnceFinal() {
+        return !changed().hasAny(['priceCents'])
+          || (!('completedAt' in resource.data) && resource.data.get('status', '') != 'cancelled');
       }
       // The identity of the booking can never be rewritten after creation.
       function identityIntact() {
@@ -310,26 +357,40 @@ service cloud.firestore {
         && request.resource.data.durationMin <= 480
         && request.resource.data.get('priceCents', 0) is number
         && request.resource.data.get('priceCents', 0) >= 0
-        && request.resource.data.get('priceCents', 0) <= 500000;
+        && request.resource.data.get('priceCents', 0) <= 500000
+        // A booking can't be born already judged.
+        && request.resource.data.get('noShow', false) == false
+        && request.resource.data.get('waived', false) == false;
 
-      // TRAINER: may reschedule, re-price, retitle, or cancel — but never write
-      // a billing field and never rewrite whose session it is.
+      // TRAINER: may reschedule, re-price, retitle, cancel, or mark a delivered
+      // session as a no-show / waived — but never write a billing field and
+      // never rewrite whose session it is.
       allow update: if isParticipant()
         && request.auth.uid == resource.data.trainerUid
         && changed().hasOnly(bookingFields())
         && identityIntact()
         && cancelStampHonest()
+        && cancelledByHonest()
+        && priceFrozenOnceFinal()
+        // Cancelling is only for a session that hasn't happened. Marking a
+        // delivered one no-show or waived is a different action and stays open.
+        && (!changed().hasAny(['status']) || request.resource.data.status != 'cancelled' || stillCancellable())
         && request.resource.data.status in ['scheduled', 'cancelled']
+        && request.resource.data.get('noShow', false) is bool
+        && request.resource.data.get('waived', false) is bool
         && request.resource.data.durationMin is number
         && request.resource.data.durationMin > 0
         && request.resource.data.durationMin <= 480;
 
-      // CLIENT: cancel only. Status may go to 'cancelled' and nothing else may move.
+      // CLIENT: cancel only. Status may go to 'cancelled' and nothing else may
+      // move — and only while the session is still ahead of them.
       allow update: if isParticipant()
         && request.auth.uid == resource.data.clientUid
         && changed().hasOnly(clientCancelFields())
         && identityIntact()
         && cancelStampHonest()
+        && cancelledByHonest()
+        && stillCancellable()
         && request.resource.data.status == 'cancelled';
 
       // Deleting would erase billing history — cancel instead. Admin only.
