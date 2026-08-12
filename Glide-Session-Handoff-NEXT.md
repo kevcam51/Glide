@@ -110,19 +110,18 @@ about money or health. A leaked feed should be embarrassing, not harmful.
   subscribed calendars on its own schedule, often only every few hours.** Real-time Google sync
   would need OAuth + the Calendar API — a separate project, not a config flip.
 
-⚠️ **S187 OPEN — the reminder SEND path is not yet confirmed. Start here.**
-The scheduler is healthy (12 consecutive on-time 2-minute runs, no errors) and the burst-prevention
-path is confirmed in prod: a session booked 7 minutes out logged `{"sessions":1,"sent":0,"marked":1}`,
-correctly recording a stale lead without firing a false alert. But **no reminder was ever observed to
-send.** The numbers only fit if `notifPrefsOf` returned `{}` and `leadsOf` fell back to
-`DEFAULT_LEADS [60]` — the 60-minute lead was hours stale, so it was marked silently, and the 5-minute
-lead I had set in the UI was never seen. Ruled out already: `storage.set` writes the value verbatim
-(no double-encode), and the writer merges + persists the whole object correctly.
-**Check first:** read `users/{uid}/kv/caliq-notif-prefs` in the console and confirm
-`sessionReminderLeads` is actually stored, then book something ~8 minutes out with a 5-minute lead and
-watch `firebase functions:log --only sessionReminderPush` for `sent:1`.
-**Note the blast radius is small either way:** if prefs read empty, users still get the default
-1-hour reminder — the feature isn't inert, it would just be ignoring custom lead times.
+✅ **S187 reminders are CONFIRMED WORKING end to end in prod.** A session at 6:32 with a 5-minute
+lead delivered at **6:28:09** — title "Reminder test in 5 minutes", body "6:32 AM with Casey Client",
+tag `session-reminder-{sessionId}-5`. Both designed behaviours were observed in the same test:
+- the 6:26 sweep read the then-current `[60]` lead, found it hours stale, and **marked it without
+  sending** (`{"sessions":1,"sent":0,"marked":1}`) — the burst-prevention rule;
+- the 6:28 sweep read the saved `[5]` lead and delivered.
+
+⚠️ **Verify reminders via the FEED, not `functions:log`.** The function only logs when it sends or
+marks, and the CLI lags a minute or two — I briefly and wrongly concluded the send path was broken
+from a log grep alone. `sendPushTo` calls `appendFeed` unconditionally, so
+`users/{uid}/kv/caliq-notif-feed` is the reliable evidence even with no push subscription (which a
+headless browser never has).
 
 ### S186b — billing cadence + fee controls (Kevin's ask, DEPLOYED)
 - **`biweekly` billing mode added** — per-session / weekly / **every two weeks** / manual. The
