@@ -2238,6 +2238,33 @@ enabled (Blaze has no default spending cap).
   ⚠️ Repeating-series and no-show writes correctly return `permission-denied` against the
   CURRENTLY-PUBLISHED rules — expected until they're published. One test session remains in prod
   (Casey, Aug 11 7:00 AM, $85, on the non-billable test trainer); clearable.
+- Session 187: **Session reminders (multiple lead times) + subscribe to your sessions from Google/Apple/
+  Outlook — both DEPLOYED.** Kevin's ask: calendar-app-style reminders each side configures themselves,
+  several per session, plus connecting Glidna to a personal calendar. (1) **Reminders** —
+  `functions/sessionReminders.js` (`sessionReminderPush`, every 2 min). Leads chosen from
+  5m/10m/15m/30m/1h/2h/4h/1d, **multiple at once**, stored in the existing `caliq-notif-prefs` as
+  `sessionReminders` + `sessionReminderLeads` (default `[60]`; an explicit `[]` means none and survives a
+  reload). Two invariants: each fire is recorded on the session in `remindersSent` via **arrayUnion**
+  (atomic — overlapping runs can't double-send), keyed `"<uid>:<minutes>"` because the two sides have
+  different prefs about the same session; and a lead only fires within 12 min of its trigger, otherwise
+  it's marked sent **silently** — booking a session 5 minutes out with leads [120,30,10] would otherwise
+  deliver three simultaneous notifications, all false. The 2-minute cadence exists because the shortest
+  offered lead is 5 minutes. (2) **Calendar subscription** — `functions/calendarFeed.js`: `calendarFeed`
+  (HTTP → ICS) + `calendarFeedLink` (callable, mints/rotates). ⚠️ **The URL is the credential and there's
+  no way around it** — a subscribing calendar app can't send an auth header; it's a bare anonymous GET
+  from Google's servers, forever. So: 160 random bits, timing-safe compare, rotatable (reset kills the old
+  URL instantly), `noindex`+`no-store`, and the feed carries only times/titles/locations/the other
+  person's name — never money or health. The query is a bare `participants array-contains` with the date
+  window applied in code, because array-contains + a range on `startAt` needs a composite index and a feed
+  that 500s until someone deploys one is worse than a few hundred extra reads. Stable
+  `UID:session-{id}@glidna.com` makes a reschedule MOVE the event rather than duplicate it; cancelled
+  sessions stay as `STATUS:CANCELLED` (dropping them strands the event on subscribers' calendars). ICS
+  line folding is by **bytes** and won't split a UTF-8 sequence — an emoji in a title would corrupt the
+  line; 15 RFC assertions pass. **Honest limit, stated in the UI:** Apple/Outlook refresh ~15 min, but
+  **Google refreshes subscribed calendars on its own schedule, often only every few hours** — real-time
+  Google sync needs OAuth + the Calendar API, a separate project. Both controls render on the calendar
+  page's Settings AND in the ≡ Notification Center (a client has no trainer-calendar page). Verified in
+  prod: feed returns valid ICS with 8 real events, bad/missing tokens give 403/400, headers correct.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

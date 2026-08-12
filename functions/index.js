@@ -230,6 +230,14 @@ exports.listTeam = require("./team").listTeam;
 // Training sessions (S100): the "red line" — stamps completedAt on sessions
 // whose end time has passed. That stamp is what Sunday billing will bill from.
 exports.sessionsMarkCompleted = require("./sessions").sessionsMarkCompleted;
+// Session reminders (S187): "starts in 30 minutes", at whatever lead times each
+// side picked — and as many of them as they want.
+exports.sessionReminderPush = require("./sessionReminders").sessionReminderPush;
+// Subscribe to your sessions from Google/Apple/Outlook (S187). The feed is a
+// bare anonymous GET — a calendar app can't authenticate — so the URL carries a
+// rotatable 160-bit token and IS the credential. See calendarFeed.js.
+exports.calendarFeed = require("./calendarFeed").calendarFeed;
+exports.calendarFeedLink = require("./calendarFeed").calendarFeedLink;
 
 // ── appRequests (S140): feature requests users sent through the AI ──────────
 // Admin-only, Admin-SDK reads/writes (top-level `appRequests`, no client rules —

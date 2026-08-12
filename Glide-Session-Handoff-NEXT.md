@@ -71,6 +71,45 @@ sessions as charged anywhere; `cancelSeriesFrom`'s query was **denied by the rul
 the emulator) and now carries the required `participants` constraint; the new ledger statuses have
 labels and count as pending rather than vanishing from Earnings.
 
+### S187 — session reminders + subscribe from your own calendar (DEPLOYED)
+Both live on the calendar page's **Settings**, and in the ≡ **Notification Center** (a client has no
+trainer-calendar page, and the Notification Center is where anyone looks for "when do I get told").
+They are PERSONAL prefs — each side picks their own; nobody sets the other's.
+
+**Reminders** — `functions/sessionReminders.js`, `sessionReminderPush`, every 2 minutes.
+Lead times are chosen from 5m/10m/15m/30m/1h/2h/4h/1d and **multiple at once** (30 AND 10 is the
+point). Stored in the existing `caliq-notif-prefs` as `sessionReminders` (on/off) +
+`sessionReminderLeads` (array of minutes; default `[60]`; an explicit `[]` means none and must
+survive a reload rather than being re-defaulted).
+Two rules that make it behave:
+- **Never twice.** Each fire is recorded on the session as `remindersSent` via `arrayUnion` —
+  atomic, so overlapping runs can't both send. The marker is `"<uid>:<minutes>"`, per person AND
+  per lead, because the two sides have different preferences about the same session.
+- **Never as a burst.** Book a session 5 minutes out with leads `[120, 30, 10]` and the naive
+  "fire everything overdue" rule sends three notifications at once, all of them false. A lead only
+  fires within `FIRE_WINDOW_MS` (12 min) of its trigger; past that it is marked sent **silently**.
+The 2-minute cadence exists because the shortest lead offered is 5 minutes — a coarser sweep would
+routinely deliver "5 minutes before" with 1 minute to go. ~21k invocations/month, far inside free.
+
+**Calendar subscription** — `functions/calendarFeed.js`: `calendarFeed` (HTTP, serves ICS) +
+`calendarFeedLink` (callable, mints/rotates the token).
+⚠️ **The URL is the credential, unavoidably.** A subscribing calendar app cannot send an auth
+header — it issues a bare anonymous GET from Google's servers, forever. Hence: 160 random bits,
+timing-safe compare, rotatable ("Reset link" kills the old URL instantly), `noindex`+`no-store`,
+and the feed deliberately carries only times/titles/locations/the other person's name — nothing
+about money or health. A leaked feed should be embarrassing, not harmful.
+- Query is a bare `participants array-contains` with the date window applied **in code**: pairing
+  array-contains with a range on `startAt` would need a composite index, and a feed that 500s until
+  someone remembers to deploy an index is worse than reading a few hundred extra docs.
+- Stable `UID:session-{id}@glidna.com` is what makes a reschedule MOVE the event instead of leaving
+  a duplicate. Cancelled sessions stay in the feed as `STATUS:CANCELLED` rather than vanishing —
+  dropping them leaves them on some subscribers' calendars forever.
+- ICS folding is by **bytes**, not characters, and won't split a UTF-8 sequence (an emoji in a
+  session title would otherwise corrupt the line). 15 RFC-compliance assertions pass.
+- **Honest limitation, stated in the UI:** Apple/Outlook refresh ~15 min; **Google refreshes
+  subscribed calendars on its own schedule, often only every few hours.** Real-time Google sync
+  would need OAuth + the Calendar API — a separate project, not a config flip.
+
 ### S186b — billing cadence + fee controls (Kevin's ask, DEPLOYED)
 - **`biweekly` billing mode added** — per-session / weekly / **every two weeks** / manual. The
   fortnight is derived from the CALENDAR (`Math.floor(daysSinceEpoch / 7) % 2`), never from a

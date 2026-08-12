@@ -17279,6 +17279,146 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
   );
 }
 
+// ─── Session reminders + calendar subscription (S187) ───────────────────────
+// Both live on the calendar page, because that is where someone thinks about
+// when a session is and how they'll be told about it. They're PERSONAL settings
+// (unlike the cancellation policy, which governs every client), so this renders
+// for trainers and clients alike.
+const REMINDER_LEADS = [
+  { m: 5, label: "5 min" }, { m: 10, label: "10 min" }, { m: 15, label: "15 min" },
+  { m: 30, label: "30 min" }, { m: 60, label: "1 hour" }, { m: 120, label: "2 hours" },
+  { m: 240, label: "4 hours" }, { m: 1440, label: "1 day" },
+];
+const DEFAULT_REMINDER_LEADS = [60];
+const callCalendarLink = httpsCallable(functions, "calendarFeedLink");
+
+function SessionReminderPrefs({ notifPrefs, onSetNotifPrefs }) {
+  const np = notifPrefs || {};
+  const on = np.master !== false && np.sessionReminders !== false;
+  // An explicit [] means "none" — a real choice, so it must survive a reload
+  // rather than being read as "unset" and silently restored to the default.
+  const leads = Array.isArray(np.sessionReminderLeads) ? np.sessionReminderLeads : DEFAULT_REMINDER_LEADS;
+  const toggleLead = (m) => {
+    const next = leads.includes(m) ? leads.filter((x) => x !== m) : [...leads, m];
+    next.sort((a, b) => b - a);
+    onSetNotifPrefs({ sessionReminderLeads: next, ...(next.length ? { master: true, sessionReminders: true } : {}) });
+  };
+  return (
+    <div className="rounded-card border border-border bg-surface p-4">
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <div className="font-display text-base tracking-wide text-primary">Remind me before a session</div>
+        <button onClick={() => onSetNotifPrefs(on ? { sessionReminders: false } : { master: true, sessionReminders: true })}
+          aria-pressed={on}
+          className={`px-3 py-1.5 rounded-full text-[.7rem] font-bold cursor-pointer border ${
+            on ? "border-primary text-primary bg-[rgba(var(--accent-rgb),.1)]" : "border-border text-muted bg-transparent"}`}>
+          {on ? "On" : "Off"}
+        </button>
+      </div>
+      <div className="text-[.74rem] text-muted leading-snug mb-2">
+        Pick as many as you like — a nudge at each one. These are yours alone; your{" "}
+        {"trainer or client"} sets their own.
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {REMINDER_LEADS.map(({ m, label }) => {
+          const sel = leads.includes(m);
+          return (
+            <button key={m} onClick={() => toggleLead(m)} disabled={!on}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold cursor-pointer border ${
+                sel && on ? "border-primary text-primaryfg bg-primaryfill"
+                  : "border-border text-fg bg-transparent"} ${on ? "" : "opacity-45 cursor-default"}`}>
+              {label}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-2 text-[.7rem] text-muted leading-snug">
+        {!on ? "Reminders are off — you'll still see sessions on your calendar."
+          : leads.length ? `Reminders ${leads.map((m) => (REMINDER_LEADS.find((r) => r.m === m) || {}).label).filter(Boolean).join(" and ")} before each session.`
+            : "No lead times picked, so nothing will be sent. Choose one above."}
+      </div>
+    </div>
+  );
+}
+
+function CalendarSubscribe() {
+  const [link, setLink] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState("");
+  const [err, setErr] = useState("");
+  const [confirmReset, setConfirmReset] = useState(false);
+  const get = async (reset) => {
+    setBusy(true); setErr("");
+    try {
+      const r = await callCalendarLink({ reset: !!reset });
+      setLink(r.data); setConfirmReset(false);
+    } catch (e) { setErr("Couldn't get your calendar link. Try again in a moment."); }
+    setBusy(false);
+  };
+  const copy = (text, which) => {
+    navigator.clipboard?.writeText(text).then(() => { setCopied(which); setTimeout(() => setCopied(""), 1600); }).catch(() => {});
+  };
+  return (
+    <div className="rounded-card border border-border bg-surface p-4">
+      <div className="font-display text-base tracking-wide text-primary mb-1">Add to your own calendar</div>
+      <div className="text-[.74rem] text-muted leading-snug mb-2">
+        Subscribe once and your booked sessions appear in Google, Apple or Outlook Calendar —
+        alongside everything else. Book, move or cancel here and the subscription follows.
+      </div>
+      {!link ? (
+        <button onClick={() => get(false)} disabled={busy}
+          className="w-full py-2.5 rounded-lg border border-primary bg-[rgba(var(--accent-rgb),.1)] text-primary text-sm font-bold cursor-pointer">
+          {busy ? "Getting your link…" : "Get my calendar link"}
+        </button>
+      ) : (
+        <>
+          <div className="rounded-lg border border-border bg-surface2 p-2 mb-2 break-all text-[.68rem] text-muted font-mono">{link.url}</div>
+          <div className="flex flex-wrap gap-1.5">
+            <a href={link.webcal}
+              className="px-3 py-2 rounded-lg border border-primary bg-[rgba(var(--accent-rgb),.1)] text-primary text-xs font-bold cursor-pointer no-underline">
+              Subscribe on this device
+            </a>
+            <button onClick={() => copy(link.url, "url")}
+              className="px-3 py-2 rounded-lg border border-border bg-transparent text-fg text-xs font-semibold cursor-pointer">
+              {copied === "url" ? "Copied ✓" : "Copy link"}
+            </button>
+            <button onClick={() => setConfirmReset(true)}
+              className="px-3 py-2 rounded-lg border border-border bg-transparent text-muted text-xs font-semibold cursor-pointer">
+              Reset link
+            </button>
+          </div>
+          {confirmReset && (
+            <div className="mt-2 rounded-lg border border-danger p-2">
+              <div className="text-[.72rem] text-fg leading-snug mb-2">
+                Anyone holding the old link loses access immediately, and any calendar already
+                subscribed with it will stop updating until you re-subscribe. Reset it?
+              </div>
+              <div className="flex gap-1.5">
+                <button onClick={() => get(true)} disabled={busy}
+                  className="px-3 py-1.5 rounded-lg bg-danger text-white text-xs font-bold cursor-pointer border-0">
+                  {busy ? "Resetting…" : "Yes, reset"}
+                </button>
+                <button onClick={() => setConfirmReset(false)}
+                  className="px-3 py-1.5 rounded-lg border border-border bg-transparent text-fg text-xs font-semibold cursor-pointer">Keep it</button>
+              </div>
+            </div>
+          )}
+          {/* Said plainly because the alternative is someone concluding the app
+              is broken when a reschedule takes hours to appear on their phone. */}
+          <div className="mt-2 text-[.7rem] text-muted leading-snug">
+            Apple and Outlook usually refresh within about 15 minutes. <b className="text-fg">Google Calendar
+            refreshes subscribed calendars on its own schedule — often only every few hours</b>, so a
+            last-minute change may reach Glidna's own reminders well before it shows there.
+          </div>
+          <div className="mt-1.5 text-[.68rem] text-muted leading-snug">
+            Treat the link like a password — anyone with it can see your session times and who they're with.
+          </div>
+        </>
+      )}
+      {err && <div className="mt-2 text-[.72rem] text-danger">{err}</div>}
+    </div>
+  );
+}
+
 // ─── Trainer calendar (S186) ────────────────────────────────────────────────
 // The trainer's whole book in one place: every client, month / week / day, with
 // a real time grid you can tap to book into.
@@ -17334,7 +17474,7 @@ function calBillingState(s, now) {
   return { label: "Scheduled", tone: "muted" };
 }
 
-function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan }) {
+function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPrefs, onSetNotifPrefs }) {
   const [sessions, setSessions] = useState(null);
   const [clients, setClients] = useState([]);
   const [view, setView] = useState("week");
@@ -17671,15 +17811,22 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan }) {
             {msg && <div className="mb-2 text-xs text-success">{msg}</div>}
 
             {showSettings && (
-              <div className="mb-3">
-                <div className="mb-2 text-[.78rem] text-muted leading-snug">
-                  These apply to every client. Each client is charged under the terms they agreed to
-                  when they saved their card, so changing this affects new agreements — anyone already
-                  on file keeps their terms until they re-save their card.
+              <div className="mb-3 flex flex-col gap-3">
+                {/* Personal first: reminders and calendar sync are about YOUR
+                    day, and every trainer wants them. The policy below is about
+                    money and only some trainers can bill at all. */}
+                <SessionReminderPrefs notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs} />
+                <CalendarSubscribe />
+                <div>
+                  <div className="mb-2 text-[.78rem] text-muted leading-snug">
+                    The policy below applies to every client. Each client is charged under the terms
+                    they agreed to when they saved their card, so changing this affects new
+                    agreements — anyone already on file keeps their terms until they re-save their card.
+                  </div>
+                  <SessionPolicyEditor policyDraft={policyDraft} setPolicyDraft={setPolicyDraft}
+                    trainerUid={meUid} defaultPriceCents={lastPrice} busy={busy}
+                    onSave={savePolicy} onCancel={() => { setShowSettings(false); setPolicyDraft(policy); }} />
                 </div>
-                <SessionPolicyEditor policyDraft={policyDraft} setPolicyDraft={setPolicyDraft}
-                  trainerUid={meUid} defaultPriceCents={lastPrice} busy={busy}
-                  onSave={savePolicy} onCancel={() => { setShowSettings(false); setPolicyDraft(policy); }} />
               </div>
             )}
 
@@ -26137,6 +26284,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                 // no way to silence them short of the master switch — the one
                 // thing the Notification Center promises you can do.
                 { key: "sessionBilling", label: "Session billing", desc: "When a session is charged or a balance settles" },
+                { key: "sessionReminders", label: "Session reminders", desc: "Before a booked session — set your lead times on the calendar page" },
                 { key: "mealReviews", label: "Meals to check", desc: "When a client tags a meal and sends it over" },
               ]
             : [
@@ -26148,6 +26296,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                 { key: "automations", label: "Automation results", desc: "When a scheduled automation finishes" },
                 { key: "referralRewards", label: "Referral rewards", desc: "When credit you've earned is ready to claim" },
                 { key: "sessionBilling", label: "Session billing", desc: "When you're charged for a session" },
+                { key: "sessionReminders", label: "Session reminders", desc: "Before a booked session — set your lead times below" },
                 { key: "mealReviews", label: "Meal check-backs", desc: "When your trainer confirms or corrects a meal you tagged" },
               ];
           const Toggle = ({ on, disabled, onClick }) => (
@@ -26188,6 +26337,12 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
                       </div>
                     );
                   })}
+                  {/* Lead times and the calendar subscription live here TOO, not
+                      only on the trainer calendar page — a client has no such
+                      page, and this is where anyone comes looking for "when do
+                      I get told about things". Same prefs either way. */}
+                  <SessionReminderPrefs notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs} />
+                  <CalendarSubscribe />
                   {/* Push DELIVERY for this device (S90) — notifications that
                       arrive even when Glidna is closed. Per-device; the prompt
                       must come from this tap (browser rule). */}
@@ -26558,7 +26713,8 @@ export default function App() {
   // card; sentReminders = the trainer's sent-to-do display; foodReminders /
   // weighInReminders / coachingNudges = client home nudge cards (Session 77).
   const [notifPrefs, setNotifPrefs] = useState({ master: true, trainerReminders: true, sentReminders: true,
-    foodReminders: true, weighInReminders: true, coachingNudges: true, messages: true, automations: true });
+    foodReminders: true, weighInReminders: true, coachingNudges: true, messages: true, automations: true,
+    sessionReminders: true });
   // Merge a partial patch and persist. Components call with e.g. { master:false }.
   const onSetNotifPrefs = (patch) => {
     setNotifPrefs((prev) => {
@@ -28116,6 +28272,7 @@ export default function App() {
     if (isTrainerHome && homeTab === "calendar") {
       return <>{chrome}<TrainerCalendar
         meUid={meUid} meName={meName}
+        notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
         onGoClients={() => setHomeTab("clients")}
         onOpenClientPlan={openClientPlan}
       /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
