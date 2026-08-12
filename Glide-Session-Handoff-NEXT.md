@@ -1,6 +1,114 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ⛔⛔⛔ NEXT SESSION — DO NOT TAKE SESSION AUTO-PAY LIVE YET (S185)
+## ⚠️⚠️⚠️ S186 — THE S185 BILLING DEFECTS ARE FIXED, BUT NOTHING IS DEPLOYED YET
+
+**Two things are required before ANY of this is live, and both are Kevin's call:**
+
+1. **PUBLISH `firestore.rules`** — `firebase deploy --only firestore:rules`.
+   **206 emulator tests pass** (was 186; +20 new attack cases).
+2. **DEPLOY the functions.** Three shared files changed; `npm run deploy-set` was run for
+   `sessionSettle.js` and the other two were derived from `functions/index.js`:
+
+```bash
+firebase deploy --only functions:sessionsSettle,functions:settleNow,functions:paySessionBalance,functions:createSessionSetupIntent,functions:recordSessionConsent,functions:removeSessionCard,functions:sessionsMarkCompleted --project calorieiq-29762
+```
+
+   (`sessionSettle.js` → sessionsSettle · settleNow · paySessionBalance;
+   `sessionBilling.js` → createSessionSetupIntent · recordSessionConsent · removeSessionCard;
+   `sessions.js` → sessionsMarkCompleted. Re-run `npm run deploy-set <file>` to confirm before
+   deploying — a subset leaves the rest on the old copy, silently.)
+3. **Frontend** — `src/App.jsx` + `src/sessions.js` changed, so pushing `main` redeploys Vercel.
+
+⚠️ **Until the rules are published, the new calendar's writes FAIL** — verified live in the preview:
+booking a repeating series and marking a no-show both return `permission-denied`, because the
+published rules don't yet allow `seriesId`/`seriesIndex`/`noShow`/`waived`. A single non-repeating
+booking works fine. This is expected, not a bug.
+
+### What was actually wrong (all CONFIRMED against the code, not taken on faith)
+- **The double-charge cluster was real.** `paymentIntents.create` shared one `try` with the
+  bookkeeping that followed it, and the `catch` called *everything* a card decline — so a Firestore
+  blip after a successful charge told the client "declined", set a hold, and their **Pay now** button
+  charged the card a second time with a deliberately fresh `Date.now()` idempotency key.
+- **`paySessionBalance` had no lock at all** (`maxInstances: 5`, React state the only guard).
+- **`cancelledBy` was unpinned in the rules** while `cancelledAt` was carefully pinned — one
+  `updateDoc` from the console made every session free, or billed a client for the trainer's cancel.
+- **A delivered session could still be "cancelled"**, turning a full charge into a fee or nothing.
+- **`noShowChargePct` was disclosed, consented to, and never applied** — every no-show billed 100%.
+- **The cancel dialog priced from the trainer's CURRENT policy** while the sweep billed the frozen
+  consent snapshot, so "In time — no cancellation charge" could be followed by a full-price charge.
+
+### The invariants the new code holds (documented at the top of sessionSettle.js)
+Only a `StripeCardError` is a decline. Bookkeeping failure is never a decline. Never charge without
+asking Stripe for an existing intent on that ledger first. Claim before charging, with an attempt
+counter as the idempotency key. Every claim is recoverable (`reclaimStranded` runs each sweep).
+Delivered beats cancelled, server-side, regardless of what the rules say.
+
+### Also fixed, same pass
+30-day lookback → 365 days + **paged** candidate scan (the hard `limit(200)` returned the OLDEST
+docs and settled ones ate the cap, which would have silently stopped billing at ~200 sessions/month);
+`timeoutSeconds: 540` on the sweep; $0 sessions reach a terminal `free` state instead of stranding in
+`processing`; no-card groups no longer mint a duplicate ledger every run; credits spend
+highest-value-first; `billableCents` frozen at completion; `stripeLivemode` stamped so a test-mode
+`cus_…` can't poison live charges; `chargedSessionIds` so Pay-now stops marking package-covered
+sessions as card-charged.
+
+### The fixes were themselves adversarially reviewed (27 agents, 5 lenses) — and it caught two CRITICALs
+Worth knowing, because both were bugs introduced BY the fix, not by the original code:
+- **`ensureCustomer` re-minted the Stripe customer on ANY error**, including a timeout — and
+  `findIntentByLedger` was scoped to the profile's *current* customer id. So a forked customer made
+  the duplicate-charge check answer a confident "no charge exists" about the wrong account, turning
+  the guard against double-charging into the cause of one. Now: only `resource_missing` re-mints;
+  the ledger pins `customerId` and `testMode` at claim time; the lookup searches the ledger's
+  customer plus any previous ones; a re-mint clears the now-unusable saved card.
+- **`classifyForBilling` billed a TRAINER-cancelled session at full price** when the cancel landed at
+  or after `startAt` (trainer cancels ten minutes into the slot). The "delivered beats cancelled"
+  branch ran before the `cancelledBy` check — the exact opposite of the file's own invariant and of
+  terms.html §6. The trainer-cancel guard now runs first, and an absent `cancelledBy` is treated as
+  not-billable.
+Also fixed from the review: the billing hold is now written BEFORE sessions are parked behind it (the
+old order could strand a client with an unpayable balance); a `processing` intent no longer marks
+sessions as charged anywhere; `cancelSeriesFrom`'s query was **denied by the rules** (proved against
+the emulator) and now carries the required `participants` constraint; the new ledger statuses have
+labels and count as pending rather than vanishing from Earnings.
+
+### S186b — billing cadence + fee controls (Kevin's ask, DEPLOYED)
+- **`biweekly` billing mode added** — per-session / weekly / **every two weeks** / manual. The
+  fortnight is derived from the CALENDAR (`Math.floor(daysSinceEpoch / 7) % 2`), never from a
+  stored "last run" marker: a marker drifts, and one missed run would permanently shift that
+  trainer's charge date. Verified over a 10-week walk — fires only on alternating Sundays, exactly
+  14 days apart, 6-hour window, and the Nov 1 2026 DST Sunday behaves.
+- **Late fee is now an explicit switch** — "Charge a fee / No fee, ever". It was always possible to
+  turn off (pick "any time", or set the % to 0), but only if you already knew that. Off maps to the
+  existing `anytime` stance rather than a new field, so the disclosure text, the consent snapshot and
+  the settle engine all keep working unchanged.
+- **The no-show % is finally editable.** S186 made it actually bill; until now it was disclosed to
+  clients and frozen into their consent with no control to set it.
+- ⚠️ The billing-mode picker stays behind `canBillSessions(trainerUid)` (the Connect interlock), so
+  only Kevin's account sees it. The late-fee and no-show controls are visible to every trainer,
+  because a cancellation policy is free for everyone.
+
+### Still open / deliberately not done
+- **3DS on the off-session sweep** is now *classified* correctly (`needs_authentication`, honest
+  copy) but the client still can't complete a bank challenge in-app — that needs `next_action`
+  handling or a `payment_intent.*` webhook.
+- **No arrears UI.** Aged unsettled work is logged (`ARREARS`) but not shown to the trainer.
+- **`settleNow` and `paySessionBalance` don't set `timeoutSeconds`** (only the scheduled sweep does).
+  Low risk — they handle one group / one ledger — but worth matching.
+- **Repeating series has no "edit this and following"** — only cancel-this-and-later. Rescheduling a
+  series edits one occurrence.
+- **Test data:** one test session exists in prod — Casey Client, Tue Aug 11 2026 7:00 AM, $85, on the
+  `trainer.uitest` account. It can never bill (that trainer isn't allowlisted). Clear it when
+  convenient.
+
+### The calendar (Kevin's spec, built)
+`TrainerCalendar` — ≡ menu → **Calendar**. Month / week / day, a real scrolling time grid, every
+client in one view, tap a slot to book, repeat weekly/biweekly, and the red current-time line. Kevin's
+"as the red line passes it counts as a session that's going to be charged" is literal: a past session's
+detail sheet reads **"Delivered — will be billed"** and offers Mark no-show / Waive charge.
+**Recurring = N real session docs sharing a `seriesId`**, deliberately not a recurrence rule — every
+downstream thing (completion stamp, billing, cancel, price freeze) operates on documents.
+
+## ⛔ (S185, now addressed by S186 above) — DO NOT TAKE SESSION AUTO-PAY LIVE YET
 
 **Kevin's plan was: skip the attorney, go straight to the live-key swap and a real-card smoke test.
 A pre-go-live review found 40 findings — 9 critical — and the answer changed to: fix first.**

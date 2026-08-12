@@ -16,7 +16,7 @@
 // grows past a few thousand, add a composite index and paginate.
 import { db } from "./firebase";
 import {
-  doc, collection, addDoc, updateDoc, getDocs, query, where, onSnapshot,
+  doc, collection, addDoc, updateDoc, getDocs, query, where, onSnapshot, writeBatch,
 } from "firebase/firestore";
 
 export const SESSION_DEFAULT_MIN = 60;
@@ -49,6 +49,100 @@ export async function bookSession(trainerUid, clientUid, {
   return ref.id;
 }
 
+// ─── Repeating sessions (S186) ──────────────────────────────────────────────
+// A standing weekly slot is how most training actually runs, so booking one
+// shouldn't mean tapping the same form twelve times.
+//
+// ⚠️ WHY REAL DOCUMENTS AND NOT A RECURRENCE RULE. It would be tidier to store
+// one doc with "every Tuesday" and expand it at read time — and it would be
+// wrong here, because every downstream thing that matters operates on session
+// DOCUMENTS: the completion sweep stamps `completedAt` on a doc, the settle
+// engine bills a doc, cancelling one week must not cancel the rest, and a price
+// change next month must not silently re-price last month. A virtual occurrence
+// has nothing to stamp, bill, cancel or freeze. So a series is just N ordinary
+// sessions that happen to share a `seriesId` — every existing code path works
+// on them unchanged, and the series id is only ever used for "and the ones
+// after this" bulk edits.
+export const REPEAT_OPTIONS = {
+  none:     { label: "Doesn't repeat", days: 0 },
+  weekly:   { label: "Every week", days: 7 },
+  biweekly: { label: "Every 2 weeks", days: 14 },
+};
+export const REPEAT_MAX = 52;
+
+// Local-time-safe date stepping: adding 7×86400000 ms breaks across a DST
+// boundary (a 9am slot becomes 8am or 10am). Stepping the DATE keeps the
+// wall-clock time the client actually agreed to.
+function addDaysKeepingLocalTime(ms, days) {
+  const d = new Date(ms);
+  d.setDate(d.getDate() + days);
+  return d.getTime();
+}
+
+// Book one session, or a whole series. Returns the created ids.
+export async function bookSeries(trainerUid, clientUid, base, { repeat = "none", count = 1 } = {}) {
+  const opt = REPEAT_OPTIONS[repeat] || REPEAT_OPTIONS.none;
+  const n = opt.days ? Math.max(1, Math.min(REPEAT_MAX, Math.round(Number(count) || 1))) : 1;
+  if (n === 1) return [await bookSession(trainerUid, clientUid, base)];
+
+  const now = Date.now();
+  const seriesId = `sr_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const batch = writeBatch(db);
+  const ids = [];
+  for (let i = 0; i < n; i++) {
+    const ref = doc(collection(db, "sessions"));
+    ids.push(ref.id);
+    batch.set(ref, {
+      participants: [trainerUid, clientUid],
+      trainerUid, clientUid,
+      startAt: addDaysKeepingLocalTime(Number(base.startAt), i * opt.days),
+      durationMin: Number(base.durationMin) || SESSION_DEFAULT_MIN,
+      status: "scheduled",
+      title: String(base.title || "").slice(0, 80),
+      location: String(base.location || "").slice(0, 120),
+      priceCents: Math.max(0, Math.round(Number(base.priceCents) || 0)),
+      seriesId, seriesIndex: i,
+      createdBy: trainerUid, createdAt: now, updatedAt: now,
+    });
+  }
+  await batch.commit();
+  return ids;
+}
+
+// Cancel this session and every LATER one in the same series. Used for "I'm
+// stopping these Tuesdays" without touching sessions already delivered.
+export async function cancelSeriesFrom(session, byUid, reason = "") {
+  if (!session || !session.seriesId) return 0;
+  // ⚠️ MUST be constrained by participants. firestore.rules only permits a
+  // session query the caller is provably part of; a bare
+  // where('seriesId','==',…) is rejected outright with permission-denied (the
+  // rules can't prove every match belongs to the caller). Verified against the
+  // emulator — the participants filter is what makes this query legal.
+  const snap = await getDocs(query(
+    collection(db, "sessions"),
+    where("participants", "array-contains", byUid),
+    where("seriesId", "==", session.seriesId),
+  ));
+  const now = Date.now();
+  const targets = snap.docs.filter((d) => {
+    const v = d.data();
+    // This one and everything after it — and only while still cancellable. The
+    // rules refuse a retroactive cancel anyway, so including delivered sessions
+    // would just fail the whole batch.
+    return v.status !== "cancelled" && !v.completedAt
+      && Number(v.startAt) >= Number(session.startAt) && Number(v.startAt) > now;
+  });
+  const batch = writeBatch(db);
+  for (const d of targets) {
+    batch.update(d.ref, {
+      status: "cancelled", cancelledBy: byUid, cancelledAt: now,
+      cancelReason: String(reason || "").slice(0, 200), updatedAt: now,
+    });
+  }
+  if (targets.length) await batch.commit();
+  return targets.length;
+}
+
 // Reschedule / retitle / re-price — trainer only (rules enforce it).
 export function updateSession(sessionId, fields) {
   const patch = { updatedAt: Date.now() };
@@ -56,6 +150,25 @@ export function updateSession(sessionId, fields) {
     if (fields[k] !== undefined) patch[k] = fields[k];
   }
   return updateDoc(doc(db, "sessions", sessionId), patch);
+}
+
+// ─── The trainer's judgement calls on a DELIVERED session (S186) ────────────
+// Until now a past session had no controls at all: once the completion sweep
+// stamped it, whatever was booked got charged. That made `noShowChargePct`
+// undeliverable — the client was shown "not showing up is charged N%", agreed to
+// it at card setup, and was then billed 100% because nothing could mark a
+// no-show. Both of these only ever REDUCE what is charged, which is why the
+// rules let the trainer write them after the fact.
+
+// Bill this session at the no-show percentage the client actually consented to.
+export function markNoShow(sessionId, on = true) {
+  return updateDoc(doc(db, "sessions", sessionId), { noShow: !!on, updatedAt: Date.now() });
+}
+
+// Charge nothing for it. The session stays on the record as delivered — waiving
+// is a decision, not an erasure, and the ledger should be able to show it.
+export function waiveSession(sessionId, on = true) {
+  return updateDoc(doc(db, "sessions", sessionId), { waived: !!on, updatedAt: Date.now() });
 }
 
 // Cancel — either side. The rules let a client write ONLY these fields, so the
@@ -132,6 +245,7 @@ export const CANCEL_TYPES = {
 export const BILLING_MODES = {
   per_session: "Charge as each session happens",
   weekly: "Charge once a week (Sunday)",
+  biweekly: "Charge every two weeks (Sunday)",
   manual: "Track only — I'll invoice myself",
 };
 
@@ -394,6 +508,8 @@ export function cancellationDisclosure(policy, trainerName = "your trainer") {
     lines.push("Sessions not covered by prepaid credit are charged to the card on file as each session takes place.");
   } else if (p.billingMode === "weekly") {
     lines.push("Sessions not covered by prepaid credit are totalled and charged to the card on file once a week.");
+  } else if (p.billingMode === "biweekly") {
+    lines.push("Sessions not covered by prepaid credit are totalled and charged to the card on file every two weeks.");
   }
   if (p.policyNote) lines.push(p.policyNote);
   return lines;
@@ -552,7 +668,12 @@ export function earningsSummary(charges, now = Date.now()) {
       if ((c.chargedAt || c.createdAt || 0) >= monthStart) s.monthCents += amt;
     } else if (c.status === "declined") {
       s.declinedCents += amt; s.declinedCount++;
-    } else if (c.status === "pending" || c.status === "no_card" || c.status === "processing") {
+    } else if (c.status === "pending" || c.status === "no_card" || c.status === "processing"
+      // S186 non-terminal states. These are money that hasn't landed and hasn't
+      // been refused — counting them as collected would overstate the trainer's
+      // earnings, and counting them as declined would understate them.
+      || c.status === "needs_reconcile" || c.status === "charged_needs_reconcile"
+      || c.status === "needs_authentication" || c.status === "retry_processing") {
       s.pendingCents += amt;
     }
   }
@@ -568,5 +689,13 @@ export function chargeStatusLabel(status) {
     processing: "Processing",
     no_card: "Awaiting card",
     covered_by_package: "Covered by package",
+    // S186. Deliberately plain-spoken: these mean "we don't know yet", and a
+    // trainer reading their earnings should not have to guess which of them is
+    // money they'll actually receive.
+    retry_processing: "Payment in progress",
+    needs_authentication: "Awaiting bank approval",
+    needs_reconcile: "Checking with the bank",
+    charged_needs_reconcile: "Paid — confirming",
+    released: "Returned to queue",
   })[status] || status || "—";
 }

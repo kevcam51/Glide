@@ -95,11 +95,17 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
-> _**S185 (Aug 11): DO NOT take session auto-pay live — a pre-go-live review found 40 findings, 9
-> critical, incl. a successful charge being recorded as a decline and then double-charged. Read
-> `docs/SESSIONS-BILLING-REVIEW-S185.md` and the S185 block in the handoff BEFORE touching
-> functions/sessionSettle.js. The live Stripe key is already in place and no webhook is needed —
-> the gate is the failure paths, not the keys._
+> _**S186 (Aug 11): the S185 billing defects are FIXED but NOT DEPLOYED. Two steps, both Kevin's
+> call: (1) PUBLISH `firestore.rules` (206 emulator tests pass), (2) deploy the changed functions via
+> `npm run deploy-set`. Until the rules are published the new calendar's writes fail with
+> `permission-denied` — verified live, expected, not a bug. Read the S186 block at the top of
+> `Glide-Session-Handoff-NEXT.md` first; the failure-path invariants are documented at the top of
+> `functions/sessionSettle.js` and should not be re-litigated without re-reading them._
+>
+> _**S185 (Aug 11): the pre-go-live review that found the above — 40 findings, 9 critical, incl. a
+> successful charge being recorded as a decline and then double-charged. Kept for its reasoning:
+> `docs/SESSIONS-BILLING-REVIEW-S185.md`. The live Stripe key is already in place and no webhook is
+> needed — the gate was always the failure paths, not the keys._
 >
 > _Last updated: Session 184 (Aug 8 — AI WEB SEARCH: **live and verified in prod**. Anthropic's
 > server-side tool, allowlisted to 27 vetted health/science domains, a per-user DAILY search counter
@@ -2185,6 +2191,53 @@ enabled (Blaze has no default spending cap).
   screen (admin UID only): roster, sub/trial state, AI tokens today, ⚑ flag at 3+ boosts. "Glide
   Ultra" tier scoped in PRICING.md (data-triggered launch). **Queue after S90: push-notification
   delivery (FCM) → client→trainer requests → data-integrity hardening → then Stripe live + domain.**
+- Session 186: **Session auto-pay hardened (the S185 review) + the trainer CALENDAR built. NOT DEPLOYED —
+  rules must be PUBLISHED and functions deployed, both Kevin's call.** Every critical S185 finding was
+  re-verified against the code before touching anything (the handoff warns prior reviews ran ~⅓ false
+  alarms; these were real). **Billing (`functions/sessionSettle.js`, a substantial rewrite):** the
+  charge now sits ALONE in the decline-classifying `try`, and only `e.type === "StripeCardError"` is a
+  decline — a Firestore blip or lost response after a successful charge used to be recorded as
+  "declined", which set a hold, told the client their card failed, and let **Pay now** charge again
+  with a fresh `Date.now()` idempotency key. Non-card errors now become `needs_reconcile` (no hold, no
+  client notification, sessions left claimed). `paySessionBalance` asks Stripe for an existing intent
+  on that ledger BEFORE charging, then claims the ledger in a transaction with an **attempt counter as
+  the idempotency key**. New `reclaimStranded` reaper resolves `settled:"processing"` claims against
+  Stripe each sweep (they were previously invisible to every query — permanently, possibly with the
+  money taken). Also: `pi.status` is checked (a `processing` intent was booked as revenue);
+  `timeoutSeconds: 540`; lookback 30d→365d with a **paged** scan (the hard `limit(200)` returned the
+  OLDEST docs and already-settled ones consumed the cap → billing would have silently stopped at ~200
+  sessions/month); $0 sessions reach a terminal `free` state instead of stranding; no-card groups stop
+  minting a duplicate ledger every run; credits spend highest-value-first; consent is chosen by what
+  was **in force when the obligation arose**, not by recency. **Rules:** `cancelledBy` is pinned to the
+  writer (it was unguarded while `cancelledAt` was carefully pinned — one console `updateDoc` made
+  every session free, or billed a client for the trainer's own cancellation); a delivered/started
+  session can no longer be cancelled; `priceCents` freezes once final (+ server-side `billableCents`
+  stamped at completion); `noShow`/`waived` are trainer-only. **206 emulator tests** (+20 attack cases,
+  both spoof directions). ⚠️ The ±5min `cancelledAt` skew tolerance was deliberately KEPT symmetric —
+  a one-sided bound rejects the write from any device whose clock runs fast, i.e. "you cannot cancel at
+  all" — and the settle engine forgives the same 5 minutes (`SKEW_GRACE_MS`) so skew only ever favours
+  the client. **No-show flow built** (Kevin's call over removing the disclosure): trainer marks a
+  no-show / waives a charge on a delivered-but-unsettled session, priced at the `noShowChargePct` the
+  client actually consented to — it was disclosed, frozen into consent, and then never applied, so
+  every no-show billed 100%. **Consent truth:** `recordSessionConsent` now mirrors the governing policy
+  to `users/{uid}.sessionConsentPolicy` (the consent log itself is server-only and unreadable from the
+  browser), so the cancel dialog quotes the terms that will actually be charged; a drift notice appears
+  when the trainer's current policy differs. **`TrainerCalendar` (≡ menu → Calendar):** month/week/day,
+  scrolling time grid, all clients in one view, tap-a-slot booking, weekly/biweekly repeats, and the
+  red current-time line — which is literal, since `sessionsMarkCompleted` stamps `completedAt` as it
+  passes, so a past session reads "Delivered — will be billed". **Recurring = N real session docs
+  sharing a `seriesId`**, NOT a recurrence rule: every downstream path (completion stamp, billing,
+  cancel, price freeze) operates on documents, and a virtual occurrence has nothing to stamp or bill.
+  Client-calendar gaps closed too: the week view now shows appointments (month dots and the day block
+  already did), and its `MealLog` got the planning props it was missing (future dates logged food as
+  EATEN while the dashboard treated the same day as planning). A trainer viewing a client's calendar
+  now sees that pair's sessions via a new `peerUid` scope (it was passed `meUid={null}`, so trainers
+  saw no appointments anywhere). **Verified live in the preview** (trainer.uitest): calendar renders,
+  slot-tap prefills the tapped time, $0-price warning fires, booking works, the session appears on the
+  grid live, the detail sheet reads "Delivered — will be billed" with the no-show/waive controls.
+  ⚠️ Repeating-series and no-show writes correctly return `permission-denied` against the
+  CURRENTLY-PUBLISHED rules — expected until they're published. One test session remains in prod
+  (Casey, Aug 11 7:00 AM, $85, on the non-billable test trainer); clearable.
 - **Saved-for-later roadmap (Kevin's calls, Sessions 68–69):**
   - **AI calendar management (in-app):** let the AI back-date logs, schedule workouts on specific weekdays, and review
     by date — same tool pattern (overlaps the plan-builder). **NOT** external calendars (Acuity/Google) — that's a

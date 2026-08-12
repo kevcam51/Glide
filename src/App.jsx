@@ -5,7 +5,8 @@ import { getForUser, setForUser, deleteForUser, listForUser, listEntriesForUser,
 import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads, exportMyThreads } from "./messaging.js";
 import { pushStatus, enablePush, disablePush } from "./push.js";
 import { privGet, privSet, privSubscribe, privListEntries } from "./privateStore.js";
-import { bookSession, updateSession, cancelSession, subscribeMySessions, sessionsByDay, isPastSession, sessionEndMs, SESSION_DEFAULT_MIN,
+import { bookSession, updateSession, cancelSession, markNoShow, waiveSession, subscribeMySessions, sessionsByDay, isPastSession, sessionEndMs, SESSION_DEFAULT_MIN,
+  bookSeries, cancelSeriesFrom, REPEAT_OPTIONS, REPEAT_MAX,
   policyOf, packsOf, describePolicy, isLateCancel, lateCancelFeeCents, saveSessionPolicy, saveSessionPacks,
   CANCEL_WINDOW_PRESETS, STARTER_PACKS, DEFAULT_SESSION_POLICY,
   CANCEL_TYPES, BILLING_MODES, cancellationDisclosure, consentLineFor, policySnapshot,
@@ -10172,14 +10173,22 @@ const fmtClock = (t) => {
 // calendar renders IN-FLOW (it *is* the page, which must scroll normally); a
 // lock here froze the whole page on Android. ClientHome's portal-overlay usage
 // locks from the caller instead (useBodyScrollLock(showCalendar) there).
-function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods, savedFoods, onToggleSaveFood, onRemoveRecentFood, onRemoveSavedFood, onLogFoods, onSaveMeasurementsFor, meUid, premium = true, role }) {
+function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, recentFoods, savedFoods, onToggleSaveFood, onRemoveRecentFood, onRemoveSavedFood, onLogFoods, onSaveMeasurementsFor, savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onPlanDays, meUid, peerUid, premium = true, role }) {
   // Booked training sessions (S100) — shown alongside the logging data so the
   // calendar answers "when am I training?" as well as "what did I eat?".
+  //
+  // `peerUid` scopes it to ONE relationship. A trainer viewing a client's plan
+  // used to be passed meUid={null} — because their own uid would have painted
+  // every OTHER client's sessions onto this client's calendar — which meant a
+  // trainer saw no appointments anywhere. Filtering to the pair shows the
+  // sessions that actually belong on this calendar. (S186)
   const [calSessions, setCalSessions] = useState([]);
   useEffect(() => {
     if (!meUid) return;
-    return subscribeMySessions(meUid, (all) => setCalSessions(all.filter((s) => s.status !== "cancelled")));
-  }, [meUid]);
+    return subscribeMySessions(meUid, (all) => setCalSessions(all.filter((s) =>
+      s.status !== "cancelled"
+      && (!peerUid || s.clientUid === peerUid || s.trainerUid === peerUid))));
+  }, [meUid, peerUid]);
   const sessionsOnDay = sessionsByDay(calSessions);
   const todayKey = ymdLocal();
   const keyOf = (y, m, d) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
@@ -10324,6 +10333,13 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
       protein: Math.max(0, (d.protein || 0) - old.protein + nm.protein),
       carbs: Math.max(0, (d.carbs || 0) - old.carbs + nm.carbs),
       fat: Math.max(0, (d.fat || 0) - old.fat + nm.fat) });
+  };
+  // Planned (not yet eaten) food for this date. `planned` rides the same day-log
+  // document as `meals` but is deliberately kept OUT of the totals — planning
+  // tomorrow's dinner must not read as having eaten it.
+  const setPlannedForDay = (next) => {
+    const d = dayLog || {};
+    writeDay({ ...d, planned: typeof next === "function" ? next(d.planned || []) : (next || []) });
   };
   // Batch add (copy-a-previous-meal onto this calendar day) — preserves brand/
   // serving/micros and writes the day once.
@@ -10504,6 +10520,18 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                         ? `${dayWear[k].total.toLocaleString()} cal`
                         : dayWear[k].active > 0 ? `${dayWear[k].active.toLocaleString()} cal` : ""}
                       {dayWear[k].steps > 0 ? `${(dayWear[k].active > 0 || dayWear[k].total > 0) ? " · " : ""}${dayWear[k].steps.toLocaleString()} steps` : ""}
+                    </span>
+                  )}
+                  {/* Booked training. The month grid has shown a session dot
+                      since S100 and the day view a full block, but the week
+                      view — the one you actually plan a week in — showed
+                      nothing at all. (S186) */}
+                  {(sessionsOnDay[k] || []).length > 0 && (
+                    <span style={{ color: "var(--accent)", fontWeight: 700 }}>
+                      <Icon name="calendar" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />
+                      {sessionsOnDay[k].length > 1
+                        ? `${sessionsOnDay[k].length} sessions`
+                        : new Date(sessionsOnDay[k][0].startAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
                     </span>
                   )}
                   {ci && ci.weight && <span style={{ color: "var(--blue)" }}><Icon name="scale" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{ci.weight}</span>}
@@ -10736,7 +10764,15 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             </div>
           </div>
           <div style={{ marginTop: 12 }}>
-            <MealLog meals={(dayLog && dayLog.meals) || []} onAddMeal={addMeal} onAddMeals={addMeals} onRemoveMeal={removeMeal} onEditMeal={editMeal} recentFoods={recentFoods} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveRecentFood={onRemoveRecentFood} onRemoveSavedFood={onRemoveSavedFood} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={sel} premium={premium} role={role} />
+            {/* The dashboard's meal log and this one are the SAME component, so
+                they should behave the same on the same date. It was missing the
+                planning props, which meant saved meals couldn't be reused here
+                and — the part that actually misleads — food logged on a FUTURE
+                date was recorded as eaten rather than planned, contradicting
+                what the dashboard shows for that very day. (S186) */}
+            <MealLog meals={(dayLog && dayLog.meals) || []} onAddMeal={addMeal} onAddMeals={addMeals} onRemoveMeal={removeMeal} onEditMeal={editMeal} recentFoods={recentFoods} savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveRecentFood={onRemoveRecentFood} onRemoveSavedFood={onRemoveSavedFood} onReadDay={onReadDay} onListLoggedDays={onListLoggedDays} dateKey={sel} premium={premium} role={role}
+              savedMeals={savedMeals} onToggleSaveMeal={onToggleSaveMeal} onRemoveSavedMeal={onRemoveSavedMeal}
+              planned={(dayLog && dayLog.planned) || []} onSetPlanned={setPlannedForDay} onPlanDays={onPlanDays} />
           </div>
         </div>
 
@@ -10968,7 +11004,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onSetPlanned, onPlanDays, onEatPlanned,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
   onSaveMeasurements, onSaveMeasurementsFor, onDeleteMeasurement, onToggleBodyFat, onSetBfSource, onSetGoalWeight, onAddCustomExercise,
-  onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetHideCompliance, meUid: dashMeUid,
+  onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetHideCompliance, meUid: dashMeUid, peerUid,
   premium = true, role, onOpenMealPlanner }) {
 
   // Swipe-down to refresh the daily view (S104) — reuses the existing onRefresh
@@ -11394,7 +11430,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveRecentFood={onRemoveRecentFood} onRemoveSavedFood={onRemoveSavedFood}
           onLogFoods={onLogFoods}
           onSaveMeasurementsFor={onSaveMeasurementsFor}
-          meUid={dashMeUid} premium={premium} role={role} />
+          savedMeals={savedMeals} onToggleSaveMeal={onToggleSaveMeal} onRemoveSavedMeal={onRemoveSavedMeal} onPlanDays={onPlanDays}
+          meUid={dashMeUid} peerUid={peerUid} premium={premium} role={role} />
       </div>
     );
   }
@@ -17195,6 +17232,577 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
   );
 }
 
+// ─── Trainer calendar (S186) ────────────────────────────────────────────────
+// The trainer's whole book in one place: every client, month / week / day, with
+// a real time grid you can tap to book into.
+//
+// WHY A SEPARATE COMPONENT FROM CalendarView. The existing calendar is a LOGGING
+// calendar — it answers "what did this one client eat, weigh and train on this
+// date", and it is scoped to a single plan. This one answers "where am I
+// supposed to be", across every client at once. Same word, different question,
+// and merging them would mean one component with two disjoint halves.
+//
+// THE RED LINE IS NOT DECORATION. `sessionsMarkCompleted` stamps `completedAt`
+// once a session's END time has passed, and that stamp is what the settle
+// engine bills from. So the current-time line sweeping past a block is
+// literally the moment that block becomes chargeable — which is why past
+// sessions render with their billing state rather than just greyed out.
+const CAL_HOUR_PX = 52;              // one hour of grid
+const CAL_DAY_START = 6;             // scroll here on open — not midnight
+const calKey = (d) => ymdLocal(d);
+const calParse = (k) => { const [y, m, dd] = k.split("-").map(Number); return new Date(y, m - 1, dd); };
+const calAddDays = (date, n) => { const d = new Date(date); d.setDate(d.getDate() + n); return d; };
+const calMondayIdx = (date) => (date.getDay() + 6) % 7;   // Mon=0 … Sun=6
+const calStartOfWeek = (date) => calAddDays(date, -calMondayIdx(date));
+const calMinutesInto = (ms) => { const d = new Date(ms); return d.getHours() * 60 + d.getMinutes(); };
+const calTimeLabel = (ms) => new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const calHourLabel = (h) => (h === 0 ? "12 AM" : h === 12 ? "12 PM" : h < 12 ? `${h} AM` : `${h - 12} PM`);
+const CAL_MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+// A stable colour per client so the same person reads the same at a glance.
+// Semantic colours (success/warn/danger) are deliberately NOT in this list —
+// those mean billing states here, and a client must never accidentally look
+// like a declined charge.
+const CAL_CLIENT_COLORS = ["#08DCE0", "#7dd3fc", "#b57bff", "#f0abfc", "#5eead4", "#a3e635", "#fca5a5", "#fdba74"];
+const calColorFor = (uid) => {
+  let h = 0;
+  for (let i = 0; i < String(uid).length; i++) h = (h * 31 + String(uid).charCodeAt(i)) >>> 0;
+  return CAL_CLIENT_COLORS[h % CAL_CLIENT_COLORS.length];
+};
+
+// What this session means for money, in the trainer's language.
+function calBillingState(s, now) {
+  if (s.status === "cancelled") {
+    return s.cancelledBy === s.trainerUid
+      ? { label: "Cancelled by you", tone: "muted" }
+      : { label: "Cancelled by client", tone: "muted" };
+  }
+  if (s.waived) return { label: "Waived", tone: "muted" };
+  if (s.settled === "charged") return { label: "Charged", tone: "success" };
+  if (s.settled === "package") return { label: "Covered by package", tone: "success" };
+  if (s.settled === "hold") return { label: "Payment failed", tone: "danger" };
+  if (s.settled === "waived" || s.settled === "free") return { label: "No charge", tone: "muted" };
+  if (s.noShow) return { label: "No-show", tone: "warn" };
+  if (sessionEndMs(s) <= now) return { label: "Delivered — will be billed", tone: "warn" };
+  return { label: "Scheduled", tone: "muted" };
+}
+
+function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan }) {
+  const [sessions, setSessions] = useState(null);
+  const [clients, setClients] = useState([]);
+  const [view, setView] = useState("week");
+  const [anchor, setAnchor] = useState(() => new Date());   // the focused date
+  const [now, setNow] = useState(() => Date.now());
+  const [detail, setDetail] = useState(null);               // session being viewed
+  const [form, setForm] = useState(null);                   // booking/reschedule form
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
+  const gridRef = useRef(null);
+
+  useEffect(() => { if (!meUid) return; return subscribeMySessions(meUid, setSessions); }, [meUid]);
+  useEffect(() => { getMyClients().then((cs) => setClients(cs || [])).catch(() => {}); }, [meUid]);
+  // The red line has to actually move, and "is this past" changes with it.
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 60000); return () => clearInterval(t); }, []);
+
+  const nameOf = useCallback((uid) => {
+    const c = clients.find((x) => x.uid === uid);
+    return (c && (c.displayName || `${c.firstName || ""} ${c.lastName || ""}`.trim() || c.email)) || "Client";
+  }, [clients]);
+
+  // Only sessions I'm the TRAINER for. A trainer who is also somebody's client
+  // (Kevin trains with another coach) must not see their own bookings here.
+  const mine = useMemo(
+    () => (sessions || []).filter((s) => s.trainerUid === meUid),
+    [sessions, meUid],
+  );
+  const byDay = useMemo(() => {
+    const out = {};
+    for (const s of mine) {
+      if (!s.startAt) continue;
+      (out[calKey(new Date(s.startAt))] ||= []).push(s);
+    }
+    for (const k of Object.keys(out)) out[k].sort((a, b) => a.startAt - b.startAt);
+    return out;
+  }, [mine]);
+
+  // Open the grid on the working day, not on 3am. Deferred a frame: on the
+  // first paint the scroll container has no laid-out height yet, so setting
+  // scrollTop synchronously is silently discarded.
+  useEffect(() => {
+    if (view === "month") return;
+    const id = requestAnimationFrame(() => {
+      if (gridRef.current) gridRef.current.scrollTop = CAL_DAY_START * CAL_HOUR_PX;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [view]);
+
+  const lastPrice = useMemo(() => {
+    const priced = mine.filter((s) => s.priceCents > 0).sort((a, b) => b.createdAt - a.createdAt);
+    return priced.length ? priced[0].priceCents : 0;
+  }, [mine]);
+
+  // ── booking ───────────────────────────────────────────────────────────────
+  // Tapping a slot pre-fills the time you tapped; the price defaults to the last
+  // one you actually used, because a blank price silently books a $0 session
+  // that can never be billed.
+  const openSlot = (date, hour) => {
+    if (!clients.length) { setErr("Link a client first — you can only book sessions with your own clients."); return; }
+    const d = new Date(date); d.setHours(hour, 0, 0, 0);
+    setErr("");
+    setForm({
+      id: null, clientUid: clients[0].uid, when: calToLocalInput(d.getTime()),
+      durationMin: String(SESSION_DEFAULT_MIN), title: "", location: "",
+      price: lastPrice ? String(lastPrice / 100) : "", repeat: "none", count: "8",
+    });
+  };
+  const openEditForm = (s) => {
+    setDetail(null);
+    setForm({
+      id: s.id, clientUid: s.clientUid, when: calToLocalInput(s.startAt),
+      durationMin: String(s.durationMin || SESSION_DEFAULT_MIN),
+      title: s.title || "", location: s.location || "",
+      price: s.priceCents ? String(s.priceCents / 100) : "", repeat: "none", count: "8",
+    });
+  };
+
+  const submit = async () => {
+    setErr("");
+    const startAt = new Date(form.when).getTime();
+    if (!Number.isFinite(startAt)) { setErr("Pick a date and time."); return; }
+    const durationMin = Math.round(Number(form.durationMin) || SESSION_DEFAULT_MIN);
+    if (durationMin < 1 || durationMin > 480) { setErr("Duration must be between 1 and 480 minutes."); return; }
+    const priceCents = Math.round((Number(form.price) || 0) * 100);
+    if (priceCents < 0) { setErr("Price can't be negative."); return; }
+    setBusy(true);
+    try {
+      if (form.id) {
+        await updateSession(form.id, { startAt, durationMin, title: form.title, location: form.location, priceCents });
+        setMsg("Session updated.");
+      } else {
+        const ids = await bookSeries(meUid, form.clientUid, { startAt, durationMin, title: form.title, location: form.location, priceCents }, { repeat: form.repeat, count: form.count });
+        setMsg(ids.length > 1 ? `${ids.length} sessions booked.` : "Session booked.");
+      }
+      setForm(null);
+      setTimeout(() => setMsg(""), 2500);
+    } catch (e) {
+      // Log the real reason. A booking that fails silently looks identical to a
+      // rules rejection, a bad date and an offline write, and the user gets the
+      // same eight words either way (S85's swallowed-promise lesson).
+      console.error("session booking failed", e && (e.code || e.message), e);
+      setErr(form.id ? "Couldn't update that session." : "Couldn't book that session.");
+    } finally { setBusy(false); }
+  };
+
+  const act = async (fn, okMsg) => {
+    setBusy(true); setErr("");
+    try { await fn(); setMsg(okMsg); setDetail(null); setTimeout(() => setMsg(""), 2500); }
+    catch { setErr("That didn't go through. Try again."); }
+    finally { setBusy(false); }
+  };
+
+  // ── chrome ────────────────────────────────────────────────────────────────
+  const subCls = "text-sm text-muted";
+  const chip = (active) => `px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer border ${
+    active ? "border-primary text-primaryfg bg-primary" : "border-border text-muted bg-transparent"}`;
+  const navBtn = "w-9 h-9 rounded-lg border border-border bg-surface2 text-fg text-base cursor-pointer flex items-center justify-center";
+
+  const periodLabel = view === "month"
+    ? `${CAL_MONTHS[anchor.getMonth()]} ${anchor.getFullYear()}`
+    : view === "week"
+      ? (() => { const ws = calStartOfWeek(anchor), we = calAddDays(ws, 6);
+          return ws.getMonth() === we.getMonth()
+            ? `${CAL_MONTHS[ws.getMonth()].slice(0, 3)} ${ws.getDate()} – ${we.getDate()}, ${we.getFullYear()}`
+            : `${CAL_MONTHS[ws.getMonth()].slice(0, 3)} ${ws.getDate()} – ${CAL_MONTHS[we.getMonth()].slice(0, 3)} ${we.getDate()}`; })()
+      : anchor.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+
+  // A stale error sitting above a different week reads as a problem with THAT
+  // week. Clear it when the view moves.
+  const shift = (dir) => {
+    setErr(""); setMsg("");
+    setAnchor((a) => {
+      if (view === "month") { const d = new Date(a); d.setDate(1); d.setMonth(d.getMonth() + dir); return d; }
+      return calAddDays(a, dir * (view === "week" ? 7 : 1));
+    });
+  };
+  const switchView = (v) => { setErr(""); setMsg(""); setView(v); };
+
+  // ── the time grid (week + day share it) ───────────────────────────────────
+  const timeGrid = (days) => {
+    const todayK = calKey(new Date(now));
+    const nowMin = calMinutesInto(now);
+    return (
+      <div className="rounded-card border border-border bg-surface overflow-hidden">
+        {/* Column headers stay put while the hours scroll under them. */}
+        <div className="flex border-b border-border bg-surface sticky top-0 z-20">
+          <div className="w-12 shrink-0" />
+          {days.map((d) => {
+            const k = calKey(d); const isToday = k === todayK;
+            return (
+              <button key={k} onClick={() => { setAnchor(d); setView("day"); }}
+                className="flex-1 min-w-0 py-2 text-center cursor-pointer bg-transparent border-0">
+                <div className="text-[.6rem] uppercase tracking-wide text-muted">{DAY_SHORT[calMondayIdx(d)]}</div>
+                <div className={`text-base font-bold ${isToday ? "text-primaryfg" : "text-fg"}`}>
+                  <span className={isToday ? "inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary" : ""}>{d.getDate()}</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <div ref={gridRef} className="relative overflow-y-auto" style={{ maxHeight: "58vh" }}>
+          <div className="relative flex" style={{ height: 24 * CAL_HOUR_PX }}>
+            {/* Hour rail */}
+            <div className="w-12 shrink-0 relative">
+              {Array.from({ length: 24 }, (_, h) => (
+                <div key={h} className="absolute right-1.5 text-[.6rem] text-muted"
+                  style={{ top: h * CAL_HOUR_PX - 5 }}>{h === 0 ? "" : calHourLabel(h)}</div>
+              ))}
+            </div>
+            {days.map((d) => {
+              const k = calKey(d);
+              const list = byDay[k] || [];
+              return (
+                <div key={k} className="flex-1 min-w-0 relative border-l border-border">
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <button key={h} onClick={() => openSlot(d, h)} aria-label={`Book ${calHourLabel(h)}`}
+                      className="absolute left-0 right-0 border-t border-border/40 cursor-pointer bg-transparent"
+                      style={{ top: h * CAL_HOUR_PX, height: CAL_HOUR_PX }} />
+                  ))}
+                  {list.map((s) => {
+                    const top = (calMinutesInto(s.startAt) / 60) * CAL_HOUR_PX;
+                    const h = Math.max(18, ((s.durationMin || SESSION_DEFAULT_MIN) / 60) * CAL_HOUR_PX - 2);
+                    const cancelled = s.status === "cancelled";
+                    const color = calColorFor(s.clientUid);
+                    const past = sessionEndMs(s) <= now;
+                    return (
+                      <button key={s.id} onClick={(e) => { e.stopPropagation(); setDetail(s); }}
+                        className="absolute left-0.5 right-0.5 rounded-md px-1.5 py-1 text-left cursor-pointer overflow-hidden"
+                        style={{ top, height: h, zIndex: 5,
+                          background: cancelled ? "transparent" : `color-mix(in srgb, ${color} ${past ? 12 : 22}%, var(--surface))`,
+                          border: `1px solid ${cancelled ? "var(--border)" : color}`,
+                          borderLeft: `3px solid ${cancelled ? "var(--muted)" : color}`,
+                          opacity: cancelled ? 0.5 : 1 }}>
+                        <div className={`text-[.66rem] font-bold leading-tight truncate ${cancelled ? "line-through text-muted" : "text-fg"}`}>
+                          {nameOf(s.clientUid)}
+                        </div>
+                        <div className="text-[.6rem] text-muted leading-tight truncate">{calTimeLabel(s.startAt)}</div>
+                      </button>
+                    );
+                  })}
+                  {/* THE RED LINE — the billing boundary, drawn where it is. */}
+                  {k === todayK && (
+                    <div className="absolute left-0 right-0 pointer-events-none" style={{ top: (nowMin / 60) * CAL_HOUR_PX, zIndex: 10 }}>
+                      <div style={{ height: 2, background: "var(--red)" }} />
+                      <div style={{ width: 7, height: 7, borderRadius: 4, background: "var(--red)", marginTop: -4.5, marginLeft: -3 }} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const monthGrid = () => {
+    const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+    const lead = calMondayIdx(first);
+    const cells = Array.from({ length: 42 }, (_, i) => calAddDays(first, i - lead));
+    const todayK = calKey(new Date(now));
+    return (
+      <div className="rounded-card border border-border bg-surface overflow-hidden">
+        <div className="grid grid-cols-7 border-b border-border">
+          {DAY_SHORT.map((d) => (
+            <div key={d} className="py-1.5 text-center text-[.6rem] uppercase tracking-wide text-muted">{d}</div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7">
+          {cells.map((d) => {
+            const k = calKey(d);
+            const list = (byDay[k] || []).filter((s) => s.status !== "cancelled");
+            const otherMonth = d.getMonth() !== anchor.getMonth();
+            return (
+              <button key={k} onClick={() => { setAnchor(d); setView("day"); }}
+                className="min-h-[74px] border-b border-r border-border p-1 text-left cursor-pointer bg-transparent align-top"
+                style={{ opacity: otherMonth ? 0.4 : 1 }}>
+                <div className={`text-[.7rem] font-bold mb-0.5 ${k === todayK ? "text-primaryfg" : "text-fg"}`}>
+                  <span className={k === todayK ? "inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary" : ""}>{d.getDate()}</span>
+                </div>
+                {list.slice(0, 3).map((s) => (
+                  <div key={s.id} className="mb-0.5 rounded px-1 text-[.58rem] leading-tight truncate"
+                    style={{ background: `color-mix(in srgb, ${calColorFor(s.clientUid)} 20%, var(--surface))`,
+                      borderLeft: `2px solid ${calColorFor(s.clientUid)}`, color: "var(--text)" }}>
+                    {calTimeLabel(s.startAt).replace(":00", "")} {nameOf(s.clientUid).split(" ")[0]}
+                  </div>
+                ))}
+                {list.length > 3 && <div className="text-[.55rem] text-muted px-1">+{list.length - 3} more</div>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const days = view === "week"
+    ? Array.from({ length: 7 }, (_, i) => calAddDays(calStartOfWeek(anchor), i))
+    : [anchor];
+
+  const upcoming = useMemo(
+    () => mine.filter((s) => s.status !== "cancelled" && s.startAt > now).sort((a, b) => a.startAt - b.startAt).slice(0, 3),
+    [mine, now],
+  );
+
+  return (
+    <div className="min-h-screen bg-bg text-fg" data-theme="pro" style={{ fontFamily: "var(--font-sans)" }}>
+      <style>{css}</style>
+      <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
+        <BrandLogo />
+      </div>
+      <div className="max-w-[900px] mx-auto px-4 pt-6 pb-28">
+        <div className="text-2xl font-extrabold tracking-tight mb-1 flex items-center gap-2">
+          <Icon name="calendar" size={22} color="var(--accent)" />Calendar
+        </div>
+        <div className={`${subCls} mb-4`}>Every client, every booked session. Tap any empty slot to book — the red line is now, and a session becomes billable once it passes.</div>
+
+        {sessions === null ? (
+          <div className="flex flex-col gap-3"><SkeletonCard rows={2} /><SkeletonCard rows={4} /></div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+              <div className="flex gap-1.5">
+                {["month", "week", "day"].map((v) => (
+                  <button key={v} onClick={() => switchView(v)} className={chip(view === v)}>
+                    {v[0].toUpperCase() + v.slice(1)}
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => setAnchor(new Date())}
+                className="px-3 py-1.5 rounded-full text-xs font-bold cursor-pointer border border-border text-fg bg-transparent">Today</button>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <button className={navBtn} onClick={() => shift(-1)} aria-label="Previous">‹</button>
+              <div className="font-bold text-[.95rem]">{periodLabel}</div>
+              <button className={navBtn} onClick={() => shift(1)} aria-label="Next">›</button>
+            </div>
+
+            {err && <div className="mb-2 text-xs text-danger">{err}</div>}
+            {msg && <div className="mb-2 text-xs text-success">{msg}</div>}
+
+            {view === "month" ? monthGrid() : timeGrid(days)}
+
+            {!mine.length && (
+              <div className="mt-4 rounded-card border border-border bg-surface p-5">
+                <div className="font-display text-lg tracking-wider text-primary mb-1">Nothing booked yet</div>
+                <div className={subCls}>Tap any slot above to book your first session. Book a standing weekly slot in one go with the Repeat option.</div>
+                <button onClick={onGoClients} className="mt-3 w-full py-3 rounded-lg border border-border bg-transparent text-fg text-sm font-semibold cursor-pointer">Go to clients</button>
+              </div>
+            )}
+
+            {upcoming.length > 0 && (
+              <div className="mt-4 rounded-card border border-border bg-surface p-4">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-muted mb-2">Coming up</div>
+                {upcoming.map((s) => (
+                  <button key={s.id} onClick={() => setDetail(s)}
+                    className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg bg-surface2 mb-1.5 text-left cursor-pointer border-0">
+                    <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: calColorFor(s.clientUid) }} />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[.86rem] font-semibold truncate">{nameOf(s.clientUid)}</span>
+                      <span className="block text-[.72rem] text-muted truncate">{fmtSessionWhen(s.startAt)}</span>
+                    </span>
+                    {s.priceCents > 0 && <span className="text-[.8rem] font-semibold shrink-0">{money(s.priceCents)}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {detail && (
+        <CalSessionSheet session={detail} nameOf={nameOf} now={now} busy={busy} meUid={meUid}
+          onClose={() => setDetail(null)} onEdit={() => openEditForm(detail)}
+          onOpenClient={onOpenClientPlan ? () => { onOpenClientPlan(detail.clientUid); } : null}
+          onCancelOne={() => act(() => cancelSession(detail.id, meUid), "Session cancelled.")}
+          onCancelSeries={() => act(async () => { const n = await cancelSeriesFrom(detail, meUid); return n; }, "Series cancelled.")}
+          onNoShow={() => act(() => markNoShow(detail.id, !detail.noShow), detail.noShow ? "No-show cleared." : "Marked as a no-show.")}
+          onWaive={() => act(() => waiveSession(detail.id, !detail.waived), detail.waived ? "This will be charged." : "Charge waived.")} />
+      )}
+      {form && (
+        <CalBookingSheet form={form} setForm={setForm} clients={clients} busy={busy} err={err}
+          onClose={() => { setForm(null); setErr(""); }} onSubmit={submit} nameOf={nameOf} />
+      )}
+    </div>
+  );
+}
+
+// datetime-local wants local wall-clock, not an ISO/UTC string.
+const calToLocalInput = (ms) => {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+// One booked session, and everything the trainer can do about it.
+function CalSessionSheet({ session: s, nameOf, now, busy, meUid, onClose, onEdit, onOpenClient, onCancelOne, onCancelSeries, onNoShow, onWaive }) {
+  const [confirm, setConfirm] = useState("");
+  const past = sessionEndMs(s) <= now;
+  const settled = !!s.settled && s.settled !== "hold";
+  const state = calBillingState(s, now);
+  const toneCls = { success: "text-success", warn: "text-warn", danger: "text-danger", muted: "text-muted" }[state.tone];
+  const btn = "rounded-md border border-border bg-transparent px-2.5 py-1.5 text-xs font-semibold text-fg cursor-pointer disabled:opacity-40";
+
+  return createPortal(
+    <div onClick={onClose} data-theme="pro" style={{ fontFamily: "var(--font-sans)" }}
+      className="fixed inset-0 z-[1600] flex items-end sm:items-center justify-center bg-black/60 px-4 py-6">
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-[440px] rounded-card border border-border bg-surface p-4 text-fg">
+        <div className="flex items-start gap-2.5 mb-3">
+          <span style={{ width: 4, alignSelf: "stretch", borderRadius: 2, background: calColorFor(s.clientUid) }} />
+          <div className="min-w-0 flex-1">
+            <div className="text-[1.05rem] font-extrabold truncate">{nameOf(s.clientUid)}</div>
+            <div className="text-[.8rem] text-muted">{fmtSessionWhen(s.startAt)} · {s.durationMin || SESSION_DEFAULT_MIN} min</div>
+            {(s.title || s.location) && <div className="text-[.78rem] text-muted mt-0.5">{[s.title, s.location].filter(Boolean).join(" · ")}</div>}
+          </div>
+          <button onClick={onClose} aria-label="Close" className="shrink-0 rounded-full border border-border bg-surface2 w-8 h-8 flex items-center justify-center cursor-pointer">
+            <Icon name="close" size={14} color="var(--muted)" />
+          </button>
+        </div>
+
+        <div className="rounded-lg bg-surface2 px-3 py-2 mb-3 flex items-center justify-between gap-2">
+          <span className={`text-[.78rem] font-semibold ${toneCls}`}>{state.label}</span>
+          {s.priceCents > 0 && <span className="text-[.9rem] font-bold">{money(s.billableCents != null ? s.billableCents : s.priceCents)}</span>}
+        </div>
+        {s.seriesId && <div className="text-[.72rem] text-muted mb-2">Part of a repeating series.</div>}
+
+        <div className="flex flex-wrap gap-1.5">
+          {!past && s.status !== "cancelled" && <button className={btn} onClick={onEdit} disabled={busy}>Reschedule</button>}
+          {past && !settled && s.status !== "cancelled" && (
+            <>
+              <button className={btn} onClick={onNoShow} disabled={busy || !!s.waived}>{s.noShow ? "Not a no-show" : "Mark no-show"}</button>
+              <button className={btn} onClick={onWaive} disabled={busy}>{s.waived ? "Charge it" : "Waive charge"}</button>
+            </>
+          )}
+          {onOpenClient && <button className={btn} onClick={onOpenClient} disabled={busy}>Open plan</button>}
+          {!past && s.status !== "cancelled" && (
+            confirm === "one" ? (
+              <>
+                <button className="rounded-md border-0 bg-danger px-2.5 py-1.5 text-xs font-bold text-white cursor-pointer" onClick={onCancelOne} disabled={busy}>Yes, cancel</button>
+                <button className={btn} onClick={() => setConfirm("")}>Keep it</button>
+              </>
+            ) : confirm === "series" ? (
+              <>
+                <button className="rounded-md border-0 bg-danger px-2.5 py-1.5 text-xs font-bold text-white cursor-pointer" onClick={onCancelSeries} disabled={busy}>Yes, cancel all</button>
+                <button className={btn} onClick={() => setConfirm("")}>Keep them</button>
+              </>
+            ) : (
+              <>
+                <button className={btn} onClick={() => setConfirm("one")} disabled={busy}>Cancel session</button>
+                {s.seriesId && <button className={btn} onClick={() => setConfirm("series")} disabled={busy}>Cancel this + later</button>}
+              </>
+            )
+          )}
+        </div>
+        {confirm === "series" && (
+          <div className="mt-2 text-[.72rem] text-muted">Cancels this session and every later one in the series. Sessions already delivered are left alone.</div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// Book (or reschedule) from the grid.
+function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit, nameOf }) {
+  const inp = "w-full min-w-0 bg-surface2 border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted";
+  const lbl = "mb-1 text-[11px] font-bold uppercase tracking-wide text-muted";
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const repeating = form.repeat !== "none" && !form.id;
+
+  return createPortal(
+    <div onClick={onClose} data-theme="pro" style={{ fontFamily: "var(--font-sans)" }}
+      className="fixed inset-0 z-[1600] flex items-end sm:items-center justify-center bg-black/60 px-4 py-6">
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-[440px] max-h-[86vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
+        <div className="text-[1.05rem] font-extrabold mb-3">{form.id ? "Reschedule session" : "New session"}</div>
+
+        {!form.id && (
+          <div className="mb-2.5">
+            <div className={lbl}>Client</div>
+            <select className={inp} value={form.clientUid} onChange={(e) => set("clientUid", e.target.value)}>
+              {clients.map((c) => <option key={c.uid} value={c.uid}>{nameOf(c.uid)}</option>)}
+            </select>
+          </div>
+        )}
+        <div className="mb-2.5">
+          <div className={lbl}>When</div>
+          <input type="datetime-local" className={inp} value={form.when} onChange={(e) => set("when", e.target.value)} />
+        </div>
+        <div className="grid grid-cols-2 gap-2 mb-2.5">
+          <div>
+            <div className={lbl}>Minutes</div>
+            <input type="number" inputMode="numeric" className={inp} value={form.durationMin} onChange={(e) => set("durationMin", e.target.value)} />
+          </div>
+          <div>
+            <div className={lbl}>Price ($)</div>
+            <input type="number" inputMode="decimal" className={inp} value={form.price} onChange={(e) => set("price", e.target.value)} placeholder="0" />
+          </div>
+        </div>
+        {/* A session left at $0 books fine and then can never be billed, so say
+            so at the moment it would happen rather than in a support email. */}
+        {!(Number(form.price) > 0) && (
+          <div className="mb-2.5 text-[.72rem] text-warn">No price set — this session won't be billed.</div>
+        )}
+        <div className="grid grid-cols-2 gap-2 mb-2.5">
+          <div>
+            <div className={lbl}>Title</div>
+            <input className={inp} value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="Upper body" />
+          </div>
+          <div>
+            <div className={lbl}>Location</div>
+            <input className={inp} value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="Studio" />
+          </div>
+        </div>
+
+        {!form.id && (
+          <div className="grid grid-cols-2 gap-2 mb-1">
+            <div>
+              <div className={lbl}>Repeat</div>
+              <select className={inp} value={form.repeat} onChange={(e) => set("repeat", e.target.value)}>
+                {Object.entries(REPEAT_OPTIONS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </div>
+            {repeating && (
+              <div>
+                <div className={lbl}>How many</div>
+                <input type="number" inputMode="numeric" className={inp} value={form.count}
+                  onChange={(e) => set("count", e.target.value)} min="1" max={String(REPEAT_MAX)} />
+              </div>
+            )}
+          </div>
+        )}
+        {repeating && (
+          <div className="mb-2.5 text-[.72rem] text-muted">
+            Books {Math.max(1, Math.min(REPEAT_MAX, Math.round(Number(form.count) || 1)))} separate sessions at this time. Each one bills, reschedules and cancels on its own.
+          </div>
+        )}
+
+        {err && <div className="mb-2 text-xs text-danger">{err}</div>}
+        <div className="flex gap-2 mt-2">
+          <button onClick={onSubmit} disabled={busy}
+            className="flex-1 py-2.5 rounded-lg border-0 bg-primary text-primaryfg text-sm font-bold cursor-pointer disabled:opacity-50">
+            {busy ? "Saving…" : form.id ? "Save changes" : repeating ? "Book sessions" : "Book session"}
+          </button>
+          <button onClick={onClose} className="px-4 py-2.5 rounded-lg border border-border bg-transparent text-muted text-sm cursor-pointer">Cancel</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // ─── Trainer earnings view (Session 105) ────────────────────────────────────
 // A read-only ledger over sessionCharges: what each client was billed for
 // training sessions, when, how much, and whether it went through. Powered by the
@@ -20786,12 +21394,18 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
                 <Icon name="clock" size={13} color="var(--accent)" />Sessions
               </button>
             )}
-            {planData && (
-              <button onClick={() => setShowCalendar(true)} title="Open the calendar to log or back-date any day"
-                className="inline-flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
-                <Icon name="calendar" size={13} color="var(--accent)" />Calendar
-              </button>
-            )}
+            {/* ALWAYS reachable — same reasoning as the Sessions button above.
+                This was gated on `planData`, so a client whose plan hadn't
+                loaded (or who has no plan yet) had no way into the calendar at
+                all — and the calendar is exactly where they'd log or back-date
+                a day, none of which needs a plan. CalendarView already handles
+                an absent plan: it takes `planData || {}`, and since S49 the
+                per-day totals load with or without a calorie target, dropping
+                only the adherence tint rather than the whole screen. */}
+            <button onClick={() => setShowCalendar(true)} title="Open the calendar to log or back-date any day"
+              className="inline-flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
+              <Icon name="calendar" size={13} color="var(--accent)" />Calendar
+            </button>
             <button onClick={() => load()} title="Reload the latest from your plan"
               className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-muted cursor-pointer whitespace-nowrap">
               ↻ Refresh
@@ -23287,6 +23901,11 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
   const [consentChecked, setConsentChecked] = useState(false);
   const [cardBusy, setCardBusy] = useState(false);
   const [confirmRemoveCard, setConfirmRemoveCard] = useState(false);
+  // The terms that actually GOVERN this client's charges: the policy frozen into
+  // their consent when they saved their card, mirrored onto their profile by
+  // recordSessionConsent. The trainer's CURRENT policy is a different object and
+  // can differ from it for as long as the client hasn't re-consented.
+  const [consentPolicy, setConsentPolicy] = useState(null);
   useEffect(() => {
     let alive = true;
     const target = isTrainer ? clientUid : meUid;
@@ -23296,10 +23915,31 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
         if (!alive) return;
         const pm = (p && p.sessionPaymentMethod) || null;
         if (isTrainer) setClientCard(pm); else setMyCard(pm);
+        const cp = p && p.sessionConsentPolicy;
+        setConsentPolicy(cp && cp.trainerUid === trainerUid ? cp : null);
       })
       .catch(() => { /* indicator only — never block the panel */ });
     return () => { alive = false; };
-  }, [isTrainer, clientUid, meUid]);
+  }, [isTrainer, clientUid, meUid, trainerUid]);
+
+  // ⚠️ QUOTE WHAT WILL BE CHARGED, NOT WHAT THE TRAINER CURRENTLY CHARGES.
+  // Every fee the client is shown is priced from their consent snapshot; the
+  // trainer's live policy is only the fallback for someone who has no card yet
+  // (nothing has been agreed, so nothing governs). Pricing the warning from the
+  // live policy while the sweep billed the snapshot is how a client could be
+  // told "In time — no cancellation charge" and then charged the full session
+  // price — a dispute they win on the screenshot alone. (S186)
+  const govPolicy = useMemo(
+    () => (consentPolicy ? policyOf({ sessionPolicy: consentPolicy }) : policy),
+    [consentPolicy, policy],
+  );
+  // Has the trainer changed their terms since this client agreed to them? Then
+  // the two objects have diverged and somebody should say so out loud.
+  const policyDrifted = useMemo(() => {
+    if (!consentPolicy) return false;
+    return ["cancelType", "cancelWindowHours", "lateCancelChargePct", "noShowChargePct"]
+      .some((k) => govPolicy[k] !== policy[k]);
+  }, [consentPolicy, govPolicy, policy]);
 
   const startCardSave = async () => {
     if (cardBusy) return;
@@ -23372,6 +24012,19 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
     setBusy(false);
   };
 
+  const setNoShow = async (id, on) => {
+    setBusy(true); setErr("");
+    try { await markNoShow(id, on); setMsg(on ? "Marked as a no-show." : "No-show cleared."); setTimeout(() => setMsg(""), 2000); }
+    catch { setErr("Couldn't update that session."); }
+    finally { setBusy(false); }
+  };
+  const setWaived = async (id, on) => {
+    setBusy(true); setErr("");
+    try { await waiveSession(id, on); setMsg(on ? "Charge waived." : "This will be charged again."); setTimeout(() => setMsg(""), 2000); }
+    catch { setErr("Couldn't update that session."); }
+    finally { setBusy(false); }
+  };
+
   const doCancel = async (id) => {
     setBusy(true);
     try { await cancelSession(id, meUid); setMsg("Session cancelled."); setTimeout(() => setMsg(""), 2000); }
@@ -23404,11 +24057,47 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
           Cancelled{s.cancelledBy ? (s.cancelledBy === trainerUid ? " by the trainer" : " by the client") : ""}
         </div>
       )}
-      {opts.past && !opts.cancelled && (
-        <div className="mt-1 text-[.74rem] text-success inline-flex items-center gap-1">
-          <Icon name="check" size={12} color="currentColor" />Completed
-        </div>
-      )}
+      {opts.past && !opts.cancelled && (() => {
+        const settled = !!s.settled && s.settled !== "hold";
+        const feeCents = Math.round((Number(s.billableCents != null ? s.billableCents : s.priceCents) || 0) * (govPolicy.noShowChargePct || 0) / 100);
+        return (
+          <>
+            <div className="mt-1 text-[.74rem] inline-flex items-center gap-1"
+              style={{ color: s.waived ? "var(--muted)" : s.noShow ? "var(--yellow)" : "var(--green)" }}>
+              <Icon name={s.waived ? "close" : s.noShow ? "alert" : "check"} size={12} color="currentColor" />
+              {s.waived ? "Waived — no charge" : s.noShow ? `No-show — billing ${money(feeCents)}` : "Completed"}
+            </div>
+            {/* The trainer's only chance to correct a delivered session before
+                it bills. Once it's settled the money has moved, so the controls
+                go away rather than pretending they still do something. */}
+            {isTrainer && !settled && (
+              <div className="mt-1.5 flex gap-1.5 flex-wrap">
+                <button onClick={() => setNoShow(s.id, !s.noShow)} disabled={busy || !!s.waived}
+                  className="rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-semibold cursor-pointer disabled:opacity-40"
+                  style={{ color: s.noShow ? "var(--yellow)" : "var(--text-secondary)" }}>
+                  {s.noShow ? "Not a no-show" : "Mark no-show"}
+                </button>
+                <button onClick={() => setWaived(s.id, !s.waived)} disabled={busy}
+                  className="rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-semibold cursor-pointer"
+                  style={{ color: s.waived ? "var(--accent)" : "var(--text-secondary)" }}>
+                  {s.waived ? "Charge it after all" : "Waive charge"}
+                </button>
+              </div>
+            )}
+            {isTrainer && !settled && s.noShow && (
+              <div className="mt-1 text-[.7rem] text-muted">
+                Billed at your {govPolicy.noShowChargePct}% no-show rate{policyDrifted ? " (the rate this client agreed to)" : ""}.
+              </div>
+            )}
+            {settled && (
+              <div className="mt-1 text-[.7rem] text-muted">
+                {s.settled === "charged" ? "Charged" : s.settled === "package" ? "Covered by their package"
+                  : s.settled === "waived" ? "Settled — no charge" : s.settled === "free" ? "No charge (unpriced)" : "Settled"}
+              </div>
+            )}
+          </>
+        );
+      })()}
       {!opts.past && !opts.cancelled && (
         <div className="mt-2 flex gap-1.5 flex-wrap">
           {isTrainer && (
@@ -23423,7 +24112,7 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
                   disagree. A TRAINER cancelling is always free (Kevin's rule),
                   which falls out of lateCancelFeeCents returning 0 for them. */}
               {(() => {
-                const fee = lateCancelFeeCents(s, policy, meUid, now);
+                const fee = lateCancelFeeCents(s, govPolicy, meUid, now);
                 if (!fee) return isTrainer ? null : (
                   <span className="w-full mb-1 text-[11px] text-success">
                     In time — no cancellation charge.
@@ -23432,13 +24121,13 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
                 return (
                   <span className="w-full mb-1 text-[11px] text-warn font-semibold">
                     Late cancellation — your trainer charges {money(fee)} for this
-                    ({policy.cancelWindowHours}h notice required).
+                    ({govPolicy.cancelWindowHours}h notice required).
                   </span>
                 );
               })()}
               <button onClick={() => doCancel(s.id)} disabled={busy}
                 className="rounded-md border-0 bg-danger px-2.5 py-1 text-xs font-bold text-white cursor-pointer">
-                {lateCancelFeeCents(s, policy, meUid, now) ? "Cancel & accept charge" : "Yes, cancel"}
+                {lateCancelFeeCents(s, govPolicy, meUid, now) ? "Cancel & accept charge" : "Yes, cancel"}
               </button>
               <button onClick={() => setConfirmCancel("")}
                 className="rounded-md border border-border bg-transparent px-2.5 py-1 text-xs text-muted cursor-pointer">Keep it</button>
@@ -23481,10 +24170,31 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
               {/* The SAME standard disclosure that goes on every invoice and
                   checkout — one wording platform-wide, only the trainer's
                   numbers differ, so a client never meets unfamiliar terms. */}
-              {cancellationDisclosure(policy, isTrainer ? "you" : (otherName || "your trainer")).map((line, i) => (
+              {/* The CLIENT sees the terms that govern their card — the ones
+                  they signed — because those are the ones they'll be charged
+                  under. The TRAINER sees their current policy, since that's the
+                  thing they edit here. */}
+              {cancellationDisclosure(isTrainer ? policy : govPolicy, isTrainer ? "you" : (otherName || "your trainer")).map((line, i) => (
                 <div key={i} className={i === 0 ? "text-[.78rem] text-fg leading-snug" : "mt-0.5 text-[.74rem] text-muted leading-snug"}>{line}</div>
               ))}
-              {!isTrainer && <div className="mt-1 text-[.7rem] text-muted">Set by your trainer.</div>}
+              {!isTrainer && consentPolicy && (
+                <div className="mt-1 text-[.7rem] text-muted">
+                  Set by your trainer · these are the terms you agreed to when you saved your card.
+                </div>
+              )}
+              {!isTrainer && !consentPolicy && <div className="mt-1 text-[.7rem] text-muted">Set by your trainer.</div>}
+              {/* A trainer can change their terms at any time, but a client is
+                  only ever charged under the ones they actually agreed to — so
+                  when the two drift apart, say so rather than letting each side
+                  read a different number off the same screen. */}
+              {policyDrifted && (
+                <div className="mt-1.5 rounded-md px-2 py-1.5 text-[.72rem] leading-snug"
+                  style={{ background: "rgba(251,191,36,.10)", color: "var(--yellow)" }}>
+                  {isTrainer
+                    ? `${otherName || "This client"} is still on the terms they agreed to when they saved their card, so that's what they'll be charged. Ask them to re-save their card to move them onto your current policy.`
+                    : "Your trainer has since updated their policy. You stay on the terms above until you save or update your card."}
+                </div>
+              )}
             </div>
             {isTrainer && (
               <button onClick={() => setEditPolicy(true)}
@@ -23590,8 +24300,40 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
 
         {isTrainer && editPolicy && (
           <div className="mb-3 rounded-lg border border-border bg-surface2 p-3">
-            {/* Cancellation STANCE first — the window only matters for one of
-                the three, so asking for hours before the stance is backwards. */}
+            {/* One switch for the whole question "do I charge for cancellations
+                at all?". It was always possible to say no — pick "any time", or
+                set the percentage to 0 — but only if you already knew that.
+                A trainer who doesn't want a late fee should be able to see that
+                choice, not deduce it. Off maps to the existing `anytime` stance
+                rather than a new field, so the disclosure text, the consent
+                snapshot and the settle engine all keep working unchanged. */}
+            <div className={lbl}>Late-cancellation fee</div>
+            <div className="mb-2 flex items-center gap-2">
+              {[["on", "Charge a fee"], ["off", "No fee, ever"]].map(([v, label]) => {
+                const isOn = v === "on" ? policyDraft.cancelType !== "anytime" : policyDraft.cancelType === "anytime";
+                return (
+                  <button key={v}
+                    onClick={() => setPolicyDraft((d) => ({
+                      ...d,
+                      cancelType: v === "off" ? "anytime" : (d.cancelType === "anytime" ? "window" : d.cancelType),
+                    }))}
+                    className={`flex-1 rounded-lg px-2.5 py-2 text-xs font-bold cursor-pointer ${
+                      isOn ? "bg-[rgba(var(--accent-rgb),.1)] text-primary border border-primary"
+                        : "bg-transparent text-muted border border-border"}`}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {policyDraft.cancelType === "anytime" && (
+              <div className="mb-2 text-[11px] text-muted leading-snug">
+                Clients can cancel any time at no charge, and a no-show isn&apos;t charged either.
+              </div>
+            )}
+
+            {/* Cancellation STANCE — the window only matters for one of the
+                three, so asking for hours before the stance is backwards. */}
+            {policyDraft.cancelType !== "anytime" && (<>
             <div className={lbl}>Cancellations</div>
             <div className="mb-2 flex flex-col gap-1.5">
               {Object.entries(CANCEL_TYPES).map(([k, label]) => (
@@ -23604,6 +24346,7 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
                 </button>
               ))}
             </div>
+            </>)}
 
             {policyDraft.cancelType === "window" && (<>
             <div className={lbl}>Free-cancellation notice</div>
@@ -23632,6 +24375,19 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
                   onChange={(e) => setPolicyDraft((d) => ({ ...d, lateCancelChargePct: e.target.value }))}
                   className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none" />
                 <span className="ml-2 text-[11px] text-muted">0 = never charge for a cancellation</span>
+              </div>
+            )}
+
+            {/* The no-show rate is now actually billed (S186), so it has to be
+                settable. It was disclosed to clients and frozen into their
+                consent long before anything could apply it. */}
+            {policyDraft.cancelType !== "anytime" && (
+              <div className="mb-2">
+                <div className={lbl}>No-show charge (% of the session)</div>
+                <input type="number" inputMode="numeric" min="0" max="100" value={policyDraft.noShowChargePct}
+                  onChange={(e) => setPolicyDraft((d) => ({ ...d, noShowChargePct: e.target.value }))}
+                  className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none" />
+                <span className="ml-2 text-[11px] text-muted">0 = never charge for a no-show</span>
               </div>
             )}
 
@@ -25035,7 +25791,7 @@ async function exportMyData({ meName, meEmail, role }) {
   return bundle.entryCount;
 }
 
-function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme, accentPref, onSetAccent, teamLocked, onReferrals }) {
+function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onCalendar, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme, accentPref, onSetAccent, teamLocked, onReferrals }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
@@ -25249,6 +26005,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
         <button style={item} onClick={() => go(onHome)}><Icon name="home" size={19} color="var(--accent)" /> <span>Home</span></button>
         {isTrainer && <button style={item} onClick={() => go(onDashboard)}><Icon name="dashboard" size={19} color="var(--accent)" /> <span>Dashboard</span></button>}
         {isTrainer && <button style={item} onClick={() => go(onClients)}><Icon name="clients" size={19} color="var(--accent)" /> <span>All clients</span></button>}
+        {isTrainer && onCalendar && <button style={item} onClick={() => go(onCalendar)}><Icon name="calendar" size={19} color="var(--accent)" /> <span>Calendar</span></button>}
         {/* Earnings is a BILLING surface — hidden unless this trainer may
             actually take money (S178). Booking stays free and visible. */}
         {/* Earnings is a BILLING surface — hidden unless this trainer may
@@ -27224,6 +27981,7 @@ export default function App() {
         onHome={() => { if (isTrainerHome) setHomeTab("dashboard"); goToProfiles(); }}
         onDashboard={() => { setHomeTab("analytics"); goToProfiles(); }}
         onClients={() => { setHomeTab("clients"); goToProfiles(); }}
+        onCalendar={() => { setHomeTab("calendar"); goToProfiles(); }}
         onEarnings={() => { setHomeTab("earnings"); goToProfiles(); }}
         onNameSaved={(n) => setMeName(n)}
         isAdminUid={meUid === OWNER_UID} />
@@ -27247,6 +28005,13 @@ export default function App() {
         onOpenClientPlan={openClientPlan}
         onGoClients={() => setHomeTab("clients")}
         meUid={meUid} meName={meName} meRole={role}
+      /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
+    }
+    if (isTrainerHome && homeTab === "calendar") {
+      return <>{chrome}<TrainerCalendar
+        meUid={meUid} meName={meName}
+        onGoClients={() => setHomeTab("clients")}
+        onOpenClientPlan={openClientPlan}
       /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
     }
     if (isTrainerHome && homeTab === "earnings") {
@@ -27376,11 +28141,10 @@ export default function App() {
               onSetDeficitMode={(m)=>setDataAndSave(p=>({...p, deficitMode: m}))}
               onSetCalorieGoal={(g)=>setDataAndSave(p=>({...p, calorieGoalDirection: g}))}
               onSetHideCompliance={(h)=>setDataAndSave(p=>({...p, hideCompliance: h}))}
-              // Sessions on the calendar are MINE. When a trainer is viewing a
-              // CLIENT's plan (activeRemoteUid set), passing my uid would paint
-              // my other clients' sessions onto this client's calendar — so it's
-              // scoped to the owner's own view only.
-              meUid={activeRemoteUid ? null : meUid}
+              // Sessions on the calendar are MINE — and when a trainer is
+              // viewing a CLIENT's plan, only the ones shared with that client
+              // (peerUid), never the trainer's whole book.
+              meUid={meUid} peerUid={activeRemoteUid || null}
               savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood} onRemoveSavedFood={onRemoveSavedFood}
               savedMeals={savedMeals} onToggleSaveMeal={onToggleSaveMeal} onRemoveSavedMeal={onRemoveSavedMeal} onLogMeal={onLogMeal}
               onReadDay={onReadDay} onWriteDay={onWriteDay} onListLoggedDays={onListLoggedDays}
