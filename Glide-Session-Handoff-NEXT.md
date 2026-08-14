@@ -1,5 +1,56 @@
 # Glidna — Next-Session Handoff (start here)
 
+## 🔜 NEXT BUILD — client self-booking + drive time (Kevin's spec + decisions, S190)
+
+**Not started. Kevin has DECIDED the open questions — don't re-ask them.**
+
+### The goal in one line
+A client who uses nothing else in Glidna — no logging, no AI, no plan — can still see when their
+trainer is free, ask for a slot, and pay. That standalone path is the point of the feature, so
+nothing here may be gated behind having a plan.
+
+### Pass 1 — the booking loop
+1. **Trainer blocks off time.** A calendar doc with no client attached ("Busy", "Lunch", "Away").
+   The week/day grid already positions timed items, so this is mostly data + a "Block time" option
+   in the existing booking sheet.
+2. **Clients see FREE/BUSY ONLY — decided.** ⚠️ Never expose the trainer's real sessions. Today
+   `sessions` is `allow read: if isParticipant()`, and that must stay: a client reading the
+   trainer's calendar would otherwise see other clients' NAMES, titles and locations — a privacy
+   leak and a competitive one. Serve anonymous busy blocks ("9:00–10:00 unavailable") from a
+   derived projection or a callable, never the raw docs.
+3. **Visibility is a TRAINER SETTING — decided.** One per-trainer toggle, in the trainer's own
+   settings (not per-client). Off by default; when off, clients see no calendar and can still
+   request a time.
+4. **Client requests a slot → trainer accepts or denies.** `functions/requests.js`
+   `sendTrainerRequest` already does the hard parts — writes the trainer's inbox transactionally,
+   pushes them, and caps open requests per client. A booking request is the same path with
+   structured fields (requested start, duration, note) plus accept/deny actions; accept creates a
+   real session via the existing `bookSession`/`bookSeries`.
+5. **Repeat on accept.** `bookSeries` already does weekly/biweekly — **add monthly**, which Kevin
+   named explicitly.
+
+### Pass 2 — "drive to you"
+6. **Addresses**: a default on the profile + a per-session override, exactly as Kevin described.
+   These are home addresses — sensitive. Readable only by the two people in that session.
+7. **BUILD BOTH ESTIMATORS — decided.** Kevin wants to compare them side by side:
+   - **No-API**: straight-line distance from coordinates × an average speed factor. Free, no
+     traffic, and wrong precisely when it matters (rush hour).
+   - **Google Routes API**: traffic-aware (`departureTime` + `TRAFFIC_AWARE`). Same Google project
+     as Blaze, so it's one key and one bill. ~$5–10 per 1,000 lookups.
+   Cache by (origin, destination, weekday, hour bucket) — the drive between two fixed addresses
+   barely changes, so a warm cache makes this pennies a month for one trainer. Geocoding
+   address→coordinates is a second, cheap call.
+8. **Back-to-back feasibility warning** — the part with the most real value. Once drive time
+   exists: compare session N's end + travel against session N+1's start and flag negative slack on
+   the calendar. No extra API calls if the drive times are cached. Build it in the SAME pass, not
+   "later" — it's what stops a trainer double-booking themselves across town.
+
+### Kevin's product note
+Drive-time/traffic is a candidate **upcharge for trainers** rather than a base feature — he raised
+it unprompted. Worth pricing before it ships broadly (see docs/PRICING.md).
+
+
+
 ## ⚠️⚠️⚠️ S186 — THE S185 BILLING DEFECTS ARE FIXED, BUT NOTHING IS DEPLOYED YET
 
 **Two things are required before ANY of this is live, and both are Kevin's call:**
