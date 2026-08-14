@@ -459,6 +459,41 @@ await check("client cannot set own sessionBillingTest", assertFails(updateDoc(pr
 await check("trainer cannot set a client's sessionBillingTest", assertFails(updateDoc(prof(head, C1), { sessionBillingTest: true })));
 await check("admin CAN set sessionBillingTest", assertSucceeds(updateDoc(prof(admin, C1), { sessionBillingTest: false })));
 
+// ---- S190: trainer time blocks ---------------------------------------------
+// A block is the trainer's own private "I'm not available" marker. The whole
+// point of the collection is that it is NOT a session, so the tests care about
+// two things: only the owner touches it, and NOBODY else can read it — free/busy
+// is served by a callable that strips the detail, never by reading these docs.
+console.log("\nTRAINER TIME BLOCKS — owner-only, and invisible to clients:");
+const blk = (db, id) => doc(db, "trainerBlocks", id);
+const blockDoc = (over = {}) => ({ trainerUid: H, startAt: Date.now() + 3600000, durationMin: 60, title: "Lunch", createdAt: Date.now(), ...over });
+
+await check("trainer creates own block", assertSucceeds(setDoc(blk(head, "b1"), blockDoc())));
+await check("trainer reads own block", assertSucceeds(getDoc(blk(head, "b1"))));
+await check("trainer updates own block", assertSucceeds(updateDoc(blk(head, "b1"), { title: "Physio", updatedAt: Date.now() })));
+await check("trainer deletes own block", assertSucceeds(deleteDoc(blk(head, "b1"))));
+
+await testEnv.withSecurityRulesDisabled(async (c) => {
+  await setDoc(doc(c.firestore(), "trainerBlocks", "b2"), blockDoc());
+});
+// The privacy case this collection exists to protect.
+await check("CLIENT cannot read their trainer's block", assertFails(getDoc(blk(c1, "b2"))));
+await check("another trainer cannot read a block", assertFails(getDoc(blk(t2, "b2"))));
+await check("client cannot list trainer blocks", assertFails(getDocs(collection(c1, "trainerBlocks"))));
+await check("client cannot delete a trainer's block", assertFails(deleteDoc(blk(c1, "b2"))));
+await check("client cannot edit a trainer's block", assertFails(updateDoc(blk(c1, "b2"), { title: "gone" })));
+await check("another trainer cannot delete a block", assertFails(deleteDoc(blk(t2, "b2"))));
+
+// Forgery: a block that claims to belong to someone else would let a trainer
+// blank out a rival's availability, or a client blank out their trainer's.
+await check("trainer cannot create a block owned by another trainer", assertFails(setDoc(blk(t2, "b3"), blockDoc({ trainerUid: H }))));
+await check("client cannot create a block at all", assertFails(setDoc(blk(c1, "b4"), blockDoc({ trainerUid: C1 }))));
+await check("trainer cannot re-point own block at another trainer", assertFails(updateDoc(blk(head, "b2"), { trainerUid: T2 })));
+await check("block with an unknown field rejected", assertFails(setDoc(blk(head, "b5"), blockDoc({ priceCents: 5000 }))));
+await check("block with zero duration rejected", assertFails(setDoc(blk(head, "b6"), blockDoc({ durationMin: 0 }))));
+await check("block longer than a day rejected", assertFails(setDoc(blk(head, "b7"), blockDoc({ durationMin: 2000 }))));
+await check("signed-out cannot read a block", assertFails(getDoc(blk(anon, "b2"))));
+
 console.log(`\n==== ${passed} passed, ${failed} failed ====`);
 if (failures.length) console.log("FAILED:", failures.join(" | "));
 await testEnv.cleanup();

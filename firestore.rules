@@ -397,6 +397,50 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ── Trainer time blocks (S190) ────────────────────────────────────────
+    // "Busy", "Lunch", "Away" — time the trainer is not available, with no
+    // client attached. Deliberately NOT a session: a session has two people, a
+    // price and a billing lifecycle, and a block has none of those. Putting
+    // them in the same collection would mean the settle sweep had to learn to
+    // ignore something, which is exactly the kind of exception that later gets
+    // billed by accident.
+    //
+    // ⚠️ READ IS OWNER-ONLY, ON PURPOSE. Clients never read these directly —
+    // free/busy is served by a callable that strips every detail down to a time
+    // range. A block's title ("Physio", "Dentist") is the trainer's private
+    // business, and the same reasoning keeps sessions participant-only: a
+    // client browsing raw calendar docs would see other clients' names.
+    match /trainerBlocks/{bid} {
+      function blockFields() {
+        return ['trainerUid', 'startAt', 'durationMin', 'title', 'seriesId',
+                'createdAt', 'updatedAt'];
+      }
+      allow read: if isSignedIn() && (resource.data.trainerUid == request.auth.uid || isAdmin());
+      // Trainers only. Self-owned junk from a client would be inert, but this is
+      // a shared collection and "anyone may write here" is not a property worth
+      // having — the get() costs one read on a write that happens a few times a
+      // week, which is the cheapest possible place to pay for it.
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly(blockFields())
+        && request.resource.data.keys().hasAll(['trainerUid', 'startAt', 'durationMin'])
+        && request.resource.data.trainerUid == request.auth.uid
+        && profileData(request.auth.uid).get('role', '') in ['head_trainer', 'sub_trainer', 'admin']
+        && request.resource.data.startAt is number
+        && request.resource.data.durationMin is number
+        && request.resource.data.durationMin > 0
+        && request.resource.data.durationMin <= 1440;
+      allow update: if isSignedIn()
+        && resource.data.trainerUid == request.auth.uid
+        && request.resource.data.trainerUid == request.auth.uid
+        && request.resource.data.keys().hasOnly(blockFields())
+        && request.resource.data.durationMin is number
+        && request.resource.data.durationMin > 0
+        && request.resource.data.durationMin <= 1440;
+      // A block carries no billing history, so unlike a session it is safe to
+      // delete outright.
+      allow delete: if isSignedIn() && (resource.data.trainerUid == request.auth.uid || isAdmin());
+    }
+
     // ── Session charge ledger (S101c) ─────────────────────────────────────
     // One doc per settlement attempt (a batch of sessions, or a late-cancel
     // fee): what was charged, why, its Stripe id, and the dispute evidence.

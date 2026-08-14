@@ -46,8 +46,11 @@ nothing here may be gated behind having a plan.
    "later" — it's what stops a trainer double-booking themselves across town.
 
 ### Kevin's product note
-Drive-time/traffic is a candidate **upcharge for trainers** rather than a base feature — he raised
-it unprompted. Worth pricing before it ships broadly (see docs/PRICING.md).
+Drive-time/traffic is **a Coach-plan feature, not a separate upcharge** (his refinement, S190b):
+put it in the coaching tier as a reason to upgrade rather than billing it on the side. That fits
+the existing grid — Coach already carries the trainer-only capabilities — and it means the Google
+Routes cost lands only on accounts already paying $49/mo, so the margin question answers itself.
+Add it to `PLAN_FEATURES` when built.
 
 
 
