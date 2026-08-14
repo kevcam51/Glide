@@ -17741,11 +17741,19 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
                 <div className={`text-[.7rem] font-bold mb-0.5 ${k === todayK ? "text-primaryfg" : "text-fg"}`}>
                   <span className={k === todayK ? "inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary" : ""}>{d.getDate()}</span>
                 </div>
+                {/* WHO comes first, then when. A month cell is narrow enough
+                    that something has to give, and the name is what makes the
+                    row scannable — "Casey" tells you what the day holds, "9 AM"
+                    on its own does not. The time drops to a second line so it
+                    stops eating the width the name needs, and the full name is
+                    shown (truncate handles the overflow) rather than pre-cut to
+                    a first name that still clipped on a phone. */}
                 {list.slice(0, 3).map((s) => (
-                  <div key={s.id} className="mb-0.5 rounded px-1 text-[.58rem] leading-tight truncate"
+                  <div key={s.id} className="mb-0.5 rounded px-1 py-0.5 leading-tight overflow-hidden"
                     style={{ background: `color-mix(in srgb, ${calColorFor(s.clientUid)} 20%, var(--surface))`,
                       borderLeft: `2px solid ${calColorFor(s.clientUid)}`, color: "var(--text)" }}>
-                    {calTimeLabel(s.startAt).replace(":00", "")} {nameOf(s.clientUid).split(" ")[0]}
+                    <div className="text-[.58rem] font-semibold truncate">{nameOf(s.clientUid)}</div>
+                    <div className="text-[.53rem] text-muted truncate">{calTimeLabel(s.startAt).replace(":00", "")}</div>
                   </div>
                 ))}
                 {list.length > 3 && <div className="text-[.55rem] text-muted px-1">+{list.length - 3} more</div>}
@@ -17953,6 +17961,83 @@ function CalSessionSheet({ session: s, nameOf, now, busy, meUid, onClose, onEdit
   );
 }
 
+// Date + time chosen by tapping, not typing (S191).
+//
+// The value in and out is the SAME local "YYYY-MM-DDTHH:mm" string a
+// datetime-local produces, so this drops in wherever that input was and no
+// caller has to change. Splitting on "T" is safe precisely because the string
+// is local-formatted (calToLocalInput builds it from getFullYear/getMonth/…),
+// never a UTC ISO string — the S45 lesson about local vs UTC date keys applies
+// here too: parse it as UTC and every evening booking lands on tomorrow.
+function WhenPicker({ value, onChange, inp }) {
+  const [showCal, setShowCal] = useState(false);
+  const [datePart, timePart] = String(value || "").split("T");
+  const hh = Number((timePart || "09:00").slice(0, 2));
+  const mm = Number((timePart || "09:00").slice(3, 5));
+  const h12 = hh % 12 === 0 ? 12 : hh % 12;
+  const ampm = hh >= 12 ? "PM" : "AM";
+
+  const emit = (d, h24, min) =>
+    onChange(`${d}T${String(h24).padStart(2, "0")}:${String(min).padStart(2, "0")}`);
+  const setTime = (nextH12, nextMin, nextAmpm) => {
+    // 12 AM is 00:00 and 12 PM is 12:00 — the one case a naive (h % 12) gets
+    // wrong in both directions.
+    const base = nextH12 % 12;
+    emit(datePart, nextAmpm === "PM" ? base + 12 : base, nextMin);
+  };
+
+  const pretty = datePart
+    ? new Date(`${datePart}T12:00:00`).toLocaleDateString("en-US",
+      { weekday: "short", month: "short", day: "numeric", year: "numeric" })
+    : "Pick a date";
+  const sel = `${inp} pr-1`;
+
+  return (
+    <>
+      <button type="button" onClick={() => setShowCal((v) => !v)}
+        className={`${inp} mb-1.5 flex items-center justify-between gap-2 text-left cursor-pointer`}>
+        <span className="flex items-center gap-2 min-w-0">
+          <Icon name="calendar" size={15} color="var(--accent)" />
+          <span className="truncate">{pretty}</span>
+        </span>
+        <span className="text-muted text-xs shrink-0">{showCal ? "▾" : "change"}</span>
+      </button>
+
+      {showCal && (
+        <div className="mb-2 rounded-lg border border-border bg-surface2 p-2">
+          {/* The month grid the check-in flow already uses. checkIns={[]} turns
+              off its "already logged" highlighting, which means nothing here. */}
+          <CheckInCalendar checkIns={[]} selected={datePart}
+            onSelect={(ds) => { emit(ds, hh, mm); setShowCal(false); }} />
+        </div>
+      )}
+
+      <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5">
+        <select className={sel} value={h12} aria-label="Hour"
+          onChange={(e) => setTime(Number(e.target.value), mm, ampm)}>
+          {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => <option key={h} value={h}>{h}</option>)}
+        </select>
+        <select className={sel} value={mm} aria-label="Minute"
+          onChange={(e) => setTime(h12, Number(e.target.value), ampm)}>
+          {/* Five-minute steps: fine enough for a real booking, short enough to
+              scan without scrolling forever. An existing session at an odd
+              minute (7:07, from an import or an older booking) is added to the
+              list rather than silently rendering the select blank and losing
+              the value on the next change. */}
+          {[...new Set([...Array.from({ length: 12 }, (_, i) => i * 5), mm])]
+            .sort((a, b) => a - b)
+            .map((m) => <option key={m} value={m}>{String(m).padStart(2, "0")}</option>)}
+        </select>
+        <select className={sel} value={ampm} aria-label="AM or PM"
+          onChange={(e) => setTime(h12, mm, e.target.value)}>
+          <option value="AM">AM</option>
+          <option value="PM">PM</option>
+        </select>
+      </div>
+    </>
+  );
+}
+
 // Book (or reschedule) from the grid.
 function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit, nameOf }) {
   const inp = "w-full min-w-0 bg-surface2 border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted";
@@ -17975,9 +18060,18 @@ function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit,
             </select>
           </div>
         )}
+        {/* DATE AND TIME ARE PICKED, NOT TYPED (S191). This was one native
+            <input type="datetime-local">. On a phone that's fine — the OS wheel
+            covers both — but on desktop the native popup only offers the DATE,
+            so the time had to be typed segment by segment, which is the slowest
+            possible way to do the single most common edit in the whole app.
+            Now: tap the date to open the same month calendar used elsewhere,
+            and set the time from three selects. `form.when` stays exactly the
+            "YYYY-MM-DDTHH:mm" string every caller already reads and writes, so
+            nothing downstream changes. */}
         <div className="mb-2.5">
           <div className={lbl}>When</div>
-          <input type="datetime-local" className={inp} value={form.when} onChange={(e) => set("when", e.target.value)} />
+          <WhenPicker value={form.when} onChange={(v) => set("when", v)} inp={inp} />
         </div>
         <div className="grid grid-cols-2 gap-2 mb-2.5">
           <div>
