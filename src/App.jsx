@@ -9,7 +9,7 @@ import { bookSession, updateSession, cancelSession, markNoShow, waiveSession, su
   bookSeries, cancelSeriesFrom, REPEAT_OPTIONS, REPEAT_MAX,
   policyOf, packsOf, describePolicy, isLateCancel, lateCancelFeeCents, saveSessionPolicy, saveSessionPacks,
   CANCEL_WINDOW_PRESETS, STARTER_PACKS, DEFAULT_SESSION_POLICY,
-  CANCEL_TYPES, BILLING_MODES, cancellationDisclosure, consentLineFor, policySnapshot,
+  CANCEL_TYPES, BILLING_MODES, cancellationDisclosure, consentLineFor, policySnapshot, POLICY_TEXT_VERSION,
   stripeFeeCents, feeComparison,
   subscribeMyEarnings, earningsSummary, chargeStatusLabel, centsToUsd,
   clientStateInfo } from "./sessions.js";
@@ -18897,6 +18897,7 @@ const callEstimateExercise = httpsCallable(functions, "estimateExercise"); // ME
 const callCreateCardSetup = httpsCallable(functions, "createSessionSetupIntent");
 const callRecordCardConsent = httpsCallable(functions, "recordSessionConsent");
 const callRemoveSessionCard = httpsCallable(functions, "removeSessionCard");
+const callReconsentPolicy = httpsCallable(functions, "reconsentSessionPolicy");
 const callPaySessionBalance = httpsCallable(functions, "paySessionBalance"); // pay-now retry (S103)
 // The policy snapshot must survive the round-trip to Stripe's hosted page.
 // localStorage (not state) — the app fully reloads on return. No PII in it:
@@ -24434,6 +24435,33 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
       .some((k) => govPolicy[k] !== policy[k]);
   }, [consentPolicy, govPolicy, policy]);
 
+  // Re-agreeing to updated terms, from the client's side only.
+  const [reconsentBusy, setReconsentBusy] = useState(false);
+  const [reconsented, setReconsented] = useState(false);
+  const [showNewTerms, setShowNewTerms] = useState(false);
+  const doReconsent = async () => {
+    if (reconsentBusy) return;
+    setReconsentBusy(true); setErr("");
+    try {
+      // Send the exact wording the client just read, so the stored consent is a
+      // record of what was actually on their screen. The POLICY itself is read
+      // server-side from the trainer's profile — never from here — so a tampered
+      // request can't agree to terms nobody offered.
+      await callReconsentPolicy({
+        trainerUid,
+        snapshot: {
+          consentLine: consentLineFor(policy, otherName || "your trainer"),
+          shownText: cancellationDisclosure(policy, otherName || "your trainer"),
+          policyVersion: POLICY_TEXT_VERSION,
+        },
+      });
+      setConsentPolicy(policy);   // the drift notice resolves immediately
+      setReconsented(true);
+    } catch (e) {
+      setErr((e && e.message) || "Couldn't save that — try again.");
+    } finally { setReconsentBusy(false); }
+  };
+
   const startCardSave = async () => {
     if (cardBusy) return;
     setCardBusy(true); setErr("");
@@ -24684,8 +24712,44 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
                 <div className="mt-1.5 rounded-md px-2 py-1.5 text-[.72rem] leading-snug"
                   style={{ background: "rgba(251,191,36,.10)", color: "var(--yellow)" }}>
                   {isTrainer
-                    ? `${otherName || "This client"} is still on the terms they agreed to when they saved their card, so that's what they'll be charged. Ask them to re-save their card to move them onto your current policy.`
-                    : "Your trainer has since updated their policy. You stay on the terms above until you save or update your card."}
+                    ? `${otherName || "This client"} is still on the terms they agreed to, so that's what they'll be charged. They've been asked to review your updated policy — you can't accept it for them.`
+                    : "Your trainer has updated their payment terms. You stay on the terms above until you agree to the new ones."}
+                </div>
+              )}
+              {/* The client's path onto the new terms. Before this, the only way
+                  was "re-save your card" — obscure, and the wrong ask, since
+                  nothing is wrong with their card. Consent has to be the
+                  client's own affirmative act, so this button exists only on
+                  their side and the server takes the policy from the trainer's
+                  profile rather than from anything this screen sends. */}
+              {policyDrifted && !isTrainer && (
+                <div className="mt-2">
+                  {reconsented ? (
+                    <div className="rounded-md px-2 py-1.5 text-[.72rem] font-semibold"
+                      style={{ background: "rgba(47,224,168,.12)", color: "var(--green)" }}>
+                      Thanks — you're on the updated terms.
+                    </div>
+                  ) : (<>
+                    <button onClick={() => setShowNewTerms((v) => !v)}
+                      className="text-[.72rem] font-semibold text-primary underline cursor-pointer bg-transparent border-0 p-0">
+                      {showNewTerms ? "Hide the updated terms" : "See what changed"}
+                    </button>
+                    {showNewTerms && (
+                      <div className="mt-1.5 rounded-md border border-border bg-surface2 p-2">
+                        {cancellationDisclosure(policy, otherName || "your trainer").map((line, i) => (
+                          <div key={i} className={i === 0 ? "text-[.74rem] text-fg leading-snug" : "mt-0.5 text-[.72rem] text-muted leading-snug"}>{line}</div>
+                        ))}
+                      </div>
+                    )}
+                    <button onClick={doReconsent} disabled={reconsentBusy}
+                      className="mt-2 w-full rounded-lg bg-primaryfill px-3 py-2 text-[.8rem] font-bold text-primaryfg cursor-pointer disabled:opacity-60">
+                      {reconsentBusy ? "Saving…" : "I agree to the updated terms"}
+                    </button>
+                    <div className="mt-1 text-[.68rem] text-muted leading-snug">
+                      Agreeing applies these terms to future sessions. Sessions already booked keep the
+                      terms in place when you booked them.
+                    </div>
+                  </>)}
                 </div>
               )}
             </div>

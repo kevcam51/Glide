@@ -317,6 +317,88 @@ exports.recordSessionConsent = onCall(
   },
 );
 
+// ─── 2b. RE-AGREE to updated terms (S192) ──────────────────────────────────
+//
+// One policy governs everyone — that is deliberate, and it is what makes the
+// terms defensible: there is a single thing the client agreed to and a single
+// thing to produce in a dispute. But a client's charges are priced from the
+// snapshot frozen when they last agreed, so until now a trainer who changed
+// their policy could never actually move existing clients onto it. The only
+// path was "re-save your card", which is both obscure and the wrong ask —
+// nothing is wrong with their card.
+//
+// This is that missing path: the client reviews the CURRENT terms and agrees,
+// and a fresh consent record is appended using the card they already have.
+//
+// ⚠️ IT MUST BE THE CLIENT WHO CALLS THIS. A trainer cannot accept new terms on
+// someone else's behalf — that is the entire point of consent — so the uid comes
+// from auth and there is no clientId parameter. The evidence (IP, user agent,
+// the exact text shown) is stamped here from the connection, exactly as at card
+// setup, because a consent record is only worth what its provenance is worth.
+exports.reconsentSessionPolicy = onCall(
+  { region: REGION, maxInstances: 10 },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
+    const db = admin.firestore();
+    const d = request.data || {};
+    const trainerUid = String(d.trainerUid || "");
+    const snapshot = d.snapshot || {};
+    if (!trainerUid) throw new HttpsError("invalid-argument", "Missing trainer.");
+    if (!snapshot.consentLine || !Array.isArray(snapshot.shownText)) {
+      throw new HttpsError("invalid-argument", "Missing the terms that were shown.");
+    }
+
+    const me = (await db.doc(`users/${uid}`).get()).data() || {};
+    // Re-consent only makes sense for a client of THIS trainer who already has a
+    // card on file — otherwise the ordinary card-setup flow is the right path
+    // and already captures consent.
+    if (me.assignedTrainerId !== trainerUid && me.headTrainerId !== trainerUid) {
+      throw new HttpsError("permission-denied", "Not your trainer.");
+    }
+    const pm = me.sessionPaymentMethod;
+    if (!pm || !pm.id) throw new HttpsError("failed-precondition", "No card on file.");
+
+    // ⚠️ The policy agreed to is read from the TRAINER'S PROFILE, never from the
+    // payload. Taking it from the client would let a modified request agree to
+    // terms nobody offered — cheaper fees, or none — and that forged snapshot
+    // would then govern every future charge.
+    const trainer = (await db.doc(`users/${trainerUid}`).get()).data() || {};
+    const policy = cleanPolicy(trainer.sessionPolicy);
+
+    const req = request.rawRequest || {};
+    const hdrs = req.headers || {};
+    const ip = String(hdrs["x-forwarded-for"] || req.ip || "").split(",")[0].trim() || null;
+    const userAgent = String(hdrs["user-agent"] || "").slice(0, 300) || null;
+    const origin = String(hdrs.origin || "");
+    const now = Date.now();
+
+    const consent = {
+      uid, trainerUid,
+      agreedAt: now,
+      consentLine: String(snapshot.consentLine).slice(0, 600),
+      shownText: snapshot.shownText.slice(0, 12).map((t) => String(t).slice(0, 400)),
+      policy,
+      policyVersion: Number(snapshot.policyVersion) || CURRENT_POLICY_VERSION,
+      ip, userAgent, origin: ALLOWED_ORIGINS.includes(origin) ? origin : null,
+      // No new SetupIntent — this re-affirms terms for the card already saved.
+      paymentMethodId: pm.id,
+      cardBrand: pm.brand || null, cardLast4: pm.last4 || null,
+      cardExpMonth: pm.expMonth || null, cardExpYear: pm.expYear || null,
+      billingState: pm.billingState || null, billingCountry: pm.billingCountry || null,
+      kind: "reconsent",
+    };
+    // Append-only, like every other agreement: the old consent stays as the
+    // record of what governed the charges made under it.
+    await db.collection(`users/${uid}/sessionConsents`).add(consent);
+    await db.doc(`users/${uid}`).set({
+      sessionConsentPolicy: { ...policy, trainerUid, agreedAt: now, policyVersion: consent.policyVersion },
+    }, { merge: true });
+
+    return { ok: true, agreedAt: now };
+  },
+);
+
 // ─── 3. Remove the card ────────────────────────────────────────────────────
 // Detaching must be as easy as saving — both because state auto-renewal laws
 // increasingly require cancellation to be as easy as sign-up, and because a

@@ -167,6 +167,7 @@ exports.trainerizeAutoSync = require("./trainerize").trainerizeAutoSync; // 30-m
 exports.createSessionSetupIntent = require("./sessionBilling").createSessionSetupIntent;
 exports.recordSessionConsent = require("./sessionBilling").recordSessionConsent;
 exports.removeSessionCard = require("./sessionBilling").removeSessionCard;
+exports.reconsentSessionPolicy = require("./sessionBilling").reconsentSessionPolicy;
 // The settle dispatcher (S101c): hourly sweep + Kevin's manual/dry-run trigger.
 exports.sessionsSettle = require("./sessionSettle").sessionsSettle;
 exports.settleNow = require("./sessionSettle").settleNow;
