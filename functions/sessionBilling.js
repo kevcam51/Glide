@@ -142,6 +142,10 @@ async function ensureCustomer(db, uid, profile, stripe, wantLive) {
 
 // Keep only the policy fields we know, at bounded sizes — a consent record
 // must not be a vehicle for writing arbitrary payloads into Firestore.
+//
+// Exported because it is also the NORMALIZER the policy-change trigger compares
+// through (below): what counts as "the terms changed" is decided here, and that
+// decision is worth being able to test on its own.
 function cleanPolicy(p) {
   if (!p || typeof p !== "object") return null;
   const num = (v, lo, hi) => (Number.isFinite(Number(v)) ? Math.min(hi, Math.max(lo, Number(v))) : null);
@@ -163,6 +167,8 @@ function cleanPolicy(p) {
     policyNote: String(p.policyNote || "").slice(0, 400),
   };
 }
+
+exports.cleanPolicy = cleanPolicy;
 
 // ─── 1. Start saving a card (hosted page) ──────────────────────────────────
 // Returns a Stripe-hosted Checkout URL in SETUP mode. Card details go from the
@@ -439,8 +445,21 @@ exports.onSessionPolicyChanged = onDocumentUpdated(
     // and a client who agreed to "$85, 100% late-cancel fee" has not agreed to
     // "$150, 100% late-cancel fee".
     const FIELDS = ["cancelType", "cancelWindowHours", "lateCancelChargePct", "noShowChargePct", "billingMode", "standardPriceCents", "policyNote"];
-    const a = before.sessionPolicy || {}, b = after.sessionPolicy || {};
-    if (!FIELDS.some((k) => String(a[k] ?? "") !== String(b[k] ?? ""))) return;
+    // ⚠️ NORMALIZE BEFORE COMPARING. The raw comparison was `String(x ?? "")`,
+    // which makes an ABSENT field ("") differ from a zero field ("0") — and
+    // every policy saved after S195 gains `standardPriceCents: 0` whether or not
+    // the trainer typed a rate. So the first save of an unchanged policy looked
+    // like a terms change to this trigger, while the app's own drift check runs
+    // both sides through policyOf and correctly saw no change. The result was
+    // the worst kind of notification: every existing client pushed "your
+    // trainer updated their payment terms", opening an app that then showed
+    // them nothing had changed and offered nothing to agree to.
+    const norm = (p) => {
+      const c = cleanPolicy(p) || {};
+      return (k) => String(c[k] ?? "");
+    };
+    const a = norm(before.sessionPolicy), b = norm(after.sessionPolicy);
+    if (!FIELDS.some((k) => a(k) !== b(k))) return;
 
     const db = admin.firestore();
     const name = after.displayName || [after.firstName, after.lastName].filter(Boolean).join(" ") || "Your trainer";
@@ -453,7 +472,12 @@ exports.onSessionPolicyChanged = onDocumentUpdated(
       // numbers should not ask anyone to re-agree to what they already accepted.
       const held = c.sessionConsentPolicy;
       if (!held || !c.sessionPaymentMethod || !c.sessionPaymentMethod.id) return;
-      if (!FIELDS.some((k) => String(held[k] ?? "") !== String(b[k] ?? ""))) return;
+      // Same normalization as above, and for the same reason: a consent
+      // snapshot written before standardPriceCents existed has no such field,
+      // and "absent" must compare equal to "0" or every one of these clients is
+      // told their terms changed when they did not.
+      const h = norm(held);
+      if (!FIELDS.some((k) => h(k) !== b(k))) return;
       await sendPushTo(db, d.id, {
         title: `${name} updated their payment terms`,
         body: "Open Sessions to see what changed and agree to the new terms. You stay on your current terms until you do.",

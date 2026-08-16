@@ -15901,17 +15901,28 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // one call rather than a local write plus a hope. The inbox is live
   // (subscribeForUser), so the answered item updates itself when it returns.
   const [bookingBusy, setBookingBusy] = useState("");
-  const [bookingMsg, setBookingMsg] = useState("");
+  // {text, ok} — a failure used to be rendered in the success colour and then
+  // left on screen forever, so "Set your standard price first" appeared as a
+  // green confirmation that the session had been booked.
+  const [bookingMsg, setBookingMsg] = useState(null);
   const answerBooking = async (requestId, accept) => {
     if (bookingBusy) return;
-    setBookingBusy(requestId); setBookingMsg("");
+    setBookingBusy(requestId); setBookingMsg(null);
     try {
       await callRespondToBooking({ requestId, accept });
-      setBookingMsg(accept ? "Booked — they've been told." : "They've been told it doesn't work.");
-      setTimeout(() => setBookingMsg(""), 3000);
+      setBookingMsg({ ok: true, text: accept ? "Booked — they've been told." : "They've been told it doesn't work." });
+      setTimeout(() => setBookingMsg(null), 3000);
     } catch (e) {
       console.error("respondToBookingRequest failed", e && (e.code || e.message));
-      setBookingMsg((e && e.message) || "Couldn't send that answer — try again.");
+      // The server's message is the useful one — it names the actual blocker
+      // ("set your standard session price first"), and the request stays open so
+      // the trainer can fix it and tap Accept again. But a transport failure
+      // surfaces as the bare word "internal", which tells a trainer nothing at
+      // all, so that one case gets plain English instead.
+      const raw = (e && e.message) || "";
+      const useful = raw && raw !== "internal" && !/^internal$/i.test(raw);
+      setBookingMsg({ ok: false, text: useful ? raw : "Couldn't reach the server — try again in a moment." });
+      setTimeout(() => setBookingMsg(null), 12000);
     } finally { setBookingBusy(""); }
   };
 
@@ -16332,7 +16343,11 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
               <Icon name="inbox" size={19} color="var(--accent)" />Asks From Clients
               {openInbox.length > 0 && <span className="rounded-full bg-primaryfill px-2 text-[.7rem] font-bold text-primaryfg">{openInbox.length}</span>}
             </div>
-            {bookingMsg && <div className="mt-1 text-[.78rem] font-semibold text-success">{bookingMsg}</div>}
+            {bookingMsg && (
+              <div className={`mt-1 text-[.78rem] font-semibold leading-snug ${bookingMsg.ok ? "text-success" : "text-danger"}`}>
+                {bookingMsg.text}
+              </div>
+            )}
             {openInbox.length === 0 && <div className={subCls}>All caught up</div>}
             {openInbox.map((r) => (
               <div key={r.id} className="mt-2 rounded-xl border border-border bg-surface2 p-3">
@@ -17589,6 +17604,7 @@ function calBillingState(s, now) {
 function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPrefs, onSetNotifPrefs }) {
   const [sessions, setSessions] = useState(null);
   const [clients, setClients] = useState([]);
+  const [clientsLoaded, setClientsLoaded] = useState(false); // "no clients" vs "not asked yet"
   const [view, setView] = useState("week");
   const [anchor, setAnchor] = useState(() => new Date());   // the focused date
   const [now, setNow] = useState(() => Date.now());
@@ -17615,7 +17631,11 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
 
   useEffect(() => { if (!meUid) return; return subscribeMySessions(meUid, setSessions); }, [meUid]);
   useEffect(() => { if (!meUid) return; return subscribeMyBlocks(meUid, setBlocks); }, [meUid]);
-  useEffect(() => { getMyClients().then((cs) => setClients(cs || [])).catch(() => {}); }, [meUid]);
+  useEffect(() => {
+    getMyClients()
+      .then((cs) => { setClients(cs || []); setClientsLoaded(true); })
+      .catch(() => setClientsLoaded(true));   // a failed read is "unknown", not "none"
+  }, [meUid]);
   useEffect(() => {
     if (!meUid) return;
     getProfile(meUid).then((p) => {
@@ -17731,7 +17751,12 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
       // Blocking time needs no client, so a trainer with an empty roster can
       // still use their calendar. Booking without one is refused on submit,
       // where the message can say why.
-      kind: clients.length ? "session" : "block",
+      //
+      // ⚠️ `clientsLoaded`, not `clients.length` — getMyClients() is async, so
+      // tapping a slot in the first moment after the page opens used to read an
+      // empty roster and silently drop the trainer into Block mode. Until the
+      // roster is known, assume the ordinary case.
+      kind: (clientsLoaded && !clients.length) ? "block" : "session",
     });
   };
   const openEditForm = (s) => {
@@ -18365,17 +18390,28 @@ function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit,
 
   // Is the chosen time already gone, and what would that mean? Recomputed on
   // every keystroke so the warning tracks the date picker rather than appearing
-  // only after a failed save. `now` is read at render time deliberately: a sheet
-  // left open across a slot boundary should tell the truth about it.
+  // only after a failed save.
+  //
+  // The warning has to track the CLOCK too, not only the form. A sheet opened a
+  // few minutes before a slot and submitted a few minutes after it would
+  // otherwise book a past session having shown no warning at all — the memo had
+  // no reason to re-run, because nothing the trainer typed had changed.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
+
   const backdate = useMemo(() => {
     const startAt = new Date(form.when).getTime();
     // A block in the past is just a record of where you were — no client, no
     // charge, nothing to warn anyone about.
-    if (isBlock || !Number.isFinite(startAt) || !isBackdated(startAt)) return null;
+    if (isBlock || !Number.isFinite(startAt) || !isBackdated(startAt, nowTick)) return null;
     const priceCents = Math.round((Number(form.price) || 0) * 100);
+    const problem = backdateProblem(startAt, nowTick);
     return {
-      problem: backdateProblem(startAt),
-      tooOld: !!backdateProblem(startAt),
+      problem,
+      tooOld: !!problem,
       clientName: nameOf(form.clientUid),
       priceLabel: priceCents > 0 ? money(priceCents) : "nothing (no price set)",
       repeating,
@@ -18384,7 +18420,7 @@ function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit,
       // exists, so "you added it" would be false.
       verb: form.id ? "moved it here" : "added it",
     };
-  }, [form.when, form.price, form.clientUid, form.id, isBlock, repeating, nameOf]);
+  }, [form.when, form.price, form.clientUid, form.id, isBlock, repeating, nameOf, nowTick]);
 
   return createPortal(
     <div onClick={onClose} data-theme="pro" style={{ fontFamily: "var(--font-sans)" }}
@@ -24922,6 +24958,11 @@ function AskForTime({ trainerUid, trainerName, onSent }) {
     let alive = true;
     const from = new Date(`${dayPart}T00:00:00`).getTime();
     if (!Number.isFinite(from)) return;
+    // Drop the previous day's answer IMMEDIATELY. Without this, changing the
+    // date left yesterday's busy ranges on screen until the new ones arrived —
+    // so the "that overlaps something" warning was being computed against a
+    // different day, which is worse than showing nothing.
+    setAvail(null);
     callTrainerAvailability({ trainerUid, from, to: from + 86400000 })
       .then((r) => { if (alive) setAvail(r.data || null); })
       .catch(() => { if (alive) setAvail(null); });   // silent: it's a convenience, not the feature
@@ -25410,8 +25451,14 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
               {policyDrifted && (
                 <div className="mt-1.5 rounded-md px-2 py-1.5 text-[.72rem] leading-snug"
                   style={{ background: "rgba(251,191,36,.10)", color: "var(--yellow)" }}>
+                  {/* "Fees" rather than "charged", precisely: the frozen
+                      consent governs the cancellation and no-show PERCENTAGES,
+                      while each session bills from its own priceCents. Saying
+                      flatly that they'll be charged their agreed terms reads,
+                      now that a rate lives in those terms, as a promise that new
+                      bookings use the old rate — which is not what happens. */}
                   {isTrainer
-                    ? `${otherName || "This client"} is still on the terms they agreed to, so that's what they'll be charged. They've been asked to review your updated policy — you can't accept it for them.`
+                    ? `${otherName || "This client"} is still on the terms they agreed to, so their cancellation and no-show fees follow those. They've been asked to review your updated policy — you can't accept it for them. New sessions are priced when you book them.`
                     : "Your trainer has updated their payment terms. You stay on the terms above until you agree to the new ones."}
                 </div>
               )}

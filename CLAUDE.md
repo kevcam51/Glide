@@ -105,7 +105,12 @@ enabled (Blaze has no default spending cap).
 > pass 1 — trainer time blocks, merged anonymous free/busy via a callable, client ask → trainer
 > accept/deny, monthly repeat, per-client calendar colours. Two latent bugs fixed in passing:
 > `cleanPolicy` dropped `biweekly` (so a fortnightly trainer's consent record said "weekly"), and the
-> settle sweep built a per-group skip reason and then threw it away before logging._
+> settle sweep built a per-group skip reason and then threw it away before logging. **The build was
+> then adversarially reviewed (29 agents) and ~10 real defects were found and fixed** — three of them
+> serious, two introduced by this session's own work: Accept & book minted an unbillable $0 session,
+> the booking sheet promised a reschedule disclosure `onDocumentCreated` could never send, and the
+> accept transaction claimed the request before the checks that could refuse it. See the S196 block
+> in the handoff._
 > _**S186 (Aug 11): the S185 billing defects are FIXED but NOT DEPLOYED. Two steps, both Kevin's
 > call: (1) PUBLISH `firestore.rules` (206 emulator tests pass), (2) deploy the changed functions via
 > `npm run deploy-set`. Until the rules are published the new calendar's writes fail with
@@ -2343,3 +2348,39 @@ enabled (Blaze has no default spending cap).
   override applied instantly across that client's sessions, the standard rate drove the next
   booking's default, and the back-date warning named the real client and amount. **The trainer's
   accept/deny UI is build-verified only** — its callable isn't deployed yet, so exercise that first.
+- Session 196b (same session): **The S196 build was adversarially reviewed (29 agents, 5 lenses) — 23
+  raised, 19 survived refutation, ~10 distinct defects, ALL FIXED.** Two of the three serious ones
+  were introduced BY the S196 work itself, which is the S186 pattern repeating: a fix's own bugs are
+  the ones nobody is looking for.
+  • **`respondToBookingRequest` minted a $0, permanently unbillable session.** It priced solely from
+  `standardPriceCents` — a field S196 had just introduced, defaulting to 0 — so every trainer who
+  hadn't typed a rate would book at $0 via a one-tap control with no price field. Delivered → frozen
+  at `billableCents: 0` → `settled: "free"`, terminal and silent. The comment above it asserted the
+  opposite of what the code did. Now refuses with an actionable message; the request stays open.
+  • **`onSessionBackdated` was `onDocumentCreated`, but the booking sheet promises a disclosure on
+  RESCHEDULE too** ("they'll be told you moved it here") — a promise nothing could keep. Now
+  `onDocumentWritten`, with the decision extracted into a pure exported `backdateNotice(before,
+  after, writtenAt)` so it is testable: **18 assertions** (create/move/past→past/cancelled/every
+  billing write staying silent/spoofed createdAt).
+  • **The accept transaction claimed the inbox item BEFORE every check that could refuse it** — a
+  refusal marked the request "accepted" with no session, no notification and no retry. Validation now
+  runs first; a failed create reopens the claim.
+  • **`markCompletedSessions` starved its own tail:** `orderBy("startAt","desc").limit(500)` returns
+  the NEWEST first while already-stamped docs still consume the cap, so once a window held 500+
+  sessions the oldest were dropped every run forever — and back-dated sessions sort exactly there.
+  Now PAGED (oldest first, cursor, page ceiling that WARNS rather than truncating silently) with
+  batch writes chunked at 450 (a paged scan can exceed Firestore's 500-write batch limit, which the
+  old single query never could). **13 assertions**, incl. 1,200 sessions in one window + idempotence.
+  • **A policy re-save pushed EVERY existing client a false "your trainer updated their terms".**
+  `onSessionPolicyChanged` compared `String(x ?? "")`, so absent ≠ 0 — and every policy saved after
+  S196 gains `standardPriceCents: 0`. The app's own drift check normalized through `policyOf` and
+  correctly saw no change, so the client got a push about a change the screen then denied. Both sides
+  now compare through `cleanPolicy`. **17 assertions**, one proving the old comparison would have fired.
+  • Also: the back-date disclosure keyed off browser-written `createdAt` (unpinned on create), so the
+  trainer it protects against could suppress it — now server event time; a failed accept rendered in
+  the SUCCESS colour and never cleared (and showed the bare word "internal"); `AskForTime` kept the
+  previous day's busy ranges, so the overlap warning judged the wrong day; the back-date warning was
+  memoized on form fields only, so a sheet open across the start time showed nothing; and tapping a
+  slot before `getMyClients()` resolved dropped the trainer into Block mode.
+  **Verified:** build passes, 230 rules tests, 48 new unit assertions across three harnesses, and the
+  booking-request UI + red error path smoke-tested live (test inbox item injected, then removed).

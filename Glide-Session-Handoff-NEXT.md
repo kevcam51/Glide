@@ -93,6 +93,37 @@ deleted; colour override applied across every session that client had, instantly
 present; standard rate saved and the next booking defaulted to $85 (replacing the old $60);
 availability toggle persisted; back-date warning fired with the real name and amount.
 
+### The build was then adversarially reviewed (29 agents, 5 lenses) — and it found real bugs
+23 raised, 19 survived independent refutation, ~10 distinct defects, **all fixed** in the follow-up
+commit. Three of them were serious, and two were introduced BY this session's own work — the same
+pattern as S186, where the review caught bugs the fix itself created:
+
+- **Accept & book minted a $0 session that could never be charged.** `respondToBookingRequest`
+  priced from `standardPriceCents` with no fallback — a field this very commit introduced, defaulting
+  to 0 — so on day one every trainer who hadn't typed a rate would book at $0 through a one-tap
+  control with no price field on it. Delivered, then frozen at `billableCents: 0` and settled
+  `free`: terminal, unbillable, silent. The code comment three lines above asserted the opposite of
+  what the code did. Now it refuses with an actionable message and the request stays open.
+- **The booking sheet promised a disclosure the backend could not send.** Rescheduling INTO the past
+  says "they'll be told you moved it here", but `onSessionBackdated` was `onDocumentCreated` — no
+  create, no notification, ever. It is now `onDocumentWritten` and handles the move, with guards so
+  the sweep's and settle engine's constant writes stay silent. **18 unit assertions** cover the
+  branching (create/move/already-past/cancelled/billing-writes/spoofed-createdAt).
+- **The accept transaction claimed the request before validating it.** Every check that could refuse
+  the booking ran AFTER the item was marked "accepted", so a refusal destroyed the request: no
+  session, no notification, no way to retry. Validation now happens first, and a failed create
+  reopens the claim.
+
+Also fixed: the completion sweep's `orderBy desc + limit(500)` starved the oldest sessions in the
+window forever — exactly where back-dated ones sort — so it is now **paged** with chunked batches
+(**13 assertions**, including 1,200 sessions in one window and idempotence on re-run); a policy
+re-save pushed EVERY existing client a false "terms changed" notice the app then denied, because
+absent ≠ 0 in the trigger's raw string compare (**17 assertions**, one of which proves the old
+comparison would have fired); the back-date disclosure keyed off browser-written `createdAt`, so the
+trainer it protects against could suppress it (now server time); a failed accept rendered in the
+SUCCESS colour and never cleared; stale busy-ranges from the previous day drove the overlap warning;
+and tapping a slot before the roster loaded dropped the trainer into Block mode.
+
 ### Not done / worth knowing
 - **The trainer-side accept/deny UI is build-verified, not click-verified** — `respondToBookingRequest`
   isn't deployed, so no real booking request could be sent end to end. Do that first after deploying:

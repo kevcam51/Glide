@@ -129,27 +129,25 @@ exports.respondToBookingRequest = onCall(
     const db = admin.firestore();
     const inboxRef = db.doc(`users/${uid}/kv/${INBOX_KEY}`);
 
-    // Claim the item in a TRANSACTION before doing anything else. Two taps on
-    // Accept — or the trainer's phone and laptop both answering — must not
-    // produce two sessions and two charges. Whoever wins the claim books.
-    let item = null;
-    await db.runTransaction(async (tx) => {
-      const snap = await tx.get(inboxRef);
+    // ⚠️ VALIDATE FIRST, CLAIM SECOND, AND PUT THE CLAIM BACK IF THE BOOKING
+    // FAILS. The first version claimed the item up front — marking it answered
+    // in a transaction — and only then checked the link, the time and the rate.
+    // Every one of those checks can throw, and each throw destroyed the
+    // request: permanently marked "accepted", no session created, no
+    // notification sent, and no way for either side to retry. The client had
+    // asked for a time and simply never heard back.
+    const readItem = async () => {
+      const snap = await inboxRef.get();
       let arr = [];
       try { const v = snap.exists && snap.data().value; arr = v ? JSON.parse(v) : []; } catch { arr = []; }
-      if (!Array.isArray(arr)) arr = [];
-      const found = arr.find((r) => r && r.id === requestId);
-      if (!found) throw new HttpsError("not-found", "That request is gone.");
-      if (found.status !== "open") throw new HttpsError("failed-precondition", "You've already answered that one.");
-      item = found;
-      const next = arr.map((r) => (r && r.id === requestId
-        ? { ...r, status: "done", doneAt: Date.now(), outcome: accept ? "accepted" : "declined" }
-        : r));
-      tx.set(inboxRef, { k: INBOX_KEY, value: JSON.stringify(next) });
-    });
+      return Array.isArray(arr) ? arr : [];
+    };
+    const preview = (await readItem()).find((r) => r && r.id === requestId);
+    if (!preview) throw new HttpsError("not-found", "That request is gone.");
+    if (preview.status !== "open") throw new HttpsError("failed-precondition", "You've already answered that one.");
 
-    const clientUid = item.fromUid;
-    const booking = item.booking || null;
+    const clientUid = preview.fromUid;
+    const booking = preview.booking || null;
     if (!clientUid) throw new HttpsError("failed-precondition", "That request has no sender.");
     // Accepting something that never named a time can't book anything — and the
     // client would be told "it's on your calendar" about a session that doesn't
@@ -170,31 +168,85 @@ exports.respondToBookingRequest = onCall(
       timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
     }) : "";
 
-    let sessionId = null;
+    // What this session will cost, decided before anything is written.
+    //
+    // ⚠️ NEVER BOOK AT $0 FROM AN ACCEPT. `standardPriceCents` is new and
+    // defaults to 0, so on the day this ships every trainer who hasn't opened
+    // the policy editor has no rate — and Accept & book is a single tap with no
+    // price field on it. A $0 session books fine, gets delivered, and is then
+    // frozen at `billableCents: 0` and settled `free`: terminal, unbillable,
+    // and silent. The trainer would have trained someone for nothing and seen
+    // only "nothing-billable" in a log they never read. Refusing is recoverable
+    // (the request stays open, because the claim hasn't happened yet); a $0
+    // booking is not.
+    let priceCents = 0;
     if (accept && booking) {
-      // Still in the future? A request accepted three days late would otherwise
-      // create a session that is already delivered and therefore already
-      // billable — a charge from a tap the trainer read as "yes, let's do it".
       if (Number(booking.startAt) < Date.now()) {
         throw new HttpsError("failed-precondition", "That time has already passed — book a new one instead.");
       }
-      const policy = trainer.sessionPolicy || {};
-      const priceCents = Math.max(0, Math.min(500000, Math.round(Number(policy.standardPriceCents) || 0)));
+      priceCents = Math.max(0, Math.min(500000, Math.round(Number((trainer.sessionPolicy || {}).standardPriceCents) || 0)));
+      if (priceCents <= 0) {
+        throw new HttpsError("failed-precondition",
+          "Set your standard session price first (Calendar → Settings) — otherwise this books at $0 and can never be charged.",
+          { reason: "no-standard-price" });
+      }
+    }
+
+    // NOW claim it. The transaction is what stops two taps — the trainer's
+    // phone and their laptop — becoming two sessions and two charges.
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(inboxRef);
+      let arr = [];
+      try { const v = snap.exists && snap.data().value; arr = v ? JSON.parse(v) : []; } catch { arr = []; }
+      if (!Array.isArray(arr)) arr = [];
+      const found = arr.find((r) => r && r.id === requestId);
+      if (!found) throw new HttpsError("not-found", "That request is gone.");
+      if (found.status !== "open") throw new HttpsError("failed-precondition", "You've already answered that one.");
+      const next = arr.map((r) => (r && r.id === requestId
+        ? { ...r, status: "done", doneAt: Date.now(), outcome: accept ? "accepted" : "declined" }
+        : r));
+      tx.set(inboxRef, { k: INBOX_KEY, value: JSON.stringify(next) });
+    });
+
+    // Reopen the request if the booking itself fails. Everything that could be
+    // checked has been, so this is the narrow window where Firestore is simply
+    // unavailable — and leaving the item marked "accepted" with no session is
+    // the one outcome nobody can recover from.
+    const releaseClaim = async () => {
+      try {
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(inboxRef);
+          let arr = [];
+          try { const v = snap.exists && snap.data().value; arr = v ? JSON.parse(v) : []; } catch { arr = []; }
+          if (!Array.isArray(arr)) return;
+          const next = arr.map((r) => (r && r.id === requestId
+            ? { ...r, status: "open", doneAt: null, outcome: null }
+            : r));
+          tx.set(inboxRef, { k: INBOX_KEY, value: JSON.stringify(next) });
+        });
+      } catch (e) { console.error("could not reopen booking request", requestId, e && e.message); }
+    };
+
+    let sessionId = null;
+    if (accept && booking) {
       const now = Date.now();
-      const ref = await db.collection("sessions").add({
-        participants: [uid, clientUid],
-        trainerUid: uid, clientUid,
-        startAt: Number(booking.startAt),
-        durationMin: Number(booking.durationMin) || 60,
-        status: "scheduled",
-        title: "", location: "",
-        // The trainer's STANDARD rate — the number their clients agreed to. A
-        // session created from an accept must not be born at $0 (unbillable) or
-        // at some price nobody stated.
-        priceCents,
-        createdBy: uid, createdAt: now, updatedAt: now,
-      });
-      sessionId = ref.id;
+      try {
+        const ref = await db.collection("sessions").add({
+          participants: [uid, clientUid],
+          trainerUid: uid, clientUid,
+          startAt: Number(booking.startAt),
+          durationMin: Number(booking.durationMin) || 60,
+          status: "scheduled",
+          title: "", location: "",
+          priceCents,
+          createdBy: uid, createdAt: now, updatedAt: now,
+        });
+        sessionId = ref.id;
+      } catch (e) {
+        await releaseClaim();
+        console.error("booking accept failed after claim", requestId, e && e.message);
+        throw new HttpsError("internal", "Couldn't book that session — try again.");
+      }
     }
 
     await sendPushTo(db, clientUid, accept
