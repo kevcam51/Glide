@@ -435,6 +435,39 @@ await check("client cannot write billableCents (server-only, decides money)", as
 await check("trainer cannot write billableCents either", assertFails(updateDoc(sess(head, "s25"),
   { billableCents: 0, updatedAt: Date.now() })));
 
+// ---- S195: how far back a session may be booked -----------------------------
+// Back-dating is legitimate bookkeeping (Friday's session, entered Sunday) and
+// it charges a real card for work the client never watched being booked. The
+// app caps it at 14 days and warns first; these are the same bound where a
+// console write or a stale build can't get past it. The rules floor is 15 days
+// so an honest booking at the app's limit is never refused over clock skew.
+const DAY = 86400000;
+console.log("\nBACK-DATED BOOKING — bounded, in the rules and not just the UI:");
+await check("trainer books yesterday's session (ordinary bookkeeping)", assertSucceeds(setDoc(sess(head, "s30"),
+  booking({ startAt: Date.now() - DAY }))));
+await check("trainer books a session 13 days back (inside the cap)", assertSucceeds(setDoc(sess(head, "s31"),
+  booking({ startAt: Date.now() - 13 * DAY }))));
+await check("trainer books a session 30 days back", assertFails(setDoc(sess(head, "bad30"),
+  booking({ startAt: Date.now() - 30 * DAY }))));
+await check("trainer books a session from LAST YEAR", assertFails(setDoc(sess(head, "bad31"),
+  booking({ startAt: Date.now() - 400 * DAY }))));
+// The create-time floor is decorative unless rescheduling has it too: book for
+// tomorrow, then move it to last spring, and the client is billed for a session
+// at a time they never had one.
+await testEnv.withSecurityRulesDisabled(async (c) => {
+  await setDoc(doc(c.firestore(), "sessions", "s32"), booking({ startAt: Date.now() + DAY }));
+  await setDoc(doc(c.firestore(), "sessions", "s33"),
+    booking({ startAt: Date.now() - 2 * 3600000, completedAt: Date.now() - 3600000 }));
+});
+await check("trainer reschedules a session into LAST YEAR", assertFails(updateDoc(sess(head, "s32"),
+  { startAt: Date.now() - 400 * DAY, updatedAt: Date.now() })));
+await check("trainer reschedules within the window (still allowed)", assertSucceeds(updateDoc(sess(head, "s32"),
+  { startAt: Date.now() - 2 * DAY, updatedAt: Date.now() })));
+// A session that is ALREADY old must stay editable in the ways that only ever
+// reduce a charge — the floor guards startAt, not the document.
+await check("trainer waives an old delivered session (startAt untouched)", assertSucceeds(updateDoc(sess(head, "s33"),
+  { waived: true, updatedAt: Date.now() })));
+
 // ---- S186: recurring series bookkeeping -------------------------------------
 await check("trainer books a session as part of a repeating series", assertSucceeds(setDoc(sess(head, "s26"),
   booking({ seriesId: "series_abc", seriesIndex: 3 }))));

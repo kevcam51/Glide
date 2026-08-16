@@ -30,11 +30,36 @@ exports.sendTrainerRequest = onCall(
     if (!trainerUid) throw new HttpsError("failed-precondition", "You're not linked to a trainer yet.");
     const fromName = me.displayName || [me.firstName, me.lastName].filter(Boolean).join(" ") || me.email || "A client";
 
+    // ── A request for a TIME (S195) ────────────────────────────────────────
+    // A booking request is an ordinary inbox item with structure attached, so
+    // it inherits everything this path already gets right: the transactional
+    // write into the trainer's kv, the open-request cap, and the push. What it
+    // adds is a slot the trainer can accept in one tap.
+    //
+    // ⚠️ ASKING IS NOT BOOKING. Nothing here creates a session — only
+    // respondToBookingRequest does, and only when the trainer accepts. A client
+    // must never be able to put an appointment (and therefore a charge) on
+    // someone's calendar by sending a message.
+    let booking = null;
+    const b = request.data && request.data.booking;
+    if (b && typeof b === "object") {
+      const startAt = Math.round(Number(b.startAt));
+      const durationMin = Math.round(Number(b.durationMin) || 60);
+      if (!Number.isFinite(startAt)) throw new HttpsError("invalid-argument", "Pick a date and time.");
+      // Forward-only, and not years out. A request for a past slot is either a
+      // mistake or an attempt to manufacture a billable session after the fact.
+      if (startAt < Date.now() - 60000) throw new HttpsError("invalid-argument", "Pick a time in the future.");
+      if (startAt > Date.now() + 365 * 86400000) throw new HttpsError("invalid-argument", "That's too far ahead.");
+      if (!(durationMin > 0 && durationMin <= 480)) throw new HttpsError("invalid-argument", "Pick a sensible length.");
+      booking = { startAt, durationMin };
+    }
+
     // Read-modify-write the trainer's inbox in a TRANSACTION (the S85-deferred
     // integrity pattern — two clients sending at once must not clobber each other).
     const ref = db.doc(`users/${trainerUid}/kv/${INBOX_KEY}`);
     const item = { id: `r${Date.now()}${Math.floor(Math.random() * 1e4)}`, fromUid: uid, fromName,
-      type, prompt, status: "open", createdAt: Date.now(), doneAt: null };
+      type: booking ? "booking" : type, prompt, status: "open", createdAt: Date.now(), doneAt: null,
+      ...(booking ? { booking } : {}) };
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
       let arr = [];
@@ -49,8 +74,9 @@ exports.sendTrainerRequest = onCall(
 
     // Best-effort: note it in the client's own activity feed + push the trainer.
     await sendPushTo(db, trainerUid,
-      { title: `Request from ${fromName}`, body: prompt.slice(0, 120), tag: "client-request", url: "/" },
-      "clientRequests").then((r) => console.log("sendTrainerRequest push", JSON.stringify({ trainerUid, ...r })))
+      { title: booking ? `${fromName} asked for a time` : `Request from ${fromName}`,
+        body: prompt.slice(0, 120), tag: booking ? "booking-request" : "client-request", url: "/" },
+      "clientRequests").then((r) => console.log("sendTrainerRequest push", JSON.stringify({ trainerUid, booking: !!booking, ...r })))
       .catch(() => {});
     return { ok: true, id: item.id };
   });

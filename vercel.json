@@ -2,6 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     { "source": "/i/:code", "destination": "/api/invite?c=:code" },
+    { "source": "/card/:code", "destination": "/api/card?c=:code" },
     { "source": "/mcp", "destination": "https://us-central1-calorieiq-29762.cloudfunctions.net/mcp" },
     { "source": "/.well-known/oauth-protected-resource", "destination": "https://us-central1-calorieiq-29762.cloudfunctions.net/mcpMetadata?doc=prm" },
     { "source": "/.well-known/oauth-protected-resource/mcp", "destination": "https://us-central1-calorieiq-29762.cloudfunctions.net/mcpMetadata?doc=prm" },

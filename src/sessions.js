@@ -16,7 +16,7 @@
 // grows past a few thousand, add a composite index and paginate.
 import { db } from "./firebase";
 import {
-  doc, collection, addDoc, updateDoc, getDocs, query, where, onSnapshot, writeBatch,
+  doc, collection, addDoc, updateDoc, deleteDoc, getDocs, query, where, onSnapshot, writeBatch,
 } from "firebase/firestore";
 
 export const SESSION_DEFAULT_MIN = 60;
@@ -67,8 +67,16 @@ export const REPEAT_OPTIONS = {
   none:     { label: "Doesn't repeat", days: 0 },
   weekly:   { label: "Every week", days: 7 },
   biweekly: { label: "Every 2 weeks", days: 14 },
+  // S195: Kevin named monthly explicitly. It can't be "every 30 days" — a
+  // monthly client expects the same DATE, not a slot that walks backwards
+  // through the calendar, so it steps months and clamps (see below).
+  monthly:  { label: "Every month", months: 1 },
 };
 export const REPEAT_MAX = 52;
+
+// Does this option repeat at all, and by how much? Kept in one place so the UI
+// and bookSeries can never disagree about what "monthly" means.
+export const repeatsOf = (opt) => (opt ? (opt.days || 0) + (opt.months || 0) : 0);
 
 // Local-time-safe date stepping: adding 7×86400000 ms breaks across a DST
 // boundary (a 9am slot becomes 8am or 10am). Stepping the DATE keeps the
@@ -79,10 +87,35 @@ function addDaysKeepingLocalTime(ms, days) {
   return d.getTime();
 }
 
+// Same idea a month at a time, with the one trap that makes naive month maths
+// wrong: setMonth on the 31st overflows (Jan 31 + 1 month = Mar 3, because
+// February has no 31st), which would silently move a client's standing slot
+// into a different month. Move to the 1st first, then clamp to the last real
+// day of the target month — so the 31st becomes the 28th/30th rather than
+// leaking forward. The time of day is never touched, so DST is a non-issue for
+// the same reason as the day stepper.
+function addMonthsKeepingLocalTime(ms, months) {
+  const d = new Date(ms);
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + months);
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, lastDay));
+  return d.getTime();
+}
+
+// The nth occurrence of a repeating booking.
+function occurrenceStart(baseMs, opt, i) {
+  if (!i) return Number(baseMs);
+  return opt.months
+    ? addMonthsKeepingLocalTime(Number(baseMs), opt.months * i)
+    : addDaysKeepingLocalTime(Number(baseMs), opt.days * i);
+}
+
 // Book one session, or a whole series. Returns the created ids.
 export async function bookSeries(trainerUid, clientUid, base, { repeat = "none", count = 1 } = {}) {
   const opt = REPEAT_OPTIONS[repeat] || REPEAT_OPTIONS.none;
-  const n = opt.days ? Math.max(1, Math.min(REPEAT_MAX, Math.round(Number(count) || 1))) : 1;
+  const n = repeatsOf(opt) ? Math.max(1, Math.min(REPEAT_MAX, Math.round(Number(count) || 1))) : 1;
   if (n === 1) return [await bookSession(trainerUid, clientUid, base)];
 
   const now = Date.now();
@@ -95,7 +128,7 @@ export async function bookSeries(trainerUid, clientUid, base, { repeat = "none",
     batch.set(ref, {
       participants: [trainerUid, clientUid],
       trainerUid, clientUid,
-      startAt: addDaysKeepingLocalTime(Number(base.startAt), i * opt.days),
+      startAt: occurrenceStart(base.startAt, opt, i),
       durationMin: Number(base.durationMin) || SESSION_DEFAULT_MIN,
       status: "scheduled",
       title: String(base.title || "").slice(0, 80),
@@ -199,6 +232,37 @@ export function subscribeMySessions(uid, cb) {
   );
 }
 
+// ─── Trainer time blocks (S195) ─────────────────────────────────────────────
+// Time the trainer isn't available, with no client attached: "Lunch", "Away",
+// "Physio". Deliberately a separate collection from sessions — a block has no
+// second person, no price and no billing lifecycle, and putting it in
+// `sessions` would mean teaching the settle sweep to ignore something, which is
+// the kind of exception that eventually gets billed by accident.
+//
+// ⚠️ Reads are OWNER-ONLY in the rules. A client never sees these documents;
+// what they see is an anonymous busy range from the availability callable. The
+// title of a block is the trainer's private business.
+export async function createBlock(trainerUid, { startAt, durationMin = 60, title = "" }) {
+  const now = Date.now();
+  const ref = await addDoc(collection(db, "trainerBlocks"), {
+    trainerUid,
+    startAt: Number(startAt),
+    durationMin: Number(durationMin) || 60,
+    title: String(title || "").slice(0, 80),
+    createdAt: now, updatedAt: now,
+  });
+  return ref.id;
+}
+export const deleteBlock = (blockId) => deleteDoc(doc(db, "trainerBlocks", blockId));
+export function subscribeMyBlocks(trainerUid, cb) {
+  return onSnapshot(
+    query(collection(db, "trainerBlocks"), where("trainerUid", "==", trainerUid)),
+    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort(bySoonest)),
+    () => cb([]),
+  );
+}
+export const blockEndMs = (b) => (b.startAt || 0) + (b.durationMin || 60) * 60000;
+
 // Group sessions by local YYYY-MM-DD so the calendar can look up a day in O(1).
 // Key must be LOCAL (ymdLocal semantics) — never UTC (S45).
 export function sessionsByDay(sessions) {
@@ -254,9 +318,56 @@ export const DEFAULT_SESSION_POLICY = {
   cancelWindowHours: 24,     // cancel earlier than this = free (window type only)
   lateCancelChargePct: 100,  // % of the session price charged for a late CLIENT cancel
   noShowChargePct: 100,      // % charged when the client simply doesn't show
-  billingMode: "weekly",     // per_session | weekly | manual
+  billingMode: "weekly",     // per_session | weekly | biweekly | manual
+  standardPriceCents: 0,     // the trainer's normal rate (S195) — 0 = not stated
   policyNote: "",            // trainer's own wording, shown to clients verbatim
 };
+
+// ─── The standard rate (S195, Kevin: "protect the company, and let clients know
+// what they're signing up for") ─────────────────────────────────────────────
+//
+// Until now the only price a client ever saw was on a session already booked
+// for them, which meant the number they were agreeing to at card setup was
+// literally absent from the agreement: they authorized a card to be charged for
+// "completed sessions" without the terms ever stating what a session costs.
+//
+// ⚠️ IT IS THE STANDARD RATE, NOT THE PRICE. Every session still carries its own
+// `priceCents` and bills from that (frozen to `billableCents` at completion), so
+// one-offs, discounts and package rates keep working exactly as before. This
+// only states what the client should normally expect — and, because it is now
+// part of the disclosed terms, a change to it must send existing clients back
+// through re-consent like any other fee change (the FIELDS list in
+// functions/sessionBilling.js onSessionPolicyChanged is where that happens).
+export const MAX_SESSION_PRICE_CENTS = 500000;   // mirrors the firestore.rules bound
+
+// ─── Back-dating a session (S195) ───────────────────────────────────────────
+// A trainer can book a session that already happened — they trained someone on
+// Friday and are entering it now. That is ordinary bookkeeping, and it charges
+// a real card, which makes it the most disputable write in the system: a charge
+// for a session added after the fact, silently, is exactly what a chargeback is
+// designed to reverse. So it is bounded and it is never silent (the client is
+// told by a server trigger, not by the trainer remembering to mention it).
+//
+// ⚠️ THE CAP IS NOT ARBITRARY. `markCompletedSessions` only sweeps sessions whose
+// startAt is inside its lookback window, and nothing bills until that sweep
+// stamps `completedAt` — so a session back-dated past the sweep's reach would
+// look booked, never settle, and quietly never be paid. The cap must stay
+// comfortably inside functions/sessions.js LOOKBACK_DAYS (21), and the rules
+// enforce a slightly wider floor so an honest 14-day booking can't trip on the
+// boundary between the browser's clock and the server's.
+export const BACKDATE_MAX_DAYS = 14;
+export const isBackdated = (startAt, now = Date.now()) => Number(startAt) < now;
+export const backdateDaysAgo = (startAt, now = Date.now()) =>
+  Math.max(0, (now - Number(startAt)) / 86400000);
+// null when it's fine to book; a plain-English reason when it isn't.
+export function backdateProblem(startAt, now = Date.now()) {
+  if (!isBackdated(startAt, now)) return null;
+  const days = backdateDaysAgo(startAt, now);
+  if (days > BACKDATE_MAX_DAYS) {
+    return `That's ${Math.floor(days)} days ago — sessions can only be added up to ${BACKDATE_MAX_DAYS} days back. Book it as a new session, or settle it with your client directly.`;
+  }
+  return null;
+}
 
 // Starter packs (Kevin's sizes). Every trainer can enable, rename, re-price or
 // delete these, and add their own — they are suggestions, never a fixed menu.
@@ -432,9 +543,16 @@ export function policyOf(trainerProfile) {
     lateCancelChargePct: clampPct(p.lateCancelChargePct, DEFAULT_SESSION_POLICY.lateCancelChargePct),
     noShowChargePct: clampPct(p.noShowChargePct, DEFAULT_SESSION_POLICY.noShowChargePct),
     billingMode: BILLING_MODES[p.billingMode] ? p.billingMode : DEFAULT_SESSION_POLICY.billingMode,
+    standardPriceCents: clampPrice(p.standardPriceCents),
     policyNote: String(p.policyNote || "").slice(0, 400),
   };
 }
+// A price is only ever whole cents inside the bound the rules accept — a typo'd
+// "8500000" must not become a number a client is shown as their standard rate.
+const clampPrice = (v) => {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) && n > 0 ? Math.min(MAX_SESSION_PRICE_CENTS, n) : 0;
+};
 const clampPct = (v, dflt) => {
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 && n <= 100 ? Math.round(n) : dflt;
@@ -499,7 +617,21 @@ export function describePolicy(policy) {
 // Glide, and a trainer cannot accidentally ship a checkout with no policy on it.
 export function cancellationDisclosure(policy, trainerName = "your trainer") {
   const p = policyOf({ sessionPolicy: policy || {} });
-  const lines = [describePolicy(p)];
+  const lines = [];
+  // THE PRICE COMES FIRST. Everything below it — the fee, the no-show charge —
+  // is expressed as a percentage OF this number, so a client reading "charged
+  // 100% of the session price" without ever being told the session price has
+  // been shown an equation with a missing term. Hedged as "unless agreed
+  // otherwise" because it is the standard rate and individual sessions keep
+  // their own price.
+  // Deliberately impersonal ("unless agreed otherwise" rather than naming the
+  // trainer): this same array is rendered to the CLIENT, where trainerName is
+  // their coach's name, and to the TRAINER, where it is "you" — and every
+  // second-person phrasing that reads right in one reads wrong in the other.
+  if (p.standardPriceCents > 0) {
+    lines.push(`Sessions are ${centsToUsd(p.standardPriceCents)} each unless agreed otherwise.`);
+  }
+  lines.push(describePolicy(p));
   if (p.cancelType !== "anytime" && p.noShowChargePct > 0) {
     lines.push(`Not showing up for a booked session is charged ${p.noShowChargePct}% of the session price.`);
   }
@@ -623,6 +755,13 @@ export function saveSessionPolicy(trainerUid, policy) {
 }
 export function saveSessionPacks(trainerUid, packs) {
   return updateDoc(doc(db, "users", trainerUid), { sessionPacks: packs });
+}
+// May clients see when this trainer is busy? (S195) One switch for the whole
+// book — not per client — and off until it's turned on. The flag lives on the
+// trainer's own profile because the availability callable has to read it
+// server-side before it will derive anything.
+export function saveAvailabilityPublic(trainerUid, on) {
+  return updateDoc(doc(db, "users", trainerUid), { availabilityPublic: !!on });
 }
 
 // ─── Earnings ledger (S105 — trainer read-only view over sessionCharges) ─────

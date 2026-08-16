@@ -448,7 +448,16 @@ async function runSettle({ dryRun = false, force = false } = {}) {
       out.details.push({ group: key, outcome: "error", error: String(e && e.message).slice(0, 200) });
     }
   }
-  console.log(`sessionsSettle: ${JSON.stringify({ ...out, details: undefined })}`);
+  // WHY each group did nothing, not just how many did nothing (S195). The
+  // outcome counts alone can't distinguish "waiting for Sunday" from "this
+  // trainer can't bill" from "no card on file" — so the one question anyone
+  // actually asks of this log ("my session didn't charge, why?") needed a
+  // separate investigation every time. Reasons only, never client or trainer
+  // ids: this line lands in Cloud Logging, and who trains with whom isn't
+  // something to leave lying around there.
+  const why = {};
+  for (const d of out.details) if (d.why) why[d.why] = (why[d.why] || 0) + 1;
+  console.log(`sessionsSettle: ${JSON.stringify({ ...out, details: undefined, why })}`);
   return out;
 }
 

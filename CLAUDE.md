@@ -95,6 +95,17 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S196 (Aug 16): the four S195 items are BUILT and verified in the preview, but NOTHING IS
+> DEPLOYED. Three steps, all Kevin's: publish `firestore.rules` (230 tests), deploy 13 functions
+> (the command is in the handoff — derived from `npm run deploy-set`, don't hand-trim it), push
+> `main`. Read the S196 block at the top of `Glide-Session-Handoff-NEXT.md` first. Shipped: the
+> `/card/CODE` "save your card" link (carries the TRAINER's invite code only — never the client's
+> identity, never a token); `standardPriceCents` in the policy + re-consent on change; back-dating
+> capped at 14 days with a plain warning and a server trigger that tells the client; and booking-loop
+> pass 1 — trainer time blocks, merged anonymous free/busy via a callable, client ask → trainer
+> accept/deny, monthly repeat, per-client calendar colours. Two latent bugs fixed in passing:
+> `cleanPolicy` dropped `biweekly` (so a fortnightly trainer's consent record said "weekly"), and the
+> settle sweep built a per-group skip reason and then threw it away before logging._
 > _**S186 (Aug 11): the S185 billing defects are FIXED but NOT DEPLOYED. Two steps, both Kevin's
 > call: (1) PUBLISH `firestore.rules` (206 emulator tests pass), (2) deploy the changed functions via
 > `npm run deploy-set`. Until the rules are published the new calendar's writes fail with
@@ -2295,4 +2306,40 @@ enabled (Blaze has no default spending cap).
     as a premium feature. Build: a mic button + recording UI in `AIChatPanel`, a `transcribeAudio` Cloud Function
     (onCall or onRequest), an OpenAI/Groq key as a Secret Manager secret. Needs Blaze (have it). Optional later: voice
     OUTPUT (TTS) — also cheap. (Path A = browser Web Speech API: free but lower/inconsistent quality, flaky on iOS —
-    rejected for the premium feel.)
+    rejected for the premium feel.)- Session 196: **The four S195 items — card link, price in the policy, back-dating, booking loop. BUILT, verified in the preview, NOT DEPLOYED.**
+  (0) **Kevin's Friday session had not charged, and was not due to** — it was Sunday 11:42 ET and the
+  weekly window opens at `Sun && hour >= 18`. The sweep was healthy (2 groups, 2 skipped) but the log
+  discarded the per-group `why` before printing, so "skipped" was unreadable; it now carries a reason
+  histogram (reasons only — no uids in Cloud Logging).
+  (1) **`/card/CODE?n=First`** (`api/card.js` + a `vercel.json` rewrite, mirroring the S81 invite
+  landing) → `?invite=CODE&savecard=1`, which reuses the existing invite auto-link so a new client is
+  linked and lands on the card sheet and an existing one goes straight there. **The link carries the
+  TRAINER's public invite code and nothing else** — no client id, no token; it navigates, it does not
+  authorize, and the card attaches to whoever is signed in. The intent is stashed at module import,
+  not in an effect, because App only mounts after AuthGate has a user (several screens and a Google
+  redirect after the URL is gone). Entry points: "Card link" beside Message, and under the trainer's
+  "No card on file yet" line — both behind `canBillSessions`.
+  (2) **`sessionPolicy.standardPriceCents`** leads the disclosure, because every percentage below it
+  is a percentage OF it; it's in `FIELDS` in `onSessionPolicyChanged` so a rate change triggers
+  re-consent, and the client-side `policyDrifted` list now mirrors that list exactly (they disagreed,
+  so a note/mode edit pushed the client about a change the screen then denied). **Fixed in passing:**
+  `cleanPolicy` omitted `biweekly`, freezing "weekly" into a fortnightly trainer's consent record;
+  and the editor preview showed one line of the five a client actually agrees to.
+  (3) **Back-dating** capped at `BACKDATE_MAX_DAYS = 14`, warned plainly before saving (client name,
+  amount, "they'll be told"), and disclosed by a new `onSessionBackdated` trigger. ⚠️ The cap is
+  coupled to `LOOKBACK_DAYS` in functions/sessions.js — nothing bills until that sweep stamps
+  `completedAt`, so 14 vs 14 would strand a session booked at the limit; **lookback went 14 → 21**.
+  Rules enforce a 15-day floor on create AND reschedule (without the second the first is decorative).
+  230 emulator tests (+7).
+  (4) **Booking loop pass 1:** monthly repeat (calendar-month stepping with day clamping — Jan 31 →
+  Feb 28 → Mar 31, not Mar 3); trainer time blocks in `trainerBlocks`, drawn striped UNDER sessions;
+  **`trainerAvailability`** serving MERGED anonymous busy ranges (it must stay a callable — raw
+  session docs carry other clients' names, and unmerged ranges leak how many clients a trainer has),
+  off by default behind one trainer-wide toggle; client ask → **`respondToBookingRequest`** accept or
+  deny, which claims the inbox item transactionally before booking so two taps can't make two charges
+  — asking is never booking; per-client colours in the trainer's own `caliq-cal-colors`.
+  **Verified live in the preview** (trainer.uitest + client.uitest): the savecard deep link opened
+  Sessions on the card section with the right banner, the block round-tripped in prod, a colour
+  override applied instantly across that client's sessions, the standard rate drove the next
+  booking's default, and the back-date warning named the real client and amount. **The trainer's
+  accept/deny UI is build-verified only** — its callable isn't deployed yet, so exercise that first.

@@ -328,6 +328,16 @@ service cloud.firestore {
         return !changed().hasAny(['priceCents'])
           || (!('completedAt' in resource.data) && resource.data.get('status', '') != 'cancelled');
       }
+      // Rescheduling has the same floor as booking (S195). Without it the
+      // create-time bound is decorative: book for tomorrow, then move it to
+      // last spring — a session the client is billed for at a time they never
+      // had one. Only checked when startAt actually MOVES, so a delivered
+      // session sitting legitimately in the past can still be marked a no-show
+      // or waived, which are the edits that only ever reduce a charge.
+      function startAtInBounds() {
+        return !changed().hasAny(['startAt'])
+          || request.resource.data.startAt > request.time.toMillis() - 1296000000;
+      }
       // The identity of the booking can never be rewritten after creation.
       function identityIntact() {
         return request.resource.data.trainerUid == resource.data.trainerUid
@@ -352,6 +362,22 @@ service cloud.firestore {
         // A new booking always starts scheduled and unsettled.
         && request.resource.data.status == 'scheduled'
         && request.resource.data.startAt is number
+        // ⚠️ HOW FAR BACK A SESSION MAY BE BOOKED (S195). Back-dating is real
+        // bookkeeping — a trainer entering Friday's session on Sunday — and it
+        // charges a real card for work the client never watched being booked,
+        // which makes it the most disputable write in this collection. The app
+        // caps it at 14 days (BACKDATE_MAX_DAYS in src/sessions.js) and warns
+        // before saving; this is the same bound where it can't be bypassed by
+        // a console write or a stale build. Deliberately 15 days rather than 14
+        // so an honest booking at the app's limit can never be refused by the
+        // gap between the browser's clock and the server's.
+        //
+        // It is also what keeps a back-dated session BILLABLE: nothing settles
+        // until the completion sweep stamps it, and that sweep only looks back
+        // LOOKBACK_DAYS (21). A session older than this bound would be booked,
+        // never stamped, and never paid — an invisible failure, which is worse
+        // than a refusal the trainer can see and act on.
+        && request.resource.data.startAt > request.time.toMillis() - 1296000000
         && request.resource.data.durationMin is number
         && request.resource.data.durationMin > 0
         && request.resource.data.durationMin <= 480
@@ -372,6 +398,7 @@ service cloud.firestore {
         && cancelStampHonest()
         && cancelledByHonest()
         && priceFrozenOnceFinal()
+        && startAtInBounds()
         // Cancelling is only for a session that hasn't happened. Marking a
         // delivered one no-show or waived is a different action and stays open.
         && (!changed().hasAny(['status']) || request.resource.data.status != 'cancelled' || stillCancellable())

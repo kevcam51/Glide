@@ -204,6 +204,12 @@ exports.weighInReminderPush = require("./push").weighInReminderPush;
 // Client → trainer requests (S90) — server-side write into the trainer's
 // inbox (a client can't touch trainer kv under the rules). functions/requests.js.
 exports.sendTrainerRequest = require("./requests").sendTrainerRequest;
+// Client self-booking (S195): free/busy WITHOUT exposing the trainer's calendar
+// (sessions and blocks are participant/owner-read; these ranges are derived and
+// merged server-side), and the trainer's accept/deny — which is where a session
+// is actually created. Asking is never booking.
+exports.trainerAvailability = require("./availability").trainerAvailability;
+exports.respondToBookingRequest = require("./availability").respondToBookingRequest;
 // FatSecret food-search proxy (S93) — adds a curated food library to typed
 // search, merged with USDA + Open Food Facts. See functions/foodsearch.js for
 // the (Kevin) FatSecret account + secret setup. No-op until the secrets are set.
@@ -232,6 +238,10 @@ exports.listTeam = require("./team").listTeam;
 // Training sessions (S100): the "red line" — stamps completedAt on sessions
 // whose end time has passed. That stamp is what Sunday billing will bill from.
 exports.sessionsMarkCompleted = require("./sessions").sessionsMarkCompleted;
+// A session booked in the PAST tells the client it happened (S195). A charge
+// for work booked after the fact, silently, is the most disputable write this
+// system makes — so the disclosure is a trigger, not a promise the app keeps.
+exports.onSessionBackdated = require("./sessions").onSessionBackdated;
 // Session reminders (S187): "starts in 30 minutes", at whatever lead times each
 // side picked — and as many of them as they want.
 exports.sessionReminderPush = require("./sessionReminders").sessionReminderPush;

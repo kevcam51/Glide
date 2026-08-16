@@ -150,7 +150,16 @@ function cleanPolicy(p) {
     cancelWindowHours: num(p.cancelWindowHours, 0, 336),
     lateCancelChargePct: num(p.lateCancelChargePct, 0, 100),
     noShowChargePct: num(p.noShowChargePct, 0, 100),
-    billingMode: ["per_session", "weekly", "manual"].includes(p.billingMode) ? p.billingMode : "weekly",
+    // ⚠️ `biweekly` was missing here while it was a real, selectable mode
+    // everywhere else (S186b added it to BILLING_MODES, the disclosure text and
+    // the settle engine). A fortnightly trainer's consent record therefore
+    // froze the word "weekly" — so the one document that is supposed to prove
+    // what the client agreed to described a charging cadence they were never
+    // put on. Kept in lock-step with BILLING_MODES in src/sessions.js.
+    billingMode: ["per_session", "weekly", "biweekly", "manual"].includes(p.billingMode) ? p.billingMode : "weekly",
+    // The standard rate (S195). Part of the terms because every percentage
+    // above is a percentage OF it.
+    standardPriceCents: Math.round(num(p.standardPriceCents, 0, 500000) || 0),
     policyNote: String(p.policyNote || "").slice(0, 400),
   };
 }
@@ -424,8 +433,12 @@ exports.onSessionPolicyChanged = onDocumentUpdated(
     const trainerUid = event.params.uid;
 
     // Only the terms that decide money. billingMode is deliberately included:
-    // "when you'll be charged" is part of what someone agreed to.
-    const FIELDS = ["cancelType", "cancelWindowHours", "lateCancelChargePct", "noShowChargePct", "billingMode", "policyNote"];
+    // "when you'll be charged" is part of what someone agreed to. So is
+    // standardPriceCents (S195) — a rate change is the most consequential edit
+    // on this list, since every fee below it is a percentage of that number,
+    // and a client who agreed to "$85, 100% late-cancel fee" has not agreed to
+    // "$150, 100% late-cancel fee".
+    const FIELDS = ["cancelType", "cancelWindowHours", "lateCancelChargePct", "noShowChargePct", "billingMode", "standardPriceCents", "policyNote"];
     const a = before.sessionPolicy || {}, b = after.sessionPolicy || {};
     if (!FIELDS.some((k) => String(a[k] ?? "") !== String(b[k] ?? ""))) return;
 

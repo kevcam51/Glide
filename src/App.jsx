@@ -7,7 +7,9 @@ import { pushStatus, enablePush, disablePush } from "./push.js";
 import { privGet, privSet, privSubscribe, privListEntries } from "./privateStore.js";
 import { bookSession, updateSession, cancelSession, markNoShow, waiveSession, subscribeMySessions, sessionsByDay, isPastSession, sessionEndMs, SESSION_DEFAULT_MIN,
   bookSeries, cancelSeriesFrom, REPEAT_OPTIONS, REPEAT_MAX,
-  policyOf, packsOf, describePolicy, isLateCancel, lateCancelFeeCents, saveSessionPolicy, saveSessionPacks,
+  isBackdated, backdateProblem,
+  createBlock, deleteBlock, subscribeMyBlocks,
+  policyOf, packsOf, isLateCancel, lateCancelFeeCents, saveSessionPolicy, saveSessionPacks, saveAvailabilityPublic,
   CANCEL_WINDOW_PRESETS, STARTER_PACKS, DEFAULT_SESSION_POLICY,
   CANCEL_TYPES, BILLING_MODES, cancellationDisclosure, consentLineFor, policySnapshot, POLICY_TEXT_VERSION,
   stripeFeeCents, feeComparison,
@@ -14724,6 +14726,38 @@ function takeStashedRef() {
   catch (e) { return ""; }
 }
 
+// "Save your card" intent from the URL (?savecard=1), set by the /card/CODE
+// landing (S195). It carries NO identity of its own — who to save a card for is
+// the ?invite= code beside it, and the card is attached to whoever is signed
+// in. All this flag does is say which screen to open on arrival.
+//
+// Stashed like the referral code because it has to survive a round trip: a new
+// client meets the sign-up screen first, and after Google's redirect the query
+// string is gone. Cleared as soon as it's read so a later reload doesn't
+// re-open the card sheet on top of whatever the person is doing.
+const SAVECARD_STASH = "glidna-savecard";
+function stashSaveCardIntent() {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    if (!p.get("savecard")) return;
+    localStorage.setItem(SAVECARD_STASH, "1");
+    const url = new URL(window.location.href);
+    url.searchParams.delete("savecard");
+    window.history.replaceState({}, "", url.toString());
+  } catch (e) { /* private mode / no history API */ }
+}
+function takeSaveCardIntent() {
+  try {
+    const v = localStorage.getItem(SAVECARD_STASH);
+    if (v) localStorage.removeItem(SAVECARD_STASH);
+    return v === "1";
+  } catch (e) { return false; }
+}
+// Captured at import, not in an effect: App only mounts once AuthGate has a
+// signed-in user, and for a brand-new client that is several screens and one
+// Google redirect later — by which time this query string is long gone.
+stashSaveCardIntent();
+
 // Remove ?invite= (and the ?n= inviter name) from the URL without reloading, so
 // they can't re-fire on refresh.
 function clearInviteFromUrl() {
@@ -15862,9 +15896,29 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const inboxRemove = (id) => writeInbox(inbox.filter((r) => r.id !== id));
   const openInbox = inbox.filter((r) => r && r.status === "open");
 
+  // Answering a request for a TIME (S195). The server books it, marks the item
+  // and notifies the client — all of which has to happen together, so this is
+  // one call rather than a local write plus a hope. The inbox is live
+  // (subscribeForUser), so the answered item updates itself when it returns.
+  const [bookingBusy, setBookingBusy] = useState("");
+  const [bookingMsg, setBookingMsg] = useState("");
+  const answerBooking = async (requestId, accept) => {
+    if (bookingBusy) return;
+    setBookingBusy(requestId); setBookingMsg("");
+    try {
+      await callRespondToBooking({ requestId, accept });
+      setBookingMsg(accept ? "Booked — they've been told." : "They've been told it doesn't work.");
+      setTimeout(() => setBookingMsg(""), 3000);
+    } catch (e) {
+      console.error("respondToBookingRequest failed", e && (e.code || e.message));
+      setBookingMsg((e && e.message) || "Couldn't send that answer — try again.");
+    } finally { setBookingBusy(""); }
+  };
+
   // In-app messaging (S90): which client's DM is open + live unread counts per
   // client (one threads listener; badges gated by the messages notif pref).
   const [msgFor, setMsgFor] = useState(null); // client object | null
+  const [cardLinkFor, setCardLinkFor] = useState(null); // client uid whose "save your card" link is showing (S195)
   const [notesFor, setNotesFor] = useState(null); // client object | null — Notes panel (S91)
   // Same panel, for one of the trainer's OWN plan files (S166). Those people are
   // clients too; they just never made an account, so they get notes like anyone
@@ -16278,6 +16332,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
               <Icon name="inbox" size={19} color="var(--accent)" />Asks From Clients
               {openInbox.length > 0 && <span className="rounded-full bg-primaryfill px-2 text-[.7rem] font-bold text-primaryfg">{openInbox.length}</span>}
             </div>
+            {bookingMsg && <div className="mt-1 text-[.78rem] font-semibold text-success">{bookingMsg}</div>}
             {openInbox.length === 0 && <div className={subCls}>All caught up</div>}
             {openInbox.map((r) => (
               <div key={r.id} className="mt-2 rounded-xl border border-border bg-surface2 p-3">
@@ -16286,10 +16341,35 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                   <span className="text-[.66rem] text-muted">{fmtStamp(r.createdAt)}</span>
                 </div>
                 <div className="mt-1 text-[.84rem] leading-relaxed text-fg">{r.prompt}</div>
-                <div className="mt-2 flex gap-2">
-                  <button className={mBtnCls} onClick={() => inboxDone(r.id)}><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Done</button>
-                  <button className={`${mBtnCls} text-muted`} onClick={() => inboxRemove(r.id)}>Dismiss</button>
-                </div>
+                {/* A request for a TIME can be answered in one tap (S195).
+                    Accepting is what creates the session — the client asking
+                    never does — and either answer notifies them, which is why
+                    it goes through the server rather than being two writes
+                    from here. */}
+                {r.booking && r.booking.startAt ? (
+                  <>
+                    <div className="mt-1.5 text-[.78rem] font-semibold text-fg">
+                      {fmtSessionWhen(r.booking.startAt)} · {r.booking.durationMin || 60} min
+                      {r.booking.startAt < Date.now() && <span className="ml-1.5 text-warn">— that time has passed</span>}
+                    </div>
+                    <div className="mt-2 flex gap-2 flex-wrap">
+                      <button className={mPrimaryCls} disabled={bookingBusy === r.id || r.booking.startAt < Date.now()}
+                        onClick={() => answerBooking(r.id, true)}>
+                        {bookingBusy === r.id ? "…" : "Accept & book"}
+                      </button>
+                      <button className={mBtnCls} disabled={bookingBusy === r.id}
+                        onClick={() => answerBooking(r.id, false)}>Can't make it</button>
+                    </div>
+                    <div className="mt-1 text-[.68rem] text-muted">
+                      Accepting books it at your standard rate and tells them. Declining tells them too.
+                    </div>
+                  </>
+                ) : (
+                  <div className="mt-2 flex gap-2">
+                    <button className={mBtnCls} onClick={() => inboxDone(r.id)}><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Done</button>
+                    <button className={`${mBtnCls} text-muted`} onClick={() => inboxRemove(r.id)}>Dismiss</button>
+                  </div>
+                )}
               </div>
             ))}
             {inbox.some((r) => r.status === "done") && (
@@ -16492,6 +16572,18 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                             <span className="rounded-full bg-primaryfill px-1.5 text-[.66rem] font-bold text-primaryfg">{msgUnread[c.uid]}</span>
                           )}
                         </button>
+                        {/* "Save your card" link (S195) — next to Message
+                            because that's how it gets sent. Only shown while
+                            this trainer can actually take money: pointing a
+                            client at a card screen that refuses to save one is
+                            worse than not offering it (the S178 interlock). */}
+                        {canBillSessions(meUid) && (
+                          <button className={`${mBtnCls} inline-flex items-center gap-1.5`}
+                            onClick={() => setCardLinkFor(cardLinkFor === c.uid ? null : c.uid)}
+                            aria-expanded={cardLinkFor === c.uid}>
+                            <Icon name="card" size={16} color="var(--accent)" />Card link
+                          </button>
+                        )}
                         {c.hasPlan && (
                           <button className={mBtnCls} onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>Open plan</button>
                         )}
@@ -16502,6 +16594,11 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                             transform: manageFor === c.uid ? "rotate(180deg)" : "rotate(0deg)", fontSize:".7em", opacity:.8 }}>▾</span>
                         </button>
                       </div>
+                      {cardLinkFor === c.uid && (
+                        <div className="mt-2">
+                          <CardLinkRow meName={meName} />
+                        </div>
+                      )}
                       {/* Secondary/plumbing actions live behind Manage (critique P2) */}
                       {manageFor === c.uid && (
                         <div className="flex gap-2 mt-2 flex-wrap">
@@ -16958,7 +17055,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       )}
       {sessionsFor && (
         <SessionsPanel meUid={meUid} role={meRole} trainerUid={meUid} clientUid={sessionsFor.uid}
-          otherName={sessionsFor.name} onClose={() => setSessionsFor(null)} />
+          meName={meName} otherName={sessionsFor.name} onClose={() => setSessionsFor(null)} />
       )}
       {notesFor && (
         <NotesPanel mode="trainer-client" meUid={meUid} meName={meName}
@@ -17455,11 +17552,22 @@ const CAL_MONTHS = ["January","February","March","April","May","June","July","Au
 // those mean billing states here, and a client must never accidentally look
 // like a declined charge.
 const CAL_CLIENT_COLORS = ["#08DCE0", "#7dd3fc", "#b57bff", "#f0abfc", "#5eead4", "#a3e635", "#fca5a5", "#fdba74"];
-const calColorFor = (uid) => {
+// Auto-assigned from the uid, unless the trainer has picked one (S195).
+// Overrides live in the TRAINER'S OWN kv (caliq-cal-colors) — their private view
+// of their own book, so it needs no rules change and no client ever sees it.
+// The hash stays the fallback: a new client always has a colour, immediately.
+const CAL_COLORS_KEY = "caliq-cal-colors";
+const calColorFor = (uid, overrides) => {
+  const pick = overrides && overrides[uid];
+  if (pick && CAL_CLIENT_COLORS.includes(pick)) return pick;
   let h = 0;
   for (let i = 0; i < String(uid).length; i++) h = (h * 31 + String(uid).charCodeAt(i)) >>> 0;
   return CAL_CLIENT_COLORS[h % CAL_CLIENT_COLORS.length];
 };
+// Time the trainer has blocked out. Deliberately NOT one of the client colours —
+// a block is "nobody", and giving it a palette entry would make it read as a
+// person at a glance, which is the one thing the colours exist to prevent.
+const CAL_BLOCK_COLOR = "#7e9a9a";
 
 // What this session means for money, in the trainer's language.
 function calBillingState(s, now) {
@@ -17497,13 +17605,49 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
   const gridRef = useRef(null);
+  // Time blocked out — lunch, travel, a dentist. Lives in its own collection
+  // (see src/sessions.js) so the billing sweep never has to learn to skip it.
+  const [blocks, setBlocks] = useState([]);
+  const [blockDetail, setBlockDetail] = useState(null);
+  // Per-client colour overrides, and whether clients may see free/busy at all.
+  const [calColors, setCalColors] = useState({});
+  const [availPublic, setAvailPublic] = useState(false);
 
   useEffect(() => { if (!meUid) return; return subscribeMySessions(meUid, setSessions); }, [meUid]);
+  useEffect(() => { if (!meUid) return; return subscribeMyBlocks(meUid, setBlocks); }, [meUid]);
   useEffect(() => { getMyClients().then((cs) => setClients(cs || [])).catch(() => {}); }, [meUid]);
   useEffect(() => {
     if (!meUid) return;
-    getProfile(meUid).then((p) => { const pol = policyOf(p); setPolicy(pol); setPolicyDraft(pol); }).catch(() => {});
+    getProfile(meUid).then((p) => {
+      const pol = policyOf(p); setPolicy(pol); setPolicyDraft(pol);
+      setAvailPublic((p && p.availabilityPublic) === true);
+    }).catch(() => {});
   }, [meUid]);
+  useEffect(() => {
+    window.storage.get(CAL_COLORS_KEY)
+      .then((r) => { try { setCalColors(JSON.parse((r && r.value) || "{}") || {}); } catch { setCalColors({}); } })
+      .catch(() => {});
+  }, []);
+
+  const setClientColor = (uid, color) => {
+    const next = { ...calColors, [uid]: color };
+    setCalColors(next);                                   // optimistic: it's a colour
+    window.storage.set(CAL_COLORS_KEY, JSON.stringify(next)).catch(() => {});
+  };
+  const colorOf = useCallback((uid) => calColorFor(uid, calColors), [calColors]);
+
+  // Whether clients can see free/busy. Off by default, and it is a single
+  // trainer-wide switch rather than a per-client one (Kevin's decision) — a
+  // calendar you show to some clients and not others is a promise you have to
+  // keep track of.
+  const saveAvailPublic = async (on) => {
+    setAvailPublic(on);                                   // optimistic
+    try { await saveAvailabilityPublic(meUid, on); }
+    catch (e) {
+      console.error("availabilityPublic save failed", e && e.message);
+      setAvailPublic(!on); setErr("Couldn't save that setting.");
+    }
+  };
 
   const savePolicy = async () => {
     setBusy(true); setErr("");
@@ -17541,6 +17685,14 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     for (const k of Object.keys(out)) out[k].sort((a, b) => a.startAt - b.startAt);
     return out;
   }, [mine]);
+  const blocksByDay = useMemo(() => {
+    const out = {};
+    for (const b of blocks) {
+      if (!b.startAt) continue;
+      (out[calKey(new Date(b.startAt))] ||= []).push(b);
+    }
+    return out;
+  }, [blocks]);
 
   // Open the grid on the working day, not on 3am. Deferred a frame: on the
   // first paint the scroll container has no laid-out height yet, so setting
@@ -17553,23 +17705,33 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     return () => cancelAnimationFrame(id);
   }, [view]);
 
+  // What a new booking should cost. The trainer's STATED rate wins — it's the
+  // number their clients agreed to in the terms, so a booking that silently
+  // differs from it is the one thing this field exists to prevent. Falling back
+  // to the last price they actually used keeps the old behaviour for trainers
+  // who haven't set a rate (a blank price books a $0 session that can never be
+  // billed, which is the failure this default was added for in the first place).
   const lastPrice = useMemo(() => {
+    if (policy.standardPriceCents > 0) return policy.standardPriceCents;
     const priced = mine.filter((s) => s.priceCents > 0).sort((a, b) => b.createdAt - a.createdAt);
     return priced.length ? priced[0].priceCents : 0;
-  }, [mine]);
+  }, [mine, policy.standardPriceCents]);
 
   // ── booking ───────────────────────────────────────────────────────────────
   // Tapping a slot pre-fills the time you tapped; the price defaults to the last
   // one you actually used, because a blank price silently books a $0 session
   // that can never be billed.
   const openSlot = (date, hour) => {
-    if (!clients.length) { setErr("Link a client first — you can only book sessions with your own clients."); return; }
     const d = new Date(date); d.setHours(hour, 0, 0, 0);
     setErr("");
     setForm({
-      id: null, clientUid: clients[0].uid, when: calToLocalInput(d.getTime()),
+      id: null, clientUid: clients.length ? clients[0].uid : "", when: calToLocalInput(d.getTime()),
       durationMin: String(SESSION_DEFAULT_MIN), title: "", location: "",
       price: lastPrice ? String(lastPrice / 100) : "", repeat: "none", count: "8",
+      // Blocking time needs no client, so a trainer with an empty roster can
+      // still use their calendar. Booking without one is refused on submit,
+      // where the message can say why.
+      kind: clients.length ? "session" : "block",
     });
   };
   const openEditForm = (s) => {
@@ -17588,8 +17750,31 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     if (!Number.isFinite(startAt)) { setErr("Pick a date and time."); return; }
     const durationMin = Math.round(Number(form.durationMin) || SESSION_DEFAULT_MIN);
     if (durationMin < 1 || durationMin > 480) { setErr("Duration must be between 1 and 480 minutes."); return; }
+
+    // Blocking out time is the one thing on this screen that involves nobody
+    // else and no money, so it takes the short path: no client, no price, no
+    // repeat, no back-date rules (a block in the past is just a record).
+    if (form.kind === "block") {
+      setBusy(true);
+      try {
+        await createBlock(meUid, { startAt, durationMin, title: form.title });
+        setForm(null); setMsg("Time blocked.");
+        setTimeout(() => setMsg(""), 2500);
+      } catch (e) {
+        console.error("block create failed", e && (e.code || e.message), e);
+        setErr("Couldn't block that time.");
+      } finally { setBusy(false); }
+      return;
+    }
+    if (!form.clientUid) { setErr("Link a client first — you can only book sessions with your own clients."); return; }
     const priceCents = Math.round((Number(form.price) || 0) * 100);
     if (priceCents < 0) { setErr("Price can't be negative."); return; }
+    // A session in the past is real bookkeeping, but it charges a real card for
+    // work booked after the fact — so it's bounded, and the sheet has already
+    // said out loud what it will do. Past the bound there is no safe automatic
+    // answer, so it's refused rather than booked-and-never-settled.
+    const backdate = backdateProblem(startAt);
+    if (backdate) { setErr(backdate); return; }
     setBusy(true);
     try {
       if (form.id) {
@@ -17677,6 +17862,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
             {days.map((d) => {
               const k = calKey(d);
               const list = byDay[k] || [];
+              const dayBlocks = blocksByDay[k] || [];
               return (
                 <div key={k} className="flex-1 min-w-0 relative border-l border-border">
                   {Array.from({ length: 24 }, (_, h) => (
@@ -17684,11 +17870,32 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
                       className="absolute left-0 right-0 border-t border-border/40 cursor-pointer bg-transparent"
                       style={{ top: h * CAL_HOUR_PX, height: CAL_HOUR_PX }} />
                   ))}
+                  {/* Blocked time sits UNDER sessions (lower z-index): if a
+                      session is booked over a block, the session is the thing
+                      that has to be readable — it's the one with a person and a
+                      price attached. Striped rather than solid so it reads as
+                      "not available" instead of "an appointment with nobody". */}
+                  {dayBlocks.map((b) => {
+                    const top = (calMinutesInto(b.startAt) / 60) * CAL_HOUR_PX;
+                    const h = Math.max(14, ((b.durationMin || 60) / 60) * CAL_HOUR_PX - 2);
+                    return (
+                      <button key={b.id} onClick={(e) => { e.stopPropagation(); setBlockDetail(b); }}
+                        title={b.title || "Blocked"}
+                        className="absolute left-0.5 right-0.5 rounded-md px-1.5 py-0.5 text-left cursor-pointer overflow-hidden"
+                        style={{ top, height: h, zIndex: 3,
+                          background: `repeating-linear-gradient(45deg, color-mix(in srgb, ${CAL_BLOCK_COLOR} 22%, var(--surface)) 0 6px, var(--surface) 6px 12px)`,
+                          border: `1px dashed ${CAL_BLOCK_COLOR}` }}>
+                        <div className="text-[.6rem] font-semibold leading-tight truncate text-muted">
+                          {b.title || "Blocked"}
+                        </div>
+                      </button>
+                    );
+                  })}
                   {list.map((s) => {
                     const top = (calMinutesInto(s.startAt) / 60) * CAL_HOUR_PX;
                     const h = Math.max(18, ((s.durationMin || SESSION_DEFAULT_MIN) / 60) * CAL_HOUR_PX - 2);
                     const cancelled = s.status === "cancelled";
-                    const color = calColorFor(s.clientUid);
+                    const color = colorOf(s.clientUid);
                     const past = sessionEndMs(s) <= now;
                     return (
                       <button key={s.id} onClick={(e) => { e.stopPropagation(); setDetail(s); }}
@@ -17761,8 +17968,8 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
                     a first name that still clipped on a phone. */}
                 {list.slice(0, 3).map((s) => (
                   <div key={s.id} className="mb-0.5 rounded px-1 py-0.5 leading-tight overflow-hidden"
-                    style={{ background: `color-mix(in srgb, ${calColorFor(s.clientUid)} 20%, var(--surface))`,
-                      borderLeft: `2px solid ${calColorFor(s.clientUid)}`, color: "var(--text)" }}>
+                    style={{ background: `color-mix(in srgb, ${colorOf(s.clientUid)} 20%, var(--surface))`,
+                      borderLeft: `2px solid ${colorOf(s.clientUid)}`, color: "var(--text)" }}>
                     <div className="text-[.58rem] font-semibold truncate">{nameOf(s.clientUid)}</div>
                     <div className="text-[.53rem] text-muted truncate">{calTimeLabel(s.startAt).replace(":00", "")}</div>
                   </div>
@@ -17836,11 +18043,39 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
                     money and only some trainers can bill at all. */}
                 <SessionReminderPrefs notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs} />
                 <CalendarSubscribe />
+
+                {/* Can clients see when you're busy? (S195) One switch for the
+                    whole book, off until it's turned on — a calendar you show
+                    to some clients and not others is a promise you'd have to
+                    keep track of. What they'd see is time ranges and nothing
+                    else: never a name, a title, a location or a price. */}
+                <div className="rounded-card border border-border bg-surface p-4">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="font-display text-base tracking-wider text-primary">Let clients see your free times</div>
+                      <div className="text-[.78rem] text-muted leading-snug mt-0.5">
+                        They see busy blocks only — never who you're with, where, or for how much.
+                        Clients can ask you for a time either way; this just saves them guessing.
+                      </div>
+                    </div>
+                    <button onClick={() => saveAvailPublic(!availPublic)}
+                      className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold cursor-pointer border ${
+                        availPublic ? "border-primary bg-primary text-primaryfg" : "border-border bg-transparent text-muted"}`}>
+                      {availPublic ? "On" : "Off"}
+                    </button>
+                  </div>
+                </div>
                 <div>
+                  {/* This used to say clients keep their terms "until they
+                      re-save their card", which stopped being true in S192 when
+                      re-consent shipped — nothing is wrong with their card, and
+                      asking them to replace it was the wrong ask. What actually
+                      happens now: saving a change pushes every already-agreed
+                      client, and each of them agrees (or doesn't) in Sessions. */}
                   <div className="mb-2 text-[.78rem] text-muted leading-snug">
-                    The policy below applies to every client. Each client is charged under the terms
-                    they agreed to when they saved their card, so changing this affects new
-                    agreements — anyone already on file keeps their terms until they re-save their card.
+                    One policy covers every client. Changing it asks anyone who has already agreed to
+                    review and accept the new terms — they're notified automatically, and until each
+                    person agrees they stay on the terms they accepted.
                   </div>
                   <SessionPolicyEditor policyDraft={policyDraft} setPolicyDraft={setPolicyDraft}
                     trainerUid={meUid} defaultPriceCents={lastPrice} busy={busy}
@@ -17865,7 +18100,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
                 {upcoming.map((s) => (
                   <button key={s.id} onClick={() => setDetail(s)}
                     className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg bg-surface2 mb-1.5 text-left cursor-pointer border-0">
-                    <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: calColorFor(s.clientUid) }} />
+                    <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: colorOf(s.clientUid) }} />
                     <span className="flex-1 min-w-0">
                       <span className="block text-[.86rem] font-semibold truncate">{nameOf(s.clientUid)}</span>
                       <span className="block text-[.72rem] text-muted truncate">{fmtSessionWhen(s.startAt)}</span>
@@ -17881,12 +18116,18 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
 
       {detail && (
         <CalSessionSheet session={detail} nameOf={nameOf} now={now} busy={busy} meUid={meUid}
+          color={colorOf(detail.clientUid)} onSetColor={setClientColor}
           onClose={() => setDetail(null)} onEdit={() => openEditForm(detail)}
           onOpenClient={onOpenClientPlan ? () => { onOpenClientPlan(detail.clientUid); } : null}
           onCancelOne={() => act(() => cancelSession(detail.id, meUid), "Session cancelled.")}
           onCancelSeries={() => act(async () => { const n = await cancelSeriesFrom(detail, meUid); return n; }, "Series cancelled.")}
           onNoShow={() => act(() => markNoShow(detail.id, !detail.noShow), detail.noShow ? "No-show cleared." : "Marked as a no-show.")}
           onWaive={() => act(() => waiveSession(detail.id, !detail.waived), detail.waived ? "This will be charged." : "Charge waived.")} />
+      )}
+      {blockDetail && (
+        <CalBlockSheet block={blockDetail} busy={busy}
+          onClose={() => setBlockDetail(null)}
+          onDelete={() => act(() => deleteBlock(blockDetail.id).then(() => setBlockDetail(null)), "Block removed.")} />
       )}
       {form && (
         <CalBookingSheet form={form} setForm={setForm} clients={clients} busy={busy} err={err}
@@ -17904,8 +18145,9 @@ const calToLocalInput = (ms) => {
 };
 
 // One booked session, and everything the trainer can do about it.
-function CalSessionSheet({ session: s, nameOf, now, busy, meUid, onClose, onEdit, onOpenClient, onCancelOne, onCancelSeries, onNoShow, onWaive }) {
+function CalSessionSheet({ session: s, nameOf, now, busy, meUid, color, onSetColor, onClose, onEdit, onOpenClient, onCancelOne, onCancelSeries, onNoShow, onWaive }) {
   const [confirm, setConfirm] = useState("");
+  const [pickColor, setPickColor] = useState(false);
   const past = sessionEndMs(s) <= now;
   const settled = !!s.settled && s.settled !== "hold";
   const state = calBillingState(s, now);
@@ -17918,7 +18160,13 @@ function CalSessionSheet({ session: s, nameOf, now, busy, meUid, onClose, onEdit
       <div onClick={(e) => e.stopPropagation()}
         className="w-full max-w-[440px] rounded-card border border-border bg-surface p-4 text-fg">
         <div className="flex items-start gap-2.5 mb-3">
-          <span style={{ width: 4, alignSelf: "stretch", borderRadius: 2, background: calColorFor(s.clientUid) }} />
+          {/* The colour stripe is also the control that changes it — a trainer
+              looking at the thing they want a different colour shouldn't have
+              to go find a settings screen to say so. (S195) */}
+          <button onClick={() => onSetColor && setPickColor((v) => !v)}
+            aria-label={onSetColor ? `Change ${nameOf(s.clientUid)}'s colour` : undefined}
+            className={onSetColor ? "cursor-pointer border-0 p-0" : "border-0 p-0"}
+            style={{ width: 4, alignSelf: "stretch", borderRadius: 2, background: color }} />
           <div className="min-w-0 flex-1">
             <div className="text-[1.05rem] font-extrabold truncate">{nameOf(s.clientUid)}</div>
             <div className="text-[.8rem] text-muted">{fmtSessionWhen(s.startAt)} · {s.durationMin || SESSION_DEFAULT_MIN} min</div>
@@ -17928,6 +18176,23 @@ function CalSessionSheet({ session: s, nameOf, now, busy, meUid, onClose, onEdit
             <Icon name="close" size={14} color="var(--muted)" />
           </button>
         </div>
+
+        {pickColor && onSetColor && (
+          <div className="mb-3 rounded-lg bg-surface2 px-3 py-2">
+            <div className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-muted">
+              {nameOf(s.clientUid)}'s colour
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {CAL_CLIENT_COLORS.map((c) => (
+                <button key={c} onClick={() => { onSetColor(s.clientUid, c); setPickColor(false); }}
+                  aria-label={`Use this colour for ${nameOf(s.clientUid)}`}
+                  className="w-7 h-7 rounded-full cursor-pointer"
+                  style={{ background: c, border: c === color ? "2px solid var(--text)" : "2px solid transparent" }} />
+              ))}
+            </div>
+            <div className="mt-1.5 text-[.68rem] text-muted">Only you see this — it's your view of your own calendar.</div>
+          </div>
+        )}
 
         <div className="rounded-lg bg-surface2 px-3 py-2 mb-3 flex items-center justify-between gap-2">
           <span className={`text-[.78rem] font-semibold ${toneCls}`}>{state.label}</span>
@@ -18050,25 +18315,115 @@ function WhenPicker({ value, onChange, inp }) {
 }
 
 // Book (or reschedule) from the grid.
+// Blocked-out time: what it is, and the one thing you can do to it. A block
+// carries no billing history, so unlike a session it can simply be deleted —
+// there's nothing to preserve a record of.
+function CalBlockSheet({ block: b, busy, onClose, onDelete }) {
+  const [confirm, setConfirm] = useState(false);
+  const btn = "rounded-md border border-border bg-transparent px-2.5 py-1.5 text-xs font-semibold text-fg cursor-pointer disabled:opacity-40";
+  return createPortal(
+    <div onClick={onClose} data-theme="pro" style={{ fontFamily: "var(--font-sans)" }}
+      className="fixed inset-0 z-[1600] flex items-end sm:items-center justify-center bg-black/60 px-4 py-6">
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-[440px] rounded-card border border-border bg-surface p-4 text-fg">
+        <div className="flex items-start gap-2.5 mb-3">
+          <span style={{ width: 4, alignSelf: "stretch", borderRadius: 2, background: CAL_BLOCK_COLOR }} />
+          <div className="min-w-0 flex-1">
+            <div className="text-[1.05rem] font-extrabold truncate">{b.title || "Blocked"}</div>
+            <div className="text-[.8rem] text-muted">{fmtSessionWhen(b.startAt)} · {b.durationMin || 60} min</div>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="shrink-0 rounded-full border border-border bg-surface2 w-8 h-8 flex items-center justify-center cursor-pointer">
+            <Icon name="close" size={14} color="var(--muted)" />
+          </button>
+        </div>
+        <div className="mb-3 rounded-lg bg-surface2 px-3 py-2 text-[.78rem] text-muted">
+          Time you're not available. Nobody is booked, nothing is charged — and clients who can see
+          your availability just see this as busy, never what it is.
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {confirm ? (
+            <>
+              <button className="rounded-md border-0 bg-danger px-2.5 py-1.5 text-xs font-bold text-white cursor-pointer" onClick={onDelete} disabled={busy}>Yes, remove</button>
+              <button className={btn} onClick={() => setConfirm(false)}>Keep it</button>
+            </>
+          ) : (
+            <button className={btn} onClick={() => setConfirm(true)} disabled={busy}>Remove block</button>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit, nameOf }) {
   const inp = "w-full min-w-0 bg-surface2 border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted";
   const lbl = "mb-1 text-[11px] font-bold uppercase tracking-wide text-muted";
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-  const repeating = form.repeat !== "none" && !form.id;
+  const isBlock = !form.id && form.kind === "block";
+  const repeating = form.repeat !== "none" && !form.id && !isBlock;
+
+  // Is the chosen time already gone, and what would that mean? Recomputed on
+  // every keystroke so the warning tracks the date picker rather than appearing
+  // only after a failed save. `now` is read at render time deliberately: a sheet
+  // left open across a slot boundary should tell the truth about it.
+  const backdate = useMemo(() => {
+    const startAt = new Date(form.when).getTime();
+    // A block in the past is just a record of where you were — no client, no
+    // charge, nothing to warn anyone about.
+    if (isBlock || !Number.isFinite(startAt) || !isBackdated(startAt)) return null;
+    const priceCents = Math.round((Number(form.price) || 0) * 100);
+    return {
+      problem: backdateProblem(startAt),
+      tooOld: !!backdateProblem(startAt),
+      clientName: nameOf(form.clientUid),
+      priceLabel: priceCents > 0 ? money(priceCents) : "nothing (no price set)",
+      repeating,
+      // A reschedule INTO the past is a different sentence from adding a
+      // session that already happened: the client already knows this booking
+      // exists, so "you added it" would be false.
+      verb: form.id ? "moved it here" : "added it",
+    };
+  }, [form.when, form.price, form.clientUid, form.id, isBlock, repeating, nameOf]);
 
   return createPortal(
     <div onClick={onClose} data-theme="pro" style={{ fontFamily: "var(--font-sans)" }}
       className="fixed inset-0 z-[1600] flex items-end sm:items-center justify-center bg-black/60 px-4 py-6">
       <div onClick={(e) => e.stopPropagation()}
         className="w-full max-w-[440px] max-h-[86vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
-        <div className="text-[1.05rem] font-extrabold mb-3">{form.id ? "Reschedule session" : "New session"}</div>
+        <div className="text-[1.05rem] font-extrabold mb-3">
+          {form.id ? "Reschedule session" : isBlock ? "Block out time" : "New session"}
+        </div>
 
+        {/* Session or block. Same sheet because it's the same question — what
+            is happening at this time — and because the alternative is a second
+            "+" button whose difference nobody can see. */}
         {!form.id && (
+          <div className="mb-2.5 flex gap-1.5">
+            {[["session", "Book a client"], ["block", "Block out time"]].map(([v, label]) => (
+              <button key={v} onClick={() => set("kind", v)}
+                className={`flex-1 rounded-lg px-2.5 py-2 text-xs font-bold cursor-pointer ${
+                  (form.kind || "session") === v
+                    ? "bg-[rgba(var(--accent-rgb),.1)] text-primary border border-primary"
+                    : "bg-transparent text-muted border border-border"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {!form.id && !isBlock && (
           <div className="mb-2.5">
             <div className={lbl}>Client</div>
-            <select className={inp} value={form.clientUid} onChange={(e) => set("clientUid", e.target.value)}>
-              {clients.map((c) => <option key={c.uid} value={c.uid}>{nameOf(c.uid)}</option>)}
-            </select>
+            {clients.length ? (
+              <select className={inp} value={form.clientUid} onChange={(e) => set("clientUid", e.target.value)}>
+                {clients.map((c) => <option key={c.uid} value={c.uid}>{nameOf(c.uid)}</option>)}
+              </select>
+            ) : (
+              <div className="text-[.72rem] text-warn">
+                No clients linked yet — invite one first, or block the time out instead.
+              </div>
+            )}
           </div>
         )}
         {/* DATE AND TIME ARE PICKED, NOT TYPED (S191). This was one native
@@ -18084,33 +18439,63 @@ function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit,
           <div className={lbl}>When</div>
           <WhenPicker value={form.when} onChange={(v) => set("when", v)} inp={inp} />
         </div>
-        <div className="grid grid-cols-2 gap-2 mb-2.5">
+        <div className={`grid ${isBlock ? "grid-cols-1" : "grid-cols-2"} gap-2 mb-2.5`}>
           <div>
             <div className={lbl}>Minutes</div>
             <input type="number" inputMode="numeric" className={inp} value={form.durationMin} onChange={(e) => set("durationMin", e.target.value)} />
           </div>
-          <div>
-            <div className={lbl}>Price ($)</div>
-            <input type="number" inputMode="decimal" className={inp} value={form.price} onChange={(e) => set("price", e.target.value)} placeholder="0" />
-          </div>
+          {/* A block has no price because it has no client and no charge. */}
+          {!isBlock && (
+            <div>
+              <div className={lbl}>Price ($)</div>
+              <input type="number" inputMode="decimal" className={inp} value={form.price} onChange={(e) => set("price", e.target.value)} placeholder="0" />
+            </div>
+          )}
         </div>
         {/* A session left at $0 books fine and then can never be billed, so say
             so at the moment it would happen rather than in a support email. */}
-        {!(Number(form.price) > 0) && (
+        {!isBlock && !(Number(form.price) > 0) && (
           <div className="mb-2.5 text-[.72rem] text-warn">No price set — this session won't be billed.</div>
         )}
-        <div className="grid grid-cols-2 gap-2 mb-2.5">
-          <div>
-            <div className={lbl}>Title</div>
-            <input className={inp} value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="Upper body" />
+        {/* BACK-DATING, SAID PLAINLY (S195). Adding a session that already
+            happened charges a real card for work the client didn't watch you
+            book — the single most disputable write in this system. So the
+            consequence is spelled out with the actual name and the actual
+            amount BEFORE the button is pressed, not implied by a date field
+            being in the past. The client is told too, by a server trigger, so
+            this promise doesn't depend on anyone remembering to keep it. */}
+        {backdate && (
+          <div className={`mb-2.5 rounded-md px-2.5 py-2 text-[.74rem] leading-snug ${backdate.tooOld ? "text-danger" : "text-fg"}`}
+            style={{ background: backdate.tooOld ? "rgba(248,113,113,.1)" : "rgba(251,191,36,.1)" }}>
+            {backdate.tooOld ? backdate.problem : (<>
+              <b>This is in the past.</b>{" "}
+              {backdate.clientName} will be charged {backdate.priceLabel} under their current terms
+              {backdate.repeating ? " for each session that has already passed" : ""}, and they'll be
+              told you {backdate.verb}.
+            </>)}
           </div>
+        )}
+        <div className={`grid ${isBlock ? "grid-cols-1" : "grid-cols-2"} gap-2 mb-2.5`}>
           <div>
-            <div className={lbl}>Location</div>
-            <input className={inp} value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="Studio" />
+            <div className={lbl}>{isBlock ? "What is it?" : "Title"}</div>
+            <input className={inp} value={form.title} onChange={(e) => set("title", e.target.value)}
+              placeholder={isBlock ? "Lunch" : "Upper body"} />
           </div>
+          {!isBlock && (
+            <div>
+              <div className={lbl}>Location</div>
+              <input className={inp} value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="Studio" />
+            </div>
+          )}
         </div>
+        {isBlock && (
+          <div className="mb-2.5 text-[.72rem] text-muted">
+            Nobody is booked and nothing is charged. Clients who can see your availability see this
+            time as busy — never what it says.
+          </div>
+        )}
 
-        {!form.id && (
+        {!form.id && !isBlock && (
           <div className="grid grid-cols-2 gap-2 mb-1">
             <div>
               <div className={lbl}>Repeat</div>
@@ -18137,7 +18522,7 @@ function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit,
         <div className="flex gap-2 mt-2">
           <button onClick={onSubmit} disabled={busy}
             className="flex-1 py-2.5 rounded-lg border-0 bg-primary text-primaryfg text-sm font-bold cursor-pointer disabled:opacity-50">
-            {busy ? "Saving…" : form.id ? "Save changes" : repeating ? "Book sessions" : "Book session"}
+            {busy ? "Saving…" : form.id ? "Save changes" : isBlock ? "Block this time" : repeating ? "Book sessions" : "Book session"}
           </button>
           <button onClick={onClose} className="px-4 py-2.5 rounded-lg border border-border bg-transparent text-muted text-sm cursor-pointer">Cancel</button>
         </div>
@@ -18885,6 +19270,11 @@ async function openBillingPortal() {
 }
 const callRequestBoost = httpsCallable(functions, "requestBudgetBoost"); // Max-tier same-day allowance boost (S90)
 const callSendTrainerRequest = httpsCallable(functions, "sendTrainerRequest"); // client → trainer inbox (S90)
+// Client self-booking (S195). Availability is DERIVED server-side into bare
+// time ranges — the client never reads the trainer's sessions, which carry
+// other clients' names — and the trainer's answer is what creates a session.
+const callTrainerAvailability = httpsCallable(functions, "trainerAvailability");
+const callRespondToBooking = httpsCallable(functions, "respondToBookingRequest");
 const callListAppRequests = httpsCallable(functions, "listAppRequests");        // S140 admin
 const callSetAppRequestStatus = httpsCallable(functions, "setAppRequestStatus"); // S140 admin
 const callAdminOverview = httpsCallable(functions, "adminOverview"); // admin all-users dashboard (S90)
@@ -21109,7 +21499,7 @@ const COACH_TIPS = [
   "Ask your AI coach to estimate a meal — just describe it or snap a photo.",
 ];
 
-function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPrefs, onSetNotifPrefs, premium = true, billingHold = null }) {
+function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPrefs, onSetNotifPrefs, premium = true, billingHold = null, openCardSetup = false }) {
   // The client's plan lives in their own account as "caliq-self"; today's log is
   // "caliq-log-self-{date}". The client is always on their own account (no remote
   // routing), so we read/write their own window.storage directly.
@@ -21146,6 +21536,42 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
     if (!meUid) return;
     return subscribeMySessions(meUid, setMySessions);
   }, [meUid]);
+
+  // Arrived from the trainer's "save your card" link (S195). The panel needs
+  // the trainer to exist before it can open — a client who signed up through
+  // this link is being linked in the same breath — so this waits for
+  // trainerInfo rather than firing on mount and rendering nothing. `handled`
+  // makes it a one-shot: re-opening should be the person's choice from here on.
+  const [cardIntentDone, setCardIntentDone] = useState(false);
+  // Separate from `cardIntentDone` so the "your trainer asked you to save a
+  // card" banner belongs to THIS opening of the panel. Reusing the one-shot
+  // flag would keep claiming the trainer asked, every later time the person
+  // opened Sessions themselves.
+  const [openedForCard, setOpenedForCard] = useState(false);
+  useEffect(() => {
+    if (!openCardSetup || cardIntentDone) return;
+    if (trainerInfo) { setShowSessions(true); setCardIntentDone(true); setOpenedForCard(true); return; }
+    // No trainer resolved YET. That's the normal case for the person this link
+    // is for: they signed up through it, so they're being linked to the trainer
+    // (RolePanel's invite auto-link) in the same breath — and the lookup that
+    // sets trainerInfo only runs on mount, so it has already missed. Rather
+    // than dropping the intent for exactly that client, re-check for a few
+    // seconds, then give up quietly and leave them on their home screen.
+    let alive = true, tries = 0;
+    const id = setInterval(async () => {
+      if (!alive || ++tries > 10) { clearInterval(id); return; }
+      try {
+        const p = await getProfile();
+        const tUid = p && p.assignedTrainerId;
+        if (!tUid || !alive) return;
+        const t = await getProfile(tUid).catch(() => null);
+        if (!alive) return;
+        clearInterval(id);
+        setTrainerInfo({ uid: tUid, name: (t && (t.displayName || [t.firstName, t.lastName].filter(Boolean).join(" "))) || "Your trainer" });
+      } catch { /* keep trying until the attempts run out */ }
+    }, 1200);
+    return () => { alive = false; clearInterval(id); };
+  }, [openCardSetup, cardIntentDone, trainerInfo]);
 
   // Pay-now (S103): retry a declined session balance from the banner.
   const [hold, setHold] = useState(billingHold);
@@ -21766,8 +22192,9 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
           <NotesPanel mode="client" meUid={meUid} meName={meName} onClose={() => setShowNotes(false)} />
         )}
         {showSessions && trainerInfo && (
-          <SessionsPanel meUid={meUid} role="client" trainerUid={trainerInfo.uid} clientUid={meUid}
-            otherName={trainerInfo.name} onClose={() => setShowSessions(false)} />
+          <SessionsPanel meUid={meUid} meName={meName} role="client" trainerUid={trainerInfo.uid} clientUid={meUid}
+            otherName={trainerInfo.name} focusCard={openedForCard}
+            onClose={() => { setShowSessions(false); setOpenedForCard(false); }} />
         )}
 
         {/* Unpaid session balance after a declined charge (S102b — Kevin's
@@ -24202,11 +24629,108 @@ const defaultSlot = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.
 // paid. Extracted (S186b) so the Sessions panel and the Calendar page edit the
 // SAME controls: duplicated money settings are exactly the thing that drifts
 // into a number shown that isn't the number charged.
+// ─── "Save your card" link (S195) ───────────────────────────────────────────
+//
+// Kevin's goal, stated repeatedly: a client who uses nothing else in Glidna
+// should still be able to do calendar + payments. Until now the card screen was
+// something a client had to find on their own — Sessions, scroll, Payment
+// method — and a trainer had no way to point at it. This is the pointer: a link
+// to text or email.
+//
+// ⚠️ WHAT IS IN THE LINK, AND WHY IT IS SAFE TO FORWARD. It carries the
+// TRAINER's public invite code and nothing else — no client id, no token, no
+// bearer of any kind. It navigates; it does not authorize. The client signs in
+// as themselves and the card attaches to the account that is signed in, so the
+// worst case for a link that ends up in the wrong hands is that a stranger sees
+// the trainer's ordinary signup path. A link that identified the CLIENT would
+// instead let whoever holds it attach a card to someone else's account and
+// start real charges against it — which is why one doesn't exist.
+function CardLinkRow({ meName = "", compact = false }) {
+  const [code, setCode] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { let alive = true; ensureInviteCode().then((c) => { if (alive) setCode(c || ""); }).catch(() => {}); return () => { alive = false; }; }, []);
+
+  const first = (meName || "").trim().split(/\s+/)[0] || "";
+  const link = code ? `${window.location.origin}/card/${code}${first ? `?n=${encodeURIComponent(first)}` : ""}` : "";
+  const blurb = `${first ? `${first} here — ` : ""}save a card in Glidna so your training sessions are handled automatically. You'll see the cancellation terms before you agree, and you can remove the card any time:`;
+
+  const copy = async () => {
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true); setFailed(false); setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Clipboard is blocked in plenty of real situations (an iOS in-app
+      // browser, an insecure origin). Showing the link so it can be selected by
+      // hand beats a button that silently does nothing.
+      setFailed(true);
+    }
+  };
+  const share = async () => {
+    if (!link) return;
+    if (navigator.share) {
+      try { await navigator.share({ title: "Save your card", text: blurb, url: link }); return; }
+      catch (e) { if (e && e.name === "AbortError") return; /* fall through to copy */ }
+    }
+    copy();
+  };
+
+  const btn = "rounded-md border border-border bg-transparent px-2.5 py-1.5 text-xs font-semibold text-fg cursor-pointer disabled:opacity-40";
+  return (
+    <div className={compact ? "" : "rounded-md border border-border bg-bg px-2.5 py-2"}>
+      {!compact && (
+        <div className="mb-1.5 text-[.72rem] text-muted leading-snug">
+          Send this to any client — it opens Glidna straight at the card screen. New clients are linked to you automatically.
+        </div>
+      )}
+      <div className="flex gap-1.5 flex-wrap items-center">
+        <button className={`${btn} inline-flex items-center gap-1.5`} onClick={share} disabled={!link}>
+          <Icon name="card" size={13} color="var(--accent)" />
+          {copied ? "Copied" : "Send card link"}
+        </button>
+        <button className={btn} onClick={copy} disabled={!link}>{copied ? "Copied" : "Copy"}</button>
+      </div>
+      {(failed || (!compact && link)) && (
+        <code className="mt-1.5 block select-all break-all rounded bg-surface2 px-2 py-1 text-[.66rem] text-muted">
+          {link || "…"}
+        </code>
+      )}
+    </div>
+  );
+}
+
 function SessionPolicyEditor({ policyDraft, setPolicyDraft, trainerUid, defaultPriceCents = 0, busy, onSave, onCancel }) {
   const inp = "w-full min-w-0 bg-surface2 border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted";
   const lbl = "mb-1 text-[11px] font-bold uppercase tracking-wide text-muted";
+  const stdDollars = policyDraft.standardPriceCents ? String(policyDraft.standardPriceCents / 100) : "";
   return (
           <div className="mb-3 rounded-lg border border-border bg-surface2 p-3">
+            {/* THE RATE COMES FIRST (S195). Every percentage below is a
+                percentage of this number, so a policy that states a 100%
+                late-cancel fee without ever stating the session price is an
+                equation with a missing term — and it's the term the client
+                actually cares about. Individual sessions keep their own price;
+                this is what a client should normally expect to pay, and it's
+                the number that now appears in the terms they agree to. */}
+            <div className={lbl}>Your standard session price</div>
+            <div className="mb-1 flex items-center gap-2">
+              <span className="text-muted text-[.92rem]">$</span>
+              <input type="number" inputMode="decimal" min="0" step="1" placeholder="85"
+                value={stdDollars}
+                onChange={(e) => setPolicyDraft((d) => ({
+                  ...d,
+                  standardPriceCents: Math.max(0, Math.round((Number(e.target.value) || 0) * 100)),
+                }))}
+                className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none" />
+              <span className="text-[11px] text-muted">per session</span>
+            </div>
+            <div className="mb-3 text-[11px] text-muted leading-snug">
+              {policyDraft.standardPriceCents > 0
+                ? <>New bookings start at this price, and clients see it in the terms they agree to. You can still price any single session differently. <b>Changing it asks existing clients to agree again</b> — they stay on the rate they last agreed to until they do.</>
+                : <>Leave blank if your rate varies. Clients then agree to fees as a percentage of a session price they were never told — stating it is the fairer default.</>}
+            </div>
+
             {/* One switch for the whole question "do I charge for cancellations
                 at all?". It was always possible to say no — pick "any time", or
                 set the percentage to 0 — but only if you already knew that.
@@ -24345,8 +24869,20 @@ function SessionPolicyEditor({ policyDraft, setPolicyDraft, trainerUid, defaultP
                 value={policyDraft.policyNote}
                 onChange={(e) => setPolicyDraft((d) => ({ ...d, policyNote: e.target.value }))} className={inp} />
             </div>
-            <div className="mb-2 rounded-md px-2.5 py-1.5 text-[.74rem]" style={{ background: "rgba(var(--accent-rgb),.08)", color: "var(--text)" }}>
-              Clients will see: “{describePolicy(policyOf({ sessionPolicy: policyDraft }))}”
+            {/* The WHOLE disclosure, not one line of it. This preview used to
+                show describePolicy alone, which is the cancellation sentence —
+                so a trainer could never see the terms their clients actually
+                agree to, and now that the rate lives in there too, the missing
+                lines are the ones about money. This renders the exact array
+                that gets frozen into the consent record. */}
+            <div className="mb-2 rounded-md px-2.5 py-2 text-[.74rem] leading-snug" style={{ background: "rgba(var(--accent-rgb),.08)", color: "var(--text)" }}>
+              <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-muted">What your clients agree to</div>
+              {/* "you", matching how the Sessions panel addresses a trainer —
+                  otherwise a trainer reads their own policy as though someone
+                  else wrote it ("cancelled by your trainer are never charged"). */}
+              {cancellationDisclosure(policyOf({ sessionPolicy: policyDraft }), "you").map((line, i) => (
+                <div key={i} className="flex gap-1.5"><span className="text-muted">·</span><span>{line}</span></div>
+              ))}
             </div>
             <div className="flex gap-1.5">
               <button onClick={onSave} disabled={busy}
@@ -24358,10 +24894,151 @@ function SessionPolicyEditor({ policyDraft, setPolicyDraft, trainerUid, defaultP
   );
 }
 
-function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultPriceCents = 0, onClose }) {
+// ─── A client asks their trainer for a time (S195) ──────────────────────────
+//
+// The point of this whole feature, in Kevin's words: a client who uses nothing
+// else in Glidna — no plan, no logging, no AI — can still see when their
+// trainer is free, ask for a slot, and pay. So this reads no plan and requires
+// nothing but a trainer link.
+//
+// ⚠️ ASKING IS NOT BOOKING. This sends a request; only the trainer's accept
+// creates a session (and therefore a charge). And the free/busy it shows is
+// derived server-side into anonymous time ranges — the client never reads the
+// trainer's sessions, because those carry other clients' names.
+function AskForTime({ trainerUid, trainerName, onSent }) {
+  const [when, setWhen] = useState(() => calToLocalInput(Date.now() + 86400000));
+  const [durationMin, setDurationMin] = useState("60");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [sent, setSent] = useState(false);
+  const [avail, setAvail] = useState(null);   // null = not loaded, {visible, busy[]}
+
+  const dayPart = String(when || "").split("T")[0];
+  // Only the chosen day is fetched, and only when the day changes — a booking
+  // screen that re-queries on every keystroke would spend a call per digit.
+  useEffect(() => {
+    if (!trainerUid || !dayPart) return;
+    let alive = true;
+    const from = new Date(`${dayPart}T00:00:00`).getTime();
+    if (!Number.isFinite(from)) return;
+    callTrainerAvailability({ trainerUid, from, to: from + 86400000 })
+      .then((r) => { if (alive) setAvail(r.data || null); })
+      .catch(() => { if (alive) setAvail(null); });   // silent: it's a convenience, not the feature
+    return () => { alive = false; };
+  }, [trainerUid, dayPart]);
+
+  const startAt = new Date(when).getTime();
+  const durMin = Math.round(Number(durationMin) || 60);
+  const endAt = startAt + durMin * 60000;
+  // Does the slot they picked collide with something? Advisory only — the
+  // trainer decides, and they can always say yes to an overlap they know about.
+  const clashes = !!(avail && avail.visible && Number.isFinite(startAt)
+    && (avail.busy || []).some((b) => startAt < b.end && endAt > b.start));
+
+  const send = async () => {
+    if (busy) return;
+    if (!Number.isFinite(startAt)) { setErr("Pick a date and time."); return; }
+    if (startAt < Date.now()) { setErr("Pick a time in the future."); return; }
+    setBusy(true); setErr("");
+    try {
+      const pretty = new Date(startAt).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      await callSendTrainerRequest({
+        type: "booking",
+        prompt: `Can we train ${pretty}? (${durMin} min)${note.trim() ? ` — ${note.trim()}` : ""}`,
+        booking: { startAt, durationMin: durMin },
+      });
+      setSent(true); setNote("");
+      if (onSent) onSent();
+    } catch (e) {
+      setErr((e && e.message) || "Couldn't send that — try again.");
+    } finally { setBusy(false); }
+  };
+
+  const inp = "w-full min-w-0 bg-surface2 border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted";
+  const lbl = "mb-1 text-[11px] font-bold uppercase tracking-wide text-muted";
+
+  if (sent) {
+    return (
+      <div className="mb-3 rounded-lg border px-3 py-2.5" style={{ borderColor: "var(--border)", background: "var(--s2)" }}>
+        <div className="text-[.84rem] font-semibold text-success">Sent to {trainerName || "your trainer"}.</div>
+        <div className="mt-1 text-[.74rem] text-muted leading-snug">
+          They'll confirm or suggest another time — you'll get a notification either way, and nothing
+          is booked or charged until they say yes.
+        </div>
+        <button onClick={() => setSent(false)}
+          className="mt-2 rounded-md border border-border bg-transparent px-2.5 py-1.5 text-xs font-semibold text-fg cursor-pointer">
+          Ask for another time
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-3 rounded-lg border px-3 py-2.5" style={{ borderColor: "var(--border)", background: "var(--s2)" }}>
+      <div className="text-[11px] font-bold uppercase tracking-wide text-muted mb-1.5">Ask for a time</div>
+      <div className="mb-2">
+        <div className={lbl}>When</div>
+        <WhenPicker value={when} onChange={setWhen} inp={inp} />
+      </div>
+      <div className="mb-2">
+        <div className={lbl}>How long</div>
+        <select className={inp} value={durationMin} onChange={(e) => setDurationMin(e.target.value)}>
+          {[30, 45, 60, 75, 90].map((m) => <option key={m} value={String(m)}>{m} minutes</option>)}
+        </select>
+      </div>
+
+      {avail && avail.visible && (
+        <div className="mb-2 text-[.72rem] leading-snug">
+          {(avail.busy || []).length === 0 ? (
+            <span className="text-success">{trainerName || "Your trainer"} looks free all day.</span>
+          ) : (
+            <span className="text-muted">
+              Already busy: {(avail.busy || []).slice(0, 6).map((b) =>
+                `${calTimeLabel(b.start)}–${calTimeLabel(b.end)}`).join(" · ")}
+            </span>
+          )}
+        </div>
+      )}
+      {clashes && (
+        <div className="mb-2 text-[.72rem] text-warn">
+          That overlaps something already on their calendar — you can still ask, they'll say.
+        </div>
+      )}
+
+      <div className="mb-2">
+        <div className={lbl}>Anything to add (optional)</div>
+        <input className={inp} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Legs, if you have space" />
+      </div>
+      {err && <div className="mb-2 text-xs text-danger">{err}</div>}
+      <button onClick={send} disabled={busy}
+        className="w-full rounded-lg px-4 py-2.5 text-sm font-bold cursor-pointer border-0 bg-primaryfill text-primaryfg disabled:opacity-50">
+        {busy ? "Sending…" : "Ask for this time"}
+      </button>
+      <div className="mt-1.5 text-[.68rem] text-muted leading-snug">
+        This is a request, not a booking — nothing goes on your calendar, and nothing is charged,
+        until {trainerName || "your trainer"} confirms.
+      </div>
+    </div>
+  );
+}
+
+function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherName, defaultPriceCents = 0, focusCard = false, onClose }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);
   const isTrainer = meUid === trainerUid;
+  // Opened from a trainer's "save your card" link: put the card section on
+  // screen rather than leaving the person to scroll past sessions and policy
+  // looking for the thing they were sent here to do.
+  const cardSectionRef = useRef(null);
+  useEffect(() => {
+    if (!focusCard || !cardSectionRef.current) return;
+    const id = setTimeout(() => {
+      try { cardSectionRef.current.scrollIntoView({ behavior: "smooth", block: "center" }); }
+      catch { /* older browsers just leave it where it is */ }
+    }, 220); // let the panel finish opening first, or the scroll lands on nothing
+    return () => clearTimeout(id);
+  }, [focusCard]);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -24442,7 +25119,11 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
   // the two objects have diverged and somebody should say so out loud.
   const policyDrifted = useMemo(() => {
     if (!consentPolicy) return false;
-    return ["cancelType", "cancelWindowHours", "lateCancelChargePct", "noShowChargePct"]
+    // Must match the FIELDS list in functions/sessionBilling.js
+    // onSessionPolicyChanged — that trigger decides who gets TOLD the terms
+    // moved, and this decides who gets SHOWN it in the app. If the two lists
+    // disagree, a client is pushed about a change the screen then denies.
+    return ["cancelType", "cancelWindowHours", "lateCancelChargePct", "noShowChargePct", "billingMode", "standardPriceCents", "policyNote"]
       .some((k) => govPolicy[k] !== policy[k]);
   }, [consentPolicy, govPolicy, policy]);
 
@@ -24511,9 +25192,12 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
     setBusy(false);
   };
 
+  // Same rule as the calendar: the trainer's stated rate is the default, so a
+  // session booked here can't quietly differ from the terms the client agreed to.
+  const newPriceCents = policy.standardPriceCents > 0 ? policy.standardPriceCents : defaultPriceCents;
   const openNew = () => { setEditingId(null); setErr(""); setForm({
     when: toLocalInput(defaultSlot()), durationMin: String(SESSION_DEFAULT_MIN),
-    title: "", location: "", price: defaultPriceCents ? String(defaultPriceCents / 100) : "" }); };
+    title: "", location: "", price: newPriceCents ? String(newPriceCents / 100) : "" }); };
   const openEdit = (s) => { setEditingId(s.id); setErr(""); setForm({
     when: toLocalInput(s.startAt), durationMin: String(s.durationMin || SESSION_DEFAULT_MIN),
     title: s.title || "", location: s.location || "", price: s.priceCents ? String(s.priceCents / 100) : "" }); };
@@ -24526,6 +25210,10 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
     if (!(durationMin > 0 && durationMin <= 480)) { setErr("Length must be between 1 and 480 minutes."); return; }
     const priceCents = Math.round((Number(form.price) || 0) * 100);
     if (priceCents < 0) { setErr("Price can't be negative."); return; }
+    // Same bound as the calendar — both booking paths must agree, or the cap is
+    // just a suggestion the other screen ignores.
+    const backdate = backdateProblem(startAt);
+    if (backdate) { setErr(backdate); return; }
     setBusy(true); setErr("");
     try {
       if (editingId) {
@@ -24771,6 +25459,13 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
           </div>
         </div>
 
+        {/* A client asks for a time (S195). Above the card on purpose: wanting
+            a session is what brings someone here, and the card is what makes it
+            work afterwards. */}
+        {!isTrainer && (
+          <AskForTime trainerUid={trainerUid} trainerName={otherName} />
+        )}
+
         {/* ── Payment method (S101) ─────────────────────────────────────────
             CLIENT: save/remove the card sessions are billed to. The consent
             checkbox sits DIRECTLY under the policy above — the agreement and
@@ -24782,7 +25477,8 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
             money. Otherwise the client would hand over a card that can never be
             charged. Booking above stays available either way. */}
         {!isTrainer && canBillSessions(trainerUid) && (
-          <div className="mb-3 rounded-lg border px-3 py-2" style={{ borderColor: "var(--border)", background: "var(--s2)" }}>
+          <div ref={cardSectionRef} className="mb-3 rounded-lg border px-3 py-2 transition-colors"
+            style={{ borderColor: focusCard && !myCard ? "var(--accent)" : "var(--border)", background: "var(--s2)" }}>
             <div className="text-[11px] font-bold uppercase tracking-wide text-muted mb-1">Payment method</div>
             {myCard ? (
               <>
@@ -24810,6 +25506,18 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
               </>
             ) : (
               <>
+                {/* Arrived from the trainer's link, so say why they're here.
+                    Without this the screen is a payment form someone landed on
+                    from a text message, which is the shape of every phishing
+                    page ever sent — naming the trainer and what happens next is
+                    what makes it read as expected rather than suspicious. */}
+                {focusCard && (
+                  <div className="mb-2 rounded-md px-2.5 py-2 text-[.76rem] leading-snug text-fg"
+                    style={{ background: "rgba(var(--accent-rgb),.1)" }}>
+                    <b>{otherName || "Your trainer"} asked you to save a card.</b> Read the terms above,
+                    then continue — the card is entered on Stripe's page, and you can remove it whenever you like.
+                  </div>
+                )}
                 <div className="text-[.76rem] text-muted leading-snug mb-2">
                   Save a card to cover sessions and any fees from the policy above — no more chasing payments after training.
                 </div>
@@ -24842,8 +25550,13 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
               {clientCard
                 ? <span><b className="text-fg">Card on file</b> — {(clientCard.brand || "card").toUpperCase()} ····{clientCard.last4}
                     {clientCard.billingState ? <span>{` · billed in ${clientCard.billingState}`}</span> : null}</span>
-                : <span>No card on file yet — {otherName || "your client"} can add one from their Sessions screen.</span>}
+                : <span>No card on file yet — send {otherName || "your client"} the link below and it takes them straight there.</span>}
             </div>
+            {/* The fix, at the moment the problem is visible (S195). "They can
+                add one from their Sessions screen" was true and useless: it
+                described a screen the client has to go find, with no way for
+                the trainer to point at it. */}
+            {!clientCard && <CardLinkRow meName={meName} />}
             {/* Client-state readiness (S105b) — informational only, never a gate.
                 Surfaces where a client's card is billed so a trainer sees whether a
                 (possibly remote) client is out-of-state BEFORE prepaid packs ship. */}
@@ -26847,6 +27560,11 @@ export default function App() {
   const [meEmail, setMeEmail] = useState(""); // current user's email (for the menu)
   const [meTrial, setMeTrial] = useState(null); // trial countdown state (or null)
   const [meBillingHold, setMeBillingHold] = useState(null); // unpaid session balance after a declined charge (S102b)
+  // Arrived from a trainer's "save your card" link (S195). Read once, from the
+  // stash written at import time, so it survives the sign-up round trip. It is
+  // an intent flag only — who the card is for comes from the invite link beside
+  // it, and the card attaches to whoever is signed in right now.
+  const [wantSaveCard] = useState(takeSaveCardIntent);
   // Appearance (S95): the inline script in index.html already painted the theme
   // before first paint; this just mirrors the stored pref so the menu can show it.
   const [themePref, setThemePref] = useState(readThemePref);
@@ -28428,7 +29146,7 @@ export default function App() {
       return <>{chrome}<ClientHome onOpenPlan={() => selectProfile("self")}
         onOpenTimeline={async () => { requestPlanTab("Timeline"); await selectProfile("self"); setShowDash(false); }}
         meUid={meUid} meName={meName} role={role} premium={mePremium}
-        billingHold={meBillingHold}
+        billingHold={meBillingHold} openCardSetup={wantSaveCard}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs} /></>;
     }
     if (isTrainerHome && homeTab === "analytics") {
