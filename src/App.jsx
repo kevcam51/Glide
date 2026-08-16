@@ -10678,8 +10678,12 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
               {fmtSessionTime(s.startAt)}
               <span style={{ color: "var(--muted)", fontWeight: 400 }}>{` · ${s.durationMin || SESSION_DEFAULT_MIN} min`}</span>
             </span>
+            {/* ALWAYS say what this is. Title and location are both optional,
+                so an untitled session rendered as a bare "5:30 PM · 30 min"
+                with no indication of what it even was. A calendar entry you
+                can't identify is worse than no entry. (S193) */}
             <span style={{ color: "var(--muted)" }}>
-              {[s.title, s.location].filter(Boolean).join(" · ")}
+              {[s.title || "Training session", s.location].filter(Boolean).join(" · ")}
               {isPastSession(s) ? <span style={{ color: "var(--green)", fontWeight: 700 }}> · done</span> : null}
             </span>
           </div>
@@ -17697,7 +17701,14 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
                         <div className={`text-[.66rem] font-bold leading-tight truncate ${cancelled ? "line-through text-muted" : "text-fg"}`}>
                           {nameOf(s.clientUid)}
                         </div>
-                        <div className="text-[.6rem] text-muted leading-tight truncate">{calTimeLabel(s.startAt)}</div>
+                        {/* Time and title share the second line. A block is only
+                            as tall as the session is long, so a 30-minute slot
+                            has room for one more line and no more — spending it
+                            on the time alone left an untitled-vs-titled session
+                            looking identical. (S193) */}
+                        <div className="text-[.6rem] text-muted leading-tight truncate">
+                          {calTimeLabel(s.startAt)}{s.title ? ` · ${s.title}` : ""}
+                        </div>
                       </button>
                     );
                   })}
