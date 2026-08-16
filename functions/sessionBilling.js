@@ -33,8 +33,10 @@
 // only the two-letter STATE code off the saved card. A state is not an address.
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
+const { sendPushTo, VAPID_PRIVATE_KEY } = require("./push");
 
 const { canBillSessions, BILLING_UNAVAILABLE_MSG } = require("./sessionBillingGate");
 
@@ -396,6 +398,57 @@ exports.reconsentSessionPolicy = onCall(
     }, { merge: true });
 
     return { ok: true, agreedAt: now };
+  },
+);
+
+// ─── 2c. TELL CLIENTS WHEN THE TERMS CHANGE (S194) ─────────────────────────
+//
+// Re-consent is worthless if nobody knows there is anything to re-consent to.
+// Without this, a client would only discover changed terms by happening to open
+// the Sessions screen — so the trainer's policy and the client's agreement could
+// sit apart indefinitely, which is the situation the whole consent record exists
+// to prevent.
+//
+// A TRIGGER, not a call from the app, deliberately: the notification then cannot
+// be skipped by a client that crashed, lost signal, or simply wasn't updated.
+// The write to the trainer's profile IS the event.
+//
+// Only clients who have ALREADY AGREED to something are notified — someone with
+// no card has nothing to re-agree to and will meet the current terms at card
+// setup, so pinging them would be noise about a decision they haven't made yet.
+exports.onSessionPolicyChanged = onDocumentUpdated(
+  { document: "users/{uid}", region: REGION, secrets: [VAPID_PRIVATE_KEY], maxInstances: 3 },
+  async (event) => {
+    const before = (event.data && event.data.before && event.data.before.data()) || {};
+    const after = (event.data && event.data.after && event.data.after.data()) || {};
+    const trainerUid = event.params.uid;
+
+    // Only the terms that decide money. billingMode is deliberately included:
+    // "when you'll be charged" is part of what someone agreed to.
+    const FIELDS = ["cancelType", "cancelWindowHours", "lateCancelChargePct", "noShowChargePct", "billingMode", "policyNote"];
+    const a = before.sessionPolicy || {}, b = after.sessionPolicy || {};
+    if (!FIELDS.some((k) => String(a[k] ?? "") !== String(b[k] ?? ""))) return;
+
+    const db = admin.firestore();
+    const name = after.displayName || [after.firstName, after.lastName].filter(Boolean).join(" ") || "Your trainer";
+    const snap = await db.collection("users").where("assignedTrainerId", "==", trainerUid).limit(200).get();
+    let notified = 0;
+    await Promise.all(snap.docs.map(async (d) => {
+      const c = d.data() || {};
+      // Already-agreed clients only, and only where the terms they hold actually
+      // differ from the new ones — a cosmetic edit that lands back on the same
+      // numbers should not ask anyone to re-agree to what they already accepted.
+      const held = c.sessionConsentPolicy;
+      if (!held || !c.sessionPaymentMethod || !c.sessionPaymentMethod.id) return;
+      if (!FIELDS.some((k) => String(held[k] ?? "") !== String(b[k] ?? ""))) return;
+      await sendPushTo(db, d.id, {
+        title: `${name} updated their payment terms`,
+        body: "Open Sessions to see what changed and agree to the new terms. You stay on your current terms until you do.",
+        tag: "session-policy-changed", url: "/",
+      }, "sessionBilling").catch(() => {});
+      notified++;
+    }));
+    if (notified) console.log("onSessionPolicyChanged", JSON.stringify({ trainerUid, notified }));
   },
 );
 

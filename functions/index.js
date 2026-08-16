@@ -168,6 +168,7 @@ exports.createSessionSetupIntent = require("./sessionBilling").createSessionSetu
 exports.recordSessionConsent = require("./sessionBilling").recordSessionConsent;
 exports.removeSessionCard = require("./sessionBilling").removeSessionCard;
 exports.reconsentSessionPolicy = require("./sessionBilling").reconsentSessionPolicy;
+exports.onSessionPolicyChanged = require("./sessionBilling").onSessionPolicyChanged;
 // The settle dispatcher (S101c): hourly sweep + Kevin's manual/dry-run trigger.
 exports.sessionsSettle = require("./sessionSettle").sessionsSettle;
 exports.settleNow = require("./sessionSettle").settleNow;
