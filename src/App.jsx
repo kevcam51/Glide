@@ -10660,6 +10660,10 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
     } finally { setBookBusy(false); }
   };
 
+  // Whose plan this calendar belongs to — used to name sessions when a trainer
+  // is looking at a client's calendar. Comes off the plan itself, which is the
+  // only identity this component has; it never loads the roster.
+  const planOwnerName = `${data.firstName || ""} ${data.lastName || ""}`.trim();
   const sessionsBlock = (k) => {
     const list = sessionsOnDay[k] || [];
     if (!list.length && !canBookHere) return null;
@@ -10678,12 +10682,16 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
               {fmtSessionTime(s.startAt)}
               <span style={{ color: "var(--muted)", fontWeight: 400 }}>{` · ${s.durationMin || SESSION_DEFAULT_MIN} min`}</span>
             </span>
-            {/* ALWAYS say what this is. Title and location are both optional,
+            {/* ALWAYS say WHO and WHAT. Title and location are both optional,
                 so an untitled session rendered as a bare "5:30 PM · 30 min"
-                with no indication of what it even was. A calendar entry you
-                can't identify is worse than no entry. (S193) */}
+                with no indication of what it even was, or who it was with. A
+                calendar entry you can't identify is worse than no entry.
+                The name is shown when a TRAINER is viewing a client's plan
+                (peerUid set) — on the client's own calendar every session is
+                theirs, so naming them back at themselves would be noise. (S196) */}
             <span style={{ color: "var(--muted)" }}>
-              {[s.title || "Training session", s.location].filter(Boolean).join(" · ")}
+              {[peerUid ? (planOwnerName || "Your client") : null, s.title || "Training session", s.location]
+                .filter(Boolean).join(" · ")}
               {isPastSession(s) ? <span style={{ color: "var(--green)", fontWeight: 700 }}> · done</span> : null}
             </span>
           </div>
@@ -17786,7 +17794,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
   );
 
   return (
-    <div className="min-h-screen bg-bg text-fg" data-theme="pro" style={{ fontFamily: "var(--font-sans)" }}>
+    <div className="min-h-screen bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <style>{css}</style>
       <div className="flex items-center justify-center px-14 border-b border-border" style={{ paddingTop: "env(safe-area-inset-top,0px)", minHeight: "calc(74px + env(safe-area-inset-top,0px))" }}>
         <BrandLogo />
@@ -17913,7 +17921,7 @@ function CalSessionSheet({ session: s, nameOf, now, busy, meUid, onClose, onEdit
   const btn = "rounded-md border border-border bg-transparent px-2.5 py-1.5 text-xs font-semibold text-fg cursor-pointer disabled:opacity-40";
 
   return createPortal(
-    <div onClick={onClose} data-theme="pro" style={{ fontFamily: "var(--font-sans)" }}
+    <div onClick={onClose} style={{ fontFamily: "var(--font-sans)" }}
       className="fixed inset-0 z-[1600] flex items-end sm:items-center justify-center bg-black/60 px-4 py-6">
       <div onClick={(e) => e.stopPropagation()}
         className="w-full max-w-[440px] rounded-card border border-border bg-surface p-4 text-fg">
@@ -18057,7 +18065,7 @@ function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit,
   const repeating = form.repeat !== "none" && !form.id;
 
   return createPortal(
-    <div onClick={onClose} data-theme="pro" style={{ fontFamily: "var(--font-sans)" }}
+    <div onClick={onClose} style={{ fontFamily: "var(--font-sans)" }}
       className="fixed inset-0 z-[1600] flex items-end sm:items-center justify-center bg-black/60 px-4 py-6">
       <div onClick={(e) => e.stopPropagation()}
         className="w-full max-w-[440px] max-h-[86vh] overflow-auto rounded-card border border-border bg-surface p-4 text-fg">
@@ -23114,7 +23122,7 @@ function ReferralPanel({ open, onClose, role }) {
     : { t: "Signed up", c: "var(--muted)" };
 
   return createPortal(
-    <div data-theme="pro" className="fixed inset-0 z-[1520] overflow-y-auto bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
+    <div className="fixed inset-0 z-[1520] overflow-y-auto bg-bg text-fg" style={{ fontFamily: "var(--font-sans)" }}>
       <div className="mx-auto max-w-[560px] px-4 pb-24" style={{ paddingTop: "calc(18px + env(safe-area-inset-top,0px))" }}>
         <div className="mb-4 relative flex items-center justify-center px-[92px]">
           <div className="font-display text-[1.15rem] font-extrabold flex items-center gap-2">
@@ -23317,7 +23325,7 @@ function MealPlannerPanel({ open, onClose, role, locked, savedFoods, recentFoods
     .filter((x,i,arr)=>x&&x.name&&arr.findIndex(y=>y.name===x.name)===i).slice(0,8);
 
   return createPortal(
-    <div data-theme="pro" className="fixed inset-0 z-[1520] overflow-y-auto bg-bg text-fg" style={{fontFamily:"var(--font-sans)"}}>
+    <div className="fixed inset-0 z-[1520] overflow-y-auto bg-bg text-fg" style={{fontFamily:"var(--font-sans)"}}>
       <div className="mx-auto max-w-[640px] px-4 pb-24" style={{paddingTop:"calc(18px + env(safe-area-inset-top,0px))"}}>
         <div className="mb-4 relative flex items-center justify-center px-[92px]">
           <div className="font-display text-[1.15rem] font-extrabold flex items-center gap-2">
@@ -24674,7 +24682,7 @@ function SessionsPanel({ meUid, role, trainerUid, clientUid, otherName, defaultP
   );
 
   return createPortal(
-    <div onClick={onClose} data-theme="pro"
+    <div onClick={onClose}
       style={{ fontFamily: "var(--font-sans)",
         paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
         paddingBottom: "calc(16px + env(safe-area-inset-bottom,0px))" }}
@@ -25966,7 +25974,7 @@ function TeamPanel({ onClose }) {
   const ghost = "rounded-lg border border-border bg-transparent px-3 py-2 text-xs font-semibold text-fg cursor-pointer disabled:opacity-60";
 
   return createPortal(
-    <div onClick={onClose} data-theme="pro"
+    <div onClick={onClose}
       style={{ fontFamily: "var(--font-sans)", paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
         paddingBottom: "calc(16px + env(safe-area-inset-bottom,0px))" }}
       className="fixed inset-0 z-[1500] flex items-start justify-center bg-black/60 px-4 overflow-auto">
@@ -28389,7 +28397,7 @@ export default function App() {
       {/* Card-setup outcome (S101) — the one moment the client returns from
           Stripe's hosted page with no panel open to report into. */}
       {cardNotice && createPortal(
-        <div data-theme="pro" style={{ position: "fixed", left: "50%", transform: "translateX(-50%)",
+        <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)",
           top: "calc(64px + env(safe-area-inset-top,0px))", zIndex: 3000, maxWidth: "min(92vw, 480px)",
           padding: "11px 16px", borderRadius: 12, border: "1px solid var(--accent,#08dce0)",
           background: "var(--surface,#121b1e)", color: "var(--text,#eafcfc)",
