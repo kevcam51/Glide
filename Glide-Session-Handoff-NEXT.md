@@ -1,5 +1,59 @@
 # Glidna — Next-Session Handoff (start here)
 
+## ▶️ START HERE (S195) — four things, in this order
+
+Everything below is DECIDED. Don't re-litigate; build it.
+
+### 1. "Save your card" link a trainer can send (highest value — unblocks standalone clients)
+Kevin's goal, stated repeatedly: **a client who uses nothing else in Glidna should still be able to
+do calendar + payments.** Today a client must find Sessions → Save card on their own, and a trainer
+has no way to point them at it. Build a copy-paste link for text/email/in-app.
+
+⚠️ **The link must carry the TRAINER's identity, never the client's, and never a bearer token that
+saves a card on someone's behalf.** The client authenticates as themselves; the link only navigates.
+Anything else is a link that, if forwarded, attaches a stranger's card to the wrong account.
+
+- Mirror the invite pattern that already works: `api/invite.js` + the `/i/:code` rewrite in
+  `vercel.json` (S81). A `/card/:code` route → `?savecard=<trainerInviteCode>` is the same shape.
+- Handle both states: an existing client deep-links straight to the card sheet; a new one signs up,
+  links to the trainer by that code, and lands on the card sheet after.
+- Put "Copy card link" on the trainer's client card next to Message, and offer Web Share like the
+  Invite Hub does.
+
+### 2. Per-session PRICE in the policy (Kevin: protect the company, and let clients know what they're signing up for)
+Add a standard rate to `sessionPolicy` (e.g. `standardPriceCents`), show it in
+`cancellationDisclosure`, and — the load-bearing part — **add it to the change-detection list in
+`onSessionPolicyChanged` (functions/sessionBilling.js) so a rate change triggers re-consent** exactly
+like a fee change. Individual sessions keep their own `priceCents` for one-offs.
+
+### 3. Back-dated sessions — DECIDED: warn + notify, no separate "charge now" button
+A trainer can book a session in the past. Before saving, warn plainly: *"This is in the past. Casey
+will be charged $85 under their current terms, and they'll be told you added it."* Then notify the
+client — not as courtesy but because a charge for a session booked after the fact, silently, is the
+most disputable thing this system could do. Cap how far back (~14 days).
+❌ **No separate "charge now" path.** It bypasses the cadence the client agreed to and creates a
+SECOND charging path — which is exactly what produced the S185 double-charge cluster. Back-dating
+rides the normal sweep.
+
+### 4. Then the booking loop + calendar colours
+The booking-loop spec is the "🔜 NEXT BUILD" section below (free/busy, request → accept/deny, monthly
+repeat). Colours: let a trainer pick per-client colours; store them in the TRAINER'S OWN kv
+(`caliq-cal-colors`) so it needs no rules change — `calColorFor` already auto-assigns, this just
+overrides it.
+
+### State as of S195 — all deployed and pushed (`97cd04a` + this)
+- Session reminders (multi lead times) — verified firing twice in prod.
+- Calendar subscription feed (Google/Apple/Outlook) — verified.
+- Re-consent flow + `onSessionPolicyChanged` push — **both live**, not yet exercised end to end.
+- Booking date/time is now picked, not typed; sessions always show what they are.
+- `trainerBlocks` rules PUBLISHED (223 tests) — the collection exists but nothing writes to it yet.
+
+### Kevin's live smoke test — CHECK THIS FIRST
+He booked a real session Friday on his own account. **Weekly billing settles Sunday ≥18:00 ET**, so
+the charge should have landed Sunday evening. If Stripe shows nothing, trace it — the sweep logs a
+reason every run (`no-card`, `awaiting-sunday`, `billing-not-enabled`, `manual-mode`).
+
+
 ## 🔜 NEXT BUILD — client self-booking + drive time (Kevin's spec + decisions, S190)
 
 **Not started. Kevin has DECIDED the open questions — don't re-ask them.**
