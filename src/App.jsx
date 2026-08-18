@@ -18164,6 +18164,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
       )}
       {form && (
         <CalBookingSheet form={form} setForm={setForm} clients={clients} busy={busy} err={err}
+          canBill={canBillSessions(meUid)}
           onClose={() => { setForm(null); setErr(""); }} onSubmit={submit} nameOf={nameOf} />
       )}
     </div>
@@ -18389,12 +18390,17 @@ function CalBlockSheet({ block: b, busy, onClose, onDelete }) {
   );
 }
 
-function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit, nameOf }) {
+function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit, nameOf, canBill = false }) {
   const inp = "w-full min-w-0 bg-surface2 border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted";
   const lbl = "mb-1 text-[11px] font-bold uppercase tracking-wide text-muted";
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const isBlock = !form.id && form.kind === "block";
   const repeating = form.repeat !== "none" && !form.id && !isBlock;
+  // Card status comes off the client profile the roster already loaded — a
+  // trainer may read their own clients' profiles, so this costs no extra read.
+  const bookingClient = clients.find((c) => c.uid === form.clientUid) || null;
+  const cardOnFile = !!(bookingClient && bookingClient.sessionPaymentMethod && bookingClient.sessionPaymentMethod.id);
+  const clientLabel = form.clientUid ? nameOf(form.clientUid) : "This client";
 
   // Is the chosen time already gone, and what would that mean? Recomputed on
   // every keystroke so the warning tracks the date picker rather than appearing
@@ -18500,6 +18506,22 @@ function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit,
             so at the moment it would happen rather than in a support email. */}
         {!isBlock && !(Number(form.price) > 0) && (
           <div className="mb-2.5 text-[.72rem] text-warn">No price set — this session won't be billed.</div>
+        )}
+        {/* NO CARD ON FILE (Kevin, S196c). The settle sweep parks an uncharged
+            session as `no-card` and tells nobody — so a trainer could book,
+            deliver, and never be paid, with the only trace a line in Cloud
+            Logging. This is that fact moved to the moment it can still be acted
+            on. Shown ONLY when there is money at stake: this trainer can
+            actually bill, a price is set, and THIS client has no card. It never
+            blocks the booking — plenty of sessions are settled in cash, and a
+            warning that stops you is a warning you learn to click past. */}
+        {canBill && !isBlock && Number(form.price) > 0 && !cardOnFile && (
+          <div className="mb-2.5 rounded-md px-2.5 py-2 text-[.72rem] leading-snug"
+            style={{ background: "rgba(251,191,36,.10)", color: "var(--text)" }}>
+            <b>{clientLabel} has no card on file.</b> This books fine, but nothing can be charged
+            for it until they save one. Send them the card link from their client card
+            (Clients → Card link).
+          </div>
         )}
         {/* BACK-DATING, SAID PLAINLY (S195). Adding a session that already
             happened charges a real card for work the client didn't watch you
@@ -19092,11 +19114,22 @@ function FeatureMatrix({ isTrainer }) {
   const tiers = ["Free", "Connect", isTrainer ? "Coach" : "Premium", isTrainer ? "Coach Elite" : "Elite"];
   const [whatsManual, setWhatsManual] = useState(false); // ⓘ "what counts as manual logging"
   const [openTip, setOpenTip] = useState(null);  // \u24d8 per-row explainer (S178h), one at a time
+  // ⚠️ A TEXT CELL MUST NEVER WRAP. The column is a fixed 46px, and any value
+  // longer than about five characters ("Unlimited", "450k/day") wrapped inside
+  // it — three adjacent columns each breaking mid-word read as one stack of
+  // broken text rather than three values, which is exactly what the first row
+  // of the coach grid looked like. Text now stays on one line and steps down in
+  // size as it gets longer, so a long value shrinks instead of shattering.
+  const textSize = (v) => {
+    const n = String(v).length;
+    return n <= 4 ? ".68rem" : n <= 6 ? ".62rem" : n <= 9 ? ".55rem" : ".5rem";
+  };
   const cell = (v, i) => (
     <div key={i} className="flex items-center justify-center" style={{ width: "46px", flexShrink: 0 }}>
       {v === true ? <Icon name="check" size={14} color="var(--color-primary)" />
         : v === false ? <span className="text-muted" style={{ fontSize: ".72rem", opacity: .5 }}>—</span>
-        : <span className={i === 0 ? "text-muted" : "text-fg"} style={{ fontSize: ".68rem", fontWeight: 700 }}>{v}</span>}
+        : <span className={i === 0 ? "text-muted" : "text-fg"}
+            style={{ fontSize: textSize(v), fontWeight: 700, whiteSpace: "nowrap", lineHeight: 1.2 }}>{v}</span>}
     </div>
   );
   return (
