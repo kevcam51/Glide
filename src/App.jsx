@@ -18355,7 +18355,7 @@ function CalBlockSheet({ block: b, busy, onClose, onDelete }) {
   const [confirm, setConfirm] = useState(false);
   const btn = "rounded-md border border-border bg-transparent px-2.5 py-1.5 text-xs font-semibold text-fg cursor-pointer disabled:opacity-40";
   return createPortal(
-    <div onClick={onClose} data-theme="pro" style={{ fontFamily: "var(--font-sans)" }}
+    <div onClick={onClose} style={{ fontFamily: "var(--font-sans)" }}
       className="fixed inset-0 z-[1600] flex items-end sm:items-center justify-center bg-black/60 px-4 py-6">
       <div onClick={(e) => e.stopPropagation()}
         className="w-full max-w-[440px] rounded-card border border-border bg-surface p-4 text-fg">
