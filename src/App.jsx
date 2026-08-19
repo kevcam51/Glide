@@ -16011,6 +16011,9 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         weight: latestWeighIn ? latestWeighIn.weight : (data ? data.weightLbs : ""),
         goal: data ? data.goalWeight : "",
         target: cal ? cal.target : null, lastLogDate, requests,
+        // Whether this person can be charged at all. Comes free with the
+        // profile the roster already read.
+        hasCard: !!(c.sessionPaymentMethod && c.sessionPaymentMethod.id),
         plans: manifest.plans, activePlanId: activeId };
     }));
     setClients(rows);
@@ -16617,6 +16620,24 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                             transform: manageFor === c.uid ? "rotate(180deg)" : "rotate(0deg)", fontSize:".7em", opacity:.8 }}>▾</span>
                         </button>
                       </div>
+                      {/* NO CARD, SAID WHERE THE CLIENT IS (Kevin, S196d).
+                          The link used to live only behind this button, so the
+                          one fact that decides whether this person can ever be
+                          charged was invisible until you went looking for it.
+                          Now a client who can't be billed says so on their own
+                          card, with the fix attached — and it appears only for
+                          a trainer who can actually take money, and only for a
+                          client who hasn't saved one. */}
+                      {canBillSessions(meUid) && !c.hasCard && cardLinkFor !== c.uid && (
+                        <div className="mt-2 rounded-md px-2.5 py-2"
+                          style={{ background: "rgba(251,191,36,.10)" }}>
+                          <div className="text-[.72rem] leading-snug text-fg mb-1.5">
+                            <b>No card on file.</b> {c.name} can be booked, but nothing can be charged
+                            until they save one.
+                          </div>
+                          <CardLinkRow meName={meName} compact />
+                        </div>
+                      )}
                       {cardLinkFor === c.uid && (
                         <div className="mt-2">
                           <CardLinkRow meName={meName} />
@@ -17199,6 +17220,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
         : (c.displayName || c.email || "Client");
       return { uid: c.uid, name: nm, hasPlan: !!data, cur, goal, start, lbsLost, onTrack,
         ratePerWeek: trend ? trend.ratePerWeek : null, wowDelta,
+        hasCard: !!(c.sessionPaymentMethod && c.sessionPaymentMethod.id),
         lastLogDate, daysSince, activeThisWeek, openReqs, last7, activePlanId: activeId };
     }));
     setClients(rows);
@@ -17213,6 +17235,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
   // Aggregates
   const total = clients.length;
   const activeWeek = clients.filter((c) => c.activeThisWeek).length;
+  const noCardRows = clients.filter((c) => !c.hasCard);
   const needsAttention = clients.filter((c) => c.hasPlan && (c.daysSince === null || c.daysSince >= attnDays))
     .sort((a, b) => (b.daysSince === null ? 1e9 : b.daysSince) - (a.daysSince === null ? 1e9 : a.daysSince));
   const openReqRows = clients.flatMap((c) => c.openReqs.map((r) => ({ ...r, clientUid: c.uid, clientName: c.name })));
@@ -17278,6 +17301,33 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
               <Tile value={needsAttention.length} label="Need attention" color={needsAttention.length ? "text-warn" : "text-muted"} />
               <Tile value={openReqRows.length} label="Open requests" color={openReqRows.length ? "text-primary" : "text-muted"} />
             </div>
+
+            {/* WHO CAN'T BE CHARGED (Kevin, S196d). This is a coaching command
+                centre, and "I delivered training I can never bill for" belongs
+                on it just as much as "nobody logged this week". The settle
+                sweep parks these sessions as `no-card` and says nothing, so
+                without this the money is invisible until someone reads a log.
+                Only rendered for a trainer who can actually take payment. */}
+            {canBillSessions(meUid) && noCardRows.length > 0 && (
+              <div className={cardCls}>
+                <div className={`${titleCls} flex items-center gap-2`}>
+                  <Icon name="card" size={19} color="var(--yellow,#fbbf24)" />No card on file
+                </div>
+                <div className={`${subCls} mb-2`}>
+                  {noCardRows.length === 1 ? "This client can" : `These ${noCardRows.length} clients can`} be
+                  booked, but nothing can be charged until they save a card. Send them the link.
+                </div>
+                {noCardRows.map((c) => (
+                  <div key={c.uid} className="flex items-center gap-2 py-1.5 border-t border-border/50">
+                    <button onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}
+                      className="flex-1 min-w-0 text-left bg-transparent border-0 cursor-pointer p-0">
+                      <span className="block text-[.86rem] font-semibold text-fg truncate">{c.name}</span>
+                    </button>
+                  </div>
+                ))}
+                <div className="mt-2"><CardLinkRow meName={meName} compact /></div>
+              </div>
+            )}
 
             {/* Needs attention */}
             <div className={cardCls}>
@@ -18149,6 +18199,10 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
 
       {detail && (
         <CalSessionSheet session={detail} nameOf={nameOf} now={now} busy={busy} meUid={meUid}
+          meName={meName}
+          hasCard={(() => { const c = clients.find((x) => x.uid === detail.clientUid);
+            return !!(c && c.sessionPaymentMethod && c.sessionPaymentMethod.id); })()}
+          canBill={canBillSessions(meUid)}
           color={colorOf(detail.clientUid)} onSetColor={setClientColor}
           onClose={() => setDetail(null)} onEdit={() => openEditForm(detail)}
           onOpenClient={onOpenClientPlan ? () => { onOpenClientPlan(detail.clientUid); } : null}
@@ -18179,7 +18233,7 @@ const calToLocalInput = (ms) => {
 };
 
 // One booked session, and everything the trainer can do about it.
-function CalSessionSheet({ session: s, nameOf, now, busy, meUid, color, onSetColor, onClose, onEdit, onOpenClient, onCancelOne, onCancelSeries, onNoShow, onWaive }) {
+function CalSessionSheet({ session: s, nameOf, now, busy, meUid, meName, hasCard = true, canBill = false, color, onSetColor, onClose, onEdit, onOpenClient, onCancelOne, onCancelSeries, onNoShow, onWaive }) {
   const [confirm, setConfirm] = useState("");
   const [pickColor, setPickColor] = useState(false);
   const past = sessionEndMs(s) <= now;
@@ -18233,6 +18287,16 @@ function CalSessionSheet({ session: s, nameOf, now, busy, meUid, color, onSetCol
           {s.priceCents > 0 && <span className="text-[.9rem] font-bold">{money(s.billableCents != null ? s.billableCents : s.priceCents)}</span>}
         </div>
         {s.seriesId && <div className="text-[.72rem] text-muted mb-2">Part of a repeating series.</div>}
+        {/* The billing state above can read "Delivered — will be billed" while
+            nothing is capable of billing it. Say which it is. (Kevin, S196d) */}
+        {canBill && !hasCard && s.status !== "cancelled" && !s.waived && Number(s.priceCents) > 0 && (
+          <div className="mb-2 rounded-md px-2.5 py-2" style={{ background: "rgba(251,191,36,.10)" }}>
+            <div className="text-[.72rem] leading-snug text-fg mb-1.5">
+              <b>No card on file.</b> {nameOf(s.clientUid)} can&apos;t be charged for this until they save one.
+            </div>
+            <CardLinkRow meName={meName} compact />
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-1.5">
           {!past && s.status !== "cancelled" && <button className={btn} onClick={onEdit} disabled={busy}>Reschedule</button>}
@@ -18895,6 +18959,19 @@ const PLAN_FEATURES = {
       // S179e (Kevin): business tooling is paid — "your health and your data
       // are free; tools that make you money are paid." Any paid plan gets both.
       ["Session booking & cancellation policy", false, true, true, true],
+      // S196e — the whole sessions/calendar arc (S185-S196) shipped without a
+      // single line on this page. A dozen real coach features were invisible to
+      // the person deciding whether to pay for the coach tier, which is the
+      // same "shipped but never advertised" hole S178i found in the free tier.
+      ["Roster calendar — month, week & day", false, true, true, true],
+      ["Repeating sessions — weekly, fortnightly, monthly", false, true, true, true],
+      ["Block out your own time", false, true, true, true],
+      ["Clients see your free slots & request a time", false, true, true, true],
+      ["Session reminders, at the lead times you pick", false, true, true, true],
+      ["Your sessions in Google, Apple or Outlook Calendar", false, true, true, true],
+      ["Card on file & automatic session billing", false, true, true, true],
+      ["No-show and waive controls on delivered sessions", false, true, true, true],
+      ["Earnings ledger — what was charged, and what didn't", false, true, true, true],
     ]},
     { section: "AI assistant — everything in Free, plus:", rows: [
       // S179f (Kevin): teams sit at Coach, not Connect — managing people who
@@ -18995,6 +19072,24 @@ const PLAN_TIPS = {
   // ── Trainer: newly advertised free rows (S178i) ──────────────────────────
   "Direct messages with every client":
     "Private conversations with each client inside Glidna, with unread badges so nothing gets missed.",
+  "Roster calendar — month, week & day":
+    "Every client in one calendar, with a live line showing where you are in the day. Tap any empty slot to book. Each client gets their own colour, and you can change it.",
+  "Repeating sessions — weekly, fortnightly, monthly":
+    "Book a standing slot once instead of twelve times. Each session still reschedules, cancels and bills on its own, so changing one week never disturbs the rest.",
+  "Block out your own time":
+    "Mark lunch, travel or anything else as busy so it's out of the way when you book — and so clients looking for a slot never see it as free.",
+  "Clients see your free slots & request a time":
+    "Optional, and off until you turn it on. Clients see only free and busy \u2014 never another client's name \u2014 and ask for a slot; you accept or decline, and accepting books it.",
+  "Session reminders, at the lead times you pick":
+    "Both you and your client choose your own reminders, and you can have several \u2014 a day before and ten minutes before. Nobody sets anyone else's.",
+  "Your sessions in Google, Apple or Outlook Calendar":
+    "Subscribe once and your sessions appear in the calendar you already use. Reschedule in Glidna and the event moves. (Google refreshes subscribed calendars on its own schedule, often a few hours.)",
+  "Card on file & automatic session billing":
+    "Clients save a card once, and completed sessions are charged automatically \u2014 per session, weekly, fortnightly, or not at all if you'd rather invoice yourself. Their cancellation terms are frozen when they agree to them.",
+  "No-show and waive controls on delivered sessions":
+    "A session that already happened is still yours to judge. Charge the no-show rate your client agreed to, or waive it entirely \u2014 both only ever reduce what's charged.",
+  "Earnings ledger — what was charged, and what didn't":
+    "Every settlement in one list: what was collected, what's still pending, and anything that was declined \u2014 so money that hasn't landed is visible rather than assumed.",
   "Session booking & cancellation policy":
     "Book, reschedule and cancel sessions with your clients, and publish a cancellation policy they see up front. Included on every paid plan \u2014 scheduling tools alone cost $16+/month elsewhere.",
   "Your clients get automatic logging reminders":

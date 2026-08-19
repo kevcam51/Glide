@@ -256,6 +256,15 @@ function isBiweeklySettleWindow(now = new Date()) {
   const days = Math.floor(Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day)) / 86400000);
   return Math.floor(days / 7) % 2 === 0;
 }
+// The ET calendar day, as a stable "YYYY-MM-DD" string. Used to notify a
+// trainer about a card-less client at most once a day rather than once an hour.
+function etDayKey(now = new Date()) {
+  const p = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" })
+    .formatToParts(now).reduce((o, x) => (o[x.type] = x.value, o), {});
+  return `${p.year}-${p.month}-${p.day}`;
+}
+const usd = (cents) => `$${(Math.max(0, Number(cents) || 0) / 100).toFixed(2)}`;
+
 // Is this the run that settles the given mode?
 function settleWindowFor(mode, now, force) {
   if (force) return true;
@@ -540,7 +549,39 @@ async function settleGroup(db, items, { now, nowDate, force, dryRun }) {
   // hourly run filed another "awaiting card" ledger for the same sessions, and
   // the trainer's Earnings tile summed them all as pending.
   if ((!pm || !pm.id || !client.stripeCustomerId) && credits <= 0) {
-    return { outcome: "skipped", why: "no-card", wouldHaveCharged: billable.reduce((a, b) => a + b.cents, 0) };
+    const owed = billable.reduce((a, b) => a + b.cents, 0);
+    // ⚠️ TELL THE TRAINER (Kevin, S196d). This branch used to return in total
+    // silence: delivered, billable work parked indefinitely, with the only
+    // trace a line in Cloud Logging that until S196 didn't even name the
+    // reason. Kevin lost a real week's session to exactly this and could only
+    // find out by having the logs read to him.
+    //
+    // THE TRAINER, AND ONLY THE TRAINER — Kevin's explicit call. The client
+    // usually knows perfectly well they never saved a card; the trainer is the
+    // one who can act on it, and pushing the client instead would read as
+    // Glidna chasing them for money on their coach's behalf.
+    //
+    // Once per client per DAY, not per sweep: this runs hourly, and a
+    // notification that repeats 24 times a day is one people turn off — which
+    // would cost them the alert that matters. The marker is written on the
+    // trainer's own profile, so it costs no new collection.
+    const dayKey = etDayKey(nowDate);
+    const seenKey = `${clientUid}:${dayKey}`;
+    const alreadyToldToday = (trainer.sessionNoCardNotified || {})[clientUid] === dayKey;
+    if (!alreadyToldToday && owed > 0) {
+      const who = client.displayName
+        || [client.firstName, client.lastName].filter(Boolean).join(" ")
+        || "A client";
+      await sendPushTo(db, trainerUid, {
+        title: `${who} has no card on file`,
+        body: `${usd(owed)} of delivered training can't be charged yet. Send them your card link — it takes them straight to the card screen.`,
+        tag: `session-no-card-${clientUid}`, url: "/",
+      }, "sessionBilling").catch(() => {});
+      await db.doc(`users/${trainerUid}`).set({
+        sessionNoCardNotified: { [clientUid]: dayKey },
+      }, { merge: true }).catch(() => {});
+    }
+    return { outcome: "skipped", why: "no-card", wouldHaveCharged: owed, notified: !alreadyToldToday && owed > 0, seenKey };
   }
 
   // ── claim + credits, transactionally ──────────────────────────────────────
