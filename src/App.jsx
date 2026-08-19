@@ -10245,7 +10245,39 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   const beforeStart = (k) => !!(startKey && k < startKey);
 
   useEffect(() => { (async () => setLoggedDays(await onListLoggedDays()))(); }, []);
-  useEffect(() => { (async () => setDayLog(await onReadDay(sel)))(); }, [sel]);
+  // ⚠️ CLEAR FIRST, THEN LOAD (S196k). This was a single line that awaited the
+  // read and assigned the result — which left the PREVIOUS day's meals on screen
+  // and in state for the length of a round trip. Tapping "+250 cal" or a
+  // recent-food chip in that window wrote the previous day's entire meal list
+  // onto the newly selected date, and because a day is saved as one whole
+  // document, that DESTROYED whatever the date actually held. It is the screen
+  // used to reconstruct a client's week, so the damage lands exactly where the
+  // record matters most.
+  //
+  // Three states now, and they are genuinely different questions:
+  //   undefined — still loading. Nothing may be written.
+  //   null      — the read FAILED. Nothing may be written, and say so.
+  //   object    — loaded; `{}` is a real, empty day and is safe to write.
+  // The alive flag matters as much as the clear: two quick date taps can resolve
+  // out of order, and without it the slower answer wins and lands day A's food
+  // under day B.
+  // Bumped by "Try again" — re-selecting the same date is a no-op to React, so a
+  // retry needs something that actually changes.
+  const [dayReload, setDayReload] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    setDayLog(undefined);
+    (async () => {
+      try {
+        const v = await onReadDay(sel);
+        if (alive) setDayLog(v || {});
+      } catch (e) {
+        console.error("could not read day", sel, e);
+        if (alive) setDayLog(null);
+      }
+    })();
+    return () => { alive = false; };
+  }, [sel, onReadDay, dayReload]);
   useEffect(() => { setWaterDraft(dayLog && dayLog.water ? String(dayLog.water) : ""); }, [dayLog]);
   // Read calorie totals for a set of dates (only logged + not-yet-cached), merge
   // into dayCals. Used by both the month and week adherence views; cached so a
@@ -10311,7 +10343,17 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   };
 
   // ── Day-detail back-dated logging ──
-  const writeDay = (next) => { setDayLog(next); onWriteDay(sel, next); if ((next.calories || 0) > 0 || (next.meals || []).length) markLogged(sel); };
+  // The other half of the same guard: never save a day that was never loaded.
+  // Every caller builds `next` by spreading the current dayLog, so writing while
+  // it is undefined (loading) or null (failed) is precisely how one day's food
+  // ends up on another day's date.
+  const dayReady = dayLog !== undefined && dayLog !== null;
+  const writeDay = (next) => {
+    if (!dayReady) return false;
+    setDayLog(next); onWriteDay(sel, next);
+    if ((next.calories || 0) > 0 || (next.meals || []).length) markLogged(sel);
+    return true;
+  };
   const addCal = (n) => writeDay({ ...(dayLog || {}), calories: Math.max(0, (dayLog?.calories || 0) + n) });
   const addMeal = (meal) => {
     const m = { id: `m${Date.now()}${Math.floor(Math.random() * 1000)}`, name: meal.name || "", type: meal.type || "",
@@ -10720,6 +10762,32 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   // ── Day view (with back-dated logging) ──
   const dayView = () => {
     const ci = ciByDate[sel] || {};
+    // ── The day has to say which of the three things it is ────────────────
+    // Rendering a not-yet-loaded or failed day as "0 cal, no meals" is what let
+    // someone log breakfast a second time over a day that already had it. A
+    // number nobody can vouch for should not be shown as a fact.
+    if (dayLog === undefined) {
+      return (
+        <div style={{ padding: "28px 4px", textAlign: "center", color: "var(--muted)", fontSize: ".9rem" }}>
+          Loading {sel}…
+        </div>
+      );
+    }
+    if (dayLog === null) {
+      return (
+        <div style={{ padding: "22px 4px", textAlign: "center" }}>
+          <div style={{ color: "var(--yellow)", fontWeight: 700, marginBottom: 6 }}>Couldn&apos;t load this day</div>
+          <div style={{ color: "var(--muted)", fontSize: ".86rem", lineHeight: 1.5, maxWidth: 340, margin: "0 auto" }}>
+            You may be offline. Logging is paused for {sel} until it loads — anything you entered now
+            could overwrite what&apos;s already there.
+          </div>
+          <button onClick={() => setDayReload((n) => n + 1)} style={{ marginTop: 12, padding: "9px 16px", borderRadius: 10,
+            border: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: ".84rem" }}>
+            Try again
+          </button>
+        </div>
+      );
+    }
     const preStart = beforeStart(sel);
     const isStart = startKey && sel === startKey;
     const dn = weekdayName(sel);
@@ -15400,13 +15468,19 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
   const type = request.type;
   const isLoggable = type === "weigh_in" || type === "log_food" || type === "log_workout";
 
+  // A refused save used to just stop the spinner: nothing logged, nothing said,
+  // and the task left open with no explanation. Now the reason is on screen —
+  // and `ok` still gates onMarkDone, so a failed save can never tick the
+  // trainer's to-do (which was the worst half of the bug: a completed task with
+  // no data behind it).
+  const [failed, setFailed] = useState("");
   const finish = async (ok) => {
-    if (!ok) { setBusy(false); return; }
+    if (!ok) { setBusy(false); setFailed(SAVE_FAILED_MSG); return; }
     await onMarkDone();
     setBusy(false); setDone(true);
     setTimeout(onClose, 1000);
   };
-  const run = async (fn) => { setBusy(true); const ok = await fn(); await finish(ok); };
+  const run = async (fn) => { setBusy(true); setFailed(""); const ok = await fn(); await finish(ok); };
 
   const inputCls = "w-full box-border rounded-lg border border-border bg-surface2 px-3.5 py-3 text-center text-[1.1rem] text-fg outline-none placeholder:text-muted";
   const primaryCls = "flex-1 rounded-[9px] border-none bg-primaryfill px-3.5 py-3 text-[.92rem] font-bold text-primaryfg cursor-pointer disabled:opacity-55 disabled:cursor-default";
@@ -15444,10 +15518,15 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
               value={val} placeholder={meta.ph} className={`${inputCls} my-1.5 mb-4`}
               onChange={(e) => setVal(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !busy) run(meta.fn); }} />
+            {failed && (
+              <div className="mb-2.5 text-[.82rem] font-semibold leading-snug" style={{ color: "var(--red)" }}>
+                {failed}
+              </div>
+            )}
             <div className="flex gap-2.5">
               <button className={primaryCls}
                 disabled={busy || (meta.numeric && !(Number(val) > 0))}
-                onClick={() => run(meta.fn)}>{busy ? "Saving…" : meta.cta}</button>
+                onClick={() => run(meta.fn)}>{busy ? "Saving…" : failed ? "Try again" : meta.cta}</button>
               <button className={ghostCls} disabled={busy} onClick={onClose}>Cancel</button>
             </div>
           </>
@@ -21819,6 +21898,10 @@ const COACH_TIPS = [
   "Ask your AI coach to estimate a meal — just describe it or snap a photo.",
 ];
 
+// One wording for every save that did not happen. Names the cause people can
+// actually check, and says what to do — never "something went wrong".
+const SAVE_FAILED_MSG = "Couldn't save — check your connection and try again.";
+
 function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPrefs, onSetNotifPrefs, premium = true, billingHold = null, openCardSetup = false }) {
   // The client's plan lives in their own account as "caliq-self"; today's log is
   // "caliq-log-self-{date}". The client is always on their own account (no remote
@@ -22155,9 +22238,24 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
     } catch { /* ignore */ }
   };
 
+  // ⚠️ REPORTS WHETHER IT ACTUALLY SAVED (S196k). This swallowed every failure
+  // and returned nothing, so the callers below cheerfully told the client
+  // "Logged today's weight: 184 lbs", updated the number on screen, and ticked
+  // the trainer's to-do — for a write that was rejected. The entry was gone on
+  // the next load, and the client would swear they had logged it. They had.
+  //
+  // The optimistic update stays: showing the number immediately is right, and
+  // yanking it back is worse than saying plainly that it did not save.
   const writeLog = async (updated) => {
     setLog(updated);
-    try { const s = JSON.stringify(updated); lastSelfLogWrite.current = s; await window.storage.set(logKey, s); } catch { /* ignore */ }
+    try {
+      const s = JSON.stringify(updated); lastSelfLogWrite.current = s;
+      await window.storage.set(logKey, s);
+      return true;
+    } catch (e) {
+      console.error("daily log save failed", e);
+      return false;
+    }
   };
   // Add (sign +1) or remove (sign -1) calories from today's running total,
   // clamped so it can't go below zero.
@@ -22165,7 +22263,8 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
     const v = Number(explicitVal != null ? explicitVal : calDraft);
     if (!v || v <= 0) { setCalDraft(""); return false; }
     const next = Math.max(0, (log.calories || 0) + sign * v);
-    await writeLog({ ...log, calories: next });
+    const ok = await writeLog({ ...log, calories: next });
+    if (!ok) { setMsg(SAVE_FAILED_MSG); return false; }
     await appendHistory(sign > 0 ? `logged ${v} cal` : `removed ${v} cal`);
     setCalDraft(""); setMsg(sign > 0 ? `Added ${v} cal to today.` : `Removed ${v} cal from today.`);
     return true;
@@ -22180,7 +22279,11 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
     // today's log, and it only becomes "current weight" if it is the latest.
     const dayKey = explicitDate || todayKey;
     const backdated = dayKey !== todayKey;
-    if (!backdated) await writeLog({ ...log, weight: v });
+    if (!backdated) {
+      const ok = await writeLog({ ...log, weight: v });
+      if (!ok) { setWtMsg(SAVE_FAILED_MSG); return false; }
+    }
+    let planSaved = false;
     try {
       // Work from the in-memory plan (updated synchronously before the async
       // write) so rapid logs stay consistent instead of racing the network.
@@ -22212,9 +22315,13 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       planWrapRef.current = obj;   // update memory FIRST so the next log is consistent
       setPlanData(d);
       { const _pw = JSON.stringify(obj); lastSelfDataWrite.current = _pw; await window.storage.set(planDataKey(activePlanId), _pw); }
-    } catch { /* ignore */ }
+      planSaved = true;
+    } catch (e) { console.error("weigh-in save failed", e); }
+    // The weigh-in lives in the PLAN (checkIns), not the day log — so if that
+    // write failed, the weight is not recorded anywhere, whatever the day log did.
+    if (!planSaved) { setWtMsg(SAVE_FAILED_MSG); return false; }
     await appendHistory(`logged weight: ${v} lbs`);
-    setWtDraft(""); setWtMsg(`Logged today's weight: ${v} lbs.`);
+    setWtDraft(""); setWtMsg(backdated ? `Logged ${v} lbs for ${dayKey}.` : `Logged today's weight: ${v} lbs.`);
     return true;
   };
 
@@ -22264,16 +22371,33 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
 
   // ── Calendar (back-dating) callbacks — read/write any date's log for the active
   // plan, on the client's own account (mirrors App's remote-aware versions). ──
-  const calReadDay = async (date) => {
-    try { const r = await get(planLogPrefix(activePlanId) + date); return r && r.value ? (JSON.parse(r.value) || {}) : {}; }
-    catch { return {}; }
-  };
+  // ⚠️ THE CLIENT'S OWN COPY OF THE SAME TWO BUGS (S196k). This mirrored the
+  // trainer-side handlers exactly, including `catch { return {} }` — a failed
+  // read handed back an EMPTY DAY, which the calendar then rendered as "0 cal,
+  // no meals" and happily wrote over. That is the more damaging of the two
+  // copies: clients are the ones logging from a car park, a gym basement or a
+  // subway, so the bad-connection path is theirs far more often than a
+  // trainer's.
+  //
+  // Memoized because CalendarView's day effect now depends on this function's
+  // identity: a new one on every ClientHome render would re-clear and re-fetch
+  // the open day continuously.
+  const calReadDay = useCallback(async (date) => {
+    // No catch — a read that failed must be distinguishable from a day with
+    // nothing in it, and only the caller knows what to do about it.
+    const r = await get(planLogPrefix(activePlanId) + date);
+    return r && r.value ? (JSON.parse(r.value) || {}) : {};
+  }, [activePlanId]);
   const calWriteDay = async (date, obj) => {
     try {
       const s = JSON.stringify(obj);
       if (date === todayKey) { lastSelfLogWrite.current = s; setLog(obj); } // keep today's live state + suppress echo
       await window.storage.set(planLogPrefix(activePlanId) + date, s);
-    } catch { /* ignore */ }
+      return true;
+    } catch (e) {
+      console.error("back-dated save failed", date, e);
+      return false;
+    }
   };
   const calListLoggedDays = async () => {
     try { const r = await window.storage.list(planLogPrefix(activePlanId)); return (r.keys || []).map((k) => k.slice(-10)); }
@@ -28756,12 +28880,33 @@ export default function App() {
   // Daily logs live with the plan: when a trainer is editing a LINKED client's
   // plan (activeRemoteUid set), the log reads/writes go to the CLIENT's account;
   // otherwise they use the signed-in user's own storage.
-  const logRead = async (key) => {
+  // ⚠️ `strict` EXISTS BECAUSE "COULDN'T READ" AND "NOTHING THERE" ARE DIFFERENT
+  // ANSWERS (S196k). Without it both came back as null, and a caller that then
+  // WRITES — the calendar's day editor — would take a failed read for an empty
+  // day and replace the real document with whatever was typed next. A client on
+  // a dead connection saw today at 0 cal, logged breakfast again, and that
+  // overwrote the real day when the device reconnected. Silent, and it destroys
+  // the record it was meant to add to.
+  //
+  // Read-only callers keep the forgiving default: a missing streak day should
+  // not throw its way out of a dashboard. Anything that writes back what it read
+  // must pass strict and handle the throw.
+  //
+  // ⚠️ MEMOIZED, AND THAT IS LOAD-BEARING. These are passed to the calendar,
+  // which now re-reads the shown day whenever its reader changes. A fresh
+  // function identity on every App render would make that effect re-fire
+  // constantly — clearing and re-fetching the day on every keystroke elsewhere
+  // in the app. Keyed on the only two things that actually change WHERE a read
+  // goes: which plan, and whose account.
+  const logRead = useCallback(async (key, { strict = false } = {}) => {
     try {
       if (activeRemoteUid) { const r = await getForUser(activeRemoteUid, key); return r && r.value ? r.value : null; }
       const r = await window.storage.get(key); return r && r.value ? r.value : null;
-    } catch (e) { return null; }
-  };
+    } catch (e) {
+      if (strict) throw e;
+      return null;
+    }
+  }, [activeRemoteUid]);
   const logWrite = (key, value) => {
     // Fire-and-forget by design (the UI updates optimistically), but a REJECTED
     // write must not vanish silently — the try/catch alone only caught sync
@@ -28793,10 +28938,12 @@ export default function App() {
   };
   // Calendar back-dated logging: read / write / list any date's log for the
   // active plan (today's log keeps its own state; these are for other dates).
-  const onReadDay = async (date) => {
-    const v = await logRead(`caliq-log-${activeId}-${date}`);
+  // Throws when the day could not be READ. `{}` now means, and only means, "that
+  // day has nothing logged" — which is what makes it safe to write back.
+  const onReadDay = useCallback(async (date) => {
+    const v = await logRead(`caliq-log-${activeId}-${date}`, { strict: true });
     return v ? (JSON.parse(v) || {}) : {};
-  };
+  }, [logRead, activeId]);
   const onWriteDay = (date, logObj) => {
     logWrite(`caliq-log-${activeId}-${date}`, JSON.stringify(logObj));
     if (date === viewDate) setDailyLog(logObj); // keep the SHOWN day's live state in sync
