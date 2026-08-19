@@ -11153,20 +11153,38 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const mealIsToday = mealDate === dashToday;
   const [mealDayLog, setMealDayLog] = useState(null); // the past day's log (today reads dailyLog)
   // (clamping now lives with the single owner of the date, in App)
+  // ⚠️ THE SAME TWO BUGS THE CALENDAR HAD, IN THE SCREEN THAT GETS USED MORE
+  // (S196L). This kept the PREVIOUS past day's meals in state while the next
+  // one loaded — and `mealWriteDay` spreads that state onto `mealDate`, so
+  // stepping from Monday to Tuesday and tapping a food in the gap wrote
+  // Monday's whole meal list onto Tuesday. And `.catch(() => ({}))` turned a
+  // failed read into an empty day, which the next write then made real.
+  //
+  // Three states, same contract as the calendar: undefined = loading,
+  // null = failed, object = loaded ({} being a genuinely empty day).
   useEffect(() => {
     let alive = true;
     if (mealIsToday) { setMealDayLog(null); return; }
-    Promise.resolve(onReadDay ? onReadDay(mealDate) : null)
+    setMealDayLog(undefined);
+    Promise.resolve(onReadDay ? onReadDay(mealDate) : {})
       .then((d) => { if (alive) setMealDayLog(d || {}); })
-      .catch(() => { if (alive) setMealDayLog({}); });
+      .catch((e) => { console.error("could not read day", mealDate, e); if (alive) setMealDayLog(null); });
     return () => { alive = false; };
   }, [mealDate, mealIsToday, onReadDay]);
+  // Today is owned by `dailyLog`; a past day is only writable once it has
+  // actually loaded. `null` here means today (the early return above), so it is
+  // only a failure when we are NOT on today.
+  const pastDayReady = mealIsToday || (mealDayLog !== undefined && mealDayLog !== null);
   // Delegates to the one owner of the selected day. Kept so MealLog's own
   // arrows keep working — they now move the WHOLE screen, which is the point.
   const shiftMealDate = (n) => { if (onStepDay) onStepDay(n); };
   // Past-day writes go through onWriteDay (date-scoped); today keeps the
   // existing handlers so the ring/streak/week-summary stay wired as they were.
-  const mealWriteDay = (next) => { setMealDayLog(next); if (onWriteDay) onWriteDay(mealDate, next); };
+  const mealWriteDay = (next) => {
+    if (!pastDayReady) return false;      // never save a day we could not read
+    setMealDayLog(next); if (onWriteDay) onWriteDay(mealDate, next);
+    return true;
+  };
   const pastAddMeals = (list) => {
     const arr = (list || []).map((meal, i) => ({
       id: `m${Date.now()}${i}${Math.floor(Math.random() * 1000)}`, name: meal.name || "", type: meal.type || "",
@@ -12512,6 +12530,20 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         })()}
         </div>)}
         </div>
+      {/* Say which day this is when it is not a day yet. Rendering an unread day
+          as an empty meal list is how the previous version invited someone to
+          log a meal that then replaced the real one. */}
+      {!mealIsToday && mealDayLog === undefined && (
+        <div className="sec-title" style={{ color: "var(--muted)", fontWeight: 400 }}>Loading {mealDate}…</div>
+      )}
+      {!mealIsToday && mealDayLog === null && (
+        <div style={{ margin: "10px 0", padding: "12px 14px", borderRadius: 12,
+          background: "rgba(251,191,36,.10)", color: "var(--text)", fontSize: ".84rem", lineHeight: 1.5 }}>
+          <b style={{ color: "var(--yellow)" }}>Couldn&apos;t load {mealDate}.</b> Logging is paused for this
+          day — anything entered now could overwrite what&apos;s already saved. Check your connection and
+          step away and back.
+        </div>
+      )}
       <MealLog meals={mealIsToday ? dailyLog.meals : ((mealDayLog && mealDayLog.meals) || [])}
         onAddMeal={mealIsToday ? onAddMeal : pastAddMeal} onAddMeals={mealIsToday ? onAddMeals : pastAddMeals}
         onRemoveMeal={mealIsToday ? onRemoveMeal : pastRemoveMeal} onEditMeal={mealIsToday ? onEditMeal : pastEditMeal}
@@ -21902,6 +21934,23 @@ const COACH_TIPS = [
 // actually check, and says what to do — never "something went wrong".
 const SAVE_FAILED_MSG = "Couldn't save — check your connection and try again.";
 
+// A save that did not happen, said out loud. Portaled + fixed so it shows over
+// full-screen overlays — the calendar is exactly where back-dated saves are
+// made, and a banner trapped behind it would be no banner at all.
+function SaveFailedBanner({ text, onDismiss }) {
+  if (!text) return null;
+  return createPortal(
+    <div role="status" onClick={onDismiss}
+      style={{ position: "fixed", left: 12, right: 12, zIndex: 2200, cursor: "pointer",
+        bottom: "calc(18px + env(safe-area-inset-bottom,0px))",
+        background: "var(--surface,#16162a)", border: "1px solid var(--yellow,#fbbf24)",
+        borderRadius: 12, padding: "12px 14px", color: "var(--text,#eafcfc)",
+        fontSize: ".84rem", lineHeight: 1.45, maxWidth: 420, margin: "0 auto",
+        boxShadow: "0 8px 28px rgba(0,0,0,.45)" }}>
+      <b style={{ color: "var(--yellow,#fbbf24)" }}>Not saved.</b> {text}
+    </div>, document.body);
+}
+
 function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPrefs, onSetNotifPrefs, premium = true, billingHold = null, openCardSetup = false }) {
   // The client's plan lives in their own account as "caliq-self"; today's log is
   // "caliq-log-self-{date}". The client is always on their own account (no remote
@@ -21920,6 +21969,12 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   const [signupYmd, setSignupYmd] = useState(null); // the client's signup date (profile.createdAt) → plan start date
   const [msg, setMsg] = useState("");              // calorie-log message
   const [wtMsg, setWtMsg] = useState("");          // weight-log message
+  const [saveErr, setSaveErr] = useState("");     // a back-dated save that was refused
+  useEffect(() => {
+    if (!saveErr) return;
+    const t = setTimeout(() => setSaveErr(""), 9000);
+    return () => clearTimeout(t);
+  }, [saveErr]);
   const [requests, setRequests] = useState([]);    // trainer → client requests (Session 19)
   const [quickReq, setQuickReq] = useState(null);  // request being completed in the quick-action popup
   // Whether the trainer to-do reminders show — driven by the shared notification
@@ -22383,10 +22438,15 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   // identity: a new one on every ClientHome render would re-clear and re-fetch
   // the open day continuously.
   const calReadDay = useCallback(async (date) => {
-    // No catch — a read that failed must be distinguishable from a day with
-    // nothing in it, and only the caller knows what to do about it.
-    const r = await get(planLogPrefix(activePlanId) + date);
-    return r && r.value ? (JSON.parse(r.value) || {}) : {};
+    // Absence is a legitimate answer ({} = nothing logged); anything else is a
+    // real failure and must reach the caller so it can refuse to overwrite.
+    try {
+      const r = await get(planLogPrefix(activePlanId) + date);
+      return r && r.value ? (JSON.parse(r.value) || {}) : {};
+    } catch (e) {
+      if (e && e.code === "not-found") return {};
+      throw e;
+    }
   }, [activePlanId]);
   const calWriteDay = async (date, obj) => {
     try {
@@ -22396,6 +22456,8 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       return true;
     } catch (e) {
       console.error("back-dated save failed", date, e);
+      // The client had already been shown the food on screen. Say it did not save.
+      setSaveErr(`Couldn't save that to ${date} — check your connection. It may not be recorded.`);
       return false;
     }
   };
@@ -23108,6 +23170,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
         <div className="fixed inset-0 z-[1396] overflow-y-auto"
           style={{ background: "var(--bg)", color: "var(--text)", fontFamily: "var(--font-sans)" }}>
           <div style={{ maxWidth: 640, margin: "0 auto", padding: "calc(12px + env(safe-area-inset-top,0px)) 16px 96px" }}>
+            <SaveFailedBanner text={saveErr} onDismiss={() => setSaveErr("")} />
             <CalendarView data={planData || {}} tdee={target} onClose={() => setShowCalendar(false)}
               onReadDay={calReadDay} onWriteDay={calWriteDay} onListLoggedDays={calListLoggedDays}
               onSaveCheckIn={calSaveCheckIn} onDeleteCheckIn={calDeleteCheckIn} recentFoods={recentFoods}
@@ -28868,6 +28931,14 @@ export default function App() {
   // today's numbers with an old meal list underneath). Defaults to today and
   // follows the midnight rollover ONLY while you're looking at today, so an open
   // past day doesn't jump when the clock ticks over.
+  // Set by logWrite when a save is REFUSED. One banner covers every date-scoped
+  // write in the app; clears itself so it can't linger after a good save.
+  const [saveError, setSaveError] = useState("");
+  useEffect(() => {
+    if (!saveError) return;
+    const t = setTimeout(() => setSaveError(""), 9000);
+    return () => clearTimeout(t);
+  }, [saveError]);
   const [viewDate, setViewDate] = useState(todayKey);
   const viewIsToday = viewDate === todayKey;
   const prevTodayRef = useRef(todayKey);
@@ -28903,6 +28974,13 @@ export default function App() {
       if (activeRemoteUid) { const r = await getForUser(activeRemoteUid, key); return r && r.value ? r.value : null; }
       const r = await window.storage.get(key); return r && r.value ? r.value : null;
     } catch (e) {
+      // A key that does not exist is an EMPTY day, not a failed read — even
+      // under strict. window.storage.get throws for both (getForUser returns
+      // null for absence), and conflating them broke the calendar's whole
+      // purpose: every never-logged date became "Couldn't load this day" with a
+      // retry that could never succeed, because a missing document throws
+      // deterministically. Caught by review before it shipped.
+      if (e && e.code === "not-found") return null;
       if (strict) throw e;
       return null;
     }
@@ -28911,10 +28989,22 @@ export default function App() {
     // Fire-and-forget by design (the UI updates optimistically), but a REJECTED
     // write must not vanish silently — the try/catch alone only caught sync
     // throws, so a failed save (offline, expired session) looked saved forever.
+    //
+    // ⚠️ CONSOLE.ERROR IS NOT TELLING ANYONE (S196L). Every back-dated save —
+    // the whole calendar, the dashboard's past-day meal card — goes through
+    // here, and a rejection reached the developer console and nowhere else. The
+    // person had already been shown the food on screen. Surfacing it HERE
+    // covers every one of those callers at once, instead of threading a return
+    // value through each and inevitably missing one.
+    const failed = (e) => {
+      console.error("Save failed for", key, e);
+      setSaveError(`Couldn't save that${/caliq-log-.*-(\d{4}-\d{2}-\d{2})$/.test(key)
+        ? ` to ${key.slice(-10)}` : ""} — check your connection. It may not be recorded.`);
+    };
     try {
       const p = activeRemoteUid ? setForUser(activeRemoteUid, key, value) : window.storage.set(key, value);
-      if (p && p.catch) p.catch((e) => console.error("Save failed for", key, e));
-    } catch (e) { console.error("Save failed for", key, e); }
+      if (p && p.catch) p.catch(failed);
+    } catch (e) { failed(e); }
   };
   // Remote-aware key listing (for the calendar's per-day indicators). Returns the
   // kv keys matching a prefix in whichever account the active plan lives in.
@@ -29570,6 +29660,10 @@ export default function App() {
   const isTrainerHome = role === ROLES.HEAD_TRAINER || role === ROLES.SUB_TRAINER;
   const chrome = (
     <>
+      {/* A save that did not happen, said out loud. Portaled and fixed so it is
+          visible from inside the calendar and any other full-screen overlay —
+          the places back-dated saves are actually made. */}
+      <SaveFailedBanner text={saveError} onDismiss={() => setSaveError("")} />
       {/* Ask once, before anything else, if they have never chosen (S134). */}
       {meAiChose === false && (
         <AiConsentPrompt isTrainer={isTrainerHome} onChoose={onSetAiOptOut} />

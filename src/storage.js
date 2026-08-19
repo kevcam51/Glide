@@ -42,7 +42,24 @@ const firestoreStorage = {
     await ready;
     const uid = requireUid();
     const snap = await getDoc(kvDoc(uid, key));
-    if (!snap.exists()) throw new Error("Key not found: " + key);
+    if (!snap.exists()) {
+      // ⚠️ ABSENCE IS NOT FAILURE, AND CALLERS NEED TO TELL THEM APART (S196L).
+      // This throws for a missing key — which is the documented behaviour and
+      // stays that way, because callers rely on it. But an unreachable database
+      // throws too, and the two are opposite answers: "nothing logged that day"
+      // is the normal case the calendar is built on, while "could not read" must
+      // stop a write that would overwrite real data. A caller cannot distinguish
+      // them from the message alone without matching on English.
+      //
+      // So the absence case carries a marker. Purely additive — the throw, its
+      // type and its text are unchanged, so nothing that catches it today
+      // behaves differently. `getForUser` (clientData.js) answers the same
+      // question by returning null; that asymmetry between the two accessors is
+      // exactly what made this worth naming rather than papering over.
+      const err = new Error("Key not found: " + key);
+      err.code = "not-found";
+      throw err;
+    }
     return { key, value: snap.data().value, shared: false };
   },
 
