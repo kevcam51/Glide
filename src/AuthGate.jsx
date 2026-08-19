@@ -14,7 +14,7 @@ import {
   sendPasswordResetEmail,
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
-import { createProfile, hasProfile, ROLES } from "./profile.js";
+import { createProfile, hasProfile, ROLES, CLAIMS_STAMP } from "./profile.js";
 import { Icon } from "./icons.jsx";
 
 // Biometric sign-in (Face ID / Touch ID passkeys — S87). The server verifies
@@ -117,8 +117,24 @@ export default function AuthGate({ children }) {
   // Force a one-time ID-token refresh on sign-in so any custom claims set
   // server-side (role + linkage — see functions/syncRoleClaims) are present in
   // this session's token without requiring a re-login. Cheap; runs once per load.
+  // ⚠️ FORCED ONLY WHEN IT CAN CHANGE ANYTHING (S196r). `getIdToken(true)`
+  // discards the cached token and round-trips to Google's token service BEFORE
+  // any Firestore read can be authorised — on every single page load, to pick up
+  // custom claims that change perhaps once in an account's life (when a role is
+  // first set, or a trainer link changes).
+  //
+  // The refresh still happens for anyone who has not yet recorded that they got
+  // one, and whenever the marker is cleared — which the claims-affecting paths
+  // do. Everyone else uses the token Firebase already refreshes hourly on its
+  // own, and their data starts loading immediately.
   useEffect(() => {
-    if (user) user.getIdToken(true).catch(() => {});
+    if (!user) return;
+    let stamp = null;
+    try { stamp = localStorage.getItem(CLAIMS_STAMP); } catch { /* private mode */ }
+    if (stamp === user.uid) return;
+    user.getIdToken(true)
+      .then(() => { try { localStorage.setItem(CLAIMS_STAMP, user.uid); } catch { /* ignore */ } })
+      .catch(() => {});
   }, [user]);
 
   if (user === undefined) {

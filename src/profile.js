@@ -65,6 +65,8 @@ export async function createProfile({ uid, email, role, displayName = "", firstN
     subscriptionStatus: "trial",
   };
   await setDoc(profileRef(uid), data, { merge: true });
+  forgetProfile(uid);
+  forgetClaimsStamp();   // role is set here, and role is a custom claim
   return data;
 }
 
@@ -90,10 +92,55 @@ export function trialInfo(profile) {
   return { lengthDays, startMs, endMs, daysLeft: Math.ceil(msLeft / 86400000), expired: msLeft <= 0, active: msLeft > 0 };
 }
 
-export async function getProfile(uid = auth.currentUser && auth.currentUser.uid) {
+// ── Read-coalescing cache (S196r) ───────────────────────────────────────────
+// The same users/{uid} document was read four to six times during a single cold
+// start — AuthGate, App's mount effect, the role panel, the trial banner and
+// the premium gate each asked for it independently, in parallel, so they did not
+// even benefit from Firestore's own caching of a completed read.
+//
+// Two mechanisms, both deliberately small. Concurrent callers share ONE in-flight
+// promise, which collapses the cold-start burst to a single network round trip.
+// A resolved profile is then reusable for PROFILE_TTL_MS, which covers the
+// stragglers that fire moments later without pinning stale data for long.
+//
+// ⚠️ Anything that CHANGES a profile must invalidate it — every writer below
+// calls forgetProfile — because a stale read here would show someone the role,
+// trial or subscription state they had a moment ago. Where liveness genuinely
+// matters (billing holds, the roster) the code already uses onSnapshot, which
+// does not come through here at all.
+// The marker AuthGate uses to decide whether this session still needs a forced
+// ID-token refresh. It lives HERE because the things that INVALIDATE it are the
+// profile writes below — a role or trainer link changing is exactly what makes
+// the cached claims wrong — and AuthGate already imports from this module, so
+// there is no cycle. Bump the suffix if the shape of the claims ever changes.
+export const CLAIMS_STAMP = "glidna-claims-v1";
+export function forgetClaimsStamp() {
+  try { localStorage.removeItem(CLAIMS_STAMP); } catch { /* private mode */ }
+}
+
+const PROFILE_TTL_MS = 15000;
+const profileCache = new Map();   // uid -> { at, value } | { promise }
+
+export function forgetProfile(uid) {
+  if (uid) profileCache.delete(uid); else profileCache.clear();
+}
+
+export async function getProfile(uid = auth.currentUser && auth.currentUser.uid, { fresh = false } = {}) {
   if (!uid) return null;
-  const snap = await getDoc(profileRef(uid));
-  return snap.exists() ? snap.data() : null;
+  const hit = profileCache.get(uid);
+  if (!fresh && hit) {
+    if (hit.promise) return hit.promise;                       // a read is already in flight
+    if (Date.now() - hit.at < PROFILE_TTL_MS) return hit.value; // recent enough
+  }
+  const promise = getDoc(profileRef(uid))
+    .then((snap) => {
+      const value = snap.exists() ? snap.data() : null;
+      profileCache.set(uid, { at: Date.now(), value });
+      return value;
+    })
+    .catch((e) => { profileCache.delete(uid); throw e; });
+  profileCache.set(uid, { promise });
+  return promise;
 }
 
 // ─── Premium entitlements (pre-Stripe placeholder) ───────────────────────────
@@ -136,6 +183,7 @@ export function aiFoodDbEnabled(profile) {
 export async function setAiFoodDbEnabled(enabled, uid = auth.currentUser && auth.currentUser.uid) {
   if (!uid) return;
   await updateDoc(profileRef(uid), { aiFoodDbEnabled: !!enabled });
+  forgetProfile(uid);
 }
 
 // AI processing consent. Default ON — the privacy policy discloses AI features,
@@ -154,6 +202,7 @@ export async function setAiOptOut(optedOut, uid = auth.currentUser && auth.curre
   // Any deliberate change also counts as having decided, so the one-time
   // prompt never reappears for someone who has already made a choice.
   await updateDoc(profileRef(uid), { aiOptOut: !!optedOut, aiChoiceAt: Date.now() });
+  forgetProfile(uid);
 }
 
 // Has this person ACTIVELY chosen, rather than been defaulted? Absence means we
@@ -221,6 +270,7 @@ export async function ensureInviteCode(uid = auth.currentUser && auth.currentUse
   if (!code) throw new Error("Could not generate a unique invite code — try again.");
 
   await updateDoc(profileRef(uid), { inviteCode: code });
+  forgetProfile(uid);
   await writeInviteCodeMirror(code, uid);
   return code;
 }
@@ -245,6 +295,13 @@ export async function joinTrainer(input) {
   try {
     const call = httpsCallable(functions, "joinTrainerByCode");
     const res = await call({ code: raw });
+    // Written SERVER-side, so the cache above has no way to notice. Without this
+    // the app could keep answering "not linked to anyone" for the next few
+    // seconds — right after the one action whose entire point is being linked.
+    forgetProfile();
+    // The trainer link is mirrored into custom claims by syncRoleClaims, so this
+    // session's token is now out of date — make the next load fetch a fresh one.
+    forgetClaimsStamp();
     return (res && res.data && res.data.trainerUid) || null;
   } catch (e) {
     // Callable errors arrive as "functions/<code>" with the server's message,
@@ -300,6 +357,7 @@ export async function setDisplayName(name) {
   const uid = auth.currentUser && auth.currentUser.uid;
   if (!uid) throw new Error("Not signed in");
   await updateDoc(profileRef(uid), { displayName: (name || "").trim() });
+  forgetProfile(uid);
 }
 
 // Update the signed-in user's first/last name (and the combined displayName).
@@ -311,6 +369,7 @@ export async function setName(firstName, lastName) {
   const last = (lastName || "").trim();
   const displayName = `${first} ${last}`.trim();
   await updateDoc(profileRef(uid), { firstName: first, lastName: last, displayName });
+  forgetProfile(uid);
   return displayName;
 }
 
@@ -332,4 +391,6 @@ export async function leaveTrainer() {
   const uid = auth.currentUser && auth.currentUser.uid;
   if (!uid) throw new Error("Not signed in");
   await updateDoc(profileRef(uid), { assignedTrainerId: null });
+  forgetProfile(uid);
+  forgetClaimsStamp();   // same reason as joinTrainer: the link is in the claims
 }
