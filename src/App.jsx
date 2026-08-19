@@ -27921,20 +27921,37 @@ export default function App() {
 
   useEffect(()=>{
     (async()=>{
+      // ⚠️ ALL AT ONCE, NOT ONE AFTER ANOTHER (S196f, Kevin: "it takes a long
+      // time to load the plans"). These five reads are completely independent —
+      // the plan index, two folder maps, the profile and the notification prefs
+      // — but they were written as five sequential awaits, each with its own
+      // try/catch, which is what made them serial. `loading` gates the ENTIRE
+      // app UI and is only cleared after the last one, so first paint waited on
+      // the SUM of five network round trips instead of the slowest one. On a
+      // phone at ~200ms each that is a second of staring at nothing, every cold
+      // start, for no reason at all.
+      //
+      // Each still fails independently: a rejected read resolves to null here
+      // rather than taking the others down with it, which is what the separate
+      // try/catch blocks were really protecting.
+      const safe = (p) => p.then((r) => r).catch(() => null);
+      const [result, fResult, cfResult, prof, np] = await Promise.all([
+        safe(window.storage.get(STORAGE_INDEX)),
+        safe(window.storage.get(STORAGE_FOLDERS)),
+        safe(window.storage.get(STORAGE_CLIENT_FOLDERS)),
+        safe(getProfile()),
+        safe(window.storage.get("caliq-notif-prefs")),
+      ]);
       try {
-        const result = await window.storage.get(STORAGE_INDEX);
         if (result && result.value) setProfiles(JSON.parse(result.value));
       } catch(e) {}
       try {
-        const fResult = await window.storage.get(STORAGE_FOLDERS);
         if (fResult && fResult.value) setFolders(JSON.parse(fResult.value));
       } catch(e) {}
       try {
-        const cfResult = await window.storage.get(STORAGE_CLIENT_FOLDERS);
         if (cfResult && cfResult.value) setClientFolders(JSON.parse(cfResult.value));
       } catch(e) {}
       try {
-        const prof = await getProfile();
         if (prof) {
           if (prof.role) setRole(prof.role);
           setMeName(prof.displayName || prof.email || "Someone");
@@ -27949,7 +27966,6 @@ export default function App() {
         }
       } catch(e) {}
       try {
-        const np = await window.storage.get("caliq-notif-prefs");
         if (np && np.value) setNotifPrefs((prev) => ({ ...prev, ...(JSON.parse(np.value) || {}) }));
       } catch(e) { /* none saved yet → defaults (all on) */ }
       setLoading(false);
@@ -29216,11 +29232,14 @@ export default function App() {
       }
       // Saved library — user-level, also small, also independent.
       try {
-        const sv = await window.storage.get(SAVED_FOODS_KEY);
+        // Two independent docs — fetched together, not one behind the other.
+        const [sv, svm] = await Promise.all([
+          window.storage.get(SAVED_FOODS_KEY),
+          window.storage.get(SAVED_MEALS_KEY),
+        ]);
         const sf = sv && sv.value ? (JSON.parse(sv.value) || []) : [];
         savedFoodsRef.current = sf;
         setSavedFoods(sf);
-        const svm = await window.storage.get(SAVED_MEALS_KEY);
         const sm = svm && svm.value ? (JSON.parse(svm.value) || []) : [];
         savedMealsRef.current = sm;
         setSavedMeals(sm);
