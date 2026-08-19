@@ -256,7 +256,11 @@ exports.respondToBookingRequest = onCall(
       : { title: `${trainerName} couldn't make that time`,
           body: when ? `${when} didn't work — ask for another time.` : "Ask for another time.",
           tag: `booking-declined-${requestId}`, url: "/" },
-      "sessionReminders").catch(() => {});
+      // An ANSWER to something the client asked for, not a timed reminder — so
+      // it follows the request/answer preference rather than the one that
+      // controls "your session starts in an hour" (S196p). Turning off
+      // reminders should not mean never hearing whether you got the slot.
+      "clientRequests").catch(() => {});
 
     return { ok: true, accepted: accept, sessionId };
   },

@@ -14976,6 +14976,12 @@ function useBackClose(isOpen, onClose) {
 let bodyLocks = 0;
 let bodyLockPrev = null;
 let bodyLockY = 0;
+// Is any overlay currently holding the body scroll lock? Pull-to-refresh needs
+// to know: while the lock is on, body is position:fixed and window.scrollY is
+// therefore 0, so its "am I at the top of the page?" test answered YES no matter
+// where the person actually was inside a sheet. Dragging a modal fired a refresh.
+function isBodyLocked() { return bodyLocks > 0; }
+
 function useBodyScrollLock(active) {
   useEffect(() => {
     if (!active) return;
@@ -15428,11 +15434,17 @@ function usePullToRefresh(onRefresh, enabled = true) {
   const [busy, setBusy] = useState(false);
   const startY = useRef(null);
   const pullRef = useRef(0);                // authoritative: state may batch
+  const lastPull = useRef(0);               // last value actually rendered
   const THRESHOLD = 70;
   useEffect(() => {
     if (!enabled || typeof window === "undefined" || !("ontouchstart" in window)) return;
     const atTop = () => (window.scrollY || document.documentElement.scrollTop || 0) <= 0;
-    const onStart = (e) => { startY.current = atTop() && e.touches.length === 1 ? e.touches[0].clientY : null; };
+    // ⚠️ NOT WHILE AN OVERLAY IS OPEN (S196p). The lock makes body position:fixed,
+    // which pins window.scrollY at 0 — so atTop() was permanently true and every
+    // downward drag inside a modal, sheet or the side menu armed a refresh.
+    const onStart = (e) => {
+      startY.current = (!isBodyLocked() && atTop() && e.touches.length === 1) ? e.touches[0].clientY : null;
+    };
     const onMove = (e) => {
       if (startY.current == null) return;
       const dy = e.touches[0].clientY - startY.current;
@@ -15440,13 +15452,24 @@ function usePullToRefresh(onRefresh, enabled = true) {
       if (dy <= 0 || !atTop()) { startY.current = null; pullRef.current = 0; setPull(0); return; }
       const next = Math.min(dy * 0.5, THRESHOLD + 20);   // resistance
       pullRef.current = next;
-      setPull(next);
+      // ⚠️ QUANTIZED (S196p). setPull ran on EVERY touchmove frame, re-rendering
+      // the largest component in the app at 60fps for the whole gesture — on the
+      // dashboard that is a 3,500-line subtree. The indicator only has three
+      // meaningful appearances (hidden, pulling, past the threshold), so a
+      // 6px step is invisible to the eye and cuts the renders by an order of
+      // magnitude. Crossing the threshold always emits, so the label flips
+      // exactly when it should.
+      const crossed = (pullRef.current >= THRESHOLD) !== (lastPull.current >= THRESHOLD);
+      if (crossed || Math.abs(next - lastPull.current) >= 6) {
+        lastPull.current = next;
+        setPull(next);
+      }
     };
     const onEnd = async () => {
       const pulled = startY.current != null;
       startY.current = null;
       const shouldRun = pulled && pullRef.current >= THRESHOLD;
-      pullRef.current = 0;
+      pullRef.current = 0; lastPull.current = 0;
       setPull(0);
       if (!shouldRun) return;
       setBusy(true);
@@ -20148,6 +20171,10 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
   // finds a layout that works shouldn't have to rebuild it every time (S162b).
   const [barH, setBarH] = useState(() => parseInt(localStorage.getItem("glidna-chat-barh") || "", 10) || 0);
   const [cardH, setCardH] = useState(() => parseInt(localStorage.getItem("glidna-chat-cardh") || "", 10) || 0);
+  // Read by the drag-end handler, which no longer re-subscribes when these
+  // change — a ref keeps it seeing the current value without that cost.
+  const sizeRef = useRef({ barH: 0, cardH: 0 });
+  sizeRef.current = { barH, cardH };
   // Resolve a stored height at RENDER time, never at mount. window.innerHeight
   // can be 0 while the app is still laying out, and a fraction of 0 is 0 — which
   // rendered a 2px chat and then saved that as the user's preferred size. A
@@ -20160,7 +20187,9 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
   const dragRef = useRef(null);   // {startY, startH, mode}
   // Drag the top edge: up grows, down shrinks. Clamped so it can neither vanish
   // nor swallow the page it exists to keep visible.
+  const [dragging, setDragging] = useState(false);
   const onResizeStart = (mode) => (e) => {
+    setDragging(true);
     const y = e.touches ? e.touches[0].clientY : e.clientY;
     dragRef.current = { startY: y, startH: mode === "bar" ? safeH(barH, 0.33) : safeH(cardH, 0.68), mode };
     e.preventDefault();
@@ -20179,13 +20208,24 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
     };
     const up = () => {
       const d = dragRef.current;
+      setDragging(false);
       if (!d) return;
       dragRef.current = null;
       try {
-        if (d.mode === "bar") localStorage.setItem("glidna-chat-barh", String(barH));
-        else localStorage.setItem("glidna-chat-cardh", String(cardH));
+        if (d.mode === "bar") localStorage.setItem("glidna-chat-barh", String(sizeRef.current.barH));
+        else localStorage.setItem("glidna-chat-cardh", String(sizeRef.current.cardH));
       } catch { /* private mode — size just won't persist */ }
     };
+    // ⚠️ ONLY WHILE A DRAG IS ACTUALLY HAPPENING (S196p). These were registered
+    // permanently, on every screen the chat panel mounts on — which is nearly
+    // all of them — and `{passive: false}` means the browser cannot start a
+    // scroll until this handler has run. So every touchmove frame of every
+    // scroll anywhere in the app paid for a listener that does nothing unless a
+    // resize handle is being dragged. `dragging` flips on mousedown/touchstart
+    // on the handle, so the listeners exist for the length of a drag and no
+    // longer. It also drops the [barH, cardH] dependency, which was tearing
+    // down and re-attaching all four listeners on every pixel of a resize.
+    if (!dragging) return undefined;
     window.addEventListener("mousemove", move, { passive: false });
     window.addEventListener("touchmove", move, { passive: false });
     window.addEventListener("mouseup", up);
@@ -20196,7 +20236,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
       window.removeEventListener("mouseup", up);
       window.removeEventListener("touchend", up);
     };
-  }, [barH, cardH]);
+  }, [dragging]);
   const [pasteOpen, setPasteOpen] = useState(false);     // "Paste from AI" import box open
   const [pasteText, setPasteText] = useState("");        // pasted text from another AI
   const [showPlans, setShowPlans] = useState(false);      // S89c plan picker (trial-expired lock → choose plan → Checkout)
@@ -25095,7 +25135,11 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
               <button onClick={() => setMealPhoto(null)} className="text-[.72rem] text-muted cursor-pointer bg-transparent border-none">Remove photo</button>
             </div>
           )}
-          <input ref={mealFileRef} type="file" accept="image/*" capture="environment" className="hidden"
+          {/* No `capture` (S196p): it FORCED the camera and hid the photo
+              library, so a meal already photographed could not be sent. The
+              plain picker offers "Take Photo" alongside the library — a
+              superset of what this allowed. */}
+          <input ref={mealFileRef} type="file" accept="image/*" className="hidden"
             onChange={async (e) => {
               const f = e.target.files && e.target.files[0];
               e.target.value = "";
@@ -27499,16 +27543,37 @@ async function exportMyData({ meName, meEmail, role }) {
       "Session bookings and payment records are shared with your trainer and aren't included here.",
     ],
   };
-  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+  await deliverFile(JSON.stringify(bundle, null, 2),
+    `Glidna-My-Data-${new Date().toISOString().slice(0, 10)}.json`);
+  return bundle.entryCount;
+}
+
+// Hand a generated file to the person, on iOS too (S196p).
+//
+// ⚠️ The anchor-click trick silently does NOTHING in an installed iOS PWA, and
+// revoking the blob URL on the very next line makes it worse: Safari has not
+// finished reading the blob by then, so even where the click registers the
+// download can die. Both export paths did exactly that, so "Download my data"
+// appeared broken to every iPhone user — no error, no file.
+//
+// The share sheet is the native way to save a file on iOS, so try it first when
+// the platform offers it for files; otherwise fall back to the anchor, and give
+// the browser a full minute with the blob before revoking it.
+async function deliverFile(json, filename) {
+  const blob = new Blob([json], { type: "application/json" });
+  const file = new File([blob], filename, { type: "application/json" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: filename }); return true; }
+    catch (e) { if (e && e.name === "AbortError") return false; /* fall through */ }
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url;
-  a.download = `Glidna-My-Data-${new Date().toISOString().slice(0, 10)}.json`;
+  a.href = url; a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  return bundle.entryCount;
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return true;
 }
 
 function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onCalendar, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme, accentPref, onSetAccent, teamLocked, onReferrals }) {
@@ -28869,16 +28934,8 @@ export default function App() {
         profiles: profiles,
         data: allData,
       };
-      const json = JSON.stringify(bundle, null, 2);
-      const blob = new Blob([json], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `Glidna-Backup-${new Date().toISOString().slice(0,10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      await deliverFile(JSON.stringify(bundle, null, 2),
+        `Glidna-Backup-${new Date().toISOString().slice(0,10)}.json`);
       return true;
     } catch(e) { return false; }
   };

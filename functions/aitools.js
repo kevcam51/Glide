@@ -3068,7 +3068,14 @@ async function runTool(name, input, ctx) {
     if (!Array.isArray(d.checkIns)) d.checkIns = [];
     const prev = Number(d.weightLbs) || v;
     if (d.startWeightLbs == null || d.startWeightLbs === "") d.startWeightLbs = prev;
-    d.weightLbs = v;
+    // ⚠️ ONLY THE MOST RECENT WEIGH-IN IS "CURRENT WEIGHT" (S196p). This set it
+    // unconditionally, so "log my weight from last Monday, I was 190" made 190
+    // the client's weight today even though they weighed 184 yesterday — and
+    // everything derived from current weight moved with it: pounds to go, the
+    // goal timeline, the calorie target, the trainer's roster card. The app's
+    // own weigh-in has guarded this since S86; the AI path never learned it.
+    const laterExists = d.checkIns.some((c) => c && c.date && c.date > date && Number(c.weight) > 0);
+    if (!laterExists) d.weightLbs = v;
     // MERGE into an existing same-date check-in — a wholesale replace here used
     // to wipe a same-day workout/notes/body-fat (log_workout at 9am, weigh-in
     // at 8pm erased the workout), mirroring the log_workout merge behavior.

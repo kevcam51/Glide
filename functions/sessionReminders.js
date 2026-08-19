@@ -225,7 +225,12 @@ async function runSessionReminders(now = Date.now()) {
         url: `/?cardlink=${encodeURIComponent(s.clientUid)}`,
         actions: [{ action: "nocard-mute", title: "Don't remind me again" }],
         actionUrls: { "nocard-mute": `/?nocardstop=${encodeURIComponent(s.clientUid)}` },
-      }, "sessionReminders").catch(() => {});
+        // ⚠️ FILED UNDER BILLING, NOT REMINDERS (S196p). This rides the session
+        // sweep, but it is not a "your session is soon" nudge — it is "you are
+        // about to deliver training you cannot charge for". Grouping it with
+        // reminders meant a trainer who turned those off also silenced every
+        // money alert, which is the one category nobody means to mute.
+      }, "sessionBilling").catch(() => {});
       sent++;
     }
   }

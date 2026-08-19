@@ -44,6 +44,7 @@ async function trimAssets() {
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
+  const url = new URL(req.url);
   // Navigations: network-first, fall back to the cached shell when offline.
   // Refresh the cached shell on every successful navigation — the install-time
   // copy goes stale after a deploy (its hashed asset URLs 404), so keeping it
@@ -63,8 +64,21 @@ self.addEventListener("fetch", (e) => {
     const SHELL_TIMEOUT_MS = 1200;
     e.respondWith((async () => {
       const cached = await caches.match("/");
+      // ⚠️ ONLY THE ROOT IS THE SHELL (S196p). This stored ANY successful
+      // navigation under "/", including the /card/:code and /i/:code landing
+      // pages — which are serverless functions returning a REDIRECT
+      // interstitial, not the app, and are explicitly marked no-store. So after
+      // anyone opened a "save your card" or invite link on their phone, the
+      // installed app's cached start screen WAS that interstitial: every cold
+      // start on a slow radio booted into a redirect page instead of Glidna.
+      //
+      // Those routes also render fine without caching — they are one-time
+      // links, always online by definition, since they were just tapped from a
+      // message.
+      const isShell = url.pathname === "/";
       const network = fetch(req).then((res) => {
-        if (res && res.ok) {
+        const noStore = res && res.headers && /no-store/i.test(res.headers.get("cache-control") || "");
+        if (res && res.ok && isShell && !noStore) {
           const copy = res.clone();
           caches.open(SHELL).then((c) => c.put("/", copy)).catch(() => {});
         }
@@ -82,7 +96,6 @@ self.addEventListener("fetch", (e) => {
   }
   // Hashed build assets: cache-first. Immutable by construction (see the note at
   // the top), so a hit is always correct — this is what makes launch #2 instant.
-  const url = new URL(req.url);
   if (url.origin === self.location.origin && url.pathname.startsWith("/assets/")) {
     e.respondWith(
       caches.match(req).then((hit) => hit || fetch(req).then((res) => {

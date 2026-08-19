@@ -64,3 +64,16 @@ body { margin: 0; padding: 0; }
  * tap-highlight: removes the gray flash iOS paints on every button tap. */
 html, body { overscroll-behavior-y: none; }
 button, a, [role="button"] { -webkit-tap-highlight-color: transparent; }
+
+/* ── iOS input zoom (S196p) ──────────────────────────────────────────────────
+   The viewport used to carry maximum-scale=1.0 to stop iOS zooming in when a
+   small input receives focus. That worked, and it also disabled pinch-zoom for
+   everyone — an accessibility control, removed on Android to solve an iOS
+   problem. This is the actual fix: iOS only auto-zooms when the focused field
+   is under 16px, so give form controls 16px at phone widths and it has no
+   reason to. */
+@media (max-width: 767px) {
+  input, textarea, select {
+    font-size: max(16px, 1em);
+  }
+}
