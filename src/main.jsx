@@ -63,6 +63,33 @@ root.render(
   </StrictMode>,
 )
 
+// ── Publish the on-screen keyboard's height (S196q) ─────────────────────────
+// iOS does not resize the layout viewport when the keyboard opens — it draws it
+// over the page — so a position:fixed panel has no idea anything happened and
+// its composer ends up underneath the keys. visualViewport DOES know: the gap
+// between it and the layout viewport IS the keyboard. Published as --kb so the
+// .kb-safe class can lift affected panels clear.
+//
+// Chrome already resizes (see interactive-widget in index.html), where this
+// measures ~0 and the class is a no-op. Nothing to feature-detect.
+if (typeof window !== 'undefined' && window.visualViewport) {
+  const vv = window.visualViewport
+  // Written synchronously. An earlier draft batched this into a
+  // requestAnimationFrame, which is dead weight here — the event fires a handful
+  // of times per keyboard transition, not per frame — and rAF is PAUSED while
+  // the tab is hidden, so the value could sit stale exactly when a backgrounded
+  // PWA came back with the keyboard already up.
+  const sync = () => {
+    // offsetTop matters when the page is scrolled under the keyboard; without
+    // it a mid-page focus over-reports the gap and pushes the panel too far.
+    const gap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop)
+    document.documentElement.style.setProperty('--kb', `${Math.round(gap)}px`)
+  }
+  vv.addEventListener('resize', sync)
+  vv.addEventListener('scroll', sync)
+  sync()
+}
+
 // Register the PWA service worker (prod only, so dev/preview isn't affected by
 // any caching). Enables home-screen install + a graceful offline shell.
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {

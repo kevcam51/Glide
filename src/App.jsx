@@ -21331,7 +21331,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
         // open) and the panel rendered BEHIND the sheet — the button vanished
         // and nothing came back. Raised above sheets only while one is up, so
         // the normal stack (side menu 1400 wins over the chat) is untouched.
-        <div className={`fixed ${sheetUp ? "z-[1660]" : "z-[1395]"} flex flex-col overflow-hidden rounded-card border border-border bg-surface text-fg shadow-2xl`}
+        <div className={`fixed kb-safe ${sheetUp ? "z-[1660]" : "z-[1395]"} flex flex-col overflow-hidden rounded-card border border-border bg-surface text-fg shadow-2xl`}
           style={size === "full" ? {
             top: "calc(10px + env(safe-area-inset-top,0px))",
             bottom: "calc(10px + env(safe-area-inset-bottom,0px))",
@@ -24998,7 +24998,9 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
   };
   const timeOf = (ts) => { try { return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch { return ""; } };
   return createPortal(
-    <div className="bg-bg text-fg" style={{ position: "fixed", inset: 0, zIndex: 2300, display: "flex", flexDirection: "column", fontFamily: "var(--font-sans)" }}>
+    // kb-safe: on iOS the keyboard is drawn OVER a fixed panel, so without this
+    // the message box you are typing into sits underneath it (S196q).
+    <div className="bg-bg text-fg kb-safe" style={{ position: "fixed", inset: 0, zIndex: 2300, display: "flex", flexDirection: "column", fontFamily: "var(--font-sans)" }}>
       <div className="relative justify-center px-[92px] flex items-center gap-2 border-b border-border bg-surface2 px-3" style={{ paddingTop: "calc(10px + env(safe-area-inset-top,0px))", paddingBottom: "10px" }}>
         <Icon name="person" size={18} color="var(--accent)" />
         <div className="min-w-0 flex-1">
