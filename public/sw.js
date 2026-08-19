@@ -107,7 +107,12 @@ self.addEventListener("push", (e) => {
     icon: "/icon-192.png",
     badge: "/icon-maskable-192.png",
     tag: d.tag || "glide",
-    data: { url: d.url || "/" },
+    // S196e: a payload may carry action buttons, each with its own destination
+    // (`actionUrls[action]`). The button does NOT act here — the worker has no
+    // signed-in Firestore access — it just opens the app at a URL that does,
+    // which is the same mechanism the invite and card links already use.
+    actions: Array.isArray(d.actions) ? d.actions.slice(0, 2) : undefined,
+    data: { url: d.url || "/", actionUrls: d.actionUrls || {} },
   }));
 });
 
@@ -119,7 +124,10 @@ self.addEventListener("push", (e) => {
 // tap doesn't reload the page out from under someone).
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
-  const url = (e.notification.data && e.notification.data.url) || "/";
+  const data = e.notification.data || {};
+  // An action button overrides the body tap. Falling back to the plain url when
+  // an action has no destination keeps an unknown action harmless.
+  const url = (e.action && data.actionUrls && data.actionUrls[e.action]) || data.url || "/";
   const target = new URL(url, self.location.origin).href;
   e.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (list) => {

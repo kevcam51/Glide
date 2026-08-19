@@ -14766,6 +14766,38 @@ function takeSaveCardIntent() {
 // Google redirect later — by which time this query string is long gone.
 stashSaveCardIntent();
 
+// ─── What a no-card reminder's buttons do (S196e) ───────────────────────────
+// The push carries two destinations: tapping the body opens the client's card
+// link, and "Don't remind me again" opens ?nocardstop=<uid>. The service worker
+// only navigates — it has no signed-in database access — so the actual write
+// happens here, where the trainer is authenticated. Captured at import for the
+// same reason as the card intent above: the query string does not survive the
+// trip through AuthGate.
+// Mirrors NO_CARD_MUTE_KEY in functions/sessionReminders.js — the trainer's own
+// kv, so muting needs no rules change and the sweep can read it with the Admin SDK.
+const NOCARD_MUTE_KEY = "caliq-nocard-muted";
+const NOCARD_STOP_STASH = "glidna-nocard-stop";
+const CARDLINK_FOR_STASH = "glidna-cardlink-for";
+function stashNoCardIntents() {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const stop = (p.get("nocardstop") || "").trim();
+    const show = (p.get("cardlink") || "").trim();
+    if (!stop && !show) return;
+    if (stop) localStorage.setItem(NOCARD_STOP_STASH, stop);
+    if (show) localStorage.setItem(CARDLINK_FOR_STASH, show);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("nocardstop");
+    url.searchParams.delete("cardlink");
+    window.history.replaceState({}, "", url.toString());
+  } catch (e) { /* private mode / no history API */ }
+}
+function takeStashed(key) {
+  try { const v = localStorage.getItem(key); if (v) localStorage.removeItem(key); return v || ""; }
+  catch (e) { return ""; }
+}
+stashNoCardIntents();
+
 // Remove ?invite= (and the ?n= inviter name) from the URL without reloading, so
 // they can't re-fire on refresh.
 function clearInviteFromUrl() {
@@ -15938,6 +15970,36 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // client (one threads listener; badges gated by the messages notif pref).
   const [msgFor, setMsgFor] = useState(null); // client object | null
   const [cardLinkFor, setCardLinkFor] = useState(null); // client uid whose "save your card" link is showing (S195)
+  const [noCardMutes, setNoCardMutes] = useState({});   // clientUid -> true: no more no-card reminders (S196e)
+  const [muteMsg, setMuteMsg] = useState("");
+  // Act on whatever a no-card reminder was tapped with. Both live in
+  // localStorage because the push lands before AuthGate has finished.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      let mutes = {};
+      try { const r = await window.storage.get(NOCARD_MUTE_KEY); mutes = JSON.parse((r && r.value) || "{}"); }
+      catch { mutes = {}; }
+      const stop = takeStashed(NOCARD_STOP_STASH);
+      if (stop) {
+        mutes = { ...mutes, [stop]: true };
+        try { await window.storage.set(NOCARD_MUTE_KEY, JSON.stringify(mutes)); } catch { /* offline */ }
+        if (alive) setMuteMsg("Card reminders turned off for that client. Their sessions still show it on screen.");
+        setTimeout(() => alive && setMuteMsg(""), 6000);
+      }
+      const show = takeStashed(CARDLINK_FOR_STASH);
+      if (alive) {
+        setNoCardMutes(mutes && typeof mutes === "object" ? mutes : {});
+        if (show) setCardLinkFor(show);
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+  const unmuteNoCard = async (uid) => {
+    const next = { ...noCardMutes }; delete next[uid];
+    setNoCardMutes(next);
+    try { await window.storage.set(NOCARD_MUTE_KEY, JSON.stringify(next)); } catch { /* offline */ }
+  };
   const [notesFor, setNotesFor] = useState(null); // client object | null — Notes panel (S91)
   // Same panel, for one of the trainer's OWN plan files (S166). Those people are
   // clients too; they just never made an account, so they get notes like anyone
@@ -16479,6 +16541,13 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
             <div className={`${subCls} mt-1 mb-2`}>
               Live data from each client's shared plan. Tap a card to open it.
             </div>
+            {/* Confirms what "Don't remind me again" on a push actually did —
+                otherwise the button silently succeeds and the trainer has no
+                way to know whether it worked. */}
+            {muteMsg && (
+              <div className="mb-2 rounded-md px-2.5 py-2 text-[.74rem]"
+                style={{ background: "rgba(var(--accent-rgb),.10)", color: "var(--text)" }}>{muteMsg}</div>
+            )}
             {/* Toggle the sent to-do reminders on the cards (shared notification
                 prefs; also in ≡ menu → Notifications). Re-enabling clears master. */}
             <button onClick={() => onSetNotifPrefs(reqsOn ? { sentReminders: false } : { master: true, sentReminders: true })}
@@ -16636,6 +16705,20 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                             until they save one.
                           </div>
                           <CardLinkRow meName={meName} compact />
+                          {/* Muting silences the 24h/12h/2h PUSH reminders only —
+                              this notice stays, because it is information about
+                              the account rather than a nag, and a one-way door
+                              with no way back is how people end up unable to
+                              explain why they stopped being told. */}
+                          {noCardMutes[c.uid] && (
+                            <div className="mt-1.5 flex items-center gap-2 text-[.68rem] text-muted">
+                              <span>Reminders off for {c.name}.</span>
+                              <button onClick={() => unmuteNoCard(c.uid)}
+                                className="underline bg-transparent border-0 p-0 text-primary cursor-pointer text-[.68rem]">
+                                Turn back on
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
                       {cardLinkFor === c.uid && (

@@ -27,6 +27,7 @@
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
 const { sendPushTo, VAPID_PRIVATE_KEY } = require("./push");
+const { canBillSessions } = require("./sessionBillingGate");
 
 const REGION = "us-central1";
 // How far ahead we look. Also the largest lead anyone may choose (24h).
@@ -42,6 +43,32 @@ const SWEEP_CAP = 400;
 // pref doc, not a user choice.
 const ALLOWED_LEADS = [5, 10, 15, 30, 60, 120, 240, 1440];
 const DEFAULT_LEADS = [60];
+
+// ─── NO-CARD REMINDERS (Kevin, S196e) ───────────────────────────────────────
+//
+// A booked session for a client with no card on file is training that will be
+// delivered and can never be charged. The settle sweep says so once, after the
+// fact; these say so BEFORE, while it can still be fixed — 24 hours, 12 hours
+// and 2 hours out.
+//
+// Three properties matter, and all three are conditions checked at FIRE time
+// rather than when the session was booked:
+//  • THE CLIENT SAVING A CARD STOPS THEM. Card state is read on every sweep, so
+//    the 12h and 2h reminders simply never happen once a card exists. Nothing
+//    needs to cancel them, which means nothing can forget to.
+//  • THE TRAINER CAN SWITCH THEM OFF per client, from the notification itself.
+//  • NEVER TWICE, and never as a burst — the same two rules as the reminders
+//    above, using the same arrayUnion marker and stale-window logic.
+const NO_CARD_LEADS = [1440, 720, 120];        // 24h · 12h · 2h
+const NO_CARD_MUTE_KEY = "caliq-nocard-muted"; // trainer's own kv: { [clientUid]: true }
+
+async function noCardMutesOf(db, uid) {
+  try {
+    const d = (await db.doc(`users/${uid}/kv/${NO_CARD_MUTE_KEY}`).get()).data();
+    const p = d && d.value ? JSON.parse(d.value) : {};
+    return p && typeof p === "object" ? p : {};
+  } catch { return {}; }
+}
 
 function leadsOf(prefs) {
   if (!prefs || prefs.master === false || prefs.sessionReminders === false) return [];
@@ -143,6 +170,63 @@ async function runSessionReminders(now = Date.now()) {
         }, "sessionReminders").catch(() => {});
         sent++;
       }
+    }
+
+    // ── the same session, asked a different question: can it be charged? ─────
+    // Trainer-only, and only where money is actually at stake.
+    if (!canBillSessions(s.trainerUid) || !(Number(s.priceCents) > 0)) continue;
+    const trainer = await load(s.trainerUid);
+    const client = await load(s.clientUid);
+    const pm = client.profile.sessionPaymentMethod;
+    // THE CARD IS CHECKED NOW, NOT AT BOOKING. A client who saved one since the
+    // last sweep silently ends the remaining reminders — no cancellation step
+    // to get wrong.
+    if (pm && pm.id) continue;
+    if (!trainer.mutes) trainer.mutes = await noCardMutesOf(db, s.trainerUid);
+    if (trainer.mutes[s.clientUid]) continue;              // "don't remind me again"
+    const clientName = nameOf(client.profile) || "Your client";
+    const noCardAlready = Array.isArray(s.noCardRemindersSent) ? s.noCardRemindersSent : [];
+
+    // ⚠️ THESE DO NOT USE THE STALE-WINDOW RULE ABOVE, and the difference is the
+    // point. "Your session is in 2 hours" becomes a lie if it is delivered 90
+    // minutes out, so a missed lead there must die silently. "They still have
+    // no card" is equally true whenever it arrives — it describes the account,
+    // not the countdown — so a lead that came due while nobody was looking is
+    // still worth sending. Book a session 90 minutes ahead for a card-less
+    // client and the naive stale rule sends NOTHING, which is exactly when the
+    // trainer most needs to know.
+    //
+    // So: every due lead is claimed at once, and ONE notification goes out for
+    // them. Booked days ahead, that is the ordinary 24h / 12h / 2h ladder;
+    // booked inside two hours, it is a single immediate heads-up rather than
+    // three at once. The body is phrased by CLOCK TIME, never "in 2 hours", so
+    // it cannot misdescribe how long is left.
+    const dueLeads = NO_CARD_LEADS.filter((lead) =>
+      !noCardAlready.includes(`${s.trainerUid}:${lead}`) && now >= startAt - lead * 60000);
+    // Nothing due, or the session has already started — at which point this is
+    // the settle sweep's problem, not a reminder.
+    if (dueLeads.length && startAt > now) {
+      try {
+        await d.ref.update({
+          noCardRemindersSent: admin.firestore.FieldValue.arrayUnion(
+            ...dueLeads.map((lead) => `${s.trainerUid}:${lead}`)),
+        });
+      } catch (e) { continue; }
+      marked += dueLeads.length;
+
+      await sendPushTo(db, s.trainerUid, {
+        title: `${clientName} still has no card on file`,
+        body: `Your ${clockET(startAt)} session can't be charged until they save one. Tap to send them the card link.`,
+        tag: `session-nocard-${d.id}`,
+        // Tapping the notification goes to the card link for THIS client; the
+        // action button turns these off for them instead. Both are ordinary
+        // app URLs, so the service worker needs no Firestore access to honour
+        // either one.
+        url: `/?cardlink=${encodeURIComponent(s.clientUid)}`,
+        actions: [{ action: "nocard-mute", title: "Don't remind me again" }],
+        actionUrls: { "nocard-mute": `/?nocardstop=${encodeURIComponent(s.clientUid)}` },
+      }, "sessionReminders").catch(() => {});
+      sent++;
     }
   }
   return { sessions: considered, sent, marked };

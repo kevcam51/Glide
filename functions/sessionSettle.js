@@ -256,13 +256,6 @@ function isBiweeklySettleWindow(now = new Date()) {
   const days = Math.floor(Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day)) / 86400000);
   return Math.floor(days / 7) % 2 === 0;
 }
-// The ET calendar day, as a stable "YYYY-MM-DD" string. Used to notify a
-// trainer about a card-less client at most once a day rather than once an hour.
-function etDayKey(now = new Date()) {
-  const p = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" })
-    .formatToParts(now).reduce((o, x) => (o[x.type] = x.value, o), {});
-  return `${p.year}-${p.month}-${p.day}`;
-}
 const usd = (cents) => `$${(Math.max(0, Number(cents) || 0) / 100).toFixed(2)}`;
 
 // Is this the run that settles the given mode?
@@ -561,14 +554,15 @@ async function settleGroup(db, items, { now, nowDate, force, dryRun }) {
     // one who can act on it, and pushing the client instead would read as
     // Glidna chasing them for money on their coach's behalf.
     //
-    // Once per client per DAY, not per sweep: this runs hourly, and a
-    // notification that repeats 24 times a day is one people turn off — which
-    // would cost them the alert that matters. The marker is written on the
-    // trainer's own profile, so it costs no new collection.
-    const dayKey = etDayKey(nowDate);
-    const seenKey = `${clientUid}:${dayKey}`;
-    const alreadyToldToday = (trainer.sessionNoCardNotified || {})[clientUid] === dayKey;
-    if (!alreadyToldToday && owed > 0) {
+    // ONCE PER CLIENT, EVER — not once a day (Kevin, S196e). A repeating alert
+    // about a fact that hasn't changed is a nag, and a nag is something people
+    // switch off, which costs them the alerts that matter. This is the single
+    // "you should know this" heads-up; the ONGOING pressure lives in the
+    // session reminders (24h/12h/2h before each booking, functions/
+    // sessionReminders.js), which are tied to real upcoming work and stop by
+    // themselves the moment a card is saved.
+    const alreadyTold = !!(trainer.sessionNoCardNotified || {})[clientUid];
+    if (!alreadyTold && owed > 0) {
       const who = client.displayName
         || [client.firstName, client.lastName].filter(Boolean).join(" ")
         || "A client";
@@ -578,10 +572,10 @@ async function settleGroup(db, items, { now, nowDate, force, dryRun }) {
         tag: `session-no-card-${clientUid}`, url: "/",
       }, "sessionBilling").catch(() => {});
       await db.doc(`users/${trainerUid}`).set({
-        sessionNoCardNotified: { [clientUid]: dayKey },
+        sessionNoCardNotified: { [clientUid]: now },
       }, { merge: true }).catch(() => {});
     }
-    return { outcome: "skipped", why: "no-card", wouldHaveCharged: owed, notified: !alreadyToldToday && owed > 0, seenKey };
+    return { outcome: "skipped", why: "no-card", wouldHaveCharged: owed, notified: !alreadyTold && owed > 0 };
   }
 
   // ── claim + credits, transactionally ──────────────────────────────────────
