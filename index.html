@@ -7,6 +7,18 @@
          16px (the message box, chat composer, etc.). Safari deliberately still
          honors pinch-to-zoom despite it, so accessibility zoom is unaffected. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+    <!-- ⚠️ THE DISPLAY FONT IS LOADED HERE, NOT FROM CSS (S196j).
+         themes.css carried `@import url(...Sora...)`, and the bundler hoisted
+         that import into the DEV-ONLY Showcase chunk — which production never
+         loads. The shipped CSS went on naming Sora in --font-display while
+         nothing ever fetched it, so every heading, hero number and the wordmark
+         rendered in the system fallback. Nobody spotted it because the app
+         still looked deliberate, just not like the design.
+         A <link> also beats @import on speed: an @import inside a stylesheet
+         cannot start downloading until that stylesheet has itself arrived. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&display=swap" />
     <title>Glidna</title>
     <meta name="description" content="Glidna — where skilled trainers and smart AI keep you aware, accountable, and on track. Powerful with a coach, capable on its own." />
     <!-- PWA: installable as a home-screen app (icons via npm run gen:icons). Also
