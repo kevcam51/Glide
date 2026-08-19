@@ -17194,13 +17194,22 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                           <span className="text-primary font-bold">Use this</span>
                         </button>
                       ))}
-                      {/* The personal-plan convention, for an account that tracks
-                          the way a client does rather than in a local file. */}
-                      <button onClick={() => setMyTracker(tzMePlanFor, "self")} disabled={tzMeBusy}
-                        className="flex items-center justify-between rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
-                        <span>My own plan <span className="text-muted">(only if you log as a client — a trainer account can&apos;t open this one)</span></span>
-                        <span className="text-primary font-bold">Use this</span>
-                      </button>
+                      {/* ⚠️ "My own plan" USED TO BE OFFERED HERE, and Kevin picked
+                          it — reasonably, since it is the obvious answer to "where
+                          should MY watch data go". It writes to `caliq-self`, the
+                          client-account convention, which NO trainer screen opens:
+                          his Garmin readings arrived every 30 minutes for weeks and
+                          were never visible anywhere. A warning label was the first
+                          attempt and it was not enough. An option that cannot work
+                          for this account should not be an option — so it is gone,
+                          and the list below covers the case where it leaves nothing
+                          to choose. */}
+                      {!((profiles || []).filter((pf) => pf && !pf.isSimulation).length) && (
+                        <div className="rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-muted leading-snug">
+                          You don&apos;t have a plan to put this in yet. Create one under
+                          &ldquo;Local Plans&rdquo; first — the watch data needs somewhere you can actually open.
+                        </div>
+                      )}
                     </div>
                     <button onClick={() => setTzMePlanFor(null)} className="mt-1.5 bg-transparent border-0 p-0 text-xs text-muted cursor-pointer">Cancel</button>
                   </div>
