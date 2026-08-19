@@ -11226,24 +11226,38 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const [showBurnModes, setShowBurnModes] = useState(false);  // target chooser (S97z)
   // Last 14 days of logged calories for the compliance tracker (S123). Uses the
   // remote-aware onReadDay, so a trainer viewing a client reads THAT client's log.
-  const [compDays, setCompDays] = useState([]);
+  // ⚠️ FOURTEEN READS, IN SERIES, ON EVERY MEAL (S196n). Two separate costs
+  // stacked here. The loop AWAITED each day before starting the next, so a
+  // fourteen-day strip cost fourteen round trips end to end — about two seconds
+  // of network on a phone. And the effect depended on `dailyLog.calories`, so
+  // every single logged meal re-ran all fourteen, on the app's busiest screen.
+  //
+  // Now: the thirteen PAST days are fetched together and only re-fetched when
+  // the day or the plan changes — they cannot change while you sit there — and
+  // TODAY is merged in from state, which is where its live value already is. So
+  // logging a meal costs zero reads and the strip still updates instantly.
+  const [pastComp, setPastComp] = useState([]);
   useEffect(() => {
     let alive = true;
-    if (!onReadDay) { setCompDays([]); return; }
+    if (!onReadDay) { setPastComp([]); return; }
     (async () => {
-      try {
-        const out = [];
-        for (let i = 0; i < 14; i++) {
-          const dt = new Date(); dt.setDate(dt.getDate() - i);
-          const key = ymdLocal(dt);
-          const v = await onReadDay(key);
-          if (v && Number(v.calories) > 0) out.push({ date: key, calories: Number(v.calories) });
-        }
-        if (alive) setCompDays(out);
-      } catch { if (alive) setCompDays([]); }
+      const keys = Array.from({ length: 13 }, (_, i) => {
+        const dt = new Date(); dt.setDate(dt.getDate() - (i + 1));
+        return ymdLocal(dt);
+      });
+      const days = await Promise.all(keys.map((k) =>
+        onReadDay(k).then((v) => (v && Number(v.calories) > 0 ? { date: k, calories: Number(v.calories) } : null))
+          // One unreadable day must not blank the whole strip — it is a display,
+          // and a missing bar is honest where an empty tracker is not.
+          .catch(() => null)));
+      if (alive) setPastComp(days.filter(Boolean));
     })();
     return () => { alive = false; };
-  }, [onReadDay, dashToday, dailyLog && dailyLog.calories]);
+  }, [onReadDay, dashToday]);
+  const compDays = useMemo(() => {
+    const todayCals = Number(dailyLog && dailyLog.calories) || 0;
+    return todayCals > 0 ? [{ date: dashToday, calories: todayCals }, ...pastComp] : pastComp;
+  }, [pastComp, dailyLog && dailyLog.calories, dashToday]);
   const [expandedStat, setExpandedStat] = useState(null);
   const [tileEdit, setTileEdit] = useState(false);
   const tileHidden = (k) => hiddenTiles.includes(k);
@@ -22515,26 +22529,36 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
     } catch { /* ignore */ }
   };
   // ── Compliance tracker (S120) — last 14 days of logged calories ──
-  const [compDays, setCompDays] = useState([]);
   const compHidden = (planData || {}).hideCompliance === true;
   const setCompHidden = (hide) => savePlanDataMutation((d) => { d.hideCompliance = hide; });
+  // Same fix as the trainer-side strip (S196n): the past thirteen days fetched
+  // TOGETHER and only when the day or plan changes, today merged in from state.
+  // The old version awaited each of fourteen reads in turn AND re-ran the whole
+  // set on `log.calories`, so every meal a client logged on their own home
+  // screen cost fourteen sequential round trips.
+  const [pastComp, setPastComp] = useState([]);
   useEffect(() => {
     let alive = true;
     (async () => {
-      try {
-        const out = [];
-        for (let i = 0; i < 14; i++) {
-          const dt = new Date(); dt.setDate(dt.getDate() - i);
-          const key = ymdLocal(dt);
-          const r = await get(planLogPrefix(activePlanId) + key);
+      const keys = Array.from({ length: 13 }, (_, i) => {
+        const dt = new Date(); dt.setDate(dt.getDate() - (i + 1));
+        return ymdLocal(dt);
+      });
+      const days = await Promise.all(keys.map(async (k) => {
+        try {
+          const r = await get(planLogPrefix(activePlanId) + k);
           const v = r && r.value ? JSON.parse(r.value) : null;
-          if (v && Number(v.calories) > 0) out.push({ date: key, calories: Number(v.calories) });
-        }
-        if (alive) setCompDays(out);
-      } catch { if (alive) setCompDays([]); }
+          return v && Number(v.calories) > 0 ? { date: k, calories: Number(v.calories) } : null;
+        } catch { return null; }   // a missing or unreadable day is just no bar
+      }));
+      if (alive) setPastComp(days.filter(Boolean));
     })();
     return () => { alive = false; };
-  }, [activePlanId, todayKey, log.calories]);
+  }, [activePlanId, todayKey]);
+  const compDays = useMemo(() => {
+    const todayCals = Number(log.calories) || 0;
+    return todayCals > 0 ? [{ date: todayKey, calories: todayCals }, ...pastComp] : pastComp;
+  }, [pastComp, log.calories, todayKey]);
 
   // Body measurements (tape) — merge into today's entry, echo-safe write path.
   const saveMeasurements = async (vals, dateKey) => {
