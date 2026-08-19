@@ -89,13 +89,18 @@ button, a, [role="button"] { -webkit-tap-highlight-color: transparent; }
    --kb is the keyboard's height, published by the visualViewport listener in
    main.jsx and 0 everywhere else. Panels that hold an input pad themselves by
    that much, which lifts the composer clear on iOS and changes nothing on a
-   platform that already resized. */
+   platform that already resized.
+
+   ⚠️ NO TRANSITION ON THIS, and not only because animating padding thrashes
+   layout. iOS fires visualViewport events THROUGHOUT the keyboard's own
+   animation, so --kb is already interpolating — easing on top of that makes the
+   composer chase a moving target and trail the keys instead of riding with
+   them. If a platform ever reported the change in one step instead, an instant
+   snap would still match how the keyboard itself appears. Either way the
+   transition only made it worse, so there is nothing here for
+   prefers-reduced-motion to turn off either. */
 :root { --kb: 0px; }
 
 .kb-safe {
   padding-bottom: calc(var(--kb) + env(safe-area-inset-bottom, 0px));
-  transition: padding-bottom .18s ease-out;
-}
-@media (prefers-reduced-motion: reduce) {
-  .kb-safe { transition: none; }
 }
