@@ -10773,21 +10773,14 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
         </div>
       );
     }
-    if (dayLog === null) {
-      return (
-        <div style={{ padding: "22px 4px", textAlign: "center" }}>
-          <div style={{ color: "var(--yellow)", fontWeight: 700, marginBottom: 6 }}>Couldn&apos;t load this day</div>
-          <div style={{ color: "var(--muted)", fontSize: ".86rem", lineHeight: 1.5, maxWidth: 340, margin: "0 auto" }}>
-            You may be offline. Logging is paused for {sel} until it loads — anything you entered now
-            could overwrite what&apos;s already there.
-          </div>
-          <button onClick={() => setDayReload((n) => n + 1)} style={{ marginTop: 12, padding: "9px 16px", borderRadius: 10,
-            border: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: ".84rem" }}>
-            Try again
-          </button>
-        </div>
-      );
-    }
+    // ⚠️ SCOPED TO WHAT IS ACTUALLY AT RISK (S196m). The first version returned
+    // early for the WHOLE day view, which also removed the weigh-in, the workout
+    // check-in, measurements and the day's booked sessions — none of which live
+    // in the day-log document that failed to read. They write to the plan's
+    // check-ins, so blocking them protected nothing and cost the client the
+    // ability to record a weight because their FOOD log was unreachable.
+    // Only the food card is withheld, and it says why.
+    const dayLoadFailed = dayLog === null;
     const preStart = beforeStart(sel);
     const isStart = startKey && sel === startKey;
     const dn = weekdayName(sel);
@@ -10842,7 +10835,22 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
 
         {sessionsBlock(sel)}
 
-        {/* Food */}
+        {/* Food — the only card fed by the day-log document, so the only one
+            withheld when that document could not be read. */}
+        {dayLoadFailed ? (
+          <div style={card}>
+            <div style={lbl}><Icon name="meal" size={18} color="currentColor" style={{flexShrink:0}} />Food</div>
+            <div style={{ color: "var(--yellow)", fontWeight: 700, margin: "6px 0 4px" }}>Couldn&apos;t load this day&apos;s food</div>
+            <div style={{ color: "var(--muted)", fontSize: ".84rem", lineHeight: 1.5 }}>
+              You may be offline. Food logging is paused for {sel} so nothing overwrites what&apos;s already
+              saved. Weight, workouts and measurements below still work.
+            </div>
+            <button onClick={() => setDayReload((n) => n + 1)} style={{ marginTop: 10, padding: "9px 16px", borderRadius: 10,
+              border: "1px solid var(--border)", background: "transparent", color: "var(--text)", cursor: "pointer", fontSize: ".84rem" }}>
+              Try again
+            </button>
+          </div>
+        ) : (
         <div style={card}>
           <div style={lbl}><Icon name="meal" size={18} color="currentColor" style={{flexShrink:0}} />Food</div>
           <div style={{ fontSize: "1.6rem", fontWeight: 800, fontFamily: "'Sora',sans-serif" }}>
@@ -10898,6 +10906,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
               planned={(dayLog && dayLog.planned) || []} onSetPlanned={setPlannedForDay} onPlanDays={onPlanDays} />
           </div>
         </div>
+        )}
 
         {/* Workout — directly under food (S161, Kevin's ordering) */}
         <div style={card}>
@@ -14262,21 +14271,30 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   // underlying store has always been date-keyed — only the UI assumed today.
   const [entryDate, setEntryDate] = useState(() => ymdLocal());
   const isBackdated = entryDate !== ymdLocal();
-  const logWeight = () => {
+  // ⚠️ AWAITS THE ANSWER (S196m). This fired onLogWeight, said "Logged N lbs"
+  // and closed itself — all before the write had resolved, and regardless of
+  // whether it was refused. Same lie as the dashboard's, in the panel people
+  // actually use to record a weigh-in. onLogWeight resolves to false when the
+  // save fails (S196k), so the confirmation now waits for it.
+  const logWeight = async () => {
     const v = Math.round(Number(weightDraft) * 10) / 10;
     if (!(v > 0)) return false;
-    onLogWeight(v, entryDate); setWeightDraft(""); setWeightMsg(`Logged ${v} lbs`);
+    const ok = await Promise.resolve(onLogWeight(v, entryDate));
+    if (ok === false) { setWeightMsg(SAVE_FAILED_MSG); setTimeout(() => setWeightMsg(""), 6000); return false; }
+    setWeightDraft(""); setWeightMsg(`Logged ${v} lbs`);
     setTimeout(() => setWeightMsg(""), 2200);
     return true;
   };
   // Logging weight is usually a standalone action, so close the modal once it's
   // saved (S110d, Kevin: "I expected it to close for me"). Brief delay lets the
   // "Logged N lbs" confirmation register first.
-  const logWeightAndClose = () => { if (logWeight()) setTimeout(() => onClose(), 850); };
+  const logWeightAndClose = async () => { if (await logWeight()) setTimeout(() => onClose(), 850); };
   // Commit a typed-but-not-yet-logged weight when the user hits Save or closes,
   // so a pending weight can never be silently lost by tapping the wrong button
   // (the tile then reflects it). Safe to call with nothing typed — it no-ops.
   const flushWeight = () => { if (Number(weightDraft) > 0) return logWeight(); return false; };
+  // Closing still flushes a pending weight, but no longer waits on it — the
+  // failure surfaces through the shared banner rather than a panel that is gone.
   const handleClose = () => { flushWeight(); onClose(); };
   // Body-fat estimate is optional: some people just want to track tape numbers
   // as a tool. `data.hideBodyFat` turns off all the % / lean-mass / goal math
@@ -15512,7 +15530,25 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
     setBusy(false); setDone(true);
     setTimeout(onClose, 1000);
   };
-  const run = async (fn) => { setBusy(true); setFailed(""); const ok = await fn(); await finish(ok); };
+  // ⚠️ A SAVE THAT NEVER SETTLES MUST NOT TRAP THE PERSON (S196m). Cancel is
+  // disabled while busy, so a promise that never resolves — an offline write
+  // that hangs rather than rejecting — left the modal frozen with no way out
+  // and no explanation. A throw did the same, because nothing caught it. The
+  // race gives it a bounded wait, and the catch gives it an honest ending.
+  const run = async (fn) => {
+    setBusy(true); setFailed("");
+    try {
+      const ok = await Promise.race([
+        Promise.resolve(fn()),
+        new Promise((res) => setTimeout(() => res("timeout"), 15000)),
+      ]);
+      if (ok === "timeout") { setBusy(false); setFailed("That's taking too long — check your connection and try again."); return; }
+      await finish(ok);
+    } catch (e) {
+      console.error("quick action failed", e);
+      setBusy(false); setFailed(SAVE_FAILED_MSG);
+    }
+  };
 
   const inputCls = "w-full box-border rounded-lg border border-border bg-surface2 px-3.5 py-3 text-center text-[1.1rem] text-fg outline-none placeholder:text-muted";
   const primaryCls = "flex-1 rounded-[9px] border-none bg-primaryfill px-3.5 py-3 text-[.92rem] font-bold text-primaryfg cursor-pointer disabled:opacity-55 disabled:cursor-default";
@@ -28934,6 +28970,10 @@ export default function App() {
   // Set by logWrite when a save is REFUSED. One banner covers every date-scoped
   // write in the app; clears itself so it can't linger after a good save.
   const [saveError, setSaveError] = useState("");
+  // false until the SHOWN day has actually been read. Every dashboard writer
+  // builds its payload by spreading `dailyLog`, so writing before this is true
+  // is how a stale or fabricated day gets saved over a real one.
+  const [dailyLogReady, setDailyLogReady] = useState(false);
   useEffect(() => {
     if (!saveError) return;
     const t = setTimeout(() => setSaveError(""), 9000);
@@ -29024,6 +29064,14 @@ export default function App() {
   };
   const persistLog = (logObj) => {
     if (!activeId) return;
+    // The single chokepoint for every dashboard write to the shown day — the
+    // meal handlers, the quick calorie buttons, water, the ring. One guard here
+    // covers all of them, which is the point: threading a readiness check
+    // through a dozen callers guarantees one gets missed.
+    if (!dailyLogReady) {
+      setSaveError(`${viewDate} hasn't finished loading — that wasn't saved. Try again in a moment.`);
+      return;
+    }
     logWrite(`caliq-log-${activeId}-${viewDate}`, JSON.stringify(logObj));
   };
   // Calendar back-dated logging: read / write / list any date's log for the
@@ -29317,11 +29365,24 @@ export default function App() {
   // case). Reads each day first so planning never clobbers what's already there.
   const onPlanDays = async (dates, items) => {
     if (!activeId || !dates.length || !items.length) return 0;
-    let written = 0;
+    let written = 0, skipped = 0;
     for (const d of dates) {
       const key = `caliq-log-${activeId}-${d}`;
-      let day = { calories: 0, water: 0, weight: 0, meals: [] };
-      try { const v = await logRead(key); if (v) day = JSON.parse(v); } catch (e) { /* new day */ }
+      // ⚠️ A DAY WE COULD NOT READ MUST BE SKIPPED, NOT REBUILT (S196m). This
+      // caught the failure and fell back to a ZEROED day — then wrote it. So one
+      // refused read replaced a real day's food, water and weight with empty
+      // fields plus the planned items, and this runs over MANY dates in a loop,
+      // so a bad connection could wipe a fortnight in one tap. An absent day is
+      // fine (that is what planning ahead means); an unreadable one is not.
+      let day;
+      try {
+        const v = await logRead(key, { strict: true });
+        day = v ? JSON.parse(v) : { calories: 0, water: 0, weight: 0, meals: [] };
+      } catch (e) {
+        console.error("skipping plan-write for unreadable day", d, e);
+        skipped++;
+        continue;
+      }
       const add = items.map((it, i) => ({
         ...it, id: `p${Date.now()}${i}${Math.floor(Math.random() * 1000)}`, done: false }));
       day.planned = [...(day.planned || []), ...add];
@@ -29329,6 +29390,7 @@ export default function App() {
       // Keep the open day in sync without a reload.
       if (d === viewDate) { setDailyLog(day); }
     }
+    if (skipped) setSaveError(`${skipped} day${skipped === 1 ? "" : "s"} couldn't be read and ${skipped === 1 ? "was" : "were"} skipped — check your connection and try those again.`);
     appendHistory([`planned ${items.length} meal${items.length === 1 ? "" : "s"} across ${written} day${written === 1 ? "" : "s"}`]);
     return written;
   };
@@ -29502,6 +29564,7 @@ export default function App() {
     // recentWearable have no onSnapshot to self-correct, so that stuck until a
     // full reload — which is exactly why the bug survived going back and forth.
     let alive = true;
+    setDailyLogReady(false);   // the shown day changed; nothing may be written until it is read
     (async () => {
       // Start every independent read AT ONCE. These used to run one after
       // another, with the recent-foods list read LAST — behind the range query
@@ -29511,15 +29574,25 @@ export default function App() {
       // depends on order across these five; each is awaited where its state is
       // set, cheapest first, so the chips no longer wait on the big query.
       const prefix = `caliq-log-${activeId}-`;
-      const pToday = logRead(`caliq-log-${activeId}-${viewDate}`);
+      const pToday = logRead(`caliq-log-${activeId}-${viewDate}`, { strict: true });
       const pFoods = logRead(`caliq-foods-${activeId}`);
       const pHist  = logRead(`caliq-history-${activeId}`);
       const pList  = logListEntries(prefix);
-      const v = await pToday;
+      // ⚠️ THE SHOWN DAY IS READ STRICTLY (S196m). A non-strict read returned
+      // null for a REFUSED read exactly as it does for an untouched day, so a
+      // failure rendered today as 0 cal with no meals — and the next meal
+      // logged wrote that emptiness over the real day. Absence is still fine
+      // (a fresh day genuinely has no document); a failure now marks the day
+      // NOT READY, and persistLog refuses to write until it is.
+      let v = null, readFailed = false;
+      try { v = await pToday; }
+      catch (e) { readFailed = true; console.error("could not read the shown day", viewDate, e); }
       if (!alive) return;
       let parsed = {calories:0, water:0, weight:0, meals:[]};
       if (v) { try { parsed = JSON.parse(v); } catch(e) {} }
       setDailyLog(parsed);
+      setDailyLogReady(!readFailed);
+      if (readFailed) setSaveError(`Couldn't load ${viewDate}. Logging is paused for that day so nothing overwrites what's already saved.`);
       // Recent foods next — small doc, and it's what the meal log's "last
       // logged" chips render from.
       {
