@@ -615,7 +615,21 @@ export function describePolicy(policy) {
 // the window and the fee." So the STRUCTURE is fixed platform-wide and only the
 // trainer's numbers vary — a client sees the same familiar terms everywhere in
 // Glide, and a trainer cannot accidentally ship a checkout with no policy on it.
-export function cancellationDisclosure(policy, trainerName = "your trainer") {
+// ⚠️ `canCharge` EXISTS BECAUSE THE LAST THREE LINES ARE A CLAIM ABOUT MONEY
+// (S196s). Automatic session billing is gated to allowlisted trainers (the
+// Connect interlock in sessionBillingGate.js), and for everyone else NO card can
+// be saved and nothing is ever charged. But this text told their clients
+// "sessions ... are totalled and charged to the card on file once a week"
+// regardless — a statement about their money that could not happen, shown above
+// a button reading "Cancel & accept charge", in a product they did not write.
+// The control that would change the sentence is behind the same gate, so the
+// trainer could not correct it either.
+//
+// The cancellation POLICY above is untouched and stays free for every trainer:
+// terms like "24 hours' notice" are real and enforceable between two people
+// whether or not a card is involved. Only the automatic-collection promise is
+// conditional, because only it depends on machinery the trainer may not have.
+export function cancellationDisclosure(policy, trainerName = "your trainer", { canCharge = true } = {}) {
   const p = policyOf({ sessionPolicy: policy || {} });
   const lines = [];
   // THE PRICE COMES FIRST. Everything below it — the fee, the no-show charge —
@@ -636,7 +650,9 @@ export function cancellationDisclosure(policy, trainerName = "your trainer") {
     lines.push(`Not showing up for a booked session is charged ${p.noShowChargePct}% of the session price.`);
   }
   lines.push(`Sessions cancelled or rescheduled by ${trainerName} are never charged.`);
-  if (p.billingMode === "per_session") {
+  if (!canCharge) {
+    lines.push("Payment is arranged directly with your trainer — Glidna doesn't take payment for these sessions.");
+  } else if (p.billingMode === "per_session") {
     lines.push("Sessions not covered by prepaid credit are charged to the card on file as each session takes place.");
   } else if (p.billingMode === "weekly") {
     lines.push("Sessions not covered by prepaid credit are totalled and charged to the card on file once a week.");
@@ -649,13 +665,19 @@ export function cancellationDisclosure(policy, trainerName = "your trainer") {
 
 // The exact sentence next to the agreement checkbox. Kept separate from the
 // bullet list so the affirmative act of consent is its own explicit statement.
-export function consentLineFor(policy, trainerName = "your trainer") {
+export function consentLineFor(policy, trainerName = "your trainer", { canCharge = true } = {}) {
   const p = policyOf({ sessionPolicy: policy || {} });
   const core = p.cancelType === "anytime"
     ? "I understand I can cancel any session at no charge"
     : p.cancelType === "never"
       ? "I understand cancelled sessions are not refunded"
       : `I understand I must give ${noticePhrase(p.cancelWindowHours).replace(" before", "")} notice to cancel free of charge`;
+  // Same conditional, and more important here: this is the sentence someone
+  // actually agrees to. Authorising a card charge that cannot occur is the one
+  // line in the product that should never be shown speculatively.
+  if (!canCharge) {
+    return `${core}, and I agree to settle any session fees described above directly with ${trainerName}. I agree to the Terms of Service.`;
+  }
   return `${core}, and I authorize ${trainerName} to charge my saved card for completed sessions and any cancellation fees described above. I agree to the Terms of Service.`;
 }
 

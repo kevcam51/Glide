@@ -17994,7 +17994,15 @@ function calBillingState(s, now) {
   if (s.settled === "hold") return { label: "Payment failed", tone: "danger" };
   if (s.settled === "waived" || s.settled === "free") return { label: "No charge", tone: "muted" };
   if (s.noShow) return { label: "No-show", tone: "warn" };
-  if (sessionEndMs(s) <= now) return { label: "Delivered — will be billed", tone: "warn" };
+  // "will be billed" is only true where Glidna can actually bill. For every
+  // trainer outside the Connect allowlist nothing is ever charged, so the label
+  // promised a collection that cannot happen — and the Waive control beside it
+  // offered to stop a charge that was never coming. (S196s)
+  if (sessionEndMs(s) <= now) {
+    return canBillSessions(s.trainerUid)
+      ? { label: "Delivered — will be billed", tone: "warn" }
+      : { label: "Delivered", tone: "muted" };
+  }
   return { label: "Scheduled", tone: "muted" };
 }
 
@@ -25500,7 +25508,7 @@ function SessionPolicyEditor({ policyDraft, setPolicyDraft, trainerUid, defaultP
               {/* "you", matching how the Sessions panel addresses a trainer —
                   otherwise a trainer reads their own policy as though someone
                   else wrote it ("cancelled by your trainer are never charged"). */}
-              {cancellationDisclosure(policyOf({ sessionPolicy: policyDraft }), "you").map((line, i) => (
+              {cancellationDisclosure(policyOf({ sessionPolicy: policyDraft }), "you", { canCharge: canBillSessions(trainerUid) }).map((line, i) => (
                 <div key={i} className="flex gap-1.5"><span className="text-muted">·</span><span>{line}</span></div>
               ))}
             </div>
@@ -25767,8 +25775,8 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
       await callReconsentPolicy({
         trainerUid,
         snapshot: {
-          consentLine: consentLineFor(policy, otherName || "your trainer"),
-          shownText: cancellationDisclosure(policy, otherName || "your trainer"),
+          consentLine: consentLineFor(policy, otherName || "your trainer", { canCharge: canBillSessions(trainerUid) }),
+          shownText: cancellationDisclosure(policy, otherName || "your trainer", { canCharge: canBillSessions(trainerUid) }),
           policyVersion: POLICY_TEXT_VERSION,
         },
       });
@@ -26019,7 +26027,7 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
                   they signed — because those are the ones they'll be charged
                   under. The TRAINER sees their current policy, since that's the
                   thing they edit here. */}
-              {cancellationDisclosure(isTrainer ? policy : govPolicy, isTrainer ? "you" : (otherName || "your trainer")).map((line, i) => (
+              {cancellationDisclosure(isTrainer ? policy : govPolicy, isTrainer ? "you" : (otherName || "your trainer"), { canCharge: canBillSessions(trainerUid) }).map((line, i) => (
                 <div key={i} className={i === 0 ? "text-[.78rem] text-fg leading-snug" : "mt-0.5 text-[.74rem] text-muted leading-snug"}>{line}</div>
               ))}
               {!isTrainer && consentPolicy && (
@@ -26066,7 +26074,7 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
                     </button>
                     {showNewTerms && (
                       <div className="mt-1.5 rounded-md border border-border bg-surface2 p-2">
-                        {cancellationDisclosure(policy, otherName || "your trainer").map((line, i) => (
+                        {cancellationDisclosure(policy, otherName || "your trainer", { canCharge: canBillSessions(trainerUid) }).map((line, i) => (
                           <div key={i} className={i === 0 ? "text-[.74rem] text-fg leading-snug" : "mt-0.5 text-[.72rem] text-muted leading-snug"}>{line}</div>
                         ))}
                       </div>
@@ -26155,7 +26163,7 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
                 <label className="flex items-start gap-2 cursor-pointer mb-1.5">
                   <input type="checkbox" checked={consentChecked} onChange={(e) => setConsentChecked(e.target.checked)}
                     className="mt-0.5 w-4 h-4 accent-primary shrink-0" />
-                  <span className="text-[.76rem] text-fg leading-snug">{consentLineFor(policy, otherName || "your trainer")}</span>
+                  <span className="text-[.76rem] text-fg leading-snug">{consentLineFor(policy, otherName || "your trainer", { canCharge: canBillSessions(trainerUid) })}</span>
                 </label>
                 <div className="mb-2 text-[.7rem] text-muted leading-snug">
                   Read the <a href="/terms.html" target="_blank" rel="noopener" className="text-primary underline">Terms of Service</a> — Section&nbsp;6 covers session billing.
