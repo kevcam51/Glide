@@ -11,7 +11,7 @@
 import { auth, db } from "./firebase.js";
 import { onAuthStateChanged } from "firebase/auth";
 import {
-  doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where,
+  doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where, orderBy, limit,
 } from "firebase/firestore";
 
 // --- track the signed-in user ------------------------------------------------
@@ -75,6 +75,31 @@ const firestoreStorage = {
     const uid = requireUid();
     await deleteDoc(kvDoc(uid, key));
     return { key, deleted: true, shared: false };
+  },
+
+  // The NEWEST key under a prefix, and nothing else (S196o).
+  //
+  // ⚠️ list() DOWNLOADS EVERY MATCHING DOCUMENT — Firestore's web SDK has no
+  // projection, so asking for keys still pulls each doc's full `value`, i.e.
+  // every meal, macro and micronutrient of every logged day. The trainer home
+  // used list("caliq-log-") purely to find each plan's most recent date, which
+  // for an imported roster meant several megabytes and thousands of billed
+  // reads to compute one string per plan.
+  //
+  // Ordering by the same field the range filters on needs no composite index,
+  // so this is one document per call. Same shape the server-side roster query
+  // has used since S85.
+  async latestKey(prefix) {
+    await ready;
+    const uid = requireUid();
+    const snap = await getDocs(query(
+      kvCol(uid),
+      where("k", ">=", prefix), where("k", "<=", prefix + "\uf8ff"),
+      orderBy("k", "desc"), limit(1),
+    ));
+    let key = null;
+    snap.forEach((d) => { if (!key) key = (d.data() || {}).k || null; });
+    return key;
   },
 
   async list(prefix) {

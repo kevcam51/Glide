@@ -16,7 +16,7 @@
 
 import { db } from "./firebase.js";
 import {
-  doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, query, where,
+  doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, query, where, orderBy, limit,
 } from "firebase/firestore";
 
 const encodeKey = (key) => encodeURIComponent(key);
@@ -62,6 +62,23 @@ export function subscribeForUser(uid, key, cb) {
 // With a prefix this uses a range query on "k" so only matching docs are read
 // (and billed) — the trainer dashboards call this once PER CLIENT, so a full
 // collection scan here scaled reads with every client's entire log history.
+// The newest key under a prefix in another user's namespace — one document,
+// not their whole history (S196o). listForUser downloads every matching doc in
+// full (Firestore's web SDK has no projection), and the trainer roster used it
+// per client purely to find each one's most recent log date. Ordering by the
+// same field the range filters on needs no composite index.
+export async function latestKeyForUser(uid, prefix) {
+  if (!uid) throw new Error("latestKeyForUser: missing uid");
+  const snap = await getDocs(query(
+    kvCol(uid),
+    where("k", ">=", prefix), where("k", "<=", prefix + "\uf8ff"),
+    orderBy("k", "desc"), limit(1),
+  ));
+  let key = null;
+  snap.forEach((d) => { if (!key) key = (d.data() || {}).k || null; });
+  return key;
+}
+
 export async function listForUser(uid, prefix) {
   if (!uid) throw new Error("listForUser: missing uid");
   const snap = await getDocs(

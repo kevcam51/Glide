@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium, setAiOptOut, aiChoiceMade } from "./profile.js";
-import { getForUser, setForUser, deleteForUser, listForUser, listEntriesForUser, subscribeForUser } from "./clientData.js";
+import { getForUser, setForUser, deleteForUser, listForUser, listEntriesForUser, latestKeyForUser, subscribeForUser } from "./clientData.js";
 import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads, exportMyThreads } from "./messaging.js";
 import { pushStatus, enablePush, disablePush } from "./push.js";
 import { privGet, privSet, privSubscribe, privListEntries } from "./privateStore.js";
@@ -16238,11 +16238,12 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         getForUser(c.uid, planDataKey(activeId)).then((r) => {
           if (r && r.value) data = (JSON.parse(r.value) || {}).data || {};
         }).catch(() => { /* not linked / no plan yet */ }),
-        listForUser(c.uid, planLogPrefix(activeId)).then((res) => {
-          (res.keys || []).forEach((k) => {
-            const d = k.slice(-10);
-            if (!lastLogDate || d > lastLogDate) lastLogDate = d;
-          });
+        // ONE document, not the client's entire logging history (S196o). This
+        // downloaded every daily log that client has ever written — full meal
+        // and micronutrient payloads — to derive a single date. Multiplied by
+        // every connected client, on every visit to the home screen.
+        latestKeyForUser(c.uid, planLogPrefix(activeId)).then((k) => {
+          if (k) lastLogDate = k.slice(-10);
         }).catch(() => { /* ignore */ }),
         readRequestsFor(c.uid, getForUser),
       ]);
@@ -16484,16 +16485,22 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         } catch (e) { /* ignore */ }
       }));
       if (!cancelled) setDetails(dmap);
-      // Most recent daily log per client — a single read of the kv index.
+      // Most recent daily log per plan. ONE DOCUMENT EACH, not the whole
+      // collection (S196o): this used list("caliq-log-"), which downloads every
+      // matching document in full — every meal and micronutrient of every day
+      // ever logged — to derive one date per plan. For a trainer who used the
+      // Trainerize importer that was thousands of documents and megabytes on
+      // every visit to the home screen, for a handful of strings.
       try {
-        const res = await window.storage.list("caliq-log-");
+        const ids = (profiles || []).map((p) => p && p.id).filter(Boolean);
+        const pairs = await Promise.all(ids.map(async (id) => {
+          try {
+            const k = await window.storage.latestKey(`caliq-log-${id}-`);
+            return k ? [id, k.slice(-10)] : null;
+          } catch { return null; }
+        }));
         const latest = {};
-        (res.keys || []).forEach((k) => {
-          const rest = k.slice("caliq-log-".length); // "{id}-YYYY-MM-DD"
-          const date = rest.slice(-10);
-          const id = rest.slice(0, -11);
-          if (id && (!latest[id] || date > latest[id])) latest[id] = date;
-        });
+        pairs.filter(Boolean).forEach(([id, date]) => { latest[id] = date; });
         if (!cancelled) setLastLog(latest);
       } catch (e) { /* ignore */ }
     })();
