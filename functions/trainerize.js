@@ -424,7 +424,11 @@ async function syncClientWorkouts(db, uid, pid, tzUserId, auth, days) {
   const endDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   const r = await tz("calendar/getList",
     { userID: tzUserId, startDate, endDate, unitDistance: "miles", unitWeight: "lbs" }, auth);
-  if (!r.ok) return 0;
+  // Same silent-zero trap as nutrition — see the note there.
+  if (!r.ok) {
+    console.warn(`tzWorkouts FAILED user=${tzUserId} status=${r.status}`);
+    return 0;
+  }
   // date → tracked workout names (cardio + strength/video/interval sessions)
   // plus the RECORDED MINUTES. Trainerize's workout items carry no calorie field
   // at all — only detail.time in seconds (verified against the live API, S161) —
@@ -489,8 +493,24 @@ async function syncClientNutrition(db, uid, pid, tzUserId, auth, days = NUTRITIO
   const endDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   const list = await tz("dailyNutrition/getList",
     { userID: tzUserId, startDate: `${startDate} 00:00:00`, endDate: `${endDate} 23:59:59` }, auth);
-  if (!list.ok) return 0;
+  // ⚠️ A FAILED CALL AND AN EMPTY ONE ARE NOT THE SAME THING (S196h, Kevin: "I
+  // have not seen the calories for a few weeks"). This used to be a bare
+  // `if (!list.ok) return 0;`, and 0 is exactly what a healthy client with
+  // nothing logged returns — so a request that was timing out, refused, or
+  // rate-limited on every run for weeks logged the identical line as one that
+  // was working perfectly with nothing to do. There was no way to tell them
+  // apart from outside, which is why this went unexplained for so long.
+  if (!list.ok) {
+    console.warn(`tzNutrition FAILED user=${tzUserId} status=${list.status} ${JSON.stringify((list.json && (list.json.error || list.json.raw)) || "").slice(0, 200)}`);
+    return 0;
+  }
   const entries = (list.json && list.json.nutrition) || [];
+  // The other half of the same question: the call succeeded — did it actually
+  // carry anything? Counted by source, because MFP/Fitbit days and
+  // Trainerize-native days travel different paths through the mapper below,
+  // and "10 entries in, 0 written" is a different bug from "0 entries in".
+  const bySource = entries.reduce((o, e) => (o[(e && e.source) || "?"] = (o[(e && e.source) || "?"] || 0) + 1, o), {});
+  console.log(`tzNutrition user=${tzUserId} window=${startDate}..${endDate} entries=${entries.length} ${JSON.stringify(bySource)}`);
   let written = 0;
   for (const entry of entries) {
     if (!entry || !/^\d{4}-\d{2}-\d{2}$/.test(entry.date || "")) continue;
