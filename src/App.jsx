@@ -17185,13 +17185,34 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                 )}
                 {tzMePlanFor && (
                   <div className="w-full rounded-lg border border-border bg-surface2 p-2.5">
-                    <div className="mb-1.5 text-xs text-muted">Which plan should the watch data go into? Pick the one you actually track in.</div>
-                    <div className="flex flex-col gap-1 max-h-[240px] overflow-auto">
-                      {(profiles || []).filter((pf) => pf && !pf.isSimulation).map((pf) => (
+                    {/* ⚠️ ORDER AND LABELS MATTER MORE THAN THE LIST DOES (S196w,
+                        Kevin: "I do not see the existing plan I'm using"). This
+                        rendered the raw index order inside a 240px scroller — about
+                        seven rows visible, no hint there were more, and nothing to
+                        tell one plan from another but a name. On a real roster the
+                        one you actually track in was simply below the fold.
+                        Most-recently-used first puts it at the top by definition,
+                        and the date makes it recognisable. */}
+                    <div className="mb-1.5 text-xs text-muted">
+                      Which plan should the watch data go into? Pick the one you actually track in —
+                      most recently used first.
+                    </div>
+                    <div className="flex flex-col gap-1 max-h-[320px] overflow-auto">
+                      {(profiles || []).filter((pf) => pf && !pf.isSimulation)
+                        .slice()
+                        .sort((a, b) => (Number(b.lastSaved) || 0) - (Number(a.lastSaved) || 0))
+                        .map((pf) => (
                         <button key={pf.id} onClick={() => setMyTracker(tzMePlanFor, pf.id)} disabled={tzMeBusy}
-                          className="flex items-center justify-between rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
-                          <span>{pf.customName || pf.name || pf.id}</span>
-                          <span className="text-primary font-bold">Use this</span>
+                          className="flex items-center justify-between gap-2 rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
+                          <span className="min-w-0">
+                            <span className="block truncate">{pf.customName || pf.name || pf.id}</span>
+                            {pf.lastSaved ? (
+                              <span className="block text-[.66rem] text-muted">
+                                last used {new Date(Number(pf.lastSaved)).toLocaleDateString()}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="text-primary font-bold shrink-0">Use this</span>
                         </button>
                       ))}
                       {/* ⚠️ "My own plan" USED TO BE OFFERED HERE, and Kevin picked
