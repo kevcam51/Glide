@@ -1,195 +1,65 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S196) — all four S195 items are BUILT. Nothing is deployed.
+## ▶️ START HERE (S196t) — ONE THING IS PENDING, AND IT IS YOURS
 
-**Kevin's Friday session had not charged when this was written, and was not supposed to have.**
-It was Sunday 11:42 ET; the weekly window is `Sun && hour >= 18` (`sessionSettle.js` `isSettleDay`).
-The hourly sweep was healthy — `{"groups":2,...,"skipped":2}` — but the log stripped the per-group
-`why`, so "skipped" was unreadable. **Fixed:** the log line now carries a reason histogram
-(`{"why":{"awaiting-sunday":1,"billing-not-enabled":1}}`), reasons only, never uids. The handoff's
-claim that reasons were already logged was wrong; they were built and then discarded.
+**Functions are written, tested and committed but NOT DEPLOYED** — the Firebase CLI token
+expired mid-session and reauth needs a browser, which only Kevin can do:
 
-### THREE THINGS BEFORE ANY OF THIS IS LIVE — all Kevin's call
-1. **PUBLISH `firestore.rules`** — `firebase deploy --only firestore:rules`. **230 emulator tests
-   pass** (was 223; +7 back-dating cases).
-2. **DEPLOY 13 functions** (from `npm run deploy-set sessions.js requests.js sessionBilling.js
-   sessionSettle.js availability.js` — don't hand-trim it):
-```bash
-firebase deploy --only functions:createSessionSetupIntent,functions:recordSessionConsent,functions:removeSessionCard,functions:reconsentSessionPolicy,functions:onSessionPolicyChanged,functions:sessionsSettle,functions:settleNow,functions:paySessionBalance,functions:sendTrainerRequest,functions:trainerAvailability,functions:respondToBookingRequest,functions:sessionsMarkCompleted,functions:onSessionBackdated --project calorieiq-29762
 ```
-3. **Push `main`** — Vercel redeploys the frontend AND the new `/card/:code` rewrite.
-   ⚠️ Order matters a little: the frontend calls `trainerAvailability`, which doesn't exist until
-   step 2. It degrades silently by design (the busy-times hint just doesn't render), but deploying
-   functions first avoids a window of failed preflights in the console.
+firebase login --reauth --no-localhost
+```
 
-### What shipped, and the decisions inside it
+then the deploy set (derived with `npm run deploy-set`, do NOT hand-trim it — a subset leaves
+the rest on the old copy, silently):
 
-**1. "Save your card" link — `/card/CODE?n=First`.** `api/card.js` + a `vercel.json` rewrite,
-mirroring the S81 invite landing. **The link carries the TRAINER's public invite code and nothing
-else** — no client id, no token. It navigates; it does not authorize. The client signs in as
-themselves and the card attaches to whoever is signed in, so a forwarded link only ever shows a
-stranger the trainer's ordinary signup path. It redirects to `?invite=CODE&savecard=1`, which reuses
-the existing invite auto-link wholesale — a new client is linked and lands on the card sheet, an
-existing one goes straight there. `savecard` is stashed at MODULE IMPORT (not in an effect): App
-only mounts after AuthGate has a user, which for a new client is several screens and a Google
-redirect later, by which time the query string is gone. Entry points: "Card link" next to Message on
-the client card, and under the trainer's "No card on file yet" line in Sessions — both behind
-`canBillSessions`, because pointing someone at a card screen that will refuse to save one is worse
-than not offering it.
-✅ **Verified end to end in the preview:** landed at `?invite=…&savecard=1` → signed in as Casey →
-Sessions opened by itself, scrolled to Payment method, banner read *"UI Tester3 asked you to save a
-card."* The landing page was separately unit-tested in Node (OG meta, redirect, `noindex`,
-`no-store`, and hostile input surviving only as escaped inert text).
+```
+firebase deploy --only functions:aiChat,functions:aiChatStream,functions:logMeal,functions:reviewMeal,functions:setWorkoutSchedule,functions:saveWorkflow,functions:listWorkflows,functions:toggleWorkflow,functions:deleteWorkflow,functions:runDueWorkflows,functions:estimateFood,functions:estimateExercise,functions:aiSeats,functions:createCheckoutSession,functions:createPortalSession,functions:stripeWebhook,functions:requestBudgetBoost,functions:trainerAvailability,functions:respondToBookingRequest,functions:mcp,functions:sessionReminderPush --project calorieiq-29762
+```
 
-**2. Standard session price — `sessionPolicy.standardPriceCents`.** It leads the disclosure
-("Sessions are $85.00 each unless agreed otherwise") because **every percentage below it is a
-percentage OF it** — a client agreeing to a 100% late-cancel fee without ever being told the session
-price was shown an equation with a missing term. It is in `FIELDS` in `onSessionPolicyChanged`, so a
-rate change sends existing clients through re-consent exactly like a fee change, and the client-side
-`policyDrifted` list was widened to match that list exactly (they disagreed before: a `policyNote`
-or `billingMode` edit pushed the client about a change the screen then denied). New bookings default
-to it in both booking paths.
-⚠️ **Found and fixed while here:** `cleanPolicy` in `functions/sessionBilling.js` omitted
-`biweekly`, so a fortnightly trainer's consent record — the one document that proves what the client
-agreed to — froze the word "weekly". Also the editor preview showed only `describePolicy` (one line
-of five), so a trainer could never see the terms their clients actually accept; it now renders the
-whole array, addressed as "you".
+What is waiting on it: the AI timezone fix (S196t), the AI back-dated weigh-in guard (S196p),
+and the notification re-filing (S196p). Everything else this session is FRONTEND and is already
+live on main — the pending `tz` field rides along and is ignored by the old functions, which is
+harmless.
 
-**3. Back-dating — warn, cap, notify.** `BACKDATE_MAX_DAYS = 14`. The booking sheet names the
-client, the amount and the consequence before you save (*"Casey Client will be charged $60 under
-their current terms, and they'll be told you added it"*), and a reschedule INTO the past says "moved
-it here" instead. **`onSessionBackdated`** (new trigger) tells the client — a trigger, not a call,
-so the disclosure can't be skipped by a crash or a stale build.
-⚠️ **The cap is not arbitrary and the numbers are coupled:** nothing bills until
-`markCompletedSessions` stamps `completedAt`, and that sweep only looks back `LOOKBACK_DAYS`. At 14
-vs 14 a session booked at the limit falls out of range within the 15 minutes before the next run and
-would sit booked, unstamped and never paid — so **LOOKBACK_DAYS went 14 → 21**. If the cap ever
-grows, the lookback grows first. The rules enforce a **15-day** floor (one day of slack over the
-app's 14, so honest clock skew can't refuse a legal booking) on create AND on reschedule — without
-the second, the first is decorative: book tomorrow, then move it to last spring.
+**Rules are unchanged this session — nothing to publish.**
 
-**4. Booking loop + colours.**
-- **Monthly repeat** — `Every month`, stepping calendar months with day clamping. Jan 31 → Feb 28 →
-  Mar 31 (a naive `setMonth` gives Mar 3 and silently moves a standing slot into the wrong month).
-  Verified over a year: wall-clock preserved across DST, strictly increasing.
-- **Trainer blocks** — "Block out time" in the same sheet as booking, written to `trainerBlocks`
-  (rules were already published). Rendered striped/dashed UNDER sessions: if something is booked
-  over a block, the thing with a person and a price attached is what has to stay readable.
-- **Free/busy** — `trainerAvailability` derives merged, anonymous time ranges server-side.
-  ⚠️ **It must stay a callable.** `sessions` is participant-read and `trainerBlocks` owner-read for
-  good reason: a client reading the raw calendar would see other clients' names, titles and
-  locations. Ranges are MERGED so three back-to-back clients and one long block look identical —
-  unmerged, the list leaks how many clients a trainer has. Off by default, one trainer-wide toggle
-  (Calendar → Settings), never per client.
-- **Ask → accept/deny** — the client picks a slot in Sessions; `sendTrainerRequest` carries
-  structured `booking` and inherits the existing transaction, spam cap and push. **Asking is never
-  booking:** only `respondToBookingRequest` creates a session, at the trainer's standard rate, and
-  it claims the inbox item in a transaction first so two taps can't produce two sessions and two
-  charges. Both answers notify the client.
-- **Colours** — tap the colour stripe in the session sheet. Overrides live in the trainer's own kv
-  (`caliq-cal-colors`), so no rules change and no client ever sees them.
-✅ **Verified in the preview** as `trainer.uitest`: block created in prod → rendered striped →
-deleted; colour override applied across every session that client had, instantly; monthly option
-present; standard rate saved and the next booking defaulted to $85 (replacing the old $60);
-availability toggle persisted; back-date warning fired with the real name and amount.
+## What S196k–S196t did (the audit cleanup)
 
-### The build was then adversarially reviewed (29 agents, 5 lenses) — and it found real bugs
-23 raised, 19 survived independent refutation, ~10 distinct defects, **all fixed** in the follow-up
-commit. Three of them were serious, and two were introduced BY this session's own work — the same
-pattern as S186, where the review caught bugs the fix itself created:
+A 5-lens audit raised 68 findings; 44 survived adversarial verification (the register is in an
+artifact, and the reasoning is in the commit messages). Worked top-down by what a paying trainer
+would notice. Highlights:
 
-- **Accept & book minted a $0 session that could never be charged.** `respondToBookingRequest`
-  priced from `standardPriceCents` with no fallback — a field this very commit introduced, defaulting
-  to 0 — so on day one every trainer who hadn't typed a rate would book at $0 through a one-tap
-  control with no price field on it. Delivered, then frozen at `billableCents: 0` and settled
-  `free`: terminal, unbillable, silent. The code comment three lines above asserted the opposite of
-  what the code did. Now it refuses with an actionable message and the request stays open.
-- **The booking sheet promised a disclosure the backend could not send.** Rescheduling INTO the past
-  says "they'll be told you moved it here", but `onSessionBackdated` was `onDocumentCreated` — no
-  create, no notification, ever. It is now `onDocumentWritten` and handles the move, with guards so
-  the sweep's and settle engine's constant writes stay silent. **18 unit assertions** cover the
-  branching (create/move/already-past/cancelled/billing-writes/spoofed-createdAt).
-- **The accept transaction claimed the request before validating it.** Every check that could refuse
-  the booking ran AFTER the item was marked "accepted", so a refusal destroyed the request: no
-  session, no notification, no way to retry. Validation now happens first, and a failed create
-  reopens the claim.
+- **Silent data loss, three ways** — "Logged" shown when the save was refused; switching days
+  writing the previous day onto the new date; a failed read treated as an empty day and then
+  overwritten. All fixed on BOTH the trainer and client copies, which were separate code.
+- **The brand font never loaded in production** — the Sora `@import` had been hoisted into the
+  dev-only Showcase chunk, so every heading rendered in the system fallback.
+- **The login screen downloaded the whole app first** — entry chunk 303kB → 22.6kB gzipped.
+- **Logging a meal cost 14 serial database reads**; the home screen downloaded every daily log
+  ever written to derive one date per plan. Both measured before/after.
+- **Other trainers' clients were told their card would be charged** by a product that cannot
+  charge them.
+- Offline cache on; the service worker no longer caches a card/invite link as the app shell;
+  the iOS keyboard no longer covers the box you type into.
 
-Also fixed: the completion sweep's `orderBy desc + limit(500)` starved the oldest sessions in the
-window forever — exactly where back-dated ones sort — so it is now **paged** with chunked batches
-(**13 assertions**, including 1,200 sessions in one window and idempotence on re-run); a policy
-re-save pushed EVERY existing client a false "terms changed" notice the app then denied, because
-absent ≠ 0 in the trigger's raw string compare (**17 assertions**, one of which proves the old
-comparison would have fired); the back-date disclosure keyed off browser-written `createdAt`, so the
-trainer it protects against could suppress it (now server time); a failed accept rendered in the
-SUCCESS colour and never cleared; stale busy-ranges from the previous day drove the overlap warning;
-and tapping a slot before the roster loaded dropped the trainer into Block mode.
+⚠️ **The S196k fix had to be fixed.** Adversarial review caught that its strict-read change
+turned "day never logged" into "could not load", which would have killed back-dated logging on
+every own-account calendar. Root cause worth remembering: **`window.storage.get` THROWS for a
+missing document while `getForUser` returns null** — the two accessors have always disagreed, and
+absence now carries `err.code = "not-found"` so callers can tell it from a real failure.
 
-### Not done / worth knowing
-- **The trainer-side accept/deny UI is build-verified, not click-verified** — `respondToBookingRequest`
-  isn't deployed, so no real booking request could be sent end to end. Do that first after deploying:
-  as Casey, Sessions → Ask for a time → send; as the trainer, Asks From Clients → Accept & book.
-- **`trainerAvailability` reads a trainer's whole `sessions` collection** per call (window applied in
-  code) — the same deliberate trade-off as `calendarFeed`, for the same reason (array-contains + a
-  range on `startAt` needs a composite index). Fine for one trainer; revisit before many.
-- **Pass 2 of the spec — "drive to you" (addresses, both estimators, back-to-back feasibility) — is
-  untouched.** The spec below still stands.
-- One test session remains in prod (Casey, Aug 11 7:00 AM, on the non-billable test trainer).
+## Still open, and why
 
----
-
-## S195 spec (all four items now built — kept for the reasoning)
-
-Everything below is DECIDED. Don't re-litigate; build it.
-
-### 1. "Save your card" link a trainer can send (highest value — unblocks standalone clients)
-Kevin's goal, stated repeatedly: **a client who uses nothing else in Glidna should still be able to
-do calendar + payments.** Today a client must find Sessions → Save card on their own, and a trainer
-has no way to point them at it. Build a copy-paste link for text/email/in-app.
-
-⚠️ **The link must carry the TRAINER's identity, never the client's, and never a bearer token that
-saves a card on someone's behalf.** The client authenticates as themselves; the link only navigates.
-Anything else is a link that, if forwarded, attaches a stranger's card to the wrong account.
-
-- Mirror the invite pattern that already works: `api/invite.js` + the `/i/:code` rewrite in
-  `vercel.json` (S81). A `/card/:code` route → `?savecard=<trainerInviteCode>` is the same shape.
-- Handle both states: an existing client deep-links straight to the card sheet; a new one signs up,
-  links to the trainer by that code, and lands on the card sheet after.
-- Put "Copy card link" on the trainer's client card next to Message, and offer Web Share like the
-  Invite Hub does.
-
-### 2. Per-session PRICE in the policy (Kevin: protect the company, and let clients know what they're signing up for)
-Add a standard rate to `sessionPolicy` (e.g. `standardPriceCents`), show it in
-`cancellationDisclosure`, and — the load-bearing part — **add it to the change-detection list in
-`onSessionPolicyChanged` (functions/sessionBilling.js) so a rate change triggers re-consent** exactly
-like a fee change. Individual sessions keep their own `priceCents` for one-offs.
-
-### 3. Back-dated sessions — DECIDED: warn + notify, no separate "charge now" button
-A trainer can book a session in the past. Before saving, warn plainly: *"This is in the past. Casey
-will be charged $85 under their current terms, and they'll be told you added it."* Then notify the
-client — not as courtesy but because a charge for a session booked after the fact, silently, is the
-most disputable thing this system could do. Cap how far back (~14 days).
-❌ **No separate "charge now" path.** It bypasses the cadence the client agreed to and creates a
-SECOND charging path — which is exactly what produced the S185 double-charge cluster. Back-dating
-rides the normal sweep.
-
-### 4. Then the booking loop + calendar colours
-The booking-loop spec is the "🔜 NEXT BUILD" section below (free/busy, request → accept/deny, monthly
-repeat). Colours: let a trainer pick per-client colours; store them in the TRAINER'S OWN kv
-(`caliq-cal-colors`) so it needs no rules change — `calColorFor` already auto-assigns, this just
-overrides it.
-
-### State as of S195 — all deployed and pushed (`97cd04a` + this)
-- Session reminders (multi lead times) — verified firing twice in prod.
-- Calendar subscription feed (Google/Apple/Outlook) — verified.
-- Re-consent flow + `onSessionPolicyChanged` push — **both live**, not yet exercised end to end.
-- Booking date/time is now picked, not typed; sessions always show what they are.
-- `trainerBlocks` rules PUBLISHED (223 tests) — the collection exists but nothing writes to it yet.
-
-### Kevin's live smoke test — CHECK THIS FIRST
-He booked a real session Friday on his own account. **Weekly billing settles Sunday ≥18:00 ET**, so
-the charge should have landed Sunday evening. If Stripe shows nothing, trace it — the sweep logs a
-reason every run (`no-card`, `awaiting-sunday`, `billing-not-enabled`, `manual-mode`).
-
+- **Prepaid packages can be spent but never sold** — nothing in the product grants a credit.
+  Needs Kevin's call: build the sell path, or remove the feature from the pricing grid.
+- **No client plans carry a `trainerizeId`**, so the auto-sync covers Kevin alone. Either
+  re-run the importer picker for the clients he wants, or add a "link this plan to a Trainerize
+  client" control so a hand-made plan can be linked without a duplicate import.
+- **Plan writes are last-write-wins** — a trainer editing a client's plan while the client logs
+  can silently discard one side. Large, needs a design pass (the day logs got transactions; the
+  plan wrapper never did).
+- **Trainerize MEAL sync is not worth fixing** — verified nobody on the roster has logged food
+  there in ~12 weeks. Calories BURNED works; see S196i for where the watch data lands.
 
 ## 🔜 NEXT BUILD — client self-booking + drive time (Kevin's spec + decisions, S190)
 
