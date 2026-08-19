@@ -3,7 +3,20 @@ import { createRoot } from 'react-dom/client'
 import './index.css'           // Tailwind v4 (theme + utilities; preflight intentionally excluded)
 import './storage.js'          // installs window.storage (Firestore-backed) + imports firebase
 import AuthGate from './AuthGate.jsx'
-import App from './App.jsx'
+// ── The app itself is lazy, and warmed immediately (S196g) ──────────────────
+// App.jsx is ~1.2MB of the bundle on its own. Loading it eagerly meant a
+// SIGNED-OUT visitor downloaded and parsed the entire application before a
+// login box could paint — a first impression paid for entirely in code they
+// cannot use yet.
+//
+// Lazy alone would be a bad trade for the signed-IN case (most visits), because
+// the chunk would only start downloading after Firebase resolved the session,
+// making a round trip serial that used to be parallel. So it is warmed on the
+// line below: the request goes out at module evaluation, in parallel with auth,
+// and by the time AuthGate has a user the chunk is normally already there.
+// Fast for the first-time visitor, no slower for everyone else.
+const App = lazy(() => import('./App.jsx'))
+import('./App.jsx')
 // Dev-only design preview — lazy so it (and its extra font CSS) stays OUT of the
 // production boot bundle. Nobody loading the real app should pay for it.
 const Showcase = lazy(() => import('./Showcase.jsx'))
@@ -41,7 +54,10 @@ root.render(
       </AuthGate>
     ) : (
       <AuthGate>
-        <App />
+        {/* No fallback markup: AuthGate has already painted its own frame, and
+            a second spinner underneath it reads as a stutter. In practice the
+            warm import means this rarely renders at all. */}
+        <Suspense fallback={null}><App /></Suspense>
       </AuthGate>
     )}
   </StrictMode>,
