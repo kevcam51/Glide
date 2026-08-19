@@ -15716,6 +15716,8 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // healthOnly:true}; the sync reads the account's ACTIVE plan each run, so a
   // future phase inherits it without setting anything up again.
   const [tzMe, setTzMe] = useState(null);        // my Trainerize id, or null when off
+  const [tzMePlan, setTzMePlan] = useState(null); // WHICH plan it writes into (S196i)
+  const [tzMeLast, setTzMeLast] = useState(null); // {date, active, resting, steps} — proof it is working
   const [tzMePick, setTzMePick] = useState(null); // roster rows while choosing WHO
   const [tzMePlanFor, setTzMePlanFor] = useState(null); // chosen tz id, while choosing WHICH PLAN
   const [tzMeBusy, setTzMeBusy] = useState(false);
@@ -15726,10 +15728,38 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         const r = await window.storage.get("caliq-tz-links");
         const links = r && r.value ? JSON.parse(r.value) : {};
         const mine = Object.entries(links).find(([, v]) => v && typeof v === "object" && v.healthOnly && v.uid === meUid);
-        if (mine) setTzMe(Number(mine[0]));
+        if (!mine) return;
+        setTzMe(Number(mine[0]));
+        const pid = (mine[1] && mine[1].planId) || "self";
+        setTzMePlan(pid);
+        // ── SHOW THE NUMBER, NOT JUST "On" (S196i, Kevin: "I do not ever see the
+        // calories") ──────────────────────────────────────────────────────────
+        // The row said "On — into your active plan" and stopped there: it never
+        // named the plan and never showed a reading, so a sync writing perfectly
+        // into a plan he wasn't looking at was indistinguishable from one doing
+        // nothing at all. The most recent tracker day IS the proof, so show it.
+        try {
+          const res = await window.storage.listEntries(`caliq-log-${pid}-`);
+          let best = null;
+          for (const e of (res.entries || [])) {
+            let day = null;
+            try { day = JSON.parse(e.value); } catch { continue; }
+            if (!day || !day.wearable) continue;
+            const date = (e.k || "").slice(`caliq-log-${pid}-`.length);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+            if (!best || date > best.date) best = { date, ...day.wearable };
+          }
+          setTzMeLast(best);
+        } catch { /* the row still works without it */ }
       } catch { /* none yet */ }
     })();
   }, [tzIsOwner, meUid]);
+  // A plan id means nothing to a person; the name they gave it does.
+  const tzPlanLabel = (pid) => {
+    if (!pid || pid === "self") return "your own personal plan";
+    const pf = (profiles || []).find((p) => p && p.id === pid);
+    return pf ? `“${pf.customName || pf.name || pid}”` : "a plan that no longer exists";
+  };
   const writeTzLinks = async (mutate) => {
     const r = await window.storage.get("caliq-tz-links");
     const links = r && r.value ? (JSON.parse(r.value) || {}) : {};
@@ -15753,7 +15783,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     setTzMeBusy(true);
     try {
       await writeTzLinks((links) => { links[tzId] = { uid: meUid, healthOnly: true, planId }; });
-      setTzMe(Number(tzId)); setTzMePick(null); setTzMePlanFor(null);
+      setTzMe(Number(tzId)); setTzMePlan(planId); setTzMePick(null); setTzMePlanFor(null);
       setTzMsg({ ok: true, text: "Watch data on — your tracker's calories land in that plan on the next sync." });
     } catch { setTzMsg({ ok: false, text: "Couldn't save that — try again." }); }
     setTzMeBusy(false);
@@ -15762,7 +15792,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     setTzMeBusy(true);
     try {
       await writeTzLinks((links) => { delete links[tzMe]; });
-      setTzMe(null); setTzMePlanFor(null);
+      setTzMe(null); setTzMePlan(null); setTzMeLast(null); setTzMePlanFor(null);
       setTzMsg({ ok: true, text: "Watch data off. Nothing already logged was removed." });
     } catch { setTzMsg({ ok: false, text: "Couldn't save that — try again." }); }
     setTzMeBusy(false);
@@ -16909,9 +16939,44 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                   <Icon name="watch" size={13} color={tzMe ? "var(--color-success)" : "var(--color-muted)"} />
                   <span className={tzMe ? "text-success" : "text-muted"}>My watch data: {tzMe ? "On" : "Off"}</span>
                   <span className="text-muted"> — {tzMe
-                    ? "calories & steps only, into your active plan · tap to turn off"
+                    ? `calories & steps only, into ${tzPlanLabel(tzMePlan)} · tap to turn off`
                     : "pull your tracker's calories into the plan you already use"}</span>
                 </button>
+                {/* THE READING ITSELF. "On" is a claim; a date and a number are
+                    evidence. Without this the row looked identical whether the
+                    sync was landing perfectly in a plan he wasn't looking at or
+                    not running at all — which is exactly how weeks went by. */}
+                {tzMe && tzMeLast && (
+                  <div className="w-full text-xs text-muted -mt-0.5">
+                    Last reading <b className="text-fg">{tzMeLast.date}</b>
+                    {Number(tzMeLast.active) > 0 && <> · <b className="text-fg">{Math.round(tzMeLast.active)}</b> active cal</>}
+                    {Number(tzMeLast.resting) > 0 && <> · {Math.round(tzMeLast.resting)} resting</>}
+                    {Number(tzMeLast.steps) > 0 && <> · {Number(tzMeLast.steps).toLocaleString()} steps</>}
+                  </div>
+                )}
+                {tzMe && !tzMeLast && (
+                  <div className="w-full text-xs text-warn -mt-0.5">
+                    No tracker readings in that plan yet. Watch data usually lands a few hours after a workout.
+                  </div>
+                )}
+                {/* ⚠️ THE TRAP THAT SWALLOWED IT. "My own plan" writes into
+                    `caliq-self`, which is the CLIENT-account convention — and no
+                    trainer screen opens it. Picking it (a perfectly reasonable
+                    reading of "my own plan") means the sync works forever and
+                    the data is unreachable. Say so, and offer the way out. */}
+                {tzMe && tzMePlan === "self" && (
+                  <div className="w-full rounded-md px-2.5 py-2 text-xs leading-snug"
+                    style={{ background: "rgba(251,191,36,.10)", color: "var(--text)" }}>
+                    <b>Your watch data is going somewhere you can&apos;t open.</b> &ldquo;My own plan&rdquo; is
+                    the client-style personal plan, and a trainer account has no screen that opens it —
+                    so the readings arrive every 30 minutes and stay invisible. Point it at one of your
+                    own plans instead.
+                    <button onClick={() => setTzMePlanFor(tzMe)} disabled={tzMeBusy}
+                      className="ml-1 underline bg-transparent border-0 p-0 text-primary cursor-pointer text-xs">
+                      Choose a plan
+                    </button>
+                  </div>
+                )}
                 {tzMePick && (
                   <div className="w-full rounded-lg border border-border bg-surface2 p-2.5">
                     <div className="mb-1.5 text-xs text-muted">Which one is you? Only your watch calories &amp; steps get pulled in — nothing else changes.</div>
@@ -16942,7 +17007,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                           the way a client does rather than in a local file. */}
                       <button onClick={() => setMyTracker(tzMePlanFor, "self")} disabled={tzMeBusy}
                         className="flex items-center justify-between rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
-                        <span>My own plan <span className="text-muted">(if you log as a client)</span></span>
+                        <span>My own plan <span className="text-muted">(only if you log as a client — a trainer account can&apos;t open this one)</span></span>
                         <span className="text-primary font-bold">Use this</span>
                       </button>
                     </div>
