@@ -14786,7 +14786,7 @@ CLIENT PROFILE:
       // links a searched answer must carry. Rather than let it spend the search
       // allowance invisibly, it opts out — it's an analysis of the person's own
       // logged data, which needs no internet.
-      const res = await callAiChat({ messages: [{ role: "user", content: prompt }], noSearch: true });
+      const res = await callAiChat({ messages: [{ role: "user", content: prompt }], noSearch: true, tz: localTz() });
       const text = (res.data && res.data.reply) || "";
       if (!text) throw new Error("empty");
       setInsights(text);
@@ -19166,6 +19166,15 @@ function TrainerEarnings({ onOpenClientPlan, onGoClients, meUid }) {
 // the reply. SSE streaming + meal-write + tools are later stages, so this just
 // awaits the full reply. Rendered via createPortal so its fixed positioning
 // escapes the .page-transition transform trap (same fix as the other modals).
+// The browser is the only thing that knows where the person actually is, and
+// the server used to assume Miami (S196t). Sent with every AI call so "today"
+// resolves to the caller's day rather than Eastern — the app already keys daily
+// logs by local date, so without this the two disagreed for anyone else.
+const localTz = () => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; }
+  catch { return ""; }
+};
+
 const callAiChat = httpsCallable(functions, "aiChat");
 // Stripe billing (S89): checkout starts a subscription for the caller's role
 // (server picks the price — never trust the client); portal manages/cancels.
@@ -19936,7 +19945,7 @@ async function streamAiChat(apiMsgs, { onDelta, onDone, onProposal, onWorkoutPro
   const resp = await fetch(AI_STREAM_URL, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ messages: apiMsgs, activeTarget: activeTarget || null }),
+    body: JSON.stringify({ messages: apiMsgs, activeTarget: activeTarget || null, tz: localTz() }),
   });
   if (!resp.ok || !resp.body) throw { code: "http", status: resp.status };
   const reader = resp.body.getReader();
@@ -20649,7 +20658,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
       if (p.time) input.time = p.time;
       if (p.clientId) input.clientId = p.clientId;
       if (p.localPlanId) input.localPlanId = p.localPlanId; // trainer's own local plan file (S87)
-      await callLogMeal(input);
+      await callLogMeal({ ...input, tz: localTz() });
       setEditDraft(null);
       setProposal((prev) => ({ ...prev, ...p, status: "logged" }));
       if (typeof onDataChanged === "function") onDataChanged();
@@ -20665,7 +20674,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
     if (!workout || !workout.raw) return;
     setWorkout((prev) => ({ ...prev, status: "saving" }));
     try {
-      await callSetWorkout(workout.raw);
+      await callSetWorkout({ ...workout.raw, tz: localTz() });
       setWorkout((prev) => ({ ...prev, status: "saved" }));
       if (typeof onDataChanged === "function") onDataChanged();
     } catch (e) {
@@ -21031,7 +21040,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
       } else {
         // Streaming unavailable (network/CORS/server) → non-streaming callable.
         try {
-          const res = await callAiChat({ messages: apiMsgs, activeTarget: target });
+          const res = await callAiChat({ messages: apiMsgs, activeTarget: target, tz: localTz() });
           const reply = (res.data && res.data.reply) || "";
           setMessages([...next, { role: "assistant", content: reply || "(no response)",
             searches: (res.data && res.data.searches) || 0, sources: (res.data && res.data.sources) || undefined }]);
@@ -24909,7 +24918,7 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
     if (!food || estimating) return;
     setEstimating(true);
     try {
-      const r = await callEstimateFood({ description: food });
+      const r = await callEstimateFood({ description: food, tz: localTz() });
       const d = (r && r.data) || {};
       setMealDraft((m) => ({ ...m,
         calories: d.calories != null ? String(Math.round(d.calories)) : m.calories,

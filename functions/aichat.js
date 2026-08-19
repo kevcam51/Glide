@@ -258,12 +258,32 @@ function todayKey() {
   return aiusage.dayKey();
 }
 
-// Today's date in the app's audience timezone (Miami / Eastern), as YYYY-MM-DD,
-// so the AI can resolve "today" / "this week" against the user's local day
-// (the app keys daily logs by local date). en-CA gives ISO-style output.
-function todayLocal() {
+// ── The USER's timezone, not the founder's (S196t) ──────────────────────────
+// These were hard-wired to America/New_York because that is where Smooth
+// Training is. The app keys every daily log by the BROWSER's local date, so for
+// anyone outside Eastern the two disagreed: a client in California logging
+// dinner by chat after 9pm had it filed under tomorrow, and the AI cheerfully
+// confirmed the wrong day. Harmless while everyone is in Miami; wrong the moment
+// Glidna is white-labelled to a trainer anywhere else — which is the plan.
+//
+// The browser passes its own zone (Intl resolves it); Eastern remains the
+// fallback for an old client that sends nothing. Validated by asking Intl to
+// use it — an unknown zone throws, and a bad value would otherwise silently
+// shift someone's logs by a day.
+//
+// ⚠️ Not a security input. It only decides which date THIS caller's own entry
+// lands on, so the worst a spoofed value can do is misfile the spoofer's lunch.
+const DEFAULT_TZ = "America/New_York";
+function safeTz(tz) {
+  const t = String(tz || "").trim();
+  if (!t || t.length > 64) return DEFAULT_TZ;
+  try { new Date().toLocaleDateString("en-CA", { timeZone: t }); return t; }
+  catch (e) { return DEFAULT_TZ; }
+}
+
+function todayLocal(tz) {
   try {
-    return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    return new Date().toLocaleDateString("en-CA", { timeZone: safeTz(tz) });
   } catch (e) {
     return todayKey();
   }
@@ -272,9 +292,9 @@ function todayLocal() {
 // Weekday name for the prompt. Changes once a day, exactly like the date it sits
 // beside, so it costs no extra prompt-cache churn — and without it the model was
 // resolving "last Monday" with no idea what day it currently is.
-function weekdayLocal() {
+function weekdayLocal(tz) {
   try {
-    return new Date().toLocaleDateString("en-US", { timeZone: "America/New_York", weekday: "long" });
+    return new Date().toLocaleDateString("en-US", { timeZone: safeTz(tz), weekday: "long" });
   } catch (e) {
     return "";
   }
@@ -284,9 +304,9 @@ function weekdayLocal() {
 // tool ctx as the default "when" stamped on a meal logged now (the AI omits the
 // time arg for "now"). Deliberately NOT injected into the cached system prompt:
 // a value that changes every minute would invalidate the prompt cache each call.
-function nowTimeLocal() {
+function nowTimeLocal(tz) {
   try {
-    return new Date().toLocaleTimeString("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false });
+    return new Date().toLocaleTimeString("en-GB", { timeZone: safeTz(tz), hour: "2-digit", minute: "2-digit", hour12: false });
   } catch (e) {
     return new Date().toISOString().slice(11, 16);
   }
@@ -458,11 +478,11 @@ async function streamModel(client, state, params, onText, onSearch) {
 }
 
 // Build the role-aware system prompt (shared by the callable + the stream fn).
-function buildSystemPrompt(role, isTrainer) {
+function buildSystemPrompt(role, isTrainer, tz) {
   const baseSystem = (role === "client") ? SYSTEM_CLIENT : SYSTEM_TRAINER;
   return `${baseSystem}
 
-Today's date is ${todayLocal()} (${weekdayLocal()}) — use it to resolve "today", "yesterday", "this week", etc.
+Today's date is ${todayLocal(tz)} (${weekdayLocal(tz)}) — use it to resolve "today", "yesterday", "this week", etc.
 
 log_meals takes ONE date for the whole batch (its top-level date arg) — use that when the user names a single day for everything; a date on an individual item overrides it for that item only.
 
@@ -541,9 +561,12 @@ function keepName(next, prev) {
   return sameId ? { ...next, name: prev.name } : next;
 }
 
-async function setupChat(uid, activeTarget, noSearch) {
+async function setupChat(uid, activeTarget, noSearch, tzArg) {
   const db = admin.firestore();
   const profile = (await db.doc(`users/${uid}`).get()).data() || {};
+  // The live caller's zone wins; a stored one covers headless runs (a scheduled
+  // automation has nobody to ask); Eastern is the last resort.
+  const tz = safeTz(tzArg || profile.tz);
   const role = profile.role || "client";
   const isTrainer = role === "head_trainer" || role === "sub_trainer" || role === "admin";
   const tier = tierFor(profile);
@@ -582,7 +605,7 @@ async function setupChat(uid, activeTarget, noSearch) {
   // breakpoint on the system block caches tools + system together). This part is
   // identical across calls within a day, so repeat messages + tool rounds pay
   // ~10% for it instead of full price (Session 67). No effect on output quality.
-  const system = [{ type: "text", text: buildSystemPrompt(role, isTrainer), cache_control: { type: "ephemeral" } }];
+  const system = [{ type: "text", text: buildSystemPrompt(role, isTrainer, tz), cache_control: { type: "ephemeral" } }];
   // Per-conversation "active subject" (S93): once the model resolves a client (or a
   // trainer's local plan), the client app relays that id back each turn so we can
   // remind the model to REUSE it instead of re-running list_clients/list_local_plans
@@ -627,7 +650,7 @@ async function setupChat(uid, activeTarget, noSearch) {
     trialExpired: trialExpiredFor(profile),
     tools,
     toolCtx: { callerUid: uid, role, isTrainer, aiOptOut: profile.aiOptOut === true,
-      today: todayLocal(), nowTime: nowTimeLocal(), callerName,
+      today: todayLocal(tz), nowTime: nowTimeLocal(tz), callerName,
       seatCap: isAdminUid(uid) ? null : seatCapFor(profile) },
   };
 }
@@ -751,8 +774,9 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
 
   const reqTarget = (request.data && request.data.activeTarget) || null;
   const { budget, usageRef, used, system, tools, toolCtx, trialExpired,
-    searchBudget, searchesUsed, searchAllowed } = await setupChat(uid, reqTarget,
-      request.data && request.data.noSearch === true);
+    searchBudget, searchesUsed, searchAllowed } = await setupChat(uid, reqTarget, /* noSearch */
+      request.data && request.data.noSearch === true,
+      request.data && request.data.tz);
   if (trialExpired) {
     throw new HttpsError("permission-denied", TRIAL_EXPIRED_MSG, { reason: "trial-expired" });
   }
@@ -854,6 +878,8 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
 // returns the reply text (or a `skipped` reason: budget / trial-expired / error).
 // Callers must bind the ANTHROPIC_API_KEY secret.
 async function runAssistantTurn(uid, userText) {
+  // A scheduled automation has no live caller to ask, so the trainer's saved
+  // zone (falling back to Eastern) is the best available answer.
   const { system, tools, toolCtx, budget, usageRef, used, trialExpired } = await setupChat(uid, null, true);
   // Headless run: nobody can answer a seat confirm, and configuring an
   // automation that names its people IS the consent — so new AI-client seats
@@ -940,7 +966,7 @@ exports.aiChatStream = onRequest(
     // unhandled rejection with no response at all.
     const reqTarget = (req.body && req.body.activeTarget) || null;
     let setup;
-    try { setup = await setupChat(uid, reqTarget, req.body && req.body.noSearch === true); } catch (e) {
+    try { setup = await setupChat(uid, reqTarget, req.body && req.body.noSearch === true, req.body && req.body.tz); } catch (e) {
       console.error("aiChatStream setup error:", e && e.message);
       res.status(500).json({ error: "setup-failed" });
       return;
@@ -1054,7 +1080,10 @@ exports.logMeal = onCall({ region: "us-central1", maxInstances: 10 }, async (req
   const callerName = profile.displayName
     || [profile.firstName, profile.lastName].filter(Boolean).join(" ")
     || profile.email || (isTrainer ? "Coach" : "Client");
-  const ctx = { callerUid: uid, role, isTrainer, today: todayLocal(), nowTime: nowTimeLocal(), callerName,
+  // Accept-card callables get the caller's zone the same way the chat does, so a
+  // meal accepted at 9pm Pacific lands on the day the person is actually living.
+  const tz = safeTz((request.data && request.data.tz) || profile.tz);
+  const ctx = { callerUid: uid, role, isTrainer, today: todayLocal(tz), nowTime: nowTimeLocal(tz), callerName,
     seatCap: isAdminUid(uid) ? null : seatCapFor(profile) };
   let out;
   try { out = await runTool("log_meal", request.data || {}, ctx); }
@@ -1077,7 +1106,10 @@ exports.reviewMeal = onCall({ region: "us-central1", maxInstances: 10 }, async (
   const callerName = profile.displayName
     || [profile.firstName, profile.lastName].filter(Boolean).join(" ")
     || profile.email || "Coach";
-  const ctx = { callerUid: uid, role, isTrainer, today: todayLocal(), nowTime: nowTimeLocal(), callerName,
+  // Accept-card callables get the caller's zone the same way the chat does, so a
+  // meal accepted at 9pm Pacific lands on the day the person is actually living.
+  const tz = safeTz((request.data && request.data.tz) || profile.tz);
+  const ctx = { callerUid: uid, role, isTrainer, today: todayLocal(tz), nowTime: nowTimeLocal(tz), callerName,
     seatCap: isAdminUid(uid) ? null : seatCapFor(profile) };
   let out;
   try { out = await runTool("review_meal", request.data || {}, ctx); }
@@ -1101,7 +1133,10 @@ exports.setWorkoutSchedule = onCall({ region: "us-central1", maxInstances: 10 },
   const callerName = profile.displayName
     || [profile.firstName, profile.lastName].filter(Boolean).join(" ")
     || profile.email || (isTrainer ? "Coach" : "Client");
-  const ctx = { callerUid: uid, role, isTrainer, today: todayLocal(), nowTime: nowTimeLocal(), callerName,
+  // Accept-card callables get the caller's zone the same way the chat does, so a
+  // meal accepted at 9pm Pacific lands on the day the person is actually living.
+  const tz = safeTz((request.data && request.data.tz) || profile.tz);
+  const ctx = { callerUid: uid, role, isTrainer, today: todayLocal(tz), nowTime: nowTimeLocal(tz), callerName,
     seatCap: isAdminUid(uid) ? null : seatCapFor(profile) };
   let out;
   try { out = await runTool("set_workout_schedule", request.data || {}, ctx); }
