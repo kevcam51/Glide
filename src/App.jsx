@@ -15367,6 +15367,15 @@ const REQUEST_TEMPLATES = [
   { type: "log_workout", iconName: "dumbbell", label: "Record a workout",  prompt: "Please record your workout for today." },
   { type: "enter_info",  iconName: "edit",     label: "Enter your info",   prompt: "Please fill in your details and goals so we can build your plan." },
 ];
+// Sent from the client's own card, not the quick-template row — it is only
+// offerable by a trainer who can actually take payment (S196z), and it exists
+// so a client with the app installed never has to leave it. The link version
+// opens a browser they may not be signed into; this lands on their home screen
+// and in the bell, and taps straight through to the card sheet.
+const SAVE_CARD_REQUEST = {
+  type: "save_card", iconName: "card", label: "Save a card on file",
+  prompt: "Please add a payment card so your sessions can be billed.",
+};
 // Resolve a request's custom icon name from its type (falls back to edit).
 const requestIconName = (type) => (REQUEST_TEMPLATES.find(t => t.type === type) || {}).iconName || "edit";
 const REQUEST_KEY = "caliq-requests";
@@ -15557,7 +15566,7 @@ async function writePlansManifest(setFn, m) {
 // inline, auto-marks the request done, and closes with a ✓ — so the client never
 // leaves the home screen. For types that need the full editor (enter info / a
 // custom ask) it offers an "Open my plan" jump instead. (Session 19)
-function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenPlan, onMarkDone, onClose }) {
+function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenPlan, onOpenCard, onMarkDone, onClose }) {
   useBodyScrollLock(true);
   const [val, setVal] = useState("");
   const [busy, setBusy] = useState(false);
@@ -15647,6 +15656,22 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
             </div>
           </>
         ) : (
+          type === "save_card" ? (
+          // The whole point of this type: no browser, no second login, no
+          // hunting for the screen. Straight to the card sheet inside the app
+          // they are already signed into.
+          <>
+            <div className="mb-1 text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="card" size={17} color="var(--accent)" />{request.prompt}</div>
+            <div className="mb-4 text-[.82rem] text-muted">
+              Your card is held securely by Stripe — Glidna never sees the number. You can remove it
+              at any time.
+            </div>
+            <div className="flex gap-2.5">
+              <button className={primaryCls} onClick={() => { onMarkDone(); onOpenCard && onOpenCard(); }}>Add my card →</button>
+              <button className={ghostCls} onClick={onClose}>Not now</button>
+            </div>
+          </>
+          ) : (
           // enter_info / custom — needs the full editor, so offer a jump there.
           <>
             <div className="mb-1 text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="edit" size={17} color="var(--accent)" />{request.prompt}</div>
@@ -15658,6 +15683,7 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
               <button className={ghostCls} onClick={onClose}>Close</button>
             </div>
           </>
+          )
         )}
       </div>
     </div>,
@@ -16196,6 +16222,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const [msgFor, setMsgFor] = useState(null); // client object | null
   const [cardLinkFor, setCardLinkFor] = useState(null); // client uid whose "save your card" link is showing (S195)
   const [noCardMutes, setNoCardMutes] = useState({});   // clientUid -> true: no more no-card reminders (S196e)
+  const [cardAsked, setCardAsked] = useState({});      // clientUid -> true once asked in-app this session
   const [muteMsg, setMuteMsg] = useState("");
   // Act on whatever a no-card reminder was tapped with. Both live in
   // localStorage because the push lands before AuthGate has finished.
@@ -16437,7 +16464,11 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       setComposingFor(null); setReqDraft("");
       flashCMsg(clientUid, true, "To-do sent.");
       await loadClients();
-    } catch (e) { flashCMsg(clientUid, false, (e && e.message) || "Couldn't send that request."); }
+      return true;
+    } catch (e) {
+      flashCMsg(clientUid, false, (e && e.message) || "Couldn't send that request.");
+      return false;   // so a caller can't report success on a failed send
+    }
     finally { setReqBusy(false); }
   };
   // Remove a request the trainer sent (e.g. by mistake, or to clear a done one).
@@ -16935,6 +16966,28 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                           <div className="text-[.72rem] leading-snug text-fg mb-1.5">
                             <b>No card on file.</b> {c.name} can be booked, but nothing can be charged
                             until they save one.
+                          </div>
+                          {/* TWO WAYS, because clients differ (S196z). The link is for
+                              someone who barely opens Glidna — it works from a text
+                              message. "Ask in the app" is better for everyone else: it
+                              lands as a to-do on their home screen and in their bell,
+                              and taps straight through to the card sheet in the app
+                              they are ALREADY SIGNED INTO. No browser, no password they
+                              may not remember. On iPhone that difference is decisive,
+                              because an installed PWA cannot claim a tapped link and
+                              does not share Safari's login. */}
+                          <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                            <button
+                              onClick={async () => {
+                                const ok = await sendRequest(c.uid, SAVE_CARD_REQUEST);
+                                if (ok) setCardAsked((m) => ({ ...m, [c.uid]: true }));
+                              }}
+                              disabled={reqBusy || cardAsked[c.uid]}
+                              className="rounded-md border border-primary bg-[rgba(var(--accent-rgb),.1)] px-2.5 py-1.5 text-xs font-semibold text-primary cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5">
+                              <Icon name="mail" size={13} color="currentColor" />
+                              {cardAsked[c.uid] ? "Asked in the app" : "Ask in the app"}
+                            </button>
+                            <span className="text-[.68rem] text-muted">or send a link:</span>
                           </div>
                           <CardLinkRow meName={meName} compact />
                           {/* Muting silences the 24h/12h/2h PUSH reminders only —
@@ -23324,6 +23377,9 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
           onLogFood={(v) => adjustCalories(1, v)}
           onLogWorkout={(note) => markWorkoutToday(note)}
           onOpenPlan={onOpenPlan}
+          // Opens the Sessions panel, which is where the card lives — the same
+          // destination the /card/CODE link reaches, minus the browser trip.
+          onOpenCard={() => { setQuickReq(null); setShowSessions(true); }}
           onMarkDone={() => markRequestDone(quickReq.id)}
           onClose={() => setQuickReq(null)} />
       )}
