@@ -17,7 +17,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const admin = require("firebase-admin");
-const { runAssistantTurn, ANTHROPIC_API_KEY, tierFor, isAdminUid } = require("./aichat");
+const { runAssistantTurn, ANTHROPIC_API_KEY, AI_SECRETS, tierFor, isAdminUid } = require("./aichat");
 const { sendPushTo, VAPID_PRIVATE_KEY } = require("./push");
 
 // Workflows allowed per tier (Kevin S92): higher tiers only — each run is the
@@ -161,7 +161,10 @@ exports.deleteWorkflow = onCall({ region: "us-central1", maxInstances: 10 }, asy
 
 // ── Hourly dispatcher: run every due automation ─────────────────────────────
 exports.runDueWorkflows = onSchedule(
-  { schedule: "every 60 minutes", secrets: [ANTHROPIC_API_KEY, VAPID_PRIVATE_KEY], timeoutSeconds: 540, region: "us-central1" },
+  // AI_SECRETS, not a hand-picked subset — see the note beside its export in
+  // aichat.js. A scheduled turn has exactly the same tools as an interactive
+  // one, so it needs exactly the same secrets.
+  { schedule: "every 60 minutes", secrets: [...AI_SECRETS, VAPID_PRIVATE_KEY], timeoutSeconds: 540, region: "us-central1" },
   async () => {
     const db = admin.firestore();
     const now = Date.now();

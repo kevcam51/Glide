@@ -930,6 +930,14 @@ async function runAssistantTurn(uid, userText) {
 }
 exports.runAssistantTurn = runAssistantTurn;
 exports.ANTHROPIC_API_KEY = ANTHROPIC_API_KEY;
+// Every secret an assistant turn can need, exported as ONE list (S196y). The
+// scheduled dispatcher used to mount ANTHROPIC_API_KEY alone, so `search_food_db`
+// — which is in the BASE tool list, available to every role on every surface —
+// could never reach the food proxy inside an automation. It did not fail
+// loudly: the tool returned nothing and the model quietly fell back to
+// estimating, so a nightly meal plan looked like it had used the database.
+// Anything that runs a turn should mount this rather than a hand-picked subset.
+exports.AI_SECRETS = AI_SECRETS;
 exports.tierFor = tierFor;
 exports.isAdminUid = isAdminUid;
 

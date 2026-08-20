@@ -1397,7 +1397,7 @@ body{
 }
 .cpt-row:nth-child(even){background:var(--tint-xs)}
 .cpt-period{color:var(--muted-light);font-weight:600}
-.cpt-val{font-family:'Sora',sans-serif;font-size:1rem;letter-spacing:.5px;text-align:center}
+.cpt-col{font-family:'Sora',sans-serif;font-size:1rem;letter-spacing:.5px;text-align:center}
 
 /* ── Quick fill ── */
 .quick-fill-toggle{
@@ -6636,18 +6636,29 @@ function WeightChart({ current, goal, paces, totalBurn, maxWeeks, compliance=1, 
         ))
       )}
 
-      {/* Lines — thicker, more space between them */}
+      {/* Lines — thicker, more space between them.
+          ⚠️ `selectedPace` arrived as a prop and was never read (S196y): the
+          selector below dimmed its own buttons and revealed "Show All", so
+          tapping a pace FELT like it did something, while the chart it is
+          pointing at carried on identically. The control announced a
+          capability the picture never had. Dimming the other paces here is the
+          missing half — the selected one keeps full weight, the rest recede
+          rather than disappearing, so it reads as emphasis and the comparison
+          is still there. */}
       {scenarios.flatMap(s=>
-        [...paces].reverse().map(p=>(
+        [...paces].reverse().map(p=>{
+          const dimmed = selectedPace && p.id !== selectedPace;
+          return (
           <path key={`line-${s.key}-${p.id}`}
             d={ptsToPath(buildPts(p,s.weeklyDef))}
             fill="none" stroke={rc(p)}
-            strokeWidth={s.dash ? 1.8 : 3.5}
+            strokeWidth={s.dash ? 1.8 : (selectedPace === p.id ? 4.5 : 3.5)}
             strokeDasharray={s.dash ? "9 6" : undefined}
             strokeLinecap="round" strokeLinejoin="round"
-            opacity={s.opacity}
+            opacity={dimmed ? s.opacity * 0.22 : s.opacity}
             transform={`translate(${PAD.left},${PAD.top})`}/>
-        ))
+          );
+        })
       )}
 
       {/* Endpoint dots */}
