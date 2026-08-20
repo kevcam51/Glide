@@ -27,8 +27,15 @@ export default async function handler(req, res) {
   const name = cleanName((req.query && req.query.n) || "");
   try {
     const fontUrl = (f) => fileURLToPath(new URL(`./_fonts/${f}`, import.meta.url));
-    const sora700 = readFileSync(fontUrl("sora-700.woff2"));
-    const sora400 = readFileSync(fontUrl("sora-400.woff2"));
+    // ⚠️ TTF, NOT WOFF2 (S196x). resvg's font database cannot parse WOFF2 — it
+    // accepts the buffer without complaint and then contributes nothing, so
+    // every card rendered here came out with NO TEXT on a host with no system
+    // fonts (Vercel's Linux runtime), and in a generic system face anywhere
+    // else. Nothing threw, so the catch below never fired and the fallback to
+    // the static /og.png never happened either. Proven: rendering with the
+    // WOFF2 buffer was BYTE-IDENTICAL to rendering with no font at all.
+    const sora700 = fontUrl("sora-700.ttf");
+    const sora400 = fontUrl("sora-400.ttf");
 
     // Headline: personalized when we have a name, generic otherwise.
     const headline = name ? `${esc(name)} invited you` : "You're invited";
@@ -50,7 +57,17 @@ export default async function handler(req, res) {
     // falls through to the static-card redirect below.
     const { Resvg } = await import("@resvg/resvg-js");
     const resvg = new Resvg(svg, {
-      font: { fontBuffers: [sora700, sora400], loadSystemFonts: false, defaultFontFamily: "Sora" },
+      // ⚠️ fontFiles, NOT fontBuffers (S196x). Two separate traps, and the card
+      // fell into both. The files were WOFF2, which resvg cannot parse at all;
+      // and `fontBuffers` is IGNORED OUTRIGHT by this version — passing the real
+      // Sora TTF and passing 29 bytes of garbage render byte-identical output,
+      // so the buffers never mattered and `loadSystemFonts: false` was silently
+      // discarded along with them. Text came from whatever the host had
+      // installed. On Vercel's Linux runtime, which has no Sora and may have no
+      // usable face at all, that means the personalised "{Name} invited you"
+      // card could render with no headline at all — and nothing throws, so the
+      // catch below never falls back to the static /og.png either.
+      font: { fontFiles: [sora700, sora400], loadSystemFonts: false, defaultFontFamily: "Sora" },
       fitTo: { mode: "width", value: 1200 },
     });
     const png = resvg.render().asPng();

@@ -9,7 +9,9 @@ import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
-const sora700 = readFileSync(join(root, "node_modules/@fontsource/sora/files/sora-latin-700-normal.woff2"));
+// Same WOFF2 trap as the share cards (S196x): the brand "G" on every app icon
+// was being drawn in a system fallback, not Sora.
+const sora700 = join(root, "api/_fonts/sora-700.ttf");
 
 // 512-canvas design (OS rounds the corners; content sits in the maskable safe
 // zone). width/height are set per target size; the viewBox scales the content.
@@ -36,7 +38,9 @@ const svgMaskable = (size) => `<svg width="${size}" height="${size}" viewBox="0 
 
 function render(size, svg = svgFor) {
   const r = new Resvg(svg(size), {
-    font: { fontBuffers: [sora700], loadSystemFonts: false, defaultFontFamily: "Sora" },
+    // fontFiles, not fontBuffers — see api/og.js. The brand "G" on every app
+    // icon was being drawn in a system face, not Sora.
+    font: { fontFiles: [sora700], loadSystemFonts: false, defaultFontFamily: "Sora" },
   });
   return r.render().asPng();
 }

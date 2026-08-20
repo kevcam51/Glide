@@ -11,9 +11,13 @@ import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
-const fontDir = join(root, "node_modules/@fontsource/sora/files");
-const sora700 = readFileSync(join(fontDir, "sora-latin-700-normal.woff2"));
-const sora400 = readFileSync(join(fontDir, "sora-latin-400-normal.woff2"));
+// TTF, not WOFF2, and from the repo rather than node_modules (S196x). resvg
+// silently ignores WOFF2 — it took the buffer and rendered no text — and
+// @fontsource/sora is not installed here, so this script could not run at all.
+// api/_fonts/ is committed and is what the deployed function already ships.
+const fontDir = join(root, "api/_fonts");
+const sora700 = join(fontDir, "sora-700.ttf");
+const sora400 = join(fontDir, "sora-400.ttf");
 
 const svg = `<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
   <rect width="1200" height="630" fill="#070f0e"/>
@@ -26,7 +30,9 @@ const svg = `<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http:/
 </svg>`;
 
 const resvg = new Resvg(svg, {
-  font: { fontBuffers: [sora700, sora400], loadSystemFonts: false, defaultFontFamily: "Sora" },
+  // fontFiles, not fontBuffers — see the note in api/og.js. Buffers are ignored
+  // by this resvg version, so this card was rendering in a system face.
+  font: { fontFiles: [sora700, sora400], loadSystemFonts: false, defaultFontFamily: "Sora" },
   fitTo: { mode: "width", value: 1200 },
 });
 const png = resvg.render().asPng();
