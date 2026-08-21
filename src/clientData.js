@@ -46,15 +46,26 @@ export async function deleteForUser(uid, key) {
 
 // Subscribe to one key in a specific user's namespace for real-time updates.
 // Calls cb(value | null) immediately with the current value and again on every
-// server-side change. Returns an unsubscribe function. Errors (e.g. a denied
-// read) are swallowed so a listener can never crash the app — it just goes
-// quiet, and the manual Refresh / next open still works.
-export function subscribeForUser(uid, key, cb) {
+// server-side change. Returns an unsubscribe function. A failing listener never
+// crashes the app — it goes quiet, and the manual Refresh / next open still
+// works.
+//
+// ⚠️ BUT "GOES QUIET" USED TO MEAN COMPLETELY SILENT (S197g). The error handler
+// was an empty function, so a listener that died — a denied read after a rules
+// change, an expired token, a dropped connection Firestore gave up on — left
+// the screen showing data that had simply stopped updating, with nothing in the
+// console and no way to tell from the outside. That is the failure mode behind
+// "it was showing me the old number": indistinguishable from nothing having
+// changed. The listener is still non-fatal; it is just no longer invisible.
+export function subscribeForUser(uid, key, cb, onError) {
   if (!uid) return () => {};
   return onSnapshot(
     kvDoc(uid, key),
     (snap) => cb(snap.exists() ? snap.data().value : null),
-    () => {},
+    (err) => {
+      console.warn(`live sync stopped for ${key}:`, (err && err.code) || err);
+      if (onError) { try { onError(err); } catch { /* a reporter must not throw */ } }
+    },
   );
 }
 

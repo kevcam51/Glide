@@ -1,6 +1,6 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S197e) — two audit items left, then the booking loop
+## ▶️ START HERE (S197g) — the audit tail is closed; next is the booking loop
 
 Everything below is DEPLOYED AND PUSHED. Working tree clean, build passing,
 230 rules tests green. Nothing is half-finished.
@@ -31,54 +31,56 @@ preview covered the other three branches (the `"/"` fallback, the already-done
 notice, the caught-up notice) plus a cold boot at `/?todo=<id>`. Test data
 removed from prod afterwards.
 
-### 2. THE AUDIT TAIL — five of seven are done; TWO REMAIN
+### 2. THE AUDIT TAIL — CLOSED
 
-From the 44-finding audit (the full register is the published artifact; the raw
-findings are in the workflow output referenced in S196 below).
+From the 44-finding audit (the full register is the published artifact). All
+seven items are resolved. ⚠️ Two of them were **already fixed in S196r** when
+the list was written — verify a finding against the code before acting on it.
 
-⚠️ **The list below was written without re-checking which items S196r had
-already fixed** — two of the seven were already done when it was written. Verify
-each finding against the code before starting on it.
+- **S196r, already done:** the profile promise cache (`PROFILE_TTL_MS`,
+  `forgetProfile` in `src/profile.js`) and the gated ID-token refresh
+  (`CLAIMS_STAMP` in `AuthGate`).
+- **S197e:** lazy SDK requires (136.7ms → 72.9ms on the real require tree —
+  Anthropic / MCP / web-push / SimpleWebAuthn no longer load on ~90 cold
+  starts); `_foodScore` scores once then sorts (1048 → 144 per search, ordering
+  proven identical over 3,200 randomised comparisons); the Recent Activity tap
+  targets are 44×44.
+- **S197f:** plan writes are transactional — see below.
+- **S197g:** listener failures are no longer silent.
 
-**Already done in S196r** (no action):
-- the profile promise cache in `src/profile.js` (`PROFILE_TTL_MS`, `forgetProfile`);
-- the forced ID-token refresh, now gated on `CLAIMS_STAMP` in `AuthGate`.
+**Plan writes (`planTxnWrap`).** Ten sites — eight AI tools in `aitools.js` and
+both Trainerize plan writes — went from `loadPlanWrap()` → mutate →
+`kvSetJSON()` (a whole-document overwrite) to a transaction. `loadPlanWrap` is
+deleted, so the old shape cannot come back by habit.
+⚠️ **The mutation callback must be synchronous and self-contained** — Firestore
+RE-RUNS it on contention, so an accumulator in the enclosing scope doubles up.
+That is why `changes` / `dropped` / `metrics` live inside and are returned.
+`{ __abort: true }` writes nothing, which is what keeps the refusal paths
+("no valid fields", "already exists") non-writing.
+**This closes the SERVER half only.** The app still saves the whole plan
+document from React state, so a client write can still land on top of a server
+one. Making that safe is a change to the app's core editing model, not a patch —
+it is the one piece of this defect still open.
 
-**Done in S197e** (deployed and pushed):
-- **Lazy SDK requires.** Anthropic / MCP / web-push / SimpleWebAuthn were
-  top-level `require`s, and since every function loads `index.js` and `index.js`
-  requires every module, all four sat on ~90 cold starts. Now lazy, like Stripe.
-  Measured 136.7ms → 72.9ms on the real require tree. The Anthropic and
-  SimpleWebAuthn paths are verified live in prod; web-push is only reached when
-  a push subscription exists and MCP only past its OAuth gate, so those two are
-  verified by export-shape assertions, not end to end.
-- **`_foodScore` scores once, then sorts** (1048 → 144 scorings per search),
-  ordering proven identical over 3,200 randomised comparisons.
-- **The Recent Activity tap targets** (13×15px refresh, ~18px "View all") are
-  44×44. Note the trap: the first attempt's −12px side margins made the refresh
-  button overlap the "N changes" label beside it.
+**The `getDoc`-then-`onSnapshot` finding was NOT actioned, deliberately.** The
+audit called the first read "pure waste"; it is not. It is also the not-found
+path and the error path — `subscribeForUser`'s ClientHome callback early-returns
+on `value == null`, so deleting the read turns "you have no plan yet", and any
+transient listener failure, into a PERMANENT "Loading your plan…". The saving is
+three document reads per app open, which is worth nothing at this scale. Please
+stop re-raising it; if it must be done, `subscribeForUser` needs a real
+absent-vs-failed distinction first.
 
-**STILL OPEN — and the first one is not the fix the audit describes:**
+What that finding DID surface is a real defect, now fixed (S197g):
+`subscribeForUser`'s error handler was an empty function, so a dead listener
+left the screen showing data that had quietly stopped updating — no console
+line, no way to tell from the outside. It still never crashes the app; it is
+just no longer invisible.
 
-- **The three `getDoc`-then-`onSnapshot` documents.** Real, but the first read is
-  NOT pure waste: it is also the not-found path and the error path.
-  `subscribeForUser` swallows listener errors and its ClientHome callback
-  early-returns on `value == null`, so deleting the read turns "you have no plan
-  yet" and any transient listener failure into a PERMANENT "Loading your plan…".
-  Doing it safely means giving `subscribeForUser` an error channel and teaching
-  the listeners to distinguish absent from failed — a change to a helper with 12
-  call sites, on the client's boot path, next to the race-sensitive
-  `planWrapRef`. Worth 3 reads per load only if done carefully.
-- **Plan writes are last-write-wins whole-document overwrites** (functions/
-  aitools.js: `loadPlanWrap` → mutate → `kvSetJSON`, at 10+ call sites). Two
-  people editing one plan silently lose one side — and with the AI writing plans
-  while a trainer edits in the app, that is a live scenario, not a theoretical
-  one. **It is more tractable than "a design pass" suggests: `kvTxnJSON` already
-  exists in that same file** (the S85 hardening that fixed day logs, meals,
-  history and requests). The work is extracting each tool's mutation into a pure
-  function of the current wrapper so Firestore can retry it, then routing the
-  plan-wrapper writes through a transaction. Plan resolution stays outside the
-  transaction. ~10 tools, each needing its own test.
+**Tests: `npm run test:units`** — 98 assertions across four harnesses
+(`test-plan-txn` 12, incl. a negative control that reproduces the old blind
+write; `test-plan-tools` 39, driving the real `runTool` for all eight converted
+tools; `test-tz-workouts` 14; the pre-existing `test-health-sync` 33).
 
 ### 3. PRODUCT DECISIONS WAITING ON KEVIN — do not guess these
 
