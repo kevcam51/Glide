@@ -1,65 +1,117 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S196t) — ONE THING IS PENDING, AND IT IS YOURS
+## ▶️ START HERE (S197c) — one live bug, then the audit tail
 
-**Functions are written, tested and committed but NOT DEPLOYED** — the Firebase CLI token
-expired mid-session and reauth needs a browser, which only Kevin can do:
+Everything below is DEPLOYED AND PUSHED. Working tree clean, 0 unpushed commits,
+build passing, 230 rules tests green. Nothing is half-finished.
 
+### 1. THE BUG KEVIN JUST HIT — "after I click Open it did not take me anywhere"
+
+He is right, it goes nowhere, and I know exactly why. Do this first.
+
+`functions/push.js:181` — the trainer-to-do push is sent with **`url: "/"`**:
+
+```js
+{ title: `To-do from ${first.fromName}`, body: …, tag: "trainer-todo", url: "/" }
 ```
-firebase login --reauth --no-localhost
-```
 
-then the deploy set (derived with `npm run deploy-set`, do NOT hand-trim it — a subset leaves
-the rest on the old copy, silently):
+So in `notifDestination` (src/App.jsx ~28570): the url is `/`, which contains
+neither `cardlink` nor `savecard`, so it falls through to
+`tag === "trainer-todo"` → returns `"todos"`. And `"todos"` is handled in
+ClientHome's intent effect by **doing nothing at all** — my own comment claims
+"arriving here IS arriving at the task", which is only true if the person is not
+already standing on their home screen. Kevin was. Nothing moved, so it read as
+broken. It is.
 
-```
-firebase deploy --only functions:aiChat,functions:aiChatStream,functions:logMeal,functions:reviewMeal,functions:setWorkoutSchedule,functions:saveWorkflow,functions:listWorkflows,functions:toggleWorkflow,functions:deleteWorkflow,functions:runDueWorkflows,functions:estimateFood,functions:estimateExercise,functions:aiSeats,functions:createCheckoutSession,functions:createPortalSession,functions:stripeWebhook,functions:requestBudgetBoost,functions:trainerAvailability,functions:respondToBookingRequest,functions:mcp,functions:sessionReminderPush --project calorieiq-29762
-```
+**Fix it in the CLIENT, not the server** — that way it also repairs every
+notification already sitting in people's feeds, which have `url: "/"` baked in
+and cannot be rewritten:
 
-What is waiting on it: the AI timezone fix (S196t), the AI back-dated weigh-in guard (S196p),
-and the notification re-filing (S196p). Everything else this session is FRONTEND and is already
-live on main — the pending `tz` field rides along and is ignored by the old functions, which is
-harmless.
+- On intent `kind: "todos"`, read the client's own `caliq-requests`, take the
+  newest still-open item, and open `QuickActionModal` for it — the same modal
+  the home-screen "Do it now →" opens. A `save_card` to-do then lands on the
+  card sheet; a weigh-in lands on the weigh-in input.
+- If nothing is open (they already did it), say so briefly rather than silently
+  doing nothing — that silence is the whole complaint.
+- ALSO worth doing, but second: give `onTrainerRequestWritten` a real url
+  (`/?todo=<id>`) so future notifications are routable without the lookup.
 
-**Rules are unchanged this session — nothing to publish.**
+⚠️ Verify as a CLIENT already sitting on the home screen — that is the case that
+fails. Opening from another screen masks it, because the navigation itself
+looks like the action worked.
 
-## What S196k–S196t did (the audit cleanup)
+### 2. THE AUDIT TAIL — all verified, none urgent
 
-A 5-lens audit raised 68 findings; 44 survived adversarial verification (the register is in an
-artifact, and the reasoning is in the commit messages). Worked top-down by what a paying trainer
-would notice. Highlights:
+From the 44-finding audit (the full register is the published artifact; the raw
+findings are in the workflow output referenced in S196 below). What is left:
 
-- **Silent data loss, three ways** — "Logged" shown when the save was refused; switching days
-  writing the previous day onto the new date; a failed read treated as an empty day and then
-  overwritten. All fixed on BOTH the trainer and client copies, which were separate code.
-- **The brand font never loaded in production** — the Sora `@import` had been hoisted into the
-  dev-only Showcase chunk, so every heading rendered in the system fallback.
-- **The login screen downloaded the whole app first** — entry chunk 303kB → 22.6kB gzipped.
-- **Logging a meal cost 14 serial database reads**; the home screen downloaded every daily log
-  ever written to derive one date per plan. Both measured before/after.
-- **Other trainers' clients were told their card would be charged** by a product that cannot
-  charge them.
-- Offline cache on; the service worker no longer caches a card/invite link as the app shell;
-  the iOS keyboard no longer covers the box you type into.
+- **The profile doc is read 4–6 times per cold start.** Add a tiny module-level
+  promise cache in `src/profile.js` keyed by uid. Small, and it is on the boot
+  path so it is felt.
+- **Three documents are `getDoc`'d and then immediately `onSnapshot`'d** — the
+  first read is pure waste, on the client home and the trainer's view.
+- **Every page load forces a full ID-token refresh** before any data read can
+  finish (`AuthGate`, the S57 `getIdToken(true)`). Gate it on a stored marker so
+  it only runs when claims might actually have changed.
+- **`_foodScore` is recomputed inside the sort comparator**, and the sort runs
+  up to four times per search. Score once into an array, then sort.
+- **Cloud Functions eagerly `require` the Anthropic SDK, MCP SDK, web-push and
+  SimpleWebAuthn into every function** — the lazy-wrapper pattern already used
+  for Stripe fixes it.
+- **Touch targets** under 44px in a few places (the Recent Activity refresh is
+  the worst).
+- **Plan writes are last-write-wins whole-document overwrites** (functions/
+  aitools.js). Two people editing one plan silently lose one side. This is the
+  only LARGE one, and it is a real design pass — the day logs got transactions,
+  the plan wrapper never did.
 
-⚠️ **The S196k fix had to be fixed.** Adversarial review caught that its strict-read change
-turned "day never logged" into "could not load", which would have killed back-dated logging on
-every own-account calendar. Root cause worth remembering: **`window.storage.get` THROWS for a
-missing document while `getForUser` returns null** — the two accessors have always disagreed, and
-absence now carries `err.code = "not-found"` so callers can tell it from a real failure.
+### 3. PRODUCT DECISIONS WAITING ON KEVIN — do not guess these
 
-## Still open, and why
+- **Prepaid packages can be spent but never sold.** Nothing in the product
+  creates a credit. Either build the grant path or take packs off the pricing
+  grid; both are defensible, it is his call.
+- **None of his 11 client plans carry a `trainerizeId`**, so the auto-sync covers
+  exactly one target (him) and zero clients. Re-run the importer picker, or add
+  a "link this plan to a Trainerize client" control so a hand-made plan can be
+  linked without being re-imported as a duplicate.
+- **Trainerize MEAL sync**: my recommendation is to drop it. Nobody on the roster
+  has logged food there in ~12 weeks and his own last entry is months old. The
+  food data lives in Glidna now. Calories BURNED is the part worth keeping, and
+  that already works.
 
-- **Prepaid packages can be spent but never sold** — nothing in the product grants a credit.
-  Needs Kevin's call: build the sell path, or remove the feature from the pricing grid.
-- **No client plans carry a `trainerizeId`**, so the auto-sync covers Kevin alone. Either
-  re-run the importer picker for the clients he wants, or add a "link this plan to a Trainerize
-  client" control so a hand-made plan can be linked without a duplicate import.
-- **Plan writes are last-write-wins** — a trainer editing a client's plan while the client logs
-  can silently discard one side. Large, needs a design pass (the day logs got transactions; the
-  plan wrapper never did).
-- **Trainerize MEAL sync is not worth fixing** — verified nobody on the roster has logged food
-  there in ~12 weeks. Calories BURNED works; see S196i for where the watch data lands.
+### 4. THE WATCH CONNECTION — still needs one tap from Kevin
+
+His trainer home shows the amber warning: watch data is pointed at
+`caliq-self`, the client-style personal plan, which **no trainer screen can
+open**. Tapping "Choose a plan" and picking one of his existing plans fixes it.
+Nothing is created and nothing is erased — `syncClientHealth` reads the existing
+day and sets only `log.wearable` (verified in functions/trainerize.js ~348).
+He was (reasonably) worried this would wipe a plan he has used for a month; it
+does not, and that reassurance is worth repeating because it is blocking him.
+
+### What shipped in S196–S197 (all live)
+Session auto-pay hardening + the calendar; the "save your card" link; the
+standard rate in the policy; back-dating with disclosure; the booking loop;
+three data-loss fixes; the bundle split (entry chunk 303kB → 22.6kB); Firestore
+offline cache; **Sora, twice** (never loaded in the app; never loaded in the
+share cards or app icons either, for a different reason); the keyboard no longer
+covering the composer on iOS; and the notification feed learning to wrap, act
+and clear.
+
+### Traps this session paid for — do not re-learn them
+- **`window.storage.get` THROWS for a MISSING document; `getForUser` returns
+  null.** That asymmetry nearly killed back-dated logging when strict reads were
+  added. Absence now carries `err.code === "not-found"`; treat it as empty, and
+  everything else as failure.
+- **resvg ignores `fontBuffers` entirely** in this version — real font and
+  garbage render byte-identical — and cannot parse WOFF2 at all. Use `fontFiles`
+  with TTF, and assert the output differs from a no-font render.
+- **A manual chunk only ever helps ALWAYS-loaded code.** A catch-all `vendor`
+  merged four lazy libraries into one eager 511kB download.
+- **`requestAnimationFrame` is paused in hidden tabs** — do not batch anything
+  through it that must be correct when a backgrounded PWA returns.
+- **The Firebase log CLI serves stale pages.** I twice concluded a function had
+  stopped running from log output alone. Corroborate before diagnosing.
 
 ## 🔜 NEXT BUILD — client self-booking + drive time (Kevin's spec + decisions, S190)
 

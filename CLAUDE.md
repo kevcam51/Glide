@@ -2384,3 +2384,37 @@ enabled (Blaze has no default spending cap).
   slot before `getMyClients()` resolved dropped the trainer into Block mode.
   **Verified:** build passes, 230 rules tests, 48 new unit assertions across three harnesses, and the
   booking-request UI + red error path smoke-tested live (test inbox item injected, then removed).
+- Session 197 (Aug 19–20): **The audit tail, the notification feed, and Sora — twice.**
+  (1) **The 44-finding audit** (5 lenses, adversarially verified; the register is a published
+  artifact) drove most of this session. Shipped from it: three DATA-LOSS fixes (the app said
+  "Logged" when a save failed; switching days in the calendar could write the previous day's meals
+  onto the new date; a failed day-read was treated as an empty day and then overwritten), the
+  Firestore **offline cache**, the service worker no longer caching a `/card/` or `/i/`
+  interstitial as the app shell, the **iOS keyboard** no longer covering the composer
+  (`visualViewport` → `--kb` → `.kb-safe`), pinch-zoom restored on Android, the iOS status bar,
+  iOS downloads (share sheet + a blob that survives long enough), pull-to-refresh no longer firing
+  inside modals or re-rendering at 60fps, and the AI chat's always-on non-passive scroll listener.
+  (2) **The bundle split**: `App.jsx` is lazy + WARMED, so the entry chunk went **303kB → 22.6kB
+  gzipped** and DOM-interactive 234ms → 13ms; react/firebase in their own chunks so a deploy stops
+  invalidating them. ⚠️ A catch-all `manualChunks` "vendor" made things WORSE first — it merged
+  four already-lazy libraries into one eager 511kB chunk. A manual chunk only helps always-loaded code.
+  (3) **SORA WAS NEVER LOADING — in two separate places.** In the app, `@import` in themes.css was
+  hoisted by the bundler into the DEV-ONLY Showcase chunk, so production named Sora and never
+  fetched it (now a `<link>` in index.html). Then a follow-up hunt found the SAME font missing from
+  every generated image — share cards (`api/og.js`), the static og.png and **every app icon** —
+  because the files were WOFF2 (resvg cannot parse it) AND because **resvg ignores `fontBuffers`
+  entirely** in this version: real Sora and 29 bytes of garbage render byte-identical. Fixed with
+  TTF + `fontFiles`.
+  (4) **Notification feed** (Kevin's report): the body was `truncate`d to one line AND stored at 140
+  chars, and tapping a row did nothing because the feed **never stored a destination**. Now wraps,
+  stores the `url`, and every row carries explicit **Open →** / **Clear**. ⚠️ STILL BROKEN for
+  trainer to-dos — `onTrainerRequestWritten` pushes `url: "/"`, which maps to a "todos" intent that
+  does nothing when the client is already on their home screen. Fix in the CLIENT (open the newest
+  open request's QuickActionModal) so existing feed rows are repaired too. See the handoff.
+  (5) Also: `save_card` to-do type (in-app card request, no browser trip), the "ask for a time"
+  rebuild (multi-day + a horizon: this week / next / in 2, 3 weeks / a month / pick a date, with the
+  trainer choosing WHICH offered slot to book), and the watch-data row now naming its plan + showing
+  the last reading + warning when it points at the unopenable `caliq-self`.
+  **⚠️ TRAPS PAID FOR:** `window.storage.get` THROWS for a missing doc while `getForUser` returns
+  null — absence now carries `err.code === "not-found"`; `requestAnimationFrame` is paused in hidden
+  tabs; and the Firebase log CLI serves stale pages (I twice wrongly concluded a function had stopped).
