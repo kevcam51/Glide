@@ -14904,10 +14904,34 @@ function takeSaveCardIntent() {
     return v === "1";
   } catch (e) { return false; }
 }
+
+// A to-do notification's destination (?todo=<id>, S197d). Same round-trip
+// problem as the card intent above — a push tap can land on the sign-in screen
+// first — so it is stashed at import and cleared as soon as it is read.
+const TODO_STASH = "glidna-todo";
+function stashTodoIntent() {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const v = p.get("todo");
+    if (!v) return;
+    localStorage.setItem(TODO_STASH, v);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("todo");
+    window.history.replaceState({}, "", url.toString());
+  } catch (e) { /* private mode / no history API */ }
+}
+function takeTodoIntent() {
+  try {
+    const v = localStorage.getItem(TODO_STASH);
+    if (v) localStorage.removeItem(TODO_STASH);
+    return v || null;
+  } catch (e) { return null; }
+}
 // Captured at import, not in an effect: App only mounts once AuthGate has a
 // signed-in user, and for a brand-new client that is several screens and one
 // Google redirect later — by which time this query string is long gone.
 stashSaveCardIntent();
+stashTodoIntent();
 
 // ─── What a no-card reminder's buttons do (S196e) ───────────────────────────
 // The push carries two destinations: tapping the body opens the client's card
@@ -22251,6 +22275,51 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   // opened Sessions themselves.
   const [openedForCard, setOpenedForCard] = useState(false);
 
+  // ⚠️ "todos" USED TO DO NOTHING AT ALL (S197d, Kevin: "after I click Open it
+  // did not take me anywhere"). The old comment claimed arriving at the home
+  // screen IS arriving at the task — true only for someone who was somewhere
+  // else. A client already standing on their home screen tapped Open and
+  // watched nothing happen, which is indistinguishable from broken.
+  //
+  // The lookup lives HERE rather than in the notification because every to-do
+  // row already sitting in someone's feed carries url "/" with no id in it, and
+  // those rows cannot be rewritten. Newer pushes carry ?todo=<id>, which picks
+  // the exact task; without one we open the newest still-open request — the
+  // same modal the home screen's "Do it now →" opens.
+  const [todoNote, setTodoNote] = useState("");
+  useEffect(() => {
+    if (!todoNote) return;
+    const t = setTimeout(() => setTodoNote(""), 6000);
+    return () => clearTimeout(t);
+  }, [todoNote]);
+  const openTodoIntent = async (wantId) => {
+    let list = requests;
+    // An empty array is indistinguishable from "the first load has not resolved
+    // yet", so re-read before telling anyone they are caught up. Absence is
+    // empty here: window.storage.get THROWS for a missing document (unlike
+    // getForUser, which returns null).
+    if (!list.length) {
+      try {
+        const r = await window.storage.get(REQUEST_KEY);
+        list = r && r.value ? (JSON.parse(r.value) || []) : [];
+      } catch { list = []; }
+      if (list.length) setRequests(list);   // so markRequestDone can find it
+    }
+    if (wantId) {
+      const exact = list.find((r) => r && r.id === wantId);
+      // Opening a DIFFERENT task than the one they tapped would be its own kind
+      // of wrong, so an already-finished one says so instead.
+      if (exact && exact.status === "done") { setTodoNote("You've already done that one."); return; }
+      if (exact) { setQuickReq(exact); return; }
+    }
+    const open = list.filter((r) => r && r.status !== "done");
+    const pick = open.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+    if (pick) setQuickReq(pick);
+    // Silence is the whole complaint — say something even when there is nothing
+    // left to open.
+    else setTodoNote("Nothing left to do — you're all caught up.");
+  };
+
   // ── Non-card destinations open immediately (S197c) ────────────────────────
   // Messages and Sessions need nothing resolved first, so a notification tapped
   // in the feed lands ON that panel instead of on the home screen. Keyed on the
@@ -22262,8 +22331,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
     lastIntentRef.current = homeIntent.n;
     if (homeIntent.kind === "messages") setShowMsg(true);
     else if (homeIntent.kind === "sessions") setShowSessions(true);
-    // "todos" is the home screen itself — the to-do cards are already at the
-    // top of it, so arriving here IS arriving at the task.
+    else if (homeIntent.kind === "todos") openTodoIntent(homeIntent.id).catch(() => {});
   }, [homeIntent]);
 
   // The card intent is separate because it cannot act until a trainer is known.
@@ -23443,6 +23511,18 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
           onMarkDone={() => markRequestDone(quickReq.id)}
           onClose={() => setQuickReq(null)} />
       )}
+
+      {/* A to-do notification that has nothing left to open still has to say so
+          (S197d). Above the quick-action modal's 1500 so it is never buried. */}
+      {todoNote && createPortal(
+        <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)",
+          top: "calc(64px + env(safe-area-inset-top,0px))", zIndex: 1600, maxWidth: "min(92vw, 420px)",
+          padding: "11px 16px", borderRadius: 12, border: "1px solid var(--border,#2e4241)",
+          background: "var(--surface,#121b1e)", color: "var(--text,#eafcfc)",
+          fontSize: ".84rem", fontWeight: 600, lineHeight: 1.45, textAlign: "center",
+          boxShadow: "0 6px 24px rgba(0,0,0,.45)" }}>
+          {todoNote}
+        </div>, document.body)}
 
       {/* Full calendar (back-dating) — log food/weight/workouts on any date.
           Portaled to escape the page-transition transform trap; :root css vars
@@ -28566,7 +28646,13 @@ export default function App() {
   // in the session had no way to reach the card sheet, and the best the feed
   // could do was drop someone on their home screen to find it themselves.
   // Bumping a number re-triggers it as many times as needed.
-  const [homeIntent, setHomeIntent] = useState(() => (takeSaveCardIntent() ? { kind: "card", n: 1 } : null));
+  const [homeIntent, setHomeIntent] = useState(() => {
+    if (takeSaveCardIntent()) return { kind: "card", n: 1 };
+    // A push tapped from outside the app navigates to /?todo=<id>; the stash
+    // survives the trip through AuthGate, the same way the card intent does.
+    const t = takeTodoIntent();
+    return t ? { kind: "todos", n: 1, id: t } : null;
+  });
   // Where a notification actually goes. The feed knows the tag and the stored
   // url; this turns that into a screen. Kept HERE because App owns the
   // navigation and ClientHome owns the panels — the feed component should not
@@ -28579,6 +28665,12 @@ export default function App() {
     if (tag.startsWith("session-")) return "sessions";
     if (tag === "trainer-todo") return "todos";
     return null;
+  };
+  // Which to-do a feed row is about. Rows written before S197d carry url "/"
+  // and have none — ClientHome falls back to the newest open one for those.
+  const notifTodoId = (n) => {
+    const m = /[?&]todo=([^&#]+)/.exec(String((n && n.url) || ""));
+    try { return m ? decodeURIComponent(m[1]) : null; } catch { return m[1]; }
   };
   // Appearance (S95): the inline script in index.html already painted the theme
   // before first paint; this just mirrors the stored pref so the menu can show it.
@@ -30234,7 +30326,7 @@ export default function App() {
           // it easier to complete the task without actually having to find
           // where to go yourself").
           const dest = notifDestination(n);
-          setHomeIntent(dest ? { kind: dest, n: Date.now() } : null);
+          setHomeIntent(dest ? { kind: dest, n: Date.now(), id: notifTodoId(n) } : null);
           goToProfiles();
         }}
         onDismiss={(id) => {

@@ -178,7 +178,12 @@ exports.onTrainerRequestWritten = onDocumentWritten(
     const r = await sendPushTo(db, uid,
       { title: `To-do from ${first.fromName || "your trainer"}`,
         body: fresh.length > 1 ? `${fresh.length} new to-dos` : String(first.prompt || "").slice(0, 120),
-        tag: "trainer-todo", url: "/" },
+        // "/" used to be the whole destination, which meant a client already
+        // on their home screen tapped the notification and nothing moved
+        // (S197d). The id lets the app open the exact task. Feed rows written
+        // before this still carry "/" — the client falls back to the newest
+        // open to-do for those, so both shapes land somewhere real.
+        tag: "trainer-todo", url: first.id ? `/?todo=${encodeURIComponent(first.id)}` : "/" },
       "trainerReminders");
     console.log("onTrainerRequestWritten push", JSON.stringify({ uid, fresh: fresh.length, ...r }));
   });
