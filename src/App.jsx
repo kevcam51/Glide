@@ -22195,7 +22195,7 @@ function SaveFailedBanner({ text, onDismiss }) {
     </div>, document.body);
 }
 
-function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPrefs, onSetNotifPrefs, premium = true, billingHold = null, openCardSetup = false }) {
+function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPrefs, onSetNotifPrefs, premium = true, billingHold = null, homeIntent = null }) {
   // The client's plan lives in their own account as "caliq-self"; today's log is
   // "caliq-log-self-{date}". The client is always on their own account (no remote
   // routing), so we read/write their own window.storage directly.
@@ -22250,9 +22250,27 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   // flag would keep claiming the trainer asked, every later time the person
   // opened Sessions themselves.
   const [openedForCard, setOpenedForCard] = useState(false);
+
+  // ── Non-card destinations open immediately (S197c) ────────────────────────
+  // Messages and Sessions need nothing resolved first, so a notification tapped
+  // in the feed lands ON that panel instead of on the home screen. Keyed on the
+  // intent's nonce so the same destination can be opened again later.
+  const lastIntentRef = useRef(0);
+  useEffect(() => {
+    if (!homeIntent || !homeIntent.n || homeIntent.n === lastIntentRef.current) return;
+    if (homeIntent.kind === "card") return;   // handled below — it needs a trainer first
+    lastIntentRef.current = homeIntent.n;
+    if (homeIntent.kind === "messages") setShowMsg(true);
+    else if (homeIntent.kind === "sessions") setShowSessions(true);
+    // "todos" is the home screen itself — the to-do cards are already at the
+    // top of it, so arriving here IS arriving at the task.
+  }, [homeIntent]);
+
+  // The card intent is separate because it cannot act until a trainer is known.
+  const openCardSetup = !!(homeIntent && homeIntent.kind === "card" && homeIntent.n !== lastIntentRef.current);
   useEffect(() => {
     if (!openCardSetup || cardIntentDone) return;
-    if (trainerInfo) { setShowSessions(true); setCardIntentDone(true); setOpenedForCard(true); return; }
+    if (trainerInfo) { setShowSessions(true); setCardIntentDone(true); setOpenedForCard(true); lastIntentRef.current = homeIntent.n; return; }
     // No trainer resolved YET. That's the normal case for the person this link
     // is for: they signed up through it, so they're being linked to the trainer
     // (RolePanel's invite auto-link) in the same breath — and the lookup that
@@ -22273,7 +22291,13 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       } catch { /* keep trying until the attempts run out */ }
     }, 1200);
     return () => { alive = false; clearInterval(id); };
-  }, [openCardSetup, cardIntentDone, trainerInfo]);
+  }, [openCardSetup, cardIntentDone, trainerInfo, homeIntent]);
+  // A NEW card intent re-arms the one-shot guard. Without this the flag would
+  // stay done forever and the second notification a client tapped would be
+  // ignored — the same one-shot trap that made this boot-only to begin with.
+  useEffect(() => {
+    if (homeIntent && homeIntent.kind === "card" && homeIntent.n !== lastIntentRef.current) setCardIntentDone(false);
+  }, [homeIntent]);
 
   // Pay-now (S103): retry a declined session balance from the banner.
   const [hold, setHold] = useState(billingHold);
@@ -28537,7 +28561,25 @@ export default function App() {
   // stash written at import time, so it survives the sign-up round trip. It is
   // an intent flag only — who the card is for comes from the invite link beside
   // it, and the card attaches to whoever is signed in right now.
-  const [wantSaveCard] = useState(takeSaveCardIntent);
+  // ⚠️ A NONCE, NOT A BOOLEAN (S197c). This was read once at mount from the
+  // /card/CODE link and could never fire again — so a notification tapped later
+  // in the session had no way to reach the card sheet, and the best the feed
+  // could do was drop someone on their home screen to find it themselves.
+  // Bumping a number re-triggers it as many times as needed.
+  const [homeIntent, setHomeIntent] = useState(() => (takeSaveCardIntent() ? { kind: "card", n: 1 } : null));
+  // Where a notification actually goes. The feed knows the tag and the stored
+  // url; this turns that into a screen. Kept HERE because App owns the
+  // navigation and ClientHome owns the panels — the feed component should not
+  // have to know either.
+  const notifDestination = (n) => {
+    const tag = String((n && n.tag) || ""), url = String((n && n.url) || "");
+    if (tag.startsWith("dm-")) return "messages";
+    if (url.includes("cardlink") || url.includes("savecard")) return "card";
+    if (tag.startsWith("session-nocard")) return "card";
+    if (tag.startsWith("session-")) return "sessions";
+    if (tag === "trainer-todo") return "todos";
+    return null;
+  };
   // Appearance (S95): the inline script in index.html already painted the theme
   // before first paint; this just mirrors the stored pref so the menu can show it.
   const [themePref, setThemePref] = useState(readThemePref);
@@ -30184,7 +30226,17 @@ export default function App() {
         // theirs. Anything more specific would need the feed to know which
         // screen owns which item, which is exactly the coupling that made these
         // rows inert in the first place.
-        onOpenTodos={() => { setFeedOpen(false); if (isTrainerHome) setHomeTab("dashboard"); goToProfiles(); }}
+        onOpenTodos={(n) => {
+          setFeedOpen(false);
+          if (isTrainerHome) { setHomeTab("dashboard"); goToProfiles(); return; }
+          // A client goes to the exact panel the notification is about, rather
+          // than to their home screen to go looking (Kevin, S197c: "this makes
+          // it easier to complete the task without actually having to find
+          // where to go yourself").
+          const dest = notifDestination(n);
+          setHomeIntent(dest ? { kind: dest, n: Date.now() } : null);
+          goToProfiles();
+        }}
         onDismiss={(id) => {
           // Written straight to the same doc the live listener reads, so the row
           // disappears everywhere at once rather than only on this device.
@@ -30234,7 +30286,7 @@ export default function App() {
       return <>{chrome}<ClientHome onOpenPlan={() => selectProfile("self")}
         onOpenTimeline={async () => { requestPlanTab("Timeline"); await selectProfile("self"); setShowDash(false); }}
         meUid={meUid} meName={meName} role={role} premium={mePremium}
-        billingHold={meBillingHold} openCardSetup={wantSaveCard}
+        billingHold={meBillingHold} homeIntent={homeIntent}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs} /></>;
     }
     if (isTrainerHome && homeTab === "analytics") {
