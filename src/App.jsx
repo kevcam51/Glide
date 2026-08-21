@@ -16196,11 +16196,15 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // left on screen forever, so "Set your standard price first" appeared as a
   // green confirmation that the session had been booked.
   const [bookingMsg, setBookingMsg] = useState(null);
-  const answerBooking = async (requestId, accept) => {
+  const answerBooking = async (requestId, accept, slotStartAt) => {
     if (bookingBusy) return;
     setBookingBusy(requestId); setBookingMsg(null);
     try {
-      await callRespondToBooking({ requestId, accept });
+      // slotStartAt names WHICH of the offered times to book (S197). The server
+      // checks it against what the client actually asked for and falls back to
+      // the earliest, so an omitted or stale value can never book a time nobody
+      // proposed.
+      await callRespondToBooking({ requestId, accept, ...(slotStartAt ? { slotStartAt } : {}) });
       setBookingMsg({ ok: true, text: accept ? "Booked — they've been told." : "They've been told it doesn't work." });
       setTimeout(() => setBookingMsg(null), 3000);
     } catch (e) {
@@ -16697,25 +16701,57 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     never does — and either answer notifies them, which is why
                     it goes through the server rather than being two writes
                     from here. */}
-                {r.booking && r.booking.startAt ? (
+                {r.booking && r.booking.startAt ? (() => {
+                  // A client can ask for several days at once (S197), so the
+                  // trainer picks WHICH one to book. One offered time keeps the
+                  // old single-button shape; several become a row of choices,
+                  // because making them read a sentence and then guess which
+                  // button books what is how the wrong session gets created.
+                  const offered = (Array.isArray(r.booking.slots) && r.booking.slots.length
+                    ? r.booking.slots : [r.booking.startAt]).map(Number).filter(Number.isFinite);
+                  const live = offered.filter((ms) => ms >= Date.now());
+                  const multi = offered.length > 1;
+                  return (
                   <>
                     <div className="mt-1.5 text-[.78rem] font-semibold text-fg">
-                      {fmtSessionWhen(r.booking.startAt)} · {r.booking.durationMin || 60} min
-                      {r.booking.startAt < Date.now() && <span className="ml-1.5 text-warn">— that time has passed</span>}
+                      {multi
+                        ? `${offered.length} times asked for · ${r.booking.durationMin || 60} min each`
+                        : <>{fmtSessionWhen(offered[0])} · {r.booking.durationMin || 60} min</>}
+                      {!live.length && <span className="ml-1.5 text-warn">— {multi ? "all those times have passed" : "that time has passed"}</span>}
                     </div>
+                    {multi && (
+                      <div className="mt-1.5 flex flex-col gap-1">
+                        {offered.map((ms) => {
+                          const past = ms < Date.now();
+                          return (
+                            <button key={ms} disabled={bookingBusy === r.id || past}
+                              onClick={() => answerBooking(r.id, true, ms)}
+                              className={`flex items-center justify-between rounded-md border px-2.5 py-1.5 text-xs text-left cursor-pointer disabled:opacity-40 ${
+                                past ? "border-border text-muted" : "border-border text-fg"}`}>
+                              <span>{fmtSessionWhen(ms)}{past ? " — passed" : ""}</span>
+                              {!past && <span className="text-primary font-bold shrink-0">Book this</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                     <div className="mt-2 flex gap-2 flex-wrap">
-                      <button className={mPrimaryCls} disabled={bookingBusy === r.id || r.booking.startAt < Date.now()}
+                      {!multi && (
+                      <button className={mPrimaryCls} disabled={bookingBusy === r.id || !live.length}
                         onClick={() => answerBooking(r.id, true)}>
                         {bookingBusy === r.id ? "…" : "Accept & book"}
                       </button>
+                      )}
                       <button className={mBtnCls} disabled={bookingBusy === r.id}
-                        onClick={() => answerBooking(r.id, false)}>Can't make it</button>
+                        onClick={() => answerBooking(r.id, false)}>Can&apos;t make it</button>
                     </div>
                     <div className="mt-1 text-[.68rem] text-muted">
-                      Accepting books it at your standard rate and tells them. Declining tells them too.
+                      {multi ? "Booking one of these books that time at your standard rate and tells them — the rest of the request closes."
+                             : "Accepting books it at your standard rate and tells them."} Declining tells them too.
                     </div>
                   </>
-                ) : (
+                  );
+                })() : (
                   <div className="mt-2 flex gap-2">
                     <button className={mBtnCls} onClick={() => inboxDone(r.id)}><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />Done</button>
                     <button className={`${mBtnCls} text-muted`} onClick={() => inboxRemove(r.id)}>Dismiss</button>
@@ -25639,8 +25675,65 @@ function SessionPolicyEditor({ policyDraft, setPolicyDraft, trainerUid, defaultP
 // creates a session (and therefore a charge). And the free/busy it shows is
 // derived server-side into anonymous time ranges — the client never reads the
 // trainer's sessions, because those carry other clients' names.
+// How far out a request starts from. A client thinks in "next week", not in
+// dates — and the trainer still receives real datetimes, because the horizon is
+// resolved to concrete days before it is sent (S197).
+const ASK_HORIZONS = [
+  { k: "this",   label: "This week",   weeks: 0 },
+  { k: "next",   label: "Next week",   weeks: 1 },
+  { k: "in2",    label: "In 2 weeks",  weeks: 2 },
+  { k: "in3",    label: "In 3 weeks",  weeks: 3 },
+  { k: "month",  label: "In a month",  weeks: 4 },
+  { k: "pick",   label: "Pick a date", weeks: null },
+];
+const ASK_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// Resolve chosen weekdays + a horizon into real future datetimes.
+// `weeks: 0` means "the rest of this week" — a day already gone is skipped
+// rather than silently rolled to next week, because "this week" has to mean
+// this week or the request is a lie.
+function askSlots({ days, horizon, startDate, hh, mm }) {
+  const out = [];
+  const now = Date.now();
+  const base = new Date();
+  base.setHours(0, 0, 0, 0);
+  if (horizon === "pick" && startDate) {
+    const [y, mo, d] = startDate.split("-").map(Number);
+    if (y && mo && d) base.setFullYear(y, mo - 1, d);
+  } else {
+    const h = ASK_HORIZONS.find((x) => x.k === horizon);
+    const weeks = h && h.weeks != null ? h.weeks : 0;
+    if (weeks > 0) {
+      // Start of that week (Sunday), so "next week" is a WEEK, not "seven days
+      // from today" — which would land mid-week and skip the days before it.
+      base.setDate(base.getDate() - base.getDay() + weeks * 7);
+    }
+  }
+  // "This week" means THIS week. `(dow - today + 7) % 7` wraps a past weekday
+  // forward into next week, so picking Monday on a Wednesday quietly produced
+  // next Monday while the chip still read "This week" — the request said one
+  // thing and meant another. A day that has gone is dropped instead, and the
+  // form says so ("those days have already passed this week"). Every other
+  // horizon starts on a Sunday, so nothing there can be in the past.
+  const thisWeek = horizon !== "pick" && (ASK_HORIZONS.find((x) => x.k === horizon) || {}).weeks === 0;
+  const todayDow = new Date().getDay();
+  for (const dow of days) {
+    if (thisWeek && dow < todayDow) continue;
+    const d = new Date(base);
+    const delta = (dow - d.getDay() + 7) % 7;
+    d.setDate(d.getDate() + delta);
+    d.setHours(hh, mm, 0, 0);
+    if (d.getTime() > now) out.push(d.getTime());
+  }
+  return out.sort((a, b) => a - b);
+}
+
 function AskForTime({ trainerUid, trainerName, onSent }) {
-  const [when, setWhen] = useState(() => calToLocalInput(Date.now() + 86400000));
+  const [days, setDays] = useState(() => [new Date(Date.now() + 86400000).getDay()]);
+  const [horizon, setHorizon] = useState("this");
+  const [startDate, setStartDate] = useState(() => ymdLocal(new Date(Date.now() + 86400000)));
+  const [hh, setHh] = useState(9);
+  const [mm, setMm] = useState(0);
   const [durationMin, setDurationMin] = useState("60");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -25648,6 +25741,11 @@ function AskForTime({ trainerUid, trainerName, onSent }) {
   const [sent, setSent] = useState(false);
   const [avail, setAvail] = useState(null);   // null = not loaded, {visible, busy[]}
 
+  const slots = useMemo(
+    () => askSlots({ days: [...days].sort(), horizon, startDate, hh, mm }),
+    [days, horizon, startDate, hh, mm],
+  );
+  const when = slots.length ? calToLocalInput(slots[0]) : "";
   const dayPart = String(when || "").split("T")[0];
   // Only the chosen day is fetched, and only when the day changes — a booking
   // screen that re-queries on every keystroke would spend a call per digit.
@@ -25667,7 +25765,7 @@ function AskForTime({ trainerUid, trainerName, onSent }) {
     return () => { alive = false; };
   }, [trainerUid, dayPart]);
 
-  const startAt = new Date(when).getTime();
+  const startAt = slots.length ? slots[0] : NaN;
   const durMin = Math.round(Number(durationMin) || 60);
   const endAt = startAt + durMin * 60000;
   // Does the slot they picked collide with something? Advisory only — the
@@ -25677,15 +25775,22 @@ function AskForTime({ trainerUid, trainerName, onSent }) {
 
   const send = async () => {
     if (busy) return;
-    if (!Number.isFinite(startAt)) { setErr("Pick a date and time."); return; }
-    if (startAt < Date.now()) { setErr("Pick a time in the future."); return; }
+    if (!days.length) { setErr("Pick at least one day."); return; }
+    if (!slots.length) { setErr("Those days have already passed this week — try a later week."); return; }
     setBusy(true); setErr("");
     try {
-      const pretty = new Date(startAt).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      const fmt = (ms) => new Date(ms).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+      // The prompt is what the trainer READS, so it names every day asked for
+      // rather than just the first. `slots` carries them in a form the accept
+      // path can book; `startAt` stays as the earliest so anything written
+      // before multi-day existed still understands the request.
+      const pretty = slots.length === 1
+        ? fmt(slots[0])
+        : `${slots.map(fmt).join(" · ")} — whichever suits`;
       await callSendTrainerRequest({
         type: "booking",
         prompt: `Can we train ${pretty}? (${durMin} min)${note.trim() ? ` — ${note.trim()}` : ""}`,
-        booking: { startAt, durationMin: durMin },
+        booking: { startAt: slots[0], slots, durationMin: durMin },
       });
       setSent(true); setNote("");
       if (onSent) onSent();
@@ -25716,15 +25821,87 @@ function AskForTime({ trainerUid, trainerName, onSent }) {
   return (
     <div className="mb-3 rounded-lg border px-3 py-2.5" style={{ borderColor: "var(--border)", background: "var(--s2)" }}>
       <div className="text-[11px] font-bold uppercase tracking-wide text-muted mb-1.5">Ask for a time</div>
+
+      {/* DAYS FIRST (S197, Kevin). People think "Tuesdays and Thursdays at 9",
+          not in single calendar dates — and asking for one date at a time meant
+          a client wanting three sessions sent three requests. Pick the days,
+          the time, and which week; the concrete dates are worked out below and
+          shown back before anything is sent. */}
       <div className="mb-2">
-        <div className={lbl}>When</div>
-        <WhenPicker value={when} onChange={setWhen} inp={inp} />
+        <div className={lbl}>Which days</div>
+        <div className="flex flex-wrap gap-1">
+          {ASK_DAYS.map((d, i) => {
+            const on = days.includes(i);
+            return (
+              <button key={d} type="button"
+                onClick={() => setDays((cur) => (cur.includes(i) ? cur.filter((x) => x !== i) : [...cur, i]))}
+                aria-pressed={on}
+                className={`rounded-full px-2.5 py-1.5 text-xs font-bold cursor-pointer border min-w-[42px] ${
+                  on ? "border-primary bg-primaryfill text-primaryfg" : "border-border bg-transparent text-fg"}`}>
+                {d}
+              </button>
+            );
+          })}
+        </div>
       </div>
+
+      <div className="mb-2">
+        <div className={lbl}>What time</div>
+        <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5">
+          <select className={inp} value={hh % 12 === 0 ? 12 : hh % 12} aria-label="Hour"
+            onChange={(e) => { const base = Number(e.target.value) % 12; setHh(hh >= 12 ? base + 12 : base); }}>
+            {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => <option key={h} value={h}>{h}</option>)}
+          </select>
+          <select className={inp} value={mm} aria-label="Minute"
+            onChange={(e) => setMm(Number(e.target.value))}>
+            {[0, 15, 30, 45].map((m) => <option key={m} value={m}>{String(m).padStart(2, "0")}</option>)}
+          </select>
+          <select className={`${inp} pr-1`} value={hh >= 12 ? "PM" : "AM"} aria-label="AM or PM"
+            onChange={(e) => { const base = hh % 12; setHh(e.target.value === "PM" ? base + 12 : base); }}>
+            <option>AM</option><option>PM</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="mb-2">
+        <div className={lbl}>Starting when</div>
+        <div className="flex flex-wrap gap-1">
+          {ASK_HORIZONS.map((h) => (
+            <button key={h.k} type="button" onClick={() => setHorizon(h.k)} aria-pressed={horizon === h.k}
+              className={`rounded-full px-2.5 py-1.5 text-xs font-semibold cursor-pointer border ${
+                horizon === h.k ? "border-primary bg-[rgba(var(--accent-rgb),.12)] text-primary" : "border-border bg-transparent text-fg"}`}>
+              {h.label}
+            </button>
+          ))}
+        </div>
+        {horizon === "pick" && (
+          <div className="mt-1.5 rounded-lg border border-border bg-surface p-2">
+            <CheckInCalendar checkIns={[]} selected={startDate} onSelect={setStartDate} />
+          </div>
+        )}
+      </div>
+
       <div className="mb-2">
         <div className={lbl}>How long</div>
         <select className={inp} value={durationMin} onChange={(e) => setDurationMin(e.target.value)}>
           {[30, 45, 60, 75, 90].map((m) => <option key={m} value={String(m)}>{m} minutes</option>)}
         </select>
+      </div>
+
+      {/* Say the real dates back. Everything above is a shorthand; this is what
+          the trainer will actually receive, so it is what the client should be
+          agreeing to before they tap send. */}
+      <div className="mb-2 rounded-md px-2.5 py-2 text-[.74rem] leading-snug"
+        style={{ background: "rgba(var(--accent-rgb),.08)", color: "var(--text)" }}>
+        {slots.length === 0 ? (
+          <span className="text-warn">
+            {days.length ? "Those days have already passed this week — pick a later week." : "Pick at least one day."}
+          </span>
+        ) : (
+          <>You&apos;re asking for <b>{slots.length}</b> session{slots.length === 1 ? "" : "s"}:{" "}
+            {slots.map((ms) => new Date(ms).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })).join(" · ")}
+          </>
+        )}
       </div>
 
       {avail && avail.visible && (
@@ -26206,8 +26383,13 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
 
         {/* A client asks for a time (S195). Above the card on purpose: wanting
             a session is what brings someone here, and the card is what makes it
-            work afterwards. */}
-        {!isTrainer && (
+            work afterwards.
+            ⚠️ EXCEPT when they arrived FOR the card (S197). Someone who tapped
+            "save your card" — from a link or the in-app to-do — came to do one
+            thing, and a booking form above it is an obstacle between them and
+            it. Hidden until the card is saved, then offered, because at that
+            point asking for a session is the natural next step. */}
+        {!isTrainer && !(focusCard && !myCard) && (
           <AskForTime trainerUid={trainerUid} trainerName={otherName} />
         )}
 

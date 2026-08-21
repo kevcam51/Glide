@@ -148,6 +148,17 @@ exports.respondToBookingRequest = onCall(
 
     const clientUid = preview.fromUid;
     const booking = preview.booking || null;
+    // ⚠️ WHICH slot (S197). A client may now ask for several days at once
+    // ("Mon/Wed/Fri at 9, starting next week"), so accepting has to say which
+    // one is being booked. The chosen time is validated against the slots the
+    // CLIENT actually offered — never taken on trust — so a tampered request
+    // cannot book a time nobody asked for. Absent `slots` means an older
+    // single-time request, where startAt is the only answer.
+    const offered = Array.isArray(booking && booking.slots) && booking.slots.length
+      ? booking.slots.map(Number).filter(Number.isFinite)
+      : (booking && Number.isFinite(Number(booking.startAt)) ? [Number(booking.startAt)] : []);
+    const wanted = Number(d.slotStartAt);
+    const chosenStart = Number.isFinite(wanted) && offered.includes(wanted) ? wanted : offered[0];
     if (!clientUid) throw new HttpsError("failed-precondition", "That request has no sender.");
     // Accepting something that never named a time can't book anything — and the
     // client would be told "it's on your calendar" about a session that doesn't
@@ -164,7 +175,7 @@ exports.respondToBookingRequest = onCall(
     const trainer = (await db.doc(`users/${uid}`).get()).data() || {};
     const trainerName = trainer.displayName
       || [trainer.firstName, trainer.lastName].filter(Boolean).join(" ") || "Your trainer";
-    const when = booking ? new Date(booking.startAt).toLocaleString("en-US", {
+    const when = booking ? new Date(chosenStart).toLocaleString("en-US", {
       timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
     }) : "";
 
@@ -181,7 +192,7 @@ exports.respondToBookingRequest = onCall(
     // booking is not.
     let priceCents = 0;
     if (accept && booking) {
-      if (Number(booking.startAt) < Date.now()) {
+      if (!Number.isFinite(chosenStart) || chosenStart < Date.now()) {
         throw new HttpsError("failed-precondition", "That time has already passed — book a new one instead.");
       }
       priceCents = Math.max(0, Math.min(500000, Math.round(Number((trainer.sessionPolicy || {}).standardPriceCents) || 0)));
@@ -234,7 +245,7 @@ exports.respondToBookingRequest = onCall(
         const ref = await db.collection("sessions").add({
           participants: [uid, clientUid],
           trainerUid: uid, clientUid,
-          startAt: Number(booking.startAt),
+          startAt: chosenStart,
           durationMin: Number(booking.durationMin) || 60,
           status: "scheduled",
           title: "", location: "",
