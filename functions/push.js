@@ -81,7 +81,18 @@ async function appendFeed(db, uid, payload) {
         id: `n${Date.now()}${Math.floor(Math.random() * 1e4)}`,
         tag: String(payload.tag || ""),
         title: String(payload.title || "").slice(0, 80),
-        body: String(payload.body || "").slice(0, 140),
+        // 300, not 140 (S197b, Kevin: "the text gets chopped off"). A push
+        // notification is a headline the OS truncates anyway, but the FEED is
+        // where someone goes to actually read what they missed — cutting it at
+        // 140 characters meant the bell held a permanently half-finished
+        // sentence, with no way to see the rest.
+        body: String(payload.body || "").slice(0, 300),
+        // ⚠️ WHERE IT GOES. The feed stored no destination, so every row was
+        // inert: a to-do could say "please add a payment card" and tapping it
+        // did nothing at all. The push payload has always carried a `url`; it
+        // simply was not kept. Stored now so a row can take you to the thing it
+        // is about.
+        url: String(payload.url || "") || undefined,
         ts: Date.now(),
       });
       tx.set(ref, { k: "caliq-notif-feed", value: JSON.stringify({ ...cur, items: items.slice(0, 50) }) });

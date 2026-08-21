@@ -26873,16 +26873,29 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
 // messages, trainer to-dos, client requests. Entries are written server-side
 // by the same code that sends pushes (functions/push.js appendFeed), so the
 // bell and the phone can never disagree. Unseen = newer than seenTs.
-function NotifFeed({ items, onClose, onOpenReferrals }) {
+function NotifFeed({ items, onClose, onOpenReferrals, onOpenTodos, onDismiss }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);
   const iconFor = (tag) => String(tag).startsWith("dm-") ? "inbox"
     : tag === "trainer-todo" ? "mail" : tag === "client-request" ? "clients"
-    : tag === "referral-vested" ? "invite" : "bell";
-  // A vested reward is the one notification with something to DO — the credit
-  // sits unclaimed until someone taps. Everything else here is history, so it
-  // stays inert rather than pretending each row is a link.
-  const actionFor = (tag) => (tag === "referral-vested" && onOpenReferrals) ? onOpenReferrals : null;
+    : tag === "referral-vested" ? "invite"
+    : String(tag).startsWith("session-") ? "calendar" : "bell";
+
+  // ⚠️ MOST ROWS USED TO BE INERT (S197b, Kevin). Only a vested reward did
+  // anything; everything else was treated as history. But a to-do saying
+  // "please add a payment card" is not history — it is a task, and tapping it
+  // did nothing, which reads as broken rather than as read-only.
+  //
+  // A row is actionable when we know where it goes: `url` if the notification
+  // carried one, otherwise the tag tells us. Older rows stored before the feed
+  // kept a url still work, because the tag is enough for the ones that matter.
+  const actionFor = (n) => {
+    if (n.tag === "referral-vested" && onOpenReferrals) return { run: onOpenReferrals, label: "Claim →" };
+    const goesHome = n.tag === "trainer-todo" || n.tag === "client-request"
+      || String(n.tag || "").startsWith("session-") || String(n.url || "").includes("cardlink");
+    if (goesHome && onOpenTodos) return { run: () => onOpenTodos(n), label: "Open →" };
+    return null;
+  };
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2400,
       background: "rgba(0,0,0,.78)", display: "flex", justifyContent: "center",
@@ -26900,25 +26913,37 @@ function NotifFeed({ items, onClose, onOpenReferrals }) {
             <div className="py-8 text-center text-[.84rem] text-muted">Nothing yet — messages, to-dos, and requests will show up here.</div>
           )}
           {items.map((n) => {
-            const act = actionFor(n.tag);
-            const Tag = act ? "button" : "div";
+            const act = actionFor(n);
             return (
-              <Tag key={n.id} onClick={act || undefined}
+              <div key={n.id}
                 className={`flex w-full items-start gap-2.5 rounded-xl border bg-surface2 px-3 py-2.5 text-left ${
-                  act ? "border-primary cursor-pointer" : "border-border"}`}>
+                  act ? "border-primary" : "border-border"}`}>
                 <span className="mt-0.5 shrink-0"><Icon name={iconFor(n.tag)} size={16} color="var(--accent)" /></span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[.84rem] font-semibold text-fg">{n.title}</div>
-                  {/* The reward body names both choices, so it must wrap rather
-                      than truncate — a clipped "or try a month of…" hides half
-                      the offer. */}
-                  {n.body && <div className={`text-[.78rem] text-muted ${act ? "leading-snug" : "truncate"}`}>{n.body}</div>}
-                  <div className="mt-0.5 flex items-center gap-2 text-[.64rem] text-muted">
+                  {/* ⚠️ ALWAYS WRAPS NOW. `truncate` clipped the body to ONE
+                      LINE with an ellipsis, so "Please add a payment card so
+                      your sessions can be billed" simply stopped mid-sentence
+                      and there was no way to read the rest — the bell is the
+                      one place you go precisely to read what you missed. */}
+                  {n.body && <div className="text-[.78rem] text-muted leading-snug break-words">{n.body}</div>}
+                  <div className="mt-1 flex items-center gap-2.5 text-[.64rem] text-muted flex-wrap">
                     <span>{timeAgo(n.ts)}</span>
-                    {act && <span className="font-bold text-primary">Claim →</span>}
+                    {act && (
+                      <button onClick={act.run}
+                        className="rounded-md border border-primary bg-[rgba(var(--accent-rgb),.1)] px-2 py-1 text-[.68rem] font-bold text-primary cursor-pointer">
+                        {act.label}
+                      </button>
+                    )}
+                    {onDismiss && (
+                      <button onClick={() => onDismiss(n.id)}
+                        className="rounded-md border border-border bg-transparent px-2 py-1 text-[.68rem] font-semibold text-muted cursor-pointer">
+                        Clear
+                      </button>
+                    )}
                   </div>
                 </div>
-              </Tag>
+              </div>
             );
           })}
         </div>
@@ -30153,7 +30178,20 @@ export default function App() {
         )}
       </button>
       {feedOpen && <NotifFeed items={notifFeed.items} onClose={() => setFeedOpen(false)}
-        onOpenReferrals={() => { setFeedOpen(false); setShowReferrals(true); }} />}
+        onOpenReferrals={() => { setFeedOpen(false); setShowReferrals(true); }}
+        // Closing the feed IS arriving at the task: a client's to-dos sit at the
+        // very top of their home, and a trainer's client asks sit at the top of
+        // theirs. Anything more specific would need the feed to know which
+        // screen owns which item, which is exactly the coupling that made these
+        // rows inert in the first place.
+        onOpenTodos={() => { setFeedOpen(false); if (isTrainerHome) setHomeTab("dashboard"); goToProfiles(); }}
+        onDismiss={(id) => {
+          // Written straight to the same doc the live listener reads, so the row
+          // disappears everywhere at once rather than only on this device.
+          const next = { items: notifFeed.items.filter((x) => x.id !== id), seenTs: Date.now() };
+          setNotifFeed(next);
+          try { window.storage.set("caliq-notif-feed", JSON.stringify(next)).catch(() => {}); } catch { /* best-effort */ }
+        }} />}
       {/* Card-setup outcome (S101) — the one moment the client returns from
           Stripe's hosted page with no panel open to report into. */}
       {cardNotice && createPortal(
