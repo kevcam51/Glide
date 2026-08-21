@@ -1,6 +1,6 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S197d) — the notification bug is FIXED and LIVE; start at the audit tail
+## ▶️ START HERE (S197e) — two audit items left, then the booking loop
 
 Everything below is DEPLOYED AND PUSHED. Working tree clean, build passing,
 230 rules tests green. Nothing is half-finished.
@@ -31,30 +31,54 @@ preview covered the other three branches (the `"/"` fallback, the already-done
 notice, the caught-up notice) plus a cold boot at `/?todo=<id>`. Test data
 removed from prod afterwards.
 
-### 2. THE AUDIT TAIL — all verified, none urgent
+### 2. THE AUDIT TAIL — five of seven are done; TWO REMAIN
 
 From the 44-finding audit (the full register is the published artifact; the raw
-findings are in the workflow output referenced in S196 below). What is left:
+findings are in the workflow output referenced in S196 below).
 
-- **The profile doc is read 4–6 times per cold start.** Add a tiny module-level
-  promise cache in `src/profile.js` keyed by uid. Small, and it is on the boot
-  path so it is felt.
-- **Three documents are `getDoc`'d and then immediately `onSnapshot`'d** — the
-  first read is pure waste, on the client home and the trainer's view.
-- **Every page load forces a full ID-token refresh** before any data read can
-  finish (`AuthGate`, the S57 `getIdToken(true)`). Gate it on a stored marker so
-  it only runs when claims might actually have changed.
-- **`_foodScore` is recomputed inside the sort comparator**, and the sort runs
-  up to four times per search. Score once into an array, then sort.
-- **Cloud Functions eagerly `require` the Anthropic SDK, MCP SDK, web-push and
-  SimpleWebAuthn into every function** — the lazy-wrapper pattern already used
-  for Stripe fixes it.
-- **Touch targets** under 44px in a few places (the Recent Activity refresh is
-  the worst).
+⚠️ **The list below was written without re-checking which items S196r had
+already fixed** — two of the seven were already done when it was written. Verify
+each finding against the code before starting on it.
+
+**Already done in S196r** (no action):
+- the profile promise cache in `src/profile.js` (`PROFILE_TTL_MS`, `forgetProfile`);
+- the forced ID-token refresh, now gated on `CLAIMS_STAMP` in `AuthGate`.
+
+**Done in S197e** (deployed and pushed):
+- **Lazy SDK requires.** Anthropic / MCP / web-push / SimpleWebAuthn were
+  top-level `require`s, and since every function loads `index.js` and `index.js`
+  requires every module, all four sat on ~90 cold starts. Now lazy, like Stripe.
+  Measured 136.7ms → 72.9ms on the real require tree. The Anthropic and
+  SimpleWebAuthn paths are verified live in prod; web-push is only reached when
+  a push subscription exists and MCP only past its OAuth gate, so those two are
+  verified by export-shape assertions, not end to end.
+- **`_foodScore` scores once, then sorts** (1048 → 144 scorings per search),
+  ordering proven identical over 3,200 randomised comparisons.
+- **The Recent Activity tap targets** (13×15px refresh, ~18px "View all") are
+  44×44. Note the trap: the first attempt's −12px side margins made the refresh
+  button overlap the "N changes" label beside it.
+
+**STILL OPEN — and the first one is not the fix the audit describes:**
+
+- **The three `getDoc`-then-`onSnapshot` documents.** Real, but the first read is
+  NOT pure waste: it is also the not-found path and the error path.
+  `subscribeForUser` swallows listener errors and its ClientHome callback
+  early-returns on `value == null`, so deleting the read turns "you have no plan
+  yet" and any transient listener failure into a PERMANENT "Loading your plan…".
+  Doing it safely means giving `subscribeForUser` an error channel and teaching
+  the listeners to distinguish absent from failed — a change to a helper with 12
+  call sites, on the client's boot path, next to the race-sensitive
+  `planWrapRef`. Worth 3 reads per load only if done carefully.
 - **Plan writes are last-write-wins whole-document overwrites** (functions/
-  aitools.js). Two people editing one plan silently lose one side. This is the
-  only LARGE one, and it is a real design pass — the day logs got transactions,
-  the plan wrapper never did.
+  aitools.js: `loadPlanWrap` → mutate → `kvSetJSON`, at 10+ call sites). Two
+  people editing one plan silently lose one side — and with the AI writing plans
+  while a trainer edits in the app, that is a live scenario, not a theoretical
+  one. **It is more tractable than "a design pass" suggests: `kvTxnJSON` already
+  exists in that same file** (the S85 hardening that fixed day logs, meals,
+  history and requests). The work is extracting each tool's mutation into a pure
+  function of the current wrapper so Firestore can retry it, then routing the
+  plan-wrapper writes through a transaction. Plan resolution stays outside the
+  transaction. ~10 tools, each needing its own test.
 
 ### 3. PRODUCT DECISIONS WAITING ON KEVIN — do not guess these
 
