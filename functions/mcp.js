@@ -32,8 +32,13 @@
 
 const { onRequest } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
-const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
-const { StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/server/streamableHttp.js");
+// Lazy, for the reason documented in aichat.js (S197e): ~69ms of require on
+// every function's cold start, for a dependency only the MCP endpoint uses.
+let _McpServer = null, _StreamableHTTPServerTransport = null;
+const McpServerLib = () => (_McpServer
+  || (_McpServer = require("@modelcontextprotocol/sdk/server/mcp.js").McpServer));
+const StreamableTransportLib = () => (_StreamableHTTPServerTransport
+  || (_StreamableHTTPServerTransport = require("@modelcontextprotocol/sdk/server/streamableHttp.js").StreamableHTTPServerTransport));
 const { z } = require("zod");
 const { buildTools, runTool, seatCapFor } = require("./aitools");
 const { defineSecret } = require("firebase-functions/params");
@@ -400,7 +405,7 @@ function unauthorized(req, res) {
 
 // Build the MCP server for ONE request (stateless: never reused).
 function buildServer(ctx, profile, db, scopes) {
-  const server = new McpServer(
+  const server = new (McpServerLib())(
     { name: "glidna", version: "1.0.0" },
     {
       capabilities: { tools: {} },
@@ -579,7 +584,7 @@ exports.mcp = onRequest({ cors: false, timeoutSeconds: 300,
   let server, transport;
   try {
     server = buildServer(ctx, profile, db, grant.scope);
-    transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    transport = new (StreamableTransportLib())({ sessionIdGenerator: undefined });
     // Per-request instances (SDK's documented serverless pattern) — closing
     // them when the response ends prevents the #1994 reuse bug.
     res.on("close", () => {

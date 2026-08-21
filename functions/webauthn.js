@@ -19,10 +19,11 @@
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
-const {
-  generateRegistrationOptions, verifyRegistrationResponse,
-  generateAuthenticationOptions, verifyAuthenticationResponse,
-} = require("@simplewebauthn/server");
+// Lazy, for the reason documented in aichat.js (S197e). This SDK is the single
+// most expensive require in the codebase (~60ms) and only the four passkey
+// ceremonies below touch it.
+let _wa = null;
+const wa = () => (_wa || (_wa = require("@simplewebauthn/server")));
 
 // Origins allowed to run the ceremony. rpID is a registrable domain the origin
 // belongs to — for both glidna.com AND www.glidna.com we use "glidna.com", so a
@@ -71,7 +72,7 @@ exports.passkeyRegisterOptions = onCall({ region: "us-central1", maxInstances: 1
 
   const user = await admin.auth().getUser(uid).catch(() => null);
   const existing = await db.collection("webauthnCreds").where("uid", "==", uid).get();
-  const options = await generateRegistrationOptions({
+  const options = await wa().generateRegistrationOptions({
     rpName: "Glide",
     rpID: rp.rpID,
     userName: (user && (user.email || user.displayName)) || uid,
@@ -100,7 +101,7 @@ exports.passkeyRegisterVerify = onCall({ region: "us-central1", maxInstances: 10
 
   let verification;
   try {
-    verification = await verifyRegistrationResponse({
+    verification = await wa().verifyRegistrationResponse({
       response: request.data && request.data.attResp,
       expectedChallenge,
       expectedOrigin: rp.origin,
@@ -131,7 +132,7 @@ exports.passkeyLoginOptions = onCall({ region: "us-central1", maxInstances: 10 }
   const rp = rpFromOrigin(String(request.data && request.data.origin || ""));
   if (!rp) throw new HttpsError("invalid-argument", "Unrecognized app origin.");
   const db = admin.firestore();
-  const options = await generateAuthenticationOptions({
+  const options = await wa().generateAuthenticationOptions({
     rpID: rp.rpID,
     userVerification: "required", // the biometric IS the factor
   });
@@ -156,7 +157,7 @@ exports.passkeyLoginVerify = onCall({ region: "us-central1", maxInstances: 10 },
 
   let verification;
   try {
-    verification = await verifyAuthenticationResponse({
+    verification = await wa().verifyAuthenticationResponse({
       response: asseResp,
       expectedChallenge,
       expectedOrigin: rp.origin,

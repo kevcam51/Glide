@@ -7470,8 +7470,14 @@ async function searchFoods(query, onPartial) {
       if (seen.has(k)) continue;
       seen.add(k); out.push(f);
     }
-    out.sort((a, b) => _foodScore(b, scoreQ) - _foodScore(a, scoreQ));
-    return out.slice(0, 12);
+    // ⚠️ SCORE ONCE, THEN SORT (S197e). Scoring inside the comparator ran
+    // _foodScore twice per comparison — and it builds several RegExps and splits
+    // strings on every call — so an n-item list paid O(n log n) scorings instead
+    // of n. rank() also runs again on every source that resolves, so the waste
+    // multiplied by roughly four per search.
+    const scored = out.map((f) => ({ f, s: _foodScore(f, scoreQ) }));
+    scored.sort((a, b) => b.s - a.s);
+    return scored.slice(0, 12).map((x) => x.f);
   };
   // Accumulate results from each source as it resolves and re-emit the ranked
   // merge, so nothing waits for the slowest source.
@@ -10066,9 +10072,14 @@ function ActivityFeed({ history, onRefresh }) {
               </span>
             )}
             {onRefresh && (
-              <button onClick={doRefresh} title="Refresh"
+              <button onClick={doRefresh} title="Refresh" aria-label="Refresh activity"
                 style={{ border:"none", background:"transparent", color:"var(--accent)",
-                  cursor:"pointer", fontSize:".95rem", lineHeight:1, padding:0 }}>
+                  cursor:"pointer", fontSize:".95rem", lineHeight:1, padding:0,
+                  // A 44px tap target for a 13px glyph (S197e). The negative
+                  // margin hands back exactly what the padding would add, so the
+                  // header row keeps the height it has always had.
+                  minWidth:44, minHeight:44, margin:"-14px -3px",
+                  display:"inline-flex", alignItems:"center", justifyContent:"center" }}>
                 {refreshing ? "…" : "↻"}
               </button>
             )}
@@ -10087,8 +10098,12 @@ function ActivityFeed({ history, onRefresh }) {
 
         {list.length > 0 && (
           <button onClick={() => { setQuery(""); setShowFull(true); }}
-            style={{ marginTop:"8px", border:"none", background:"transparent", color:"var(--accent)",
-              cursor:"pointer", fontSize:".76rem", fontWeight:600, padding:"2px 0" }}>
+            style={{ border:"none", background:"transparent", color:"var(--accent)",
+              cursor:"pointer", fontSize:".76rem", fontWeight:600,
+              // Was 2px of padding around 14px of text — a ~18px tall target on
+              // a phone (S197e). The trimmed margins keep the card's height
+              // within a few pixels of what it was.
+              padding:"15px 0", marginTop:-2, marginBottom:-4, alignSelf:"flex-start" }}>
             View all changes →
           </button>
         )}

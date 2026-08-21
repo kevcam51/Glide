@@ -13,7 +13,16 @@ const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https")
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const aiusage = require("./aiusage");
-const Anthropic = require("@anthropic-ai/sdk");
+// ⚠️ REQUIRED LAZILY, like Stripe (S197e). Every deployed function loads
+// index.js, and index.js requires every module — so a top-level require here
+// put the whole Anthropic SDK on the cold start of ~90 functions, almost none
+// of which ever call it. Deferring it to the first client construction costs
+// nothing at call time (the module cache makes every later call free).
+let _Anthropic = null;
+const anthropicClient = (apiKey) => {
+  if (!_Anthropic) _Anthropic = require("@anthropic-ai/sdk");
+  return new _Anthropic({ apiKey });
+};
 const { buildTools, runTool, seatCapFor, seatMonthKey } = require("./aitools");
 const { GLIDNA_KNOWLEDGE } = require("./knowledge");
 
@@ -785,7 +794,7 @@ exports.aiChat = onCall({ secrets: AI_SECRETS, region: "us-central1", maxInstanc
       "You've reached today's AI usage limit. It resets tomorrow.");
   }
 
-  const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+  const client = anthropicClient(ANTHROPIC_API_KEY.value());
   const convo = messages.slice();
   // Mutable per-turn tool state: carries the search allowance so capTurnSearches
   // can withdraw the tool once this message has had its share, and lets callModel
@@ -888,7 +897,7 @@ async function runAssistantTurn(uid, userText) {
   toolCtx.seatAutoConfirm = 2;
   if (trialExpired) return { skipped: "trial-expired" };
   if (used >= budget) return { skipped: "budget" };
-  const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+  const client = anthropicClient(ANTHROPIC_API_KEY.value());
   const convo = [{ role: "user", content: userText }];
   // Scheduled automations do NOT get web search (S184) — setupChat(…, true)
   // above both withholds the tool and tells the model so. Nobody is watching a
@@ -1001,7 +1010,7 @@ exports.aiChatStream = onRequest(
       return;
     }
 
-    const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+    const client = anthropicClient(ANTHROPIC_API_KEY.value());
     const convo = messages.slice();
     const state = { tools, searchOn: setup.searchAllowed, searchesUsed, searchBudget };
     const agg = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, searches: 0 };
@@ -1208,7 +1217,7 @@ exports.estimateExercise = onCall(
     if (used >= budget) {
       throw new HttpsError("resource-exhausted", "You've reached today's AI usage limit. It resets tomorrow.");
     }
-    const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+    const client = anthropicClient(ANTHROPIC_API_KEY.value());
     let msg;
     try {
       msg = await client.messages.create({
@@ -1279,7 +1288,7 @@ exports.estimateFood = onCall(
     if (used >= budget) {
       throw new HttpsError("resource-exhausted", "You've reached today's AI usage limit. It resets tomorrow.");
     }
-    const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+    const client = anthropicClient(ANTHROPIC_API_KEY.value());
     let msg;
     try {
       msg = await client.messages.create({

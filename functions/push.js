@@ -18,7 +18,10 @@ const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
-const webpush = require("web-push");
+// Lazy, for the reason documented in aichat.js (S197e): index.js pulls every
+// module into every function, and only the push senders below need this one.
+let _webpush = null;
+const webpushLib = () => (_webpush || (_webpush = require("web-push")));
 const crypto = require("crypto");
 
 const VAPID_PRIVATE_KEY = defineSecret("VAPID_PRIVATE_KEY");
@@ -106,11 +109,11 @@ async function sendPushTo(db, uid, payload, prefKey) {
   if (!prefOn(prefs, prefKey)) return { skipped: "prefs" };
   const subs = await db.collection(`users/${uid}/pushSubs`).limit(10).get();
   if (subs.empty) return { skipped: "no-subs" };
-  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY.value());
+  webpushLib().setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY.value());
   let sent = 0, pruned = 0;
   await Promise.all(subs.docs.map(async (d) => {
     try {
-      await webpush.sendNotification(d.data().sub, JSON.stringify(payload), { TTL: 86400 });
+      await webpushLib().sendNotification(d.data().sub, JSON.stringify(payload), { TTL: 86400 });
       sent++;
     } catch (e) {
       // 404/410 = the browser dropped the subscription — prune it.
