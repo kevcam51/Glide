@@ -1,44 +1,35 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S197c) — one live bug, then the audit tail
+## ▶️ START HERE (S197d) — the notification bug is FIXED and LIVE; start at the audit tail
 
-Everything below is DEPLOYED AND PUSHED. Working tree clean, 0 unpushed commits,
-build passing, 230 rules tests green. Nothing is half-finished.
+Everything below is DEPLOYED AND PUSHED. Working tree clean, build passing,
+230 rules tests green. Nothing is half-finished.
 
-### 1. THE BUG KEVIN JUST HIT — "after I click Open it did not take me anywhere"
+### 1. ✅ FIXED (S197d) — "after I click Open it did not take me anywhere"
 
-He is right, it goes nowhere, and I know exactly why. Do this first.
+Kevin was right and the S197c diagnosis was right: `notifDestination` returned
+`"todos"`, and `"todos"` was handled by doing nothing, on the theory that
+arriving at the home screen IS arriving at the task. True from anywhere else —
+he was already ON his home screen, so nothing moved.
 
-`functions/push.js:181` — the trainer-to-do push is sent with **`url: "/"`**:
+Fixed in the CLIENT, so it also repairs the rows already sitting in people's
+feeds (they carry `url: "/"` with no id and cannot be rewritten). On a `todos`
+intent, ClientHome now opens the same `QuickActionModal` the home screen's
+"Do it now →" opens: the exact request when the url names one, otherwise the
+newest still-open one; an already-done one says so rather than opening a
+DIFFERENT task; an empty queue says "you're all caught up", because the
+unexplained silence was the whole complaint.
 
-```js
-{ title: `To-do from ${first.fromName}`, body: …, tag: "trainer-todo", url: "/" }
-```
+`onTrainerRequestWritten` now sends `/?todo=<id>`, and App stashes that param
+**at module import** — a push tapped from outside the app lands on the sign-in
+screen first, exactly like the card link, so reading it in an effect is too late.
 
-So in `notifDestination` (src/App.jsx ~28570): the url is `/`, which contains
-neither `cardlink` nor `savecard`, so it falls through to
-`tag === "trainer-todo"` → returns `"todos"`. And `"todos"` is handled in
-ClientHome's intent effect by **doing nothing at all** — my own comment claims
-"arriving here IS arriving at the task", which is only true if the person is not
-already standing on their home screen. Kevin was. Nothing moved, so it read as
-broken. It is.
-
-**Fix it in the CLIENT, not the server** — that way it also repairs every
-notification already sitting in people's feeds, which have `url: "/"` baked in
-and cannot be rewritten:
-
-- On intent `kind: "todos"`, read the client's own `caliq-requests`, take the
-  newest still-open item, and open `QuickActionModal` for it — the same modal
-  the home-screen "Do it now →" opens. A `save_card` to-do then lands on the
-  card sheet; a weigh-in lands on the weigh-in input.
-- If nothing is open (they already did it), say so briefly rather than silently
-  doing nothing — that silence is the whole complaint.
-- ALSO worth doing, but second: give `onTrainerRequestWritten` a real url
-  (`/?todo=<id>`) so future notifications are routable without the lookup.
-
-⚠️ Verify as a CLIENT already sitting on the home screen — that is the case that
-fails. Opening from another screen masks it, because the navigation itself
-looks like the action worked.
+Deployed (all 35 functions in push.js's bundle set) and pushed. Verified in
+PRODUCTION as a client already standing on the home screen: the trigger wrote
+`/?todo=rS197D-PROD`, tapping Open opened the weigh-in modal, and the local
+preview covered the other three branches (the `"/"` fallback, the already-done
+notice, the caught-up notice) plus a cold boot at `/?todo=<id>`. Test data
+removed from prod afterwards.
 
 ### 2. THE AUDIT TAIL — all verified, none urgent
 
