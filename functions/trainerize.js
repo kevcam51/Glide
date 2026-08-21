@@ -81,6 +81,29 @@ async function kvSetJSON(db, uid, key, obj) {
   await db.doc(`users/${uid}/kv/${encodeURIComponent(key)}`).set({ k: key, value: JSON.stringify(obj) });
 }
 
+// Transactional read-modify-write of ONE plan wrapper — the same helper as
+// aitools.js planTxnWrap, mirrored here rather than imported, matching how the
+// kv helpers above are already mirrored. It matters MORE here than there: this
+// runs on a 30-minute schedule, so it lands while people are using the app.
+// `fn` must be synchronous and self-contained — Firestore re-runs it on
+// contention. Return { __abort: true } to write nothing.
+async function planTxnWrap(db, uid, planId, fn) {
+  const key = `caliq-${planId}`;
+  const ref = db.doc(`users/${uid}/kv/${encodeURIComponent(key)}`);
+  let out;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    let wrap = null;
+    try { wrap = snap.exists ? JSON.parse(snap.data().value || "null") : null; } catch { wrap = null; }
+    if (!wrap || typeof wrap !== "object") wrap = { data: {}, step: 0 };
+    if (!wrap.data) wrap.data = {};
+    out = fn(wrap);
+    if (out && out.__abort) return;
+    tx.set(ref, { k: key, value: JSON.stringify(wrap) });
+  });
+  return out;
+}
+
 // ── Field mapping: Trainerize → Glide plan `data` ───────────────────────────
 // Trainerize activeLevel → Glide ACTIVITY_LEVELS id (App.jsx).
 const ACTIVITY_MAP = {
@@ -451,9 +474,8 @@ async function syncClientWorkouts(db, uid, pid, tzUserId, auth, days) {
   if (!dates.length) return 0;
 
   // Merge into the plan's check-ins in ONE wrapper read+write per client.
-  const wrapKey = `caliq-${pid}`;
-  const wrap = (await kvGetJSON(db, uid, wrapKey)) || { data: {}, step: 0 };
-  const d = wrap.data || (wrap.data = {});
+  const res = await planTxnWrap(db, uid, pid, (wrap) => {
+  const d = wrap.data;
   const cis = Array.isArray(d.checkIns) ? d.checkIns : (d.checkIns = []);
   let marked = 0;
   for (const date of dates) {
@@ -479,10 +501,11 @@ async function syncClientWorkouts(db, uid, pid, tzUserId, auth, days) {
     if (sessions > 0) ci.tzSessions = sessions; else delete ci.tzSessions;
     marked++;
   }
-  if (!marked) return 0;
+  if (!marked) return { __abort: true, marked: 0 };
   cis.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-  await kvSetJSON(db, uid, wrapKey, wrap);
-  return marked;
+  return { marked };
+  });
+  return res.marked;
 }
 
 // Sync one client's recent Trainerize nutrition into the profile's day logs.
@@ -577,7 +600,7 @@ async function fetchRoster(auth) {
 // local ctz profile (targetUid=admin, planId=ctz{id}) OR a LINKED client's account
 // (targetUid=client, planId=their active plan) — see runImport's tz-links routing.
 async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDate, auth, days) {
-  const wrap = (await kvGetJSON(db, targetUid, `caliq-${planId}`)) || { data: {}, step: 0 };
+  await planTxnWrap(db, targetUid, planId, (wrap) => {
   const prev = wrap.data || {};
   // Trainerize stays source of truth for the snapshot fields (weight, goal,
   // stats — S86d, and the coach dashboards depend on that). Macro targets are
@@ -625,7 +648,12 @@ async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDat
   }
   const complete = d.gender && d.age && d.heightFt && d.weightLbs && d.activityLevel;
   const step = Math.max(wrap.step || 0, complete ? 5 : 0);
-  await kvSetJSON(db, targetUid, `caliq-${planId}`, { data: d, step });
+  // Assigning onto `wrap` rather than replacing it with { data, step } also
+  // stops the sync quietly dropping any other wrapper field.
+  wrap.data = d;
+  wrap.step = step;
+  return {};
+  });
   let mealDays = 0, healthDays = 0, workoutDays = 0;
   try { mealDays = await syncClientNutrition(db, targetUid, planId, u.id, auth, days); }
   catch (e) { console.error("nutrition sync failed for", u.id, e && e.message); }

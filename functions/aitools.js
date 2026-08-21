@@ -533,12 +533,42 @@ async function activePlanData(db, uid, planOverride) {
   const wrap = await kvGetJSON(db, uid, `caliq-${id}`);
   return { id, data: (wrap && wrap.data) || {} };
 }
-// Full plan wrapper ({data, step}) for read-modify-write of plan fields.
-async function loadPlanWrap(db, uid, planOverride) {
-  const id = await activePlanId(db, uid, planOverride);
-  const wrap = (await kvGetJSON(db, uid, `caliq-${id}`)) || { data: {}, step: 0 };
-  if (!wrap.data) wrap.data = {};
-  return { id, wrap };
+// ── Transactional read-modify-write of ONE plan wrapper (S197f) ──────────────
+// Every plan-editing tool used to loadPlanWrap() → mutate → kvSetJSON(), which
+// is a last-write-wins overwrite of the WHOLE document. Two writers a moment
+// apart silently lost one side — and that is not hypothetical: the AI writes
+// plans through these tools while a trainer edits the same plan in the app, and
+// the app's own autoSave writes the same document. The day logs, meals, history
+// and requests got transactions in S85; the plan wrapper never did.
+//
+// The plan is RESOLVED before the transaction (which id) and only the wrapper
+// itself is read and written inside it, so the transaction stays a single
+// read/write pair.
+//
+// ⚠️ `fn` MUST be synchronous and depend on nothing outside `wrap` and its own
+// locals. Firestore RE-RUNS it on contention, so an accumulator declared in the
+// enclosing scope ("changes", "dropped") would double up on a retry. Anything
+// the caller needs afterwards — a summary, a computed profile — has to be
+// returned from `fn`, not read off `wrap` after the fact.
+//
+// Return `{ __abort: true, ... }` from `fn` to make the call a no-op: nothing is
+// written and the object comes straight back. That is how "no valid fields were
+// provided" and "this already exists" stay non-writing.
+async function planTxnWrap(db, uid, planId, fn) {
+  const key = `caliq-${planId}`;
+  const ref = kvDocRef(db, uid, key);
+  let out;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    let wrap = null;
+    try { wrap = snap.exists ? JSON.parse(snap.data().value || "null") : null; } catch { wrap = null; }
+    if (!wrap || typeof wrap !== "object") wrap = { data: {}, step: 0 };
+    if (!wrap.data) wrap.data = {};
+    out = fn(wrap);
+    if (out && out.__abort) return;   // a refusal, not a write
+    tx.set(ref, { k: key, value: JSON.stringify(wrap) });
+  });
+  return out;
 }
 
 // After the AI writes to a LOCAL plan, keep the trainer-home card fresh: update
@@ -2459,7 +2489,8 @@ async function runTool(name, input, ctx) {
   }
 
   if (name === "set_personal_info") {
-    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
+    const planId = await activePlanId(db, uid, planOverride);
+    const res = await planTxnWrap(db, uid, planId, (wrap) => {
     const d = wrap.data;
     const changes = [];
     // clamp to sane ranges; round1 keeps one decimal (weights/percentages).
@@ -2509,11 +2540,13 @@ async function runTool(name, input, ctx) {
       d.wearableAdjust = input.wearableAdjust;
       changes.push(`tracker adjustment ${input.wearableAdjust ? "on (measured burn drives eat-back day targets)" : "off"}`);
     }
-    if (changes.length === 0) return { error: "No valid profile fields were provided." };
-    await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
-    await appendHistory(db, uid, planId, ctx, `updated profile: ${changes.join(", ")}`);
+    if (changes.length === 0) return { __abort: true, error: "No valid profile fields were provided." };
+    return { changes, profile: profileSummary(d) };
+    });
+    if (res.error) return { error: res.error };
+    await appendHistory(db, uid, planId, ctx, `updated profile: ${res.changes.join(", ")}`);
     if (planOverride) await touchLocalIndex(db, uid, planOverride);
-    return { ok: true, updated: changes, profile: profileSummary(d) };
+    return { ok: true, updated: res.changes, profile: res.profile };
   }
 
   if (name === "list_plans") {
@@ -2592,7 +2625,8 @@ async function runTool(name, input, ctx) {
       return { error: "Provide at least one of: mood, bodyFatPct, hitCalorieTarget, notes." };
     }
     const loggedBy = (ctx.isTrainer && uid !== ctx.callerUid) ? "trainer" : "client";
-    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
+    const planId = await activePlanId(db, uid, planOverride);
+    await planTxnWrap(db, uid, planId, (wrap) => {
     const d = wrap.data;
     if (!Array.isArray(d.checkIns)) d.checkIns = [];
     const sameDay = d.checkIns.find((c) => c && c.date === date);
@@ -2605,7 +2639,8 @@ async function runTool(name, input, ctx) {
     if (hit != null) entry.hitTarget = hit;
     entry.timestamp = checkInTimestamp(date);
     d.checkIns = [...d.checkIns.filter((c) => c && c.date !== date), entry];
-    await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
+    return {};
+    });
     const bits = [mood != null && `mood ${mood}/5`, bf != null && `body fat ${bf}%`,
       hit != null && (hit ? "hit calorie target" : "missed calorie target"), notes != null && "a note"].filter(Boolean);
     await appendHistory(db, uid, planId, ctx, `checked in: ${bits.join(", ")} (${date})`);
@@ -2627,7 +2662,8 @@ async function runTool(name, input, ctx) {
       return { error: "Provide at least one measurement in inches: " + MEASUREMENT_FIELDS.join(", ") + "." };
     }
     const loggedBy = (ctx.isTrainer && uid !== ctx.callerUid) ? "trainer" : "client";
-    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
+    const planId = await activePlanId(db, uid, planOverride);
+    const { metrics } = await planTxnWrap(db, uid, planId, (wrap) => {
     const d = wrap.data;
     if (!Array.isArray(d.measurements)) d.measurements = [];
     const sameDay = d.measurements.find((e) => e && e.date === date);
@@ -2639,7 +2675,8 @@ async function runTool(name, input, ctx) {
     // A computed body-fat % also updates the plan's bodyFat (like log_check_in) —
     // unless the user opted out of the estimate (measurements-only mode).
     if (metrics.bodyFatPct != null && !d.hideBodyFat) d.bodyFat = metrics.bodyFatPct;
-    await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
+    return { metrics };
+    });
     const bits = Object.keys(vals).map((f) => `${f} ${vals[f]}"`);
     await appendHistory(db, uid, planId, ctx, `logged measurements: ${bits.join(", ")} (${date})`);
     if (planOverride) await touchLocalIndex(db, uid, planOverride);
@@ -3044,14 +3081,16 @@ async function runTool(name, input, ctx) {
     const date = re.test(input.date || "") ? input.date : ctx.today;
     const note = String(input.note || "").slice(0, 300);
     const loggedBy = (ctx.isTrainer && uid !== ctx.callerUid) ? "trainer" : "client";
-    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
-    const d = wrap.data;
-    if (!Array.isArray(d.checkIns)) d.checkIns = [];
-    const ci = d.checkIns.find((c) => c.date === date);
-    if (ci) { ci.workedOut = true; if (note) ci.notes = note; }
-    else d.checkIns.push({ date, timestamp: checkInTimestamp(date), weight: null, calories: null,
-      hitTarget: null, workedOut: true, mood: null, notes: note, bodyFat: null, loggedBy, isFuturePlan: false });
-    await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
+    const planId = await activePlanId(db, uid, planOverride);
+    await planTxnWrap(db, uid, planId, (wrap) => {
+      const d = wrap.data;
+      if (!Array.isArray(d.checkIns)) d.checkIns = [];
+      const ci = d.checkIns.find((c) => c.date === date);
+      if (ci) { ci.workedOut = true; if (note) ci.notes = note; }
+      else d.checkIns.push({ date, timestamp: checkInTimestamp(date), weight: null, calories: null,
+        hitTarget: null, workedOut: true, mood: null, notes: note, bodyFat: null, loggedBy, isFuturePlan: false });
+      return {};
+    });
     await appendHistory(db, uid, planId, ctx, note ? `recorded a workout: "${note}"` : "recorded a workout");
     if (planOverride) await touchLocalIndex(db, uid, planOverride);
     return { ok: true, date, note: note || null };
@@ -3063,7 +3102,8 @@ async function runTool(name, input, ctx) {
     const re = /^\d{4}-\d{2}-\d{2}$/;
     const date = re.test(input.date || "") ? input.date : ctx.today;
     const loggedBy = (ctx.isTrainer && uid !== ctx.callerUid) ? "trainer" : "client";
-    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
+    const planId = await activePlanId(db, uid, planOverride);
+    await planTxnWrap(db, uid, planId, (wrap) => {
     const d = wrap.data;
     if (!Array.isArray(d.checkIns)) d.checkIns = [];
     const prev = Number(d.weightLbs) || v;
@@ -3086,14 +3126,16 @@ async function runTool(name, input, ctx) {
     entry.weight = v;
     entry.timestamp = checkInTimestamp(date);
     d.checkIns = [...d.checkIns.filter((c) => c && c.date !== date), entry];
-    await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
+    return {};
+    });
     await appendHistory(db, uid, planId, ctx, `logged weight: ${v} lbs`);
     if (planOverride) await touchLocalIndex(db, uid, planOverride);
     return { ok: true, date, weightLbs: v };
   }
 
   if (name === "set_targets") {
-    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
+    const planId = await activePlanId(db, uid, planOverride);
+    const res = await planTxnWrap(db, uid, planId, (wrap) => {
     const d = wrap.data;
     const changes = [];
     if (input.proteinTarget != null || input.carbsTarget != null || input.fatTarget != null) {
@@ -3115,11 +3157,13 @@ async function runTool(name, input, ctx) {
       const g = Math.round(Number(input.goalWeightLbs) * 10) / 10;
       if (g > 0) { d.goalWeight = g; changes.push(`goal weight to ${g} lbs`); }
     }
-    if (changes.length === 0) return { error: "Provide at least one of protein/carbs/fat target or goal weight." };
-    await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
-    await appendHistory(db, uid, planId, ctx, `updated ${changes.join(" and ")}`);
+    if (changes.length === 0) return { __abort: true, error: "Provide at least one of protein/carbs/fat target or goal weight." };
+    return { changes, updated: { macroTargets: d.macroTargets || null, goalWeightLbs: d.goalWeight != null ? d.goalWeight : null } };
+    });
+    if (res.error) return { error: res.error };
+    await appendHistory(db, uid, planId, ctx, `updated ${res.changes.join(" and ")}`);
     if (planOverride) await touchLocalIndex(db, uid, planOverride);
-    return { ok: true, updated: { macroTargets: d.macroTargets || null, goalWeightLbs: d.goalWeight != null ? d.goalWeight : null } };
+    return { ok: true, updated: res.updated };
   }
 
   if (name === "add_custom_exercise") {
@@ -3138,28 +3182,33 @@ async function runTool(name, input, ctx) {
     if (!rawMet && !rawCpm) {
       return { error: "Provide a met (intensity, 1–20) — or calPerMin and I'll convert it." };
     }
-    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
-    const d = wrap.data;
-    if (!Array.isArray(d.customExercises)) d.customExercises = [];
-    // Dedupe by lowercased label + type — reuse the existing id if already there.
-    const existing = d.customExercises.find((e) => e && e.type === exType && (e.label || "").toLowerCase() === label.toLowerCase());
-    if (existing) return { ok: true, exercise: { id: existing.id, label: existing.label, type: exType }, note: "Already exists — reusing it." };
-    const ex = { id: randId("custom_"), label, icon: "⭐", met,
-      cat: exType === "cardio" ? "Custom Cardio" : "Custom Strength", note: "Custom exercise — AI-estimated", isCustom: true, type: exType };
-    d.customExercises.push(ex);
-    await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
+    const planId = await activePlanId(db, uid, planOverride);
+    const res = await planTxnWrap(db, uid, planId, (wrap) => {
+      const d = wrap.data;
+      if (!Array.isArray(d.customExercises)) d.customExercises = [];
+      // Dedupe by lowercased label + type — reuse the existing id if already there.
+      const existing = d.customExercises.find((e) => e && e.type === exType && (e.label || "").toLowerCase() === label.toLowerCase());
+      // Already there: hand back its id and write nothing.
+      if (existing) return { __abort: true, existing: { id: existing.id, label: existing.label, type: exType } };
+      const ex = { id: randId("custom_"), label, icon: "⭐", met,
+        cat: exType === "cardio" ? "Custom Cardio" : "Custom Strength", note: "Custom exercise — AI-estimated", isCustom: true, type: exType };
+      d.customExercises.push(ex);
+      return { ex };
+    });
+    if (res.existing) return { ok: true, exercise: res.existing, note: "Already exists — reusing it." };
     await appendHistory(db, uid, planId, ctx, `added a custom exercise: ${label}`);
     if (planOverride) await touchLocalIndex(db, uid, planOverride);
     // Report the burn for THIS plan so the answer is concrete ("~250 cal in
     // 30 min") rather than a MET number nobody thinks in.
-    return { ok: true, exercise: { id: ex.id, label: ex.label, type: exType, met },
+    return { ok: true, exercise: { id: res.ex.id, label: res.ex.label, type: exType, met },
       burnPer30min: wLbs > 0 ? Math.round(met * wLbs * 0.453592 * 0.5) : null,
       note: "Intensity is stored as a MET, so the calorie burn adapts to whoever does it." };
   }
 
   if (name === "set_workout_schedule") {
     const replace = input.replace !== false; // default true
-    const { id: planId, wrap } = await loadPlanWrap(db, uid, planOverride);
+    const planId = await activePlanId(db, uid, planOverride);
+    const res = await planTxnWrap(db, uid, planId, (wrap) => {
     const d = wrap.data;
     const cx = customExerciseSets(d); // the plan's custom exercises are valid ids too
     const strSet = new Set([...STRENGTH_IDS, ...cx.strengthIds]);
@@ -3172,16 +3221,22 @@ async function runTool(name, input, ctx) {
     if (input.cardio && typeof input.cardio === "object") {
       d.cardio = buildWorkoutWeek(input.cardio, carSet, 30, d.cardio, replace, dropped); changed.push("cardio");
     }
-    if (changed.length === 0) return { error: "Provide cardio and/or strength as day-keyed objects." };
-    await kvSetJSON(db, uid, `caliq-${planId}`, wrap);
-    await appendHistory(db, uid, planId, ctx, "updated the workout program");
-    if (planOverride) await touchLocalIndex(db, uid, planOverride);
+    if (changed.length === 0) return { __abort: true, error: "Provide cardio and/or strength as day-keyed objects." };
     const summarize = (sched) => DAYS.filter((day) => ((sched || {})[day] || []).length)
       .map((day) => `${day} (${sched[day].length})`);
     return {
-      ok: true, replaced: replace, updated: changed,
+      changed,
       strengthDays: summarize(d.strength), cardioDays: summarize(d.cardio),
       droppedInvalidIds: [...new Set(dropped)],
+    };
+    });
+    if (res.error) return { error: res.error };
+    await appendHistory(db, uid, planId, ctx, "updated the workout program");
+    if (planOverride) await touchLocalIndex(db, uid, planOverride);
+    return {
+      ok: true, replaced: replace, updated: res.changed,
+      strengthDays: res.strengthDays, cardioDays: res.cardioDays,
+      droppedInvalidIds: res.droppedInvalidIds,
     };
   }
 
