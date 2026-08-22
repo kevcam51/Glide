@@ -1,38 +1,57 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S197i) — TWO COMMANDS FOR KEVIN, then pass 2 is live
+## ▶️ START HERE (S197j) — booking pass 2 is LIVE and verified in prod
 
 Everything below is DEPLOYED AND PUSHED. Working tree clean, build passing,
 230 rules tests green. Nothing is half-finished.
 
-### 0. ⚠️ TWO COMMANDS, BOTH KEVIN'S — the Firebase CLI token expired mid-session
+### 0. ✅ DONE — drive time is deployed, and one thing is left for Kevin
 
-Everything is committed, pushed and Vercel-deployed. Only the FUNCTIONS half of
-drive time is waiting, and neither command is risky.
+`sessionTravel` is live, `GOOGLE_MAPS_API_KEY` exists as a PLACEHOLDER, and the
+feature runs on the free estimator. **Verified in production with real
+addresses**: two sessions booked 30 minutes apart, 1300 Ocean Drive Miami Beach
+→ 19501 Biscayne Blvd Aventura, produced
+
+> **This one you can't make** — Tue, Aug 25 — 9:00 AM → 10:30 AM leaves 30 min,
+> and the drive is about 43. Short by 13 min.
+
+Nominatim geocoding works from the function with no key. Warm cache 2.0s vs ~12s
+cold, so the caching does what it claims. Test sessions cancelled afterwards.
+
+**Kevin's one optional step — traffic-aware times.** Enable the Routes API in
+the same Google project, then:
 
 ```bash
-firebase login --reauth --no-localhost
+printf 'YOUR_REAL_KEY\n' | firebase functions:secrets:set GOOGLE_MAPS_API_KEY --project calorieiq-29762 --force
+firebase deploy --only functions:sessionTravel --project calorieiq-29762
 ```
 
-Then create the (placeholder) maps secret and deploy the three functions:
+Nothing else changes: the code checks the key's SHAPE (Google keys begin
+`AIza`), so the placeholder reads as "no key" today and a real one upgrades
+geocoding AND the estimate in place. ~$5–10 per 1,000 lookups, and the cache
+means one trainer's week is a handful of them.
 
-```bash
-printf 'unset\n' | firebase functions:secrets:set GOOGLE_MAPS_API_KEY --project calorieiq-29762 --force
-firebase deploy --only functions:trainerAvailability,functions:respondToBookingRequest,functions:sessionTravel --project calorieiq-29762
-```
+**Still to do on this (not blocking):** `PLAN_FEATURES` needs the Coach-tier
+line — Kevin's S190b note that drive time is a reason to upgrade, not a separate
+charge — and local-plan clients have no address of their own yet.
 
-The secret has to EXIST for the deploy to succeed, but it does not have to be
-real: the code checks the key's SHAPE (Google keys begin `AIza`), so a
-placeholder behaves as "no key" and the feature runs on the free estimator. A
-bogus-looking key would instead fail geocoding and silently remove every
-warning, which is why the shape check is there. Drop a real key into the same
-secret whenever you want traffic-aware times — no code change, no redeploy of
-anything else.
+### ⚠️ THE TRAP THIS COST — read before adding any Firestore query
 
-Until this is deployed the calendar simply shows no travel warnings. That is
-the designed behaviour for "could not check", not a broken screen.
+`sessionTravel` deployed clean and then 500'd on every call: `trainerUid ==`
+combined with a range on `startAt` **requires a composite index**. The codebase
+had already written this lesson down in S187 for `calendarFeed`, and I walked
+into it anyway. One equality, window filtered in code.
 
-### 1. ✅ FIXED (S197d) — "after I click Open it did not take me anywhere"
+It matters more here than there, and the reason generalises: **this feature
+fails SILENTLY, and silence reads as "your schedule is fine."** An infra gap
+must never be able to say that. Prefer a few hundred extra reads over a query
+that needs an index somebody has to remember to deploy.
+
+It was caught because of S197g — "travel check unavailable: functions/internal"
+in the console. Before that change it would have been a feature that quietly
+never worked.
+
+### 1. ✅ FIXED (S197d)### 1. ✅ FIXED (S197d) — "after I click Open it did not take me anywhere"
 
 Kevin was right and the S197c diagnosis was right: `notifDestination` returned
 `"todos"`, and `"todos"` was handled by doing nothing, on the theory that
