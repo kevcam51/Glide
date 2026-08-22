@@ -202,6 +202,12 @@ const fakeFetch = async (url) => {
   ok("sessionTravel exists", bodyStart > 0);
   ok("it is scoped to the caller as TRAINER, not merely a participant",
      /\.where\("trainerUid", "==", uid\)/.test(avail.slice(bodyStart)));
+  // ⚠️ Pinned because it already went wrong once: equality + a range on a
+  // different field needs a composite index, and this feature fails SILENTLY,
+  // which reads as "your schedule is fine".
+  ok("the query needs no composite index (one equality, window filtered in code)",
+     !/\.where\("startAt"/.test(avail.slice(bodyStart)));
+  ok("and the window is still applied", /st < from \|\| st > to/.test(avail.slice(bodyStart)));
   ok("it bounds the window it will read",
      /range is too wide/.test(avail.slice(bodyStart)));
   ok("it looks legs up by session pair, never by address",

@@ -311,16 +311,22 @@ exports.sessionTravel = onCall(
     if (to - from > 45 * 86400000) throw new HttpsError("invalid-argument", "That range is too wide.");
 
     const db = admin.firestore();
-    const snap = await db.collection("sessions")
-      .where("trainerUid", "==", uid)
-      .where("startAt", ">=", from)
-      .where("startAt", "<=", to)
-      .get();
+    // ⚠️ ONE EQUALITY, NO RANGE — the window is applied in CODE. Combining
+    // `trainerUid ==` with a range on `startAt` needs a composite index, and a
+    // feature that 500s until someone remembers to deploy one is worse than a
+    // few hundred extra reads. This is the same call S187 made for calendarFeed,
+    // and for a stronger reason here: this feature's failure mode is SILENCE,
+    // and silence reads as "your schedule is fine". An infra gap must never be
+    // able to say that. (Revisit if a single trainer's session history passes a
+    // few thousand documents; then an index, deployed with the function, wins.)
+    const snap = await db.collection("sessions").where("trainerUid", "==", uid).get();
 
     const sessions = [];
     snap.forEach((doc) => {
       const s = doc.data() || {};
       if (s.status === "cancelled") return;
+      const st = Number(s.startAt) || 0;
+      if (st < from || st > to) return;
       sessions.push({ id: doc.id, startAt: Number(s.startAt) || 0,
         durationMin: Number(s.durationMin) || 0, location: String(s.location || ""),
         status: s.status || "scheduled" });
