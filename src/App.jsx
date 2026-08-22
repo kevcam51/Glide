@@ -22347,6 +22347,12 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
     if (homeIntent.kind === "messages") setShowMsg(true);
     else if (homeIntent.kind === "sessions") setShowSessions(true);
     else if (homeIntent.kind === "todos") openTodoIntent(homeIntent.id).catch(() => {});
+    // A weigh-in nudge opens the weigh-in input, and a food nudge (or a coach
+    // confirming a meal) opens the plan, where food is logged — the same two
+    // places the home-screen nudge cards send people, so the notification and
+    // the card agree instead of one of them being a dead end.
+    else if (homeIntent.kind === "weighIn") setShowWt(true);
+    else if (homeIntent.kind === "food") onOpenPlan();
   }, [homeIntent]);
 
   // The card intent is separate because it cannot act until a trainer is known.
@@ -26992,7 +26998,7 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
 // messages, trainer to-dos, client requests. Entries are written server-side
 // by the same code that sends pushes (functions/push.js appendFeed), so the
 // bell and the phone can never disagree. Unseen = newer than seenTs.
-function NotifFeed({ items, onClose, onOpenReferrals, onOpenTodos, onDismiss }) {
+function NotifFeed({ items, onClose, onOpenReferrals, onOpenTodos, onDismiss, destinationFor }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);
   const iconFor = (tag) => String(tag).startsWith("dm-") ? "inbox"
@@ -27005,15 +27011,15 @@ function NotifFeed({ items, onClose, onOpenReferrals, onOpenTodos, onDismiss }) 
   // "please add a payment card" is not history — it is a task, and tapping it
   // did nothing, which reads as broken rather than as read-only.
   //
-  // A row is actionable when we know where it goes: `url` if the notification
-  // carried one, otherwise the tag tells us. Older rows stored before the feed
-  // kept a url still work, because the tag is enough for the ones that matter.
+  // A row is actionable exactly when App can say where it goes — this asks
+  // `destinationFor` rather than repeating the decision, because the second
+  // copy that used to live here drifted out of step with the real one and drew
+  // "Open →" on rows that went nowhere (S197h).
   const actionFor = (n) => {
-    if (n.tag === "referral-vested" && onOpenReferrals) return { run: onOpenReferrals, label: "Claim →" };
-    const goesHome = n.tag === "trainer-todo" || n.tag === "client-request"
-      || String(n.tag || "").startsWith("session-") || String(n.url || "").includes("cardlink");
-    if (goesHome && onOpenTodos) return { run: () => onOpenTodos(n), label: "Open →" };
-    return null;
+    const dest = destinationFor ? destinationFor(n) : null;
+    if (!dest) return null;
+    if (dest === "referrals" && onOpenReferrals) return { run: onOpenReferrals, label: "Claim →" };
+    return onOpenTodos ? { run: () => onOpenTodos(n), label: "Open →" } : null;
   };
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2400,
@@ -28672,13 +28678,36 @@ export default function App() {
   // url; this turns that into a screen. Kept HERE because App owns the
   // navigation and ClientHome owns the panels — the feed component should not
   // have to know either.
+  // ⚠️ THE ONLY PLACE THAT DECIDES WHERE A NOTIFICATION GOES (S197h). There
+  // used to be a second, differently-shaped copy of this decision inside
+  // NotifFeed, which chose whether to draw an "Open →" button at all. Two
+  // functions, one question — so they drifted, and the drift is invisible
+  // until someone taps: seven of the sixteen tags the server emits reached
+  // nothing, and `session-no-card-*` (the "we could not charge your card"
+  // push) landed on the sessions LIST instead of the card sheet it is asking
+  // the person to go to. NotifFeed now asks this function and shows a button
+  // only when the answer is not null, so a dead control cannot be drawn.
+  //
+  // Returning null is a real answer, not a gap: an automation result carries
+  // its whole payload in the notification body, and there is no screen that
+  // shows more than the row already does.
   const notifDestination = (n) => {
     const tag = String((n && n.tag) || ""), url = String((n && n.url) || "");
     if (tag.startsWith("dm-")) return "messages";
     if (url.includes("cardlink") || url.includes("savecard")) return "card";
-    if (tag.startsWith("session-nocard")) return "card";
-    if (tag.startsWith("session-")) return "sessions";
-    if (tag === "trainer-todo") return "todos";
+    // TWO SPELLINGS, ONE MEANING: sessionReminders.js emits `session-nocard-*`
+    // and sessionSettle.js emits `session-no-card-*`. Both mean "add a card",
+    // and matching only the first sent the billing one to the wrong screen.
+    if (tag.startsWith("session-nocard") || tag.startsWith("session-no-card")) return "card";
+    // `booking-accepted-*` / `booking-declined-*` say "it's on your calendar" —
+    // so they had better be able to reach it.
+    if (tag.startsWith("session-") || tag.startsWith("booking-")) return "sessions";
+    if (tag === "trainer-todo" || tag === "client-request") return "todos";
+    if (tag === "referral-vested") return "referrals";
+    if (tag === "weighin-reminder") return "weighIn";
+    // A coach confirming a meal and a "you haven't logged food" nudge both want
+    // the same place: where food is logged.
+    if (tag === "food-reminder" || tag === "meal-review") return "food";
     return null;
   };
   // Which to-do a feed row is about. Rows written before S197d carry url "/"
@@ -30327,6 +30356,7 @@ export default function App() {
         )}
       </button>
       {feedOpen && <NotifFeed items={notifFeed.items} onClose={() => setFeedOpen(false)}
+        destinationFor={notifDestination}
         onOpenReferrals={() => { setFeedOpen(false); setShowReferrals(true); }}
         // Closing the feed IS arriving at the task: a client's to-dos sit at the
         // very top of their home, and a trainer's client asks sit at the top of
@@ -30335,12 +30365,23 @@ export default function App() {
         // rows inert in the first place.
         onOpenTodos={(n) => {
           setFeedOpen(false);
-          if (isTrainerHome) { setHomeTab("dashboard"); goToProfiles(); return; }
+          const dest = notifDestination(n);
+          // Referrals is App-level, so it never becomes a homeIntent — and it
+          // is the one destination both roles share.
+          if (dest === "referrals") { setShowReferrals(true); return; }
+          if (isTrainerHome) {
+            // A trainer has no Sessions panel: their sessions live on the
+            // calendar, and a client's ask lands on the dashboard. Sending
+            // every tag to the dashboard meant a session reminder dropped them
+            // on a roster instead of the day it was about.
+            setHomeTab(dest === "sessions" || dest === "card" ? "calendar" : "dashboard");
+            goToProfiles();
+            return;
+          }
           // A client goes to the exact panel the notification is about, rather
           // than to their home screen to go looking (Kevin, S197c: "this makes
           // it easier to complete the task without actually having to find
           // where to go yourself").
-          const dest = notifDestination(n);
           setHomeIntent(dest ? { kind: dest, n: Date.now(), id: notifTodoId(n) } : null);
           goToProfiles();
         }}
