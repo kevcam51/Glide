@@ -18202,6 +18202,10 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
   // Per-client colour overrides, and whether clients may see free/busy at all.
   const [calColors, setCalColors] = useState({});
   const [availPublic, setAvailPublic] = useState(false);
+  // Can this schedule actually be driven? (S197i) Server-side, because the
+  // estimate needs a key the browser must never hold and a cache every device
+  // should share. Null until asked; { warnings, legs, trafficAware } after.
+  const [travel, setTravel] = useState(null);
 
   useEffect(() => { if (!meUid) return; return subscribeMySessions(meUid, setSessions); }, [meUid]);
   useEffect(() => { if (!meUid) return; return subscribeMyBlocks(meUid, setBlocks); }, [meUid]);
@@ -18222,6 +18226,29 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
       .then((r) => { try { setCalColors(JSON.parse((r && r.value) || "{}") || {}); } catch { setCalColors({}); } })
       .catch(() => {});
   }, []);
+
+  // ⚠️ KEYED ON THE SESSIONS, NOT THE VIEW. Asking about a fixed horizon rather
+  // than the visible range means flipping month/week/day does not re-ask, and
+  // the answer is about the schedule rather than about where you happen to be
+  // looking. Only worth asking at all once two sessions could collide.
+  const travelSig = useMemo(() => (sessions || [])
+    .filter((s) => s.trainerUid === meUid && s.status !== "cancelled" && s.startAt > Date.now())
+    .map((s) => `${s.id}:${s.startAt}:${s.durationMin}:${s.location || ""}`).sort().join("|"),
+    [sessions, meUid]);
+  useEffect(() => {
+    if (!meUid || travelSig.split("|").filter(Boolean).length < 2) { setTravel(null); return; }
+    let alive = true;
+    const from = Date.now();
+    const t = setTimeout(() => {
+      callSessionTravel({ from, to: from + 21 * 86400000 })
+        .then((r) => { if (alive) setTravel(r && r.data ? r.data : null); })
+        // A failed estimate must leave the calendar working. Silence is the
+        // honest outcome: we cannot say the schedule is fine, only that we
+        // could not check it.
+        .catch((e) => { if (alive) { setTravel(null); console.warn("travel check unavailable:", e && (e.code || e.message)); } });
+    }, 600);
+    return () => { alive = false; clearTimeout(t); };
+  }, [meUid, travelSig]);
 
   const setClientColor = (uid, color) => {
     const next = { ...calColors, [uid]: color };
@@ -18311,6 +18338,20 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     return priced.length ? priced[0].priceCents : 0;
   }, [mine, policy.standardPriceCents]);
 
+  // Where this client is usually trained. The "default address" the booking
+  // spec asks for, taken from what has already been booked rather than from a
+  // new field somebody has to fill in: it needs no storage, no permission
+  // question (a client's profile is not writable by their trainer), and it
+  // works for every existing client the moment this ships. It also feeds the
+  // drive-time check, which is worthless while locations are blank.
+  const lastLocationFor = useCallback((clientUid) => {
+    if (!clientUid) return "";
+    const prev = mine
+      .filter((s) => s.clientUid === clientUid && s.location)
+      .sort((a, b) => (b.createdAt || b.startAt || 0) - (a.createdAt || a.startAt || 0));
+    return prev.length ? prev[0].location : "";
+  }, [mine]);
+
   // ── booking ───────────────────────────────────────────────────────────────
   // Tapping a slot pre-fills the time you tapped; the price defaults to the last
   // one you actually used, because a blank price silently books a $0 session
@@ -18320,7 +18361,8 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     setErr("");
     setForm({
       id: null, clientUid: clients.length ? clients[0].uid : "", when: calToLocalInput(d.getTime()),
-      durationMin: String(SESSION_DEFAULT_MIN), title: "", location: "",
+      durationMin: String(SESSION_DEFAULT_MIN), title: "",
+      location: lastLocationFor(clients.length ? clients[0].uid : ""),
       price: lastPrice ? String(lastPrice / 100) : "", repeat: "none", count: "8",
       // Blocking time needs no client, so a trainer with an empty roster can
       // still use their calendar. Booking without one is refused on submit,
@@ -18603,6 +18645,63 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
         </div>
         <div className={`${subCls} mb-4`}>Every client, every booked session. Tap any empty slot to book — the red line is now, and a session becomes billable once it passes.</div>
 
+        {/* Can this schedule be driven? (S197i) Only ever rendered when there is
+            something wrong — a panel that says "all fine" every day is a panel
+            people stop reading, and this one needs to be noticed. */}
+        {travel && travel.warnings && travel.warnings.length > 0 && (
+          <div className="mb-4 rounded-card border p-3"
+            style={travel.warnings.some((w) => w.kind !== "tight")
+              ? { borderColor: "var(--red,#f87171)", background: "rgba(248,113,113,.08)" }
+              : { borderColor: "var(--yellow,#fbbf24)", background: "rgba(251,191,36,.08)" }}>
+            <div className="flex items-center gap-2 mb-1.5 font-bold text-[.95rem]"
+              style={{ color: travel.warnings.some((w) => w.kind !== "tight") ? "var(--red,#f87171)" : "var(--yellow,#fbbf24)" }}>
+              <Icon name="alert" size={16} color="currentColor" />
+              {(() => {
+                // ⚠️ SAY WHICH KIND. Calling a connection with 5 minutes to
+                // spare "impossible" is the over-warning this whole panel is
+                // supposed to avoid — one exaggerated heading and people stop
+                // reading the real ones.
+                const hard = travel.warnings.filter((w) => w.kind !== "tight").length;
+                const tight = travel.warnings.length - hard;
+                if (hard && tight) return `${hard} you can't make, ${tight} cutting it fine`;
+                if (hard) return hard === 1 ? "This one you can't make" : `${hard} of these you can't make`;
+                return tight === 1 ? "This one is cutting it fine" : `${tight} are cutting it fine`;
+              })()}
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {travel.warnings.slice(0, 6).map((w) => {
+                const a = mine.find((x) => x.id === w.fromId), b = mine.find((x) => x.id === w.toId);
+                if (!a || !b) return null;
+                const t = (x) => new Date(x.startAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+                const dayOf = (x) => new Date(x.startAt).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+                const day = dayOf(a);
+                // Adjacent sessions are almost always the same day, but a pair
+                // straddling midnight would otherwise render both times under
+                // one date and quietly claim the wrong day.
+                const t2 = dayOf(b) === day ? t(b) : `${dayOf(b)} ${t(b)}`;
+                return (
+                  <div key={`${w.fromId}>${w.toId}`} className="text-[.8rem] leading-snug">
+                    <span className="font-semibold">{day}</span>{" — "}
+                    {w.kind === "overlap"
+                      ? <>{nameOf(a.clientUid)} at {t(a)} and {nameOf(b.clientUid)} at {t2} <span style={{ color: "var(--red,#f87171)" }}>overlap by {Math.abs(w.gapMin)} min</span>.</>
+                      : w.kind === "impossible"
+                        ? <>{t(a)} → {t2} leaves {w.gapMin} min, and the drive is about {w.driveMin}. <span style={{ color: "var(--red,#f87171)" }}>Short by {Math.abs(w.slackMin)} min.</span></>
+                        : <>{t(a)} → {t2} leaves {w.gapMin} min for a {w.driveMin} min drive — {w.slackMin} min to spare.</>}
+                  </div>
+                );
+              })}
+            </div>
+            {/* Say how much to trust the number. The free estimator knows
+                nothing about traffic, so it is at its most optimistic exactly
+                when back-to-back sessions actually collide. */}
+            <div className="mt-2 text-[.68rem] text-muted">
+              {travel.trafficAware
+                ? "Drive times include current traffic."
+                : "Drive times are straight-line estimates — no traffic, so treat them as the best case."}
+            </div>
+          </div>
+        )}
+
         {sessions === null ? (
           <div className="flex flex-col gap-3"><SkeletonCard rows={2} /><SkeletonCard rows={4} /></div>
         ) : (
@@ -18733,7 +18832,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
           onDelete={() => act(() => deleteBlock(blockDetail.id).then(() => setBlockDetail(null)), "Block removed.")} />
       )}
       {form && (
-        <CalBookingSheet form={form} setForm={setForm} clients={clients} busy={busy} err={err}
+        <CalBookingSheet form={form} setForm={setForm} clients={clients} busy={busy} err={err} lastLocationFor={lastLocationFor}
           canBill={canBillSessions(meUid)}
           onClose={() => { setForm(null); setErr(""); }} onSubmit={submit} nameOf={nameOf} />
       )}
@@ -18970,7 +19069,7 @@ function CalBlockSheet({ block: b, busy, onClose, onDelete }) {
   );
 }
 
-function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit, nameOf, canBill = false }) {
+function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit, nameOf, canBill = false, lastLocationFor }) {
   const inp = "w-full min-w-0 bg-surface2 border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted";
   const lbl = "mb-1 text-[11px] font-bold uppercase tracking-wide text-muted";
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -19046,7 +19145,17 @@ function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit,
           <div className="mb-2.5">
             <div className={lbl}>Client</div>
             {clients.length ? (
-              <select className={inp} value={form.clientUid} onChange={(e) => set("clientUid", e.target.value)}>
+              <select className={inp} value={form.clientUid} onChange={(e) => {
+                const uid = e.target.value;
+                // Switching client moves the location with them — but only when
+                // the field has not been typed in. Overwriting something
+                // somebody deliberately entered because they corrected the
+                // client dropdown is the kind of "helpful" that loses work.
+                const prev = lastLocationFor ? lastLocationFor(form.clientUid) : "";
+                const untouched = !form.location || form.location === prev;
+                setForm((f) => ({ ...f, clientUid: uid,
+                  location: untouched && lastLocationFor ? lastLocationFor(uid) : f.location }));
+              }}>
                 {clients.map((c) => <option key={c.uid} value={c.uid}>{nameOf(c.uid)}</option>)}
               </select>
             ) : (
@@ -19130,7 +19239,8 @@ function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit,
           {!isBlock && (
             <div>
               <div className={lbl}>Location</div>
-              <input className={inp} value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="Studio" />
+              <input className={inp} value={form.location} onChange={(e) => set("location", e.target.value)}
+                placeholder="Studio, or an address to check drive time" />
             </div>
           )}
         </div>
@@ -19972,6 +20082,7 @@ const callSendTrainerRequest = httpsCallable(functions, "sendTrainerRequest"); /
 // other clients' names — and the trainer's answer is what creates a session.
 const callTrainerAvailability = httpsCallable(functions, "trainerAvailability");
 const callRespondToBooking = httpsCallable(functions, "respondToBookingRequest");
+const callSessionTravel = httpsCallable(functions, "sessionTravel");   // drive time + back-to-back warnings (S197i)
 const callListAppRequests = httpsCallable(functions, "listAppRequests");        // S140 admin
 const callSetAppRequestStatus = httpsCallable(functions, "setAppRequestStatus"); // S140 admin
 const callAdminOverview = httpsCallable(functions, "adminOverview"); // admin all-users dashboard (S90)

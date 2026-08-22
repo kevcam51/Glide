@@ -1,0 +1,258 @@
+// Drive time between sessions, and the back-to-back feasibility check (S197i).
+//
+// Kevin's ask: a trainer who drives to clients needs to know when two bookings
+// cannot both be kept. That is the part of "drive to you" with the real value —
+// it is what stops someone double-booking themselves across town.
+//
+// ⚠️ TWO ESTIMATORS ON PURPOSE (Kevin's decision, S190). The straight-line one
+// is free, needs no key, and is WRONG PRECISELY WHEN IT MATTERS — it knows
+// nothing about traffic, so it is at its most optimistic during rush hour, which
+// is when back-to-back sessions actually collide. The Google Routes one is
+// traffic-aware and costs ~$5–10 per 1,000 lookups. Both are here so they can be
+// compared, and every estimate is LABELLED with which produced it: a warning
+// that cannot say how confident it is would be worse than none.
+//
+// Nothing here requires a key to work. With no GOOGLE_MAPS_API_KEY configured
+// the module geocodes through OpenStreetMap's Nominatim (free, no key) and
+// estimates by straight line. Adding the key upgrades both halves in place —
+// same shape as the voice provider swap in S79.
+
+const ROAD_FACTOR = 1.3;        // straight line → actual road distance, roughly
+const AVG_MPH = 25;             // city driving with lights; deliberately not highway
+const OVERHEAD_MIN = 5;         // parking, walking to and from the car, saying goodbye
+const TIGHT_BUFFER_MIN = 10;    // less slack than this and it is not a real gap
+const GEO_TTL_MS = 180 * 86400000;   // an address's coordinates do not move
+const DRIVE_TTL_MS = 30 * 86400000;  // the drive between two fixed points barely changes
+
+// ── address handling ────────────────────────────────────────────────────────
+// The cache key. Two people typing the same address differently must land on
+// the same entry, or every booking pays for a fresh lookup.
+function normalizeAddress(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[.,#]/g, " ")
+    .replace(/\b(street|str)\b/g, "st")
+    .replace(/\b(avenue|ave)\b/g, "ave")
+    .replace(/\b(road)\b/g, "rd")
+    .replace(/\b(drive)\b/g, "dr")
+    .replace(/\b(boulevard|blvd)\b/g, "blvd")
+    .replace(/\b(apartment|apt|unit|suite|ste)\b\s*\S+/g, " ")  // unit numbers do not move the pin
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// A stable, filename-safe cache id. Not a security hash — just a short key.
+function addressKey(addr) {
+  const n = normalizeAddress(addr);
+  let h = 5381;
+  for (let i = 0; i < n.length; i++) h = ((h * 33) ^ n.charCodeAt(i)) >>> 0;
+  return `a${h.toString(36)}_${n.length}`;
+}
+
+// ── distance ────────────────────────────────────────────────────────────────
+function haversineMiles(a, b) {
+  if (!a || !b || !isFinite(a.lat) || !isFinite(a.lng) || !isFinite(b.lat) || !isFinite(b.lng)) return null;
+  const R = 3958.8, toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
+  const s = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+// The free estimate. Rounded UP: when the number is a guess, the guess that
+// makes someone leave earlier is the safe one.
+function straightLineMinutes(from, to) {
+  const miles = haversineMiles(from, to);
+  if (miles == null) return null;
+  if (miles < 0.1) return 0;               // same place
+  return Math.ceil((miles * ROAD_FACTOR / AVG_MPH) * 60 + OVERHEAD_MIN);
+}
+
+// ── the feasibility check — PURE, and the part worth trusting ───────────────
+// `sessions`: [{ id, startAt, durationMin, location, status }]
+// `travelMin(fromSession, toSession)`: minutes (or {minutes, source}), or null
+// when it cannot be known. It receives the SESSIONS, not their addresses —
+// looking a leg up by address is ambiguous the moment two different pairs share
+// one, and the caller already knows the pair it estimated.
+//
+// Returns one entry per adjacent pair that is a problem. Deliberately silent
+// where it cannot know: an unknown drive produces NO warning rather than a
+// guess, because a warning nobody can act on trains people to ignore them.
+function feasibilityWarnings(sessions, travelMin, opts = {}) {
+  const tight = opts.tightBufferMin != null ? opts.tightBufferMin : TIGHT_BUFFER_MIN;
+  const live = (sessions || [])
+    .filter((s) => s && s.status !== "cancelled" && isFinite(s.startAt))
+    .sort((a, b) => a.startAt - b.startAt);
+  const out = [];
+  for (let i = 0; i < live.length - 1; i++) {
+    const a = live[i], b = live[i + 1];
+    const endA = a.startAt + (Number(a.durationMin) || 0) * 60000;
+    const gapMin = Math.round((b.startAt - endA) / 60000);
+
+    // An outright overlap is a different, worse problem than a tight drive, and
+    // it is true regardless of where the two sessions are.
+    if (b.startAt < endA) {
+      out.push({ fromId: a.id, toId: b.id, kind: "overlap",
+        gapMin, driveMin: null, slackMin: gapMin, source: null });
+      continue;
+    }
+    const drive = travelMin ? travelMin(a, b) : null;
+    if (drive == null) continue;            // unknown — say nothing
+    const driveMin = drive.minutes != null ? drive.minutes : drive;
+    if (driveMin == null) continue;
+    const slackMin = gapMin - driveMin;
+    if (slackMin < 0) {
+      out.push({ fromId: a.id, toId: b.id, kind: "impossible",
+        gapMin, driveMin, slackMin, source: drive.source || null });
+    } else if (driveMin > 0 && slackMin < tight) {
+      // ⚠️ ONLY WHEN THERE IS ACTUALLY A DRIVE. Two sessions back to back at the
+      // same gym have zero travel and zero slack, which is how most trainers
+      // work all day — flagging every one of those would put a warning on a
+      // normal schedule and teach people to ignore the ones that mean
+      // something.
+      out.push({ fromId: a.id, toId: b.id, kind: "tight",
+        gapMin, driveMin, slackMin, source: drive.source || null });
+    }
+  }
+  return out;
+}
+
+// ── geocoding ───────────────────────────────────────────────────────────────
+// Google when a key is configured, otherwise Nominatim. Nominatim's usage
+// policy asks for an identifying User-Agent and low volume; every result is
+// cached for months and one trainer geocodes a handful of addresses ever, so
+// this sits well inside it.
+async function geocodeLive(address, apiKey, fetchFn) {
+  const f = fetchFn || fetch;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    if (apiKey) {
+      const url = "https://maps.googleapis.com/maps/api/geocode/json?address="
+        + encodeURIComponent(address) + "&key=" + encodeURIComponent(apiKey);
+      const r = await f(url, { signal: ctrl.signal });
+      if (!r.ok) return null;
+      const j = await r.json();
+      const loc = j && j.results && j.results[0] && j.results[0].geometry && j.results[0].geometry.location;
+      if (!loc) return null;
+      return { lat: Number(loc.lat), lng: Number(loc.lng), provider: "google" };
+    }
+    const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q="
+      + encodeURIComponent(address);
+    const r = await f(url, { signal: ctrl.signal, headers: { "User-Agent": "Glidna/1.0 (support@glidna.com)" } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const hit = Array.isArray(j) && j[0];
+    if (!hit) return null;
+    return { lat: Number(hit.lat), lng: Number(hit.lon), provider: "nominatim" };
+  } catch { return null; } finally { clearTimeout(t); }
+}
+
+// Cached geocode. A MISS IS CACHED TOO (as {failed:true}), for a shorter time —
+// otherwise a typo'd address is looked up again on every single calendar open.
+async function geocode(db, address, apiKey, fetchFn) {
+  const norm = normalizeAddress(address);
+  if (!norm) return null;
+  const ref = db.doc(`geocache/${addressKey(address)}`);
+  try {
+    const snap = await ref.get();
+    if (snap.exists) {
+      const d = snap.data() || {};
+      const age = Date.now() - (d.at || 0);
+      if (d.failed && age < 86400000) return null;              // retry a failure tomorrow
+      if (!d.failed && age < GEO_TTL_MS && isFinite(d.lat)) {
+        return { lat: d.lat, lng: d.lng, provider: d.provider, cached: true };
+      }
+    }
+  } catch { /* a cache read failure must not stop the lookup */ }
+  const live = await geocodeLive(norm, apiKey, fetchFn);
+  try {
+    await ref.set(live
+      ? { at: Date.now(), lat: live.lat, lng: live.lng, provider: live.provider, q: norm.slice(0, 120) }
+      : { at: Date.now(), failed: true, q: norm.slice(0, 120) });
+  } catch { /* best-effort */ }
+  return live;
+}
+
+// ── drive estimate ──────────────────────────────────────────────────────────
+// Cached by (origin, destination, weekday, hour) exactly as the spec asks: the
+// drive between two fixed addresses barely changes for a given time of week, so
+// a warm cache makes this pennies a month.
+function driveKey(fromAddr, toAddr, departMs) {
+  const d = new Date(departMs || Date.now());
+  return `${addressKey(fromAddr)}__${addressKey(toAddr)}__${d.getUTCDay()}_${d.getUTCHours()}`;
+}
+
+async function routesLive(from, to, departMs, apiKey, fetchFn) {
+  const f = fetchFn || fetch;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const body = {
+      origin: { location: { latLng: { latitude: from.lat, longitude: from.lng } } },
+      destination: { location: { latLng: { latitude: to.lat, longitude: to.lng } } },
+      travelMode: "DRIVE",
+      routingPreference: "TRAFFIC_AWARE",
+      // Routes rejects a departureTime in the past, and a session that already
+      // started is exactly that case.
+      departureTime: new Date(Math.max(Date.now() + 60000, departMs || 0)).toISOString(),
+    };
+    const r = await f("https://routes.googleapis.com/directions/v2:computeRoutes", {
+      method: "POST", signal: ctrl.signal,
+      headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey,
+                 "X-Goog-FieldMask": "routes.duration,routes.distanceMeters" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const route = j && j.routes && j.routes[0];
+    if (!route || !route.duration) return null;
+    const secs = Number(String(route.duration).replace("s", ""));
+    if (!isFinite(secs)) return null;
+    return { minutes: Math.ceil(secs / 60) + OVERHEAD_MIN,
+             miles: route.distanceMeters ? route.distanceMeters / 1609.34 : null,
+             source: "routes" };
+  } catch { return null; } finally { clearTimeout(t); }
+}
+
+// The one entry point. Always returns a labelled estimate or null — and falls
+// back to the straight line whenever Routes is unavailable, so a key problem
+// degrades the estimate instead of removing the warning.
+async function estimateDrive(db, fromAddr, toAddr, departMs, apiKey, fetchFn) {
+  if (!normalizeAddress(fromAddr) || !normalizeAddress(toAddr)) return null;
+  if (normalizeAddress(fromAddr) === normalizeAddress(toAddr)) {
+    return { minutes: 0, miles: 0, source: "same-place", cached: false };
+  }
+  const ref = db.doc(`drivecache/${driveKey(fromAddr, toAddr, departMs)}`);
+  try {
+    const snap = await ref.get();
+    if (snap.exists) {
+      const d = snap.data() || {};
+      if (Date.now() - (d.at || 0) < DRIVE_TTL_MS && isFinite(d.minutes)) {
+        return { minutes: d.minutes, miles: d.miles != null ? d.miles : null, source: d.source, cached: true };
+      }
+    }
+  } catch { /* fall through to a live estimate */ }
+
+  const [from, to] = await Promise.all([
+    geocode(db, fromAddr, apiKey, fetchFn),
+    geocode(db, toAddr, apiKey, fetchFn),
+  ]);
+  if (!from || !to) return null;
+
+  let est = apiKey ? await routesLive(from, to, departMs, apiKey, fetchFn) : null;
+  if (!est) {
+    const minutes = straightLineMinutes(from, to);
+    if (minutes == null) return null;
+    est = { minutes, miles: haversineMiles(from, to), source: "straight-line" };
+  }
+  try { await ref.set({ at: Date.now(), minutes: est.minutes, miles: est.miles, source: est.source }); }
+  catch { /* best-effort */ }
+  return { ...est, cached: false };
+}
+
+module.exports = {
+  normalizeAddress, addressKey, haversineMiles, straightLineMinutes,
+  feasibilityWarnings, geocode, estimateDrive, driveKey,
+  ROAD_FACTOR, AVG_MPH, OVERHEAD_MIN, TIGHT_BUFFER_MIN,
+};

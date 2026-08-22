@@ -22,7 +22,13 @@ const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const { sendPushTo } = require("./push");
 
+const { estimateDrive, feasibilityWarnings } = require("./driveTime");
+
 const VAPID_PRIVATE_KEY = defineSecret("VAPID_PRIVATE_KEY");
+// Optional by design: with no key configured the drive estimates fall back to
+// straight-line distance, which needs nothing and still catches the schedules
+// that cannot work at all.
+const GOOGLE_MAPS_API_KEY = defineSecret("GOOGLE_MAPS_API_KEY");
 const REGION = "us-central1";
 const MAX_WINDOW_DAYS = 45;     // how far ahead a client may look
 const INBOX_KEY = "caliq-inbox";
@@ -274,5 +280,87 @@ exports.respondToBookingRequest = onCall(
       "clientRequests").catch(() => {});
 
     return { ok: true, accepted: accept, sessionId };
+  },
+);
+
+// ─── 3. Can I actually make it from one session to the next? ────────────────
+// Pass 2 of the booking spec (S197i). The trainer asks about a date range; they
+// get back a drive estimate for each adjacent pair and a warning where the
+// schedule does not survive the drive.
+//
+// ⚠️ TRAINER-ONLY, AND ONLY THEIR OWN SESSIONS. The reply contains client
+// ADDRESSES — the whole point is the drive between them — so it is scoped to
+// sessions where the caller is the trainer, never merely a participant. A
+// client calling this would otherwise learn where the trainer's other clients
+// live, which is the exact leak `trainerAvailability` exists to prevent.
+//
+// Costs nothing to call repeatedly: every estimate is cached by
+// (origin, destination, weekday, hour), so an unchanged week is all cache hits.
+exports.sessionTravel = onCall(
+  { region: REGION, maxInstances: 10, secrets: [GOOGLE_MAPS_API_KEY] },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
+    const d = request.data || {};
+    const from = Number(d.from), to = Number(d.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+      throw new HttpsError("invalid-argument", "Give a from/to range in ms.");
+    }
+    // A bounded window, for the same reason trainerAvailability has one: an
+    // unbounded range is an unbounded read.
+    if (to - from > 45 * 86400000) throw new HttpsError("invalid-argument", "That range is too wide.");
+
+    const db = admin.firestore();
+    const snap = await db.collection("sessions")
+      .where("trainerUid", "==", uid)
+      .where("startAt", ">=", from)
+      .where("startAt", "<=", to)
+      .get();
+
+    const sessions = [];
+    snap.forEach((doc) => {
+      const s = doc.data() || {};
+      if (s.status === "cancelled") return;
+      sessions.push({ id: doc.id, startAt: Number(s.startAt) || 0,
+        durationMin: Number(s.durationMin) || 0, location: String(s.location || ""),
+        status: s.status || "scheduled" });
+    });
+    sessions.sort((a, b) => a.startAt - b.startAt);
+
+    // Estimate each adjacent pair ONCE, up front, so the pure feasibility pass
+    // stays synchronous and testable.
+    // Google API keys are 39 chars beginning "AIza". Checking the SHAPE means a
+    // placeholder (the secret has to exist for the deploy to succeed) behaves as
+    // "no key" — falling back to straight-line — instead of as a broken key,
+    // which would fail geocoding and silently remove every warning.
+    const raw = (GOOGLE_MAPS_API_KEY.value() || "").trim();
+    const key = raw.startsWith("AIza") ? raw : null;
+    const legs = {};
+    for (let i = 0; i < sessions.length - 1; i++) {
+      const a = sessions[i], b = sessions[i + 1];
+      if (!a.location || !b.location) continue;
+      const legKey = `${a.id}>${b.id}`;
+      if (legs[legKey]) continue;
+      try {
+        legs[legKey] = await estimateDrive(db, a.location, b.location, b.startAt, key);
+      } catch (e) {
+        console.error("drive estimate failed:", e && e.message);
+        legs[legKey] = null;   // unknown, which the feasibility pass treats as silence
+      }
+    }
+    // Looked up by the exact pair that was estimated — never by address, which
+    // would collide as soon as one client is visited twice in a day.
+    const warnings = feasibilityWarnings(sessions, (a, b) => legs[`${a.id}>${b.id}`] || null);
+
+    return {
+      warnings,
+      legs: Object.entries(legs).filter(([, v]) => v).map(([k, v]) => ({
+        pair: k, minutes: v.minutes, miles: v.miles != null ? Math.round(v.miles * 10) / 10 : null,
+        source: v.source, cached: !!v.cached,
+      })),
+      // So the UI can say how much to trust the numbers rather than implying
+      // they are traffic-aware when they are not.
+      trafficAware: !!key,
+    };
   },
 );
