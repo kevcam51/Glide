@@ -1,6 +1,6 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S197g) — the audit tail is closed; next is the booking loop
+## ▶️ START HERE (S197h) — pass 1 is verified in prod; next is pass 2 (drive time)
 
 Everything below is DEPLOYED AND PUSHED. Working tree clean, build passing,
 230 rules tests green. Nothing is half-finished.
@@ -132,7 +132,26 @@ and clear.
 
 ## 🔜 NEXT BUILD — client self-booking + drive time (Kevin's spec + decisions, S190)
 
-**Not started. Kevin has DECIDED the open questions — don't re-ask them.**
+**Pass 1 is BUILT (S196) and now VERIFIED END-TO-END IN PRODUCTION (S197h) —
+it had only ever been build-verified, because `respondToBookingRequest` was not
+deployed at the time. Pass 2 (drive time) is what remains. Kevin has DECIDED the
+open questions — don't re-ask them.**
+
+The live run, as a real client and a real trainer on glidna.com: Casey asked for
+Wed 9:00 AM → the multi-day picker refused a day already past this week → "next
+week" resolved it and the anonymous availability callable reported "UI Tester3
+looks free all day" → the ask landed in the trainer's "Asks From Clients" →
+**Accept & book** created a real session at Wed Aug 26 9:00 AM, 60 min, $85
+(the trainer's `standardPriceCents`, not a guess) → the client was notified →
+cancelling quoted "In time — no cancellation charge" from the consented policy.
+Test session cancelled and the feed rows cleaned up afterwards.
+
+⚠️ **That run is what turned up S197h** — the booking confirmation said "it's on
+your calendar" and could not reach one. Seven of sixteen notification types
+routed nowhere and `session-no-card-*` was misrouted. Fixed, with
+`scripts/test-notif-routes.mjs` now pinning every server tag to a decided
+destination. **Exercising shipped-but-unrun code is how that was found; do it
+before building pass 2 on top.**
 
 ### The goal in one line
 A client who uses nothing else in Glidna — no logging, no AI, no plan — can still see when their
