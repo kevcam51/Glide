@@ -1,9 +1,36 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S197h) — pass 1 is verified in prod; next is pass 2 (drive time)
+## ▶️ START HERE (S197i) — TWO COMMANDS FOR KEVIN, then pass 2 is live
 
 Everything below is DEPLOYED AND PUSHED. Working tree clean, build passing,
 230 rules tests green. Nothing is half-finished.
+
+### 0. ⚠️ TWO COMMANDS, BOTH KEVIN'S — the Firebase CLI token expired mid-session
+
+Everything is committed, pushed and Vercel-deployed. Only the FUNCTIONS half of
+drive time is waiting, and neither command is risky.
+
+```bash
+firebase login --reauth --no-localhost
+```
+
+Then create the (placeholder) maps secret and deploy the three functions:
+
+```bash
+printf 'unset\n' | firebase functions:secrets:set GOOGLE_MAPS_API_KEY --project calorieiq-29762 --force
+firebase deploy --only functions:trainerAvailability,functions:respondToBookingRequest,functions:sessionTravel --project calorieiq-29762
+```
+
+The secret has to EXIST for the deploy to succeed, but it does not have to be
+real: the code checks the key's SHAPE (Google keys begin `AIza`), so a
+placeholder behaves as "no key" and the feature runs on the free estimator. A
+bogus-looking key would instead fail geocoding and silently remove every
+warning, which is why the shape check is there. Drop a real key into the same
+secret whenever you want traffic-aware times — no code change, no redeploy of
+anything else.
+
+Until this is deployed the calendar simply shows no travel warnings. That is
+the designed behaviour for "could not check", not a broken screen.
 
 ### 1. ✅ FIXED (S197d) — "after I click Open it did not take me anywhere"
 
@@ -178,7 +205,28 @@ nothing here may be gated behind having a plan.
 5. **Repeat on accept.** `bookSeries` already does weekly/biweekly — **add monthly**, which Kevin
    named explicitly.
 
-### Pass 2 — "drive to you"
+### Pass 2 — "drive to you" — ITEMS 7 AND 8 ARE BUILT (S197i)
+
+`functions/driveTime.js` + the `sessionTravel` callable + the warning panel on
+the trainer's calendar. **Both estimators exist as Kevin asked**, and the free
+one needs no key, so the feature works the moment it is deployed. 57 assertions
+in `scripts/test-drive-time.mjs`.
+
+**Item 6 (addresses) was answered differently than the spec assumed, and it is
+worth knowing why.** Sessions ALREADY carry an allowlisted `location`, and the
+booking sheet already edits it — so there was no schema change to make. For the
+"default", the sheet now pre-fills from that client's own booking history (the
+pattern `lastPrice` already uses) instead of adding a profile field. That avoids
+a real problem: **a trainer cannot write a client's profile** (`users` update is
+owner-or-admin), so a profile-held address would have to be entered by the
+client, and Kevin's own clients are largely LOCAL PLANS with no account at all.
+Learning it from history works for every client immediately and asks nobody to
+fill anything in.
+
+Still open on this: a per-client address book for local-plan clients, and
+`PLAN_FEATURES` needs the Coach-tier line once this is live (Kevin's S190b note).
+
+### The original pass-2 spec
 6. **Addresses**: a default on the profile + a per-session override, exactly as Kevin described.
    These are home addresses — sensitive. Readable only by the two people in that session.
 7. **BUILD BOTH ESTIMATORS — decided.** Kevin wants to compare them side by side:
