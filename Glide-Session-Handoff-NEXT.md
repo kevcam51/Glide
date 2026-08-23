@@ -1,6 +1,6 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S197m) — the audit is fully closed; booking pass 2 is live
+## ▶️ START HERE (S197r) — a live sign-out bug fixed; booking loop verified end to end
 
 Everything below is DEPLOYED AND PUSHED. Working tree clean, build passing,
 230 rules tests green. Nothing is half-finished.
@@ -65,7 +65,48 @@ It was caught because of S197g — "travel check unavailable: functions/internal
 in the console. Before that change it would have been a feature that quietly
 never worked.
 
-### 1. ✅ FIXED (S197d)### 1. ✅ FIXED (S197d) — "after I click Open it did not take me anywhere"
+### 0b. ⚠️ FIXED S197r — SIGNING OUT LEFT THE WHOLE CACHE BEHIND
+
+**This was live in production, and it is the kind of thing a demo dies on.**
+Sign out, sign in as a different account on the same device, and the app stuck
+on "Couldn't load your account — check your connection" — permanently, across
+full page reloads. Retry can never fix it, because Retry re-reads through the
+same poisoned cache.
+
+The connection was never the problem: a REST read of the very same profile with
+the very same token the SDK held returned 200. Deleting only the Firestore
+IndexedDB fixed it instantly. The persistent cache added in S196p is keyed by
+PROJECT, not by user, and nothing ever cleared it.
+
+**The second half is worse than the lock-out.** Whatever the previous account
+had read — their plans, their clients, their health data — stayed on the device
+after they signed out, readable by whoever signed in next.
+
+`signOutAndClearCache()` (src/firebase.js) now signs out → terminates → clears
+→ reloads, from all three sign-out call sites. The order is forced:
+`clearIndexedDbPersistence()` only runs while Firestore is stopped, and `db` is
+unusable afterwards, so the reload is part of the operation, not a nicety.
+
+⚠️ **Anyone already stuck** gets a way out: the "Couldn't load your account"
+screen now offers **"Sign out & clear local data"**. Verified in prod in both
+directions — trainer→client and client→trainer — after first reproducing the
+failure.
+
+### 0c. ✅ THE BOOKING LOOP IS VERIFIED END TO END (S197r)
+
+Every leg exercised against production rather than read:
+- **Free/busy** — `trainerAvailability` serves merged anonymous ranges
+  ("Already busy: 9:00 AM–10:00 AM · 2:00 PM–3:00 PM"). No names, no prices.
+- **The ask** — multi-day picker, horizon, duration; the overlap warning fires,
+  and it says plainly that asking is not booking.
+- **Accept** — creates a real session at the trainer's standard rate and tells
+  the client (S197j).
+- **Deny** — the path that had NEVER been run: "They've been told it doesn't
+  work", and they really were — "UI Tester3 couldn't make that time … ask for
+  another time", tagged `booking-declined-*`, which routes back to the sessions
+  panel so they can.
+
+### 1. ✅ FIXED (S197d) — "after I click Open it did not take me anywhere"
 
 Kevin was right and the S197c diagnosis was right: `notifDestination` returned
 `"todos"`, and `"todos"` was handled by doing nothing, on the theory that
