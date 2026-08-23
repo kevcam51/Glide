@@ -1,6 +1,6 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S197j) — booking pass 2 is LIVE and verified in prod
+## ▶️ START HERE (S197k) — booking pass 2 is DONE, live and on the pricing page
 
 Everything below is DEPLOYED AND PUSHED. Working tree clean, build passing,
 230 rules tests green. Nothing is half-finished.
@@ -31,9 +31,23 @@ Nothing else changes: the code checks the key's SHAPE (Google keys begin
 geocoding AND the estimate in place. ~$5–10 per 1,000 lookups, and the cache
 means one trainer's week is a handful of them.
 
-**Still to do on this (not blocking):** `PLAN_FEATURES` needs the Coach-tier
-line — Kevin's S190b note that drive time is a reason to upgrade, not a separate
-charge — and local-plan clients have no address of their own yet.
+**Pricing — DONE (S197k).** Two rows in the sessions section with explainers,
+`false, true, true, true` like every other booking feature. The split follows
+Kevin's own reasoning rather than gating the lot: the WARNING and the free
+straight-line estimate are for everyone (no per-lookup cost, and a safety check
+is not an upsell), while TRAFFIC-AWARE times are paid — that is the part with a
+bill. It agrees with S179e ("tools that make you money are paid"): session
+booking is already paid, so a free trainer has no sessions for the warning to be
+about. Boundary is one constant, `TRAFFIC_AWARE_TIERS` — every paid plan today.
+**Move it to `["base","max"]` if "$49/mo" in the S190b note was meant literally.**
+
+The disclosure line only offers the upgrade when traffic-aware times actually
+exist (`trafficAvailable`), so nothing is advertised before the key is in.
+
+**There is nothing else outstanding on this feature.** An earlier note claimed
+local-plan clients needed addresses; they do not — the calendar roster is
+`getMyClients()`, connected accounts only, so a local plan can never hold a
+session and there is nothing for a drive to be between.
 
 ### ⚠️ THE TRAP THIS COST — read before adding any Firestore query
 
