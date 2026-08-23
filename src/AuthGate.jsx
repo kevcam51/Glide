@@ -3,14 +3,13 @@
 // app only mounts when a user exists, storage.js can always assume a uid.
 
 import { useState, useEffect, useRef } from "react";
-import { auth, googleProvider, functions } from "./firebase.js";
+import { auth, googleProvider, functions, signOutAndClearCache} from "./firebase.js";
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
   signInWithCustomToken,
-  signOut,
   sendPasswordResetEmail,
 } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -34,7 +33,7 @@ export function useAuth() {
 export function SignOutButton() {
   return (
     <button
-      onClick={() => signOut(auth)}
+      onClick={() => signOutAndClearCache()}
       style={{
         position: "fixed", top: 12, right: 12, zIndex: 9999,
         padding: "6px 12px", fontSize: 13, borderRadius: 8,
@@ -150,6 +149,19 @@ export default function AuthGate({ children }) {
           <div style={{ textAlign: "center" }}>
             <div style={{ marginBottom: 12 }}>Couldn't load your account — check your connection.</div>
             <button style={S.primary} onClick={() => setRetryTick((t) => t + 1)}>Retry</button>
+            {/* ⚠️ THE RECOVERY PATH (S197r). This screen used to offer only
+                Retry, and there is one cause it can never fix: a stale local
+                cache from a previous account on this device, which survives
+                reloads and makes Retry fail forever while blaming the network.
+                Anyone already stuck when this shipped needs a way out that does
+                not involve knowing what IndexedDB is. */}
+            <div style={{ marginTop: 18, fontSize: ".82rem", opacity: .75 }}>
+              Still stuck after a retry or two?
+            </div>
+            <button style={{ ...S.primary, background: "transparent", border: "1px solid rgba(255,255,255,.35)", marginTop: 8 }}
+              onClick={() => signOutAndClearCache()}>
+              Sign out & clear local data
+            </button>
           </div>
         </div>
       );

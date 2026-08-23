@@ -5,8 +5,9 @@
 // safe to expose in client code, but we keep it in env vars for cleanliness.
 
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
+import { getAuth, GoogleAuthProvider, signOut } from "firebase/auth";
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  terminate, clearIndexedDbPersistence } from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
 
 const firebaseConfig = {
@@ -46,3 +47,36 @@ export const googleProvider = new GoogleAuthProvider();
 // callable (aiChat) and future server-side features are invoked through this.
 export const functions = getFunctions(app, "us-central1");
 export default app;
+
+// ── Signing out has to clear the cache too (S197r) ──────────────────────────
+// Two problems, one cause. The persistent cache above is keyed by PROJECT, not
+// by user, and nothing was clearing it:
+//
+// 1. THE LOCK-OUT. Sign out, sign in as someone else on the same device, and
+//    the app got stuck on "Couldn't load your account — check your connection"
+//    and stayed stuck across full reloads. Reproduced in production, and the
+//    connection was never the problem: a REST read of the very same profile,
+//    with the very same token the SDK was holding, returned 200. Deleting only
+//    the Firestore IndexedDB fixed it instantly.
+//
+// 2. THE PRIVACY HALF, which is arguably worse. Whatever the previous account
+//    had read — their plans, their clients, their health data — stayed on the
+//    device after they signed out, readable by whoever signed in next. Firebase
+//    recommends clearing persistence on sign-out for exactly this reason.
+//
+// clearIndexedDbPersistence() may only run while the instance is stopped, so
+// the order is fixed: sign out, terminate, clear, and then RELOAD, because `db`
+// is unusable once terminated. Each step is best-effort — a failure here must
+// still end with the person signed out.
+export async function signOutAndClearCache() {
+  try { await signOut(auth); } catch (e) { console.warn("sign-out failed", e); }
+  try { await terminate(db); } catch { /* already stopped */ }
+  try {
+    await clearIndexedDbPersistence(db);
+  } catch (e) {
+    // failed-precondition means another tab still holds the cache. Nothing else
+    // to do from here, and the reload below still gets this tab to a clean app.
+    console.warn("could not clear the local cache:", (e && e.code) || e);
+  }
+  window.location.replace("/");
+}

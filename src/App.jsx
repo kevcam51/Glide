@@ -16,7 +16,7 @@ import { bookSession, updateSession, cancelSession, markNoShow, waiveSession, su
   stripeFeeCents, feeComparison,
   subscribeMyEarnings, earningsSummary, chargeStatusLabel, centsToUsd,
   clientStateInfo } from "./sessions.js";
-import { auth, functions } from "./firebase.js";
+import { auth, functions, signOutAndClearCache} from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
 import { Icon } from "./icons.jsx";
@@ -28655,7 +28655,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
         </div>
 
         <div style={{ flex: 1, minHeight: 12 }} />
-        <button style={{ ...item, color: "var(--red)", border: "1px solid color-mix(in srgb,var(--red) 40%,transparent)", background: "color-mix(in srgb,var(--red) 8%,transparent)", justifyContent: "center", marginTop: 8 }} onClick={() => signOut(auth)}><Icon name="signout" size={19} /> <span>Sign out</span></button>
+        <button style={{ ...item, color: "var(--red)", border: "1px solid color-mix(in srgb,var(--red) 40%,transparent)", background: "color-mix(in srgb,var(--red) 8%,transparent)", justifyContent: "center", marginTop: 8 }} onClick={() => { signOutAndClearCache(); }}><Icon name="signout" size={19} /> <span>Sign out</span></button>
         <div style={{ display: "flex", justifyContent: "center", gap: 14, marginTop: 10 }}>
           <a href="/terms.html" target="_blank" rel="noopener" style={{ fontSize: ".68rem", color: "var(--muted)", textDecoration: "none" }}>Terms of Service</a>
           <a href="/privacy.html" target="_blank" rel="noopener" style={{ fontSize: ".68rem", color: "var(--muted)", textDecoration: "none" }}>Privacy Policy</a>
@@ -29154,7 +29154,7 @@ export default function App() {
     if (!idleSignOut) return; // toggled off — no timer armed
     const IDLE_MS = 30 * 60 * 1000;
     let timer;
-    const reset = () => { clearTimeout(timer); timer = setTimeout(() => { signOut(auth).catch(() => {}); }, IDLE_MS); };
+    const reset = () => { clearTimeout(timer); timer = setTimeout(() => { signOutAndClearCache().catch(() => {}); }, IDLE_MS); };
     const evs = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"];
     evs.forEach((e) => window.addEventListener(e, reset, { passive: true }));
     reset();
