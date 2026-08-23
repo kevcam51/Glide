@@ -95,10 +95,14 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
-> _**S196 (Aug 16): the four S195 items are BUILT and verified in the preview, but NOTHING IS
-> DEPLOYED. Three steps, all Kevin's: publish `firestore.rules` (230 tests), deploy 13 functions
-> (the command is in the handoff — derived from `npm run deploy-set`, don't hand-trim it), push
-> `main`. Read the S196 block at the top of `Glide-Session-Handoff-NEXT.md` first. Shipped: the
+> _**S197p (Aug 23): EVERYTHING BELOW IS DEPLOYED AND LIVE — the "NOTHING IS DEPLOYED" warnings
+> that used to lead this block were true when written and are not true now. Verified against
+> Google's own APIs, not from memory: the published ruleset is byte-identical to `firestore.rules`
+> in this repo (and contains `noShow`/`waived`/`seriesId`/`trainerBlocks`, so it is the S186/S196
+> one), and every session/billing function is ACTIVE on code from Aug 21 or later. ⚠️ A stale
+> "not deployed" warning costs a session or causes a rollback — CHECK before acting on one:
+> `GET firebaserules.googleapis.com/v1/projects/calorieiq-29762/releases/cloud.firestore`, then
+> diff the ruleset source. S196 shipped: the
 > `/card/CODE` "save your card" link (carries the TRAINER's invite code only — never the client's
 > identity, never a token); `standardPriceCents` in the policy + re-consent on change; back-dating
 > capped at 14 days with a plain warning and a server trigger that tells the client; and booking-loop
@@ -111,10 +115,11 @@ enabled (Blaze has no default spending cap).
 > the booking sheet promised a reschedule disclosure `onDocumentCreated` could never send, and the
 > accept transaction claimed the request before the checks that could refuse it. See the S196 block
 > in the handoff._
-> _**S186 (Aug 11): the S185 billing defects are FIXED but NOT DEPLOYED. Two steps, both Kevin's
-> call: (1) PUBLISH `firestore.rules` (206 emulator tests pass), (2) deploy the changed functions via
-> `npm run deploy-set`. Until the rules are published the new calendar's writes fail with
-> `permission-denied` — verified live, expected, not a bug. Read the S186 block at the top of
+> _**S186 (Aug 11): the S185 billing defects are FIXED, and as of S197p PUBLISHED AND DEPLOYED
+> (see the S197p line above — rules diffed against the live ruleset, functions confirmed ACTIVE).
+> The old "until the rules are published the calendar's writes fail with permission-denied" no
+> longer applies; repeating series, no-shows and waives all work in production. Read the S186
+> block at the top of
 > `Glide-Session-Handoff-NEXT.md` first; the failure-path invariants are documented at the top of
 > `functions/sessionSettle.js` and should not be re-litigated without re-reading them._
 >
@@ -2207,7 +2212,7 @@ enabled (Blaze has no default spending cap).
   screen (admin UID only): roster, sub/trial state, AI tokens today, ⚑ flag at 3+ boosts. "Glide
   Ultra" tier scoped in PRICING.md (data-triggered launch). **Queue after S90: push-notification
   delivery (FCM) → client→trainer requests → data-integrity hardening → then Stripe live + domain.**
-- Session 186: **Session auto-pay hardened (the S185 review) + the trainer CALENDAR built. NOT DEPLOYED —
+- Session 186: **Session auto-pay hardened (the S185 review) + the trainer CALENDAR built. [DEPLOYED SINCE — verified S197p] NOT DEPLOYED AT THE TIME —
   rules must be PUBLISHED and functions deployed, both Kevin's call.** Every critical S185 finding was
   re-verified against the code before touching anything (the handoff warns prior reviews ran ~⅓ false
   alarms; these were real). **Billing (`functions/sessionSettle.js`, a substantial rewrite):** the
@@ -2311,7 +2316,7 @@ enabled (Blaze has no default spending cap).
     as a premium feature. Build: a mic button + recording UI in `AIChatPanel`, a `transcribeAudio` Cloud Function
     (onCall or onRequest), an OpenAI/Groq key as a Secret Manager secret. Needs Blaze (have it). Optional later: voice
     OUTPUT (TTS) — also cheap. (Path A = browser Web Speech API: free but lower/inconsistent quality, flaky on iOS —
-    rejected for the premium feel.)- Session 196: **The four S195 items — card link, price in the policy, back-dating, booking loop. BUILT, verified in the preview, NOT DEPLOYED.**
+    rejected for the premium feel.)- Session 196: **The four S195 items — card link, price in the policy, back-dating, booking loop. BUILT, verified in the preview, NOT DEPLOYED AT THE TIME — [DEPLOYED SINCE, verified S197p].**
   (0) **Kevin's Friday session had not charged, and was not due to** — it was Sunday 11:42 ET and the
   weekly window opens at `Sun && hour >= 18`. The sweep was healthy (2 groups, 2 skipped) but the log
   discarded the per-group `why` before printing, so "skipped" was unreadable; it now carries a reason

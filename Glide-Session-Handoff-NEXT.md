@@ -301,29 +301,41 @@ Add it to `PLAN_FEATURES` when built.
 
 
 
-## ⚠️⚠️⚠️ S186 — THE S185 BILLING DEFECTS ARE FIXED, BUT NOTHING IS DEPLOYED YET
+## ✅ S186 — THE S185 BILLING DEFECTS ARE FIXED, AND IT IS ALL LIVE
 
-**Two things are required before ANY of this is live, and both are Kevin's call:**
+**This block used to say "NOTHING IS DEPLOYED YET" in three red triangles. That
+was true when written and is not true now — VERIFIED S197p, against Google's
+APIs rather than from memory:**
 
-1. **PUBLISH `firestore.rules`** — `firebase deploy --only firestore:rules`.
-   **206 emulator tests pass** (was 186; +20 new attack cases).
-2. **DEPLOY the functions.** Three shared files changed; `npm run deploy-set` was run for
-   `sessionSettle.js` and the other two were derived from `functions/index.js`:
+- **Rules are PUBLISHED and byte-identical to `firestore.rules` in this repo.**
+  Fetched the live ruleset via the Firebase Rules API and diffed it: identical,
+  and it contains `noShow`, `waived`, `seriesId` and `trainerBlocks`, so it is
+  the S186/S196 ruleset and not an older one.
+- **Every function in the list below is deployed and ACTIVE**, on code from
+  2026-08-21 or later (checked through the Cloud Functions API).
+
+So repeating series, no-shows and waives all work in production. If you are
+reading this block looking for something to do: there is nothing.
+
+⚠️ **A stale warning is worse than no warning.** This one survived several
+sessions after it stopped being true, and the next person to read it would
+either lose an afternoon confirming it or, worse, "re-publish" and roll
+something back. When a handoff says something is undeployed, CHECK before
+acting — the two commands are at the top of this file's history, and the check
+takes a minute:
+`GET firebaserules.googleapis.com/v1/projects/calorieiq-29762/releases/cloud.firestore`
+then diff the ruleset source against the repo.
+
+For the record, the deploy set that was required (and has been done):
 
 ```bash
 firebase deploy --only functions:sessionsSettle,functions:settleNow,functions:paySessionBalance,functions:createSessionSetupIntent,functions:recordSessionConsent,functions:removeSessionCard,functions:sessionsMarkCompleted --project calorieiq-29762
 ```
 
-   (`sessionSettle.js` → sessionsSettle · settleNow · paySessionBalance;
-   `sessionBilling.js` → createSessionSetupIntent · recordSessionConsent · removeSessionCard;
-   `sessions.js` → sessionsMarkCompleted. Re-run `npm run deploy-set <file>` to confirm before
-   deploying — a subset leaves the rest on the old copy, silently.)
-3. **Frontend** — `src/App.jsx` + `src/sessions.js` changed, so pushing `main` redeploys Vercel.
-
-⚠️ **Until the rules are published, the new calendar's writes FAIL** — verified live in the preview:
-booking a repeating series and marking a no-show both return `permission-denied`, because the
-published rules don't yet allow `seriesId`/`seriesIndex`/`noShow`/`waived`. A single non-repeating
-booking works fine. This is expected, not a bug.
+(`sessionSettle.js` → sessionsSettle · settleNow · paySessionBalance;
+`sessionBilling.js` → createSessionSetupIntent · recordSessionConsent · removeSessionCard;
+`sessions.js` → sessionsMarkCompleted. Re-run `npm run deploy-set <file>` before
+any future deploy — a subset leaves the rest on the old copy, silently.)
 
 ### What was actually wrong (all CONFIRMED against the code, not taken on faith)
 - **The double-charge cluster was real.** `paymentIntents.create` shared one `try` with the
