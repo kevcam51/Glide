@@ -57,6 +57,25 @@ const firestoreStorage = {
       // behaves differently. `getForUser` (clientData.js) answers the same
       // question by returning null; that asymmetry between the two accessors is
       // exactly what made this worth naming rather than papering over.
+      // ⚠️ AND THE OFFLINE CACHE CAN FAKE AN ABSENCE (S197s). getDoc() waits for
+      // the server when it can, but when it CANNOT it falls back to the local
+      // cache — and a document that exists on the server but was never cached
+      // comes back exists() === false. Callers read that as "nothing logged
+      // that day", write a fresh object over the top, and the real day is gone
+      // as soon as the connection returns. That is precisely the data-loss
+      // shape S196L/S197 fixed three times; the persistent cache (S196p)
+      // quietly reopened it.
+      //
+      // snap.metadata.fromCache is the discriminator: an online getDoc round-
+      // trips, so fromCache means the server was never heard from and this
+      // absence is UNKNOWN rather than confirmed. It gets a different code, so
+      // the `not-found` handlers — which correctly mean "empty day" — do not
+      // swallow it and overwrite real data.
+      if (snap.metadata && snap.metadata.fromCache) {
+        const err = new Error("Offline — can't confirm whether this exists: " + key);
+        err.code = "unavailable";
+        throw err;
+      }
       const err = new Error("Key not found: " + key);
       err.code = "not-found";
       throw err;

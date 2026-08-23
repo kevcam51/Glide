@@ -28,7 +28,17 @@ const kvCol = (uid) => collection(db, "users", uid, "kv");
 export async function getForUser(uid, key) {
   if (!uid) throw new Error("getForUser: missing uid");
   const snap = await getDoc(kvDoc(uid, key));
-  return snap.exists() ? { key, value: snap.data().value } : null;
+  if (snap.exists()) return { key, value: snap.data().value };
+  // Absence is normally a real answer and callers rely on the null. But when the
+  // snapshot came from the offline cache the server was never reached, so this
+  // "missing" may be a document that exists and simply was not cached — and the
+  // caller would write over it. Same reasoning as window.storage.get (S197s).
+  if (snap.metadata && snap.metadata.fromCache) {
+    const err = new Error("Offline — can't confirm whether this exists: " + key);
+    err.code = "unavailable";
+    throw err;
+  }
+  return null;
 }
 
 // Write one key into a specific user's namespace.
