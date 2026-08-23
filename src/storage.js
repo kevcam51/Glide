@@ -12,6 +12,7 @@ import { auth, db } from "./firebase.js";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   doc, getDoc, setDoc, deleteDoc, collection, getDocs, query, where, orderBy, limit,
+  runTransaction,
 } from "firebase/firestore";
 
 // --- track the signed-in user ------------------------------------------------
@@ -68,6 +69,34 @@ const firestoreStorage = {
     const uid = requireUid();
     await setDoc(kvDoc(uid, key), { k: key, value });
     return { key, value, shared: false };
+  },
+
+  // Read-modify-write ONE key inside a transaction (S197m).
+  //
+  // ⚠️ ADDITIVE. get/set/delete/list are untouched — App.jsx depends on their
+  // exact behaviour and this adds a fifth door rather than changing any of them.
+  //
+  // `fn(currentValueString | null)` returns the string to write, and is RE-RUN
+  // if the document changed under us, so it must be a pure function of its
+  // argument. Returning null/undefined writes nothing.
+  //
+  // This exists because the app saves whole documents from React state: without
+  // it, a save lands on top of anything the AI or the Trainerize sync wrote
+  // while someone was typing. See src/planMerge.js for the argument.
+  async mergeSet(key, fn) {
+    await ready;
+    const uid = requireUid();
+    const ref = kvDoc(uid, key);
+    let written = null;
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      const cur = snap.exists() ? snap.data().value : null;
+      const next = fn(cur);
+      if (next == null) { written = null; return; }
+      tx.set(ref, { k: key, value: next });
+      written = next;
+    });
+    return { key, value: written, shared: false };
   },
 
   async delete(key) {

@@ -17,6 +17,7 @@
 import { db } from "./firebase.js";
 import {
   doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, query, where, orderBy, limit,
+  runTransaction,
 } from "firebase/firestore";
 
 const encodeKey = (key) => encodeURIComponent(key);
@@ -35,6 +36,29 @@ export async function setForUser(uid, key, value) {
   if (!uid) throw new Error("setForUser: missing uid");
   await setDoc(kvDoc(uid, key), { k: key, value });
   return { key, value };
+}
+
+// Read-modify-write one key in a specific user's namespace, inside a
+// transaction — the cross-account twin of window.storage.mergeSet (S197m).
+//
+// The trainer editing a linked client's plan is the case this matters most for:
+// the client is on their own home screen, and the AI may be writing the same
+// document, so a whole-document save from the trainer's browser lands on top of
+// both. `fn(currentValueString | null)` returns the string to write and is
+// RE-RUN on contention, so it must be pure. Returning null writes nothing.
+export async function mergeForUser(uid, key, fn) {
+  if (!uid) throw new Error("mergeForUser: missing uid");
+  const ref = kvDoc(uid, key);
+  let written = null;
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const cur = snap.exists() ? snap.data().value : null;
+    const next = fn(cur);
+    if (next == null) { written = null; return; }
+    tx.set(ref, { k: key, value: next });
+    written = next;
+  });
+  return { key, value: written };
 }
 
 // Delete one key from a specific user's namespace.

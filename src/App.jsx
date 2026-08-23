@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium, setAiOptOut, aiChoiceMade } from "./profile.js";
-import { getForUser, setForUser, deleteForUser, listForUser, listEntriesForUser, latestKeyForUser, subscribeForUser } from "./clientData.js";
+import { getForUser, setForUser, mergeForUser, deleteForUser, listForUser, listEntriesForUser, latestKeyForUser, subscribeForUser } from "./clientData.js";
+import { mergePlanWrap } from "./planMerge.js";
 import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads, exportMyThreads } from "./messaging.js";
 import { pushStatus, enablePush, disablePush } from "./push.js";
 import { privGet, privSet, privSubscribe, privListEntries } from "./privateStore.js";
@@ -22950,15 +22951,31 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   };
   // Apply a mutation to the active plan's data (checkIns etc.) from the calendar,
   // keeping planWrapRef + state in sync and echo-suppressing our own write.
+  // ⚠️ APPLIED TO WHAT THE SERVER HOLDS, NOT TO THE COPY IN MEMORY (S197m).
+  // This used to mutate planWrapRef and write the whole document, so anything
+  // the AI or the Trainerize sync wrote since this screen loaded was erased by
+  // the next tap here. The mutation is re-applied to a freshly-read document
+  // inside a transaction — and `mutate` is written as a mutation already, so
+  // this is exactly the shape that fix wants.
   const savePlanDataMutation = async (mutate) => {
     try {
-      const obj = planWrapRef.current ? JSON.parse(JSON.stringify(planWrapRef.current)) : { data: {}, step: 0 };
-      if (!obj.data) obj.data = {};
-      mutate(obj.data);
-      planWrapRef.current = obj;
-      setPlanData(obj.data);
-      const s = JSON.stringify(obj); lastSelfDataWrite.current = s;
-      await window.storage.set(planDataKey(activePlanId), s);
+      const written = await window.storage.mergeSet(planDataKey(activePlanId), (cur) => {
+        let obj = null;
+        try { obj = cur ? JSON.parse(cur) : null; } catch { obj = null; }
+        if (!obj || typeof obj !== "object") obj = { data: {}, step: 0 };
+        if (!obj.data) obj.data = {};
+        mutate(obj.data);
+        return JSON.stringify(obj);
+      });
+      // Echo suppression has to name what was ACTUALLY written — the merged
+      // document, not the one we hoped to write — or the listener treats our own
+      // save as a remote change.
+      if (written && written.value) {
+        lastSelfDataWrite.current = written.value;
+        const obj = JSON.parse(written.value);
+        planWrapRef.current = obj;
+        setPlanData(obj.data);
+      }
     } catch { /* ignore */ }
   };
   // ── Compliance tracker (S120) — last 14 days of logged calories ──
@@ -29155,24 +29172,44 @@ export default function App() {
     const remote = activeRemoteUid; // capture: are we editing a linked client's plan?
     saveTimer.current = setTimeout(async ()=>{
       try {
-        const payload = JSON.stringify({ data: newData||data, step: newStep??step });
+        const nextData = newData||data;
+        const nextStep = newStep??step;
+        // ⚠️ WRITE ONLY WHAT CHANGED, ONTO WHAT THE SERVER HOLDS (S197m).
+        //
+        // This used to write the whole in-memory document. The live-sync
+        // listener deliberately skips remote changes while an edit is mid-
+        // debounce — yanking a half-typed form would be worse — so anything the
+        // AI or the Trainerize sync wrote during those 600ms was in nobody's
+        // copy by the time this fired, and the write erased it.
+        //
+        // The baseline is the snapshot the activity feed already keeps. With no
+        // baseline (a brand-new plan) mergePlanWrap writes the whole thing,
+        // which is the old behaviour and the only honest answer.
+        const baseline = lastSnapshotRef.current;
+        const mergeInto = (cur) => {
+          let server = null;
+          try { server = cur ? JSON.parse(cur) : null; } catch { server = null; }
+          return JSON.stringify(mergePlanWrap(server, baseline, nextData, nextStep));
+        };
         if (remote) {
           // Editing a linked client's plan — save straight into THEIR account.
           // (No local index update; this profile doesn't live in our list.)
-          lastRemoteWriteRef.current = payload; // mark our own write so live-sync ignores its echo
-          await setForUser(remote, planDataKey(activeId), payload);
-          recordPlanEdits(newData||data);
+          const res = await mergeForUser(remote, planDataKey(activeId), mergeInto);
+          // Mark the ACTUAL written string, or live-sync treats our own merged
+          // write as a remote change and re-applies it over the open form.
+          if (res && res.value) lastRemoteWriteRef.current = res.value;
+          recordPlanEdits(nextData);
           setSaving(true);
           setTimeout(()=>setSaving(false), 1200);
           return;
         }
         const SL = ["Personal","Goal Weight","Activity","Cardio","Strength","Results"];
-        await window.storage.set(profileKey(activeId), payload);
-        const d = newData||data;
-        const up = profiles.map(p => p.id===activeId ? {...p, name:fullName(d)||p.name, weight:d.weightLbs||"", goal:d.goalWeight||"", lastSaved:Date.now(), stepLabel:SL[newStep??step]||""} : p);
+        await window.storage.mergeSet(profileKey(activeId), mergeInto);
+        const d = nextData;
+        const up = profiles.map(p => p.id===activeId ? {...p, name:fullName(d)||p.name, weight:d.weightLbs||"", goal:d.goalWeight||"", lastSaved:Date.now(), stepLabel:SL[nextStep]||""} : p);
         setProfiles(up);
         await saveIndex(up);
-        recordPlanEdits(newData||data);
+        recordPlanEdits(nextData);
         setSaving(true);
         setTimeout(()=>setSaving(false), 1200);
       } catch(e) {}
