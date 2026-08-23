@@ -120,11 +120,26 @@ from the automation used here. Worth a manual airplane-mode pass.
 **If a user ever reports something inexplicable** — wrong data, won't load,
 stale numbers — look at this cache first. Three for three so far.
 
-**Next candidate in the same family, NOT done:** `calWriteDay` still writes the
-whole day object from a possibly-stale read (`window.storage.set`), so day logs
-have the last-write-wins problem that plan writes had until S197m. The merge
-machinery to fix it already exists — `window.storage.mergeSet` and
-`src/planMerge.js`.
+**A claim I made here last turn was WRONG, and testing it is what showed that.**
+I wrote that day logs still had the plan-writes race and should get the same
+merge. They do not, in practice — **measured, not reasoned**: with a client's
+home open, an external write added `_raceProbe` and `water` to today's log, and
+an in-app quick-add of 250 cal a few seconds later. All three survived.
+
+The reason is structural. The plan race existed because the live-sync listener
+deliberately SKIPS remote changes while an edit is mid-debounce, so the app held
+stale state for as long as someone kept typing. The day-log listener has no such
+guard — it applies remote changes to `log` immediately (only suppressing its own
+echo), so the next write is computed from fresh data.
+
+So: **do not "fix" this.** It would mean touching the most-used write path in
+the app to close a window that live-sync already closes. The residual case is a
+genuinely simultaneous write (sub-second, before the listener delivers), which
+is narrow and no worse than the rest of the system.
+
+⚠️ The guard on the PLAN listener is what makes plans different. If anyone ever
+adds a similar "skip while editing" guard to the day-log listener, this race
+becomes real and the merge WOULD then be needed.
 
 ### 0c. ✅ THE BOOKING LOOP IS VERIFIED END TO END (S197r)
 
