@@ -44,8 +44,12 @@ const exported = [];
 for (const m of index.matchAll(/^exports\.(\w+)\s*=\s*require\(["']\.\/([\w.-]+)["']\)/gm)) {
   exported.push({ name: m[1], module: m[2].endsWith(".js") ? m[2] : `${m[2]}.js` });
 }
-// …plus the ones index.js defines inline (onCall/onRequest/onSchedule right there).
-for (const m of index.matchAll(/^exports\.(\w+)\s*=\s*(onCall|onRequest|onSchedule)\b/gm)) {
+// …plus the ones index.js defines inline (a trigger declared right there).
+// ⚠️ ALL trigger forms, not just the callables: this used to match only
+// onCall/onRequest/onSchedule and so never mentioned syncRoleClaims or
+// fenceNewAccountTrial (onDocumentWritten / onDocumentCreated), which is a
+// blind spot in the one tool that exists to stop silent staleness.
+for (const m of index.matchAll(/^exports\.(\w+)\s*=\s*(onCall|onRequest|onSchedule|onDocument\w+|onObject\w+|beforeUser\w+)\b/gm)) {
   exported.push({ name: m[1], module: "index.js", inline: true });
 }
 
