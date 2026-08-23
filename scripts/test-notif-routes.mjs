@@ -83,6 +83,22 @@ ok("a plain session reminder still reaches sessions",
    notifDestination({ tag: "session-reminder-abc-60", url: "/" }) === "sessions");
 ok("a DM still reaches messages", notifDestination({ tag: "dm-t1_c1", url: "/" }) === "messages");
 ok("a card link still wins on the url", notifDestination({ tag: "whatever", url: "/?savecard=1" }) === "card");
+// ── Routed is not the same as ARRIVING (the original bug) ──────────────────
+// `notifDestination` returning "todos" was never the problem — the problem was
+// that ClientHome handled "todos" by doing nothing, so the button moved nobody.
+// A destination nobody handles is the same dead tap with extra steps, so read
+// the handled set out of the code rather than trusting the mapping alone.
+const handled = new Set();
+for (const m of app.matchAll(/homeIntent\.kind === "([a-zA-Z]+)"/g)) handled.add(m[1]);
+for (const m of app.matchAll(/dest === "([a-zA-Z]+)"/g)) handled.add(m[1]);  // App-level, not a panel
+ok("found the destinations the client actually handles", handled.size >= 5, [...handled]);
+const unhandled = [];
+for (const tag of tags) {
+  const dest = notifDestination({ tag, url: "/" });
+  if (dest && !handled.has(dest)) unhandled.push(`${tag} → ${dest}`);
+}
+ok("EVERY destination is actually handled, not just mapped", unhandled.length === 0, unhandled);
+
 ok("an unknown tag routes nowhere rather than guessing",
    notifDestination({ tag: "something-new", url: "/" }) === null);
 
