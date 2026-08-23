@@ -31,6 +31,10 @@ const VAPID_PRIVATE_KEY = defineSecret("VAPID_PRIVATE_KEY");
 const GOOGLE_MAPS_API_KEY = defineSecret("GOOGLE_MAPS_API_KEY");
 const REGION = "us-central1";
 const MAX_WINDOW_DAYS = 45;     // how far ahead a client may look
+// Paid plans that get traffic-aware drive times (see sessionTravel). Every
+// plan carries session booking, so every paid plan gets the accurate number;
+// the free estimator stays free for everyone.
+const TRAFFIC_AWARE_TIERS = ["connect", "base", "max"];
 const INBOX_KEY = "caliq-inbox";
 
 // Is `trainerUid` really this client's trainer? Mirrors firestore.rules
@@ -340,7 +344,32 @@ exports.sessionTravel = onCall(
     // "no key" — falling back to straight-line — instead of as a broken key,
     // which would fail geocoding and silently remove every warning.
     const raw = (GOOGLE_MAPS_API_KEY.value() || "").trim();
-    const key = raw.startsWith("AIza") ? raw : null;
+    const keyPresent = raw.startsWith("AIza");
+
+    // ── Who gets TRAFFIC-AWARE times (S197k) ────────────────────────────────
+    // Kevin's S190b note says drive time is "a Coach-plan feature, not a
+    // separate upcharge... it means the Google Routes cost lands only on
+    // accounts already paying, so the margin question answers itself."
+    //
+    // Split along the line his own reasoning draws, rather than gating the
+    // whole feature:
+    //   • The WARNING and the free straight-line estimate: everyone. It costs
+    //     nothing per lookup, PLAN_FEATURES says in as many words that the
+    //     coaching workspace is free, and this is a safety check — telling
+    //     someone they cannot make it across town is not an upsell.
+    //   • TRAFFIC-AWARE times: paid plans only. That is the part with a real
+    //     per-lookup bill attached, which is exactly the cost Kevin wanted to
+    //     land on paying accounts.
+    // The boundary is one constant. Move it if he wants Routes reserved for
+    // Coach and above rather than every paid plan.
+    let paid = false;
+    try {
+      const me = (await db.doc(`users/${uid}`).get()).data() || {};
+      paid = me.role === "admin"
+        || (me.subscriptionStatus === "active" && TRAFFIC_AWARE_TIERS.includes(
+             String(me.subscriptionTier || "base").toLowerCase()));
+    } catch { /* a profile read failure just means the free estimator */ }
+    const key = keyPresent && paid ? raw : null;
     const legs = {};
     for (let i = 0; i < sessions.length - 1; i++) {
       const a = sessions[i], b = sessions[i + 1];
@@ -367,6 +396,9 @@ exports.sessionTravel = onCall(
       // So the UI can say how much to trust the numbers rather than implying
       // they are traffic-aware when they are not.
       trafficAware: !!key,
+      // Why it is not, when it is not — so the UI can tell the difference
+      // between "your plan does not include this" and "nobody has one yet".
+      trafficAvailable: keyPresent,
     };
   },
 );

@@ -18698,6 +18698,12 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
               {travel.trafficAware
                 ? "Drive times include current traffic."
                 : "Drive times are straight-line estimates — no traffic, so treat them as the best case."}
+              {/* Only when traffic-aware times EXIST and this account simply
+                  isn't on a plan that includes them. Saying "upgrade for
+                  traffic" while nobody has it would be selling a thing that
+                  does not yet work. */}
+              {!travel.trafficAware && travel.trafficAvailable
+                ? " Traffic-aware times come with any paid plan." : ""}
             </div>
           </div>
         )}
@@ -19607,6 +19613,11 @@ const PLAN_FEATURES = {
       ["Card on file & automatic session billing", false, true, true, true],
       ["No-show and waive controls on delivered sessions", false, true, true, true],
       ["Earnings ledger — what was charged, and what didn't", false, true, true, true],
+      // S197k — drive time. Kevin's S190b call: a plan feature, not a separate
+      // upcharge, so the Google Routes bill lands only on paying accounts.
+      // Every paid plan carries session booking, so every paid plan gets it.
+      ["Drive time between sessions, with traffic", false, true, true, true],
+      ["Warns you when you can't make it across town", false, true, true, true],
     ]},
     { section: "AI assistant — everything in Free, plus:", rows: [
       // S179f (Kevin): teams sit at Coach, not Connect — managing people who
@@ -19725,6 +19736,10 @@ const PLAN_TIPS = {
     "A session that already happened is still yours to judge. Charge the no-show rate your client agreed to, or waive it entirely \u2014 both only ever reduce what's charged.",
   "Earnings ledger — what was charged, and what didn't":
     "Every settlement in one list: what was collected, what's still pending, and anything that was declined \u2014 so money that hasn't landed is visible rather than assumed.",
+  "Drive time between sessions, with traffic":
+    "If you travel to clients, Glidna works out how long the drive between two sessions actually takes \u2014 traffic included, at the time you'd be making it.",
+  "Warns you when you can't make it across town":
+    "Book two sessions too close together and Glidna says so, with the numbers: how long the gap is, how long the drive is, and how short you are.",
   "Session booking & cancellation policy":
     "Book, reschedule and cancel sessions with your clients, and publish a cancellation policy they see up front. Included on every paid plan \u2014 scheduling tools alone cost $16+/month elsewhere.",
   "Your clients get automatic logging reminders":
