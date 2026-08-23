@@ -1,6 +1,6 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S197k) — booking pass 2 is DONE, live and on the pricing page
+## ▶️ START HERE (S197m) — the audit is fully closed; booking pass 2 is live
 
 Everything below is DEPLOYED AND PUSHED. Working tree clean, build passing,
 230 rules tests green. Nothing is half-finished.
@@ -117,10 +117,27 @@ RE-RUNS it on contention, so an accumulator in the enclosing scope doubles up.
 That is why `changes` / `dropped` / `metrics` live inside and are returned.
 `{ __abort: true }` writes nothing, which is what keeps the refusal paths
 ("no valid fields", "already exists") non-writing.
-**This closes the SERVER half only.** The app still saves the whole plan
-document from React state, so a client write can still land on top of a server
-one. Making that safe is a change to the app's core editing model, not a patch —
-it is the one piece of this defect still open.
+**Both halves are now closed (S197m).** The app used to save the whole plan
+document from React state, so any browser save landed on top of everything the
+AI or the Trainerize sync had written. It now writes ONLY the top-level keys the
+user actually changed, onto whatever the server holds, inside a transaction —
+using the snapshot the activity feed already keeps as the baseline, so it needed
+no new bookkeeping. `src/planMerge.js` carries the argument.
+
+⚠️ The live-sync listener still SKIPS remote changes while an edit is mid-
+debounce, and that is correct — yanking a half-typed form would be worse. The
+merge is what makes that safe.
+
+⚠️ Conflict rule, in one sentence: **top-level key granularity, user wins the
+keys they touched.** Merging inside an array needs element identity and produces
+results neither side wrote. Do not "improve" this without a reason.
+
+`window.storage.mergeSet` and `mergeForUser` are ADDITIVE — get/set/delete/list
+are untouched, per the standing rule that App.jsx depends on them.
+
+Verified against real Firestore on BOTH paths with an external writer mid-edit:
+the outside write and the app's edit both survived. Negative control in
+`scripts/test-plan-merge.mjs` reproduces the old behaviour losing one.
 
 **The `getDoc`-then-`onSnapshot` finding was NOT actioned, deliberately.** The
 audit called the first read "pure waste"; it is not. It is also the not-found
