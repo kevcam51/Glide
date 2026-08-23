@@ -92,6 +92,40 @@ screen now offers **"Sign out & clear local data"**. Verified in prod in both
 directions — trainer→client and client→trainer — after first reproducing the
 failure.
 
+### 0d. ⚠️ THE OFFLINE CACHE HAS NOW CAUSED THREE LIVE BUGS — TREAT IT AS SUSPECT
+
+`persistentLocalCache` (S196p) is a reasonable feature that sits in the boot
+path and has since produced three separate production defects. Two were fixed
+in S197r (the sign-out lock-out and the privacy leak). The third, S197s:
+
+**An absence served from cache authorises a write.** getDoc() waits for the
+server when it can; when it cannot, it falls back to the cache, and a document
+that exists on the server but was never cached returns exists() === false. The
+callers read that as "nothing logged that day", write a fresh object over the
+top, and the real day is gone when the connection returns — the same data-loss
+shape S196L and S197 already fixed three times.
+
+`snap.metadata.fromCache` now distinguishes them: an online getDoc round-trips,
+so fromCache means the server was never heard from and the absence is UNKNOWN.
+It throws `unavailable` rather than `not-found`, so the handlers that correctly
+mean "empty day" do not swallow it. Both accessors changed —
+`window.storage.get` and `getForUser`.
+
+**Verified in prod:** online, a missing key still reports `not-found` and real
+reads still work, so the S196L regression ("every never-logged date became
+'Couldn't load this day'") does NOT occur. ⚠️ The offline half is correct by
+construction but was NOT exercised — there is no way to force the SDK offline
+from the automation used here. Worth a manual airplane-mode pass.
+
+**If a user ever reports something inexplicable** — wrong data, won't load,
+stale numbers — look at this cache first. Three for three so far.
+
+**Next candidate in the same family, NOT done:** `calWriteDay` still writes the
+whole day object from a possibly-stale read (`window.storage.set`), so day logs
+have the last-write-wins problem that plan writes had until S197m. The merge
+machinery to fix it already exists — `window.storage.mergeSet` and
+`src/planMerge.js`.
+
 ### 0c. ✅ THE BOOKING LOOP IS VERIFIED END TO END (S197r)
 
 Every leg exercised against production rather than read:
