@@ -600,7 +600,7 @@ async function fetchRoster(auth) {
 // local ctz profile (targetUid=admin, planId=ctz{id}) OR a LINKED client's account
 // (targetUid=client, planId=their active plan) — see runImport's tz-links routing.
 async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDate, auth, days) {
-  await planTxnWrap(db, targetUid, planId, (wrap) => {
+  const { d, step } = await planTxnWrap(db, targetUid, planId, (wrap) => {
   const prev = wrap.data || {};
   // Trainerize stays source of truth for the snapshot fields (weight, goal,
   // stats — S86d, and the coach dashboards depend on that). Macro targets are
@@ -652,7 +652,10 @@ async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDat
   // stops the sync quietly dropping any other wrapper field.
   wrap.data = d;
   wrap.step = step;
-  return {};
+  // ⚠️ RETURN THEM. `d` and `step` are declared inside this callback, and the
+  // caller below still reports both — reading them out there is a
+  // ReferenceError that kills every import and every scheduled sync (S197t).
+  return { d, step };
   });
   let mealDays = 0, healthDays = 0, workoutDays = 0;
   try { mealDays = await syncClientNutrition(db, targetUid, planId, u.id, auth, days); }

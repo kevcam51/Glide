@@ -11161,6 +11161,13 @@ function WeightDayLogger({ date, existing, onSave }) {
 }
 
 function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
+  // ⚠️ THIS WAS NEVER A PROP, AND THE BODY READ IT ANYWAY (S160 → fixed S197t).
+  // Tapping "Progress Snapshot" on any plan with 2+ weigh-ins threw
+  // `ReferenceError: logAdherence is not defined` and WHITE-SCREENED THE APP.
+  // Reproduced in production before fixing. It shipped in July and survived
+  // because the card only reads it once expanded, and expanding it is a tap
+  // most people never make. eslint's no-undef had it the whole time.
+  logAdherence,
   viewDate, viewIsToday = true, todayKeyProp, onStepDay, onGoToday,
   data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
@@ -30262,7 +30269,11 @@ export default function App() {
     let hist = [];
     if (hv) { try { hist = JSON.parse(hv); } catch(e) {} }
     historyRef.current = hist;
-    if (!alive) return;
+    // `alive` was never declared here — a cancellation guard copied in from an
+    // effect (S139). It threw a ReferenceError on every manual Refresh, right
+    // before setHistory, so the plan and the day reloaded but the activity feed
+    // silently never did, and the rejection went nowhere. There is nothing to
+    // cancel in a one-shot handler, so the guard is simply gone.
     setHistory(hist);
   };
 
@@ -30718,6 +30729,7 @@ export default function App() {
           {step===4 && <StepStrength   data={data} onChange={update} onBack={()=>setStepAndSave(3)} onNext={()=>setStepAndSave(5)}/>}
           {step===5 && showDash && (
             <DailyDashboard hiddenTiles={hiddenTiles} onSetHiddenTiles={onSetHiddenTiles}
+              logAdherence={logAdherence}
               viewDate={viewDate} viewIsToday={viewIsToday} todayKeyProp={todayKey}
               onStepDay={(n)=>{ const d=new Date(viewDate+"T12:00:00"); d.setDate(d.getDate()+n); setViewDate(ymdLocal(d)); }}
               onGoToday={()=>setViewDate(todayKey)}
