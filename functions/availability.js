@@ -31,10 +31,19 @@ const VAPID_PRIVATE_KEY = defineSecret("VAPID_PRIVATE_KEY");
 const GOOGLE_MAPS_API_KEY = defineSecret("GOOGLE_MAPS_API_KEY");
 const REGION = "us-central1";
 const MAX_WINDOW_DAYS = 45;     // how far ahead a client may look
-// Paid plans that get traffic-aware drive times (see sessionTravel). Every
-// plan carries session booking, so every paid plan gets the accurate number;
-// the free estimator stays free for everyone.
-const TRAFFIC_AWARE_TIERS = ["connect", "base", "max"];
+// Paid COACH plans that get traffic-aware drive times (see sessionTravel).
+// Every paid plan carries session booking, so every paid plan gets the accurate
+// number; the free estimator stays free for everyone.
+//
+// ⚠️ THESE ARE `subscriptionTier` VALUES, FROM THE CATALOG IN billing.js — not
+// the tier LABELS in PLAN_FEATURES. The first version of this constant said
+// ["connect", "base", "max"], which was read straight off the pricing grid and
+// matches NO trainer subscription: the real values are coach-prefixed, and
+// "base" is not a tier at all. Every paying coach silently got the free
+// estimator while the UI told them their plan included traffic. Keep this in
+// step with CATALOG (functions/billing.js) — scripts/test-drive-time.mjs
+// asserts the two agree.
+const TRAFFIC_AWARE_TIERS = ["coach_connect", "coach", "coach_max", "coach_ultra"];
 const INBOX_KEY = "caliq-inbox";
 
 // Is `trainerUid` really this client's trainer? Mirrors firestore.rules

@@ -107,15 +107,37 @@ const firestoreStorage = {
     const uid = requireUid();
     const ref = kvDoc(uid, key);
     let written = null;
-    await runTransaction(db, async (tx) => {
-      const snap = await tx.get(ref);
-      const cur = snap.exists() ? snap.data().value : null;
+    try {
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref);
+        const cur = snap.exists() ? snap.data().value : null;
+        const next = fn(cur);
+        if (next == null) { written = null; return; }
+        tx.set(ref, { k: key, value: next });
+        written = next;
+      });
+      return { key, value: written, shared: false };
+    } catch (e) {
+      // ⚠️ A TRANSACTION CANNOT COMMIT OFFLINE, AND setDoc CAN (S197u).
+      // This is the cost of merging: runTransaction needs a server round trip,
+      // so on a dead radio it rejects — where the plain write it replaced would
+      // have queued in the local cache and synced later. autoSave swallows save
+      // errors, so the edit would simply vanish. That is a worse bug than the
+      // one merging fixes.
+      //
+      // Offline there is no server copy to merge against anyway, so falling
+      // back to the whole-document write is not a compromise — it is the only
+      // meaningful answer, and it is exactly what this did before.
+      const offline = e && (e.code === "unavailable" || e.code === "failed-precondition"
+        || e.code === "deadline-exceeded");
+      if (!offline) throw e;
+      let cur = null;
+      try { const s = await getDoc(ref); cur = s.exists() ? s.data().value : null; } catch { /* cache miss → treat as new */ }
       const next = fn(cur);
-      if (next == null) { written = null; return; }
-      tx.set(ref, { k: key, value: next });
-      written = next;
-    });
-    return { key, value: written, shared: false };
+      if (next == null) return { key, value: null, shared: false };
+      await setDoc(ref, { k: key, value: next });   // queues in the offline cache
+      return { key, value: next, shared: false, offlineQueued: true };
+    }
   },
 
   async delete(key) {

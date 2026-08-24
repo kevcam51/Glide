@@ -11,6 +11,7 @@
 //   • Cache keys survive the same address typed differently.
 //
 // Run: node scripts/test-drive-time.mjs
+import { readFileSync } from "fs";
 import { createRequire } from "module";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -144,6 +145,26 @@ ok("a different weekday does not",
    D.driveKey("A st", "B st", mon9) !== D.driveKey("A st", "B st", mon9 + 86400000));
 ok("direction matters (one-ways, tolls)",
    D.driveKey("A st", "B st", mon9) !== D.driveKey("B st", "A st", mon9));
+
+// ── the tier constant must name REAL subscription tiers ────────────────────
+// It once said ["connect", "base", "max"], read off the PLAN_FEATURES grid
+// labels rather than the billing catalog. Those match no trainer subscription,
+// so every paying coach silently got the free estimator while the UI told them
+// their plan included traffic. Pin it to the catalog it has to agree with.
+{
+  const avail = readFileSync(FN + "availability.js", "utf8");
+  const billing = readFileSync(FN + "billing.js", "utf8");
+  const tiers = (avail.match(/const TRAFFIC_AWARE_TIERS = \[([^\]]*)\]/) || [])[1] || "";
+  const listed = [...tiers.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  const catalog = [...billing.matchAll(/^\s{2}(\w+):\s*\{\s*key:/gm)].map((m) => m[1]);
+  ok("the tier constant is not empty", listed.length > 0, listed);
+  const bogus = listed.filter((t) => !catalog.includes(t));
+  ok("every tier it names exists in the billing catalog", bogus.length === 0, { bogus, catalog });
+  ok("it names the $49 coach plan Kevin called out", listed.includes("coach"), listed);
+  ok("and the higher coach plans, which cannot get less", 
+     listed.includes("coach_max") && listed.includes("coach_ultra"), listed);
+  ok("it does not name a client-only tier", !listed.includes("premium"), listed);
+}
 
 // ── estimateDrive against a fake Firestore + fake network ───────────────────
 const store = new Map();

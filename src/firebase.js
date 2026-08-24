@@ -7,7 +7,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signOut } from "firebase/auth";
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  terminate, clearIndexedDbPersistence } from "firebase/firestore";
+  terminate, clearIndexedDbPersistence, waitForPendingWrites } from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
 
 const firebaseConfig = {
@@ -69,7 +69,30 @@ export default app;
 // is unusable once terminated. Each step is best-effort — a failure here must
 // still end with the person signed out.
 export async function signOutAndClearCache() {
+  // ⚠️ FLUSH BEFORE CLEARING, OR SIGNING OUT EATS UNSYNCED WORK (S197u).
+  // Clearing persistence deletes the pending-write queue too. Someone who
+  // logged a meal on a dead radio and then signed out — or, worse, said nothing
+  // and let the 30-minute idle timer sign them out unattended — would lose it
+  // with no message.
+  //
+  // So: give pending writes a few seconds to reach the server. If they make it,
+  // clearing is safe. If they do not, we are offline, and KEEPING the cache is
+  // the lesser evil: the stale-cache lock-out this function exists to prevent is
+  // recoverable from the "Sign out & clear local data" button, and lost data is
+  // not.
+  let flushed = true;
+  try {
+    await Promise.race([
+      waitForPendingWrites(db),
+      new Promise((res) => setTimeout(() => { flushed = false; res(); }, 4000)),
+    ]);
+  } catch { flushed = false; }
   try { await signOut(auth); } catch (e) { console.warn("sign-out failed", e); }
+  if (!flushed) {
+    console.warn("unsynced writes still pending — keeping the local cache rather than discarding them");
+    window.location.replace("/");
+    return;
+  }
   try { await terminate(db); } catch { /* already stopped */ }
   try {
     await clearIndexedDbPersistence(db);
