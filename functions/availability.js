@@ -43,7 +43,11 @@ const MAX_WINDOW_DAYS = 45;     // how far ahead a client may look
 // estimator while the UI told them their plan included traffic. Keep this in
 // step with CATALOG (functions/billing.js) — scripts/test-drive-time.mjs
 // asserts the two agree.
-const TRAFFIC_AWARE_TIERS = ["coach_connect", "coach", "coach_max", "coach_ultra"];
+// Kevin's call (S198): Coach and above — the rung ABOVE Connect. Traffic-aware
+// drive time is a reason to move up from the connector, not something the entry
+// plan carries. Connect keeps the free straight-line estimate and the
+// can't-make-it warning, which are the safety half and cost nothing per lookup.
+const TRAFFIC_AWARE_TIERS = ["coach", "coach_max", "coach_ultra"];
 const INBOX_KEY = "caliq-inbox";
 
 // Is `trainerUid` really this client's trainer? Mirrors firestore.rules

@@ -179,6 +179,9 @@ ok("direction matters (one-ways, tolls)",
   ok("and the higher coach plans, which cannot get less", 
      listed.includes("coach_max") && listed.includes("coach_ultra"), listed);
   ok("it does not name a client-only tier", !listed.includes("premium"), listed);
+  // Kevin's S198 decision: Coach and above, not the Connect entry rung.
+  ok("Connect does NOT get traffic (it is the upgrade reason)",
+     !listed.includes("coach_connect"), listed);
 }
 
 // ── estimateDrive against a fake Firestore + fake network ───────────────────

@@ -16083,12 +16083,23 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // (caliq-plans.active, default "self"), which is not where a trainer tracking
   // in their own local plan file would ever look — the data would land in a plan
   // they never open, i.e. the exact "my workout never showed up" symptom.
-  const setMyTracker = async (tzId, planId) => {
+  // ⚠️ `targetUid` EXISTS BECAUSE THIS WROTE `uid: meUid` UNCONDITIONALLY (S198).
+  // Kevin tracks himself in a CONNECTED CLIENT ACCOUNT ("Kev Cam"), not in a
+  // local plan file. This function overwrote the whole link entry with his
+  // TRAINER uid, so the moment he used "My watch data" it silently stole the
+  // Trainerize id away from that account: his Garmin calories stopped arriving
+  // where he looks on 2026-08-08 and piled up in a trainer-side plan no screen
+  // can open. He reported it as "I have not seen his calories for weeks", and
+  // he was right. S196w read the same complaint as a sorting problem and
+  // reordered the list — the plan he wanted was never IN the list.
+  const setMyTracker = async (tzId, planId, targetUid) => {
     setTzMeBusy(true);
     try {
-      await writeTzLinks((links) => { links[tzId] = { uid: meUid, healthOnly: true, planId }; });
+      const uid = targetUid || meUid;
+      await writeTzLinks((links) => { links[tzId] = { uid, healthOnly: true, planId }; });
       setTzMe(Number(tzId)); setTzMePlan(planId); setTzMePick(null); setTzMePlanFor(null);
-      setTzMsg({ ok: true, text: "Watch data on — your tracker's calories land in that plan on the next sync." });
+      const who = uid === meUid ? "that plan" : "that client's account";
+      setTzMsg({ ok: true, text: `Watch data on — your tracker's calories land in ${who} on the next sync.` });
     } catch { setTzMsg({ ok: false, text: "Couldn't save that — try again." }); }
     setTzMeBusy(false);
   };
@@ -17380,6 +17391,28 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                       Which plan should the watch data go into? Pick the one you actually track in —
                       most recently used first.
                     </div>
+                    {/* A trainer who tracks THEMSELVES usually does it in their own
+                        client account, not in a plan file on the coach side. That
+                        account was never offered here, which is why "the plan I use"
+                        appeared to be missing however the list was sorted. */}
+                    {!!(clients || []).length && (
+                      <>
+                        <div className="mb-1 mt-0.5 text-[.66rem] font-bold uppercase tracking-wide text-muted">Connected accounts</div>
+                        <div className="flex flex-col gap-1 mb-2">
+                          {(clients || []).map((c) => (
+                            <button key={c.uid} onClick={() => setMyTracker(tzMePlanFor, c.activePlanId || "self", c.uid)} disabled={tzMeBusy}
+                              className="flex items-center justify-between gap-2 rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-fg cursor-pointer text-left">
+                              <span className="min-w-0">
+                                <span className="block truncate">{c.name || c.email || "Client"}</span>
+                                <span className="block text-[.66rem] text-muted">their own account</span>
+                              </span>
+                              <span className="text-primary font-bold shrink-0">Use this</span>
+                            </button>
+                          ))}
+                        </div>
+                        <div className="mb-1 text-[.66rem] font-bold uppercase tracking-wide text-muted">Your plan files</div>
+                      </>
+                    )}
                     <div className="flex flex-col gap-1 max-h-[320px] overflow-auto">
                       {(profiles || []).filter((pf) => pf && !pf.isSimulation)
                         .slice()

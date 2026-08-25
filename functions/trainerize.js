@@ -658,8 +658,21 @@ async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDat
   return { d, step };
   });
   let mealDays = 0, healthDays = 0, workoutDays = 0;
-  try { mealDays = await syncClientNutrition(db, targetUid, planId, u.id, auth, days); }
-  catch (e) { console.error("nutrition sync failed for", u.id, e && e.message); }
+  // ⚠️ MEAL SYNC IS OFF (Kevin's call, S198). Nobody on the roster had logged
+  // food in Trainerize in about twelve weeks — the food data lives in Glidna
+  // now — so every sync was making a detail call per Trainerize-native day to
+  // import nothing, and any day it DID import arrived as a second set of meals
+  // beside the real ones. Calories BURNED is the part worth keeping, and that
+  // is syncClientHealth below, which is untouched.
+  //
+  // Deliberately left in place rather than deleted: the function, its tests and
+  // the documented endpoint contracts are all still correct, and turning this
+  // back on is one line if a client ever starts logging there again.
+  const MEAL_SYNC_ENABLED = false;
+  if (MEAL_SYNC_ENABLED) {
+    try { mealDays = await syncClientNutrition(db, targetUid, planId, u.id, auth, days); }
+    catch (e) { console.error("nutrition sync failed for", u.id, e && e.message); }
+  }
   let healthRange = null, healthSeen = 0;
   try { const hr = await syncClientHealth(db, targetUid, planId, u.id, auth, days); healthDays = hr.days; healthSeen = hr.seen; healthRange = hr; }
   catch (e) { console.error("health sync failed for", u.id, e && e.message); }
