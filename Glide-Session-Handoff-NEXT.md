@@ -1,6 +1,6 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S197r) — a live sign-out bug fixed; booking loop verified end to end
+## ▶️ START HERE (S197w) — an adversarial review of this session found 8 real defects; all fixed
 
 Everything below is DEPLOYED AND PUSHED. Working tree clean, build passing,
 230 rules tests green. Nothing is half-finished.
@@ -64,6 +64,48 @@ that needs an index somebody has to remember to deploy.
 It was caught because of S197g — "travel check unavailable: functions/internal"
 in the console. Before that change it would have been a feature that quietly
 never worked.
+
+### 0a. ⚠️ THE REVIEW OF THIS SESSION'S OWN WORK — 8 REAL DEFECTS, ALL FIXED
+
+A 29-agent adversarial review of everything shipped this session raised 28,
+10 survived refutation, and 8 were real. **Six were introduced by this
+session's own fixes.** That is the third time the pattern is on record (S186,
+S196b): a fix's own bugs are the ones nobody is looking for.
+
+The worst two were not from the review at all — they came from finally running
+eslint over the repo:
+
+- **Tapping "Progress Snapshot" WHITE-SCREENED THE APP.** `DailyDashboard` read
+  `logAdherence`, which was never one of its props. Any plan with 2+ weigh-ins;
+  reproduced in production before fixing. Live since 2026-07-29.
+- **`applySnapshotAndSyncs` threw on every call** — `d` and `step` returned from
+  outside the callback S197f moved them into. Every Trainerize import and every
+  scheduled auto-sync, and Kevin's auto-sync is ON.
+
+From the review, all mine, all fixed:
+1. **Merging broke offline plan edits** — runTransaction cannot commit offline
+   where setDoc queued; autoSave swallows errors, so the edit vanished.
+2. **Signing out ate unsynced writes** — clearIndexedDbPersistence deletes the
+   pending queue, and the 30-minute idle timer calls it unattended.
+3. **`TRAFFIC_AWARE_TIERS` named no real subscription** — read off the pricing
+   grid labels instead of the billing catalog, so no paying coach could ever
+   get traffic-aware times while the UI said their plan included them.
+4. **A spent `homeIntent` bounced clients off their own home screen** on every
+   remount.
+5. **New plans silently reverted to eat-back** — the merge baseline was seeded
+   with data the server had never seen, so `deficitMode` read as unchanged.
+6. **`booking-request` dropped the trainer on an empty calendar** — the inbox is
+   on the dashboard. Kevin's original complaint, one tag along.
+7. **`trafficAware` was derived from the key, not the legs**, so a configured
+   key would claim traffic over straight-line numbers.
+
+⚠️ **`npm run check:undef` now exists and should stay green.** eslint's no-undef
+had two of these the whole time. Nobody ran it because a blanket lint reports
+~380 pre-existing style errors and can never go green, so the real signal was
+buried. That script checks ONE rule across src/, functions/ and scripts/.
+
+**Not verified, low:** `normalizeAddress` strips the token after "ste", which
+would mangle "Sainte-" street names. Cosmetic cache-key collision; left.
 
 ### 0b. ⚠️ FIXED S197r — SIGNING OUT LEFT THE WHOLE CACHE BEHIND
 
