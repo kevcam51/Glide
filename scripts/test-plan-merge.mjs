@@ -103,5 +103,20 @@ ok("the trainer's program edit lands", m2.strength.Monday.length === 2, m2.stren
 ok("the AI's workout survives", m2.checkIns.length === 1, m2.checkIns);
 ok("the AI's macro change survives", m2.macroTargets.protein === 200, m2.macroTargets);
 
+// ── a BRAND-NEW plan must save every field it starts with ──────────────────
+// createProfile seeds data the server has never seen. If the baseline is that
+// same object, the first save diffs it against itself and writes nothing —
+// which silently dropped deficitMode from every plan created in-app.
+{
+  const fresh = { deficitMode: "accelerate", gender: "female" };
+  const written = mergePlanData(null, null, fresh);
+  ok("a null baseline writes the whole document", written.deficitMode === "accelerate", written);
+  ok("and keeps its other seeded fields", written.gender === "female", written);
+  // The failure mode it replaced, pinned so it cannot come back:
+  const wrong = mergePlanData(null, fresh, fresh);
+  ok("baseline === next would have written NOTHING (the bug)",
+     Object.keys(wrong).length === 0, wrong);
+}
+
 console.log(`  ${checks - fails}/${checks} assertions passed`);
 process.exit(fails ? 1 : 0);

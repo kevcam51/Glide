@@ -22368,7 +22368,7 @@ function SaveFailedBanner({ text, onDismiss }) {
     </div>, document.body);
 }
 
-function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPrefs, onSetNotifPrefs, premium = true, billingHold = null, homeIntent = null }) {
+function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPrefs, onSetNotifPrefs, premium = true, billingHold = null, homeIntent = null, onIntentHandled }) {
   // The client's plan lives in their own account as "caliq-self"; today's log is
   // "caliq-log-self-{date}". The client is always on their own account (no remote
   // routing), so we read/write their own window.storage directly.
@@ -22487,13 +22487,20 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
     // the card agree instead of one of them being a dead end.
     else if (homeIntent.kind === "weighIn") setShowWt(true);
     else if (homeIntent.kind === "food") onOpenPlan();
+    // ⚠️ TELL APP IT IS SPENT (S197v). lastIntentRef is a ref, so it resets
+    // whenever this component REMOUNTS — and App held the intent forever. Going
+    // Home → plan → Home re-fired it: for "food" that means onOpenPlan() again,
+    // so the client was bounced off their own home screen every time they
+    // returned to it, with only a reload to escape.
+    if (onIntentHandled) onIntentHandled();
   }, [homeIntent]);
 
   // The card intent is separate because it cannot act until a trainer is known.
   const openCardSetup = !!(homeIntent && homeIntent.kind === "card" && homeIntent.n !== lastIntentRef.current);
   useEffect(() => {
     if (!openCardSetup || cardIntentDone) return;
-    if (trainerInfo) { setShowSessions(true); setCardIntentDone(true); setOpenedForCard(true); lastIntentRef.current = homeIntent.n; return; }
+    if (trainerInfo) { setShowSessions(true); setCardIntentDone(true); setOpenedForCard(true); lastIntentRef.current = homeIntent.n;
+      if (onIntentHandled) onIntentHandled(); return; }
     // No trainer resolved YET. That's the normal case for the person this link
     // is for: they signed up through it, so they're being linked to the trainer
     // (RolePanel's invite auto-link) in the same breath — and the lookup that
@@ -29398,7 +29405,14 @@ export default function App() {
     saveIndex(up);
     const fresh = {...EMPTY_DATA, deficitMode: NEW_PLAN_DEFICIT_MODE};
     setData(fresh);
-    lastSnapshotRef.current = fresh;
+    // ⚠️ NULL, NOT `fresh` (S197v). This ref is the merge baseline, and it means
+    // "what the server already has" — but nothing has been written yet for a
+    // brand-new plan. Seeding it with `fresh` made the first save diff `fresh`
+    // against itself, so deficitMode counted as unchanged and was never
+    // persisted: every plan created in-app silently reverted from "accelerate"
+    // to the eat-back default the next time it was opened. A null baseline is
+    // exactly the case mergePlanData handles by writing the whole document.
+    lastSnapshotRef.current = null;
     setStep(0);
     setActiveRemoteUid(null);
     setActiveId(id);
@@ -30609,6 +30623,7 @@ export default function App() {
         onOpenTimeline={async () => { requestPlanTab("Timeline"); await selectProfile("self"); setShowDash(false); }}
         meUid={meUid} meName={meName} role={role} premium={mePremium}
         billingHold={meBillingHold} homeIntent={homeIntent}
+        onIntentHandled={() => setHomeIntent(null)}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs} /></>;
     }
     if (isTrainerHome && homeTab === "analytics") {
