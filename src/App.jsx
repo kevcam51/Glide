@@ -15934,7 +15934,7 @@ const IdBadge = ({ id, n, className = "" }) => {
   );
 };
 
-function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, meUid, meName, meRole, notifPrefs, onSetNotifPrefs, rosterCap, rosterBlocked }) {
+function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onRosterChanged, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, meUid, meName, meRole, notifPrefs, onSetNotifPrefs, rosterCap, rosterBlocked }) {
   const [rosterPlans, setRosterPlans] = useState(false);   // plan picker from the roster banner (S179b)
   const [details, setDetails] = useState({}); // id -> { tdee, target }
   // AI-client seats (S176f): who the AI has worked on this month vs the plan's
@@ -15957,6 +15957,42 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const [tzSyncing, setTzSyncing] = useState(false); // manual "sync now" in flight
   const [tzMsg, setTzMsg] = useState(null); // { ok, text }
   const [tzPick, setTzPick] = useState(null); // null | {loading:true} | {clients:[…], sel:{id:bool}}
+  // ── Link a Trainerize client to a plan that ALREADY EXISTS (S197z, Kevin) ──
+  // The importer only ever CREATED plans. Kevin had already built twelve by
+  // hand, with a month of work in them, and there was no way to tell the sync
+  // which Trainerize person each one is — so the 30-minute auto-sync covered
+  // exactly nobody, and the only offered route was re-importing, which would
+  // have made duplicates beside the plans he actually uses.
+  //
+  // The link IS just `trainerizeId` on the index entry — that is the whole key
+  // the sync looks for (functions/trainerize.js). So this writes that one field
+  // and touches nothing else: no plan data, no logs, no check-ins.
+  const [tzLinkFor, setTzLinkFor] = useState(null);  // the roster row being linked
+  const [tzLinkMsg, setTzLinkMsg] = useState("");
+  const linkPlanToTrainerize = async (planId, tzClient) => {
+    try {
+      const r = await window.storage.get("caliq-index");
+      const index = r && r.value ? (JSON.parse(r.value) || []) : [];
+      const entry = index.find((p) => p && p.id === planId);
+      if (!entry) { setTzLinkMsg("That plan is gone — reopen the list."); return; }
+      // Refuse to point two plans at one Trainerize person: the sync would write
+      // the same stats into both and neither would be the real one.
+      const clash = index.find((p) => p && p.trainerizeId === tzClient.id && p.id !== planId);
+      if (clash) {
+        setTzLinkMsg(`${tzClient.name} is already linked to “${clash.customName || clash.name || "another plan"}”.`);
+        return;
+      }
+      entry.trainerizeId = tzClient.id;
+      if (tzClient.email && !entry.email) entry.email = tzClient.email;
+      await window.storage.set("caliq-index", JSON.stringify(index));
+      if (onRosterChanged) await onRosterChanged();   // App owns the roster state
+      setTzLinkFor(null);
+      setTzLinkMsg(`Linked ${tzClient.name} → “${entry.customName || entry.name || "that plan"}”. The next sync fills in their latest stats; nothing already in the plan is removed.`);
+    } catch (e) {
+      console.error("link to trainerize failed", e);
+      setTzLinkMsg("Couldn't save that link — check your connection.");
+    }
+  };
   // 30-min background auto-sync kill switch — stored in the trainer's own kv
   // (caliq-tz-autosync {enabled}); the scheduled function checks it each run.
   // Default ON; only an explicit false turns it off.
@@ -17455,6 +17491,16 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         {c.status && c.status !== "active" && (
                           <span className="text-[10px] text-warn whitespace-nowrap">{c.status}</span>
                         )}
+                        {/* The route that did not exist: attach this person to a
+                            plan already in Glidna, instead of importing a second
+                            copy of them beside it. */}
+                        {!c.imported && (
+                          <button type="button"
+                            onClick={(e) => { e.preventDefault(); setTzLinkMsg(""); setTzLinkFor(c); }}
+                            className="text-[10px] font-bold text-primary bg-transparent border-0 cursor-pointer whitespace-nowrap underline p-1 -m-1">
+                            link to a plan
+                          </button>
+                        )}
                       </label>
                     ))}
                     {!tzPick.clients.length && <div className="text-sm text-muted">No clients found in your Trainerize group.</div>}
@@ -17467,6 +17513,30 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                     </button>
                     <button onClick={() => setTzPick(null)} className={mBtnCls}>Cancel</button>
                   </div>
+                  {tzLinkFor && (
+                    <div className="mt-2.5 p-2.5 rounded-lg border border-primary" style={{ background: "color-mix(in srgb, var(--color-primary) 6%, var(--color-surface))" }}>
+                      <div className="text-sm text-fg mb-1.5">
+                        Which plan is <b>{tzLinkFor.name}</b>?
+                      </div>
+                      <div className={`${subCls} mb-2`}>
+                        Nothing in the plan is deleted. Trainerize becomes the source for weight,
+                        body stats and goals from the next sync on; your notes, logs and check-ins stay.
+                      </div>
+                      <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
+                        {(profiles || []).filter((p) => p && !p.isSimulation && !p.trainerizeId).map((p) => (
+                          <button key={p.id} onClick={() => linkPlanToTrainerize(p.id, tzLinkFor)}
+                            className="text-left text-sm text-fg bg-surface2 border border-border rounded px-2.5 py-2 cursor-pointer hover:border-primary">
+                            {p.customName || p.name || "(unnamed plan)"}
+                          </button>
+                        ))}
+                        {!(profiles || []).some((p) => p && !p.isSimulation && !p.trainerizeId) && (
+                          <div className="text-sm text-muted">Every plan is already linked to someone.</div>
+                        )}
+                      </div>
+                      <button onClick={() => setTzLinkFor(null)} className={`${mBtnCls} mt-2`}>Cancel</button>
+                    </div>
+                  )}
+                  {tzLinkMsg && <div className="mt-2 text-sm text-fg">{tzLinkMsg}</div>}
                   <div className={`${subCls} mt-1.5`}>Re-importing someone already in Glidna refreshes their stats from Trainerize (no duplicates).</div>
                 </>
               )}
@@ -30665,7 +30735,7 @@ export default function App() {
         onNewSimulation={()=>createProfile(null,{isSimulation:true})}
         onConvertSimulation={convertSimulation}
         onDeletePlan={removeLocalProfileById}
-        onTrainerizeImport={importFromTrainerize}
+        onTrainerizeImport={importFromTrainerize} onRosterChanged={reloadProfilesIndex}
         meUid={meUid} meName={meName} meRole={role} rosterCap={rosterCap} rosterBlocked={rosterBlocked}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
       /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
