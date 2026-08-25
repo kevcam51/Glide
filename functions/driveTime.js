@@ -36,7 +36,12 @@ function normalizeAddress(s) {
     .replace(/\b(road)\b/g, "rd")
     .replace(/\b(drive)\b/g, "dr")
     .replace(/\b(boulevard|blvd)\b/g, "blvd")
-    .replace(/\b(apartment|apt|unit|suite|ste)\b\s*\S+/g, " ")  // unit numbers do not move the pin
+    // Unit numbers do not move the pin, so they are dropped — but ONLY when what
+    // follows actually looks like a unit. Swallowing the next token whatever it
+    // was turned "100 Ste Catherine St" into "100 st", destroying the street
+    // name and collapsing unrelated addresses onto one cache key. A unit starts
+    // with a digit ("Suite 200", "Apt 3B") or is a lone letter ("Apt B").
+    .replace(/\b(apartment|apt|unit|suite|ste)\b\.?\s*#?\s*(\d[\w-]*|[a-z]\b)/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

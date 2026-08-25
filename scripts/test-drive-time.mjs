@@ -32,6 +32,21 @@ ok("and therefore shares a cache key",
 ok("a unit number does not move the pin",
    D.normalizeAddress("50 Ocean Dr Apt 3B, Miami") === D.normalizeAddress("50 Ocean Drive, Miami"),
    [D.normalizeAddress("50 Ocean Dr Apt 3B, Miami"), D.normalizeAddress("50 Ocean Drive, Miami")]);
+// A street name that merely BEGINS like a unit designator must survive. This
+// used to swallow the following token unconditionally, so "100 Ste Catherine
+// St" normalised to "100 st" — a destroyed street name, and a cache key shared
+// with anything else that collapsed to the same thing.
+ok("\"Ste\" in a street name is not a unit number",
+   D.normalizeAddress("100 Ste Catherine St, Montreal").includes("catherine"),
+   D.normalizeAddress("100 Ste Catherine St, Montreal"));
+ok("a real suite number is still dropped",
+   !D.normalizeAddress("100 Main St Suite 200, Miami").includes("200"),
+   D.normalizeAddress("100 Main St Suite 200, Miami"));
+ok("a lettered unit is still dropped",
+   !D.normalizeAddress("12 King St Unit 4, Toronto").includes("4"),
+   D.normalizeAddress("12 King St Unit 4, Toronto"));
+ok("two Ste-streets with different names stay distinct",
+   D.addressKey("100 Ste Catherine St") !== D.addressKey("100 Ste Anne St"));
 ok("different addresses do not collide",
    D.addressKey("123 Main St Miami") !== D.addressKey("124 Main St Miami"));
 ok("an empty address normalises to empty", D.normalizeAddress("  ") === "");
