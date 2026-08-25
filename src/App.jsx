@@ -15969,6 +15969,22 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // and touches nothing else: no plan data, no logs, no check-ins.
   const [tzLinkFor, setTzLinkFor] = useState(null);  // the roster row being linked
   const [tzLinkMsg, setTzLinkMsg] = useState("");
+  // Link a Trainerize person to a CONNECTED GLIDNA ACCOUNT rather than to a
+  // local plan file (S198b, Kevin: "I want to connect it to the glide plan
+  // already made called kev cam"). Those are two different things underneath —
+  // a local plan is `trainerizeId` on the index entry, an account is an entry in
+  // caliq-tz-links — which is exactly why the first version of this sheet only
+  // offered half of them and the plan he wanted appeared to be missing.
+  const linkAccountToTrainerize = async (client, tzClient) => {
+    try {
+      await writeTzLinks((links) => { links[tzClient.id] = client.uid; });
+      setTzLinkFor(null);
+      setTzLinkMsg(`Linked ${tzClient.name} → ${client.name}'s account. Their Trainerize stats and watch data sync in from the next run; nothing already in the account is removed.`);
+    } catch (e) {
+      console.error("link to account failed", e);
+      setTzLinkMsg("Couldn't save that link — check your connection.");
+    }
+  };
   const linkPlanToTrainerize = async (planId, tzClient) => {
     try {
       const r = await window.storage.get("caliq-index");
@@ -17555,6 +17571,21 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         Nothing in the plan is deleted. Trainerize becomes the source for weight,
                         body stats and goals from the next sync on; your notes, logs and check-ins stay.
                       </div>
+                      {!!(clients || []).length && (
+                        <>
+                          <div className="mb-1 text-[.66rem] font-bold uppercase tracking-wide text-muted">Connected accounts</div>
+                          <div className="flex flex-col gap-1 mb-2">
+                            {(clients || []).map((c) => (
+                              <button key={c.uid} onClick={() => linkAccountToTrainerize(c, tzLinkFor)}
+                                className="text-left text-sm text-fg bg-surface2 border border-border rounded px-2.5 py-2 cursor-pointer hover:border-primary">
+                                {c.name}
+                                <span className="block text-[.66rem] text-muted">their own account</span>
+                              </button>
+                            ))}
+                          </div>
+                          <div className="mb-1 text-[.66rem] font-bold uppercase tracking-wide text-muted">Your plan files</div>
+                        </>
+                      )}
                       <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
                         {(profiles || []).filter((p) => p && !p.isSimulation && !p.trainerizeId).map((p) => (
                           <button key={p.id} onClick={() => linkPlanToTrainerize(p.id, tzLinkFor)}
@@ -17563,7 +17594,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                           </button>
                         ))}
                         {!(profiles || []).some((p) => p && !p.isSimulation && !p.trainerizeId) && (
-                          <div className="text-sm text-muted">Every plan is already linked to someone.</div>
+                          <div className="text-sm text-muted">Every plan file is already linked to someone.</div>
                         )}
                       </div>
                       <button onClick={() => setTzLinkFor(null)} className={`${mBtnCls} mt-2`}>Cancel</button>
