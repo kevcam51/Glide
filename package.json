@@ -10,7 +10,7 @@
     "gen:icons": "node scripts/gen-icons.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:units": "node scripts/test-plan-merge.mjs && node scripts/test-plan-txn.mjs && node scripts/test-plan-tools.mjs && node scripts/test-tz-workouts.mjs && node scripts/test-health-sync.mjs && node scripts/test-notif-routes.mjs && node scripts/test-drive-time.mjs",
+    "test:units": "node scripts/test-offline-paths.mjs && node scripts/test-plan-merge.mjs && node scripts/test-plan-txn.mjs && node scripts/test-plan-tools.mjs && node scripts/test-tz-workouts.mjs && node scripts/test-health-sync.mjs && node scripts/test-notif-routes.mjs && node scripts/test-drive-time.mjs",
     "check:undef": "node scripts/check-undef.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project calorieiq-rules-test \"node firestore.rules.test.js\"",
     "check:stale": "node scripts/check-stale-functions.mjs",
