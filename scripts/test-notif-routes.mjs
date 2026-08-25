@@ -71,6 +71,9 @@ ok("session-no-card-* reaches the CARD sheet, not the sessions list",
    notifDestination({ tag: "session-no-card-abc", url: "/" }) === "card");
 ok("session-nocard-* (the other spelling) also reaches the card sheet",
    notifDestination({ tag: "session-nocard-abc", url: "/" }) === "card");
+ok("a client's ASK reaches the trainer's inbox, not their calendar",
+   notifDestination({ tag: "booking-request", url: "/" }) === "todos",
+   notifDestination({ tag: "booking-request", url: "/" }));
 ok("a booking confirmation can reach the calendar it mentions",
    notifDestination({ tag: "booking-accepted-r1", url: "/" }) === "sessions");
 ok("a declined booking goes there too, so they can ask again",

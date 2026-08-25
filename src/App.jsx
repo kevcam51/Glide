@@ -28856,6 +28856,12 @@ export default function App() {
     // and sessionSettle.js emits `session-no-card-*`. Both mean "add a card",
     // and matching only the first sent the billing one to the wrong screen.
     if (tag.startsWith("session-nocard") || tag.startsWith("session-no-card")) return "card";
+    // ⚠️ `booking-request` GOES THE OTHER WAY (S197w). It is the notification a
+    // CLIENT's ask sends the TRAINER, and the accept/deny inbox lives on their
+    // dashboard, not the calendar — so the generic booking- prefix below was
+    // dropping them on a calendar with nothing to answer. Same dead end Kevin
+    // reported for to-dos, one tag along.
+    if (tag.startsWith("booking-request")) return "todos";
     // `booking-accepted-*` / `booking-declined-*` say "it's on your calendar" —
     // so they had better be able to reach it.
     if (tag.startsWith("session-") || tag.startsWith("booking-")) return "sessions";

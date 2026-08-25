@@ -402,9 +402,12 @@ exports.sessionTravel = onCall(
         pair: k, minutes: v.minutes, miles: v.miles != null ? Math.round(v.miles * 10) / 10 : null,
         source: v.source, cached: !!v.cached,
       })),
-      // So the UI can say how much to trust the numbers rather than implying
-      // they are traffic-aware when they are not.
-      trafficAware: !!key,
+      // ⚠️ DERIVED FROM THE LEGS, NOT FROM THE KEY (S197w). This used to report
+      // `!!key`, but routesLive falls back to the straight line whenever Routes
+      // fails or a geocode misses — so a configured key made the UI announce
+      // "Drive times include current traffic" over numbers that knew nothing
+      // about traffic. Say it only when something actually came back that way.
+      trafficAware: Object.values(legs).some((v) => v && v.source === "routes"),
       // Why it is not, when it is not — so the UI can tell the difference
       // between "your plan does not include this" and "nobody has one yet".
       trafficAvailable: keyPresent,
