@@ -11720,15 +11720,26 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
       <div className="dash-ring-wrap">
         <div onClick={()=>setShowBurnModes(true)}
           title="Tap to see how today's target is built"
-          style={{position:"relative",width:"150px",height:"150px",cursor:"pointer"}}>
+          style={{position:"relative",width:"184px",height:"184px",cursor:"pointer"}}>
           <svg viewBox="0 0 140 140" style={{width:"100%",height:"100%",transform:"rotate(-90deg)"}}>
             <circle cx="70" cy="70" r={ringR} fill="none" stroke="var(--border)" strokeWidth="8"/>
             <circle cx="70" cy="70" r={ringR} fill="none" stroke={ringColor} strokeWidth="8"
               strokeDasharray={ringC} strokeDashoffset={ringOffset}
               strokeLinecap="round" style={{transition:"stroke-dashoffset .5s ease"}}/>
           </svg>
-          <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-            <div style={{fontFamily:"'Sora',sans-serif",fontSize:"2.2rem",color:overCals?(overMild?"var(--yellow)":"var(--red)"):"var(--accent)",lineHeight:1}}>{remaining.toLocaleString()}</div>
+          <div style={{position:"absolute",inset:0,padding:"0 26px",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+            {/* ⚠️ FOUR LINES LIVE INSIDE THIS CIRCLE (S198n, Kevin: "it might
+                need to be a little bigger so all of the numbers and text can
+                fit"): the number, CAL REMAINING, the deficit word, and
+                sometimes the with-workout line. At 150px a four-digit total
+                like "2,365" filled the width edge to edge. The ring is bigger
+                now, and the number also steps DOWN when the string is long, so
+                a five-character value cannot collide with the stroke however
+                large the total gets. */}
+            <div style={{fontFamily:"'Sora',sans-serif",
+              fontSize: remaining.toLocaleString().length >= 6 ? "2.1rem"
+                : remaining.toLocaleString().length >= 5 ? "2.45rem" : "2.75rem",
+              color:overCals?(overMild?"var(--yellow)":"var(--red)"):"var(--accent)",lineHeight:1}}>{remaining.toLocaleString()}</div>
             <div style={{fontSize:".65rem",color:overCals?(overMild?"var(--yellow)":"var(--red)"):"var(--muted)",letterSpacing:".5px"}}>{overCals?"CAL OVER":"CAL REMAINING"}</div>
             {/* Deficit / surplus vs today's target (S108b, Kevin's spec).
                 Just the WORD now (no number) — "Deficit"/"Surplus"/"On target" —
@@ -11755,6 +11766,42 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           </div>
         </div>
       </div>
+      {/* ── Daily calorie targets (S198n, Kevin's ask) ───────────────────────
+          The same four numbers as "Daily Targets" on the personalised plan
+          page, brought to the screen people actually live on. Same maths —
+          floor(tdee − cut) — deliberately, because two screens quoting
+          different daily targets is worse than one screen not quoting it.
+          The rate the plan is ACTUALLY set to is marked, so this reads as
+          "here is where you are, and here is what the others would be"
+          rather than as four numbers with no anchor. */}
+      {isFinite(tdee) && tdee > 0 && (
+        <div className="card" style={{marginTop:"14px"}}>
+          <div className="sec-title" style={{marginBottom:"8px"}}>Daily Calorie Targets</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"6px"}}>
+            {[{lbl:"Maintain",cut:0,rate:0},{lbl:"½ lb/wk",cut:250,rate:0.5},
+              {lbl:"1 lb/wk",cut:500,rate:1},{lbl:"2 lbs/wk",cut:1000,rate:2}].map((t)=>{
+              const active = Math.abs(planRate - t.rate) < 0.01;
+              const val = Math.max(1200, Math.floor(tdee - t.cut));
+              const floored = Math.floor(tdee - t.cut) < 1200;
+              return (
+                <div key={t.lbl} style={{padding:"8px 4px",borderRadius:"9px",textAlign:"center",
+                  background: active ? "rgba(var(--accent-rgb),.12)" : "var(--s2)",
+                  border: active ? "1px solid var(--accent)" : "1px solid var(--border)"}}>
+                  <div style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>{t.lbl}</div>
+                  <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.05rem",
+                    color: active ? "var(--accent)" : "var(--text)"}}>{val.toLocaleString()}</div>
+                  <div style={{fontSize:".5rem",color:"var(--muted)"}}>{floored ? "1,200 floor" : "cal/day"}</div>
+                  {active && <div style={{fontSize:".5rem",color:"var(--accent)",fontWeight:800,marginTop:"1px"}}>YOURS</div>}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{fontSize:".62rem",color:"var(--muted)",marginTop:"7px",lineHeight:1.4}}>
+            Based on your body\u2019s daily burn of {Math.round(tdee).toLocaleString()} cal. Today\u2019s ring
+            uses your own target, which also counts anything you have scheduled.
+          </div>
+        </div>
+      )}
       {/* Discoverability (S104, Kevin: "I didn't see the weight projection").
           The projected weight loss lives in the sheet the ring opens — say so,
           right under the ring, so it's found. */}
