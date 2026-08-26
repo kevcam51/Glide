@@ -16047,6 +16047,11 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       // tell them apart, so they try again.
       setTzForClient(null);
       setTzLinkFor(null);
+      // Which card shows the result, and refresh the badge state from what was
+      // actually written. Both of these went missing in an earlier edit that
+      // used a silent replace — the link worked, and said nothing, again.
+      setTzLinkedTo(client.uid);
+      await refreshTzLinks();
       setTzLinkMsg(`Linked ${tzClient.name} → ${client.name}'s account. Their Trainerize stats and watch data sync in from the next run; nothing already in the account is removed.`
         + (replaced ? ` A different Trainerize client was pointed at ${client.name} before — that one has been disconnected, so only this link syncs.` : ""));
     } catch (e) {
