@@ -11862,6 +11862,14 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               {onSetWeeklyRate && (
                 <button onClick={()=>{ onSetWeeklyRate(previewRate);
                     if (manualTarget != null && onSetCalorieTarget) onSetCalorieTarget(0);
+                    // ⚠️ AND KEEP THE DAILY GOAL HONEST (S198u). Deficit /
+                    // Maintain / Surplus decides whether the word under the ring
+                    // reads green or red — it is "what counts as a good day",
+                    // not a calorie number. Choosing Maintain as your TARGET
+                    // while that still says Deficit would paint a perfect
+                    // maintenance day red. The two are separate settings and
+                    // stay separate; this only stops them contradicting.
+                    if (onSetCalorieGoal) onSetCalorieGoal(previewRate === 0 ? "maintain" : "deficit");
                     setPreviewRate(null); }}
                   style={{flex:2,padding:"8px",borderRadius:"8px",cursor:"pointer",border:"none",
                     background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)",
@@ -11961,7 +11969,14 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           them (rides setDataAndSave like every other plan field). */}
       {onSetCalorieGoal && (
         <div style={{marginTop:"10px",marginBottom:"14px",textAlign:"center"}}>
-          <div style={{fontSize:".56rem",color:"var(--muted)",letterSpacing:".5px",textTransform:"uppercase",fontWeight:700,marginBottom:"6px"}}>Daily goal</div>
+          <div style={{fontSize:".56rem",color:"var(--muted)",letterSpacing:".5px",textTransform:"uppercase",fontWeight:700,marginBottom:"2px"}}>Daily goal</div>
+          {/* These three never set a calorie number and it was never said so —
+              they decide what counts as a good day, which is why the word under
+              the ring turns green or red. The number lives in Daily Calorie
+              Targets below. */}
+          <div style={{fontSize:".6rem",color:"var(--muted)",marginBottom:"6px"}}>
+            What counts as a good day — colours the word in the ring. Your calorie number is set below.
+          </div>
           <div style={{display:"inline-flex",gap:6}}>
             {[["deficit","Deficit"],["maintain","Maintain"],["surplus","Surplus"]].map(([v,l])=>{
               const on = goalDir===v;
@@ -14402,9 +14417,17 @@ function MetricLineChart({ points, label, unit, color, onEditPoint }) {
           <path d={path} fill="none" stroke={color} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
           {data.map((p, i) => (
             <g key={i}>
+              {/* ⚠️ THE DOT IS NOT THE TAP TARGET (S198u, Kevin: "I clicked on
+                  the charts and they did not seem editable"). A 5px radius is a
+                  10px target — under half the 44px a finger needs — so the
+                  feature worked and was effectively unhittable on a phone. This
+                  invisible circle is the target; the dot is just what you see. */}
+              {onEditPoint && (
+                <circle cx={xAt(i)} cy={yAt(p.v)} r={20} fill="transparent"
+                  style={{ cursor: "pointer" }} onClick={() => onEditPoint(p)} />
+              )}
               <circle cx={xAt(i)} cy={yAt(p.v)} r={onEditPoint ? 5 : 3.4} fill={color}
-                style={onEditPoint ? { cursor: "pointer" } : undefined}
-                onClick={onEditPoint ? () => onEditPoint(p) : undefined} />
+                style={onEditPoint ? { cursor: "pointer", pointerEvents: "none" } : undefined} />
               {/* Value label with a background-colored halo (paint-order: stroke)
                   so the number stays readable where the line passes behind it. */}
               <text x={xAt(i)} y={yAt(p.v) - 10} textAnchor="middle" fontSize="9.5" fontWeight="700"
@@ -15044,8 +15067,39 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                             never rendered. Nothing errored; they were just invisible. */}
                         {m.leanMassLbs != null && <span className="text-[.68rem] text-muted">lean {m.leanMassLbs} lbs</span>}
                         {m.fatMassLbs != null && <span className="text-[.68rem] text-muted">fat {m.fatMassLbs} lbs</span>}
-                        {m.bodyFatSource && <span className="text-[.62rem] text-muted">via {m.bodyFatSource === "scale" ? "scale/scanner" : m.bodyFatSource}</span>}
                       </div>
+                      {/* EVERY method that produced a number that day, named
+                          (S198u, Kevin: "I do not see the body fat % from the
+                          tape measure and caliper"). The headline figure is
+                          whichever source the plan prefers, which meant the
+                          others were computed and thrown away on screen — so a
+                          tape reading and a caliper reading could disagree by
+                          four points with no way to notice. The one in use is
+                          marked; the rest are shown for comparison, because
+                          disagreement between methods IS the useful signal. */}
+                      {(() => {
+                        const methods = [
+                          { k: "scale",   label: "Scale / scanner", v: m.manualBF },
+                          { k: "caliper", label: "Calipers",        v: m.caliperBF },
+                          { k: "tape",    label: "Tape (average)",  v: m.tapeBF },
+                          { k: "bailey",  label: "Tape · Bailey",   v: m.baileyBF, sub: true },
+                          { k: "navy",    label: "Tape · Navy",     v: m.navyBF,   sub: true },
+                        ].filter((x) => x.v != null);
+                        if (methods.length < 2) return null;
+                        return (
+                          <div className="mt-1.5 flex flex-col gap-0.5 border-t border-border pt-1.5">
+                            {methods.map((x) => (
+                              <div key={x.k} className="flex items-baseline justify-between gap-2">
+                                <span className={`text-[.66rem] ${x.sub ? "pl-2 text-muted" : "text-muted"}`}>{x.label}</span>
+                                <span className="text-[.72rem] font-semibold"
+                                  style={{ color: m.bodyFatSource === x.k ? "var(--accent)" : "var(--text-secondary)" }}>
+                                  {x.v}%{m.bodyFatSource === x.k ? " · in use" : ""}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })()}
