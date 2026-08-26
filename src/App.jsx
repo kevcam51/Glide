@@ -15985,30 +15985,6 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       setTzLinkMsg("Couldn't save that link — check your connection.");
     }
   };
-  const linkPlanToTrainerize = async (planId, tzClient) => {
-    try {
-      const r = await window.storage.get("caliq-index");
-      const index = r && r.value ? (JSON.parse(r.value) || []) : [];
-      const entry = index.find((p) => p && p.id === planId);
-      if (!entry) { setTzLinkMsg("That plan is gone — reopen the list."); return; }
-      // Refuse to point two plans at one Trainerize person: the sync would write
-      // the same stats into both and neither would be the real one.
-      const clash = index.find((p) => p && p.trainerizeId === tzClient.id && p.id !== planId);
-      if (clash) {
-        setTzLinkMsg(`${tzClient.name} is already linked to “${clash.customName || clash.name || "another plan"}”.`);
-        return;
-      }
-      entry.trainerizeId = tzClient.id;
-      if (tzClient.email && !entry.email) entry.email = tzClient.email;
-      await window.storage.set("caliq-index", JSON.stringify(index));
-      if (onRosterChanged) await onRosterChanged();   // App owns the roster state
-      setTzLinkFor(null);
-      setTzLinkMsg(`Linked ${tzClient.name} → “${entry.customName || entry.name || "that plan"}”. The next sync fills in their latest stats; nothing already in the plan is removed.`);
-    } catch (e) {
-      console.error("link to trainerize failed", e);
-      setTzLinkMsg("Couldn't save that link — check your connection.");
-    }
-  };
   // 30-min background auto-sync kill switch — stored in the trainer's own kv
   // (caliq-tz-autosync {enabled}); the scheduled function checks it each run.
   // Default ON; only an explicit false turns it off.
@@ -17552,13 +17528,21 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                   </div>
                   <div className="flex flex-col gap-1 max-h-64 overflow-y-auto">
                     {tzPick.clients.map((c) => (
-                      <label key={c.id} className="flex items-center gap-2.5 py-1.5 px-1 rounded cursor-pointer hover:bg-[rgba(var(--accent-rgb),.05)]">
-                        <input type="checkbox" checked={!!tzPick.sel[c.id]}
-                          onChange={(e) => setTzPick((p) => ({ ...p, sel: { ...p.sel, [c.id]: e.target.checked } }))}
-                          className="w-4 h-4 accent-[color:var(--color-primary)]" />
-                        <span className="text-sm text-fg flex-1 min-w-0 truncate">{c.name}
-                          {c.email ? <span className="text-muted text-xs"> · {c.email}</span> : null}
-                        </span>
+                      // ⚠️ THE BUTTON CANNOT LIVE INSIDE THE <label> (S198d, Kevin:
+                      // "I clicked link to a plan and nothing happened"). A click
+                      // anywhere in a label is forwarded to its control, so the
+                      // press went to the checkbox instead of the handler and the
+                      // row just ticked. The label now wraps ONLY the checkbox and
+                      // the name; the action is its sibling.
+                      <div key={c.id} className="flex items-center gap-2.5 py-1.5 px-1 rounded hover:bg-[rgba(var(--accent-rgb),.05)]">
+                        <label className="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer">
+                          <input type="checkbox" checked={!!tzPick.sel[c.id]}
+                            onChange={(e) => setTzPick((p) => ({ ...p, sel: { ...p.sel, [c.id]: e.target.checked } }))}
+                            className="w-4 h-4 accent-[color:var(--color-primary)]" />
+                          <span className="text-sm text-fg flex-1 min-w-0 truncate">{c.name}
+                            {c.email ? <span className="text-muted text-xs"> · {c.email}</span> : null}
+                          </span>
+                        </label>
                         {c.imported
                           ? <span className="text-[10px] font-bold text-success whitespace-nowrap"><Icon name="check" size={13} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />in Glidna</span>
                           : <span className="text-[10px] font-bold text-primary whitespace-nowrap">new</span>}
@@ -17568,14 +17552,15 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         {/* The route that did not exist: attach this person to a
                             plan already in Glidna, instead of importing a second
                             copy of them beside it. */}
-                        {!c.imported && (
-                          <button type="button"
-                            onClick={(e) => { e.preventDefault(); setTzLinkMsg(""); setTzLinkFor(c); }}
-                            className="text-[10px] font-bold text-primary bg-transparent border-0 cursor-pointer whitespace-nowrap underline p-1 -m-1">
-                            link to a plan
-                          </button>
-                        )}
-                      </label>
+                        {/* Offered on EVERY row, imported or not: being in Glidna
+                            already as a plan file is not the same as being linked
+                            to the account the person actually uses. */}
+                        <button type="button"
+                          onClick={() => { setTzLinkMsg(""); setTzLinkFor(c); }}
+                          className="text-[10px] font-bold text-primary bg-transparent border border-primary rounded px-1.5 py-1 cursor-pointer whitespace-nowrap">
+                          Link to client
+                        </button>
+                      </div>
                     ))}
                     {!tzPick.clients.length && <div className="text-sm text-muted">No clients found in your Trainerize group.</div>}
                   </div>
@@ -17590,36 +17575,36 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                   {tzLinkFor && (
                     <div className="mt-2.5 p-2.5 rounded-lg border border-primary" style={{ background: "color-mix(in srgb, var(--color-primary) 6%, var(--color-surface))" }}>
                       <div className="text-sm text-fg mb-1.5">
-                        Which plan is <b>{tzLinkFor.name}</b>?
+                        Who is <b>{tzLinkFor.name}</b> in Glidna?
                       </div>
+                      {/* ⚠️ CONNECTED ACCOUNTS ONLY — Kevin's rule (S198d): a link
+                          may only point at a plan that belongs to a real signed-in
+                          client. Offering local plan FILES here was worse than
+                          useless: a file has no account behind it, so the person
+                          could never see the synced data, and the two kinds of
+                          target look identical in a list while behaving nothing
+                          alike. Importing still creates plan files as before —
+                          this is only about attaching a Trainerize person to
+                          someone who actually logs in. */}
                       <div className={`${subCls} mb-2`}>
-                        Nothing in the plan is deleted. Trainerize becomes the source for weight,
-                        body stats and goals from the next sync on; your notes, logs and check-ins stay.
+                        Their Trainerize stats, body composition, workouts and watch data sync into
+                        that client's own account. Nothing already there is deleted — your notes,
+                        logs and check-ins stay, and a weigh-in entered here is not replaced by an
+                        older Trainerize one.
                       </div>
-                      {!!(clients || []).length && (
-                        <>
-                          <div className="mb-1 text-[.66rem] font-bold uppercase tracking-wide text-muted">Connected accounts</div>
-                          <div className="flex flex-col gap-1 mb-2">
-                            {(clients || []).map((c) => (
-                              <button key={c.uid} onClick={() => linkAccountToTrainerize(c, tzLinkFor)}
-                                className="text-left text-sm text-fg bg-surface2 border border-border rounded px-2.5 py-2 cursor-pointer hover:border-primary">
-                                {c.name}
-                                <span className="block text-[.66rem] text-muted">their own account</span>
-                              </button>
-                            ))}
-                          </div>
-                          <div className="mb-1 text-[.66rem] font-bold uppercase tracking-wide text-muted">Your plan files</div>
-                        </>
-                      )}
                       <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
-                        {(profiles || []).filter((p) => p && !p.isSimulation && !p.trainerizeId).map((p) => (
-                          <button key={p.id} onClick={() => linkPlanToTrainerize(p.id, tzLinkFor)}
+                        {(clients || []).map((c) => (
+                          <button key={c.uid} onClick={() => linkAccountToTrainerize(c, tzLinkFor)}
                             className="text-left text-sm text-fg bg-surface2 border border-border rounded px-2.5 py-2 cursor-pointer hover:border-primary">
-                            {p.customName || p.name || "(unnamed plan)"}
+                            {c.name}
+                            <span className="block text-[.66rem] text-muted">{c.email || "their own account"}</span>
                           </button>
                         ))}
-                        {!(profiles || []).some((p) => p && !p.isSimulation && !p.trainerizeId) && (
-                          <div className="text-sm text-muted">Every plan file is already linked to someone.</div>
+                        {!(clients || []).length && (
+                          <div className="text-sm text-muted">
+                            No connected clients yet. A Trainerize person can only be linked to
+                            someone who has signed in to Glidna — invite them first, then come back.
+                          </div>
                         )}
                       </div>
                       <button onClick={() => setTzLinkFor(null)} className={`${mBtnCls} mt-2`}>Cancel</button>
