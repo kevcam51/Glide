@@ -11632,6 +11632,28 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // else: the plan is untouched, and the ring says so while it is active.
   const [previewRate, setPreviewRate] = useState(null);
   const previewing = previewRate != null;
+  const [customCal, setCustomCal] = useState("");
+  const [customMsg, setCustomMsg] = useState(null);   // { text, warn }
+  // ⚠️ THE 1,200 FLOOR APPLIES TO A TYPED NUMBER TOO (S198s). Everything the
+  // app CALCULATES is floored, and a manual target bypasses that calculation
+  // entirely — so without this the one path a person could take to a 900
+  // calorie target is the one where they typed it themselves, which is exactly
+  // the person the floor exists to protect. Clamped, and told plainly why,
+  // rather than silently accepted or silently changed.
+  const commitCustomTarget = () => {
+    const n = Math.round(Number(customCal));
+    if (!(n > 0)) return;
+    if (n < 1200) {
+      onSetCalorieTarget && onSetCalorieTarget(1200);
+      setCustomMsg({ warn: true, text: `${n.toLocaleString()} is below 1,200 — too low to be healthy or sustainable, so we've set it to 1,200. If you want a bigger deficit than that, take it from movement: more workout days, longer sessions, more steps.` });
+    } else {
+      onSetCalorieTarget && onSetCalorieTarget(n);
+      setCustomMsg({ warn: false, text: `Target set to ${n.toLocaleString()} cal/day.` });
+    }
+    setCustomCal("");
+    setPreviewRate(null);
+    setTimeout(() => setCustomMsg(null), 9000);
+  };
   const ringTarget = previewing ? targetForRate(previewRate) : target;
   const ringRemaining = ringTarget - logged;
   const ringOver = ringRemaining < 0;
@@ -11830,12 +11852,68 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
             })}
           </div>
           {previewing && (
-            <button onClick={()=>setPreviewRate(null)}
-              style={{marginTop:"8px",width:"100%",padding:"7px",borderRadius:"8px",cursor:"pointer",
-                border:"1px solid var(--accent)",background:"rgba(var(--accent-rgb),.08)",
-                color:"var(--accent)",fontSize:".72rem",fontWeight:700}}>
-              Previewing {rates.find(r=>Math.abs(r.rate-previewRate)<0.01)?.lbl} — tap to go back to your plan
-            </button>
+            <div style={{marginTop:"8px",display:"flex",gap:"6px"}}>
+              {/* ⚠️ COMMITTING A RATE MUST ALSO CLEAR A MANUAL TARGET (S198s).
+                  data.calorieTarget WINS over the rate calculation, so setting a
+                  new rate while one is in force would change the plan's maths
+                  and nothing on screen — the ring would sit where it was and the
+                  tap would look broken. Choosing a rate here is an explicit
+                  choice to go back to the calculated number. */}
+              {onSetWeeklyRate && (
+                <button onClick={()=>{ onSetWeeklyRate(previewRate);
+                    if (manualTarget != null && onSetCalorieTarget) onSetCalorieTarget(0);
+                    setPreviewRate(null); }}
+                  style={{flex:2,padding:"8px",borderRadius:"8px",cursor:"pointer",border:"none",
+                    background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)",
+                    fontSize:".74rem",fontWeight:800}}>
+                  Make {rates.find(r=>Math.abs(r.rate-previewRate)<0.01)?.lbl} my target
+                </button>
+              )}
+              <button onClick={()=>setPreviewRate(null)}
+                style={{flex:1,padding:"8px",borderRadius:"8px",cursor:"pointer",
+                  border:"1px solid var(--border)",background:"var(--s2)",
+                  color:"var(--text-secondary)",fontSize:".72rem",fontWeight:700}}>
+                Cancel
+              </button>
+            </div>
+          )}
+          {/* A number of their own — a coach-given figure, or one from somewhere
+              else entirely. It overrides the rate maths, so the card says which
+              one is in force rather than leaving two plausible numbers on screen. */}
+          {onSetCalorieTarget && (
+            <div style={{marginTop:"9px",borderTop:"1px solid var(--border)",paddingTop:"9px"}}>
+              {manualTarget != null ? (
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px",flexWrap:"wrap"}}>
+                  <span style={{fontSize:".72rem",color:"var(--text-secondary)"}}>
+                    Your target is set by hand to <strong style={{color:"var(--accent)"}}>{manualTarget.toLocaleString()}</strong> cal/day.
+                  </span>
+                  <button onClick={()=>{ onSetCalorieTarget(0); setCustomCal(""); setCustomMsg(""); }}
+                    style={{padding:"5px 10px",borderRadius:"7px",cursor:"pointer",border:"1px solid var(--border)",
+                      background:"var(--s2)",color:"var(--text)",fontSize:".7rem",fontWeight:700}}>
+                    Use the calculated one
+                  </button>
+                </div>
+              ) : (
+                <div style={{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap"}}>
+                  <span style={{fontSize:".72rem",color:"var(--muted)"}}>Or set your own:</span>
+                  <input type="number" inputMode="numeric" placeholder="e.g. 2,100" value={customCal}
+                    onChange={(e)=>setCustomCal(e.target.value)}
+                    onKeyDown={(e)=>{ if(e.key==="Enter") commitCustomTarget(); }}
+                    style={{width:"92px",padding:"6px 8px",borderRadius:"7px",border:"1px solid var(--border)",
+                      background:"var(--surface)",color:"var(--text)",fontSize:".8rem",outline:"none"}} />
+                  <button onClick={commitCustomTarget} disabled={!(Number(customCal) > 0)}
+                    style={{padding:"6px 11px",borderRadius:"7px",border:"none",
+                      cursor: Number(customCal) > 0 ? "pointer" : "default",
+                      opacity: Number(customCal) > 0 ? 1 : .5,
+                      background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)",
+                      fontSize:".72rem",fontWeight:800}}>Set</button>
+                </div>
+              )}
+              {customMsg && (
+                <div style={{marginTop:"6px",fontSize:".7rem",lineHeight:1.45,
+                  color: customMsg.warn ? "var(--yellow)" : "var(--green)"}}>{customMsg.text}</div>
+              )}
+            </div>
           )}
           {/* ⚠️ THE 1,200 WARNING IS THE POINT OF SHOWING THESE AT ALL (S198q,
               Kevin). A rate whose real maths lands under 1,200 is not a faster
