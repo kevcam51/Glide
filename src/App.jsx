@@ -16112,10 +16112,35 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     setTzMeBusy(true);
     try {
       const uid = targetUid || meUid;
+      // ⚠️ SAY WHAT THIS REPLACES (S198c). This wrote the whole entry with no
+      // regard for what was already there, and that is not hypothetical: on
+      // Aug 8 it silently moved Kevin's Garmin feed off his client account and
+      // into a plan on the coach side that no screen can open, and six weeks of
+      // "my calories never show up" followed with nothing on screen ever having
+      // said anything changed.
+      //
+      // Two flows now write this same link — this one and the importer's "link
+      // to an account" — so the clash is real: a FULL sync (stats, goals,
+      // workouts) becomes watch-only when this runs over it. Choosing is still
+      // allowed, because the destination is named in the list they just picked
+      // from. It is no longer SILENT.
+      let prev = null;
+      try {
+        const r = await window.storage.get("caliq-tz-links");
+        prev = (r && r.value ? JSON.parse(r.value) : {})[tzId] || null;
+      } catch { /* nothing linked yet */ }
+      const prevUid = typeof prev === "string" ? prev : (prev && prev.uid) || null;
+      const wasFull = !!prev && typeof prev === "string";
       await writeTzLinks((links) => { links[tzId] = { uid, healthOnly: true, planId }; });
       setTzMe(Number(tzId)); setTzMePlan(planId); setTzMePick(null); setTzMePlanFor(null);
       const who = uid === meUid ? "that plan" : "that client's account";
-      setTzMsg({ ok: true, text: `Watch data on — your tracker's calories land in ${who} on the next sync.` });
+      const moved = prevUid && prevUid !== uid
+        ? " It was going somewhere else before — that stops now."
+        : "";
+      const downgraded = wasFull
+        ? " Note: this person was on a FULL sync (stats, goals, workouts). That is now watch data only."
+        : "";
+      setTzMsg({ ok: true, text: `Watch data on — your tracker's calories land in ${who} on the next sync.${moved}${downgraded}` });
     } catch { setTzMsg({ ok: false, text: "Couldn't save that — try again." }); }
     setTzMeBusy(false);
   };
