@@ -11625,10 +11625,23 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   };
   const pctSum = (parseFloat(mtPct.protein) || 0) + (parseFloat(mtPct.carbs) || 0) + (parseFloat(mtPct.fat) || 0);
 
+  // ── Try a different rate without committing to it (S198q, Kevin) ──────────
+  // Tapping a daily target previews it IN THE RING, so the question "what would
+  // ½ lb a week actually let me eat today?" is answered by the number people
+  // already read, not by arithmetic in their head. It is a PREVIEW and nothing
+  // else: the plan is untouched, and the ring says so while it is active.
+  const [previewRate, setPreviewRate] = useState(null);
+  const previewing = previewRate != null;
+  const ringTarget = previewing ? targetForRate(previewRate) : target;
+  const ringRemaining = ringTarget - logged;
+  const ringOver = ringRemaining < 0;
+  const ringOverMild = ringOver && ringTarget > 0 && logged <= ringTarget * 1.1;
+  const ringPct = ringTarget > 0 ? Math.min(100, Math.round((logged / ringTarget) * 100)) : pct;
+
   // Ring SVG
   const ringR = 58, ringC = 2 * Math.PI * ringR;
-  const ringOffset = ringC - (pct / 100) * ringC;
-  const ringColor = overCals ? "var(--red)" : pct > 80 ? "var(--yellow)" : "var(--green)";
+  const ringOffset = ringC - (ringPct / 100) * ringC;
+  const ringColor = ringOver ? "var(--red)" : ringPct > 80 ? "var(--yellow)" : "var(--green)";
 
   const hasGoal = goalWeight && Number(goalWeight) < Number(weightLbs);
   const toLose = hasGoal ? Number(weightLbs) - Number(goalWeight) : null;
@@ -11746,10 +11759,10 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                 a five-character value cannot collide with the stroke however
                 large the total gets. */}
             <div style={{fontFamily:"'Sora',sans-serif",
-              fontSize: remaining.toLocaleString().length >= 6 ? "2.1rem"
-                : remaining.toLocaleString().length >= 5 ? "2.45rem" : "2.75rem",
-              color:overCals?(overMild?"var(--yellow)":"var(--red)"):"var(--accent)",lineHeight:1}}>{remaining.toLocaleString()}</div>
-            <div style={{fontSize:".65rem",color:overCals?(overMild?"var(--yellow)":"var(--red)"):"var(--muted)",letterSpacing:".5px"}}>{overCals?"CAL OVER":"CAL REMAINING"}</div>
+              fontSize: ringRemaining.toLocaleString().length >= 6 ? "2.1rem"
+                : ringRemaining.toLocaleString().length >= 5 ? "2.45rem" : "2.75rem",
+              color:ringOver?(ringOverMild?"var(--yellow)":"var(--red)"):"var(--accent)",lineHeight:1}}>{ringRemaining.toLocaleString()}</div>
+            <div style={{fontSize:".65rem",color:ringOver?(ringOverMild?"var(--yellow)":"var(--red)"):"var(--muted)",letterSpacing:".5px"}}>{ringOver?"CAL OVER":"CAL REMAINING"}</div>
             {/* Deficit / surplus vs today's target (S108b, Kevin's spec).
                 Just the WORD now (no number) — "Deficit"/"Surplus"/"On target" —
                 colored by whether it MATCHES the user's chosen goal direction:
@@ -11783,34 +11796,76 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           The rate the plan is ACTUALLY set to is marked, so this reads as
           "here is where you are, and here is what the others would be"
           rather than as four numbers with no anchor. */}
-      {isFinite(tdee) && tdee > 0 && (
+      {isFinite(tdee) && tdee > 0 && (() => {
+        const rates = [{lbl:"Maintain",rate:0},{lbl:"½ lb/wk",rate:0.5},{lbl:"1 lb/wk",rate:1},{lbl:"2 lbs/wk",rate:2}];
+        // Floored means the honest answer for this rate is "we won't go there".
+        const flooredAt = (r) => rawTargetForRate(r) < 1200;
+        const shownRate = previewing ? previewRate : planRate;
+        const shownFloored = flooredAt(shownRate);
+        return (
         <div className="card" style={{marginTop:"14px"}}>
           <div className="sec-title" style={{marginBottom:"8px"}}>Daily Calorie Targets</div>
+          <div style={{fontSize:".68rem",color:"var(--muted)",marginBottom:"8px"}}>
+            Tap one to see it in the ring above — your plan doesn’t change.
+          </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"6px"}}>
-            {[{lbl:"Maintain",cut:0,rate:0},{lbl:"½ lb/wk",cut:250,rate:0.5},
-              {lbl:"1 lb/wk",cut:500,rate:1},{lbl:"2 lbs/wk",cut:1000,rate:2}].map((t)=>{
-              const active = Math.abs(planRate - t.rate) < 0.01;
-              const val = Math.max(1200, Math.floor(tdee - t.cut));
-              const floored = Math.floor(tdee - t.cut) < 1200;
+            {rates.map((t)=>{
+              const isPlan = Math.abs(planRate - t.rate) < 0.01;
+              const isShown = Math.abs(shownRate - t.rate) < 0.01;
+              const val = targetForRate(t.rate);
+              const low = flooredAt(t.rate);
               return (
-                <div key={t.lbl} style={{padding:"8px 4px",borderRadius:"9px",textAlign:"center",
-                  background: active ? "rgba(var(--accent-rgb),.12)" : "var(--s2)",
-                  border: active ? "1px solid var(--accent)" : "1px solid var(--border)"}}>
+                <button key={t.lbl}
+                  onClick={()=>setPreviewRate(previewing && isShown ? null : (isPlan ? null : t.rate))}
+                  style={{padding:"8px 4px",borderRadius:"9px",textAlign:"center",cursor:"pointer",
+                    background: isShown ? "rgba(var(--accent-rgb),.12)" : "var(--s2)",
+                    border: isShown ? "1px solid var(--accent)" : "1px solid var(--border)"}}>
                   <div style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>{t.lbl}</div>
                   <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.05rem",
-                    color: active ? "var(--accent)" : "var(--text)"}}>{val.toLocaleString()}</div>
-                  <div style={{fontSize:".5rem",color:"var(--muted)"}}>{floored ? "1,200 floor" : "cal/day"}</div>
-                  {active && <div style={{fontSize:".5rem",color:"var(--accent)",fontWeight:800,marginTop:"1px"}}>YOURS</div>}
-                </div>
+                    color: low ? "var(--yellow)" : isShown ? "var(--accent)" : "var(--text)"}}>{val.toLocaleString()}</div>
+                  <div style={{fontSize:".5rem",color: low ? "var(--yellow)" : "var(--muted)"}}>{low ? "floored" : "cal/day"}</div>
+                  {isPlan && <div style={{fontSize:".5rem",color:"var(--accent)",fontWeight:800,marginTop:"1px"}}>YOURS</div>}
+                </button>
               );
             })}
           </div>
-          <div style={{fontSize:".62rem",color:"var(--muted)",marginTop:"7px",lineHeight:1.4}}>
-            Based on your body’s daily burn of {Math.round(tdee).toLocaleString()} cal. Today’s ring
-            uses your own target, which also counts anything you have scheduled.
-          </div>
+          {previewing && (
+            <button onClick={()=>setPreviewRate(null)}
+              style={{marginTop:"8px",width:"100%",padding:"7px",borderRadius:"8px",cursor:"pointer",
+                border:"1px solid var(--accent)",background:"rgba(var(--accent-rgb),.08)",
+                color:"var(--accent)",fontSize:".72rem",fontWeight:700}}>
+              Previewing {rates.find(r=>Math.abs(r.rate-previewRate)<0.01)?.lbl} — tap to go back to your plan
+            </button>
+          )}
+          {/* ⚠️ THE 1,200 WARNING IS THE POINT OF SHOWING THESE AT ALL (S198q,
+              Kevin). A rate whose real maths lands under 1,200 is not a faster
+              plan, it is a floored one — the extra deficit simply does not
+              exist. Say so loudly the moment such a rate is the one on screen,
+              and point at the lever that does work. Same position the plan page
+              has always taken; this is the first time the dashboard takes it. */}
+          {shownFloored ? (
+            <div style={{marginTop:"9px",padding:"10px 11px",borderRadius:"10px",
+              border:"1px solid var(--yellow)",background:"rgba(251,191,36,.10)"}}>
+              <div style={{fontSize:".76rem",fontWeight:800,color:"var(--yellow)",marginBottom:"3px"}}>
+                That rate would put you under 1,200 calories
+              </div>
+              <div style={{fontSize:".7rem",color:"var(--text-secondary)",lineHeight:1.5}}>
+                Too low to be healthy or sustainable, so we don’t go there — the number stays at
+                1,200. Eating less isn’t the lever here: <strong style={{color:"var(--text)"}}>burning more
+                is</strong>. Add movement — more workout days, longer sessions, more steps — and the
+                deficit comes from training while you still eat enough to keep muscle, energy, and
+                the habit.
+              </div>
+            </div>
+          ) : (
+            <div style={{fontSize:".62rem",color:"var(--muted)",marginTop:"7px",lineHeight:1.4}}>
+              Based on your body’s daily burn of {Math.round(tdee).toLocaleString()} cal.
+              Targets are floored at 1,200 cal/day for safety, and are estimates — individual needs vary.
+            </div>
+          )}
         </div>
-      )}
+        );
+      })()}
       {/* Discoverability (S104, Kevin: "I didn't see the weight projection").
           The projected weight loss lives in the sheet the ring opens — say so,
           right under the ring, so it's found. */}
