@@ -14624,6 +14624,38 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
     setDrafts({}); setMsg(isBackdated ? "Saved to " + entryDate + "." : "Saved.");
   };
 
+  // ── One day's measurements, in full (S198r, Kevin) ────────────────────────
+  // The list only ever showed a squashed one-line summary and a delete button,
+  // so the way to inspect or correct a single number was to squint at a run-on
+  // string, or delete the day and re-enter it. This opens the day itself:
+  // every field grouped by what it IS, the change since last time and since the
+  // start, each value editable in place, and ‹ › to walk the days either way.
+  // Charts stay where they are — Kevin asked for the numbers those charts
+  // carry, not another copy of the charts.
+  const [openTs, setOpenTs] = useState(null);
+  const openIdx = entries.findIndex((e) => e.timestamp === openTs);
+  const openEntry = openIdx >= 0 ? entries[openIdx] : null;
+  const [fieldEdit, setFieldEdit] = useState(null);   // { field, value }
+  // The most recent EARLIER entry that actually recorded this field — not simply
+  // the previous entry, which may not have measured it at all.
+  const priorFor = (idx, f) => {
+    for (let i = idx - 1; i >= 0; i--) if (Number(entries[i][f]) > 0) return entries[i];
+    return null;
+  };
+  const firstFor = (f) => entries.find((e) => Number(e[f]) > 0) || null;
+  const fmtDelta = (n, unit) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(1)}${unit}`;
+  const dayGroups = (e, idx) => ([
+    { title: "Tape measurements", unit: "\u2033", fields: MEASUREMENT_FIELDS, label: (f) => MEASUREMENT_LABELS[f] },
+    { title: "Caliper sites", unit: "mm", fields: CALIPER_ALL, label: (f) => CALIPER_LABELS[f] },
+  ].map((g) => ({ ...g, rows: g.fields.filter((f) => Number(e[f]) > 0).map((f) => {
+    const prior = priorFor(idx, f), first = firstFor(f);
+    const val = Number(e[f]);
+    return { f, label: g.label(f), val, unit: g.unit,
+      sincePrev: prior ? val - Number(prior[f]) : null,
+      prevDate: prior ? prior.date : null,
+      sinceFirst: first && first !== e ? val - Number(first[f]) : null };
+  }) })).filter((g) => g.rows.length));
+
   const summarize = (e) => {
     const parts = [];
     const bf = showBF ? measurementMetrics(d, e).bodyFatPct : null;
@@ -14868,19 +14900,118 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         {/* History list with delete */}
         {onDelete && entries.length > 0 && (
           <div className="mt-3.5">
-            <div className="mb-1.5 text-sm text-muted">Entries ({entries.length}) — tap the trash icon to remove a mistake</div>
+            <div className="mb-1.5 text-sm text-muted">Entries ({entries.length}) — tap a day to see everything recorded on it</div>
             <div className="flex max-h-[180px] flex-col gap-1 overflow-y-auto">
               {[...entries].reverse().map((e) => (
                 <div key={e.timestamp} className="flex items-center justify-between gap-2 rounded-lg bg-surface2 px-2.5 py-1.5">
-                  <span className="min-w-0 text-[.82rem]">
+                  <button onClick={() => { setOpenTs(e.timestamp); setFieldEdit(null); }}
+                    className="min-w-0 flex-1 cursor-pointer border-none bg-transparent p-0 text-left text-[.82rem] text-fg">
                     <span className="text-muted">{new Date(e.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
                     <span className="ml-2 font-semibold">{summarize(e)}</span>
-                  </span>
+                  </button>
                   <button onClick={() => onDelete(e.timestamp)} title="Delete this entry"
                     className="cursor-pointer border-none bg-transparent px-1.5 py-0.5 text-base leading-none text-danger"><Icon name="close" size={15} color="currentColor" /></button>
                 </div>
               ))}
             </div>
+
+            {/* ── The day itself ─────────────────────────────────────────── */}
+            {openEntry && (
+              <div className="mt-2.5 rounded-xl border border-primary p-3"
+                style={{ background: "color-mix(in srgb, var(--color-primary) 5%, var(--color-surface))" }}>
+                <div className="flex items-center justify-between gap-2">
+                  <button disabled={openIdx <= 0}
+                    onClick={() => { setOpenTs(entries[openIdx - 1].timestamp); setFieldEdit(null); }}
+                    className={`rounded-md border border-border bg-surface2 px-2 py-1 text-xs ${openIdx <= 0 ? "opacity-35" : "cursor-pointer"}`}
+                    title="Earlier entry">‹</button>
+                  <div className="text-center">
+                    <div className="text-[.9rem] font-bold text-fg">
+                      {new Date(openEntry.timestamp).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+                    </div>
+                    <div className="text-[.62rem] text-muted">entry {openIdx + 1} of {entries.length}</div>
+                  </div>
+                  <button disabled={openIdx >= entries.length - 1}
+                    onClick={() => { setOpenTs(entries[openIdx + 1].timestamp); setFieldEdit(null); }}
+                    className={`rounded-md border border-border bg-surface2 px-2 py-1 text-xs ${openIdx >= entries.length - 1 ? "opacity-35" : "cursor-pointer"}`}
+                    title="Later entry">›</button>
+                </div>
+
+                {showBF && (() => {
+                  const m = measurementMetrics(d, openEntry);
+                  const prevBf = (() => { for (let i = openIdx - 1; i >= 0; i--) {
+                    const pm = measurementMetrics(d, entries[i]); if (pm.bodyFatPct != null) return pm.bodyFatPct; } return null; })();
+                  if (m.bodyFatPct == null) return null;
+                  return (
+                    <div className="mt-2.5 rounded-lg bg-surface2 px-2.5 py-2">
+                      <div className="text-[.62rem] uppercase tracking-wide text-muted">Body composition</div>
+                      <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                        <span className="font-display text-[1.1rem] text-primary">{m.bodyFatPct}%</span>
+                        <span className="text-[.68rem] text-muted">body fat</span>
+                        {prevBf != null && (
+                          <span className="text-[.68rem]" style={{ color: m.bodyFatPct <= prevBf ? "var(--green)" : "var(--yellow)" }}>
+                            {fmtDelta(m.bodyFatPct - prevBf, "%")} since last
+                          </span>
+                        )}
+                        {m.leanMass != null && <span className="text-[.68rem] text-muted">lean {m.leanMass} lbs</span>}
+                        {m.fatMass != null && <span className="text-[.68rem] text-muted">fat {m.fatMass} lbs</span>}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {dayGroups(openEntry, openIdx).map((g) => (
+                  <div key={g.title} className="mt-2.5">
+                    <div className="mb-1 text-[.62rem] uppercase tracking-wide text-muted">{g.title}</div>
+                    <div className="flex flex-col gap-1">
+                      {g.rows.map((r) => {
+                        const editing = fieldEdit && fieldEdit.field === r.f;
+                        return (
+                          <div key={r.f} className="flex items-center justify-between gap-2 rounded-lg bg-surface2 px-2.5 py-1.5">
+                            <span className="text-[.78rem] text-muted" style={{ minWidth: 74 }}>{r.label}</span>
+                            {editing ? (
+                              <>
+                                <input type="number" inputMode="decimal" step="0.1" autoFocus value={fieldEdit.value}
+                                  onChange={(ev) => setFieldEdit({ field: r.f, value: ev.target.value })}
+                                  onKeyDown={(ev) => {
+                                    if (ev.key === "Enter") { const v = Math.round(Number(fieldEdit.value) * 10) / 10; if (v > 0) onSave({ [r.f]: v }, openEntry.date); setFieldEdit(null); }
+                                    if (ev.key === "Escape") setFieldEdit(null);
+                                  }}
+                                  className="w-20 rounded-md border border-border bg-surface px-2 py-1 text-[.82rem] text-fg outline-none" />
+                                <button onClick={() => { const v = Math.round(Number(fieldEdit.value) * 10) / 10; if (v > 0) onSave({ [r.f]: v }, openEntry.date); setFieldEdit(null); }}
+                                  className="cursor-pointer rounded-md border-none bg-primaryfill px-2.5 py-1 text-[.72rem] font-bold text-primaryfg">Save</button>
+                                <button onClick={() => setFieldEdit(null)}
+                                  className="cursor-pointer border-none bg-transparent px-1 text-[.72rem] text-muted">Cancel</button>
+                              </>
+                            ) : (
+                              <button onClick={() => setFieldEdit({ field: r.f, value: String(r.val) })}
+                                className="flex flex-1 cursor-pointer items-baseline justify-end gap-2 border-none bg-transparent p-0 text-right">
+                                <span className="text-[.85rem] font-bold text-fg">{r.val}{r.unit}</span>
+                                {r.sincePrev != null && (
+                                  <span className="text-[.64rem] text-muted">{fmtDelta(r.sincePrev, r.unit)} vs {r.prevDate ? new Date(r.prevDate + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "last"}</span>
+                                )}
+                                {r.sinceFirst != null && (
+                                  <span className="text-[.64rem]" style={{ color: r.sinceFirst < 0 ? "var(--green)" : r.sinceFirst > 0 ? "var(--yellow)" : "var(--muted)" }}>
+                                    {fmtDelta(r.sinceFirst, r.unit)} total
+                                  </span>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {!dayGroups(openEntry, openIdx).length && (
+                  <div className="mt-2.5 text-[.75rem] text-muted">No tape or caliper numbers on this day.</div>
+                )}
+                <div className="mt-2.5 flex items-center justify-between">
+                  <span className="text-[.62rem] text-muted">Tap any number to correct it — the date stays put.</span>
+                  <button onClick={() => { setOpenTs(null); setFieldEdit(null); }}
+                    className="cursor-pointer rounded-md border border-border bg-surface2 px-2.5 py-1 text-[.72rem] text-fg">Close</button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
