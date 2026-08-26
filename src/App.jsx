@@ -16051,7 +16051,9 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         + (replaced ? ` A different Trainerize client was pointed at ${client.name} before — that one has been disconnected, so only this link syncs.` : ""));
     } catch (e) {
       console.error("link to account failed", e);
-      setTzLinkMsg("Couldn't save that link — check your connection.");
+      // Same rule as success: report it WHERE THE ACTION WAS, or it is invisible.
+      setTzLinkedTo(client.uid);
+      setTzLinkMsg("Couldn't save that link — check your connection and try again.");
     }
   };
   // 30-min background auto-sync kill switch — stored in the trainer's own kv
@@ -16131,8 +16133,21 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     return pf ? `“${pf.customName || pf.name || pid}”` : "a plan that no longer exists";
   };
   const writeTzLinks = async (mutate) => {
-    const r = await window.storage.get("caliq-tz-links");
-    const links = r && r.value ? (JSON.parse(r.value) || {}) : {};
+    // ⚠️ NO DOCUMENT YET IS THE NORMAL CASE, AND IT THREW (S198i).
+    // window.storage.get THROWS for a missing key — the documented asymmetry
+    // with getForUser, which returns null — so the FIRST link any trainer ever
+    // made blew up here with "Key not found: caliq-tz-links" and reported
+    // nothing on screen. Kevin never hit it only because his links document
+    // already existed from a month ago; every new trainer would have hit it
+    // every time. Absence carries err.code === "not-found"; anything else is a
+    // real failure and must still propagate.
+    let links = {};
+    try {
+      const r = await window.storage.get("caliq-tz-links");
+      links = r && r.value ? (JSON.parse(r.value) || {}) : {};
+    } catch (e) {
+      if (!e || e.code !== "not-found") throw e;
+    }
     mutate(links);
     await window.storage.set("caliq-tz-links", JSON.stringify(links));
   };
