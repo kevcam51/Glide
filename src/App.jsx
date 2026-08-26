@@ -11797,7 +11797,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
             })}
           </div>
           <div style={{fontSize:".62rem",color:"var(--muted)",marginTop:"7px",lineHeight:1.4}}>
-            Based on your body\u2019s daily burn of {Math.round(tdee).toLocaleString()} cal. Today\u2019s ring
+            Based on your body’s daily burn of {Math.round(tdee).toLocaleString()} cal. Today’s ring
             uses your own target, which also counts anything you have scheduled.
           </div>
         </div>
