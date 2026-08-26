@@ -15495,6 +15495,34 @@ function useRefreshOnResume(fn, minGapMs = 20000) {
 // threshold runs the loader. Touch-only by design — desktop has no such gesture
 // and would just add stray handlers. Passive listeners keep scrolling smooth;
 // we never preventDefault, so the browser's own overscroll still feels native.
+// A new version is live and this page is still running the old one. Says so,
+// and reloads on tap — never on its own, because yanking the page mid-sentence
+// is its own bug (S198m).
+function UpdateBanner() {
+  const [ready, setReady] = useState(() => typeof window !== "undefined" && !!window.__glidnaUpdateReady);
+  useEffect(() => {
+    const on = () => setReady(true);
+    window.addEventListener("glidna:update-ready", on);
+    return () => window.removeEventListener("glidna:update-ready", on);
+  }, []);
+  if (!ready) return null;
+  return createPortal(
+    <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)",
+      bottom: "calc(18px + env(safe-area-inset-bottom,0px))", zIndex: 3200,
+      display: "flex", alignItems: "center", gap: 10, maxWidth: "min(92vw,420px)",
+      padding: "10px 14px", borderRadius: 999, border: "1px solid var(--accent,#08dce0)",
+      background: "var(--surface,#121b1e)", color: "var(--text,#eafcfc)",
+      boxShadow: "0 6px 24px rgba(0,0,0,.45)", fontSize: ".84rem", fontWeight: 600 }}>
+      <span>A newer version of Glidna is ready.</span>
+      <button onClick={() => window.location.reload()}
+        style={{ border: "none", borderRadius: 999, padding: "6px 12px", cursor: "pointer",
+          background: "var(--accent-fill,#08dce0)", color: "var(--color-primaryfg,#04211f)",
+          fontWeight: 800, fontSize: ".8rem", whiteSpace: "nowrap" }}>
+        Update
+      </button>
+    </div>, document.body);
+}
+
 function usePullToRefresh(onRefresh, enabled = true) {
   const fnRef = useRef(onRefresh); fnRef.current = onRefresh;
   const [pull, setPull] = useState(0);      // px pulled, for the indicator
@@ -15540,6 +15568,10 @@ function usePullToRefresh(onRefresh, enabled = true) {
       setPull(0);
       if (!shouldRun) return;
       setBusy(true);
+      // Pulling down means "show me what's current", and for a PWA that has to
+      // include the APP, not just its data — otherwise the gesture refreshes
+      // everything except the thing the person is looking for (S198m).
+      try { window.__glidnaCheckUpdate?.(); } catch { /* not registered yet */ }
       try { await fnRef.current?.(); } catch (e) { /* best-effort */ }
       finally { setBusy(false); }
     };
@@ -30982,6 +31014,9 @@ export default function App() {
         onNameSaved={(n) => setMeName(n)}
         isAdminUid={meUid === OWNER_UID} />
       <InstallPrompt />
+      {/* Chrome, so it reaches every screen and every role — a stale PWA is not
+          a trainer-only problem. */}
+      <UpdateBanner />
       {upgradeCongrats && <UpgradeCongrats isTrainer={role !== ROLES.CLIENT} onClose={() => setUpgradeCongrats(false)} />}
     </>
   );

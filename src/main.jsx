@@ -94,6 +94,34 @@ if (typeof window !== 'undefined' && window.visualViewport) {
 // any caching). Enables home-screen install + a graceful offline shell.
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {})
+    // ⚠️ AN INSTALLED PWA HAS NO ADDRESS BAR, SO THERE WAS NO WAY TO GET A NEW
+    // VERSION (S198m, Kevin: "I wanted to refresh the page so I can see if the
+    // button popped up"). sw.js calls skipWaiting() + clients.claim(), so a new
+    // worker takes over as soon as it is fetched — but the page already open
+    // keeps running the JavaScript it loaded with, and nothing said so. On a
+    // phone that had not been force-closed in days, that meant looking at
+    // yesterday's app while being told to "reload and check".
+    //
+    // updateViaCache:'none' stops the browser serving sw.js itself from cache,
+    // which is what made the check unreliable in the first place.
+    const hadController = !!navigator.serviceWorker.controller
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+      .then((reg) => {
+        const check = () => { try { reg.update() } catch { /* offline */ } }
+        // Check now, and every time the app comes back to the foreground —
+        // which for a PWA is the moment someone is most likely to be looking
+        // for something that just shipped.
+        check()
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) check() })
+        window.__glidnaCheckUpdate = check
+      })
+      .catch(() => {})
+    // A controller change with no PREVIOUS controller is just this page's first
+    // registration, not an update — only the second one means we are stale.
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController) return
+      window.__glidnaUpdateReady = true
+      window.dispatchEvent(new CustomEvent('glidna:update-ready'))
+    })
   })
 }
