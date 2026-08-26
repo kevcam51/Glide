@@ -65,6 +65,49 @@ It was caught because of S197g — "travel check unavailable: functions/internal
 in the console. Before that change it would have been a feature that quietly
 never worked.
 
+### 0. ▶️ S198 — WHERE THINGS ACTUALLY ARE (read this first)
+
+Everything below is deployed, pushed and verified by clicking it in production.
+`main` clean, 76 functions current, `npm run test:units` green, `npm run
+check:undef` clean.
+
+**Kevin's open items — nothing is blocking:**
+- Traffic-aware drive time is on ALL paid plans; he said "$49/mo", which is
+  Coach alone. One constant: `TRAFFIC_AWARE_TIERS` in functions/availability.js.
+- Prepaid packages: dropped, per him. Billing stays per-session.
+- Trainerize meal sync: off, per him.
+
+**⚠️ THE THREE HABITS THIS SESSION PAID FOR — they are not optional:**
+
+1. **ASK WHAT BUILD THEY ARE ON BEFORE READING CODE.** An installed PWA had no
+   way to load a new version (S198m). Kevin reported three "missing" features
+   that were all shipped and correct; he was looking at a days-old app while
+   being told to "reload and check". There is now an Update banner, a check on
+   foreground, and pull-to-refresh asks too — but the instinct matters more
+   than the fix.
+
+2. **PRESS THE BUTTON YOURSELF.** functions/trainerize.js has `TEST_UIDS` +
+   `TEST_ROSTER` (S198g): the test account gets `mode:"list"` ONLY and a
+   SYNTHETIC roster, never the real API, and every write stays owner-only.
+   Within fifteen minutes it found a TDZ crash that blanked the trainer home in
+   production, a first-link failure that would have hit every new trainer
+   forever, and two of my own edits that had silently no-opped. Before that I
+   was wrong three times in a row on the same feature. **Extend this pattern to
+   anything else that is owner-gated.**
+
+3. **SILENT SUCCESS IS THE SAME BUG AS SILENT FAILURE.** It appeared FIVE times
+   in two days: a notification that navigated nowhere, a save that said
+   "Logged" when it failed, a Trainerize link that worked and said nothing
+   (twice), and a chart edit that worked but had a 10px tap target. If an
+   action can succeed, something on screen must say so, on the surface the
+   person acted from.
+
+**Verification habits that earned their keep:** check the STORED DATA after a
+UI action, never the screen alone — twice a "failure" was my own test selector
+grabbing a modal's Save button. And `check:undef` cannot see a
+temporal-dead-zone error or a wrong-but-defined field name (`m.leanMass` vs
+`m.leanMassLbs` rendered nothing and threw nothing); only rendering finds those.
+
 ### 0a. ⚠️ THE REVIEW OF THIS SESSION'S OWN WORK — 8 REAL DEFECTS, ALL FIXED
 
 A 29-agent adversarial review of everything shipped this session raised 28,
