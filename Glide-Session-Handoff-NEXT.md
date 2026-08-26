@@ -107,6 +107,44 @@ buried. That script checks ONE rule across src/, functions/ and scripts/.
 **Not verified, low:** `normalizeAddress` strips the token after "ste", which
 would mangle "Sainte-" street names. Cosmetic cache-key collision; left.
 
+### 0a. ✅ S198 — THE TRAINERIZE/WATCH CHASE, AND WHAT IT COST
+
+Kevin's Garmin calories had been missing from the client account he actually
+looks at ("Kev Cam") since **Aug 8**. Root cause: `setMyTracker` overwrote the
+whole tz-link entry with `uid: meUid`, silently moving the feed from his CLIENT
+account to his TRAINER account's `self` plan — which no trainer screen can open.
+Six weeks of "I just don't see his calories" followed, with nothing on screen
+ever saying anything had changed.
+
+**Now verified working: 21 of the last 21 days of wearable data in Kev Cam's
+account (was 3).**
+
+⚠️ **THE REAL LESSON, AND IT IS NOT ABOUT TRAINERIZE.** Three times I diagnosed
+this from the code, shipped a fix, and was wrong — because I could not press the
+button. The gating is correct (a shared Trainerize token means a role check
+would hand any stranger the real roster), but it meant only Kevin could ever
+click it, so every cycle cost him a round trip. What finally worked:
+
+  **`TEST_UIDS` + `TEST_ROSTER` in functions/trainerize.js (S198g)** — the test
+  account gets `mode:"list"` ONLY, and a SYNTHETIC roster; the real Trainerize
+  API is never called for it and every write stays owner-only. Within fifteen
+  minutes of existing it found three defects nobody could have found otherwise:
+  a TDZ crash that blanked the trainer home in production, a first-link failure
+  that would have hit EVERY new trainer forever, and two of my own edits that
+  had silently no-opped. **Use it. Extend the same pattern to anything else that
+  is owner-gated.**
+
+**And the delivery bug underneath all of it (S198m):** an installed PWA has no
+address bar, so there was no way to load a new build. sw.js skipWaiting()s, but
+the open page keeps its old JavaScript. Kevin was being told "reload and check"
+while looking at a days-old app. There is now an "A newer version is ready ·
+Update" banner, a check on foreground, and pull-to-refresh asks too. **If
+someone reports a fix missing, ask what build they are on BEFORE reading code.**
+
+**Still to do (one tap, Kevin's):** two Trainerize ids still point at Kev Cam
+(21029731 and 25367292) — two syncs writing weight and stats into one plan every
+30 minutes. Tapping **Change → Kevin Cameron** on his card collapses them to one.
+
 ### 0b. ⚠️ FIXED S197r — SIGNING OUT LEFT THE WHOLE CACHE BEHIND
 
 **This was live in production, and it is the kind of thing a demo dies on.**
