@@ -16009,34 +16009,6 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // disconnect"). Without this the only way to know a link existed was to watch
   // data appear days later, which is how a misdirected feed went unnoticed for
   // six weeks.
-  const [tzLinksByUid, setTzLinksByUid] = useState({});
-  const refreshTzLinks = useCallback(async () => {
-    if (!tzIsOwner) return;
-    try {
-      const r = await window.storage.get("caliq-tz-links");
-      const links = r && r.value ? (JSON.parse(r.value) || {}) : {};
-      const byUid = {};
-      for (const [tzId, v] of Object.entries(links)) {
-        const target = typeof v === "string" ? v : (v && v.uid);
-        if (target) byUid[target] = { tzId, healthOnly: !!(v && v.healthOnly) };
-      }
-      setTzLinksByUid(byUid);
-    } catch { setTzLinksByUid({}); }
-  }, [tzIsOwner]);
-  useEffect(() => { refreshTzLinks(); }, [refreshTzLinks]);
-  const disconnectTz = async (client) => {
-    const cur = tzLinksByUid[client.uid];
-    if (!cur) return;
-    try {
-      await writeTzLinks((links) => { delete links[cur.tzId]; });
-      await refreshTzLinks();
-      setTzLinkedTo(client.uid);
-      setTzLinkMsg(`Disconnected ${client.name} from Trainerize. Nothing already synced is removed — it just stops updating from now on.`);
-    } catch {
-      setTzLinkedTo(client.uid);
-      setTzLinkMsg("Couldn't disconnect that — check your connection.");
-    }
-  };
   // Link a Trainerize person to a CONNECTED GLIDNA ACCOUNT rather than to a
   // local plan file (S198b, Kevin: "I want to connect it to the glide plan
   // already made called kev cam"). Those are two different things underneath —
@@ -16163,6 +16135,39 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     const links = r && r.value ? (JSON.parse(r.value) || {}) : {};
     mutate(links);
     await window.storage.set("caliq-tz-links", JSON.stringify(links));
+  };
+  // ⚠️ MUST SIT BELOW tzIsOwner AND writeTzLinks (S198h). A useCallback's
+  // DEPENDENCY ARRAY is evaluated during render, so [tzIsOwner] declared
+  // above the const it names is a temporal-dead-zone ReferenceError and the
+  // whole trainer home renders as a blank screen. check:undef cannot see it:
+  // the variable is defined, just not yet.
+  const [tzLinksByUid, setTzLinksByUid] = useState({});
+  const refreshTzLinks = useCallback(async () => {
+    if (!tzIsOwner) return;
+    try {
+      const r = await window.storage.get("caliq-tz-links");
+      const links = r && r.value ? (JSON.parse(r.value) || {}) : {};
+      const byUid = {};
+      for (const [tzId, v] of Object.entries(links)) {
+        const target = typeof v === "string" ? v : (v && v.uid);
+        if (target) byUid[target] = { tzId, healthOnly: !!(v && v.healthOnly) };
+      }
+      setTzLinksByUid(byUid);
+    } catch { setTzLinksByUid({}); }
+  }, [tzIsOwner]);
+  useEffect(() => { refreshTzLinks(); }, [refreshTzLinks]);
+  const disconnectTz = async (client) => {
+    const cur = tzLinksByUid[client.uid];
+    if (!cur) return;
+    try {
+      await writeTzLinks((links) => { delete links[cur.tzId]; });
+      await refreshTzLinks();
+      setTzLinkedTo(client.uid);
+      setTzLinkMsg(`Disconnected ${client.name} from Trainerize. Nothing already synced is removed — it just stops updating from now on.`);
+    } catch {
+      setTzLinkedTo(client.uid);
+      setTzLinkMsg("Couldn't disconnect that — check your connection.");
+    }
   };
   const chooseMyTracker = async () => {
     setTzMeBusy(true);
