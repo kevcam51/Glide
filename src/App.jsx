@@ -15934,7 +15934,7 @@ const IdBadge = ({ id, n, className = "" }) => {
   );
 };
 
-function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onRosterChanged, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, meUid, meName, meRole, notifPrefs, onSetNotifPrefs, rosterCap, rosterBlocked }) {
+function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onRosterChanged, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, meUid, meName, meRole, notifPrefs, onSetNotifPrefs, rosterCap, rosterBlocked, tzTrialCapped = false }) {
   const [rosterPlans, setRosterPlans] = useState(false);   // plan picker from the roster banner (S179b)
   const [details, setDetails] = useState({}); // id -> { tdee, target }
   // AI-client seats (S176f): who the AI has worked on this month vs the plan's
@@ -15968,6 +15968,38 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // the sync looks for (functions/trainerize.js). So this writes that one field
   // and touches nothing else: no plan data, no logs, no check-ins.
   const [tzLinkFor, setTzLinkFor] = useState(null);  // the roster row being linked
+  // The SAME link, started from the other end (S198e, Kevin): from the client's
+  // own card, pick who they are in Trainerize. That is the direction people
+  // actually think in — you are looking at Kev Cam and you want to attach his
+  // tracker — and it puts the control where the client already is, instead of
+  // buried in an import list of strangers.
+  // ── How many Trainerize clients a trial can attach (S198e, Kevin) ────────
+  // A trial gets a real taste of the importer — fifteen people, which is the
+  // same number the free tier caps plans at — and then it asks for an upgrade.
+  // ⚠️ THIS IS THE HONEST HALF ONLY. It stops the UI from creating a sixteenth
+  // link, which is enough while trainerizeImport is admin-gated to Kevin and
+  // literally nobody else can reach it. The moment Trainerize goes
+  // multi-tenant this has to be re-checked SERVER-SIDE in trainerizeImport,
+  // because anything enforced only in a browser is a suggestion.
+  const TZ_TRIAL_LINKS = 15;
+  const [tzForClient, setTzForClient] = useState(null);   // {client, roster|null}
+  const [tzForBusy, setTzForBusy] = useState(false);
+  // How many Trainerize people are already attached to a Glidna account.
+  const tzLinkedCount = (links) => Object.values(links || {})
+    .filter((v) => v && (typeof v === "string" || v.uid)).length;
+  const openTzForClient = async (client) => {
+    setTzLinkMsg("");
+    setTzForClient({ client, roster: null });
+    setTzForBusy(true);
+    try {
+      const res = await callTrainerizeImport({ mode: "list" });
+      setTzForClient({ client, roster: (res.data && res.data.clients) || [] });
+    } catch (e) {
+      setTzForClient(null);
+      setTzLinkMsg(tzErrText(e));
+    }
+    setTzForBusy(false);
+  };
   const [tzLinkMsg, setTzLinkMsg] = useState("");
   // Link a Trainerize person to a CONNECTED GLIDNA ACCOUNT rather than to a
   // local plan file (S198b, Kevin: "I want to connect it to the glide plan
@@ -15977,7 +16009,18 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // offered half of them and the plan he wanted appeared to be missing.
   const linkAccountToTrainerize = async (client, tzClient) => {
     try {
-      await writeTzLinks((links) => { links[tzClient.id] = client.uid; });
+      let refused = false;
+      await writeTzLinks((links) => {
+        // Already linked to this same person → not a new seat, just a re-point.
+        const isNew = !links[tzClient.id];
+        if (isNew && tzTrialCapped && tzLinkedCount(links) >= TZ_TRIAL_LINKS) { refused = true; return; }
+        links[tzClient.id] = client.uid;
+      });
+      if (refused) {
+        setTzLinkFor(null); setTzForClient(null);
+        setTzLinkMsg(`Your trial covers ${TZ_TRIAL_LINKS} connected Trainerize clients, and they're all in use. Upgrade to connect more — the ones already linked keep syncing.`);
+        return;
+      }
       setTzLinkFor(null);
       setTzLinkMsg(`Linked ${tzClient.name} → ${client.name}'s account. Their Trainerize stats and watch data sync in from the next run; nothing already in the account is removed.`);
     } catch (e) {
@@ -17091,6 +17134,41 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         )}
                         {c.hasPlan && (
                           <button className={mBtnCls} onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>Open plan</button>
+                        )}
+                        {/* Attach this person's Trainerize account, from their
+                            own card. Owner-only for now because the Trainerize
+                            credentials are still single-tenant. */}
+                        {tzIsOwner && (
+                          <button className={`${mBtnCls} inline-flex items-center gap-1.5`} disabled={tzForBusy}
+                            onClick={() => openTzForClient(c)}>
+                            <Icon name="link" size={16} color="var(--accent)" />
+                            {tzForBusy && tzForClient && tzForClient.client.uid === c.uid ? "Loading…" : "Link Trainerize"}
+                          </button>
+                        )}
+                        {/* The roster, filtered down to a choice about THIS client. */}
+                        {tzForClient && tzForClient.client.uid === c.uid && tzForClient.roster && (
+                          <div className="w-full mt-2 p-2.5 rounded-lg border border-primary"
+                            style={{ background: "color-mix(in srgb, var(--color-primary) 6%, var(--color-surface))" }}>
+                            <div className="text-sm text-fg mb-1">Who is <b>{c.name}</b> in Trainerize?</div>
+                            <div className={`${subCls} mb-2`}>
+                              Their stats, body composition, workouts and watch data sync into this
+                              account. Nothing here is deleted, and a weigh-in entered in Glidna is
+                              not replaced by an older Trainerize one.
+                            </div>
+                            <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
+                              {tzForClient.roster.map((t) => (
+                                <button key={t.id} onClick={() => linkAccountToTrainerize(c, t)}
+                                  className="text-left text-sm text-fg bg-surface2 border border-border rounded px-2.5 py-2 cursor-pointer hover:border-primary">
+                                  {t.name || `Client ${t.id}`}
+                                  {t.email ? <span className="block text-[.66rem] text-muted">{t.email}</span> : null}
+                                </button>
+                              ))}
+                              {!tzForClient.roster.length && (
+                                <div className="text-sm text-muted">No clients found in your Trainerize group.</div>
+                              )}
+                            </div>
+                            <button className={`${mBtnCls} mt-2`} onClick={() => setTzForClient(null)}>Cancel</button>
+                          </div>
                         )}
                         <button className={`${mBtnCls} inline-flex items-center gap-1.5`} aria-expanded={manageFor === c.uid}
                           onClick={() => setManageFor(manageFor === c.uid ? null : c.uid)}>
@@ -19733,6 +19811,9 @@ const PLAN_FEATURES = {
   trainer: [
     { section: "The basics — free forever", rows: [
       ["Clients & plan files", "15", "Unlimited", "Unlimited", "Unlimited"],
+      // S198e (Kevin): a trial connects up to 15 Trainerize clients, then asks
+      // for an upgrade. Stated here so hitting the wall is not a surprise.
+      ["Connect clients from Trainerize", "15", "Unlimited", "Unlimited", "Unlimited"],
       ["Coaching analytics — who needs attention", true, true, true, true],
       ["To-dos, nudges & requests — both ways", true, true, true, true],
       ["Invite Hub — link, QR, email invites, referrals", true, true, true, true],
@@ -19892,6 +19973,8 @@ const PLAN_TIPS = {
     "If you travel to clients, Glidna works out how long the drive between two sessions actually takes \u2014 traffic included, at the time you'd be making it.",
   "Warns you when you can't make it across town":
     "Book two sessions too close together and Glidna says so, with the numbers: how long the gap is, how long the drive is, and how short you are.",
+  "Connect clients from Trainerize":
+    "Attach a Trainerize client to their Glidna account and their stats, body composition, workouts and watch data sync across automatically. Free covers 15 connected clients.",
   "Session booking & cancellation policy":
     "Book, reschedule and cancel sessions with your clients, and publish a cancellation policy they see up front. Included on every paid plan \u2014 scheduling tools alone cost $16+/month elsewhere.",
   "Your clients get automatic logging reminders":
@@ -30800,6 +30883,9 @@ export default function App() {
     }
     if (isTrainerHome && homeTab === "dashboard") {
       return <>{chrome}<TrainerDashboard
+        // Trial trainers get a bounded taste of the Trainerize importer; a paid
+        // plan (or the owner) is uncapped.
+        tzTrialCapped={meSubStatus !== "active" && meUid !== OWNER_UID}
         profiles={profiles} loading={loading}
         onSelect={selectProfile} onManageClients={()=>setHomeTab("clients")}
         onOpenClientPlan={openClientPlan}
