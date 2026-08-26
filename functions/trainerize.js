@@ -62,12 +62,44 @@ async function tz(path, body, auth) {
 // Multi-tenant (each trainer connects their OWN token, stored encrypted)
 // lifts this gate later — see docs/TRAINERIZE-API.md.
 const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
+
+// ── The test account, and the exact reason it exists (S198g) ────────────────
+// Everything in this file is gated to the owner, which is correct — the shared
+// group token means a role check would hand any self-signed-up "trainer" the
+// real client roster. But it also meant NOBODY except Kevin could exercise the
+// linking UI, and three wrong diagnoses came out of that in two days: a button
+// that "did nothing" (it was inside a <label>), a plan list missing the only
+// entry that mattered, and a link that worked perfectly and never said so.
+// Each was found by Kevin clicking, reporting, and waiting.
+//
+// So the test account gets a path — with the PII removed rather than shared:
+//   • ONLY mode:"list", and ONLY a SYNTHETIC roster. The real Trainerize API is
+//     never called for this uid, so no real client's name or email can reach it.
+//   • Every WRITE (importing, syncing) stays owner-only. Nothing here can touch
+//     Kevin's data or anyone else's.
+// The fake names are obviously fake on purpose: if one ever shows up in a real
+// screenshot, that is the bug report.
+const TEST_UIDS = ["fP1rohsbKBaoJezm98F1UwYZDZD2"];   // trainer.uitest@calorieiq-test.com
+const TEST_ROSTER = [
+  { id: 990001, firstName: "Testcase", lastName: "Alpha", email: "alpha@example.test", status: "active" },
+  { id: 990002, firstName: "Testcase", lastName: "Bravo", email: "bravo@example.test", status: "active" },
+  { id: 990003, firstName: "Testcase", lastName: "Charlie", email: "charlie@example.test", status: "inactive" },
+];
+const isTestUid = (uid) => TEST_UIDS.includes(uid);
+
 async function requireAdmin(uid) {
   if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
   if (!ADMIN_UIDS.includes(uid)) {
     throw new HttpsError("permission-denied",
       "The Trainerize connection is linked to the platform owner's account.");
   }
+}
+// Read-only roster preview: the owner, or the test account (which gets fakes).
+async function requireRosterRead(uid) {
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+  if (ADMIN_UIDS.includes(uid) || isTestUid(uid)) return;
+  throw new HttpsError("permission-denied",
+    "The Trainerize connection is linked to the platform owner's account.");
 }
 
 // ── kv helpers — mirror src/storage.js exactly: users/{uid}/kv/{encodeURIComponent(key)}
@@ -812,13 +844,17 @@ exports.trainerizeImport = onCall(
   { secrets: [TRAINERIZE_GROUP_ID, TRAINERIZE_API_TOKEN], cors: true, timeoutSeconds: 300 },
   async (request) => {
     const uid = request.auth && request.auth.uid;
-    await requireAdmin(uid);
+    // Listing is the only thing the test account may do; everything below the
+    // list block still calls requireAdmin, so writes remain owner-only.
+    const listOnly = request.data && request.data.mode === "list";
+    if (listOnly) await requireRosterRead(uid); else await requireAdmin(uid);
     const auth = Buffer.from(`${TRAINERIZE_GROUP_ID.value()}:${TRAINERIZE_API_TOKEN.value()}`).toString("base64");
     const db = admin.firestore();
 
     // Preview mode: roster + already-imported flags, NO writes (the picker).
-    if (request.data && request.data.mode === "list") {
-      const roster = await fetchRoster(auth);
+    if (listOnly) {
+      // The test account never reaches Trainerize at all.
+      const roster = isTestUid(uid) ? TEST_ROSTER : await fetchRoster(auth);
       const index = (await kvGetJSON(db, uid, "caliq-index")) || [];
       const tzLinks = (await kvGetJSON(db, uid, "caliq-tz-links")) || {};
       const importedIds = new Set(index.filter((p) => p && p.trainerizeId).map((p) => p.trainerizeId));

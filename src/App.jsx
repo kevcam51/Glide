@@ -15997,12 +15997,46 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     } catch (e) {
       setTzForClient(null);
       setTzLinkedTo(client.uid);
+      await refreshTzLinks();
       setTzLinkMsg(tzErrText(e));
     }
     setTzForBusy(false);
   };
   const [tzLinkMsg, setTzLinkMsg] = useState("");
   const [tzLinkedTo, setTzLinkedTo] = useState(null);  // which client card should show it
+  // uid -> { tzId, name } for the "Connected" badge and Disconnect (S198g, Kevin:
+  // "make it so we can see that the account is connected... and an option to
+  // disconnect"). Without this the only way to know a link existed was to watch
+  // data appear days later, which is how a misdirected feed went unnoticed for
+  // six weeks.
+  const [tzLinksByUid, setTzLinksByUid] = useState({});
+  const refreshTzLinks = useCallback(async () => {
+    if (!tzIsOwner) return;
+    try {
+      const r = await window.storage.get("caliq-tz-links");
+      const links = r && r.value ? (JSON.parse(r.value) || {}) : {};
+      const byUid = {};
+      for (const [tzId, v] of Object.entries(links)) {
+        const target = typeof v === "string" ? v : (v && v.uid);
+        if (target) byUid[target] = { tzId, healthOnly: !!(v && v.healthOnly) };
+      }
+      setTzLinksByUid(byUid);
+    } catch { setTzLinksByUid({}); }
+  }, [tzIsOwner]);
+  useEffect(() => { refreshTzLinks(); }, [refreshTzLinks]);
+  const disconnectTz = async (client) => {
+    const cur = tzLinksByUid[client.uid];
+    if (!cur) return;
+    try {
+      await writeTzLinks((links) => { delete links[cur.tzId]; });
+      await refreshTzLinks();
+      setTzLinkedTo(client.uid);
+      setTzLinkMsg(`Disconnected ${client.name} from Trainerize. Nothing already synced is removed — it just stops updating from now on.`);
+    } catch {
+      setTzLinkedTo(client.uid);
+      setTzLinkMsg("Couldn't disconnect that — check your connection.");
+    }
+  };
   // Link a Trainerize person to a CONNECTED GLIDNA ACCOUNT rather than to a
   // local plan file (S198b, Kevin: "I want to connect it to the glide plan
   // already made called kev cam"). Those are two different things underneath —
@@ -16051,7 +16085,12 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // 30-min background auto-sync kill switch — stored in the trainer's own kv
   // (caliq-tz-autosync {enabled}); the scheduled function checks it each run.
   // Default ON; only an explicit false turns it off.
-  const tzIsOwner = meUid === OWNER_UID;
+  // The test account may open the Trainerize UI too — the callable hands it a
+  // SYNTHETIC roster and refuses every write (functions/trainerize.js S198g), so
+  // this exposes no real client to anyone. It exists so this flow can be
+  // exercised without Kevin being the only person able to click it.
+  const TZ_TEST_UID = "fP1rohsbKBaoJezm98F1UwYZDZD2";
+  const tzIsOwner = meUid === OWNER_UID || meUid === TZ_TEST_UID;
   const [tzAuto, setTzAuto] = useState(true);
   useEffect(() => {
     if (!tzIsOwner) return;
@@ -17169,13 +17208,26 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                               className="ml-2 bg-transparent border-0 p-0 text-xs text-muted cursor-pointer underline">dismiss</button>
                           </div>
                         )}
-                        {tzIsOwner && (
+                        {tzIsOwner && (tzLinksByUid[c.uid] ? (
+                          // Connected: say so plainly, and offer the way out.
+                          <span className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[.7rem] font-bold"
+                            style={{ borderColor: "var(--green)", color: "var(--green)",
+                              background: "color-mix(in srgb, var(--green) 10%, transparent)" }}>
+                            <Icon name="check" size={13} color="currentColor" />
+                            Trainerize connected
+                            {tzLinksByUid[c.uid].healthOnly ? " · watch only" : ""}
+                            <button onClick={() => disconnectTz(c)}
+                              className="ml-1 bg-transparent border-0 p-0 text-[.7rem] font-bold text-muted underline cursor-pointer">
+                              Disconnect
+                            </button>
+                          </span>
+                        ) : (
                           <button className={`${mBtnCls} inline-flex items-center gap-1.5`} disabled={tzForBusy}
                             onClick={() => openTzForClient(c)}>
                             <Icon name="link" size={16} color="var(--accent)" />
                             {tzForBusy && tzForClient && tzForClient.client.uid === c.uid ? "Loading…" : "Link Trainerize"}
                           </button>
-                        )}
+                        ))}
                         {/* The roster, filtered down to a choice about THIS client. */}
                         {tzForClient && tzForClient.client.uid === c.uid && tzForClient.roster && (
                           <div className="w-full mt-2 p-2.5 rounded-lg border border-primary"
