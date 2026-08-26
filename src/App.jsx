@@ -14436,7 +14436,7 @@ const BF_METHODS = [
 const BF_METHOD_NAME = { scale: "your scale", caliper: "your calipers", tape: "your tape measurements" };
 const BF_METHOD_SHORT = { scale: "Scale", caliper: "Calipers", tape: "Tape" };
 
-function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, bfAvailable, onSetBfSource, onEditWeighIn }) {
+function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, bfAvailable, onSetBfSource, onEditWeighIn, onEditScanBf }) {
   const [range, setRange] = useState("all");
   const [edit, setEdit] = useState(null); // { date, t, value } when editing a weigh-in
   const wAll = [...(weighIns || [])].filter((w) => w && w.t).sort((a, b) => a.t - b.t);
@@ -14458,9 +14458,16 @@ function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, bfAvai
   const methods = BF_METHODS
     .map((m) => ({ ...m, rows: inRange((bfBySource && bfBySource[m.key]) || []) }))
     .filter((m) => m.rows.length >= 2);
+  // ⚠️ ONLY THE SCALE SERIES IS EDITABLE (S198t). A scale/scanner reading is a
+  // number the person typed in, so correcting it on the chart is the same act
+  // as correcting it in the list. Caliper and tape body fat are CALCULATED from
+  // the skinfold and tape numbers — editing those points would write a value
+  // the next recalculation would silently discard, so they stay read-only and
+  // are corrected from their own measurements.
   const bfCharts = methods.length
     ? methods.map((m) => ({ key: "bf", label: methods.length === 1 ? "Body fat %" : m.label,
-        unit: "%", color: m.color, src: m.rows, id: "bf-" + m.key }))
+        unit: "%", color: m.color, src: m.rows, id: "bf-" + m.key,
+        editable: m.key === "scale", scanBf: m.key === "scale" }))
     : [{ key: "bf", label: "Body fat %", unit: "%", color: "var(--yellow)", src: b, id: "bf" }];
   const CHARTS = [
     { key: "weight", label: "Bodyweight", unit: "lbs", color: "var(--accent)", src: w, editable: true },
@@ -14487,12 +14494,12 @@ function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, bfAvai
           <div className="flex items-center gap-2 flex-wrap">
             <input type="number" inputMode="decimal" step="0.1" autoFocus value={edit.value}
               onChange={(e) => setEdit((s) => ({ ...s, value: e.target.value }))}
-              onKeyDown={(e) => { if (e.key === "Enter") { const v = Math.round(Number(edit.value) * 10) / 10; if (v > 0) onEditWeighIn(edit.date, v); setEdit(null); } }}
+              onKeyDown={(e) => { if (e.key === "Enter") { const v = Math.round(Number(edit.value) * 10) / 10; if (v > 0) (edit.scanBf ? onEditScanBf : onEditWeighIn)(edit.date, v); setEdit(null); } }}
               className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-sm outline-none" />
             <span className="text-xs text-muted">lbs</span>
-            <button onClick={() => { const v = Math.round(Number(edit.value) * 10) / 10; if (v > 0) onEditWeighIn(edit.date, v); setEdit(null); }}
+            <button onClick={() => { const v = Math.round(Number(edit.value) * 10) / 10; if (v > 0) (edit.scanBf ? onEditScanBf : onEditWeighIn)(edit.date, v); setEdit(null); }}
               className="rounded-lg bg-primaryfill px-3.5 py-2 text-sm font-bold text-primaryfg cursor-pointer">Save</button>
-            <button onClick={() => { onEditWeighIn(edit.date, null); setEdit(null); }}
+            <button onClick={() => { (edit.scanBf ? onEditScanBf : onEditWeighIn)(edit.date, null); setEdit(null); }}
               className="rounded-lg border border-danger bg-transparent px-3.5 py-2 text-sm font-bold text-danger cursor-pointer">Delete</button>
             <button onClick={() => setEdit(null)}
               className="rounded-lg border border-border bg-transparent px-3.5 py-2 text-sm text-fg cursor-pointer">Cancel</button>
@@ -14501,7 +14508,8 @@ function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, bfAvai
       )}
       {CHARTS.map((c) => (
         <MetricLineChart key={c.id || c.key} points={seriesOf(c)} label={c.label} unit={c.unit} color={c.color}
-          onEditPoint={c.editable && onEditWeighIn ? (p) => setEdit({ date: p.date, t: p.t, value: String(p.v) }) : undefined} />
+          onEditPoint={c.editable && (c.scanBf ? onEditScanBf : onEditWeighIn)
+            ? (p) => setEdit({ date: p.date, t: p.t, value: String(p.v), scanBf: !!c.scanBf }) : undefined} />
       ))}
       {/* Which method drives fat & lean mass is the person's choice (S183s,
           Kevin) — a scale is easiest, calipers take more effort and are
@@ -15030,13 +15038,84 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                             {fmtDelta(m.bodyFatPct - prevBf, "%")} since last
                           </span>
                         )}
-                        {m.leanMass != null && <span className="text-[.68rem] text-muted">lean {m.leanMass} lbs</span>}
-                        {m.fatMass != null && <span className="text-[.68rem] text-muted">fat {m.fatMass} lbs</span>}
+                        {/* ⚠️ leanMassLbs / fatMassLbs — NOT leanMass / fatMass.
+                            measurementMetrics returns the Lbs-suffixed names, so the
+                            first version of these two chips read undefined and simply
+                            never rendered. Nothing errored; they were just invisible. */}
+                        {m.leanMassLbs != null && <span className="text-[.68rem] text-muted">lean {m.leanMassLbs} lbs</span>}
+                        {m.fatMassLbs != null && <span className="text-[.68rem] text-muted">fat {m.fatMassLbs} lbs</span>}
+                        {m.bodyFatSource && <span className="text-[.62rem] text-muted">via {m.bodyFatSource === "scale" ? "scale/scanner" : m.bodyFatSource}</span>}
                       </div>
                     </div>
                   );
                 })()}
 
+                {/* Weight and the scale/scanner body-fat reading (S198t, Kevin:
+                    "I did not see those two"). Neither lives in the measurements
+                    array — weight is a CHECK-IN keyed by date, and the scanner
+                    number is the entry's bodyFatManual — which is exactly why
+                    the first version of this panel showed neither. Both are
+                    editable here, through the same handlers the rest of the app
+                    already uses. */}
+                {(() => {
+                  const dayKey = openEntry.date;
+                  const ci = (d.checkIns || []).find((c) => c && c.date === dayKey && Number(c.weight) > 0);
+                  const priorCi = [...(d.checkIns || [])]
+                    .filter((c) => c && Number(c.weight) > 0 && c.date < dayKey)
+                    .sort((a, b) => (a.date < b.date ? 1 : -1))[0] || null;
+                  const scan = Number(openEntry.bodyFatManual) > 0 ? Number(openEntry.bodyFatManual) : null;
+                  const priorScan = (() => { for (let i = openIdx - 1; i >= 0; i--) {
+                    if (Number(entries[i].bodyFatManual) > 0) return entries[i]; } return null; })();
+                  if (!ci && scan == null) return null;
+                  const row = (key, label, val, unit, delta, prevDate, onCommit) => {
+                    const editing = fieldEdit && fieldEdit.field === key;
+                    return (
+                      <div className="flex items-center justify-between gap-2 rounded-lg bg-surface2 px-2.5 py-1.5">
+                        <span className="text-[.78rem] text-muted" style={{ minWidth: 74 }}>{label}</span>
+                        {editing ? (
+                          <>
+                            <input type="number" inputMode="decimal" step="0.1" autoFocus value={fieldEdit.value}
+                              onChange={(ev) => setFieldEdit({ field: key, value: ev.target.value })}
+                              onKeyDown={(ev) => {
+                                if (ev.key === "Enter") { const v = Math.round(Number(fieldEdit.value) * 10) / 10; if (v > 0) onCommit(v); setFieldEdit(null); }
+                                if (ev.key === "Escape") setFieldEdit(null);
+                              }}
+                              className="w-20 rounded-md border border-border bg-surface px-2 py-1 text-[.82rem] text-fg outline-none" />
+                            <button onClick={() => { const v = Math.round(Number(fieldEdit.value) * 10) / 10; if (v > 0) onCommit(v); setFieldEdit(null); }}
+                              className="cursor-pointer rounded-md border-none bg-primaryfill px-2.5 py-1 text-[.72rem] font-bold text-primaryfg">Save</button>
+                            <button onClick={() => setFieldEdit(null)}
+                              className="cursor-pointer border-none bg-transparent px-1 text-[.72rem] text-muted">Cancel</button>
+                          </>
+                        ) : (
+                          <button onClick={() => setFieldEdit({ field: key, value: String(val) })}
+                            className="flex flex-1 cursor-pointer items-baseline justify-end gap-2 border-none bg-transparent p-0 text-right">
+                            <span className="text-[.85rem] font-bold text-fg">{val}{unit}</span>
+                            {delta != null && (
+                              <span className="text-[.64rem]" style={{ color: delta < 0 ? "var(--green)" : delta > 0 ? "var(--yellow)" : "var(--muted)" }}>
+                                {fmtDelta(delta, unit)} vs {prevDate ? new Date(prevDate + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "last"}
+                              </span>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  };
+                  return (
+                    <div className="mt-2.5">
+                      <div className="mb-1 text-[.62rem] uppercase tracking-wide text-muted">Weight &amp; scan</div>
+                      <div className="flex flex-col gap-1">
+                        {ci && onEditWeighIn && row("__weight", "Weight", Number(ci.weight), " lbs",
+                          priorCi ? Number(ci.weight) - Number(priorCi.weight) : null,
+                          priorCi ? priorCi.date : null,
+                          (v) => onEditWeighIn(dayKey, v))}
+                        {scan != null && row("__scanBf", "Body fat (scan)", scan, "%",
+                          priorScan ? scan - Number(priorScan.bodyFatManual) : null,
+                          priorScan ? priorScan.date : null,
+                          (v) => onSave({ bodyFatManual: v }, dayKey))}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {dayGroups(openEntry, openIdx).map((g) => (
                   <div key={g.title} className="mt-2.5">
                     <div className="mb-1 text-[.62rem] uppercase tracking-wide text-muted">{g.title}</div>
@@ -15107,7 +15186,8 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
             <BodyCompCharts weighIns={bodyCompData.weighIns} bfReads={bodyCompData.bfReads}
               bfBySource={bodyCompData.bfBySource} primaryBfSource={bodyCompData.primaryBfSource}
               bfAvailable={bodyCompData.bfAvailable} onSetBfSource={onSetBfSource}
-              onEditWeighIn={onEditWeighIn} />
+              onEditWeighIn={onEditWeighIn}
+              onEditScanBf={(dateKey, v) => onSave({ bodyFatManual: v == null ? 0 : v }, dateKey)} />
             {/* Tape / caliper single-metric trend (inches + skinfold sites) */}
             {chartable.length > 0 && (
               <div className="mt-4 rounded-lg bg-surface2 p-3">
