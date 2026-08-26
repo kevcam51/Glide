@@ -4101,7 +4101,16 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
             <WeightChartModal checkIns={data.checkIns || []} goalWeight={data.goalWeight}
               currentWeight={data.weightLbs} rangeLow={data.goalRangeLow} rangeHigh={data.goalRangeHigh}
               startWeight={data.startWeightLbs}
-              onDelete={onDeleteCheckIn} onClose={() => setShowWeightModal(false)} />
+              onDelete={onDeleteCheckIn}
+              onEditWeighIn={(dateKey, weight) => {
+                const ex = (data.checkIns || []).find((c) => c.date === dateKey);
+                if (weight == null) { if (ex && onDeleteCheckIn) onDeleteCheckIn(ex.timestamp); return; }
+                // Keep the ENTRY, change the number: same date, same timestamp,
+                // and any body fat or note recorded that day survives.
+                onSaveCheckIn && onSaveCheckIn({ ...(ex || {}), date: dateKey,
+                  timestamp: (ex && ex.timestamp) || new Date(dateKey + "T12:00:00").getTime(), weight });
+              }}
+              onClose={() => setShowWeightModal(false)} />
           )}
           {/* Body measurements — tape → body fat, no scale needed (S92) */}
           {onSaveMeasurements && (
@@ -14088,8 +14097,17 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
 // and the Pro Tracking section. `onDelete(timestamp)` is optional (omit to make
 // it read-only). `startWeight` lets the chart draw a "start → now" segment when
 // there's only one real weigh-in yet.
-function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, rangeHigh, startWeight, onDelete, onClose }) {
+function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, rangeHigh, startWeight, onDelete, onEditWeighIn, onClose }) {
   useBodyScrollLock(true);
+  // Which weigh-in is being corrected, and the value being typed (S198p, Kevin:
+  // "I see there is an issue with one and I want to know if we can edit a past
+  // entry by clicking on the weigh-ins instead of the x button"). Deleting and
+  // re-adding was the only route, which loses the entry's date and any body-fat
+  // or note recorded with it — a destructive fix for a typo.
+  //
+  // Same onEditWeighIn(dateKey, weightOrNull) contract BodyCompCharts already
+  // uses, so both call sites pass a handler that exists.
+  const [edit, setEdit] = useState(null);   // { date, value }
   useBackClose(true, onClose);   // phone Back closes the modal
   // Theme comes from <html> (S95), so this looks identical wherever it's opened
   // from — it used to carry its own data-theme="pro" for that.
@@ -14127,22 +14145,53 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
         {onDelete && weighIns.length > 0 && (
           <div className="mt-3.5">
             <div className="mb-1.5 text-sm text-muted">
-              Weigh-ins ({weighIns.length}) — tap the trash icon to remove a mistake
+              Weigh-ins ({weighIns.length}) — {onEditWeighIn ? "tap one to correct it, or the ✕ to remove it" : "tap the trash icon to remove a mistake"}
             </div>
             <div className="flex max-h-[180px] flex-col gap-1 overflow-y-auto">
-              {[...weighIns].reverse().map((c) => (
+              {[...weighIns].reverse().map((c) => {
+                const dateKey = c.date || new Date(c.timestamp).toISOString().slice(0, 10);
+                const editing = edit && edit.date === dateKey;
+                return (
                 <div key={c.timestamp}
-                  className="flex items-center justify-between rounded-lg bg-surface2 px-2.5 py-1.5">
-                  <span className="text-[.88rem] font-semibold">
-                    {c.weight} lbs
-                    <span className="ml-2 text-[.76rem] font-normal text-muted">
-                      {new Date(c.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                    </span>
-                  </span>
-                  <button onClick={() => onDelete(c.timestamp)} title="Delete this weigh-in"
-                    className="cursor-pointer border-none bg-transparent px-1.5 py-0.5 text-base leading-none text-danger"><Icon name="close" size={15} color="currentColor" /></button>
+                  className="flex items-center justify-between gap-2 rounded-lg bg-surface2 px-2.5 py-1.5">
+                  {editing ? (
+                    <>
+                      <input type="number" inputMode="decimal" step="0.1" autoFocus
+                        value={edit.value}
+                        onChange={(e) => setEdit({ date: dateKey, value: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { const v = Math.round(Number(edit.value) * 10) / 10; if (v > 0) onEditWeighIn(dateKey, v); setEdit(null); }
+                          if (e.key === "Escape") setEdit(null);
+                        }}
+                        className="w-20 rounded-md border border-border bg-surface px-2 py-1 text-[.88rem] text-fg outline-none" />
+                      <span className="flex-1 text-[.76rem] text-muted">
+                        {new Date(c.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      </span>
+                      <button onClick={() => { const v = Math.round(Number(edit.value) * 10) / 10; if (v > 0) onEditWeighIn(dateKey, v); setEdit(null); }}
+                        className="cursor-pointer rounded-md border-none bg-primaryfill px-2.5 py-1 text-[.76rem] font-bold text-primaryfg">Save</button>
+                      <button onClick={() => setEdit(null)}
+                        className="cursor-pointer border-none bg-transparent px-1 text-[.76rem] text-muted">Cancel</button>
+                    </>
+                  ) : (
+                    <>
+                      {/* The whole row is the edit affordance — the date stays put
+                          so a correction never becomes a new entry on today. */}
+                      <button
+                        onClick={() => onEditWeighIn && setEdit({ date: dateKey, value: String(c.weight) })}
+                        disabled={!onEditWeighIn}
+                        className={`flex-1 text-left text-[.88rem] font-semibold bg-transparent border-none p-0 text-fg ${onEditWeighIn ? "cursor-pointer" : "cursor-default"}`}>
+                        {c.weight} lbs
+                        <span className="ml-2 text-[.76rem] font-normal text-muted">
+                          {new Date(c.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                        </span>
+                      </button>
+                      <button onClick={() => onDelete(c.timestamp)} title="Delete this weigh-in"
+                        className="cursor-pointer border-none bg-transparent px-1.5 py-0.5 text-base leading-none text-danger"><Icon name="close" size={15} color="currentColor" /></button>
+                    </>
+                  )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -24108,7 +24157,9 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       {showChart && (
         <WeightChartModal checkIns={(planData && planData.checkIns) || []} goalWeight={g} currentWeight={w}
           rangeLow={rLo} rangeHigh={rHi} startWeight={start}
-          onDelete={deleteWeighIn} onClose={() => setShowChart(false)} />
+          onDelete={deleteWeighIn}
+          onEditWeighIn={(dateKey, weight) => { if (weight != null) logWeight(weight, dateKey); }}
+          onClose={() => setShowChart(false)} />
       )}
 
       {/* Body measurements popup — tape → body fat, no scale needed (S92) */}
