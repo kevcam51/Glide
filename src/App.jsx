@@ -16031,7 +16031,11 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           const target = typeof v === "string" ? v : (v && v.uid);
           if (String(id) !== String(tzClient.id) && target === client.uid) { delete links[id]; replaced = true; }
         }
-        links[tzClient.id] = client.uid;
+        // ⚠️ SHAPE NOTE: an object { uid, name } is read by the server exactly
+        // like the bare uid string was (linkedUid = link.uid, healthOnly stays
+        // false) — see functions/trainerize.js. The name is carried purely so
+        // the badge can say WHO is connected instead of just "connected".
+        links[tzClient.id] = { uid: client.uid, name: tzClient.name || `Client ${tzClient.id}` };
       });
       if (refused) {
         setTzLinkFor(null); setTzForClient(null);
@@ -16170,7 +16174,11 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       const byUid = {};
       for (const [tzId, v] of Object.entries(links)) {
         const target = typeof v === "string" ? v : (v && v.uid);
-        if (target) byUid[target] = { tzId, healthOnly: !!(v && v.healthOnly) };
+        if (target) byUid[target] = { tzId, healthOnly: !!(v && v.healthOnly),
+          name: (v && v.name) || null,
+          // More than one Trainerize person pointing at one account is
+          // corruption, not a feature — surface it so it can be cleared.
+          extra: (byUid[target] ? (byUid[target].extra || 0) + 1 : 0) };
       }
       setTzLinksByUid(byUid);
     } catch { setTzLinksByUid({}); }
@@ -16180,7 +16188,15 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     const cur = tzLinksByUid[client.uid];
     if (!cur) return;
     try {
-      await writeTzLinks((links) => { delete links[cur.tzId]; });
+      // EVERY id pointing at this account, not just the one the badge showed.
+      // Kevin ended up with two, and removing one would have left the other
+      // syncing invisibly — the exact shape of the problem being fixed.
+      await writeTzLinks((links) => {
+        for (const [id, v] of Object.entries(links)) {
+          const target = typeof v === "string" ? v : (v && v.uid);
+          if (target === client.uid) delete links[id];
+        }
+      });
       await refreshTzLinks();
       setTzLinkedTo(client.uid);
       setTzLinkMsg(`Disconnected ${client.name} from Trainerize. Nothing already synced is removed — it just stops updating from now on.`);
@@ -17235,14 +17251,28 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         )}
                         {tzIsOwner && (tzLinksByUid[c.uid] ? (
                           // Connected: say so plainly, and offer the way out.
-                          <span className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[.7rem] font-bold"
+                          <span className="inline-flex items-center gap-1.5 flex-wrap rounded-md border px-2 py-1 text-[.7rem] font-bold"
                             style={{ borderColor: "var(--green)", color: "var(--green)",
                               background: "color-mix(in srgb, var(--green) 10%, transparent)" }}>
                             <Icon name="check" size={13} color="currentColor" />
-                            Trainerize connected
+                            {/* Name the person, not just the state. "Connected" alone
+                                cannot tell you it is connected to the WRONG one. */}
+                            {tzLinksByUid[c.uid].name
+                              ? `Trainerize: ${tzLinksByUid[c.uid].name}`
+                              : "Trainerize connected"}
                             {tzLinksByUid[c.uid].healthOnly ? " · watch only" : ""}
+                            {/* ⚠️ A CONNECTED CARD MUST STILL OFFER A WAY TO RE-POINT
+                                (S198L, Kevin: "I don't see the link button"). It was
+                                showing the badge INSTEAD of the button, so the only
+                                route to a different Trainerize person was to
+                                disconnect first and hope you noticed why. */}
+                            <button onClick={() => openTzForClient(c)} disabled={tzForBusy}
+                              className="ml-1 bg-transparent border-0 p-0 text-[.7rem] font-bold underline cursor-pointer"
+                              style={{ color: "var(--accent)" }}>
+                              Change
+                            </button>
                             <button onClick={() => disconnectTz(c)}
-                              className="ml-1 bg-transparent border-0 p-0 text-[.7rem] font-bold text-muted underline cursor-pointer">
+                              className="bg-transparent border-0 p-0 text-[.7rem] font-bold text-muted underline cursor-pointer">
                               Disconnect
                             </button>
                           </span>
