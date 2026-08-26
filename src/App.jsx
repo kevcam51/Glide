@@ -15996,11 +15996,13 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       setTzForClient({ client, roster: (res.data && res.data.clients) || [] });
     } catch (e) {
       setTzForClient(null);
+      setTzLinkedTo(client.uid);
       setTzLinkMsg(tzErrText(e));
     }
     setTzForBusy(false);
   };
   const [tzLinkMsg, setTzLinkMsg] = useState("");
+  const [tzLinkedTo, setTzLinkedTo] = useState(null);  // which client card should show it
   // Link a Trainerize person to a CONNECTED GLIDNA ACCOUNT rather than to a
   // local plan file (S198b, Kevin: "I want to connect it to the glide plan
   // already made called kev cam"). Those are two different things underneath —
@@ -16009,11 +16011,20 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // offered half of them and the plan he wanted appeared to be missing.
   const linkAccountToTrainerize = async (client, tzClient) => {
     try {
-      let refused = false;
+      let refused = false, replaced = false;
       await writeTzLinks((links) => {
         // Already linked to this same person → not a new seat, just a re-point.
         const isNew = !links[tzClient.id];
         if (isNew && tzTrialCapped && tzLinkedCount(links) >= TZ_TRIAL_LINKS) { refused = true; return; }
+        // ⚠️ ONE ACCOUNT, ONE TRAINERIZE PERSON. Two ids pointing at the same
+        // account means two syncs writing weight, goals and body stats into the
+        // same plan every half hour, each overwriting the other — and Kevin
+        // already had exactly that after clicking twice on a screen that gave
+        // no feedback. The newest choice wins and the older one is dropped.
+        for (const [id, v] of Object.entries(links)) {
+          const target = typeof v === "string" ? v : (v && v.uid);
+          if (String(id) !== String(tzClient.id) && target === client.uid) { delete links[id]; replaced = true; }
+        }
         links[tzClient.id] = client.uid;
       });
       if (refused) {
@@ -16021,8 +16032,17 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         setTzLinkMsg(`Your trial covers ${TZ_TRIAL_LINKS} connected Trainerize clients, and they're all in use. Upgrade to connect more — the ones already linked keep syncing.`);
         return;
       }
+      // ⚠️ CLOSE THE SHEET AND SAY IT WORKED, FROM EITHER ENTRY POINT (S198f).
+      // This wrote the link correctly and then reported it into a box that only
+      // exists inside the IMPORTER sheet — so from the client card it looked
+      // like nothing happened at all. It cost Kevin two rounds of "I clicked it
+      // and nothing happened" on a feature that had been working the whole time.
+      // Silent success is the same bug as silent failure: the person cannot
+      // tell them apart, so they try again.
+      setTzForClient(null);
       setTzLinkFor(null);
-      setTzLinkMsg(`Linked ${tzClient.name} → ${client.name}'s account. Their Trainerize stats and watch data sync in from the next run; nothing already in the account is removed.`);
+      setTzLinkMsg(`Linked ${tzClient.name} → ${client.name}'s account. Their Trainerize stats and watch data sync in from the next run; nothing already in the account is removed.`
+        + (replaced ? ` A different Trainerize client was pointed at ${client.name} before — that one has been disconnected, so only this link syncs.` : ""));
     } catch (e) {
       console.error("link to account failed", e);
       setTzLinkMsg("Couldn't save that link — check your connection.");
@@ -17138,6 +17158,17 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         {/* Attach this person's Trainerize account, from their
                             own card. Owner-only for now because the Trainerize
                             credentials are still single-tenant. */}
+                        {/* The result, WHERE THE ACTION WAS. The only copy of
+                            this used to live in the importer sheet, so a link
+                            made from here confirmed itself to an empty room. */}
+                        {tzLinkMsg && tzLinkedTo === c.uid && (
+                          <div className="w-full mt-2 rounded-lg border border-primary px-2.5 py-2 text-sm text-fg"
+                            style={{ background: "color-mix(in srgb, var(--color-primary) 8%, var(--color-surface))" }}>
+                            {tzLinkMsg}
+                            <button onClick={() => { setTzLinkMsg(""); setTzLinkedTo(null); }}
+                              className="ml-2 bg-transparent border-0 p-0 text-xs text-muted cursor-pointer underline">dismiss</button>
+                          </div>
+                        )}
                         {tzIsOwner && (
                           <button className={`${mBtnCls} inline-flex items-center gap-1.5`} disabled={tzForBusy}
                             onClick={() => openTzForClient(c)}>
