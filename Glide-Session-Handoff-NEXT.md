@@ -65,6 +65,48 @@ It was caught because of S197g — "travel check unavailable: functions/internal
 in the console. Before that change it would have been a feature that quietly
 never worked.
 
+### 0. ▶️ THE LIVE THREAD — the plan dashboard & body-comp work (S198n–v)
+
+**Kevin is continuing this. Do not treat it as closed.** Everything below is
+deployed and was verified by clicking it in production, not by reading code.
+
+**What shipped, and why each mattered**
+
+| Area | What it does now |
+|---|---|
+| Calorie ring | 184px (was 150), number steps down for long values — four lines live inside that circle |
+| Daily Calorie Targets | New card under the ring: Maintain / ½ / 1 / 2 lb per week |
+| — tap | Previews that rate IN THE RING (plan untouched, says so) |
+| — commit | "Make ½ lb/wk my target" writes `weeklyRate`, clears any manual target, and syncs the daily-goal direction |
+| — custom | Free-text box → `data.calorieTarget`, clamped at 1,200 with the reason |
+| 1,200 floor | Amber "floored" on any rate whose real maths goes under; full warning when that rate is the one on screen — *eating less is not the lever, burning more is* |
+| Weigh-ins | Tap one to correct it; the DATE is preserved (delete-and-re-add silently moved the entry to today) |
+| Measurement days | Tap an entry → that day in full: body composition, weight, scan BF, tape, calipers — grouped, with change since last and since the start, every value editable in place, ‹ › to walk days |
+| Body-fat methods | ALL of them listed and named, with the one in use marked |
+| Charts | Bodyweight and scale-BF points are tappable to edit; hit target 40×40 (was a 10px dot) |
+
+**Deficit / Maintain / Surplus vs the targets card — the distinction to keep**
+The three buttons NEVER set a calorie number; they decide what counts as a good
+day, which is what colours the word in the ring. The targets card sets the
+number. They used to be able to contradict each other; committing a target now
+syncs the direction. Do not merge them — they answer different questions.
+
+**Deliberate choices worth not undoing**
+- Caliper and tape body-fat charts are READ-ONLY. Those percentages are
+  CALCULATED from skinfold and tape numbers, so an edit there would write a
+  value the next recalculation silently discards.
+- Colour is narrow: down is green only on TOTALS. A thigh or forearm going up
+  can be exactly what someone wants; the app should not editorialise.
+- Showing every BF method is the point. On one seeded day they spanned 21.8% to
+  34.5% — a 12.7-point disagreement the old panel hid behind a single figure.
+
+**Natural next steps in this thread (none started)**
+- Weight is editable in the measurement day view but has no row when that date
+  has no measurement entry — a weigh-in-only day cannot be opened at all.
+- The tape/caliper trend chart (the one with the metric chips) is still not
+  tappable; only the body-comp charts are.
+- Macro targets get no equivalent of the calorie targets card.
+
 ### 0. ▶️ S198 — WHERE THINGS ACTUALLY ARE (read this first)
 
 Everything below is deployed, pushed and verified by clicking it in production.
