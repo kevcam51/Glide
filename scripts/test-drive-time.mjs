@@ -212,6 +212,39 @@ const fakeFetch = async (url) => {
   ok("the cached call touched the network zero times", calls === afterFirst, calls - afterFirst);
   ok("the cached estimate matches", e2.minutes === e1.minutes);
 
+  // ⚠️ A straight-line entry must be re-done once a key exists, or the day the
+  // key arrives changes nothing for any route already cached (S198w).
+  {
+    const store2 = new Map();
+    const db2 = { doc: (p) => ({ path: p,
+      async get() { const d = store2.get(p); return { exists: !!d, data: () => d }; },
+      async set(v) { store2.set(p, v); } }) };
+    const key = D.driveKey("100 Ocean Dr Miami", "200 NW 2nd Ave Wynwood", mon9);
+    store2.set(`drivecache/${key}`, { at: Date.now(), minutes: 43, miles: 5, source: "straight-line" });
+    const noKey = await D.estimateDrive(db2, "100 Ocean Dr Miami", "200 NW 2nd Ave Wynwood", mon9, null, fakeFetch);
+    ok("with NO key the cached straight line is still used", noKey.cached === true && noKey.minutes === 43, noKey);
+    // With a key, Routes is attempted; this fake returns non-ok so it falls back —
+    // the point is that it did NOT serve the stale cached entry.
+    // With a key it geocodes through GOOGLE and calls Routes, so the stub has to
+    // answer both; Routes replies with a real 22-minute duration.
+    const googleFetch = async (url, opts) => {
+      const u = String(url);
+      if (u.includes("maps.googleapis.com/maps/api/geocode")) {
+        const q = decodeURIComponent(u.split("address=")[1].split("&")[0]);
+        const pt = /wynwood|2nd ave/i.test(q) ? wynwood : southBeach;
+        return { ok: true, json: async () => ({ results: [{ geometry: { location: { lat: pt.lat, lng: pt.lng } } }] }) };
+      }
+      if (u.includes("routes.googleapis.com")) {
+        return { ok: true, json: async () => ({ routes: [{ duration: "1320s", distanceMeters: 9000 }] }) };
+      }
+      return { ok: false };
+    };
+    const withKey = await D.estimateDrive(db2, "100 Ocean Dr Miami", "200 NW 2nd Ave Wynwood", mon9, "AIzaTESTKEY", googleFetch);
+    ok("with a key the stale straight line is NOT served from cache", withKey && withKey.cached === false, withKey);
+    ok("and the answer is traffic-aware", withKey && withKey.source === "routes", withKey && withKey.source);
+    ok("Routes duration is used (22 min + overhead)", withKey && withKey.minutes === 27, withKey && withKey.minutes);
+  }
+
   const same = await D.estimateDrive(db, "50 Main St", "50 main street", mon9, null, fakeFetch);
   ok("the same address twice is zero minutes and never geocoded",
      same && same.minutes === 0 && same.source === "same-place", same);

@@ -233,7 +233,15 @@ async function estimateDrive(db, fromAddr, toAddr, departMs, apiKey, fetchFn) {
     const snap = await ref.get();
     if (snap.exists) {
       const d = snap.data() || {};
-      if (Date.now() - (d.at || 0) < DRIVE_TTL_MS && isFinite(d.minutes)) {
+      // ⚠️ A CACHED GUESS MUST NOT OUTLIVE THE ABILITY TO DO BETTER (S198w).
+      // Entries live 30 days. Every estimate made before a Maps key existed is
+      // a straight line, so without this the day the key arrives changes
+      // nothing for any route already looked at — the trainer keeps reading
+      // "no traffic" estimates for a month and reasonably concludes the key did
+      // not work. A straight-line entry is therefore treated as a MISS once a
+      // key is available, and recomputed for real.
+      const staleGuess = d.source === "straight-line" && !!apiKey;
+      if (!staleGuess && Date.now() - (d.at || 0) < DRIVE_TTL_MS && isFinite(d.minutes)) {
         return { minutes: d.minutes, miles: d.miles != null ? d.miles : null, source: d.source, cached: true };
       }
     }
