@@ -11323,6 +11323,9 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const [mtDraft, setMtDraft] = useState({ protein:"", carbs:"", fat:"" });   // grams draft
   const [mtMode, setMtMode] = useState("grams"); // "grams" | "pct" — how you enter targets
   const [mtPct, setMtPct] = useState({ protein:"", carbs:"", fat:"" });       // percentage draft
+  // Try a macro split without committing to it (S198y, Kevin) — the same move
+  // Daily Calorie Targets makes for calories. Holds { key, t:{protein,carbs,fat} }.
+  const [previewMacros, setPreviewMacros] = useState(null);
   // Drafts so water/weight only save when you press Enter or tap Log — not on
   // every keystroke (which used to log "weight: 1 lbs" as you typed).
   const [waterDraft, setWaterDraft] = useState("");
@@ -11633,6 +11636,43 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
     fat: pctToG(parseFloat(mtPct.fat) || 0, 9),
   };
   const pctSum = (parseFloat(mtPct.protein) || 0) + (parseFloat(mtPct.carbs) || 0) + (parseFloat(mtPct.fat) || 0);
+
+  // ── Macro Targets (S198y, Kevin) ──────────────────────────────────────────
+  // Feeds the card under Daily Calorie Targets. These are the SAME three
+  // recommendations the hand-entry editor already offers — the card only shows
+  // them as grams, marks the one in force, and takes one tap to adopt. Selecting
+  // one is a PREVIEW: nothing is written until the confirm button, and the
+  // macro bars (further down the same page) follow the preview while it is up.
+  const macroPresets = (() => {
+    const fromPct = (r) => ({ protein: pctToG(r.protein, 4), carbs: pctToG(r.carbs, 4), fat: pctToG(r.fat, 9) });
+    const autoCarbs = Math.max(0, Math.round((target - autoProtein * 4 - autoFat * 9) / 4));
+    const gw = Number(goalWeight), cw = Number(weightLbs);
+    const goalLbl = gw && cw && gw < cw - 0.5 ? "Cutting" : gw && cw && gw > cw + 0.5 ? "Bulking" : "Maintaining";
+    const list = [
+      { key: "bodyweight", label: "Bodyweight", sub: `${proteinPerLb} g/lb protein`, t: { protein: autoProtein, carbs: autoCarbs, fat: autoFat } },
+      { key: "balanced", label: "Balanced", sub: "30 / 40 / 30", t: fromPct(recPct("balanced")) },
+      { key: "goal", label: goalLbl, sub: "from your goal", t: fromPct(recPct("goal")) },
+    ];
+    // Two buttons with identical numbers is noise, not choice — when the
+    // goal-based split lands on the balanced one (i.e. maintaining), drop it.
+    const seen = new Set();
+    return list.filter((o) => {
+      if (!(o.t.protein > 0 || o.t.carbs > 0 || o.t.fat > 0)) return false;
+      const sig = `${o.t.protein}/${o.t.carbs}/${o.t.fat}`;
+      if (seen.has(sig)) return false;
+      seen.add(sig); return true;
+    });
+  })();
+  const sameMacros = (a, b) => a && b && a.protein === b.protein && a.carbs === b.carbs && a.fat === b.fat;
+  // Which preset the plan is on right now: auto === the bodyweight numbers by
+  // construction, otherwise whichever preset the stored triple matches exactly.
+  const planMacroKey = macrosCustom
+    ? (macroPresets.find((o) => sameMacros(o.t, { protein: proteinTarget, carbs: carbsTarget, fat: fatTarget })) || {}).key || null
+    : "bodyweight";
+  // What the bars are drawn against — the preview when one is up, the plan otherwise.
+  const shownP = previewMacros ? previewMacros.t.protein : proteinTarget;
+  const shownC = previewMacros ? previewMacros.t.carbs : carbsTarget;
+  const shownF = previewMacros ? previewMacros.t.fat : fatTarget;
 
   // ── Try a different rate without committing to it (S198q, Kevin) ──────────
   // Tapping a daily target previews it IN THE RING, so the question "what would
@@ -11963,6 +12003,79 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         </div>
         );
       })()}
+      {/* ── Macro Targets (S198y, Kevin) ─────────────────────────────────────
+          The macro half of Daily Calorie Targets, and it sits directly under it
+          because that is what "an equivalent" means. The only macro controls
+          were three levels down — the LOGGED tile, then "Add macros manually",
+          then "Macros & Micros" — and they were a text editor: choosing a split
+          meant typing six numbers to find out what they came to. These are the
+          same three recommendations that editor already offers, shown as grams,
+          one tap to adopt. The editor stays where it is; it is still where a
+          number that is nobody's recommendation gets typed. */}
+      {onSetMacroTargets && macroPresets.length > 0 && target > 0 && (
+        <div className="card" style={{marginTop:"14px"}}>
+          <div className="sec-title" style={{marginBottom:"8px"}}>Macro Targets</div>
+          <div style={{fontSize:".68rem",color:"var(--muted)",marginBottom:"8px"}}>
+            Grams of protein / carbs / fat a day. Tap one to see what it comes to — your plan doesn’t change until you say so.
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:`repeat(${macroPresets.length},1fr)`,gap:"6px"}}>
+            {macroPresets.map((o) => {
+              const isPlan = planMacroKey === o.key;
+              const isShown = previewMacros ? previewMacros.key === o.key : isPlan;
+              return (
+                <button key={o.key}
+                  onClick={()=>setPreviewMacros(previewMacros && previewMacros.key === o.key ? null : (isPlan ? null : { key:o.key, t:o.t }))}
+                  style={{padding:"8px 4px",borderRadius:"9px",textAlign:"center",cursor:"pointer",
+                    background: isShown ? "rgba(var(--accent-rgb),.12)" : "var(--surface)",
+                    border: isShown ? "1px solid var(--accent)" : "1px solid var(--border)"}}>
+                  <div style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>{o.label}</div>
+                  <div style={{fontFamily:"'Sora',sans-serif",fontSize:".95rem",color: isShown ? "var(--accent)" : "var(--text)"}}>
+                    {o.t.protein}<span style={{opacity:.5}}>/</span>{o.t.carbs}<span style={{opacity:.5}}>/</span>{o.t.fat}
+                  </div>
+                  <div style={{fontSize:".5rem",color:"var(--muted)"}}>g P/C/F · {o.sub}</div>
+                  {isPlan && <div style={{fontSize:".5rem",color:"var(--accent)",fontWeight:800,marginTop:"1px"}}>YOURS</div>}
+                </button>
+              );
+            })}
+          </div>
+          {previewMacros && (
+            <div style={{marginTop:"8px",display:"flex",gap:"6px"}}>
+              <button onClick={()=>{ onSetMacroTargets({ ...previewMacros.t }); setPreviewMacros(null); setEditMacros(false); }}
+                style={{flex:2,padding:"8px",borderRadius:"8px",cursor:"pointer",border:"none",
+                  background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)",fontSize:".74rem",fontWeight:800}}>
+                Make {(macroPresets.find((o)=>o.key===previewMacros.key)||{}).label} my macro targets
+              </button>
+              <button onClick={()=>setPreviewMacros(null)}
+                style={{flex:1,padding:"8px",borderRadius:"8px",cursor:"pointer",border:"1px solid var(--border)",
+                  background:"var(--surface)",color:"var(--text-secondary)",fontSize:".72rem",fontWeight:700}}>
+                Cancel
+              </button>
+            </div>
+          )}
+          {macrosCustom && !planMacroKey && !previewMacros && (
+            <div style={{marginTop:"7px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px",flexWrap:"wrap"}}>
+              <span style={{fontSize:".68rem",color:"var(--text-secondary)"}}>
+                Your targets are set by hand to <strong style={{color:"var(--accent)"}}>{proteinTarget}/{carbsTarget}/{fatTarget}g</strong>.
+              </span>
+              <button onClick={()=>onSetMacroTargets(null)}
+                style={{padding:"5px 10px",borderRadius:"7px",cursor:"pointer",border:"1px solid var(--border)",
+                  background:"var(--surface)",color:"var(--text)",fontSize:".68rem",fontWeight:700}}>
+                Back to the estimates
+              </button>
+            </div>
+          )}
+          {/* What the numbers on screen actually come to. A split is only
+              meaningful against the calorie target it divides up, and the
+              arithmetic (4/4/9 cal per gram) is not something to make anyone do. */}
+          <div style={{fontSize:".62rem",color:"var(--muted)",marginTop:"7px",lineHeight:1.45}}>
+            {previewMacros ? "That would be " : "Right now: "}
+            <strong style={{color: previewMacros ? "var(--yellow)" : "var(--text-secondary)"}}>{shownP}g protein · {shownC}g carbs · {shownF}g fat</strong>
+            {" — "}{gToPct(shownP,4)}/{gToPct(shownC,4)}/{gToPct(shownF,9)}% of your {target.toLocaleString()} cal
+            {previewMacros ? <span style={{color:"var(--yellow)",fontWeight:700}}> · not saved yet</span> : null}.
+            {!previewMacros && " Want a number that isn’t here? Set any of the three by hand under Macros & Micros."}
+          </div>
+        </div>
+      )}
       {/* Discoverability (S104, Kevin: "I didn't see the weight projection").
           The projected weight loss lives in the sheet the ring opens — say so,
           right under the ring, so it's found. */}
@@ -12644,10 +12757,15 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
             </button>
           </div>
         )}
+        {previewMacros && (
+          <div style={{marginBottom:"8px",fontSize:".66rem",fontWeight:700,color:"var(--yellow)",textAlign:"center"}}>
+            Previewing {(macroPresets.find((o)=>o.key===previewMacros.key)||{}).label} — your plan still targets {proteinTarget}/{carbsTarget}/{fatTarget}g
+          </div>
+        )}
         {[
-          { label:"Protein", color:"var(--pink)", val:dailyLog.protein||0, tgt:proteinTarget },
-          { label:"Carbs",   color:"var(--yellow)", val:dailyLog.carbs||0,   tgt:carbsTarget },
-          { label:"Fat",     color:"var(--blue)", val:dailyLog.fat||0,     tgt:fatTarget },
+          { label:"Protein", color:"var(--pink)", val:dailyLog.protein||0, tgt:shownP },
+          { label:"Carbs",   color:"var(--yellow)", val:dailyLog.carbs||0,   tgt:shownC },
+          { label:"Fat",     color:"var(--blue)", val:dailyLog.fat||0,     tgt:shownF },
         ].map((m) => {
           const fill = m.tgt > 0 ? Math.min(100, Math.round((m.val / m.tgt) * 100)) : 0;
           const over = m.tgt > 0 && m.val > m.tgt;
@@ -12675,12 +12793,12 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           {(dailyLog.protein > 0 || dailyLog.carbs > 0 || dailyLog.fat > 0)
             ? `${((dailyLog.protein||0)*4 + (dailyLog.carbs||0)*4 + (dailyLog.fat||0)*9).toLocaleString()} cal from macros · `
             : ""}
-          {macrosCustom ? "custom targets set by you" : "estimates from bodyweight & calorie goal"}
+          {previewMacros ? "preview — not saved yet" : macrosCustom ? "custom targets set by you" : "estimates from bodyweight & calorie goal"}
         </div>
         {/* Recommended/current split shown as % of calories (S94, part a). */}
-        {target > 0 && (proteinTarget || carbsTarget || fatTarget) > 0 && (
+        {target > 0 && (shownP || shownC || shownF) > 0 && (
           <div style={{fontSize:".65rem",color:"var(--muted)",marginTop:"3px",textAlign:"center"}}>
-            Split: <span style={{color:"var(--pink)",fontWeight:700}}>{splitP}%</span> protein · <span style={{color:"var(--yellow)",fontWeight:700}}>{splitC}%</span> carbs · <span style={{color:"var(--blue)",fontWeight:700}}>{splitF}%</span> fat
+            Split: <span style={{color:"var(--pink)",fontWeight:700}}>{gToPct(shownP,4)}%</span> protein · <span style={{color:"var(--yellow)",fontWeight:700}}>{gToPct(shownC,4)}%</span> carbs · <span style={{color:"var(--blue)",fontWeight:700}}>{gToPct(shownF,9)}%</span> fat
           </div>
         )}
         {/* Protein basis — user choice for the AUTO target (custom targets override it). */}
@@ -13290,18 +13408,35 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         </div>
       </BottomSheet>
 
-      {showMeasure && onSaveMeasurements && (
+      {showMeasure && onSaveMeasurements && (() => {
+        // One dated writer, shared by the modal's own date picker and by the
+        // tap-to-edit on the weight chart: merge by date so a same-day workout,
+        // note or mood survives. onDeleteCheckIn needs the timestamp, not the date.
+        const writeWeighIn = (dateKey, weight) => {
+          const ex = (data.checkIns || []).find((c) => c.date === dateKey);
+          if (weight == null) { if (ex && onDeleteCheckIn) onDeleteCheckIn(ex.timestamp); return; }
+          onSaveCheckIn && onSaveCheckIn({ ...(ex || {}), date: dateKey,
+            timestamp: (ex && ex.timestamp) || new Date(dateKey + "T12:00:00").getTime(), weight });
+        };
+        return (
         <MeasurementsModal data={data} onSave={onSaveMeasurements} onDelete={onDeleteMeasurement}
           onSetGoalWeight={onSetGoalWeight} onToggleBodyFat={onToggleBodyFat} onSetBfSource={onSetBfSource}
-          onLogWeight={(v)=>onLogUpdate("weight", v)}  /* in-plan: date handled by the plan editor */
-          onEditWeighIn={(dateKey, weight)=>{
-            const ex = (data.checkIns || []).find((c) => c.date === dateKey);
-            if (weight == null) { if (ex && onDeleteCheckIn) onDeleteCheckIn(ex.timestamp); return; }
-            onSaveCheckIn && onSaveCheckIn({ ...(ex || {}), date: dateKey,
-              timestamp: (ex && ex.timestamp) || new Date(dateKey + "T12:00:00").getTime(), weight });
+          onLogWeight={(v, dateKey)=>{
+            // ⚠️ THE MODAL PROMISES THE DATE IT IS SHOWING (S198y). It says
+            // "Saving to <date> — a weight entered here counts as that day's
+            // weigh-in", and this dropped the argument and handed it to
+            // onLogUpdate, which always writes the day being VIEWED. A weight
+            // back-dated in the picker landed on today, and the screen said
+            // otherwise. Another day goes through the merge-by-date path;
+            // the viewed day keeps the log path, which also moves the day's
+            // running totals and the streak.
+            if (dateKey && dateKey !== mealDate) { writeWeighIn(dateKey, v); return; }
+            onLogUpdate("weight", v);
           }}
+          onEditWeighIn={writeWeighIn}
           onClose={()=>setShowMeasure(false)} />
-      )}
+        );
+      })()}
 
       {/* Log-confirmation toast — fixed at the bottom so it's visible no matter
           where you've scrolled (Kevin: previously no confirmation that it saved). */}
@@ -14062,7 +14197,10 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
 // ─── Progress Chart (from check-in history) ──────────────────────────────────
 
 function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, showValues, pxPerPoint, rangeLow, rangeHigh, surfaceless,
-  unit = "lbs", label = "Weight Trend", pointNoun = "weigh-in", hideAdherence = false }) {
+  unit = "lbs", label = "Weight Trend", pointNoun = "weigh-in", hideAdherence = false, onEditPoint }) {
+  // onEditPoint(point) makes the plotted points tappable — same contract as
+  // MetricLineChart, and the same reason for an oversized invisible target:
+  // a 5px dot is a 10px hit area, well under the 44px a finger needs.
   // unit/label/pointNoun/hideAdherence generalize the chart for non-weight
   // series (tape measurements / body-fat %) — pass points as {date, timestamp,
   // weight: <value>}. Defaults keep the weight behavior identical.
@@ -14124,7 +14262,7 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}}>
         <div>
           <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",letterSpacing:"2px",color:"var(--accent)",display:"flex",alignItems:"center",gap:"8px"}}><Icon name="chart" size={18} color="var(--accent)" />Progress</div>
-          <div style={{fontSize:".74rem",color:"var(--muted)"}}>{sorted.length} {sorted.length === 1 ? pointNoun : pointNoun.endsWith("y") ? pointNoun.slice(0, -1) + "ies" : pointNoun + "s"}{pointNoun === "weigh-in" ? ` · ${checkIns.length} ${checkIns.length === 1 ? "check-in" : "check-ins"}` : ""}</div>
+          <div style={{fontSize:".74rem",color:"var(--muted)"}}>{sorted.length} {sorted.length === 1 ? pointNoun : pointNoun.endsWith("y") ? pointNoun.slice(0, -1) + "ies" : pointNoun + "s"}{pointNoun === "weigh-in" ? ` · ${checkIns.length} ${checkIns.length === 1 ? "check-in" : "check-ins"}` : ""}{onEditPoint ? " · tap a dot to edit" : ""}</div>
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.3rem",color:trendColor}}>
@@ -14226,6 +14364,14 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
             {goal}
           </text>
         )}
+
+        {/* Tap targets, drawn ABSOLUTELY LAST so nothing sits over them — the
+            value labels are <text> and would otherwise swallow a tap aimed
+            squarely at the number. Invisible, 44px across. */}
+        {onEditPoint && sorted.map((c, i) => (
+          <circle key={`hit${i}`} cx={PAD.left + xScale(i)} cy={PAD.top + yScale(c.weight)} r={22}
+            fill="transparent" style={{ cursor: "pointer" }} onClick={() => onEditPoint(c)} />
+        ))}
       </svg>
       </div>
 
@@ -14649,6 +14795,17 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         .map((e) => ({ date: e.date, timestamp: e.timestamp, weight: Number(e[activeMetric]) })) : [];
   const chartLabel = (f) => (f === "bodyFat" ? "Body fat %" : CALIPER_LABELS[f] || MEASUREMENT_LABELS[f]);
   const chartUnit = (f) => (f === "bodyFat" ? "%" : CALIPER_ALL.includes(f) ? "mm" : "in");
+  // Correct a reading by tapping its point on the tape/caliper trend (S198y,
+  // Kevin) — the body-composition charts have been tappable since S198u and
+  // this one was not, so the same gesture did nothing on half the charts.
+  const [pointEdit, setPointEdit] = useState(null); // { field, date, t, value }
+  const metricEditable = !!activeMetric && activeMetric !== "bodyFat";
+  const commitPointEdit = () => {
+    if (!pointEdit) return;
+    const v = Math.round(Number(pointEdit.value) * 10) / 10;
+    if (v > 0) onSave({ [pointEdit.field]: v }, pointEdit.date);
+    setPointEdit(null);
+  };
 
   // Body-composition timeline (S109): join weigh-ins (weight over time) with
   // measurement entries (BF% over time) by date, carrying each forward so the
@@ -14752,9 +14909,36 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   // start, each value editable in place, and ‹ › to walk the days either way.
   // Charts stay where they are — Kevin asked for the numbers those charts
   // carry, not another copy of the charts.
-  const [openTs, setOpenTs] = useState(null);
-  const openIdx = entries.findIndex((e) => e.timestamp === openTs);
-  const openEntry = openIdx >= 0 ? entries[openIdx] : null;
+  // ── Every DAY that has something on it (S198y, Kevin) ─────────────────────
+  // The list and the ‹ › walked `entries` — the measurement array — so a day
+  // with a weigh-in and no tape or caliper numbers had no row to tap and no way
+  // to be reached at all, even though this panel can already show and correct
+  // that weight. The unit here is the DAY, not the measurement entry: a day
+  // carries an entry, a weigh-in, or both.
+  const dayList = (() => {
+    const byDate = new Map();
+    for (const e of entries) if (e && e.date) byDate.set(e.date, { date: e.date, ts: e.timestamp, entry: e, ci: null });
+    for (const c of (d.checkIns || [])) {
+      if (!c || !c.date || !(Number(c.weight) > 0)) continue;
+      const ex = byDate.get(c.date);
+      if (ex) ex.ci = c;
+      else byDate.set(c.date, { date: c.date, ts: c.timestamp || new Date(c.date + "T12:00:00").getTime(), entry: null, ci: c });
+    }
+    return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  })();
+  const weighInOnlyCount = dayList.filter((x) => !x.entry).length;
+  // Weigh-in-only days stay OUT of the list by default: someone can weigh daily
+  // and measure monthly, and burying six measurement days under ninety weigh-ins
+  // would trade one problem for a worse one. They are always reachable with ‹ ›,
+  // and the line under the list says they exist.
+  const [showWeighInDays, setShowWeighInDays] = useState(false);
+  const [openDate, setOpenDate] = useState(null);
+  const dayIdx = dayList.findIndex((x) => x.date === openDate);
+  const openDay = dayIdx >= 0 ? dayList[dayIdx] : null;
+  const openEntry = openDay ? openDay.entry : null;
+  // Index INTO `entries` — what priorFor/dayGroups walk. −1 on a weigh-in-only
+  // day, which their loops read as "nothing earlier", which is correct.
+  const openIdx = openEntry ? entries.indexOf(openEntry) : -1;
   const [fieldEdit, setFieldEdit] = useState(null);   // { field, value }
   // The most recent EARLIER entry that actually recorded this field — not simply
   // the previous entry, which may not have measured it at all.
@@ -15018,45 +15202,60 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         {msg ? <div className="mt-2 text-sm text-success">{msg}</div> : null}
 
         {/* History list with delete */}
-        {onDelete && entries.length > 0 && (
+        {dayList.length > 0 && (
           <div className="mt-3.5">
-            <div className="mb-1.5 text-sm text-muted">Entries ({entries.length}) — tap a day to see everything recorded on it</div>
+            <div className="mb-1.5 text-sm text-muted">
+              {showWeighInDays ? `Days (${dayList.length})` : `Entries (${entries.length})`} — tap a day to see everything recorded on it
+            </div>
             <div className="flex max-h-[180px] flex-col gap-1 overflow-y-auto">
-              {[...entries].reverse().map((e) => (
-                <div key={e.timestamp} className="flex items-center justify-between gap-2 rounded-lg bg-surface2 px-2.5 py-1.5">
-                  <button onClick={() => { setOpenTs(e.timestamp); setFieldEdit(null); }}
+              {[...(showWeighInDays ? dayList : dayList.filter((x) => x.entry))].reverse().map((x) => (
+                <div key={x.date} className="flex items-center justify-between gap-2 rounded-lg bg-surface2 px-2.5 py-1.5">
+                  <button onClick={() => { setOpenDate(x.date); setFieldEdit(null); }}
                     className="min-w-0 flex-1 cursor-pointer border-none bg-transparent p-0 text-left text-[.82rem] text-fg">
-                    <span className="text-muted">{new Date(e.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
-                    <span className="ml-2 font-semibold">{summarize(e)}</span>
+                    <span className="text-muted">{new Date(x.ts).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+                    <span className={`ml-2 font-semibold ${x.entry ? "" : "text-muted"}`}>
+                      {x.entry ? summarize(x.entry) : `${x.ci.weight} lbs · weigh-in only`}
+                    </span>
                   </button>
-                  <button onClick={() => onDelete(e.timestamp)} title="Delete this entry"
-                    className="cursor-pointer border-none bg-transparent px-1.5 py-0.5 text-base leading-none text-danger"><Icon name="close" size={15} color="currentColor" /></button>
+                  {onDelete && x.entry && (
+                    <button onClick={() => { onDelete(x.entry.timestamp); if (openDate === x.date) setOpenDate(null); }} title="Delete this entry"
+                      className="cursor-pointer border-none bg-transparent px-1.5 py-0.5 text-base leading-none text-danger"><Icon name="close" size={15} color="currentColor" /></button>
+                  )}
                 </div>
               ))}
             </div>
+            {weighInOnlyCount > 0 && (
+              <button onClick={() => setShowWeighInDays((v) => !v)}
+                className="mt-1 cursor-pointer border-none bg-transparent p-0 text-left text-[.7rem] text-muted">
+                {showWeighInDays
+                  ? `Hide the ${weighInOnlyCount} ${weighInOnlyCount === 1 ? "day" : "days"} with only a weigh-in`
+                  : `${weighInOnlyCount} more ${weighInOnlyCount === 1 ? "day has" : "days have"} a weigh-in and nothing else · `}
+                <span className="text-primary font-semibold">{showWeighInDays ? "" : "Show"}</span>
+              </button>
+            )}
 
             {/* ── The day itself ─────────────────────────────────────────── */}
-            {openEntry && (
+            {openDay && (
               <div className="mt-2.5 rounded-xl border border-primary p-3"
                 style={{ background: "color-mix(in srgb, var(--color-primary) 5%, var(--color-surface))" }}>
                 <div className="flex items-center justify-between gap-2">
-                  <button disabled={openIdx <= 0}
-                    onClick={() => { setOpenTs(entries[openIdx - 1].timestamp); setFieldEdit(null); }}
-                    className={`rounded-md border border-border bg-surface2 px-2 py-1 text-xs ${openIdx <= 0 ? "opacity-35" : "cursor-pointer"}`}
-                    title="Earlier entry">‹</button>
+                  <button disabled={dayIdx <= 0}
+                    onClick={() => { setOpenDate(dayList[dayIdx - 1].date); setFieldEdit(null); }}
+                    className={`rounded-md border border-border bg-surface2 px-2 py-1 text-xs ${dayIdx <= 0 ? "opacity-35" : "cursor-pointer"}`}
+                    title="Earlier day">‹</button>
                   <div className="text-center">
                     <div className="text-[.9rem] font-bold text-fg">
-                      {new Date(openEntry.timestamp).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+                      {new Date(openDay.ts).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
                     </div>
-                    <div className="text-[.62rem] text-muted">entry {openIdx + 1} of {entries.length}</div>
+                    <div className="text-[.62rem] text-muted">day {dayIdx + 1} of {dayList.length}</div>
                   </div>
-                  <button disabled={openIdx >= entries.length - 1}
-                    onClick={() => { setOpenTs(entries[openIdx + 1].timestamp); setFieldEdit(null); }}
-                    className={`rounded-md border border-border bg-surface2 px-2 py-1 text-xs ${openIdx >= entries.length - 1 ? "opacity-35" : "cursor-pointer"}`}
-                    title="Later entry">›</button>
+                  <button disabled={dayIdx >= dayList.length - 1}
+                    onClick={() => { setOpenDate(dayList[dayIdx + 1].date); setFieldEdit(null); }}
+                    className={`rounded-md border border-border bg-surface2 px-2 py-1 text-xs ${dayIdx >= dayList.length - 1 ? "opacity-35" : "cursor-pointer"}`}
+                    title="Later day">›</button>
                 </div>
 
-                {showBF && (() => {
+                {showBF && openEntry && (() => {
                   const m = measurementMetrics(d, openEntry);
                   const prevBf = (() => { for (let i = openIdx - 1; i >= 0; i--) {
                     const pm = measurementMetrics(d, entries[i]); if (pm.bodyFatPct != null) return pm.bodyFatPct; } return null; })();
@@ -15123,12 +15322,12 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                     editable here, through the same handlers the rest of the app
                     already uses. */}
                 {(() => {
-                  const dayKey = openEntry.date;
-                  const ci = (d.checkIns || []).find((c) => c && c.date === dayKey && Number(c.weight) > 0);
+                  const dayKey = openDay.date;
+                  const ci = openDay.ci;
                   const priorCi = [...(d.checkIns || [])]
                     .filter((c) => c && Number(c.weight) > 0 && c.date < dayKey)
                     .sort((a, b) => (a.date < b.date ? 1 : -1))[0] || null;
-                  const scan = Number(openEntry.bodyFatManual) > 0 ? Number(openEntry.bodyFatManual) : null;
+                  const scan = openEntry && Number(openEntry.bodyFatManual) > 0 ? Number(openEntry.bodyFatManual) : null;
                   const priorScan = (() => { for (let i = openIdx - 1; i >= 0; i--) {
                     if (Number(entries[i].bodyFatManual) > 0) return entries[i]; } return null; })();
                   if (!ci && scan == null) return null;
@@ -15181,7 +15380,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                     </div>
                   );
                 })()}
-                {dayGroups(openEntry, openIdx).map((g) => (
+                {(openEntry ? dayGroups(openEntry, openIdx) : []).map((g) => (
                   <div key={g.title} className="mt-2.5">
                     <div className="mb-1 text-[.62rem] uppercase tracking-wide text-muted">{g.title}</div>
                     <div className="flex flex-col gap-1">
@@ -15224,12 +15423,15 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                     </div>
                   </div>
                 ))}
-                {!dayGroups(openEntry, openIdx).length && (
-                  <div className="mt-2.5 text-[.75rem] text-muted">No tape or caliper numbers on this day.</div>
+                {!(openEntry ? dayGroups(openEntry, openIdx).length : 0) && (
+                  <div className="mt-2.5 text-[.75rem] text-muted">
+                    {openEntry ? "No tape or caliper numbers on this day."
+                               : "Only a weigh-in on this day — no tape, caliper or scan numbers."}
+                  </div>
                 )}
                 <div className="mt-2.5 flex items-center justify-between">
                   <span className="text-[.62rem] text-muted">Tap any number to correct it — the date stays put.</span>
-                  <button onClick={() => { setOpenTs(null); setFieldEdit(null); }}
+                  <button onClick={() => { setOpenDate(null); setFieldEdit(null); }}
                     className="cursor-pointer rounded-md border border-border bg-surface2 px-2.5 py-1 text-[.72rem] text-fg">Close</button>
                 </div>
               </div>
@@ -15259,15 +15461,50 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                 <div className="mb-1.5 text-[.72rem] font-bold uppercase tracking-wide text-muted">Tape &amp; caliper sites</div>
                 <div className="mb-1.5 flex flex-wrap gap-1.5">
                   {chartable.map((f) => (
-                    <button key={f} onClick={() => setMetric(f)}
+                    <button key={f} onClick={() => { setMetric(f); setPointEdit(null); }}
                       className={`rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer whitespace-nowrap ${activeMetric === f ? "bg-primaryfill text-primaryfg border-0" : "bg-transparent text-fg border border-border"}`}>
                       {chartLabel(f)}
                     </button>
                   ))}
                 </div>
+                {/* ⚠️ ONLY A STORED NUMBER IS EDITABLE (S198y) — the same rule the
+                    body-fat charts already follow. Every chip here except "Body
+                    fat %" plots a number the person typed, so correcting it on
+                    the chart is the same act as correcting it in the day view.
+                    The body-fat series is CALCULATED from these very numbers, so
+                    an edit there would write a value the next recalculation
+                    silently discards. */}
+                {pointEdit && (
+                  <div className="mb-2 rounded-lg border border-primary bg-surface p-3">
+                    <div className="mb-2 text-sm font-semibold">
+                      {chartLabel(pointEdit.field)} · {new Date(pointEdit.t).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input type="number" inputMode="decimal" step="0.1" autoFocus value={pointEdit.value}
+                        onChange={(ev) => setPointEdit((s2) => ({ ...s2, value: ev.target.value }))}
+                        onKeyDown={(ev) => { if (ev.key === "Enter") commitPointEdit(); if (ev.key === "Escape") setPointEdit(null); }}
+                        className="w-[110px] rounded-lg border border-border bg-surface2 px-2.5 py-2 text-sm text-fg outline-none" />
+                      <span className="text-xs text-muted">{chartUnit(pointEdit.field)}</span>
+                      <button onClick={commitPointEdit}
+                        className="cursor-pointer rounded-lg bg-primaryfill px-3.5 py-2 text-sm font-bold text-primaryfg">Save</button>
+                      <button onClick={() => { onSave({ [pointEdit.field]: 0 }, pointEdit.date); setPointEdit(null); }}
+                        className="cursor-pointer rounded-lg border border-danger bg-transparent px-3.5 py-2 text-sm font-bold text-danger">Remove</button>
+                      <button onClick={() => setPointEdit(null)}
+                        className="cursor-pointer rounded-lg border border-border bg-transparent px-3.5 py-2 text-sm text-fg">Cancel</button>
+                    </div>
+                    <div className="mt-1.5 text-[.64rem] text-muted">Removing clears just this reading — the rest of that day stays.</div>
+                  </div>
+                )}
                 <ProgressChart checkIns={points} showValues pxPerPoint={64} surfaceless hideAdherence
                   unit={activeMetric ? chartUnit(activeMetric) : ""} pointNoun="entry"
+                  onEditPoint={metricEditable ? (pt) => setPointEdit({ field: activeMetric, date: pt.date, t: pt.timestamp, value: String(pt.weight) }) : undefined}
                   label={activeMetric ? `${chartLabel(activeMetric)} Trend` : "Trend"} />
+                {!metricEditable && activeMetric === "bodyFat" && (
+                  <div className="mt-1.5 text-[.64rem] text-muted">
+                    This line is worked out from your other numbers, so it isn’t edited directly — correct the
+                    scan reading or the tape and caliper measurements for a day and it follows.
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -31674,7 +31911,15 @@ export default function App() {
               onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; n.macroTargetsEditedAt=Date.now(); return n; })}
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
-              onSaveMeasurements={(vals)=>setDataAndSave(p=>{ const next={...p}; mergeMeasurements(next, vals, viewDate, activeRemoteUid ? "trainer" : "client"); return next; })}
+              onSaveMeasurements={(vals, dateKey)=>setDataAndSave(p=>{
+                // ⚠️ HONOUR THE DATE THE CALLER ASKED FOR (S198y). This used to
+                // drop its second argument and file every save under viewDate, so
+                // the modal's own back-date picker, the day view's "the date stays
+                // put" promise, and the scan-BF chart edit all wrote onto the day
+                // being VIEWED instead: correcting last month's waist created a
+                // new entry on today and left the old one untouched. A silent
+                // success. ClientHome's copy always took the date; this one lost it.
+                const next={...p}; mergeMeasurements(next, vals, dateKey || viewDate, activeRemoteUid ? "trainer" : "client"); return next; })}
               onSaveMeasurementsFor={(dateKey, vals)=>setDataAndSave(p=>{ const next={...p}; mergeMeasurements(next, vals, dateKey, activeRemoteUid ? "trainer" : "client"); return next; })}
               onDeleteMeasurement={(ts)=>setDataAndSave(p=>({...p, measurements:(p.measurements||[]).filter(e=>e && e.timestamp!==ts)}))}
               onToggleBodyFat={(show)=>setDataAndSave(p=>({...p, hideBodyFat: !show}))}
@@ -31746,12 +31991,15 @@ export default function App() {
               return next;
             })}
             onUpdateNotes={(text)=>setDataAndSave(p=>({...p, trainerNotes:text}))}
-            onSaveMeasurements={(vals)=>setDataAndSave(p=>{
-              // Tape measurements: merge into today's entry (one per date) and
+            onSaveMeasurements={(vals, dateKey)=>setDataAndSave(p=>{
+              // Tape measurements: merge into that day's entry (one per date) and
               // refresh bodyFat from the tape formulas. mergeMeasurements builds
               // a NEW measurements array, so mutating the shallow copy is safe.
+              // dateKey is the day the caller is editing (the modal's back-date
+              // picker, the day view, a chart point); viewDate is only the
+              // fallback for "log this now" — see the note on the dashboard's copy.
               const next = {...p};
-              mergeMeasurements(next, vals, viewDate, activeRemoteUid ? "trainer" : "client");
+              mergeMeasurements(next, vals, dateKey || viewDate, activeRemoteUid ? "trainer" : "client");
               return next;
             })}
             onDeleteMeasurement={(ts)=>setDataAndSave(p=>({...p,
