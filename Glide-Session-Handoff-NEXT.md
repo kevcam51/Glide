@@ -65,10 +65,12 @@ It was caught because of S197g — "travel check unavailable: functions/internal
 in the console. Before that change it would have been a feature that quietly
 never worked.
 
-### 0. ▶️ THE LIVE THREAD — the plan dashboard & body-comp work (S198n–v)
+### 0. ▶️ THE LIVE THREAD — the plan dashboard & body-comp work (S198n–y)
 
-**Kevin is continuing this. Do not treat it as closed.** Everything below is
-deployed and was verified by clicking it in production, not by reading code.
+**Kevin is continuing this. Do not treat it as closed.** Everything below was
+verified by clicking it, not by reading code. S198n–x is deployed; **S198y is
+committed and NOT yet pushed** — it is frontend only (no functions, no rules),
+so pushing `main` is all it needs.
 
 **What shipped, and why each mattered**
 
@@ -85,6 +87,9 @@ deployed and was verified by clicking it in production, not by reading code.
 | Measurement days | Tap an entry → that day in full: body composition, weight, scan BF, tape, calipers — grouped, with change since last and since the start, every value editable in place, ‹ › to walk days |
 | Body-fat methods | ALL of them listed and named, with the one in use marked |
 | Charts | Bodyweight and scale-BF points are tappable to edit; hit target 40×40 (was a 10px dot) |
+| Tape/caliper trend | Tappable too (S198y) — Save or Remove one reading, on the day it belongs to. The body-fat chip stays read-only and now says why |
+| — weigh-in-only days | They open now (S198y). The unit is the DAY, not the measurement entry; ‹ › walk all of them, and a line under the list reveals the weigh-in-only ones on request (out of the list by default — daily weighing would bury monthly measuring) |
+| Macro Targets | New card under Daily Calorie Targets (S198y) — Bodyweight / Balanced / goal-based, as grams. Tap previews (the bars follow), one tap commits |
 
 **Deficit / Maintain / Surplus vs the targets card — the distinction to keep**
 The three buttons NEVER set a calorie number; they decide what counts as a good
@@ -101,12 +106,29 @@ syncs the direction. Do not merge them — they answer different questions.
 - Showing every BF method is the point. On one seeded day they spanned 21.8% to
   34.5% — a 12.7-point disagreement the old panel hid behind a single figure.
 
+**⚠️ S198y — THE BUG THE THREE NEXT STEPS UNCOVERED, AND IT WAS THE OLDEST ONE**
+`onSaveMeasurements` DROPPED ITS SECOND ARGUMENT on the in-plan path (the
+dashboard's copy and Results') and filed every save under `viewDate`. So the
+modal's own back-date picker, the day view's "the date stays put" promise, and
+the scan-BF chart edit all wrote onto the day being VIEWED — correcting last
+month's waist created a NEW entry on today, left the old one untouched, and
+said "Saved." ClientHome's copy always took the date, which is why S198r/t read
+as verified: they were, as the client. `onLogWeight` had the identical shape and
+now goes through the same merge-by-date writer as the chart edit.
+
+**That is the fourth silent success in three sessions.** The pattern is not
+"forgot to save" — it is a save that goes somewhere plausible and says nothing.
+When a handler takes a date, check every caller actually passes it through.
+
 **Natural next steps in this thread (none started)**
-- Weight is editable in the measurement day view but has no row when that date
-  has no measurement entry — a weigh-in-only day cannot be opened at all.
-- The tape/caliper trend chart (the one with the metric chips) is still not
-  tappable; only the body-comp charts are.
-- Macro targets get no equivalent of the calorie targets card.
+- The month/week CALENDAR has no measurement or weigh-in indicator, so the body
+  composition work is invisible from the surface people browse days on.
+- `dayList` includes future-dated planned weigh-ins (`isFuturePlan`) with no
+  marking — consistent with the existing charts, but the day view will happily
+  open one and call it a day's record.
+- The Macro Targets card is preset-or-hand-typed; there is no macro equivalent
+  of the calorie card's 1,200-style honesty check (e.g. a split whose grams do
+  not add up to the calorie target after rounding).
 
 ### 0. ▶️ S198 — WHERE THINGS ACTUALLY ARE (read this first)
 
