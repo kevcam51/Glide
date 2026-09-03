@@ -343,9 +343,18 @@ function weeksToGoal(totalLbs, weeklyDeficitCal) {
 // read, so the app and the AI can't quote different targets (the S86 bug).
 // Anything unset/invalid falls back to 1, which is exactly today's behavior — so
 // every existing plan keeps its current number.
-const RATE_OPTS = [0, 0.5, 1, 2];
-const RATE_LABEL = { 0: "Maintenance", 0.5: "Lose ½ lb/week", 1: "Lose 1 lb/week", 2: "Lose 2 lb/week" };
-const RATE_SHORT = { 0: "Maintain", 0.5: "½ lb/wk", 1: "1 lb/wk", 2: "2 lb/wk" };
+// ⚠️ NEGATIVE IS A SURPLUS (S198x, Kevin: "add surplus calories as an option").
+// The rate is pounds per week of INTENDED CHANGE and the deficit is rate × 3500
+// / 7, so a negative rate is simply eating above maintenance: −0.5 → +250/day,
+// −1 → +500/day. Nothing else had to learn a new concept.
+// Safe by construction on the projection side: weeksToGoal returns null for a
+// non-positive deficit, so a surplus produces "no ETA" rather than a negative
+// one, and the goal-date maths never divides the wrong way.
+const RATE_OPTS = [-1, -0.5, 0, 0.5, 1, 2];
+const RATE_LABEL = { "-1": "Gain 1 lb/week", "-0.5": "Gain ½ lb/week",
+  0: "Maintenance", 0.5: "Lose ½ lb/week", 1: "Lose 1 lb/week", 2: "Lose 2 lb/week" };
+const RATE_SHORT = { "-1": "+1 lb/wk", "-0.5": "+½ lb/wk",
+  0: "Maintain", 0.5: "½ lb/wk", 1: "1 lb/wk", 2: "2 lb/wk" };
 // NOTE 0 is a REAL value here (maintenance), so the usual `Number(x) || 1` is a
 // trap: Number(null) and Number("") are both 0, which would silently park a plan
 // at maintenance — and null is exactly what this app passes to mean "reset to
@@ -11819,7 +11828,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           "here is where you are, and here is what the others would be"
           rather than as four numbers with no anchor. */}
       {isFinite(tdee) && tdee > 0 && (() => {
-        const rates = [{lbl:"Maintain",rate:0},{lbl:"½ lb/wk",rate:0.5},{lbl:"1 lb/wk",rate:1},{lbl:"2 lbs/wk",rate:2}];
+        const rates = [{lbl:"Maintain",rate:0},{lbl:"½ lb/wk",rate:0.5},{lbl:"1 lb/wk",rate:1},
+          {lbl:"2 lbs/wk",rate:2},{lbl:"+½ lb/wk",rate:-0.5},{lbl:"+1 lb/wk",rate:-1}];
         // Floored means the honest answer for this rate is "we won't go there".
         const flooredAt = (r) => rawTargetForRate(r) < 1200;
         const shownRate = previewing ? previewRate : planRate;
@@ -11830,7 +11840,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           <div style={{fontSize:".68rem",color:"var(--muted)",marginBottom:"8px"}}>
             Tap one to see it in the ring above — your plan doesn’t change.
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:"6px"}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"6px"}}>
             {rates.map((t)=>{
               const isPlan = Math.abs(planRate - t.rate) < 0.01;
               const isShown = Math.abs(shownRate - t.rate) < 0.01;
@@ -11845,7 +11855,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                   <div style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>{t.lbl}</div>
                   <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.05rem",
                     color: low ? "var(--yellow)" : isShown ? "var(--accent)" : "var(--text)"}}>{val.toLocaleString()}</div>
-                  <div style={{fontSize:".5rem",color: low ? "var(--yellow)" : "var(--muted)"}}>{low ? "floored" : "cal/day"}</div>
+                  <div style={{fontSize:".5rem",color: low ? "var(--yellow)" : "var(--muted)"}}>
+                    {low ? "floored" : t.rate < 0 ? "cal/day · gain" : "cal/day"}</div>
                   {isPlan && <div style={{fontSize:".5rem",color:"var(--accent)",fontWeight:800,marginTop:"1px"}}>YOURS</div>}
                 </button>
               );
@@ -11869,7 +11880,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                     // while that still says Deficit would paint a perfect
                     // maintenance day red. The two are separate settings and
                     // stay separate; this only stops them contradicting.
-                    if (onSetCalorieGoal) onSetCalorieGoal(previewRate === 0 ? "maintain" : "deficit");
+                    if (onSetCalorieGoal) onSetCalorieGoal(previewRate === 0 ? "maintain" : previewRate < 0 ? "surplus" : "deficit");
                     setPreviewRate(null); }}
                   style={{flex:2,padding:"8px",borderRadius:"8px",cursor:"pointer",border:"none",
                     background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)",
