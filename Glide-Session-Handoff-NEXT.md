@@ -79,6 +79,7 @@ deployed and was verified by clicking it in production, not by reading code.
 | — tap | Previews that rate IN THE RING (plan untouched, says so) |
 | — commit | "Make ½ lb/wk my target" writes `weeklyRate`, clears any manual target, and syncs the daily-goal direction |
 | — custom | Free-text box → `data.calorieTarget`, clamped at 1,200 with the reason |
+| — surplus | +½ and +1 lb/wk (S198x). A surplus is a NEGATIVE rate: −0.5 → +250/day. `RATE_OPTS` carries them, so the other rate chooser picked them up for free. weeksToGoal already returned null for a non-positive deficit, so a surplus yields no ETA rather than a negative one. |
 | 1,200 floor | Amber "floored" on any rate whose real maths goes under; full warning when that rate is the one on screen — *eating less is not the lever, burning more is* |
 | Weigh-ins | Tap one to correct it; the DATE is preserved (delete-and-re-add silently moved the entry to today) |
 | Measurement days | Tap an entry → that day in full: body composition, weight, scan BF, tape, calipers — grouped, with change since last and since the start, every value editable in place, ‹ › to walk days |
