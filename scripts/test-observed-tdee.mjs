@@ -17,11 +17,14 @@
 //
 // Run: node scripts/test-observed-tdee.mjs
 import { createRequire } from "module";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { dirname, join } from "path";
+import { readFileSync } from "fs";
 const require = createRequire(import.meta.url);
-const FN = join(dirname(fileURLToPath(import.meta.url)), "..", "functions") + "/";
-const O = require(FN + "observedTdee.js");
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const O = require(join(ROOT, "functions", "observedTdee.js"));
+// The client's ESM mirror, loaded so every rule below is proved on BOTH copies.
+const M = await import(pathToFileURL(join(ROOT, "src", "observedTdee.js")).href);
 
 let fails = 0, checks = 0;
 const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n, x !== undefined ? JSON.stringify(x) : ""); } };
@@ -276,6 +279,57 @@ const LAST = key(27);   // the 28-day window ends here
      O.dayNum("2026-11-01") + 1 === O.dayNum("2026-11-02"));
   ok("a malformed date is rejected, not coerced", O.dayNum("8 March") === null);
   ok("a Date object is rejected rather than silently stringified", O.dayNum(new Date()) === null);
+}
+
+// ── the two copies must not drift ───────────────────────────────────────────
+// This repo has lost two mirrors to silent drift already. The guard is in two
+// parts: the SOURCE must be identical apart from the export line, and the
+// BEHAVIOUR must match across a fixture matrix — so a change that somehow keeps
+// the text in step but alters the maths still fails.
+{
+  const cjs = readFileSync(join(ROOT, "functions", "observedTdee.js"), "utf8");
+  const esm = readFileSync(join(ROOT, "src", "observedTdee.js"), "utf8");
+  const strip = (t) => t
+    .replace(/^[\s\S]*?(?=\/\/ Observed \(adaptive\) TDEE)/, "")   // drop the mirror header
+    .replace(/\n(module\.exports = \{[^}]*\};|export \{[^}]*\};)\n?$/, "\n");
+  ok("the server copy and the client copy are byte-identical apart from the export line",
+     strip(cjs) === strip(esm),
+     strip(cjs) === strip(esm) ? undefined
+       : { cjsLen: strip(cjs).length, esmLen: strip(esm).length,
+           hint: "edit functions/observedTdee.js, copy it to src/, swap the last line to `export {...}`" });
+  ok("both expose the same surface",
+     JSON.stringify(Object.keys(O).sort()) === JSON.stringify(Object.keys(M).sort()),
+     [Object.keys(O).sort(), Object.keys(M).sort()]);
+  ok("and the same tuning constants",
+     JSON.stringify(O.TUNING) === JSON.stringify(M.TUNING), [O.TUNING, M.TUNING]);
+
+  // Behavioural matrix: every combination below must agree exactly.
+  let compared = 0, diverged = 0;
+  for (const nDays of [0, 9, 14, 23, 26, 28]) {
+    for (const cal of [1500, 2200, 3000]) {
+      for (const nW of [0, 2, 4, 8, 14]) {
+        for (const perWeek of [-1, -0.5, 0, 0.5, 1]) {
+          const days = evenDays(nDays, cal);
+          const ws = linearWeights(nW, 2, 200, perWeek);
+          const args = { days, weighIns: ws, asOf: LAST, formulaTdee: 2600 };
+          const a = JSON.stringify(O.estimateObservedTdee(args));
+          const b = JSON.stringify(M.estimateObservedTdee(args));
+          compared++;
+          if (a !== b) { diverged++; if (diverged === 1) console.log("  first divergence:", { args: { nDays, cal, nW, perWeek }, a, b }); }
+        }
+      }
+    }
+  }
+  ok(`both copies agree across all ${compared} estimator fixtures`, diverged === 0, { compared, diverged });
+
+  let clampDiverged = 0, clampCompared = 0;
+  for (const obs of [900, 1800, 2300, 2500, 2600, 2900, 3120, 3400, 9000]) {
+    for (const f of [0, 1800, 2600, 3200]) {
+      clampCompared++;
+      if (JSON.stringify(O.clampToFormula(obs, f)) !== JSON.stringify(M.clampToFormula(obs, f))) clampDiverged++;
+    }
+  }
+  ok(`both copies agree across all ${clampCompared} clamp fixtures`, clampDiverged === 0, { clampCompared, clampDiverged });
 }
 
 console.log(`  ${checks - fails}/${checks} assertions passed`);

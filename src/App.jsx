@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium, setAiOptOut, aiChoiceMade } from "./profile.js";
 import { getForUser, setForUser, mergeForUser, deleteForUser, listForUser, listEntriesForUser, latestKeyForUser, subscribeForUser } from "./clientData.js";
 import { mergePlanWrap } from "./planMerge.js";
+import { estimateObservedTdee } from "./observedTdee.js";
 import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads, exportMyThreads } from "./messaging.js";
 import { pushStatus, enablePush, disablePush } from "./push.js";
 import { privGet, privSet, privSubscribe, privListEntries } from "./privateStore.js";
@@ -11460,7 +11461,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood,
   savedFoods, onToggleSaveFood, onRemoveSavedFood, onLogFoods, weekSummary, recentWearable, history, onRefresh, isRemote,
   savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onSetPlanned, onPlanDays, onEatPlanned,
-  onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget,
+  onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget, dayCalsAll,
   onSaveMeasurements, onSaveMeasurementsFor, onDeleteMeasurement, onToggleBodyFat, onSetBfSource, onSetGoalWeight, onAddCustomExercise,
   onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetHideCompliance, meUid: dashMeUid, peerUid,
   premium = true, role, onOpenMealPlanner }) {
@@ -11942,6 +11943,34 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const shownC = previewMacros ? previewMacros.t.carbs : carbsTarget;
   const shownF = previewMacros ? previewMacros.t.fat : fatTarget;
 
+  // ── Measured burn (S199) ──────────────────────────────────────────────────
+  // What the body ACTUALLY burned, from the food log and the scale, instead of
+  // from a formula. READ-ONLY in this slice: it changes no target, no macro and
+  // no stored field — it sits beside the formula number and says whether the
+  // two agree.
+  //
+  // Free: `dayCalsAll` is date→calories for the whole plan, already in memory
+  // from the single range query that runs on plan open, and `data.checkIns`
+  // rides the plan document. Zero extra Firestore reads.
+  const observed = useMemo(() => {
+    if (!dayCalsAll || !isFinite(tdee) || tdee <= 0) return null;
+    // ⚠️ THE WINDOW ENDS YESTERDAY. Today is partial by definition — a day
+    // measured at 9am is a 400-calorie day, and including it drags the mean
+    // down and the estimate with it, every single morning.
+    const t = todayKeyProp || dashToday;
+    const asOf = t ? ymdLocal(new Date(new Date(t + "T12:00:00").getTime() - 86400000)) : null;
+    if (!asOf) return null;
+    return estimateObservedTdee({
+      days: Object.entries(dayCalsAll).map(([date, calories]) => ({ date, calories })),
+      // A planned goal weight is not a weigh-in — the same filter weightTrend
+      // now applies, because this reads checkIns directly.
+      weighIns: (data.checkIns || [])
+        .filter((c) => c && c.weight > 0 && c.date && !c.isFuturePlan)
+        .map((c) => ({ date: c.date, weight: Number(c.weight) })),
+      asOf, formulaTdee: tdee,
+    });
+  }, [dayCalsAll, data.checkIns, tdee, todayKeyProp, dashToday]);
+
   // ── Try a different rate without committing to it (S198q, Kevin) ──────────
   // Tapping a daily target previews it IN THE RING, so the question "what would
   // ½ lb a week actually let me eat today?" is answered by the number people
@@ -12328,6 +12357,78 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         </div>
         );
       })()}
+      {/* ── Measured burn (S199) ──────────────────────────────────────────────
+          Sits directly under Daily Calorie Targets because it comments on the
+          number that card's footer cites — "based on your body's daily burn of
+          N". This one is measured rather than predicted, and it changes
+          nothing: no target, no macro, no stored field. Saying so on the card
+          is the point, not a disclaimer. */}
+      {observed && (
+        <div className="card" style={{marginTop:"14px"}}>
+          <div className="sec-title" style={{marginBottom:"8px"}}>Measured Burn</div>
+          {observed.tdee ? (
+            <>
+              <div style={{display:"flex",alignItems:"flex-end",gap:"12px",flexWrap:"wrap"}}>
+                <div>
+                  <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.7rem",color:"var(--accent)",lineHeight:1.1}}>
+                    {observed.tdee.toLocaleString()}
+                  </div>
+                  <div style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>
+                    cal/day, measured
+                  </div>
+                </div>
+                <div style={{paddingBottom:"3px"}}>
+                  <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.05rem",color:"var(--text-secondary)",lineHeight:1.1}}>
+                    {Math.round(tdee).toLocaleString()}
+                  </div>
+                  <div style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>
+                    the estimate
+                  </div>
+                </div>
+                {observed.deltaVsFormula != null && Math.abs(observed.deltaVsFormula) >= 25 && (
+                  <div style={{paddingBottom:"5px",fontSize:".74rem",fontWeight:700,
+                    color: observed.diverged ? "var(--yellow)" : "var(--muted)"}}>
+                    {observed.deltaVsFormula > 0 ? "+" : "−"}{Math.abs(observed.deltaVsFormula).toLocaleString()} cal
+                  </div>
+                )}
+              </div>
+              <div style={{fontSize:".68rem",color:"var(--muted)",marginTop:"7px",lineHeight:1.45}}>
+                From <strong style={{color:"var(--text-secondary)"}}>{observed.loggedDays}</strong> logged days and{" "}
+                <strong style={{color:"var(--text-secondary)"}}>{observed.weighIns}</strong> weigh-ins over the last {observed.windowDays} days
+                {observed.trendLbsPerWeek != null && Math.abs(observed.trendLbsPerWeek) >= 0.05 && (
+                  <> · scale moving {observed.trendLbsPerWeek < 0 ? "down" : "up"}{" "}
+                  {Math.abs(observed.trendLbsPerWeek).toFixed(1)} lb/wk</>
+                )}
+                {observed.confidence === "low" && <> · <span style={{color:"var(--yellow)"}}>early read</span></>}
+              </div>
+              {observed.diverged && (
+                <div style={{marginTop:"9px",padding:"10px 11px",borderRadius:"10px",
+                  border:"1px solid var(--yellow)",background:"rgba(251,191,36,.10)"}}>
+                  <div style={{fontSize:".74rem",fontWeight:800,color:"var(--yellow)",marginBottom:"3px"}}>
+                    Your logging and the estimate disagree
+                  </div>
+                  <div style={{fontSize:".7rem",color:"var(--text-secondary)",lineHeight:1.5}}>
+                    {observed.deltaVsFormula < 0
+                      ? <>Your food log and the scale together point <strong style={{color:"var(--text)"}}>lower</strong> than
+                        the formula. That usually means the activity level on your profile is set too high — or that some
+                        food isn&rsquo;t making it into the log. Both look identical from here, so nothing has been changed.</>
+                      : <>Your food log and the scale together point <strong style={{color:"var(--text)"}}>higher</strong> than
+                        the formula — you may be burning more than your profile assumes.</>}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={{fontSize:".78rem",color:"var(--text-secondary)",lineHeight:1.5}}>
+              {observed.reason}
+            </div>
+          )}
+          <div style={{fontSize:".62rem",color:"var(--muted)",marginTop:"9px",lineHeight:1.45}}>
+            Measured from what you logged and what the scale did — not a formula. It doesn&rsquo;t change your
+            target; it&rsquo;s here so you can see whether the estimate above matches what your body is actually doing.
+          </div>
+        </div>
+      )}
       {/* ── Macro Targets (S198y, Kevin) ─────────────────────────────────────
           The macro half of Daily Calorie Targets, and it sits directly under it
           because that is what "an equivalent" means. The only macro controls
@@ -32252,6 +32353,7 @@ export default function App() {
               onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; n.macroTargetsEditedAt=Date.now(); return n; })}
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
+              dayCalsAll={dayCalsAll}
               onSaveMeasurements={(vals, dateKey)=>setDataAndSave(p=>{
                 // ⚠️ HONOUR THE DATE THE CALLER ASKED FOR (S198y). This used to
                 // drop its second argument and file every save under viewDate, so
