@@ -663,7 +663,13 @@ function calcBMR(gender, weightLbs, heightFt, heightIn, age) {
 // NOTE 0 is a REAL value (maintenance), so `Number(x) || 1` is a trap here:
 // Number(null) and Number("") are both 0 and would silently mean maintenance.
 // Screen the empties before trusting a 0. Mirrors App.jsx weeklyRateOf.
-const RATE_OPTS = [0, 0.5, 1, 2];
+// ⚠️ DRIFTED, AND THE COMMENT ABOVE PREDICTED IT (S199). The app gained
+// surplus rates in S198x and this list was not updated, so a gaining plan
+// (weeklyRate -1) failed the membership test and silently fell back to 1 —
+// LOSING a pound a week. The AI and the MCP connector quoted a target 1,000
+// calories below the one every screen showed, for exactly the clients whose
+// plan is to eat more. Must stay identical to RATE_OPTS in src/App.jsx.
+const RATE_OPTS = [-2, -1, -0.5, 0, 0.5, 1, 2];
 function weeklyRate(d) {
   const raw = d && d.weeklyRate;
   if (raw === null || raw === undefined || raw === "") return 1;
@@ -741,6 +747,15 @@ function nutritionTargets(d) {
       cal = Math.max(1200, Math.round(tdee - dailyDeficit(d) + (eatback ? weeklyPlanBurn(d) / 7 : 0)));
     }
   }
+  // ⚠️ THE MANUAL OVERRIDE WINS, AND THIS NEVER KNEW (S199). data.calorieTarget
+  // is a coach's or client's own number and it beats the calculation on every
+  // screen (src/App.jsx computeClientCalories and the dashboard ladder) — but
+  // the server computed the formula and stopped, so the AI, get_profile,
+  // coach_summary and the MCP connector all quoted a target the person had
+  // explicitly replaced. Applied OUTSIDE the formula block on purpose: a typed
+  // target stands even on a plan too incomplete to compute one, which is
+  // exactly how the dashboard behaves.
+  if (Number(d.calorieTarget) > 0) cal = Math.round(Number(d.calorieTarget));
   const mt = d.macroTargets || {};
   // Protein basis is a per-plan user choice (App.jsx proteinBasisOf): 1.0 g/lb
   // (default) or 0.7 g/lb. Keep the AI's target in sync with the app.
@@ -880,7 +895,9 @@ const MEASUREMENT_FIELDS = ["waist", "hips", "neck", "thigh", "calf", "forearm",
 // Least-squares weight trend (lbs/week) from check-ins — mirrors src/App.jsx
 // weightTrend. Needs 2+ weigh-ins spread over ≥3 days. null otherwise.
 function weightTrend(checkIns) {
-  const pts = [...(checkIns || [])].filter((c) => c.weight && c.timestamp)
+  // Future-dated entries are PLANNED goals, not measurements — mirrors the
+  // filter in src/App.jsx weightTrend (S199).
+  const pts = [...(checkIns || [])].filter((c) => c.weight && c.timestamp && !c.isFuturePlan)
     .sort((a, b) => a.timestamp - b.timestamp);
   if (pts.length < 2) return null;
   const t0 = pts[0].timestamp;

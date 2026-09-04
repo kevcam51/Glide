@@ -405,7 +405,13 @@ function formatWeeks(w) {
 // n } or null when there isn't enough spread to be meaningful (need 2+ points
 // across at least ~3 days, so same-day logs don't produce a bogus rate).
 function weightTrend(checkIns) {
-  const pts = [...(checkIns || [])].filter(c => c.weight && c.timestamp)
+  // ⚠️ A PLANNED GOAL IS NOT A MEASUREMENT (S199). The Plan Ahead screen
+  // relabels this very field "Target Weight (lbs)" and writes an ASPIRATION
+  // into the `weight` slot with isFuturePlan:true. Regressing that alongside
+  // real weigh-ins bends the trend toward the goal and reports progress that
+  // has not happened. Only one consumer in the file filtered it; the filter
+  // belongs here, where every consumer gets it.
+  const pts = [...(checkIns || [])].filter(c => c.weight && c.timestamp && !c.isFuturePlan)
     .sort((a, b) => a.timestamp - b.timestamp);
   if (pts.length < 2) return null;
   const t0 = pts[0].timestamp;
@@ -25629,7 +25635,13 @@ function buildMergedData(d) {
 // never updated the dashboards, "lbs to go", or the calorie target (S86 fix).
 function syncWeightFromCheckIns(next, checkin) {
   if (!checkin || !checkin.weight) return next;
-  const weighIns = (next.checkIns || []).filter((c) => c && c.weight)
+  // ⚠️ AND IT MUST NOT BE DRIVEN BY ONE EITHER (S199). This takes the NEWEST
+  // weigh-in, and a future-dated entry is always the newest — so saving a
+  // "Target Weight 165 by March" on a 200 lb plan set data.weightLbs to 165
+  // today, which is the input to BMR, the calorie target and every macro
+  // derived from it. A goal is not a weigh-in in either direction.
+  if (checkin.isFuturePlan) return next;
+  const weighIns = (next.checkIns || []).filter((c) => c && c.weight && !c.isFuturePlan)
     .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
   const latest = weighIns[weighIns.length - 1];
   if (latest && latest.date === checkin.date) {

@@ -64,13 +64,24 @@ const TUNING = {
   // The shortest window that can produce anything at all. Below two weeks, day
   // to day fluctuation in water and gut content dominates the actual trend.
   MIN_SPAN_DAYS: 14,
-  // Logged days needed inside the window. Fourteen of twenty-eight is already
-  // generous; the mean is only meaningful if it is a mean of most of the days.
+  // Absolute floor on logged days. In practice MIN_COVERAGE below is stricter;
+  // this exists so that shortening the window cannot quietly drop the bar too.
   MIN_LOGGED_DAYS: 14,
-  // ...and they must cover enough OF the window. 14 logged days clustered in
-  // one week paired with a weight trend spanning four is a mismatched
-  // comparison: the intake describes one period and the weight change another.
-  MIN_COVERAGE: 0.5,
+  // ⚠️ THE SINGLE CHEAPEST GUARD AGAINST THE SPIRAL, AND IT IS WHY THIS IS 0.8
+  // AND NOT 0.5. Averaging only the LOGGED days silently assumes the unlogged
+  // ones matched that average — and they do not, because people skip logging on
+  // big days, not small ones. At 50% coverage with a plausible 800-cal gap on
+  // the days that went unlogged, the estimate reads ~400 cal/day LOW, which
+  // points the correction straight down at someone whose real problem is that
+  // they are not logging. Requiring 23 of 28 days does not fix under-reporting
+  // WITHIN a day, but it removes the whole-day hole, which is the larger and
+  // more systematic error.
+  MIN_COVERAGE: 0.8,
+  // A window may not contain a longer unlogged run than this. Coverage alone
+  // permits five missing days scattered harmlessly OR bunched into one holiday,
+  // and a holiday is precisely the stretch that was not average. Four days off
+  // the log is a different week, not a gap in this one.
+  MAX_GAP_DAYS: 3,
   // Weigh-ins needed, and how far apart. The slope is the noisy half of this
   // calculation, so it gets the stricter bar.
   MIN_WEIGH_INS: 4,
@@ -151,7 +162,7 @@ function estimateObservedTdee(input) {
   const T = Object.assign({}, TUNING, inp.tuning || {});
   const out = {
     tdee: null, reason: null, confidence: null, meanIntake: null,
-    loggedDays: 0, windowDays: T.WINDOW_DAYS, coverage: 0, weighIns: 0, spanDays: 0,
+    loggedDays: 0, windowDays: T.WINDOW_DAYS, coverage: 0, maxGapDays: 0, weighIns: 0, spanDays: 0,
     trendLbsPerWeek: null, diverged: false, deltaVsFormula: null,
   };
 
@@ -192,6 +203,17 @@ function estimateObservedTdee(input) {
   }
   out.loggedDays = inWindowDays.length;
   out.coverage = Math.round((inWindowDays.length / T.WINDOW_DAYS) * 100) / 100;
+  // Longest run of consecutive days in the window with no qualifying log,
+  // counting runs at both edges — a window that starts with a week of silence
+  // is as unrepresentative as one with the hole in the middle.
+  {
+    const has = new Set(inWindowDays.map((d) => d.x));
+    let run = 0, worst = 0;
+    for (let n = start; n <= end; n++) {
+      if (has.has(n)) run = 0; else { run++; if (run > worst) worst = run; }
+    }
+    out.maxGapDays = worst;
+  }
 
   // Weight: every weigh-in in the window.
   const inWindowW = [];
@@ -205,12 +227,16 @@ function estimateObservedTdee(input) {
 
   // ── The bars. Each returns a sentence a person can act on, because "not
   // enough data" tells nobody what to do about it. ──────────────────────────
-  if (out.loggedDays < T.MIN_LOGGED_DAYS) {
-    out.reason = `Needs ${T.MIN_LOGGED_DAYS} logged days in the last ${T.WINDOW_DAYS} — there are ${out.loggedDays}.`;
+  // Coverage IS the count bar — the two were separate tunables saying the same
+  // thing, and the weaker one got to speak first, so a 15-of-28 window passed
+  // the named check and then failed the real one with the wrong sentence.
+  const needDays = Math.max(T.MIN_LOGGED_DAYS, Math.ceil(T.WINDOW_DAYS * T.MIN_COVERAGE));
+  if (out.loggedDays < needDays) {
+    out.reason = `Needs ${needDays} of the last ${T.WINDOW_DAYS} days logged — there are ${out.loggedDays}.`;
     return out;
   }
-  if (out.coverage < T.MIN_COVERAGE) {
-    out.reason = "Your logged days are too bunched together to compare against the scale.";
+  if (out.maxGapDays > T.MAX_GAP_DAYS) {
+    out.reason = `There's a ${out.maxGapDays}-day stretch with nothing logged — a gap that long isn't an average week.`;
     return out;
   }
   if (out.weighIns < T.MIN_WEIGH_INS) {
@@ -253,27 +279,54 @@ function estimateObservedTdee(input) {
 }
 
 /**
- * Bound how far a measured number may pull a target away from the formula.
+ * Decide whether a measured number may move the target, and how far.
  *
- * ⚠️ THE UNDER-LOGGING SPIRAL LIVES HERE. A person who logs 60% of what they
- * eat measures as a person with a very low expenditure, and the honest response
- * to a low expenditure is less food — which is precisely the wrong prescription
- * for someone who is already eating more than they think. Bounding the
- * DOWNWARD movement more tightly than the upward one is deliberate and
- * asymmetric: being wrong upward feeds someone slightly too much for a while,
- * being wrong downward starves someone who is already mis-measuring themselves.
+ * ⚠️ A DOWNWARD CLAMP MEANS REFUSE, NOT SUBSTITUTE. The first version of this
+ * returned `f * 0.9` whenever the observed number sat further below the formula
+ * than that — so a caller that used `value` without also branching on `clamped`
+ * would publish a number NOBODY MEASURED: not the formula, not the observation,
+ * a floor invented to sit between them, rendered with all the authority of a
+ * measurement. That is the house rule broken by the very function written to
+ * enforce it. Below the bound there is now no value at all, and a reason
+ * instead.
+ *
+ * ⚠️ THE UNDER-LOGGING SPIRAL LIVES HERE. A person logging 60% of what they eat
+ * measures as a person with a very low expenditure, and the honest response to
+ * a low expenditure is less food — the wrong prescription for exactly that
+ * person, whose next measurement then justifies less again. Nothing in this
+ * data separates that from genuine metabolic adaptation, so the design does not
+ * try to diagnose it: it bounds the damage and says which of the two it cannot
+ * tell apart.
+ *
+ * The asymmetry is deliberate. Being wrong upward feeds someone slightly too
+ * much for a while. Being wrong downward starves someone who is already
+ * mis-measuring themselves.
+ *
+ * @returns { value, applied, clamped, direction, reason }
+ *   applied false  -> do NOT move the target. Show `reason`.
+ *   clamped true   -> `value` was pulled to the bound (upward only).
  */
 function clampToFormula(observed, formulaTdee, opts) {
   const o = opts || {};
-  const downPct = o.maxDropPct != null ? o.maxDropPct : 0.10;   // at most 10% below the formula
-  const upPct = o.maxRisePct != null ? o.maxRisePct : 0.20;     // up to 20% above it
+  const downPct = o.maxDropPct != null ? o.maxDropPct : 0.10;   // refuse below 10% under
+  const upPct = o.maxRisePct != null ? o.maxRisePct : 0.20;     // clamp at 20% over
   const f = Number(formulaTdee);
   const v = Number(observed);
-  if (!(f > 0) || !isFinite(v)) return { value: null, clamped: false, direction: null };
+  if (!(f > 0) || !isFinite(v)) {
+    return { value: null, applied: false, clamped: false, direction: null,
+      reason: "No estimate to compare against yet." };
+  }
   const lo = f * (1 - downPct), hi = f * (1 + upPct);
-  if (v < lo) return { value: Math.round(lo), clamped: true, direction: "down" };
-  if (v > hi) return { value: Math.round(hi), clamped: true, direction: "up" };
-  return { value: Math.round(v), clamped: false, direction: null };
+  if (v < lo) {
+    return { value: null, applied: false, clamped: false, direction: "down",
+      reason: "Your logged food and the scale point to a much lower burn than expected. "
+        + "Either your body has adapted, or some food isn't making it into the log — "
+        + "we can't tell which from here, so nothing has been changed." };
+  }
+  if (v > hi) {
+    return { value: Math.round(hi), applied: true, clamped: true, direction: "up", reason: null };
+  }
+  return { value: Math.round(v), applied: true, clamped: false, direction: null, reason: null };
 }
 
 module.exports = { estimateObservedTdee, clampToFormula, dayNum, slope, TUNING, CAL_PER_LB };
