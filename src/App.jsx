@@ -350,11 +350,18 @@ function weeksToGoal(totalLbs, weeklyDeficitCal) {
 // Safe by construction on the projection side: weeksToGoal returns null for a
 // non-positive deficit, so a surplus produces "no ETA" rather than a negative
 // one, and the goal-date maths never divides the wrong way.
-const RATE_OPTS = [-1, -0.5, 0, 0.5, 1, 2];
-const RATE_LABEL = { "-1": "Gain 1 lb/week", "-0.5": "Gain ½ lb/week",
+// Symmetric by design (S198z, Kevin): the same three paces in both directions,
+// so "gain 2 lb/week" is as reachable as "lose 2 lb/week" instead of the gain
+// side stopping short at 1. A NEGATIVE rate is a surplus — see the note above.
+const RATE_OPTS = [-2, -1, -0.5, 0, 0.5, 1, 2];
+const RATE_LABEL = { "-2": "Gain 2 lb/week", "-1": "Gain 1 lb/week", "-0.5": "Gain ½ lb/week",
   0: "Maintenance", 0.5: "Lose ½ lb/week", 1: "Lose 1 lb/week", 2: "Lose 2 lb/week" };
-const RATE_SHORT = { "-1": "+1 lb/wk", "-0.5": "+½ lb/wk",
+const RATE_SHORT = { "-2": "+2 lb/wk", "-1": "+1 lb/wk", "-0.5": "+½ lb/wk",
   0: "Maintain", 0.5: "½ lb/wk", 1: "1 lb/wk", 2: "2 lb/wk" };
+// The pace as a sentence, in the direction it actually goes. "Eat less to lose
+// ~+1 lb/wk" is what the deficit-only phrasing produced once surpluses existed.
+const RATE_SENTENCE = (r) => (r === 0 ? "Maintenance — no deficit"
+  : r < 0 ? `Eat more to gain ~${RATE_SHORT[r]}` : `Eat less to lose ~${RATE_SHORT[r]}`);
 // NOTE 0 is a REAL value here (maintenance), so the usual `Number(x) || 1` is a
 // trap: Number(null) and Number("") are both 0, which would silently park a plan
 // at maintenance — and null is exactly what this app passes to mean "reset to
@@ -11178,6 +11185,261 @@ function WeightDayLogger({ date, existing, onSave }) {
   );
 }
 
+// ─── Calorie simulator (S198z, Kevin) ───────────────────────────────────────
+// A sandbox for "what if". Pick a pace or type your own intake, add the training
+// you're considering, and see the day's net and where it lands you in a week,
+// a fortnight, a month, two months. It WRITES NOTHING — the point is to let a
+// coach or client play with numbers and see the shape of a decision before
+// committing to it, the same way the Simulation plans (S20) work for programs.
+//
+// ⚠️ ONE BASIS, SHARED WITH THE CARD THAT OPENS IT. `intakeFor` is the very
+// function the Daily Calorie Targets grid uses, and maintenance is that same
+// function at rate 0 — so "Maintain" here is the number shown up there, not a
+// second opinion computed a different way. Two screens quoting different daily
+// targets is the failure this deliberately avoids.
+//
+// The 3,500 cal ≈ 1 lb rule is a linear simplification; real bodies adapt (see
+// the note on data.observedTdee). Said out loud at the bottom rather than
+// presented as a promise.
+const CAL_PER_LB = 3500;
+function CalorieSimulator({ data, weightLbs, planRate, intakeFor, onClose }) {
+  useBodyScrollLock(true);
+  useBackClose(true, onClose);
+  const d = data || {};
+  const w = Number(weightLbs) || Number(d.weightLbs) || 0;
+  const maintain = intakeFor(0);
+
+  const [useCustom, setUseCustom] = useState(false);
+  const [rate, setRate] = useState(RATE_OPTS.includes(planRate) ? planRate : 0);
+  const [customIntake, setCustomIntake] = useState("");
+  const [exId, setExId] = useState("");
+  const [exMin, setExMin] = useState("30");
+  const [extraBurn, setExtraBurn] = useState("");
+  const [daysPerWeek, setDaysPerWeek] = useState(7);
+
+  // Every exercise the plan can reach, grouped the way the pickers group them —
+  // cardio by equipment, strength by movement pattern, custom last.
+  const exGroups = useMemo(() => {
+    const custom = [...customOf(d.customExercises, "cardio"), ...customOf(d.customExercises, "strength")];
+    return [
+      ...CARDIO_GROUPS.map((g) => ({ group: g.group, items: g.options })),
+      ...STRENGTH_GROUPS.map((cat) => ({ group: cat, items: STRENGTH_EXERCISES.filter((e) => e.cat === cat) })),
+      ...(custom.length ? [{ group: "Custom", items: custom }] : []),
+    ].filter((g) => g.items && g.items.length);
+  }, [d.customExercises]);
+  const pickedEx = useMemo(() => {
+    for (const g of exGroups) { const hit = g.items.find((e) => e.id === exId); if (hit) return hit; }
+    return null;
+  }, [exGroups, exId]);
+
+  const minutes = Math.max(0, Math.round(Number(exMin) || 0));
+  const sessionBurn = pickedEx && minutes > 0 ? exBurn(pickedEx, w, minutes, d) : 0;
+  const manualBurn = Math.max(0, Math.round(Number(extraBurn) || 0));
+  // Training a few days a week is not the same as training daily, and a
+  // projection that quietly assumes daily would overstate every plan that isn't.
+  const burnPerDay = Math.round(((sessionBurn + manualBurn) * daysPerWeek) / 7);
+
+  const typed = Math.round(Number(customIntake) || 0);
+  const intake = useCustom ? (typed > 0 ? typed : 0) : intakeFor(rate);
+  const ready = intake > 0;
+  // Negative = a deficit = weight comes off.
+  const balance = ready ? intake - burnPerDay - maintain : 0;
+  const lbsIn = (days) => (-balance * days) / CAL_PER_LB;   // positive = lost
+  const HORIZONS = [[7, "1 week"], [14, "2 weeks"], [30, "1 month"], [60, "2 months"]];
+  const dir = balance < -20 ? "lose" : balance > 20 ? "gain" : "hold";
+  const fmtLbs = (n) => `${Math.abs(n).toFixed(1)} lb${Math.abs(n) >= 1.05 || Math.abs(n) < 0.95 ? "s" : ""}`;
+
+  const lbl = { fontSize: ".62rem", color: "var(--muted)", textTransform: "uppercase",
+    letterSpacing: ".5px", fontWeight: 800, marginBottom: "5px" };
+  const input = { width: "100%", boxSizing: "border-box", padding: "9px 10px", borderRadius: "8px",
+    border: "1px solid var(--border)", background: "var(--surface)", color: "var(--text)",
+    fontFamily: "inherit", fontSize: ".88rem", outline: "none" };
+
+  return createPortal(
+    <div onClick={onClose}
+      style={{ fontFamily: "var(--font-sans)", position: "fixed", inset: 0, zIndex: 1500,
+        display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.6)",
+        padding: "16px", paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
+        paddingBottom: "calc(16px + env(safe-area-inset-bottom,0px))" }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ width: "100%", maxWidth: "560px", maxHeight: "88vh", overflowY: "auto",
+          background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "16px",
+          padding: "16px", color: "var(--text)" }}>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "9px", marginBottom: "3px" }}>
+          <Icon name="chart" size={19} color="var(--accent)" />
+          <div style={{ flex: 1, fontFamily: "'Sora',sans-serif", fontSize: "1.05rem", letterSpacing: "1px" }}>
+            What if…
+          </div>
+          <button onClick={onClose} aria-label="Close"
+            style={{ border: "none", background: "transparent", cursor: "pointer", padding: "4px" }}>
+            <Icon name="close" size={17} color="var(--muted)" />
+          </button>
+        </div>
+        <div style={{ fontSize: ".72rem", color: "var(--muted)", marginBottom: "13px", lineHeight: 1.45 }}>
+          Play with the numbers. Nothing here changes your plan.
+        </div>
+
+        {/* ── 1. What you eat ─────────────────────────────────────────────── */}
+        <div style={lbl}>1 · What you eat</div>
+        <div style={{ display: "flex", gap: "5px", marginBottom: "8px" }}>
+          {[[false, "Pick a pace"], [true, "Type a number"]].map(([v, t]) => (
+            <button key={t} onClick={() => setUseCustom(v)}
+              style={{ flex: 1, padding: "7px", borderRadius: "8px", cursor: "pointer", fontFamily: "inherit",
+                fontSize: ".74rem", fontWeight: 700,
+                border: useCustom === v ? "1.5px solid var(--accent)" : "1px solid var(--border)",
+                background: useCustom === v ? "rgba(var(--accent-rgb),.10)" : "transparent",
+                color: useCustom === v ? "var(--accent)" : "var(--muted)" }}>{t}</button>
+          ))}
+        </div>
+        {useCustom ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+            <input type="number" inputMode="numeric" autoFocus placeholder="e.g. 2,100" value={customIntake}
+              onChange={(e) => setCustomIntake(e.target.value)} style={{ ...input, width: "130px" }} />
+            <span style={{ fontSize: ".78rem", color: "var(--muted)" }}>cal a day</span>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "5px" }}>
+            {[...RATE_OPTS].sort((a, b) => b - a).map((r) => {
+              const on = Math.abs(rate - r) < 0.01;
+              return (
+                <button key={r} onClick={() => setRate(r)}
+                  style={{ padding: "7px 3px", borderRadius: "8px", cursor: "pointer", textAlign: "center",
+                    fontFamily: "inherit",
+                    border: on ? "1.5px solid var(--accent)" : "1px solid var(--border)",
+                    background: on ? "rgba(var(--accent-rgb),.10)" : "var(--s2)" }}>
+                  <div style={{ fontSize: ".56rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".3px" }}>
+                    {RATE_SHORT[r]}
+                  </div>
+                  <div style={{ fontFamily: "'Sora',sans-serif", fontSize: ".92rem",
+                    color: on ? "var(--accent)" : "var(--text)" }}>{intakeFor(r).toLocaleString()}</div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* ── 2. What you burn on top ─────────────────────────────────────── */}
+        <div style={{ ...lbl, marginTop: "15px" }}>2 · Training you add (optional)</div>
+        <select value={exId} onChange={(e) => setExId(e.target.value)} style={{ ...input, marginBottom: "7px" }}>
+          <option value="">— no exercise —</option>
+          {exGroups.map((g) => (
+            <optgroup key={g.group} label={g.group}>
+              {g.items.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
+            </optgroup>
+          ))}
+        </select>
+        <div style={{ display: "flex", gap: "7px", flexWrap: "wrap", alignItems: "center" }}>
+          <div>
+            <input type="number" inputMode="numeric" value={exMin} onChange={(e) => setExMin(e.target.value)}
+              style={{ ...input, width: "78px" }} />
+            <div style={{ fontSize: ".58rem", color: "var(--muted)", marginTop: "2px", textAlign: "center" }}>minutes</div>
+          </div>
+          <div>
+            <select value={daysPerWeek} onChange={(e) => setDaysPerWeek(Number(e.target.value))}
+              style={{ ...input, width: "108px" }}>
+              {[1, 2, 3, 4, 5, 6, 7].map((n) => <option key={n} value={n}>{n}× a week</option>)}
+            </select>
+            <div style={{ fontSize: ".58rem", color: "var(--muted)", marginTop: "2px", textAlign: "center" }}>how often</div>
+          </div>
+          <div>
+            <input type="number" inputMode="numeric" placeholder="or cal" value={extraBurn}
+              onChange={(e) => setExtraBurn(e.target.value)} style={{ ...input, width: "92px" }} />
+            <div style={{ fontSize: ".58rem", color: "var(--muted)", marginTop: "2px", textAlign: "center" }}>own number</div>
+          </div>
+        </div>
+        {(sessionBurn > 0 || manualBurn > 0) && (
+          <div style={{ fontSize: ".68rem", color: "var(--muted)", marginTop: "6px" }}>
+            {sessionBurn > 0 && <>{pickedEx.label} {minutes} min ≈ <b style={{ color: "var(--orange)" }}>{sessionBurn.toLocaleString()}</b> cal</>}
+            {sessionBurn > 0 && manualBurn > 0 && " + "}
+            {manualBurn > 0 && <>your own <b style={{ color: "var(--orange)" }}>{manualBurn.toLocaleString()}</b> cal</>}
+            {daysPerWeek !== 7 && <> · {daysPerWeek}× a week averages <b style={{ color: "var(--orange)" }}>{burnPerDay.toLocaleString()}</b> cal a day</>}
+          </div>
+        )}
+
+        {/* ── 3. The answer ───────────────────────────────────────────────── */}
+        <div style={{ marginTop: "16px", borderTop: "1px solid var(--border)", paddingTop: "13px" }}>
+          {!ready ? (
+            <div style={{ fontSize: ".8rem", color: "var(--muted)" }}>Type a calorie number to see what it would do.</div>
+          ) : (
+            <>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: ".78rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "var(--muted)" }}>You eat</span>
+                  <span style={{ fontFamily: "'Sora',sans-serif" }}>{intake.toLocaleString()} cal</span>
+                </div>
+                {burnPerDay > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "var(--muted)" }}>Training burns</span>
+                    <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--orange)" }}>−{burnPerDay.toLocaleString()} cal</span>
+                  </div>
+                )}
+                <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--border)", paddingTop: "4px" }}>
+                  <span style={{ fontWeight: 700 }}>= Net for the day</span>
+                  <span style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "var(--accent)" }}>
+                    {(intake - burnPerDay).toLocaleString()} cal
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "var(--muted)" }}>Your body burns</span>
+                  <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--muted)" }}>{maintain.toLocaleString()} cal</span>
+                </div>
+              </div>
+
+              <div style={{ marginTop: "12px", padding: "11px", borderRadius: "10px",
+                background: "var(--s2)", border: "1px solid var(--border)", textAlign: "center" }}>
+                {dir === "hold" ? (
+                  <div style={{ fontSize: ".85rem", fontWeight: 700 }}>That holds your weight steady.</div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: ".68rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".6px" }}>
+                      {Math.abs(balance).toLocaleString()} cal {balance < 0 ? "under" : "over"} a day
+                    </div>
+                    <div style={{ fontFamily: "'Sora',sans-serif", fontSize: "1.5rem", color: "var(--accent)", margin: "2px 0" }}>
+                      {dir === "lose" ? "−" : "+"}{fmtLbs(lbsIn(7))} a week
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {dir !== "hold" && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "5px", marginTop: "9px" }}>
+                  {HORIZONS.map(([days, label]) => (
+                    <div key={days} style={{ padding: "8px 3px", borderRadius: "9px", textAlign: "center",
+                      background: "var(--s2)", border: "1px solid var(--border)" }}>
+                      <div style={{ fontSize: ".55rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".3px" }}>{label}</div>
+                      <div style={{ fontFamily: "'Sora',sans-serif", fontSize: ".95rem", color: "var(--accent)" }}>
+                        {dir === "lose" ? "−" : "+"}{Math.abs(lbsIn(days)).toFixed(1)}
+                      </div>
+                      {w > 0 && (
+                        <div style={{ fontSize: ".55rem", color: "var(--muted)" }}>
+                          {(w - lbsIn(days)).toFixed(1)} lbs
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {intake < 1200 && (
+                <div style={{ marginTop: "9px", fontSize: ".7rem", lineHeight: 1.45, color: "var(--yellow)" }}>
+                  Under 1,200 calories a day isn&rsquo;t healthy or sustainable — your plan won&rsquo;t go there.
+                  If you want a bigger gap than this, take it from movement rather than food.
+                </div>
+              )}
+            </>
+          )}
+          <div style={{ marginTop: "11px", fontSize: ".62rem", color: "var(--muted)", lineHeight: 1.45 }}>
+            Estimates only, on the standard 3,500 cal ≈ 1 lb rule. Real bodies adapt as weight comes off,
+            so a long projection drifts optimistic — treat the first week or two as the useful part.
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // ⚠️ THIS WAS NEVER A PROP, AND THE BODY READ IT ANYWAY (S160 → fixed S197t).
   // Tapping "Progress Snapshot" on any plan with 2+ weigh-ins threw
@@ -11681,6 +11943,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // else: the plan is untouched, and the ring says so while it is active.
   const [previewRate, setPreviewRate] = useState(null);
   const previewing = previewRate != null;
+  const [showSim, setShowSim] = useState(false);   // the "What if…" sandbox (S198z)
   const [customCal, setCustomCal] = useState("");
   const [customMsg, setCustomMsg] = useState(null);   // { text, warn }
   // ⚠️ THE 1,200 FLOOR APPLIES TO A TYPED NUMBER TOO (S198s). Everything the
@@ -11868,8 +12131,24 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           "here is where you are, and here is what the others would be"
           rather than as four numbers with no anchor. */}
       {isFinite(tdee) && tdee > 0 && (() => {
-        const rates = [{lbl:"Maintain",rate:0},{lbl:"½ lb/wk",rate:0.5},{lbl:"1 lb/wk",rate:1},
-          {lbl:"2 lbs/wk",rate:2},{lbl:"+½ lb/wk",rate:-0.5},{lbl:"+1 lb/wk",rate:-1}];
+        // ── Grouped by DIRECTION (S198z, Kevin) ───────────────────────────
+        // One flat row of six mixed the two directions together and leaned on a
+        // "+" buried in the label to tell them apart, so "2 lbs/wk" and
+        // "+1 lb/wk" sat side by side meaning opposite things. Now: maintenance
+        // on its own at the top (it is the anchor every other option is a step
+        // away from), then all three losing paces, then all three gaining ones,
+        // each under a heading that says which is which. Both directions carry
+        // the same ½ / 1 / 2 lb choices — the gain side used to stop at 1.
+        const rates = [
+          { lbl:"Maintain",  rate: 0,    group:"maintain", sign:"" },
+          { lbl:"½ lb/wk",   rate: 0.5,  group:"loss", sign:"−" },
+          { lbl:"1 lb/wk",   rate: 1,    group:"loss", sign:"−" },
+          { lbl:"2 lbs/wk",  rate: 2,    group:"loss", sign:"−" },
+          { lbl:"½ lb/wk",   rate:-0.5,  group:"gain", sign:"+" },
+          { lbl:"1 lb/wk",   rate:-1,    group:"gain", sign:"+" },
+          { lbl:"2 lbs/wk",  rate:-2,    group:"gain", sign:"+" },
+        ];
+        const rateName = (t) => (t ? `${t.sign}${t.lbl}` : "");
         // Floored means the honest answer for this rate is "we won't go there".
         const flooredAt = (r) => rawTargetForRate(r) < 1200;
         const shownRate = previewing ? previewRate : planRate;
@@ -11880,28 +12159,56 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           <div style={{fontSize:".68rem",color:"var(--muted)",marginBottom:"8px"}}>
             Tap one to see it in the ring above — your plan doesn’t change.
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"6px"}}>
-            {rates.map((t)=>{
+          {(() => {
+            const rateBtn = (t, wide) => {
               const isPlan = Math.abs(planRate - t.rate) < 0.01;
               const isShown = Math.abs(shownRate - t.rate) < 0.01;
               const val = targetForRate(t.rate);
               const low = flooredAt(t.rate);
               return (
-                <button key={t.lbl}
+                <button key={t.group + t.rate}
                   onClick={()=>setPreviewRate(previewing && isShown ? null : (isPlan ? null : t.rate))}
-                  style={{padding:"8px 4px",borderRadius:"9px",textAlign:"center",cursor:"pointer",
+                  style={{padding:wide?"9px 4px":"8px 4px",borderRadius:"9px",textAlign:"center",cursor:"pointer",
                     background: isShown ? "rgba(var(--accent-rgb),.12)" : "var(--s2)",
                     border: isShown ? "1px solid var(--accent)" : "1px solid var(--border)"}}>
-                  <div style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>{t.lbl}</div>
+                  <div style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px",
+                    display:"inline-flex",alignItems:"baseline",gap:"1px"}}>
+                    {/* The sign is the fastest read on the card, so it is set
+                        bigger than the words beside it rather than hiding inside
+                        them at label size (S198z, Kevin). */}
+                    {t.sign ? <span style={{fontSize:".95rem",fontWeight:900,lineHeight:.9,
+                      color: isShown ? "var(--accent)" : "var(--text-secondary)"}}>{t.sign}</span> : null}
+                    <span>{t.lbl}</span>
+                  </div>
                   <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.05rem",
                     color: low ? "var(--yellow)" : isShown ? "var(--accent)" : "var(--text)"}}>{val.toLocaleString()}</div>
                   <div style={{fontSize:".5rem",color: low ? "var(--yellow)" : "var(--muted)"}}>
-                    {low ? "floored" : t.rate < 0 ? "cal/day · gain" : "cal/day"}</div>
+                    {low ? "floored" : "cal/day"}</div>
                   {isPlan && <div style={{fontSize:".5rem",color:"var(--accent)",fontWeight:800,marginTop:"1px"}}>YOURS</div>}
                 </button>
               );
-            })}
-          </div>
+            };
+            const heading = (txt) => (
+              <div style={{fontSize:".56rem",color:"var(--muted)",textTransform:"uppercase",
+                letterSpacing:".8px",fontWeight:800,margin:"9px 0 4px"}}>{txt}</div>
+            );
+            const row = (g) => (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"6px"}}>
+                {rates.filter((t)=>t.group===g).map((t)=>rateBtn(t))}
+              </div>
+            );
+            return (
+              <>
+                <div style={{display:"grid",gridTemplateColumns:"1fr",gap:"6px"}}>
+                  {rates.filter((t)=>t.group==="maintain").map((t)=>rateBtn(t, true))}
+                </div>
+                {heading("Weight loss")}
+                {row("loss")}
+                {heading("Weight gain")}
+                {row("gain")}
+              </>
+            );
+          })()}
           {previewing && (
             <div style={{marginTop:"8px",display:"flex",gap:"6px"}}>
               {/* ⚠️ COMMITTING A RATE MUST ALSO CLEAR A MANUAL TARGET (S198s).
@@ -11925,7 +12232,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                   style={{flex:2,padding:"8px",borderRadius:"8px",cursor:"pointer",border:"none",
                     background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)",
                     fontSize:".74rem",fontWeight:800}}>
-                  Make {rates.find(r=>Math.abs(r.rate-previewRate)<0.01)?.lbl} my target
+                  Make {rateName(rates.find(r=>Math.abs(r.rate-previewRate)<0.01))} my target
                 </button>
               )}
               <button onClick={()=>setPreviewRate(null)}
@@ -11936,6 +12243,18 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               </button>
             </div>
           )}
+          {/* Try a combination before committing to it (S198z, Kevin). The grid
+              above answers "what would this pace let me eat"; this answers the
+              question underneath it — "what if I also trained, and what does
+              that add up to in a month". */}
+          <button onClick={()=>setShowSim(true)}
+            style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"7px",width:"100%",
+              marginTop:"10px",padding:"9px",borderRadius:"9px",cursor:"pointer",fontFamily:"inherit",
+              border:"1px solid var(--accent)",background:"rgba(var(--accent-rgb),.07)",
+              color:"var(--accent)",fontSize:".78rem",fontWeight:800}}>
+            <Icon name="chart" size={14} color="var(--accent)" />
+            What if… try a number or add training
+          </button>
           {/* A number of their own — a coach-given figure, or one from somewhere
               else entirely. It overrides the rate maths, so the card says which
               one is in force rather than leaving two plausible numbers on screen. */}
@@ -12263,8 +12582,11 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
             leaves you, and the full amount you could eat with today's burn. */}
         <div style={{marginTop:"6px",borderTop:"1px solid var(--border)",paddingTop:"10px"}}>
           {[["Your body's daily burn (TDEE)", `${tdee.toLocaleString()} cal`, "var(--text)", false],
-            [planRate === 0 ? "Maintenance — no deficit" : `Eat less to lose ~${RATE_SHORT[planRate]}`,
-             planRate === 0 ? "−0 cal" : `−${dailyDeficitOf(data).toLocaleString()} cal`, "var(--red)", false],
+            [RATE_SENTENCE(planRate),
+             planRate === 0 ? "−0 cal"
+               : planRate < 0 ? `+${Math.abs(dailyDeficitOf(data)).toLocaleString()} cal`
+               : `−${dailyDeficitOf(data).toLocaleString()} cal`,
+             planRate < 0 ? "var(--text)" : "var(--red)", false],
             ["= Target before exercise", `${targetNoBurn.toLocaleString()} cal`, "var(--text)", true],
             ["Burned training today", `+${scheduledBurn.toLocaleString()} cal`, "var(--orange)", false],
             ["= Total with today's burn", `${targetWithBurn.toLocaleString()} cal`, "var(--accent)", true]
@@ -12487,9 +12809,11 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                     </div>
                   )}
                   <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                    <span style={{color:"var(--muted)"}}>{planRate === 0 ? "Maintenance — no deficit" : `Eat less to lose ~${RATE_SHORT[planRate]}`}</span>
-                    <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:planRate===0?"var(--muted)":"var(--red)"}}>
-                      {planRate === 0 ? "−0 cal" : `−${dailyDeficitOf(data)} cal`}
+                    <span style={{color:"var(--muted)"}}>{RATE_SENTENCE(planRate)}</span>
+                    <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:planRate===0?"var(--muted)":planRate<0?"var(--text)":"var(--red)"}}>
+                      {planRate === 0 ? "−0 cal"
+                        : planRate < 0 ? `+${Math.abs(dailyDeficitOf(data))} cal`
+                        : `−${dailyDeficitOf(data)} cal`}
                     </span>
                   </div>
                   {/* Running total after the deficit (S99, Kevin) — the number the
@@ -13407,6 +13731,11 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           )}
         </div>
       </BottomSheet>
+
+      {showSim && (
+        <CalorieSimulator data={data} weightLbs={weightLbs} planRate={planRate}
+          intakeFor={targetForRate} onClose={()=>setShowSim(false)} />
+      )}
 
       {showMeasure && onSaveMeasurements && (() => {
         // One dated writer, shared by the modal's own date picker and by the
