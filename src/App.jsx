@@ -11464,7 +11464,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget, dayCalsAll,
   onSaveMeasurements, onSaveMeasurementsFor, onDeleteMeasurement, onToggleBodyFat, onSetBfSource, onSetGoalWeight, onAddCustomExercise,
   onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetHideCompliance, meUid: dashMeUid, peerUid,
-  premium = true, role, onOpenMealPlanner }) {
+  premium = true, role, onOpenMealPlanner, onSetActivityLevel, canEditActivity = true }) {
 
   // Swipe-down to refresh the daily view (S104) — reuses the existing onRefresh
   // (reloadPlanLive), which re-pulls the plan + today's log.
@@ -11971,6 +11971,53 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
     });
   }, [dayCalsAll, data.checkIns, tdee, todayKeyProp, dashToday]);
 
+  // ── What the measurement says about the activity level (S199, slice 6) ────
+  // THE ANSWER TO "should the activity level we set at signup change?" — yes,
+  // but a person decides, not the app. `activityLevel` is the user's own stated
+  // answer and several screens render it as words, so overwriting it silently
+  // would make those screens lie about what they said. Proposed, one tap.
+  //
+  // Why this is the safe rung to act on: the ladder has five fixed multipliers,
+  // so a tap can only ever produce a NORMAL formula TDEE — never an arbitrary
+  // number the measurement happened to land on. It is bounded by construction,
+  // which is exactly what the observed number is not.
+  const activitySuggestion = useMemo(() => {
+    if (!observed || !observed.tdee) return null;
+    // High confidence only: this rewrites a profile field the whole app reads,
+    // so an early read is not enough to propose it.
+    if (observed.confidence !== "high") return null;
+    // ⚠️ DELIBERATELY NOT GATED ON `diverged`. That flag is 15%, and a
+    // single wrong rung on this ladder is only 9-13% (1.55 -> 1.375 is 11.3%),
+    // so keying the suggestion off it would miss every one-step error — which
+    // is precisely the error it exists to catch, and the most common one. The
+    // right test is not "is the gap large" but "does another rung fit better",
+    // which is what the search below actually asks.
+    //
+    // The margin keeps it off measurement noise: the estimator is worth about
+    // +/-120 cal/day at this window length, so a gap under ~150 is not evidence
+    // of anything.
+    if (Math.abs(observed.tdee - tdee) < Math.max(150, tdee * 0.05)) return null;
+    const cur = ACTIVITY_LEVELS.find((a) => a.id === data.activityLevel) || ACTIVITY_LEVELS[0];
+    const bmr = tdee / cur.multiplier;          // tdee is bmr x multiplier
+    if (!(bmr > 0) || !isFinite(bmr)) return null;
+    const implied = observed.tdee / bmr;
+    const lo = ACTIVITY_LEVELS[0].multiplier;
+    const hi = ACTIVITY_LEVELS[ACTIVITY_LEVELS.length - 1].multiplier;
+    // ⚠️ IF THE LADDER CANNOT EXPRESS IT, DO NOT PIN IT TO AN END RUNG. A
+    // measurement implying less than sedentary is not evidence that someone is
+    // sedentary — it is evidence that something else is wrong, and the most
+    // likely something is the food log. Offering "set yourself to Sedentary"
+    // there would launder an under-logging problem into a calorie cut.
+    if (implied < lo - 0.02 || implied > hi + 0.02) return { outOfLadder: true, implied };
+    let best = ACTIVITY_LEVELS[0], bestErr = Infinity;
+    for (const a of ACTIVITY_LEVELS) {
+      const e = Math.abs(a.multiplier - implied);
+      if (e < bestErr) { bestErr = e; best = a; }
+    }
+    if (best.id === cur.id) return null;
+    return { from: cur, to: best, newTdee: Math.round(bmr * best.multiplier) };
+  }, [observed, data.activityLevel, tdee]);
+
   // ── Try a different rate without committing to it (S198q, Kevin) ──────────
   // Tapping a daily target previews it IN THE RING, so the question "what would
   // ½ lb a week actually let me eat today?" is answered by the number people
@@ -12415,12 +12462,53 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                       : <>Your food log and the scale together point <strong style={{color:"var(--text)"}}>higher</strong> than
                         the formula — you may be burning more than your profile assumes.</>}
                   </div>
+
                 </div>
               )}
             </>
           ) : (
             <div style={{fontSize:".78rem",color:"var(--text-secondary)",lineHeight:1.5}}>
               {observed.reason}
+            </div>
+          )}
+
+          {/* ── Slice 6: the one thing worth acting on ──────────────
+              The activity level is the crudest input in the whole
+              calculation and the only one nobody has revisited since
+              signup. Proposing a rung — never writing one — keeps the
+              person's own stated answer theirs, and because the ladder
+              has five fixed multipliers the result is always an
+              ordinary formula TDEE rather than whatever number the
+              measurement happened to land on. */}
+          {activitySuggestion && !activitySuggestion.outOfLadder && (
+            <div style={{marginTop:"10px",paddingTop:"9px",borderTop:"1px solid rgba(251,191,36,.35)"}}>
+              <div style={{fontSize:".72rem",color:"var(--text-secondary)",lineHeight:1.5,marginBottom:"7px"}}>
+                Your logging looks closer to <strong style={{color:"var(--text)"}}>{activitySuggestion.to.label}</strong>{" "}
+                than the <strong style={{color:"var(--text)"}}>{activitySuggestion.from.label}</strong> on the profile.
+                That would put the daily burn at <strong style={{color:"var(--text)"}}>{activitySuggestion.newTdee.toLocaleString()}</strong> cal.
+              </div>
+              {canEditActivity && onSetActivityLevel ? (
+                <button onClick={()=>onSetActivityLevel(activitySuggestion.to.id)}
+                  style={{display:"inline-flex",alignItems:"center",gap:"7px",padding:"8px 13px",borderRadius:"8px",
+                    cursor:"pointer",border:"none",fontFamily:"inherit",fontSize:".76rem",fontWeight:800,
+                    background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)"}}>
+                  <Icon name="check" size={13} color="var(--color-primaryfg)" />
+                  Set activity to {activitySuggestion.to.label}
+                </button>
+              ) : (
+                // Coach-owned when a trainer is linked (Kevin's call):
+                // the client sees the finding, the coach applies it.
+                <div style={{fontSize:".7rem",color:"var(--muted)",fontStyle:"italic"}}>
+                  Your coach can update this from your plan.
+                </div>
+              )}
+            </div>
+          )}
+          {activitySuggestion && activitySuggestion.outOfLadder && (
+            <div style={{marginTop:"10px",paddingTop:"9px",borderTop:"1px solid rgba(251,191,36,.35)",
+              fontSize:".71rem",color:"var(--text-secondary)",lineHeight:1.5}}>
+              This gap is bigger than any activity level explains, so changing it wouldn&rsquo;t account for it.
+              The usual cause is food that isn&rsquo;t reaching the log — worth checking before anything else moves.
             </div>
           )}
           <div style={{fontSize:".62rem",color:"var(--muted)",marginTop:"9px",lineHeight:1.45}}>
@@ -30396,6 +30484,10 @@ export default function App() {
     return () => { alive = false; };
   }, [meUid]);
   const [meEmail, setMeEmail] = useState(""); // current user's email (for the menu)
+  // Does the signed-in person have a coach? Decides who may act on the measured
+  // burn: coach-owned when a trainer is linked (S199, Kevin's call), so a
+  // connected client SEES the finding and their coach is the one who applies it.
+  const [meHasCoach, setMeHasCoach] = useState(false);
   const [meTrial, setMeTrial] = useState(null); // trial countdown state (or null)
   const [meBillingHold, setMeBillingHold] = useState(null); // unpaid session balance after a declined charge (S102b)
   // Arrived from a trainer's "save your card" link (S195). Read once, from the
@@ -30588,6 +30680,7 @@ export default function App() {
           setMeName(prof.displayName || prof.email || "Someone");
           setMeUid(prof.uid || "");
           setMeEmail(prof.email || "");
+          setMeHasCoach(!!prof.assignedTrainerId);
           setMeTrial(trialInfo(prof));
           setMePremium(isPremium(prof));
           setMeSubStatus(prof.subscriptionStatus || null);
@@ -32354,6 +32447,8 @@ export default function App() {
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
               dayCalsAll={dayCalsAll}
+              onSetActivityLevel={(id)=>setDataAndSave(p=>({...p, activityLevel: id}))}
+              canEditActivity={!(role === ROLES.CLIENT && meHasCoach)}
               onSaveMeasurements={(vals, dateKey)=>setDataAndSave(p=>{
                 // ⚠️ HONOUR THE DATE THE CALLER ASKED FOR (S198y). This used to
                 // drop its second argument and file every save under viewDate, so
