@@ -32,11 +32,18 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
+- `npm run test:units` — the JS unit suites (**632 assertions across 15 suites**, S199n).
+  Re-count rather than quoting this: it moved twice in one afternoon.
+  ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
+  the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
+  NOT created when a worktree is made. Fix once per worktree: `(cd functions && npm install)`.
+- `npm run check:undef` — fails on any undefined reference in `src/` or `functions/` (S197t).
 - `npm run test:rules` — Firestore security-rules tests against the Firebase emulator. The
   emulator needs Java (Temurin JDK). A local JDK is installed at `~/.glide-jdk` (Temurin 21, no
   brew/sudo on this machine) — run with it via:
   `JAVA_HOME="$HOME/.glide-jdk/jdk-21.0.11+10/Contents/Home" PATH="$JAVA_HOME/bin:$PATH" npm run test:rules`
-  (61 tests currently pass).
+  (**230 tests pass** — verified S199m; this line said 61 for many sessions after the suite had
+  nearly quadrupled, so re-run it rather than trusting the number).
 
 ## Important files
 
@@ -192,7 +199,8 @@ enabled (Blaze has no default spending cap).
 >   passkey login, custom exercises end-to-end, live-sync (onSnapshot) on all trainer/client surfaces,
 >   Notification Center, 30-day trials (soft).
 > - **Security:** profile reads scoped (S59), billing/trial fields locked to admin (S85), invite codes
->   un-harvestable (S85). **61 emulator rules tests** — run before ANY rules change and PUBLISH after.
+>   un-harvestable (S85). **230 emulator rules tests** (verified S199m) — run before ANY rules change
+>   and PUBLISH after.
 > - **Stripe billing v1 is LIVE in TEST MODE (S89b):** trials are now ENFORCED (expiry locks the AI
 >   layer; basics stay free; legacy accounts grandfathered), Checkout/portal/webhook deployed +
 >   E2E-verified. To charge real money: confirm prices ($49 coach / $9.99 client are placeholders) +
