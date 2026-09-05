@@ -191,8 +191,11 @@ const call = (name, input, isTrainer) => runTool(name, input, ctxFor(isTrainer))
     /setDataAndSave\(\(p\) => \{ const n = \{ \.\.\.p \}; delete n\.trainerNotes; return n; \}\);/,
     // the shape declaration
     /checkIns:\[\], trainerNotes:"", bodyFat:"", goalBodyFat:"",/,
-    // the coach's audit row (records THAT it changed, never the content)
-    /if \(\(p\.trainerNotes \|\| ""\) !== \(n\.trainerNotes \|\| ""\)\) out\.push\("updated trainer notes"\);/,
+    // The coach's audit row — records THAT it changed, never the content. Two
+    // lines since S199o, because clearing the field is FILING the note, not
+    // writing one, and the client reads this feed.
+    /if \(\(p\.trainerNotes \|\| ""\) !== \(n\.trainerNotes \|\| ""\)\) \{/,
+    /out\.push\(n\.trainerNotes \? "updated trainer notes" : "filed an older note away"\);/,
     // the export stripper
     /if \(d && typeof d === "object" && typeof d\.trainerNotes === "string" && d\.trainerNotes\) \{/,
     /delete d\.trainerNotes; n\+\+;/,

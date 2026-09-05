@@ -213,6 +213,13 @@ const base = {
 
   // The activity level was already recorded and must stay: it is the one input
   // S199 made coach-owned, so its edits matter most.
+  // Clearing it is FILING it, not writing it — the client reads this feed.
+  ok("filing the older note is not reported as writing one",
+     /filed an older note away/.test(describe({ ...plan, trainerNotes: "x" }, plan).join(" ")),
+     describe({ ...plan, trainerNotes: "x" }, plan));
+  ok("...while an actual edit still says so",
+     /updated trainer notes/.test(one({ trainerNotes: "new text" }).join(" ")), one({ trainerNotes: "new text" }));
+
   ok("the activity level is still recorded",
      /activity level/.test(one({ activityLevel: "light" }).join(" ")), one({ activityLevel: "light" }));
 }

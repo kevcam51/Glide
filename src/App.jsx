@@ -26221,7 +26221,14 @@ function describePlanChanges(prev, next) {
   });
   if (JSON.stringify(p.cardio || {}) !== JSON.stringify(n.cardio || {})) out.push("edited the cardio plan");
   if (JSON.stringify(p.strength || {}) !== JSON.stringify(n.strength || {})) out.push("edited the strength plan");
-  if ((p.trainerNotes || "") !== (n.trainerNotes || "")) out.push("updated trainer notes");
+  // ⚠️ THE FIELD IS NOW ONLY EVER CLEARED (S199n) — the plan editor's textarea is
+  // gone, and the one remaining writer files the text into the real notes system
+  // and deletes it. Reporting that as "updated trainer notes" told the client
+  // their coach had written something when the opposite had happened. The feed
+  // is read BY the client, so the wording is not cosmetic.
+  if ((p.trainerNotes || "") !== (n.trainerNotes || "")) {
+    out.push(n.trainerNotes ? "updated trainer notes" : "filed an older note away");
+  }
   if (JSON.stringify(p.customExercises || []) !== JSON.stringify(n.customExercises || [])) out.push("edited custom exercises");
   if ((n.checkIns || []).length > (p.checkIns || []).length) out.push("added a check-in");
   if (JSON.stringify(p.measurements || []) !== JSON.stringify(n.measurements || [])) out.push("updated tape measurements");
