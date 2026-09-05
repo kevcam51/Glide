@@ -95,7 +95,20 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
-> _**S199k (Sep 5): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S199k)" first.** Tip
+> _**S199m (Sep 5): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S199m)" first.** Tip
+> `d7a2e7a`, all pushed and deployed (frontend only — no functions or rules touched),
+> `npm run test:units` green at **612 assertions across 15 suites**. Shipped: **"↺ Start Over" is
+> no longer one unconfirmed tap** — it called `onReset` directly, wiping stats/goal/workout
+> schedule/macro targets with no undo, from a bar that renders OUTSIDE the Simple/Detailed switch
+> and so sat one tap from a client's default landing view. Now a confirm for everyone, worded by
+> WHOSE plan it is (a coached client's names their coach; a trainer erasing a connected client's
+> says it lands in that client's own account). ⚠️ **The activity-ladder "coach-owned" call was
+> REVERSED** (`57da79b`): a client has the same control over their own account as a trainer,
+> made safe by the activity feed, not by a lock — do not restore it, and note
+> `scripts/test-target-parity.mjs` now enumerates every `ROLES.CLIENT` branch in App.jsx and
+> fails on a new one. Two commits are both labelled S199m; they are unrelated._
+>
+> _**S199k (Sep 5): earlier context — `Glide-Session-Handoff-NEXT.md` §"S199k".** Tip
 > `430ff78`, all pushed and deployed, `npm run test:units` green at 485 assertions. Shipped: the Daily Calorie
 > Targets card redesigned to read as a direction (Maintain / loss / gain, ½·1·2 both ways) plus a
 > **"What if…" simulator** that writes nothing and shares the card's own target function; an
@@ -2452,8 +2465,8 @@ enabled (Blaze has no default spending cap).
   ENDING YESTERDAY, refusing rather than guessing (80% coverage, no >3-day gap, ≥4 weigh-ins over
   ≥10 days, sub-800-cal days not counted as real eating). **A downward clamp REFUSES** — a number
   between the formula and the observation is one nobody measured. It answers "should the activity
-  level change?" by **proposing a rung, one tap** — never rewriting it, and coach-owned when a
-  trainer is linked. (3) **Calendar/booking**: multi-day asks now survive the server (`booking.slots`
+  level change?" by **proposing a rung, one tap** — never rewriting it. (It was briefly coach-owned
+  when a trainer was linked; **S199m reversed that** — see the S199m entry below.) (3) **Calendar/booking**: multi-day asks now survive the server (`booking.slots`
   was being dropped by its only writer, so the whole path was dead); the geocode fallback only ran
   when Google failed FAST (one shared AbortController); a failed lookup is a 10-minute soft fail,
   merged, never the 24h uid-less `failed`; "couldn't check" renders alongside warnings; and bookings

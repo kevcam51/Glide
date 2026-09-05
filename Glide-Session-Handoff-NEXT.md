@@ -1,6 +1,66 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S199k) — everything below is PUSHED AND DEPLOYED
+## ▶️ START HERE (S199m) — everything below is PUSHED AND DEPLOYED
+
+Tip is the commit carrying this block; the last functional change is `d7a2e7a`
+(this one is documentation plus one corrected comment). Working tree clean, `npm run build` passes, `check:undef`
+clean, **612 unit assertions green across 15 suites**, 230 rules tests unchanged
+(no rules touched — this arc is frontend only, so nothing needed a Firebase
+deploy; Vercel auto-deployed from `main`). Nothing is half-finished.
+
+### What shipped (S199l → S199m)
+
+**Start Over was one tap, and it was not yours to take (S199l, `453d33a`).**
+The edit bar's `↺ Start Over` called `onReset` directly — no confirm, no undo,
+no role check — clearing stats, goal, workout schedule, macro targets and every
+check-in-derived field on the normal ~600ms debounce. The bar renders OUTSIDE
+the Simple/Detailed ternary and clients default to Simple, so it sat one tap
+from a client's ordinary landing screen; with no role gate, a connected client
+could wipe a plan their coach built. **Kevin's call was NOT to block it** — a
+person may start their own plan over even when a coach built it — so it is a
+confirm for everyone, and a coached client's confirm names their coach and says
+the change lands in the activity feed. Persuasion, not permission.
+
+**Then the same bug in the mirror (S199m, `d7a2e7a`).** That fix asked "does the
+VIEWER have a coach", which is the wrong question when the viewer IS the coach:
+a trainer with a connected client's plan open was warned about "YOUR stats, YOUR
+goal" for a document living in the client's account. The wording is now chosen by
+the SUBJECT of the plan — five variants (`remote` / `coached` / `simulation` /
+`local` / `plain`), with `simulation` deliberately checked BEFORE the named
+branch because a sim carries a person's name too.
+
+⚠️ **A connected client's plan usually has NO name on it.** They signed up and
+were linked; nobody ran the wizard for them, so it renders as "New Client" — the
+common case for the one warning that reaches into another account. It falls back
+to the connected-clients roster (already in App state, no extra read). This was
+only caught by running it; every unit test passed while it said "this client".
+
+`resetWarning` and `resetPlanData` are module-level and pure so
+`scripts/test-reset-confirm.mjs` (91 assertions) can EXECUTE the shipping copy
+rather than pattern-match it.
+
+### ⚠️ The coach-owned call was REVERSED (S199m, `57da79b`)
+
+A parallel session removed the activity-ladder lock outright: **a client has the
+same control over their own account as a trainer does**, made safe by the
+activity feed (S199i) rather than by permission. Do not "restore" it. Two
+consequences worth knowing before you edit `src/App.jsx`:
+
+1. `scripts/test-target-parity.mjs` **enumerates every `ROLES.CLIENT` branch** in
+   App.jsx. A new one fails the suite and has to justify itself as cosmetic or
+   routing, not as a restriction.
+2. The same suite asserts the deleted prop's identifier appears **nowhere in the
+   file, prose included**. Writing it in a comment fails the build — which is
+   how this handoff's own first draft of that comment was caught.
+
+`meHasCoach` survives but no longer gates capability: it picks the Start Over
+wording and strips the coach's private notes from a client's data export.
+
+**Numbering note:** two commits are both labelled S199m (`57da79b` from the
+parallel session, `d7a2e7a` here). They are unrelated changes that landed the
+same afternoon.
+
+## S199k — everything below is PUSHED AND DEPLOYED
 
 Tip is `430ff78`. Working tree clean, `npm run build` passes, `check:undef`
 clean, **485 unit assertions green across 13 suites** (351 of them in the six
@@ -62,8 +122,9 @@ Two decisions not to undo:
   is the user's own stated answer and several screens render it as words, so
   overwriting it silently would make those screens lie. And because the ladder
   has five fixed multipliers, a tap can only ever produce an ordinary formula
-  TDEE. When a linked coach exists the tap is theirs, not the client's
-  (`canEditActivity`); the client still sees the finding.
+  TDEE. ⚠️ The "when a linked coach exists the tap is theirs" rule that used to
+  live here (`canEditActivity`) was **REVERSED in S199m** — the prop is gone and
+  the client taps it themselves. See §"S199l → S199m" at the top.
 
 The suggestion gate is **"does another rung fit better", with a 150-cal noise
 margin** — not `DIVERGENCE_FLAG`. One rung is only 9–13%, so a 15% flag could

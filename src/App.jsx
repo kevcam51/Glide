@@ -30859,9 +30859,23 @@ export default function App() {
     return () => { alive = false; };
   }, [meUid]);
   const [meEmail, setMeEmail] = useState(""); // current user's email (for the menu)
-  // Does the signed-in person have a coach? Decides who may act on the measured
-  // burn: coach-owned when a trainer is linked (S199, Kevin's call), so a
-  // connected client SEES the finding and their coach is the one who applies it.
+  // Does the signed-in person have a coach?
+  //
+  // ⚠️ THIS NO LONGER GATES ANYTHING (S199m). It used to decide who may act on
+  // the measured burn — coach-owned when a trainer was linked — and that call
+  // was REVERSED: the per-role prop that locked the activity ladder was deleted
+  // outright, and a client now has the same control over their own account as a
+  // trainer does, made safe by the activity feed rather than by a lock. Do not
+  // reintroduce a capability check here; the enumeration in
+  // scripts/test-target-parity.mjs will fail and ask why.
+  //
+  // (Deliberately not naming the deleted prop: that suite asserts the
+  // identifier appears NOWHERE in this file, prose included, so writing it
+  // here — as the first draft of this comment did — fails the build.)
+  //
+  // What it still decides is what the person is TOLD, plus one content
+  // boundary: the Start Over confirm's wording (naming their coach), and
+  // stripping the coach's private notes from a client's data export (S199k).
   const [meHasCoach, setMeHasCoach] = useState(false);
   // The coach's uid + display name, for the Start Over confirm (S199l). The name
   // is loaded ON DEMAND rather than at boot: it is used by one rare destructive
