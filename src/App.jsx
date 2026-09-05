@@ -3916,6 +3916,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
   // Filing the legacy note can fail; a failure must not read as a success.
   const [noteMoving, setNoteMoving] = useState(false);
   const [noteMoveErr, setNoteMoveErr] = useState(false);
+  const [noteMoved, setNoteMoved] = useState(null);   // { scrubbed } after a successful file
   const [openResultDay, setOpenResultDay] = useState(null);
   const [showWeightModal, setShowWeightModal] = useState(false); // Pro Tracking chart popup
   const [showMeasureModal, setShowMeasureModal] = useState(false); // body-measurements popup
@@ -4200,24 +4201,32 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
               they are private in practice; a client reading raw Firestore in
               devtools is not. Making them private in fact means moving them to
               the trainer's own account, which is a migration, not a flag. */}
-          {canSeeNotes && (
+          {onOpenNotes && (
           <div className="card" style={{padding:"16px",marginBottom:"16px"}}>
             <div style={{display:"flex",alignItems:"center",gap:"10px",marginBottom: showNotes?"12px":"0",cursor:"pointer"}} onClick={()=>setShowNotes(v=>!v)}>
               <Icon name="edit" size={18} color="var(--accent)" />
               <div style={{flex:1}}>
                 <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",letterSpacing:"2px",color:"var(--text-secondary)"}}>Notes</div>
-                <div style={{fontSize:".72rem",color:"var(--muted)"}}>{data.trainerNotes
+                <div style={{fontSize:".72rem",color:"var(--muted)"}}>{canSeeNotes && data.trainerNotes
                   ? "1 older note to file"
-                  : "Private to you, or shared with them — your choice on each one"}</div>
+                  : canSeeNotes
+                    ? "Private to you, or shared with them — your choice on each one"
+                    : hasCoach
+                      ? "Private to you, or shared with your coach — your choice on each one"
+                      : "Private to you — your choice on each one"}</div>
               </div>
               <span style={{color:"var(--muted)",fontSize:".7rem",transition:"transform .2s",transform:showNotes?"rotate(180deg)":"none"}}>▼</span>
             </div>
             {showNotes && (
               <div style={{animation:"fadeUp .18s ease both"}}>
                 <div style={{fontSize:".78rem",color:"var(--text-secondary)",lineHeight:1.55,marginBottom:"10px"}}>
-                  {!isRemoteClient
-                    ? <>Notes about this person, kept in your own account. They have no login, so there is nobody to share with — everything here is yours.</>
-                    : <>Every note is either <strong style={{color:"var(--text)"}}>private to you</strong> or <strong style={{color:"var(--text)"}}>shared with them</strong>, and you choose when you write it. Private notes live in your own account, so they are private by structure rather than by a setting.</>}
+                  {!canSeeNotes
+                    ? (hasCoach
+                        ? <>Every note is either <strong style={{color:"var(--text)"}}>private to you</strong> or <strong style={{color:"var(--text)"}}>shared with your coach</strong>, and you choose when you write it. A private note is stored where only you can reach it — not hidden by a setting your coach could change.</>
+                        : <>Every note is <strong style={{color:"var(--text)"}}>private to you</strong>, stored where only you can reach it. If you connect a coach later you can choose, per note, which ones they see.</>)
+                    : !isRemoteClient
+                      ? <>Notes about this person, kept in your own account. They have no login, so there is nobody to share with — everything here is yours.</>
+                      : <>Every note is either <strong style={{color:"var(--text)"}}>private to you</strong> or <strong style={{color:"var(--text)"}}>shared with them</strong>, and you choose when you write it. Private notes live in your own account, so they are private by structure rather than by a setting.</>}
                 </div>
                 {onOpenNotes && (
                   <button onClick={onOpenNotes}
@@ -4237,7 +4246,20 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
                     about; guess "private" and a note written to be read is
                     buried. So it is shown, read-only, until a person decides.
                     Nothing is lost meanwhile — it stays where it has always been. */}
-                {data.trainerNotes && onMoveLegacyNote && (
+                {noteMoved && (
+                  <div style={{marginTop:"11px",padding:"10px 11px",borderRadius:"10px",
+                    border:"1px solid var(--green)",background:"rgba(47,224,168,.08)",
+                    fontSize:".74rem",color:"var(--text-secondary)",lineHeight:1.55}}>
+                    <strong style={{color:"var(--green)"}}>Filed.</strong>{" "}
+                    {noteMoved.scrubbed > 0
+                      // ⚠️ SAY WHAT IT DID AND WHAT IT CANNOT DO. The scrub matches
+                      // text the assistant quoted; a paraphrase is beyond it, and
+                      // "removed" must not be read as "guaranteed gone".
+                      ? <>It was also removed from {noteMoved.scrubbed} earlier AI {noteMoved.scrubbed === 1 ? "reply" : "replies"} that had quoted it back to them. If the assistant ever paraphrased it rather than quoting it, that wording won&rsquo;t have been found.</>
+                      : <>No earlier AI reply had quoted it back to them.</>}
+                  </div>
+                )}
+                {canSeeNotes && data.trainerNotes && onMoveLegacyNote && (
                   <div style={{marginTop:"12px",padding:"11px",borderRadius:"10px",
                     border:"1px solid var(--yellow)",background:"rgba(251,191,36,.08)"}}>
                     <div style={{fontSize:".72rem",fontWeight:800,color:"var(--yellow)",marginBottom:"5px"}}>
@@ -4257,7 +4279,8 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
                     )}
                     <div style={{display:"flex",gap:"7px",flexWrap:"wrap"}}>
                       <button disabled={noteMoving} onClick={async ()=>{ setNoteMoving(true); setNoteMoveErr(false);
-                        const done = await onMoveLegacyNote(false); setNoteMoving(false); if (!done) setNoteMoveErr(true); }}
+                        const done = await onMoveLegacyNote(false); setNoteMoving(false);
+                        if (!done) setNoteMoveErr(true); else setNoteMoved(done); }}
                         style={{padding:"8px 12px",borderRadius:"8px",cursor:"pointer",border:"none",
                           fontFamily:"inherit",fontSize:".76rem",fontWeight:800,
                           background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)"}}>
@@ -4265,7 +4288,8 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
                       </button>
                       {isRemoteClient && (
                         <button disabled={noteMoving} onClick={async ()=>{ setNoteMoving(true); setNoteMoveErr(false);
-                          const done = await onMoveLegacyNote(true); setNoteMoving(false); if (!done) setNoteMoveErr(true); }}
+                          const done = await onMoveLegacyNote(true); setNoteMoving(false);
+                          if (!done) setNoteMoveErr(true); else setNoteMoved(done); }}
                           style={{padding:"8px 12px",borderRadius:"8px",cursor:"pointer",
                             border:"1px solid var(--border-light)",background:"transparent",
                             fontFamily:"inherit",fontSize:".76rem",fontWeight:700,color:"var(--text-secondary)"}}>
@@ -27729,6 +27753,47 @@ function buildNote({ title, body, store, authorUid, authorName, clientUid, planI
   };
 }
 
+// ── Scrubbing a coaching note out of a client's past AI conversations ───────
+// The exposure this closes (S199p, found by the S199j review): before the notes
+// gate, get_profile returned `data.trainerNotes` verbatim, so a client could ask
+// their assistant "what has my coach written about me?" and be read it. That
+// REPLY was saved into the client's own `caliq-ai-chat-{id}`, and reopening the
+// panel restores it — and feeds it back to the model, so the note keeps leaking
+// forward inside that thread. No gate reaches data already written.
+//
+// ⚠️ WHAT THIS CANNOT DO, stated because the UI must not overclaim: it matches
+// VERBATIM runs. If the assistant paraphrased ("he thinks the new job is the
+// problem") nothing here will find it. Verbatim quoting is the realistic case —
+// the model was handed the exact string — but "removed" must never be read as
+// "guaranteed gone".
+//
+// Scope: `data.trainerNotes` was the ONLY note text a client's AI ever saw.
+// list_notes reads a trainer's about-notes only when the caller is the trainer
+// (isSelf gates it), so the notes system proper was never exposed.
+const NOTE_MIN_RUN = 24;   // chars of exact overlap before we call it a quote
+const normalizeForMatch = (t) => String(t || "").toLowerCase().replace(/\s+/g, " ").trim();
+function quotesNote(text, note) {
+  const n = normalizeForMatch(note), h = normalizeForMatch(text);
+  // A short note is not safely matchable — "back tight" would redact half a
+  // conversation. Below the floor we do nothing rather than something wrong.
+  if (n.length < 12 || !h) return false;
+  const run = Math.min(NOTE_MIN_RUN, n.length);
+  for (let i = 0; i + run <= n.length; i++) if (h.includes(n.slice(i, i + run))) return true;
+  return false;
+}
+const NOTE_REDACTED = "[This quoted a private coaching note, and has been removed.]";
+// Only ASSISTANT turns. A client who typed the text themselves already knows it,
+// and rewriting a person's own words in their own transcript is not ours to do.
+function redactThread(thread, note) {
+  let redacted = 0;
+  const out = (Array.isArray(thread) ? thread : []).map((m) => {
+    if (!m || m.role !== "assistant" || m.content === NOTE_REDACTED || !quotesNote(m.content, note)) return m;
+    redacted++;
+    return { ...m, content: NOTE_REDACTED, redacted: true };
+  });
+  return { thread: out, redacted };
+}
+
 async function appendNote({ body, visibility, meUid, meName }) {
   const text = String(body || "").trim();
   if (!text) return false;
@@ -31765,10 +31830,32 @@ export default function App() {
       }
     } catch (e) {
       console.error("could not file the legacy trainer note", e && e.message);
-      return false;
+      return null;
+    }
+    // Filed PRIVATELY = the coach has just said this was never for the client.
+    // So take it out of any past AI reply that quoted it, in the same action —
+    // asking them to remember a second step is asking them to forget it.
+    // Shared needs no scrub: the client is now meant to have it.
+    let scrubbed = 0;
+    if (!shared && activeRemoteUid) {
+      const keys = ["caliq-ai-chat"];   // the pre-S90 single thread, key-mapped as "legacy"
+      try {
+        const idx = JSON.parse(((await getForUser(activeRemoteUid, "caliq-ai-chats")) || {}).value || "null");
+        for (const c of (idx && idx.chats) || []) if (c && c.id) keys.push(`caliq-ai-chat-${c.id}`);
+      } catch { /* no index → just the legacy thread */ }
+      for (const k of keys) {
+        try {
+          const arr = JSON.parse(((await getForUser(activeRemoteUid, k)) || {}).value || "null");
+          if (!Array.isArray(arr) || !arr.length) continue;
+          const r = redactThread(arr, text);
+          if (!r.redacted) continue;
+          await setForUser(activeRemoteUid, k, JSON.stringify(r.thread));
+          scrubbed += r.redacted;
+        } catch (e) { console.error("could not scrub a past chat", k, e && e.message); }
+      }
     }
     setDataAndSave((p) => { const n = { ...p }; delete n.trainerNotes; return n; });
-    return true;
+    return { scrubbed };
   };
 
   const goToProfiles = () => { setScreen("profiles"); setActiveId(null); setActiveRemoteUid(null); };
@@ -33143,7 +33230,15 @@ export default function App() {
           connected client gets "trainer-client" (private about-notes in my own
           kv, shared notes in theirs); a local plan file gets "trainer-plan",
           which has no shared option because that person has no account. */}
-      {planNotesOpen && (activeRemoteUid
+      {/* ⚠️ THE ROLE TEST IS POSITIVE (S199p). isTrainerHome is false while the
+          profile read is still in flight, so an unresolved role lands in
+          "client" mode — which writes to the signed-in person's OWN stores. The
+          negative form would have put a client in "trainer-plan" mode on a cold
+          open and filed their note against a plan id instead of their notes. */}
+      {planNotesOpen && (!isTrainerHome
+        ? <NotesPanel mode="client" meUid={meUid} meName={meName}
+            onClose={() => setPlanNotesOpen(false)} />
+        : activeRemoteUid
         ? <NotesPanel mode="trainer-client" meUid={meUid} meName={meName}
             clientUid={activeRemoteUid}
             /* resetSubjectName already resolves this exact question — the plan's

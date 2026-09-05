@@ -153,7 +153,19 @@ const call = (name, input, isTrainer) => runTool(name, input, ctxFor(isTrainer))
 
 // ── the UI half ─────────────────────────────────────────────────────────────
 {
-  ok("the Results card is gated", /\{canSeeNotes && \(/.test(APP));
+  // ⚠️ THE GATE MOVED, IT DID NOT GO (S199p). The card became an entry point to
+  // a panel clients already have on their Home, so gating the DOORWAY was
+  // arbitrary under Kevin's "same control" rule. What is still the coach's is
+  // the legacy blob, and that is what the gate now wraps.
+  // ⚠️ ANCHORED TO THE CARD, NOT THE BUTTON. `{onOpenNotes && (` appears twice —
+  // the card wrapper and the "Open notes" button inside it — so the loose form
+  // stayed green with the card re-gated, because it was matching the button.
+  ok("the card itself is open to whoever owns the plan",
+     /\{onOpenNotes && \(\n\s*<div className="card"/.test(APP));
+  ok("...while the coach's older note stays gated",
+     /\{canSeeNotes && data\.trainerNotes && onMoveLegacyNote && \(/.test(APP));
+  ok("...and a client is routed to their OWN notes context, by a POSITIVE role test",
+     /\{planNotesOpen && \(!isTrainerHome\s*\n\s*\? <NotesPanel mode="client"/.test(APP));
   // Matches the DEFAULT, not the prop's position in the list: this used to
   // require `canSeeNotes = false }) {`, so adding any prop after it failed a
   // test about privacy for a reason that had nothing to do with privacy (S199l).
@@ -183,8 +195,8 @@ const call = (name, input, isTrainer) => runTool(name, input, ctxFor(isTrainer))
     // The gated card, inside {canSeeNotes && (...)}. The textarea is GONE: the
     // field is no longer editable anywhere (S199n). It is displayed read-only
     // until a coach files it into the real notes system, and then deleted.
-    /\{data\.trainerNotes$/,
-    /\{data\.trainerNotes && onMoveLegacyNote && \(/,
+    /\{canSeeNotes && data\.trainerNotes$/,
+    /\{canSeeNotes && data\.trainerNotes && onMoveLegacyNote && \(/,
     /marginBottom:"9px"\}\}>\{data\.trainerNotes\}<\/div>/,
     // moveLegacyNote — reachable only from that card
     /const text = String\(\(data && data\.trainerNotes\) \|\| ""\)\.trim\(\);/,
@@ -359,14 +371,85 @@ const call = (name, input, isTrainer) => runTool(name, input, ctxFor(isTrainer))
   // version of this assertion was an ordering check alone, so deleting the
   // `return false` entirely — which makes a failed write fall through and clear
   // the note anyway, the exact bug — left it green. Existence first, then order.
-  const failExit = body.indexOf("return false;");
+  const failExit = body.indexOf("return null;");
   const clears = body.indexOf("delete n.trainerNotes");
-  ok("the catch actually returns false", failExit >= 0, failExit);
+  ok("the catch returns a failure value", failExit >= 0, failExit);
   ok("...before anything is cleared", failExit >= 0 && clears >= 0 && failExit < clears, { failExit, clears });
   ok("...and the card says so rather than looking like it worked",
      /Couldn&rsquo;t file it — nothing moved/.test(APP));
   ok("the legacy note is never auto-filed — a person picks",
      /onMoveLegacyNote\(false\)/.test(APP) && /onMoveLegacyNote\(true\)/.test(APP));
+}
+
+// ── scrubbing the note out of past AI replies (S199p) ───────────────────────
+// Before the gate, get_profile handed a client's assistant the note verbatim,
+// and the REPLY was saved into that client's own chat thread — where reopening
+// the panel restores it and feeds it back to the model. No gate reaches data
+// already written, so filing a note PRIVATELY now also redacts it from those
+// threads. EXECUTED, because a matcher that is too eager destroys a person's
+// conversation and one that is too shy does nothing, and both look identical
+// from a source regex.
+{
+  const q = /const quotesNote = |function quotesNote\(text, note\) \{[\s\S]*?\n\}/.exec(APP);
+  const r = /function redactThread\(thread, note\) \{[\s\S]*?\n\}/.exec(APP);
+  const norm = /const normalizeForMatch = [^\n]*\n/.exec(APP);
+  const run = /const NOTE_MIN_RUN = [^\n]*\n/.exec(APP);
+  const marker = /const NOTE_REDACTED = [^\n]*\n/.exec(APP);
+  ok("the scrub helpers are liftable", !!q && !!r && !!norm && !!run && !!marker);
+  const [quotesNote, redactThread, NOTE_REDACTED] = new Function(
+    `${run[0]}${norm[0]}${marker[0]}${q[0]}\n${r[0]}\nreturn [quotesNote, redactThread, NOTE_REDACTED];`)();
+
+  const NOTE = "Keeps skipping Thursdays — suspect the new job. Do not raise directly.";
+
+  ok("a verbatim quote is found", quotesNote(`Kevin noted: "${NOTE}"`, NOTE));
+  ok("...through different whitespace and case",
+     quotesNote("KEEPS   SKIPPING\nTHURSDAYS — SUSPECT THE NEW JOB.", NOTE));
+  ok("...and when only part of the note was quoted",
+     quotesNote("he wrote that you keep skipping thursdays — suspect the new job", NOTE));
+
+  // ⚠️ FALSE POSITIVES DESTROY A TRANSCRIPT. An ordinary coaching reply that
+  // happens to share a few words must survive.
+  ok("an unrelated reply is left alone",
+     !quotesNote("You skipped Thursday this week — want to move it to Friday?", NOTE));
+  ok("...and so is an empty one", !quotesNote("", NOTE));
+  // The honest limit, pinned so nobody later claims more than it does.
+  ok("a PARAPHRASE is not found — this is a verbatim scrub",
+     !quotesNote("He thinks your new job is why Thursdays keep slipping.", NOTE));
+  // ⚠️ THE SHORT-NOTE FLOOR, EXERCISED. The first version of this assertion used
+  // a haystack that did not contain the short note at all, so it passed with the
+  // floor deleted — a mutation proved it. The phrase must actually BE there.
+  ok("a note too short to be distinctive is not matched even when present",
+     !quotesNote("we talked about his back tight after squats", "back tight"));
+  ok("...while a note just over the floor still matches",
+     quotesNote("she said left knee clicks on squats today", "left knee clicks on squats"));
+
+  // ⚠️ The user turn QUOTES THE NOTE TOO. It has to, or dropping the role check
+  // changes nothing and the assertion below is decorative — which is exactly
+  // what a mutation caught the first time.
+  const thread = [
+    { role: "user", content: `did you say "${NOTE}"? that's harsh` },
+    { role: "assistant", content: `Your coach wrote: "${NOTE}"` },
+    { role: "user", content: "ok" },
+    { role: "assistant", content: "Want to look at this week's protein?" },
+  ];
+  const out = redactThread(thread, NOTE);
+  ok("the quoting reply is redacted", out.redacted === 1, out.redacted);
+  ok("...and replaced with a marker, not deleted", out.thread[1].content === NOTE_REDACTED);
+  ok("...while the innocent reply is untouched", out.thread[3].content === "Want to look at this week's protein?");
+  // A client who typed it already knows it, and rewriting someone's own words
+  // in their own transcript is not ours to do.
+  ok("the client's own messages are never rewritten, even quoting it verbatim",
+     out.thread[0].content.includes(NOTE) && out.thread[0].content !== NOTE_REDACTED, out.thread[0].content);
+  ok("re-running it redacts nothing further", redactThread(out.thread, NOTE).redacted === 0);
+  ok("junk input does not throw", redactThread(null, NOTE).redacted === 0
+     && redactThread([null, 7, {}], NOTE).redacted === 0);
+
+  // Wiring: private only, and the outcome is reported without overclaiming.
+  ok("the scrub runs on the PRIVATE path only", /if \(!shared && activeRemoteUid\) \{/.test(APP));
+  ok("...covering the pre-S90 single thread as well as the indexed ones",
+     /const keys = \["caliq-ai-chat"\]/.test(APP) && /caliq-ai-chat-\$\{c\.id\}/.test(APP));
+  ok("...and the card admits what a paraphrase would defeat",
+     /paraphrased it rather than quoting it/.test(APP));
 }
 
 console.log(`  ${checks - fails}/${checks} assertions passed`);
