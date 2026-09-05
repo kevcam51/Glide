@@ -22,10 +22,15 @@ const GROQ_API_KEY = defineSecret("GROQ_API_KEY");
 // trialExpiredFor() / src/profile.js isPremium(); no-trialStartedAt accounts
 // are grandfathered. Kept as a small local copy so this function stays
 // independently deployable (it doesn't share aitools.js).
-function trialExpiredFor(profile) {
+// Admin UID (matches functions/index.js and firestore.rules isAdmin()). Kept
+// local so this function stays independently deployable.
+const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
+function isAdminUid(uid) { return ADMIN_UIDS.includes(uid); }
+function trialExpiredFor(profile, uid) {
   if (!profile) return false;
   if (profile.subscriptionStatus === "active") return false;
-  if (profile.role === "admin") return false;
+  // Admin by UID — `profile.role` is never "admin" on a real document (S199h).
+  if (uid && isAdminUid(uid)) return false;
   if (profile.entitlements && profile.entitlements.premium === true) return false;
   const t = profile.trialStartedAt;
   const startMs = t && typeof t.toMillis === "function" ? t.toMillis()
@@ -92,7 +97,7 @@ exports.transcribeAudio = onCall(
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Please sign in to use voice.");
     const profile = (await admin.firestore().doc(`users/${uid}`).get()).data();
-    if (trialExpiredFor(profile)) {
+    if (trialExpiredFor(profile, uid)) {
       throw new HttpsError("permission-denied",
         "Your free trial has ended — upgrade to keep using Glide AI voice.", { reason: "trial-expired" });
     }

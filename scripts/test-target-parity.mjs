@@ -120,5 +120,48 @@ const base = {
      /\(next\.checkIns \|\| \[\]\)\.filter\(\(c\) => c && c\.weight && !c\.isFuturePlan\)/.test(APP));
 }
 
+// ── admin is a UID, never a profile role (S199g/h) ──────────────────────────
+// createProfile only ever writes "client" or "head_trainer", and index.js
+// mirrors the admin role into the custom CLAIM alone — so `profile.role ===
+// "admin"` is false for EVERY real document, the owner's included. Six gates
+// were written against it and every one was dead code. The rule was already
+// documented in aichat.js; a comment did not stop the next five, so it is
+// pinned here instead.
+{
+  const files = ["functions/availability.js", "functions/aitools.js", "functions/mcp.js",
+    "functions/aichat.js", "functions/transcribe.js", "functions/index.js", "functions/billing.js"];
+  // Comments QUOTE the banned pattern while explaining it, so strip them first —
+  // otherwise the assertion fails on its own documentation, which is the kind of
+  // test that gets deleted rather than fixed.
+  const stripComments = (t) => t.replace(/^\s*\/\/.*$/gm, "");
+  const src = Object.fromEntries(files.map((f) => [f, stripComments(readFileSync(join(ROOT, f), "utf8"))]));
+  // A dead admin GATE looks like `role === "admin"` used as the whole test.
+  // `role === "head_trainer" || ... || role === "admin"` is a different thing —
+  // an is-this-a-trainer check where the extra term is harmless — so it is
+  // allowed, and only the standalone forms are banned.
+  const deadGate = /(?:^|[^|&\s])\s*(?:if \(\s*)?(?:profile|me|ctx|d)\.role === "admin"/;
+  for (const f of files) {
+    ok(`${f} has no admin gate on a profile role`, !deadGate.test(src[f]),
+       (src[f].match(deadGate) || [])[0]);
+  }
+  // ...and every file that gates on admin declares the same UID.
+  for (const f of ["functions/availability.js", "functions/aitools.js", "functions/mcp.js",
+                   "functions/aichat.js", "functions/transcribe.js", "functions/index.js"]) {
+    ok(`${f} identifies admin by the shared UID`,
+       /ADMIN_UIDS = \["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"\]/.test(src[f]));
+  }
+  // The four converted this round now take a uid and use it.
+  ok("resolveTargetUid checks the caller's UID", /isAdminUid\(ctx\.callerUid\)/.test(src["functions/aitools.js"]));
+  ok("seatCapFor takes a uid and the ctx path passes it",
+     /function seatCapFor\(profile, uid\)/.test(src["functions/aitools.js"])
+     && /seatCapFor\(prof, ctx\.callerUid\)/.test(src["functions/aitools.js"]));
+  ok("planFor takes a uid and its caller passes it",
+     /function planFor\(profile, uid\)/.test(src["functions/mcp.js"])
+     && /planFor\(profile, ctx\.callerUid\)/.test(src["functions/mcp.js"]));
+  ok("both trialExpiredFor copies take a uid",
+     /function trialExpiredFor\(profile, uid\)/.test(src["functions/aichat.js"])
+     && /function trialExpiredFor\(profile, uid\)/.test(src["functions/transcribe.js"]));
+}
+
 console.log(`  ${checks - fails}/${checks} assertions passed`);
 process.exit(fails ? 1 : 0);

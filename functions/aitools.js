@@ -890,6 +890,12 @@ function measurementMetrics(d, m) {
     leanMassLbs, goalWeightFromLeanMass };
 }
 
+// Admin UID (matches functions/index.js, aichat.js, mcp.js and firestore.rules
+// isAdmin()). Admin exists ONLY in the custom claim, never on the profile doc,
+// so every admin gate must go through here.
+const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
+function isAdminUid(uid) { return ADMIN_UIDS.includes(uid); }
+
 const MEASUREMENT_FIELDS = ["waist", "hips", "neck", "thigh", "calf", "forearm", "wrist"];
 
 // Least-squares weight trend (lbs/week) from check-ins — mirrors src/App.jsx
@@ -1694,7 +1700,11 @@ async function resolveTargetUid(db, input, ctx) {
   if (!clientId || clientId === ctx.callerUid) return ctx.callerUid;
   const prof = (await db.doc(`users/${clientId}`).get()).data();
   if (!prof) return { error: "No client found with that id." };
-  if (ctx.role === "admin") return prof.aiOptOut ? { error: AI_OPTED_OUT_CLIENT } : clientId;
+  // ⚠️ BY UID, NEVER BY THE PROFILE ROLE (S199h). `ctx.role` is `profile.role`
+  // (aichat.js:579, mcp.js:562) and createProfile only ever writes "client" or
+  // "head_trainer" — index.js mirrors admin into the custom CLAIM alone — so
+  // this branch was unreachable for every real account, the owner's included.
+  if (isAdminUid(ctx.callerUid)) return prof.aiOptOut ? { error: AI_OPTED_OUT_CLIENT } : clientId;
   // Direct client, or a trainer directly under me.
   if (prof.assignedTrainerId === ctx.callerUid || prof.headTrainerId === ctx.callerUid) {
     return prof.aiOptOut ? { error: AI_OPTED_OUT_CLIENT } : clientId;
@@ -1736,9 +1746,12 @@ function seatMonthKey() {
 // and all): connect BEFORE coach ("coach_connect" contains "coach"), ultra
 // before max before coach. Grandfathered accounts (no trialStartedAt) are
 // treated as Coach — consistent with how every other gate treats them as paid.
-function seatCapFor(profile) {
+function seatCapFor(profile, uid) {
   if (!profile) return 0;
-  if (profile.role === "admin") return null;
+  // Admin by UID. Most callers already wrap this in their own isAdminUid check,
+  // but seatCapForCtx below did not — so the uncapped-admin case rested
+  // entirely on a role that no document ever carries.
+  if (uid && isAdminUid(uid)) return null;
   if (profile.subscriptionStatus === "active") {
     const t = String(profile.subscriptionTier || "").toLowerCase();
     // The ladder (S178b, Kevin). ONE number per tier, deliberately: a seat is
@@ -1776,7 +1789,7 @@ function seatCapFor(profile) {
 async function seatCapForCtx(db, ctx) {
   if (ctx.seatCap !== undefined) return ctx.seatCap;
   const prof = (await db.doc(`users/${ctx.callerUid}`).get()).data() || {};
-  ctx.seatCap = seatCapFor(prof);
+  ctx.seatCap = seatCapFor(prof, ctx.callerUid);
   return ctx.seatCap;
 }
 const SEAT_LIMIT_MSG = (used, cap) =>

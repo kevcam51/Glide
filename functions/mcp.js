@@ -264,9 +264,14 @@ const TRAINER_ROLES = ["head_trainer", "sub_trainer", "admin"];
 // real profile doc never carries role "admin", so anything admin-gated must
 // check the UID, not the role.
 const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
-function planFor(profile) {
+function isAdminUid(uid) { return ADMIN_UIDS.includes(uid); }
+function planFor(profile, uid) {
   if (!profile) return "free";
-  if (profile.role === "admin") return "ultra";
+  // ⚠️ THE COMMENT TWO LINES ABOVE SAYS EXACTLY THIS, AND THIS FUNCTION DID THE
+  // OPPOSITE (S199h): admin lives only in the custom claim, so `profile.role ===
+  // "admin"` is false for every real document and the owner was silently
+  // dropped to whatever his subscription said — "free", in practice.
+  if (uid && isAdminUid(uid)) return "ultra";
   if (profile.entitlements && profile.entitlements.premium === true) return "premium";
   if (profile.subscriptionStatus === "active") {
     // Order matters: check ultra before max before coach, since the coach tiers
@@ -435,7 +440,7 @@ function buildServer(ctx, profile, db, scopes) {
     },
   );
 
-  const plan = planFor(profile);
+  const plan = planFor(profile, ctx.callerUid);
   const granted = new Set(Array.isArray(scopes) ? scopes : String(scopes || "read").split(/\s+/));
   // Two gates, in order: (1) buildTools role-filters, so a client never sees a
   // trainer tool; (2) the token's scopes decide which writes are exposed.
@@ -578,7 +583,7 @@ exports.mcp = onRequest({ cors: false, timeoutSeconds: 300,
     // AI-client seat cap (S176f) — same profile-derived cap the in-app chat
     // attaches, so runTool's seat gate treats both surfaces identically. Admin
     // by UID: the profile role is never "admin" on a real doc.
-    seatCap: ADMIN_UIDS.includes(uid) ? null : seatCapFor(profile),
+    seatCap: isAdminUid(uid) ? null : seatCapFor(profile, uid),
   };
 
   let server, transport;

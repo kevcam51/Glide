@@ -546,10 +546,11 @@ ${GLIDNA_KNOWLEDGE}`;
 // (created before trials existed, incl. admin/test accounts) are grandfathered.
 // Keep the semantics in sync with src/profile.js isPremium() and the copy in
 // functions/transcribe.js.
-function trialExpiredFor(profile) {
+function trialExpiredFor(profile, uid) {
   if (!profile) return false;
   if (profile.subscriptionStatus === "active") return false;
-  if (profile.role === "admin") return false;
+  // Admin by UID — `profile.role` is never "admin" on a real document (S199h).
+  if (uid && isAdminUid(uid)) return false;
   if (profile.entitlements && profile.entitlements.premium === true) return false;
   const t = profile.trialStartedAt;
   const startMs = t && typeof t.toMillis === "function" ? t.toMillis()
@@ -656,7 +657,7 @@ async function setupChat(uid, activeTarget, noSearch, tzArg) {
   return {
     role, isTrainer, budget, usageRef, used, system,
     searchBudget, searchesUsed, searchAllowed,
-    trialExpired: trialExpiredFor(profile),
+    trialExpired: trialExpiredFor(profile, uid),
     tools,
     toolCtx: { callerUid: uid, role, isTrainer, aiOptOut: profile.aiOptOut === true,
       today: todayLocal(tz), nowTime: nowTimeLocal(tz), callerName,
@@ -1207,7 +1208,7 @@ exports.estimateExercise = onCall(
     if (!name) throw new HttpsError("invalid-argument", "Name the exercise first.");
     const db = admin.firestore();
     const profile = (await db.doc(`users/${uid}`).get()).data() || {};
-    if (trialExpiredFor(profile)) {
+    if (trialExpiredFor(profile, uid)) {
       throw new HttpsError("permission-denied", TRIAL_EXPIRED_MSG, { reason: "trial-expired" });
     }
     const usageRef = db.doc(`users/${uid}/aiUsage/${todayKey()}`);
@@ -1278,7 +1279,7 @@ exports.estimateFood = onCall(
     if (!desc && !notes && !imgBlock) throw new HttpsError("invalid-argument", "Describe the food or add a photo first.");
     const db = admin.firestore();
     const profile = (await db.doc(`users/${uid}`).get()).data() || {};
-    if (trialExpiredFor(profile)) {
+    if (trialExpiredFor(profile, uid)) {
       throw new HttpsError("permission-denied", TRIAL_EXPIRED_MSG, { reason: "trial-expired" });
     }
     const usageRef = db.doc(`users/${uid}/aiUsage/${todayKey()}`);
