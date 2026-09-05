@@ -3865,7 +3865,7 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   );
 }
 
-function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTotal, loggingStreak, dayCalsAll, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, onSetBfSource, defaultView = "detailed", onSetPlanViewDefault,
+function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTotal, loggingStreak, dayCalsAll, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, onSetBfSource, defaultView = "detailed", onSetPlanViewDefault,
   // Coaching notes are the coach's (S199j). Defaults CLOSED so a caller that
   // forgets the prop hides them rather than leaking them — the safe direction
   // for a privacy gate is the one that fails quiet, not the one that fails open.
@@ -3875,7 +3875,11 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
   // confirm opens, so nobody pays a profile read for a sentence they never see.
   // subjectName/isRemoteClient say WHOSE plan this is (S199m) — a trainer must
   // not be warned about "your stats" for a document in a client's account.
-  hasCoach = false, coachName = "", onNeedCoachName, subjectName = "", isRemoteClient = false }) {
+  // isRemoteClient does double duty for notes (S199n): a LOCAL plan file is a
+  // person with no account, so there is nobody to share a note WITH. It is the
+  // same `!!activeRemoteUid` either way, and one prop cannot disagree with itself.
+  hasCoach = false, coachName = "", onNeedCoachName, subjectName = "", isRemoteClient = false,
+  onOpenNotes, onMoveLegacyNote }) {
   const [tab, setTab] = useState(0);
   const [confirmReset, setConfirmReset] = useState(false);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
@@ -3909,6 +3913,9 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
   };
   const [showEdit, setShowEdit] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
+  // Filing the legacy note can fail; a failure must not read as a success.
+  const [noteMoving, setNoteMoving] = useState(false);
+  const [noteMoveErr, setNoteMoveErr] = useState(false);
   const [openResultDay, setOpenResultDay] = useState(null);
   const [showWeightModal, setShowWeightModal] = useState(false); // Pro Tracking chart popup
   const [showMeasureModal, setShowMeasureModal] = useState(false); // body-measurements popup
@@ -4198,27 +4205,76 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
             <div style={{display:"flex",alignItems:"center",gap:"10px",marginBottom: showNotes?"12px":"0",cursor:"pointer"}} onClick={()=>setShowNotes(v=>!v)}>
               <Icon name="edit" size={18} color="var(--accent)" />
               <div style={{flex:1}}>
-                <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",letterSpacing:"2px",color:"var(--text-secondary)"}}>Trainer Notes</div>
-                <div style={{fontSize:".72rem",color:"var(--muted)"}}>{data.trainerNotes ? `${data.trainerNotes.length} chars · last updated` : "No notes yet — tap to add"}</div>
+                <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",letterSpacing:"2px",color:"var(--text-secondary)"}}>Notes</div>
+                <div style={{fontSize:".72rem",color:"var(--muted)"}}>{data.trainerNotes
+                  ? "1 older note to file"
+                  : "Private to you, or shared with them — your choice on each one"}</div>
               </div>
               <span style={{color:"var(--muted)",fontSize:".7rem",transition:"transform .2s",transform:showNotes?"rotate(180deg)":"none"}}>▼</span>
             </div>
             {showNotes && (
               <div style={{animation:"fadeUp .18s ease both"}}>
-                <textarea
-                  value={data.trainerNotes || ""}
-                  onChange={e => onUpdateNotes(e.target.value)}
-                  placeholder="Session observations, things to follow up on, client preferences, injury notes, anything you want to remember for next time..."
-                  style={{
-                    width:"100%", minHeight:"120px", padding:"12px", borderRadius:"8px",
-                    border:"1.5px solid var(--border)", background:"var(--s2)",
-                    color:"var(--text)", fontFamily:"inherit", fontSize:".84rem",
-                    lineHeight:1.6, resize:"vertical", outline:"none",
-                  }}
-                />
-                <div style={{fontSize:".7rem",color:"var(--muted)",marginTop:"6px"}}>
-                  Notes save automatically. Use this for session recaps, form cues, dietary preferences, injuries, or anything you want to remember before the next session.
+                <div style={{fontSize:".78rem",color:"var(--text-secondary)",lineHeight:1.55,marginBottom:"10px"}}>
+                  {!isRemoteClient
+                    ? <>Notes about this person, kept in your own account. They have no login, so there is nobody to share with — everything here is yours.</>
+                    : <>Every note is either <strong style={{color:"var(--text)"}}>private to you</strong> or <strong style={{color:"var(--text)"}}>shared with them</strong>, and you choose when you write it. Private notes live in your own account, so they are private by structure rather than by a setting.</>}
                 </div>
+                {onOpenNotes && (
+                  <button onClick={onOpenNotes}
+                    style={{display:"inline-flex",alignItems:"center",gap:"7px",padding:"9px 14px",borderRadius:"8px",
+                      cursor:"pointer",border:"none",fontFamily:"inherit",fontSize:".8rem",fontWeight:800,
+                      background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)"}}>
+                    <Icon name="edit" size={14} color="var(--color-primaryfg)" />Open notes
+                  </button>
+                )}
+
+                {/* ⚠️ THE OLD SINGLE BLOB, AND WHY IT IS NOT SILENTLY MIGRATED
+                    (S199n). `data.trainerNotes` was one free-text field with no
+                    visibility choice, living in the plan document — which for a
+                    connected client sits in THAT CLIENT's own storage. Filing it
+                    automatically would mean guessing: guess "shared" and a
+                    coach's candid observation is published to the person it is
+                    about; guess "private" and a note written to be read is
+                    buried. So it is shown, read-only, until a person decides.
+                    Nothing is lost meanwhile — it stays where it has always been. */}
+                {data.trainerNotes && onMoveLegacyNote && (
+                  <div style={{marginTop:"12px",padding:"11px",borderRadius:"10px",
+                    border:"1px solid var(--yellow)",background:"rgba(251,191,36,.08)"}}>
+                    <div style={{fontSize:".72rem",fontWeight:800,color:"var(--yellow)",marginBottom:"5px"}}>
+                      An older note, from before notes had a private/shared choice
+                    </div>
+                    <div style={{fontSize:".8rem",color:"var(--text)",lineHeight:1.55,whiteSpace:"pre-wrap",
+                      maxHeight:"160px",overflowY:"auto",marginBottom:"9px"}}>{data.trainerNotes}</div>
+                    <div style={{fontSize:".7rem",color:"var(--text-secondary)",lineHeight:1.5,marginBottom:"8px"}}>
+                      {!isRemoteClient
+                        ? "File it with your notes about this person."
+                        : "Decide where it belongs. Until you do, it stays here and only you can see it."}
+                    </div>
+                    {noteMoveErr && (
+                      <div style={{fontSize:".72rem",color:"var(--red)",marginBottom:"7px",lineHeight:1.5}}>
+                        Couldn&rsquo;t file it — nothing moved, and the note is still here. Check your connection and try again.
+                      </div>
+                    )}
+                    <div style={{display:"flex",gap:"7px",flexWrap:"wrap"}}>
+                      <button disabled={noteMoving} onClick={async ()=>{ setNoteMoving(true); setNoteMoveErr(false);
+                        const done = await onMoveLegacyNote(false); setNoteMoving(false); if (!done) setNoteMoveErr(true); }}
+                        style={{padding:"8px 12px",borderRadius:"8px",cursor:"pointer",border:"none",
+                          fontFamily:"inherit",fontSize:".76rem",fontWeight:800,
+                          background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)"}}>
+                        Keep it private to me
+                      </button>
+                      {isRemoteClient && (
+                        <button disabled={noteMoving} onClick={async ()=>{ setNoteMoving(true); setNoteMoveErr(false);
+                          const done = await onMoveLegacyNote(true); setNoteMoving(false); if (!done) setNoteMoveErr(true); }}
+                          style={{padding:"8px 12px",borderRadius:"8px",cursor:"pointer",
+                            border:"1px solid var(--border-light)",background:"transparent",
+                            fontFamily:"inherit",fontSize:".76rem",fontWeight:700,color:"var(--text-secondary)"}}>
+                          Share it with them
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -27633,6 +27689,39 @@ const noteAutoTitle = (body) => (String(body || "").trim().split("\n")[0] || "Un
 // "private" goes to the owner-only privkv (a trainer can read all client kv by
 // design, so a flag alone would NOT be private); "shared" goes to the normal kv
 // the client and trainer both read/write.
+// Where a new note lives, and what one looks like. Module-level because there
+// are now TWO places that create notes about a client — NotesPanel and the plan
+// editor's "move this older note in" — and a note filed in the wrong store is
+// either invisible or, worse, private-looking while sitting in the client's own
+// kv. One definition, executed by a test, rather than two that agree today.
+//
+// The stores, and why: "aboutClient" is the TRAINER's own kv (a client cannot
+// read a trainer's kv, so it is private by structure); "clientShared" is the
+// CLIENT's kv (both sides read and write); "priv" is privkv, owner-only by
+// rules, which is what makes a client's own private note private FROM the
+// trainer. A visibility flag alone would be decoration — the S91 plan says so
+// and the emulator suite has nine attack cases proving it.
+function noteStoreFor(mode, shared) {
+  if (mode === "client") return shared ? "sharedOwn" : "priv";
+  if (mode === "trainer-client") return shared ? "clientShared" : "aboutClient";
+  if (mode === "trainer-plan") return "aboutPlan";   // a plan file has no account to share with
+  return "self";
+}
+function buildNote({ title, body, store, authorUid, authorName, clientUid, planId, aiHidden, now }) {
+  const t = now || Date.now();
+  return {
+    id: `nt${t}${Math.floor(Math.random() * 1e4)}`,
+    title: title || noteAutoTitle(body), body,
+    authorUid: authorUid || "", authorName: authorName || "Me",
+    visibility: store === "clientShared" || store === "sharedOwn" ? "shared" : "private",
+    ...(store === "aboutClient" ? { aboutUid: clientUid } : {}),
+    ...(store === "aboutPlan" ? { aboutPlanId: planId } : {}),
+    kind: "note",
+    ...(aiHidden ? { aiHidden: true } : {}),
+    createdAt: t, updatedAt: t,
+  };
+}
+
 async function appendNote({ body, visibility, meUid, meName }) {
   const text = String(body || "").trim();
   if (!text) return false;
@@ -28982,12 +29071,7 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
     return window.storage.set(NOTES_KEY, val);
   };
   // Which store a NEW note goes to, given the shared toggle.
-  const storeForNew = () => {
-    if (mode === "client") return dShared ? "sharedOwn" : "priv";
-    if (mode === "trainer-client") return dShared ? "clientShared" : "aboutClient";
-    if (mode === "trainer-plan") return "aboutPlan";   // no account to share with
-    return "self";
-  };
+  const storeForNew = () => noteStoreFor(mode, dShared);
 
   const openNew = () => { setEditing("new"); setDTitle(""); setDBody(""); setDShared(false); setDAiHidden(false); setErr(""); };
   const openNote = (n) => { setEditing(n); setDTitle(n.title || ""); setDBody(n.body || ""); setDShared(n._store === "sharedOwn" || n._store === "clientShared"); setDAiHidden(n.aiHidden === true); setErr(""); };
@@ -29001,13 +29085,8 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
       const title = dTitle.trim() || noteAutoTitle(body);
       if (editing === "new") {
         const store = storeForNew();
-        const note = { id: `nt${now}${Math.floor(Math.random() * 1e4)}`, title, body,
-          authorUid: uid, authorName: meName || "Me",
-          visibility: store === "clientShared" || store === "sharedOwn" ? "shared" : "private",
-          ...(store === "aboutClient" ? { aboutUid: clientUid } : {}),
-          ...(store === "aboutPlan" ? { aboutPlanId: planId } : {}), kind: "note",
-          ...(dAiHidden ? { aiHidden: true } : {}),
-          createdAt: now, updatedAt: now };
+        const note = buildNote({ title, body, store, authorUid: uid, authorName: meName,
+          clientUid, planId, aiHidden: dAiHidden, now });
         const arr = await readStore(store);
         await writeStore(store, [note, ...arr]);
       } else {
@@ -31651,6 +31730,40 @@ export default function App() {
     } catch(e) {}
   };
 
+  const [planNotesOpen, setPlanNotesOpen] = useState(false);
+
+  // Move the legacy single-blob `data.trainerNotes` into the real notes system
+  // (S199n), where every note carries the private/shared choice its author made.
+  //
+  // ⚠️ THE WRITE LANDS BEFORE THE SOURCE IS CLEARED, and a failure clears
+  // nothing. Deleting the only copy on the strength of a write nobody confirmed
+  // is how this codebase has lost data before — the same shape as a save that
+  // goes somewhere plausible and says nothing. Returns false so the card can say
+  // so rather than looking like it worked.
+  const moveLegacyNote = async (shared) => {
+    const text = String((data && data.trainerNotes) || "").trim();
+    if (!text) return true;
+    const mode = activeRemoteUid ? "trainer-client" : "trainer-plan";
+    const store = noteStoreFor(mode, shared);
+    const note = buildNote({ body: text, store, authorUid: meUid, authorName: meName,
+      clientUid: activeRemoteUid, planId: activeId });
+    try {
+      if (store === "clientShared") {
+        const cur = parseNotes((await getForUser(activeRemoteUid, NOTES_KEY) || {}).value);
+        await setForUser(activeRemoteUid, NOTES_KEY, JSON.stringify([note, ...cur].slice(0, 100)));
+      } else {
+        // aboutClient / aboutPlan: the TRAINER's own kv, which a client cannot read.
+        const cur = parseNotes(await window.storage.get(NOTES_KEY).then((v) => v && v.value).catch(() => null));
+        await window.storage.set(NOTES_KEY, JSON.stringify([note, ...cur].slice(0, 100)));
+      }
+    } catch (e) {
+      console.error("could not file the legacy trainer note", e && e.message);
+      return false;
+    }
+    setDataAndSave((p) => { const n = { ...p }; delete n.trainerNotes; return n; });
+    return true;
+  };
+
   const goToProfiles = () => { setScreen("profiles"); setActiveId(null); setActiveRemoteUid(null); };
   // ⚠️ START OVER MEANS THE PLAN, NOT THE COACH'S NOTES (S199k). EMPTY_DATA
   // declares trainerNotes:"", and planMerge treats a key whose value differs
@@ -32967,7 +33080,8 @@ export default function App() {
               else if (p.startWeightLbs) next.weightLbs = p.startWeightLbs;
               return next;
             })}
-            onUpdateNotes={(text)=>setDataAndSave(p=>({...p, trainerNotes:text}))}
+            onOpenNotes={()=>setPlanNotesOpen(true)}
+            onMoveLegacyNote={moveLegacyNote}
             onSaveMeasurements={(vals, dateKey)=>setDataAndSave(p=>{
               // Tape measurements: merge into that day's entry (one per date) and
               // refresh bodyFat from the tape formulas. mergeMeasurements builds
@@ -33017,6 +33131,25 @@ export default function App() {
           computes, delivered via rosterCap.teamsLocked so UI and backend can't
           drift. isRemote tells the apply step it's writing onto a CLIENT's days
           (onPlanDays is already remote-aware, so the write itself just works). */}
+      {/* Notes for the person whose plan is open (S199n) — the SAME panel the
+          client card opens, so there is one notes system rather than two. A
+          connected client gets "trainer-client" (private about-notes in my own
+          kv, shared notes in theirs); a local plan file gets "trainer-plan",
+          which has no shared option because that person has no account. */}
+      {planNotesOpen && (activeRemoteUid
+        ? <NotesPanel mode="trainer-client" meUid={meUid} meName={meName}
+            clientUid={activeRemoteUid}
+            /* resetSubjectName already resolves this exact question — the plan's
+               own name, falling back to the roster profile — because a connected
+               client's plan often carries no firstName at all (they never ran the
+               wizard). Verified live: the header read "Notes — your client" about
+               someone the trainer knows by name. One helper, not two. */
+            clientName={resetSubjectName || "your client"}
+            onClose={() => setPlanNotesOpen(false)} />
+        : <NotesPanel mode="trainer-plan" meUid={meUid} meName={meName}
+            planId={activeId} planName={resetSubjectName || "this plan"}
+            onClose={() => setPlanNotesOpen(false)} />)}
+
       <MealPlannerPanel open={showMealPlanner} onClose={() => setShowMealPlanner(false)}
         role={role} isRemote={!!activeRemoteUid}
         locked={(role === "head_trainer" || role === "sub_trainer") ? !!(rosterCap && rosterCap.teamsLocked) : !mePremium}

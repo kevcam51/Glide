@@ -180,9 +180,15 @@ const call = (name, input, isTrainer) => runTool(name, input, ctxFor(isTrainer))
 {
   const lines = APP.split("\n");
   const ALLOWED = [
-    // the gated card (read + edit), inside {canSeeNotes && (...)}
-    /\{data\.trainerNotes \? `\$\{data\.trainerNotes\.length\} chars/,
-    /value=\{data\.trainerNotes \|\| ""\}/,
+    // The gated card, inside {canSeeNotes && (...)}. The textarea is GONE: the
+    // field is no longer editable anywhere (S199n). It is displayed read-only
+    // until a coach files it into the real notes system, and then deleted.
+    /\{data\.trainerNotes$/,
+    /\{data\.trainerNotes && onMoveLegacyNote && \(/,
+    /marginBottom:"9px"\}\}>\{data\.trainerNotes\}<\/div>/,
+    // moveLegacyNote — reachable only from that card
+    /const text = String\(\(data && data\.trainerNotes\) \|\| ""\)\.trim\(\);/,
+    /setDataAndSave\(\(p\) => \{ const n = \{ \.\.\.p \}; delete n\.trainerNotes; return n; \}\);/,
     // the shape declaration
     /checkIns:\[\], trainerNotes:"", bodyFat:"", goalBodyFat:"",/,
     // the coach's audit row (records THAT it changed, never the content)
@@ -193,8 +199,6 @@ const call = (name, input, isTrainer) => runTool(name, input, ctxFor(isTrainer))
     // Start Over carrying them across
     /const keep = prev && prev\.trainerNotes;/,
     /return \{ \.\.\.EMPTY_DATA, \.\.\.\(keep \? \{ trainerNotes: keep \} : \{\}\) \};/,
-    // the writer, reachable only from the gated card
-    /onUpdateNotes=\{\(text\)=>setDataAndSave\(p=>\(\{\.\.\.p, trainerNotes:text\}\)\)\}/,
   ];
   // Comments discuss this field at length — including JSX {/* ... */} blocks,
   // whose continuation lines start with neither // nor *. Tracked properly, so
@@ -284,6 +288,82 @@ const call = (name, input, isTrainer) => runTool(name, input, ctxFor(isTrainer))
   ok("...and an empty note does not become undefined", reset({ trainerNotes: "" }).trainerNotes === "");
   ok("...nor does a missing plan throw", reset(null).trainerNotes === "" && reset(undefined).trainerNotes === "");
   ok("the App uses it rather than a private copy", /const fresh = resetPlanData\(data\);/.test(APP));
+}
+
+// ── one notes system, not two (S199n, Kevin) ────────────────────────────────
+// "Trainers can have their own private notes for clients and notes that are
+// open for clients to see — the trainer decides when the note is created."
+//
+// That already existed (S91): NotesPanel writes each note to a store chosen by
+// its visibility, and privacy is STRUCTURAL — a private about-client note lives
+// in the TRAINER's own kv, which a client cannot read, and a client's own
+// private note lives in privkv, which the rules make owner-only. A flag alone
+// would be decoration; the S91 plan says exactly that and the emulator suite
+// has nine attack cases behind it.
+//
+// The one surface that lacked the choice was the plan editor's `trainerNotes`
+// blob. It now points at the same panel — so these two functions are the seam
+// where a second implementation could drift back in, and they are EXECUTED.
+{
+  const storeSrc = /function noteStoreFor\(mode, shared\) \{[\s\S]*?\n\}/.exec(APP);
+  const buildSrc = /function buildNote\(\{[\s\S]*?\n\}/.exec(APP);
+  const titleSrc = /const noteAutoTitle = [^\n]*\n/.exec(APP);
+  ok("the note helpers are liftable", !!storeSrc && !!buildSrc && !!titleSrc);
+  const [noteStoreFor, buildNote] = new Function(
+    `${titleSrc[0]}\n${storeSrc[0]}\n${buildSrc[0]}\nreturn [noteStoreFor, buildNote];`)();
+
+  // ⚠️ THE ROUTING IS THE PRIVACY. A private note filed to the client's own kv
+  // is not private, however it is labelled.
+  ok("a coach's private note about a client goes to the COACH's own kv",
+     noteStoreFor("trainer-client", false) === "aboutClient");
+  ok("...and a shared one goes to the CLIENT's kv, where they can read it",
+     noteStoreFor("trainer-client", true) === "clientShared");
+  ok("a client's own private note goes to privkv, not their kv",
+     noteStoreFor("client", false) === "priv");
+  ok("...and their shared one to their kv, where the coach can read it",
+     noteStoreFor("client", true) === "sharedOwn");
+  // A local plan file is a person with no account. There is nobody to share
+  // WITH, so the shared flag must not silently route somewhere readable.
+  ok("a local plan file has no shared store", noteStoreFor("trainer-plan", true) === "aboutPlan"
+     && noteStoreFor("trainer-plan", false) === "aboutPlan");
+
+  const n = (store, extra) => buildNote({ body: "keeps skipping Thursdays", store,
+    authorUid: "u1", authorName: "Coach", clientUid: "c1", planId: "p1", now: 1000, ...extra });
+  ok("an aboutClient note is marked private and tagged with the client",
+     n("aboutClient").visibility === "private" && n("aboutClient").aboutUid === "c1", n("aboutClient"));
+  ok("a clientShared note is marked shared and carries NO aboutUid",
+     n("clientShared").visibility === "shared" && n("clientShared").aboutUid === undefined, n("clientShared"));
+  ok("a plan-file note is private and tagged with the plan",
+     n("aboutPlan").visibility === "private" && n("aboutPlan").aboutPlanId === "p1", n("aboutPlan"));
+  ok("the title is auto-derived when none is given", n("aboutClient").title === "keeps skipping Thursdays");
+  ok("...and a given title wins", n("aboutClient", { title: "Thursdays" }).title === "Thursdays");
+  ok("aiHidden is absent unless asked for",
+     n("aboutClient").aiHidden === undefined && n("aboutClient", { aiHidden: true }).aiHidden === true);
+
+  // NotesPanel must use the SAME two functions, or the drift is back.
+  ok("NotesPanel routes through noteStoreFor",
+     /const storeForNew = \(\) => noteStoreFor\(mode, dShared\);/.test(APP));
+  ok("...and builds through buildNote", /const note = buildNote\(\{ title, body, store, authorUid: uid/.test(APP));
+  ok("the plan editor opens the same panel rather than a second one",
+     /<NotesPanel mode="trainer-client" meUid=\{meUid\} meName=\{meName\}\s+clientUid=\{activeRemoteUid\}/.test(APP));
+
+  // ⚠️ THE WRITE LANDS BEFORE THE SOURCE IS CLEARED. Deleting the only copy on
+  // the strength of an unconfirmed write is how this repo has lost data before.
+  const mv = /const moveLegacyNote = async \(shared\) => \{[\s\S]*?\n  \};/.exec(APP);
+  ok("moveLegacyNote is findable", !!mv);
+  const body = mv ? mv[0] : "";
+  // ⚠️ indexOf RETURNS -1 WHEN ABSENT, and -1 is less than everything. The first
+  // version of this assertion was an ordering check alone, so deleting the
+  // `return false` entirely — which makes a failed write fall through and clear
+  // the note anyway, the exact bug — left it green. Existence first, then order.
+  const failExit = body.indexOf("return false;");
+  const clears = body.indexOf("delete n.trainerNotes");
+  ok("the catch actually returns false", failExit >= 0, failExit);
+  ok("...before anything is cleared", failExit >= 0 && clears >= 0 && failExit < clears, { failExit, clears });
+  ok("...and the card says so rather than looking like it worked",
+     /Couldn&rsquo;t file it — nothing moved/.test(APP));
+  ok("the legacy note is never auto-filed — a person picks",
+     /onMoveLegacyNote\(false\)/.test(APP) && /onMoveLegacyNote\(true\)/.test(APP));
 }
 
 console.log(`  ${checks - fails}/${checks} assertions passed`);
