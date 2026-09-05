@@ -201,23 +201,28 @@ enabled (Blaze has no default spending cap).
 > - **Security:** profile reads scoped (S59), billing/trial fields locked to admin (S85), invite codes
 >   un-harvestable (S85). **230 emulator rules tests** (verified S199m) — run before ANY rules change
 >   and PUBLISH after.
-> - **Stripe billing v1 is LIVE in TEST MODE (S89b):** trials are now ENFORCED (expiry locks the AI
->   layer; basics stay free; legacy accounts grandfathered), Checkout/portal/webhook deployed +
->   E2E-verified. To charge real money: confirm prices ($49 coach / $9.99 client are placeholders) +
->   swap live keys. Connect revenue splits = later phase.
-> - **Still NOT built:** client→trainer requests/messaging, push-notification delivery, Stripe Connect
->   splits, custom claims in rules (deliberately skipped, S57).
+> - **Stripe billing is LIVE — REAL MONEY (since S90; the "TEST MODE" claim that stood here was
+>   ~110 sessions stale, verified S199n).** `functions/billing.js` carries the live portal config
+>   `bpc_1Tr5VX…`, and `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` hold live values. Final prices
+>   (NOT placeholders): Premium $14.99/mo · $119.99/yr · Max $29.99/$299.99yr · Coach $49/$490yr ·
+>   Coach Max $79/$790yr. Trials ENFORCED (expiry locks the AI layer; basics stay free; legacy
+>   accounts grandfathered). ⚠️ To rehearse billing use the S182 `*_TEST` secret twins — NEVER
+>   overwrite the live secrets with test values. Connect revenue splits = still a later phase.
+> - **Still NOT built:** Stripe Connect revenue splits, and custom claims in rules (deliberately
+>   skipped, S57). ⚠️ This line also claimed client→trainer requests, messaging and push delivery
+>   were missing; all three shipped in S90 (`src/messaging.js`, `src/push.js` + `functions/push.js`,
+>   `functions/requests.js`). Corrected S199n.
 > - **Key gotchas:** `.page-transition` keeps a CSS transform → any fixed overlay must
 >   `createPortal(…, document.body)` (S27/S30). Local-date keys via `ymdLocal`/`useTodayKey` — never
 >   UTC "today" (S45/S85). kv range queries use the `""` ESCAPE (raw char breaks silently, S85).
 >   When a SHARED `functions/` file changes, run **`npm run deploy-set <file>`** and deploy exactly
 >   what it prints — a subset leaves the rest on the old copy, silently (S78, S168b; `aitools.js` is
->   12 functions now, not 4). Firebase CLI token expires — `firebase login --reauth --no-localhost`.
-> - **Next up (Kevin's queue): Stripe LIVE-mode swap.** Pricing is DECIDED & BUILT (S89c): Premium
->   $14.99/$119.99yr · Max $29.99/$299.99yr · Coach $49/$490yr · Coach Max $79/$790yr — all
->   E2E-verified in test mode (CATALOG in billing.js, subscriptionTier→Max budgets, PlanPicker UI).
->   Remaining: live key + live webhook + liability hygiene (see handoff + docs/PRICING.md). After
->   that: push-notification delivery. Face ID device-tested ✓; auto-sync ON (S89c).
+>   **18** functions now, verified S199n — it was 4, then 12; run the command, don't quote a count). Firebase CLI token expires — `firebase login --reauth --no-localhost`.
+> - ~~**Next up: Stripe LIVE-mode swap**~~ — **DONE in S90** (live key, live webhook, live portal
+>   config). This line survived ~110 sessions telling every fresh chat to do finished work, and it
+>   sent one there in S199n. **There is no standing "next up" here — the current queue lives in
+>   `Glide-Session-Handoff-NEXT.md` §"START HERE", or ask Kevin.** Do not resurrect a queue in this
+>   file: a priority list nobody is obliged to update is worse than none.
 
 - Session 1: Vite project, app moved in, deployed to Vercel.
 - Session 2: Firebase Auth + Firestore; storage migrated from localStorage to Firestore;

@@ -14,17 +14,24 @@
 // price and MOVES the lookup key (transfer_lookup_key) — which is how the
 // Premium $9.99 placeholder became $14.99 without dashboard surgery.
 //
-// SETUP (Kevin, one-time — functions won't deploy until the secrets exist):
-//   1. Stripe dashboard → Developers → API keys → copy the TEST secret key.
-//      printf 'sk_test_…' | firebase functions:secrets:set STRIPE_SECRET_KEY --data-file=-
-//   2. Deploy, then Stripe dashboard → Developers → Webhooks → Add endpoint:
-//      https://us-central1-calorieiq-29762.cloudfunctions.net/stripeWebhook
-//      events: checkout.session.completed, customer.subscription.updated,
-//              customer.subscription.deleted
-//      → copy the signing secret (whsec_…):
-//      printf 'whsec_…' | firebase functions:secrets:set STRIPE_WEBHOOK_SECRET --data-file=-
-//      → redeploy stripeWebhook.
-//   (Live mode later = replace both secrets with the live-mode values.)
+// ⚠️ SETUP IS DONE, AND THIS BLOCK USED TO TELL YOU TO BREAK IT (S199n).
+// STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET hold LIVE-mode values and have
+// since S90 — real money moves through this file. What stood here was the
+// original one-time setup recipe, whose step 1 was "copy the TEST secret key"
+// into STRIPE_SECRET_KEY. Following it today points production at a test key:
+// every real subscription silently stops working, and the webhook rejects the
+// live signatures it is sent. It is left described, not executable, so nobody
+// reconstructs it from memory:
+//
+//   • Live secrets (already set — do NOT overwrite to rehearse anything):
+//     STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET.
+//   • To rehearse against test clocks, use the S182 twins BESIDE them —
+//     STRIPE_SECRET_KEY_TEST / STRIPE_WEBHOOK_SECRET_TEST. That is exactly why
+//     they exist: test mode without ever aiming production at a test key.
+//   • Live webhook endpoint:
+//     https://us-central1-calorieiq-29762.cloudfunctions.net/stripeWebhook
+//     events: checkout.session.completed, customer.subscription.updated,
+//             customer.subscription.deleted
 //
 // The webhook is the ONLY writer of subscriptionStatus — owner updates to the
 // billing fields are blocked by firestore.rules (S85); the Admin SDK here
