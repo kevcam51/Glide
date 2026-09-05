@@ -27857,21 +27857,36 @@ function AskForTime({ trainerUid, trainerName, onSent }) {
         )}
       </div>
 
-      {avail && avail.visible && (
-        <div className="mb-2 text-[.72rem] leading-snug">
-          {(avail.busy || []).length === 0 ? (
-            <span className="text-success">{trainerName || "Your trainer"} looks free all day.</span>
-          ) : (
-            <span className="text-muted">
-              Already busy: {(avail.busy || []).slice(0, 6).map((b) =>
-                `${calTimeLabel(b.start)}–${calTimeLabel(b.end)}`).join(" · ")}
-            </span>
-          )}
-        </div>
-      )}
+      {/* ⚠️ THIS VERDICT COVERS ONE DAY, AND MUST SAY WHICH (S199c). The
+          free/busy fetch above is keyed on slots[0] alone, so on a Mon/Wed/Fri
+          ask it describes MONDAY. That was harmless while the server discarded
+          `slots` and only Monday could ever be booked — but the trainer can now
+          tap "Book this" on Wednesday, a day nothing on either side ever
+          checked. Naming the day is the honest minimum; an unqualified "looks
+          free all day" over three days is the same wrong-day mistake S196b
+          fixed here once already. */}
+      {avail && avail.visible && Number.isFinite(startAt) && (() => {
+        const dayName = new Date(startAt).toLocaleDateString([], { weekday: "long" });
+        const more = slots.length - 1;
+        return (
+          <div className="mb-2 text-[.72rem] leading-snug">
+            {(avail.busy || []).length === 0 ? (
+              <span className="text-success">{trainerName || "Your trainer"} looks free all day on {dayName}.</span>
+            ) : (
+              <span className="text-muted">
+                Busy on {dayName}: {(avail.busy || []).slice(0, 6).map((b) =>
+                  `${calTimeLabel(b.start)}–${calTimeLabel(b.end)}`).join(" · ")}
+              </span>
+            )}
+            {more > 0 && (
+              <span className="text-muted"> Your other {more === 1 ? "day hasn't" : `${more} days haven't`} been checked.</span>
+            )}
+          </div>
+        );
+      })()}
       {clashes && (
         <div className="mb-2 text-[.72rem] text-warn">
-          That overlaps something already on their calendar — you can still ask, they'll say.
+          That overlaps something already on their calendar{slots.length > 1 ? " on the first day" : ""} — you can still ask, they'll say.
         </div>
       )}
 

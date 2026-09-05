@@ -287,8 +287,18 @@ exports.respondToBookingRequest = onCall(
       ? { title: `${trainerName} confirmed your session`,
           body: when ? `${when} — it's on your calendar.` : "It's on your calendar.",
           tag: `booking-accepted-${requestId}`, url: "/" }
-      : { title: `${trainerName} couldn't make that time`,
-          body: when ? `${when} didn't work — ask for another time.` : "Ask for another time.",
+      // ⚠️ A DECLINE CLOSES EVERY OFFERED TIME, SO IT MUST NAME EVERY ONE.
+      // "Can't make it" sends no chosen slot, so `chosenStart` falls back to
+      // offered[0] — and a Mon/Wed/Fri ask was answered with "Mon, Sep 7 didn't
+      // work", while the request was marked done and vanished from the
+      // trainer's list. The client, who has no view of their own sent asks,
+      // reads that as "Monday is out, the others are still pending" and waits
+      // for an answer that can never come. This became wrong the moment `slots`
+      // started surviving; before that there was only ever one time.
+      : { title: `${trainerName} couldn't make ${offered.length > 1 ? "those times" : "that time"}`,
+          body: offered.length > 1
+            ? `None of the ${offered.length} times you asked for worked — ask for another.`
+            : (when ? `${when} didn't work — ask for another time.` : "Ask for another time."),
           tag: `booking-declined-${requestId}`, url: "/" },
       // An ANSWER to something the client asked for, not a timed reminder — so
       // it follows the request/answer preference rather than the one that

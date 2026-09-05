@@ -139,11 +139,18 @@ function feasibilityWarnings(sessions, travelMin, opts = {}) {
 // Google is now tried FIRST and Nominatim is the fallback, for everyone.
 //
 // The return distinguishes two things the old shape could not:
-//   hit       — coordinates, or null
-//   definite  — true when the providers actually AGREE the address is unknown,
-//               false when the lookup itself failed. Only a definite miss may
-//               be cached; a 429 cached as "not found" would disable the drive
-//               check for that address for a day, for every trainer.
+//   hit    — coordinates, or null
+//   missBy — WHICH providers actually concluded "no such address": null when the
+//            lookup merely failed, "google", "nominatim", or "both".
+//
+// ⚠️ A BARE BOOLEAN WAS NOT ENOUGH, AND THE FIRST VERSION LEAKED. `definite` was
+// set by Google's ZERO_RESULTS and then RETURNED from the Nominatim branch when
+// that branch failed transiently — so "Google has not heard of Brickell Park"
+// plus "Nominatim was rate-limited" was written to the cache as "no such
+// address", in a doc with no uid in it, for every trainer, for 24 hours. Naming
+// the provider also fixes the reverse: a free trainer's Nominatim-only miss no
+// longer short-circuits a PAYING trainer's Google lookup, which is strictly
+// better at US addresses.
 // ⚠️ EACH PROVIDER GETS ITS OWN TIMEOUT BUDGET. The first version of this fix
 // shared ONE AbortController across both calls, which quietly undid the fix it
 // was making: when Google is SLOW — a hung request, a rate-limit stall, which
@@ -164,7 +171,7 @@ async function fetchWithTimeout(f, url, opts, ms) {
 
 async function geocodeLive(address, apiKey, fetchFn) {
   const f = fetchFn || fetch;
-  let definite = false;
+  let googleMiss = false;
   {
     if (apiKey) {
       try {
@@ -174,12 +181,15 @@ async function geocodeLive(address, apiKey, fetchFn) {
         if (r.ok) {
           const j = await r.json();
           const loc = j && j.results && j.results[0] && j.results[0].geometry && j.results[0].geometry.location;
-          if (loc) return { hit: { lat: Number(loc.lat), lng: Number(loc.lng), provider: "google" }, definite: true };
+          const glat = Number(loc && loc.lat), glng = Number(loc && loc.lng);
+          // Malformed coordinates are not a location; fall through rather than
+          // caching NaN (or a 0,0 in the Gulf of Guinea) for months.
+          if (isFinite(glat) && isFinite(glng)) return { hit: { lat: glat, lng: glng, provider: "google" }, missBy: null };
           // ZERO_RESULTS is Google saying the address is not real. Anything else
           // — REQUEST_DENIED, OVER_QUERY_LIMIT, an unreadable body — is Google
           // failing to answer, which is not the same claim and must not be
           // cached as one.
-          if (j && j.status === "ZERO_RESULTS") definite = true;
+          if (j && j.status === "ZERO_RESULTS") googleMiss = true;
         }
       } catch { /* fall through to the free provider */ }
     }
@@ -188,16 +198,16 @@ async function geocodeLive(address, apiKey, fetchFn) {
         + encodeURIComponent(address);
       const r = await fetchWithTimeout(f, url,
         { headers: { "User-Agent": "Glidna/1.0 (support@glidna.com)" } }, GEOCODE_TIMEOUT_MS);
-      if (!r.ok) return { hit: null, definite };
+      if (!r.ok) return { hit: null, missBy: googleMiss ? "google" : null };
       const j = await r.json();
       const hit = Array.isArray(j) && j[0];
-      if (!hit) return { hit: null, definite: true };
+      if (!hit) return { hit: null, missBy: googleMiss ? "both" : "nominatim" };
       const lat = Number(hit.lat), lng = Number(hit.lon);
       // A malformed pair is not a location. Returning NaN coordinates would
       // cache them and hand haversineMiles a null distance for months.
-      if (!isFinite(lat) || !isFinite(lng)) return { hit: null, definite };
-      return { hit: { lat, lng, provider: "nominatim" }, definite: true };
-    } catch { return { hit: null, definite }; }
+      if (!isFinite(lat) || !isFinite(lng)) return { hit: null, missBy: googleMiss ? "google" : null };
+      return { hit: { lat, lng, provider: "nominatim" }, missBy: null };
+    } catch { return { hit: null, missBy: googleMiss ? "google" : null }; }
   }
 }
 
@@ -212,20 +222,28 @@ async function geocode(db, address, apiKey, fetchFn) {
     if (snap.exists) {
       const d = snap.data() || {};
       const age = Date.now() - (d.at || 0);
-      if (d.failed && age < 86400000) return null;              // retry a failure tomorrow
+      // ⚠️ A CACHED MISS IS ONLY AUTHORITATIVE FOR A CALLER WITH NO BETTER
+      // PROVIDER. `geocache/{addressKey}` has no uid in it, so it is shared by
+      // every trainer — and a FREE trainer's Nominatim-only miss was
+      // short-circuiting a PAYING trainer's Google lookup, which is materially
+      // better at US addresses. A miss recorded by the free provider alone is
+      // ignored when we now hold a key.
+      if (d.failed && age < 86400000 && !(apiKey && d.missBy === "nominatim")) return null;
       if (!d.failed && age < GEO_TTL_MS && isFinite(d.lat)) {
         return { lat: d.lat, lng: d.lng, provider: d.provider, cached: true };
       }
     }
   } catch { /* a cache read failure must not stop the lookup */ }
-  const { hit, definite } = await geocodeLive(norm, apiKey, fetchFn);
+  const { hit, missBy } = await geocodeLive(norm, apiKey, fetchFn);
   try {
     if (hit) {
       await ref.set({ at: Date.now(), lat: hit.lat, lng: hit.lng, provider: hit.provider, q: norm.slice(0, 120) });
-    } else if (definite) {
-      // A real miss: both providers agree there is no such address. Worth
+    } else if (missBy) {
+      // A real miss — a provider actually answered "no such address" — worth
       // remembering for a day so a typo is not looked up on every calendar open.
-      await ref.set({ at: Date.now(), failed: true, q: norm.slice(0, 120) });
+      // WHICH provider is recorded, because the answer is only as good as the
+      // provider that gave it (see the read guard above).
+      await ref.set({ at: Date.now(), failed: true, missBy, q: norm.slice(0, 120) });
     }
     // ⚠️ AND WHEN IT IS NOT DEFINITE, WRITE NOTHING. A rate-limit, a timeout or
     // a 5xx used to be stored as `{failed:true}` for 24 hours — in
