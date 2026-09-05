@@ -53,6 +53,11 @@ const RELEVANT_GAP_MIN = 240;
 // plan carries. Connect keeps the free straight-line estimate and the
 // can't-make-it warning, which are the safety half and cost nothing per lookup.
 const TRAFFIC_AWARE_TIERS = ["coach", "coach_max", "coach_ultra"];
+// Admin UID (matches functions/index.js, aichat.js and firestore.rules isAdmin()).
+// Identified by UID and never by a profile-doc role, because the admin role
+// exists only in the custom claim — see the note at the paid check below.
+const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
+function isAdminUid(uid) { return ADMIN_UIDS.includes(uid); }
 const INBOX_KEY = "caliq-inbox";
 
 // Is `trainerUid` really this client's trainer? Mirrors firestore.rules
@@ -448,13 +453,23 @@ exports.sessionTravel = onCall(
     //     land on paying accounts.
     // The boundary is one constant. Move it if he wants Routes reserved for
     // Coach and above rather than every paid plan.
-    let paid = false;
-    try {
-      const me = (await db.doc(`users/${uid}`).get()).data() || {};
-      paid = me.role === "admin"
-        || (me.subscriptionStatus === "active" && TRAFFIC_AWARE_TIERS.includes(
-             String(me.subscriptionTier || "base").toLowerCase()));
-    } catch { /* a profile read failure just means the free estimator */ }
+    // ⚠️ ADMIN IS A UID, NEVER A PROFILE ROLE (S199g). This read
+    // `me.role === "admin"` from the profile DOC — and createProfile only ever
+    // writes "client" or "head_trainer", while index.js mirrors the admin role
+    // into the custom CLAIM alone. So that condition is false for every real
+    // document, including the owner's: the one account meant to bypass the tier
+    // gate never did, and the owner saw straight-line estimates plus an upgrade
+    // prompt for a feature he had paid Google for and enabled himself. The
+    // trap is documented verbatim in functions/aichat.js:54-58; this was the
+    // one gate that did not go through it.
+    let paid = isAdminUid(uid);
+    if (!paid) {
+      try {
+        const me = (await db.doc(`users/${uid}`).get()).data() || {};
+        paid = me.subscriptionStatus === "active" && TRAFFIC_AWARE_TIERS.includes(
+          String(me.subscriptionTier || "base").toLowerCase());
+      } catch { /* a profile read failure just means the free estimator */ }
+    }
     const key = keyPresent && paid ? raw : null;
     const legs = {};
     // Pairs we could have checked, pairs we could not estimate, and pairs with

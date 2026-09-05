@@ -142,6 +142,18 @@ ok("a trainer who uses no locations at all is not nagged",
    /if \(!sessions\.some\(\(s\) => s\.location\)\) noAddress = 0;/.test(AVAIL));
 ok("the booking sheet names blocked time as blocked time",
    /time you've blocked out/.test(APP) && /allBlocks/.test(APP));
+// ⚠️ ADMIN IS A UID, NEVER A PROFILE ROLE. createProfile only ever writes
+// "client" or "head_trainer" and index.js mirrors admin into the custom CLAIM
+// alone, so `profile.role === "admin"` is false for every real document — the
+// owner's included. The traffic-aware gate read exactly that and so the one
+// account meant to bypass the tier check never did.
+ok("the traffic-aware gate identifies admin by UID",
+   /let paid = isAdminUid\(uid\);/.test(AVAIL));
+ok("...and no longer by a profile-doc role",
+   !/paid = me\.role === "admin"/.test(AVAIL));
+ok("...with the UID list matching the one every other function uses",
+   /const ADMIN_UIDS = \["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"\];/.test(AVAIL));
+
 ok("a soft geocode failure does not clear a cached verdict",
    !/softFail: true, softAt: Date\.now\(\), failed: false/.test(readFileSync(join(ROOT, "functions", "driveTime.js"), "utf8")));
 
