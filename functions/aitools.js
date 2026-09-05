@@ -777,7 +777,11 @@ function nutritionTargets(d) {
 // Personal profile summary (the wizard's StepPersonal/Goal/Activity fields) +
 // which required pieces are missing for a calorie target. Used by get_profile
 // and returned after set_personal_info so the AI can guide onboarding.
-function profileSummary(d) {
+// `canSeeNotes` is the coach-only gate on trainerNotes (S199j). It is a
+// PARAMETER rather than a lookup because profileSummary is pure and is called
+// from three tools; making each caller state the permission means a new caller
+// cannot inherit the answer by accident.
+function profileSummary(d, canSeeNotes) {
   d = d || {};
   const num = (v) => (v === "" || v == null ? null : Number(v));
   const required = {
@@ -805,7 +809,14 @@ function profileSummary(d) {
     activityLevel: d.activityLevel || null,
     bodyFatPct: num(d.bodyFat),
     goalBodyFatPct: num(d.goalBodyFat),
-    trainerNotes: d.trainerNotes || null,
+    // ⚠️ COACH-ONLY, AND THE KEY IS OMITTED RATHER THAN NULLED (S199j). A
+    // client asking the AI "what are my coach's notes" used to get them read
+    // back verbatim, which is why hiding the card in Results would have been a
+    // false promise. Sending `trainerNotes: null` instead would be a different
+    // lie — the model would report "no notes" to a person whose coach has
+    // written pages. An absent key is the only honest answer to a question the
+    // caller may not ask.
+    ...(canSeeNotes ? { trainerNotes: d.trainerNotes || null } : {}),
     // "eatback" = workout burn added to the daily target (easier diet);
     // "accelerate" = tighter target, workouts speed up the goal date.
     deficitMode: d.deficitMode === "accelerate" ? "accelerate" : "eatback",
@@ -1017,7 +1028,10 @@ function buildTools(role, opts = {}) {
           goalRangeHighLbs: { type: "number", description: "Optional goal-range high bound, lbs (≥ low)" },
           bodyFatPct: { type: "number", description: "Current body-fat %" },
           goalBodyFatPct: { type: "number", description: "Goal body-fat %" },
-          trainerNotes: { type: "string", description: "Coaching notes (replaces existing)" },
+          // Coach-only (S199j). Not merely hidden from the client's schema — the
+          // handler refuses it too, because a schema is what the model is told,
+          // not what it can be talked into sending.
+          ...(isTrainer ? { trainerNotes: { type: "string", description: "Coaching notes (replaces existing). Not visible to the client." } } : {}),
           deficitMode: { type: "string", enum: ["eatback", "accelerate"],
             description: "'eatback' (default: workout burn added to target, steady ~1 lb/wk) or 'accelerate' (target stays TDEE−500, workouts speed the goal date). Set on a sustainability-vs-speed choice." },
           wearableAdjust: { type: "boolean",
@@ -2515,7 +2529,7 @@ async function runTool(name, input, ctx) {
 
   if (name === "get_profile") {
     const { data } = await activePlanData(db, uid, planOverride);
-    return profileSummary(data);
+    return profileSummary(data, ctx.isTrainer);
   }
 
   if (name === "set_personal_info") {
@@ -2523,6 +2537,9 @@ async function runTool(name, input, ctx) {
     const res = await planTxnWrap(db, uid, planId, (wrap) => {
     const d = wrap.data;
     const changes = [];
+    // Fields the caller asked for and is not allowed to set. Kept separate from
+    // `changes` so a refusal can never be reported as an edit.
+    const refused = [];
     // clamp to sane ranges; round1 keeps one decimal (weights/percentages).
     const clampNum = (v, lo, hi, round1) => {
       const n = Number(v);
@@ -2558,7 +2575,16 @@ async function runTool(name, input, ctx) {
     if (input.activityLevel && ACTIVITY_MULT[input.activityLevel]) { d.activityLevel = input.activityLevel; changes.push(`activity ${input.activityLevel}`); }
     if (input.bodyFatPct != null) { const b = clampNum(input.bodyFatPct, 2, 70, true); if (b) { d.bodyFat = b; changes.push("body fat"); } }
     if (input.goalBodyFatPct != null) { const b = clampNum(input.goalBodyFatPct, 2, 70, true); if (b) { d.goalBodyFat = b; changes.push("goal body fat"); } }
-    if (typeof input.trainerNotes === "string") { d.trainerNotes = input.trainerNotes.slice(0, 4000); changes.push("trainer notes"); }
+    // The write half of the same gate. `trainerNotes` is not offered in a
+    // client's tool schema, but a schema is a suggestion to a model, not a
+    // boundary — a client who talks the assistant into sending the field would
+    // otherwise overwrite their coach's notes wholesale (it REPLACES, it does
+    // not append). Refused out loud: silently dropping it would have the AI
+    // report "saved" for a change that never happened.
+    if (typeof input.trainerNotes === "string") {
+      if (ctx.isTrainer) { d.trainerNotes = input.trainerNotes.slice(0, 4000); changes.push("trainer notes"); }
+      else refused.push("Coaching notes are your coach's — they can't be changed from here.");
+    }
     if (input.deficitMode === "eatback" || input.deficitMode === "accelerate") {
       d.deficitMode = input.deficitMode; changes.push(`nutrition approach: ${input.deficitMode === "eatback" ? "eat more (burn buys food)" : "faster results (burn buys speed)"}`);
     }
@@ -2570,13 +2596,20 @@ async function runTool(name, input, ctx) {
       d.wearableAdjust = input.wearableAdjust;
       changes.push(`tracker adjustment ${input.wearableAdjust ? "on (measured burn drives eat-back day targets)" : "off"}`);
     }
-    if (changes.length === 0) return { __abort: true, error: "No valid profile fields were provided." };
-    return { changes, profile: profileSummary(d) };
+    if (changes.length === 0) {
+      return { __abort: true, error: refused.length ? refused.join(" ") : "No valid profile fields were provided." };
+    }
+    return { changes, profile: profileSummary(d, ctx.isTrainer), ...(refused.length ? { refused } : {}) };
     });
     if (res.error) return { error: res.error };
     await appendHistory(db, uid, planId, ctx, `updated profile: ${res.changes.join(", ")}`);
     if (planOverride) await touchLocalIndex(db, uid, planOverride);
-    return { ok: true, updated: res.changes, profile: res.profile };
+    // ⚠️ CARRY THE REFUSAL OUT. The transaction result was being unpacked field
+    // by field, so anything it learned that was not a `change` died here: a
+    // client asking to set their weight AND their coach's notes got "saved" for
+    // both, with the notes untouched. The all-refused case surfaces as an error
+    // and was always visible; the MIXED case was the silent one.
+    return { ok: true, updated: res.changes, profile: res.profile, ...(res.refused ? { refused: res.refused } : {}) };
   }
 
   if (name === "list_plans") {
@@ -2614,7 +2647,7 @@ async function runTool(name, input, ctx) {
     if (makeActive) m.active = newId;
     await writeManifest(db, uid, m);
     await appendHistory(db, uid, newId, ctx, `created a new plan: "${nm}"`);
-    return { ok: true, planId: newId, name: nm, activePlanId: m.active, copiedStats: copyStats, profile: profileSummary(data) };
+    return { ok: true, planId: newId, name: nm, activePlanId: m.active, copiedStats: copyStats, profile: profileSummary(data, ctx.isTrainer) };
   }
 
   if (name === "switch_plan") {

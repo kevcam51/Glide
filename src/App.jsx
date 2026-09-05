@@ -3865,7 +3865,11 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   );
 }
 
-function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTotal, loggingStreak, dayCalsAll, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, onSetBfSource, defaultView = "detailed", onSetPlanViewDefault }) {
+function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTotal, loggingStreak, dayCalsAll, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onUpdateNotes, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, onSetBfSource, defaultView = "detailed", onSetPlanViewDefault,
+  // Coaching notes are the coach's (S199j). Defaults CLOSED so a caller that
+  // forgets the prop hides them rather than leaking them — the safe direction
+  // for a privacy gate is the one that fails quiet, not the one that fails open.
+  canSeeNotes = false }) {
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
   // Simple (plain-English) vs Detailed plan view — a display pref, remembered
@@ -4168,7 +4172,21 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
           )}
           <AICoach data={data} tdee={tdee} totalBurn={totalBurn} totalStrBurn={totalStrBurn} activeDays={activeDays} activeStrDays={activeStrDays} />
 
-          {/* ── Trainer Notes ── */}
+          {/* ── Trainer Notes — the coach's, and only the coach's (S199j) ──
+              The plan is one shared document both sides edit, so this card sat
+              in the client's own Results page from the day it was written: a
+              coach recording "keeps skipping Thursdays, suspect the job" was
+              writing it to the person it was about. Now trainer-side only.
+
+              ⚠️ THIS IS A PRODUCT BOUNDARY, NOT A STORAGE ONE. The notes live
+              in `data.trainerNotes` inside the plan document, and for a
+              connected client that document is in the CLIENT's own kv, which
+              firestore.rules quite correctly lets its owner read. Every route
+              the app offers is closed — this card and both AI directions — so
+              they are private in practice; a client reading raw Firestore in
+              devtools is not. Making them private in fact means moving them to
+              the trainer's own account, which is a migration, not a flag. */}
+          {canSeeNotes && (
           <div className="card" style={{padding:"16px",marginBottom:"16px"}}>
             <div style={{display:"flex",alignItems:"center",gap:"10px",marginBottom: showNotes?"12px":"0",cursor:"pointer"}} onClick={()=>setShowNotes(v=>!v)}>
               <Icon name="edit" size={18} color="var(--accent)" />
@@ -4197,6 +4215,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
               </div>
             )}
           </div>
+          )}
         </>
       )}
 
@@ -32694,6 +32713,7 @@ export default function App() {
             </div>
             <Results data={data} isSimulation={activeIsSim} meUid={meUid} meName={meName} logAdherence={logAdherence} loggedDaysTotal={loggedDaysTotal} loggingStreak={streak} dayCalsAll={dayCalsAll} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
             defaultView={role === ROLES.CLIENT ? (data.planViewDefault || "simple") : "detailed"}
+            canSeeNotes={isTrainerHome}
             onSetPlanViewDefault={activeRemoteUid ? (v)=>setDataAndSave(p=>({...p, planViewDefault: v})) : undefined}
             onSetFitnessGoal={(g)=>setDataAndSave(p=>({...p, fitnessGoal: g}))}
             onSetDeficitMode={(mode)=>setDataAndSave(p=>({...p, deficitMode: mode}))}
