@@ -1,6 +1,205 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S197w) — an adversarial review of this session found 8 real defects; all fixed
+## ▶️ START HERE (S199k) — everything below is PUSHED AND DEPLOYED
+
+Tip is `430ff78`. Working tree clean, `npm run build` passes, `check:undef`
+clean, **485 unit assertions green across 13 suites** (351 of them in the six
+suites this arc created plus the one it grew), 230 rules tests unchanged
+(no rules were touched this arc). Nothing is half-finished.
+
+**Two stale claims in the older blocks below — do not act on them.**
+
+1. **Drive time is NOT waiting on a key.** The S197w block says
+   `GOOGLE_MAPS_API_KEY` is a placeholder and traffic-aware times are "Kevin's
+   one optional step". That was true when written and is not now: the key is
+   real, `sessionTravel` is pinned to secret **version 3**, and both keys in the
+   Console are API-restricted to Geocoding + Routes. Traffic-aware estimates
+   work today.
+2. **`TRAFFIC_AWARE_TIERS` needs no decision.** The same block asks whether it
+   should be `["base","max"]`. It was settled in code; leave it alone unless
+   Kevin reopens it.
+
+⚠️ Verify before acting on any "not deployed" note anywhere in this file.
+`GET firebaserules.googleapis.com/v1/projects/calorieiq-29762/releases/cloud.firestore`
+for rules; the Cloud Functions API's `updateTime` for functions. A stale warning
+here has cost this project a session more than once.
+
+### What shipped (S198z → S199k)
+
+**The plan dashboard (S198z).** The Daily Calorie Targets card was a flat row of
+rates that gave no clue which way any of them went. It now reads as a direction:
+**Maintain** alone on top, **weight loss** on the row under it, **weight gain**
+under that, each group labelled, each button carrying a large − or + sign, and
+both directions carrying the full ½ / 1 / 2 lb set (gain previously stopped at 1).
+
+**The simulator ("What if…", S198z).** A sandbox opened from that card: pick a
+pace *or* type your own intake, add a session from the exercise list *or* a
+manual burn, choose how many days a week, and read the net and the projected
+change at 1 week / 2 / 1 month / 2. **It writes nothing.** The one invariant
+worth keeping: it takes `intakeFor` — the dashboard's *own* `targetForRate` — so
+"Maintain" in the sandbox is the number the card shows, not a second opinion
+computed a different way. Two screens quoting different daily targets is the
+failure this exists to avoid.
+
+**Observed (adaptive) TDEE — S199, the answer to "should the activity level we
+set at signup change?"** New pure estimator, mirrored:
+`functions/observedTdee.js` and `src/observedTdee.js`, kept **byte-identical
+apart from the export line**, and `scripts/test-observed-tdee.mjs` asserts that
+character-for-character alongside its behaviour.
+
+`expenditure = mean daily intake − (weight change lbs × 3500 / days)`. 28-day
+window ending **yesterday** (today is partial by definition; including it drags
+every morning's estimate down). Refuses rather than guesses: 80% coverage, no
+gap over 3 days, ≥4 weigh-ins spanning ≥10 days, and days under 800 cal are not
+counted as real eating (that is the under-logging spiral arriving by the back
+door). Every refusal names what would fix it.
+
+Two decisions not to undo:
+- **A downward clamp REFUSES.** `clampToFormula` publishes nothing below the
+  formula rather than substituting a floor — a number between the formula and
+  the observation is one nobody measured.
+- **The activity level is PROPOSED, never rewritten.** One tap. `activityLevel`
+  is the user's own stated answer and several screens render it as words, so
+  overwriting it silently would make those screens lie. And because the ladder
+  has five fixed multipliers, a tap can only ever produce an ordinary formula
+  TDEE. When a linked coach exists the tap is theirs, not the client's
+  (`canEditActivity`); the client still sees the finding.
+
+The suggestion gate is **"does another rung fit better", with a 150-cal noise
+margin** — not `DIVERGENCE_FLAG`. One rung is only 9–13%, so a 15% flag could
+never gate it. Slices 7 and 8 were deliberately NOT built: ship 1–6 and watch
+real clients for a month first.
+
+**Calendar and booking (S199b–f).**
+- A **multi-day ask survives the server.** `booking.slots` was rebuilt as
+  `{startAt, durationMin}` by the only writer, so the per-slot buttons had never
+  rendered in production and Accept always booked the first day. `buildBooking`
+  is now exported and tested directly.
+- **The geocode fallback only worked when Google failed FAST** — one shared
+  `AbortController` across both providers, so a slow Google ate the whole budget.
+  Per-provider budgets now.
+- **A failed lookup is a soft fail, 10 minutes, merged** — never `failed`, which
+  means "no such address" and lasts 24h in a doc with no uid in it. `at`
+  (geocoded) and `softAt` (last failure) are separate so a fault cannot make a
+  stale pin look fresh.
+- **"Couldn't check" renders alongside warnings**, not only instead of them.
+- **Bookings check whether the hour is already taken** — server-side in
+  `respondToBookingRequest` (refusing before it claims the inbox item) and in
+  the trainer calendar sheet, including `trainerBlocks`, every occurrence of a
+  repeating series expanded.
+
+**Admin is a UID, never a profile role (S199g/h).** `createProfile` only ever
+writes `client` or `head_trainer`, and the admin role is mirrored into the
+custom **claim** alone — so `profile.role === "admin"` is false on every real
+document, the owner's included. **Five gates were written that way and every one
+was dead code**, including one that locked Kevin out of his own feature. Pinned
+by a cross-file assertion in `scripts/test-target-parity.mjs`; it strips comments
+first, because the comments quote the banned pattern while explaining it.
+
+**Client access audit (S199i–k).** All the dashboard work above is on
+`DailyDashboard`/`Results`, which render in exactly ONE place — a client reaches
+them via ClientHome → "Open my plan" — so clients got it automatically, and none
+of it is tier-gated (pure local maths; `premium` gates only the AI). The audit
+found two things:
+
+- **S199i — the client could rewrite the prescription silently.** S199 had made
+  the activity ladder coach-owned while leaving the three controls that set the
+  same number *directly* wide open — weekly pace, typed calorie target, macro
+  split — and `describePlanChanges` recorded none of them. A coached client
+  retyping their coach's target produced an empty feed and a dashboard quoting
+  the new number as though the coach had set it. Now recorded (in words:
+  "Lose 1 lb/week", not a signed float). Whether to BLOCK those is Kevin's call
+  and not obviously yes.
+- **S199j/k — coaching notes are the coach's.** The plan is one shared document,
+  so a card titled "Trainer Notes" rendered in the client's own Results page.
+  Four routes closed: the card, `get_profile` (key **omitted**, not nulled — a
+  null would report "no notes" about someone whose coach wrote pages), the
+  `set_personal_info` write (refused out loud; it REPLACES, so a client could
+  wipe everything in one sentence), and the client tool schema.
+
+  An 11-agent review then found two more, and **four independent lenses found
+  the same one**: **"Download my data"** handed the notes over verbatim (the
+  export is a deliberately unfiltered kv scan, so the plan wrapper came out
+  whole), and **"Start Over"** erased them (EMPTY_DATA declares
+  `trainerNotes:""`, and planMerge treats a differing value as a deliberate
+  edit, so the blank was written *over* the coach's text). Both fixed. The
+  export strips **only for a client who has a coach** — someone without one can
+  only have written that text themselves.
+
+  ⚠️ **This is a PRODUCT boundary, not a storage one.** The notes still live in
+  the plan document, which for a connected client sits in that client's own kv,
+  which the rules correctly let its owner read. Real privacy means moving notes
+  to the trainer's account — a migration, not a flag.
+
+### ⚠️ TRAPS PAID FOR THIS ARC — read before writing a test or a deploy
+
+**A test that pattern-matches a guard is not testing the guard. Twice.**
+`scripts/test-booking-slots.mjs` first transcribed the validation and asserted
+against the transcription; mutating `slots.length > 1` to `> 99` in the real
+file — which reinstates the exact bug — left it **23/23 green**. Later,
+`test-target-parity.mjs` asserted the string `"weeklyRate"` appeared in
+`describePlanChanges`; replacing the whole guard with `if (false)` left it green,
+because the field name still sat inside the dead branch. **Lift the real source
+and RUN it.** `buildBooking`, `describePlanChanges`, `stripCoachNotes`,
+`resetPlanData` and `nutritionTargets` are all executed by tests for this reason
+— two of them were extracted to module level *specifically* so they could be.
+And **mutation-check every new guard**: break it, watch the suite go red.
+
+**A gate on one render site is not a boundary.** The trainer-notes test passed
+while the export handed the notes over and Start Over deleted them, because
+neither touches the card. Every `trainerNotes` reference in App.jsx is now
+enumerated; a new one fails with the offending line.
+
+**Deploy FUNCTIONS FIRST, then push.** Vercel ships on push within the minute.
+Push-then-forget produces the inverted state — visible half closed, server half
+open — and it looks done. `npm run deploy-set <file>` prints the exact command;
+`aitools.js` is **18 functions** now, `mcp` among them.
+
+**A ceiling belonged on the counters, not on the check.** Bounding the drive
+check by gap minutes also skipped the ESTIMATE, so an impossible drive (270-min
+gap, 407-min drive) rendered a blank calendar. The panel's *counters* take the
+ceiling; the check never does.
+
+**A Firestore test double that always replaces on `set` hides merge bugs** — it
+hid the geocode cache clobber twice. Honour `{merge:true}`.
+
+**Sessions are cancel-only by rule.** `DELETE` on a probe session returns 403;
+cancel them properly or you leave live sessions behind while reporting cleanup
+done.
+
+**Verify a Vercel deploy by unique-string presence in the live bundle**, not by
+chunk hash — Vercel's hashes differ from local `dist/`.
+
+### Open — Kevin's calls, nothing blocking
+
+- **Old chat threads can replay the coach's notes.** A client who asked before
+  S199j has that answer saved in their own account; reopening the panel restores
+  it and feeds it back to the model. No code gate reaches data already written.
+  A scrub is possible but partial (it can only match notes text that still
+  exists). Kevin has been told; not built.
+- **The activity feed still says "updated trainer notes".** Content is private;
+  the fact of an edit is not. Left deliberately — stripping audit rows is its
+  own risk.
+- **"Start Over" has no confirmation at all** and no role gate, and the edit bar
+  sits OUTSIDE the Simple/Detailed switch, so it is one tap from a client's
+  default view. Notes now survive it; nothing else does. **A separate session
+  was started on this (task_f83644da) — check whether it landed before touching
+  that area.**
+- **Two booking paths still have no overlap check**: `CalendarView.bookSubmit`
+  and `SessionsPanel.submit`. `CalendarView` structurally cannot — its session
+  list is filtered to one client relationship.
+- **The server overlap read is not transactional with the session create**, so
+  two accepts in the same second can both pass.
+- `GOOGLE_MAPS_API_KEY@2` is a dead secret version. Harmless, but a footgun:
+  `firebase functions:secrets:destroy GOOGLE_MAPS_API_KEY@2`.
+- **The live Maps key was printed into a session transcript.** Rotating again
+  needs `functions:secrets:set` **and** a redeploy, since `sessionTravel` pins
+  version 3.
+
+---
+
+## S197w — an adversarial review of that session found 8 real defects; all fixed
+
 
 Everything below is DEPLOYED AND PUSHED. Working tree clean, build passing,
 230 rules tests green. Nothing is half-finished.
@@ -68,9 +267,11 @@ never worked.
 ### 0. ▶️ THE LIVE THREAD — the plan dashboard & body-comp work (S198n–y)
 
 **Kevin is continuing this. Do not treat it as closed.** Everything below was
-verified by clicking it, not by reading code. S198n–x is deployed; **S198y is
-committed and NOT yet pushed** — it is frontend only (no functions, no rules),
-so pushing `main` is all it needs.
+verified by clicking it, not by reading code. **S198n–y is deployed and pushed**
+(the "S198y is committed and NOT yet pushed" note that stood here was true when
+written; it went out in the same arc). S198z continued this thread — see the
+S199k block at the top for the targets-card redesign, the simulator, and the
+observed-TDEE work that grew out of it.
 
 **What shipped, and why each mattered**
 

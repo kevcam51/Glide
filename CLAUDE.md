@@ -95,6 +95,22 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S199k (Sep 5): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S199k)" first.** Tip
+> `430ff78`, all pushed and deployed, `npm run test:units` green at 485 assertions. Shipped: the Daily Calorie
+> Targets card redesigned to read as a direction (Maintain / loss / gain, ½·1·2 both ways) plus a
+> **"What if…" simulator** that writes nothing and shares the card's own target function; an
+> **observed (adaptive) TDEE** estimator (`functions/observedTdee.js` + a byte-identical
+> `src/` mirror) that measures expenditure from intake and scale trend, refuses rather than
+> guesses, and PROPOSES an activity rung instead of rewriting one; the calendar/booking fixes
+> (multi-day asks surviving the server, the geocode fallback, soft-fail caching, overlap checks);
+> **admin is a UID, never a profile role** — five gates were dead code; and a client-access audit
+> that made the prescription visible in the coach's feed (S199i) and **coaching notes coach-only**
+> across the card, both AI directions, the data export and Start Over (S199j/k).
+> ⚠️ Two lessons this arc paid for twice each: **a test that pattern-matches a guard stays green
+> when the guard is `if (false)` — lift the real source and RUN it, then mutation-check it**; and
+> **deploy functions BEFORE pushing**, or Vercel ships the visible half while the server half
+> stays open and it looks done (`npm run deploy-set aitools.js` = 18 functions)._
+>
 > _**S197p (Aug 23): EVERYTHING BELOW IS DEPLOYED AND LIVE — the "NOTHING IS DEPLOYED" warnings
 > that used to lead this block were true when written and are not true now. Verified against
 > Google's own APIs, not from memory: the published ruleset is byte-identical to `firestore.rules`
@@ -2423,3 +2439,44 @@ enabled (Blaze has no default spending cap).
   **⚠️ TRAPS PAID FOR:** `window.storage.get` THROWS for a missing doc while `getForUser` returns
   null — absence now carries `err.code === "not-found"`; `requestAnimationFrame` is paused in hidden
   tabs; and the Firebase log CLI serves stale pages (I twice wrongly concluded a function had stopped).
+- Sessions 198z–199k (Sep 5): **The plan dashboard finished, a measured TDEE, the calendar's silent
+  failures, and who is allowed to see what.** All pushed + deployed (`430ff78`); `npm run test:units` is
+  **485 assertions across 13 suites**, 351 of them in the six this arc created plus the one it grew. Full detail in `Glide-Session-Handoff-NEXT.md` §"START HERE (S199k)" — read that
+  first. Headlines: (1) **Daily Calorie Targets reads as a direction** — Maintain alone, weight loss
+  under it, weight gain under that, ½·1·2 lb both ways with large −/+ signs — plus a **"What if…"
+  simulator** (pick a pace or type an intake, add a session or a manual burn, choose days/week, see
+  net + projected change at 1w/2w/1mo/2mo). It WRITES NOTHING and takes the dashboard's own
+  `targetForRate`, so the sandbox and the card can never quote different numbers. (2) **Observed
+  (adaptive) TDEE** — `functions/observedTdee.js` + a byte-identical `src/` mirror (a test asserts
+  that character-for-character): `expenditure = mean intake − (lbs × 3500 / days)` over 28 days
+  ENDING YESTERDAY, refusing rather than guessing (80% coverage, no >3-day gap, ≥4 weigh-ins over
+  ≥10 days, sub-800-cal days not counted as real eating). **A downward clamp REFUSES** — a number
+  between the formula and the observation is one nobody measured. It answers "should the activity
+  level change?" by **proposing a rung, one tap** — never rewriting it, and coach-owned when a
+  trainer is linked. (3) **Calendar/booking**: multi-day asks now survive the server (`booking.slots`
+  was being dropped by its only writer, so the whole path was dead); the geocode fallback only ran
+  when Google failed FAST (one shared AbortController); a failed lookup is a 10-minute soft fail,
+  merged, never the 24h uid-less `failed`; "couldn't check" renders alongside warnings; and bookings
+  check whether the hour is taken, blocks included, every occurrence of a series. (4) **Admin is a
+  UID, never a profile role** — `profile.role === "admin"` is false on every real document, and
+  **five gates were written that way and were all dead code**, one of them locking Kevin out of his
+  own feature; pinned by a cross-file assertion. (5) **Client-access audit**: the dashboard work is
+  on the shared `DailyDashboard`/`Results`, so clients got all of it automatically and none of it is
+  tier-gated (`premium` gates only the AI) — but a coached client could silently rewrite the
+  prescription (weekly pace / typed target / macros were in no audit row: **S199i**), and **coaching
+  notes were readable by the client they were about (S199j/k)** — closed across the card,
+  `get_profile` (key omitted, not nulled), the `set_personal_info` write, the tool schema, the data
+  export and Start Over. ⚠️ Notes are now a PRODUCT boundary, not a storage one: they still live in
+  the client's own kv, which the rules correctly let them read.
+  **⚠️ TRAPS PAID FOR (each hit twice):** a test that PATTERN-MATCHES a guard stays green when the
+  guard is replaced with `if (false)`, and one that tests a transcribed COPY stays green when the
+  real file is mutated — **lift the shipping source and RUN it, then mutation-check every guard**
+  (`buildBooking`, `describePlanChanges`, `stripCoachNotes`, `resetPlanData`, `nutritionTargets` are
+  all executed for this reason; two were extracted to module level specifically so they could be).
+  And **deploy functions BEFORE pushing** — Vercel ships on push within the minute, so push-first
+  leaves the server half open while the visible half looks done (`npm run deploy-set aitools.js` is
+  **18** functions now, `mcp` among them). Also: a gate on ONE render site is not a boundary (four
+  review lenses found the data export handing over the very notes the card had just hidden); a
+  ceiling belonged on the drive-check COUNTERS, not on the check, which had been blanking the
+  calendar on genuinely impossible drives; and a Firestore test double that always replaces on `set`
+  hid the same cache-clobber bug twice — honour `{merge:true}`.
