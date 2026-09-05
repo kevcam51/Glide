@@ -3873,7 +3873,9 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
   // Start Over is destructive and unconfirmed no longer (S199l). hasCoach picks
   // the stronger wording; coachName is fetched LAZILY by the App when the
   // confirm opens, so nobody pays a profile read for a sentence they never see.
-  hasCoach = false, coachName = "", onNeedCoachName }) {
+  // subjectName/isRemoteClient say WHOSE plan this is (S199m) — a trainer must
+  // not be warned about "your stats" for a document in a client's account.
+  hasCoach = false, coachName = "", onNeedCoachName, subjectName = "", isRemoteClient = false }) {
   const [tab, setTab] = useState(0);
   const [confirmReset, setConfirmReset] = useState(false);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
@@ -4798,7 +4800,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
         )}
       </div>
       {confirmReset && (()=>{
-        const w = resetWarning(hasCoach, coachName);
+        const w = resetWarning({ hasCoach, coachName, subjectName, isRemoteClient, isSimulation });
         return (
           <div style={{marginTop:"10px",padding:"14px",borderRadius:"var(--radius-sm)",
             border:"1.5px solid color-mix(in srgb,var(--red) 30%,transparent)",
@@ -26006,25 +26008,79 @@ function resetPlanData(prev) {
 // Kevin's call: NOT blocked for a connected client — a person may start their
 // own plan over even when a coach built it — but the warning names the coach and
 // says plainly that the coach will see it. Persuasion, not permission.
-function resetWarning(hasCoach, coachName) {
-  const who = String(coachName || "").trim();
-  if (!hasCoach) {
+//
+// ⚠️ WHOSE PLAN IS IT (S199m). The first cut asked one question — does the
+// VIEWER have a coach — which is the wrong question when the viewer is the
+// coach. A trainer with a connected client's plan open was told "This clears
+// YOUR stats, YOUR goal", about a document that lives in someone else's account
+// and re-renders on their device the moment it is written. Same button, same
+// 600ms, and the person who loses the data is not the person reading the
+// sentence. So the warning is chosen by the SUBJECT of the plan, not the role of
+// the reader.
+function resetWarning(opts) {
+  const { hasCoach = false, coachName = "", subjectName = "",
+          isRemoteClient = false, isSimulation = false } = opts || {};
+  const coach = String(coachName || "").trim();
+  const subject = String(subjectName || "").trim();
+
+  // A trainer, erasing a plan that is not theirs and not on their device. The
+  // only branch where confirming reaches into another account.
+  if (isRemoteClient) {
+    const who = subject || "this client";
     return {
-      coached: false,
-      title: "Erase this plan and start over?",
-      body: "This clears your stats, goal, workout schedule and macro targets. There's no undo.",
+      variant: "remote",
+      title: `Erase ${who}'s plan?`,
+      body: `This clears ${who}'s stats, goal, workout schedule and macro targets in their own `
+        + "account — it updates on their device too, and lands in their activity feed. "
+        + "Your coaching notes stay. There's no undo.",
+      confirmLabel: "Yes, erase their plan",
+    };
+  }
+
+  // A client whose coach built this. Persuasion, not permission.
+  if (hasCoach) {
+    return {
+      variant: "coached",
+      // ⚠️ FALLS BACK TO A ROLE, NEVER TO A BLANK. The name is fetched lazily and
+      // may not have arrived (or may be denied); "  built this plan for you" would
+      // read as a bug at the exact moment the reader needs to trust the sentence.
+      title: `${coach || "Your coach"} built this plan for you.`,
+      body: "Starting over clears your stats, goal, workout schedule and macro targets. "
+        + "Their coaching notes stay, and the change shows up in your plan's activity feed. There's no undo.",
+      confirmLabel: "Yes, erase it",
+    };
+  }
+
+  // A sandbox. Checked BEFORE the named-plan branch: a simulation carries a
+  // person's name too, and calling a what-if file "Prospect Pat's plan" would
+  // claim a real client is about to lose something.
+  if (isSimulation) {
+    return {
+      variant: "simulation",
+      title: "Erase this simulation and start over?",
+      body: "This clears the sandbox's stats, goal, workout schedule and macro targets. "
+        + "It's a what-if file, so no client's own data is touched. There's no undo.",
       confirmLabel: "Yes, start over",
     };
   }
+
+  // A trainer's own local file for a real person (they usually are — an
+  // unconnected plan is still somebody's programme).
+  if (subject) {
+    return {
+      variant: "local",
+      title: `Erase ${subject}'s plan and start over?`,
+      body: `This clears ${subject}'s stats, goal, workout schedule and macro targets on this file. `
+        + "Your coaching notes stay. There's no undo.",
+      confirmLabel: "Yes, erase it",
+    };
+  }
+
   return {
-    coached: true,
-    // ⚠️ FALLS BACK TO A ROLE, NEVER TO A BLANK. The name is fetched lazily and
-    // may not have arrived (or may be denied); "  built this plan for you" would
-    // read as a bug at the exact moment the reader needs to trust the sentence.
-    title: `${who || "Your coach"} built this plan for you.`,
-    body: "Starting over clears your stats, goal, workout schedule and macro targets. "
-      + "Their coaching notes stay, and the change shows up in your plan's activity feed. There's no undo.",
-    confirmLabel: "Yes, erase it",
+    variant: "plain",
+    title: "Erase this plan and start over?",
+    body: "This clears your stats, goal, workout schedule and macro targets. There's no undo.",
+    confirmLabel: "Yes, start over",
   };
 }
 const STORAGE_INDEX = "caliq-index";
@@ -32538,6 +32594,21 @@ export default function App() {
 
   // Global navigation chrome (hamburger + slide-out menu), shown on every screen.
   const isTrainerHome = role === ROLES.HEAD_TRAINER || role === ROLES.SUB_TRAINER;
+  // Whose plan the Start Over confirm is about (S199m). Blank for a client —
+  // fullName(data) on their own plan is THEIR name, and being asked to confirm
+  // erasing "Casey Client's plan" when you are Casey reads as someone else's
+  // document.
+  //
+  // ⚠️ THE PLAN'S OWN NAME FIELDS ARE USUALLY EMPTY FOR A CONNECTED CLIENT.
+  // They signed up and were linked; nobody ran the wizard on their behalf, so
+  // the plan renders as "New Client". That is the COMMON case for the one
+  // warning that reaches into another account, so it falls back to the
+  // connected-clients list — already in state for the organizer, no extra read.
+  const resetSubjectName = isTrainerHome
+    ? (fullName(data) || (activeRemoteUid
+        ? ((connectedClients.find((c) => c.uid === activeRemoteUid) || {}).name || "")
+        : ""))
+    : "";
   const chrome = (
     <>
       {/* A save that did not happen, said out loud. Portaled and fixed so it is
@@ -32858,6 +32929,7 @@ export default function App() {
             defaultView={role === ROLES.CLIENT ? (data.planViewDefault || "simple") : "detailed"}
             canSeeNotes={isTrainerHome}
             hasCoach={role === ROLES.CLIENT && meHasCoach} coachName={meCoachName} onNeedCoachName={loadCoachName}
+            subjectName={resetSubjectName} isRemoteClient={!!activeRemoteUid}
             /* Was `activeRemoteUid ? … : undefined`, so ONLY a trainer viewing a
                client could set which view that plan opens in — the client whose
                plan it is could flip it for the session and never make it stick.
