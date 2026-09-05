@@ -217,5 +217,66 @@ const base = {
      /activity level/.test(one({ activityLevel: "light" }).join(" ")), one({ activityLevel: "light" }));
 }
 
+// ── a client manages their own account, same as a trainer (S199m, Kevin) ────
+// The rule: "clients that want to should be able to manage themselves just like
+// a trainer can." S199 had briefly gone the other way — the measured-burn card's
+// Apply button was replaced by "Your coach can update this from your plan" for
+// any client with a linked trainer, and the persisted Simple/Detailed default
+// was settable ONLY by a trainer viewing the client, so the person whose plan it
+// was could flip the view for a session and never make it stick.
+//
+// What makes the freedom safe is S199i, not a lock: every prescription change
+// lands in the activity feed the coach reads. Accountability, not permission.
+//
+// ⚠️ ENUMERATED, for the reason the trainer-notes guard was: a gate on one
+// control is not a policy. A NEW `role === ROLES.CLIENT` branch in App.jsx fails
+// this and has to justify itself — because a restriction added anywhere else
+// would be just as invisible as the two above were.
+{
+  ok("the activity-level lock is gone, not merely defaulted open",
+     !/canEditActivity/.test(APP));
+  ok("...and the plan owner can set their own default view",
+     /onSetPlanViewDefault=\{\(v\)=>setDataAndSave/.test(APP));
+
+  const ALLOWED = [
+    // cosmetic: who wrote a feed entry
+    /const histNameColor = \(role\) =>/,
+    /\{ev\.role === ROLES\.CLIENT \? "client" : "trainer"\}/,
+    /loggedBy: role === ROLES\.CLIENT \? "client" : "trainer"/,
+    // the invite auto-link only applies to an unlinked client
+    /if \(p && p\.role === ROLES\.CLIENT && !p\.assignedTrainerId && invite\)/,
+    // the coach's own notes are not the client's to read (S199j/k) — the one
+    // deliberate asymmetry, and it is about the COACH's content, not control
+    /stripCoachNotes\(data, role === ROLES\.CLIENT && !!hasCoach\)/,
+    // routing and copy, not capability
+    /isTrainer=\{role !== ROLES\.CLIENT\}/,
+    /if \(role === ROLES\.CLIENT\) \{/,
+    /\(role === ROLES\.CLIENT \? "Home" : "Clients"\)/,
+    // a DEFAULT, not a lock — the client can change it and now it sticks
+    /defaultView=\{role === ROLES\.CLIENT \? \(data\.planViewDefault \|\| "simple"\) : "detailed"\}/,
+    // COPY, not capability (S199l): picks the wording of the Start Over confirm
+    // so a coached client's dialog can name their coach. resetWarning returns
+    // only { title, body, confirmLabel } — BOTH branches proceed with the reset,
+    // which is the whole point of that change ("persuasion, not permission").
+    // Checked by reading the function, not by trusting the prop name.
+    /hasCoach=\{role === ROLES\.CLIENT && meHasCoach\}/,
+  ];
+  const lines = APP.split("\n");
+  const unknown = [];
+  let inBlock = false;
+  lines.forEach((ln, i) => {
+    const wasInBlock = inBlock;
+    const o = ln.lastIndexOf("/*"), c = ln.lastIndexOf("*/");
+    if (o > c) inBlock = true; else if (c > o) inBlock = false;
+    if (!ln.includes("ROLES.CLIENT")) return;
+    if (wasInBlock || /^\s*(\/\/|\*|\/\*)/.test(ln)) return;
+    if (ALLOWED.some((re) => re.test(ln))) return;
+    unknown.push(`${i + 1}: ${ln.trim().slice(0, 90)}`);
+  });
+  ok("no client-only branch outside the known set — a new one must be justified "
+     + "as cosmetic/routing, not as a restriction on managing their own account",
+     unknown.length === 0, unknown);
+}
+
 console.log(`  ${checks - fails}/${checks} assertions passed`);
 process.exit(fails ? 1 : 0);

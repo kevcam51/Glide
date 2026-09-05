@@ -11566,7 +11566,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget, dayCalsAll,
   onSaveMeasurements, onSaveMeasurementsFor, onDeleteMeasurement, onToggleBodyFat, onSetBfSource, onSetGoalWeight, onAddCustomExercise,
   onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetHideCompliance, meUid: dashMeUid, peerUid,
-  premium = true, role, onOpenMealPlanner, onSetActivityLevel, canEditActivity = true }) {
+  premium = true, role, onOpenMealPlanner, onSetActivityLevel }) {
 
   // Swipe-down to refresh the daily view (S104) — reuses the existing onRefresh
   // (reloadPlanLive), which re-pulls the plan + today's log.
@@ -12589,7 +12589,21 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                 than the <strong style={{color:"var(--text)"}}>{activitySuggestion.from.label}</strong> on the profile.
                 That would put the daily burn at <strong style={{color:"var(--text)"}}>{activitySuggestion.newTdee.toLocaleString()}</strong> cal.
               </div>
-              {canEditActivity && onSetActivityLevel ? (
+              {/* ⚠️ NO ROLE LOCK HERE, DELIBERATELY (S199m, Kevin — reversing the
+                  S199 call). This button used to be replaced by "Your coach can
+                  update this from your plan" for any client with a linked
+                  trainer. Kevin's rule is that a client has the same control
+                  over their own account as a trainer does: clients who want to
+                  manage themselves get to.
+
+                  What makes that safe is S199i, not a lock — every change to the
+                  prescription (activity level included) is written to the plan's
+                  activity feed, which the coach reads. Accountability rather
+                  than permission. Do not "restore" the lock; and if a future
+                  change adds a client-only restriction anywhere on the plan, the
+                  enumeration in scripts/test-target-parity.mjs will fail and ask
+                  why. */}
+              {onSetActivityLevel ? (
                 <button onClick={()=>onSetActivityLevel(activitySuggestion.to.id)}
                   style={{display:"inline-flex",alignItems:"center",gap:"7px",padding:"8px 13px",borderRadius:"8px",
                     cursor:"pointer",border:"none",fontFamily:"inherit",fontSize:".76rem",fontWeight:800,
@@ -12597,13 +12611,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                   <Icon name="check" size={13} color="var(--color-primaryfg)" />
                   Set activity to {activitySuggestion.to.label}
                 </button>
-              ) : (
-                // Coach-owned when a trainer is linked (Kevin's call):
-                // the client sees the finding, the coach applies it.
-                <div style={{fontSize:".7rem",color:"var(--muted)",fontStyle:"italic"}}>
-                  Your coach can update this from your plan.
-                </div>
-              )}
+              ) : null}
             </div>
           )}
           {activitySuggestion && activitySuggestion.outOfLadder && (
@@ -32788,7 +32796,6 @@ export default function App() {
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
               dayCalsAll={dayCalsAll}
               onSetActivityLevel={(id)=>setDataAndSave(p=>({...p, activityLevel: id}))}
-              canEditActivity={!(role === ROLES.CLIENT && meHasCoach)}
               onSaveMeasurements={(vals, dateKey)=>setDataAndSave(p=>{
                 // ⚠️ HONOUR THE DATE THE CALLER ASKED FOR (S198y). This used to
                 // drop its second argument and file every save under viewDate, so
@@ -32851,7 +32858,11 @@ export default function App() {
             defaultView={role === ROLES.CLIENT ? (data.planViewDefault || "simple") : "detailed"}
             canSeeNotes={isTrainerHome}
             hasCoach={role === ROLES.CLIENT && meHasCoach} coachName={meCoachName} onNeedCoachName={loadCoachName}
-            onSetPlanViewDefault={activeRemoteUid ? (v)=>setDataAndSave(p=>({...p, planViewDefault: v})) : undefined}
+            /* Was `activeRemoteUid ? … : undefined`, so ONLY a trainer viewing a
+               client could set which view that plan opens in — the client whose
+               plan it is could flip it for the session and never make it stick.
+               Same rule as above: the owner of an account manages it. */
+            onSetPlanViewDefault={(v)=>setDataAndSave(p=>({...p, planViewDefault: v}))}
             onSetFitnessGoal={(g)=>setDataAndSave(p=>({...p, fitnessGoal: g}))}
             onSetDeficitMode={(mode)=>setDataAndSave(p=>({...p, deficitMode: mode}))}
             onSetWearableAdjust={(on)=>setDataAndSave(p=>({...p, wearableAdjust: !!on}))}
