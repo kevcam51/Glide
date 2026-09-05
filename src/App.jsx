@@ -20085,7 +20085,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
   const openSlot = (date, hour) => {
     const d = new Date(date); d.setHours(hour, 0, 0, 0);
     setErr("");
-    setForm({
+    setConfirmOverlap(null); setForm({
       id: null, clientUid: clients.length ? clients[0].uid : "", when: calToLocalInput(d.getTime()),
       durationMin: String(SESSION_DEFAULT_MIN), title: "",
       location: lastLocationFor(clients.length ? clients[0].uid : ""),
@@ -20103,7 +20103,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
   };
   const openEditForm = (s) => {
     setDetail(null);
-    setForm({
+    setConfirmOverlap(null); setForm({
       id: s.id, clientUid: s.clientUid, when: calToLocalInput(s.startAt),
       durationMin: String(s.durationMin || SESSION_DEFAULT_MIN),
       title: s.title || "", location: s.location || "",
@@ -20125,7 +20125,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
       setBusy(true);
       try {
         await createBlock(meUid, { startAt, durationMin, title: form.title });
-        setForm(null); setMsg("Time blocked.");
+        setForm(null); setConfirmOverlap(null); setMsg("Time blocked.");
         setTimeout(() => setMsg(""), 2500);
       } catch (e) {
         console.error("block create failed", e && (e.code || e.message), e);
@@ -20154,9 +20154,21 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     // nowhere to put a question. A repeating series is checked across EVERY
     // occurrence — occurrences 4..52 were examined by nothing at all.
     const wanted = seriesStarts(startAt, form.repeat, form.count);
-    const hits = overlappingSessions(sessions, wanted, durationMin, form.id);
-    if (hits.length && confirmOverlap !== startAt) {
-      setConfirmOverlap(startAt);
+    // Blocks are the trainer's own "I'm not available" and are drawn on this
+    // very grid; leaving them out warned about clients and stayed silent about
+    // physio. A block has no status field, so it is normalised in.
+    const busy = [...sessions, ...(blocks || []).map((b) => ({ ...b, id: `blk:${b.id}` }))];
+    const hits = overlappingSessions(busy, wanted, durationMin, form.id);
+    // ⚠️ THE CONSENT COVERS THE WHOLE BOOKING, NOT JUST ITS START. Keyed on
+    // startAt alone, a trainer warned about Tuesday 9:00 could then change the
+    // duration from 30 to 120, or the repeat from none to weekly x8, and the
+    // second tap booked dates and spans nothing had ever checked. And it was
+    // never cleared, so a LATER booking that happened to land on the same
+    // instant was created with no check and no message at all — a silent
+    // success on exactly the hazard this exists to prevent.
+    const overlapKey = [startAt, durationMin, form.repeat, form.count, form.clientUid, form.id || ""].join("|");
+    if (hits.length && confirmOverlap !== overlapKey) {
+      setConfirmOverlap(overlapKey);
       const first = hits[0];
       setErr(hits.length === 1
         ? `That overlaps ${first.label}. Tap Save again to book it anyway.`
@@ -20173,7 +20185,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
         const ids = await bookSeries(meUid, form.clientUid, { startAt, durationMin, title: form.title, location: form.location, priceCents }, { repeat: form.repeat, count: form.count });
         setMsg(ids.length > 1 ? `${ids.length} sessions booked.` : "Session booked.");
       }
-      setForm(null);
+      setForm(null); setConfirmOverlap(null);
       setTimeout(() => setMsg(""), 2500);
     } catch (e) {
       // Log the real reason. A booking that fails silently looks identical to a
@@ -20396,18 +20408,31 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
         {/* Can this schedule be driven? (S197i) Only ever rendered when there is
             something wrong — a panel that says "all fine" every day is a panel
             people stop reading, and this one needs to be noticed. */}
-        {/* Could not check — said out loud rather than rendered as an all-clear. */}
-        {travel && (travel.failed || travel.unknownPairs > 0 || travel.pairsWithoutAddress > 0)
-          && !(travel.warnings && travel.warnings.length) && (
+        {/* ⚠️ COVERAGE IS REPORTED WHETHER OR NOT THERE ARE WARNINGS. This was
+            gated on having NO warnings, which suppressed it in the one state
+            where the trainer is definitely reading the panel — a red list of
+            problems reads as a complete audit, so "one warning, four legs
+            unchecked" looked like "one problem, everything else fine". The
+            whole point of the counts is that those are different.
+            And both counts are shown when both are set: they are separately
+            actionable, and the address one is the fixable half. */}
+        {travel && (travel.failed || travel.unknownPairs > 0 || travel.pairsWithoutAddress > 0) && (
           <div className="mb-2 rounded-lg border border-border bg-surface2 px-3 py-2 text-[.72rem] leading-snug text-muted">
-            {travel.failed
-              ? <>Couldn&rsquo;t check your drive times just now — this isn&rsquo;t an all-clear. Reopen the calendar to try again.</>
-              : travel.unknownPairs > 0
-                ? <>Couldn&rsquo;t work out {travel.unknownPairs === 1 ? "one connection" : `${travel.unknownPairs} connections`} between
-                  back-to-back sessions{travel.checkedPairs ? ` (of ${travel.checkedPairs})` : ""} — so this isn&rsquo;t an all-clear.
-                  Usually an address the map doesn&rsquo;t recognise.</>
-                : <>{travel.pairsWithoutAddress === 1 ? "One pair of back-to-back sessions has" : `${travel.pairsWithoutAddress} pairs of back-to-back sessions have`} no
-                  address to measure between — add a location to check the drive.</>}
+            {travel.failed ? (
+              <>Couldn&rsquo;t check your drive times just now — this isn&rsquo;t an all-clear. Reopen the calendar to try again.</>
+            ) : (
+              <>
+                {travel.unknownPairs > 0 && (
+                  <>Couldn&rsquo;t work out {travel.unknownPairs === 1 ? "one tight connection" : `${travel.unknownPairs} tight connections`}
+                  {travel.checkedPairs ? ` of ${travel.checkedPairs}` : ""} — so this isn&rsquo;t a full all-clear.
+                  Usually an address the map doesn&rsquo;t recognise.{" "}</>
+                )}
+                {travel.pairsWithoutAddress > 0 && (
+                  <>{travel.pairsWithoutAddress === 1 ? "One tight gap has" : `${travel.pairsWithoutAddress} tight gaps have`} no
+                  address to measure between — add a location to check the drive.</>
+                )}
+              </>
+            )}
           </div>
         )}
         {travel && travel.warnings && travel.warnings.length > 0 && (
@@ -20602,7 +20627,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
       {form && (
         <CalBookingSheet form={form} setForm={setForm} clients={clients} busy={busy} err={err} lastLocationFor={lastLocationFor}
           canBill={canBillSessions(meUid)}
-          onClose={() => { setForm(null); setErr(""); }} onSubmit={submit} nameOf={nameOf} />
+          onClose={() => { setForm(null); setErr(""); setConfirmOverlap(null); }} onSubmit={submit} nameOf={nameOf} />
       )}
     </div>
   );

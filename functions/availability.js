@@ -31,6 +31,11 @@ const VAPID_PRIVATE_KEY = defineSecret("VAPID_PRIVATE_KEY");
 const GOOGLE_MAPS_API_KEY = defineSecret("GOOGLE_MAPS_API_KEY");
 const REGION = "us-central1";
 const MAX_WINDOW_DAYS = 45;     // how far ahead a client may look
+// Beyond this gap between two sessions, no realistic drive makes the pair
+// infeasible — so a pair further apart than this is not a "connection" worth
+// reporting as unchecked. Four hours is generous: the longest drive anyone
+// books across a city is well under it.
+const RELEVANT_GAP_MIN = 240;
 // Paid COACH plans that get traffic-aware drive times (see sessionTravel).
 // Every paid plan carries session booking, so every paid plan gets the accurate
 // number; the free estimator stays free for everyone.
@@ -244,23 +249,34 @@ exports.respondToBookingRequest = onCall(
       const endAt = chosenStart + (Number(booking.durationMin) || 60) * 60000;
       // One equality, window filtered in code — a range on startAt alongside it
       // needs a composite index, and this repo has been bitten by that twice.
-      const mine = await db.collection("sessions").where("trainerUid", "==", uid).get();
+      // ⚠️ BLOCKS COUNT TOO. `trainerBlocks` is the trainer's own "I am not
+      // available" — physio, lunch, the school run — and trainerAvailability
+      // already MERGES it into the busy ranges a client is shown. Checking only
+      // sessions meant the app told the client that hour was taken and then
+      // booked it anyway, on the one path that refuses rather than asks.
+      const [mine, blocks] = await Promise.all([
+        db.collection("sessions").where("trainerUid", "==", uid).get(),
+        db.collection("trainerBlocks").where("trainerUid", "==", uid).get(),
+      ]);
       let clash = null;
-      mine.forEach((doc) => {
+      const consider = (v, isBlock) => {
         if (clash) return;
-        const v = doc.data() || {};
-        if (v.status === "cancelled") return;
+        if (!isBlock && v.status === "cancelled") return;
         const st = Number(v.startAt) || 0;
         if (st < dayFrom || st > dayTo) return;
         const en = st + (Number(v.durationMin) || 60) * 60000;
-        if (chosenStart < en && endAt > st) clash = { st, en };
-      });
+        if (chosenStart < en && endAt > st) clash = { st, en, isBlock };
+      };
+      mine.forEach((doc) => consider(doc.data() || {}, false));
+      blocks.forEach((doc) => consider(doc.data() || {}, true));
       if (clash) {
         const clashWhen = new Date(clash.st).toLocaleString("en-US", {
           timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "2-digit",
         });
         throw new HttpsError("failed-precondition",
-          `That overlaps a session you already have at ${clashWhen}. Decline this and offer another time, or book it yourself from the calendar.`,
+          clash.isBlock
+            ? `That runs into time you've blocked out at ${clashWhen}. Decline this and offer another time, or book it yourself from the calendar.`
+            : `That overlaps a session you already have at ${clashWhen}. Decline this and offer another time, or book it yourself from the calendar.`,
           { reason: "overlap" });
       }
     }
@@ -323,8 +339,16 @@ exports.respondToBookingRequest = onCall(
     }
 
     await sendPushTo(db, clientUid, accept
+      // Accepting ONE slot closes the whole ask, so say which one was taken and
+      // that the others are released — otherwise a client who offered three
+      // days is told a session is booked and is left to work out whether the
+      // other two are still pending. Same failure as the decline had.
       ? { title: `${trainerName} confirmed your session`,
-          body: when ? `${when} — it's on your calendar.` : "It's on your calendar.",
+          body: when
+            ? (offered.length > 1
+                ? `${when} — it's on your calendar. The other ${offered.length - 1 === 1 ? "time you offered is" : `${offered.length - 1} times you offered are`} free again.`
+                : `${when} — it's on your calendar.`)
+            : "It's on your calendar.",
           tag: `booking-accepted-${requestId}`, url: "/" }
       // ⚠️ A DECLINE CLOSES EVERY OFFERED TIME, SO IT MUST NAME EVERY ONE.
       // "Can't make it" sends no chosen slot, so `chosenStart` falls back to
@@ -444,6 +468,16 @@ exports.sessionTravel = onCall(
       // of seven legs failed" BYTE-IDENTICAL on screen, on a feature whose
       // failure mode is silence and whose silence reads as "your schedule is
       // fine". These two counts are what let the panel tell the difference.
+      // ⚠️ ONLY PAIRS WHERE A DRIVE COULD POSSIBLY MATTER. Counting every
+      // adjacent pair in a 21-day window meant sessions a DAY apart — which no
+      // drive can ever make infeasible — were reported on screen as
+      // "back-to-back sessions" we could not check. Two consequences, both bad:
+      // a permanent "this isn't an all-clear" on schedules that are entirely
+      // fine, and a permanent, undismissable "add a location" for the majority
+      // of trainers who never fill a location in at all. A panel that is always
+      // on is a panel nobody reads, which is how the real warning gets missed.
+      const gapMin = (b.startAt - (a.startAt + (Number(a.durationMin) || 0) * 60000)) / 60000;
+      if (!(gapMin < RELEVANT_GAP_MIN)) continue;
       if (!a.location || !b.location) { noAddress++; continue; }
       checkable++;
       const legKey = `${a.id}>${b.id}`;

@@ -234,7 +234,12 @@ async function geocode(db, address, apiKey, fetchFn) {
       // short-circuiting a PAYING trainer's Google lookup, which is materially
       // better at US addresses. A miss recorded by the free provider alone is
       // ignored when we now hold a key.
-      if (d.failed && age < 86400000 && !(apiKey && d.missBy === "nominatim")) return null;
+      // ...and only for a caller whose providers are no better than the ones
+      // that produced it. Symmetric: a Google-only ZERO_RESULTS must not lock
+      // out a caller who has only Nominatim, which knows plenty of places
+      // Google does not (parks, rural routes, new builds).
+      const missIrrelevant = (apiKey && d.missBy === "nominatim") || (!apiKey && d.missBy === "google");
+      if (d.failed && age < 86400000 && !missIrrelevant) return null;
       // ⚠️ AND A RECENT FAILURE IS REMEMBERED BRIEFLY, WHICH IS NOT THE SAME
       // CLAIM. Refusing to cache a transient failure fixed the poisoning — a
       // 429 must never be stored as "no such address" — but it removed ALL
@@ -273,12 +278,23 @@ async function geocode(db, address, apiKey, fetchFn) {
       // caching transient failures precisely to avoid that, and adding the
       // damping back reintroduced it. The marker is written ALONGSIDE any hit we
       // already had, and that hit is what we return.
-      if (stale) {
-        await ref.set({ at: staleAt, lat: stale.lat, lng: stale.lng, provider: stale.provider,
-          softFail: true, softAt: Date.now(), q: norm.slice(0, 120) });
-      } else {
-        await ref.set({ at: Date.now(), softFail: true, softAt: Date.now(), q: norm.slice(0, 120) });
-      }
+      // ⚠️ MERGE, NEVER REPLACE. `stale` is only populated when the cache READ
+      // succeeded — and that read is wrapped in a catch, so a Firestore blip,
+      // or simply losing a race to another invocation that wrote the hit a
+      // moment ago, leaves `stale` null while a perfectly good document still
+      // exists. A full `set` then destroyed it, and because the shared doc has
+      // no uid in it that disabled the drive check at that address for EVERY
+      // trainer, with no lookup even attempted for the next ten minutes.
+      // That is the third time in this pair of commits that a new guard broke
+      // what a previous one protected.
+      //
+      // `failed`/`missBy` are cleared explicitly: merge leaves absent fields
+      // alone, and a stale "no such address" verdict must not survive a write
+      // that says the opposite.
+      await ref.set({
+        softFail: true, softAt: Date.now(), failed: false, missBy: null, q: norm.slice(0, 120),
+        ...(stale ? { at: staleAt, lat: stale.lat, lng: stale.lng, provider: stale.provider } : {}),
+      }, { merge: true });
     } else if (missBy) {
       // A real miss — a provider actually answered "no such address" — worth
       // remembering for a day so a typo is not looked up on every calendar open.
@@ -286,14 +302,15 @@ async function geocode(db, address, apiKey, fetchFn) {
       // provider that gave it (see the read guard above).
       await ref.set({ at: Date.now(), failed: true, missBy, q: norm.slice(0, 120) });
     }
-    // ⚠️ AND WHEN IT IS NOT DEFINITE, WRITE NOTHING. A rate-limit, a timeout or
-    // a 5xx used to be stored as `{failed:true}` for 24 hours — in
+    // ⚠️ A NON-DEFINITE FAILURE IS NEVER WRITTEN AS `failed`. A rate-limit, a
+    // timeout or a 5xx used to be stored as `{failed:true}` for 24 hours — in
     // `geocache/{addressKey}`, which has NO uid in it. So one account's unlucky
     // second disabled the drive check at that address for EVERY trainer with a
     // session there, for a day, and the two concurrent lookups per leg against
     // Nominatim's ~1-request-per-second budget made it likely rather than
-    // theoretical. Writing nothing also means a transient failure can no longer
-    // overwrite a good cached hit, which `ref.set` would otherwise do.
+    // theoretical. It is now a ten-minute `softFail`, merged rather than
+    // written over the top, so it damps a retry storm without destroying
+    // anything or making a claim about the address.
   } catch { /* best-effort */ }
   // A stale hit beats no answer: the alternative is no drive check at all.
   return hit || stale;

@@ -108,19 +108,46 @@ const existing = [
   ok("junk rows are skipped", overlappingSessions([null, {}, { startAt: 0 }], [at("2026-09-07T09:00:00Z")], 60).length === 0);
 }
 
+// ── blocks are busy too ─────────────────────────────────────────────────────
+// trainerAvailability already publishes trainerBlocks to clients as busy, so
+// booking straight over one is the app contradicting itself.
+{
+  const withBlock = [{ id: "blk:1", startAt: at("2026-09-10T12:00:00Z"), durationMin: 30 }];
+  ok("a block is treated as busy by the overlap helper",
+     overlappingSessions(withBlock, [at("2026-09-10T12:00:00Z")], 60).length === 1);
+  ok("...and a block with no status field is not skipped as cancelled",
+     overlappingSessions(withBlock, [at("2026-09-10T12:15:00Z")], 60).length === 1);
+}
+
 // ── the server refuses the one-tap path ─────────────────────────────────────
 const AVAIL = readFileSync(join(ROOT, "functions", "availability.js"), "utf8");
 ok("the accept path checks for an overlap before claiming", /reason: "overlap"/.test(AVAIL));
 ok("...and refuses rather than booking on top", /That overlaps a session you already have/.test(AVAIL));
 ok("...using one equality, with the window filtered in code",
    /where\("trainerUid", "==", uid\)/.test(AVAIL));
+ok("...and it considers the trainer's own blocked time",
+   /collection\("trainerBlocks"\)\.where\("trainerUid", "==", uid\)/.test(AVAIL));
+ok("...naming a block as a block when it refuses",
+   /time you&#39;ve blocked out|time you've blocked out/.test(AVAIL));
+ok("accepting one slot says the other offered times are released",
+   /free again/.test(AVAIL));
+ok("only pairs where a drive could matter are counted",
+   /RELEVANT_GAP_MIN/.test(AVAIL));
 
 // ── the panel can say "couldn't check" ──────────────────────────────────────
 ok("sessionTravel reports what it could not estimate", /unknownPairs: unknown/.test(AVAIL));
 ok("...and pairs with no address separately", /pairsWithoutAddress: noAddress/.test(AVAIL));
 ok("a failed travel call is no longer rendered as an all-clear",
    /setTravel\(\{ warnings: \[\], failed: true \}\)/.test(APP));
-ok("...and the panel says so", /this isn&rsquo;t an all-clear/.test(APP));
+ok("...and the panel says so", /isn&rsquo;t an all-clear/.test(APP));
+ok("coverage is reported even when there ARE warnings",
+   !/travel\.pairsWithoutAddress > 0\)\s*\n\s*&& !\(travel\.warnings/.test(APP));
+ok("the overlap consent covers duration and repeat, not just the start",
+   /const overlapKey = \[startAt, durationMin, form\.repeat, form\.count/.test(APP));
+ok("...and is cleared when the form opens or closes",
+   (APP.match(/setConfirmOverlap\(null\)/g) || []).length >= 5);
+ok("the client check includes the trainer's blocks",
+   /\.\.\.\(blocks \|\| \[\]\)\.map/.test(APP));
 
 console.log(`  ${checks - fails}/${checks} assertions passed`);
 process.exit(fails ? 1 : 0);

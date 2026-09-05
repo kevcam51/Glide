@@ -272,9 +272,16 @@ const fakeFetch = async (url) => {
   // the paying accounts that had one. The old suite could not see it: its one
   // key-present stub always succeeded.
   {
+    // ⚠️ THE DOUBLE MUST HONOUR `merge`, or it proves nothing about Firestore.
+    // The soft-fail write relies on merge to preserve coordinates it cannot see
+    // (the cache read may have thrown), so a double that always replaces would
+    // pass a test the real database fails — and the reverse: the old
+    // always-replace double is exactly why the clobber shipped.
     const mkDb = () => { const m = new Map(); return { store: m, db: { doc: (path) => ({ path,
       async get() { const d = m.get(path); return { exists: !!d, data: () => d }; },
-      async set(v) { m.set(path, v); } }) } }; };
+      async set(v, opts) {
+        m.set(path, (opts && opts.merge && m.get(path)) ? { ...m.get(path), ...v } : v);
+      } }) } }; };
 
     // Google refuses (a restricted key, a lapsed bill); Nominatim answers.
     {
@@ -397,6 +404,53 @@ const fakeFetch = async (url) => {
       // for the whole TTL — a stale answer made permanent by a temporary fault.
       ok("...without the failure making the stale pin look fresh",
          store.get(key).at === 0 && store.get(key).softAt > 0, store.get(key));
+    }
+
+    // ⚠️ EVEN WHEN THE CACHE READ ITSELF FAILS. `stale` is only populated from a
+    // read that succeeded, so a Firestore blip — or losing a race to another
+    // invocation that just wrote the hit — leaves it null while a perfectly
+    // good document exists. A full replace destroyed it, for every trainer at
+    // that address, with no lookup even attempted for ten minutes.
+    {
+      const m = new Map();
+      const key = "geocache/" + D.addressKey("3000 NW 2nd Ave Miami");
+      m.set(key, { at: Date.now(), lat: 25.8, lng: -80.19, provider: "google", q: "x" });
+      let failNextRead = true;
+      const d2 = { doc: (path) => ({ path,
+        async get() { if (failNextRead) { failNextRead = false; throw new Error("deadline exceeded"); }
+          const d = m.get(path); return { exists: !!d, data: () => d }; },
+        async set(v, opts) { m.set(path, (opts && opts.merge && m.get(path)) ? { ...m.get(path), ...v } : v); } }) };
+      await D.geocode(d2, "3000 NW 2nd Ave Miami", "AIzaTESTKEY", async () => ({ ok: false }));
+      const doc = m.get(key);
+      ok("a LOST cache read does not destroy the stored coordinates",
+         doc && doc.lat === 25.8 && doc.lng === -80.19, doc);
+      ok("...and the next call can still serve them", (await D.geocode(d2, "3000 NW 2nd Ave Miami", "AIzaTESTKEY",
+         async () => ({ ok: false }))) !== null);
+    }
+
+    // A stale "no such address" must not survive a write that says otherwise.
+    {
+      const { store, db: d2 } = mkDb();
+      const k = "geocache/" + D.addressKey("7 Contested Way");
+      // Aged past the 24h miss window, so the lookup actually re-runs — a FRESH
+      // miss short-circuits before any write, which is correct.
+      store.set(k, { at: Date.now() - 25 * 3600000, failed: true, missBy: "both", q: "x" });
+      await D.geocode(d2, "7 Contested Way", null, async () => ({ ok: false }));
+      ok("a soft failure clears a previous 'no such address' verdict",
+         store.get(k).failed === false && store.get(k).softFail === true, store.get(k));
+    }
+
+    // Symmetric to the nominatim guard: a GOOGLE-only miss must not lock out a
+    // caller who only has the free provider, which knows places Google does not.
+    {
+      const { store, db: d2 } = mkDb();
+      const k = "geocache/" + D.addressKey("Brickell Park Miami");
+      store.set(k, { at: Date.now(), failed: true, missBy: "google", q: "x" });
+      let osm = 0;
+      const hit = await D.geocode(d2, "Brickell Park Miami", null, async () => {
+        osm++; return { ok: true, json: async () => [{ lat: "25.76", lon: "-80.19" }] };
+      });
+      ok("a Google-only miss does not block a Nominatim-only caller", !!hit && osm === 1, { hit, osm });
     }
 
     // And a transient failure must not overwrite a good cached hit — `ref.set`
