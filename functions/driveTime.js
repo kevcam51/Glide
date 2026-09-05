@@ -127,30 +127,55 @@ function feasibilityWarnings(sessions, travelMin, opts = {}) {
 // policy asks for an identifying User-Agent and low volume; every result is
 // cached for months and one trainer geocodes a handful of addresses ever, so
 // this sits well inside it.
+// ⚠️ A CONFIGURED KEY MUST NOT REMOVE THE FREE FALLBACK (S199). Every exit
+// inside the `if (apiKey)` branch used to be `return null`, which made the
+// Nominatim block below unreachable the moment a key existed. Geocoding and
+// Routes are separately-enabled Google APIs and a key can be restricted,
+// rate-limited, or simply have billing lapse — and in every one of those cases
+// this returned null, estimateDrive returned null, feasibilityWarnings fell
+// silent, and the panel did not render AT ALL. Turning the key on turned the
+// safety check off, and only for the paying accounts that had one.
+//
+// Google is now tried FIRST and Nominatim is the fallback, for everyone.
+//
+// The return distinguishes two things the old shape could not:
+//   hit       — coordinates, or null
+//   definite  — true when the providers actually AGREE the address is unknown,
+//               false when the lookup itself failed. Only a definite miss may
+//               be cached; a 429 cached as "not found" would disable the drive
+//               check for that address for a day, for every trainer.
 async function geocodeLive(address, apiKey, fetchFn) {
   const f = fetchFn || fetch;
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 8000);
+  let definite = false;
   try {
     if (apiKey) {
-      const url = "https://maps.googleapis.com/maps/api/geocode/json?address="
-        + encodeURIComponent(address) + "&key=" + encodeURIComponent(apiKey);
-      const r = await f(url, { signal: ctrl.signal });
-      if (!r.ok) return null;
-      const j = await r.json();
-      const loc = j && j.results && j.results[0] && j.results[0].geometry && j.results[0].geometry.location;
-      if (!loc) return null;
-      return { lat: Number(loc.lat), lng: Number(loc.lng), provider: "google" };
+      try {
+        const url = "https://maps.googleapis.com/maps/api/geocode/json?address="
+          + encodeURIComponent(address) + "&key=" + encodeURIComponent(apiKey);
+        const r = await f(url, { signal: ctrl.signal });
+        if (r.ok) {
+          const j = await r.json();
+          const loc = j && j.results && j.results[0] && j.results[0].geometry && j.results[0].geometry.location;
+          if (loc) return { hit: { lat: Number(loc.lat), lng: Number(loc.lng), provider: "google" }, definite: true };
+          // ZERO_RESULTS is Google saying the address is not real. Anything else
+          // — REQUEST_DENIED, OVER_QUERY_LIMIT, an unreadable body — is Google
+          // failing to answer, which is not the same claim and must not be
+          // cached as one.
+          if (j && j.status === "ZERO_RESULTS") definite = true;
+        }
+      } catch { /* fall through to the free provider */ }
     }
     const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q="
       + encodeURIComponent(address);
     const r = await f(url, { signal: ctrl.signal, headers: { "User-Agent": "Glidna/1.0 (support@glidna.com)" } });
-    if (!r.ok) return null;
+    if (!r.ok) return { hit: null, definite };
     const j = await r.json();
     const hit = Array.isArray(j) && j[0];
-    if (!hit) return null;
-    return { lat: Number(hit.lat), lng: Number(hit.lon), provider: "nominatim" };
-  } catch { return null; } finally { clearTimeout(t); }
+    if (!hit) return { hit: null, definite: true };
+    return { hit: { lat: Number(hit.lat), lng: Number(hit.lon), provider: "nominatim" }, definite: true };
+  } catch { return { hit: null, definite }; } finally { clearTimeout(t); }
 }
 
 // Cached geocode. A MISS IS CACHED TOO (as {failed:true}), for a shorter time —
@@ -170,13 +195,25 @@ async function geocode(db, address, apiKey, fetchFn) {
       }
     }
   } catch { /* a cache read failure must not stop the lookup */ }
-  const live = await geocodeLive(norm, apiKey, fetchFn);
+  const { hit, definite } = await geocodeLive(norm, apiKey, fetchFn);
   try {
-    await ref.set(live
-      ? { at: Date.now(), lat: live.lat, lng: live.lng, provider: live.provider, q: norm.slice(0, 120) }
-      : { at: Date.now(), failed: true, q: norm.slice(0, 120) });
+    if (hit) {
+      await ref.set({ at: Date.now(), lat: hit.lat, lng: hit.lng, provider: hit.provider, q: norm.slice(0, 120) });
+    } else if (definite) {
+      // A real miss: both providers agree there is no such address. Worth
+      // remembering for a day so a typo is not looked up on every calendar open.
+      await ref.set({ at: Date.now(), failed: true, q: norm.slice(0, 120) });
+    }
+    // ⚠️ AND WHEN IT IS NOT DEFINITE, WRITE NOTHING. A rate-limit, a timeout or
+    // a 5xx used to be stored as `{failed:true}` for 24 hours — in
+    // `geocache/{addressKey}`, which has NO uid in it. So one account's unlucky
+    // second disabled the drive check at that address for EVERY trainer with a
+    // session there, for a day, and the two concurrent lookups per leg against
+    // Nominatim's ~1-request-per-second budget made it likely rather than
+    // theoretical. Writing nothing also means a transient failure can no longer
+    // overwrite a good cached hit, which `ref.set` would otherwise do.
   } catch { /* best-effort */ }
-  return live;
+  return hit;
 }
 
 // ── drive estimate ──────────────────────────────────────────────────────────

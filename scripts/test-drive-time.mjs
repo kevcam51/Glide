@@ -265,6 +265,87 @@ const fakeFetch = async (url) => {
   const g3 = await D.geocode(db, "17 Somewhere Ave Miami", null, throwFetch);
   ok("a thrown network error yields null, not an exception", g3 === null);
 
+  // ── a configured key must not disable the free geocoder (S199) ────────────
+  // The whole `if (apiKey)` branch used to end in `return null` on every
+  // failure, which made the Nominatim block unreachable the moment a key
+  // existed — so turning the key on turned the drive warning OFF, and only for
+  // the paying accounts that had one. The old suite could not see it: its one
+  // key-present stub always succeeded.
+  {
+    const mkDb = () => { const m = new Map(); return { store: m, db: { doc: (path) => ({ path,
+      async get() { const d = m.get(path); return { exists: !!d, data: () => d }; },
+      async set(v) { m.set(path, v); } }) } }; };
+
+    // Google refuses (a restricted key, a lapsed bill); Nominatim answers.
+    {
+      const { db: d2 } = mkDb();
+      let google = 0, osm = 0;
+      const f = async (url) => {
+        const u = String(url);
+        if (u.includes("maps.googleapis.com")) { google++; return { ok: false }; }
+        osm++; return { ok: true, json: async () => [{ lat: "25.79", lon: "-80.13" }] };
+      };
+      const hit = await D.geocode(d2, "1300 Ocean Dr Miami Beach", "AIzaTESTKEY", f);
+      ok("a key that fails falls back to the free geocoder", !!hit && hit.provider === "nominatim", hit);
+      ok("...and Google was genuinely tried first", google === 1 && osm === 1, { google, osm });
+    }
+
+    // Google answers: the free provider must not be called at all.
+    {
+      const { db: d2 } = mkDb();
+      let osm = 0;
+      const f = async (url) => {
+        const u = String(url);
+        if (u.includes("maps.googleapis.com")) {
+          return { ok: true, json: async () => ({ status: "OK", results: [{ geometry: { location: { lat: 25.78, lng: -80.13 } } }] }) };
+        }
+        osm++; return { ok: true, json: async () => [] };
+      };
+      const hit = await D.geocode(d2, "1300 Ocean Dr Miami Beach", "AIzaTESTKEY", f);
+      ok("a working key still short-circuits", !!hit && hit.provider === "google", hit);
+      ok("...and the fallback is not called needlessly", osm === 0, { osm });
+    }
+
+    // ⚠️ A TRANSIENT FAILURE MUST NOT BE CACHED AS "no such address". The cache
+    // doc has no uid in it, so one account's rate-limited second would disable
+    // the drive check at that address for EVERY trainer for a day.
+    {
+      const { store, db: d2 } = mkDb();
+      const f = async () => ({ ok: false });     // both providers down
+      const hit = await D.geocode(d2, "77 Transient Way Miami", "AIzaTESTKEY", f);
+      ok("both providers failing yields null", hit === null);
+      ok("...and NOTHING is written to the shared cache", store.size === 0, [...store.keys()]);
+    }
+
+    // A real miss — both providers agree it does not exist — is still cached.
+    {
+      const { store, db: d2 } = mkDb();
+      const f = async (url) => String(url).includes("maps.googleapis.com")
+        ? { ok: true, json: async () => ({ status: "ZERO_RESULTS", results: [] }) }
+        : { ok: true, json: async () => [] };
+      const hit = await D.geocode(d2, "zzz not a place zzz", "AIzaTESTKEY", f);
+      ok("a genuine miss still yields null", hit === null);
+      ok("...and IS remembered, so a typo is not looked up every open",
+         [...store.values()].some((v) => v && v.failed === true), [...store.values()]);
+    }
+
+    // And a transient failure must not overwrite a good cached hit — `ref.set`
+    // replaces, so writing on every outcome would destroy a working entry.
+    {
+      const { store, db: d2 } = mkDb();
+      const good = await D.geocode(d2, "9 Good Address Miami", "AIzaTESTKEY",
+        async (url) => String(url).includes("maps.googleapis.com")
+          ? { ok: true, json: async () => ({ status: "OK", results: [{ geometry: { location: { lat: 25.7, lng: -80.2 } } }] }) }
+          : { ok: true, json: async () => [] });
+      ok("a good entry is cached", !!good && store.size === 1, good);
+      const key = [...store.keys()][0];
+      store.get(key).at = 0;                       // force it stale so the lookup re-runs
+      await D.geocode(d2, "9 Good Address Miami", "AIzaTESTKEY", async () => ({ ok: false }));
+      ok("a later transient failure does not clobber it",
+         store.get(key) && store.get(key).failed !== true && store.get(key).lat === 25.7, store.get(key));
+    }
+  }
+
   // ── the sessionTravel callable's own wiring ───────────────────────────────
   // Extracted and run against a fake Firestore, because it cannot be deployed
   // yet (CLI token) and the leg-lookup is the part most likely to be wrong.
