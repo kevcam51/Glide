@@ -25945,6 +25945,15 @@ const EMPTY_DATA = {
   checkIns:[], trainerNotes:"", bodyFat:"", goalBodyFat:"",
   customExercises:[], measurements:[],
 };
+
+// What "Start Over" leaves behind. A module-level function rather than an inline
+// spread so it can be EXECUTED by a test: the first version of this fix lived
+// inside the App component, and a mutation that reinstated the bug stayed green
+// because nothing could call it.
+function resetPlanData(prev) {
+  const keep = prev && prev.trainerNotes;
+  return { ...EMPTY_DATA, ...(keep ? { trainerNotes: keep } : {}) };
+}
 const STORAGE_INDEX = "caliq-index";
 const STORAGE_FOLDERS = "caliq-folders";
 // Connected clients (linked accounts) → folderId, stored in the TRAINER's own
@@ -29964,7 +29973,36 @@ function AiConsentPrompt({ isTrainer, onChoose }) {
 // Everything the account owns comes out, including keys added after this was
 // written. Values are stored as JSON strings, so each is parsed back where
 // possible and passed through untouched when it isn't.
-async function exportMyData({ meName, meEmail, role }) {
+// ⚠️ THE EXPORT WAS THE HOLE IN "COACH-ONLY" (S199k). Four independent review
+// lenses landed on this one, and they were right: the scan above is DELIBERATELY
+// unfiltered, so the plan wrapper comes out whole — and for a connected client
+// that wrapper is in their own kv with the coach's `trainerNotes` inside it. The
+// Results card was hidden, get_profile omitted the key, set_personal_info
+// refused the write, and one labelled button in the menu handed over the lot.
+//
+// Stripped ONLY for a client who actually has a coach. A person with no coach
+// can only have written that text themselves, and taking it out of their export
+// would be deleting their own words to protect nobody — their proper notes home
+// is caliq-notes (the NotesPanel), but this field predates it by ~100 sessions.
+//
+// Matched on SHAPE, not on key name: any value that is a plan wrapper. A future
+// plan key with a different name is then covered without anyone remembering to
+// come back here, which is the same reasoning that made the scan unfiltered.
+function stripCoachNotes(data, hide) {
+  if (!hide) return 0;
+  let n = 0;
+  for (const k of Object.keys(data || {})) {
+    const v = data[k];
+    if (!v || typeof v !== "object") continue;
+    const d = v.data;
+    if (d && typeof d === "object" && typeof d.trainerNotes === "string" && d.trainerNotes) {
+      delete d.trainerNotes; n++;
+    }
+  }
+  return n;
+}
+
+async function exportMyData({ meName, meEmail, role, hasCoach }) {
   const { entries } = await window.storage.listEntries("");
   const data = {};
   for (const e of entries || []) {
@@ -29972,6 +30010,9 @@ async function exportMyData({ meName, meEmail, role }) {
     try { data[e.k] = JSON.parse(e.value); }
     catch (err) { data[e.k] = e.value; }   // not JSON — keep it verbatim
   }
+
+  // Before anything downstream can copy these values around.
+  const strippedNotes = stripCoachNotes(data, role === ROLES.CLIENT && !!hasCoach);
 
   // A person's data is NOT all in kv, and an export that quietly stopped there
   // would be false in the places people care about most. Private notes live in
@@ -30021,6 +30062,7 @@ async function exportMyData({ meName, meEmail, role }) {
       ...(notesError ? [notesError] : []),
       ...(messagesError ? [messagesError] : []),
       "Session bookings and payment records are shared with your trainer and aren't included here.",
+      ...(strippedNotes ? ["Your coach's private coaching notes are theirs, not yours, and aren't included here."] : []),
     ],
   };
   await deliverFile(JSON.stringify(bundle, null, 2),
@@ -30056,7 +30098,7 @@ async function deliverFile(json, filename) {
   return true;
 }
 
-function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onCalendar, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme, accentPref, onSetAccent, teamLocked, onReferrals }) {
+function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onCalendar, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme, accentPref, onSetAccent, teamLocked, onReferrals }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
@@ -30495,7 +30537,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, trial, subA
           if (dlBusy) return;
           setDlBusy(true); setDlMsg(null);
           try {
-            const n = await exportMyData({ meName, meEmail, role });
+            const n = await exportMyData({ meName, meEmail, role, hasCoach });
             setDlMsg({ ok: true, text: `Downloaded — ${n} item${n === 1 ? "" : "s"} saved to your device.` });
           } catch (e) {
             setDlMsg({ ok: false, text: "Couldn't build the file. Check your connection and try again." });
@@ -31451,7 +31493,20 @@ export default function App() {
   };
 
   const goToProfiles = () => { setScreen("profiles"); setActiveId(null); setActiveRemoteUid(null); };
-  const reset = () => { setStep(0); setData({...EMPTY_DATA}); autoSave({...EMPTY_DATA}, 0); };
+  // ⚠️ START OVER MEANS THE PLAN, NOT THE COACH'S NOTES (S199k). EMPTY_DATA
+  // declares trainerNotes:"", and planMerge treats a key whose value differs
+  // from the baseline as a deliberate edit — so the blank was written straight
+  // over the coach's text rather than merged around it. An ungated, unconfirmed
+  // button in the edit bar, which sits OUTSIDE the Simple/Detailed switch and so
+  // is one tap from a client's default view, erased in 600ms exactly what
+  // set_personal_info had just been taught to refuse.
+  //
+  // Carried across for a trainer too: resetting a plan you are rebuilding is not
+  // a reason to lose your own observations about the person.
+  const reset = () => {
+    const fresh = resetPlanData(data);
+    setStep(0); setData(fresh); autoSave(fresh, 0);
+  };
   const update = (k,v) => setDataAndSave(p=>({...p,[k]:v}));
 
   // Recovery: scan storage for profiles missing from the index
@@ -32483,7 +32538,7 @@ export default function App() {
       <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} role={role} meName={meName} meEmail={meEmail}
         aiOptOut={meAiOptOut} onSetAiOptOut={onSetAiOptOut}
         idleSignOut={idleSignOut} onSetIdleSignOut={onSetIdleSignOut}
-        isTrainer={isTrainerHome} trial={meTrial} subActive={meSubStatus === "active"}
+        isTrainer={isTrainerHome} hasCoach={meHasCoach} trial={meTrial} subActive={meSubStatus === "active"}
         teamLocked={!!(rosterCap && rosterCap.teamsLocked)}
         onReferrals={() => setShowReferrals(true)}
         themePref={themePref} onSetTheme={setTheme}
