@@ -3869,8 +3869,13 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
   // Coaching notes are the coach's (S199j). Defaults CLOSED so a caller that
   // forgets the prop hides them rather than leaking them — the safe direction
   // for a privacy gate is the one that fails quiet, not the one that fails open.
-  canSeeNotes = false }) {
+  canSeeNotes = false,
+  // Start Over is destructive and unconfirmed no longer (S199l). hasCoach picks
+  // the stronger wording; coachName is fetched LAZILY by the App when the
+  // confirm opens, so nobody pays a profile read for a sentence they never see.
+  hasCoach = false, coachName = "", onNeedCoachName }) {
   const [tab, setTab] = useState(0);
+  const [confirmReset, setConfirmReset] = useState(false);
   const [viewMode, setViewMode] = useState("pro"); // "basic" or "pro"
   // Simple (plain-English) vs Detailed plan view — a display pref, remembered
   // per device. First visit (no stored pref) follows the role default (S90b,
@@ -4785,8 +4790,37 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
         <button className="edit-bar-btn" onClick={()=>setShowEdit(v=>!v)}>
           <Icon name="edit" size={16} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:6}} />Edit My Info {showEdit ? "▲" : "▼"}
         </button>
-        <button className="edit-bar-reset" onClick={onReset}>↺ Start Over</button>
+        {!confirmReset && (
+          <button className="edit-bar-reset" onClick={()=>{
+            setConfirmReset(true);
+            if (hasCoach && !coachName && onNeedCoachName) onNeedCoachName();
+          }}>↺ Start Over</button>
+        )}
       </div>
+      {confirmReset && (()=>{
+        const w = resetWarning(hasCoach, coachName);
+        return (
+          <div style={{marginTop:"10px",padding:"14px",borderRadius:"var(--radius-sm)",
+            border:"1.5px solid color-mix(in srgb,var(--red) 30%,transparent)",
+            background:"color-mix(in srgb,var(--red) 6%,transparent)"}}>
+            <div style={{fontSize:".88rem",fontWeight:700,color:"var(--text)",marginBottom:"6px"}}>{w.title}</div>
+            <div style={{fontSize:".78rem",color:"var(--text-secondary)",lineHeight:1.6,marginBottom:"12px"}}>{w.body}</div>
+            <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
+              <button onClick={()=>{ setConfirmReset(false); onReset(); }}
+                style={{minHeight:"44px",padding:"0 16px",borderRadius:"10px",border:"none",cursor:"pointer",
+                  fontFamily:"inherit",fontSize:".84rem",fontWeight:700,background:"var(--red)",color:"#fff"}}>
+                {w.confirmLabel}
+              </button>
+              <button onClick={()=>setConfirmReset(false)}
+                style={{minHeight:"44px",padding:"0 16px",borderRadius:"10px",cursor:"pointer",
+                  border:"1.5px solid var(--border)",background:"transparent",color:"var(--muted-light)",
+                  fontFamily:"inherit",fontSize:".84rem",fontWeight:700}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        );
+      })()}
       {showEdit && (
         <div className="edit-panel fu">
           <div className="edit-panel-title">Jump back to any step to make changes — your other answers are saved.</div>
@@ -25954,6 +25988,37 @@ function resetPlanData(prev) {
   const keep = prev && prev.trainerNotes;
   return { ...EMPTY_DATA, ...(keep ? { trainerNotes: keep } : {}) };
 }
+
+// What the Start Over confirm SAYS (S199l). Module-level and pure, for the same
+// reason resetPlanData is: a test can EXECUTE it. The gate this replaces was a
+// bare onClick — no confirm, no undo, and it sits OUTSIDE the Simple/Detailed
+// switch, so on a client's default landing view it was one tap from erasing
+// stats, goal, workout schedule and macro targets.
+//
+// Kevin's call: NOT blocked for a connected client — a person may start their
+// own plan over even when a coach built it — but the warning names the coach and
+// says plainly that the coach will see it. Persuasion, not permission.
+function resetWarning(hasCoach, coachName) {
+  const who = String(coachName || "").trim();
+  if (!hasCoach) {
+    return {
+      coached: false,
+      title: "Erase this plan and start over?",
+      body: "This clears your stats, goal, workout schedule and macro targets. There's no undo.",
+      confirmLabel: "Yes, start over",
+    };
+  }
+  return {
+    coached: true,
+    // ⚠️ FALLS BACK TO A ROLE, NEVER TO A BLANK. The name is fetched lazily and
+    // may not have arrived (or may be denied); "  built this plan for you" would
+    // read as a bug at the exact moment the reader needs to trust the sentence.
+    title: `${who || "Your coach"} built this plan for you.`,
+    body: "Starting over clears your stats, goal, workout schedule and macro targets. "
+      + "Their coaching notes stay, and the change shows up in your plan's activity feed. There's no undo.",
+    confirmLabel: "Yes, erase it",
+  };
+}
 const STORAGE_INDEX = "caliq-index";
 const STORAGE_FOLDERS = "caliq-folders";
 // Connected clients (linked accounts) → folderId, stored in the TRAINER's own
@@ -30734,6 +30799,21 @@ export default function App() {
   // burn: coach-owned when a trainer is linked (S199, Kevin's call), so a
   // connected client SEES the finding and their coach is the one who applies it.
   const [meHasCoach, setMeHasCoach] = useState(false);
+  // The coach's uid + display name, for the Start Over confirm (S199l). The name
+  // is loaded ON DEMAND rather than at boot: it is used by one rare destructive
+  // dialog, and a profile read on every coached client's cold start to fill a
+  // string most of them will never see is a cost with no reader.
+  const [meCoachUid, setMeCoachUid] = useState("");
+  const [meCoachName, setMeCoachName] = useState("");
+  const coachNameTried = useRef(false);
+  const loadCoachName = useCallback(async () => {
+    if (coachNameTried.current || !meCoachUid) return;
+    coachNameTried.current = true;
+    try {
+      const coach = await getProfile(meCoachUid);
+      if (coach) setMeCoachName(coach.displayName || coach.firstName || "");
+    } catch { /* denied or offline → the confirm says "Your coach" */ }
+  }, [meCoachUid]);
   const [meTrial, setMeTrial] = useState(null); // trial countdown state (or null)
   const [meBillingHold, setMeBillingHold] = useState(null); // unpaid session balance after a declined charge (S102b)
   // Arrived from a trainer's "save your card" link (S195). Read once, from the
@@ -30927,6 +31007,7 @@ export default function App() {
           setMeUid(prof.uid || "");
           setMeEmail(prof.email || "");
           setMeHasCoach(!!prof.assignedTrainerId);
+          setMeCoachUid(prof.assignedTrainerId || "");
           setMeTrial(trialInfo(prof));
           setMePremium(isPremium(prof));
           setMeSubStatus(prof.subscriptionStatus || null);
@@ -32769,6 +32850,7 @@ export default function App() {
             <Results data={data} isSimulation={activeIsSim} meUid={meUid} meName={meName} logAdherence={logAdherence} loggedDaysTotal={loggedDaysTotal} loggingStreak={streak} dayCalsAll={dayCalsAll} onReset={reset} onEdit={s=>{setNavFrom("results");setStepAndSave(s);setShowDash(false);}}
             defaultView={role === ROLES.CLIENT ? (data.planViewDefault || "simple") : "detailed"}
             canSeeNotes={isTrainerHome}
+            hasCoach={role === ROLES.CLIENT && meHasCoach} coachName={meCoachName} onNeedCoachName={loadCoachName}
             onSetPlanViewDefault={activeRemoteUid ? (v)=>setDataAndSave(p=>({...p, planViewDefault: v})) : undefined}
             onSetFitnessGoal={(g)=>setDataAndSave(p=>({...p, fitnessGoal: g}))}
             onSetDeficitMode={(mode)=>setDataAndSave(p=>({...p, deficitMode: mode}))}

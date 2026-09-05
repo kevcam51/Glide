@@ -154,7 +154,10 @@ const call = (name, input, isTrainer) => runTool(name, input, ctxFor(isTrainer))
 // ── the UI half ─────────────────────────────────────────────────────────────
 {
   ok("the Results card is gated", /\{canSeeNotes && \(/.test(APP));
-  ok("...on a prop that defaults CLOSED", /canSeeNotes = false \}\) \{/.test(APP));
+  // Matches the DEFAULT, not the prop's position in the list: this used to
+  // require `canSeeNotes = false }) {`, so adding any prop after it failed a
+  // test about privacy for a reason that had nothing to do with privacy (S199l).
+  ok("...on a prop that defaults CLOSED", /canSeeNotes = false\s*[,}]/.test(APP));
   // ⚠️ `role` is null until the profile loads, so a NEGATIVE test would show the
   // notes on every cold start until the read returned. isTrainerHome is the
   // app's existing positive predicate (head_trainer || sub_trainer).
