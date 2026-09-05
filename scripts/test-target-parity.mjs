@@ -163,5 +163,59 @@ const base = {
      && /function trialExpiredFor\(profile, uid\)/.test(src["functions/transcribe.js"]));
 }
 
+// ── the coach can see what the client changed (S199i) ───────────────────────
+// describePlanChanges is the ONLY writer of the activity feed a coach reads, and
+// it listed who the person IS while listing nothing about what they were told to
+// EAT. A coached client retyping their daily target produced an empty feed and a
+// dashboard quoting the new number as though the coach had set it.
+//
+// ⚠️ THIS IS EXECUTED, NOT PATTERN-MATCHED. The first version of this block
+// asserted that the string "weeklyRate" appeared in the function body — and a
+// mutation replacing the whole guard with `if (false)` left it green, because
+// the field name still appeared inside the dead branch. That is precisely the
+// mistake test-booking-slots.mjs was rewritten to stop making. So the real
+// source text is lifted out of App.jsx and RUN. It is a pure function over two
+// plain objects; its only free variable is RATE_LABEL, lifted with it.
+{
+  const rateSrc = /const RATE_LABEL = \{[\s\S]*?\};/.exec(APP);
+  const fnSrc = /function describePlanChanges\(prev, next\) \{[\s\S]*?\n\}/.exec(APP);
+  ok("describePlanChanges is liftable from App.jsx", !!rateSrc && !!fnSrc);
+  const describe = new Function(`${rateSrc[0]}\n${fnSrc[0]}\nreturn describePlanChanges;`)();
+
+  const plan = { weightLbs: 200, activityLevel: "moderate", weeklyRate: 1 };
+  const one = (patch) => describe(plan, { ...plan, ...patch });
+
+  ok("an unchanged plan writes nothing", describe(plan, { ...plan }).length === 0);
+  // The six controls that set what the person eats. Each must produce a row.
+  ok("changing the weekly pace is recorded", /pace/.test(one({ weeklyRate: 0.5 }).join(" ")), one({ weeklyRate: 0.5 }));
+  ok("...naming the new pace in words, not a signed number",
+     /Lose ½ lb\/week/.test(one({ weeklyRate: 0.5 }).join(" ")), one({ weeklyRate: 0.5 }));
+  ok("...and a switch to gaining reads as gaining",
+     /Gain 1 lb\/week/.test(one({ weeklyRate: -1 }).join(" ")), one({ weeklyRate: -1 }));
+  ok("typing a daily calorie target is recorded",
+     /1,900/.test(one({ calorieTarget: 1900 }).join(" ")), one({ calorieTarget: 1900 }));
+  ok("...and dropping back to the calculated one is too",
+     /calculated/.test(describe({ ...plan, calorieTarget: 1900 }, plan).join(" ")));
+  ok("overwriting the macro split is recorded",
+     /180p/.test(one({ macroTargets: { protein: 180, carbs: 200, fat: 70 } }).join(" ")));
+  ok("changing the protein basis is recorded", one({ proteinPerLb: 1.2 }).length === 1, one({ proteinPerLb: 1.2 }));
+  ok("switching the nutrition approach is recorded",
+     /nutrition approach/.test(one({ deficitMode: "eatback" }).join(" ")), one({ deficitMode: "eatback" }));
+  ok("toggling tracker-adjusted targets is recorded",
+     /tracker/.test(one({ wearableAdjust: true }).join(" ")), one({ wearableAdjust: true }));
+
+  // ⚠️ NO SPURIOUS ROWS. None of these six live in EMPTY_DATA, so they are
+  // absent by default — and a diff that fired on absent-vs-absent would put a
+  // fake edit in every coach's feed on every save.
+  ok("absent fields do not fire against each other", describe({}, {}).length === 0, describe({}, {}));
+  ok("...nor does an unrelated edit drag them in",
+     describe(plan, { ...plan, goalWeight: 180 }).length === 1, describe(plan, { ...plan, goalWeight: 180 }));
+
+  // The activity level was already recorded and must stay: it is the one input
+  // S199 made coach-owned, so its edits matter most.
+  ok("the activity level is still recorded",
+     /activity level/.test(one({ activityLevel: "light" }).join(" ")), one({ activityLevel: "light" }));
+}
+
 console.log(`  ${checks - fails}/${checks} assertions passed`);
 process.exit(fails ? 1 : 0);

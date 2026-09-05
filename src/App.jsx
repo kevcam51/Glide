@@ -26012,6 +26012,46 @@ function describePlanChanges(prev, next) {
   if (JSON.stringify(p.customExercises || []) !== JSON.stringify(n.customExercises || [])) out.push("edited custom exercises");
   if ((n.checkIns || []).length > (p.checkIns || []).length) out.push("added a check-in");
   if (JSON.stringify(p.measurements || []) !== JSON.stringify(n.measurements || [])) out.push("updated tape measurements");
+
+  // ⚠️ THE PRESCRIPTION ITSELF WAS INVISIBLE (S199i). Everything above records
+  // who the person IS — weight, age, activity level, tape — and nothing at all
+  // recorded what they were told to EAT. So a coached client could retype their
+  // coach's daily calorie target, pick a different weekly pace or overwrite the
+  // macro split, and the coach's activity feed showed nothing whatsoever: every
+  // screen then quoted the new number as though the coach had set it.
+  //
+  // The ASYMMETRY is what makes this a defect rather than a policy. S199 locked
+  // the activity LADDER for a coached client, because a coach owns it — while
+  // leaving open the three controls that set the same number directly and far
+  // more sharply: a rung moves the burn ~10%, a typed target can be anything at
+  // all. Whether to lock those outright is Kevin's call and not obviously right
+  // (an uncoached client needs them, and plenty of coaches want self-management)
+  // — but making the change VISIBLE is right under either answer, and is the
+  // house rule: silent success is the same bug as silent failure.
+  if (String(p.weeklyRate ?? "") !== String(n.weeklyRate ?? "")) {
+    out.push(n.weeklyRate == null || n.weeklyRate === ""
+      ? "cleared the weekly pace"
+      : `set the weekly pace to ${RATE_LABEL[String(Number(n.weeklyRate))] || `${n.weeklyRate} lb/week`}`);
+  }
+  if (Math.round(Number(p.calorieTarget) || 0) !== Math.round(Number(n.calorieTarget) || 0)) {
+    out.push(Number(n.calorieTarget) > 0
+      ? `set the daily calorie target to ${Math.round(Number(n.calorieTarget)).toLocaleString()} cal`
+      : "went back to the calculated calorie target");
+  }
+  if (JSON.stringify(p.macroTargets || null) !== JSON.stringify(n.macroTargets || null)) {
+    out.push(n.macroTargets
+      ? `set macro targets to ${n.macroTargets.protein}p / ${n.macroTargets.carbs}c / ${n.macroTargets.fat}f`
+      : "went back to the calculated macros");
+  }
+  if (Number(p.proteinPerLb || 0) !== Number(n.proteinPerLb || 0)) {
+    out.push(n.proteinPerLb ? `set protein to ${n.proteinPerLb}g per lb` : "went back to the default protein basis");
+  }
+  if ((p.deficitMode || "") !== (n.deficitMode || "")) {
+    out.push(`switched the nutrition approach to ${n.deficitMode === "accelerate" ? "reach the goal faster" : "eat back training calories"}`);
+  }
+  if (!!p.wearableAdjust !== !!n.wearableAdjust) {
+    out.push(n.wearableAdjust ? "turned on tracker-adjusted targets" : "turned off tracker-adjusted targets");
+  }
   return out;
 }
 
