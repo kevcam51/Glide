@@ -222,7 +222,7 @@ async function geocode(db, address, apiKey, fetchFn) {
   const norm = normalizeAddress(address);
   if (!norm) return null;
   const ref = db.doc(`geocache/${addressKey(address)}`);
-  let stale = null;   // an expired-but-usable hit, if we have one
+  let stale = null, staleAt = 0;   // an expired-but-usable hit, and when it was geocoded
   try {
     const snap = await ref.get();
     if (snap.exists) {
@@ -244,13 +244,19 @@ async function geocode(db, address, apiKey, fetchFn) {
       // a policy of roughly one per second. That is how a transient failure
       // becomes a permanent one. A soft failure is therefore held for MINUTES,
       // never hours, and it still means "could not check" — never "not real".
-      if (d.softFail && age < SOFT_FAIL_TTL_MS && !isFinite(d.lat)) return null;
+      // `softAt` is when the last LOOKUP failed; `at` stays when the
+      // coordinates were geocoded. Keeping them apart matters: stamping a fresh
+      // `at` on a soft-fail write would make an expired hit look newly
+      // geocoded, and it would then never be refreshed again for the whole
+      // GEO_TTL — a stale pin frozen in place by the very failure that was
+      // supposed to be temporary.
+      if (d.softFail && (Date.now() - (d.softAt || d.at || 0)) < SOFT_FAIL_TTL_MS && !isFinite(d.lat)) return null;
       if (!d.failed && age < GEO_TTL_MS && isFinite(d.lat)) {
         return { lat: d.lat, lng: d.lng, provider: d.provider, cached: true };
       }
       // An EXPIRED hit is still the best answer available if the lookup then
       // fails — buildings do not move. Kept aside rather than discarded.
-      if (!d.failed && isFinite(d.lat)) stale = { lat: d.lat, lng: d.lng, provider: d.provider, cached: true };
+      if (!d.failed && isFinite(d.lat)) { stale = { lat: d.lat, lng: d.lng, provider: d.provider, cached: true }; staleAt = d.at || 0; }
     }
   } catch { /* a cache read failure must not stop the lookup */ }
   const { hit, missBy } = await geocodeLive(norm, apiKey, fetchFn);
@@ -268,10 +274,10 @@ async function geocode(db, address, apiKey, fetchFn) {
       // damping back reintroduced it. The marker is written ALONGSIDE any hit we
       // already had, and that hit is what we return.
       if (stale) {
-        await ref.set({ at: Date.now(), lat: stale.lat, lng: stale.lng, provider: stale.provider,
-          softFail: true, q: norm.slice(0, 120) });
+        await ref.set({ at: staleAt, lat: stale.lat, lng: stale.lng, provider: stale.provider,
+          softFail: true, softAt: Date.now(), q: norm.slice(0, 120) });
       } else {
-        await ref.set({ at: Date.now(), softFail: true, q: norm.slice(0, 120) });
+        await ref.set({ at: Date.now(), softFail: true, softAt: Date.now(), q: norm.slice(0, 120) });
       }
     } else if (missBy) {
       // A real miss — a provider actually answered "no such address" — worth

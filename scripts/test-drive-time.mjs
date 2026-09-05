@@ -392,6 +392,11 @@ const fakeFetch = async (url) => {
          !!after && after.lat === 25.5, after);
       ok("...and the coordinates survive the soft-fail write",
          store.get(key).lat === 25.5 && store.get(key).softFail === true, store.get(key));
+      // ⚠️ AND THE HIT IS NOT RE-DATED BY THE FAILURE. Stamping a fresh `at`
+      // would make an expired pin look newly geocoded and freeze it in place
+      // for the whole TTL — a stale answer made permanent by a temporary fault.
+      ok("...without the failure making the stale pin look fresh",
+         store.get(key).at === 0 && store.get(key).softAt > 0, store.get(key));
     }
 
     // And a transient failure must not overwrite a good cached hit — `ref.set`
