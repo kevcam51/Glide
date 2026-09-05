@@ -245,87 +245,85 @@ exports.respondToBookingRequest = onCall(
     // books an hour nothing on either side ever looked at.
     //
     // Refused rather than warned, because a one-tap control has nowhere to put
-    // a warning — and refusing is recoverable (the request stays open, the
-    // claim has not happened yet) where a double-booking is not. A trainer who
+    // a warning — and refusing is recoverable (the request stays open, the claim
+    // has not happened yet) where a double-booking is not. A trainer who
     // genuinely wants an overlap can still create it from the calendar, which
     // has a real form and a confirmation.
-    if (accept && booking) {
-      const dayFrom = chosenStart - 12 * 3600000, dayTo = chosenStart + 12 * 3600000;
-      const endAt = chosenStart + (Number(booking.durationMin) || 60) * 60000;
-      // One equality, window filtered in code — a range on startAt alongside it
-      // needs a composite index, and this repo has been bitten by that twice.
+    //
+    // ⚠️ THE CHECK, THE CLAIM AND THE CREATE ARE NOW ONE TRANSACTION (S199q).
+    // They used to be three steps: read the day, then claim the inbox item, then
+    // add() the session. Every one of them was correct on its own and the gap
+    // between them was the bug — two different requests for overlapping hours,
+    // accepted in the same second, both read a clear calendar and both booked.
+    // Two billable sessions, no warning to anyone. Firestore re-runs the whole
+    // callback on contention, so the overlap read is re-done against the state
+    // the write will actually land on.
+    //
+    // Reads must all precede writes inside a transaction, which is why the
+    // session's id is minted up front rather than by add().
+    const sessionRef = db.collection("sessions").doc();
+    const now = Date.now();
+    let sessionId = null;
+    await db.runTransaction(async (tx) => {
+      // ── reads ──────────────────────────────────────────────────────────
+      const snap = await tx.get(inboxRef);
+      // One equality each, window filtered in code — a range on startAt
+      // alongside it needs a composite index, and this repo has been bitten by
+      // that twice.
       // ⚠️ BLOCKS COUNT TOO. `trainerBlocks` is the trainer's own "I am not
       // available" — physio, lunch, the school run — and trainerAvailability
       // already MERGES it into the busy ranges a client is shown. Checking only
       // sessions meant the app told the client that hour was taken and then
       // booked it anyway, on the one path that refuses rather than asks.
-      const [mine, blocks] = await Promise.all([
-        db.collection("sessions").where("trainerUid", "==", uid).get(),
-        db.collection("trainerBlocks").where("trainerUid", "==", uid).get(),
-      ]);
-      let clash = null;
-      const consider = (v, isBlock) => {
-        if (clash) return;
-        if (!isBlock && v.status === "cancelled") return;
-        const st = Number(v.startAt) || 0;
-        if (st < dayFrom || st > dayTo) return;
-        const en = st + (Number(v.durationMin) || 60) * 60000;
-        if (chosenStart < en && endAt > st) clash = { st, en, isBlock };
-      };
-      mine.forEach((doc) => consider(doc.data() || {}, false));
-      blocks.forEach((doc) => consider(doc.data() || {}, true));
-      if (clash) {
-        const clashWhen = new Date(clash.st).toLocaleString("en-US", {
-          timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "2-digit",
-        });
-        throw new HttpsError("failed-precondition",
-          clash.isBlock
-            ? `That runs into time you've blocked out at ${clashWhen}. Decline this and offer another time, or book it yourself from the calendar.`
-            : `That overlaps a session you already have at ${clashWhen}. Decline this and offer another time, or book it yourself from the calendar.`,
-          { reason: "overlap" });
-      }
-    }
+      const [mine, blocks] = accept && booking
+        ? await Promise.all([
+            tx.get(db.collection("sessions").where("trainerUid", "==", uid)),
+            tx.get(db.collection("trainerBlocks").where("trainerUid", "==", uid)),
+          ])
+        : [null, null];
 
-    // NOW claim it. The transaction is what stops two taps — the trainer's
-    // phone and their laptop — becoming two sessions and two charges.
-    await db.runTransaction(async (tx) => {
-      const snap = await tx.get(inboxRef);
+      // ── decide, before anything is written ─────────────────────────────
       let arr = [];
       try { const v = snap.exists && snap.data().value; arr = v ? JSON.parse(v) : []; } catch { arr = []; }
       if (!Array.isArray(arr)) arr = [];
       const found = arr.find((r) => r && r.id === requestId);
       if (!found) throw new HttpsError("not-found", "That request is gone.");
       if (found.status !== "open") throw new HttpsError("failed-precondition", "You've already answered that one.");
+
+      if (accept && booking) {
+        const dayFrom = chosenStart - 12 * 3600000, dayTo = chosenStart + 12 * 3600000;
+        const endAt = chosenStart + (Number(booking.durationMin) || 60) * 60000;
+        let clash = null;
+        const consider = (v, isBlock) => {
+          if (clash) return;
+          if (!isBlock && v.status === "cancelled") return;
+          const st = Number(v.startAt) || 0;
+          if (st < dayFrom || st > dayTo) return;
+          const en = st + (Number(v.durationMin) || 60) * 60000;
+          if (chosenStart < en && endAt > st) clash = { st, en, isBlock };
+        };
+        mine.forEach((doc) => consider(doc.data() || {}, false));
+        blocks.forEach((doc) => consider(doc.data() || {}, true));
+        if (clash) {
+          const clashWhen = new Date(clash.st).toLocaleString("en-US", {
+            timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "2-digit",
+          });
+          throw new HttpsError("failed-precondition",
+            clash.isBlock
+              ? `That runs into time you've blocked out at ${clashWhen}. Decline this and offer another time, or book it yourself from the calendar.`
+              : `That overlaps a session you already have at ${clashWhen}. Decline this and offer another time, or book it yourself from the calendar.`,
+            { reason: "overlap" });
+        }
+      }
+
+      // ── writes ─────────────────────────────────────────────────────────
       const next = arr.map((r) => (r && r.id === requestId
         ? { ...r, status: "done", doneAt: Date.now(), outcome: accept ? "accepted" : "declined" }
         : r));
       tx.set(inboxRef, { k: INBOX_KEY, value: JSON.stringify(next) });
-    });
 
-    // Reopen the request if the booking itself fails. Everything that could be
-    // checked has been, so this is the narrow window where Firestore is simply
-    // unavailable — and leaving the item marked "accepted" with no session is
-    // the one outcome nobody can recover from.
-    const releaseClaim = async () => {
-      try {
-        await db.runTransaction(async (tx) => {
-          const snap = await tx.get(inboxRef);
-          let arr = [];
-          try { const v = snap.exists && snap.data().value; arr = v ? JSON.parse(v) : []; } catch { arr = []; }
-          if (!Array.isArray(arr)) return;
-          const next = arr.map((r) => (r && r.id === requestId
-            ? { ...r, status: "open", doneAt: null, outcome: null }
-            : r));
-          tx.set(inboxRef, { k: INBOX_KEY, value: JSON.stringify(next) });
-        });
-      } catch (e) { console.error("could not reopen booking request", requestId, e && e.message); }
-    };
-
-    let sessionId = null;
-    if (accept && booking) {
-      const now = Date.now();
-      try {
-        const ref = await db.collection("sessions").add({
+      if (accept && booking) {
+        tx.set(sessionRef, {
           participants: [uid, clientUid],
           trainerUid: uid, clientUid,
           startAt: chosenStart,
@@ -335,13 +333,13 @@ exports.respondToBookingRequest = onCall(
           priceCents,
           createdBy: uid, createdAt: now, updatedAt: now,
         });
-        sessionId = ref.id;
-      } catch (e) {
-        await releaseClaim();
-        console.error("booking accept failed after claim", requestId, e && e.message);
-        throw new HttpsError("internal", "Couldn't book that session — try again.");
+        sessionId = sessionRef.id;
       }
-    }
+    });
+    // No releaseClaim any more, and none is possible to need: the claim and the
+    // session are the same commit, so there is no window where one exists
+    // without the other. The reopen path it used to guard was itself a risk —
+    // it ran AFTER a failure, on a connection that had just failed.
 
     await sendPushTo(db, clientUid, accept
       // Accepting ONE slot closes the whole ask, so say which one was taken and

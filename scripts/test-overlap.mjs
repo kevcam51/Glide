@@ -6,34 +6,59 @@
 // for the FIRST offered day, so "Book this" on Wednesday books an hour nothing
 // on either side ever looked at.
 //
-// The two helpers are pure, so the arithmetic is tested here away from
-// Firestore and React. They are read out of src/App.jsx and evaluated, because
-// a 32k-line JSX bundle cannot be imported.
+// The helpers are pure, so the arithmetic is tested away from Firestore and
+// React. They MOVED in S199q: App.jsx used to carry its own copies, and its
+// seriesStarts was a hand-written MIRROR of bookSeries's occurrence maths — by
+// its own admission — so a warning could describe dates the booking would not
+// create. There is now one implementation, in src/sessions.js, and it is the
+// one that does the booking. Lifted rather than imported because that module
+// pulls in Firebase.
 //
 // Run: node scripts/test-overlap.mjs
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const SRC = readFileSync(join(ROOT, "src", "sessions.js"), "utf8");
 const APP = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
 
 let fails = 0, checks = 0;
 const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n, x !== undefined ? JSON.stringify(x) : ""); } };
 
-const grab = (name) => {
-  const i = APP.indexOf(`function ${name}(`);
-  if (i < 0) throw new Error(`${name} not found in src/App.jsx`);
-  // brace-match to the end of the declaration
-  let d = 0, j = APP.indexOf("{", i);
-  for (let k = j; k < APP.length; k++) {
-    if (APP[k] === "{") d++;
-    else if (APP[k] === "}") { d--; if (d === 0) return APP.slice(i, k + 1); }
+// Brace-match a declaration out of the module text.
+const grab = (name, kind = "function") => {
+  const i = SRC.indexOf(`${kind} ${name}`);
+  if (i < 0) throw new Error(`${name} not found in src/sessions.js`);
+  let d = 0;
+  for (let k = SRC.indexOf("{", i); k < SRC.length; k++) {
+    if (SRC[k] === "{") d++;
+    else if (SRC[k] === "}") { d--; if (d === 0) return SRC.slice(i, k + 1); }
   }
   throw new Error(`${name} unterminated`);
 };
+const line = (re) => { const m = re.exec(SRC); if (!m) throw new Error(`${re} not found`); return m[0]; };
+
+// Everything the two helpers stand on, lifted from the same file so the
+// occurrence maths under test IS the shipping one.
+const scope = [
+  "const SESSION_DEFAULT_MIN = 60;",
+  line(/export const REPEAT_OPTIONS = \{[\s\S]*?\n\};/).replace("export ", ""),
+  line(/export const REPEAT_MAX = \d+;/).replace("export ", ""),
+  line(/export const repeatsOf = [^\n]*/).replace("export ", ""),
+  grab("addDaysKeepingLocalTime"),
+  grab("addMonthsKeepingLocalTime"),
+  grab("occurrenceStart"),
+  grab("seriesStarts", "export function"),
+  grab("overlappingSessions", "export function"),
+].join("\n").replace(/export function /g, "function ");
+const [seriesStarts, overlappingSessions] =
+  new Function(`${scope}\nreturn [seriesStarts, overlappingSessions];`)();
 const SESSION_DEFAULT_MIN = 60, REPEAT_MAX = 52;
-const seriesStarts = eval(`(${grab("seriesStarts").replace(/^function /, "function ")})`);
-const overlappingSessions = eval(`(${grab("overlappingSessions").replace(/^function /, "function ")})`);
+
+// ── the mirror is gone, and must stay gone ──────────────────────────────────
+ok("App.jsx no longer carries its own copy of the occurrence maths",
+   !/^function seriesStarts\(/m.test(APP) && !/^function overlappingSessions\(/m.test(APP));
+ok("...it imports them from the module that books", /seriesStarts, overlappingSessions/.test(APP));
 
 const H = 3600000;
 const at = (iso) => Date.parse(iso);
@@ -171,6 +196,107 @@ ok("...and is cleared when the form opens or closes",
    (APP.match(/setConfirmOverlap\(null\)/g) || []).length >= 5);
 ok("the client check includes the trainer's blocks",
    /\.\.\.\(blocks \|\| \[\]\)\.map/.test(APP));
+
+// ── every write path asks the question (S199q) ──────────────────────────────
+// S199d guarded the trainer calendar and the one-tap Accept, and left the other
+// three alone: the in-plan calendar's booking sheet, the Sessions panel, and
+// RESCHEDULING, which moves a session onto an hour exactly as easily as booking
+// one does. Neither screen can answer it themselves — both hold only the
+// sessions between the trainer and the ONE client in front of them, so a clash
+// with a different client is invisible there. The question is asked in
+// sessions.js, against the trainer's whole book.
+{
+  const guarded = (fn) => {
+    const i = SRC.indexOf(fn);
+    if (i < 0) return false;
+    return SRC.slice(i, i + 1400).includes("guardOverlap(");
+  };
+  ok("booking one session asks", guarded("export async function bookSession("));
+  ok("booking a series asks", guarded("export async function bookSeries("));
+  ok("...for EVERY occurrence, not just the first",
+     /guardOverlap\(trainerUid, seriesStarts\(base\.startAt, repeat, n\)/.test(SRC));
+  ok("rescheduling asks", guarded("export async function updateSession("));
+  ok("...but only when the TIME moves — renaming should not need permission",
+     /fields\.startAt !== undefined \|\| fields\.durationMin !== undefined/.test(SRC));
+  ok("...and skips the session being moved, which always overlaps itself",
+     /skipId: sessionId/.test(SRC));
+  ok("the sessions query is constrained by participants, as the rules require",
+     /where\("participants", "array-contains", trainerUid\)/.test(SRC));
+  ok("the trainer's own blocks count as busy too",
+     /collection\(db, "trainerBlocks"\), where\("trainerUid", "==", trainerUid\)/.test(SRC));
+
+  // A refusal must be answerable — a trainer may genuinely want the overlap.
+  const cls = /export class SessionOverlapError extends Error \{[\s\S]*?\n\}/.exec(SRC);
+  ok("the refusal is a typed error a caller can offer to override", !!cls);
+  const SessionOverlapError = new Function(
+    `${cls[0].replace("export ", "")}\nreturn SessionOverlapError;`)();
+  const hit = (id) => ({ startAt: 0, other: { id }, label: "Tue, Sep 8, 9:00 AM" });
+  ok("one clash reads as one", /overlaps a session you already have at Tue, Sep 8/.test(new SessionOverlapError([hit("s1")]).message));
+  ok("a clash with the trainer's own block says so, not 'a session'",
+     /time you've blocked out/.test(new SessionOverlapError([hit("blk:b1")]).message));
+  ok("several clashes are counted and the first named",
+     /^3 of those dates overlap sessions you already have \(first: Tue, Sep 8/.test(
+       new SessionOverlapError([hit("s1"), hit("s2"), hit("s3")]).message));
+  ok("...and a mixed set does not call blocks sessions or vice versa",
+     /sessions you already have/.test(new SessionOverlapError([hit("blk:b1"), hit("s2")]).message));
+  ok("the code is machine-readable so a UI can branch on it",
+     new SessionOverlapError([hit("s1")]).code === "overlap");
+
+  // ⚠️ CONSENT COVERS THE WHOLE BOOKING AND DIES WITH ITS FORM. Keyed on the
+  // start alone, a trainer warned about Tuesday 9:00 could change the duration
+  // and the second tap booked a span nothing had checked; never cleared, a later
+  // booking on the same instant went through with no check and no message.
+  ok("the in-plan calendar keys consent on the whole booking",
+     /const key = \[startAt, durationMin, bookForm\.repeat \|\| "none", bookForm\.count \|\| 1\]\.join\("\|"\)/.test(APP));
+  ok("...and drops it when the sheet closes", /setBookForm\(null\); setBookErr\(""\); setBookConfirm\(null\);/.test(APP));
+  ok("...and when a new one opens", /setBookConfirm\(null\);\n\s*setBookForm\(\{ id: null/.test(APP));
+  ok("the sessions panel keys consent on the booking too, edit included",
+     /const key = \[editingId \|\| "new", startAt, durationMin\]\.join\("\|"\)/.test(APP));
+  ok("...and clears it on open and on edit",
+     /const openNew = \(\) => \{ setEditingId\(null\); setErr\(""\); setOverlapOk\(null\);/.test(APP)
+     && /const openEdit = \(s\) => \{ setEditingId\(s\.id\); setErr\(""\); setOverlapOk\(null\);/.test(APP));
+  // The trainer calendar asked first, so it passes its own consent through
+  // rather than being asked the identical question twice.
+  ok("the trainer calendar threads its consent through", /allowOverlap: true, skipId: form\.id \|\| ""/.test(APP));
+}
+
+// ── the accept path is ONE transaction (S199q) ──────────────────────────────
+// It used to be three steps — read the day, claim the inbox item, add() the
+// session — each correct alone, with the bug living in the gaps. Two different
+// requests for overlapping hours, accepted in the same second, both read a
+// clear calendar and both booked: two billable sessions, nobody told.
+{
+  const AV = readFileSync(join(ROOT, "functions", "availability.js"), "utf8");
+  const i = AV.indexOf("const sessionRef = db.collection(\"sessions\").doc();");
+  ok("the session id is minted before the transaction", i > 0);
+  const txStart = AV.indexOf("await db.runTransaction", i);
+  const txEnd = AV.indexOf("\n    });", txStart);
+  ok("the transaction is findable", txStart > 0 && txEnd > txStart);
+  const tx = AV.slice(txStart, txEnd);
+
+  ok("the overlap is read INSIDE the transaction", /tx\.get\(db\.collection\("sessions"\)/.test(tx));
+  ok("...blocks too", /tx\.get\(db\.collection\("trainerBlocks"\)/.test(tx));
+  ok("the session is CREATED inside the same transaction", /tx\.set\(sessionRef, \{/.test(tx));
+  ok("...so the old separate add() is gone", !/collection\("sessions"\)\.add\(/.test(AV));
+
+  // ⚠️ FIRESTORE REQUIRES ALL READS BEFORE ANY WRITE. Getting this wrong throws
+  // at runtime, not at build, and only on the accept path.
+  const lastGet = tx.lastIndexOf("tx.get(");
+  const firstSet = tx.indexOf("tx.set(");
+  ok("every read precedes every write", lastGet >= 0 && firstSet > lastGet, { lastGet, firstSet });
+
+  // The refusal must abort before anything is claimed, or a refused request is
+  // marked answered with no session against it.
+  const throwAt = tx.indexOf('reason: "overlap"');
+  ok("the overlap refusal fires before the claim is written", throwAt > 0 && throwAt < firstSet,
+     { throwAt, firstSet });
+
+  // releaseClaim existed to reopen a request when the create failed after the
+  // claim. One commit means that window cannot open — and the reopen ran on a
+  // connection that had just failed, so it was never reliable anyway.
+  ok("the reopen-after-failure path is gone with the window it guarded",
+     !/const releaseClaim = async/.test(AV));
+}
 
 console.log(`  ${checks - fails}/${checks} assertions passed`);
 process.exit(fails ? 1 : 0);

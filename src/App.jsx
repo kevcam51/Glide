@@ -8,7 +8,7 @@ import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread
 import { pushStatus, enablePush, disablePush } from "./push.js";
 import { privGet, privSet, privSubscribe, privListEntries } from "./privateStore.js";
 import { bookSession, updateSession, cancelSession, markNoShow, waiveSession, subscribeMySessions, sessionsByDay, isPastSession, sessionEndMs, SESSION_DEFAULT_MIN,
-  bookSeries, cancelSeriesFrom, REPEAT_OPTIONS, REPEAT_MAX,
+  bookSeries, cancelSeriesFrom, REPEAT_OPTIONS, REPEAT_MAX, seriesStarts, overlappingSessions, SessionOverlapError,
   isBackdated, backdateProblem,
   createBlock, deleteBlock, subscribeMyBlocks,
   policyOf, packsOf, isLateCancel, lateCancelFeeCents, saveSessionPolicy, saveSessionPacks, saveAvailabilityPublic,
@@ -10382,6 +10382,11 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   const [bookForm, setBookForm] = useState(null);
   const [bookBusy, setBookBusy] = useState(false);
   const [bookErr, setBookErr] = useState("");
+  // Consent to book on top of something, keyed on the WHOLE booking (S199q).
+  // Keyed on the start alone, a trainer warned about Tuesday 9:00 could change
+  // the duration or the repeat and the second tap would book spans nothing had
+  // checked — the exact defect S196b found in the calendar's copy of this.
+  const [bookConfirm, setBookConfirm] = useState(null);
   useEffect(() => {
     if (!meUid) return;
     return subscribeMySessions(meUid, (all) => setCalSessions(all.filter((s) =>
@@ -10885,16 +10890,27 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
     if (!Number.isFinite(startAt)) { setBookErr("Pick a date and time."); return; }
     const durationMin = Math.round(Number(bookForm.durationMin) || SESSION_DEFAULT_MIN);
     if (durationMin < 1 || durationMin > 480) { setBookErr("Duration must be between 1 and 480 minutes."); return; }
+    // ⚠️ THIS CALENDAR CANNOT ANSWER THE QUESTION ITSELF. Its session list is
+    // scoped to the trainer and the ONE client whose plan is open, so a clash
+    // with another client is invisible here. bookSeries asks it properly —
+    // against every session the trainer has — and refuses; a trainer who
+    // genuinely wants the overlap taps again.
+    const key = [startAt, durationMin, bookForm.repeat || "none", bookForm.count || 1].join("|");
     setBookBusy(true); setBookErr("");
     try {
       await bookSeries(meUid, peerUid, {
         startAt, durationMin, title: bookForm.title, location: bookForm.location,
         priceCents: Math.round((Number(bookForm.price) || 0) * 100),
-      }, { repeat: bookForm.repeat, count: bookForm.count });
-      setBookForm(null);
+      }, { repeat: bookForm.repeat, count: bookForm.count, allowOverlap: bookConfirm === key });
+      setBookForm(null); setBookConfirm(null);
     } catch (e) {
-      console.error("in-plan session booking failed", e && (e.code || e.message), e);
-      setBookErr("Couldn't book that session.");
+      if (e && e.code === "overlap") {
+        setBookConfirm(key);
+        setBookErr(`${e.message} Tap Book again to book it anyway.`);
+      } else {
+        console.error("in-plan session booking failed", e && (e.code || e.message), e);
+        setBookErr("Couldn't book that session.");
+      }
     } finally { setBookBusy(false); }
   };
 
@@ -10939,6 +10955,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             onClick={() => {
               const d = parseKey(k); const when = new Date(d.y, d.m, d.d, 9, 0, 0, 0);
               setBookErr("");
+              setBookConfirm(null);
               setBookForm({ id: null, when: calToLocalInput(when.getTime()), durationMin: String(SESSION_DEFAULT_MIN),
                 title: "", location: "", price: "", repeat: "none", count: "8" });
             }}
@@ -11304,7 +11321,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
         <CalBookingSheet form={bookForm} setForm={setBookForm}
           clients={[{ uid: peerUid }]} busy={bookBusy} err={bookErr}
           nameOf={() => [data.firstName, data.lastName].filter(Boolean).join(" ") || "your client"}
-          onClose={() => { setBookForm(null); setBookErr(""); }} onSubmit={bookSubmit} />
+          onClose={() => { setBookForm(null); setBookErr(""); setBookConfirm(null); }} onSubmit={bookSubmit} />
       )}
     </div>
   );
@@ -11334,47 +11351,11 @@ function WeightDayLogger({ date, existing, onSave }) {
 //
 // A repeating series is expanded FIRST, because occurrences 4..52 were examined
 // by nothing at all — the calendar's own warning panel only looks 21 days out.
-function seriesStarts(startAt, repeat, count) {
-  const n = Math.max(1, Math.min(Number(count) || 1, REPEAT_MAX || 52));
-  if (!repeat || repeat === "none") return [startAt];
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    const d = new Date(startAt);
-    if (repeat === "monthly") {
-      // Calendar-month stepping with day clamping — Jan 31 → Feb 28 → Mar 31,
-      // never Mar 3. Mirrors bookSeries.
-      const day = d.getDate();
-      d.setDate(1); d.setMonth(d.getMonth() + i);
-      d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
-    } else {
-      d.setDate(d.getDate() + i * (repeat === "biweekly" ? 14 : 7));
-    }
-    out.push(d.getTime());
-  }
-  return out;
-}
-// Every existing session that overlaps any of `starts`. `skipId` is the session
-// being rescheduled, which must not be found to overlap itself.
-function overlappingSessions(existing, starts, durationMin, skipId) {
-  const dur = Math.max(1, Number(durationMin) || SESSION_DEFAULT_MIN) * 60000;
-  const hits = [];
-  for (const st of starts) {
-    const en = st + dur;
-    for (const s of (existing || [])) {
-      if (!s || s.status === "cancelled") continue;
-      if (skipId && s.id === skipId) continue;
-      const sSt = Number(s.startAt) || 0;
-      if (!sSt) continue;
-      const sEn = sSt + (Number(s.durationMin) || SESSION_DEFAULT_MIN) * 60000;
-      if (st < sEn && en > sSt) {
-        hits.push({ startAt: st, other: s,
-          label: `${new Date(sSt).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` });
-        break;   // one clash per requested date is enough to report
-      }
-    }
-  }
-  return hits;
-}
+// seriesStarts and overlappingSessions now come from src/sessions.js (S199q).
+// The copies that stood here were a hand-written MIRROR of bookSeries's
+// occurrence maths — the comment said so — and a warning that describes dates
+// the booking will not actually create is worse than no warning. One
+// implementation, and it is the one that does the booking.
 
 // ─── Calorie simulator (S198z, Kevin) ───────────────────────────────────────
 // A sandbox for "what if". Pick a pace or type your own intake, add the training
@@ -20334,7 +20315,11 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
         await updateSession(form.id, { startAt, durationMin, title: form.title, location: form.location, priceCents });
         setMsg("Session updated.");
       } else {
-        const ids = await bookSeries(meUid, form.clientUid, { startAt, durationMin, title: form.title, location: form.location, priceCents }, { repeat: form.repeat, count: form.count });
+        // The confirm gate above has already run and been satisfied, so the
+        // shared guard would only ask the same question twice. skipId keeps a
+        // reschedule from finding itself.
+        const ids = await bookSeries(meUid, form.clientUid, { startAt, durationMin, title: form.title, location: form.location, priceCents },
+          { repeat: form.repeat, count: form.count, allowOverlap: true, skipId: form.id || "" });
         setMsg(ids.length > 1 ? `${ids.length} sessions booked.` : "Session booked.");
       }
       setForm(null); setConfirmOverlap(null);
@@ -28419,6 +28404,10 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
   const [confirmCancel, setConfirmCancel] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(null); // null = closed; else the booking draft
+  // Consent to double-book, keyed on the whole booking and cleared whenever the
+  // sheet opens — a token that outlives its form authorises a booking nobody
+  // was warned about (S196b, in the calendar's copy of this).
+  const [overlapOk, setOverlapOk] = useState(null);
   const [now, setNow] = useState(Date.now());
 
   // Live: if the other side cancels while this is open, it updates in place.
@@ -28567,10 +28556,10 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
   // Same rule as the calendar: the trainer's stated rate is the default, so a
   // session booked here can't quietly differ from the terms the client agreed to.
   const newPriceCents = policy.standardPriceCents > 0 ? policy.standardPriceCents : defaultPriceCents;
-  const openNew = () => { setEditingId(null); setErr(""); setForm({
+  const openNew = () => { setEditingId(null); setErr(""); setOverlapOk(null); setForm({
     when: toLocalInput(defaultSlot()), durationMin: String(SESSION_DEFAULT_MIN),
     title: "", location: "", price: newPriceCents ? String(newPriceCents / 100) : "" }); };
-  const openEdit = (s) => { setEditingId(s.id); setErr(""); setForm({
+  const openEdit = (s) => { setEditingId(s.id); setErr(""); setOverlapOk(null); setForm({
     when: toLocalInput(s.startAt), durationMin: String(s.durationMin || SESSION_DEFAULT_MIN),
     title: s.title || "", location: s.location || "", price: s.priceCents ? String(s.priceCents / 100) : "" }); };
 
@@ -28586,20 +28575,31 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
     // just a suggestion the other screen ignores.
     const backdate = backdateProblem(startAt);
     if (backdate) { setErr(backdate); return; }
+    // ⚠️ THIS PANEL HAS NO VIEW OF THE TRAINER'S OTHER CLIENTS EITHER. Its
+    // session list is one pair, so the question is asked in sessions.js against
+    // the whole book. Consent covers the whole booking, not just its start.
+    const key = [editingId || "new", startAt, durationMin].join("|");
     setBusy(true); setErr("");
     try {
       if (editingId) {
-        await updateSession(editingId, { startAt, durationMin, title: form.title, location: form.location, priceCents });
+        await updateSession(editingId, { startAt, durationMin, title: form.title, location: form.location, priceCents },
+          { trainerUid, allowOverlap: overlapOk === key });
         setMsg("Session updated.");
       } else {
-        await bookSession(trainerUid, clientUid, { startAt, durationMin, title: form.title, location: form.location, priceCents });
+        await bookSession(trainerUid, clientUid, { startAt, durationMin, title: form.title, location: form.location, priceCents },
+          { allowOverlap: overlapOk === key });
         setMsg("Session booked.");
       }
-      setForm(null); setEditingId(null);
+      setForm(null); setEditingId(null); setOverlapOk(null);
       setTimeout(() => setMsg(""), 2000);
     } catch (e) {
-      console.error("session save failed", e);
-      setErr(isTrainer ? "Couldn't save that session. Check you're still linked to this client." : "Only your trainer can book sessions.");
+      if (e && e.code === "overlap") {
+        setOverlapOk(key);
+        setErr(`${e.message} Tap ${editingId ? "Save changes" : "Book it"} again to do it anyway.`);
+      } else {
+        console.error("session save failed", e);
+        setErr(isTrainer ? "Couldn't save that session. Check you're still linked to this client." : "Only your trainer can book sessions.");
+      }
     }
     setBusy(false);
   };

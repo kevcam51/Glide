@@ -33,7 +33,8 @@ export const isPastSession = (s, now = Date.now()) => sessionEndMs(s) <= now;
 // that request.auth.uid === trainerUid AND that the client is really theirs.
 export async function bookSession(trainerUid, clientUid, {
   startAt, durationMin = SESSION_DEFAULT_MIN, title = "", location = "", priceCents = 0,
-}) {
+}, { allowOverlap = false, skipId = "" } = {}) {
+  await guardOverlap(trainerUid, [Number(startAt)], durationMin, { allowOverlap, skipId });
   const now = Date.now();
   const ref = await addDoc(collection(db, "sessions"), {
     participants: [trainerUid, clientUid],
@@ -112,11 +113,101 @@ function occurrenceStart(baseMs, opt, i) {
     : addDaysKeepingLocalTime(Number(baseMs), opt.days * i);
 }
 
-// Book one session, or a whole series. Returns the created ids.
-export async function bookSeries(trainerUid, clientUid, base, { repeat = "none", count = 1 } = {}) {
+// ─── Is that hour already taken? (S199q) ────────────────────────────────────
+// THE GAP THIS CLOSES. S199d added an overlap check to the trainer calendar's
+// booking sheet and to the one-tap Accept, and left the two other paths that
+// create sessions with none at all: the in-plan calendar's "book a session" and
+// the Sessions panel. Both are trainer-facing, both write real billable
+// sessions, and neither looked at anything before doing it.
+//
+// It belongs HERE rather than in each screen, because the screens cannot do it
+// properly: the in-plan calendar holds only the sessions between the trainer and
+// the ONE client whose plan is open, so a clash with a different client is
+// invisible to it. This function asks the question the way it has to be asked —
+// against every session the trainer has.
+//
+// ⚠️ THE SESSIONS QUERY MUST BE CONSTRAINED BY `participants`. firestore.rules
+// only permits a session query the caller is provably part of; a bare
+// where('trainerUid','==',…) is rejected outright with permission-denied. Same
+// constraint cancelSeriesFrom documents, learned the same way.
+export function seriesStarts(startAt, repeat = "none", count = 1) {
   const opt = REPEAT_OPTIONS[repeat] || REPEAT_OPTIONS.none;
   const n = repeatsOf(opt) ? Math.max(1, Math.min(REPEAT_MAX, Math.round(Number(count) || 1))) : 1;
-  if (n === 1) return [await bookSession(trainerUid, clientUid, base)];
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(occurrenceStart(Number(startAt), opt, i));
+  return out;
+}
+
+// Pure: which of `starts` collide with something already on the books.
+export function overlappingSessions(existing, starts, durationMin, skipId) {
+  const dur = Math.max(1, Number(durationMin) || SESSION_DEFAULT_MIN) * 60000;
+  const hits = [];
+  for (const st of starts) {
+    const en = st + dur;
+    for (const s of (existing || [])) {
+      if (!s || s.status === "cancelled") continue;
+      if (skipId && s.id === skipId) continue;
+      const sSt = Number(s.startAt) || 0;
+      if (!sSt) continue;
+      const sEn = sSt + (Number(s.durationMin) || SESSION_DEFAULT_MIN) * 60000;
+      if (st < sEn && en > sSt) {
+        hits.push({ startAt: st, other: s,
+          label: new Date(sSt).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) });
+        break;   // one clash per requested date is enough to report
+      }
+    }
+  }
+  return hits;
+}
+
+// Thrown by the booking calls so a caller can offer "book it anyway" rather
+// than treating a refusal as a failure. A trainer may genuinely want an overlap
+// — two clients on one court, a handover — so this is a QUESTION, not a wall.
+export class SessionOverlapError extends Error {
+  constructor(hits) {
+    const first = hits[0];
+    const allBlocks = hits.every((h) => String(h.other && h.other.id).startsWith("blk:"));
+    const noun = allBlocks ? "time you've blocked out" : "sessions you already have";
+    super(hits.length === 1
+      ? `That overlaps ${allBlocks ? "time you've blocked out" : "a session you already have"} at ${first.label}.`
+      : `${hits.length} of those dates overlap ${noun} (first: ${first.label}).`);
+    this.name = "SessionOverlapError";
+    this.code = "overlap";
+    this.hits = hits;
+  }
+}
+
+async function findConflicts(trainerUid, starts, durationMin, skipId) {
+  const [sess, blk] = await Promise.all([
+    getDocs(query(collection(db, "sessions"), where("participants", "array-contains", trainerUid))),
+    getDocs(query(collection(db, "trainerBlocks"), where("trainerUid", "==", trainerUid))),
+  ]);
+  const busy = [];
+  sess.forEach((d) => busy.push({ id: d.id, ...d.data() }));
+  // A block has no `status`, and is prefixed so the message can tell a client
+  // session apart from the trainer's own lunch break.
+  blk.forEach((d) => busy.push({ id: `blk:${d.id}`, ...d.data() }));
+  return overlappingSessions(busy, starts, durationMin, skipId);
+}
+
+// Refuse unless the caller has already asked the person. Every write path that
+// creates a session goes through here.
+async function guardOverlap(trainerUid, starts, durationMin, { allowOverlap, skipId }) {
+  if (allowOverlap) return;
+  const hits = await findConflicts(trainerUid, starts, durationMin, skipId);
+  if (hits.length) throw new SessionOverlapError(hits);
+}
+
+// Book one session, or a whole series. Returns the created ids.
+export async function bookSeries(trainerUid, clientUid, base,
+  { repeat = "none", count = 1, allowOverlap = false, skipId = "" } = {}) {
+  const opt = REPEAT_OPTIONS[repeat] || REPEAT_OPTIONS.none;
+  const n = repeatsOf(opt) ? Math.max(1, Math.min(REPEAT_MAX, Math.round(Number(count) || 1))) : 1;
+  // ⚠️ EVERY OCCURRENCE, not just the first. A standing Tuesday booked twelve
+  // deep is twelve chances to sit on top of something, and occurrences 2..52
+  // were examined by nothing at all on these paths.
+  if (n === 1) return [await bookSession(trainerUid, clientUid, base, { allowOverlap, skipId })];
+  await guardOverlap(trainerUid, seriesStarts(base.startAt, repeat, n), base.durationMin, { allowOverlap, skipId });
 
   const now = Date.now();
   const seriesId = `sr_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -177,10 +268,20 @@ export async function cancelSeriesFrom(session, byUid, reason = "") {
 }
 
 // Reschedule / retitle / re-price — trainer only (rules enforce it).
-export function updateSession(sessionId, fields) {
+export async function updateSession(sessionId, fields, { trainerUid = "", allowOverlap = false } = {}) {
   const patch = { updatedAt: Date.now() };
   for (const k of ["startAt", "durationMin", "title", "location", "priceCents"]) {
     if (fields[k] !== undefined) patch[k] = fields[k];
+  }
+  // MOVING a session can land on top of something exactly as easily as booking
+  // one, and this path had no check either (S199q). Guarded only when the TIME
+  // actually changes — renaming a session should not have to ask the calendar
+  // for permission — and skipping the session itself, which would otherwise
+  // always be found overlapping where it already is.
+  if (trainerUid && !allowOverlap && (fields.startAt !== undefined || fields.durationMin !== undefined)) {
+    await guardOverlap(trainerUid, [Number(patch.startAt !== undefined ? patch.startAt : fields.startAt)],
+      patch.durationMin !== undefined ? patch.durationMin : fields.durationMin,
+      { allowOverlap: false, skipId: sessionId });
   }
   return updateDoc(doc(db, "sessions", sessionId), patch);
 }
