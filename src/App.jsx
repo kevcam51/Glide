@@ -11192,6 +11192,55 @@ function WeightDayLogger({ date, existing, onSave }) {
   );
 }
 
+// ── Does a booking land on something already there? (S199d) ────────────────
+// Nothing on any booking path checked this, so two billable sessions could sit
+// on the same hour with neither party told. Both helpers are pure so the
+// arithmetic is testable away from Firestore.
+//
+// A repeating series is expanded FIRST, because occurrences 4..52 were examined
+// by nothing at all — the calendar's own warning panel only looks 21 days out.
+function seriesStarts(startAt, repeat, count) {
+  const n = Math.max(1, Math.min(Number(count) || 1, REPEAT_MAX || 52));
+  if (!repeat || repeat === "none") return [startAt];
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const d = new Date(startAt);
+    if (repeat === "monthly") {
+      // Calendar-month stepping with day clamping — Jan 31 → Feb 28 → Mar 31,
+      // never Mar 3. Mirrors bookSeries.
+      const day = d.getDate();
+      d.setDate(1); d.setMonth(d.getMonth() + i);
+      d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()));
+    } else {
+      d.setDate(d.getDate() + i * (repeat === "biweekly" ? 14 : 7));
+    }
+    out.push(d.getTime());
+  }
+  return out;
+}
+// Every existing session that overlaps any of `starts`. `skipId` is the session
+// being rescheduled, which must not be found to overlap itself.
+function overlappingSessions(existing, starts, durationMin, skipId) {
+  const dur = Math.max(1, Number(durationMin) || SESSION_DEFAULT_MIN) * 60000;
+  const hits = [];
+  for (const st of starts) {
+    const en = st + dur;
+    for (const s of (existing || [])) {
+      if (!s || s.status === "cancelled") continue;
+      if (skipId && s.id === skipId) continue;
+      const sSt = Number(s.startAt) || 0;
+      if (!sSt) continue;
+      const sEn = sSt + (Number(s.durationMin) || SESSION_DEFAULT_MIN) * 60000;
+      if (st < sEn && en > sSt) {
+        hits.push({ startAt: st, other: s,
+          label: `${new Date(sSt).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` });
+        break;   // one clash per requested date is enough to report
+      }
+    }
+  }
+  return hits;
+}
+
 // ─── Calorie simulator (S198z, Kevin) ───────────────────────────────────────
 // A sandbox for "what if". Pick a pace or type your own intake, add the training
 // you're considering, and see the day's net and where it lands you in a week,
@@ -19850,6 +19899,10 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
   const [now, setNow] = useState(() => Date.now());
   const [detail, setDetail] = useState(null);               // session being viewed
   const [form, setForm] = useState(null);                   // booking/reschedule form
+  // Which startAt the trainer has already been warned about, so the second tap
+  // on Save means "yes, book it anyway" rather than showing the same warning
+  // forever (S199d).
+  const [confirmOverlap, setConfirmOverlap] = useState(null);
   // The rules that govern every session on this page — cancellation stance,
   // fees, and billing cadence. They live HERE rather than only inside a single
   // client's Sessions panel because they aren't per-client: one policy governs
@@ -19908,10 +19961,17 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     const t = setTimeout(() => {
       callSessionTravel({ from, to: from + 21 * 86400000 })
         .then((r) => { if (alive) setTravel(r && r.data ? r.data : null); })
-        // A failed estimate must leave the calendar working. Silence is the
-        // honest outcome: we cannot say the schedule is fine, only that we
-        // could not check it.
-        .catch((e) => { if (alive) { setTravel(null); console.warn("travel check unavailable:", e && (e.code || e.message)); } });
+        // ⚠️ SILENCE IS NOT HONEST HERE, IT IS THE BUG (S199d). A failed
+        // estimate left `travel` null and the panel gated on
+        // `warnings.length > 0` — so "checked, all clear", "six of seven legs
+        // failed" and "the call threw" were BYTE-IDENTICAL on screen, on a
+        // feature whose whole job is to stop a trainer double-booking across
+        // town. An infra gap must never be able to say "your schedule is fine".
+        .catch((e) => {
+          if (!alive) return;
+          console.warn("travel check unavailable:", e && (e.code || e.message));
+          setTravel({ warnings: [], failed: true });
+        });
     }, 600);
     return () => { alive = false; clearTimeout(t); };
   }, [meUid, travelSig]);
@@ -20082,6 +20142,28 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     // answer, so it's refused rather than booked-and-never-settled.
     const backdate = backdateProblem(startAt);
     if (backdate) { setErr(backdate); return; }
+
+    // ⚠️ DOES THIS LAND ON SOMETHING ALREADY THERE? (S199d) Nothing on any
+    // booking path checked, so a trainer could put two billable sessions on one
+    // hour and find out from a client. `sessions` is already in memory here —
+    // this screen subscribes to it — so the check costs nothing.
+    //
+    // WARNED, not refused: this sheet has a form and a second tap, and a
+    // trainer may genuinely want an overlap (two clients on one court, a
+    // handover). The one-tap Accept path refuses instead, because it has
+    // nowhere to put a question. A repeating series is checked across EVERY
+    // occurrence — occurrences 4..52 were examined by nothing at all.
+    const wanted = seriesStarts(startAt, form.repeat, form.count);
+    const hits = overlappingSessions(sessions, wanted, durationMin, form.id);
+    if (hits.length && confirmOverlap !== startAt) {
+      setConfirmOverlap(startAt);
+      const first = hits[0];
+      setErr(hits.length === 1
+        ? `That overlaps ${first.label}. Tap Save again to book it anyway.`
+        : `${hits.length} of those dates overlap sessions you already have (first: ${first.label}). Tap Save again to book them anyway.`);
+      return;
+    }
+    setConfirmOverlap(null);
     setBusy(true);
     try {
       if (form.id) {
@@ -20314,6 +20396,20 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
         {/* Can this schedule be driven? (S197i) Only ever rendered when there is
             something wrong — a panel that says "all fine" every day is a panel
             people stop reading, and this one needs to be noticed. */}
+        {/* Could not check — said out loud rather than rendered as an all-clear. */}
+        {travel && (travel.failed || travel.unknownPairs > 0 || travel.pairsWithoutAddress > 0)
+          && !(travel.warnings && travel.warnings.length) && (
+          <div className="mb-2 rounded-lg border border-border bg-surface2 px-3 py-2 text-[.72rem] leading-snug text-muted">
+            {travel.failed
+              ? <>Couldn&rsquo;t check your drive times just now — this isn&rsquo;t an all-clear. Reopen the calendar to try again.</>
+              : travel.unknownPairs > 0
+                ? <>Couldn&rsquo;t work out {travel.unknownPairs === 1 ? "one connection" : `${travel.unknownPairs} connections`} between
+                  back-to-back sessions{travel.checkedPairs ? ` (of ${travel.checkedPairs})` : ""} — so this isn&rsquo;t an all-clear.
+                  Usually an address the map doesn&rsquo;t recognise.</>
+                : <>{travel.pairsWithoutAddress === 1 ? "One pair of back-to-back sessions has" : `${travel.pairsWithoutAddress} pairs of back-to-back sessions have`} no
+                  address to measure between — add a location to check the drive.</>}
+          </div>
+        )}
         {travel && travel.warnings && travel.warnings.length > 0 && (
           <div className="mb-4 rounded-card border p-3"
             style={travel.warnings.some((w) => w.kind !== "tight")

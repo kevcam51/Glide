@@ -314,7 +314,13 @@ const fakeFetch = async (url) => {
       const f = async () => ({ ok: false });     // both providers down
       const hit = await D.geocode(d2, "77 Transient Way Miami", "AIzaTESTKEY", f);
       ok("both providers failing yields null", hit === null);
-      ok("...and NOTHING is written to the shared cache", store.size === 0, [...store.keys()]);
+      // A soft marker IS written — it damps a retry storm — but it must never
+      // be a verdict about the address, because the cache doc is shared by
+      // every trainer and `failed` short-circuits them all for a day.
+      ok("...and NO 'no such address' verdict is written",
+         ![...store.values()].some((v) => v && v.failed), [...store.values()]);
+      ok("...only a short-lived soft marker",
+         [...store.values()].every((v) => v && v.softFail === true), [...store.values()]);
     }
 
     // A real miss — both providers agree it does not exist — is still cached.
@@ -365,7 +371,27 @@ const fakeFetch = async (url) => {
         : { ok: true, json: async () => [{ lat: "not-a-number", lon: "-80.1" }] };
       const hit = await D.geocode(d2, "12 Garbled St", "AIzaTESTKEY", f);
       ok("a malformed lat/lon yields null rather than NaN coordinates", hit === null, hit);
-      ok("...and is not cached as a definite miss", store.size === 0, [...store.values()]);
+      ok("...and is not cached as a definite miss",
+         ![...store.values()].some((v) => v && v.failed), [...store.values()]);
+    }
+
+    // ⚠️ AN EXPIRED HIT BEATS NO ANSWER. Buildings do not move, so when the
+    // lookup fails we serve what we already knew rather than losing the drive
+    // check for ten minutes.
+    {
+      const { store, db: d2 } = mkDb();
+      const good = await D.geocode(d2, "5 Stale Rd Miami", "AIzaTESTKEY",
+        async (url) => String(url).includes("maps.googleapis.com")
+          ? { ok: true, json: async () => ({ status: "OK", results: [{ geometry: { location: { lat: 25.5, lng: -80.5 } } }] }) }
+          : { ok: true, json: async () => [] });
+      ok("a hit is cached", !!good, good);
+      const key = [...store.keys()][0];
+      store.get(key).at = 0;                         // expire it
+      const after = await D.geocode(d2, "5 Stale Rd Miami", "AIzaTESTKEY", async () => ({ ok: false }));
+      ok("an expired hit is served when the lookup then fails",
+         !!after && after.lat === 25.5, after);
+      ok("...and the coordinates survive the soft-fail write",
+         store.get(key).lat === 25.5 && store.get(key).softFail === true, store.get(key));
     }
 
     // And a transient failure must not overwrite a good cached hit — `ref.set`

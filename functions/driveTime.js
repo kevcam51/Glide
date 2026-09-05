@@ -161,6 +161,11 @@ function feasibilityWarnings(sessions, travelMin, opts = {}) {
 // stub that respects `signal.aborted` the way real fetch does; the original
 // stub ignored it and reported a pass.
 const GEOCODE_TIMEOUT_MS = 5000;
+// How long a FAILED lookup (as opposed to a genuine "no such address") is
+// remembered. Minutes, not hours: long enough to stop a retry storm forming
+// across repeated calendar opens, short enough that a brief outage recovers on
+// its own without anyone waiting a day.
+const SOFT_FAIL_TTL_MS = 10 * 60 * 1000;
 async function fetchWithTimeout(f, url, opts, ms) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
@@ -217,6 +222,7 @@ async function geocode(db, address, apiKey, fetchFn) {
   const norm = normalizeAddress(address);
   if (!norm) return null;
   const ref = db.doc(`geocache/${addressKey(address)}`);
+  let stale = null;   // an expired-but-usable hit, if we have one
   try {
     const snap = await ref.get();
     if (snap.exists) {
@@ -229,15 +235,44 @@ async function geocode(db, address, apiKey, fetchFn) {
       // better at US addresses. A miss recorded by the free provider alone is
       // ignored when we now hold a key.
       if (d.failed && age < 86400000 && !(apiKey && d.missBy === "nominatim")) return null;
+      // ⚠️ AND A RECENT FAILURE IS REMEMBERED BRIEFLY, WHICH IS NOT THE SAME
+      // CLAIM. Refusing to cache a transient failure fixed the poisoning — a
+      // 429 must never be stored as "no such address" — but it removed ALL
+      // damping from the failure path, so a struggling address was re-queried
+      // on every calendar open: measured at 14 unthrottled Nominatim requests
+      // for one 8-session day, from a single Cloud Function egress IP, against
+      // a policy of roughly one per second. That is how a transient failure
+      // becomes a permanent one. A soft failure is therefore held for MINUTES,
+      // never hours, and it still means "could not check" — never "not real".
+      if (d.softFail && age < SOFT_FAIL_TTL_MS && !isFinite(d.lat)) return null;
       if (!d.failed && age < GEO_TTL_MS && isFinite(d.lat)) {
         return { lat: d.lat, lng: d.lng, provider: d.provider, cached: true };
       }
+      // An EXPIRED hit is still the best answer available if the lookup then
+      // fails — buildings do not move. Kept aside rather than discarded.
+      if (!d.failed && isFinite(d.lat)) stale = { lat: d.lat, lng: d.lng, provider: d.provider, cached: true };
     }
   } catch { /* a cache read failure must not stop the lookup */ }
   const { hit, missBy } = await geocodeLive(norm, apiKey, fetchFn);
   try {
     if (hit) {
       await ref.set({ at: Date.now(), lat: hit.lat, lng: hit.lng, provider: hit.provider, q: norm.slice(0, 120) });
+    } else if (!missBy) {
+      // Not a miss — a failed lookup.
+      //
+      // ⚠️ AND IT MUST NOT DESTROY WHAT WE ALREADY KNEW. `ref.set` REPLACES, so
+      // writing a bare soft-fail marker over an expired hit threw away perfectly
+      // good coordinates and returned null for the next ten minutes — turning a
+      // provider hiccup into a lost drive check. The previous fix stopped
+      // caching transient failures precisely to avoid that, and adding the
+      // damping back reintroduced it. The marker is written ALONGSIDE any hit we
+      // already had, and that hit is what we return.
+      if (stale) {
+        await ref.set({ at: Date.now(), lat: stale.lat, lng: stale.lng, provider: stale.provider,
+          softFail: true, q: norm.slice(0, 120) });
+      } else {
+        await ref.set({ at: Date.now(), softFail: true, q: norm.slice(0, 120) });
+      }
     } else if (missBy) {
       // A real miss — a provider actually answered "no such address" — worth
       // remembering for a day so a typo is not looked up on every calendar open.
@@ -254,7 +289,8 @@ async function geocode(db, address, apiKey, fetchFn) {
     // theoretical. Writing nothing also means a transient failure can no longer
     // overwrite a good cached hit, which `ref.set` would otherwise do.
   } catch { /* best-effort */ }
-  return hit;
+  // A stale hit beats no answer: the alternative is no drive check at all.
+  return hit || stale;
 }
 
 // ── drive estimate ──────────────────────────────────────────────────────────

@@ -226,6 +226,45 @@ exports.respondToBookingRequest = onCall(
       }
     }
 
+    // ⚠️ AND NOT ON TOP OF SOMETHING ALREADY THERE (S199d). Nothing on any
+    // booking path checked this, and Accept is a SINGLE TAP with no
+    // confirmation and no price field — so a trainer could put two billable
+    // sessions on the same hour without either party seeing a thing. It matters
+    // more now that a client can offer several days: the composer only fetches
+    // free/busy for the FIRST offered day, so tapping "Book this" on Wednesday
+    // books an hour nothing on either side ever looked at.
+    //
+    // Refused rather than warned, because a one-tap control has nowhere to put
+    // a warning — and refusing is recoverable (the request stays open, the
+    // claim has not happened yet) where a double-booking is not. A trainer who
+    // genuinely wants an overlap can still create it from the calendar, which
+    // has a real form and a confirmation.
+    if (accept && booking) {
+      const dayFrom = chosenStart - 12 * 3600000, dayTo = chosenStart + 12 * 3600000;
+      const endAt = chosenStart + (Number(booking.durationMin) || 60) * 60000;
+      // One equality, window filtered in code — a range on startAt alongside it
+      // needs a composite index, and this repo has been bitten by that twice.
+      const mine = await db.collection("sessions").where("trainerUid", "==", uid).get();
+      let clash = null;
+      mine.forEach((doc) => {
+        if (clash) return;
+        const v = doc.data() || {};
+        if (v.status === "cancelled") return;
+        const st = Number(v.startAt) || 0;
+        if (st < dayFrom || st > dayTo) return;
+        const en = st + (Number(v.durationMin) || 60) * 60000;
+        if (chosenStart < en && endAt > st) clash = { st, en };
+      });
+      if (clash) {
+        const clashWhen = new Date(clash.st).toLocaleString("en-US", {
+          timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "2-digit",
+        });
+        throw new HttpsError("failed-precondition",
+          `That overlaps a session you already have at ${clashWhen}. Decline this and offer another time, or book it yourself from the calendar.`,
+          { reason: "overlap" });
+      }
+    }
+
     // NOW claim it. The transaction is what stops two taps — the trainer's
     // phone and their laptop — becoming two sessions and two charges.
     await db.runTransaction(async (tx) => {
@@ -394,9 +433,19 @@ exports.sessionTravel = onCall(
     } catch { /* a profile read failure just means the free estimator */ }
     const key = keyPresent && paid ? raw : null;
     const legs = {};
+    // Pairs we could have checked, pairs we could not estimate, and pairs with
+    // no address to work from — three different things the UI must not merge.
+    let checkable = 0, unknown = 0, noAddress = 0;
     for (let i = 0; i < sessions.length - 1; i++) {
       const a = sessions[i], b = sessions[i + 1];
-      if (!a.location || !b.location) continue;
+      // ⚠️ COUNT WHAT COULD NOT BE CHECKED. An unknown drive produces no
+      // warning, which is right — a warning nobody can act on trains people to
+      // ignore the ones that matter — but it left "checked, all clear" and "six
+      // of seven legs failed" BYTE-IDENTICAL on screen, on a feature whose
+      // failure mode is silence and whose silence reads as "your schedule is
+      // fine". These two counts are what let the panel tell the difference.
+      if (!a.location || !b.location) { noAddress++; continue; }
+      checkable++;
       const legKey = `${a.id}>${b.id}`;
       if (legs[legKey]) continue;
       try {
@@ -405,6 +454,7 @@ exports.sessionTravel = onCall(
         console.error("drive estimate failed:", e && e.message);
         legs[legKey] = null;   // unknown, which the feasibility pass treats as silence
       }
+      if (!legs[legKey]) unknown++;
     }
     // Looked up by the exact pair that was estimated — never by address, which
     // would collide as soon as one client is visited twice in a day.
@@ -425,6 +475,12 @@ exports.sessionTravel = onCall(
       // Why it is not, when it is not — so the UI can tell the difference
       // between "your plan does not include this" and "nobody has one yet".
       trafficAvailable: keyPresent,
+      // What the answer is worth. `unknownPairs > 0` means the panel must NOT
+      // read as an all-clear, and `pairsWithoutAddress` is separately
+      // actionable — the fix for that one is typing an address, not retrying.
+      checkedPairs: checkable,
+      unknownPairs: unknown,
+      pairsWithoutAddress: noAddress,
     };
   },
 );
