@@ -20170,9 +20170,18 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     if (hits.length && confirmOverlap !== overlapKey) {
       setConfirmOverlap(overlapKey);
       const first = hits[0];
+      // ⚠️ SAY WHAT IT ACTUALLY CLASHES WITH. Blocks were folded into the pool
+      // without touching this copy, so a trainer whose only conflict was their
+      // own lunch break was told "8 of those dates overlap sessions you already
+      // have" — a false statement about their book, on a billing surface. Either
+      // they hunt for eight phantom double-bookings, or they learn the warning
+      // is unreliable and tap through it, which disables the guard for the real
+      // case. The server half of this same fix already made the distinction.
+      const allBlocks = hits.every((h) => String(h.other && h.other.id).startsWith("blk:"));
+      const noun = allBlocks ? "time you've blocked out" : "sessions you already have";
       setErr(hits.length === 1
-        ? `That overlaps ${first.label}. Tap Save again to book it anyway.`
-        : `${hits.length} of those dates overlap sessions you already have (first: ${first.label}). Tap Save again to book them anyway.`);
+        ? `That overlaps ${allBlocks ? "time you've blocked out" : "something"} at ${first.label}. Tap Save again to book it anyway.`
+        : `${hits.length} of those dates overlap ${noun} (first: ${first.label}). Tap Save again to book them anyway.`);
       return;
     }
     setConfirmOverlap(null);

@@ -239,7 +239,13 @@ async function geocode(db, address, apiKey, fetchFn) {
       // out a caller who has only Nominatim, which knows plenty of places
       // Google does not (parks, rural routes, new builds).
       const missIrrelevant = (apiKey && d.missBy === "nominatim") || (!apiKey && d.missBy === "google");
-      if (d.failed && age < 86400000 && !missIrrelevant) return null;
+      if (d.failed && age < 86400000 && !missIrrelevant) {
+        // A miss still short-circuits the lookup (that is the damping), but if
+        // we hold coordinates from before, they are a better answer than none:
+        // the alternative is the drive check going dark for a day over an
+        // address we already know where to find.
+        return isFinite(d.lat) ? { lat: d.lat, lng: d.lng, provider: d.provider, cached: true } : null;
+      }
       // ⚠️ AND A RECENT FAILURE IS REMEMBERED BRIEFLY, WHICH IS NOT THE SAME
       // CLAIM. Refusing to cache a transient failure fixed the poisoning — a
       // 429 must never be stored as "no such address" — but it removed ALL
@@ -288,11 +294,19 @@ async function geocode(db, address, apiKey, fetchFn) {
       // That is the third time in this pair of commits that a new guard broke
       // what a previous one protected.
       //
-      // `failed`/`missBy` are cleared explicitly: merge leaves absent fields
-      // alone, and a stale "no such address" verdict must not survive a write
-      // that says the opposite.
+      // ⚠️ AND IT MUST NOT CLEAR THE VERDICT EITHER. This used to write
+      // `failed:false, missBy:null` on the reasoning that a soft failure "says
+      // the opposite" of a miss. It says NOTHING — and the writer often cannot
+      // even see what the document holds, because `stale` is null exactly when
+      // the read threw. So a rate-limited second could erase a verdict both
+      // providers had agreed on, and worse: with the new symmetric guard a
+      // key-less caller walks past a `missBy:"google"` doc, fails transiently,
+      // and deletes the verdict a PAYING caller's Google lookup recorded — so
+      // that address gets re-billed to Google every ten minutes instead of once
+      // a day, ping-ponging between the two callers. A write only clears what
+      // it actually learned.
       await ref.set({
-        softFail: true, softAt: Date.now(), failed: false, missBy: null, q: norm.slice(0, 120),
+        softFail: true, softAt: Date.now(), q: norm.slice(0, 120),
         ...(stale ? { at: staleAt, lat: stale.lat, lng: stale.lng, provider: stale.provider } : {}),
       }, { merge: true });
     } else if (missBy) {
@@ -300,7 +314,11 @@ async function geocode(db, address, apiKey, fetchFn) {
       // remembering for a day so a typo is not looked up on every calendar open.
       // WHICH provider is recorded, because the answer is only as good as the
       // provider that gave it (see the read guard above).
-      await ref.set({ at: Date.now(), failed: true, missBy, q: norm.slice(0, 120) });
+      // Merged, for the same reason as above: a full replace deleted expired
+      // coordinates that were still the best answer anyone had, and the guard
+      // below then returned null for 24 hours — the drive check dark, using a
+      // pin that had been sitting in the row a moment earlier.
+      await ref.set({ at: Date.now(), failed: true, missBy, q: norm.slice(0, 120) }, { merge: true });
     }
     // ⚠️ A NON-DEFINITE FAILURE IS NEVER WRITTEN AS `failed`. A rate-limit, a
     // timeout or a 5xx used to be stored as `{failed:true}` for 24 hours — in

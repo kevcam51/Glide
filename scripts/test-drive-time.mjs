@@ -428,7 +428,11 @@ const fakeFetch = async (url) => {
          async () => ({ ok: false }))) !== null);
     }
 
-    // A stale "no such address" must not survive a write that says otherwise.
+    // ⚠️ A SOFT FAILURE MUST NOT CLEAR A VERDICT. It knows nothing — and the
+    // writer often cannot even see what the document holds, because `stale` is
+    // null exactly when the read threw. Clearing on an inconclusive result let
+    // a key-less caller delete the verdict a PAYING caller's Google lookup
+    // recorded, re-billing that address every ten minutes instead of daily.
     {
       const { store, db: d2 } = mkDb();
       const k = "geocache/" + D.addressKey("7 Contested Way");
@@ -436,8 +440,21 @@ const fakeFetch = async (url) => {
       // miss short-circuits before any write, which is correct.
       store.set(k, { at: Date.now() - 25 * 3600000, failed: true, missBy: "both", q: "x" });
       await D.geocode(d2, "7 Contested Way", null, async () => ({ ok: false }));
-      ok("a soft failure clears a previous 'no such address' verdict",
-         store.get(k).failed === false && store.get(k).softFail === true, store.get(k));
+      ok("a soft failure leaves an existing verdict alone",
+         store.get(k).failed === true && store.get(k).missBy === "both", store.get(k));
+      ok("...while still recording that a lookup was attempted",
+         store.get(k).softFail === true, store.get(k));
+    }
+    // ...and a definite miss must not destroy coordinates we already had.
+    {
+      const { store, db: d2 } = mkDb();
+      const k = "geocache/" + D.addressKey("11 Renamed Plaza");
+      store.set(k, { at: Date.now() - 200 * 86400000, lat: 25.78, lng: -80.19, provider: "google", q: "x" });
+      await D.geocode(d2, "11 Renamed Plaza", null, async () => ({ ok: true, json: async () => [] }));
+      ok("a miss keeps the coordinates it had", store.get(k).lat === 25.78, store.get(k));
+      const again = await D.geocode(d2, "11 Renamed Plaza", null, async () => ({ ok: false }));
+      ok("...and the next call serves them rather than going dark",
+         !!again && again.lat === 25.78, again);
     }
 
     // Symmetric to the nominatim guard: a GOOGLE-only miss must not lock out a

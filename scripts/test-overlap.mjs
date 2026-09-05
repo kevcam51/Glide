@@ -131,8 +131,19 @@ ok("...naming a block as a block when it refuses",
    /time you&#39;ve blocked out|time you've blocked out/.test(AVAIL));
 ok("accepting one slot says the other offered times are released",
    /free again/.test(AVAIL));
-ok("only pairs where a drive could matter are counted",
-   /RELEVANT_GAP_MIN/.test(AVAIL));
+ok("only pairs where a drive could matter are COUNTED", /RELEVANT_GAP_MIN/.test(AVAIL));
+// ⚠️ ...but the ESTIMATE still runs for every pair. Bounding the estimate meant
+// a >4h-apart impossible drive produced no warning AND no coverage note — a
+// blank calendar on a schedule the same code would otherwise call infeasible.
+ok("...while the estimate is NOT skipped by the ceiling",
+   /const counts = gapMin < RELEVANT_GAP_MIN;/.test(AVAIL)
+   && !/if \(!\(gapMin < RELEVANT_GAP_MIN\)\) continue;/.test(AVAIL));
+ok("a trainer who uses no locations at all is not nagged",
+   /if \(!sessions\.some\(\(s\) => s\.location\)\) noAddress = 0;/.test(AVAIL));
+ok("the booking sheet names blocked time as blocked time",
+   /time you've blocked out/.test(APP) && /allBlocks/.test(APP));
+ok("a soft geocode failure does not clear a cached verdict",
+   !/softFail: true, softAt: Date\.now\(\), failed: false/.test(readFileSync(join(ROOT, "functions", "driveTime.js"), "utf8")));
 
 // ── the panel can say "couldn't check" ──────────────────────────────────────
 ok("sessionTravel reports what it could not estimate", /unknownPairs: unknown/.test(AVAIL));

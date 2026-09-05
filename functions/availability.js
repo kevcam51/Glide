@@ -476,10 +476,20 @@ exports.sessionTravel = onCall(
       // fine, and a permanent, undismissable "add a location" for the majority
       // of trainers who never fill a location in at all. A panel that is always
       // on is a panel nobody reads, which is how the real warning gets missed.
+      // ⚠️ THE CEILING BOUNDS THE COUNTERS, NOT THE ESTIMATE. Placing this
+      // `continue` above the estimate meant a pair more than four hours apart
+      // got no leg AND no count — so a genuinely impossible long drive produced
+      // no warning and no coverage note, a blank calendar on a schedule the
+      // same code would have called infeasible one commit earlier. That is a
+      // silent all-clear, which is the one thing this feature may never do.
+      // feasibilityWarnings has no ceiling of its own, so the estimate must
+      // still run for every pair; only the "did we manage to check it" counting
+      // is bounded, because a pair a day apart is not a connection anyone needs
+      // reassuring about.
       const gapMin = (b.startAt - (a.startAt + (Number(a.durationMin) || 0) * 60000)) / 60000;
-      if (!(gapMin < RELEVANT_GAP_MIN)) continue;
-      if (!a.location || !b.location) { noAddress++; continue; }
-      checkable++;
+      const counts = gapMin < RELEVANT_GAP_MIN;
+      if (!a.location || !b.location) { if (counts) noAddress++; continue; }
+      if (counts) checkable++;
       const legKey = `${a.id}>${b.id}`;
       if (legs[legKey]) continue;
       try {
@@ -488,8 +498,17 @@ exports.sessionTravel = onCall(
         console.error("drive estimate failed:", e && e.message);
         legs[legKey] = null;   // unknown, which the feasibility pass treats as silence
       }
-      if (!legs[legKey]) unknown++;
+      if (!legs[legKey] && counts) unknown++;
     }
+    // ⚠️ DO NOT NAG SOMEONE WHO DOES NOT USE ADDRESSES. Location is optional and
+    // is only ever pre-filled from an earlier session that had one, so a trainer
+    // who has never typed one never gets one — and every back-to-back pair they
+    // ever book would report "no address to measure between", permanently, with
+    // nothing wrong and nothing they asked for. Bounding by gap cut that from 74
+    // to 60 on a normal week, which is not a fix. The honest signal is whether
+    // they use locations AT ALL: if none of their sessions has one, this feature
+    // is not something they are using and the panel has nothing to tell them.
+    if (!sessions.some((s) => s.location)) noAddress = 0;
     // Looked up by the exact pair that was estimated — never by address, which
     // would collide as soon as one client is visited twice in a day.
     const warnings = feasibilityWarnings(sessions, (a, b) => legs[`${a.id}>${b.id}`] || null);
