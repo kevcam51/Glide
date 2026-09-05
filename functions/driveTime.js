@@ -144,17 +144,33 @@ function feasibilityWarnings(sessions, travelMin, opts = {}) {
 //               false when the lookup itself failed. Only a definite miss may
 //               be cached; a 429 cached as "not found" would disable the drive
 //               check for that address for a day, for every trainer.
+// ⚠️ EACH PROVIDER GETS ITS OWN TIMEOUT BUDGET. The first version of this fix
+// shared ONE AbortController across both calls, which quietly undid the fix it
+// was making: when Google is SLOW — a hung request, a rate-limit stall, which
+// is the realistic failure, not a clean 403 — the shared controller fires, the
+// Google fetch rejects, and Nominatim is then called with an ALREADY-ABORTED
+// signal and throws instantly. So the fallback ran only when Google failed
+// FAST, and the common case still ended in silence. Caught by probing with a
+// stub that respects `signal.aborted` the way real fetch does; the original
+// stub ignored it and reported a pass.
+const GEOCODE_TIMEOUT_MS = 5000;
+async function fetchWithTimeout(f, url, opts, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await f(url, Object.assign({}, opts, { signal: ctrl.signal }));
+  } finally { clearTimeout(t); }
+}
+
 async function geocodeLive(address, apiKey, fetchFn) {
   const f = fetchFn || fetch;
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 8000);
   let definite = false;
-  try {
+  {
     if (apiKey) {
       try {
         const url = "https://maps.googleapis.com/maps/api/geocode/json?address="
           + encodeURIComponent(address) + "&key=" + encodeURIComponent(apiKey);
-        const r = await f(url, { signal: ctrl.signal });
+        const r = await fetchWithTimeout(f, url, {}, GEOCODE_TIMEOUT_MS);
         if (r.ok) {
           const j = await r.json();
           const loc = j && j.results && j.results[0] && j.results[0].geometry && j.results[0].geometry.location;
@@ -167,15 +183,22 @@ async function geocodeLive(address, apiKey, fetchFn) {
         }
       } catch { /* fall through to the free provider */ }
     }
-    const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q="
-      + encodeURIComponent(address);
-    const r = await f(url, { signal: ctrl.signal, headers: { "User-Agent": "Glidna/1.0 (support@glidna.com)" } });
-    if (!r.ok) return { hit: null, definite };
-    const j = await r.json();
-    const hit = Array.isArray(j) && j[0];
-    if (!hit) return { hit: null, definite: true };
-    return { hit: { lat: Number(hit.lat), lng: Number(hit.lon), provider: "nominatim" }, definite: true };
-  } catch { return { hit: null, definite }; } finally { clearTimeout(t); }
+    try {
+      const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&q="
+        + encodeURIComponent(address);
+      const r = await fetchWithTimeout(f, url,
+        { headers: { "User-Agent": "Glidna/1.0 (support@glidna.com)" } }, GEOCODE_TIMEOUT_MS);
+      if (!r.ok) return { hit: null, definite };
+      const j = await r.json();
+      const hit = Array.isArray(j) && j[0];
+      if (!hit) return { hit: null, definite: true };
+      const lat = Number(hit.lat), lng = Number(hit.lon);
+      // A malformed pair is not a location. Returning NaN coordinates would
+      // cache them and hand haversineMiles a null distance for months.
+      if (!isFinite(lat) || !isFinite(lng)) return { hit: null, definite };
+      return { hit: { lat, lng, provider: "nominatim" }, definite: true };
+    } catch { return { hit: null, definite }; }
+  }
 }
 
 // Cached geocode. A MISS IS CACHED TOO (as {failed:true}), for a shorter time —

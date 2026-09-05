@@ -329,6 +329,45 @@ const fakeFetch = async (url) => {
          [...store.values()].some((v) => v && v.failed === true), [...store.values()]);
     }
 
+    // ⚠️ THE REALISTIC GOOGLE FAILURE IS SLOW, NOT FAST — and the first version
+    // of this fix died on exactly that. One shared AbortController across both
+    // providers meant a hung Google call aborted the signal, and Nominatim was
+    // then invoked with an ALREADY-ABORTED signal and threw instantly. The
+    // fallback ran only when Google failed fast.
+    //
+    // This stub REJECTS on an already-aborted signal, the way real fetch does.
+    // The earlier stub ignored it and happily reported a pass, which is why the
+    // bug survived its own test.
+    {
+      const { db: d2 } = mkDb();
+      let osm = 0;
+      const slowGoogle = async (url, opts) => {
+        const sig = opts && opts.signal;
+        if (sig && sig.aborted) { const e = new Error("aborted"); e.name = "AbortError"; throw e; }
+        if (String(url).includes("maps.googleapis.com")) {
+          return await new Promise((_r, rej) => sig.addEventListener("abort", () => {
+            const e = new Error("aborted"); e.name = "AbortError"; rej(e);
+          }));
+        }
+        osm++;
+        return { ok: true, json: async () => [{ lat: "25.79", lon: "-80.13" }] };
+      };
+      const hit = await D.geocode(d2, "1300 Ocean Dr Miami Beach", "AIzaTESTKEY", slowGoogle);
+      ok("a SLOW Google still reaches the free fallback", !!hit && hit.provider === "nominatim", hit);
+      ok("...because each provider has its own timeout budget", osm === 1, { osm });
+    }
+
+    // Malformed coordinates are not a location.
+    {
+      const { store, db: d2 } = mkDb();
+      const f = async (url) => String(url).includes("maps.googleapis.com")
+        ? { ok: false }
+        : { ok: true, json: async () => [{ lat: "not-a-number", lon: "-80.1" }] };
+      const hit = await D.geocode(d2, "12 Garbled St", "AIzaTESTKEY", f);
+      ok("a malformed lat/lon yields null rather than NaN coordinates", hit === null, hit);
+      ok("...and is not cached as a definite miss", store.size === 0, [...store.values()]);
+    }
+
     // And a transient failure must not overwrite a good cached hit — `ref.set`
     // replaces, so writing on every outcome would destroy a working entry.
     {
