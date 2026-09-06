@@ -1,25 +1,23 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S200h) — ⚠️ PUSHED BUT **NOT DEPLOYED**
+## ▶️ START HERE (S200h) — PUSHED AND DEPLOYED
 
-Tip is `ad4b8fa`; **923 unit assertions across 18 suites**; build and
-`check:undef` clean.
+Tip is `d9bd487`; **923 unit assertions across 18 suites**; build and
+`check:undef` clean. `trainerizeTest`, `trainerizeImport` and
+`trainerizeAutoSync` all redeployed after Kevin re-authed.
 
-⚠️ **`functions/trainerize.js` IS COMMITTED AND PUSHED BUT NOT DEPLOYED.** The
-Firebase CLI token expired partway through the session — the deploy printed
-`Authentication Error: Your credentials are no longer valid`, and an earlier
-invocation reported "0 functions updated", which is what an auth failure looks
-like if you only count success lines. **Until Kevin runs
-`firebase login --reauth --no-localhost` and the deploy below succeeds, the
-30-minute auto-sync is still running the S200g code and STILL WRITES THE FULL
-PROFILE SNAPSHOT.**
+⚠️ **A DEPLOY THAT PRINTS NOTHING IS AN AUTH FAILURE, NOT A NO-OP.** The first
+attempt this session reported "0 functions updated" because the CLI token had
+expired mid-session; only the re-run surfaced
+`Authentication Error: Your credentials are no longer valid`. Count the
+`Successful update operation` lines and treat zero as a failure — the same
+invocation shape that deployed fine an hour earlier silently deployed nothing.
+Fix is `firebase login --reauth --no-localhost`.
 
-```
-npx firebase deploy --only functions:trainerizeTest,functions:trainerizeImport,functions:trainerizeAutoSync --project calorieiq-29762
-```
-
-Nothing is half-shipped by the push: S200h touches only `functions/` and
-`scripts/`, so the frontend has no counterpart waiting on it.
+⚠️ **The `functions:log` CLI lags by an hour or more** (already noted in S197).
+Runs at 04:09Z were visible as "Starting new instance" while the newest
+`trainerizeAutoSync {...}` line still read 03:39Z. Do not conclude a function
+has stopped from a stale page.
 
 **S200h — Trainerize stops changing Glidna in the background.** Kevin: *"I do
 not want anything input in trainerize, other than the calorie burn, to affect
