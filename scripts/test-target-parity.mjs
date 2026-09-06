@@ -126,8 +126,16 @@ const base = {
   // Pin the SET: a new reader of checkIns.weight has to say why it may include
   // an aspiration, rather than inheriting the bug by omission.
   {
+    // ⚠️ EXEMPT THE RULE'S OWN BODY. splitWeighIns (S199z) is the one function
+    // that decides what a reading is, so its first line necessarily reads
+    // checkIns weight before the split happens on the next. Flagging it would
+    // make the guard fire on its own implementation — the same shape that made
+    // the trainer-notes enumeration fail on its own documentation.
+    const ruleBody = /function splitWeighIns\(checkIns\) \{[\s\S]*?\n\}/.exec(APP);
+    const exempt = new Set((ruleBody ? ruleBody[0] : "").split("\n").map((l) => l.trim()));
     const readers = APP.split("\n").filter((ln) =>
-      /checkIns[^\n]*\.filter\(/.test(ln) || /\(d\.checkIns \|\| \[\]\)/.test(ln));
+      (/checkIns[^\n]*\.filter\(/.test(ln) || /\(d\.checkIns \|\| \[\]\)/.test(ln))
+      && !exempt.has(ln.trim()));
     const unfiltered = readers.filter((ln) => /\bweight\b/.test(ln) && !/isFuturePlan/.test(ln));
     ok("no reader of checkIns weight forgets the planned-goal filter",
        unfiltered.length === 0, unfiltered.map((l) => l.trim().slice(0, 80)));
