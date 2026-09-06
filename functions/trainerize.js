@@ -143,6 +143,13 @@ const ACTIVITY_MAP = {
   veryActive: "very", extremelyActive: "extra", extraActive: "extra",
 };
 
+// Snapshot fields a deliberate Glidna edit takes ownership of (S200g). Mirrors
+// what mapSnapshot below can write, minus weightLbs — see applySnapshotAndSyncs.
+// Marked by stampLocalEdits in src/App.jsx and by set_personal_info in
+// functions/aitools.js; scripts/test-tz-snapshot.mjs holds the two in step.
+const LOCAL_EDIT_WINS = ["firstName", "lastName", "gender", "age", "heightFt", "heightIn",
+  "goalWeight", "bodyFat", "activityLevel", "macroTargets"];
+
 // Age in whole years from a "YYYY-MM-DD" birth date (null if unparseable).
 function ageFromBirthDate(birthDate) {
   if (!birthDate) return null;
@@ -641,26 +648,26 @@ async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDat
   // over the top every run, so an edit silently reverted within the half hour.
   // Once someone has set them here, Trainerize never touches that one field again.
   const snapApply = { ...snap };
-  if (prev.macroTargetsEditedAt) delete snapApply.macroTargets;
-  // ⚠️ AND activityLevel, FOR THE SAME REASON — THE THIRD TIME THIS CLASS HAS
-  // BITTEN (S200f). It sat between two fields that each already carry a
-  // don't-clobber guard, and had none: Trainerize's `activeLevel` was re-stamped
-  // over the local value on every run, so a deliberate change here reverted
-  // within the half hour and looked exactly like "it didn't save".
+  // ⚠️ A DELIBERATE LOCAL EDIT BEATS THE SNAPSHOT, FOR EVERY FIELD (S200g).
   //
-  // That is worse for this field than for the others, because Glidna now
-  // PROPOSES an activity rung from measured expenditure (the observed-TDEE card)
-  // — a number Trainerize cannot see. Letting a stale signup answer overwrite a
-  // measured one would make the app argue with its own recommendation.
-  if (prev.activityLevelEditedAt) delete snapApply.activityLevel;
-  // Weight: NEWEST MEASUREMENT WINS, whichever side it came from. This used to
-  // overwrite unconditionally, so a weigh-in logged in Glidna today was reverted
-  // to Trainerize's older stat within 30 minutes — and because the sync only
-  // re-stamps the check-in dated lastStatDate, the Glidna check-in kept the new
-  // number while data.weightLbs went back to the old one. The client home reads
-  // weightLbs, so it showed the stale weight (Kevin: logged 200, still saw 202).
-  // Comparing dates keeps Trainerize authoritative for genuinely newer stats
-  // without discarding a fresher reading someone took here.
+  // Trainerize stays source of truth for the snapshot (S86d, and the coach
+  // dashboards depend on that) until a person changes something HERE on
+  // purpose. Then that field is theirs, and this sync stops touching it.
+  //
+  // This used to be one hand-written line per field, added each time somebody
+  // reported the same symptom — macroTargets in S86, weightLbs in S198,
+  // activityLevel in S200f — while every field beside them stayed exposed. The
+  // rule now comes from a list, and the app marks the fields from a single
+  // choke point (stampLocalEdits in src/App.jsx), so the next field cannot be
+  // the one nobody remembered.
+  //
+  // weightLbs is absent on purpose: it is a measurement rather than a setting,
+  // so it keeps syncing under the newest-reading-wins rule just below. Freezing
+  // the scale after one manual correction would be a worse bug than the one
+  // this prevents.
+  for (const f of LOCAL_EDIT_WINS) {
+    if (prev[`${f}EditedAt`]) delete snapApply[f];
+  }
   if (snapApply.weightLbs != null) {
     const cis = Array.isArray(prev.checkIns) ? prev.checkIns : [];
     const newestLocal = cis.reduce((acc, c) =>

@@ -483,6 +483,50 @@ function activityRungSuggestion({ observed, tdee, activityLevel, activityCheck, 
   return { from: cur, to: best, newTdee: Math.round(bmr * best.multiplier) };
 }
 
+// Fields the Trainerize sync re-stamps from its own snapshot, and the mark that
+// says a person changed one here on purpose (S200g).
+//
+// ⚠️ THIS IS A LIST, NOT A HABIT, BECAUSE THE HABIT KEPT FAILING. The same bug
+// has now been fixed three times one field at a time — macroTargets in S86
+// ("an edit silently reverted within the half hour"), weightLbs in S198
+// ("logged 200, still saw 202"), activityLevel in S200f — each time by adding a
+// guard to the one field that had just been reported. Everything beside them
+// stayed exposed. So the rule is stated once, applied to every field the
+// snapshot can write, and the marker is stamped from ONE place below rather
+// than at each of the ~40 handlers that could set one.
+//
+// weightLbs is deliberately NOT here. It is a measurement, not a setting: it is
+// supposed to keep changing, and it already has a better rule than a marker —
+// newest reading wins, whichever side took it. A marker would freeze the scale.
+const TZ_SNAPSHOT_FIELDS = ["firstName", "lastName", "gender", "age", "heightFt", "heightIn",
+  "goalWeight", "bodyFat", "activityLevel", "macroTargets"];
+
+// Mark any protected field this edit actually changed. Compared by VALUE:
+// React rebuilds the data object on every edit, so reference equality would
+// stamp all ten fields on every keystroke and hand Trainerize's whole snapshot
+// to the first person who typed a letter.
+function stampLocalEdits(prev, next) {
+  if (!prev || !next) return next;
+  let out = next;
+  const mark = (f) => {
+    if (out === next) out = { ...next };
+    out[`${f}EditedAt`] = Date.now();
+  };
+  for (const f of TZ_SNAPSHOT_FIELDS) {
+    const a = prev[f], b = next[f];
+    const same = (a && typeof a === "object") || (b && typeof b === "object")
+      ? JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+      : String(a ?? "") === String(b ?? "");
+    if (same) continue;
+    mark(f);
+    // Height is written as a pair and re-stamped as a pair. Marking one half
+    // would let a sync restore the other and invent a height nobody has.
+    if (f === "heightFt") mark("heightIn");
+    if (f === "heightIn") mark("heightFt");
+  }
+  return out;
+}
+
 // A plan edit that has not reached Firestore yet, parked somewhere synchronous
 // (S200f).
 //
@@ -32004,7 +32048,12 @@ export default function App() {
 
   const setDataAndSave = (updater) => {
     setData(prev => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
+      const raw = typeof updater === "function" ? updater(prev) : updater;
+      // Every plan edit in the app funnels through here — the wizard, the
+      // dashboard cards, the measurement sheets, a trainer editing a client.
+      // Marking Trainerize-owned fields at this one point is what makes the
+      // guard exhaustive instead of a list of handlers someone has to remember.
+      const next = stampLocalEdits(prev, raw);
       autoSave(next, step);
       return next;
     });
@@ -32417,15 +32466,9 @@ export default function App() {
     const fresh = resetPlanData(data);
     setStep(0); setData(fresh); autoSave(fresh, 0);
   };
-  // ⚠️ THE WIZARD IS A DELIBERATE CHOICE TOO (S200f). The Activity step writes
-  // through this generic setter, so stamping only at the suggestion card would
-  // leave the wizard's answer unprotected and reverted by the next Trainerize
-  // sync — the same bug, reached by the more common route.
-  const update = (k,v) => setDataAndSave(p => {
-    const n = { ...p, [k]: v };
-    if (k === "activityLevel") n.activityLevelEditedAt = Date.now();
-    return n;
-  });
+  // The wizard is a deliberate choice too, and needs no special case: every
+  // Trainerize-owned field it writes is marked by stampLocalEdits (S200g).
+  const update = (k,v) => setDataAndSave(p=>({...p,[k]:v}));
 
   // Recovery: scan storage for profiles missing from the index
   const recoverProfiles = async () => {
@@ -33641,11 +33684,9 @@ export default function App() {
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
               dayCalsAll={dayCalsAll}
               onSetActivityLevel={(id)=>setDataAndSave(p=>({...p, activityLevel: id,
-                // Two stamps, two jobs. `activityLevelEditedAt` tells the Trainerize
-                // sync a person chose this, so its own snapshot must not re-stamp it
-                // half an hour later (S200f — the third field to need that guard).
-                activityLevelEditedAt: Date.now(),
-                // `activityCheck` starts the 14-day cooldown so the card stops asking.
+                // The anti-clobber marker is stamped by stampLocalEdits (S200g).
+                // This records the DECISION, which starts the 14-day cooldown so
+                // the card stops asking.
                 activityCheck: { at: Date.now(), to: id, decision: "accepted" }}))}
               onDismissActivitySuggestion={(id)=>setDataAndSave(p=>({...p,
                 // Dismissing writes only the cooldown: "not now" is an answer to the

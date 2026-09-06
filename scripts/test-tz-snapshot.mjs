@@ -26,6 +26,9 @@ const cut = (start, endMarker) => {
   return SRC.slice(a, b);
 };
 const planTxn = cut("async function planTxnWrap", "\n}\n") + "\n}\n";
+// The real list, lifted rather than retyped: a local copy would keep passing
+// while the shipping one lost a field (S200g).
+const localWins = cut("const LOCAL_EDIT_WINS = [", "];") + "];";
 const applyFn = cut("async function applySnapshotAndSyncs", "\n// Every Trainerize client we should keep in sync");
 
 const store = new Map();
@@ -49,7 +52,7 @@ const seed = (uid, key, obj) => store.set(K(uid, key), { k: key, value: JSON.str
 // isolates the snapshot/merge logic (the workout sync has its own harness).
 const scope = new Function(
   "db_unused", "syncClientNutrition", "syncClientHealth", "syncClientWorkouts", "console",
-  `${planTxn}\n${applyFn}\nreturn { applySnapshotAndSyncs };`
+  `${localWins}\n${planTxn}\n${applyFn}\nreturn { applySnapshotAndSyncs, LOCAL_EDIT_WINS };`
 )(null,
   async () => 0,
   async () => ({ days: 0, seen: 0 }),
@@ -107,45 +110,85 @@ const CLIENT = { id: 4242 };
      read("admin", "caliq-ctz4242").data.macroTargets.protein === 200,
      read("admin", "caliq-ctz4242").data.macroTargets);
 
-  // ── 5b. and neither is a deliberately-chosen activity level (S200f) ──────
-  // ⚠️ THE THIRD FIELD TO NEED THIS GUARD, AND THE ONE THAT COST A REPORT.
-  // `activityLevel` sat between macroTargets (guarded above) and weightLbs
-  // (guarded by date) with nothing of its own, so Trainerize's signup answer
-  // was re-stamped over the local value on EVERY run — every 30 minutes, and
-  // again whenever the owner taps "sync tracker". Kevin: "I select the
-  // recommended new activity level, it works, but when I close the app it ends
-  // up going away."
-  //
-  // It matters more here than for the others because Glidna now MEASURES an
-  // activity rung from logged intake and the scale and proposes it. Letting a
-  // stale remote answer win would have the app overrule its own recommendation
-  // on a timer.
-  store.clear();
-  seed("admin", "caliq-ctz4242", { data: { activityLevel: "very", activityLevelEditedAt: 123 }, step: 5 });
-  await scope.applySnapshotAndSyncs(db, "admin", "ctz4242", CLIENT,
-    { activityLevel: "moderate", weightLbs: 180 }, null, {}, 14);
-  ok("a chosen activity level survives the sync",
-     read("admin", "caliq-ctz4242").data.activityLevel === "very",
-     read("admin", "caliq-ctz4242").data.activityLevel);
+  // ── 5b. EVERY snapshot field yields to a deliberate local edit (S200f/g) ──
+  // ⚠️ THE SAME BUG WAS FIXED THREE TIMES, ONE FIELD AT A TIME. macroTargets in
+  // S86 ("an edit silently reverted within the half hour"), weightLbs in S198
+  // ("logged 200, still saw 202"), activityLevel in S200f — each guard added for
+  // the field that had just been reported, while everything beside it stayed
+  // exposed. Kevin: "protect the other fields too." So the rule is now a list,
+  // and this loop walks the SHIPPING list rather than a copy of it: a field that
+  // drops out of LOCAL_EDIT_WINS fails here instead of silently losing its guard.
+  const SNAP = { firstName: "Tz", lastName: "Remote", gender: "male", age: 41,
+    heightFt: 6, heightIn: 2, goalWeight: 175, bodyFat: 22,
+    activityLevel: "moderate", macroTargets: { protein: 111 } };
+  const LOCAL = { firstName: "Kev", lastName: "Local", gender: "female", age: 30,
+    heightFt: 5, heightIn: 9, goalWeight: 160, bodyFat: 14,
+    activityLevel: "very", macroTargets: { protein: 200 } };
+  const sameVal = (x, y) => JSON.stringify(x) === JSON.stringify(y);
 
-  // The control, and it is the important half: with no local choice on record
-  // Trainerize is still source of truth, exactly as it was before. A guard that
-  // also broke the first import would be a different bug, not a fix.
-  store.clear();
-  seed("admin", "caliq-ctz4242", { data: { activityLevel: "very" }, step: 5 });
-  await scope.applySnapshotAndSyncs(db, "admin", "ctz4242", CLIENT,
-    { activityLevel: "moderate", weightLbs: 180 }, null, {}, 14);
-  ok("an UNedited activity level still follows Trainerize",
-     read("admin", "caliq-ctz4242").data.activityLevel === "moderate",
-     read("admin", "caliq-ctz4242").data.activityLevel);
+  for (const f of scope.LOCAL_EDIT_WINS) {
+    // marked → the local value is untouchable
+    store.clear();
+    seed("admin", "caliq-ctz4242", { data: { [f]: LOCAL[f], [`${f}EditedAt`]: 123 }, step: 5 });
+    await scope.applySnapshotAndSyncs(db, "admin", "ctz4242", CLIENT, { ...SNAP }, null, {}, 14);
+    ok(`a chosen ${f} survives the sync`,
+       sameVal(read("admin", "caliq-ctz4242").data[f], LOCAL[f]),
+       read("admin", "caliq-ctz4242").data[f]);
 
-  // The marker alone must not freeze the rest of the snapshot.
+    // unmarked → Trainerize is still source of truth, exactly as before. A guard
+    // that also broke the first import would be a different bug, not a fix.
+    store.clear();
+    seed("admin", "caliq-ctz4242", { data: { [f]: LOCAL[f] }, step: 5 });
+    await scope.applySnapshotAndSyncs(db, "admin", "ctz4242", CLIENT, { ...SNAP }, null, {}, 14);
+    ok(`an UNedited ${f} still follows Trainerize`,
+       sameVal(read("admin", "caliq-ctz4242").data[f], SNAP[f]),
+       read("admin", "caliq-ctz4242").data[f]);
+  }
+
+  // The list itself, because its CONTENTS are the guarantee.
+  ok("the guard covers every field mapSnapshot can write, minus the measurement", (() => {
+    const fn = SRC.slice(SRC.indexOf("function mapSnapshot"), SRC.indexOf("\n}", SRC.indexOf("function mapSnapshot")));
+    const written = [...fn.matchAll(/\bd\.([a-zA-Z]+) =/g)].map((m) => m[1])
+      .filter((k) => !k.startsWith("_"));
+    // weightLbs is deliberately excluded — it is a measurement and keeps syncing
+    // under the newest-reading-wins rule; a marker there would freeze the scale.
+    const missing = [...new Set(written)].filter((k) => k !== "weightLbs" && !scope.LOCAL_EDIT_WINS.includes(k));
+    if (missing.length) console.log("      unguarded snapshot fields:", missing.join(", "));
+    return missing.length === 0;
+  })());
+  ok("weightLbs is NOT marker-guarded — it keeps its newest-reading-wins rule",
+     !scope.LOCAL_EDIT_WINS.includes("weightLbs"));
+
+  // The three lists that have to agree, because the app stamps what this drops.
+  {
+    const list = (src, name) => {
+      const m = src.match(new RegExp(`const ${name} = \\[([\\s\\S]*?)\\];`));
+      return m ? [...m[1].matchAll(/"([a-zA-Z]+)"/g)].map((x) => x[1]).sort() : null;
+    };
+    const app = list(readFileSync(join(ROOT, "src/App.jsx"), "utf8"), "TZ_SNAPSHOT_FIELDS");
+    const ai = list(readFileSync(join(ROOT, "functions/aitools.js"), "utf8"), "TZ_OWNED_FIELDS");
+    const tz = [...scope.LOCAL_EDIT_WINS].sort();
+    ok("the app stamps exactly what the sync yields on", JSON.stringify(app) === JSON.stringify(tz), { app, tz });
+    ok("and so does the assistant", JSON.stringify(ai) === JSON.stringify(tz), { ai, tz });
+  }
+
+  // Height is written as a pair, so half a guard would invent a height nobody has.
   store.clear();
-  seed("admin", "caliq-ctz4242", { data: { activityLevel: "very", activityLevelEditedAt: 123, weightLbs: 300 }, step: 5 });
+  seed("admin", "caliq-ctz4242", { data: { heightFt: 5, heightIn: 9, heightFtEditedAt: 1, heightInEditedAt: 1 }, step: 5 });
+  await scope.applySnapshotAndSyncs(db, "admin", "ctz4242", CLIENT, { heightFt: 6, heightIn: 2 }, null, {}, 14);
+  ok("a marked height survives as a PAIR",
+     read("admin", "caliq-ctz4242").data.heightFt === 5 && read("admin", "caliq-ctz4242").data.heightIn === 9,
+     read("admin", "caliq-ctz4242").data);
+
+  // And a marker on one field must not freeze the others.
+  store.clear();
+  seed("admin", "caliq-ctz4242", { data: { activityLevel: "very", activityLevelEditedAt: 123, goalWeight: 300 }, step: 5 });
   await scope.applySnapshotAndSyncs(db, "admin", "ctz4242", CLIENT,
-    { activityLevel: "moderate", weightLbs: 180, gender: "male" }, "2026-09-01", {}, 14);
-  ok("...so weight and profile fields still sync",
-     read("admin", "caliq-ctz4242").data.weightLbs === 180 && read("admin", "caliq-ctz4242").data.gender === "male",
+    { activityLevel: "moderate", goalWeight: 175, gender: "male" }, null, {}, 14);
+  ok("the guard is field-scoped, not a whole-snapshot veto",
+     read("admin", "caliq-ctz4242").data.activityLevel === "very"
+     && read("admin", "caliq-ctz4242").data.goalWeight === 175
+     && read("admin", "caliq-ctz4242").data.gender === "male",
      read("admin", "caliq-ctz4242").data);
 
   // ── 6. a plan that does not exist yet is created, not crashed on ─────────

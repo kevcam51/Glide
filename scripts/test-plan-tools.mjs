@@ -71,6 +71,20 @@ const ok = (name, cond, extra) => { checks++; if (!cond) { fails++; console.log(
   ok("set_personal_info returns a profile", !!r.profile && r.profile.weightLbs === 180, r.profile);
   ok("set_personal_info kept other fields", read("u1", "caliq-self").data.gender === "female");
   ok("set_personal_info kept step", read("u1", "caliq-self").step === 5);
+  // ⚠️ THE MARKER IS LOAD-BEARING (S200g). The Trainerize sync re-stamps these
+  // fields from its own snapshot every 30 minutes unless a deliberate local edit
+  // is on record — so without this, the assistant confirms a change that quietly
+  // reverts within the half hour. goalWeight is protected; weightLbs is not,
+  // because it keeps syncing under newest-reading-wins and a marker would freeze
+  // the scale. Both directions asserted, or the guard could pass by marking
+  // everything.
+  ok("set_personal_info marks the field it changed",
+     read("u1", "caliq-self").data.goalWeightEditedAt > 0, read("u1", "caliq-self").data.goalWeightEditedAt);
+  ok("set_personal_info does NOT mark weightLbs",
+     read("u1", "caliq-self").data.weightLbsEditedAt === undefined);
+  ok("set_personal_info does not mark fields it left alone",
+     read("u1", "caliq-self").data.genderEditedAt === undefined
+     && read("u1", "caliq-self").data.activityLevelEditedAt === undefined);
 
   // refusal path must NOT write
   reset();

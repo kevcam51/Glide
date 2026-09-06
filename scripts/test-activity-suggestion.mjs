@@ -108,8 +108,59 @@ ok("the memo re-runs when the decision is recorded", /\}\), \[observed, data\.ac
 ok("accepting records the cooldown", /activityCheck: \{ at: Date\.now\(\), to: id, decision: "accepted" \}/.test(APP));
 ok("dismissing records the cooldown", /activityCheck: \{ at: Date\.now\(\), to: id, decision: "dismissed" \}/.test(APP));
 ok("there is a Not now to dismiss with", /onDismissActivitySuggestion\(activitySuggestion\.to\.id\)/.test(APP));
-ok("accepting also stamps the anti-clobber marker", /activityLevelEditedAt: Date\.now\(\)/.test(APP));
-ok("the wizard stamps it too", /if \(k === "activityLevel"\) n\.activityLevelEditedAt = Date\.now\(\);/.test(APP));
+// ── the anti-clobber stamper (S200g) ──────────────────────────────────────
+// Trainerize re-stamps its snapshot fields every 30 minutes unless a deliberate
+// local edit is on record. Marking those at each of the ~40 handlers that could
+// set one is how the guard got forgotten three times; it is marked once, in
+// setDataAndSave, and executed here.
+{
+  const src = APP.match(/function stampLocalEdits\([\s\S]*?\n\}/);
+  const lst = APP.match(/const TZ_SNAPSHOT_FIELDS = \[[\s\S]*?\];/);
+  if (!src || !lst) { console.log("  FAIL: stampLocalEdits/TZ_SNAPSHOT_FIELDS not found"); process.exit(1); }
+  const { stamp, FIELDS } = new Function(`${lst[0]}\n${src[0]}\nreturn { stamp: stampLocalEdits, FIELDS: TZ_SNAPSHOT_FIELDS };`)();
+
+  const base = { gender: "female", age: "30", heightFt: "5", heightIn: "6", goalWeight: "172",
+    bodyFat: "22", activityLevel: "moderate", macroTargets: { protein: 180 },
+    firstName: "Casey", lastName: "Client", weightLbs: "186", checkIns: [] };
+
+  ok("stamper: an untouched edit marks nothing",
+     Object.keys(stamp(base, { ...base, water: 8 })).filter((k) => k.endsWith("EditedAt")).length === 0);
+
+  for (const f of FIELDS) {
+    const changed = { ...base, [f]: f === "macroTargets" ? { protein: 999 } : "CHANGED" };
+    const out = stamp(base, changed);
+    ok(`stamper: marks ${f} when it changes`, out[`${f}EditedAt`] > 0, out[`${f}EditedAt`]);
+    ok(`stamper: does not mark the others for ${f}`,
+       Object.keys(out).filter((k) => k.endsWith("EditedAt")).length <= (f.startsWith("height") ? 2 : 1),
+       Object.keys(out).filter((k) => k.endsWith("EditedAt")));
+  }
+
+  // Height is written and re-stamped as a pair; half a guard invents a height.
+  ok("stamper: height marks both halves",
+     !!stamp(base, { ...base, heightFt: "6" }).heightInEditedAt
+     && !!stamp(base, { ...base, heightIn: "9" }).heightFtEditedAt);
+
+  // ⚠️ VALUE, NOT REFERENCE. React rebuilds the data object on every edit, so a
+  // reference compare would mark all ten fields on the first keystroke and hand
+  // Trainerize's whole snapshot to whoever typed a letter.
+  ok("stamper: an identical value is not an edit",
+     Object.keys(stamp(base, { ...base, macroTargets: { protein: 180 } })).filter((k) => k.endsWith("EditedAt")).length === 0);
+  ok("stamper: a number and its string are not an edit",
+     Object.keys(stamp({ ...base, age: 30 }, { ...base, age: "30" })).filter((k) => k.endsWith("EditedAt")).length === 0);
+
+  // weightLbs keeps its newest-reading-wins rule; a marker would freeze the scale.
+  ok("stamper: weightLbs is deliberately NOT marked", !FIELDS.includes("weightLbs"));
+  ok("stamper: ...and a weigh-in marks nothing",
+     Object.keys(stamp(base, { ...base, weightLbs: "180" })).filter((k) => k.endsWith("EditedAt")).length === 0);
+
+  ok("the app marks from one place, not per handler",
+     /const next = stampLocalEdits\(prev, raw\);/.test(APP));
+
+  // NEG: the reference-compare version this deliberately avoids.
+  const byRef = (prev, next) => { const o = { ...next }; for (const f of FIELDS) if (prev[f] !== next[f]) o[`${f}EditedAt`] = 1; return o; };
+  ok("NEG: a reference compare would mark macroTargets on an identical value",
+     !!byRef(base, { ...base, macroTargets: { protein: 180 } }).macroTargetsEditedAt);
+}
 // Dismissing must not touch the plan — it is an answer, not an edit.
 {
   const seg = APP.slice(APP.indexOf("onDismissActivitySuggestion={"), APP.indexOf("onDismissActivitySuggestion={") + 420);

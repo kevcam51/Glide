@@ -611,6 +611,31 @@ async function writeManifest(db, uid, m) {
 // Personal stats carried over when starting a new phase (so the user/client
 // doesn't re-enter them). Phase-specific things (goal, targets, workouts,
 // check-ins, meals) start fresh.
+// Plan fields the 30-minute Trainerize sync re-stamps from its own snapshot
+// unless a deliberate local edit is on record (S200g). MUST match
+// LOCAL_EDIT_WINS in functions/trainerize.js and TZ_SNAPSHOT_FIELDS in
+// src/App.jsx — scripts/test-tz-snapshot.mjs asserts all three agree, because a
+// field that drops out of one list silently loses its guard.
+const TZ_OWNED_FIELDS = ["firstName", "lastName", "gender", "age", "heightFt", "heightIn",
+  "goalWeight", "bodyFat", "activityLevel", "macroTargets"];
+
+// Mark, in place, every protected field this edit actually changed. Compared by
+// value, so re-sending an identical number does not claim ownership of a field
+// nobody touched.
+function stampTzEdits(before, d) {
+  const same = (a, b) => ((a && typeof a === "object") || (b && typeof b === "object")
+    ? JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+    : String(a ?? "") === String(b ?? ""));
+  for (const f of TZ_OWNED_FIELDS) {
+    if (same(before[f], d[f])) continue;
+    d[`${f}EditedAt`] = Date.now();
+    // Height is written and re-stamped as a pair; half a guard would let a sync
+    // restore the other half and invent a height nobody has.
+    if (f === "heightFt") d.heightInEditedAt = Date.now();
+    if (f === "heightIn") d.heightFtEditedAt = Date.now();
+  }
+}
+
 const PERSONAL_FIELDS = ["firstName", "lastName", "gender", "age", "heightFt", "heightIn", "weightLbs", "activityLevel"];
 // Append an activity-feed event to the plan's history (best-effort), same
 // shape as App.appendHistory so AI actions show in the Recent Activity feed.
@@ -2539,6 +2564,12 @@ async function runTool(name, input, ctx) {
     const planId = await activePlanId(db, uid, planOverride);
     const res = await planTxnWrap(db, uid, planId, (wrap) => {
     const d = wrap.data;
+    // What the protected fields looked like before this edit (S200g). The
+    // assistant sets them one `if` at a time, so stamping the anti-clobber
+    // markers per branch would mean ten more places to forget; diffing once at
+    // the end cannot miss one.
+    const beforeTz = {};
+    for (const f of TZ_OWNED_FIELDS) beforeTz[f] = d[f];
     const changes = [];
     // Fields the caller asked for and is not allowed to set. Kept separate from
     // `changes` so a refusal can never be reported as an edit.
@@ -2575,11 +2606,7 @@ async function runTool(name, input, ctx) {
     if (d.goalRangeLow && d.goalRangeHigh && Number(d.goalRangeLow) > Number(d.goalRangeHigh)) {
       const t = d.goalRangeLow; d.goalRangeLow = d.goalRangeHigh; d.goalRangeHigh = t; // swap if reversed
     }
-    // The stamp is the point, not decoration (S200f): the Trainerize sync
-    // re-stamps activityLevel from its own snapshot every 30 minutes unless a
-    // deliberate local choice is on record. Setting it here without the marker
-    // would have the assistant confirm a change that reverts within the hour.
-    if (input.activityLevel && ACTIVITY_MULT[input.activityLevel]) { d.activityLevel = input.activityLevel; d.activityLevelEditedAt = Date.now(); changes.push(`activity ${input.activityLevel}`); }
+    if (input.activityLevel && ACTIVITY_MULT[input.activityLevel]) { d.activityLevel = input.activityLevel; changes.push(`activity ${input.activityLevel}`); }
     if (input.bodyFatPct != null) { const b = clampNum(input.bodyFatPct, 2, 70, true); if (b) { d.bodyFat = b; changes.push("body fat"); } }
     if (input.goalBodyFatPct != null) { const b = clampNum(input.goalBodyFatPct, 2, 70, true); if (b) { d.goalBodyFat = b; changes.push("goal body fat"); } }
     // The write half of the same gate. `trainerNotes` is not offered in a
@@ -2606,6 +2633,11 @@ async function runTool(name, input, ctx) {
     if (changes.length === 0) {
       return { __abort: true, error: refused.length ? refused.join(" ") : "No valid profile fields were provided." };
     }
+    // ⚠️ THE STAMP IS THE POINT, NOT DECORATION. Without it the Trainerize sync
+    // re-stamps these fields from its own snapshot within the half hour, so the
+    // assistant would confirm a change that quietly reverts. See LOCAL_EDIT_WINS
+    // in functions/trainerize.js and stampLocalEdits in src/App.jsx.
+    stampTzEdits(beforeTz, d);
     return { changes, profile: profileSummary(d, ctx.isTrainer), ...(refused.length ? { refused } : {}) };
     });
     if (res.error) return { error: res.error };
