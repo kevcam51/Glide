@@ -353,6 +353,21 @@ export function myInviteCode(uid = auth.currentUser && auth.currentUser.uid) {
 // Update the signed-in user's display name. Owner-only self-write (allowed by
 // the existing rules: owner may update their own profile as long as role is
 // unchanged).
+// The browser's own timezone, stored so SERVER-side notifications can name an
+// hour the reader recognises (S200). Every booking push formatted in a
+// hard-coded America/New_York — fine while everyone is in Miami, wrong the
+// moment Glidna is white-labelled, which is the plan. Written only when it
+// actually changes, so this costs nothing on a normal load.
+export async function ensureTimezone(uid) {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!tz || tz.length > 64) return;
+    const snap = await getDoc(profileRef(uid));
+    if (!snap.exists() || snap.data().tz === tz) return;
+    await updateDoc(profileRef(uid), { tz });
+  } catch { /* best-effort: a missing tz just falls back to Eastern */ }
+}
+
 export async function setDisplayName(name) {
   const uid = auth.currentUser && auth.currentUser.uid;
   if (!uid) throw new Error("Not signed in");

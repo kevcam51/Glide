@@ -7,6 +7,8 @@
 //
 // Run: node scripts/test-availability.mjs
 import { readFileSync } from "fs";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -107,6 +109,82 @@ const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n,
   ok("...so the panel says so instead of rendering nothing",
      /showSessions && !trainerInfo && profileLoadFailed/.test(APP));
   ok("...with a way out", /Try again/.test(APP));
+}
+
+// ── the trainer's inbox must not lose or silently ignore anything ──────────
+{
+  const RQ = readFileSync(join(ROOT, "functions", "requests.js"), "utf8");
+  // A blind slice dropped the OLDEST item whatever its status, so a trainer who
+  // never taps "Clear completed" silently lost an unanswered ask the moment the
+  // list filled — after the client had been told it was sent.
+  // EXECUTED, not matched: the first version of this asserted the lines existed,
+  // and a mutation that broke the logic while leaving them in place stayed green.
+  const { capInbox } = require(join(ROOT, "functions", "requests.js"));
+  const mk = (i, st) => ({ id: `r${i}`, status: st });
+  // ⚠️ THE OLD ASK MUST BE AT THE END, or a blind slice keeps it by accident and
+  // the assertion proves nothing — which is exactly what the first fixture did.
+  // The array is newest-first (`[item, ...arr]`), so the item at risk is last.
+  const full = [mk(1, "done"), mk(2, "done"), mk(3, "done"), mk(4, "open")];
+  const capped = capInbox(full, 3);
+  ok("the oldest UNANSWERED ask survives when the list fills",
+     capped.some((r) => r.id === "r4"), capped);
+  ok("...and an answered one is what got dropped instead",
+     capped.length === 3 && capped.filter((r) => r.status === "done").length === 2, capped);
+  ok("under the cap nothing is touched", capInbox(full, 10).length === full.length);
+  ok("an all-open inbox still caps rather than growing forever",
+     capInbox([mk(1,"open"),mk(2,"open"),mk(3,"open")], 2).length === 2);
+  ok("junk entries do not throw", capInbox([null, mk(1,"open"), undefined], 5).length === 1);
+
+  // The inbox doc is written by the SERVER too, so replacing it wholesale from
+  // React state deleted every ask that arrived while the page sat open.
+  ok("the inbox is read-modify-written, not replaced from state",
+     /const r = await window\.storage\.get\("caliq-inbox"\);/.test(APP));
+  ok("...and callers pass a mutation, not an array",
+     /const inboxDone = \(id\) => writeInbox\(\(arr\) =>/.test(APP)
+     && /const inboxRemove = \(id\) => writeInbox\(\(arr\) =>/.test(APP));
+
+  // answerBooking opens with `if (bookingBusy) return`, so a tap on ANOTHER row
+  // while one was in flight did nothing at all — no disable, no spinner.
+  ok("every answer button disables while any row is in flight",
+     /disabled=\{!!bookingBusy \|\| !live\.length\}/.test(APP) && /disabled=\{!!bookingBusy\}/.test(APP));
+
+  // Accept and decline are both server calls that REFUSE once a client unlinks,
+  // so an ask from someone who left could never be cleared — and a trainer who
+  // booked the time manually had to push "couldn't make it" about a session
+  // that exists.
+  // BOTH kinds of item need the exit — the loose form matched the pre-existing
+  // one on ordinary to-dos and would have stayed green with the booking one gone.
+  ok("both ordinary to-dos AND booking asks have a truthful exit",
+     (APP.match(/onClick=\{\(\) => inboxRemove\(r\.id\)\}>Dismiss<\/button>/g) || []).length === 2,
+     (APP.match(/inboxRemove\(r\.id\)\}>Dismiss/g) || []).length);
+}
+
+// ── notifications name an hour the reader recognises ───────────────────────
+{
+  ok("no booking notification is hard-coded to Eastern any more",
+     !/timeZone: "America\/New_York"/.test(AV));
+  ok("the client's confirmation uses the CLIENT's zone", /fmtWhen\(chosenStart, client\.tz/.test(AV));
+  ok("the overlap refusal uses the TRAINER's", /fmtWhen\(clash\.st, trainer\.tz/.test(AV));
+  ok("an unknown or absent zone falls back rather than throwing",
+     /catch \(e\) \{ return DEFAULT_TZ; \}/.test(AV));
+  ok("the browser stores its own zone for the server to use",
+     /export async function ensureTimezone/.test(readFileSync(join(ROOT, "src", "profile.js"), "utf8")));
+}
+
+// ── a one-tap Accept keeps the drive check working ─────────────────────────
+{
+  ok("an accepted session inherits where this pair last trained",
+     /title: "", location: lastLocationForClient,/.test(AV));
+  ok("...from that client's own history", /where\("participants", "array-contains", clientUid\)/.test(AV));
+  ok("...and only from sessions this trainer delivered", /if \(v\.trainerUid !== uid \|\| !v\.location\) return;/.test(AV));
+}
+
+// ── the form never opens in a state it immediately complains about ─────────
+{
+  ok("the default horizon is derived, not assumed", /function defaultAskHorizon\(days, startDate\)/.test(APP));
+  ok("...and falls to next week when this week has already gone",
+     /\.length \? "this" : "next"/.test(APP));
+  ok("...and is used as the initial value", /useState\(\(\) => defaultAskHorizon\(/.test(APP));
 }
 
 console.log(`  ${checks - fails}/${checks} assertions passed`);

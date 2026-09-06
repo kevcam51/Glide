@@ -84,6 +84,22 @@ function buildBooking(b, now) {
 const MAX_ITEMS = 100;      // inbox cap (newest kept)
 const MAX_OPEN_PER_CLIENT = 10; // spam guard: open requests one client may have
 
+// ⚠️ EVICT ANSWERED ITEMS, NEVER UNANSWERED ONES (S200). A blind
+// `.slice(0, MAX_ITEMS)` drops the OLDEST entry whatever its status, so a
+// trainer who never taps "Clear completed" — there is no reason they would —
+// silently loses the oldest OPEN ask the moment the list fills. It vanishes from
+// "Asks From Clients" with no trace, after the client was told it had been sent
+// and is waiting for an answer that can no longer come. Done items are what the
+// cap is for: they go first, and an open ask is only ever displaced by another
+// open ask. Exported so the test drives the real thing rather than a copy.
+function capInbox(items, max) {
+  const arr = (items || []).filter(Boolean);
+  if (arr.length <= max) return arr;
+  const open = arr.filter((r) => r.status === "open");
+  const answered = arr.filter((r) => r.status !== "open");
+  return [...open, ...answered].slice(0, max);
+}
+
 exports.sendTrainerRequest = onCall(
   { region: "us-central1", maxInstances: 10, secrets: [VAPID_PRIVATE_KEY] },
   async (request) => {
@@ -131,7 +147,7 @@ exports.sendTrainerRequest = onCall(
       if (myOpen >= MAX_OPEN_PER_CLIENT) {
         throw new HttpsError("resource-exhausted", "You already have several open requests — give your trainer a chance to catch up.");
       }
-      tx.set(ref, { k: INBOX_KEY, value: JSON.stringify([item, ...arr].slice(0, MAX_ITEMS)) });
+      tx.set(ref, { k: INBOX_KEY, value: JSON.stringify(capInbox([item, ...arr], MAX_ITEMS)) });
     });
 
     // Best-effort: note it in the client's own activity feed + push the trainer.
@@ -152,4 +168,5 @@ exports.sendTrainerRequest = onCall(
 // Exported for scripts/test-booking-slots.mjs, which must drive the real
 // validation rather than a transcription of it.
 exports.buildBooking = buildBooking;
+exports.capInbox = capInbox;
 exports.MAX_ASK_SLOTS = MAX_ASK_SLOTS;

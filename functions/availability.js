@@ -59,6 +59,24 @@ const TRAFFIC_AWARE_TIERS = ["coach", "coach_max", "coach_ultra"];
 const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
 function isAdminUid(uid) { return ADMIN_UIDS.includes(uid); }
 const INBOX_KEY = "caliq-inbox";
+// ⚠️ THE READER'S CLOCK, NOT THE FOUNDER'S (S200). Every booking notification
+// formatted in a hard-coded America/New_York, so a Denver trainer accepting a
+// Denver client's 9:00 AM sent them "11:00 AM — it's on your calendar" while the
+// app itself correctly showed 9:00. The one message that confirms a booking
+// named an hour nobody had agreed to. `tz` is written to each profile by the
+// browser that owns it; Eastern remains the fallback for a profile that predates
+// it. Same shape as safeTz in aichat.js, and not a security input — the worst a
+// spoofed value can do is misformat that person's own notification.
+const DEFAULT_TZ = "America/New_York";
+function fmtWhen(ms, tz, opts) {
+  const zone = (() => {
+    const t = String(tz || "").trim();
+    if (!t || t.length > 64) return DEFAULT_TZ;
+    try { new Date().toLocaleDateString("en-CA", { timeZone: t }); return t; }
+    catch (e) { return DEFAULT_TZ; }
+  })();
+  return new Date(ms).toLocaleString("en-US", { timeZone: zone, ...opts });
+}
 
 // Is `trainerUid` really this client's trainer? Mirrors firestore.rules
 // isTrainerOf exactly: the direct trainer, or the head ABOVE that trainer.
@@ -225,9 +243,9 @@ exports.respondToBookingRequest = onCall(
     const trainer = (await db.doc(`users/${uid}`).get()).data() || {};
     const trainerName = trainer.displayName
       || [trainer.firstName, trainer.lastName].filter(Boolean).join(" ") || "Your trainer";
-    const when = booking ? new Date(chosenStart).toLocaleString("en-US", {
-      timeZone: "America/New_York", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-    }) : "";
+    // Formatted for the CLIENT, who is the one being told.
+    const when = booking ? fmtWhen(chosenStart, client.tz,
+      { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
 
     // What this session will cost, decided before anything is written.
     //
@@ -293,6 +311,24 @@ exports.respondToBookingRequest = onCall(
     //
     // Reads must all precede writes inside a transaction, which is why the
     // session's id is minted up front rather than by add().
+    // Where this pair last trained, so a one-tap Accept keeps the drive check
+    // working. Read outside the transaction: it is a default, not an invariant,
+    // and a stale answer is no worse than the empty string it replaces.
+    let lastLocationForClient = "";
+    if (accept && booking) {
+      try {
+        const prior = await db.collection("sessions")
+          .where("participants", "array-contains", clientUid).get();
+        let bestAt = 0;
+        prior.forEach((doc) => {
+          const v = doc.data() || {};
+          if (v.trainerUid !== uid || !v.location) return;
+          const at = Number(v.startAt) || 0;
+          if (at > bestAt) { bestAt = at; lastLocationForClient = String(v.location).slice(0, 120); }
+        });
+      } catch { /* a default that could not be read is just the empty one */ }
+    }
+
     const sessionRef = db.collection("sessions").doc();
     const now = Date.now();
     let sessionId = null;
@@ -341,9 +377,9 @@ exports.respondToBookingRequest = onCall(
         mine.forEach((doc) => consider(doc.data() || {}, false));
         blocks.forEach((doc) => consider(doc.data() || {}, true));
         if (clash) {
-          const clashWhen = new Date(clash.st).toLocaleString("en-US", {
-            timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "2-digit",
-          });
+          // ...and this one is read by the TRAINER, so it is their clock.
+          const clashWhen = fmtWhen(clash.st, trainer.tz,
+            { weekday: "short", hour: "numeric", minute: "2-digit" });
           throw new HttpsError("failed-precondition",
             clash.isBlock
               ? `That runs into time you've blocked out at ${clashWhen}. Decline this and offer another time, or book it yourself from the calendar.`
@@ -365,7 +401,15 @@ exports.respondToBookingRequest = onCall(
           startAt: chosenStart,
           durationMin: Number(booking.durationMin) || 60,
           status: "scheduled",
-          title: "", location: "",
+          // ⚠️ CARRY THE PLACE FORWARD (S200). An accepted ask created the
+          // session with an empty location, and the drive-time check skips any
+          // leg with no address — so a mobile trainer whose every self-booked
+          // session carries the client's address had that safety check silently
+          // stop applying to the ones the client booked themselves. The booking
+          // sheet already pre-fills from the client's own history for exactly
+          // this reason; the one-tap Accept has no field to type into, so it
+          // inherits the same way.
+          title: "", location: lastLocationForClient,
           priceCents,
           createdBy: uid, createdAt: now, updatedAt: now,
         });

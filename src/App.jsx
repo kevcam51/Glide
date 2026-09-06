@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium, setAiOptOut, aiChoiceMade } from "./profile.js";
+import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium, setAiOptOut, aiChoiceMade, ensureTimezone } from "./profile.js";
 import { getForUser, setForUser, mergeForUser, deleteForUser, listForUser, listEntriesForUser, latestKeyForUser, subscribeForUser } from "./clientData.js";
 import { mergePlanWrap } from "./planMerge.js";
 import { estimateObservedTdee } from "./observedTdee.js";
@@ -18011,12 +18011,30 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       try { const a = val ? JSON.parse(val) : []; setInbox(Array.isArray(a) ? a : []); } catch { setInbox([]); }
     });
   }, [meUid]);
-  const writeInbox = (next) => {
+  // ⚠️ READ-MODIFY-WRITE, NOT A REPLACE FROM STATE (S200). This wrote the whole
+  // document from the React array it happened to be holding, and sendTrainerRequest
+  // commits new asks into that same doc from the server. A trainer with the
+  // dashboard open — a queued write on a slow connection, a tab left up over
+  // lunch — dismissing one old to-do would write back an array that predated
+  // every ask received since, deleting them outright. They had been pushed, so
+  // the trainer knew they existed and would go looking for them.
+  //
+  // `window.storage.get` THROWS for a missing document rather than returning
+  // null (the S197 trap), so absence and failure both land in the catch and fall
+  // back to what we have — which is correct in both cases.
+  const writeInbox = async (mutate) => {
+    let cur = inbox;
+    try {
+      const r = await window.storage.get("caliq-inbox");
+      const a = r && r.value ? JSON.parse(r.value) : [];
+      if (Array.isArray(a)) cur = a;
+    } catch { /* missing or unreachable — the in-memory copy is the best we have */ }
+    const next = mutate(cur);
     setInbox(next);
-    window.storage.set("caliq-inbox", JSON.stringify(next)).catch(() => {});
+    try { await window.storage.set("caliq-inbox", JSON.stringify(next)); } catch { /* best-effort */ }
   };
-  const inboxDone = (id) => writeInbox(inbox.map((r) => r.id === id ? { ...r, status: "done", doneAt: Date.now() } : r));
-  const inboxRemove = (id) => writeInbox(inbox.filter((r) => r.id !== id));
+  const inboxDone = (id) => writeInbox((arr) => arr.map((r) => r.id === id ? { ...r, status: "done", doneAt: Date.now() } : r));
+  const inboxRemove = (id) => writeInbox((arr) => arr.filter((r) => r.id !== id));
   const openInbox = inbox.filter((r) => r && r.status === "open");
 
   // Answering a request for a TIME (S195). The server books it, marks the item
@@ -18568,14 +18586,33 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                       </div>
                     )}
                     <div className="mt-2 flex gap-2 flex-wrap">
+                      {/* ⚠️ DISABLED WHILE ANY ROW IS IN FLIGHT, not just this one
+                          (S200). answerBooking opens with `if (bookingBusy) return`,
+                          so a trainer working through three overnight asks who
+                          tapped the second while the first was still running got
+                          NOTHING — no disable, no spinner, no message — and moved
+                          on believing it was booked. */}
                       {!multi && (
-                      <button className={mPrimaryCls} disabled={bookingBusy === r.id || !live.length}
+                      <button className={mPrimaryCls} disabled={!!bookingBusy || !live.length}
                         onClick={() => answerBooking(r.id, true)}>
                         {bookingBusy === r.id ? "…" : "Accept & book"}
                       </button>
                       )}
-                      <button className={mBtnCls} disabled={bookingBusy === r.id}
-                        onClick={() => answerBooking(r.id, false)}>Can&apos;t make it</button>
+                      <button className={mBtnCls} disabled={!!bookingBusy}
+                        onClick={() => answerBooking(r.id, false)}>
+                        {bookingBusy === r.id ? "…" : "Can't make it"}
+                      </button>
+                      {/* ⚠️ A TRUTHFUL EXIT (S200). Accept and "Can't make it" were
+                          the only ways out, and both are server calls that REFUSE
+                          once the client unlinks — so an ask from someone who left
+                          could never be cleared and sat in the list forever. Worse,
+                          a trainer who followed the overlap refusal's own advice
+                          and booked the time manually had to push the client
+                          "couldn't make it" about a session that exists. This
+                          closes the item in the trainer's OWN kv and tells the
+                          client nothing, because nothing happened to them. */}
+                      <button className={`${mBtnCls} text-muted`} disabled={!!bookingBusy}
+                        onClick={() => inboxRemove(r.id)}>Dismiss</button>
                     </div>
                     <div className="mt-1 text-[.68rem] text-muted">
                       {multi ? "Booking one of these books that time at your standard rate and tells them — the rest of the request closes."
@@ -18593,7 +18630,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
             ))}
             {inbox.some((r) => r.status === "done") && (
               <button className="mt-2 border-0 bg-transparent p-0 text-[.72rem] text-muted underline cursor-pointer"
-                onClick={() => writeInbox(inbox.filter((r) => r.status !== "done"))}>
+                onClick={() => writeInbox((arr) => arr.filter((r) => r.status !== "done"))}>
                 Clear {inbox.filter((r) => r.status === "done").length} completed
               </button>
             )}
@@ -28305,9 +28342,23 @@ function askSlots({ days, horizon, startDate, hh, mm }) {
   return out.sort((a, b) => a - b);
 }
 
+// ⚠️ THE DEFAULTS MUST NOT CONTRADICT EACH OTHER (S200). The form opened on
+// tomorrow's weekday with horizon "this week" — which on a SATURDAY is a day
+// already gone, so every client opening Sessions that day was met with an amber
+// "Those days have already passed this week — pick a later week" over a chip the
+// form itself had selected, and a send button that stayed enabled. Asked rather
+// than assumed: if "this week" yields no slot for the default day, the default
+// is next week. Self-correcting, so it survives any change to how a week is cut.
+function defaultAskHorizon(days, startDate) {
+  try {
+    return askSlots({ days, horizon: "this", startDate, hh: 9, mm: 0 }).length ? "this" : "next";
+  } catch { return "this"; }
+}
+
 function AskForTime({ trainerUid, trainerName, onSent }) {
   const [days, setDays] = useState(() => [new Date(Date.now() + 86400000).getDay()]);
-  const [horizon, setHorizon] = useState("this");
+  const [horizon, setHorizon] = useState(() => defaultAskHorizon(
+    [new Date(Date.now() + 86400000).getDay()], ymdLocal(new Date(Date.now() + 86400000))));
   const [startDate, setStartDate] = useState(() => ymdLocal(new Date(Date.now() + 86400000)));
   const [hh, setHh] = useState(9);
   const [mm, setMm] = useState(0);
@@ -31415,6 +31466,10 @@ export default function App() {
           setMeUid(prof.uid || "");
           setMeEmail(prof.email || "");
           setMeHasCoach(!!prof.assignedTrainerId);
+          // Store this browser's timezone so SERVER-side notifications can name
+          // an hour the reader recognises (S200). Best-effort and only on a
+          // change, so it costs nothing on a normal load.
+          ensureTimezone(meUid);
           setMeCoachUid(prof.assignedTrainerId || "");
           setMeTrial(trialInfo(prof));
           setMePremium(isPremium(prof));
