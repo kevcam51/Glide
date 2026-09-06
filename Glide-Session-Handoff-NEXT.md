@@ -1,6 +1,127 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S199v) — everything below is PUSHED AND DEPLOYED
+## ▶️ START HERE (S200c) — everything below is PUSHED AND DEPLOYED
+
+Tip is `2f33483`. Working tree clean, `npm run build` passes, `check:undef`
+clean, **781 unit assertions green across 16 test scripts**, 230 rules tests
+unchanged (no rules were touched). Functions deployed where needed: the booking
+set (`sendTrainerRequest`, `trainerAvailability`, `respondToBookingRequest`,
+`sessionTravel`) and the 18-function `aitools.js` set. Nothing half-finished.
+
+⚠️ **Two sessions ran in parallel earlier in this arc and the numbering
+collided** — there are two commits labelled S199m and two labelled S199n. Go by
+SHA, not by label.
+
+### The booking loop was audited end to end, and 18 findings were real
+
+An 11-agent audit (five lenses + a completeness critic) of client-ask →
+trainer-accept: **18 confirmed of 29**. All fixed, deployed, and the loop
+re-verified in production as a real client and a real trainer.
+
+**The four that could hurt someone:**
+
+- **A client could read another client's schedule.** Free/busy merges ranges so
+  "three back-to-back clients" and "one long block" look identical — the file's
+  own header says so — but it pushed the TRUE endpoints and nothing bounded how
+  narrow a probe could be. Looping one-minute queries recovered 09:00–10:00,
+  10:00–11:00, 11:00–12:00 from a block that renders as one 09:00–12:00: every
+  appointment's start and length, and the trainer's client count. Ranges are
+  clipped to the window now. ⚠️ **This did not change what a TRAINER sees** —
+  `sessions` is `allow read: if isParticipant()` and a trainer is a participant
+  in every session they deliver, so their view of every client is untouched.
+- **…and so could a hundred people who cannot book them.** `isMyTrainer` walked
+  a rung up the chain, so at a gym with five sub-trainers all their clients could
+  read the owner's calendar. A booking only ever targets `assignedTrainerId`, so
+  that access served no flow at all. Direct clients only.
+- **A client was charged a rate they never agreed to.** Both screens promise "you
+  stay on the terms above until you agree to the new ones", and
+  `sessionConsentPolicy` mirrors exactly that — but Accept priced from the
+  trainer's LIVE rate. $85 → $120 and the next Accept stamped $120 on a client
+  consented at $85, frozen as `billableCents` and charged.
+- **Every session control was a silent no-op after one failed read.**
+  `.catch(() => {})` with no retry left `trainerInfo` null forever, and the panel
+  hosting the ask form, the policy, the card and cancel renders only when it is
+  set. The buttons that OPEN it come from elsewhere, so they kept rendering and
+  did nothing.
+
+**And the critic's:** the two halves described different transactions. The
+composer said "You're asking for 3 sessions"; the loop implements
+one-of-several — the prompt ends "whichever suits", the first Accept books one
+and closes the request. Plus the server returned `droppedSlots` for times that
+passed while the sheet sat open and the client discarded it: "Sent." for times
+never sent.
+
+**The mediums**, all shipped: the inbox ate unanswered asks at its cap *and*
+again via stale-state writes; a tap on a second ask did nothing; there was no
+truthful exit for an ask handled another way (Dismiss now closes it locally and
+tells the client nothing); notifications named Eastern to everyone (each side now
+formats in the READER's zone, stored per profile by `ensureTimezone`); an
+accepted session lost its location and silently disabled the drive check; and the
+ask form opened invalid every Saturday.
+
+### The body-composition thread is finished
+
+- **Measurement days are visible** on the month grid and week list — they were
+  only ever on the day view, so a month of measuring looked like a month of
+  nothing. Solid dot on purpose (the tracker dot is hollow because a 90-day
+  backfill makes it true almost daily; measuring is monthly).
+- **A plotted goal is no longer counted as a weigh-in.** Plan Ahead writes an
+  aspiration into the same `weight` slot with `isFuturePlan`. The rule was
+  applied in four places and **forgotten in fourteen** — including the chart
+  (which drew the line straight into the goal and computed "change since your
+  previous reading" against it) and the weigh-in REMINDER (a future target is
+  always newest, so "days since" went negative and it could never fire again).
+- **…and the plan is now a dashed tail** off the last real reading, excluded from
+  every number and from tap-to-edit. `splitWeighIns` is the one function that
+  decides what is a reading and what is a hope.
+- **Macros must add up to the day.** A computed split reconciles by construction;
+  a hand-typed one is three independent numbers, and nothing compared their sum
+  to the calorie goal. 200p/200c/100f is 2,500 on a 1,900 target, both on screen
+  calling themselves the plan.
+
+### ⚠️ TRAPS PAID FOR — read before writing a test or pushing
+
+**MY TESTS KEPT PASSING OVER REAL GAPS. Mutation-test every guard.** This arc
+alone: a short-note floor tested with a haystack that did not contain the note; a
+"never rewrite the client's words" test whose user turn did not quote it; a
+card-gate test matching a string that appears twice, so it checked the BUTTON
+while the card was re-gated; an ordering check using `indexOf`, where -1 sorts
+before everything; an eviction fixture with the at-risk item at the FRONT, where
+a blind slice keeps it by accident. **Every one read fine.** Break the code and
+watch the suite go red — that is the only thing that distinguishes a guard from a
+decoration.
+
+**A rule applied in four places and forgotten in fourteen is not a rule.** Both
+`trainerNotes` and `checkIns` weight are now ENUMERATED in the suite: a new
+reader fails and has to justify itself. Those guards have since fired on three
+real changes, including another session's — and once on their own implementation,
+which is the shape to watch for (exempt the rule's own body, not the guard).
+
+**I pushed a commit with the suite RED.** The output said `408/409` across 10 of
+15 suites — the `&&` chain had aborted early — and I read past it to the push.
+Nothing shipped broken, but that was luck. The point of running the suite before
+a push is that the push waits for the answer.
+
+**A test that passes while a probe fails is aimed at the wrong branch.** The
+first drive-time precision fix refused Google's centroid and fell straight
+through to OpenStreetMap's. The suite was green throughout.
+
+### Open — nothing blocking
+
+- **The dead-panel fix is the one thing not verified in production** — forcing a
+  real profile read to fail is not something a probe can do. It rests on the test.
+- Old AI chat threads can still replay a coaching note that was PARAPHRASED
+  rather than quoted. Known, stated limit; the verbatim scrub cannot reach it.
+- The geocache keeps pre-fix area pins until TTL. One bad row existed and was
+  deleted by hand; at real volume this wants a `precise` marker and a
+  revalidation pass.
+- `client.uitest`'s trial is expired again (restored after use). Extending it is
+  how to exercise any client-side AI path in production.
+
+---
+
+## S199v — everything below is PUSHED AND DEPLOYED
+
 
 Tip is `8faa090`. Working tree clean, `npm run build` passes, `check:undef` clean,
 **677 unit assertions green** across 15 test scripts, 230 rules tests unchanged

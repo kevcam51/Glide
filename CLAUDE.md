@@ -102,6 +102,23 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S200c (Sep 6): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S200c)" first.** Tip
+> `2f33483`, all pushed and deployed, `npm run test:units` green at **781 assertions across 16
+> suites**. ⚠️ Two parallel sessions collided on numbering earlier in this arc — two S199m and two
+> S199n commits; go by SHA. Shipped: **the booking loop audited end to end (18 confirmed findings
+> of 29, all fixed and re-verified in production)** — a client could de-merge another client's
+> schedule out of the anonymous free/busy by probing minute-by-minute, a head trainer's calendar
+> was readable by every sub-trainer's client, Accept priced from the trainer's LIVE rate instead of
+> the one the client consented to, and one swallowed profile read turned every session control into
+> a silent no-op. ⚠️ **None of that changed what a TRAINER sees** — `sessions` is
+> `allow read: if isParticipant()`, so their view of every client is untouched. Also: the
+> body-composition thread finished (measurement dots on month/week, a plotted goal no longer
+> counted as a weigh-in — the rule was applied in 4 places and forgotten in 14 — the plan drawn as
+> a dashed tail, and macros now checked against the calorie target).
+> ⚠️ **The lesson of this arc: my own tests kept passing over real gaps.** Five decorative
+> assertions, each found only by breaking the code and watching the suite go red. Mutation-test
+> every guard, and enumerate a rule's readers rather than trusting it was applied everywhere._
+>
 > _**S199s (Sep 5): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S199s)" first.** Tip
 > `8faa090`, all pushed and deployed, `npm run test:units` green at 677 assertions. ⚠️ TWO parallel
 > sessions collided on numbering — there are two S199m and two S199n commits; go by SHA. Shipped:
