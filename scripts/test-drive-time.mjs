@@ -323,6 +323,91 @@ const fakeFetch = async (url) => {
   ok("...and hands estimateDrive both, in the right order",
      /estimateDrive\(db, a\.location, b\.location, b\.startAt, geoKey, undefined, key\)/.test(AV));
 
+  // ── the damper S199u disabled, and S199v put back (review finding) ───────
+  // The two arms of `missIrrelevant` were written when a key told free callers
+  // from paid ones apart. Giving EVERY caller a geocoding key made
+  // `apiKey && missBy === "nominatim"` always true, so the 24h damper could
+  // never fire for the addresses it exists to damp — measured at 128 Google +
+  // 128 Nominatim lookups in one call, and self-reinforcing via OVER_QUERY_LIMIT.
+  {
+    const st = new Map();
+    const dbm = { doc: (p) => ({ path: p,
+      async get() { const d = st.get(p); return { exists: !!d, data: () => d }; },
+      async set(v, o) { st.set(p, o && o.merge ? { ...(st.get(p) || {}), ...v } : v); } }) };
+    let google = 0, osm = 0;
+    // Google answers non-definitively (a denied/over-quota key); OSM says "not found".
+    const failing = async (url) => {
+      const u = String(url);
+      if (u.includes("maps.googleapis.com")) { google++; return { ok: true, json: async () => ({ status: "OVER_QUERY_LIMIT" }) }; }
+      if (u.includes("nominatim")) { osm++; return { ok: true, json: async () => [] }; }
+      return { ok: false };
+    };
+    const A = "2901 Florida Ave, Coconut Grove, FL 33133";
+    for (let i = 0; i < 6; i++) await D.geocode(dbm, A, "AIzaTESTKEY", failing);
+    ok("a repeated unresolvable address is damped, not re-queried every time",
+       google <= 2 && osm <= 2, { google, osm });
+    const doc = st.get(`geocache/${D.addressKey(A)}`);
+    ok("...and the miss records WHICH providers produced it", doc && doc.triedGoogle === true, doc);
+    ok("...as a miss, not as a soft failure", doc && doc.failed === true && doc.missBy === "nominatim", doc);
+
+    // The arm that must SURVIVE: a miss recorded WITHOUT Google must not lock
+    // out a caller who can try Google. That was the whole point of the escape.
+    const st2 = new Map();
+    const db2m = { doc: (p) => ({ path: p,
+      async get() { const d = st2.get(p); return { exists: !!d, data: () => d }; },
+      async set(v, o) { st2.set(p, o && o.merge ? { ...(st2.get(p) || {}), ...v } : v); } }) };
+    st2.set(`geocache/${D.addressKey(A)}`,
+      { at: Date.now(), failed: true, missBy: "nominatim", q: A });   // legacy: no triedGoogle
+    let g2 = 0;
+    const googleOk = async (url) => {
+      if (String(url).includes("maps.googleapis.com")) { g2++;
+        return { ok: true, json: async () => ({ status: "OK", results: [{ partial_match: false,
+          geometry: { location_type: "ROOFTOP", location: { lat: 25.73, lng: -80.24 } } }] }) }; }
+      return { ok: false };
+    };
+    const healed = await D.geocode(db2m, A, "AIzaTESTKEY", googleOk);
+    ok("a pre-S199v miss from OSM alone still gets one Google retry", g2 === 1, g2);
+    ok("...and Google's answer heals it", healed && healed.lat === 25.73, healed);
+  }
+
+  // ── an approximate pin is not an address (review critic) ─────────────────
+  // Google answers almost anything. Two centroids sit on top of each other, the
+  // leg computes ~0 minutes, no warning fires and the pair is NOT counted as
+  // unknown — the panel renders nothing on a connection that may be impossible.
+  {
+    const st3 = new Map();
+    const db3m = { doc: (p) => ({ path: p,
+      async get() { const d = st3.get(p); return { exists: !!d, data: () => d }; },
+      async set(v, o) { st3.set(p, o && o.merge ? { ...(st3.get(p) || {}), ...v } : v); } }) };
+    const reply = (extra) => async (url) => {
+      const u = String(url);
+      if (u.includes("maps.googleapis.com")) return { ok: true, json: async () => ({ status: "OK",
+        results: [{ geometry: { location: { lat: 25.7, lng: -80.2 }, ...extra.geometry }, ...extra.top }] }) };
+      if (u.includes("nominatim")) return { ok: true, json: async () => [] };   // OSM cannot help either
+      return { ok: false };
+    };
+    const rooftop = await D.geocode(db3m, "2901 Florida Ave, Coconut Grove, FL 33133", "AIzaK",
+      reply({ top: { partial_match: false }, geometry: { location_type: "ROOFTOP" } }));
+    ok("a ROOFTOP answer is accepted — S199u's own case still works",
+       rooftop && rooftop.lat === 25.7, rooftop);
+
+    const st4 = new Map();
+    const db4m = { doc: (p) => ({ path: p,
+      async get() { const d = st4.get(p); return { exists: !!d, data: () => d }; },
+      async set(v, o) { st4.set(p, o && o.merge ? { ...(st4.get(p) || {}), ...v } : v); } }) };
+    const approx = await D.geocode(db4m, "Coconut Grove, FL", "AIzaK",
+      reply({ top: { partial_match: false }, geometry: { location_type: "APPROXIMATE" } }));
+    ok("a neighbourhood CENTROID is refused rather than used as an address", approx === null, approx);
+
+    const st5 = new Map();
+    const db5m = { doc: (p) => ({ path: p,
+      async get() { const d = st5.get(p); return { exists: !!d, data: () => d }; },
+      async set(v, o) { st5.set(p, o && o.merge ? { ...(st5.get(p) || {}), ...v } : v); } }) };
+    const guess = await D.geocode(db5m, "near the gym in miami", "AIzaK",
+       reply({ top: { partial_match: true }, geometry: { location_type: "ROOFTOP" } }));
+    ok("...and so is a partial_match guess, even at ROOFTOP", guess === null, guess);
+  }
+
   const same = await D.estimateDrive(db, "50 Main St", "50 main street", mon9, null, fakeFetch);
   ok("the same address twice is zero minutes and never geocoded",
      same && same.minutes === 0 && same.source === "same-place", same);

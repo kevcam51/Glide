@@ -185,11 +185,25 @@ async function geocodeLive(address, apiKey, fetchFn) {
         const r = await fetchWithTimeout(f, url, {}, GEOCODE_TIMEOUT_MS);
         if (r.ok) {
           const j = await r.json();
-          const loc = j && j.results && j.results[0] && j.results[0].geometry && j.results[0].geometry.location;
+          const g0 = j && j.results && j.results[0];
+          const loc = g0 && g0.geometry && g0.geometry.location;
           const glat = Number(loc && loc.lat), glng = Number(loc && loc.lng);
+          // ⚠️ A CITY CENTROID IS NOT AN ADDRESS (S199v). Google answers almost
+          // anything: "Coconut Grove, FL" returns the neighbourhood's middle,
+          // and "near the gym in miami" returns Miami with partial_match set.
+          // Taken as a pin, two such answers sit almost on top of each other,
+          // the leg computes as ~0 minutes, no warning fires AND the pair is
+          // not counted as unknown — so the panel renders nothing at all on a
+          // connection that may be impossible. That is the silent all-clear
+          // this feature exists to never produce. Verified against the live API:
+          // "2901 Florida Ave, Coconut Grove, FL 33133" — the address S199u was
+          // written for — comes back ROOFTOP with partial_match false, so
+          // refusing the vague ones costs that fix nothing.
+          const vague = g0 && (g0.partial_match === true
+            || (g0.geometry && g0.geometry.location_type === "APPROXIMATE"));
           // Malformed coordinates are not a location; fall through rather than
           // caching NaN (or a 0,0 in the Gulf of Guinea) for months.
-          if (isFinite(glat) && isFinite(glng)) return { hit: { lat: glat, lng: glng, provider: "google" }, missBy: null };
+          if (isFinite(glat) && isFinite(glng) && !vague) return { hit: { lat: glat, lng: glng, provider: "google" }, missBy: null };
           // ZERO_RESULTS is Google saying the address is not real. Anything else
           // — REQUEST_DENIED, OVER_QUERY_LIMIT, an unreadable body — is Google
           // failing to answer, which is not the same claim and must not be
@@ -238,7 +252,22 @@ async function geocode(db, address, apiKey, fetchFn) {
       // that produced it. Symmetric: a Google-only ZERO_RESULTS must not lock
       // out a caller who has only Nominatim, which knows plenty of places
       // Google does not (parks, rural routes, new builds).
-      const missIrrelevant = (apiKey && d.missBy === "nominatim") || (!apiKey && d.missBy === "google");
+      // ⚠️ WHAT PRODUCED THE MISS, NOT WHAT THIS CALLER HOLDS (S199v). The two
+      // arms above were written when a key told the two classes of caller apart:
+      // free trainers geocoded on Nominatim alone, paying ones on Google. S199u
+      // gave EVERY caller a geocoding key — and that made `apiKey && missBy ===
+      // "nominatim"` unconditionally true, so the 24-hour damper could never
+      // fire again for exactly the addresses it exists to damp. Measured by the
+      // review: 128 Google plus 128 Nominatim lookups in a SINGLE sessionTravel
+      // call, against 1 before, on one unresolvable home address in a 21-day
+      // window — re-run on every calendar open, and self-reinforcing, because
+      // OVER_QUERY_LIMIT is itself a non-definitive answer that keeps the damper
+      // off. `triedGoogle` records the providers that actually produced the
+      // miss, which is the only thing that makes it authoritative. Absent on
+      // pre-S199v documents, which therefore get one retry and then damp
+      // properly for good.
+      const missIrrelevant = (!!apiKey && d.triedGoogle !== true && d.missBy === "nominatim")
+        || (!apiKey && d.missBy === "google");
       if (d.failed && age < 86400000 && !missIrrelevant) {
         // A miss still short-circuits the lookup (that is the damping), but if
         // we hold coordinates from before, they are a better answer than none:
@@ -318,7 +347,7 @@ async function geocode(db, address, apiKey, fetchFn) {
       // coordinates that were still the best answer anyone had, and the guard
       // below then returned null for 24 hours — the drive check dark, using a
       // pin that had been sitting in the row a moment earlier.
-      await ref.set({ at: Date.now(), failed: true, missBy, q: norm.slice(0, 120) }, { merge: true });
+      await ref.set({ at: Date.now(), failed: true, missBy, triedGoogle: !!apiKey, q: norm.slice(0, 120) }, { merge: true });
     }
     // ⚠️ A NON-DEFINITE FAILURE IS NEVER WRITTEN AS `failed`. A rate-limit, a
     // timeout or a 5xx used to be stored as `{failed:true}` for 24 hours — in
