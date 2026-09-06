@@ -1,8 +1,64 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S200e) — everything below is PUSHED AND DEPLOYED
+## ▶️ START HERE (S200f) — everything below is PUSHED AND DEPLOYED
 
-Tip is `188b776`. Working tree clean, `npm run build` passes, `check:undef`
+Tip is `67ea7b5`; **861 unit assertions across 18 suites**. Functions deployed
+before the push: the Trainerize set (3) and the `aitools.js` set (18).
+
+**S200f — "I set the recommended activity level, close the app, and it's back."
+Two independent causes.**
+
+1. **`functions/trainerize.js` re-stamped `activityLevel` every 30 minutes.** It
+   sat between `macroTargets` (guarded by `macroTargetsEditedAt`) and `weightLbs`
+   (guarded by date) with no guard of its own — the third instance of a class
+   this repo has already fixed twice, on the one field Glidna now MEASURES.
+   Guarded by `activityLevelEditedAt`, stamped by the suggestion card, the
+   wizard's generic `update`, and the AI's `set_personal_info`.
+   ⚠️ The same unguarded re-stamp still applies to `gender`, `age`, `heightFt/In`,
+   `goalWeight` and `bodyFat`. Left alone deliberately — Trainerize is documented
+   as source of truth for snapshot fields (S86d), so changing that is a product
+   decision, not a bug fix. Worth putting to Kevin.
+2. **The 600ms plan debounce had no flush.** Reproduced live: tap, reload
+   immediately → nothing stored; tap, wait 2.5s → stored. Applies to every plan
+   edit, not just this one.
+
+⚠️ **THE FIX TOOK THREE ATTEMPTS AND ONLY THE THIRD WORKS — do not "simplify"
+it back.** Measured in a real browser, all three:
+   • flushing on `pagehide` alone is NOT enough: the debounce has usually already
+     fired, and clearing the pending job when the TIMER fires (rather than when
+     the write CONFIRMS) leaves the flush nothing to rescue while the doomed
+     transaction is still in flight;
+   • `runTransaction` genuinely cannot be queued offline and `setDoc` can — but a
+     merge that `await`s an IndexedDB read first still loses. A write issued 30ms
+     before a reload survives; the same write behind one awaited read does not;
+     one issued from the `pagehide` handler does not either;
+   • what works: **localStorage is synchronous.** The flush merges from
+     `serverWrapRef` (an in-memory copy of the server document) and parks the
+     exact bytes in `glide-pending-plan` BEFORE attempting the network write. The
+     next plan load replays and clears it — at the read, not in a background
+     effect, or it races the load it is repairing.
+
+Also: `autoSave`'s `catch(e) {}` no longer swallows a failed plan write,
+`saveTimer`'s clear is identity-checked, and `setStepAndSave` takes a functional
+update.
+
+**The 14-day cooldown (Kevin's ask).** `activityRungSuggestion` is module-level
+and pure; both the accept and a new "Not now" record an `activityCheck` stamp.
+14 is set against the estimator's own 28-day window — half the evidence is new;
+7 would re-ask on 75% the same data. The `outOfLadder` branch is deliberately NOT
+silenced: it asks for nothing and says the food log needs attention.
+
+**Method note worth keeping:** a 34-agent audit raised 28 candidates and exactly
+one survived refutation — the Trainerize re-stamp — and it survived because an
+agent *lifted the real function and ran it*. The debounce cause was refuted by
+those same verifiers on reachability grounds and was real anyway; I had already
+reproduced it in the browser. Neither method alone would have found both.
+
+---
+
+### Previous: S200e
+
+Tip was `188b776`. Working tree clean, `npm run build` passes, `check:undef`
 clean, **806 unit assertions green across 17 test scripts**, 230 rules tests
 unchanged (no rules were touched).
 
