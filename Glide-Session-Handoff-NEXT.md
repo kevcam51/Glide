@@ -1,10 +1,25 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S200c) — everything below is PUSHED AND DEPLOYED
+## ▶️ START HERE (S200e) — everything below is PUSHED AND DEPLOYED
 
-Tip is `2f33483`. Working tree clean, `npm run build` passes, `check:undef`
-clean, **781 unit assertions green across 16 test scripts**, 230 rules tests
-unchanged (no rules were touched). Functions deployed where needed: the booking
+Tip is `188b776`. Working tree clean, `npm run build` passes, `check:undef`
+clean, **806 unit assertions green across 17 test scripts**, 230 rules tests
+unchanged (no rules were touched).
+
+**S200e (frontend only, pushed — no function deploy needed).** The S200 error
+card in the client's Sessions panel had never rendered: the button that opens
+the panel was gated on `trainerInfo` alone, so on exactly the failed profile
+read the card exists for, the button vanished — leaving the card reachable only
+via a declined-payment banner, an existing session, or a notification. A client
+with none of those lost booking, their saved card and their cancellation terms
+silently, under a comment reading "Always reachable". **Found by forcing the
+read to fail in the preview, not by reading the code** — three JSX gates written
+at different times, each locally sensible, disagreeing about one contract. The
+contract is now pure `sessionsPanelState(trainerInfo, profileLoadFailed)`, all
+three gates call it, and `scripts/test-sessions-gate.mjs` (25 assertions,
+mutation-checked three ways) executes it. The stale source regex in
+`test-availability.mjs` matched one of the three gates — not the broken one —
+and now points at the predicate. Functions deployed where needed: the booking
 set (`sendTrainerRequest`, `trainerAvailability`, `respondToBookingRequest`,
 `sessionTravel`) and the 18-function `aitools.js` set. Nothing half-finished.
 
