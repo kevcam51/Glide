@@ -483,6 +483,28 @@ const bfFieldsFor = (gender) => new Set(
   gender === "male" ? ["waist", "hips", "neck", "forearm", "wrist"]
   : gender === "female" ? ["waist", "hips", "neck", "thigh", "calf", "wrist"]
   : []);
+// ⚠️ DO THESE MACROS ADD UP TO THE DAY? (S200c, the macro half of the calorie
+// card's 1,200-cal honesty check.) A COMPUTED split always reconciles — carbs are
+// derived as whatever is left of the target after protein and fat — but a
+// hand-typed one is three independent numbers, and nothing ever compared their
+// sum to the calorie goal. 200p/200c/100f is 2,500 cal; on a 1,900 target that is
+// 600 more than the ring says, and both numbers sit on the same screen calling
+// themselves the plan. Whoever eats to the macros is not eating to the target.
+//
+// Tolerance because grams are rounded and a few calories of drift is arithmetic,
+// not disagreement: 2% of the target, floor 40, so a small target is not nagged
+// by a rounding error and a large one is not deafened to a real gap.
+const CAL_PER_G = { protein: 4, carbs: 4, fat: 9 };
+function macroCalorieGap(protein, carbs, fat, target) {
+  const t = Number(target) || 0;
+  const cals = Math.round((Number(protein) || 0) * CAL_PER_G.protein
+    + (Number(carbs) || 0) * CAL_PER_G.carbs + (Number(fat) || 0) * CAL_PER_G.fat);
+  if (t <= 0) return { cals, gap: 0, off: false, tolerance: 0 };
+  const tolerance = Math.max(40, Math.round(t * 0.02));
+  const gap = cals - t;
+  return { cals, gap, tolerance, off: Math.abs(gap) > tolerance };
+}
+
 // Does an entry actually RECORD something? mergeMeasurements creates one per
 // date carrying `date`/`timestamp`/`loggedBy` whether or not a value came with
 // it, so "an entry exists" is not the same claim as "this person was measured"
@@ -12798,6 +12820,30 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               </button>
             </div>
           )}
+          {/* The honesty check. Shown for whatever split is CURRENTLY on screen —
+              a preview as well as the saved plan — because the point is to say
+              so before someone adopts it, not after. */}
+          {(() => {
+            const shown = previewMacros ? previewMacros.t : { protein: proteinTarget, carbs: carbsTarget, fat: fatTarget };
+            const chk = macroCalorieGap(shown.protein, shown.carbs, shown.fat, target);
+            if (!chk.off) return null;
+            const over = chk.gap > 0;
+            return (
+              <div style={{marginTop:"9px",padding:"9px 11px",borderRadius:"9px",
+                border:"1px solid var(--yellow)",background:"rgba(251,191,36,.09)"}}>
+                <div style={{fontSize:".72rem",fontWeight:800,color:"var(--yellow)",marginBottom:"3px"}}>
+                  These macros don&rsquo;t add up to your day
+                </div>
+                <div style={{fontSize:".7rem",color:"var(--text-secondary)",lineHeight:1.5}}>
+                  {shown.protein}p / {shown.carbs}c / {shown.fat}f comes to{" "}
+                  <strong style={{color:"var(--text)"}}>{chk.cals.toLocaleString()} cal</strong>, but your daily
+                  target is <strong style={{color:"var(--text)"}}>{target.toLocaleString()}</strong> —{" "}
+                  {Math.abs(chk.gap).toLocaleString()} {over ? "more" : "less"}. Eating to these macros means
+                  eating {over ? "above" : "below"} the number in the ring.
+                </div>
+              </div>
+            );
+          })()}
           {macrosCustom && !planMacroKey && !previewMacros && (
             <div style={{marginTop:"7px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px",flexWrap:"wrap"}}>
               <span style={{fontSize:".68rem",color:"var(--text-secondary)"}}>

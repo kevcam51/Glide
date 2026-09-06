@@ -109,5 +109,62 @@ ok("the set is built through hasMeasurement, not from entry existence",
   ok("the dashed line says what it is", /— not measured/.test(APP));
 }
 
+// ── do the macros add up to the day? (S200c) ───────────────────────────────
+// The macro half of the calorie card's 1,200-cal honesty check. A COMPUTED split
+// always reconciles — carbs are derived as whatever is left of the target — but
+// a hand-typed one is three independent numbers and nothing compared their sum
+// to the goal. Both numbers then sit on the same screen calling themselves the
+// plan, and whoever eats to the macros is not eating to the target.
+{
+  const fn = /function macroCalorieGap\(protein, carbs, fat, target\) \{[\s\S]*?\n\}/.exec(APP);
+  const per = /const CAL_PER_G = [^\n]*\n/.exec(APP);
+  ok("macroCalorieGap is liftable", !!fn && !!per);
+  const gap = new Function(`${per[0]}${fn[0]}\nreturn macroCalorieGap;`)();
+
+  // The headline case: 200/200/100 is 2,500 against a 1,900 target.
+  const bad = gap(200, 200, 100, 1900);
+  ok("a split that overshoots is flagged", bad.off === true, bad);
+  ok("...with the real total", bad.cals === 2500, bad.cals);
+  ok("...and the real gap", bad.gap === 600, bad.gap);
+
+  const under = gap(100, 100, 40, 1900);
+  ok("a split that undershoots is flagged too", under.off === true && under.gap < 0, under);
+
+  // A computed split reconciles by construction: protein and fat chosen, carbs
+  // taking the remainder. It must never be nagged.
+  const t = 2000, prot = 180, fat = Math.round((t * 0.28) / 9);
+  const carbs = Math.max(0, Math.round((t - prot * 4 - fat * 9) / 4));
+  ok("the app's own computed split is never flagged", gap(prot, carbs, fat, t).off === false,
+     gap(prot, carbs, fat, t));
+
+  // ⚠️ ROUNDING IS NOT DISAGREEMENT. Grams are whole numbers, so a few calories
+  // of drift is arithmetic — nagging about it would train people to ignore the
+  // warning that matters.
+  // 150p/200c/66f = 1,994 against 2,000 — six calories, which is what rounding
+  // whole grams costs and is not a disagreement about anything.
+  ok("a few calories of rounding drift is tolerated", gap(150, 200, 66, 2000).off === false,
+     gap(150, 200, 66, 2000));
+  ok("the tolerance scales with the target, with a floor",
+     gap(0, 0, 0, 1000).tolerance === 40 && gap(0, 0, 0, 4000).tolerance === 80,
+     [gap(0, 0, 0, 1000).tolerance, gap(0, 0, 0, 4000).tolerance]);
+  // ⚠️ THE BOUNDARY, BOTH SIDES. Without the second of these the band is
+  // decorative: a check that never fires and a check that always fires look the
+  // same from a test that only asserts one side.
+  ok("an exact match is silent", gap(250, 0, 0, 1000).off === false, gap(250, 0, 0, 1000));
+  ok("...and so is a gap exactly AT the tolerance", gap(260, 0, 0, 1000).off === false,
+     gap(260, 0, 0, 1000));
+  ok("but one calorie past it fires", gap(261, 0, 0, 1000).off === true, gap(261, 0, 0, 1000));
+
+  // No target means no claim to make — an incomplete plan must not be scolded.
+  ok("with no calorie target it says nothing", gap(200, 200, 100, 0).off === false);
+  ok("junk does not throw", gap(null, undefined, "x", 2000).cals === 0);
+
+  // Wiring: shown for the PREVIEW too, so it warns before adoption, not after.
+  ok("the card checks the split currently on screen",
+     /const shown = previewMacros \? previewMacros\.t : \{ protein: proteinTarget/.test(APP));
+  ok("...and says what it comes to versus the target",
+     /These macros don&rsquo;t add up to your day/.test(APP));
+}
+
 console.log(`  ${checks - fails}/${checks} assertions passed`);
 process.exit(fails ? 1 : 0);
