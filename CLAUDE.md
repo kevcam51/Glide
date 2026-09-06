@@ -972,11 +972,14 @@ enabled (Blaze has no default spending cap).
   (the log CLI serves stale pages — cross-check by BEHAVIOUR too). The reliable forcing move is to
   **destroy the old version first**: a destroyed version cannot be mounted, so the next deploy must
   bind the new one. Then prove it with a real call, not with the deploy's own "Successful update".
-- **Nominatim is not a dependable fallback from Cloud Functions.** The drive check is designed to
-  fall back to OpenStreetMap when Google fails, and the code does exactly that — but when the Google
-  key was dead (above), a live probe still returned `unknownPairs: 1`, i.e. no estimate at all.
-  Nominatim rate-limits datacenter IPs hard. Do not promise "the free estimator covers it" without
-  measuring it; the feature's own rule is that silence must never read as "your schedule is fine".
+- **Nominatim rejects neighbourhood-style addresses; it is not rate-limiting.** ⚠️ An earlier
+  version of this note blamed datacenter rate limits. MEASURED instead (S199u): 9 of 9 ordinary
+  Miami addresses resolved through the deployed function, and the one failure was
+  `"2901 Florida Ave, Coconut Grove, FL 33133"` — Coconut Grove is a neighbourhood, not a
+  municipality, so OpenStreetMap cannot find it while Google normalises it to Miami and can. Since
+  the drive WARNING is free for everyone (S197k) and cannot happen without geocoding, geocoding now
+  uses Google for EVERY trainer and only traffic-aware ROUTES stays paid. Guess less, probe more:
+  the rate-limit story was plausible, wrong, and would have sent the next session to build retries.
 - **Commit style**: clear, descriptive messages; keep unrelated changes in separate commits.
 - Build (`npm run build`) should pass before committing code changes.
 - Keep this file (CLAUDE.md) updated as the project evolves.

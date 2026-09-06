@@ -468,6 +468,11 @@ exports.sessionTravel = onCall(
           String(me.subscriptionTier || "base").toLowerCase());
       } catch { /* a profile read failure just means the free estimator */ }
     }
+    // Geocoding for everyone, traffic-aware routing for paid (S199u). The single
+    // `key` used to gate both, so a free trainer's addresses never reached Google
+    // — and the free straight-line WARNING, which is meant to be universal,
+    // silently did not happen for any address OpenStreetMap could not parse.
+    const geoKey = keyPresent ? raw : null;
     const key = keyPresent && paid ? raw : null;
     const legs = {};
     // Pairs we could have checked, pairs we could not estimate, and pairs with
@@ -506,7 +511,7 @@ exports.sessionTravel = onCall(
       const legKey = `${a.id}>${b.id}`;
       if (legs[legKey]) continue;
       try {
-        legs[legKey] = await estimateDrive(db, a.location, b.location, b.startAt, key);
+        legs[legKey] = await estimateDrive(db, a.location, b.location, b.startAt, geoKey, undefined, key);
       } catch (e) {
         console.error("drive estimate failed:", e && e.message);
         legs[legKey] = null;   // unknown, which the feasibility pass treats as silence

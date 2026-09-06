@@ -82,11 +82,21 @@ key. The question was only ever "are these the same?", which
 later identified. The Maps key was the CHEAP version of this mistake;
 `STRIPE_SECRET_KEY` has been live money since S90.
 
-**Nominatim is not a dependable fallback from Cloud Functions.** The drive check
-falls through to it correctly when Google fails — the path was read to confirm —
-but with a dead key a live probe still returned `unknownPairs: 1`, no estimate at
-all. It rate-limits datacenter IPs. The free tier is supposed to rest on this;
-do not promise it covers a gap without measuring.
+**Nominatim rejects neighbourhood-style addresses — it is NOT rate-limiting, and
+the free tier no longer rests on it (S199u).** ⚠️ This block previously blamed
+datacenter rate limits, from one failed probe. Measured properly: 9 of 9 ordinary
+addresses resolved through the deployed function; the single failure was
+`"2901 Florida Ave, Coconut Grove, FL 33133"`, because Coconut Grove is a
+neighbourhood rather than a municipality. Google normalises it and finds it.
+
+⚠️ AND THE PROBE THAT STARTED THAT STORY PROVED NOTHING ABOUT THE KEY. The test
+trainer is free-tier, and `availability.js` passed `null` for the API key unless
+the trainer was PAID — so those probes only ever used OpenStreetMap, and the
+`unknownPairs: 1` had nothing to do with the stale secret. (The stale-secret trap
+above is real and rests on the AUDIT LOG, which is independent.) Geocoding is now
+Google for every trainer, with only traffic-aware ROUTES behind the paywall: the
+warning is meant to be universal and cannot happen without geocoding, so the
+paywall had been sitting on the prerequisite.
 
 **A gate on ONE control is not a policy.** Four review lenses found the data
 export handing over the very notes the card had just hidden, and a fifth found

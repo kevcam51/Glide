@@ -17,6 +17,9 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 const require = createRequire(import.meta.url);
 const FN = join(dirname(fileURLToPath(import.meta.url)), "..", "functions") + "/";
+// Read at module scope: a `const { readFileSync } = require("fs")` further down
+// shadows the import for its whole block, so a nested read hits the TDZ.
+const AV = readFileSync(FN + "availability.js", "utf8");
 const D = require(FN + "driveTime.js");
 
 let fails = 0, checks = 0;
@@ -244,6 +247,81 @@ const fakeFetch = async (url) => {
     ok("and the answer is traffic-aware", withKey && withKey.source === "routes", withKey && withKey.source);
     ok("Routes duration is used (22 min + overhead)", withKey && withKey.minutes === 27, withKey && withKey.minutes);
   }
+
+  // ── geocoding is free, traffic is paid (S199u) ────────────────────────────
+  // They used to be ONE key, and availability.js passed null for both unless the
+  // trainer was on a paid coach tier — so a free trainer's addresses only ever
+  // reached OpenStreetMap. Measured against the live service: Nominatim resolves
+  // ordinary addresses fine, but cannot find "2901 Florida Ave, Coconut Grove,
+  // FL 33133" at all, because Coconut Grove is a neighbourhood and not a
+  // municipality. Google normalises it and finds it. The drive WARNING is
+  // deliberately free for everyone and cannot happen without geocoding, so the
+  // paywall was sitting on the prerequisite rather than on the paid part.
+  {
+    const store3 = new Map();
+    const db3 = { doc: (p) => ({ path: p,
+      async get() { const d = store3.get(p); return { exists: !!d, data: () => d }; },
+      async set(v) { store3.set(p, v); } }) };
+    let googleGeo = 0, nominatimGeo = 0, routes = 0;
+    const spyFetch = async (url) => {
+      const u = String(url);
+      if (u.includes("maps.googleapis.com/maps/api/geocode")) {
+        googleGeo++;
+        const q = decodeURIComponent(u.split("address=")[1].split("&")[0]);
+        const pt = /wynwood|2nd ave/i.test(q) ? wynwood : southBeach;
+        return { ok: true, json: async () => ({ results: [{ geometry: { location: { lat: pt.lat, lng: pt.lng } } }] }) };
+      }
+      if (u.includes("nominatim")) {
+        nominatimGeo++;
+        const q = decodeURIComponent(String(u).split("q=")[1] || "");
+        const pt = q.includes("wynwood") ? wynwood : southBeach;
+        return { ok: true, json: async () => [{ lat: String(pt.lat), lon: String(pt.lng) }] };
+      }
+      if (u.includes("routes.googleapis.com")) {
+        routes++;
+        return { ok: true, json: async () => ({ routes: [{ duration: "1320s", distanceMeters: 9000 }] }) };
+      }
+      return { ok: false };
+    };
+    // A FREE trainer: geocoding key present, routes key null.
+    const free = await D.estimateDrive(db3, "100 Ocean Dr Miami", "200 NW 2nd Ave Wynwood",
+      mon9, "AIzaTESTKEY", spyFetch, null);
+    ok("a free trainer's addresses DO reach Google", googleGeo === 2, { googleGeo, nominatimGeo });
+    ok("...and OpenStreetMap is not needed at all", nominatimGeo === 0, nominatimGeo);
+    ok("...but Routes is never called for them", routes === 0, routes);
+    ok("...so the answer is the free straight-line estimate", free && free.source === "straight-line", free);
+
+    // ⚠️ AND THEIR ESTIMATE MUST STILL CACHE. staleGuess is keyed on routesKey,
+    // not apiKey — keyed on apiKey, every free trainer would re-run the same
+    // estimate on every calendar open forever, because geocoding never turns a
+    // straight line into a road distance.
+    const before = googleGeo + nominatimGeo;
+    const free2 = await D.estimateDrive(db3, "100 Ocean Dr Miami", "200 NW 2nd Ave Wynwood",
+      mon9b, "AIzaTESTKEY", spyFetch, null);
+    ok("a free trainer's straight line is served from cache", free2 && free2.cached === true, free2);
+    ok("...touching the network zero more times", googleGeo + nominatimGeo === before);
+
+    // A PAID trainer on the same route: the cached straight line is stale for
+    // them, and Routes answers.
+    const paid = await D.estimateDrive(db3, "100 Ocean Dr Miami", "200 NW 2nd Ave Wynwood",
+      mon9, "AIzaTESTKEY", spyFetch, "AIzaTESTKEY");
+    ok("a paid trainer is not served the free straight line", paid && paid.cached === false, paid);
+    ok("...they get traffic-aware times", paid && paid.source === "routes", paid && paid.source);
+    ok("...and Routes was called exactly once", routes === 1, routes);
+
+    // Nobody at all: no key of either kind still works, on OpenStreetMap.
+    const none = await D.estimateDrive(db3, "1 A St", "2 B St", mon9, null, spyFetch, null);
+    ok("with no key at all it still falls back to OpenStreetMap", nominatimGeo === 2 && none && none.minutes >= 0,
+       { nominatimGeo, none });
+  }
+
+  // The wiring: availability.js must pass the geocode key unconditionally.
+  ok("availability.js gives every trainer a geocoding key",
+     /const geoKey = keyPresent \? raw : null;/.test(AV));
+  ok("...while traffic-aware routing stays behind the paid gate",
+     /const key = keyPresent && paid \? raw : null;/.test(AV));
+  ok("...and hands estimateDrive both, in the right order",
+     /estimateDrive\(db, a\.location, b\.location, b\.startAt, geoKey, undefined, key\)/.test(AV));
 
   const same = await D.estimateDrive(db, "50 Main St", "50 main street", mon9, null, fakeFetch);
   ok("the same address twice is zero minutes and never geocoded",

@@ -378,7 +378,21 @@ async function routesLive(from, to, departMs, apiKey, fetchFn) {
 // The one entry point. Always returns a labelled estimate or null — and falls
 // back to the straight line whenever Routes is unavailable, so a key problem
 // degrades the estimate instead of removing the warning.
-async function estimateDrive(db, fromAddr, toAddr, departMs, apiKey, fetchFn) {
+// ⚠️ TWO KEYS, ONE STRING (S199u). `apiKey` geocodes and is for EVERYONE;
+// `routesKey` buys traffic-aware times and is the paid half. They used to be the
+// same parameter, and availability.js passed null for both unless the trainer was
+// on a paid coach tier — so a FREE trainer's addresses were resolved by
+// OpenStreetMap alone. That is not a pricing choice, it is an accident: the drive
+// WARNING is deliberately free for everyone (S197k), and it cannot happen at all
+// without geocoding. Measured: Nominatim resolves ordinary addresses fine (9/9 in
+// a live probe) but rejects "2901 Florida Ave, Coconut Grove, FL 33133" outright,
+// because Coconut Grove is a neighbourhood rather than a municipality. Google
+// normalises it to Miami and finds it. So a free trainer who wrote the
+// neighbourhood — which people do — got no safety check and no reason why.
+// Geocoding is an Essentials SKU: 10k free lookups a month, and every result is
+// cached in `geocache` and shared across trainers, so this costs approximately
+// nothing. Defaulted to apiKey so every existing caller and test is unchanged.
+async function estimateDrive(db, fromAddr, toAddr, departMs, apiKey, fetchFn, routesKey = apiKey) {
   if (!normalizeAddress(fromAddr) || !normalizeAddress(toAddr)) return null;
   if (normalizeAddress(fromAddr) === normalizeAddress(toAddr)) {
     return { minutes: 0, miles: 0, source: "same-place", cached: false };
@@ -395,7 +409,11 @@ async function estimateDrive(db, fromAddr, toAddr, departMs, apiKey, fetchFn) {
       // "no traffic" estimates for a month and reasonably concludes the key did
       // not work. A straight-line entry is therefore treated as a MISS once a
       // key is available, and recomputed for real.
-      const staleGuess = d.source === "straight-line" && !!apiKey;
+      // Keyed on routesKey, not apiKey: a straight line is stale once TRAFFIC is
+      // available, which is what would improve it. Geocoding never turns a
+      // straight-line entry into a road distance, so keying it on apiKey would
+      // make every free trainer re-run the same estimate on every calendar open.
+      const staleGuess = d.source === "straight-line" && !!routesKey;
       if (!staleGuess && Date.now() - (d.at || 0) < DRIVE_TTL_MS && isFinite(d.minutes)) {
         return { minutes: d.minutes, miles: d.miles != null ? d.miles : null, source: d.source, cached: true };
       }
@@ -408,7 +426,7 @@ async function estimateDrive(db, fromAddr, toAddr, departMs, apiKey, fetchFn) {
   ]);
   if (!from || !to) return null;
 
-  let est = apiKey ? await routesLive(from, to, departMs, apiKey, fetchFn) : null;
+  let est = routesKey ? await routesLive(from, to, departMs, routesKey, fetchFn) : null;
   if (!est) {
     const minutes = straightLineMinutes(from, to);
     if (minutes == null) return null;
