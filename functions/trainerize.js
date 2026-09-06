@@ -638,7 +638,29 @@ async function fetchRoster(auth) {
 // wearable/health, workouts) against that same plan. `target` is either Kevin's own
 // local ctz profile (targetUid=admin, planId=ctz{id}) OR a LINKED client's account
 // (targetUid=client, planId=their active plan) — see runImport's tz-links routing.
-async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDate, auth, days) {
+async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDate, auth, days, writeSnapshot = true) {
+  // ⚠️ writeSnapshot=false: TOUCH NOTHING BUT THE WATCH DATA (S200h, Kevin).
+  //
+  // "I do not want anything input in trainerize, other than the calorie burn,
+  // to affect glide and change glide." The profile snapshot — name, gender,
+  // age, height, activity level, goal weight, weight, body fat, macro targets —
+  // is somebody typing into Trainerize, and it was being re-asserted over the
+  // Glidna plan every thirty minutes. That is what made an activity level snap
+  // back (S200f), and the per-field guards only ever covered fields a person
+  // had already edited here; anything untouched stayed Trainerize's forever.
+  //
+  // Seeding on a DELIBERATE import still happens — that is Kevin choosing to
+  // bring a client's stats across, and it is how a plan gets populated at all.
+  // The background sync is the part that changed Glidna without being asked,
+  // so that is the part that now carries only what the watch measured.
+  if (!writeSnapshot) {
+    let healthDays = 0, healthSeen = 0, healthRange = null, workoutDays = 0;
+    try { const hr = await syncClientHealth(db, targetUid, planId, u.id, auth, days); healthDays = hr.days; healthSeen = hr.seen; healthRange = hr; }
+    catch (e) { console.error("health sync failed for", u.id, e && e.message); }
+    try { workoutDays = await syncClientWorkouts(db, targetUid, planId, u.id, auth, days); }
+    catch (e) { console.error("workout sync failed for", u.id, e && e.message); }
+    return { d: {}, step: 0, mealDays: 0, healthDays, healthSeen, healthRange, workoutDays, snapshotSkipped: true };
+  }
   const { d, step } = await planTxnWrap(db, targetUid, planId, (wrap) => {
   const prev = wrap.data || {};
   // Trainerize stays source of truth for the snapshot fields (weight, goal,
@@ -749,7 +771,7 @@ async function syncTargetIds(db, uid) {
   ].filter(Boolean))];
 }
 
-async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTRITION_DAYS } = {}) {
+async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTRITION_DAYS, writeSnapshot = true } = {}) {
   let roster = await fetchRoster(auth);
   const wanted = Array.isArray(clientIds) ? new Set(clientIds.map(Number).filter(Boolean)) : null;
   if (wanted) roster = roster.filter((u) => wanted.has(Number(u.id)));
@@ -825,7 +847,7 @@ async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTR
             mealDays: 0, healthDays, healthSeen, healthFrom, healthTo, workoutDays });
           continue;
         }
-        const r = await applySnapshotAndSyncs(db, linkedUid, clientPlanId, u, snap, lastStatDate, auth, nutritionDays);
+        const r = await applySnapshotAndSyncs(db, linkedUid, clientPlanId, u, snap, lastStatDate, auth, nutritionDays, writeSnapshot);
         results.push({ name, weight: r.d.weightLbs || "", goal: r.d.goalWeight || "", status: u.status || "",
           linked: true, mealDays: r.mealDays, healthDays: r.healthDays, healthSeen: r.healthSeen,
           healthFrom: r.healthRange && r.healthRange.firstDate, healthTo: r.healthRange && r.healthRange.lastDate,
@@ -836,7 +858,21 @@ async function runImport(db, uid, auth, { clientIds = null, nutritionDays = NUTR
       // LOCAL profile (default): dedupe by trainerizeId, else the deterministic id.
       const pid = (index.find((p) => p && p.trainerizeId === u.id) || {}).id || `ctz${u.id}`;
       const existing = index.find((p) => p && p.id === pid);
-      const r = await applySnapshotAndSyncs(db, uid, pid, u, snap, lastStatDate, auth, nutritionDays);
+      const r = await applySnapshotAndSyncs(db, uid, pid, u, snap, lastStatDate, auth, nutritionDays, writeSnapshot);
+      // ⚠️ AND THE INDEX CARD IS PART OF "NOTHING ELSE CHANGES" (S200h). With the
+      // snapshot skipped `r.d` is empty, so rebuilding the entry from it would
+      // blank the card's weight and goal, reset its step label to "Personal" and
+      // re-stamp the name from Trainerize — quietly changing Glidna in the
+      // background, which is the whole thing this flag exists to stop.
+      if (!writeSnapshot) {
+        if (existing) updated++;
+        results.push({ name: (existing && existing.name) || name, weight: (existing && existing.weight) || "",
+          goal: (existing && existing.goal) || "", status: u.status || "",
+          mealDays: 0, healthDays: r.healthDays, healthSeen: r.healthSeen,
+          healthFrom: r.healthRange && r.healthRange.firstDate, healthTo: r.healthRange && r.healthRange.lastDate,
+          workoutDays: r.workoutDays, snapshotSkipped: true });
+        continue;
+      }
       const entry = {
         ...(existing || {}), id: pid, name, weight: r.d.weightLbs || "", goal: r.d.goalWeight || "",
         lastSaved: Date.now(), stepLabel: STEP_LABELS[r.step] || "Personal",
@@ -898,7 +934,9 @@ exports.trainerizeImport = onCall(
     if (request.data && request.data.mode === "sync") {
       const ids = await syncTargetIds(db, uid);
       if (!ids.length) return { ok: true, total: 0, synced: 0, clients: [], nothingToSync: true };
-      const r = await runImport(db, uid, auth, { clientIds: ids, nutritionDays: 14 });
+      // "Sync tracker now" means the tracker, not the profile (S200h). Same rule
+      // as the 30-minute schedule below: burn and workouts, nothing else.
+      const r = await runImport(db, uid, auth, { clientIds: ids, nutritionDays: 14, writeSnapshot: false });
       return { ...r, synced: r.total };
     }
 
@@ -928,7 +966,13 @@ exports.trainerizeAutoSync = onSchedule(
     if (!ids.length) { console.log("trainerizeAutoSync: no imported or linked Trainerize clients — nothing to sync (run the import to restore)"); return; }
     const auth = Buffer.from(`${TRAINERIZE_GROUP_ID.value()}:${TRAINERIZE_API_TOKEN.value()}`).toString("base64");
     try {
-      const r = await runImport(db, uid, auth, { clientIds: ids, nutritionDays: 14 });
+      // ⚠️ writeSnapshot:false — THE BACKGROUND RUN CARRIES WATCH DATA ONLY
+      // (S200h, Kevin: "I do not want anything input in trainerize, other than
+      // the calorie burn, to affect glide and change glide"). Calorie burn and
+      // completed workouts still flow; the profile snapshot does not. Seeding a
+      // client's stats stays a deliberate act, from the import picker, which
+      // still passes the default.
+      const r = await runImport(db, uid, auth, { clientIds: ids, nutritionDays: 14, writeSnapshot: false });
       // healthDays included (S160): for a watch-only link it is the ONLY number
       // that moves — meals/workouts are 0 by design — so leaving it out made a
       // working tracker sync and a silently broken one log identically.

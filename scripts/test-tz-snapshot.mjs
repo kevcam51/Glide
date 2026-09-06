@@ -191,6 +191,62 @@ const CLIENT = { id: 4242 };
      && read("admin", "caliq-ctz4242").data.gender === "male",
      read("admin", "caliq-ctz4242").data);
 
+  // ── 5c. writeSnapshot:false — WATCH DATA ONLY (S200h) ────────────────────
+  // Kevin: "I do not want anything input in trainerize, other than the calorie
+  // burn, to affect glide and change glide."
+  //
+  // The per-field guards above only protect what someone has ALREADY edited
+  // here; a field nobody has touched stayed Trainerize's forever, re-asserted
+  // every thirty minutes. So the background paths — the 30-minute schedule and
+  // the "sync tracker now" button — now carry only what the watch measured.
+  // Seeding on a deliberate import is unchanged: that is Kevin choosing.
+  store.clear();
+  seed("admin", "caliq-ctz4242", { data: { gender: "female", age: 30, goalWeight: 160,
+    activityLevel: "very", weightLbs: 150, trainerNotes: "keep this" }, step: 5 });
+  const before = JSON.stringify(read("admin", "caliq-ctz4242"));
+  const rSkip = await scope.applySnapshotAndSyncs(db, "admin", "ctz4242", CLIENT,
+    { gender: "male", age: 41, goalWeight: 999, activityLevel: "sedentary", weightLbs: 999 },
+    "2026-09-01", {}, 14, false);
+  ok("watch-only: the plan document is byte-identical afterwards",
+     JSON.stringify(read("admin", "caliq-ctz4242")) === before,
+     read("admin", "caliq-ctz4242").data);
+  ok("watch-only: it says so to the caller", rSkip.snapshotSkipped === true, rSkip);
+  ok("watch-only: the watch syncs still ran", "healthDays" in rSkip && "workoutDays" in rSkip, rSkip);
+
+  // ⚠️ AND THE DEFAULT MUST STAY THE OLD BEHAVIOUR, or a deliberate import
+  // silently stops importing. Same call, flag omitted.
+  store.clear();
+  seed("admin", "caliq-ctz4242", { data: { gender: "female" }, step: 5 });
+  await scope.applySnapshotAndSyncs(db, "admin", "ctz4242", CLIENT, { gender: "male", age: 41 }, null, {}, 14);
+  ok("a deliberate import still seeds the profile",
+     read("admin", "caliq-ctz4242").data.gender === "male" && read("admin", "caliq-ctz4242").data.age === 41,
+     read("admin", "caliq-ctz4242").data);
+
+  // The two background callers must pass the flag; the picker must not. This is
+  // a source check because the callers are Cloud Function bodies, but it is the
+  // half that decides whether any of the above ever runs in production.
+  {
+    const bg = (SRC.match(/runImport\(db, uid, auth, \{ clientIds: ids, nutritionDays: 14, writeSnapshot: false \}\)/g) || []).length;
+    ok("both background paths ask for watch data only", bg === 2, bg);
+    ok("the 30-minute schedule is one of them",
+       /trainerizeAutoSync[\s\S]*?writeSnapshot: false/.test(SRC));
+    ok("the import picker still seeds",
+       /return await runImport\(db, uid, auth, \{ clientIds, nutritionDays: NUTRITION_DAYS \}\);/.test(SRC));
+    ok("no background caller was left on the old signature",
+       !/runImport\(db, uid, auth, \{ clientIds: ids, nutritionDays: 14 \}\)/.test(SRC));
+    // ⚠️ THE LOCAL INDEX CARD IS PART OF THE SAME PROMISE, and it lives in
+    // runImport, which this harness cannot drive (it would call Trainerize). So
+    // this is a source check — but a real one: with the snapshot skipped, `r.d`
+    // is empty, so rebuilding the card from it would blank its weight and goal
+    // and reset the step label. The guard must bail BEFORE the rebuild.
+    const local = SRC.slice(SRC.indexOf("// LOCAL profile (default)"), SRC.indexOf("await kvSetJSON(db, uid, \"caliq-index\""));
+    ok("watch-only bails before rebuilding the local index card",
+       /if \(!writeSnapshot\) \{[\s\S]*?continue;[\s\S]*?\}\s*const entry = \{/.test(local),
+       local.slice(local.indexOf("const r = await applySnapshot"), local.indexOf("const r = await applySnapshot") + 200));
+    ok("...and the rebuild it guards is still there for a real import",
+       /const entry = \{[\s\S]*?weight: r\.d\.weightLbs/.test(local));
+  }
+
   // ── 6. a plan that does not exist yet is created, not crashed on ─────────
   store.clear();
   threw = null;
