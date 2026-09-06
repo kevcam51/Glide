@@ -29675,9 +29675,24 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
       return ownKvNotes.filter((n) => n.aboutPlanId === planId).map((n) => ({ ...n, _store: "aboutPlan" }))
         .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     }
-    // "My Notes" = genuinely mine: not about a client, not about a plan file.
-    return ownKvNotes.filter((n) => !n.aboutUid && !n.aboutPlanId).map((n) => ({ ...n, _store: "self" }))
-      .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    // "My Notes" = my own notes first, then the ones I wrote ABOUT someone.
+    //
+    // ⚠️ THIS SCREEN USED TO HIDE THE SECOND GROUP ENTIRELY (S200m). Every note
+    // here lives in the trainer's OWN account either way; the filter was about
+    // tidiness, and the cost was that a note filed against a client was
+    // unreachable from the one screen called "My notes". That is how Kevin's
+    // note disappeared: the AI filed it under a client (fixed at source in
+    // functions/aitools.js), and this screen then removed it from view.
+    //
+    // Fixing the AI does nothing for notes ALREADY misfiled, and there is no
+    // move-between-stores action anywhere — so without this, the fix is
+    // invisible to exactly the person who reported it. Shown, labelled with who
+    // they are about, and sorted below the trainer's own.
+    const mine = ownKvNotes.filter((n) => !n.aboutUid && !n.aboutPlanId).map((n) => ({ ...n, _store: "self" }));
+    const about = ownKvNotes.filter((n) => n.aboutUid || n.aboutPlanId)
+      .map((n) => ({ ...n, _store: n.aboutPlanId ? "aboutPlan" : "aboutClient", _filedElsewhere: true }));
+    const byNewest = (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0);
+    return [...mine.sort(byNewest), ...about.sort(byNewest)];
   })();
 
   // store readers/writers (read-modify-write; the AI side is transactional)
@@ -29747,6 +29762,10 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
 
   const badge = (n) => {
     if (n._store === "priv") return { icon: "fingerprint", label: "Private" };
+    // On "My notes" these are surfaced from elsewhere, so the badge has to say
+    // WHERE — "Private to you" is true of the whole screen and tells you nothing
+    // about why a note you don't recognise is sitting in the list (S200m).
+    if (n._filedElsewhere) return { icon: "fingerprint", label: n.aboutPlanId ? "About a plan file" : "About a client" };
     if (n._store === "aboutClient") return { icon: "fingerprint", label: "Private to you" };
     if (n._store === "aboutPlan") return { icon: "fingerprint", label: "Private to you" };
     if (n._store === "self") return { icon: "file", label: "My note" };

@@ -989,7 +989,28 @@ function buildTools(role, opts = {}) {
   const clientIdProp = isTrainer
     ? { clientId: { type: "string", description: "The client's id from list_clients. " + TRAINER_NOTE } }
     : {};
-  const localPlanProp = isTrainer
+
+
+  // ⚠️ THE ESCAPE HATCH FROM THE CONVERSATION'S ACTIVE SUBJECT (S200m).
+  //
+  // The chat relays an ACTIVE SUBJECT — whichever client or plan was last
+  // touched — and tells the model to reuse that id for EVERY read and edit. That
+  // is right for logging and plan edits and wrong for notes: a trainer saying
+  // "make a note for me" got a note filed against the client, which lands in
+  // their own kv with an aboutUid and is exactly what the "My notes" screen
+  // filters out. The note existed, the tool honestly returned ok, and nothing
+  // appeared. Kevin hit this.
+  //
+  // A prompt sentence alone would not hold: the subject survives chat switches
+  // and reloads, so it is prose competing against an all-caps instruction, for
+  // the life of the chat. A schema hint alone already failed — clientIdProp has
+  // said "omit it for your own data" since S199 and this happened anyway.
+  //
+  // So the model gets a way to SAY it, and the server enforces it: aboutMe wins
+  // over any id present, in code, at the top of the handler.
+  const aboutMeProp = { aboutMe: { type: "boolean",
+    description: "TRUE when the note is the USER'S OWN — 'a note for me', 'my notes', 'remember this for me'. "
+      + "Overrides clientId/localPlanId, which otherwise file it under that person where the user will not find it." } };  const localPlanProp = isTrainer
     ? { localPlanId: { type: "string", description: "One of YOUR OWN local plan/sim files (id from list_local_plans), not a client account. Never with clientId." } }
     : {};
 
@@ -1518,7 +1539,7 @@ function buildTools(role, opts = {}) {
         + "guidance over generic advice. Notes whose owner has hidden them from AI are omitted; withheldFromAI "
         + "says how many. "
         + "Pass localPlanId instead for notes about one of your own plan files (those people are clients too).",
-      input_schema: { type: "object", properties: { ...clientIdProp, ...localPlanProp } },
+      input_schema: { type: "object", properties: { ...clientIdProp, ...localPlanProp, ...aboutMeProp } },
     },
     {
       name: "create_note",
@@ -1536,7 +1557,7 @@ function buildTools(role, opts = {}) {
           title: { type: "string", description: "Optional title; defaults to the first line" },
           shared: { type: "boolean", description: "true = visible to the other side (client↔trainer). Default false (private)." },
           kind: { type: "string", enum: ["note", "recap"], description: "'recap' for conversation summaries / client snapshots (gets a recap badge)" },
-          ...clientIdProp, ...localPlanProp,
+          ...clientIdProp, ...localPlanProp, ...aboutMeProp,
         },
         required: ["body"],
       },
@@ -2303,7 +2324,9 @@ async function runTool(name, input, ctx) {
   }
 
   // Data tools — resolve & authorize the target user first.
-  const uid = await resolveTargetUid(db, input, ctx);
+  // `let`, not `const`: the notes tools re-point this to the caller when the
+  // model says the note is the user's own (aboutMe) — see the S200m note there.
+  let uid = await resolveTargetUid(db, input, ctx);
   if (uid && uid.error) return uid; // { error }
 
   // Local-plan targeting (S87, trainers): localPlanId points a tool at one of
@@ -2424,6 +2447,22 @@ async function runTool(name, input, ctx) {
   // store is only ever touched when the target IS the caller. A trainer with
   // clientId gets the client's SHARED notes + their own about-notes, period.
   if (name === "list_notes" || name === "create_note" || name === "update_note") {
+    // ⚠️ "THIS ONE IS MINE" WINS OVER THE CONVERSATION'S SUBJECT, IN CODE (S200m).
+    //
+    // The chat relays an ACTIVE SUBJECT and instructs the model to reuse that id
+    // for EVERY read and edit. Correct for logs and plan edits, wrong for notes:
+    // a trainer saying "make a note for me" got clientId passed anyway, the note
+    // was filed against that client, and the "My notes" screen filters exactly
+    // those out. It saved, it reported ok, and nothing appeared.
+    //
+    // Enforced here rather than asked for in the prompt, because the subject
+    // survives chat switches and reloads — a prompt sentence would be prose
+    // competing with an all-caps instruction for the life of the chat, and the
+    // schema hint that already said "omit it for your own data" did not hold.
+    // update_note is deliberately included even though it copes today: it looks
+    // in the caller's own kv second, so it works by luck, and dropping the ids
+    // makes it look there FIRST.
+    if (input && input.aboutMe === true) { uid = ctx.callerUid; planOverride = ""; }
     const isSelf = uid === ctx.callerUid;
     const cap = (arr) => [...arr].slice(0, 100);
     // Notes about one of the caller's OWN plan files (S166). That person is a
@@ -2495,33 +2534,43 @@ async function runTool(name, input, ctx) {
         visibility: "private", kind: input.kind === "recap" ? "recap" : "note",
         createdAt: now, updatedAt: now,
       };
-      let storedAs;
+      // ⚠️ SAY WHERE IT WENT, IN A PLACE THEY CAN OPEN (S200m). `storedAs` has
+      // six values and was returned and never interpreted, so "private to you"
+      // covered the user's own notes AND a note filed under a client — which is
+      // exactly what Kevin was told before finding nothing. `visibleIn` names a
+      // screen; the prompt requires quoting it back.
+      let storedAs, visibleIn;
       if (aboutPlan) {
         note.aboutPlanId = aboutPlan;
         await kvTxnJSON(db, ctx.callerUid, "caliq-notes", (arr) => cap([note, ...(Array.isArray(arr) ? arr : [])]));
         storedAs = "private-to-you-about-this-plan";
-        return { ok: true, id: note.id, title: note.title, storedAs,
+        visibleIn = "the Notes panel on that plan file — NOT under your own \u201cMy notes\u201d";
+        return { ok: true, id: note.id, title: note.title, storedAs, visibleIn,
           ...(input.shared === true ? { note: "There is no account on their end, so nothing was shared — the note is filed against that plan in your own notes." } : {}) };
       }
       if (isSelf) {
         if (!ctx.isTrainer && input.shared !== true) {
           await privTxnJSON(db, ctx.callerUid, "caliq-notes", (arr) => cap([note, ...(Array.isArray(arr) ? arr : [])]));
           storedAs = "private";
+          visibleIn = "your Notes screen, private to you";
         } else {
           if (!ctx.isTrainer) note.visibility = "shared";
           await kvTxnJSON(db, uid, "caliq-notes", (arr) => cap([note, ...(Array.isArray(arr) ? arr : [])]));
           storedAs = ctx.isTrainer ? "my-notes" : "shared-with-trainer";
+          visibleIn = ctx.isTrainer ? "\u201cMy notes\u201d in the \u2261 menu" : "your Notes screen, and your trainer can see it";
         }
       } else if (input.shared === true) {
         note.visibility = "shared";
         await kvTxnJSON(db, uid, "caliq-notes", (arr) => cap([note, ...(Array.isArray(arr) ? arr : [])]));
         storedAs = "shared-with-client";
+        visibleIn = "that client\u2019s Notes, where they can read it";
       } else {
         note.aboutUid = uid;
         await kvTxnJSON(db, ctx.callerUid, "caliq-notes", (arr) => cap([note, ...(Array.isArray(arr) ? arr : [])]));
         storedAs = "private-to-you-about-this-client";
+        visibleIn = "the Notes panel on that client\u2019s card — NOT under your own \u201cMy notes\u201d";
       }
-      return { ok: true, id: note.id, title: note.title, storedAs };
+      return { ok: true, id: note.id, title: note.title, storedAs, visibleIn };
     }
     // update_note — find which accessible store holds the id, then transact it.
     const nid = String(input.noteId || "");
