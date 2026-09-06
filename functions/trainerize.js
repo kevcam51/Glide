@@ -642,6 +642,17 @@ async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDat
   // Once someone has set them here, Trainerize never touches that one field again.
   const snapApply = { ...snap };
   if (prev.macroTargetsEditedAt) delete snapApply.macroTargets;
+  // ⚠️ AND activityLevel, FOR THE SAME REASON — THE THIRD TIME THIS CLASS HAS
+  // BITTEN (S200f). It sat between two fields that each already carry a
+  // don't-clobber guard, and had none: Trainerize's `activeLevel` was re-stamped
+  // over the local value on every run, so a deliberate change here reverted
+  // within the half hour and looked exactly like "it didn't save".
+  //
+  // That is worse for this field than for the others, because Glidna now
+  // PROPOSES an activity rung from measured expenditure (the observed-TDEE card)
+  // — a number Trainerize cannot see. Letting a stale signup answer overwrite a
+  // measured one would make the app argue with its own recommendation.
+  if (prev.activityLevelEditedAt) delete snapApply.activityLevel;
   // Weight: NEWEST MEASUREMENT WINS, whichever side it came from. This used to
   // overwrite unconditionally, so a weigh-in logged in Glidna today was reverted
   // to Trainerize's older stat within 30 minutes — and because the sync only

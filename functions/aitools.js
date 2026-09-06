@@ -2575,7 +2575,11 @@ async function runTool(name, input, ctx) {
     if (d.goalRangeLow && d.goalRangeHigh && Number(d.goalRangeLow) > Number(d.goalRangeHigh)) {
       const t = d.goalRangeLow; d.goalRangeLow = d.goalRangeHigh; d.goalRangeHigh = t; // swap if reversed
     }
-    if (input.activityLevel && ACTIVITY_MULT[input.activityLevel]) { d.activityLevel = input.activityLevel; changes.push(`activity ${input.activityLevel}`); }
+    // The stamp is the point, not decoration (S200f): the Trainerize sync
+    // re-stamps activityLevel from its own snapshot every 30 minutes unless a
+    // deliberate local choice is on record. Setting it here without the marker
+    // would have the assistant confirm a change that reverts within the hour.
+    if (input.activityLevel && ACTIVITY_MULT[input.activityLevel]) { d.activityLevel = input.activityLevel; d.activityLevelEditedAt = Date.now(); changes.push(`activity ${input.activityLevel}`); }
     if (input.bodyFatPct != null) { const b = clampNum(input.bodyFatPct, 2, 70, true); if (b) { d.bodyFat = b; changes.push("body fat"); } }
     if (input.goalBodyFatPct != null) { const b = clampNum(input.goalBodyFatPct, 2, 70, true); if (b) { d.goalBodyFat = b; changes.push("goal body fat"); } }
     // The write half of the same gate. `trainerNotes` is not offered in a

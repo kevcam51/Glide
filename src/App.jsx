@@ -412,6 +412,128 @@ function formatWeeks(w) {
 // `planned` is only what comes AFTER the last real reading: a future-flagged
 // entry dated in the past is not a continuation of the line, and threading it
 // through the middle would draw a weight nobody stood on.
+// Should we propose a different activity rung, and are we allowed to ask? (S199 slice 6; cooldown S200f)
+//
+// THE ANSWER TO "should the activity level we set at signup change?" — yes, but
+// a person decides, not the app. `activityLevel` is the user's own stated answer
+// and several screens render it as words, so overwriting it silently would make
+// those screens lie about what they said. Proposed, one tap.
+//
+// Why this rung is the safe thing to act on: the ladder has five fixed
+// multipliers, so a tap can only ever produce a NORMAL formula TDEE — never an
+// arbitrary number the measurement happened to land on. Bounded by construction,
+// which is exactly what the observed number is not.
+//
+// ⚠️ THE COOLDOWN IS NOT POLITENESS, IT IS ANTI-THRASH (S200f, Kevin's ask).
+// When the measurement lands BETWEEN two rungs, each new day of data can nudge
+// `implied` back across the midpoint — so without a cooldown the card can ask,
+// be answered, and ask the opposite next week, forever. Fourteen days is chosen
+// against the estimator's own 28-day window: at 14, half the evidence is new. At
+// 7 it would re-ask on data that is 75% the same, which is re-asking the same
+// question, not asking a better one.
+//
+// Suppression hides the PROMPT, never the information: the measured-burn card
+// this sits inside still renders the observed number and still says whether it
+// agrees with the estimate.
+//
+// Module-level and pure so scripts/test-activity-suggestion.mjs runs the
+// shipping code rather than a transcription of it.
+const ACTIVITY_COOLDOWN_DAYS = 14;
+
+function activityRungSuggestion({ observed, tdee, activityLevel, activityCheck, now }) {
+  if (!observed || !observed.tdee) return null;
+  // High confidence only: this rewrites a profile field the whole app reads, so
+  // an early read is not enough to propose it.
+  if (observed.confidence !== "high") return null;
+  // ⚠️ DELIBERATELY NOT GATED ON `diverged`. That flag is 15%, and a single
+  // wrong rung on this ladder is only 9-13% (1.55 -> 1.375 is 11.3%), so keying
+  // the suggestion off it would miss every one-step error — which is precisely
+  // the error it exists to catch, and the most common one. The right test is not
+  // "is the gap large" but "does another rung fit better", which is what the
+  // search below actually asks.
+  //
+  // The margin keeps it off measurement noise: the estimator is worth about
+  // +/-120 cal/day at this window length, so a gap under ~150 is not evidence.
+  if (!(tdee > 0) || !isFinite(tdee)) return null;
+  if (Math.abs(observed.tdee - tdee) < Math.max(150, tdee * 0.05)) return null;
+  const cur = ACTIVITY_LEVELS.find((a) => a.id === activityLevel) || ACTIVITY_LEVELS[0];
+  const bmr = tdee / cur.multiplier;          // tdee is bmr x multiplier
+  if (!(bmr > 0) || !isFinite(bmr)) return null;
+  const implied = observed.tdee / bmr;
+  const lo = ACTIVITY_LEVELS[0].multiplier;
+  const hi = ACTIVITY_LEVELS[ACTIVITY_LEVELS.length - 1].multiplier;
+  // ⚠️ IF THE LADDER CANNOT EXPRESS IT, DO NOT PIN IT TO AN END RUNG. A
+  // measurement implying less than sedentary is not evidence that someone is
+  // sedentary — it is evidence that something else is wrong, and the most likely
+  // something is the food log. Offering "set yourself to Sedentary" there would
+  // launder an under-logging problem into a calorie cut.
+  //
+  // Reported BEFORE the cooldown on purpose: this branch asks for nothing, so
+  // there is nothing to be quiet about, and silencing it for a fortnight would
+  // hide the one message that says the log itself needs attention.
+  if (implied < lo - 0.02 || implied > hi + 0.02) return { outOfLadder: true, implied };
+  let best = ACTIVITY_LEVELS[0], bestErr = Infinity;
+  for (const a of ACTIVITY_LEVELS) {
+    const e = Math.abs(a.multiplier - implied);
+    if (e < bestErr) { bestErr = e; best = a; }
+  }
+  if (best.id === cur.id) return null;
+  const at = activityCheck && Number(activityCheck.at);
+  if (at > 0 && Number(now) - at < ACTIVITY_COOLDOWN_DAYS * 86400000) return null;
+  return { from: cur, to: best, newTdee: Math.round(bmr * best.multiplier) };
+}
+
+// A plan edit that has not reached Firestore yet, parked somewhere synchronous
+// (S200f).
+//
+// ⚠️ EVERY OTHER OPTION WAS TRIED AND MEASURED FAILING. The plan write is
+// debounced 600ms, so closing the app on top of an edit loses it. Flushing on
+// pagehide is necessary and NOT sufficient:
+//
+//   • runTransaction commits only against the backend — it can never be queued
+//     offline, so an in-flight merge dies with the process;
+//   • a plain setDoc queues in Firestore's IndexedDB mutation queue, which
+//     survives a kill — but ONLY if the SDK gets to write it. Measured in the
+//     browser: a setDoc issued 30ms before a reload survived; the same setDoc
+//     issued from the pagehide handler did not, and neither did one placed
+//     behind a single awaited IndexedDB read.
+//
+// localStorage is the one store that is synchronous, so it is the one that can
+// be written while the page is already going away. The journal holds the exact
+// bytes we meant to write; the next load replays them and clears it.
+//
+// One slot: the app has one plan open at a time. Keyed by uid AND storage key
+// so a journal can never be replayed into somebody else's account or onto a
+// different plan.
+const PLAN_JOURNAL = "glide-pending-plan";
+const PLAN_JOURNAL_MAX_AGE_MS = 7 * 86400000;
+
+function stashPendingPlan(entry) {
+  try { localStorage.setItem(PLAN_JOURNAL, JSON.stringify({ ...entry, at: Date.now() })); }
+  catch (e) { /* quota or private mode — the async write is still in flight */ }
+}
+function clearPendingPlan() {
+  try { localStorage.removeItem(PLAN_JOURNAL); } catch (e) { /* nothing to do */ }
+}
+// Returns the parked wrapper for exactly this uid+key, and removes it. Anything
+// stale, foreign or unparseable is dropped rather than guessed at: replaying an
+// edit from a week ago over a plan someone has since changed would be a worse
+// bug than the one this fixes.
+function takePendingPlan(uid, key) {
+  let raw = null;
+  try { raw = localStorage.getItem(PLAN_JOURNAL); } catch (e) { return null; }
+  if (!raw) return null;
+  let j = null;
+  try { j = JSON.parse(raw); } catch (e) { clearPendingPlan(); return null; }
+  if (!j || j.uid !== uid || j.key !== key || typeof j.wrap !== "string"
+      || !(Date.now() - Number(j.at) < PLAN_JOURNAL_MAX_AGE_MS)) {
+    if (j && !(Date.now() - Number(j.at) < PLAN_JOURNAL_MAX_AGE_MS)) clearPendingPlan();
+    return null;
+  }
+  clearPendingPlan();
+  return j.wrap;
+}
+
 function splitWeighIns(checkIns) {
   const all = [...(checkIns || [])].filter((c) => c && Number(c.weight) > 0 && c.timestamp);
   const real = all.filter((c) => !c.isFuturePlan).sort((a, b) => a.timestamp - b.timestamp);
@@ -11710,7 +11832,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget, dayCalsAll,
   onSaveMeasurements, onSaveMeasurementsFor, onDeleteMeasurement, onToggleBodyFat, onSetBfSource, onSetGoalWeight, onAddCustomExercise,
   onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetHideCompliance, meUid: dashMeUid, peerUid,
-  premium = true, role, onOpenMealPlanner, onSetActivityLevel }) {
+  premium = true, role, onOpenMealPlanner, onSetActivityLevel, onDismissActivitySuggestion }) {
 
   // Swipe-down to refresh the daily view (S104) — reuses the existing onRefresh
   // (reloadPlanLive), which re-pulls the plan + today's log.
@@ -12217,52 +12339,13 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
     });
   }, [dayCalsAll, data.checkIns, tdee, todayKeyProp, dashToday]);
 
-  // ── What the measurement says about the activity level (S199, slice 6) ────
-  // THE ANSWER TO "should the activity level we set at signup change?" — yes,
-  // but a person decides, not the app. `activityLevel` is the user's own stated
-  // answer and several screens render it as words, so overwriting it silently
-  // would make those screens lie about what they said. Proposed, one tap.
-  //
-  // Why this is the safe rung to act on: the ladder has five fixed multipliers,
-  // so a tap can only ever produce a NORMAL formula TDEE — never an arbitrary
-  // number the measurement happened to land on. It is bounded by construction,
-  // which is exactly what the observed number is not.
-  const activitySuggestion = useMemo(() => {
-    if (!observed || !observed.tdee) return null;
-    // High confidence only: this rewrites a profile field the whole app reads,
-    // so an early read is not enough to propose it.
-    if (observed.confidence !== "high") return null;
-    // ⚠️ DELIBERATELY NOT GATED ON `diverged`. That flag is 15%, and a
-    // single wrong rung on this ladder is only 9-13% (1.55 -> 1.375 is 11.3%),
-    // so keying the suggestion off it would miss every one-step error — which
-    // is precisely the error it exists to catch, and the most common one. The
-    // right test is not "is the gap large" but "does another rung fit better",
-    // which is what the search below actually asks.
-    //
-    // The margin keeps it off measurement noise: the estimator is worth about
-    // +/-120 cal/day at this window length, so a gap under ~150 is not evidence
-    // of anything.
-    if (Math.abs(observed.tdee - tdee) < Math.max(150, tdee * 0.05)) return null;
-    const cur = ACTIVITY_LEVELS.find((a) => a.id === data.activityLevel) || ACTIVITY_LEVELS[0];
-    const bmr = tdee / cur.multiplier;          // tdee is bmr x multiplier
-    if (!(bmr > 0) || !isFinite(bmr)) return null;
-    const implied = observed.tdee / bmr;
-    const lo = ACTIVITY_LEVELS[0].multiplier;
-    const hi = ACTIVITY_LEVELS[ACTIVITY_LEVELS.length - 1].multiplier;
-    // ⚠️ IF THE LADDER CANNOT EXPRESS IT, DO NOT PIN IT TO AN END RUNG. A
-    // measurement implying less than sedentary is not evidence that someone is
-    // sedentary — it is evidence that something else is wrong, and the most
-    // likely something is the food log. Offering "set yourself to Sedentary"
-    // there would launder an under-logging problem into a calorie cut.
-    if (implied < lo - 0.02 || implied > hi + 0.02) return { outOfLadder: true, implied };
-    let best = ACTIVITY_LEVELS[0], bestErr = Infinity;
-    for (const a of ACTIVITY_LEVELS) {
-      const e = Math.abs(a.multiplier - implied);
-      if (e < bestErr) { bestErr = e; best = a; }
-    }
-    if (best.id === cur.id) return null;
-    return { from: cur, to: best, newTdee: Math.round(bmr * best.multiplier) };
-  }, [observed, data.activityLevel, tdee]);
+  // What the measurement says about the activity level — see
+  // activityRungSuggestion (module level, so the rule is testable and the
+  // 14-day cooldown cannot drift away from the card that honours it).
+  const activitySuggestion = useMemo(() => activityRungSuggestion({
+    observed, tdee, activityLevel: data.activityLevel,
+    activityCheck: data.activityCheck, now: Date.now(),
+  }), [observed, data.activityLevel, data.activityCheck, tdee]);
 
   // ── Try a different rate without committing to it (S198q, Kevin) ──────────
   // Tapping a daily target previews it IN THE RING, so the question "what would
@@ -12747,14 +12830,32 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                   change adds a client-only restriction anywhere on the plan, the
                   enumeration in scripts/test-target-parity.mjs will fail and ask
                   why. */}
+              {/* ⚠️ "NOT NOW" IS A REAL ANSWER, AND IT HAS TO BE RECORDED
+                  (S200f). Without it the only way to answer the card was to
+                  accept it; scrolling past is not a decision, so the card asked
+                  again on every open. Both buttons write the same
+                  `activityCheck` stamp, because a cooldown that only starts on
+                  ACCEPT would leave the person who said no being asked daily —
+                  the exact nagging the cooldown exists to stop. */}
               {onSetActivityLevel ? (
-                <button onClick={()=>onSetActivityLevel(activitySuggestion.to.id)}
-                  style={{display:"inline-flex",alignItems:"center",gap:"7px",padding:"8px 13px",borderRadius:"8px",
-                    cursor:"pointer",border:"none",fontFamily:"inherit",fontSize:".76rem",fontWeight:800,
-                    background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)"}}>
-                  <Icon name="check" size={13} color="var(--color-primaryfg)" />
-                  Set activity to {activitySuggestion.to.label}
-                </button>
+                <div style={{display:"flex",gap:"8px",flexWrap:"wrap",alignItems:"center"}}>
+                  <button onClick={()=>onSetActivityLevel(activitySuggestion.to.id)}
+                    style={{display:"inline-flex",alignItems:"center",gap:"7px",padding:"8px 13px",borderRadius:"8px",
+                      cursor:"pointer",border:"none",fontFamily:"inherit",fontSize:".76rem",fontWeight:800,
+                      background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)"}}>
+                    <Icon name="check" size={13} color="var(--color-primaryfg)" />
+                    Set activity to {activitySuggestion.to.label}
+                  </button>
+                  {onDismissActivitySuggestion ? (
+                    <button onClick={()=>onDismissActivitySuggestion(activitySuggestion.to.id)}
+                      title={`We won't ask again for about ${ACTIVITY_COOLDOWN_DAYS} days`}
+                      style={{padding:"8px 13px",borderRadius:"8px",cursor:"pointer",fontFamily:"inherit",
+                        fontSize:".76rem",fontWeight:700,border:"1px solid var(--border)",
+                        background:"transparent",color:"var(--text-secondary)"}}>
+                      Not now
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           )}
@@ -31486,6 +31587,20 @@ export default function App() {
     }
   };
   const saveTimer = useRef(null);
+  // The last plan wrapper we know the server holds, as the raw stored string.
+  //
+  // ⚠️ THIS EXISTS FOR ONE REASON: THE FLUSH CANNOT AWAIT A READ (S200f).
+  // Measured in the browser — a write issued straight away survives a reload
+  // 30ms later; the same write issued after ONE awaited IndexedDB read does
+  // not. So the leaving-the-app path has to merge against something already in
+  // memory. It is refreshed on every load and on every successful save, so it
+  // is the server's copy as of seconds ago rather than milliseconds.
+  //
+  // When it is null the flush writes the whole in-memory wrapper instead of
+  // merging: mergePlanData with a null server copy and a non-null baseline
+  // returns ONLY the changed keys, which would not save a plan — it would
+  // truncate one.
+  const serverWrapRef = useRef(null);
   // The exact plan-wrapper payload we last wrote to a remote client's account, so
   // the live-sync listener can ignore our own echoed write (vs. a real change
   // from the client / AI). Pairs with the onSnapshot effect below.
@@ -31725,56 +31840,157 @@ export default function App() {
   };
 
   // Auto-save (debounced 600ms)
+  //
+  // ⚠️ A DEBOUNCED WRITE WITH NO FLUSH IS A WRITE THAT DIES WITH THE PAGE
+  // (S200f). Everything the plan owns is written through this one timer, and
+  // nothing used to cancel it on the way out — so any edit made in the last
+  // ~600ms before the app was closed or backgrounded was simply gone, with no
+  // error, no badge, and no way for the person to tell. Measured on the running
+  // app: tapping an activity level and reloading immediately persisted NOTHING;
+  // the same tap followed by 2.5 seconds persisted fine.
+  //
+  // The write body therefore lives in runPlanSave, so it can also be run on
+  // demand, and `pendingSave` carries the job the timer is holding.
+  const runPlanSave = async (job) => {
+    const { nextData, nextStep, remote } = job;
+    try {
+      // ⚠️ WRITE ONLY WHAT CHANGED, ONTO WHAT THE SERVER HOLDS (S197m).
+      //
+      // This used to write the whole in-memory document. The live-sync
+      // listener deliberately skips remote changes while an edit is mid-
+      // debounce — yanking a half-typed form would be worse — so anything the
+      // AI or the Trainerize sync wrote during those 600ms was in nobody's
+      // copy by the time this fired, and the write erased it.
+      //
+      // The baseline is the snapshot the activity feed already keeps. With no
+      // baseline (a brand-new plan) mergePlanWrap writes the whole thing,
+      // which is the old behaviour and the only honest answer.
+      const baseline = lastSnapshotRef.current;
+      const mergeInto = (cur) => {
+        let server = null;
+        try { server = cur ? JSON.parse(cur) : null; } catch { server = null; }
+        const out = JSON.stringify(mergePlanWrap(server, baseline, nextData, nextStep));
+        serverWrapRef.current = out;   // what the server will hold once this commits
+        return out;
+      };
+      if (remote) {
+        // Editing a linked client's plan — save straight into THEIR account.
+        // (No local index update; this profile doesn't live in our list.)
+        const res = await mergeForUser(remote, planDataKey(activeId), mergeInto);
+        // Mark the ACTUAL written string, or live-sync treats our own merged
+        // write as a remote change and re-applies it over the open form.
+        if (res && res.value) lastRemoteWriteRef.current = res.value;
+        recordPlanEdits(nextData);
+        if (pendingSave.current === job) { pendingSave.current = null; clearPendingPlan(); }   // confirmed
+        setSaving(true);
+        setTimeout(()=>setSaving(false), 1200);
+        return;
+      }
+      const SL = ["Personal","Goal Weight","Activity","Cardio","Strength","Results"];
+      await window.storage.mergeSet(profileKey(activeId), mergeInto);
+      const d = nextData;
+      const up = profiles.map(p => p.id===activeId ? {...p, name:fullName(d)||p.name, weight:d.weightLbs||"", goal:d.goalWeight||"", lastSaved:Date.now(), stepLabel:SL[nextStep]||""} : p);
+      setProfiles(up);
+      await saveIndex(up);
+      recordPlanEdits(nextData);
+      if (pendingSave.current === job) { pendingSave.current = null; clearPendingPlan(); }   // confirmed
+      setSaving(true);
+      setTimeout(()=>setSaving(false), 1200);
+    } catch(e) {
+      // ⚠️ THIS USED TO BE `catch(e) {}` — TOTALLY SILENT. A rejected plan write
+      // left the new value alive in React state for the rest of the session and
+      // only vanished on the next load, which is indistinguishable from "it
+      // saved and something else changed it back". The day log was given exactly
+      // this treatment in S85; the plan never was.
+      console.error("plan autoSave failed", e && e.code, e && e.message);
+      setSaveError("That change didn't save. Check your connection — anything you change now may not be kept.");
+    }
+  };
+
+  // The edit the debounce is holding, if any. Read by the flush below, which is
+  // the only thing standing between a tap and the app being closed on top of it.
+  const pendingSave = useRef(null);
+
   const autoSave = (newData, newStep) => {
     if (!activeId) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    const remote = activeRemoteUid; // capture: are we editing a linked client's plan?
-    saveTimer.current = setTimeout(async ()=>{
-      try {
-        const nextData = newData||data;
-        const nextStep = newStep??step;
-        // ⚠️ WRITE ONLY WHAT CHANGED, ONTO WHAT THE SERVER HOLDS (S197m).
-        //
-        // This used to write the whole in-memory document. The live-sync
-        // listener deliberately skips remote changes while an edit is mid-
-        // debounce — yanking a half-typed form would be worse — so anything the
-        // AI or the Trainerize sync wrote during those 600ms was in nobody's
-        // copy by the time this fired, and the write erased it.
-        //
-        // The baseline is the snapshot the activity feed already keeps. With no
-        // baseline (a brand-new plan) mergePlanWrap writes the whole thing,
-        // which is the old behaviour and the only honest answer.
-        const baseline = lastSnapshotRef.current;
-        const mergeInto = (cur) => {
-          let server = null;
-          try { server = cur ? JSON.parse(cur) : null; } catch { server = null; }
-          return JSON.stringify(mergePlanWrap(server, baseline, nextData, nextStep));
-        };
-        if (remote) {
-          // Editing a linked client's plan — save straight into THEIR account.
-          // (No local index update; this profile doesn't live in our list.)
-          const res = await mergeForUser(remote, planDataKey(activeId), mergeInto);
-          // Mark the ACTUAL written string, or live-sync treats our own merged
-          // write as a remote change and re-applies it over the open form.
-          if (res && res.value) lastRemoteWriteRef.current = res.value;
-          recordPlanEdits(nextData);
-          setSaving(true);
-          setTimeout(()=>setSaving(false), 1200);
-          return;
-        }
-        const SL = ["Personal","Goal Weight","Activity","Cardio","Strength","Results"];
-        await window.storage.mergeSet(profileKey(activeId), mergeInto);
-        const d = nextData;
-        const up = profiles.map(p => p.id===activeId ? {...p, name:fullName(d)||p.name, weight:d.weightLbs||"", goal:d.goalWeight||"", lastSaved:Date.now(), stepLabel:SL[nextStep]||""} : p);
-        setProfiles(up);
-        await saveIndex(up);
-        recordPlanEdits(nextData);
-        setSaving(true);
-        setTimeout(()=>setSaving(false), 1200);
-      } catch(e) {}
-      finally { saveTimer.current = null; } // debounce done — clears the "edit in flight" guard
+    // capture: are we editing a linked client's plan?
+    const job = { nextData: newData||data, nextStep: newStep??step, remote: activeRemoteUid };
+    pendingSave.current = job;
+    const id = setTimeout(async () => {
+      // ⚠️ THE JOB STAYS PENDING UNTIL THE WRITE IS CONFIRMED, NOT MERELY
+      // STARTED (S200f). Clearing it here looked equivalent and was not: the
+      // transaction needs a server round trip, so an app closed while it was in
+      // flight left the flush with nothing to rescue and the edit died with the
+      // request. Measured — the failure happened at 600ms+, not inside the
+      // debounce at all, which is why the first version of this fix did not
+      // work. Leaving it pending also means a REJECTED write is retried by the
+      // next flush instead of being dropped by an empty catch.
+      try { await runPlanSave(job); }
+      // ⚠️ IDENTITY-CHECKED, NOT A BARE NULL. saveTimer.current doubles as the
+      // "an edit is in flight" guard that reloadPlanLive and the live-sync
+      // listener read before overwriting the open form. Clearing it
+      // unconditionally let a slow save disarm a guard that a NEWER pending
+      // edit still owns.
+      finally { if (saveTimer.current === id) saveTimer.current = null; }
     }, 600);
+    saveTimer.current = id;
   };
+
+  // Write it NOW, because the app is going away.
+  //
+  // ⚠️ NOTHING MAY BE AWAITED BEFORE THE WRITE IS ISSUED. This is measured, not
+  // assumed: with a reload 30ms later, an immediate window.storage.set survived
+  // and the identical write placed behind a single awaited IndexedDB read did
+  // not. So the merge is computed synchronously from serverWrapRef and the
+  // write is fired without awaiting it — the SDK queues the mutation locally
+  // and replays it on next launch, which a transaction can never do (a
+  // transaction commits only against the backend).
+  //
+  // The cost, stated plainly: the base is our last known server copy rather
+  // than a fresh read, so a server write from the last few seconds could be
+  // overwritten for the keys we are writing. That beats the alternative, which
+  // is not a safer write but no write at all.
+  const flushPlanSave = () => {
+    const job = pendingSave.current;
+    if (!job) return;
+    pendingSave.current = null;
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    if (!activeId) return;
+    try {
+      const baseline = lastSnapshotRef.current;
+      let server = null;
+      try { server = serverWrapRef.current ? JSON.parse(serverWrapRef.current) : null; } catch { server = null; }
+      const out = JSON.stringify(server
+        ? mergePlanWrap(server, baseline, job.nextData, job.nextStep)
+        // No known server copy: write the document whole rather than the diff.
+        : { data: job.nextData, step: job.nextStep });
+      serverWrapRef.current = out;
+      // PARK IT FIRST, synchronously — this is the only step that is guaranteed
+      // to complete once the page is being torn down.
+      const key = job.remote ? planDataKey(activeId) : profileKey(activeId);
+      stashPendingPlan({ uid: job.remote || meUid, key, remote: !!job.remote, wrap: out });
+      // Then try the real write anyway: when the app is merely backgrounded this
+      // lands, and the journal is consumed as a no-op on the next load.
+      if (job.remote) setForUser(job.remote, key, out).catch(() => {});
+      else window.storage.set(key, out).catch(() => {});
+    } catch (e) { console.error("plan flush failed", e && e.message); }
+  };
+  // No dependency array on purpose: runPlanSave closes over activeId and
+  // profiles, so a listener registered once would flush a stale plan. Re-binding
+  // two listeners per render is cheap; writing the wrong document is not.
+  useEffect(() => {
+    // visibilitychange is the one that actually fires on mobile — iOS Safari
+    // and installed PWAs do not reliably deliver beforeunload/unload at all, so
+    // relying on those would have fixed this only on desktop.
+    const onHide = () => { if (document.visibilityState === "hidden") flushPlanSave(); };
+    window.addEventListener("pagehide", flushPlanSave);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("pagehide", flushPlanSave);
+      document.removeEventListener("visibilitychange", onHide);
+    };
+  });
 
   // After a save settles, record any meaningful plan-structure changes (goal,
   // workouts, notes, …) in the history. Diffs against the last saved snapshot.
@@ -31793,17 +32009,32 @@ export default function App() {
       return next;
     });
   };
-  const setStepAndSave = (s) => { setStep(s); autoSave(data, s); };
+  // Functional, so it can never queue a pre-edit document: this shares the
+  // one debounce with every other writer, and passing the render closure's
+  // `data` would let a navigation tap replace a just-made edit with the
+  // document from before it (S200f — hardening; not the reported cause).
+  const setStepAndSave = (st) => { setStep(st); setData(cur => { autoSave(cur, st); return cur; }); };
 
   const selectProfile = async (id) => {
     resetPlanScopedState();   // same hazard as openClientPlan — imported clients are local profiles
     setViewDate(todayKey);    // always open on TODAY
     let merged = {...EMPTY_DATA};
     let stp = 0;
+    // Seed the flush's merge base with what the server just gave us (S200f):
+    // null here would make a flush write the whole in-memory document.
+    serverWrapRef.current = null;
     try {
       const result = await window.storage.get(profileKey(id));
-      if (result && result.value) {
-        const parsed = JSON.parse(result.value);
+      // ⚠️ REPLAYED HERE, NOT IN A STARTUP EFFECT (S200f). Consuming the journal
+      // at the moment of the read is what makes it race-free: a background
+      // replay could land after this read and leave the screen showing the value
+      // the person had already changed — which is the very bug being fixed.
+      const parked = takePendingPlan(meUid, profileKey(id));
+      if (parked) window.storage.set(profileKey(id), parked).catch(() => {});
+      const value = parked || (result && result.value);
+      if (value) {
+        serverWrapRef.current = value;
+        const parsed = JSON.parse(value);
         const d = parsed.data || {};
         // Backward compat: migrate old "name" field to firstName/lastName
         if (d.name && !d.firstName) {
@@ -31853,10 +32084,15 @@ export default function App() {
     setViewDate(todayKey);    // always open on TODAY, not wherever the last plan was left
     let pid = planId;
     if (!pid) { const m = await readPlansManifest((k) => getForUser(clientUid, k)); pid = m.active; }
+    serverWrapRef.current = null;   // same as selectProfile — see S200f note there
     try {
       const r = await getForUser(clientUid, planDataKey(pid));
-      if (r && r.value) {
-        const parsed = JSON.parse(r.value);
+      const parked = takePendingPlan(clientUid, planDataKey(pid));   // see selectProfile
+      if (parked) setForUser(clientUid, planDataKey(pid), parked).catch(() => {});
+      const value = parked || (r && r.value);
+      if (value) {
+        serverWrapRef.current = value;
+        const parsed = JSON.parse(value);
         const d = parsed.data || {};
         if (d.name && !d.firstName) {
           const parts = d.name.trim().split(/\s+/);
@@ -31958,6 +32194,7 @@ export default function App() {
     // to the eat-back default the next time it was opened. A null baseline is
     // exactly the case mergePlanData handles by writing the whole document.
     lastSnapshotRef.current = null;
+    serverWrapRef.current = null;   // nothing written yet; a flush writes the whole document
     setStep(0);
     setActiveRemoteUid(null);
     setActiveId(id);
@@ -32180,7 +32417,15 @@ export default function App() {
     const fresh = resetPlanData(data);
     setStep(0); setData(fresh); autoSave(fresh, 0);
   };
-  const update = (k,v) => setDataAndSave(p=>({...p,[k]:v}));
+  // ⚠️ THE WIZARD IS A DELIBERATE CHOICE TOO (S200f). The Activity step writes
+  // through this generic setter, so stamping only at the suggestion card would
+  // leave the wizard's answer unprotected and reverted by the next Trainerize
+  // sync — the same bug, reached by the more common route.
+  const update = (k,v) => setDataAndSave(p => {
+    const n = { ...p, [k]: v };
+    if (k === "activityLevel") n.activityLevelEditedAt = Date.now();
+    return n;
+  });
 
   // Recovery: scan storage for profiles missing from the index
   const recoverProfiles = async () => {
@@ -32887,7 +33132,7 @@ export default function App() {
     // an in-flight local edit.
     if (!saveTimer.current) {
       const pv = await logRead(planDataKey(activeId));
-      if (pv) { try { const wrap = JSON.parse(pv); const merged = buildMergedData(wrap.data); setData(merged); lastSnapshotRef.current = merged; } catch(e) {} }
+      if (pv) { try { const wrap = JSON.parse(pv); const merged = buildMergedData(wrap.data); setData(merged); lastSnapshotRef.current = merged; serverWrapRef.current = pv; } catch(e) {} }
     }
     const v = await logRead(`caliq-log-${activeId}-${viewDate}`);
     let parsed = {calories:0, water:0, weight:0, meals:[]};
@@ -32926,6 +33171,7 @@ export default function App() {
       if (JSON.stringify(merged) === JSON.stringify(lastSnapshotRef.current)) return; // no real change
       setData(merged);
       lastSnapshotRef.current = merged;              // keep the diff baseline current (no phantom history)
+      serverWrapRef.current = value;                 // and the flush's merge base
     }));
 
     // 2) Today's daily log (meals / calories / water / weight)
@@ -33394,7 +33640,17 @@ export default function App() {
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
               dayCalsAll={dayCalsAll}
-              onSetActivityLevel={(id)=>setDataAndSave(p=>({...p, activityLevel: id}))}
+              onSetActivityLevel={(id)=>setDataAndSave(p=>({...p, activityLevel: id,
+                // Two stamps, two jobs. `activityLevelEditedAt` tells the Trainerize
+                // sync a person chose this, so its own snapshot must not re-stamp it
+                // half an hour later (S200f — the third field to need that guard).
+                activityLevelEditedAt: Date.now(),
+                // `activityCheck` starts the 14-day cooldown so the card stops asking.
+                activityCheck: { at: Date.now(), to: id, decision: "accepted" }}))}
+              onDismissActivitySuggestion={(id)=>setDataAndSave(p=>({...p,
+                // Dismissing writes only the cooldown: "not now" is an answer to the
+                // question, not an edit to the plan, so nothing about the plan changes.
+                activityCheck: { at: Date.now(), to: id, decision: "dismissed" }}))}
               onSaveMeasurements={(vals, dateKey)=>setDataAndSave(p=>{
                 // ⚠️ HONOUR THE DATE THE CALLER ASKED FOR (S198y). This used to
                 // drop its second argument and file every save under viewDate, so

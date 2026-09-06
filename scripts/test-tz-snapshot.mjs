@@ -107,6 +107,47 @@ const CLIENT = { id: 4242 };
      read("admin", "caliq-ctz4242").data.macroTargets.protein === 200,
      read("admin", "caliq-ctz4242").data.macroTargets);
 
+  // ── 5b. and neither is a deliberately-chosen activity level (S200f) ──────
+  // ⚠️ THE THIRD FIELD TO NEED THIS GUARD, AND THE ONE THAT COST A REPORT.
+  // `activityLevel` sat between macroTargets (guarded above) and weightLbs
+  // (guarded by date) with nothing of its own, so Trainerize's signup answer
+  // was re-stamped over the local value on EVERY run — every 30 minutes, and
+  // again whenever the owner taps "sync tracker". Kevin: "I select the
+  // recommended new activity level, it works, but when I close the app it ends
+  // up going away."
+  //
+  // It matters more here than for the others because Glidna now MEASURES an
+  // activity rung from logged intake and the scale and proposes it. Letting a
+  // stale remote answer win would have the app overrule its own recommendation
+  // on a timer.
+  store.clear();
+  seed("admin", "caliq-ctz4242", { data: { activityLevel: "very", activityLevelEditedAt: 123 }, step: 5 });
+  await scope.applySnapshotAndSyncs(db, "admin", "ctz4242", CLIENT,
+    { activityLevel: "moderate", weightLbs: 180 }, null, {}, 14);
+  ok("a chosen activity level survives the sync",
+     read("admin", "caliq-ctz4242").data.activityLevel === "very",
+     read("admin", "caliq-ctz4242").data.activityLevel);
+
+  // The control, and it is the important half: with no local choice on record
+  // Trainerize is still source of truth, exactly as it was before. A guard that
+  // also broke the first import would be a different bug, not a fix.
+  store.clear();
+  seed("admin", "caliq-ctz4242", { data: { activityLevel: "very" }, step: 5 });
+  await scope.applySnapshotAndSyncs(db, "admin", "ctz4242", CLIENT,
+    { activityLevel: "moderate", weightLbs: 180 }, null, {}, 14);
+  ok("an UNedited activity level still follows Trainerize",
+     read("admin", "caliq-ctz4242").data.activityLevel === "moderate",
+     read("admin", "caliq-ctz4242").data.activityLevel);
+
+  // The marker alone must not freeze the rest of the snapshot.
+  store.clear();
+  seed("admin", "caliq-ctz4242", { data: { activityLevel: "very", activityLevelEditedAt: 123, weightLbs: 300 }, step: 5 });
+  await scope.applySnapshotAndSyncs(db, "admin", "ctz4242", CLIENT,
+    { activityLevel: "moderate", weightLbs: 180, gender: "male" }, "2026-09-01", {}, 14);
+  ok("...so weight and profile fields still sync",
+     read("admin", "caliq-ctz4242").data.weightLbs === 180 && read("admin", "caliq-ctz4242").data.gender === "male",
+     read("admin", "caliq-ctz4242").data);
+
   // ── 6. a plan that does not exist yet is created, not crashed on ─────────
   store.clear();
   threw = null;
