@@ -113,6 +113,26 @@ const base = {
      /filter\(c => c\.weight && c\.timestamp && !c\.isFuturePlan\)/.test(APP));
   ok("server weightTrend filters planned entries",
      /filter\(\(c\) => c\.weight && c\.timestamp && !c\.isFuturePlan\)/.test(AITOOLS));
+  // ⚠️ EVERY CONSUMER, ENUMERATED (S199y). Two were missed for a long time and
+  // both were the ones a person actually LOOKS at: ProgressChart drew the line
+  // from real weigh-ins straight into the aspiration and computed "change since
+  // your previous reading" against it, and the measurements day-walker opened a
+  // future target as a record of a day that has not happened. A rule applied in
+  // four places and forgotten in the two visible ones is not a rule.
+  ok("the weight CHART excludes planned targets",
+     /filter\(c => c\.weight && !c\.isFuturePlan\)/.test(APP));
+  ok("the measurements day-walker excludes them too",
+     /!\(Number\(c\.weight\) > 0\) \|\| c\.isFuturePlan\) continue;/.test(APP));
+  // Pin the SET: a new reader of checkIns.weight has to say why it may include
+  // an aspiration, rather than inheriting the bug by omission.
+  {
+    const readers = APP.split("\n").filter((ln) =>
+      /checkIns[^\n]*\.filter\(/.test(ln) || /\(d\.checkIns \|\| \[\]\)/.test(ln));
+    const unfiltered = readers.filter((ln) => /\bweight\b/.test(ln) && !/isFuturePlan/.test(ln));
+    ok("no reader of checkIns weight forgets the planned-goal filter",
+       unfiltered.length === 0, unfiltered.map((l) => l.trim().slice(0, 80)));
+  }
+
   // ...and the plan's CURRENT weight must not be dragged to a future goal.
   ok("syncWeightFromCheckIns refuses a planned entry",
      /if \(checkin\.isFuturePlan\) return next;/.test(APP));

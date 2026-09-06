@@ -14422,7 +14422,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               </div>
             </div>
             {(data.checkIns||[]).length > 1 && (() => {
-              const sorted = [...data.checkIns].filter(c=>c.weight).sort((a,b)=>a.timestamp-b.timestamp);
+              const sorted = [...data.checkIns].filter(c=>c.weight && !c.isFuturePlan).sort((a,b)=>a.timestamp-b.timestamp);
               const first = sorted[0]?.weight;
               const last = sorted[sorted.length-1]?.weight;
               const diff = first - last;
@@ -14950,7 +14950,15 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
   const cardStyle = surfaceless
     ? { background: "transparent", border: "none", padding: 0, marginBottom: 0 }
     : undefined;
-  const sorted = [...(checkIns || [])].filter(c => c.weight).sort((a, b) => a.timestamp - b.timestamp);
+  // ⚠️ A PLANNED GOAL IS NOT A MEASUREMENT (S199y). The Plan Ahead screen
+  // relabels the weight field "Target Weight (lbs)" and writes an ASPIRATION
+  // into the same `weight` slot with isFuturePlan:true. Every other consumer
+  // filters it — weightTrend, the observed-TDEE feed, the coach dashboard, the
+  // current-weight sync — and this one, the actual CHART, did not: it drew the
+  // line from real weigh-ins straight into the goal, and the header's "change
+  // since your previous reading" was computed against it. Someone who plotted
+  // 180 lbs for December was shown as having already got there.
+  const sorted = [...(checkIns || [])].filter(c => c.weight && !c.isFuturePlan).sort((a, b) => a.timestamp - b.timestamp);
   if (sorted.length < 2) return (
     <div className="card" style={{padding:"16px",textAlign:"center",color:"var(--muted)",fontSize:".84rem",lineHeight:1.6,...cardStyle}}>
       Progress chart appears after 2+ check-ins with weight logged. Keep checking in daily!
@@ -15158,7 +15166,7 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
   // from — it used to carry its own data-theme="pro" for that.
   const w = Number(currentWeight) || 0;
   const start = Number(startWeight) || 0;
-  const weighIns = [...(checkIns || [])].filter(c => c.weight).sort((a, b) => a.timestamp - b.timestamp);
+  const weighIns = [...(checkIns || [])].filter(c => c.weight && !c.isFuturePlan).sort((a, b) => a.timestamp - b.timestamp);
   let chartCheckIns = checkIns || [];
   if (weighIns.length === 1 && start && start !== w) {
     const firstTs = weighIns[0].timestamp || Date.now();
@@ -15659,7 +15667,9 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
     const byDate = new Map();
     for (const e of entries) if (e && e.date) byDate.set(e.date, { date: e.date, ts: e.timestamp, entry: e, ci: null });
     for (const c of (d.checkIns || [])) {
-      if (!c || !c.date || !(Number(c.weight) > 0)) continue;
+      // A future TARGET is not a day that happened, so it neither opens as one
+      // nor inflates the "N weigh-in-only days" line below (S199y).
+      if (!c || !c.date || !(Number(c.weight) > 0) || c.isFuturePlan) continue;
       const ex = byDate.get(c.date);
       if (ex) ex.ci = c;
       else byDate.set(c.date, { date: c.date, ts: c.timestamp || new Date(c.date + "T12:00:00").getTime(), entry: null, ci: c });
@@ -16270,7 +16280,7 @@ function AICoach({ data, tdee, totalBurn, totalStrBurn, activeDays, activeStrDay
       // Weigh-ins only, in TIME order — the raw array is append-ordered (a
       // back-dated edit lands last) and contains weight-less workout check-ins,
       // which used to make this narrate "null lbs" or a stale "most recent".
-      const recent = checkIns.filter(c => c && c.weight)
+      const recent = checkIns.filter(c => c && c.weight && !c.isFuturePlan)
         .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).slice(-14);
       const adherence = adherenceOf(checkIns);
       const weightTrend = recent.length >= 2
@@ -18309,7 +18319,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
             const c = computeClientCalories(d) || {};
             // Progress baseline: earliest check-in that recorded a weight. The
             // bar only fills once there's real tracking to measure against.
-            const weighIns = (d.checkIns || []).filter((x) => x.weight)
+            const weighIns = (d.checkIns || []).filter((x) => x.weight && !x.isFuturePlan)
               .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
             const start = weighIns.length ? Number(weighIns[0].weight) : null;
             const cur = Number(d.weightLbs), goal = Number(d.goalWeight);
@@ -19578,7 +19588,7 @@ function TrainerAnalytics({ onOpenClientPlan, onGoClients, meUid, meName, meRole
       ]);
       const openReqs = (requests || []).filter((r) => r.status !== "done");
       const checkIns = (data && data.checkIns) || [];
-      const weighIns = checkIns.filter((x) => x.weight).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      const weighIns = checkIns.filter((x) => x.weight && !x.isFuturePlan).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
       const cur = data && data.weightLbs ? Number(data.weightLbs) : null;
       const goal = data && data.goalWeight ? Number(data.goalWeight) : null;
       const start = weighIns.length ? Number(weighIns[0].weight)
@@ -24876,7 +24886,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       const d = obj.data;
       const removed = d.checkIns.find(c => c.timestamp === ts);
       d.checkIns = d.checkIns.filter(c => c.timestamp !== ts);
-      const remaining = d.checkIns.filter(c => c.weight).sort((a, b) => a.timestamp - b.timestamp);
+      const remaining = d.checkIns.filter(c => c.weight && !c.isFuturePlan).sort((a, b) => a.timestamp - b.timestamp);
       if (remaining.length) d.weightLbs = remaining[remaining.length - 1].weight;
       else if (d.startWeightLbs) d.weightLbs = d.startWeightLbs;
       planWrapRef.current = obj;
@@ -25011,7 +25021,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
           timestamp: (ex && ex.timestamp) || new Date(dateKey + "T12:00:00").getTime(), weight };
         d.checkIns = [...list.filter((c) => c.date !== dateKey), ci];
       }
-      const remaining = (d.checkIns || []).filter((c) => c.weight).sort((a, b) => a.timestamp - b.timestamp);
+      const remaining = (d.checkIns || []).filter((c) => c.weight && !c.isFuturePlan).sort((a, b) => a.timestamp - b.timestamp);
       if (remaining.length) d.weightLbs = remaining[remaining.length - 1].weight;
       else if (d.startWeightLbs) d.weightLbs = d.startWeightLbs;
     });
@@ -25030,7 +25040,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   });
   const calDeleteCheckIn = (ts) => savePlanDataMutation((d) => {
     const checkIns = (d.checkIns || []).filter((c) => c.timestamp !== ts);
-    const remaining = checkIns.filter((c) => c.weight).sort((a, b) => a.timestamp - b.timestamp);
+    const remaining = checkIns.filter((c) => c.weight && !c.isFuturePlan).sort((a, b) => a.timestamp - b.timestamp);
     d.checkIns = checkIns;
     if (remaining.length) d.weightLbs = remaining[remaining.length - 1].weight;
   });
@@ -25054,7 +25064,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   const towardGoal = (g && start && change) ? ((g < start) ? change < 0 : change > 0) : null;
   // Previous weigh-in (so the client can see the difference): the reading just
   // before the current one, falling back to the starting weight.
-  const weighIns = [...((planData && planData.checkIns) || [])].filter(c => c.weight)
+  const weighIns = [...((planData && planData.checkIns) || [])].filter(c => c.weight && !c.isFuturePlan)
     .sort((a, b) => a.timestamp - b.timestamp);
   const prevWeight = weighIns.length >= 2 ? weighIns[weighIns.length - 2].weight
     : (start && start !== w ? start : null);
@@ -25379,7 +25389,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
                   cta: { label: "Log now", onClick: onOpenPlan } });
               }
               // Weigh-in reminder — no weigh-in in the last 7 days.
-              const weighIns = (planData.checkIns || []).filter((c) => c.weight && c.timestamp).sort((a, b) => b.timestamp - a.timestamp);
+              const weighIns = (planData.checkIns || []).filter((c) => c.weight && c.timestamp && !c.isFuturePlan).sort((a, b) => b.timestamp - a.timestamp);
               const daysSinceWeigh = weighIns.length ? Math.floor((Date.now() - weighIns[0].timestamp) / 86400000) : null;
               if (np.master && np.weighInReminders !== false && !nudgeDismiss.weigh && (daysSinceWeigh === null || daysSinceWeigh >= 7)) {
                 nudges.push({ key: "weigh", icon: "scale",
@@ -33163,7 +33173,7 @@ export default function App() {
               })}
               onDeleteCheckIn={(ts)=>setDataAndSave(p=>{
                 const checkIns = (p.checkIns||[]).filter(c => c.timestamp !== ts);
-                const remaining = checkIns.filter(c => c.weight).sort((a,b)=>a.timestamp-b.timestamp);
+                const remaining = checkIns.filter(c => c.weight && !c.isFuturePlan).sort((a,b)=>a.timestamp-b.timestamp);
                 const next = {...p, checkIns};
                 if (remaining.length) next.weightLbs = remaining[remaining.length-1].weight;
                 return next;
@@ -33211,7 +33221,7 @@ export default function App() {
               const checkIns = (p.checkIns||[]).filter(c => c.timestamp !== ts);
               // Re-point current weight to the latest remaining weigh-in, or back
               // to the starting weight if no weigh-ins remain (matches ClientHome).
-              const remaining = checkIns.filter(c => c.weight).sort((a,b)=>a.timestamp-b.timestamp);
+              const remaining = checkIns.filter(c => c.weight && !c.isFuturePlan).sort((a,b)=>a.timestamp-b.timestamp);
               const next = {...p, checkIns};
               if (remaining.length) next.weightLbs = remaining[remaining.length-1].weight;
               else if (p.startWeightLbs) next.weightLbs = p.startWeightLbs;
