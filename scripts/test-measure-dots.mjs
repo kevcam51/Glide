@@ -63,5 +63,51 @@ ok("a day with ONLY a measurement no longer renders as an empty dash",
 ok("the set is built through hasMeasurement, not from entry existence",
    /if \(e && e\.date && hasMeasurement\(e\)\) set\.add\(e\.date\)/.test(APP));
 
+// ── the plan is drawn, and never counted (S199z) ────────────────────────────
+// S199y made planned targets invisible on the chart, which was the safe fix and
+// the wrong end state: Plan Ahead exists so you can plot where you intend to be.
+// They are now a DASHED tail off the last real reading — visible as a plan,
+// excluded from every number. splitWeighIns is module-level because S199y found
+// this same rule applied in four places and forgotten in fourteen; one function
+// is what stops the fifteenth.
+{
+  const fn = /function splitWeighIns\(checkIns\) \{[\s\S]*?\n\}/.exec(APP);
+  ok("splitWeighIns is liftable", !!fn);
+  const split = new Function(`${fn[0]}\nreturn splitWeighIns;`)();
+  const t = (d) => new Date(`2026-0${d}-01T12:00:00Z`).getTime();
+  const real = (d, w) => ({ date: `d${d}`, timestamp: t(d), weight: w });
+  const plan = (d, w) => ({ ...real(d, w), isFuturePlan: true });
+
+  const r = split([real(1, 200), plan(4, 180), real(2, 195), plan(3, 190)]);
+  ok("real readings come back in time order", r.real.map((c) => c.weight).join() === "200,195", r.real);
+  ok("...with no target among them", r.real.every((c) => !c.isFuturePlan));
+  ok("the plan comes back in time order", r.planned.map((c) => c.weight).join() === "190,180", r.planned);
+
+  // ⚠️ ONLY WHAT COMES AFTER THE LAST READING. A future-flagged entry dated in
+  // the PAST is not a continuation of the line — threading it through the middle
+  // would draw a weight nobody ever stood on.
+  const back = split([plan(1, 210), real(3, 195)]);
+  ok("a target dated before the last reading is not drawn", back.planned.length === 0, back.planned);
+  ok("...and never sneaks into the real series", back.real.length === 1);
+
+  ok("weightless check-ins are ignored on both sides",
+     split([{ date: "x", timestamp: t(1), workedOut: true }]).real.length === 0);
+  ok("entries with no timestamp are ignored", split([{ weight: 200, isFuturePlan: true }]).planned.length === 0);
+  ok("junk does not throw", split(null).real.length === 0 && split([null, 7]).planned.length === 0);
+
+  // The chart must USE it, draw the plan dashed, and count none of it.
+  ok("the chart splits through the shared function",
+     /const \{ real: sorted, planned \} = splitWeighIns\(checkIns\);/.test(APP));
+  ok("the plan is dashed, not solid", /strokeDasharray="5 4"/.test(APP));
+  ok("...anchored to the last real reading so it reads as a continuation",
+     /\[sorted\[sorted\.length - 1\], \.\.\.planned\]/.test(APP));
+  ok("...and the x-axis makes room for it", /const slots = sorted\.length \+ planned\.length;/.test(APP));
+  ok("...and the y-axis fits it", /\.\.\.planned\.map\(c => c\.weight\)/.test(APP));
+  // The numbers are all derived from `sorted`, which excludes the plan — and the
+  // tap-to-edit hit targets are too, so a target cannot be edited as a weigh-in.
+  ok("only real readings are tappable", /\{onEditPoint && sorted\.map\(/.test(APP));
+  ok("the dashed line says what it is", /— not measured/.test(APP));
+}
+
 console.log(`  ${checks - fails}/${checks} assertions passed`);
 process.exit(fails ? 1 : 0);

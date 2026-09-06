@@ -405,6 +405,22 @@ function formatWeeks(w) {
 // weight vs. time. Returns { ratePerWeek (lbs/wk; negative = losing), spanDays,
 // n } or null when there isn't enough spread to be meaningful (need 2+ points
 // across at least ~3 days, so same-day logs don't produce a bogus rate).
+// Real readings and the plotted plan, split once (S199z). S199y found this rule
+// applied in four places and forgotten in fourteen — including the chart and the
+// weigh-in reminder — so it lives in one function that anyone drawing or
+// counting weight can call, rather than being re-derived at each call site.
+// `planned` is only what comes AFTER the last real reading: a future-flagged
+// entry dated in the past is not a continuation of the line, and threading it
+// through the middle would draw a weight nobody stood on.
+function splitWeighIns(checkIns) {
+  const all = [...(checkIns || [])].filter((c) => c && Number(c.weight) > 0 && c.timestamp);
+  const real = all.filter((c) => !c.isFuturePlan).sort((a, b) => a.timestamp - b.timestamp);
+  const lastRealTs = real.length ? real[real.length - 1].timestamp : 0;
+  const planned = all.filter((c) => c.isFuturePlan && c.timestamp > lastRealTs)
+    .sort((a, b) => a.timestamp - b.timestamp);
+  return { real, planned };
+}
+
 function weightTrend(checkIns) {
   // ⚠️ A PLANNED GOAL IS NOT A MEASUREMENT (S199). The Plan Ahead screen
   // relabels this very field "Target Weight (lbs)" and writes an ASPIRATION
@@ -14958,7 +14974,9 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
   // line from real weigh-ins straight into the goal, and the header's "change
   // since your previous reading" was computed against it. Someone who plotted
   // 180 lbs for December was shown as having already got there.
-  const sorted = [...(checkIns || [])].filter(c => c.weight && !c.isFuturePlan).sort((a, b) => a.timestamp - b.timestamp);
+  // Drawn but never counted: the plan is a hope, not evidence, so it appears on
+  // the line and in none of the numbers (S199z, Kevin).
+  const { real: sorted, planned } = splitWeighIns(checkIns);
   if (sorted.length < 2) return (
     <div className="card" style={{padding:"16px",textAlign:"center",color:"var(--muted)",fontSize:".84rem",lineHeight:1.6,...cardStyle}}>
       Progress chart appears after 2+ check-ins with weight logged. Keep checking in daily!
@@ -14970,8 +14988,11 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
   // With pxPerPoint set, the chart width grows with the number of points (fixed
   // spacing per weigh-in) so labels don't overlap and it scrolls sideways. Without
   // it, the chart stays a fixed responsive 500-wide (the full-plan view).
+  // The plan occupies its own slots on the x-axis, so the chart has to be wide
+  // enough for them or the dashed tail is drawn off the end of the card.
+  const slots = sorted.length + planned.length;
   const W = pxPerPoint
-    ? PAD.left + PAD.right + Math.max(1, sorted.length - 1) * pxPerPoint
+    ? PAD.left + PAD.right + Math.max(1, slots - 1) * pxPerPoint
     : 500;
   const chartW = W - PAD.left - PAD.right;
   const chartH = H - PAD.top - PAD.bottom;
@@ -14982,15 +15003,21 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
   const rLo = Number(rangeLow) || null;
   const rHi = Number(rangeHigh) || null;
   const hasBand = rLo && rHi && rLo < rHi;
-  const allVals = [...weights, ...(goal ? [goal] : []), ...(hasBand ? [rLo, rHi] : [])];
+  const allVals = [...weights, ...planned.map(c => c.weight), ...(goal ? [goal] : []), ...(hasBand ? [rLo, rHi] : [])];
   const yMin = Math.min(...allVals) - 3;
   const yMax = Math.max(...allVals) + 3;
   const yRange = yMax - yMin;
 
-  const xScale = (i) => (i / (sorted.length - 1)) * chartW;
+  const xScale = (i) => (i / Math.max(1, slots - 1)) * chartW;
   const yScale = (w) => chartH - ((w - yMin) / yRange) * chartH;
 
   const linePts = sorted.map((c, i) => `${i === 0 ? "M" : "L"}${(PAD.left + xScale(i)).toFixed(1)},${(PAD.top + yScale(c.weight)).toFixed(1)}`).join(" ");
+  // Starts at the last real point so the plan reads as a continuation of where
+  // you are, not a second unrelated line floating to the right.
+  const planPts = planned.length
+    ? [sorted[sorted.length - 1], ...planned].map((c, i) =>
+        `${i === 0 ? "M" : "L"}${(PAD.left + xScale(sorted.length - 1 + i)).toFixed(1)},${(PAD.top + yScale(c.weight)).toFixed(1)}`).join(" ")
+    : "";
 
   const startW = sorted[0].weight;
   const endW = sorted[sorted.length - 1].weight;
@@ -15011,6 +15038,14 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
         <div>
           <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",letterSpacing:"2px",color:"var(--accent)",display:"flex",alignItems:"center",gap:"8px"}}><Icon name="chart" size={18} color="var(--accent)" />Progress</div>
           <div style={{fontSize:".74rem",color:"var(--muted)"}}>{sorted.length} {sorted.length === 1 ? pointNoun : pointNoun.endsWith("y") ? pointNoun.slice(0, -1) + "ies" : pointNoun + "s"}{pointNoun === "weigh-in" ? ` · ${checkIns.length} ${checkIns.length === 1 ? "check-in" : "check-ins"}` : ""}{onEditPoint ? " · tap a dot to edit" : ""}</div>
+          {planned.length > 0 && (
+            <div style={{fontSize:".7rem",color:"var(--muted)",display:"flex",alignItems:"center",gap:"5px",marginTop:"2px"}}>
+              <svg width="18" height="4" style={{overflow:"visible",flex:"none"}} aria-hidden="true">
+                <line x1="0" y1="2" x2="18" y2="2" stroke="currentColor" strokeWidth="2" strokeDasharray="5 4" />
+              </svg>
+              {planned.length === 1 ? "your plan" : `your plan · ${planned.length} targets`} — not measured
+            </div>
+          )}
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.3rem",color:trendColor}}>
@@ -15057,6 +15092,25 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
         )}
 
         {/* Weight line */}
+        {/* THE PLAN, drawn first so measured data is never obscured by it, and
+            DASHED in a muted colour so it can never be mistaken for a reading.
+            It is excluded from every number in this component — the headline
+            change, the trend word, the period line — because it is a hope, not
+            evidence (S199z). */}
+        {planPts && (
+          <path d={planPts} fill="none" stroke={cssVarColor("var(--muted)")} strokeWidth="2"
+            strokeDasharray="5 4" strokeLinecap="round" strokeLinejoin="round" opacity=".85" />
+        )}
+        {planned.map((c, i) => (
+          <circle key={`pl${i}`} cx={PAD.left + xScale(sorted.length + i)} cy={PAD.top + yScale(c.weight)}
+            r={showValues ? 4.5 : 3.5} fill="var(--surface)"
+            stroke={cssVarColor("var(--muted)")} strokeWidth="2" />
+        ))}
+        {showValues && planned.map((c, i) => (
+          <text key={`pv${i}`} x={PAD.left + xScale(sorted.length + i)}
+            y={PAD.top + yScale(c.weight) - 12} textAnchor="middle"
+            style={{ fontSize: "10px", fill: "var(--muted)", fontWeight: 600 }}>{c.weight}</text>
+        ))}
         <path d={linePts} fill="none" stroke={cssVarColor("var(--green)")} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
 
         {/* Dots */}
