@@ -467,6 +467,15 @@ const bfFieldsFor = (gender) => new Set(
   gender === "male" ? ["waist", "hips", "neck", "forearm", "wrist"]
   : gender === "female" ? ["waist", "hips", "neck", "thigh", "calf", "wrist"]
   : []);
+// Does an entry actually RECORD something? mergeMeasurements creates one per
+// date carrying `date`/`timestamp`/`loggedBy` whether or not a value came with
+// it, so "an entry exists" is not the same claim as "this person was measured"
+// — and a calendar dot for an empty shell is a lie on the surface people browse
+// days on. Module-level so a test can drive it (S199x).
+function hasMeasurement(entry) {
+  if (!entry) return false;
+  return MEASURED_ANY_FIELD.some((f) => Number(entry[f]) > 0);
+}
 const MEASUREMENT_LABELS = { waist: "Waist", hips: "Hips", neck: "Neck",
   thigh: "Thigh", calf: "Calf", forearm: "Forearm", wrist: "Wrist" };
 // Skinfold CALIPER sites (mm) for the Jackson-Pollock 3-site method — chest/
@@ -474,6 +483,9 @@ const MEASUREMENT_LABELS = { waist: "Waist", hips: "Hips", neck: "Neck",
 const CALIPER_FIELDS_M = ["calChest", "calAbdomen", "calThigh"];
 const CALIPER_FIELDS_F = ["calTriceps", "calSuprailiac", "calThigh"];
 const CALIPER_ALL = ["calChest", "calAbdomen", "calThigh", "calTriceps", "calSuprailiac"];
+// Every field that counts as "measured": tape, calipers, or a scan reading.
+const MEASURED_ANY_FIELD = ["waist", "hips", "neck", "thigh", "calf", "forearm", "wrist",
+  "calChest", "calAbdomen", "calThigh", "calTriceps", "calSuprailiac", "scanBf"];
 const CALIPER_LABELS = { calChest: "Chest", calAbdomen: "Abdomen", calThigh: "Thigh",
   calTriceps: "Triceps", calSuprailiac: "Suprailiac" };
 const caliperFieldsFor = (d) => (d.gender === "female" ? CALIPER_FIELDS_F : CALIPER_FIELDS_M);
@@ -10531,6 +10543,17 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   const markLogged = (k) => setLoggedDays((prev) => prev.includes(k) ? prev : [...prev, k]);
 
   // Indicator dots for a day cell.
+  // ⚠️ THE BODY-COMP WORK WAS INVISIBLE HERE (S199x, Kevin's own note). Tape,
+  // caliper and scan readings had no marker on the month grid or the week list —
+  // the two surfaces people actually browse days on — so a month of measuring
+  // looked identical to a month of nothing. The day view has shown them since
+  // S92; only the overview did not.
+  const measuredDates = useMemo(() => {
+    const set = new Set();
+    for (const e of (data.measurements || [])) if (e && e.date && hasMeasurement(e)) set.add(e.date);
+    return set;
+  }, [data.measurements]);
+
   const dots = (k) => {
     const ci = ciByDate[k];
     // Prefer the loaded truth (did calories/meals exist); fall back to "a document
@@ -10538,7 +10561,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
     const food = k in dayAte ? dayAte[k] : loggedDays.includes(k);
     return { food, weight: !!(ci && ci.weight), workout: !!(ci && ci.workedOut),
       sched: scheduledFor(k) > 0, session: !!(sessionsOnDay[k] && sessionsOnDay[k].length),
-      tracker: !!dayWear[k] };
+      tracker: !!dayWear[k], measured: measuredDates.has(k) };
   };
 
   // ── Day-detail back-dated logging ──
@@ -10639,6 +10662,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
         <span><span style={{ color: "var(--orange)" }}>●</span> workout</span>
         <span><span style={{ color: "var(--muted)" }}>◦</span> scheduled</span>
         <span><span style={{ color: "var(--accent)", opacity: .7 }}>◦</span> tracker</span>
+        <span><span style={{ color: "var(--purple)" }}>●</span> measured</span>
       </div>
       {calTarget && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, justifyContent: "center", fontSize: ".68rem", color: "var(--muted)", marginTop: 6 }}>
@@ -10664,6 +10688,11 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             90-day watch backfill this is true on almost every day, so a sixth
             solid dot would read as noise rather than information. */}
         {d.tracker && <span style={{ width: 5, height: 5, borderRadius: 3, border: "1px solid var(--accent)", opacity: .55 }} />}
+        {/* Tape / caliper / scan reading (S199x). SOLID, unlike the tracker dot:
+            that one is hollow because a 90-day watch backfill makes it true on
+            nearly every day, whereas measuring is monthly — so a day with a
+            reading is genuinely worth spotting rather than noise. */}
+        {d.measured && <span style={{ width: 5, height: 5, borderRadius: 3, background: "var(--purple)" }} />}
       </div>
     );
   };
@@ -10782,12 +10811,26 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                   )}
                   {ci && ci.weight && <span style={{ color: "var(--blue)" }}><Icon name="scale" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{ci.weight}</span>}
                   {ci && ci.workedOut && <span style={{ color: "var(--orange)" }}><Icon name="dumbbell" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />done</span>}
+                  {/* The week list is where a week gets planned, and a measuring
+                      day was invisible in it (S199x). Shows the waist when there
+                      is one — the number people actually track — and falls back
+                      to the plain fact otherwise, rather than inventing detail. */}
+                  {measuredDates.has(k) && (() => {
+                    const e = (data.measurements || []).find((x) => x && x.date === k) || {};
+                    const waist = Number(e.waist) > 0 ? `waist ${e.waist}"` : "measured";
+                    return (
+                      <span style={{ color: "var(--purple)" }}>
+                        <Icon name="ruler" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{waist}
+                      </span>
+                    );
+                  })()}
                   {scheduledFor(k) > 0 && !(ci && ci.workedOut) && (
                     k < todayKey
                       ? <span style={{ color: "var(--red)" }}><Icon name="close" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />missed workout</span>
                       : <span>◦ {scheduledFor(k)} scheduled</span>
                   )}
-                  {!isStart && !loggedDays.includes(k) && !(ci && (ci.weight || ci.workedOut)) && scheduledFor(k) === 0 && <span>—</span>}
+                  {!isStart && !loggedDays.includes(k) && !(ci && (ci.weight || ci.workedOut))
+                    && scheduledFor(k) === 0 && !measuredDates.has(k) && <span>—</span>}
                   </>}
                 </div>
               </button>
