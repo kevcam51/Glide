@@ -1047,7 +1047,18 @@ function buildTools(role, opts = {}) {
           heightInches: { type: "number", description: "Height inches part 0–11 (convert from cm/total inches if given)" },
           weightLbs: { type: "number", description: "Current weight, lbs" },
           activityLevel: { type: "string", enum: ["sedentary", "light", "moderate", "very", "extra"],
-            description: "Everyday activity, NOT workouts: sedentary=desk; light=some walking; moderate=on feet most of day; very=demanding job; extra=intense labor" },
+            // ⚠️ THE SAME BANDS THE WIZARD PUBLISHES (S200l). Once the Activity
+            // step shows step ranges, people report them here too ("I walk about
+            // 9,000 steps") — and this description is the only thing telling the
+            // model how to map that. Different anchors here would rung the same
+            // self-report differently from the wizard, on the same plan. The MCP
+            // connector reuses buildTools and has no system prompt, so this string
+            // is its ONLY guidance.
+            description: "Everyday activity, NOT workouts — a planned walk or run is logged separately. "
+              + "Rough guide, everyday steps only: sedentary=desk, under 5k; light=some walking, 5–7.5k; "
+              + "moderate=on feet most of day, 7.5–11k; very=demanding job, 11–15k or heavy lifting; "
+              + "extra=intense labour all day, 15k+. Steps are a hint, not a rule: standing or lifting work "
+              + "counts here even when the step count looks low." },
           goalWeightLbs: { type: "number", description: "Goal weight, lbs" },
           goalRangeLowLbs: { type: "number", description: "Optional goal-range low bound, lbs" },
           goalRangeHighLbs: { type: "number", description: "Optional goal-range high bound, lbs (≥ low)" },

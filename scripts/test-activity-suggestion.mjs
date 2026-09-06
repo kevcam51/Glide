@@ -55,6 +55,43 @@ const call = (o) => suggest({ observed: obs(o.tdee, o.conf), tdee: o.tdee2 ?? MO
 ok("cooldown is in the 7-14 day range Kevin asked for", COOLDOWN_DAYS >= 7 && COOLDOWN_DAYS <= 14, COOLDOWN_DAYS);
 ok("the ladder has the five known rungs", LADDER.length === 5 && LADDER[0].id === "sedentary" && LADDER[4].id === "extra");
 
+// ── the step bands (S200l, Kevin) ─────────────────────────────────────────
+// ⚠️ A CORRELATE, NOT A DEFINITION. The bands are published population figures;
+// they are NOT derivable from the multiplier, and the arithmetic proves it — at
+// 1.55 a 200 lb man's ladder adds ~1,000 cal/day over resting, while 1,000 cal
+// of flat walking is roughly 30,000 steps. So this file checks the bands are
+// present, contiguous and worded as a hint, and never that they reconcile with
+// the multipliers.
+{
+  const FIELDS = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
+  ok("every rung publishes a step band", LADDER.every((a) => typeof a.steps === "string" && a.steps.length > 3),
+     LADDER.map((a) => a.steps));
+  // The old ⓘ prose ran 4,000 / 4,000–7,000 / 7,000–10,000+ / 12,000+, so
+  // 10–12k belonged to nobody. Bands must tile.
+  const nums = LADDER.map((a) => (a.steps.match(/[\d,]{3,}/g) || []).map((x) => Number(x.replace(/,/g, ""))));
+  ok("the bands are contiguous — no step count belongs to nobody",
+     nums[0][0] === nums[1][0] && nums[1][1] === nums[2][0] && nums[2][1] === nums[3][0] && nums[3][1] === nums[4][0],
+     nums);
+  ok("...and strictly increasing", nums[0][0] < nums[1][1] && nums[1][1] < nums[2][1] && nums[2][1] < nums[3][1], nums);
+  // ⚠️ label is rendered by five other screens in single-line rows with no wrap
+  // guard; a step range there pushes the value off the row.
+  ok("no step figure leaked into label", LADDER.every((a) => !/\d{3}/.test(a.label)), LADDER.map((a) => a.label));
+  ok("the wizard words it as a hint, not a rule", /Most people here: \{a\.steps\}/.test(FIELDS));
+  ok("the everyday-steps exclusion is carried once, above the list",
+     /Everyday steps only/.test(FIELDS) && (FIELDS.match(/Everyday steps only/g) || []).length === 1);
+  ok("the tracker is used when we have it", /trackerSteps && trackerSteps\.avg > 0/.test(FIELDS));
+  ok("...and never auto-selects a rung", !/trackerSteps[\s\S]{0,200}onChange\("activityLevel"/.test(FIELDS));
+  ok("...averaged over the days that reported, not over 7",
+     /stepDays\.reduce\(\(a, b\) => a \+ b, 0\) \/ stepDays\.length/.test(FIELDS));
+  // AI/MCP parity: the connector has no system prompt, so the schema string is
+  // its only guidance, and a different anchor rungs the same answer differently.
+  const AI = readFileSync(join(ROOT, "functions", "aitools.js"), "utf8");
+  for (const band of ["under 5k", "5–7.5k", "7.5–11k", "11–15k", "15k+"]) {
+    ok(`the assistant knows the ${band} band`, AI.includes(band));
+  }
+  ok("...and the same exclusion", /a planned walk or run is logged separately/.test(AI));
+}
+
 // ── it proposes a better rung when one genuinely fits ─────────────────────
 // implied ≈ 2200/1600 = 1.375 → "light", one rung down from moderate.
 const down = call({ tdee: 2200 });

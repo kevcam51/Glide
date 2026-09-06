@@ -99,12 +99,34 @@ const cssVarColor = (expr) => {
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
+// ⚠️ `steps` IS A CORRELATE, NOT A DEFINITION, AND THE TWO ARE NOT CONVERTIBLE
+// (S200l, Kevin: "categorize it by the amount of steps per day … easier for
+// someone to guess their level of daily activity").
+//
+// The bands are published population figures (Tudor-Locke/Bassett), stretched at
+// the top two rungs where the work is labour rather than distance. They are NOT
+// derivable from the multiplier, and the arithmetic says so: at 1.55 a 200 lb
+// man's ladder adds ~1,000 cal/day over resting, while 1,000 cal of flat walking
+// is roughly 30,000 steps. Anyone deriving one from the other gets nonsense — so
+// the chip is worded as "most people here", the calorie figure beside it is the
+// app's OWN arithmetic (BMR × multiplier − BMR), and the two are never presented
+// as the same measurement.
+//
+// Contiguous on purpose: the old ⓘ prose ran 4,000 / 4,000–7,000 / 7,000–10,000+
+// / 12,000+, leaving 10–12k belonging to nobody.
+//
+// ⚠️ `label` MUST STAY BYTE-FOR-BYTE — five other screens render it in
+// single-line rows with no wrap guard or ellipsis, and "TDEE (Extremely Active)"
+// is already near the limit. All new content lives in `steps`/`desc`, which are
+// consumed only by StepActivity.
+// ⚠️ One rung per line: scripts/test-activity-suggestion.mjs lifts this array by
+// regex and a reformat breaks the extraction.
 const ACTIVITY_LEVELS = [
-  { id:"sedentary", label:"Sedentary",         iconName:"person", desc:"Desk/office job, mostly sitting all day, drive everywhere",                multiplier:1.2   },
-  { id:"light",     label:"Lightly Active",    iconName:"walk", desc:"Some walking during the day, light on-your-feet tasks, occasional errands", multiplier:1.375 },
-  { id:"moderate",  label:"Moderately Active", iconName:"run", desc:"On your feet most of the day — retail, teaching, nursing, warehouse work",  multiplier:1.55  },
-  { id:"very",      label:"Very Active",       iconName:"bolt", desc:"Physically demanding job — construction, landscaping, manual labor",         multiplier:1.725 },
-  { id:"extra",     label:"Extremely Active",  iconName:"flame", desc:"Intense physical labor all day — roofing, farming, moving heavy loads",      multiplier:1.9   },
+  { id:"sedentary", label:"Sedentary",         iconName:"person", desc:"Desk or driving job, sitting most of the day",              steps:"under 5,000 steps",     multiplier:1.2   },
+  { id:"light",     label:"Lightly Active",    iconName:"walk", desc:"Some walking and errands, on your feet now and then",       steps:"5,000–7,500 steps",     multiplier:1.375 },
+  { id:"moderate",  label:"Moderately Active", iconName:"run", desc:"On your feet most of the day — retail, nursing, teaching",   steps:"7,500–11,000 steps",    multiplier:1.55  },
+  { id:"very",      label:"Very Active",       iconName:"bolt", desc:"Physical job — lifting, carrying, climbing, labouring",      steps:"11,000–15,000, or heavy lifting", multiplier:1.725 },
+  { id:"extra",     label:"Extremely Active",  iconName:"flame", desc:"Hard labour all day — roofing, farming, heavy loads",        steps:"15,000+, or all-day heavy labour",  multiplier:1.9   },
 ];
 
 const CARDIO_GROUPS = [
@@ -2932,14 +2954,26 @@ function StepGoalWeight({ data, onChange, onBack, onNext }) {
 
 // ─── Step 3: Activity ─────────────────────────────────────────────────────────
 
-function StepActivity({ data, onChange, onBack, onNext }) {
+function StepActivity({ data, onChange, onBack, onNext, trackerSteps }) {
   const [activeInfo, setActiveInfo] = useState(null);
+  // ⚠️ THE PERSON'S OWN NUMBER, NOT A PRINTED RANGE (S200l). The add-on is
+  // BMR × (multiplier − 1), and BMR varies ~55% across ordinary clients — at
+  // `moderate` that is 725 cal for a 135 lb woman and 1,131 for a 250 lb man, so
+  // one printed range is wrong for both ends. Personal Info is step 0 and this is
+  // step 2, so the inputs are already there; it falls back to showing nothing
+  // when the plan was reached some other way and they are not.
+  //
+  // Computed as a DIFFERENCE OF ROUNDED VALUES so it reconciles exactly with the
+  // "BMR × multiplier" line the same person sees later in Results.
+  const bmr = calcBMR(data.gender, Number(data.weightLbs), Number(data.heightFt), Number(data.heightIn), effectiveAge(data));
+  const haveBmr = bmr > 0 && isFinite(bmr) && !!data.gender && Number(data.weightLbs) > 0;
+  const addOn = (m) => Math.round((Math.round(bmr * m) - Math.round(bmr)) / 25) * 25;
   const ACTIVITY_DETAILS = {
-    sedentary: "You sit most of the day — at a desk, in a car, on a couch. Steps per day are typically under 4,000. Examples: office worker, programmer, driver, student. Your body burns very little beyond your base metabolism from daily movement. Multiplier: 1.2× BMR.",
-    light: "You're moving a bit more than just sitting — maybe a short walk at lunch, some light housework, or errands a few times a week. Steps around 4,000–7,000/day. Examples: teacher who mostly stands, stay-at-home parent, light retail. Multiplier: 1.375× BMR.",
-    moderate: "You're on your feet and moving for most of your working hours. Steps typically 7,000–10,000+/day. This is genuine physical activity throughout the day, not just occasional standing. Examples: nurse, waiter/waitress, warehouse worker, postal carrier, retail floor worker. Multiplier: 1.55× BMR.",
-    very: "Your job is physically demanding — you're lifting, carrying, climbing, or moving heavy things regularly. Steps 12,000+/day plus significant physical labor. Examples: construction worker, landscaper, mover, agricultural worker. Multiplier: 1.725× BMR.",
-    extra: "Extremely hard physical labor for most of the day — the kind of work where you're exhausted by the end of every shift. Examples: roofer, heavy farmer, lumberjack, commercial fisherman, mining. Very few people are truly in this category. Multiplier: 1.9× BMR.",
+    sedentary: "You sit for most of the day — at a desk, in a car, on the couch. Examples: office worker, programmer, driver, student. Very little burn beyond your base metabolism comes from daily movement. Multiplier: 1.2\u00d7 BMR.",
+    light: "A bit more than just sitting — a short walk at lunch, light housework, errands a few times a week. Examples: teacher who mostly stands, stay-at-home parent, light retail. Multiplier: 1.375\u00d7 BMR.",
+    moderate: "On your feet and moving for most of your working hours — genuine activity through the day, not just occasional standing. Examples: nurse, server, warehouse worker, postal carrier. On your feet but not covering ground — standing, lifting, holding a position — still counts here even if your step count looks low. Multiplier: 1.55\u00d7 BMR.",
+    very: "Physically demanding work — lifting, carrying, climbing, moving heavy things regularly. Examples: construction, landscaping, moving, agriculture. The load matters more than the distance: a builder walks less than a postal carrier and burns more, so pick this on the work, not the step count. Multiplier: 1.725\u00d7 BMR.",
+    extra: "Extremely hard physical labour for most of the day — the kind of work you are exhausted by at the end of every shift. Examples: roofer, heavy farming, lumberjack, commercial fishing, mining. Very few people are truly here. Multiplier: 1.9\u00d7 BMR.",
   };
   return (
     <div className="fu text-fg" onClick={()=>activeInfo && setActiveInfo(null)}>
@@ -2951,6 +2985,26 @@ function StepActivity({ data, onChange, onBack, onNext }) {
         <div className={`${WZ.tip} mt-0 mb-4`}>
           <strong>How this works:</strong> Your body burns a baseline number of calories just existing (BMR). This step estimates how much your daily lifestyle adds on top of that — sitting at a desk all day burns far fewer calories than being on your feet in a warehouse. Your planned cardio and strength training are calculated separately in the next steps and added to this baseline, so you get an accurate total without double-counting.
         </div>
+        {/* ⚠️ MEASURE IT IF WE CAN, ASK IF WE CANNOT (S200l, Kevin's call). For a
+            tracker-connected client the wizard was asking them to estimate a
+            number the app already has. Shown, never auto-selected: a tracker
+            average INCLUDES workout steps, and the next two wizard steps count
+            those again — auto-picking a rung from it would build the
+            double-count in rather than warn about it. */}
+        {trackerSteps && trackerSteps.avg > 0 && (
+          <div className="mb-3 px-3.5 py-2.5 rounded-lg bg-[rgba(var(--accent-rgb),.08)] border border-[rgba(var(--accent-rgb),.22)] text-[.78rem] text-fg leading-snug">
+            Your tracker averaged <strong className="text-primary tabular-nums">{trackerSteps.avg.toLocaleString()} steps/day</strong>
+            {trackerSteps.days < 7 ? ` over the last ${trackerSteps.days} day${trackerSteps.days === 1 ? "" : "s"}` : " over the last week"}.
+            <span className="text-muted"> That includes any workouts, so pick the rung that matches your ordinary day.</span>
+          </div>
+        )}
+        {/* Carried once, above the list — not inside a chip, where it is skimmed
+            past. A number is not skimmed past: a desk worker who runs after work
+            sees 13,000 on his watch, picks "Very Active", and then enters the run
+            again in the next step. */}
+        <div className="mb-3 text-[.75rem] text-muted leading-snug">
+          Everyday steps only — a planned walk or run doesn&rsquo;t count here, you&rsquo;ll add those in the next step.
+        </div>
         {ACTIVITY_LEVELS.map(a=>{
           const active = data.activityLevel===a.id;
           return (
@@ -2958,7 +3012,17 @@ function StepActivity({ data, onChange, onBack, onNext }) {
             <div className="flex items-center gap-1">
               <button className={`${wzAbtn(active)} flex-1`} onClick={()=>{onChange("activityLevel",a.id);setActiveInfo(null);}}>
                 <Icon name={a.iconName} size={26} color="var(--color-primary,#08DCE0)" className="shrink-0" />
-                <div><div className={`font-bold text-[.97rem] ${active?"text-primary":"text-fg"}`}>{a.label}</div><div className="text-[.76rem] text-muted leading-snug">{a.desc}</div></div>
+                <div className="min-w-0">
+                  <div className={`font-bold text-[.97rem] ${active?"text-primary":"text-fg"}`}>{a.label}</div>
+                  <div className="text-[.76rem] text-muted leading-snug">{a.desc}</div>
+                  {/* "Most people here" — a hint, never a rule. A step number read
+                      as a rule has no answer for a wheelchair user, and under-ranks
+                      standing-still work (cashier, security, hairdresser). */}
+                  <div className="text-[.7rem] text-primary/80 font-semibold leading-snug mt-0.5 tabular-nums">
+                    Most people here: {a.steps}
+                    {haveBmr && <span className="text-muted font-normal"> · about +{addOn(a.multiplier).toLocaleString()} cal/day</span>}
+                  </div>
+                </div>
                 {active && <span className="ml-auto shrink-0 w-7 h-7 rounded-full bg-[rgba(var(--accent-rgb),.15)] text-primary flex items-center justify-center"><Icon name="check" size={15} color="currentColor" /></span>}
               </button>
               <button className={`shrink-0 w-8 h-8 rounded-full border flex items-center justify-center text-sm cursor-pointer ${activeInfo===a.id?"border-primary text-primary bg-[rgba(var(--accent-rgb),.08)]":"border-border text-muted bg-surface2"}`}
@@ -31427,6 +31491,9 @@ export default function App() {
     return { pct: Math.round((onTarget / cals.length) * 100), days: cals.length };
   }, [dayCalsAll, data]);
   const [recentWearable, setRecentWearable] = useState(null); // latest day (≤3 back) with tracker data — {daysAgo, wearable}
+  // 7-day mean step count, for the Activity step of the wizard (S200l). Derived
+  // from the SAME day map the week summary already read — no extra round-trips.
+  const [trackerSteps, setTrackerSteps] = useState(null); // {avg, days} | null
   const [meName, setMeName] = useState("");   // current user's display name
   const [meUid, setMeUid] = useState("");     // current user's uid
 
@@ -32180,7 +32247,7 @@ export default function App() {
     setWeekSummary(null);
     setDayCalsAll({});
     setLoggedDaysTotal(null);
-    setRecentWearable(null);
+    setRecentWearable(null); setTrackerSteps(null);
   };
 
   const openClientPlan = async (clientUid, planId) => {
@@ -33429,7 +33496,20 @@ export default function App() {
         const pl = byDate[keyFor(i)];
         if (pl && hasWearable(pl.wearable) && !pl.wearable.manual) rw = { daysAgo: i, wearable: pl.wearable };
       }
+      // Mean over the days that actually reported, not over 7 — dividing by 7
+      // when only three synced reports a third of the real number and would
+      // point people at a lower rung than they belong on. Hand-entered days are
+      // skipped for the same reason the card skips them: they are not a tracker.
+      const stepDays = [];
+      for (let i = 1; i <= 7; i++) {
+        const pl = byDate[keyFor(i)];
+        const w = pl && pl.wearable;
+        if (w && !w.manual && Number(w.steps) > 0) stepDays.push(Number(w.steps));
+      }
       if (!alive) return;
+      setTrackerSteps(stepDays.length
+        ? { avg: Math.round(stepDays.reduce((a, b) => a + b, 0) / stepDays.length), days: stepDays.length }
+        : null);
       setRecentWearable(rw);
     })();
     // Cancel this loader if the open plan/client changes before it finishes.
@@ -33727,7 +33807,7 @@ export default function App() {
           <div className="page-transition" key={step===5 ? (showDash ? "v-dash" : "v-results") : "v-step"+step}>
           {step===0 && <StepPersonal   data={data} onChange={update} onNext={()=>setStepAndSave(1)}/>}
           {step===1 && <StepGoalWeight data={data} onChange={update} onBack={()=>setStepAndSave(0)} onNext={()=>setStepAndSave(2)}/>}
-          {step===2 && <StepActivity   data={data} onChange={update} onBack={()=>setStepAndSave(1)} onNext={()=>setStepAndSave(3)}/>}
+          {step===2 && <StepActivity   data={data} onChange={update} trackerSteps={trackerSteps} onBack={()=>setStepAndSave(1)} onNext={()=>setStepAndSave(3)}/>}
           {step===3 && <StepCardio     data={data} onChange={update} onBack={()=>setStepAndSave(2)} onNext={()=>setStepAndSave(4)}/>}
           {step===4 && <StepStrength   data={data} onChange={update} onBack={()=>setStepAndSave(3)} onNext={()=>setStepAndSave(5)}/>}
           {step===5 && showDash && (
