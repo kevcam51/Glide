@@ -942,6 +942,24 @@ enabled (Blaze has no default spending cap).
   **The Maps key was the cheap version of this mistake** — the same slip on `STRIPE_SECRET_KEY`
   (live money since S90) or `ANTHROPIC_API_KEY` would be materially worse. If a value does reach
   a transcript, it is burned: rotate it, do not reason about who might have seen it.
+- **⚠️ `firebase deploy` DOES NOT NECESSARILY REBIND A SECRET TO THE NEWEST VERSION.** Setting a
+  new secret version and redeploying is NOT enough, and it fails silently (S199r). After
+  `functions:secrets:set` created `GOOGLE_MAPS_API_KEY@4`, a `deploy --only functions:sessionTravel`
+  reported success while the audit log showed the service still mounting **version 3** — the CLI
+  skips re-resolving the secret when the function's code hash is unchanged. The old key kept working
+  until it was deleted in the Console, at which point the feature degraded with no error anywhere.
+  **Always verify the mounted version after a secret rotation:**
+  ```bash
+  npx firebase functions:log --only <fn> --project calorieiq-29762 | grep -o '"secretEnvironmentVariables":\[[^]]*\]' | tail -1
+  ```
+  (the log CLI serves stale pages — cross-check by BEHAVIOUR too). The reliable forcing move is to
+  **destroy the old version first**: a destroyed version cannot be mounted, so the next deploy must
+  bind the new one. Then prove it with a real call, not with the deploy's own "Successful update".
+- **Nominatim is not a dependable fallback from Cloud Functions.** The drive check is designed to
+  fall back to OpenStreetMap when Google fails, and the code does exactly that — but when the Google
+  key was dead (above), a live probe still returned `unknownPairs: 1`, i.e. no estimate at all.
+  Nominatim rate-limits datacenter IPs hard. Do not promise "the free estimator covers it" without
+  measuring it; the feature's own rule is that silence must never read as "your schedule is fine".
 - **Commit style**: clear, descriptive messages; keep unrelated changes in separate commits.
 - Build (`npm run build`) should pass before committing code changes.
 - Keep this file (CLAUDE.md) updated as the project evolves.
