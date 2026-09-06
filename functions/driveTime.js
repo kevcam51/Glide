@@ -174,6 +174,15 @@ async function fetchWithTimeout(f, url, opts, ms) {
   } finally { clearTimeout(t); }
 }
 
+// Area-level answers, which are not addresses: a pin in the middle of one is
+// not where anybody is training. Two of them a mile apart produce a leg of a few
+// minutes and no warning at all, on a connection nobody has actually checked.
+const AREA_ADDRESS_TYPES = new Set([
+  "neighbourhood", "neighborhood", "suburb", "quarter", "city_district", "borough", "district",
+  "city", "town", "village", "hamlet", "municipality", "county", "state", "state_district",
+  "region", "province", "country", "postcode", "administrative", "residential",
+]);
+
 async function geocodeLive(address, apiKey, fetchFn) {
   const f = fetchFn || fetch;
   let googleMiss = false;
@@ -221,6 +230,18 @@ async function geocodeLive(address, apiKey, fetchFn) {
       const j = await r.json();
       const hit = Array.isArray(j) && j[0];
       if (!hit) return { hit: null, missBy: googleMiss ? "both" : "nominatim" };
+      // ⚠️ THE SAME STANDARD ON THIS SIDE (S199v, second pass). Refusing
+      // Google's centroid only sent the vague address one line down: asked for
+      // "Coconut Grove, FL", OpenStreetMap returns the neighbourhood's middle
+      // just as happily, so the first version of this fix changed nothing that
+      // a live probe could see. It reports `addresstype`, and an AREA is not an
+      // address. Denied by name rather than allowed by name, because the useful
+      // long tail is enormous — building, house, road, amenity, shop, leisure,
+      // a gym that is its own POI — and an allow-list would quietly reject a
+      // real venue.
+      if (AREA_ADDRESS_TYPES.has(String(hit.addresstype || hit.type || "").toLowerCase())) {
+        return { hit: null, missBy: googleMiss ? "both" : "nominatim" };
+      }
       const lat = Number(hit.lat), lng = Number(hit.lon);
       // A malformed pair is not a location. Returning NaN coordinates would
       // cache them and hand haversineMiles a null distance for months.

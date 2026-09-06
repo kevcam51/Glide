@@ -406,6 +406,30 @@ const fakeFetch = async (url) => {
     const guess = await D.geocode(db5m, "near the gym in miami", "AIzaK",
        reply({ top: { partial_match: true }, geometry: { location_type: "ROOFTOP" } }));
     ok("...and so is a partial_match guess, even at ROOFTOP", guess === null, guess);
+
+    // ⚠️ AND THE SAME STANDARD ON THE OTHER PROVIDER. Refusing Google's centroid
+    // only moved the problem one line down: OpenStreetMap answers
+    // "Coconut Grove, FL" with the neighbourhood's middle just as happily, so
+    // the first version of this fix changed nothing a live probe could see —
+    // which is exactly what the live probe showed.
+    const osmOnly = (addresstype) => async (url) => {
+      const u = String(url);
+      if (u.includes("maps.googleapis.com")) return { ok: true, json: async () => ({ status: "OVER_QUERY_LIMIT" }) };
+      if (u.includes("nominatim")) return { ok: true, json: async () => [{ lat: "25.7", lon: "-80.2", addresstype }] };
+      return { ok: false };
+    };
+    const mkDb = () => { const m = new Map(); return { doc: (p) => ({ path: p,
+      async get() { const d = m.get(p); return { exists: !!d, data: () => d }; },
+      async set(v, o) { m.set(p, o && o.merge ? { ...(m.get(p) || {}), ...v } : v); } }) }; };
+    ok("OpenStreetMap's neighbourhood centroid is refused too",
+       (await D.geocode(mkDb(), "Coconut Grove, FL", "AIzaK", osmOnly("neighbourhood"))) === null);
+    ok("...as is a city centroid",
+       (await D.geocode(mkDb(), "Miami, FL", "AIzaK", osmOnly("city"))) === null);
+    ok("...but a real building is still accepted",
+       ((await D.geocode(mkDb(), "1111 Lincoln Rd", "AIzaK", osmOnly("building"))) || {}).lat === 25.7);
+    // Denied by name, not allowed by name: a gym that is its own POI must work.
+    ok("...and so is a venue POI, which an allow-list would have rejected",
+       ((await D.geocode(mkDb(), "Equinox South Beach", "AIzaK", osmOnly("amenity"))) || {}).lat === 25.7);
   }
 
   const same = await D.estimateDrive(db, "50 Main St", "50 main street", mon9, null, fakeFetch);
