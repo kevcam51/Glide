@@ -1,6 +1,40 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S200f) — everything below is PUSHED AND DEPLOYED
+## ▶️ START HERE (S200g) — everything below is PUSHED AND DEPLOYED
+
+Tip is `c87ecb8`; **913 unit assertions across 18 suites**. Functions deployed
+before each push: the Trainerize set (3) and the `aitools.js` set (18).
+
+**S200g — the Trainerize clobber is now a RULE, not a list of past incidents.**
+The sync re-stamps its whole profile snapshot every 30 minutes. Three fields had
+a guard, each added the week that field was reported: `macroTargets` (S86),
+`weightLbs` (S198), `activityLevel` (S200f). Everything else stayed exposed.
+Kevin: "protect the other fields too."
+
+`LOCAL_EDIT_WINS` in `functions/trainerize.js` now covers firstName, lastName,
+gender, age, heightFt/In, goalWeight, bodyFat, activityLevel, macroTargets.
+⚠️ **`weightLbs` is excluded on purpose** — it is a measurement, not a setting,
+and already has the better rule (newest reading wins, either side). A marker
+there would freeze the scale after one manual correction. Do not "complete" the
+list by adding it; a test fails if you do.
+
+⚠️ **MARKED FROM ONE PLACE.** `stampLocalEdits` runs inside `setDataAndSave`, so
+every in-app edit is covered without touching the ~40 handlers — hand-stamping
+per handler is precisely how the guard got forgotten three times. `aitools.js`
+`set_personal_info` does the same by diffing once at the end of its transaction.
+Both compare by VALUE: React rebuilds the data object on every edit, so a
+reference compare marks all ten fields on the first keystroke. Height is marked
+as a pair.
+
+Three lists must agree (`TZ_SNAPSHOT_FIELDS` in App.jsx, `TZ_OWNED_FIELDS` in
+aitools.js, `LOCAL_EDIT_WINS` in trainerize.js). `scripts/test-tz-snapshot.mjs`
+asserts that, loops the SHIPPING list per field in both directions, and checks
+the list against everything `mapSnapshot` writes — so a newly-synced field
+cannot arrive unguarded.
+
+---
+
+### Previous: S200f
 
 Tip is `67ea7b5`; **861 unit assertions across 18 suites**. Functions deployed
 before the push: the Trainerize set (3) and the `aitools.js` set (18).
