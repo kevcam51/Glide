@@ -256,5 +256,63 @@ const err = (code) => Object.assign(new Error(code), { code });
      /console\.error\("plan autoSave failed"/.test(src) && !/\} catch\(e\) \{\}\s*\n\s*finally \{ if \(saveTimer/.test(src));
 }
 
+// ── 5. ClientHome must MERGE, not replace (S200j) ──────────────────────────
+// The client's home-screen weigh-in, mark-workout and delete-weigh-in each
+// deep-copied an in-memory wrapper and wrote the WHOLE plan document back — so
+// anything written since that screen loaded (an AI edit, the coach's change,
+// the Trainerize burn sync's check-in) was erased by a tap on the home screen.
+// The in-memory copy was for CONSISTENCY between rapid logs, not authority over
+// the server. savePlanDataMutation already existed twenty lines below them.
+{
+  const src = readFileSync(join(ROOT, "src/App.jsx"), "utf8");
+  const home = src.slice(src.indexOf("function ClientHome({ onOpenPlan,"),
+                         src.indexOf("\nfunction ", src.indexOf("function ClientHome({ onOpenPlan,") + 10));
+
+  ok("no whole-plan-document write survives in ClientHome",
+     !/window\.storage\.set\(planDataKey\(activePlanId\)/.test(home),
+     (home.match(/window\.storage\.set\(planDataKey\(activePlanId\)/g) || []).length);
+  ok("the three handlers go through the merging helper",
+     (home.match(/await savePlanDataMutation\(\(d\) => \{/g) || []).length >= 3,
+     (home.match(/await savePlanDataMutation\(\(d\) => \{/g) || []).length);
+
+  // ⚠️ AND THE HELPER HAS TO REPORT. logWeight shows SAVE_FAILED_MSG on a
+  // failure, and that exists because the app used to say "Logged" for a save
+  // that never happened (S197). A helper that swallows and returns undefined
+  // would make every weigh-in look successful again.
+  ok("savePlanDataMutation reports success", /return true;\s*\n\s*\} catch \(e\) \{ console\.error\("plan mutation failed"[\s\S]{0,80}return false; \}/.test(home));
+  ok("...and the weigh-in still refuses to claim success on a failed write",
+     /const planSaved = await savePlanDataMutation\(/.test(home)
+     && /if \(!planSaved\) \{ setWtMsg\(SAVE_FAILED_MSG\); return false; \}/.test(home));
+  ok("...and marking a workout does too", /if \(!ok\) return false;/.test(home));
+  ok("...and deleting a weigh-in does not log history for a write that failed",
+     /if \(!ok\) return;\s*\n\s*await appendHistory\(`deleted a weigh-in/.test(home));
+
+// ── 6. the client's "open my plan" must open THEIR plan (S200j) ────────────
+// ClientHome resolves the active plan from the caliq-plans manifest and every
+// one of its own screens honours it — but App handed it `() => selectProfile("self")`,
+// so a client on a cut phase tapped "Open my full plan" and landed on their old
+// Main plan. profileKey and planDataKey are the same `caliq-{id}` shape, so the
+// id ClientHome already holds is exactly what selectProfile wants.
+  ok("App opens the plan it is handed, not a hardcoded default",
+     /<ClientHome onOpenPlan=\{\(pid\) => selectProfile\(pid \|\| "self"\)\}/.test(src));
+  ok("...and the old hardcode is gone", !/onOpenPlan=\{\(\) => selectProfile\("self"\)\}/.test(src));
+  ok("ClientHome routes every open through one place that knows the plan",
+     /const openActivePlan = \(\) => onOpenPlan\(activePlanId\);/.test(home));
+  // A new button wired to the raw prop would silently reintroduce the bug. A
+  // bare occurrence count would break on a comment edit, so this checks for the
+  // things that actually carry the defect: a call, or a handler binding, that
+  // is not the wrapper itself.
+  {
+    const code = home.split("\n")
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))                    // drop comments
+      .filter((l) => !/const openActivePlan = \(\) => onOpenPlan\(activePlanId\);/.test(l))
+      .join("\n");
+    const calls = code.match(/onOpenPlan\(/g) || [];
+    ok("no ClientHome path calls the raw prop", calls.length === 0, calls.length);
+    ok("no ClientHome control is bound straight to it",
+       !/onClick=\{onOpenPlan\}/.test(code) && !/onClick: onOpenPlan\b/.test(code));
+  }
+}
+
 console.log(`  ${checks - fails}/${checks} assertions passed`);
 process.exit(fails ? 1 : 0);

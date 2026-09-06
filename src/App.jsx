@@ -24759,7 +24759,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
     // places the home-screen nudge cards send people, so the notification and
     // the card agree instead of one of them being a dead end.
     else if (homeIntent.kind === "weighIn") setShowWt(true);
-    else if (homeIntent.kind === "food") onOpenPlan();
+    else if (homeIntent.kind === "food") openActivePlan();
     // ⚠️ TELL APP IT IS SPENT (S197v). lastIntentRef is a ref, so it resets
     // whenever this component REMOUNTS — and App held the intent forever. Going
     // Home → plan → Home re-fired it: for "food" that means onOpenPlan() again,
@@ -24849,6 +24849,9 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   // active. Each plan's data/log/history is keyed by its id (default "self").
   const [plans, setPlans] = useState([{ id: "self", name: "Main plan", createdAt: 0 }]);
   const [activePlanId, setActivePlanId] = useState("self");
+  // Every "open the plan" route goes through here, so a new button cannot
+  // quietly reintroduce the hardcoded default (S200j).
+  const openActivePlan = () => onOpenPlan(activePlanId);
   const [showPlans, setShowPlans] = useState(false); // plan switcher open
   const [renamingPlanId, setRenamingPlanId] = useState(null);
   const [confirmDelPlanId, setConfirmDelPlanId] = useState(null); // S117c: plan delete requires an inline confirm (critique P1 — it wipes plan+logs+history)
@@ -25133,13 +25136,14 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       const ok = await writeLog({ ...log, weight: v });
       if (!ok) { setWtMsg(SAVE_FAILED_MSG); return false; }
     }
-    let planSaved = false;
-    try {
-      // Work from the in-memory plan (updated synchronously before the async
-      // write) so rapid logs stay consistent instead of racing the network.
-      const obj = planWrapRef.current
-        ? JSON.parse(JSON.stringify(planWrapRef.current)) : { data: {}, step: 0 };
-      const d = obj.data || (obj.data = {});
+    // ⚠️ MERGED, NOT REPLACED (S200j). This used to deep-copy the in-memory
+    // wrapper and write the WHOLE document back, so anything written since this
+    // screen last loaded — an AI edit, the coach's change, the Trainerize burn
+    // sync's check-in — was erased by a weigh-in from the home screen. The
+    // in-memory copy was for CONSISTENCY between rapid logs, not authority over
+    // the server; savePlanDataMutation gives both, since it re-reads inside a
+    // transaction and refreshes planWrapRef from what was actually written.
+    const planSaved = await savePlanDataMutation((d) => {
       const prev = Number(d.weightLbs) || v;
       // Confetti when this weigh-in CROSSES the goal (Kevin's pick #3).
       if (!backdated && crossedGoal(prev, v, d.goalWeight)) celebrate("goal");
@@ -25162,11 +25166,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       merged.weight = v; // the new weigh-in always wins
       merged.timestamp = new Date(dayKey + "T12:00:00").getTime();
       d.checkIns = [...d.checkIns.filter(c => c && c.date !== dayKey), merged];
-      planWrapRef.current = obj;   // update memory FIRST so the next log is consistent
-      setPlanData(d);
-      { const _pw = JSON.stringify(obj); lastSelfDataWrite.current = _pw; await window.storage.set(planDataKey(activePlanId), _pw); }
-      planSaved = true;
-    } catch (e) { console.error("weigh-in save failed", e); }
+    });
     // The weigh-in lives in the PLAN (checkIns), not the day log — so if that
     // write failed, the weight is not recorded anywhere, whatever the day log did.
     if (!planSaved) { setWtMsg(SAVE_FAILED_MSG); return false; }
@@ -25179,22 +25179,20 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   // creating one if needed). Used by the "Record a workout" quick action.
   const markWorkoutToday = async (note) => {
     try {
-      const obj = planWrapRef.current
-        ? JSON.parse(JSON.stringify(planWrapRef.current)) : { data: {}, step: 0 };
-      const d = obj.data || (obj.data = {});
-      if (!Array.isArray(d.checkIns)) d.checkIns = [];
-      const existing = d.checkIns.find(c => c.date === todayKey);
-      if (existing) {
-        existing.workedOut = true;
-        if (note) existing.notes = note;
-      } else {
-        d.checkIns.push({ date: todayKey, timestamp: new Date(todayKey + "T12:00:00").getTime(),
-          weight: null, calories: null, hitTarget: null, workedOut: true, mood: null,
-          notes: note || "", bodyFat: null, loggedBy: "client", isFuturePlan: false });
-      }
-      planWrapRef.current = obj;
-      setPlanData(d);
-      { const _pw = JSON.stringify(obj); lastSelfDataWrite.current = _pw; await window.storage.set(planDataKey(activePlanId), _pw); }
+      // Merged, not replaced — see logWeight (S200j).
+      const ok = await savePlanDataMutation((d) => {
+        if (!Array.isArray(d.checkIns)) d.checkIns = [];
+        const existing = d.checkIns.find(c => c.date === todayKey);
+        if (existing) {
+          existing.workedOut = true;
+          if (note) existing.notes = note;
+        } else {
+          d.checkIns.push({ date: todayKey, timestamp: new Date(todayKey + "T12:00:00").getTime(),
+            weight: null, calories: null, hitTarget: null, workedOut: true, mood: null,
+            notes: note || "", bodyFat: null, loggedBy: "client", isFuturePlan: false });
+        }
+      });
+      if (!ok) return false;
     } catch { return false; }
     await appendHistory(note ? `recorded a workout: "${note}"` : `recorded a workout`);
     return true;
@@ -25204,17 +25202,19 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   // latest remaining weigh-in (or back to the starting weight if none remain).
   const deleteWeighIn = async (ts) => {
     try {
-      const obj = planWrapRef.current ? JSON.parse(JSON.stringify(planWrapRef.current)) : null;
-      if (!obj || !Array.isArray((obj.data || {}).checkIns)) return;
-      const d = obj.data;
-      const removed = d.checkIns.find(c => c.timestamp === ts);
-      d.checkIns = d.checkIns.filter(c => c.timestamp !== ts);
-      const remaining = d.checkIns.filter(c => c.weight && !c.isFuturePlan).sort((a, b) => a.timestamp - b.timestamp);
-      if (remaining.length) d.weightLbs = remaining[remaining.length - 1].weight;
-      else if (d.startWeightLbs) d.weightLbs = d.startWeightLbs;
-      planWrapRef.current = obj;
-      setPlanData(d);
-      { const _pw = JSON.stringify(obj); lastSelfDataWrite.current = _pw; await window.storage.set(planDataKey(activePlanId), _pw); }
+      // Merged, not replaced — see logWeight (S200j). The deletion is expressed
+      // against whatever the server holds NOW, so a check-in added elsewhere
+      // since this screen loaded survives instead of being rolled back with it.
+      let removed = null;
+      const ok = await savePlanDataMutation((d) => {
+        if (!Array.isArray(d.checkIns)) return;
+        removed = d.checkIns.find(c => c.timestamp === ts) || null;
+        d.checkIns = d.checkIns.filter(c => c.timestamp !== ts);
+        const remaining = d.checkIns.filter(c => c.weight && !c.isFuturePlan).sort((a, b) => a.timestamp - b.timestamp);
+        if (remaining.length) d.weightLbs = remaining[remaining.length - 1].weight;
+        else if (d.startWeightLbs) d.weightLbs = d.startWeightLbs;
+      });
+      if (!ok) return;
       await appendHistory(`deleted a weigh-in${removed && removed.weight ? `: ${removed.weight} lbs` : ""}`);
     } catch { /* ignore */ }
   };
@@ -25268,6 +25268,10 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   // the next tap here. The mutation is re-applied to a freshly-read document
   // inside a transaction — and `mutate` is written as a mutation already, so
   // this is exactly the shape that fix wants.
+  // Returns TRUE only when the write actually landed. The boolean is not
+  // decoration: logWeight shows SAVE_FAILED_MSG on a failure, and that exists
+  // because the app used to say "Logged" for a save that never happened (S197).
+  // Swallowing the error here and returning nothing would reintroduce it.
   const savePlanDataMutation = async (mutate) => {
     try {
       const written = await window.storage.mergeSet(planDataKey(activePlanId), (cur) => {
@@ -25287,7 +25291,8 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
         planWrapRef.current = obj;
         setPlanData(obj.data);
       }
-    } catch { /* ignore */ }
+      return true;
+    } catch (e) { console.error("plan mutation failed", e && e.code, e && e.message); return false; }
   };
   // ── Compliance tracker (S120) — last 14 days of logged calories ──
   const compHidden = (planData || {}).hideCompliance === true;
@@ -25726,7 +25731,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
               You don't have a plan set up yet. Open it to enter your details and
               goals — or if your trainer linked one, it'll be waiting for you.
             </div>
-            <button onClick={onOpenPlan} className={`${primaryBtnCls} w-full py-3 text-base`}>Set up my plan</button>
+            <button onClick={openActivePlan} className={`${primaryBtnCls} w-full py-3 text-base`}>Set up my plan</button>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
@@ -25739,7 +25744,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
               // Food-logging reminder — nothing logged yet and it's past midday.
               if (np.master && np.foodReminders !== false && !nudgeDismiss.food && !loggedToday && hour >= 12) {
                 nudges.push({ key: "food", icon: "meal", text: "You haven't logged any food today.",
-                  cta: { label: "Log now", onClick: onOpenPlan } });
+                  cta: { label: "Log now", onClick: openActivePlan } });
               }
               // Weigh-in reminder — no weigh-in in the last 7 days.
               const weighIns = (planData.checkIns || []).filter((c) => c.weight && c.timestamp && !c.isFuturePlan).sort((a, b) => b.timestamp - a.timestamp);
@@ -25978,7 +25983,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
               {msg ? <div className="mt-2 text-sm text-muted">{msg}</div> : null}
             </div>
 
-            <button onClick={onOpenPlan} className={`${ghostBtnCls} w-full py-3 text-base`}>Open my full plan</button>
+            <button onClick={openActivePlan} className={`${ghostBtnCls} w-full py-3 text-base`}>Open my full plan</button>
           </div>
         )}
 
@@ -26011,7 +26016,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
           onWeighIn={(v) => logWeight(v)}
           onLogFood={(v) => adjustCalories(1, v)}
           onLogWorkout={(note) => markWorkoutToday(note)}
-          onOpenPlan={onOpenPlan}
+          onOpenPlan={openActivePlan}
           // Opens the Sessions panel, which is where the card lives — the same
           // destination the /card/CODE link reaches, minus the browser trip.
           onOpenCard={() => { setQuickReq(null); setShowSessions(true); }}
@@ -33558,7 +33563,14 @@ export default function App() {
     // A client manages just their own plan (stored in their account as
     // "caliq-self"), not a list of other people's profiles.
     if (role === ROLES.CLIENT) {
-      return <>{chrome}<ClientHome onOpenPlan={() => selectProfile("self")}
+      {/* ⚠️ THE PLAN THEY ARE ON, NOT "self" (S200j). ClientHome resolves the
+          active plan from the caliq-plans manifest and every one of its own
+          screens honours it — but this hardcoded "self" sent "Open my full
+          plan" to the DEFAULT plan instead. A client on a cut phase tapped
+          through to their old Main plan and edited the wrong document.
+          profileKey and planDataKey are the same `caliq-{id}` shape, so the id
+          ClientHome already has is exactly what selectProfile wants. */}
+      return <>{chrome}<ClientHome onOpenPlan={(pid) => selectProfile(pid || "self")}
         onOpenTimeline={async () => { requestPlanTab("Timeline"); await selectProfile("self"); setShowDash(false); }}
         meUid={meUid} meName={meName} role={role} premium={mePremium}
         billingHold={meBillingHold} homeIntent={homeIntent}
