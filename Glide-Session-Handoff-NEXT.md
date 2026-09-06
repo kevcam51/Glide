@@ -1,6 +1,47 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S200g) — everything below is PUSHED AND DEPLOYED
+## ▶️ START HERE (S200h) — ⚠️ PUSHED BUT **NOT DEPLOYED**
+
+Tip is `ad4b8fa`; **923 unit assertions across 18 suites**; build and
+`check:undef` clean.
+
+⚠️ **`functions/trainerize.js` IS COMMITTED AND PUSHED BUT NOT DEPLOYED.** The
+Firebase CLI token expired partway through the session — the deploy printed
+`Authentication Error: Your credentials are no longer valid`, and an earlier
+invocation reported "0 functions updated", which is what an auth failure looks
+like if you only count success lines. **Until Kevin runs
+`firebase login --reauth --no-localhost` and the deploy below succeeds, the
+30-minute auto-sync is still running the S200g code and STILL WRITES THE FULL
+PROFILE SNAPSHOT.**
+
+```
+npx firebase deploy --only functions:trainerizeTest,functions:trainerizeImport,functions:trainerizeAutoSync --project calorieiq-29762
+```
+
+Nothing is half-shipped by the push: S200h touches only `functions/` and
+`scripts/`, so the frontend has no counterpart waiting on it.
+
+**S200h — Trainerize stops changing Glidna in the background.** Kevin: *"I do
+not want anything input in trainerize, other than the calorie burn, to affect
+glide and change glide. Not yet."* The S200f/g per-field guards only protected
+fields somebody had ALREADY edited here; anything untouched stayed Trainerize's
+forever. `runImport` now takes `writeSnapshot`, and **both background callers
+pass false** — the 30-minute schedule and the in-app "sync tracker now" button,
+which ran the identical full import despite its name. Calorie burn and completed
+workouts still flow (Kevin's explicit call on workouts; he asked for them in
+S161). **A deliberate import from the picker still seeds a profile** — also his
+call, and it is the only way a plan gets populated.
+⚠️ The local index card had to be guarded separately: with the snapshot skipped
+`r.d` is empty, so rebuilding the entry from it blanks the card's weight and
+goal and resets its step label.
+
+**Standing product rule, in Kevin's words:** additions to Glide do not have to be
+connected to Trainerize; the calorie tracking was the important part. Do not
+reach for a Trainerize hook when designing a feature.
+
+---
+
+### Previous: S200g
 
 Tip is `c87ecb8`; **913 unit assertions across 18 suites**. Functions deployed
 before each push: the Trainerize set (3) and the `aitools.js` set (18).
