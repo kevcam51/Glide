@@ -1,6 +1,134 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S199m) — everything below is PUSHED AND DEPLOYED
+## ▶️ START HERE (S199s) — everything below is PUSHED AND DEPLOYED
+
+Tip is `244c05a`. Working tree clean, `npm run build` passes, `check:undef` clean,
+**652 unit assertions green** across 15 test scripts, 230 rules tests unchanged
+(no rules were touched in this arc). Functions deployed where needed — the
+availability set (`trainerAvailability`, `respondToBookingRequest`,
+`sessionTravel`) for the booking work, plus `sessionTravel` again for the key
+rotation. Nothing is half-finished.
+
+⚠️ **Two sessions ran in parallel and the numbering collided.** There are TWO
+commits labelled S199m and TWO labelled S199n — one pair from the Start Over /
+docs session, one from this one. Go by SHA, not by label.
+
+### What shipped (S199n → S199s)
+
+**Coaching notes are the coach's, and per-note visibility already existed.**
+Kevin asked for "private notes and notes the client can see, decided when the
+note is created". That shipped in **S91** (`docs/NOTES-PLAN.md`) and its privacy
+is STRUCTURAL, not a flag: a private about-client note lives in the TRAINER's own
+kv, which a client cannot read; a client's own private note lives in `privkv`,
+owner-only by rules, with nine emulator attack cases behind it. `create_note`
+takes `shared`, so the AI had it too.
+
+Exactly ONE surface lacked the choice — the plan editor's `data.trainerNotes`
+blob, a single free-text field with no visibility at all. That is the card in
+front of a coach, which is why the feature looked missing. It now opens the same
+NotesPanel the client card opens: **one notes system, not two.**
+
+The legacy blob is NOT auto-migrated. Filing it would mean guessing — guess
+"shared" and a candid observation is published to the person it is about; guess
+"private" and a note written to be read is buried. It is shown read-only with
+both choices, the write lands BEFORE the source is cleared, a failure clears
+nothing, and the card says so.
+
+**Filing a note privately also un-quotes it from past AI replies.** Before the
+gate, `get_profile` returned `trainerNotes` verbatim, so a client could ask their
+assistant and be read it — and that REPLY was saved into their own chat thread,
+where reopening the panel restores it AND feeds it back to the model. No gate
+reaches data already written, so the private-file action now redacts it from the
+pre-S90 single thread and every indexed one. ⚠️ It matches VERBATIM runs; a
+paraphrase is beyond it, and the card says that rather than claiming more. Only
+ASSISTANT turns are touched — a client who typed it already knows it.
+
+**A client manages their own account, same as a trainer** (Kevin's rule, and it
+reversed an S199 call). The measured-burn Apply button and the persisted
+Simple/Detailed default were both trainer-only; both are open now. What makes
+that safe is S199i — every prescription change lands in the coach's activity
+feed — not a lock. All nine trainer-only AI tools are about managing OTHER
+people; none withhold self-management.
+
+**Every booking path now checks whether the hour is taken.** S199d guarded the
+trainer calendar and the one-tap Accept and left three alone: the in-plan
+calendar sheet, the Sessions panel, and RESCHEDULING. Neither screen could answer
+it — each holds only the trainer↔one-client sessions — so the question is asked
+in `src/sessions.js` against the trainer's whole book, and refuses with a typed
+error a caller can turn into a two-tap. **And App.jsx's `seriesStarts` mirror is
+gone**: it was a hand-written copy of `bookSeries`'s occurrence maths, so a
+warning could name dates the booking would not create.
+
+**The accept path is ONE transaction.** Check, claim and create used to be three
+steps, each correct alone, with the bug in the gaps: two requests for overlapping
+hours accepted in the same second both read a clear calendar and both booked.
+`releaseClaim` went with the window it guarded.
+
+### ⚠️ TRAPS PAID FOR — read before rotating a secret or writing a test
+
+**`firebase deploy` DOES NOT necessarily rebind a secret to the newest version,
+and it reports success either way.** After `secrets:set` created
+`GOOGLE_MAPS_API_KEY@4`, a redeploy of `sessionTravel` said "Successful update
+operation" while the audit log showed it still mounting **version 3** — the CLI
+skips re-resolving when the function's code hash is unchanged. It stayed
+invisible because v3's key was still alive. The forcing move is to **destroy the
+old version first** (a destroyed version cannot be mounted), then prove it with a
+real call. Full rule in CLAUDE.md.
+
+**NEVER print a secret's value — treat the transcript as public.** This cost a
+real key rotation: `functions:secrets:access` was run to inspect the live Maps
+key. The question was only ever "are these the same?", which
+`| shasum -a 256 | cut -c1-12` answers without a value — and is how the leak was
+later identified. The Maps key was the CHEAP version of this mistake;
+`STRIPE_SECRET_KEY` has been live money since S90.
+
+**Nominatim is not a dependable fallback from Cloud Functions.** The drive check
+falls through to it correctly when Google fails — the path was read to confirm —
+but with a dead key a live probe still returned `unknownPairs: 1`, no estimate at
+all. It rate-limits datacenter IPs. The free tier is supposed to rest on this;
+do not promise it covers a gap without measuring.
+
+**A gate on ONE control is not a policy.** Four review lenses found the data
+export handing over the very notes the card had just hidden, and a fifth found
+Start Over erasing them — neither touches the card. Both `trainerNotes` and
+`role === ROLES.CLIENT` are now ENUMERATED in the test suite: a new one fails and
+has to justify itself. That guard has since fired on three real changes,
+including another session's.
+
+**Mutation-test every new guard; four of mine were decorative.** A short-note
+floor tested with a haystack that did not contain the note. A "never rewrite the
+client's words" test whose user turn did not quote it. A card-gate test matching
+a string that appears twice, so it checked the BUTTON while the card was
+re-gated. An ordering check using `indexOf`, where -1 sorts before everything.
+All four read fine; only the mutations caught them.
+
+### Open — nothing blocking
+
+- **`client.uitest`'s trial has expired**, so its AI returns PERMISSION_DENIED
+  before any tool runs. That blocks the client-side PRODUCTION check of the notes
+  gate — the local test drives the real `runTool` with `isTrainer: false`, which
+  is solid, but is not the same as clicking it. Extending that account's trial
+  closes it.
+- **Old chat threads can still replay a note** that was paraphrased rather than
+  quoted. Nothing reaches that; it is a known, stated limit.
+- **The activity feed still says a note was filed** ("filed an older note away").
+  Content is private; the fact of an edit is not. Deliberate.
+- **`aichat.js:664` calls `seatCapFor(profile)` without the uid** added in S199h.
+  Harmless — `isAdminUid(uid) ?` short-circuits first — but it reads as though
+  the parameter is optional, which is the shape the five dead admin gates had.
+  One line, needs an 18-function deploy, so batch it.
+- **Mobile app note (Kevin, S199s):** live trainer location à la Uber needs no
+  Maps key for the POSITION (`navigator.geolocation`, free) — only for drawing
+  the map (Maps JS, 10k free loads/month then ~$7/1k) and the ETA (Routes,
+  already keyed). A PWA cannot do it: iOS has no background geolocation for web
+  apps. **Native can**, and when that happens it needs a SEPARATE key restricted
+  by bundle ID / SHA-1 — never the server key, which must stay Geocoding+Routes
+  with no application restriction.
+
+---
+
+## S199m — everything below is PUSHED AND DEPLOYED
+
 
 Tip is the commit carrying this block; the last functional change is `d7a2e7a`
 (this one is documentation plus one corrected comment). Working tree clean, `npm run build` passes, `check:undef`

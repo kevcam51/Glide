@@ -102,6 +102,23 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S199s (Sep 5): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S199s)" first.** Tip
+> `244c05a`, all pushed and deployed, `npm run test:units` green at 652 assertions. ⚠️ TWO parallel
+> sessions collided on numbering — there are two S199m and two S199n commits; go by SHA. Shipped:
+> coaching notes are the coach's across the card, both AI directions, the data export and Start
+> Over — and the per-note private/shared choice Kevin asked for ALREADY EXISTED (S91,
+> `docs/NOTES-PLAN.md`, privacy structural via `privkv`); only the plan editor's legacy
+> `trainerNotes` blob lacked it, and it now opens that same panel. Filing a note privately also
+> redacts it from past AI replies that quoted it (verbatim only, and the card says so). A client
+> now manages their own account exactly as a trainer does. Every booking path checks for a clash
+> — the in-plan calendar, the Sessions panel and RESCHEDULING had none — and the one-tap Accept
+> is now a single transaction (check + claim + create), so two accepts in the same second cannot
+> both book.
+> ⚠️ **A `firebase deploy` reports success while still mounting the OLD secret version** if the
+> function's code hash hasn't changed — it cost a silent drive-time outage. Destroy the old
+> version first, then prove the new one with a real call. And NEVER print a secret's value;
+> `| shasum -a 256` answers "are these the same?" without one._
+>
 > _**S199m (Sep 5): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S199m)" first.** Tip
 > `d7a2e7a`, all pushed and deployed (frontend only — no functions or rules touched),
 > `npm run test:units` green at **612 assertions across 15 suites**. Shipped: **"↺ Start Over" is
