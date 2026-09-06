@@ -24707,18 +24707,42 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
 
   // The client's start date = when they signed up (profile.createdAt). Read it
   // once so we can stamp it onto the plan (below) and gate the calendar.
-  useEffect(() => {
-    getProfile().then((p) => {
+  // ⚠️ A SWALLOWED READ TURNED EVERY SESSION CONTROL INTO A NO-OP (S200). This
+  // was `.catch(() => {})` with no retry: one failed profile read on a flaky
+  // connection left `trainerInfo` null forever, and SessionsPanel — the only
+  // host of the ask form, the cancellation policy, the card and the cancel
+  // controls — renders only when it is truthy. The buttons that OPEN it come
+  // from elsewhere (the payment-needed banner reads a profile field; the
+  // next-session card comes from a live subscription), so they kept rendering
+  // and simply did nothing when tapped. A client whose card had been declined
+  // could tap "Update card" all day and watch nothing happen.
+  //
+  // Retried, and the failure is REMEMBERED so the panel can say so instead of
+  // being absent. Sessions are how the trainer gets paid; this is the last
+  // surface that may fail quietly.
+  const [profileLoadFailed, setProfileLoadFailed] = useState(false);
+  const loadTrainerInfo = useCallback(async (attempt = 0) => {
+    try {
+      const p = await getProfile();
       const y = tsToYmd(p && p.createdAt); if (y) setSignupYmd(y);
       // In-app messaging (S90): resolve my trainer for the Message button.
       const tUid = p && p.assignedTrainerId;
       if (tUid) {
-        getProfile(tUid)
-          .then((t) => setTrainerInfo({ uid: tUid, name: (t && (t.displayName || [t.firstName, t.lastName].filter(Boolean).join(" "))) || "Your trainer" }))
-          .catch(() => setTrainerInfo({ uid: tUid, name: "Your trainer" }));
+        const t = await getProfile(tUid).catch(() => null);
+        setTrainerInfo({ uid: tUid, name: (t && (t.displayName || [t.firstName, t.lastName].filter(Boolean).join(" "))) || "Your trainer" });
       } else setTrainerInfo(null);
-    }).catch(() => {});
+      setProfileLoadFailed(false);
+      return true;
+    } catch (e) {
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+        return loadTrainerInfo(attempt + 1);
+      }
+      setProfileLoadFailed(true);
+      return false;
+    }
   }, []);
+  useEffect(() => { loadTrainerInfo(); }, [loadTrainerInfo]);
   // Stamp the signup date onto the active plan as data.startDate if it's missing,
   // so the calendar (here AND the trainer's view of this client) treats days
   // before the client joined as untracked. One-time per plan; echo-suppressed.
@@ -25248,6 +25272,26 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
         )}
         {showNotes && (
           <NotesPanel mode="client" meUid={meUid} meName={meName} onClose={() => setShowNotes(false)} />
+        )}
+        {/* The panel could not be built. Saying so — with a way out — is the
+            whole point: the alternative is a tap that does nothing. */}
+        {showSessions && !trainerInfo && profileLoadFailed && (
+          <div style={{ margin: "12px 0", padding: "12px 14px", borderRadius: 10,
+            border: "1px solid var(--red)", background: "rgba(248,113,113,.08)" }}>
+            <div style={{ fontSize: ".82rem", fontWeight: 700, color: "var(--red)", marginBottom: 4 }}>
+              Couldn&rsquo;t load your sessions
+            </div>
+            <div style={{ fontSize: ".76rem", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 9 }}>
+              We couldn&rsquo;t reach your account just now, so booking, your card and your
+              cancellation terms aren&rsquo;t available. Nothing has changed.
+            </div>
+            <button onClick={() => { setProfileLoadFailed(false); loadTrainerInfo(); }}
+              style={{ padding: "8px 13px", borderRadius: 8, cursor: "pointer", border: "none",
+                fontFamily: "inherit", fontSize: ".78rem", fontWeight: 800,
+                background: "var(--accent-fill,#08dce0)", color: "var(--color-primaryfg)" }}>
+              Try again
+            </button>
+          </div>
         )}
         {showSessions && trainerInfo && (
           <SessionsPanel meUid={meUid} meName={meName} role="client" trainerUid={trainerInfo.uid} clientUid={meUid}
@@ -28272,6 +28316,7 @@ function AskForTime({ trainerUid, trainerName, onSent }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [sent, setSent] = useState(false);
+  const [droppedCount, setDroppedCount] = useState(0);   // times the server refused as already past
   const [avail, setAvail] = useState(null);   // null = not loaded, {visible, busy[]}
 
   const slots = useMemo(
@@ -28312,19 +28357,30 @@ function AskForTime({ trainerUid, trainerName, onSent }) {
     if (!slots.length) { setErr("Those days have already passed this week — try a later week."); return; }
     setBusy(true); setErr("");
     try {
-      const fmt = (ms) => new Date(ms).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-      // The prompt is what the trainer READS, so it names every day asked for
-      // rather than just the first. `slots` carries them in a form the accept
-      // path can book; `startAt` stays as the earliest so anything written
-      // before multi-day existed still understands the request.
-      const pretty = slots.length === 1
-        ? fmt(slots[0])
-        : `${slots.map(fmt).join(" · ")} — whichever suits`;
-      await callSendTrainerRequest({
+      const res = await callSendTrainerRequest({
         type: "booking",
-        prompt: `Can we train ${pretty}? (${durMin} min)${note.trim() ? ` — ${note.trim()}` : ""}`,
+        // ⚠️ NO FROZEN TIMES IN THE PROMPT (S200). This baked the offered times
+        // into a string HERE, which made the trainer's card contradict itself
+        // twice over: the string named every time the client picked while the
+        // buttons beneath render only `booking.slots`, so a slot the server
+        // dropped as already-past appeared in the prose and nowhere else — and
+        // the string was formatted in the ASKER's timezone, so a client asking
+        // from London had their trainer read "9:00 AM" above a button labelled
+        // 4:00 AM. The structured slots are the single source of truth, and each
+        // side renders them in its own zone.
+        prompt: note.trim() ? note.trim() : `Can we train? (${durMin} min)`,
         booking: { startAt: slots[0], slots, durationMin: durMin },
       });
+      // ⚠️ THE SERVER TELLS US WHAT IT THREW AWAY, AND WE DROPPED IT (S200).
+      // buildBooking discards any offered time that has passed while the sheet
+      // sat open — the slot list is memoised and never re-derives on a clock
+      // tick, so picking "today 9:00" at 8:52 and sending at 9:02 loses today —
+      // and it returns droppedSlots saying exactly that. The reply was not even
+      // bound: the client read "Sent." and believed three times had gone when
+      // two had. requests.js returns it under a comment calling a bare ok:true
+      // "the same silence this whole change is about", and a test asserts it
+      // "so the client can be told". Nothing told them.
+      setDroppedCount(Number((res && res.data && res.data.droppedSlots) || 0));
       setSent(true); setNote("");
       if (onSent) onSent();
     } catch (e) {
@@ -28339,6 +28395,13 @@ function AskForTime({ trainerUid, trainerName, onSent }) {
     return (
       <div className="mb-3 rounded-lg border px-3 py-2.5" style={{ borderColor: "var(--border)", background: "var(--s2)" }}>
         <div className="text-[.84rem] font-semibold text-success">Sent to {trainerName || "your trainer"}.</div>
+        {droppedCount > 0 && (
+          <div className="mt-1 text-[.74rem] leading-snug" style={{ color: "var(--yellow)" }}>
+            {droppedCount === 1 ? "One of those times had already passed" : `${droppedCount} of those times had already passed`}
+            {" "}by the time this sent, so {droppedCount === 1 ? "it wasn't" : "they weren't"} included.
+            Ask again if you still want {droppedCount === 1 ? "it" : "them"}.
+          </div>
+        )}
         <div className="mt-1 text-[.74rem] text-muted leading-snug">
           They'll confirm or suggest another time — you'll get a notification either way, and nothing
           is booked or charged until they say yes.
@@ -28431,7 +28494,16 @@ function AskForTime({ trainerUid, trainerName, onSent }) {
             {days.length ? "Those days have already passed this week — pick a later week." : "Pick at least one day."}
           </span>
         ) : (
-          <>You&apos;re asking for <b>{slots.length}</b> session{slots.length === 1 ? "" : "s"}:{" "}
+          <>{slots.length === 1
+              ? <>You&apos;re asking for <b>1</b> session:{" "}</>
+              /* ⚠️ ONE OF THESE, NOT ALL OF THEM (S200). This said "asking for 3
+                 sessions" while every other part of the loop implements
+                 one-of-several: the prompt the trainer reads ends "whichever
+                 suits", the first Accept books ONE and closes the whole request,
+                 and the client is then pushed "the other 2 times you offered are
+                 free again". A client who read this and got one session back had
+                 been told by the app that they asked for three. */
+              : <>You&apos;re offering <b>{slots.length}</b> times — your trainer books whichever suits:{" "}</>}
             {slots.map((ms) => new Date(ms).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })).join(" · ")}
           </>
         )}

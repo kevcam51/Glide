@@ -62,12 +62,17 @@ const INBOX_KEY = "caliq-inbox";
 
 // Is `trainerUid` really this client's trainer? Mirrors firestore.rules
 // isTrainerOf exactly: the direct trainer, or the head ABOVE that trainer.
+// ⚠️ WHO MAY SEE A TRAINER'S FREE/BUSY: their OWN clients, and nobody else
+// (S200). This used to walk one rung up the chain and return true for the HEAD
+// trainer above your coach — so at a gym with five sub-trainers, all hundred of
+// their clients could read the owner's calendar, people the owner may never have
+// met and who cannot book them at all. The booking loop only ever creates a
+// session with `assignedTrainerId`, so the head is not a reachable destination:
+// the access served no flow and only widened who could see the block pattern.
+// `direct` stays the whole rule.
 async function isMyTrainer(db, clientProfile, trainerUid) {
   const direct = clientProfile && clientProfile.assignedTrainerId;
-  if (!direct) return false;
-  if (direct === trainerUid) return true;
-  const t = (await db.doc(`users/${direct}`).get()).data();
-  return !!t && t.headTrainerId === trainerUid;
+  return !!direct && direct === trainerUid;
 }
 
 // Overlapping/touching ranges become one. Sorted, so a single pass does it.
@@ -122,20 +127,32 @@ exports.trainerAvailability = onCall(
     const ranges = [];
     sessSnap.forEach((doc) => {
       const s = doc.data() || {};
-      // Only what this trainer is DELIVERING. A trainer who is also somebody's
-      // client (Kevin trains with another coach) would otherwise publish their
-      // own training as unavailability — true, but not theirs to share here.
-      if (s.trainerUid !== trainerUid) return;
+      // ⚠️ INCLUDING THE TRAINING THEY RECEIVE (S200). This used to keep only
+      // what the trainer DELIVERS, on the reasoning that their own session with
+      // another coach was "not theirs to share here". But the only thing that
+      // leaves this function is an anonymous merged range — it says "busy", never
+      // who with — so nothing was being protected, while the trainer was shown as
+      // FREE during their own training and the one-tap Accept booked over it.
+      // The query is already `participants array-contains`, so both sides are here.
       if (s.status === "cancelled") return;
       const start = Number(s.startAt) || 0;
       const end = start + (Number(s.durationMin) || 60) * 60000;
-      if (end > from && start < to) ranges.push({ start, end });
+      // ⚠️ CLIPPED TO THE WINDOW, WHICH IS WHAT MAKES THE MERGE MEAN ANYTHING
+      // (S200). The ranges are merged so that "three back-to-back clients" and
+      // "one long block" look identical from outside — but the TRUE endpoints
+      // were being pushed, and nothing bounds how narrow a window may be. A
+      // client looping one-minute probes across a day got 09:00–10:00,
+      // 10:00–11:00, 11:00–12:00 back out of a block that renders as a single
+      // 09:00–12:00: each appointment's exact start and length, and therefore
+      // the trainer's client count. Clipped, a one-minute probe can only ever
+      // answer "busy during this minute", which merges back into the same block.
+      if (end > from && start < to) ranges.push({ start: Math.max(start, from), end: Math.min(end, to) });
     });
     blockSnap.forEach((doc) => {
       const b = doc.data() || {};
       const start = Number(b.startAt) || 0;
       const end = start + (Number(b.durationMin) || 60) * 60000;
-      if (end > from && start < to) ranges.push({ start, end });
+      if (end > from && start < to) ranges.push({ start: Math.max(start, from), end: Math.min(end, to) });
     });
 
     // Nothing but times leaves this function.
@@ -228,7 +245,22 @@ exports.respondToBookingRequest = onCall(
       if (!Number.isFinite(chosenStart) || chosenStart < Date.now()) {
         throw new HttpsError("failed-precondition", "That time has already passed — book a new one instead.");
       }
-      priceCents = Math.max(0, Math.min(500000, Math.round(Number((trainer.sessionPolicy || {}).standardPriceCents) || 0)));
+      // ⚠️ THE RATE THEY AGREED TO, NOT TODAY'S (S200). This priced from the
+      // trainer's LIVE sessionPolicy while both screens promise the opposite:
+      // the client's terms read "Sessions are $85.00 each" and "you stay on the
+      // terms above until you agree to the new ones", and `sessionConsentPolicy`
+      // on their profile is the mirror of exactly that. A trainer raising their
+      // rate to $120 had the next Accept stamp $120 onto a client still on $85 —
+      // frozen as billableCents at completion and charged, against terms the
+      // client had been shown and never re-agreed. The settle engine already
+      // picks the policy in force when the obligation arose (S186); this was the
+      // one place that reached for the current one instead.
+      //
+      // No consent record means nothing has been promised yet, so the live rate
+      // is the only rate there is — and they will consent to it at card setup.
+      const consented = Number((client.sessionConsentPolicy || {}).standardPriceCents) || 0;
+      const live = Number((trainer.sessionPolicy || {}).standardPriceCents) || 0;
+      priceCents = Math.max(0, Math.min(500000, Math.round(consented > 0 ? consented : live)));
       if (priceCents <= 0) {
         throw new HttpsError("failed-precondition",
           "Set your standard session price first (Calendar → Settings) — otherwise this books at $0 and can never be charged.",
@@ -277,7 +309,11 @@ exports.respondToBookingRequest = onCall(
       // booked it anyway, on the one path that refuses rather than asks.
       const [mine, blocks] = accept && booking
         ? await Promise.all([
-            tx.get(db.collection("sessions").where("trainerUid", "==", uid)),
+            // `participants`, not `trainerUid ==`: a session where this person is
+            // the CLIENT of another coach is still an hour they cannot train in,
+            // and free/busy now reports it as busy — so the accept path has to
+            // refuse it too, or the two disagree (S200).
+            tx.get(db.collection("sessions").where("participants", "array-contains", uid)),
             tx.get(db.collection("trainerBlocks").where("trainerUid", "==", uid)),
           ])
         : [null, null];
