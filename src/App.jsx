@@ -8281,7 +8281,8 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
   const gramsNow = isServing ? null : (unit === "serving" ? (parseFloat(qty) || 0) * (food.servingGrams || 0) : unitToGrams(qty, unit, null));
   const baseAmtLabel = food.baseUnit === "ml" ? "ml" : "g"; // liquids read in ml, solids in g
 
-  const inp = { padding: "9px 11px", fontSize: ".9rem", borderRadius: "8px",
+  // 1rem for the same reason as MealLog's inp — see the note there (S200k).
+  const inp = { padding: "9px 11px", fontSize: "1rem", borderRadius: "8px",
     border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)", minWidth: 0 };
 
   const save = () => {
@@ -8393,7 +8394,10 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                 <span style={{ fontSize: ".72rem", color: "var(--muted)", whiteSpace: "nowrap" }}>1 {(food.servingLabel || "serving").replace(/^1\s+/, "")} =</span>
-                <input style={{ ...inp, width: "88px", padding: "7px 9px", fontSize: ".82rem" }}
+                {/* Overrides the spread, so it needs raising too, and a little
+                    more width: 16px in a 70px content box fits "e.g. 240" only
+                    just. Dropping the font back would re-zoom (S200k). */}
+                <input style={{ ...inp, width: "96px", padding: "7px 9px", fontSize: "1rem" }}
                   type="number" inputMode="decimal" min="0" placeholder="e.g. 240"
                   value={servingWeight}
                   onChange={(e) => setServingWeight(e.target.value.replace(/[^\d.]/g, ""))}
@@ -8623,6 +8627,8 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
   savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onReadDay, onListLoggedDays, initialMode = "foods", onClose }) {
   // Foods vs Meals (S97): a Meal is a whole saved/previous combo of foods.
   const [mode, setMode] = useState(initialMode);
+  // The open effect below decides the real starting tab; this is only the
+  // pre-effect frame, and patching it alone changes nothing (S200k).
   const [tab, setTab] = useState("recent");
   // Meal-type filter (S97): All / Breakfast / Lunch / Dinner / Snack. When the
   // page was opened FROM a specific meal (mealType set) it's pre-scoped there.
@@ -8640,8 +8646,22 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
   useEffect(() => { if (open) {
     setMode(initialMode); setQ(""); setFlash(""); setConfirmDel(""); setLogAs("");
     const k = mealType != null ? recentMealKey(mealType) : "all";
-    setMealFilter(["breakfast", "lunch", "dinner", "snack"].includes(k) ? k : "all");
-    setTab((savedFoods || []).length ? "saved" : "recent");
+    const filter = ["breakfast", "lunch", "dinner", "snack"].includes(k) ? k : "all";
+    setMealFilter(filter);
+    // ⚠️ PREVIOUSLY LOGGED FIRST (S200k, Kevin: "it always starts with the
+    // saved meals first. I wanted to start off with the previously logged").
+    // This used to open on Saved the moment the library held anything at all,
+    // which after the first star is forever — so the list you reach for most
+    // sat behind a tap every single time.
+    //
+    // Falls through when there is nothing to fall back ON: a brand-new user has
+    // no recents, and opening them on an empty list while Saved has content
+    // would be a worse first run than the bug. Scoped to the same filter the
+    // panel is about to apply, or "recents-first" could still land on an empty
+    // list when opened from a meal type nothing has been logged under yet.
+    const inFilter = (f) => f && f.name
+      && (filter === "all" || f.type == null || recentMealKey(f.type) === filter);
+    setTab((recentFoods || []).some(inFilter) ? "recent" : ((savedFoods || []).length ? "saved" : "recent"));
   } }, [open]);
   // Derive "previously logged meals" from the last ~14 logged days: each day's
   // foods grouped by meal section = one meal you can re-log or star. Only when
@@ -8904,11 +8924,15 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
           </div>
         )}
 
-        {/* Foods vs Meals (S97) — Meals = whole saved/previous combos of foods. */}
+        {/* Foods vs Meals (S97) — Meals = whole saved/previous combos of foods.
+            ⚠️ No setTab in the handler (S200k): slamming the list back to Saved
+            on every Foods/Meals tap discarded the user's choice, so even with
+            the right default, "open → Meals → Foods" landed on Saved again and
+            read as the fix not having worked. */}
         {onToggleSaveMeal && (
           <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
             {[["foods", "Foods"], ["meals", "Meals"]].map(([k, label]) => (
-              <button key={k} onClick={() => { setMode(k); setConfirmDel(""); setTab("saved"); }}
+              <button key={k} onClick={() => { setMode(k); setConfirmDel(""); }}
                 style={{ flex: 1, padding: "10px 8px", borderRadius: 10, cursor: "pointer", fontFamily: "inherit",
                   fontSize: ".84rem", fontWeight: 800,
                   border: `1.5px solid ${mode === k ? "var(--accent)" : "var(--border)"}`,
@@ -8950,7 +8974,7 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
 
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={mode === "meals" ? "Search your meals…" : "Search your foods…"}
           style={{ width: "100%", padding: "10px 12px", borderRadius: 9, border: "1px solid var(--border)",
-            background: "var(--surface)", color: "var(--text)", fontSize: ".9rem", fontFamily: "inherit",
+            background: "var(--surface)", color: "var(--text)", fontSize: "1rem", fontFamily: "inherit",
             boxSizing: "border-box", marginBottom: 12 }} />
 
         {flash && (
@@ -9586,7 +9610,17 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
     return [...new Set(out)];
   };
 
-  const inp = { padding:"9px 11px", fontSize:".85rem", borderRadius:"8px",
+  // ⚠️ 1rem, NOT 0.85 — ANYTHING UNDER 16px MAKES iOS ZOOM ON FOCUS (S200k).
+  // Kevin: "whenever I'm logging a meal and I click on the meal type, it
+  // always zooms in a little bit too close." Tapping a meal type opens the
+  // add form with the search box ALREADY FOCUSED, and Mobile Safari zooms the
+  // viewport whenever a focused control computes under 16px. The meal type is
+  // where it is noticed; the cause is the box that takes focus behind it.
+  // Fixing the shared `inp` clears it for every control spread from it.
+  // ⚠️ Do NOT "fix" this with maximum-scale / user-scalable=no in the
+  // viewport: pinch-zoom was deliberately restored in S196p (c1cd28b) after
+  // S90 took it away, and that trade is not ours to silently reverse.
+  const inp = { padding:"9px 11px", fontSize:"1rem", borderRadius:"8px",
     border:"1px solid var(--border)", background:"var(--s2)", color:"var(--text)", minWidth:0 };
   const addBtn = { marginTop:"4px", padding:"9px 12px", fontSize:".8rem", fontWeight:700,
     borderRadius:"8px", border:"1px solid var(--accent)", background:"rgba(var(--accent-rgb),.08)",
@@ -9779,7 +9813,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
                 placeholder="What's in it, where it's from, anything else — e.g. “chicken burrito bowl from Chipotle, double chicken, no rice, ate about half”"
                 style={{ width:"100%", marginTop:"8px", padding:"8px 10px", borderRadius:8,
                   border:"1px solid var(--border)", background:"var(--s2)", color:"var(--text)",
-                  fontSize:".82rem", fontFamily:"inherit", resize:"vertical" }} />
+                  fontSize:"1rem", fontFamily:"inherit", resize:"vertical" }} />
               <div style={{ fontSize:".66rem", color:"var(--muted)", marginTop:"3px" }}>
                 Optional — the estimate uses your description as well as the photo, and trusts it for anything the camera can’t show.
               </div>
@@ -10507,7 +10541,7 @@ function ActivityFeed({ history, onRefresh }) {
             </div>
             <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
               placeholder="Search by name, action, date, or '3 days ago', '2 weeks', 'last month'…"
-              style={{ padding:"10px 12px", fontSize:".88rem", borderRadius:"8px",
+              style={{ padding:"10px 12px", fontSize:"1rem", borderRadius:"8px",
                 border:"1px solid var(--border)", background:"var(--s2)", color:"var(--text)" }} />
             <div style={{ display:"flex", flexDirection:"column", gap:"8px", overflowY:"auto", flex:1 }}>
               {filtered.length === 0 ? (
@@ -11347,7 +11381,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
               <input type="number" inputMode="numeric" placeholder="Type calories" value={calQuick}
                 onChange={(e) => setCalQuick(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") applyQuick(1); }}
-                style={{ flex: 1, minWidth: 0, padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)", fontSize: ".9rem" }} />
+                style={{ flex: 1, minWidth: 0, padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)", fontSize: "1rem" }} />
               <button onClick={() => applyQuick(-1)} style={{ ...quick, padding: "9px 12px" }}>− Remove</button>
               <button onClick={() => applyQuick(1)} style={{ padding: "9px 14px", fontSize: ".82rem", fontWeight: 800, borderRadius: 8, cursor: "pointer", border: "none", background: "var(--accent)", color: "#0b0b12" }}>+ Add</button>
             </div>
@@ -11491,7 +11525,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                                   onBlur={(e) => commit(f, e.target.value)}
                                   onKeyDown={(e) => { if (e.key === "Enter") commit(f, e.target.value); }}
                                   style={{ width: "100%", padding: "8px 9px", borderRadius: 7, border: "1px solid var(--border)",
-                                    background: "var(--s2)", color: "var(--text)", fontSize: ".88rem",
+                                    background: "var(--s2)", color: "var(--text)", fontSize: "1rem",
                                     fontFamily: "'Sora',sans-serif" }} />
                               </div>
                             );
@@ -11547,7 +11581,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                 <input type="number" inputMode="numeric" placeholder="Set oz" value={waterDraft}
                   onChange={(e) => setWaterDraft(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") commitWater(); }}
-                  style={{ flex: 1, minWidth: 0, padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)", fontSize: ".9rem" }} />
+                  style={{ flex: 1, minWidth: 0, padding: "9px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)", fontSize: "1rem" }} />
                 <button onClick={commitWater} style={{ padding: "9px 16px", fontSize: ".82rem", fontWeight: 800, borderRadius: 8, cursor: "pointer", border: "none", background: "var(--accent)", color: "#0b0b12" }}>Set</button>
               </div>
             </div>
@@ -11583,7 +11617,7 @@ function WeightDayLogger({ date, existing, onSave }) {
     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
       <input value={draft} onChange={(e) => setDraft(e.target.value)} inputMode="decimal" placeholder="e.g. 182"
         onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
-        style={{ flex: 1, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)", fontSize: ".95rem" }} />
+        style={{ flex: 1, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)", fontSize: "1rem" }} />
       <button onClick={commit} style={{ padding: "10px 16px", fontWeight: 700, borderRadius: 8, border: "none", background: "var(--accent-fill)", color: "#0b0b12", cursor: "pointer" }}>
         {existing ? "Update" : "Log"}
       </button>
