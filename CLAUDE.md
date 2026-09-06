@@ -928,6 +928,20 @@ enabled (Blaze has no default spending cap).
 - **Security-rule changes**: always write/run emulator tests and pass them before committing;
   remind Kevin to publish the rules.
 - **Don't break the storage interface** or push secrets. `.env.local` stays gitignored.
+- **NEVER PRINT A SECRET'S VALUE. Treat the session transcript as public.** This cost Kevin a
+  real key rotation (S199r): `firebase functions:secrets:access NAME@N` was run to inspect the
+  live `GOOGLE_MAPS_API_KEY`, which wrote it into the transcript, and it had to be regenerated in
+  the Google Console, re-set, and `sessionTravel` redeployed. The question being asked was only
+  ever *"are these two values the same?"* — which needs no value at all:
+  ```bash
+  npx firebase functions:secrets:access NAME@N --project calorieiq-29762 | shasum -a 256 | cut -c1-12
+  ```
+  Pipe it, compare fingerprints, never echo it. The same goes for reading a key out of a file, a
+  curl that interpolates one into a URL that is then echoed, and any `env`/`cat` of `.env.local`.
+  To USE a key in a probe, read it into a shell variable and print only the response status.
+  **The Maps key was the cheap version of this mistake** — the same slip on `STRIPE_SECRET_KEY`
+  (live money since S90) or `ANTHROPIC_API_KEY` would be materially worse. If a value does reach
+  a transcript, it is burned: rotate it, do not reason about who might have seen it.
 - **Commit style**: clear, descriptive messages; keep unrelated changes in separate commits.
 - Build (`npm run build`) should pass before committing code changes.
 - Keep this file (CLAUDE.md) updated as the project evolves.
