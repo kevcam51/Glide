@@ -158,6 +158,17 @@ const base = {
   ok("planFor takes a uid and its caller passes it",
      /function planFor\(profile, uid\)/.test(src["functions/mcp.js"])
      && /planFor\(profile, ctx\.callerUid\)/.test(src["functions/mcp.js"]));
+  // ⚠️ ONE ADMIN RULE PER QUESTION (S199w). Callers wrapping seatCapFor in their
+  // own isAdminUid ternary is a second copy — and having one is precisely why
+  // they stopped passing `uid`, leaving the check inside dead for the one caller
+  // that did not wrap it. The rule lives in seatCapFor; callers pass the uid.
+  for (const f of ["functions/aichat.js", "functions/mcp.js"]) {
+    ok(`${f} does not re-implement the seat-cap admin rule`,
+       !/isAdminUid\([^)]*\)\s*\?\s*null\s*:\s*seatCapFor/.test(src[f]),
+       (src[f].match(/isAdminUid\([^)]*\)\s*\?\s*null\s*:\s*seatCapFor/) || [])[0]);
+    ok(`${f} passes the uid so the rule can apply`, /seatCapFor\(profile, uid\)/.test(src[f]));
+  }
+
   ok("both trialExpiredFor copies take a uid",
      /function trialExpiredFor\(profile, uid\)/.test(src["functions/aichat.js"])
      && /function trialExpiredFor\(profile, uid\)/.test(src["functions/transcribe.js"]));

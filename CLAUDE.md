@@ -103,7 +103,7 @@ enabled (Blaze has no default spending cap).
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
 > _**S199s (Sep 5): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S199s)" first.** Tip
-> `244c05a`, all pushed and deployed, `npm run test:units` green at 652 assertions. ⚠️ TWO parallel
+> `8faa090`, all pushed and deployed, `npm run test:units` green at 677 assertions. ⚠️ TWO parallel
 > sessions collided on numbering — there are two S199m and two S199n commits; go by SHA. Shipped:
 > coaching notes are the coach's across the card, both AI directions, the data export and Start
 > Over — and the per-note private/shared choice Kevin asked for ALREADY EXISTED (S91,
@@ -972,14 +972,28 @@ enabled (Blaze has no default spending cap).
   (the log CLI serves stale pages — cross-check by BEHAVIOUR too). The reliable forcing move is to
   **destroy the old version first**: a destroyed version cannot be mounted, so the next deploy must
   bind the new one. Then prove it with a real call, not with the deploy's own "Successful update".
-- **Nominatim rejects neighbourhood-style addresses; it is not rate-limiting.** ⚠️ An earlier
-  version of this note blamed datacenter rate limits. MEASURED instead (S199u): 9 of 9 ordinary
-  Miami addresses resolved through the deployed function, and the one failure was
-  `"2901 Florida Ave, Coconut Grove, FL 33133"` — Coconut Grove is a neighbourhood, not a
-  municipality, so OpenStreetMap cannot find it while Google normalises it to Miami and can. Since
-  the drive WARNING is free for everyone (S197k) and cannot happen without geocoding, geocoding now
-  uses Google for EVERY trainer and only traffic-aware ROUTES stays paid. Guess less, probe more:
-  the rate-limit story was plausible, wrong, and would have sent the next session to build retries.
+- **An area centroid is not an address, and BOTH geocoders will hand you one (S199u/v).** The
+  drive WARNING is free for everyone and cannot happen without geocoding, so geocoding now uses
+  Google for every trainer and only traffic-aware ROUTES stays paid — the paywall had been sitting
+  on the prerequisite. But Google answers almost anything ("Coconut Grove, FL" → the
+  neighbourhood's middle, APPROXIMATE; "near the gym in miami" → Miami, `partial_match`), and so
+  does Nominatim. Two such pins collapse to a ~0-minute leg: no warning AND not counted as unknown,
+  so the panel shows NOTHING on a connection that may be impossible. Google is checked on
+  `partial_match`/`location_type`, Nominatim on `addresstype` — denied by name, never allowed by
+  name, or a gym that is its own POI gets silently rejected.
+  ⚠️ Two corrections worth keeping, both mine: an earlier note here blamed Nominatim RATE LIMITS
+  from one failed probe — measured properly it is 9/9 on ordinary addresses and simply cannot parse
+  a neighbourhood. And the first version of the precision fix did NOTHING, because refusing
+  Google's centroid just fell through to OpenStreetMap's. **The unit tests stayed green the whole
+  time — they were aimed at the branch that was fixed while production took the other one.**
+- **⚠️ REMOVING A DISTINCTION SILENTLY DISARMS EVERY GUARD THAT BRANCHED ON IT (S199v).**
+  `missIrrelevant` had two arms keyed on whether the caller held a Maps key, because that told free
+  callers from paid ones apart. Giving EVERY caller a key made one arm unconditionally true, so a
+  24-hour retry damper could never fire again: **128 Google + 128 Nominatim lookups in a single
+  call**, against 1 before, re-run on every calendar open, and self-reinforcing because
+  OVER_QUERY_LIMIT is itself the non-definitive answer that keeps the damper off. It now records
+  what PRODUCED the miss rather than what the caller holds. **When you collapse two classes of
+  caller into one, grep every guard that branched on the thing you just made universal.**
 - **Commit style**: clear, descriptive messages; keep unrelated changes in separate commits.
 - Build (`npm run build`) should pass before committing code changes.
 - Keep this file (CLAUDE.md) updated as the project evolves.

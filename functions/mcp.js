@@ -583,7 +583,7 @@ exports.mcp = onRequest({ cors: false, timeoutSeconds: 300,
     // AI-client seat cap (S176f) — same profile-derived cap the in-app chat
     // attaches, so runTool's seat gate treats both surfaces identically. Admin
     // by UID: the profile role is never "admin" on a real doc.
-    seatCap: isAdminUid(uid) ? null : seatCapFor(profile, uid),
+    seatCap: seatCapFor(profile, uid),
   };
 
   let server, transport;

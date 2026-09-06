@@ -1762,9 +1762,12 @@ function seatMonthKey() {
 // treated as Coach — consistent with how every other gate treats them as paid.
 function seatCapFor(profile, uid) {
   if (!profile) return 0;
-  // Admin by UID. Most callers already wrap this in their own isAdminUid check,
-  // but seatCapForCtx below did not — so the uncapped-admin case rested
-  // entirely on a role that no document ever carries.
+  // ⚠️ ADMIN IS DECIDED HERE, ONCE (S199w). Callers used to wrap this in their
+  // own `isAdminUid(uid) ? null : seatCapFor(profile)` — a second copy of the
+  // same rule, which then had no reason to pass `uid` and so left this check
+  // dead in the one path (seatCapForCtx) that did not wrap it. Two copies of an
+  // admin rule is exactly the shape that produced five dead gates in S199g/h.
+  // Pass the uid; do not re-check outside.
   if (uid && isAdminUid(uid)) return null;
   if (profile.subscriptionStatus === "active") {
     const t = String(profile.subscriptionTier || "").toLowerCase();

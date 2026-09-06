@@ -661,7 +661,7 @@ async function setupChat(uid, activeTarget, noSearch, tzArg) {
     tools,
     toolCtx: { callerUid: uid, role, isTrainer, aiOptOut: profile.aiOptOut === true,
       today: todayLocal(tz), nowTime: nowTimeLocal(tz), callerName,
-      seatCap: isAdminUid(uid) ? null : seatCapFor(profile) },
+      seatCap: seatCapFor(profile, uid) },
   };
 }
 
@@ -1102,7 +1102,7 @@ exports.logMeal = onCall({ region: "us-central1", maxInstances: 10 }, async (req
   // meal accepted at 9pm Pacific lands on the day the person is actually living.
   const tz = safeTz((request.data && request.data.tz) || profile.tz);
   const ctx = { callerUid: uid, role, isTrainer, today: todayLocal(tz), nowTime: nowTimeLocal(tz), callerName,
-    seatCap: isAdminUid(uid) ? null : seatCapFor(profile) };
+    seatCap: seatCapFor(profile, uid) };
   let out;
   try { out = await runTool("log_meal", request.data || {}, ctx); }
   catch (e) { console.error("logMeal error:", e && e.message); throw new HttpsError("internal", "Couldn't save the meal."); }
@@ -1128,7 +1128,7 @@ exports.reviewMeal = onCall({ region: "us-central1", maxInstances: 10 }, async (
   // meal accepted at 9pm Pacific lands on the day the person is actually living.
   const tz = safeTz((request.data && request.data.tz) || profile.tz);
   const ctx = { callerUid: uid, role, isTrainer, today: todayLocal(tz), nowTime: nowTimeLocal(tz), callerName,
-    seatCap: isAdminUid(uid) ? null : seatCapFor(profile) };
+    seatCap: seatCapFor(profile, uid) };
   let out;
   try { out = await runTool("review_meal", request.data || {}, ctx); }
   catch (e) { console.error("reviewMeal error:", e && e.message); throw new HttpsError("internal", "Couldn't save that review."); }
@@ -1155,7 +1155,7 @@ exports.setWorkoutSchedule = onCall({ region: "us-central1", maxInstances: 10 },
   // meal accepted at 9pm Pacific lands on the day the person is actually living.
   const tz = safeTz((request.data && request.data.tz) || profile.tz);
   const ctx = { callerUid: uid, role, isTrainer, today: todayLocal(tz), nowTime: nowTimeLocal(tz), callerName,
-    seatCap: isAdminUid(uid) ? null : seatCapFor(profile) };
+    seatCap: seatCapFor(profile, uid) };
   let out;
   try { out = await runTool("set_workout_schedule", request.data || {}, ctx); }
   catch (e) { console.error("setWorkoutSchedule error:", e && e.message); throw new HttpsError("internal", "Couldn't save the program."); }
@@ -1175,7 +1175,7 @@ exports.aiSeats = onCall({ region: "us-central1", maxInstances: 10 }, async (req
   if (!(role === "head_trainer" || role === "sub_trainer" || role === "admin" || isAdminUid(uid))) {
     return { trainer: false };
   }
-  const cap = isAdminUid(uid) ? null : seatCapFor(profile);
+  const cap = seatCapFor(profile, uid);
   const month = seatMonthKey();
   const cur = (await db.doc(`users/${uid}/aiClients/${month}`).get()).data() || {};
   const targets = Object.entries(cur.targets || {})

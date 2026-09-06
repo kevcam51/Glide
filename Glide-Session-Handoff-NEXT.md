@@ -1,9 +1,9 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S199s) — everything below is PUSHED AND DEPLOYED
+## ▶️ START HERE (S199v) — everything below is PUSHED AND DEPLOYED
 
-Tip is `244c05a`. Working tree clean, `npm run build` passes, `check:undef` clean,
-**652 unit assertions green** across 15 test scripts, 230 rules tests unchanged
+Tip is `8faa090`. Working tree clean, `npm run build` passes, `check:undef` clean,
+**677 unit assertions green** across 15 test scripts, 230 rules tests unchanged
 (no rules were touched in this arc). Functions deployed where needed — the
 availability set (`trainerAvailability`, `respondToBookingRequest`,
 `sessionTravel`) for the booking work, plus `sessionTravel` again for the key
@@ -82,21 +82,45 @@ key. The question was only ever "are these the same?", which
 later identified. The Maps key was the CHEAP version of this mistake;
 `STRIPE_SECRET_KEY` has been live money since S90.
 
-**Nominatim rejects neighbourhood-style addresses — it is NOT rate-limiting, and
-the free tier no longer rests on it (S199u).** ⚠️ This block previously blamed
-datacenter rate limits, from one failed probe. Measured properly: 9 of 9 ordinary
-addresses resolved through the deployed function; the single failure was
-`"2901 Florida Ave, Coconut Grove, FL 33133"`, because Coconut Grove is a
-neighbourhood rather than a municipality. Google normalises it and finds it.
+**⚠️ REMOVING A DISTINCTION SILENTLY DISARMS EVERY GUARD THAT USED IT (S199v).**
+The most expensive thing in this arc. `missIrrelevant` in driveTime.js had two
+arms written for a world where a key told the caller classes apart — free
+trainers geocoded on Nominatim alone, paid ones on Google — so a miss recorded
+by the weaker provider set could not lock out the stronger one. S199u gave EVERY
+caller a geocoding key, which made `apiKey && missBy === "nominatim"`
+unconditionally TRUE: the 24-hour damper could never fire again, for exactly the
+addresses it exists to damp. Measured by review: **128 Google + 128 Nominatim
+lookups in a SINGLE sessionTravel call**, against 1 before, re-run on every
+calendar open — and self-reinforcing, because OVER_QUERY_LIMIT is itself a
+non-definitive answer, so hitting the cap is the one response that removes the
+damper. The guard now asks what PRODUCED the miss (`triedGoogle`), not what the
+caller holds. **When you collapse two classes of caller into one, grep every
+guard that branched on the thing you just made universal.**
 
-⚠️ AND THE PROBE THAT STARTED THAT STORY PROVED NOTHING ABOUT THE KEY. The test
-trainer is free-tier, and `availability.js` passed `null` for the API key unless
-the trainer was PAID — so those probes only ever used OpenStreetMap, and the
-`unknownPairs: 1` had nothing to do with the stale secret. (The stale-secret trap
-above is real and rests on the AUDIT LOG, which is independent.) Geocoding is now
-Google for every trainer, with only traffic-aware ROUTES behind the paywall: the
-warning is meant to be universal and cannot happen without geocoding, so the
-paywall had been sitting on the prerequisite.
+**An area centroid is not an address, on EITHER provider.** Google answers almost
+anything — "Coconut Grove, FL" returns the neighbourhood's middle (APPROXIMATE),
+"near the gym in miami" returns Miami with `partial_match`. As pins, two of those
+collapse to a ~0-minute leg: no warning fires AND the pair is not counted as
+unknown, so the panel renders NOTHING on a connection that may be impossible —
+the silent all-clear this feature exists to never produce. Google is now checked
+on `partial_match`/`location_type`, and Nominatim on `addresstype` against
+`AREA_ADDRESS_TYPES`. Denied by name, not allowed by name: the useful tail
+(building, house, road, amenity, shop, a gym that is its own POI) is too long for
+an allow-list, and rejecting a real venue is the same silent failure in a coat.
+
+⚠️ **AND THE FIRST VERSION OF THAT FIX DID NOTHING, WHICH ONLY A LIVE PROBE
+SHOWED.** Refusing Google's centroid just sent the lookup one line down to
+OpenStreetMap, which returns its own neighbourhood centroid just as happily. The
+unit tests were green throughout — they exercised the Google branch, which was
+genuinely fixed, while production took the other one. **A test that passes and a
+probe that fails means the test is aimed at the wrong branch.** Run the probe
+after deploying, not instead of.
+
+⚠️ **The geocache keeps pre-fix pins.** New bad pins can no longer be written,
+but existing ones live out their TTL. There were 18 rows and exactly one was bad
+(all of it probe residue); it was deleted by hand. At real volume this would want
+a `precise` marker and a revalidation pass — noted, not built, because there is
+no real data in there yet.
 
 **A gate on ONE control is not a policy.** Four review lenses found the data
 export handing over the very notes the card had just hidden, and a fifth found
