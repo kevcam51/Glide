@@ -24479,6 +24479,23 @@ function SaveFailedBanner({ text, onDismiss }) {
     </div>, document.body);
 }
 
+// Who can open the Sessions panel, and what they see when they do (S200e).
+//
+// THREE GATES, ONE CONTRACT. The button, the error card and the panel were
+// three separate JSX conditions, and they disagreed: the button was gated on
+// `trainerInfo` alone, so on a failed profile read it VANISHED — taking the
+// only general way into the error card with it. The comment above it said
+// "always reachable". It wasn't, and reading the code did not reveal that;
+// forcing the read to fail in the preview did.
+//
+// So the three gates now come from here, where the invariant can be executed:
+// the button shows exactly when tapping it renders something, and a body that
+// can render is never unreachable.
+function sessionsPanelState(trainerInfo, profileLoadFailed) {
+  const body = trainerInfo ? "panel" : (profileLoadFailed ? "error" : null);
+  return { buttonVisible: body !== null, body };
+}
+
 function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPrefs, onSetNotifPrefs, premium = true, billingHold = null, homeIntent = null, onIntentHandled }) {
   // The client's plan lives in their own account as "caliq-self"; today's log is
   // "caliq-log-self-{date}". The client is always on their own account (no remote
@@ -25324,7 +25341,17 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
                 renders once a session EXISTS, but the panel is also where the
                 client reads the cancellation policy and saves their card —
                 both of which they may need before anything is booked. */}
-            {trainerInfo && (
+            {/* ⚠️ ...AND REACHABLE WHEN THE READ FAILED, WHICH IS EXACTLY WHEN
+                IT MATTERS (S200e). Gated on `trainerInfo` alone this button
+                VANISHED on a failed profile read — so the S200 error card, with
+                its Try again, could only ever be reached by one of the other
+                three entry points (a declined-payment banner, an existing
+                session, a notification). A client with none of those silently
+                lost booking, their card and their cancellation terms, and the
+                comment above claiming this is "always reachable" was false.
+                Found by forcing the read to fail in the preview rather than by
+                reading the code, which had looked fine. */}
+            {sessionsPanelState(trainerInfo, profileLoadFailed).buttonVisible && (
               <button onClick={() => setShowSessions(true)} title="Your training sessions, policy and payment card"
                 className="inline-flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
                 <Icon name="clock" size={13} color="var(--accent)" />Sessions
@@ -25358,7 +25385,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
         )}
         {/* The panel could not be built. Saying so — with a way out — is the
             whole point: the alternative is a tap that does nothing. */}
-        {showSessions && !trainerInfo && profileLoadFailed && (
+        {showSessions && sessionsPanelState(trainerInfo, profileLoadFailed).body === "error" && (
           <div style={{ margin: "12px 0", padding: "12px 14px", borderRadius: 10,
             border: "1px solid var(--red)", background: "rgba(248,113,113,.08)" }}>
             <div style={{ fontSize: ".82rem", fontWeight: 700, color: "var(--red)", marginBottom: 4 }}>
@@ -25376,7 +25403,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
             </button>
           </div>
         )}
-        {showSessions && trainerInfo && (
+        {showSessions && sessionsPanelState(trainerInfo, profileLoadFailed).body === "panel" && (
           <SessionsPanel meUid={meUid} meName={meName} role="client" trainerUid={trainerInfo.uid} clientUid={meUid}
             otherName={trainerInfo.name} focusCard={openedForCard}
             onClose={() => { setShowSessions(false); setOpenedForCard(false); }} />

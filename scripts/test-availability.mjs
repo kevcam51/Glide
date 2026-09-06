@@ -106,8 +106,11 @@ const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n,
 {
   ok("the client's profile read is retried", /return loadTrainerInfo\(attempt \+ 1\);/.test(APP));
   ok("...and a final failure is remembered", /setProfileLoadFailed\(true\)/.test(APP));
+  // S200e: this was a source regex on one of three JSX gates, and the gate it
+  // did NOT cover — the button — was the broken one. The reachability contract
+  // now lives in an executable predicate; test-sessions-gate.mjs runs it.
   ok("...so the panel says so instead of rendering nothing",
-     /showSessions && !trainerInfo && profileLoadFailed/.test(APP));
+     /showSessions && sessionsPanelState\(trainerInfo, profileLoadFailed\)\.body === "error"/.test(APP));
   ok("...with a way out", /Try again/.test(APP));
 }
 
