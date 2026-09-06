@@ -233,6 +233,25 @@ const err = (code) => Object.assign(new Error(code), { code });
   ok("app: the flush is wired to both lifecycle events",
      /window\.addEventListener\("pagehide", flushPlanSave\)/.test(src)
      && /document\.addEventListener\("visibilitychange", onHide\)/.test(src));
+  // ⚠️ "NO SERVER COPY" HAS TWO MEANINGS AND THE FLUSH MUST NOT CONFLATE THEM
+  // (S200i — a regression introduced by S200f, caught before it shipped far).
+  // A brand-new plan has nothing on the server, so writing the whole in-memory
+  // document is right. A plan whose READ FAILED also has nothing in
+  // serverWrapRef — but its document is on the server, intact, and the screen is
+  // showing EMPTY_DATA because selectProfile falls back to a blank on any error.
+  // Flushing that blank whole would replace a real plan with an empty one.
+  ok("app: a failed plan read is recorded",
+     /catch\(e\) \{ merged = \{\.\.\.EMPTY_DATA\}; stp = 0; planLoadFailedRef\.current = true; \}/.test(src)
+     && /lastSnapshotRef\.current = \{\.\.\.EMPTY_DATA\}; planLoadFailedRef\.current = true; \}/.test(src));
+  ok("app: a SUCCESSFUL read clears it, or one failure mutes saving forever",
+     (src.match(/planLoadFailedRef\.current = false;/g) || []).length === 3);
+  ok("app: the flush refuses on a plan that never loaded",
+     /if \(planLoadFailedRef\.current\) \{ console\.warn[\s\S]{0,80}return; \}/.test(src));
+  ok("app: ...and refuses BEFORE it builds a document to write",
+     src.indexOf("if (planLoadFailedRef.current) { console.warn") < src.indexOf("const out = JSON.stringify(server"));
+  ok("app: a brand-new plan is still allowed the whole-document write",
+     /serverWrapRef\.current = null;   \/\/ nothing written yet[\s\S]{0,120}planLoadFailedRef\.current = false;/.test(src));
+
   ok("app: a failed plan save is no longer swallowed",
      /console\.error\("plan autoSave failed"/.test(src) && !/\} catch\(e\) \{\}\s*\n\s*finally \{ if \(saveTimer/.test(src));
 }

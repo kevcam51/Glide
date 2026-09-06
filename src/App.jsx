@@ -31645,6 +31645,18 @@ export default function App() {
   // returns ONLY the changed keys, which would not save a plan — it would
   // truncate one.
   const serverWrapRef = useRef(null);
+  // ⚠️ AND "NO SERVER COPY" HAS TWO MEANINGS THAT MUST NOT BE CONFLATED (S200i).
+  //
+  // A brand-new plan has nothing on the server, so writing the whole in-memory
+  // document is right. A plan whose READ FAILED also has nothing in
+  // serverWrapRef — but its document is sitting on the server, intact, and the
+  // screen is showing EMPTY_DATA because selectProfile falls back to a blank on
+  // any error. Writing that blank whole would replace a real plan with an empty
+  // one. Same null, opposite correct action, and the difference is only knowable
+  // here. Set on a failed load, cleared on a good one; the flush refuses while
+  // it is true, because a document we could not read is not one we can safely
+  // overwrite.
+  const planLoadFailedRef = useRef(false);
   // The exact plan-wrapper payload we last wrote to a remote client's account, so
   // the live-sync listener can ignore our own echoed write (vs. a real change
   // from the client / AI). Pairs with the onSnapshot effect below.
@@ -32001,6 +32013,9 @@ export default function App() {
     pendingSave.current = null;
     if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
     if (!activeId) return;
+    // Never overwrite a document we could not read. The in-memory copy is a
+    // blank fallback, not the plan.
+    if (planLoadFailedRef.current) { console.warn("plan flush skipped: the plan never loaded"); return; }
     try {
       const baseline = lastSnapshotRef.current;
       let server = null;
@@ -32095,7 +32110,8 @@ export default function App() {
         merged = {...EMPTY_DATA, ...d, cardio:{...defaultCardio,...(d.cardio||{})}, strength:{...defaultStrength,...(d.strength||{})}};
         stp = parsed.step || 0;
       }
-    } catch(e) { merged = {...EMPTY_DATA}; stp = 0; }
+      planLoadFailedRef.current = false;   // read completed — blank here means genuinely new
+    } catch(e) { merged = {...EMPTY_DATA}; stp = 0; planLoadFailedRef.current = true; }
     setData(merged);
     setStep(stp);
     setShowDash(stp >= 5);
@@ -32153,7 +32169,8 @@ export default function App() {
       } else {
         setData({...EMPTY_DATA}); lastSnapshotRef.current = {...EMPTY_DATA};
       }
-    } catch(e) { setData({...EMPTY_DATA}); lastSnapshotRef.current = {...EMPTY_DATA}; }
+      planLoadFailedRef.current = false;   // see selectProfile
+    } catch(e) { setData({...EMPTY_DATA}); lastSnapshotRef.current = {...EMPTY_DATA}; planLoadFailedRef.current = true; }
     // Open a linked client straight to the Daily Dashboard (where logging + the
     // Recent Activity feed live) — the trainer is checking in, not re-running setup.
     setStep(5);
@@ -32244,6 +32261,7 @@ export default function App() {
     // exactly the case mergePlanData handles by writing the whole document.
     lastSnapshotRef.current = null;
     serverWrapRef.current = null;   // nothing written yet; a flush writes the whole document
+    planLoadFailedRef.current = false;   // ...and that is correct here, unlike a failed read
     setStep(0);
     setActiveRemoteUid(null);
     setActiveId(id);
