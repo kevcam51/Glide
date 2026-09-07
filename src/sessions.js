@@ -195,10 +195,18 @@ export function onMyWayStatus(s, meUid, now = Date.now()) {
   // "arriving now" rather than a negative number.
   const remain = w.etaAt ? Math.round((Number(w.etaAt) - now) / 60000) : null;
   const hasEta = !stale && isFinite(minutes) && minutes > 0 && !!w.etaAt;
+  // ⚠️ ARRIVAL ENDS THE COUNTDOWN AND OUTRANKS EVERYTHING. Once someone says
+  // they are here, "about 4 minutes away" is not a smaller truth beside it —
+  // it is a contradiction on the same row. `arrivedAt` is written as null (not
+  // deleted) by a fresh departure, so falsy is the test, never `in`.
+  const arrivedAt = Number(w.arrivedAt) || 0;
+  const arrived = arrivedAt > 0;
   return {
     mine, stale, ageMin, etaAt: w.etaAt || null, source: w.source || null,
-    minutesOut: hasEta ? Math.max(0, remain) : null,
-    overdue: hasEta && remain < 0,
+    arrived, arrivedAt: arrived ? arrivedAt : null,
+    arrivedMinAgo: arrived ? Math.max(0, Math.round((now - arrivedAt) / 60000)) : null,
+    minutesOut: arrived ? null : (hasEta ? Math.max(0, remain) : null),
+    overdue: !arrived && hasEta && remain < 0,
   };
 }
 

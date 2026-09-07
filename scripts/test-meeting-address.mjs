@@ -187,6 +187,37 @@ ok("undefined is not a place", !M.isMeetAt(undefined));
   // never look at.
   ok("the row's value is read only once the menu is opened",
      /if \(!open \|\| savedAddr !== undefined\) return;/.test(APP), true);
+
+  // ── it is HIGH in the menu, which was half the ask (S204) ─────────────────
+  // "Make it pretty easy to find" is not satisfied by existing. Pinned by
+  // POSITION relative to the other rows rather than by a line number, which
+  // would break on any unrelated edit above it.
+  const at = (needle) => APP_CODE.indexOf(needle);
+  const rowAt = at('{isTrainer ? "Where I train clients" : "Where I train"}');
+  ok("the address row exists", rowAt > 0);
+  ok("...above Notifications", rowAt < at("<span>Notifications</span>"), true);
+  ok("...above My notes", rowAt < at("<span>My notes</span>"), true);
+  ok("...and above Connect your AI", rowAt < at("<span>Connect your AI</span>"), true);
+  ok("...while still below the navigation rows it belongs with",
+     rowAt > at("<span>Calendar</span>"), true);
+
+  // ── a client with no trainer has nobody to give it to (S204, Kevin) ───────
+  // ⚠️ THE GATE IS ROLE-ASYMMETRIC ON PURPOSE. A trainer's place is theirs to
+  // set before their first client exists; a client's address is only ever read
+  // by their own trainer, so before they join one the field goes nowhere.
+  ok("the row locks for a client with no trainer",
+     /const locked = !isTrainer && !hasCoach;/.test(APP_CODE), true);
+  ok("...the button is actually disabled, not just faded",
+     /disabled=\{locked\}/.test(APP_CODE), true);
+  ok("...the panel cannot be opened around it",
+     /showAddr && !locked/.test(APP_CODE), true);
+  ok("...and it says WHY rather than looking broken",
+     /Join a trainer/.test(APP_CODE), true);
+  // A TRAINER must never be gated by this — they have no coach and never will.
+  ok("a trainer is never locked out of their own address",
+     /!isTrainer && !hasCoach/.test(APP_CODE) && !/isTrainer \|\| !hasCoach/.test(APP_CODE), true);
+  ok("hasCoach actually reaches the menu",
+     /function SideMenu\(\{[^}]*hasCoach/.test(APP), true);
 }
 
 console.log(`  ${checks - fails}/${checks} assertions passed`);

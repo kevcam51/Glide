@@ -566,6 +566,72 @@ ok("validPoint rejects NaN", D.validPoint({ lat: NaN, lng: 0 }) === null);
   }
 }
 
+// ── 10b. arriving (S204) — the other end of the same journey ────────────────
+{
+  const lifted = SESSIONS.match(/export function onMyWayStatus\([\s\S]*?\n\}/)[0];
+  const canSrc = SESSIONS.match(/export function canSayOnMyWay\([\s\S]*?\n\}/)[0];
+  const mod = new Function(`
+    const ON_MY_WAY_LEAD_MIN = ${(SESSIONS.match(/export const ON_MY_WAY_LEAD_MIN = (\d+)/) || [])[1]};
+    const ON_MY_WAY_STALE_MIN = ${(SESSIONS.match(/export const ON_MY_WAY_STALE_MIN = (\d+)/) || [])[1]};
+    const SESSION_DEFAULT_MIN = 60;
+    const sessionEndMs = (s) => (s.startAt || 0) + (s.durationMin || SESSION_DEFAULT_MIN) * 60000;
+    const isPastSession = (s, now) => sessionEndMs(s) <= now;
+    ${lifted.replace("export ", "")}
+    ${canSrc.replace("export ", "")}
+    return onMyWayStatus;
+  `)();
+  const withW = (w) => S({ startAt: NOW + 20 * MIN, onMyWay: w });
+
+  // ⚠️ ARRIVAL OUTRANKS THE COUNTDOWN. "Kev has arrived" and "about 4 min away"
+  // on the same row is a contradiction, not extra detail.
+  {
+    const v = mod(withW({ by: "t1", at: NOW - 10 * MIN, minutes: 14, etaAt: NOW + 4 * MIN, arrivedAt: NOW - MIN }), "c1", NOW);
+    ok("arrival is reported", v.arrived === true, v);
+    ok("...and the countdown stops", v.minutesOut === null, v);
+    ok("...and it is never also 'overdue'", v.overdue === false, v);
+    ok("...with how long ago", v.arrivedMinAgo === 1, v);
+  }
+  {
+    const v = mod(withW({ by: "t1", at: NOW, minutes: 9, etaAt: NOW + 9 * MIN }), "c1", NOW);
+    ok("no arrival leaves the countdown alone", v.arrived === false && v.minutesOut === 9, v);
+  }
+  // ⚠️ `arrivedAt: null` IS THE CLEARED STATE, NOT A MISSING KEY. A fresh
+  // departure writes null rather than deleting (a nested delete needs a dotted
+  // path), so a truthiness test is the only correct read — `"arrivedAt" in w`
+  // would report every re-departure as arrived, forever.
+  {
+    const v = mod(withW({ by: "t1", at: NOW, minutes: 9, etaAt: NOW + 9 * MIN, arrivedAt: null }), "c1", NOW);
+    ok("a cleared arrival reads as NOT arrived", v.arrived === false, v);
+    ok("...and the countdown comes back", v.minutesOut === 9, v);
+  }
+  ok("a zero stamp is not an arrival", mod(withW({ by: "t1", at: NOW, arrivedAt: 0 }), "c1", NOW).arrived === false);
+
+  // The server half.
+  const body = AVAIL.slice(AVAIL.indexOf("exports.sessionOnMyWay"));
+  ok("the callable handles arriving", /d\.arrived === true/.test(body));
+  // ⚠️ NO GPS ON THIS PATH. Arriving is a statement; asking for a fix to confirm
+  // it would collect a position to learn nothing.
+  const arriveBranch = body.slice(body.indexOf("d.arrived === true"), body.indexOf("A repeat inside the cooldown"));
+  ok("...without reading a position", !/estimateDriveFrom|d\.lat|d\.lng/.test(arriveBranch), arriveBranch.slice(0, 200));
+  ok("...idempotently — two taps are one arrival", /prev && prev\.arrivedAt/.test(arriveBranch), true);
+  ok("...and it still notifies the other side", /sendPushTo/.test(arriveBranch), true);
+  // ⚠️ THE BUG THIS ALMOST SHIPPED WITH: set(..., {merge:true}) merges nested
+  // maps RECURSIVELY, so omitting arrivedAt on a new departure would leave the
+  // previous one in place — a fresh journey stamped "arrived" forever.
+  ok("a new departure explicitly CLEARS the arrival",
+     /arrivedAt: null \}/.test(body), true);
+  ok("the plan gate still runs before arriving can notify anyone",
+     body.indexOf("trainerHasDriveFeatures") < body.indexOf("d.arrived === true"), true);
+
+  // The app half.
+  ok("the app offers 'I'm here' only once you have set off",
+     /status && status\.mine && !status\.arrived && \(/.test(APP), true);
+  ok("...and drops the departure control once you have arrived",
+     /!\(status && status\.arrived\) && \(/.test(APP), true);
+  ok("...and sends no coordinates with it",
+     /callSessionOnMyWay\(\{ sessionId: s\.id, arrived: true \}\)/.test(APP), true);
+}
+
 // ── 11. the session doc stays server-owned ──────────────────────────────────
 // `onMyWay` is deliberately absent from firestore.rules bookingFields(), so
 // neither side can type an arrival time from a console — and no rules publish

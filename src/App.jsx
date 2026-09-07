@@ -21210,6 +21210,24 @@ function OnMyWay({ session: s, meUid, otherName, compact = false, enabled = fals
   // which is a data-shape change to a live billing document and a decision for
   // Kevin, not a silent widening here.
 
+  // Saying you have arrived is a STATEMENT, not a measurement — no GPS is read
+  // for it. Asking for a fix to confirm something the person just told us would
+  // collect a position to learn nothing, which is the opposite of the promise
+  // printed under the button.
+  const arrive = async () => {
+    if (busy) return;
+    setBusy(true); setErr(""); setNote("");
+    try {
+      await callSessionOnMyWay({ sessionId: s.id, arrived: true });
+      setNote(`${otherName || "They"} know you're here.`);
+      setTimeout(() => setNote(""), 6000);
+    } catch (e) {
+      console.error("arrival failed", e);
+      setErr(onMyWayError(e));
+    }
+    setBusy(false);
+  };
+
   const send = async () => {
     if (busy) return;
     setBusy(true); setErr(""); setNote("");
@@ -21241,11 +21259,13 @@ function OnMyWay({ session: s, meUid, otherName, compact = false, enabled = fals
       <div className={`${compact ? "mt-1.5" : "mt-2"} rounded-md px-2.5 py-2`}
         style={{ background: "rgba(var(--accent-rgb),.10)" }}>
         <div className="text-[.78rem] font-semibold text-fg inline-flex items-center gap-1.5">
-          <Icon name="car" size={14} color="var(--accent)" />
-          {otherName || "They"} {status.overdue ? "should be arriving now" : "is on the way"}
+          <Icon name={status.arrived ? "check" : "car"} size={14} color="var(--accent)" />
+          {otherName || "They"} {status.arrived ? "has arrived" : status.overdue ? "should be arriving now" : "is on the way"}
         </div>
         <div className="mt-0.5 text-[.72rem] text-muted">
-          {status.minutesOut != null && !status.overdue
+          {status.arrived
+            ? (status.arrivedMinAgo > 0 ? `Arrived ${status.arrivedMinAgo} min ago.` : "Just arrived.")
+            : status.minutesOut != null && !status.overdue
             ? <>About <b className="text-fg">{status.minutesOut} min</b> away
                 {status.etaAt ? <> — arriving around <b className="text-fg">{calTimeLabel(status.etaAt)}</b></> : null}
                 {/* Say how good the number is. A straight-line estimate knows
@@ -21265,17 +21285,35 @@ function OnMyWay({ session: s, meUid, otherName, compact = false, enabled = fals
   return (
     <div className={compact ? "mt-1.5" : "mt-2"}>
       <div className="flex gap-1.5 flex-wrap items-center">
-        <button onClick={send} disabled={busy}
-          className={btn}
-          style={status
-            ? { borderColor: "var(--border)", background: "transparent", color: "var(--text-secondary)" }
-            : { borderColor: "var(--accent)", background: "rgba(var(--accent-rgb),.10)", color: "var(--text)" }}>
-          <Icon name="car" size={13} color="var(--accent)" />
-          {busy ? "Sending…" : status ? "Update ETA" : "On my way"}
-        </button>
+        {/* Once you have said you are here there is nothing left to send, so the
+            departure control goes rather than sitting there inviting a tap that
+            would restart the journey. */}
+        {!(status && status.arrived) && (
+          <button onClick={send} disabled={busy}
+            className={btn}
+            style={status
+              ? { borderColor: "var(--border)", background: "transparent", color: "var(--text-secondary)" }
+              : { borderColor: "var(--accent)", background: "rgba(var(--accent-rgb),.10)", color: "var(--text)" }}>
+            <Icon name="car" size={13} color="var(--accent)" />
+            {busy ? "Sending…" : status ? "Update ETA" : "On my way"}
+          </button>
+        )}
+        {/* The other end of the same journey (S204). Only offered once you have
+            actually set off — "I'm here" on a session nobody is travelling to
+            is a message about nothing. */}
+        {status && status.mine && !status.arrived && (
+          <button onClick={arrive} disabled={busy}
+            className={btn}
+            style={{ borderColor: "var(--accent)", background: "rgba(var(--accent-rgb),.10)", color: "var(--text)" }}>
+            <Icon name="check" size={13} color="var(--accent)" />
+            {busy ? "Sending…" : "I'm here"}
+          </button>
+        )}
         {status && status.mine && (
           <span className="text-[.72rem] text-muted">
-            {status.minutesOut != null && !status.overdue
+            {status.arrived
+              ? (status.arrivedMinAgo > 0 ? `You told them ${status.arrivedMinAgo} min ago` : "They know you're here")
+              : status.minutesOut != null && !status.overdue
               ? <>They see <b className="text-fg">{status.minutesOut} min</b>{status.etaAt ? ` · ~${calTimeLabel(status.etaAt)}` : ""}</>
               : status.overdue ? "They're expecting you now"
               : status.stale ? `Sent ${status.ageMin} min ago` : "They know you're on the way"}
@@ -32374,6 +32412,46 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
             the same test canBillSessions makes). Booking stays free. */}
         {isTrainer && onEarnings && isAdminUid && <button style={item} onClick={() => go(onEarnings)}><Icon name="receipt" size={19} color="var(--accent)" /> <span>Earnings</span></button>}
 
+        {/* Where I train (S203; moved up S204, Kevin). It sits with the other
+            session/scheduling rows rather than below the AI and team ones —
+            "make it pretty easy to find" was half the original ask, and it was
+            eleventh in a list of thirteen.
+            ⚠️ A CLIENT WITH NO TRAINER HAS NOBODY TO GIVE IT TO. The address is
+            only ever read by the owner's own trainer, so before they join one it
+            is a field that goes nowhere; disabled, and it says why, rather than
+            silently saving into a void. A TRAINER is never gated — their place
+            is theirs to set before their first client arrives. */}
+        {(() => {
+          const locked = !isTrainer && !hasCoach;
+          return (
+            <>
+              <button style={{ ...item, opacity: locked ? 0.5 : 1, cursor: locked ? "default" : "pointer" }}
+                disabled={locked}
+                title={locked ? "Join a trainer first — this address is shared with them" : undefined}
+                onClick={() => !locked && setShowAddr(true)}>
+                <Icon name="pin" size={19} color={locked ? "var(--muted)" : "var(--accent)"} />
+                <span>{isTrainer ? "Where I train clients" : "Where I train"}</span>
+                <span style={{ marginLeft: "auto",
+                  color: locked ? "var(--muted)" : savedAddr === undefined ? "var(--muted)" : (savedAddr ? "var(--text-secondary)" : "var(--accent)"),
+                  fontSize: ".68rem", fontWeight: locked || savedAddr ? 400 : 800, maxWidth: 150, overflow: "hidden",
+                  textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {locked ? "NO TRAINER" : savedAddr === undefined ? "" : savedAddr ? (savedAddr.label || savedAddr.address) : "ADD"}
+                </span>
+              </button>
+              {locked && (
+                <div style={{ padding: "0 16px 8px 46px", fontSize: ".66rem", color: "var(--muted)", lineHeight: 1.45 }}>
+                  Join a trainer and this is where you tell them to meet you.
+                </div>
+              )}
+              {showAddr && !locked && (
+                <MeetingAddressPanel isTrainer={isTrainer}
+                  onSaved={(a) => setSavedAddr(a)}
+                  onClose={() => setShowAddr(false)} />
+              )}
+            </>
+          );
+        })()}
+
         {/* Notification Center (Session 76) — master on/off + per-type toggles.
             One notification type today (trainer to-dos); more slot in as features
             are added. Backed by the shared notifPrefs (synced with inline toggles). */}
@@ -32511,27 +32589,6 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
           <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
         </button>
         {showConnectAI && <ConnectAIPanel onClose={() => setShowConnectAI(false)} />}
-
-        {/* Where I train (S203, Kevin: "we gotta make it pretty easy to find it").
-            BOTH ROLES, deliberately: a client saves where they want to be
-            trained and a trainer saves where clients should come, and the
-            booking sheet then picks between the two. The subtitle shows the
-            saved value so the row answers the question without being opened —
-            "have I set this?" is the whole reason someone taps it. */}
-        <button style={item} onClick={() => setShowAddr(true)}>
-          <Icon name="pin" size={19} color="var(--accent)" />
-          <span>{isTrainer ? "Where I train clients" : "Where I train"}</span>
-          <span style={{ marginLeft: "auto", color: savedAddr === undefined ? "var(--muted)" : (savedAddr ? "var(--text-secondary)" : "var(--accent)"),
-            fontSize: ".68rem", fontWeight: savedAddr ? 400 : 800, maxWidth: 150, overflow: "hidden",
-            textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {savedAddr === undefined ? "" : savedAddr ? (savedAddr.label || savedAddr.address) : "ADD"}
-          </span>
-        </button>
-        {showAddr && (
-          <MeetingAddressPanel isTrainer={isTrainer}
-            onSaved={(a) => setSavedAddr(a)}
-            onClose={() => setShowAddr(false)} />
-        )}
 
         {/* My notes (trainer) — general notes; per-client notes live on the client cards (S91) */}
         {isTrainer && (

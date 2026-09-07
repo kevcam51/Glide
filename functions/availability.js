@@ -793,6 +793,19 @@ function onMyWayMessage(name, minutes, etaAt, tz) {
   };
 }
 
+// The other half of the same sentence. Pure, for the same reason as the
+// departure wording: the no-name case has to read as English.
+function onMyWayArrivalMessage(name, meetAt, viewerIsTrainerRecipient) {
+  const who = name || "They";
+  // "Outside" is the true and useful word when they have driven to YOUR place;
+  // at a studio the visitor has arrived somewhere, not outside anything.
+  const outside = meetAt === "client" && viewerIsTrainerRecipient === false;
+  return {
+    title: `${who} ${outside ? "is outside" : "has arrived"}`,
+    body: outside ? "They\u2019re here for your session." : "They\u2019ve arrived for your session.",
+  };
+}
+
 exports.sessionOnMyWay = onCall(
   { region: REGION, maxInstances: 10, secrets: [GOOGLE_MAPS_API_KEY, VAPID_PRIVATE_KEY] },
   async (request) => {
@@ -833,11 +846,46 @@ exports.sessionOnMyWay = onCall(
         "“On my way” isn’t part of this plan.");
     }
 
+    const prev = session.onMyWay || null;
+
+    // ── "I'm here" (S204) ──────────────────────────────────────────────────
+    // The end of the same journey, and deliberately the same callable: the
+    // participant check, the still-relevant-session window and the plan gate
+    // above are exactly the ones arriving needs, and a second endpoint would be
+    // a second place for them to drift.
+    // ⚠️ NO GPS AT ALL ON THIS PATH. Arriving is a statement, not a measurement
+    // — asking for a fix to confirm it would collect a position to learn
+    // something the person just told us, which is the opposite of the promise
+    // this feature was approved on.
+    if (d.arrived === true) {
+      // Idempotent: tapping it twice is one arrival, and must not re-notify.
+      if (prev && prev.arrivedAt) {
+        return { ok: true, arrived: true, repeated: true, arrivedAt: prev.arrivedAt };
+      }
+      await ref.set({
+        onMyWay: {
+          // Preserve the ETA that was sent, so the other side's row can still
+          // say what was promised next to what happened.
+          ...(prev && prev.by === uid ? prev : { by: uid, at: now, minutes: null, etaAt: null, source: null }),
+          by: uid, arrivedAt: now,
+        },
+      }, { merge: true });
+      let nm = "";
+      try {
+        const me = (await db.doc(`users/${uid}`).get()).data() || {};
+        nm = me.displayName || [me.firstName, me.lastName].filter(Boolean).join(" ") || "";
+      } catch { /* the message reads fine without it */ }
+      await sendPushTo(db, verdict.otherUid, {
+        ...onMyWayArrivalMessage(nm, session.meetAt, verdict.otherUid === session.trainerUid),
+        tag: `session-onmyway-${sessionId}`, url: "/?notif=session-onmyway",
+      }, "sessionOnMyWay").catch(() => {});
+      return { ok: true, arrived: true, arrivedAt: now };
+    }
+
     // A repeat inside the cooldown returns what is already stored: no Routes
     // call, no second push, and — importantly — no write, so the "sent at"
     // stamp the cooldown itself is measured from cannot be pushed forward by
     // the taps it is suppressing.
-    const prev = session.onMyWay || null;
     if (onMyWayThrottled(prev, uid, now)) {
       return { ok: true, repeated: true, minutes: prev.minutes ?? null,
         etaAt: prev.etaAt ?? null, source: prev.source || null };
@@ -881,7 +929,14 @@ exports.sessionOnMyWay = onCall(
     // ⚠️ MERGE, AND ONLY THIS FIELD. The document is a live billing record —
     // status, prices, completion stamps — and a bare `set` here would erase it.
     await ref.set({
-      onMyWay: { by: uid, at: now, minutes, etaAt, source: (est && est.source) || null },
+      // ⚠️ `arrivedAt: null` IS EXPLICIT, AND OMITTING IT WOULD BE A BUG.
+      // `set(..., {merge:true})` merges nested MAPS RECURSIVELY, so a new
+      // departure that simply left the key out would keep the previous
+      // `arrivedAt` — a fresh journey permanently stamped "arrived", for anyone
+      // who gets there, leaves to fetch something and sets off back. Written as
+      // null rather than deleted because a nested delete needs a dotted-path
+      // update, and every reader already treats falsy as "not arrived".
+      onMyWay: { by: uid, at: now, minutes, etaAt, source: (est && est.source) || null, arrivedAt: null },
       // NOT `updatedAt`: that field belongs to the booking, and moving it for a
       // travel note would make an untouched session look freshly edited.
     }, { merge: true });
@@ -922,5 +977,6 @@ exports.sessionOnMyWay = onCall(
 exports.onMyWayDecision = onMyWayDecision;
 exports.onMyWayThrottled = onMyWayThrottled;
 exports.onMyWayMessage = onMyWayMessage;
+exports.onMyWayArrivalMessage = onMyWayArrivalMessage;
 exports.ON_MY_WAY_LEAD_MIN = ON_MY_WAY_LEAD_MIN;
 exports.ON_MY_WAY_MIN_GAP_MS = ON_MY_WAY_MIN_GAP_MS;
