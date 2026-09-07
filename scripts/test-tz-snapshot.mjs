@@ -152,12 +152,24 @@ const CLIENT = { id: 4242 };
       .filter((k) => !k.startsWith("_"));
     // weightLbs is deliberately excluded — it is a measurement and keeps syncing
     // under the newest-reading-wins rule; a marker there would freeze the scale.
-    const missing = [...new Set(written)].filter((k) => k !== "weightLbs" && !scope.LOCAL_EDIT_WINS.includes(k));
+    // weightLbs is excluded deliberately (a measurement — see above). ageSetAt is
+    // not a setting either: it is the stamp that lets a typed age roll forward,
+    // and it is guarded as a PAIR with age rather than on its own (S201b).
+    const missing = [...new Set(written)]
+      .filter((k) => k !== "weightLbs" && k !== "ageSetAt" && !scope.LOCAL_EDIT_WINS.includes(k));
     if (missing.length) console.log("      unguarded snapshot fields:", missing.join(", "));
     return missing.length === 0;
   })());
   ok("weightLbs is NOT marker-guarded — it keeps its newest-reading-wins rule",
      !scope.LOCAL_EDIT_WINS.includes("weightLbs"));
+  // The pairing itself, since the field list no longer covers it.
+  store.clear();
+  seed("admin", "caliq-ctz4242", { data: { age: "40", ageEditedAt: 123, ageSetAt: 111 }, step: 5 });
+  await scope.applySnapshotAndSyncs(db, "admin", "ctz4242", CLIENT, { age: "55", ageSetAt: 999 }, null, {}, 14);
+  ok("a locally-owned age keeps its own stamp, or it would never roll",
+     read("admin", "caliq-ctz4242").data.ageSetAt === 111,
+     read("admin", "caliq-ctz4242").data.ageSetAt);
+  ok("...and the age itself is still protected", read("admin", "caliq-ctz4242").data.age === "40");
 
   // The three lists that have to agree, because the app stamps what this drops.
   {

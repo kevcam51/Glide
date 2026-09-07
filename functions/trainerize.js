@@ -176,7 +176,10 @@ function mapSnapshot(profile, stats, goals) {
     if (profile.lastName) d.lastName = String(profile.lastName).trim();
     if (profile.sex === "male" || profile.sex === "female") d.gender = profile.sex;
     const age = ageFromBirthDate(profile.birthDate);
-    if (age != null) d.age = String(age);
+    // Recomputed from birthDate on every sync, so it is already current — but
+    // stamp it anyway, or a client whose Trainerize link is later removed would
+    // have their age freeze at whatever the last sync wrote (S201b).
+    if (age != null) { d.age = String(age); d.ageSetAt = Date.now(); }
     const hIn = Number(profile.height);
     if (hIn > 36 && hIn < 96) { // sane 3–8 ft; height arrives as total inches
       d.heightFt = String(Math.floor(hIn / 12));
@@ -690,6 +693,12 @@ async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDat
   for (const f of LOCAL_EDIT_WINS) {
     if (prev[`${f}EditedAt`]) delete snapApply[f];
   }
+  // ⚠️ ageSetAt TRAVELS WITH age (S201b), the way heightIn travels with heightFt.
+  // It is the stamp effectiveAge rolls a typed age forward from — so re-stamping
+  // it on a plan whose AGE is locally owned would reset the clock to the sync
+  // time on every run, and the age would never roll at all. Caught by the
+  // test-tz-snapshot guard that enumerates what mapSnapshot writes.
+  if (prev.ageEditedAt) delete snapApply.ageSetAt;
   if (snapApply.weightLbs != null) {
     const cis = Array.isArray(prev.checkIns) ? prev.checkIns : [];
     const newestLocal = cis.reduce((acc, c) =>

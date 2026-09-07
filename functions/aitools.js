@@ -672,7 +672,40 @@ function ageFromDob(dob) {
   if (beforeBday) age -= 1;
   return (age >= 0 && age <= 120) ? age : null;
 }
-const effectiveAge = (d) => { const a = ageFromDob(d && d.dob); return a != null ? a : (Number(d && d.age) || 0); };
+// ⚠️ A TYPED AGE GOES STALE, AND EVERYTHING DOWNSTREAM BELIEVES IT (S201b,
+// Kevin: "if a user enters their age and not the birthday, let's have the app
+// automatically update their age every year based on the date it was entered").
+//
+// A date of birth stays current on its own; a number does not. Someone who typed
+// 40 two years ago is still being fed to Mifflin-St Jeor, Jackson-Pollock and
+// Bailey's over/under-30 branch as 40 — quietly wrong, and wrong in one
+// direction, forever.
+//
+// So a typed age is stamped with WHEN it was typed (ageSetAt) and rolls forward
+// from there. The stored number is never rewritten — it is what they said, and
+// the roll-forward is derived, so correcting the age later just re-stamps it.
+//
+// ⚠️ IT IS AN APPROXIMATION AND SHOULD NOT PRETEND OTHERWISE: someone who says
+// "40" may be 40 and one month or 40 and eleven, so a year on they are 41 or
+// nearly 42. Rolling forward is closer than freezing, but a dob is exact — which
+// is why dob still wins whenever it is present.
+const effectiveAge = (d) => {
+  const fromDob = ageFromDob(d && d.dob);
+  if (fromDob != null) return fromDob;
+  const typed = Number(d && d.age) || 0;
+  if (!typed) return 0;
+  const setAt = Number(d && d.ageSetAt) || 0;
+  if (!(setAt > 0) || setAt > Date.now()) return typed;   // unstamped, or a clock skew
+  const years = Math.floor((Date.now() - setAt) / 31557600000);   // 365.25 days
+  // ⚠️ CAP THE ROLL, NOT JUST THE RESULT. A corrupt stamp (a 1970 timestamp, say)
+  // rolls 56 years and lands on 96 — under any sane ceiling on the ANSWER, and
+  // completely wrong. No real plan has been dormant for decades, so a roll longer
+  // than this is bad data rather than a long absence: fall back to what they
+  // typed. The ceiling below stays as a backstop.
+  if (years > 25) return typed;
+  const rolled = typed + Math.max(0, years);
+  return rolled > 120 ? typed : rolled;
+};
 function calcBMR(gender, weightLbs, heightFt, heightIn, age) {
   const kg = weightLbs * 0.453592;
   const cm = (Number(heightFt) * 12 + Number(heightIn)) * 2.54;
@@ -2737,7 +2770,9 @@ async function runTool(name, input, ctx) {
       d.lastName = input.lastName.trim().slice(0, 40); if (!changes.includes("name")) changes.push("name");
     }
     if (input.gender === "male" || input.gender === "female") { d.gender = input.gender; changes.push(`gender ${input.gender}`); }
-    if (input.age != null) { const a = clampNum(input.age, 13, 100); if (a) { d.age = a; changes.push(`age ${a}`); } }
+    // ageSetAt is what lets effectiveAge roll a typed age forward (S201b) —
+    // without it the number the assistant saves is frozen at today's value.
+    if (input.age != null) { const a = clampNum(input.age, 13, 100); if (a) { d.age = a; d.ageSetAt = Date.now(); changes.push(`age ${a}`); } }
     // Optional date of birth (S110g) — validate, store, and derive age. Empty
     // string clears it (falls back to the manual age).
     if (typeof input.dob === "string") {
