@@ -911,6 +911,46 @@ function navyBF(d, m) {
   return bf != null && bf > 1 && bf < 75 ? Math.round(bf * 10) / 10 : null;
 }
 
+// ⚠️ LIFTED FROM src/App.jsx SO THE TWO CANNOT DISAGREE (S200v). The server had
+// no caliper maths at all and no idea the scale reading existed, so the AI
+// reported a TAPE-ONLY body fat while the app showed the caliper or scale
+// number — up to eight points apart, for the same client on the same day, with
+// neither side saying which method it used.
+function caliperBF(d, m) {
+  // ⚠️ NO AGE, NO ANSWER (S200v). effectiveAge falls back to `Number(d.age) || 0`,
+  // and both age-bearing formulas consumed that unguarded — so a plan with no
+  // age computed at age ZERO and read 4.4 points too lean at 40, 5.6 at 50.
+  // Silently, with no null and no warning.
+  //
+  // And it did NOT shift the three methods together: Navy has no age term, so a
+  // missing age drove the caliper and tape numbers DOWN while leaving the scale
+  // reading untouched — fabricating exactly the pattern Kevin reported
+  // ("scanner 20, caliper 15, tape 11"). Reachable in production: the caliper
+  // panel gates on gender alone, and the Trainerize importer writes `age` only
+  // when the profile carries a birthDate.
+  //
+  // leeMuscleMass right below already guards this way; it simply was not applied
+  // to the two functions whose numbers a trainer reads.
+  const age = effectiveAge(d);
+  if (!(age >= 15 && age <= 100)) return null;
+  const n = (v) => (Number(v) > 0 ? Number(v) : null);
+  let sum = null, bd = null;
+  if (d.gender === "male") {
+    const a = n(m.calChest), b = n(m.calAbdomen), c = n(m.calThigh);
+    if (!a || !b || !c) return null;
+    sum = a + b + c;
+    bd = 1.10938 - 0.0008267 * sum + 0.0000016 * sum * sum - 0.0002574 * age;
+  } else if (d.gender === "female") {
+    const a = n(m.calTriceps), b = n(m.calSuprailiac), c = n(m.calThigh);
+    if (!a || !b || !c) return null;
+    sum = a + b + c;
+    bd = 1.0994921 - 0.0009929 * sum + 0.0000023 * sum * sum - 0.0001392 * age;
+  } else return null;
+  if (!(bd > 0)) return null;
+  const bf = 495 / bd - 450; // Siri
+  return bf > 1 && bf < 75 ? Math.round(bf * 10) / 10 : null;
+}
+
 // Waist-to-height ratio: >0.5 = elevated health risk (scale-free health flag).
 function whtrOf(d, m) {
   const heightIn = (Number(d.heightFt) || 0) * 12 + (Number(d.heightIn) || 0);
@@ -923,8 +963,14 @@ function whtrOf(d, m) {
 function measurementMetrics(d, m) {
   const bailey = baileyBF(d, m);
   const navy = navyBF(d, m);
-  const both = [bailey, navy].filter((v) => v != null);
-  const avg = both.length ? Math.round((both.reduce((a, b) => a + b, 0) / both.length) * 10) / 10 : null;
+  const caliper = caliperBF(d, m);
+  const manual = Number(m.bodyFatManual) > 0 ? Math.round(Number(m.bodyFatManual) * 10) / 10 : null;
+  // Navy over Bailey, and the same precedence the app uses — see the notes on
+  // both in src/App.jsx measurementMetrics (S200v).
+  const tapeAvg = navy != null ? navy : bailey;
+  const tapeSource = navy != null ? "navy" : bailey != null ? "bailey" : null;
+  const avg = manual != null ? manual : caliper != null ? caliper : tapeAvg;
+  const bodyFatSource = manual != null ? "scale" : caliper != null ? "caliper" : tapeAvg != null ? "tape" : null;
   const whtr = whtrOf(d, m);
   const weight = Number(d.weightLbs) || 0;
   const bf = avg;
@@ -934,7 +980,10 @@ function measurementMetrics(d, m) {
   const targetBf = Number(d.goalBodyFat) || null;
   const goalWeightFromLeanMass = leanMassLbs && targetBf && targetBf > 1 && targetBf < 60
     ? Math.round(leanMassLbs / (1 - targetBf / 100)) : null;
-  return { baileyBF: bailey, navyBF: navy, bodyFatPct: avg, waistToHeight: whtr,
+  // The METHOD travels with the number, so the assistant can say which one it
+  // is reading rather than quoting a bare percentage the app may disagree with.
+  return { baileyBF: bailey, navyBF: navy, caliperBF: caliper, manualBF: manual,
+    bodyFatPct: avg, bodyFatSource, tapeSource, waistToHeight: whtr,
     leanMassLbs, goalWeightFromLeanMass };
 }
 

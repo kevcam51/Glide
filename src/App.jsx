@@ -762,7 +762,22 @@ const TAPE_SITE_HELP = {
 // Jackson-Pollock 3-site skinfold → body density → Siri body-fat %. Needs age +
 // gender (both on the plan). Skinfolds in millimetres.
 function caliperBF(d, m) {
+  // ⚠️ NO AGE, NO ANSWER (S200v). effectiveAge falls back to `Number(d.age) || 0`,
+  // and both age-bearing formulas consumed that unguarded — so a plan with no
+  // age computed at age ZERO and read 4.4 points too lean at 40, 5.6 at 50.
+  // Silently, with no null and no warning.
+  //
+  // And it did NOT shift the three methods together: Navy has no age term, so a
+  // missing age drove the caliper and tape numbers DOWN while leaving the scale
+  // reading untouched — fabricating exactly the pattern Kevin reported
+  // ("scanner 20, caliper 15, tape 11"). Reachable in production: the caliper
+  // panel gates on gender alone, and the Trainerize importer writes `age` only
+  // when the profile carries a birthDate.
+  //
+  // leeMuscleMass right below already guards this way; it simply was not applied
+  // to the two functions whose numbers a trainer reads.
   const age = effectiveAge(d);
+  if (!(age >= 15 && age <= 100)) return null;
   const n = (v) => (Number(v) > 0 ? Number(v) : null);
   let sum = null, bd = null;
   if (d.gender === "male") {
@@ -785,6 +800,7 @@ function caliperBF(d, m) {
 // scale, no height. Age/gender variants selected from the plan's own fields.
 function baileyBF(d, m) {
   const age = effectiveAge(d);
+  if (!(age >= 15 && age <= 100)) return null;   // see caliperBF (S200v)
   const n = (v) => (Number(v) > 0 ? Number(v) : null);
   if (d.gender === "male") {
     const waist = n(m.waist), hips = n(m.hips), forearm = n(m.forearm), wrist = n(m.wrist);
@@ -862,8 +878,23 @@ function measurementMetrics(d, m) {
   const navy = navyBF(d, m);
   const caliper = caliperBF(d, m);
   const manual = Number(m.bodyFatManual) > 0 ? Math.round(Number(m.bodyFatManual) * 10) / 10 : null;
-  const both = [bailey, navy].filter((v) => v != null);
-  const tapeAvg = both.length ? Math.round((both.reduce((a, b) => a + b, 0) / both.length) * 10) / 10 : null;
+  // ⚠️ NAVY, NOT AN AVERAGE OF NAVY AND BAILEY (S200v). Bailey adds and subtracts
+  // INCHES and calls the result a percent — no height, no weight anywhere in it —
+  // so it measures frame and muscularity as much as fat. Measured on the shipping
+  // code with waist, neck and all three skinfolds held FIXED (so the man's actual
+  // fatness cannot change), varying only hips/forearm/wrist across realistic
+  // builds moved Bailey 20.7 -> 13.0. A 7.7-point swing on someone whose fatness
+  // did not move, while Navy and the calipers returned the same number every time.
+  //
+  // Forearm alone moves it 5.4 points per two inches — so it reads systematically
+  // LOW for muscular people, which is exactly who a personal-training business
+  // coaches. Averaging it 50/50 with Navy did not cancel that; it imported half of
+  // it into the number on the screen and degraded the one validated regression.
+  //
+  // Kept as a FALLBACK because it needs no neck measurement, so it still answers
+  // when Navy cannot.
+  const tapeAvg = navy != null ? navy : bailey;
+  const tapeSource = navy != null ? "navy" : bailey != null ? "bailey" : null;
   // Effective body fat: prefer the most direct source the user gave —
   // a scale/scanner reading, then calipers, then the tape estimate.
   const avg = manual != null ? manual : caliper != null ? caliper : tapeAvg;
@@ -878,7 +909,7 @@ function measurementMetrics(d, m) {
   const targetBf = Number(d.goalBodyFat) || null;
   const goalWeightFromLeanMass = leanMassLbs && targetBf && targetBf > 1 && targetBf < 60
     ? Math.round(leanMassLbs / (1 - targetBf / 100)) : null;
-  return { baileyBF: bailey, navyBF: navy, caliperBF: caliper, manualBF: manual, tapeBF: tapeAvg,
+  return { baileyBF: bailey, navyBF: navy, caliperBF: caliper, manualBF: manual, tapeBF: tapeAvg, tapeSource,
     bodyFatPct: avg, bodyFatSource, waistToHeight: whtr, leanMassLbs, fatMassLbs, muscleMassLbs, goalWeightFromLeanMass };
 }
 
