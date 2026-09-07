@@ -1,6 +1,126 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S200h) — PUSHED AND DEPLOYED
+## ▶️ START HERE (S201) — PUSHED AND DEPLOYED
+
+Tip `cb25eaa`. Working tree clean, build + `check:undef` clean, **1,211 unit
+assertions across 24 suites, all green**. 27 commits this session. Functions
+redeployed after every server change (the `aitools.js` 18-set, the Trainerize
+3-set, and the 36-function push set).
+
+### ⏳ IN PROGRESS — "On my way" + ETA (Kevin approved the scope, NO CODE WRITTEN)
+
+Kevin asked for Amazon-style live trainer tracking. **I talked him out of the
+live-map version and he agreed** — a PWA cannot get background location, so the
+driver would have to keep the app foregrounded for the whole journey. The live
+map waits for a native app.
+
+**What he approved instead:** a one-tap "On my way" that computes an ETA and
+tells the other side. Design settled, nothing built:
+
+- New callable (put it in `functions/availability.js`, beside `sessionTravel`).
+  Input `{ sessionId, lat, lng }`. Verify the caller is a PARTICIPANT of that
+  session, then compute drive time to the session's `location`.
+- ⚠️ `estimateDrive(db, fromAddr, toAddr, departMs, apiKey, fetchFn, routesKey)`
+  in `functions/driveTime.js:445` takes ADDRESS STRINGS and geocodes both ends.
+  The origin here is a raw GPS fix, so either add an origin path that skips
+  geocoding when given `{lat,lng}`, or hand `routesLive(from, to, …)` the
+  resolved point directly — do NOT feed "25.76,-80.19" to the geocoder, whose
+  precision check (S199u/v: `partial_match` / `APPROXIMATE`) may well reject it.
+- ⚠️ **PRIVACY — store the ETA, never the position.** A one-shot
+  `navigator.geolocation` read at the moment of tapping needs no background
+  permission and is a far lighter ask than continuous sharing. Persist only
+  `onMyWay: { by, at, minutes, etaAt }` on the session. Do not write coordinates.
+- Notify the other participant (push + feed). ⚠️ Give it a real `url` —
+  `/?notif=session-onmyway` and a `notifDestination` branch, or it joins the
+  fifteen dead pushes S200q just fixed.
+- Both directions: the trainer travelling to a client, or the client to the
+  trainer. Whoever taps it is the one moving.
+- Cost: one Routes call per tap. `sessionTravel` is gated to paid Coach plans;
+  decide whether this is too (Kevin has not been asked).
+
+---
+
+### What shipped this session
+
+**The notes thread (S200m–S200o), which started from "the AI said it saved my
+note and I can't find it".** It HAD saved. The chat relays an ACTIVE SUBJECT —
+whichever client was last touched — and instructs the model to reuse that id for
+every edit, so "a note for me" was filed under a client, which `My notes`
+filters out. Fixed with a real `aboutMe` parameter enforced server-side (a
+prompt sentence alone would not hold — the subject survives chat switches, and
+the schema hint that already said "omit it for your own data" had not held).
+`list_notes` had the same bug and worse: with a subject in play it returned the
+CLIENT's notes and omitted the trainer's entirely. Then two more stores nobody
+could see: the check-in sheet's "Keep private" wrote a trainer's note into
+privkv, and **privkv was read by exactly one screen** — so a trainer's own
+private notes existed nowhere in the app.
+
+**The 1,200 floor is now a STANDARD (S200u), recorded in CLAUDE.md.** An audit
+found the manual `calorieTarget` override applied OUTSIDE the floor at every
+read — a typed 1 came back from the shipping server function as a 1 cal/day
+prescription with macros divided out of it. Named `MIN_DAILY_CAL` /
+`atLeastMinCal`; `functions/` carries its own copy (it cannot import from
+`src/`) and a test pins the two. ⚠️ The old suite was green because
+`test-target-parity.mjs` tested the floor without an override and the override
+with above-floor values, and **never crossed the two**.
+
+**Body fat (S200v–S200y).** ⚠️ **THE FORMULAS ARE CORRECT — do not "fix" them.**
+Every coefficient matches the published sources, the per-sex sites are right,
+Navy is the imperial variant with log10 fed imperial inputs. The defects were:
+no age guard (a missing age computed at age ZERO, reading 4–6 points too lean,
+and since Navy has no age term it opened the gap rather than shifting all three);
+Bailey averaged 50/50 into the tape number (it is a frame index — 7.7 points of
+swing on identical fatness, biased low for muscular people); the server had no
+caliper maths at all so the AI quoted a different number than the app; the
+"±2%" accuracy claim that made honest disagreement look like a defect; the
+female waist landmark; the JP3 quadratic turning over past ~258 mm; and a trend
+chart plotting whichever method happened to exist that day.
+**Kevin supplied Bailey's own source and it MATCHED the code** — his four worked
+examples are now assertions. Added Bailey's correct weight (lean ÷ .85 / ÷ .78)
+and his lean-mass-by-height table, both labelled as his.
+⚠️ Stored `d.bodyFat` snapshots are repaired on plan open — **correct only,
+never erase**, because a null recompute (no age) would delete a live reading.
+
+**Also:** the make-up-a-big-day calculator (S200r); fifteen dead push
+destinations plus the URL→screen router they needed (S200q); the meal-type zoom
+(it was the autofocused search box behind it) scoped to `pointer: coarse`
+because iOS does not care about width (S200k/t); ClientHome writing whole plan
+documents (S200j); the profile index dropping profiles the server created
+(S200p); activity-level step bands, tracker-measured when available (S200l);
+Trainerize background sync reduced to watch data only (S200h); and the AI now
+reusing previously-logged meals instead of re-estimating (S200x).
+
+### ⚠️ Traps this session paid for
+
+- **A falling assertion COUNT is a failure.** `npm run test:units` aborts the
+  chain on the first bad script, so the total silently drops. I pushed red twice
+  (`4eeec83`, `S200y`) by reading past it.
+- **A test can be green against the bug.** `test-measure-dots.mjs` asserted a
+  dead key "counts" — it proved a list contained a string and nothing more.
+- **A deploy that prints nothing is an AUTH FAILURE, not a no-op.** Count the
+  `Successful update` lines; zero means the token expired.
+- **`functions:log` lags an hour or more.** Do not conclude a function stopped.
+- **Vercel lags the push.** Verify a fix is live by diffing the deployed bundle
+  for a marker before asking Kevin to reload — I sent him to look three times at
+  a build that did not have the fix.
+- **Ask the cheap diagnostic question first.** The missing note was visible on
+  his screen for several rounds under a title he did not recognise; one question
+  about the badge would have ended it before three more fixes.
+
+### Standing product rules (Kevin's, do not re-litigate)
+
+- **Never prescribe below 1,200 cal/day** — see CLAUDE.md. Prescribing is not
+  displaying; a silent clamp is its own bug; anything derived from a floored
+  target must use the floored value.
+- **Trainerize is one input, not a spine.** Additions do not need a Trainerize
+  hook; the calorie/burn data is the part that earns its keep.
+- **A client manages their own account like a trainer** (S199m).
+  `scripts/test-target-parity.mjs` fails on a new `ROLES.CLIENT` branch — justify
+  it in the allowlist, do not suppress it.
+
+---
+
+### Previous: S200h — PUSHED AND DEPLOYED
 
 Tip is `d9bd487`; **923 unit assertions across 18 suites**; build and
 `check:undef` clean. `trainerizeTest`, `trainerizeImport` and

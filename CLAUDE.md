@@ -102,6 +102,23 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S201 (Sep 6): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S201)" first.** Tip
+> `cb25eaa`, all pushed and deployed, **1,211 unit assertions across 24 suites** green.
+> ⏳ **IN PROGRESS, no code yet: the "On my way" + ETA feature** — Kevin approved the
+> ETA-only version after I explained a PWA cannot get background location; the live
+> Amazon-style map waits for a native app. Design is in the handoff.
+> Shipped: the AI note that "saved" and vanished (it was filed under the chat's active
+> client, and a trainer's own private store was read by NO screen); **the 1,200 calorie
+> floor made a standard** after an audit found the manual target override bypassing it
+> everywhere — a typed 1 came back as a 1 cal/day prescription; the body-fat spread Kevin
+> reported (**the formulas were RIGHT** — it was a missing age guard computing at age
+> ZERO, and Bailey averaged into the tape number); fifteen push notifications that opened
+> the app and did nothing; and typing while the AI is thinking.
+> ⚠️ **Three lessons worth more than the fixes:** a falling assertion COUNT is a failure
+> (the suite aborts and the total drops — I pushed red twice); a test can be GREEN against
+> the bug it is supposed to guard; and Vercel lags the push, so diff the deployed bundle
+> for a marker before asking Kevin to reload._
+>
 > _**S200c (Sep 6): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S200c)" first.** Tip
 > `2f33483`, all pushed and deployed, `npm run test:units` green at **781 assertions across 16
 > suites**. ⚠️ Two parallel sessions collided on numbering earlier in this arc — two S199m and two
