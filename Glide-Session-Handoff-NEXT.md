@@ -2,10 +2,18 @@
 
 ## ▶️ START HERE (S201) — PUSHED AND DEPLOYED
 
-Tip `cb25eaa`. Working tree clean, build + `check:undef` clean, **1,211 unit
-assertions across 24 suites, all green**. 27 commits this session. Functions
+Tip `7240ebb`. Working tree clean, build + `check:undef` clean, **1,245 unit
+assertions across 25 suites, all green**. 27 commits this session. Functions
 redeployed after every server change (the `aitools.js` 18-set, the Trainerize
 3-set, and the 36-function push set).
+
+**S201b (last thing done): a typed age now ROLLS FORWARD annually** from
+`ageSetAt`, instead of being believed forever by Mifflin-St Jeor, Jackson-Pollock
+and Bailey's over/under-30 branch. A dob still wins. Unstamped ages (every plan
+that predates this) read exactly as before. ⚠️ The cap is on the ROLL, not the
+result — a corrupt 1970 stamp rolls 56 years and lands on 96, under any ceiling
+on the answer. And `ageSetAt` travels with `age` through the Trainerize guard, or
+every sync would reset the clock and it would never roll.
 
 ### ⏳ IN PROGRESS — "On my way" + ETA (Kevin approved the scope, NO CODE WRITTEN)
 
