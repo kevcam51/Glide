@@ -1,54 +1,105 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S201) — PUSHED AND DEPLOYED
+## ▶️ START HERE (S202) — PUSHED AND DEPLOYED
 
-Tip `7240ebb`. Working tree clean, build + `check:undef` clean, **1,245 unit
-assertions across 25 suites, all green**. 27 commits this session. Functions
-redeployed after every server change (the `aitools.js` 18-set, the Trainerize
-3-set, and the 36-function push set).
+Tip `f753e0a`. Build + `check:undef` clean, **1,357 unit assertions across 27
+suites, all green**. `sessionOnMyWay` created and the other three
+`availability.js` functions redeployed; the new bundle is confirmed live on
+glidna.com (marker-diffed, not assumed).
 
-**S201b (last thing done): a typed age now ROLLS FORWARD annually** from
-`ageSetAt`, instead of being believed forever by Mifflin-St Jeor, Jackson-Pollock
-and Bailey's over/under-30 branch. A dob still wins. Unstamped ages (every plan
-that predates this) read exactly as before. ⚠️ The cap is on the ROLL, not the
-result — a corrupt 1970 stamp rolls 56 years and lands on 96, under any ceiling
-on the answer. And `ageSetAt` travels with `age` through the Trainerize guard, or
-every sync would reset the clock and it would never roll.
+⚠️ **A PARALLEL SESSION SHIPPED S201b WHILE THIS WAS BEING BUILT.** origin/main
+had moved two commits (the age roll-forward); this work was rebased onto it.
+`package.json` conflicted because both sides appended a suite to `test:units` —
+resolved as a union, both suites present, no duplicates. `src/App.jsx`
+auto-merged and their `test-age-rollforward.mjs` still passes, which is what
+says the merge did not eat their feature. Go by SHA, not by label.
 
-### ⏳ IN PROGRESS — "On my way" + ETA (Kevin approved the scope, NO CODE WRITTEN)
+### ✅ SHIPPED — "On my way" + ETA (the S201 in-progress item)
 
-Kevin asked for Amazon-style live trainer tracking. **I talked him out of the
-live-map version and he agreed** — a PWA cannot get background location, so the
-driver would have to keep the app foregrounded for the whole journey. The live
-map waits for a native app.
+One tap on an upcoming session takes a single GPS fix, computes drive time to
+the session's address, and tells the other person "X is on the way — about 12
+min out, arriving around 12:34". Either direction; whoever taps is moving.
+`sessionOnMyWay` in `functions/availability.js`, and ONE `OnMyWay` component in
+`src/App.jsx` serving three surfaces (trainer calendar sheet, shared Sessions
+panel, client next-session card).
 
-**What he approved instead:** a one-tap "On my way" that computes an ETA and
-tells the other side. Design settled, nothing built:
+**The two traps the S201 handoff flagged, both closed:**
 
-- New callable (put it in `functions/availability.js`, beside `sessionTravel`).
-  Input `{ sessionId, lat, lng }`. Verify the caller is a PARTICIPANT of that
-  session, then compute drive time to the session's `location`.
-- ⚠️ `estimateDrive(db, fromAddr, toAddr, departMs, apiKey, fetchFn, routesKey)`
-  in `functions/driveTime.js:445` takes ADDRESS STRINGS and geocodes both ends.
-  The origin here is a raw GPS fix, so either add an origin path that skips
-  geocoding when given `{lat,lng}`, or hand `routesLive(from, to, …)` the
-  resolved point directly — do NOT feed "25.76,-80.19" to the geocoder, whose
-  precision check (S199u/v: `partial_match` / `APPROXIMATE`) may well reject it.
-- ⚠️ **PRIVACY — store the ETA, never the position.** A one-shot
-  `navigator.geolocation` read at the moment of tapping needs no background
-  permission and is a far lighter ask than continuous sharing. Persist only
-  `onMyWay: { by, at, minutes, etaAt }` on the session. Do not write coordinates.
-- Notify the other participant (push + feed). ⚠️ Give it a real `url` —
-  `/?notif=session-onmyway` and a `notifDestination` branch, or it joins the
-  fifteen dead pushes S200q just fixed.
-- Both directions: the trainer travelling to a client, or the client to the
-  trainer. Whoever taps it is the one moving.
-- Cost: one Routes call per tap. `sessionTravel` is gated to paid Coach plans;
-  decide whether this is too (Kevin has not been asked).
+- `estimateDriveFrom(db, {lat,lng}, toAddr, …)` in `functions/driveTime.js`
+  geocodes ONLY the destination. A test counts geocoder calls — exactly one, and
+  the origin's coordinates appear in none of them.
+- **The ETA is stored, the position is not.** The session carries
+  `onMyWay: { by, at, minutes, etaAt, source }`. It also skips `drivecache` on
+  purpose: that key is (origin, destination, weekday, hour), so caching a live
+  position would write coordinates into a shared uid-less doc for a cache that
+  could never hit.
+
+⚠️ **`onMyWay` IS DELIBERATELY ABSENT FROM `firestore.rules bookingFields()`** —
+server-written only, so neither side can type an arrival time from a console,
+and **no rules publish was needed**: `changed()` is a diff of affected keys, so
+a field nobody edits never appears in it. Do not "complete" bookingFields with
+it; a test fails if you do.
+
+**Decisions worth not re-litigating:**
+
+- Gating follows the split S199u already drew: geocoding free for everyone,
+  traffic-aware Routes for paid Coach tiers — decided by the **TRAINER's** tier,
+  not the caller's, because keying it on the caller would give a paying coach's
+  client the worse estimate for the same session. **Kevin has not been asked;
+  this is the consistent default, not his ruling.**
+- **One journey per session**, the shape the scope specified. While the other
+  person is en route you read their ETA instead of getting a button — right for
+  the case this exists for (if your trainer is driving to your house, you are at
+  home). It is a limit only where BOTH sides travel to a third place. Fixing
+  that means a record per participant, i.e. a data-shape change to a live
+  billing document — Kevin's call, not a silent widening.
+- Its own notification type (`sessionOnMyWay`), not "session reminders": someone
+  who silenced the automated countdown still wants to know their trainer is ten
+  minutes out.
+
+### ⚠️ Three defects this session's OWN work introduced
+
+All three were in code I had just written, which is the S186/S196b pattern: a
+fix's own bugs are the ones nobody is looking for.
+
+- **A one-millisecond disagreement.** The server used `now > endAt` while
+  `isPastSession` is `end <= now`, so at the exact end instant the button hid
+  while the server still accepted the tap. **Comparing the two CONSTANTS found
+  nothing — they matched all along.** It took cross-checking both predicates
+  across a range of offsets, which is now a loop in the test.
+- **The bare word "internal" on a client's screen.** A Firebase callable's
+  `message` IS its code when the server supplies none, so passing it through
+  renders a status code as an apology — the exact defect S196b fixed once on the
+  booking Accept. **Found by tapping the button in a browser, not by reading the
+  code**, and only visible because the function was not yet deployed.
+- **A reschedule left a stale note.** Tap at 12:50 for a 1:00 session, move it to
+  3:00, and the client still read "12 minutes away". `onMyWayStatus` now defers
+  to `canSayOnMyWay`, so saying it and showing it cannot disagree.
+
+### ⚠️ And a test that passed for the wrong reason
+
+`scripts/test-on-my-way.mjs` is 111 assertions, every predicate LIFTED FROM THE
+SHIPPING SOURCE AND RUN, then mutation-checked 16 ways. **Two mutations survived
+the first pass**: deleting the null-island and off-globe guards left the file
+green, because the bad-fix assertions used a fake geocoder that THREW — so
+`null` came back whether the guard ran or not. Fixed with a working destination
+geocoder, a lookup counter ("and nothing was looked up"), and a control case
+proving a GOOD fix through the same harness does estimate. **A negative
+assertion needs a positive control, or it is asserting that the harness is
+broken.**
 
 ---
 
-### What shipped this session
+### Previously: what shipped in S201
+
+**S201b — a typed age now ROLLS FORWARD annually** from `ageSetAt`, instead of
+being believed forever by Mifflin-St Jeor, Jackson-Pollock and Bailey's
+over/under-30 branch. A dob still wins. Unstamped ages (every plan that predates
+it) read exactly as before. ⚠️ The cap is on the ROLL, not the result — a corrupt
+1970 stamp rolls 56 years and lands on 96, under any ceiling on the answer. And
+`ageSetAt` travels with `age` through the Trainerize guard, or every sync would
+reset the clock and it would never roll. _(Shipped by a parallel session; this
+work was rebased onto it — see the merge note at the top.)_
 
 **The notes thread (S200m–S200o), which started from "the AI said it saved my
 note and I can't find it".** It HAD saved. The chat relays an ACTIVE SUBJECT —

@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**632 assertions across 15 suites**, S199n).
+- `npm run test:units` — the JS unit suites (**1,357 assertions across 27 suites**, S202).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -102,6 +102,27 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S202 (Sep 7): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S202)" first.** Tip
+> `f753e0a`, pushed and deployed (the bundle was marker-diffed on glidna.com, not
+> assumed), **1,357 unit assertions across 27 suites** green. Shipped the S201
+> in-progress item: **"On my way" + ETA** — one tap takes a single GPS fix,
+> computes drive time to the session's address, and tells the other side "about
+> 12 min out, arriving around 12:34". Either direction.
+> ⚠️ **The ETA is stored; the position never is** — not in Firestore, not in a
+> log, and deliberately not in `drivecache` (whose key would put coordinates in a
+> shared uid-less doc for a cache that could never hit). `onMyWay` is
+> server-written and deliberately ABSENT from `firestore.rules bookingFields()`,
+> so **no rules publish was needed** — do not "complete" that list with it.
+> ⚠️ A parallel session shipped S201b mid-build; this was rebased onto it and
+> `package.json`'s `test:units` was resolved as a union. **Go by SHA.**
+> ⚠️ **Three lessons:** comparing two CONSTANTS found nothing when the two sides
+> disagreed by one millisecond — it took running both predicates across a range
+> of offsets; a callable's `message` IS its code, so passing it through put the
+> bare word "internal" on a client's screen (S196b's defect, again); and **two
+> mutations survived my first test pass because a negative assertion used a fake
+> that threw** — `null` came back whether the guard ran or not. A negative
+> assertion needs a positive control._
+>
 > _**S201 (Sep 6): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S201)" first.** Tip
 > `cb25eaa`, all pushed and deployed, **1,211 unit assertions across 24 suites** green.
 > ⏳ **IN PROGRESS, no code yet: the "On my way" + ETA feature** — Kevin approved the
