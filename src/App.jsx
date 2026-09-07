@@ -16,7 +16,8 @@ import { bookSession, updateSession, cancelSession, markNoShow, waiveSession, su
   CANCEL_TYPES, BILLING_MODES, cancellationDisclosure, consentLineFor, policySnapshot, POLICY_TEXT_VERSION,
   stripeFeeCents, feeComparison,
   subscribeMyEarnings, earningsSummary, chargeStatusLabel, centsToUsd,
-  clientStateInfo } from "./sessions.js";
+  clientStateInfo,
+  canSayOnMyWay, onMyWayStatus } from "./sessions.js";
 import { auth, functions, signOutAndClearCache} from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -20945,6 +20946,176 @@ const calColorFor = (uid, overrides) => {
 // person at a glance, which is the one thing the colours exist to prevent.
 const CAL_BLOCK_COLOR = "#7e9a9a";
 
+// ─── "On my way" (S201) ─────────────────────────────────────────────────────
+// One tap, one GPS fix, an ETA the other person can see. Kevin asked for the
+// Amazon live-tracking map; a PWA cannot get BACKGROUND location — the driver
+// would have to hold the app open for the whole journey — so the live map waits
+// for a native app and this ships the part that carries the value.
+//
+// ⚠️ ONE COMPONENT, THREE SURFACES (the client's next-session card, the shared
+// Sessions panel, the trainer's calendar sheet). Two copies of a decision is
+// exactly how the notification feed and the push router drifted in S197h, and
+// this one has a privacy promise printed on it — a second copy is a second
+// place for that promise to stop being true.
+//
+// ⚠️ THE POSITION IS NEVER STORED, ANYWHERE. It is read once, handed to the
+// callable, and dropped; the callable uses it to call Routes and writes only
+// { by, at, minutes, etaAt, source } onto the session. Nothing here keeps it in
+// state, and nothing writes it to storage. Say so on screen, because a location
+// prompt with no explanation is the thing people decline.
+//
+// A denied prompt is NOT a failure: the other person is still told "on the
+// way", just without a number. The notification is the point; the ETA is the
+// bonus.
+const GEO_OPTS = { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 };
+function oneGpsFix() {
+  return new Promise((resolve) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return resolve(null);
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    // A belt-and-braces timer: some browsers never call either callback when the
+    // permission prompt is dismissed rather than answered, and a button stuck on
+    // "Locating…" forever is worse than one that gives up and sends without a fix.
+    const t = setTimeout(() => finish(null), GEO_OPTS.timeout + 2000);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { clearTimeout(t); finish(pos && pos.coords
+        ? { lat: pos.coords.latitude, lng: pos.coords.longitude } : null); },
+      () => { clearTimeout(t); finish(null); },   // denied, unavailable, timed out — all the same here
+      GEO_OPTS,
+    );
+  });
+}
+
+// What went wrong, in words. PURE and module-level so it can be run by a test.
+//
+// ⚠️ A CALLABLE'S RAW MESSAGE IS SOMETIMES THE BARE WORD "internal". S196b
+// already shipped that once, on the booking Accept — the trainer's failure
+// banner read "internal" and nothing else. The server's own wording is the RIGHT
+// thing to show when it refused on purpose (it knows the session was cancelled,
+// or finished, or is days away, and a generic apology sends someone looking for
+// a fault that is not there) — but the codes that mean "something broke" carry
+// no such sentence, and passing those through is how the word "internal" ends up
+// on a client's screen.
+const OMW_SERVER_SAYS = ["failed-precondition", "permission-denied", "not-found", "invalid-argument"];
+function onMyWayError(e) {
+  const code = String((e && e.code) || "").replace(/^functions\//, "");
+  const msg = String((e && e.message) || "").trim();
+  if (OMW_SERVER_SAYS.includes(code) && msg && msg.toLowerCase() !== code) return msg;
+  if (code === "unauthenticated") return "Please sign in again.";
+  if (code === "unavailable" || code === "deadline-exceeded") {
+    return "Couldn't reach Glidna — check your connection and try again.";
+  }
+  return "Couldn't send that just now — try again in a moment.";
+}
+
+function OnMyWay({ session: s, meUid, otherName, compact = false }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [note, setNote] = useState("");
+  // The row counts DOWN, so it has to re-render on its own — an ETA rendered
+  // once and left alone still says "12 min out" half an hour later.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
+
+  const status = onMyWayStatus(s, meUid, now);
+  const canSay = canSayOnMyWay(s, now);
+  if (!status && !canSay) return null;
+
+  // ⚠️ ONE JOURNEY PER SESSION, ON PURPOSE. The record is a single
+  // { by, at, minutes, etaAt } — the shape this feature was scoped with — so
+  // while the OTHER person is en route the viewer reads their ETA instead of
+  // being offered a button. That is right for the case this exists for: if your
+  // trainer is driving to your house, you are at home and have nowhere to be on
+  // the way to. It is a real limit only where BOTH sides travel to a third place
+  // and both want to say so; making that work means a record per participant,
+  // which is a data-shape change to a live billing document and a decision for
+  // Kevin, not a silent widening here.
+
+  const send = async () => {
+    if (busy) return;
+    setBusy(true); setErr(""); setNote("");
+    // ⚠️ THE FIX IS BEST-EFFORT AND THE TAP IS NOT. Awaiting the position before
+    // the call is right (an ETA needs it), but a refusal must never swallow the
+    // message — oneGpsFix resolves null rather than rejecting for exactly that.
+    const fix = await oneGpsFix();
+    try {
+      const r = await callSessionOnMyWay({ sessionId: s.id, ...(fix || {}) });
+      const d = (r && r.data) || {};
+      setNote(d.minutes != null
+        ? `Sent — ${otherName || "they"} can see you're about ${d.minutes} min away.`
+        : !fix
+          ? `Sent — ${otherName || "they"} know you're on the way. No arrival time: location wasn't shared.`
+          : `Sent — ${otherName || "they"} know you're on the way. No arrival time: this session has no address.`);
+      setTimeout(() => setNote(""), 6000);
+    } catch (e) {
+      console.error("on-my-way failed", e);
+      setErr(onMyWayError(e));
+    }
+    setBusy(false);
+  };
+
+  const btn = "rounded-md border px-2.5 py-1.5 text-xs font-semibold cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5";
+  // What the OTHER person reads. Their trainer or client is en route, so this is
+  // the line that matters most on the whole row.
+  if (status && !status.mine) {
+    return (
+      <div className={`${compact ? "mt-1.5" : "mt-2"} rounded-md px-2.5 py-2`}
+        style={{ background: "rgba(var(--accent-rgb),.10)" }}>
+        <div className="text-[.78rem] font-semibold text-fg inline-flex items-center gap-1.5">
+          <Icon name="car" size={14} color="var(--accent)" />
+          {otherName || "They"} {status.overdue ? "should be arriving now" : "is on the way"}
+        </div>
+        <div className="mt-0.5 text-[.72rem] text-muted">
+          {status.minutesOut != null && !status.overdue
+            ? <>About <b className="text-fg">{status.minutesOut} min</b> away
+                {status.etaAt ? <> — arriving around <b className="text-fg">{calTimeLabel(status.etaAt)}</b></> : null}
+                {/* Say how good the number is. A straight-line estimate knows
+                    nothing about traffic and is at its most optimistic exactly
+                    at rush hour — the same honesty the drive-check panel owes
+                    (S197i), and the reason every estimate is labelled. */}
+                {status.source === "straight-line" ? <span className="text-muted"> · rough estimate, no traffic</span> : null}
+              </>
+            : status.stale
+              ? `Set off ${status.ageMin} min ago — no fresh arrival time.`
+              : "No arrival estimate."}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={compact ? "mt-1.5" : "mt-2"}>
+      <div className="flex gap-1.5 flex-wrap items-center">
+        <button onClick={send} disabled={busy}
+          className={btn}
+          style={status
+            ? { borderColor: "var(--border)", background: "transparent", color: "var(--text-secondary)" }
+            : { borderColor: "var(--accent)", background: "rgba(var(--accent-rgb),.10)", color: "var(--text)" }}>
+          <Icon name="car" size={13} color="var(--accent)" />
+          {busy ? "Sending…" : status ? "Update ETA" : "On my way"}
+        </button>
+        {status && status.mine && (
+          <span className="text-[.72rem] text-muted">
+            {status.minutesOut != null && !status.overdue
+              ? <>They see <b className="text-fg">{status.minutesOut} min</b>{status.etaAt ? ` · ~${calTimeLabel(status.etaAt)}` : ""}</>
+              : status.overdue ? "They're expecting you now"
+              : status.stale ? `Sent ${status.ageMin} min ago` : "They know you're on the way"}
+          </span>
+        )}
+      </div>
+      {/* The promise, where the decision is made. A location prompt with no
+          explanation beside it is the one people decline. */}
+      {!status && (
+        <div className="mt-1 text-[.68rem] text-muted leading-snug">
+          Uses your location once to work out the arrival time. Only the ETA is shared — never where you are.
+        </div>
+      )}
+      {note && <div className="mt-1 text-[.72rem] text-success">{note}</div>}
+      {err && <div className="mt-1 text-[.72rem] text-danger">{err}</div>}
+    </div>
+  );
+}
+
 // What this session means for money, in the trainer's language.
 function calBillingState(s, now) {
   if (s.status === "cancelled") {
@@ -21797,6 +21968,13 @@ function CalSessionSheet({ session: s, nameOf, now, busy, meUid, meName, hasCard
             </div>
             <CardLinkRow meName={meName} compact />
           </div>
+        )}
+
+        {/* "On my way" (S201) — the trainer is usually the one driving, so this
+            is the surface it matters on most. Same component as the Sessions
+            panel: one place decides when it may be said and what it promises. */}
+        {!past && s.status !== "cancelled" && (
+          <OnMyWay session={s} meUid={meUid} otherName={nameOf(s.clientUid)} />
         )}
 
         <div className="flex flex-wrap gap-1.5">
@@ -22983,6 +23161,9 @@ const callSendTrainerRequest = httpsCallable(functions, "sendTrainerRequest"); /
 const callTrainerAvailability = httpsCallable(functions, "trainerAvailability");
 const callRespondToBooking = httpsCallable(functions, "respondToBookingRequest");
 const callSessionTravel = httpsCallable(functions, "sessionTravel");   // drive time + back-to-back warnings (S197i)
+// "On my way" (S201). One GPS fix goes up, an ETA comes back; the position is
+// never stored — see functions/availability.js sessionOnMyWay.
+const callSessionOnMyWay = httpsCallable(functions, "sessionOnMyWay");
 const callListAppRequests = httpsCallable(functions, "listAppRequests");        // S140 admin
 const callSetAppRequestStatus = httpsCallable(functions, "setAppRequestStatus"); // S140 admin
 const callAdminOverview = httpsCallable(functions, "adminOverview"); // admin all-users dashboard (S90)
@@ -26261,23 +26442,36 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
         {/* Next session (S100) — the client's view of what their trainer booked.
             Only shows once there IS one, so it never nags an unlinked user. */}
         {nextSession && (
-          <button onClick={() => setShowSessions(true)}
-            className="mb-4 w-full text-left rounded-card border border-primary bg-surface p-3.5 cursor-pointer"
+          /* ⚠️ A DIV WRAPPING A BUTTON, NOT A BUTTON (S201). The whole card used
+             to be one <button>, and "On my way" lives here — a button inside a
+             button is invalid HTML and the inner one's taps are eaten by the
+             outer. The tappable area is now the text; the travel row sits
+             beside it, in the same card. */
+          <div className="mb-4 w-full rounded-card border border-primary bg-surface p-3.5"
             style={{ background: "rgba(var(--accent-rgb),.06)" }}>
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <span className="font-display text-base tracking-wide text-primary uppercase inline-flex items-center gap-2">
-                <Icon name="calendar" size={17} color="var(--accent)" />Next session
-              </span>
-              {upcomingSessions.length > 1 && (
-                <span className="text-xs text-muted">+{upcomingSessions.length - 1} more</span>
-              )}
-            </div>
-            <div className="mt-1.5 text-fg font-bold text-[1.02rem]">{fmtSessionWhen(nextSession.startAt)}</div>
-            <div className="mt-0.5 text-sm text-muted">
-              {[nextSession.title, nextSession.location].filter(Boolean).join(" · ")
-                || `${nextSession.durationMin || SESSION_DEFAULT_MIN} min with ${trainerInfo ? trainerInfo.name : "your trainer"}`}
-            </div>
-          </button>
+            <button onClick={() => setShowSessions(true)}
+              className="w-full text-left bg-transparent border-0 p-0 cursor-pointer">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="font-display text-base tracking-wide text-primary uppercase inline-flex items-center gap-2">
+                  <Icon name="calendar" size={17} color="var(--accent)" />Next session
+                </span>
+                {upcomingSessions.length > 1 && (
+                  <span className="text-xs text-muted">+{upcomingSessions.length - 1} more</span>
+                )}
+              </div>
+              <div className="mt-1.5 text-fg font-bold text-[1.02rem]">{fmtSessionWhen(nextSession.startAt)}</div>
+              <div className="mt-0.5 text-sm text-muted">
+                {[nextSession.title, nextSession.location].filter(Boolean).join(" · ")
+                  || `${nextSession.durationMin || SESSION_DEFAULT_MIN} min with ${trainerInfo ? trainerInfo.name : "your trainer"}`}
+              </div>
+            </button>
+            {/* The client's own "on my way", and where they READ the trainer's.
+                This card is the one thing on their home screen about today's
+                session, so an ETA that only lived behind two taps in the
+                Sessions panel would mostly go unseen. */}
+            <OnMyWay session={nextSession} meUid={meUid}
+              otherName={trainerInfo ? trainerInfo.name : "Your trainer"} />
+          </div>
         )}
 
         {/* Plan switcher (Session 21) — pick the active plan, or make a new one. */}
@@ -29831,6 +30025,12 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
           </>
         );
       })()}
+      {/* "On my way" (S201) — either side, whoever is travelling. Renders
+          nothing until the session is close enough for it to be a true
+          statement, so it does not sit on next month's booking. */}
+      {!opts.past && !opts.cancelled && (
+        <OnMyWay session={s} meUid={meUid} otherName={otherName} compact />
+      )}
       {!opts.past && !opts.cancelled && (
         <div className="mt-2 flex gap-1.5 flex-wrap">
           {isTrainer && (
@@ -31793,6 +31993,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
                 // thing the Notification Center promises you can do.
                 { key: "sessionBilling", label: "Session billing", desc: "When a session is charged or a balance settles" },
                 { key: "sessionReminders", label: "Session reminders", desc: "Before a booked session — set your lead times on the calendar page" },
+                { key: "sessionOnMyWay", label: "\u201cOn my way\u201d alerts", desc: "When a client sets off for a session and shares an ETA" },
                 { key: "mealReviews", label: "Meals to check", desc: "When a client tags a meal and sends it over" },
               ]
             : [
@@ -31805,6 +32006,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
                 { key: "referralRewards", label: "Referral rewards", desc: "When credit you've earned is ready to claim" },
                 { key: "sessionBilling", label: "Session billing", desc: "When you're charged for a session" },
                 { key: "sessionReminders", label: "Session reminders", desc: "Before a booked session — set your lead times below" },
+                { key: "sessionOnMyWay", label: "\u201cOn my way\u201d alerts", desc: "When your trainer sets off and shares an ETA" },
                 { key: "mealReviews", label: "Meal check-backs", desc: "When your trainer confirms or corrects a meal you tagged" },
               ];
           const Toggle = ({ on, disabled, onClick }) => (
@@ -32308,7 +32510,7 @@ export default function App() {
   // weighInReminders / coachingNudges = client home nudge cards (Session 77).
   const [notifPrefs, setNotifPrefs] = useState({ master: true, trainerReminders: true, sentReminders: true,
     foodReminders: true, weighInReminders: true, coachingNudges: true, messages: true, automations: true,
-    sessionReminders: true });
+    sessionReminders: true, sessionOnMyWay: true });
   // Merge a partial patch and persist. Components call with e.g. { master:false }.
   const onSetNotifPrefs = (patch) => {
     setNotifPrefs((prev) => {

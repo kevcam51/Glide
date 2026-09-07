@@ -29,6 +29,70 @@ export const bySoonest = (a, b) => (a.startAt || 0) - (b.startAt || 0);
 export const sessionEndMs = (s) => (s.startAt || 0) + (s.durationMin || SESSION_DEFAULT_MIN) * 60000;
 export const isPastSession = (s, now = Date.now()) => sessionEndMs(s) <= now;
 
+// ─── "On my way" (S201) ─────────────────────────────────────────────────────
+// The ETA a person shares by tapping one button, and nothing else. The WRITE is
+// server-only (functions/availability.js sessionOnMyWay) — `onMyWay` is
+// deliberately absent from firestore.rules bookingFields(), so neither side can
+// type an arrival time from a console. What lives here is the reading half: who
+// may say it, when it is still true, and how to word it.
+//
+// ⚠️ NO POSITION EVER REACHES THIS FILE. The browser takes one GPS fix, hands it
+// to the callable, and forgets it. The session carries { by, at, minutes, etaAt,
+// source } — a duration and a clock time.
+
+// How early "on my way" is a true statement, and therefore how early the button
+// appears. MUST equal ON_MY_WAY_LEAD_MIN in functions/availability.js: the
+// server refuses outside this window, so a wider bound here is a button that
+// throws and a narrower one is a button that hides when it should work.
+// scripts/test-on-my-way.mjs reads both numbers out of both files and fails if
+// they drift.
+export const ON_MY_WAY_LEAD_MIN = 240;
+// An ETA that was true forty minutes ago is not an ETA. Past this the row stops
+// quoting a number and says only that they set off — the honest version of an
+// estimate nobody has refreshed.
+export const ON_MY_WAY_STALE_MIN = 45;
+
+// May I tell the other person I'm on the way to this session, right now?
+// Mirrors onMyWayDecision on the server, minus the participant check the rules
+// and the callable both make anyway.
+export function canSayOnMyWay(s, now = Date.now()) {
+  if (!s || s.status === "cancelled") return false;
+  if (isPastSession(s, now)) return false;
+  return (Number(s.startAt) || 0) - now <= ON_MY_WAY_LEAD_MIN * 60000;
+}
+
+// What the row should say about an onMyWay that is already on the session.
+// `mine` = the viewer is the one who tapped it. Returns null when there is
+// nothing to show, so a caller can render it or not without a second rule.
+export function onMyWayStatus(s, meUid, now = Date.now()) {
+  const w = s && s.onMyWay;
+  if (!w || !w.by) return null;
+  // ⚠️ THE SAME PREDICATE THAT GOVERNS SAYING IT GOVERNS SHOWING IT. A cancelled
+  // or finished session's travel note is history nobody needs — but so is one on
+  // a session that has since been RESCHEDULED out of reach: tap "on my way" at
+  // 12:50 for a 1:00 session, move the session to 3:00, and a hand-rolled
+  // cancelled/past pair would still have shown "12 minutes away" about a session
+  // two hours off. Deferring to canSayOnMyWay covers all three at once and means
+  // the two halves of this feature cannot disagree about what "en route" means.
+  if (!canSayOnMyWay(s, now)) return null;
+  const mine = w.by === meUid;
+  const ageMin = Math.max(0, Math.round((now - (Number(w.at) || 0)) / 60000));
+  const stale = ageMin > ON_MY_WAY_STALE_MIN;
+  const minutes = Number(w.minutes);
+  // ⚠️ COUNT DOWN FROM THE ETA, NOT FROM THE ORIGINAL DURATION. Storing "12 min
+  // out" and rendering it unchanged means a row that still claims twelve
+  // minutes half an hour later. The stored etaAt is a fixed clock time, so the
+  // remaining minutes fall on their own — and once it is behind us the row says
+  // "arriving now" rather than a negative number.
+  const remain = w.etaAt ? Math.round((Number(w.etaAt) - now) / 60000) : null;
+  const hasEta = !stale && isFinite(minutes) && minutes > 0 && !!w.etaAt;
+  return {
+    mine, stale, ageMin, etaAt: w.etaAt || null, source: w.source || null,
+    minutesOut: hasEta ? Math.max(0, remain) : null,
+    overdue: hasEta && remain < 0,
+  };
+}
+
 // Book a session. Only a trainer can call this successfully — the rules check
 // that request.auth.uid === trainerUid AND that the client is really theirs.
 export async function bookSession(trainerUid, clientUid, {

@@ -487,8 +487,58 @@ async function estimateDrive(db, fromAddr, toAddr, departMs, apiKey, fetchFn, ro
   return { ...est, cached: false };
 }
 
+// ── an estimate from a LIVE POSITION, not an address (S201) ─────────────────
+// "On my way": the person taps a button, the phone hands us one GPS fix, and we
+// answer "how long until they get there". The destination is still an address —
+// the session's `location` — so only that end is geocoded.
+//
+// ⚠️ THIS EXISTS BECAUSE estimateDrive GEOCODES BOTH ENDS, AND A GPS FIX MUST
+// NEVER GO THROUGH A GEOCODER. Handing it "25.7617,-80.1918" is not merely
+// wasteful: the precision guard added in S199u/v rejects an APPROXIMATE or
+// `partial_match` result, and a bare coordinate pair is exactly the kind of
+// query both providers answer with the middle of somewhere. The pin we already
+// hold to the metre would come back as a neighbourhood centroid, or be refused
+// outright. So the origin is used as-is and never round-tripped.
+//
+// ⚠️ AND IT IS NEVER CACHED. `drivecache` is keyed by (origin, destination,
+// weekday, hour), which for a live position would mean writing coordinates into
+// a shared, uid-less document — the one thing the privacy rule for this feature
+// forbids — in exchange for a cache that could never hit, because nobody stands
+// in the same spot twice. A fresh lookup per tap is also the correct answer:
+// an ETA is worthless the moment it is stale.
+function validPoint(p) {
+  if (!p || !isFinite(p.lat) || !isFinite(p.lng)) return null;
+  const lat = Number(p.lat), lng = Number(p.lng);
+  // Reject the null island and anything outside the globe. (0,0) is what a
+  // broken sensor and an uninitialised struct both produce, and it is 1,000
+  // miles from the nearest road — an ETA computed from it would be nonsense
+  // presented as fact.
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  if (Math.abs(lat) < 0.0001 && Math.abs(lng) < 0.0001) return null;
+  return { lat, lng };
+}
+
+async function estimateDriveFrom(db, fromPoint, toAddr, departMs, apiKey, fetchFn, routesKey = apiKey) {
+  const from = validPoint(fromPoint);
+  if (!from) return null;
+  if (!normalizeAddress(toAddr)) return null;
+  const to = await geocode(db, toAddr, apiKey, fetchFn);
+  if (!to) return null;
+  // Departure is NOW — the person is leaving as they tap, not at the session's
+  // start time. Passing the session start would price the drive for a moment
+  // that has not arrived, which is the opposite of what an ETA is for.
+  const depart = departMs || Date.now();
+  let est = routesKey ? await routesLive(from, to, depart, routesKey, fetchFn) : null;
+  if (!est) {
+    const minutes = straightLineMinutes(from, to);
+    if (minutes == null) return null;
+    est = { minutes, miles: haversineMiles(from, to), source: "straight-line" };
+  }
+  return { ...est, cached: false };
+}
+
 module.exports = {
   normalizeAddress, addressKey, haversineMiles, straightLineMinutes,
-  feasibilityWarnings, geocode, estimateDrive, driveKey,
+  feasibilityWarnings, geocode, estimateDrive, estimateDriveFrom, validPoint, driveKey,
   ROAD_FACTOR, AVG_MPH, OVERHEAD_MIN, TIGHT_BUFFER_MIN,
 };

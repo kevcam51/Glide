@@ -67,6 +67,9 @@ const GLYPHS = {
   pause: (<><path d="M9 5.5v13" /><path d="M15 5.5v13" /></>),
   watch: (<><circle cx="12" cy="12" r="5.6" /><path d="M12 9.5V12l1.8 1.2" /><path d="M9 6.6 9.6 2.5h4.8L15 6.6" /><path d="M9 17.4 9.6 21.5h4.8L15 17.4" /></>),
   card: (<><rect x="2.5" y="5.5" width="19" height="13" rx="2.2" /><path d="M2.5 10h19" /><path d="M6 14.5h4" /></>),
+  // S201 — "On my way". A car, because the message is literally "I have set
+  // off and here is when I arrive".
+  car: (<><path d="M3 15.5v-3l2-4.6A2 2 0 0 1 6.8 6.5h10.4a2 2 0 0 1 1.8 1.4l2 4.6v3" /><path d="M3 15.5h18" /><path d="M5 15.5v2.5h2.6v-2.5" /><path d="M16.4 15.5V18H19v-2.5" /><circle cx="7.3" cy="12.6" r="1" /><circle cx="16.7" cy="12.6" r="1" /></>),
   receipt: (<><path d="M5 3.5h14v17l-2.3-1.5-2.3 1.5-2.4-1.5L7.3 20 5 20.5z" /><path d="M9 8h6" /><path d="M9 11.5h6" /><path d="M9 15h4" /></>),
   heart: (<path d="M12 20.5C7 17 3.5 13.8 3.5 9.6A4.1 4.1 0 0 1 12 7a4.1 4.1 0 0 1 8.5 2.6c0 4.2-3.5 7.4-8.5 10.9z" />),
   jump: (<><circle cx="12" cy="4" r="1.9" /><path d="M12 6v6" /><path d="m12 7.5-3.2-1.8M12 7.5l3.2-1.8" /><path d="m12 12-3 5M12 12l3 5" /><path d="M4.5 20.5c2-1.6 5-1.6 7.5-1.6s5.5 0 7.5 1.6" /></>),

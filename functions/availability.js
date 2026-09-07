@@ -22,7 +22,7 @@ const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const { sendPushTo } = require("./push");
 
-const { estimateDrive, feasibilityWarnings } = require("./driveTime");
+const { estimateDrive, estimateDriveFrom, feasibilityWarnings } = require("./driveTime");
 
 const VAPID_PRIVATE_KEY = defineSecret("VAPID_PRIVATE_KEY");
 // Optional by design: with no key configured the drive estimates fall back to
@@ -635,3 +635,218 @@ exports.sessionTravel = onCall(
     };
   },
 );
+
+// ─── 4. "On my way" (S201) ──────────────────────────────────────────────────
+// Kevin asked for Amazon-style live tracking of a trainer driving to a client.
+// A PWA cannot get BACKGROUND location — the driver would have to hold the app
+// open the whole way — so the live map waits for a native app. What ships
+// instead is the part that carries almost all of the value: one tap, one GPS
+// fix, an ETA, and the other person is told.
+//
+// ⚠️ THE ETA IS STORED. THE POSITION IS NOT. A one-shot
+// `navigator.geolocation` read needs no background permission and is a far
+// smaller ask than continuous sharing — and it stays small only if the
+// coordinates die here. They are used to call Routes and are never written to
+// Firestore, never logged, and never cached (see estimateDriveFrom's note on
+// why `drivecache` is skipped). What lands on the session is
+// `onMyWay: { by, at, minutes, etaAt, source }` — a duration and a clock time,
+// which is all the other person needs and all they are owed.
+//
+// ⚠️ AND IT IS SERVER-WRITTEN, so `onMyWay` is deliberately absent from
+// firestore.rules `bookingFields()`. Neither side can type an ETA from a
+// console, and no rules change (or publish) is needed: `changed()` is a diff of
+// affected keys, so a field nobody edits never appears in it.
+//
+// Either direction: whoever taps is the one moving. A trainer driving to a
+// client's home and a client driving to the studio are the same event.
+
+// How early "on my way" is a true statement. Tapping it two days out would push
+// the other person a notification about a journey nobody is on, so it is
+// refused rather than sent — and the UI hides the button on the same bound
+// (ON_MY_WAY_LEAD_MIN in src/sessions.js, pinned equal by
+// scripts/test-on-my-way.mjs).
+const ON_MY_WAY_LEAD_MIN = 240;
+// Two taps in the same breath are one tap. A person legitimately re-taps when
+// traffic turns — that is the feature working — but each tap is a Routes call
+// and a push, so a double-tap or an impatient retry reuses the stored answer
+// instead of re-billing Google and buzzing the other person twice.
+const ON_MY_WAY_MIN_GAP_MS = 60000;
+
+// May this person say they are on the way to this session, right now?
+// PURE, and exported so it can be run rather than pattern-matched.
+function onMyWayDecision(session, uid, now) {
+  if (!session) return { ok: false, code: "not-found", reason: "That session no longer exists." };
+  const parts = Array.isArray(session.participants) ? session.participants : [];
+  if (!uid || !parts.includes(uid)) {
+    return { ok: false, code: "permission-denied", reason: "That isn't your session." };
+  }
+  if (session.status === "cancelled") {
+    return { ok: false, code: "failed-precondition", reason: "That session was cancelled." };
+  }
+  const startAt = Number(session.startAt) || 0;
+  const endAt = startAt + (Number(session.durationMin) || 60) * 60000;
+  // Past the end there is nothing to be on the way to, and saying so is kinder
+  // than a notification that arrives after the session it is about.
+  // ⚠️ `>=`, NOT `>`, because src/sessions.js isPastSession is `end <= now` and
+  // the two must agree exactly. With `>` the button was hidden while the server
+  // still accepted the tap, for the one millisecond the session ends on — found
+  // by cross-checking the two predicates across a range of offsets rather than
+  // by comparing the constants, which matched all along.
+  if (now >= endAt) {
+    return { ok: false, code: "failed-precondition", reason: "That session has already finished." };
+  }
+  if (startAt - now > ON_MY_WAY_LEAD_MIN * 60000) {
+    return { ok: false, code: "failed-precondition",
+      reason: "That session is too far off to be on the way to yet." };
+  }
+  // The other participant, taken from the document rather than from a role: the
+  // client tapping it must reach the trainer and vice versa, and `participants`
+  // is the only field that is authoritative about who the pair are.
+  const otherUid = parts.find((p) => p !== uid) || "";
+  if (!otherUid) return { ok: false, code: "failed-precondition", reason: "That session has nobody to tell." };
+  return { ok: true, otherUid, destination: String(session.location || "") };
+}
+
+// Should this tap reuse the stored ETA instead of buying a fresh one?
+// PURE. `prev` is the session's existing onMyWay, or null.
+function onMyWayThrottled(prev, uid, now) {
+  if (!prev || prev.by !== uid) return false;         // the OTHER side tapping is a new event
+  const at = Number(prev.at) || 0;
+  return now - at < ON_MY_WAY_MIN_GAP_MS && now >= at;
+}
+
+// What the other person is told. Pure so the wording is testable, and shaped so
+// the no-ETA case is a real sentence rather than a blank where a number was
+// supposed to be — a session with no address, or a phone with location denied,
+// still has something worth saying.
+function onMyWayMessage(name, minutes, etaAt, tz) {
+  const who = name || "They";
+  if (!(minutes > 0)) {
+    return { title: `${who} is on the way`, body: "No arrival estimate — they're heading over now." };
+  }
+  const at = etaAt ? fmtWhen(etaAt, tz, { hour: "numeric", minute: "2-digit" }) : "";
+  return {
+    title: `${who} is on the way`,
+    body: `About ${minutes} min out${at ? ` — arriving around ${at}` : ""}.`,
+  };
+}
+
+exports.sessionOnMyWay = onCall(
+  { region: REGION, maxInstances: 10, secrets: [GOOGLE_MAPS_API_KEY, VAPID_PRIVATE_KEY] },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
+    const d = request.data || {};
+    const sessionId = String(d.sessionId || "").trim();
+    // ⚠️ A DOCUMENT ID, NOT A PATH. `sessions/${id}` with a slash in the id is
+    // still a valid Firestore path — "a/b/c" would address a document three
+    // levels down — so an id is required to be exactly one segment. Nothing
+    // lives under a session today, which is precisely why this is worth pinning
+    // now rather than after something does.
+    if (!sessionId || sessionId.length > 200 || /[/.]/.test(sessionId)) {
+      throw new HttpsError("invalid-argument", "Which session?");
+    }
+
+    const db = admin.firestore();
+    const ref = db.doc(`sessions/${sessionId}`);
+    const snap = await ref.get();
+    const session = snap.exists ? snap.data() : null;
+    const now = Date.now();
+
+    const verdict = onMyWayDecision(session, uid, now);
+    if (!verdict.ok) throw new HttpsError(verdict.code, verdict.reason);
+
+    // A repeat inside the cooldown returns what is already stored: no Routes
+    // call, no second push, and — importantly — no write, so the "sent at"
+    // stamp the cooldown itself is measured from cannot be pushed forward by
+    // the taps it is suppressing.
+    const prev = session.onMyWay || null;
+    if (onMyWayThrottled(prev, uid, now)) {
+      return { ok: true, repeated: true, minutes: prev.minutes ?? null,
+        etaAt: prev.etaAt ?? null, source: prev.source || null };
+    }
+
+    // ── the ETA ────────────────────────────────────────────────────────────
+    // Location is OPTIONAL on a session and a phone may refuse the fix, so both
+    // halves degrade to "on the way, no estimate" rather than to a failure. The
+    // notification is the point; the number is the bonus.
+    const raw = (GOOGLE_MAPS_API_KEY.value() || "").trim();
+    const keyPresent = raw.startsWith("AIza");      // a placeholder is no key (see sessionTravel)
+    // Geocoding for everyone, traffic-aware routing for paid — the same split
+    // S199u drew for sessionTravel, and for the same reason: the free half
+    // costs nothing per lookup, the Routes half has a real bill on it.
+    // ⚠️ THE TRAINER'S TIER DECIDES, NOT THE CALLER'S. Kevin's rule is that the
+    // Routes cost lands on accounts already paying — and in this pair that is
+    // the trainer, whose coaching workspace is the thing being sold. Keying it
+    // on the caller would mean a paying coach's client got the worse estimate
+    // for the same session, which is not a boundary anyone would draw on
+    // purpose.
+    const trainerUid = String(session.trainerUid || "");
+    let paid = isAdminUid(trainerUid);
+    if (!paid && trainerUid) {
+      try {
+        const t = (await db.doc(`users/${trainerUid}`).get()).data() || {};
+        paid = t.subscriptionStatus === "active" && TRAFFIC_AWARE_TIERS.includes(
+          String(t.subscriptionTier || "base").toLowerCase());
+      } catch { /* a profile read failure just means the free estimator */ }
+    }
+
+    let est = null;
+    if (verdict.destination) {
+      try {
+        est = await estimateDriveFrom(db, { lat: d.lat, lng: d.lng }, verdict.destination,
+          now, keyPresent ? raw : null, undefined, keyPresent && paid ? raw : null);
+      } catch (e) {
+        console.error("on-my-way estimate failed:", e && e.message);
+        est = null;   // an unknown ETA is silence about the ETA, never a failed tap
+      }
+    }
+    const minutes = est && isFinite(est.minutes) ? est.minutes : null;
+    const etaAt = minutes != null ? now + minutes * 60000 : null;
+
+    // ⚠️ MERGE, AND ONLY THIS FIELD. The document is a live billing record —
+    // status, prices, completion stamps — and a bare `set` here would erase it.
+    await ref.set({
+      onMyWay: { by: uid, at: now, minutes, etaAt, source: (est && est.source) || null },
+      // NOT `updatedAt`: that field belongs to the booking, and moving it for a
+      // travel note would make an untouched session look freshly edited.
+    }, { merge: true });
+
+    // Who is moving, in the reader's own words and their own timezone.
+    let name = "";
+    try {
+      const me = (await db.doc(`users/${uid}`).get()).data() || {};
+      name = me.displayName || [me.firstName, me.lastName].filter(Boolean).join(" ") || "";
+    } catch { /* the message reads fine without it */ }
+    let tz = "";
+    try {
+      const them = (await db.doc(`users/${verdict.otherUid}`).get()).data() || {};
+      tz = them.tz || "";
+    } catch { /* fmtWhen falls back to Eastern */ }
+
+    const msg = onMyWayMessage(name, minutes, etaAt, tz);
+    // ⚠️ A REAL DESTINATION. `session-` routes to the sessions screen in
+    // notifDestination (src/App.jsx) for both roles — which is where the ETA is
+    // shown — so this cannot join the fifteen dead pushes S200q had to fix.
+    // scripts/test-notif-routes.mjs harvests this tag automatically and fails
+    // if it ever stops routing.
+    await sendPushTo(db, verdict.otherUid, {
+      ...msg, tag: `session-onmyway-${sessionId}`, url: "/?notif=session-onmyway",
+    // Its OWN preference, not "session reminders": a countdown nobody asked for
+    // and a person telling you they have left are different things, and someone
+    // who silenced the automated ones still wants to know their trainer is ten
+    // minutes out. One new key, one new row — the shape the Notification Center
+    // was built for.
+    }, "sessionOnMyWay").catch(() => {});
+
+    return { ok: true, minutes, etaAt, source: (est && est.source) || null,
+             // So the UI can say WHY there is no number instead of showing a gap.
+             noDestination: !verdict.destination, noFix: !d.lat && !d.lng };
+  },
+);
+
+exports.onMyWayDecision = onMyWayDecision;
+exports.onMyWayThrottled = onMyWayThrottled;
+exports.onMyWayMessage = onMyWayMessage;
+exports.ON_MY_WAY_LEAD_MIN = ON_MY_WAY_LEAD_MIN;
+exports.ON_MY_WAY_MIN_GAP_MS = ON_MY_WAY_MIN_GAP_MS;

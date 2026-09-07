@@ -211,6 +211,9 @@ exports.sendTrainerRequest = require("./requests").sendTrainerRequest;
 exports.trainerAvailability = require("./availability").trainerAvailability;
 exports.respondToBookingRequest = require("./availability").respondToBookingRequest;
 exports.sessionTravel = require("./availability").sessionTravel;
+// "On my way" (S201) — one tap, one GPS fix, an ETA for the other person.
+// The position is used to call Routes and thrown away; only the ETA is stored.
+exports.sessionOnMyWay = require("./availability").sessionOnMyWay;
 // FatSecret food-search proxy (S93) — adds a curated food library to typed
 // search, merged with USDA + Open Food Facts. See functions/foodsearch.js for
 // the (Kevin) FatSecret account + secret setup. No-op until the secrets are set.
