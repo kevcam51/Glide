@@ -99,8 +99,12 @@ ok("NEG: 1rem would not", px("1rem") >= 16);
 // to every React inline style, which is how this app styles nearly everything.
 {
   const CSS = readFileSync(join(ROOT, "src", "index.css"), "utf8");
-  const rule = (CSS.match(/@media \(max-width: 767px\) \{[\s\S]*?\n\}/) || [""])[0];
+  const rule = (CSS.match(/@media \(max-width: 767px\)[^{]*\{[\s\S]*?\n\}/) || [""])[0];
   ok("the phone floor exists", /font-size: max\(16px, 1em\)/.test(rule), rule.slice(0, 120));
+  // ⚠️ TOUCH, NOT WIDTH (S200t). iOS zooms on any touch device with a focused
+  // sub-16px field — an iPad, or a phone turned landscape, both exceed 767px.
+  // 19 popups in this app autofocus an input, which is when it fires.
+  ok("...on every touch device, not just narrow ones", /\(pointer: coarse\)/.test(CSS));
   ok("...and can beat an inline style", /max\(16px, 1em\) !important/.test(rule));
   ok("...and still covers textarea and select", /textarea,/.test(rule) && /select \{/.test(rule));
 

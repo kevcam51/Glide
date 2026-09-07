@@ -1011,6 +1011,23 @@ enabled (Blaze has no default spending cap).
   OVER_QUERY_LIMIT is itself the non-definitive answer that keeps the damper off. It now records
   what PRODUCED the miss rather than what the caller holds. **When you collapse two classes of
   caller into one, grep every guard that branched on the thing you just made universal.**
+- **⚠️ THE 1,200 CALORIE FLOOR IS A STANDARD, NOT A DETAIL (Kevin, S200s).** No
+  formula, screen, projection, tool or AI reply may PRESCRIBE a daily intake
+  below 1,200 — in his words, *"these formulas and responses do not go below the
+  1200 mark and we should make that a standard. Users should come up with their
+  own creative ways to work around the 1200 limit."* Three consequences worth
+  stating because each has been got wrong once:
+  - **Prescribing is not displaying.** Showing that someone ATE 900 is correct
+    and must not be "fixed"; telling them to eat 900 is the violation.
+  - **A silent clamp is its own bug.** If the floor changes the answer, say so —
+    a plan that quietly pays back less than the card promised is worse than a
+    refusal (S200r's make-up calculator moves the remainder to training and
+    reports it).
+  - **Anything DERIVED from a floored target must use the floored value.** An ETA
+    computed from the unclamped deficit promises a date the plan cannot deliver.
+  Use the shared constant rather than a fresh `Math.max(1200, …)`, and remember
+  `functions/` cannot import from `src/` — see the mirror note on observedTdee.
+
 - **Commit style**: clear, descriptive messages; keep unrelated changes in separate commits.
 - Build (`npm run build`) should pass before committing code changes.
 - Keep this file (CLAUDE.md) updated as the project evolves.

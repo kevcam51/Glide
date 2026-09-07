@@ -90,7 +90,14 @@ button, a, [role="button"] { -webkit-tap-highlight-color: transparent; }
    user-scalable=no). That is what S90 did and c1cd28b removed on purpose: it
    stops the zoom by disabling PINCH-ZOOM for everyone, which is an
    accessibility control, on every platform, to solve an iOS problem. */
-@media (max-width: 767px) {
+/* ⚠️ WIDTH IS THE WRONG CONDITION — TOUCH IS (S200t, Kevin: "a weird zoom-in
+   whenever I click on any of the buttons that have a pop-up"). iOS auto-zooms on
+   any touch device with a focused sub-16px field, not only on narrow ones. Scoped
+   to 767px this missed an iPad entirely, and missed a phone the moment it was
+   turned landscape — and 19 of this app's popups autofocus an input, which is
+   precisely the moment the zoom fires. `pointer: coarse` is the actual condition
+   under which the browser does it; desktop keeps its own sizes. */
+@media (max-width: 767px), (pointer: coarse) {
   input:not(.dash-log-input):not(.keep-size),
   textarea,
   select {
