@@ -81,6 +81,15 @@ and his lean-mass-by-height table, both labelled as his.
 ⚠️ Stored `d.bodyFat` snapshots are repaired on plan open — **correct only,
 never erase**, because a null recompute (no age) would delete a live reading.
 
+⚠️ **AND THE AGE GUARD WAS NOT THE CAUSE FOR KEVIN'S OWN CLIENT — he checked,
+Kev Cam HAS an age on his plan.** So the remaining explanation for his reported
+20 / 15 / 11 is the Bailey dilution (fixed) plus normal method error. With Bailey
+out of the tape average, the tape number should rise toward Navy — expect roughly
+20 (scanner) / 15 (caliper) / 13-ish (tape), and a scale-vs-caliper gap of ~5
+points is ordinary: consumer BIA scales are the least reliable of the three and
+are biased. **Not yet confirmed on his data — ask him what the three read now.**
+The age guard is still correct and still worth having; it simply was not his bug.
+
 **Also:** the make-up-a-big-day calculator (S200r); fifteen dead push
 destinations plus the URL→screen router they needed (S200q); the meal-type zoom
 (it was the autofocused search box behind it) scoped to `pointer: coarse`
