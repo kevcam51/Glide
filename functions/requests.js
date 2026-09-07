@@ -153,7 +153,8 @@ exports.sendTrainerRequest = onCall(
     // Best-effort: note it in the client's own activity feed + push the trainer.
     await sendPushTo(db, trainerUid,
       { title: booking ? `${fromName} asked for a time` : `Request from ${fromName}`,
-        body: prompt.slice(0, 120), tag: booking ? "booking-request" : "client-request", url: "/" },
+        body: prompt.slice(0, 120), tag: booking ? "booking-request" : "client-request",
+          url: booking ? "/?notif=booking-request" : "/?notif=client-request" },
       "clientRequests").then((r) => console.log("sendTrainerRequest push", JSON.stringify({ trainerUid, booking: !!booking, ...r })))
       .catch(() => {});
     // ⚠️ REPORT WHAT WAS DROPPED. Returning a bare ok:true after silently

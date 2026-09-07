@@ -206,7 +206,7 @@ exports.onSessionBackdated = onDocumentWritten(
       // Per WRITE, not per session: a session moved twice is two things the
       // client needs to know about, and a shared tag would collapse them.
       tag: `session-backdated-${event.params.sid}-${isCreate ? "new" : startAt}`,
-      url: "/",
+      url: "/?notif=session-backdated",
     }, "sessionBilling").catch(() => {});
     console.log("onSessionBackdated", JSON.stringify({
       sid: event.params.sid, kind: isCreate ? "created" : "moved",

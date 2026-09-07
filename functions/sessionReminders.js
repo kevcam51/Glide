@@ -166,7 +166,7 @@ async function runSessionReminders(now = Date.now()) {
           title,
           body: `${clockET(startAt)} with ${otherName}${s.location ? ` · ${s.location}` : ""}`,
           tag: `session-reminder-${d.id}-${lead}`,
-          url: "/",
+          url: "/?notif=session-reminder",
         }, "sessionReminders").catch(() => {});
         sent++;
       }

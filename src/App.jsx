@@ -16787,6 +16787,41 @@ function takeSaveCardIntent() {
 // problem as the card intent above — a push tap can land on the sign-in screen
 // first — so it is stashed at import and cleared as soon as it is read.
 const TODO_STASH = "glidna-todo";
+// Which SCREEN a notification is about. Module-level and used by exactly two
+// callers — the in-app feed and a tapped push — because two copies of this
+// decision is how the feed and the push ended up disagreeing (S197h, S200q).
+//
+// ⚠️ ROUTES BY TAG, NOT BY URL, and it must stay that way: every feed row ever
+// written carries a tag, and switching to url would break every row written
+// before the change. The url is checked for exactly one thing (the card sheet),
+// which is why a new push url must never contain "cardlink" or "savecard"
+// unless it really means the card screen.
+function notifDestination(n) {
+  const tag = String((n && n.tag) || ""), url = String((n && n.url) || "");
+  if (tag.startsWith("dm-")) return "messages";
+  if (url.includes("cardlink") || url.includes("savecard")) return "card";
+  // TWO SPELLINGS, ONE MEANING: sessionReminders.js emits `session-nocard-*`
+  // and sessionSettle.js emits `session-no-card-*`. Both mean "add a card",
+  // and matching only the first sent the billing one to the wrong screen.
+  if (tag.startsWith("session-nocard") || tag.startsWith("session-no-card")) return "card";
+  // ⚠️ `booking-request` GOES THE OTHER WAY (S197w). It is the notification a
+  // CLIENT's ask sends the TRAINER, and the accept/deny inbox lives on their
+  // dashboard, not the calendar — so the generic booking- prefix below was
+  // dropping them on a calendar with nothing to answer. Same dead end Kevin
+  // reported for to-dos, one tag along.
+  if (tag.startsWith("booking-request")) return "todos";
+  // `booking-accepted-*` / `booking-declined-*` say "it's on your calendar" —
+  // so they had better be able to reach it.
+  if (tag.startsWith("session-") || tag.startsWith("booking-")) return "sessions";
+  if (tag === "trainer-todo" || tag === "client-request") return "todos";
+  if (tag === "referral-vested") return "referrals";
+  if (tag === "weighin-reminder") return "weighIn";
+  // A coach confirming a meal and a "you haven't logged food" nudge both want
+  // the same place: where food is logged.
+  if (tag === "food-reminder" || tag === "meal-review") return "food";
+  return null;
+}
+
 function stashTodoIntent() {
   try {
     const p = new URLSearchParams(window.location.search);
@@ -16797,6 +16832,28 @@ function stashTodoIntent() {
     url.searchParams.delete("todo");
     window.history.replaceState({}, "", url.toString());
   } catch (e) { /* private mode / no history API */ }
+}
+// A tapped push arrives as /?notif=<tag>. The TAG, not a screen name: it feeds
+// the same notifDestination the feed uses, so the two can never drift, and it
+// cannot name a screen that does not exist (S200q).
+const NOTIF_STASH = "glide-notif-intent";
+function stashNotifIntent() {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const v = (p.get("notif") || "").slice(0, 40);
+    if (!v) return;
+    localStorage.setItem(NOTIF_STASH, v);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("notif");
+    window.history.replaceState({}, "", url.toString());
+  } catch (e) { /* private mode / no history API */ }
+}
+function takeNotifIntent() {
+  try {
+    const v = localStorage.getItem(NOTIF_STASH);
+    if (v) localStorage.removeItem(NOTIF_STASH);
+    return v || null;
+  } catch (e) { return null; }
 }
 function takeTodoIntent() {
   try {
@@ -16810,6 +16867,7 @@ function takeTodoIntent() {
 // Google redirect later — by which time this query string is long gone.
 stashSaveCardIntent();
 stashTodoIntent();
+stashNotifIntent();
 
 // ─── What a no-card reminder's buttons do (S196e) ───────────────────────────
 // The push carries two destinations: tapping the body opens the client's card
@@ -31684,12 +31742,23 @@ export default function App() {
   // in the session had no way to reach the card sheet, and the best the feed
   // could do was drop someone on their home screen to find it themselves.
   // Bumping a number re-triggers it as many times as needed.
+  // ⚠️ TAKEN UNCONDITIONALLY, BEFORE ANY EARLY RETURN (S200q). Each take*
+  // CLEARS its stash, so one that is skipped because another intent won stays
+  // in localStorage and fires spuriously on the next launch — a notification
+  // from days ago opening a panel out of nowhere.
+  const bootCard = takeSaveCardIntent();
+  const bootTodo = takeTodoIntent();
+  const bootNotif = takeNotifIntent();
   const [homeIntent, setHomeIntent] = useState(() => {
-    if (takeSaveCardIntent()) return { kind: "card", n: 1 };
+    if (bootCard) return { kind: "card", n: 1 };
     // A push tapped from outside the app navigates to /?todo=<id>; the stash
     // survives the trip through AuthGate, the same way the card intent does.
-    const t = takeTodoIntent();
-    return t ? { kind: "todos", n: 1, id: t } : null;
+    if (bootTodo) return { kind: "todos", n: 1, id: bootTodo };
+    // /?notif=<tag> — every other push. Clients only: a trainer has different
+    // screens, and `role` is not known yet at this point (it loads async), so
+    // the trainer half is handled by the effect below.
+    const d = bootNotif ? notifDestination({ tag: bootNotif }) : null;
+    return d && d !== "referrals" ? { kind: d, n: 1 } : null;
   });
   // Where a notification actually goes. The feed knows the tag and the stored
   // url; this turns that into a screen. Kept HERE because App owns the
@@ -31708,31 +31777,6 @@ export default function App() {
   // Returning null is a real answer, not a gap: an automation result carries
   // its whole payload in the notification body, and there is no screen that
   // shows more than the row already does.
-  const notifDestination = (n) => {
-    const tag = String((n && n.tag) || ""), url = String((n && n.url) || "");
-    if (tag.startsWith("dm-")) return "messages";
-    if (url.includes("cardlink") || url.includes("savecard")) return "card";
-    // TWO SPELLINGS, ONE MEANING: sessionReminders.js emits `session-nocard-*`
-    // and sessionSettle.js emits `session-no-card-*`. Both mean "add a card",
-    // and matching only the first sent the billing one to the wrong screen.
-    if (tag.startsWith("session-nocard") || tag.startsWith("session-no-card")) return "card";
-    // ⚠️ `booking-request` GOES THE OTHER WAY (S197w). It is the notification a
-    // CLIENT's ask sends the TRAINER, and the accept/deny inbox lives on their
-    // dashboard, not the calendar — so the generic booking- prefix below was
-    // dropping them on a calendar with nothing to answer. Same dead end Kevin
-    // reported for to-dos, one tag along.
-    if (tag.startsWith("booking-request")) return "todos";
-    // `booking-accepted-*` / `booking-declined-*` say "it's on your calendar" —
-    // so they had better be able to reach it.
-    if (tag.startsWith("session-") || tag.startsWith("booking-")) return "sessions";
-    if (tag === "trainer-todo" || tag === "client-request") return "todos";
-    if (tag === "referral-vested") return "referrals";
-    if (tag === "weighin-reminder") return "weighIn";
-    // A coach confirming a meal and a "you haven't logged food" nudge both want
-    // the same place: where food is logged.
-    if (tag === "food-reminder" || tag === "meal-review") return "food";
-    return null;
-  };
   // Which to-do a feed row is about. Rows written before S197d carry url "/"
   // and have none — ClientHome falls back to the newest open one for those.
   const notifTodoId = (n) => {
@@ -33653,6 +33697,35 @@ export default function App() {
 
   // Global navigation chrome (hamburger + slide-out menu), shown on every screen.
   const isTrainerHome = role === ROLES.HEAD_TRAINER || role === ROLES.SUB_TRAINER;
+  // ⚠️ THE TRAINER HALF, WHICH THE CLIENT PATH CANNOT COVER (S200q).
+  //
+  // homeIntent is only ever handed to ClientHome, and a trainer's destinations
+  // resolve differently — they have no Sessions panel (their sessions are on the
+  // calendar) and a client's ask lands on the dashboard. Trainers receive plenty
+  // of these pushes: a booking request, a client with no card, a session
+  // reminder, the weekly billing summary.
+  //
+  // It has to be an EFFECT and not the initializer above, because `role` starts
+  // null and is loaded asynchronously — at boot there is nothing to branch on.
+  // Gated on a ref so it fires exactly once per launch, and only after the role
+  // is actually known.
+  const bootNotifRef = useRef(bootNotif);
+  useEffect(() => {
+    if (!role || !bootNotifRef.current) return;
+    const tag = bootNotifRef.current;
+    bootNotifRef.current = null;
+    const dest = notifDestination({ tag });
+    if (!dest) return;
+    // Referrals is App-level and shared by both roles.
+    if (dest === "referrals") { setShowReferrals(true); goToProfiles(); return; }
+    if (role === ROLES.HEAD_TRAINER || role === ROLES.SUB_TRAINER) {
+      // Same mapping the in-app feed uses — deliberately, so a tap from the
+      // lock screen and a tap in the bell land in the same place.
+      setHomeTab(dest === "sessions" || dest === "card" ? "calendar" : "dashboard");
+      goToProfiles();
+    }
+    // A client's intent was already set by the initializer; nothing to redo.
+  }, [role]); // eslint-disable-line react-hooks/exhaustive-deps
   // Whose plan the Start Over confirm is about (S199m). Blank for a client —
   // fullName(data) on their own plan is THEIR name, and being asked to confirm
   // erasing "Casey Client's plan" when you are Casey reads as someone else's

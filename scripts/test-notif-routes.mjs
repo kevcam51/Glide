@@ -34,14 +34,26 @@ for (const f of readdirSync(fnDir).filter((n) => n.endsWith(".js"))) {
     tags.add(lit);
   }
 }
-ok("found the server's notification tags", tags.size >= 12, tags.size);
+// ⚠️ THE HARVESTER MISSED TWO (S200q). `tag: booking ? "booking-request" :
+// "client-request"` has no literal in the `tag:` position, so neither tag was
+// ever checked here — and they are the trainer's two most common pushes.
+for (const f of readdirSync(fnDir).filter((n) => n.endsWith(".js"))) {
+  const src = readFileSync(join(fnDir, f), "utf8");
+  for (const m of src.matchAll(/tag:\s*[^,\n]*\?[^,\n]*"([^"]+)"\s*:\s*"([^"]+)"/g)) { tags.add(m[1]); tags.add(m[2]); }
+}
+ok("found the server's notification tags", tags.size >= 14, tags.size);
+ok("...including the ones behind a ternary", tags.has("booking-request") && tags.has("client-request"));
 
 // ── 2. lift the REAL notifDestination out of App.jsx ────────────────────────
 const app = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
-const start = app.indexOf("const notifDestination = (n) => {");
-const end = app.indexOf("\n  };", start) + 5;
+const start = app.indexOf("function notifDestination(n) {");
+const end = app.indexOf("\n}", start) + 2;
 ok("extracted notifDestination", start > 0 && end > start);
 const notifDestination = new Function(`${app.slice(start, end)}; return notifDestination;`)();
+// ⚠️ ONE COPY, MODULE-LEVEL (S200q). It is now called by the in-app feed AND by
+// a tapped push; two copies of this decision is exactly how the feed and the
+// router drifted in S197h.
+ok("it is module-level so both callers share it", /^function notifDestination\(n\) \{/m.test(app));
 
 // ── 3. the destinations the app can actually act on ─────────────────────────
 // Kept in step with ClientHome's intent effect + App's feed handler.
@@ -111,6 +123,58 @@ const feedSrc = app.slice(feedStart, app.indexOf("\n  };", feedStart));
 ok("NotifFeed asks destinationFor instead of re-deriving the route",
    feedSrc.includes("destinationFor") && !feedSrc.includes("startsWith(\"session-\")"));
 ok("NotifFeed draws no button when there is no destination", /if \(!dest\) return null/.test(feedSrc));
+
+
+// ── 4. a tapped push must reach the same screen (S200q) ────────────────────
+// Kevin: nine pushes shipped url "/". Tapping one opened the app at "/" and
+// nothing happened — sw.js sees the open client's url already equals the
+// target, skips navigate(), and just focuses. The in-app FEED rows worked the
+// whole time, because the feed routes by TAG; this was tap-a-push-only.
+//
+// ⚠️ AND SETTING THE URLS ALONE WAS INERT. The app had no URL→screen router for
+// four of the six destinations, so /?sessions would have been parsed by nothing.
+// The url carries the TAG and goes through the one router above.
+{
+  const files = readdirSync(fnDir).filter((n) => n.endsWith(".js"));
+  const dead = [], unrouted = [], cardish = [];
+  for (const f of files) {
+    const src = readFileSync(join(fnDir, f), "utf8");
+    for (const m of src.matchAll(/url:\s*"(\/[^"]*)"/g)) {
+      const u = m[1];
+      // workflows.js emits no tag at all, so notifDestination returns null by
+      // design and there is nothing to route to. referrals uses ?reward=1,
+      // which App handles separately.
+      if (f === "workflows.js" || u.includes("reward=")) continue;
+      if (u === "/") { dead.push(`${f}: ${u}`); continue; }
+      const t = /[?&]notif=([^&"]*)/.exec(u);
+      if (!t) continue;
+      if (!notifDestination({ tag: t[1] })) unrouted.push(`${f}: ${u}`);
+      // ⚠️ notifDestination checks the URL for these BEFORE any tag branch, so a
+      // url containing either silently re-routes the in-app feed row too.
+      if (/cardlink|savecard/.test(u) && notifDestination({ tag: t[1] }) !== "card") cardish.push(`${f}: ${u}`);
+    }
+  }
+  ok("no push still lands on a bare /", dead.length === 0, dead);
+  ok("every push url routes to a real screen", unrouted.length === 0, unrouted);
+  ok("no url accidentally hijacks the feed's card check", cardish.length === 0, cardish);
+
+  // The app side: stash at import, take unconditionally, route both roles.
+  ok("the app stashes ?notif= at import, like the todo intent",
+     /^stashNotifIntent\(\);$/m.test(app) && /function stashNotifIntent\(\)/.test(app));
+  // ⚠️ Each take* CLEARS its stash, so one skipped by an early return stays in
+  // localStorage and fires days later, out of nowhere.
+  ok("every intent is taken before any of them can win",
+     /const bootCard = takeSaveCardIntent\(\);\s*\n\s*const bootTodo = takeTodoIntent\(\);\s*\n\s*const bootNotif = takeNotifIntent\(\);/.test(app));
+  ok("a client's push resolves through the shared router",
+     /bootNotif \? notifDestination\(\{ tag: bootNotif \}\) : null/.test(app));
+  // ⚠️ THE HALF THAT WAS MISSING ENTIRELY. homeIntent only reaches ClientHome,
+  // and role is null at boot, so trainers need an effect.
+  ok("a trainer's push is routed once the role is known",
+     /if \(!role \|\| !bootNotifRef\.current\) return;/.test(app));
+  ok("...to the same screens the in-app feed uses",
+     (app.match(/setHomeTab\(dest === "sessions" \|\| dest === "card" \? "calendar" : "dashboard"\);/g) || []).length === 2);
+  ok("...exactly once per launch", /bootNotifRef\.current = null;/.test(app));
+}
 
 console.log(`  ${checks - failures}/${checks} assertions passed`);
 process.exit(failures ? 1 : 0);

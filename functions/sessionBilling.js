@@ -481,7 +481,7 @@ exports.onSessionPolicyChanged = onDocumentUpdated(
       await sendPushTo(db, d.id, {
         title: `${name} updated their payment terms`,
         body: "Open Sessions to see what changed and agree to the new terms. You stay on your current terms until you do.",
-        tag: "session-policy-changed", url: "/",
+        tag: "session-policy-changed", url: "/?notif=session-policy-changed",
       }, "sessionBilling").catch(() => {});
       notified++;
     }));

@@ -569,7 +569,7 @@ async function settleGroup(db, items, { now, nowDate, force, dryRun }) {
       await sendPushTo(db, trainerUid, {
         title: `${who} has no card on file`,
         body: `${usd(owed)} of delivered training can't be charged yet. Send them your card link — it takes them straight to the card screen.`,
-        tag: `session-no-card-${clientUid}`, url: "/",
+        tag: `session-no-card-${clientUid}`, url: "/?notif=session-no-card",
       }, "sessionBilling").catch(() => {});
       await db.doc(`users/${trainerUid}`).set({
         sessionNoCardNotified: { [clientUid]: now },
@@ -790,9 +790,9 @@ async function notifyBoth(db, trainer, client, trainerUid, clientUid, trainerTit
   // Passing clientTitle === null means TRAINER ONLY, deliberately: when we don't
   // yet know whether a charge succeeded, the client must not be told anything —
   // a wrong "declined" is what leads them to pay twice.
-  const sends = [sendPushTo(db, trainerUid, { title: trainerTitle, body: trainerBody, tag: "session-billing", url: "/" }, "sessionBilling").catch(() => {})];
+  const sends = [sendPushTo(db, trainerUid, { title: trainerTitle, body: trainerBody, tag: "session-billing", url: "/?notif=session-billing" }, "sessionBilling").catch(() => {})];
   if (clientTitle !== null) {
-    sends.push(sendPushTo(db, clientUid, { title: clientTitle || trainerTitle, body: clientBody || trainerBody, tag: "session-billing", url: "/" }, "sessionBilling").catch(() => {}));
+    sends.push(sendPushTo(db, clientUid, { title: clientTitle || trainerTitle, body: clientBody || trainerBody, tag: "session-billing", url: "/?notif=session-billing" }, "sessionBilling").catch(() => {}));
   }
   await Promise.all(sends);
 }

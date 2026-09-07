@@ -151,7 +151,7 @@ exports.onDmCreated = onDocumentCreated(
     const sender = (await db.doc(`users/${msg.from}`).get()).data() || {};
     const name = sender.displayName || [sender.firstName, sender.lastName].filter(Boolean).join(" ") || "New message";
     const r = await sendPushTo(db, to,
-      { title: name, body: String(msg.text || "").slice(0, 120), tag: `dm-${event.params.tid}`, url: "/" },
+      { title: name, body: String(msg.text || "").slice(0, 120), tag: `dm-${event.params.tid}`, url: "/?notif=dm-" },
       "messages");
     console.log("onDmCreated push", JSON.stringify({ to, ...r }));
   });
@@ -237,7 +237,7 @@ exports.onMealReviewWritten = onDocumentWritten(
           body: fresh.length > 1
             ? "Already in their log — confirm or correct them."
             : `${first.name || "Meal"} — ${first.calories || 0} cal. Already in their log; confirm or correct it.`,
-          tag: "meal-review", url: "/",
+          tag: "meal-review", url: "/?notif=meal-review",
         }, "mealReviews");
         console.log("onMealReviewWritten → trainer", JSON.stringify({ trainerUid, fresh: fresh.length, ...r }));
       }
@@ -252,7 +252,7 @@ exports.onMealReviewWritten = onDocumentWritten(
         body: d.decision === "reject" ? `${d.name || "That meal"} was taken off your log.`
           : d.decision === "adjust" ? `${d.name || "Meal"} is now ${d.calories || 0} cal.`
           : `${d.name || "Meal"} looks good — no changes.`,
-        tag: "meal-review", url: "/",
+        tag: "meal-review", url: "/?notif=meal-review",
       }, "mealReviews");
       console.log("onMealReviewWritten → client", JSON.stringify({ clientUid, decided: decided.length, ...r }));
     }
@@ -340,10 +340,10 @@ exports.foodReminderPush = onSchedule(
       const streak = await streakEndingYesterday(db, uid, plan, today);
       if (streak >= 3) {
         return { title: `Your ${streak}${streak >= STREAK_LOOKBACK ? "+" : ""}-day streak is on the line`,
-          tag: "food-reminder", url: "/",
+          tag: "food-reminder", url: "/?notif=food-reminder",
           body: "Nothing logged yet today — one quick add keeps it alive." };
       }
-      return { title: "Log today's food", tag: "food-reminder", url: "/",
+      return { title: "Log today's food", tag: "food-reminder", url: "/?notif=food-reminder",
         body: "Nothing logged yet today — a quick add keeps your streak alive." };
     });
     console.log("foodReminderPush", JSON.stringify(r));
@@ -364,7 +364,7 @@ exports.weighInReminderPush = onSchedule(
         .filter((t) => Number.isFinite(t));
       const latest = weighTs.length ? Math.max(...weighTs) : null;
       if (latest && Date.now() - latest < 7 * 86400e3) return null;
-      return { title: "Time for a weigh-in", tag: "weighin-reminder", url: "/",
+      return { title: "Time for a weigh-in", tag: "weighin-reminder", url: "/?notif=weighin-reminder",
         body: latest ? "It's been a week since your last weigh-in — hop on the scale." :
           "Log your first weigh-in to start tracking your trend." };
     });

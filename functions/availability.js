@@ -432,7 +432,7 @@ exports.respondToBookingRequest = onCall(
                 ? `${when} — it's on your calendar. The other ${offered.length - 1 === 1 ? "time you offered is" : `${offered.length - 1} times you offered are`} free again.`
                 : `${when} — it's on your calendar.`)
             : "It's on your calendar.",
-          tag: `booking-accepted-${requestId}`, url: "/" }
+          tag: `booking-accepted-${requestId}`, url: "/?notif=booking-accepted" }
       // ⚠️ A DECLINE CLOSES EVERY OFFERED TIME, SO IT MUST NAME EVERY ONE.
       // "Can't make it" sends no chosen slot, so `chosenStart` falls back to
       // offered[0] — and a Mon/Wed/Fri ask was answered with "Mon, Sep 7 didn't
@@ -445,7 +445,7 @@ exports.respondToBookingRequest = onCall(
           body: offered.length > 1
             ? `None of the ${offered.length} times you asked for worked — ask for another.`
             : (when ? `${when} didn't work — ask for another time.` : "Ask for another time."),
-          tag: `booking-declined-${requestId}`, url: "/" },
+          tag: `booking-declined-${requestId}`, url: "/?notif=booking-declined" },
       // An ANSWER to something the client asked for, not a timed reminder — so
       // it follows the request/answer preference rather than the one that
       // controls "your session starts in an hour" (S196p). Turning off
