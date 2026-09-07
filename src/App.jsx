@@ -21193,7 +21193,7 @@ function OnMyWay({ session: s, meUid, otherName, compact = false, enabled = fals
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
 
   const status = onMyWayStatus(s, meUid, now);
-  const canSay = canSayOnMyWay(s, now);
+  const canSay = canSayOnMyWay(s, now, meUid);
   // Not on this trainer's plan → the feature is not here at all. Including the
   // READ side: a stored ETA can outlive a downgrade, and showing one on a plan
   // that can no longer produce another would be a feature that works once.
@@ -26026,6 +26026,17 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   };
   const upcomingSessions = mySessions.filter((s) => s.status !== "cancelled" && !isPastSession(s));
   const nextSession = upcomingSessions[0] || null;
+  // Do I have a place saved? (S204) Read once — it drives a single prompt on the
+  // next-session card, not a screen.
+  const [myAddrC, setMyAddrC] = useState(undefined);
+  useEffect(() => {
+    let alive = true;
+    window.storage.get(MEETING_ADDRESS_KEY)
+      .then((r) => { if (alive) setMyAddrC(parseMeetingAddress(r)); })
+      .catch(() => { if (alive) setMyAddrC(null); });   // absence throws (S197s)
+    return () => { alive = false; };
+  }, []);
+  const [showAddrC, setShowAddrC] = useState(false);
   const [showMsg, setShowMsg] = useState(false);
   const [showNotes, setShowNotes] = useState(false); // Notes panel (S91)
   const [myUnread, setMyUnread] = useState(0);
@@ -26724,6 +26735,11 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
         {showNotes && (
           <NotesPanel mode="client" meUid={meUid} meName={meName} onClose={() => setShowNotes(false)} />
         )}
+        {showAddrC && (
+          <MeetingAddressPanel isTrainer={false}
+            onSaved={(a) => setMyAddrC(a)}
+            onClose={() => setShowAddrC(false)} />
+        )}
         {/* The panel could not be built. Saying so — with a way out — is the
             whole point: the alternative is a tap that does nothing. */}
         {showSessions && sessionsPanelState(trainerInfo, profileLoadFailed).body === "error" && (
@@ -26815,6 +26831,31 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
                 </div>
               )}
             </button>
+            {/* ⚠️ THE MENU ROW IS NOT ENOUGH ON ITS OWN (S204). A client who
+                never opens the menu never saves a place, so their trainer can
+                never book "at their place" — the option is permanently greyed
+                out on the trainer's side and neither of them knows why. Kevin
+                asked whether to capture it at SIGNUP; this is the same fix
+                without the cost, because the role chooser asks for a name and
+                nothing else and an address field there is a drop-off risk
+                before anyone has a reason to trust the app.
+                Shown only when it is actually actionable: they have a trainer,
+                they have a session coming, and nothing is saved. One line, on
+                the card they are already reading, and it disappears for good the
+                moment they save one. */}
+            {myAddrC === null && trainerInfo && (
+              <button onClick={(e) => { e.stopPropagation(); setShowAddrC(true); }}
+                className="mt-2 w-full text-left rounded-lg border px-2.5 py-2 cursor-pointer bg-transparent"
+                style={{ borderColor: "rgba(var(--accent-rgb),.35)" }}>
+                <span className="text-[.76rem] text-fg inline-flex items-center gap-1.5">
+                  <Icon name="pin" size={13} color="var(--accent)" />
+                  Want {trainerInfo.name} to come to you?
+                </span>
+                <span className="block text-[.7rem] text-muted mt-0.5">
+                  Save the address you&rsquo;d like to train at — they can then book sessions there.
+                </span>
+              </button>
+            )}
             {/* The client's own "on my way", and where they READ the trainer's.
                 This card is the one thing on their home screen about today's
                 session, so an ETA that only lived behind two taps in the

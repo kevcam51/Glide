@@ -57,9 +57,44 @@ trainer whose "My place" choice fails to save. Rules → functions → push.
   keep the previous arrival — every re-departure stamped "arrived" forever.
   Readers test truthiness, never key presence.
 
-⚠️ **NOT YET EXERCISED LIVE: the arrival branch**, because no test account is on
-a Coach tier. Unit-tested and mutation-checked five ways; Kevin's account passes
-the gate by UID and can run it.
+⚠️ **THE ARRIVAL BRANCH STILL HAS NOT BEEN TAPPED END-TO-END** — no test account
+sits on a Coach tier and the CLI cannot grant one (no generic Firestore write,
+and creating a service-account key for it is not worth it). What WAS closed is
+the part that actually carried the risk: `firestore.rules.test.js` now MEASURES
+the nested-map merge against real Firestore (S205), and the trap is confirmed —
+an omitted key survives a merge, an explicit `null` clears it, and the null
+remains PRESENT, so a reader testing `"arrivedAt" in w` would still say
+"arrived". Truthiness is the only correct read.
+
+### S205 — the three open items closed
+
+- **Verified the Maps pricing properly** (it had been single-sourced). Three
+  independent readings of Google's raw SKU HTML plus a refutation pass, all
+  agreeing: Geocoding 10,000 free/month then $5.00/1,000; Compute Routes
+  Essentials 10,000 then $5.00; **Compute Routes Pro 5,000 then $10.00**.
+  ⚠️ **EVERY ROUTES CALL WE MAKE BILLS Pro**, because `TRAFFIC_AWARE` is a Pro
+  feature and Routes bills ONE SKU per request at the highest tier any requested
+  feature belongs to. So traffic costs 2x the unit price AND half the free
+  allowance — ~4x worse at the point you start paying. Deliberate.
+  ⚠️ **Three OTHER features silently promote a request to Pro**: 11-25
+  intermediate waypoints, `optimizeWaypointOrder`, and location modifiers
+  (sideOfRoad / heading / vehicleStopover). Our body carries none; a test now
+  fails if one appears, because adding one would double the bill for callers who
+  never wanted traffic.
+- **"On my way" is now hidden from a client at their OWN place** (both app and
+  server). ⚠️ **Asymmetric on purpose**: a trainer's saved place is where they
+  WORK and they commute to it — running late to your own studio is exactly the
+  case this exists for — while a client's is where they ARE. Restricting the
+  host in general would remove a real use; restricting a client at their own
+  address removes only nonsense. A mutation test fails if someone "fixes" the
+  asymmetry.
+- **No address at signup, a contextual prompt instead.** A client who never
+  opens the menu never saves a place, so their trainer's "their place" option
+  stays greyed out forever and neither knows why. The next-session card now
+  carries one line — "Want {trainer} to come to you?" — shown only when they
+  have a trainer, a session, and nothing saved, and gone for good once saved.
+  Verified as a full loop: client saves → the trainer's picker flips from "none
+  saved" to selectable and fills the address.
 
 **Left undone, deliberately, both Kevin's call:** capturing an address at SIGNUP
 (the role chooser asks only for a name, and an address field there is a drop-off

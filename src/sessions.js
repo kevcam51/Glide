@@ -164,9 +164,21 @@ export const ON_MY_WAY_STALE_MIN = 45;
 // May I tell the other person I'm on the way to this session, right now?
 // Mirrors onMyWayDecision on the server, minus the participant check the rules
 // and the callable both make anyway.
-export function canSayOnMyWay(s, now = Date.now()) {
+export function canSayOnMyWay(s, now = Date.now(), meUid = "") {
   if (!s || s.status === "cancelled") return false;
   if (isPastSession(s, now)) return false;
+  // ⚠️ YOU CANNOT BE ON YOUR WAY TO YOUR OWN PLACE (S204). Once a session says
+  // it is at the CLIENT's saved address, the client is the host — they are
+  // already there, and offering them a button to announce they have set off is
+  // nonsense on the one screen that is supposed to be about their trainer
+  // arriving.
+  // ⚠️ AND THE MIRROR CASE IS DELIBERATELY *NOT* RESTRICTED. It looks
+  // asymmetric and it is, because the two saved places mean different things: a
+  // trainer's is where they WORK and they commute to it — a trainer running
+  // late to their own studio is precisely who needs this — while a client's is
+  // where they ARE. Hiding it from a host in general would remove a real use;
+  // hiding it from a client at their own address removes only nonsense.
+  if (meUid && s.meetAt === MEET_AT.CLIENT && s.clientUid === meUid) return false;
   return (Number(s.startAt) || 0) - now <= ON_MY_WAY_LEAD_MIN * 60000;
 }
 

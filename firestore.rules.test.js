@@ -506,6 +506,52 @@ await check("a CLIENT cannot set meetAt", assertFails(updateDoc(sess(c1, "s41"),
 await check("...not even a valid one on their own session", assertFails(updateDoc(sess(c1, "s42"),
   { meetAt: "client", updatedAt: Date.now() })));
 
+// ---- S204: what set({merge:true}) ACTUALLY does to a nested map -------------
+// ⚠️ THIS IS HERE BECAUSE I GOT IT WRONG IN A COMMENT AND ALMOST SHIPPED IT.
+// The arrival record lives INSIDE the `onMyWay` map, and my first version of the
+// departure write omitted `arrivedAt` on the reasoning that a merge would
+// replace the map. It does not — a merge recurses INTO maps — so the previous
+// arrival would have survived, leaving every re-departure permanently stamped
+// "arrived" for anyone who gets somewhere, leaves to fetch something, and sets
+// off back.
+//
+// Reasoning about it is what produced the bug, so this MEASURES it against real
+// Firestore. Rules are disabled because `onMyWay` is server-written (the Admin
+// SDK is what does this in production) — the point here is the storage
+// semantic, not the access control.
+console.log("\nMERGE SEMANTICS — the nested-map trap:");
+await testEnv.withSecurityRulesDisabled(async (c) => {
+  const db = c.firestore();
+  const ref = doc(db, "sessions", "merge1");
+  await setDoc(ref, { ...booking(), onMyWay: { by: H, at: 1000, minutes: 12, etaAt: 2000, arrivedAt: 5000 } });
+
+  // 1. The trap itself: omit the key and it SURVIVES.
+  await setDoc(ref, { onMyWay: { by: H, at: 9000, minutes: 7, etaAt: 9500 } }, { merge: true });
+  const kept = (await getDoc(ref)).data().onMyWay;
+  await check("a merge recurses INTO the map — an omitted key is NOT cleared",
+    Promise.resolve(kept.arrivedAt === 5000 ? true : Promise.reject(new Error(`arrivedAt was ${kept.arrivedAt}`))));
+  await check("...while the keys that WERE written did change",
+    Promise.resolve(kept.at === 9000 && kept.minutes === 7 ? true : Promise.reject(new Error(JSON.stringify(kept)))));
+
+  // 2. The fix: an explicit null clears it, which is what the shipping code does.
+  await setDoc(ref, { onMyWay: { by: H, at: 11000, minutes: 5, etaAt: 11500, arrivedAt: null } }, { merge: true });
+  const cleared = (await getDoc(ref)).data().onMyWay;
+  await check("an explicit null DOES clear the arrival",
+    Promise.resolve(!cleared.arrivedAt ? true : Promise.reject(new Error(`arrivedAt was ${cleared.arrivedAt}`))));
+  // ⚠️ And it survives as a real null, so a reader testing `"arrivedAt" in w`
+  // would still say "arrived". Truthiness is the only correct test, which is
+  // what src/sessions.js onMyWayStatus does.
+  await check("...as a null that is still PRESENT — so readers must test truthiness, not key presence",
+    Promise.resolve("arrivedAt" in cleared ? true : Promise.reject(new Error("key vanished; the truthiness note is now wrong"))));
+
+  // 3. And the arrival write keeps the ETA that was promised.
+  await setDoc(ref, { onMyWay: { by: H, at: 11000, minutes: 5, etaAt: 11500, arrivedAt: 12000 } }, { merge: true });
+  const arrived = (await getDoc(ref)).data().onMyWay;
+  await check("arriving keeps the ETA that was sent, for the record",
+    Promise.resolve(arrived.minutes === 5 && arrived.etaAt === 11500 && arrived.arrivedAt === 12000
+      ? true : Promise.reject(new Error(JSON.stringify(arrived)))));
+});
+
 // ---- S101c: charge ledger + test-mode flag ---------------------------------
 console.log("\nCHARGE LEDGER — participants read, nobody client-writes:");
 await testEnv.withSecurityRulesDisabled(async (c) => {

@@ -761,6 +761,17 @@ function onMyWayDecision(session, uid, now) {
     return { ok: false, code: "failed-precondition",
       reason: "That session is too far off to be on the way to yet." };
   }
+  // ⚠️ THE SAME "not to your own place" RULE THE APP APPLIES (S204). It is not
+  // a security bound — announcing a journey to your own front door harms
+  // nobody — but the two sides having different ideas of when this is offerable
+  // is exactly the drift this file has paid for before, and a hidden button
+  // whose callable would have accepted is a rule that exists in only one place.
+  // Mirrors canSayOnMyWay in src/sessions.js; asymmetric for the reason
+  // documented there.
+  if (session.meetAt === "client" && uid === session.clientUid) {
+    return { ok: false, code: "failed-precondition",
+      reason: "This session is at your place \u2014 they\u2019re coming to you." };
+  }
   // The other participant, taken from the document rather than from a role: the
   // client tapping it must reach the trainer and vice versa, and `participants`
   // is the only field that is authoritative about who the pair are.

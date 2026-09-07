@@ -393,6 +393,23 @@ function driveKey(fromAddr, toAddr, departMs) {
   return `${addressKey(fromAddr)}__${addressKey(toAddr)}__${d.getUTCDay()}_${d.getUTCHours()}`;
 }
 
+// ⚠️ WHAT THIS REQUEST COSTS, AND WHY (verified S204 against Google's own SKU
+// tables, three independent readings plus a refutation pass).
+// Routes bills ONE SKU per request, at the highest tier any requested feature
+// belongs to. `routingPreference: TRAFFIC_AWARE` is a Pro feature, so every
+// call here bills **Compute Routes Pro** (02F7-1B55-DC90): 5,000 free events a
+// month, then $10.00/1,000 — versus Essentials (9EFF-679A-9B16) at 10,000 free
+// then $5.00/1,000. Traffic is therefore 2x the unit price AND half the free
+// allowance: roughly 4x worse at the point a low-volume caller starts paying.
+// That is a deliberate trade — a drive estimate that knows nothing about
+// traffic is at its most optimistic exactly at rush hour, which is when
+// back-to-back sessions actually collide.
+// ⚠️ NOTHING ELSE HERE MAY DRIFT INTO Pro BY ACCIDENT. The other Pro triggers
+// are 11-25 intermediate waypoints, `optimizeWaypointOrder: true`, and location
+// modifiers (side of road, heading, vehicle stopover). This body deliberately
+// carries none of them, so the tier is a choice about traffic and nothing else.
+// Adding any of them would silently double the bill for callers who did not
+// want traffic at all.
 async function routesLive(from, to, departMs, apiKey, fetchFn) {
   const f = fetchFn || fetch;
   const ctrl = new AbortController();

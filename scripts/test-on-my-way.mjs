@@ -504,6 +504,7 @@ ok("validPoint rejects NaN", D.validPoint({ lat: NaN, lng: 0 }) === null);
     const SESSION_DEFAULT_MIN = 60;
     const sessionEndMs = (s) => (s.startAt || 0) + (s.durationMin || SESSION_DEFAULT_MIN) * 60000;
     const isPastSession = (s, now) => sessionEndMs(s) <= now;
+    const MEET_AT = { TRAINER: "trainer", CLIENT: "client" };
     ${lifted.replace("export ", "")}
     ${canSrc.replace("export ", "")}
     return { onMyWayStatus, canSayOnMyWay };
@@ -576,6 +577,7 @@ ok("validPoint rejects NaN", D.validPoint({ lat: NaN, lng: 0 }) === null);
     const SESSION_DEFAULT_MIN = 60;
     const sessionEndMs = (s) => (s.startAt || 0) + (s.durationMin || SESSION_DEFAULT_MIN) * 60000;
     const isPastSession = (s, now) => sessionEndMs(s) <= now;
+    const MEET_AT = { TRAINER: "trainer", CLIENT: "client" };
     ${lifted.replace("export ", "")}
     ${canSrc.replace("export ", "")}
     return onMyWayStatus;
@@ -630,6 +632,86 @@ ok("validPoint rejects NaN", D.validPoint({ lat: NaN, lng: 0 }) === null);
      /!\(status && status\.arrived\) && \(/.test(APP), true);
   ok("...and sends no coordinates with it",
      /callSessionOnMyWay\(\{ sessionId: s\.id, arrived: true \}\)/.test(APP), true);
+}
+
+// ── 10c. you cannot be on your way to your own place (S204) ─────────────────
+{
+  const lifted = SESSIONS.match(/export function onMyWayStatus\([\s\S]*?\n\}/)[0];
+  const canSrc = SESSIONS.match(/export function canSayOnMyWay\([\s\S]*?\n\}/)[0];
+  const canSay = new Function(`
+    const ON_MY_WAY_LEAD_MIN = ${(SESSIONS.match(/export const ON_MY_WAY_LEAD_MIN = (\d+)/) || [])[1]};
+    const ON_MY_WAY_STALE_MIN = ${(SESSIONS.match(/export const ON_MY_WAY_STALE_MIN = (\d+)/) || [])[1]};
+    const SESSION_DEFAULT_MIN = 60;
+    const MEET_AT = { TRAINER: "trainer", CLIENT: "client" };
+    const sessionEndMs = (s) => (s.startAt || 0) + (s.durationMin || SESSION_DEFAULT_MIN) * 60000;
+    const isPastSession = (s, now) => sessionEndMs(s) <= now;
+    ${lifted.replace("export ", "")}
+    ${canSrc.replace("export ", "")}
+    return canSayOnMyWay;
+  `)();
+  const soon = (over) => S({ startAt: NOW + 30 * MIN, ...over });
+
+  // At the CLIENT's place: the client is the host and is already there.
+  ok("the client is not offered it at their own place",
+     !canSay(soon({ meetAt: "client" }), NOW, "c1"));
+  ok("...but the trainer, who is driving there, is",
+     canSay(soon({ meetAt: "client" }), NOW, "t1"));
+  // ⚠️ THE MIRROR IS DELIBERATELY NOT RESTRICTED. A trainer's saved place is
+  // where they WORK and they commute to it — running late to your own studio is
+  // exactly the case this exists for. Hiding it there would remove a real use.
+  ok("at the TRAINER's place the trainer keeps it (they commute to their studio)",
+     canSay(soon({ meetAt: "trainer" }), NOW, "t1"));
+  ok("...and so does the client, who is travelling",
+     canSay(soon({ meetAt: "trainer" }), NOW, "c1"));
+  // Nothing chosen means nobody is designated, so neither side is restricted.
+  ok("with no place chosen, both sides keep it",
+     canSay(soon({}), NOW, "c1") && canSay(soon({}), NOW, "t1"));
+  // The window still wins over all of it.
+  ok("the lead window still applies", !canSay(S({ startAt: NOW + 600 * MIN, meetAt: "trainer" }), NOW, "c1"));
+
+  // And the SERVER agrees — a hidden button whose callable would have accepted
+  // is a rule that exists in only one place.
+  {
+    const v = onMyWayDecision(soon({ meetAt: "client" }), "c1", NOW);
+    ok("the server refuses the client at their own place", !v.ok, v);
+    ok("...with a reason a person can read", /coming to you/i.test(v.reason || ""), v);
+    ok("the server still allows the trainer driving there",
+       onMyWayDecision(soon({ meetAt: "client" }), "t1", NOW).ok);
+    ok("...and both sides at the trainer's place",
+       onMyWayDecision(soon({ meetAt: "trainer" }), "t1", NOW).ok
+       && onMyWayDecision(soon({ meetAt: "trainer" }), "c1", NOW).ok);
+  }
+  // Cross-check across the window, for BOTH participants and all three places.
+  for (const meetAt of ["", "trainer", "client"]) {
+    for (const who of ["t1", "c1"]) {
+      for (const off of [-200, -1, 30, 239, 241]) {
+        const st = S({ startAt: NOW + off * MIN, meetAt });
+        ok(`button and server agree (${meetAt || "none"}/${who}/${off}m)`,
+           canSay(st, NOW, who) === onMyWayDecision(st, who, NOW).ok, [meetAt, who, off]);
+      }
+    }
+  }
+  ok("the app passes the viewer through, or the rule never fires",
+     /canSayOnMyWay\(s, now, meUid\)/.test(APP), true);
+}
+
+// ── 10d. the Routes request stays on the tier we think it is (S204) ─────────
+// ⚠️ Routes bills ONE SKU per request, at the highest tier ANY requested feature
+// belongs to. Traffic-awareness puts us on Pro (5,000 free/month then $10/1,000
+// against Essentials' 10,000 then $5) — a deliberate trade. But three OTHER
+// features silently promote a request to the same tier, so a future edit could
+// double the bill while adding nothing anyone asked for.
+{
+  const body = (DRIVE_SRC.match(/const body = \{[\s\S]*?\n    \};/) || [""])[0];
+  ok("found the Routes request body", body.length > 80, body.length);
+  ok("traffic-awareness is requested deliberately", /routingPreference: "TRAFFIC_AWARE"/.test(body));
+  // The other three Pro triggers, none of which this feature needs.
+  ok("no intermediate waypoints", !/intermediates/.test(body), body);
+  ok("no waypoint-order optimisation", !/optimizeWaypointOrder/.test(body), body);
+  ok("no location modifiers (side of road / heading / stopover)",
+     !/sideOfRoad|heading|vehicleStopover/.test(body), body);
+  ok("and the cost consequence is written down where the request is",
+     /Compute Routes Pro/.test(DRIVE_SRC), true);
 }
 
 // ── 11. the session doc stays server-owned ──────────────────────────────────

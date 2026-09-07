@@ -218,6 +218,26 @@ ok("undefined is not a place", !M.isMeetAt(undefined));
      /!isTrainer && !hasCoach/.test(APP_CODE) && !/isTrainer \|\| !hasCoach/.test(APP_CODE), true);
   ok("hasCoach actually reaches the menu",
      /function SideMenu\(\{[^}]*hasCoach/.test(APP), true);
+
+  // ── and the menu row alone is not enough (S204) ───────────────────────────
+  // ⚠️ A CLIENT WHO NEVER OPENS THE MENU NEVER SAVES A PLACE, so their trainer's
+  // "their place" option stays permanently greyed out and neither of them knows
+  // why. Kevin asked whether to capture it at SIGNUP; this is the same fix
+  // without the drop-off risk of an address field on the role chooser.
+  ok("a client with no saved place is prompted where it matters",
+     /Want \{trainerInfo\.name\} to come to you\?/.test(APP_CODE), true);
+  // Only when ACTIONABLE: a trainer exists, and nothing is saved. `undefined`
+  // means "not read yet" and must not flash the prompt at someone who has one.
+  ok("...only once we know they have none", /myAddrC === null && trainerInfo &&/.test(APP_CODE), true);
+  ok("...never while the answer is still loading", !/myAddrC !== undefined && trainerInfo/.test(APP_CODE), true);
+  ok("...and it opens the same panel the menu does",
+     /<MeetingAddressPanel isTrainer=\{false\}/.test(APP_CODE), true);
+  // It sits inside a card that is itself a button, so the tap must not also
+  // open the Sessions panel behind it.
+  ok("...without also triggering the card it sits on",
+     /e\.stopPropagation\(\); setShowAddrC\(true\)/.test(APP_CODE), true);
+  ok("...and it disappears once they save one",
+     /onSaved=\{\(a\) => setMyAddrC\(a\)\}/.test(APP_CODE), true);
 }
 
 console.log(`  ${checks - fails}/${checks} assertions passed`);

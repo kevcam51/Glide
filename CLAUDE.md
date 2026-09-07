@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**1,491 assertions across 28 suites**, S204).
+- `npm run test:units` — the JS unit suites (**1,544 assertions across 28 suites**, S205).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -42,7 +42,7 @@ unified platform that complements and eventually replaces these.
   emulator needs Java (Temurin JDK). A local JDK is installed at `~/.glide-jdk` (Temurin 21, no
   brew/sudo on this machine) — run with it via:
   `JAVA_HOME="$HOME/.glide-jdk/jdk-21.0.11+10/Contents/Home" PATH="$JAVA_HOME/bin:$PATH" npm run test:rules`
-  (**240 tests pass** — verified S203; this line said 61 for many sessions after the suite had
+  (**245 tests pass** — verified S205; this line said 61 for many sessions after the suite had
   nearly quadrupled, so re-run it rather than trusting the number).
 
 ## Important files
