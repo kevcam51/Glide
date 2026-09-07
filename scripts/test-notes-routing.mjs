@@ -32,14 +32,29 @@ const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n,
 
 // ── the override is enforced in code, before anything reads the target ─────
 {
-  const m = AI.match(/if \(input && input\.aboutMe === true\) \{ uid = ctx\.callerUid; planOverride = ""; \}/);
-  ok("aboutMe re-points the target to the caller", !!m);
+  const m = AI.match(/if \(NOTES_TOOLS\.has\(name\) && input && input\.aboutMe === true\) \{[\s\S]{0,200}?\}/);
+  ok("aboutMe re-points the target to the caller", !!m && /uid = ctx\.callerUid;/.test(m[0]));
   ok("...and clears the plan override too — either id misfiles it",
-     !!m && /planOverride = "";/.test(m[0]));
-  // Order matters: isSelf is derived from uid, so the override has to land first.
-  const at = AI.indexOf('if (input && input.aboutMe === true)');
+     !!m && /planOverride = null;/.test(m[0]));
+  // ⚠️ ORDER, AND IT IS LOAD-BEARING TWICE (S200p). isSelf is derived from uid,
+  // so the re-point must precede it — and the AI-CLIENT SEAT GATE is computed
+  // from uid too, ~100 lines earlier. Landing after the gate meant a trainer at
+  // their seat cap was REFUSED when saving a note into their own account, and
+  // one below the cap was charged a client seat for it.
+  const at = AI.indexOf("if (NOTES_TOOLS.has(name) && input && input.aboutMe === true)");
+  const seat = AI.indexOf("const seatKey = planOverride", at > 0 ? 0 : 0);
   const isSelf = AI.indexOf("const isSelf = uid === ctx.callerUid;", at);
   ok("it runs BEFORE isSelf is derived from it", at > 0 && isSelf > at, { at, isSelf });
+  ok("...and BEFORE the seat gate charges for the uncorrected target", at > 0 && at < seat, { at, seat });
+  // Scoped, or it becomes a way to dodge the gate from any tool.
+  ok("only the notes tools may re-point", /const NOTES_TOOLS = new Set\(\["list_notes", "create_note", "update_note"\]\);/.test(AI));
+  ok("...and the late duplicate is gone",
+     !/if \(input && input\.aboutMe === true\) \{ uid = ctx\.callerUid; planOverride = ""; \}/.test(AI));
+  // update_note must be able to edit anything list_notes can show.
+  ok("update_note searches privkv whenever the target is the caller",
+     /\? \[\["priv", ctx\.callerUid\], \["kv", uid\]\]/.test(AI));
+  ok("...and no longer excludes trainers from their own private store",
+     !/!ctx\.isTrainer \? \[\["priv", ctx\.callerUid\]\] : \[\]/.test(AI));
   // uid must be reassignable or the override is a silent no-op at runtime.
   ok("the target binding allows it", /let uid = await resolveTargetUid/.test(AI));
   ok("...and is not still a const", !/const uid = await resolveTargetUid/.test(AI));

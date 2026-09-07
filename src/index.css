@@ -72,9 +72,29 @@ button, a, [role="button"] { -webkit-tap-highlight-color: transparent; }
    problem. This is the actual fix: iOS only auto-zooms when the focused field
    is under 16px, so give form controls 16px at phone widths and it has no
    reason to. */
+/* ⚠️ !important IS LOAD-BEARING, NOT CARGO CULT (S200p). The rule above was
+   written as a bare element selector, which loses to every Tailwind class
+   (0,1,0 beats 0,0,1) and to every React inline style — and this app styles
+   most controls one of those two ways. Measured: 98 of 152 focusable controls
+   were still under 16px with the rule in place, including all six login and
+   role-chooser inputs at 15px. !important on an author rule is the only thing
+   that beats an inline style, and it is the alternative to editing ~80 call
+   sites in a 34,000-line file.
+
+   The exclusions exist because max(16px, 1em) can SHRINK as well as raise:
+   `1em` resolves against the PARENT, so a control deliberately set to 1.1rem
+   (17.6px) gets clamped DOWN to 16px. Neither is a zoom risk; both are
+   deliberately large, so they keep their size.
+
+   ⚠️ Do NOT "simplify" this back to the viewport (maximum-scale=1 /
+   user-scalable=no). That is what S90 did and c1cd28b removed on purpose: it
+   stops the zoom by disabling PINCH-ZOOM for everyone, which is an
+   accessibility control, on every platform, to solve an iOS problem. */
 @media (max-width: 767px) {
-  input, textarea, select {
-    font-size: max(16px, 1em);
+  input:not(.dash-log-input):not(.keep-size),
+  textarea,
+  select {
+    font-size: max(16px, 1em) !important;
   }
 }
 

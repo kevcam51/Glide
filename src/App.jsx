@@ -2828,7 +2828,9 @@ function StepGoalWeight({ data, onChange, onBack, onNext }) {
         </div>
         <div className="mb-4">
           <label className={WZ.label}>Enter your goal weight <span className={WZ.hint}>lbs</span></label>
-          <input className={`${WZ.input} text-center font-semibold text-[1.1rem]`}
+          {/* keep-size: deliberately 17.6px; excluded from the 16px floor in
+              src/index.css so the phone rule cannot shrink it (S200p). */}
+          <input className={`${WZ.input} keep-size text-center font-semibold text-[1.1rem]`}
             inputMode="decimal"
             placeholder="e.g. 165"
             value={data.goalWeight}
@@ -17539,7 +17541,8 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
     }
   };
 
-  const inputCls = "w-full box-border rounded-lg border border-border bg-surface2 px-3.5 py-3 text-center text-[1.1rem] text-fg outline-none placeholder:text-muted";
+  // keep-size: deliberately 17.6px — see src/index.css (S200p).
+  const inputCls = "w-full box-border rounded-lg border border-border bg-surface2 px-3.5 py-3 text-center text-[1.1rem] keep-size text-fg outline-none placeholder:text-muted";
   const primaryCls = "flex-1 rounded-[9px] border-none bg-primaryfill px-3.5 py-3 text-[.92rem] font-bold text-primaryfg cursor-pointer disabled:opacity-55 disabled:cursor-default";
   const ghostCls = "rounded-[9px] border border-border bg-transparent px-3.5 py-3 text-[.88rem] font-semibold text-fg cursor-pointer";
 
@@ -32070,8 +32073,34 @@ export default function App() {
     return () => { clearTimeout(timer); evs.forEach((e) => window.removeEventListener(e, reset)); };
   }, [idleSignOut]);
 
-  const saveIndex = async (list) => {
-    try { await window.storage.set(STORAGE_INDEX, JSON.stringify(list)); } catch(e) {}
+  // ⚠️ MERGE BY ID — THE SERVER WRITES THIS DOCUMENT TOO (S200p).
+  //
+  // caliq-index had twelve callers all writing the array WHOLE from React state,
+  // with no baseline. But it is not browser-owned: functions/trainerize.js
+  // rewrites it on every import and every 30-minute auto-sync, and
+  // functions/aitools.js touchLocalIndex rewrites it after any AI edit to a
+  // local plan. So a browser holding a copy from before one of those — including
+  // a copy served from the offline cache, which carries no signal that it is
+  // stale — silently DELETED every profile it had never seen the moment the user
+  // renamed a plan.
+  //
+  // Merging on id keeps rows this browser does not know about, and lets the
+  // twelve callers stay exactly as they are. Deletion still works because it is
+  // expressed as an explicit id list, not as an absence.
+  const saveIndex = async (list, removedIds) => {
+    const gone = new Set(removedIds || []);
+    try {
+      await window.storage.mergeSet(STORAGE_INDEX, (cur) => {
+        let server = [];
+        try { server = cur ? JSON.parse(cur) : []; } catch { server = []; }
+        if (!Array.isArray(server)) server = [];
+        const mine = new Map((list || []).map((p) => [p && p.id, p]));
+        // Rows the server has that this browser never saw, minus anything the
+        // user just deleted here.
+        const unseen = server.filter((p) => p && p.id && !mine.has(p.id) && !gone.has(p.id));
+        return JSON.stringify([...(list || []), ...unseen]);
+      });
+    } catch(e) { console.warn("index save failed", e && e.code); }
   };
 
   // Auto-save (debounced 600ms)
@@ -32361,10 +32390,13 @@ export default function App() {
 
   // When a local file is linked to a client, the plan now lives in the client's
   // account — remove the local duplicate so there's one source of truth.
+  // ⚠️ NAME THE DELETION (S200p). saveIndex merges by id and keeps rows this
+  // browser has not seen — so a deletion expressed only as an ABSENCE would be
+  // read as "never seen it" and restored on the next write.
   const removeLocalProfileById = async (localId) => {
     let up = profiles;
     setProfiles(prev => { up = prev.filter(p => p.id !== localId); return up; });
-    await saveIndex(up);
+    await saveIndex(up, [localId]);
     try { await window.storage.delete(profileKey(localId)); } catch(e) {}
     // S90 hardening (S86-deferred): also delete the plan's per-date logs,
     // history, and recent-foods docs — deleting only the wrapper left them
@@ -32465,7 +32497,7 @@ export default function App() {
     try { await window.storage.delete(profileKey(id)); } catch(e) {}
     const up = profiles.filter(p=>p.id!==id);
     setProfiles(up);
-    await saveIndex(up);
+    await saveIndex(up, [id]);
     setConfirmDeleteId(null);
   };
 

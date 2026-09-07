@@ -2349,6 +2349,21 @@ async function runTool(name, input, ctx) {
     planOverride = wantedPid;
   }
 
+  // ⚠️ THE aboutMe RE-POINT HAS TO HAPPEN BEFORE THE SEAT GATE (S200p — a
+  // regression from S200m's own fix). It landed ~100 lines below, after the gate
+  // had already computed seatKey from the UNCORRECTED uid. So a trainer with a
+  // client as the active subject who said "make a note for me" was charged an
+  // AI-client seat for a note going into their OWN account — and at the cap, was
+  // REFUSED outright. The correction is worthless if the request never reaches it.
+  //
+  // Scoped by tool name so it can never become a universal gate bypass: aboutMe
+  // is a notes concept, and every other tool ignores it.
+  const NOTES_TOOLS = new Set(["list_notes", "create_note", "update_note"]);
+  if (NOTES_TOOLS.has(name) && input && input.aboutMe === true) {
+    uid = ctx.callerUid;
+    planOverride = null;   // null, not "" — matches what the planOverride block leaves
+  }
+
   // ── AI-client seat gate (S176f: 20/30/50, trial 15, Connect/admin uncapped) ─
   // Charged per DISTINCT target per UTC month, on first actual use, behind an
   // explicit confirm. seatKey is the target's identity: p_<planId> for a local
@@ -2462,7 +2477,6 @@ async function runTool(name, input, ctx) {
     // update_note is deliberately included even though it copes today: it looks
     // in the caller's own kv second, so it works by luck, and dropping the ids
     // makes it look there FIRST.
-    if (input && input.aboutMe === true) { uid = ctx.callerUid; planOverride = ""; }
     const isSelf = uid === ctx.callerUid;
     const cap = (arr) => [...arr].slice(0, 100);
     // Notes about one of the caller's OWN plan files (S166). That person is a
@@ -2584,7 +2598,15 @@ async function runTool(name, input, ctx) {
       updatedAt: Date.now(),
     } : n);
     const stores = isSelf
-      ? [...(!ctx.isTrainer ? [["priv", ctx.callerUid]] : []), ["kv", uid]]
+      // ⚠️ SEARCH EVERY STORE list_notes CAN SHOW (S200p). This excluded privkv
+      // for trainers while list_notes reads it whenever the target is the caller
+      // (gated on isSelf alone) — so the assistant could READ a trainer's private
+      // note aloud and then fail to edit the note it had just quoted. Trainers do
+      // have privkv notes: the check-in sheet's "Keep private" wrote there until
+      // S200n, and S200o finally made them visible. The privacy invariant is
+      // untouched — the tuple's uid is the literal callerUid, never the resolved
+      // one, and the whole branch is already inside isSelf.
+      ? [["priv", ctx.callerUid], ["kv", uid]]
       : [["kv", uid], ["kv", ctx.callerUid]]; // client's shared notes, then my about-notes
     for (const [type, tuid] of stores) {
       const arr = type === "priv" ? await privGetJSON(db, tuid, "caliq-notes") : await kvGetJSON(db, tuid, "caliq-notes");

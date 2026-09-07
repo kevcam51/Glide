@@ -91,6 +91,40 @@ ok("the Foods/Meals toggle no longer discards the choice",
 ok("NEG: a 0.85rem control would be caught", px("0.85rem") < 16);
 ok("NEG: 1rem would not", px("1rem") >= 16);
 
+// ── the app-wide floor (S200p) ─────────────────────────────────────────────
+// S200k raised every control in the logging flows by hand. Measuring the rest
+// of the app found 98 of 152 focusable controls still under 16px — including
+// all six login and role-chooser inputs at 15px — because the S196p rule is a
+// bare element selector (0,0,1) and loses to every Tailwind class (0,1,0) and
+// to every React inline style, which is how this app styles nearly everything.
+{
+  const CSS = readFileSync(join(ROOT, "src", "index.css"), "utf8");
+  const rule = (CSS.match(/@media \(max-width: 767px\) \{[\s\S]*?\n\}/) || [""])[0];
+  ok("the phone floor exists", /font-size: max\(16px, 1em\)/.test(rule), rule.slice(0, 120));
+  ok("...and can beat an inline style", /max\(16px, 1em\) !important/.test(rule));
+  ok("...and still covers textarea and select", /textarea,/.test(rule) && /select \{/.test(rule));
+
+  // ⚠️ max(16px, 1em) SHRINKS as well as raises — 1em resolves against the
+  // PARENT — so anything deliberately larger is clamped DOWN to 16px unless
+  // excluded. Neither exclusion is a zoom risk; both are deliberately large.
+  ok("the deliberately-large controls are excluded",
+     /input:not\(\.dash-log-input\):not\(\.keep-size\)/.test(rule));
+  ok("...and the marker is actually on them",
+     (APP.match(/keep-size/g) || []).length >= 2, (APP.match(/keep-size/g) || []).length);
+  ok("...on both 1.1rem controls",
+     /\$\{WZ\.input\} keep-size text-center font-semibold text-\[1\.1rem\]/.test(APP)
+     && /text-\[1\.1rem\] keep-size text-fg/.test(APP));
+
+  // The escape-hatch bug this nearly shipped with: a double-backslashed Tailwind
+  // escape drops the whole media block, and iOS zoom returns everywhere at once.
+  ok("no double-escaped selector silently voids the block", !/\\\\\[1\\\\\.1rem\\\\\]/.test(CSS));
+
+  // And the login screen, which is styled by an inline object in another file.
+  const AUTH = readFileSync(join(ROOT, "src", "AuthGate.jsx"), "utf8");
+  ok("the login inputs are covered by the rule rather than left at 15px",
+     /fontSize: 1[56]/.test(AUTH) && /!important/.test(rule));
+}
+
 console.log(fails === 0
   ? `  PASS  meal-logging UX (${checks} assertions)`
   : `  ${fails}/${checks} FAILED`);
