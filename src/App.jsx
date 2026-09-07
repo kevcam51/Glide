@@ -11726,7 +11726,50 @@ function WeightDayLogger({ date, existing, onSave }) {
 // the note on data.observedTdee). Said out loud at the bottom rather than
 // presented as a promise.
 const CAL_PER_LB = 3500;
-function CalorieSimulator({ data, weightLbs, planRate, intakeFor, onClose }) {
+// Making up an over-eating day (S200r, Kevin) — the arithmetic, kept pure.
+//
+// "Let's say they ate 5,000 when they were supposed to eat 2,500. How much
+// exercise, and how much of a deficit, to make it up — and let them choose over
+// how many days, and how much of the work comes from training versus eating."
+//
+// ⚠️ THE FLOOR IS NOT NEGOTIABLE, AND IT CHANGES THE ANSWER. Everything the app
+// calculates is floored at 1,200 (see targetForRate), and a make-up plan is
+// exactly where someone would drive intake through it: at 100% from eating,
+// three days, a 2,500 overage takes 833/day off a 2,000 target. So the split the
+// person asked for is honoured only as far as the floor, and whatever the floor
+// refuses is REPORTED rather than silently dropped — otherwise the tool quietly
+// hands back a plan that does not add up to what it promised.
+//
+// `share` is the fraction of the make-up coming from TRAINING (0 = all from
+// eating, 1 = all from training).
+function makeUpPlan({ over, days, share, target, floor = 1200 }) {
+  const total = Math.max(0, Math.round(Number(over) || 0));
+  const n = Math.max(1, Math.round(Number(days) || 1));
+  const sh = Math.min(1, Math.max(0, Number(share)));
+  const tgt = Math.round(Number(target) || 0);
+  if (!total) return null;
+
+  const wantEat = Math.round((total * (1 - sh)) / n);          // per-day cut asked for
+  const room = Math.max(0, tgt - floor);                       // per-day cut the floor allows
+  const cutPerDay = Math.min(wantEat, room);
+  const shortfall = (wantEat - cutPerDay) * n;                 // what eating cannot cover
+  // The shortfall does not vanish: it moves to training, which is the honest
+  // reading of "make up the whole thing".
+  const burnPerDay = Math.round((total * sh) / n) + Math.round(shortfall / n);
+
+  return {
+    total, days: n, share: sh,
+    burnPerDay, cutPerDay,
+    newTarget: tgt - cutPerDay,
+    floorHit: shortfall > 0,
+    movedToTraining: Math.round(shortfall),
+    // What the whole thing is worth on the scale, so nobody treats one big day
+    // as a catastrophe: 3,500 cal ~ 1 lb.
+    lbs: total / CAL_PER_LB,
+  };
+}
+
+function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, todayTarget, onClose }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);
   const d = data || {};
@@ -11740,6 +11783,32 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, onClose }) {
   const [exMin, setExMin] = useState("30");
   const [extraBurn, setExtraBurn] = useState("");
   const [daysPerWeek, setDaysPerWeek] = useState(7);
+  // ── Make up a big day (S200r) ────────────────────────────────────────────
+  const [muDate, setMuDate] = useState("");
+  const [muDays, setMuDays] = useState(3);
+  const [muShare, setMuShare] = useState(50);   // % of the make-up from TRAINING
+
+  // Only days that were actually logged, newest first, and only the ones that
+  // went OVER — there is nothing to make up for a day that did not.
+  const overDays = useMemo(() => {
+    const tgt = Number(todayTarget) || 0;
+    if (!dayCalsAll || !tgt) return [];
+    return Object.entries(dayCalsAll)
+      .map(([date, cals]) => ({ date, cals: Number(cals) || 0 }))
+      .filter((x) => x.cals > tgt)
+      .sort((a, b) => (a.date < b.date ? 1 : -1))
+      .slice(0, 30);
+  }, [dayCalsAll, todayTarget]);
+  const muPicked = overDays.find((x) => x.date === muDate) || null;
+  const mu = muPicked
+    ? makeUpPlan({ over: muPicked.cals - Number(todayTarget), days: muDays,
+        share: muShare / 100, target: Number(todayTarget) })
+    : null;
+  // Translate the daily burn into the exercise they already picked above, so
+  // "burn 833 a day" becomes a length of time rather than a number.
+  const muMinutes = mu && pickedEx && w > 0
+    ? Math.round(mu.burnPerDay / Math.max(1, exBurn(pickedEx, w, 60, d) / 60))
+    : null;
 
   // Every exercise the plan can reach, grouped the way the pickers group them —
   // cardio by equipment, strength by movement pattern, custom last.
@@ -11949,6 +12018,101 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, onClose }) {
                 <div style={{ marginTop: "9px", fontSize: ".7rem", lineHeight: 1.45, color: "var(--yellow)" }}>
                   Under 1,200 calories a day isn&rsquo;t healthy or sustainable — your plan won&rsquo;t go there.
                   If you want a bigger gap than this, take it from movement rather than food.
+                </div>
+              )}
+
+              {/* ── Make up a big day (S200r, Kevin) ────────────────────────
+                  "They ate 5,000 when they were supposed to eat 2,500 — how
+                  much exercise, how much of a deficit, over how many days, and
+                  let them choose how much comes from each." The split is the
+                  point: some people would rather train more than eat less, and
+                  the app should show them what that actually costs instead of
+                  prescribing one answer. */}
+              {overDays.length > 0 && (
+                <div style={{ marginTop: "14px", paddingTop: "12px", borderTop: "1px solid var(--border)" }}>
+                  <div style={lbl}>Make up a big day</div>
+                  <div style={{ fontSize: ".72rem", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: "8px" }}>
+                    Pick a day you went over and choose how to pay it back.
+                  </div>
+                  <select value={muDate} onChange={(e) => setMuDate(e.target.value)} style={{ ...input, marginBottom: "8px" }}>
+                    <option value="">Choose a day…</option>
+                    {overDays.map((x) => (
+                      <option key={x.date} value={x.date}>
+                        {new Date(x.date + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+                        {" — "}{x.cals.toLocaleString()} cal ({"+"}{(x.cals - Number(todayTarget)).toLocaleString()} over)
+                      </option>
+                    ))}
+                  </select>
+
+                  {mu && (
+                    <>
+                      <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={lbl}>Over how many days</div>
+                          <select value={muDays} onChange={(e) => setMuDays(Number(e.target.value))} style={input}>
+                            {[1, 2, 3, 4, 5, 7, 10, 14].map((n2) => (
+                              <option key={n2} value={n2}>{n2} day{n2 === 1 ? "" : "s"}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* The slider IS the feature: 100% training, 100% eating,
+                          or any mix. Endpoints labelled so it reads without
+                          having to work out which end is which. */}
+                      <div style={lbl}>How to split the work</div>
+                      <input type="range" min="0" max="100" step="5" value={muShare}
+                        onChange={(e) => setMuShare(Number(e.target.value))}
+                        style={{ width: "100%", accentColor: "var(--accent)" }} />
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: ".62rem",
+                        color: "var(--muted)", marginTop: "-2px", marginBottom: "10px" }}>
+                        <span>Eat less</span>
+                        <span style={{ color: "var(--accent)", fontWeight: 800 }}>
+                          {muShare}% training · {100 - muShare}% eating
+                        </span>
+                        <span>Train more</span>
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                        <div style={{ padding: "10px", borderRadius: "10px", background: "var(--s2)", border: "1px solid var(--border)" }}>
+                          <div style={{ fontSize: ".55rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".3px" }}>Burn per day</div>
+                          <div style={{ fontFamily: "'Sora',sans-serif", fontSize: "1.15rem", color: "var(--accent)" }}>
+                            {mu.burnPerDay.toLocaleString()}
+                          </div>
+                          {muMinutes > 0 && pickedEx && (
+                            <div style={{ fontSize: ".58rem", color: "var(--muted)", lineHeight: 1.35 }}>
+                              ≈ {muMinutes} min of {pickedEx.label}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ padding: "10px", borderRadius: "10px", background: "var(--s2)", border: "1px solid var(--border)" }}>
+                          <div style={{ fontSize: ".55rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".3px" }}>Eat per day</div>
+                          <div style={{ fontFamily: "'Sora',sans-serif", fontSize: "1.15rem", color: "var(--accent)" }}>
+                            {mu.newTarget.toLocaleString()}
+                          </div>
+                          <div style={{ fontSize: ".58rem", color: "var(--muted)", lineHeight: 1.35 }}>
+                            {mu.cutPerDay > 0 ? `${mu.cutPerDay.toLocaleString()} under your target` : "your normal target"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* ⚠️ SAY WHAT THE FLOOR DID. Silently capping the cut
+                          would hand back a plan that does not add up to the
+                          number at the top of the card. */}
+                      {mu.floorHit && (
+                        <div style={{ marginTop: "9px", fontSize: ".7rem", lineHeight: 1.45, color: "var(--yellow)" }}>
+                          Eating can only carry so much of this — your plan won&rsquo;t go below 1,200 a day.
+                          The remaining {mu.movedToTraining.toLocaleString()} cal moved to training. Give it more
+                          days if that&rsquo;s too much.
+                        </div>
+                      )}
+                      <div style={{ marginTop: "9px", fontSize: ".66rem", lineHeight: 1.45, color: "var(--muted)" }}>
+                        That day was <strong style={{ color: "var(--text-secondary)" }}>{mu.total.toLocaleString()} cal</strong> over
+                        — about {mu.lbs.toFixed(1)} lb. One big day isn&rsquo;t a setback unless it becomes the pattern;
+                        spreading it over more days is easier to actually do than clearing it in one.
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </>
@@ -14457,7 +14621,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
 
       {showSim && (
         <CalorieSimulator data={data} weightLbs={weightLbs} planRate={planRate}
-          intakeFor={targetForRate} onClose={()=>setShowSim(false)} />
+          intakeFor={targetForRate} dayCalsAll={dayCalsAll} todayTarget={target}
+          onClose={()=>setShowSim(false)} />
       )}
 
       {showMeasure && onSaveMeasurements && (() => {
