@@ -931,6 +931,33 @@ function mergeMeasurements(d, vals, dateKey, loggedBy) {
   return entry;
 }
 
+// Bring a stored body-fat snapshot back in line with the corrected maths (S200v).
+//
+// ⚠️ THE MEASUREMENTS SELF-CORRECT; THE SNAPSHOT DOES NOT. Every screen derives
+// body fat from the RAW measurement each time it renders, so fixing the age
+// guard and dropping Bailey out of the tape average repairs every historical
+// reading automatically. But mergeMeasurements ALSO writes `d.bodyFat` — a
+// snapshot taken with whatever maths was current when it was saved — and that
+// value is frozen. It feeds lean mass, the goal weight derived from it, the
+// trainer dashboards and the AI, so leaving it stale would mean the app shows a
+// corrected number in one place and the old wrong one in another.
+//
+// ⚠️ IT ONLY EVER CORRECTS, NEVER ERASES. With the new age guard a plan with no
+// age returns null for calipers, and writing that null would delete a reading
+// the person can still see. So a null recompute is left alone: the fix there is
+// to add the age, not to lose the number.
+function repairedBodyFat(d) {
+  const list = Array.isArray(d && d.measurements) ? d.measurements : [];
+  if (!list.length || d.hideBodyFat) return null;
+  const newest = [...list].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))[0];
+  if (!newest) return null;
+  const fresh = measurementMetrics(d, newest).bodyFatPct;
+  if (fresh == null) return null;                       // never erase
+  const stored = Number(d.bodyFat);
+  if (!(stored > 0)) return fresh;                      // nothing there — fill it
+  return Math.abs(stored - fresh) >= 0.1 ? fresh : null; // null = already correct
+}
+
 // ─── CSS ──────────────────────────────────────────────────────────────────────
 
 const css = `
@@ -32613,6 +32640,16 @@ export default function App() {
     setStep(stp);
     setShowDash(stp >= 5);
     lastSnapshotRef.current = merged; // baseline for plan-edit history diffs
+    // ⚠️ REPAIR THE FROZEN BODY-FAT SNAPSHOT ON OPEN (S200v). The measurements
+    // themselves recompute correctly now; `d.bodyFat` was written at save time
+    // with the old maths and cannot fix itself. Corrects only — a null recompute
+    // (e.g. calipers refusing because the plan has no age) is left alone rather
+    // than erasing a number the person can still see. Runs through the normal
+    // save, so it lands in the activity feed like any other change.
+    {
+      const fixed = repairedBodyFat(merged);
+      if (fixed != null) setTimeout(() => setDataAndSave((prev) => ({ ...prev, bodyFat: String(fixed) })), 0);
+    }
     setActiveRemoteUid(null); // a local (or own "self") profile, not a remote client's
     setActiveId(id);
     setScreen("app");

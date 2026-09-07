@@ -115,6 +115,29 @@ ok("...and reports which method it used", /bodyFatSource, tapeSource,/.test(AI))
   ok("the two copies of caliperBF are identical", appFn === srvFn);
 }
 
+// ── 4. already-stored numbers (S200v) ─────────────────────────────────────
+// Kevin: "will these changes be able to make changes to already inputed
+// information? I want to make sure the information that is already in is
+// correct." The raw measurements self-correct — every screen recomputes from
+// them. The SNAPSHOT in d.bodyFat does not: it was written at save time with
+// whatever maths was current, and it feeds lean mass, the derived goal weight,
+// the trainer dashboards and the AI.
+{
+  const rb = new Function(`${fnOf(APP, "repairedBodyFat")}\nreturn repairedBodyFat;`);
+  ok("the repair exists and is pure", typeof rb === "function");
+  ok("it runs when a plan is opened", /const fixed = repairedBodyFat\(merged\);/.test(APP));
+  // ⚠️ THE ONE RULE THAT MATTERS: correct, never erase. With the new age guard a
+  // plan without an age returns null for calipers, and writing that null would
+  // delete a reading the person can still see.
+  ok("a null recompute never overwrites a stored number", /if \(fresh == null\) return null;\s*\/\/ never erase/.test(APP));
+  ok("...and the caller only writes when it returns something", /if \(fixed != null\)/.test(APP));
+  ok("an unchanged value is not rewritten", /Math\.abs\(stored - fresh\) >= 0\.1 \? fresh : null/.test(APP));
+  ok("an empty slot is filled rather than skipped", /if \(!\(stored > 0\)\) return fresh;/.test(APP));
+  ok("it respects the hide-body-fat opt-out", /if \(!list\.length \|\| d\.hideBodyFat\) return null;/.test(APP));
+  ok("it repairs from the NEWEST measurement, not an arbitrary one",
+     /sort\(\(a, b\) => \(b\.timestamp \|\| 0\) - \(a\.timestamp \|\| 0\)\)\[0\]/.test(APP));
+}
+
 console.log(fails === 0
   ? `  PASS  body fat (${checks} assertions)`
   : `  ${fails}/${checks} FAILED`);
