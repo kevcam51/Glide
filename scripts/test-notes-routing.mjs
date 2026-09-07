@@ -112,7 +112,7 @@ const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n,
      /const about = ownKvNotes\.filter\(\(n\) => n\.aboutUid \|\| n\.aboutPlanId\)/.test(APP));
   ok("...tagged so edits write back to the right store",
      /_store: n\.aboutPlanId \? "aboutPlan" : "aboutClient", _filedElsewhere: true/.test(APP));
-  ok("...below the user's own, not mixed in", /\[\.\.\.mine\.sort\(byNewest\), \.\.\.about\.sort\(byNewest\)\]/.test(APP));
+  ok("...below the user's own, not mixed in", /\.\.\.mine\.sort\(byNewest\), \.\.\.about\.sort\(byNewest\)\]/.test(APP));
   ok("...and badged with what they are", /label: n\.aboutPlanId \? "About a plan file" : "About a client"/.test(APP));
   ok("the old filter that hid them is gone",
      !/return ownKvNotes\.filter\(\(n\) => !n\.aboutUid && !n\.aboutPlanId\)\.map/.test(APP));
@@ -170,6 +170,29 @@ const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n,
      /noteMode !== "trainer-plan" && \(/.test(APP));
   ok("the context is derived where all three facts live",
      /mode: activeRemoteUid \? "trainer-client" : \(role === ROLES\.CLIENT \? "client" : "trainer-plan"\)/.test(APP));
+}
+
+// ── a trainer's own private store was read by nothing (S200o) ─────────────
+// Kevin, after S200m surfaced the about-client notes: "I see 2 notes… I feel
+// that I am missing something." He was. privkv is the owner-only store, and
+// only NotesPanel mode "client" ever subscribed to it — so a trainer's own
+// private notes existed on no screen in the app. The check-in sheet's "Keep
+// private" button wrote there for years (source fixed in S200n); those notes
+// are still in it, and until now nothing could show them.
+{
+  ok("a trainer's My Notes subscribes to their private store",
+     /if \(mode !== "trainer-client" && mode !== "trainer-plan"\) \{\s*\n\s*unsubs\.push\(privSubscribe\(NOTES_KEY/.test(APP));
+  // ⚠️ AND ONLY THERE. A client's or a plan's panel is scoped to that subject;
+  // pulling the trainer's private notes into it would put unrelated notes on
+  // someone else's card.
+  ok("...and NOT on a client's or a plan's panel",
+     /mode !== "trainer-client" && mode !== "trainer-plan"/.test(APP));
+  ok("they are listed", /const priv = privNotes\.map\(\(n\) => \(\{ \.\.\.n, _store: "priv" \}\)\);/.test(APP));
+  ok("...first, since nothing has ever shown them",
+     /\[\.\.\.priv\.sort\(byNewest\), \.\.\.mine\.sort\(byNewest\), \.\.\.about\.sort\(byNewest\)\]/.test(APP));
+  // The store tag has to round-trip, or editing one writes it to the wrong place.
+  ok("editing one writes back to privkv", /if \(store === "priv"\) return privSet\(NOTES_KEY, val\);/.test(APP));
+  ok("...and reading one reads privkv", /if \(store === "priv"\) return parseNotes\(await privGet\(NOTES_KEY\)\);/.test(APP));
 }
 
 console.log(fails === 0

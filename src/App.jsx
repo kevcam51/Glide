@@ -29689,6 +29689,17 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
       unsubs.push(subscribeForUser(uid, NOTES_KEY, (v) => setOwnKvNotes(parseNotes(v))));
     } else {
       unsubs.push(subscribeForUser(uid, NOTES_KEY, (v) => setOwnKvNotes(parseNotes(v))));
+      // ⚠️ A TRAINER HAS A PRIVATE STORE TOO, AND NOTHING EVER READ IT (S200o).
+      // privkv is the owner-only store — rules deny it even to the owner's own
+      // trainer — but only mode "client" subscribed, so a trainer's own private
+      // notes were invisible on every screen in the app. The check-in sheet's
+      // "Keep private" button wrote there for years (fixed at source in S200n),
+      // and those notes are still sitting in it. Scoped to "My notes", which is
+      // the screen that means "everything of mine"; a client's or a plan's panel
+      // stays scoped to that subject.
+      if (mode !== "trainer-client" && mode !== "trainer-plan") {
+        unsubs.push(privSubscribe(NOTES_KEY, (v) => setPrivNotes(parseNotes(v))));
+      }
       if (mode === "trainer-client" && clientUid) {
         unsubs.push(subscribeForUser(clientUid, NOTES_KEY, (v) => setClientKvNotes(parseNotes(v))));
       }
@@ -29728,11 +29739,14 @@ function NotesPanel({ mode, meUid, meName, clientUid, clientName, planId, planNa
     // move-between-stores action anywhere — so without this, the fix is
     // invisible to exactly the person who reported it. Shown, labelled with who
     // they are about, and sorted below the trainer's own.
+    // privkv first: these are the ones nothing has ever shown, so burying them
+    // under everything else would repeat the bug more quietly.
+    const priv = privNotes.map((n) => ({ ...n, _store: "priv" }));
     const mine = ownKvNotes.filter((n) => !n.aboutUid && !n.aboutPlanId).map((n) => ({ ...n, _store: "self" }));
     const about = ownKvNotes.filter((n) => n.aboutUid || n.aboutPlanId)
       .map((n) => ({ ...n, _store: n.aboutPlanId ? "aboutPlan" : "aboutClient", _filedElsewhere: true }));
     const byNewest = (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0);
-    return [...mine.sort(byNewest), ...about.sort(byNewest)];
+    return [...priv.sort(byNewest), ...mine.sort(byNewest), ...about.sort(byNewest)];
   })();
 
   // store readers/writers (read-modify-write; the AI side is transactional)
