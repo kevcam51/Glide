@@ -1081,7 +1081,7 @@ function buildTools(role, opts = {}) {
       description:
         "Get daily nutrition logs (calories, protein, carbs, fat, and the foods eaten each day), plus any weigh-in and whether a workout was done, for a date range. "
         + (isTrainer ? TRAINER_NOTE : CLIENT_NOTE)
-        + " Range is capped at 31 days.",
+        + " Range is capped at 31 days. Also the way to RE-LOG something eaten before: each day comes back with its meals by name and macros, so 'the usual' or 'same lunch as yesterday' should be re-logged from the matching entry rather than re-estimated — an invented estimate drifts from what they logged last time and makes their own history inconsistent.",
       input_schema: {
         type: "object",
         properties: {

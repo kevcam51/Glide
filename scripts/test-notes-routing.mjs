@@ -210,6 +210,38 @@ const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n,
   ok("...and reading one reads privkv", /if \(store === "priv"\) return parseNotes\(await privGet\(NOTES_KEY\)\);/.test(APP));
 }
 
+// ── what carries between conversations, and what does not (S200x) ─────────
+// Kevin: "I want it to remember facts about the person and their plan… but I
+// think it is more important that the chat be able to be separated when needed."
+//
+// ⚠️ HIS INSTINCT IS RIGHT, FOR A SHARPER REASON THAN VOLUME. Carrying
+// CONVERSATION across chats is what caused S200m: the active subject leaked, and
+// "a note for me" was filed under a client. So conversation stays separate and
+// nothing here changes that. What carries is the PERSON'S DATA, which was always
+// available on demand — the model simply was not told to reach for it instead of
+// asking someone to repeat what the app already knows.
+{
+  ok("the model is told what carries and what does not",
+     /WHAT CARRIES BETWEEN CONVERSATIONS/.test(CHAT));
+  ok("...naming the tools that hold the facts",
+     /call get_profile and get_nutrition_targets/.test(CHAT));
+  ok("...and that the separation is deliberate, not a gap",
+     /that separation is intentional/.test(CHAT));
+  // ⚠️ AND NOTHING ACTUALLY SHARES A TRANSCRIPT. If a future change starts
+  // pooling history this assertion is where it should be argued for.
+  ok("no cross-chat transcript sharing was introduced",
+     !/allChats|mergeThreads|globalHistory/.test(CHAT));
+
+  // Re-logging: needs no memory at all, only guidance. The log already returns
+  // each day's meals by name and macros.
+  ok("the model is told to re-log rather than re-estimate",
+     /RE-USE WHAT THEY HAVE ALREADY LOGGED/.test(CHAT));
+  ok("...with the reason, so it survives editing", /drift from the number they logged last time/.test(CHAT));
+  ok("...and to say which day it came from", /Say which day you took it from/.test(CHAT));
+  // The connector gets no system prompt, so the tool description carries it.
+  ok("the connector learns it from the tool itself", /Also the way to RE-LOG something eaten before/.test(AI));
+}
+
 console.log(fails === 0
   ? `  PASS  notes routing (${checks} assertions)`
   : `  ${fails}/${checks} FAILED`);
