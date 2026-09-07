@@ -146,11 +146,11 @@ const MIN_DAILY_CAL = 1200;
 const atLeastMinCal = (n) => Math.max(MIN_DAILY_CAL, Math.round(Number(n) || 0));
 
 const ACTIVITY_LEVELS = [
-  { id:"sedentary", label:"Sedentary",         iconName:"person", desc:"Desk or driving job, sitting most of the day",              steps:"under 5,000 steps",     multiplier:1.2   },
-  { id:"light",     label:"Lightly Active",    iconName:"walk", desc:"Some walking and errands, on your feet now and then",       steps:"5,000–7,500 steps",     multiplier:1.375 },
-  { id:"moderate",  label:"Moderately Active", iconName:"run", desc:"On your feet most of the day — retail, nursing, teaching",   steps:"7,500–11,000 steps",    multiplier:1.55  },
-  { id:"very",      label:"Very Active",       iconName:"bolt", desc:"Physical job — lifting, carrying, climbing, labouring",      steps:"11,000–15,000, or heavy lifting", multiplier:1.725 },
-  { id:"extra",     label:"Extremely Active",  iconName:"flame", desc:"Hard labour all day — roofing, farming, heavy loads",        steps:"15,000+, or all-day heavy labour",  multiplier:1.9   },
+  { id:"sedentary", label:"Sedentary",         iconName:"person", desc:"Desk or driving job, sitting most of the day",              steps:"Under 5,000",     multiplier:1.2   },
+  { id:"light",     label:"Lightly Active",    iconName:"walk", desc:"Some walking and errands, on your feet now and then",       steps:"5,000–7,500",     multiplier:1.375 },
+  { id:"moderate",  label:"Moderately Active", iconName:"run", desc:"On your feet most of the day — retail, nursing, teaching",   steps:"7,500–11,000",    multiplier:1.55  },
+  { id:"very",      label:"Very Active",       iconName:"bolt", desc:"Physical job — lifting, carrying, climbing, labouring",      steps:"11,000–15,000", stepsNote:"or heavy lifting", multiplier:1.725 },
+  { id:"extra",     label:"Extremely Active",  iconName:"flame", desc:"Hard labour all day — roofing, farming, heavy loads",        steps:"15,000+", stepsNote:"or all-day heavy labour",  multiplier:1.9   },
 ];
 
 const CARDIO_GROUPS = [
@@ -2799,8 +2799,12 @@ const WZ = {
 };
 // Big toggle button (gender, etc.) — cyan when active.
 const wzGbtn = (active) => `min-h-[48px] p-4 rounded-lg border-2 cursor-pointer font-semibold flex items-center justify-center gap-2 transition-colors ${active ? "border-primary text-primary bg-[rgba(var(--accent-rgb),.08)]" : "border-border text-muted bg-surface2"}`;
-// Large scannable selection row (activity levels, exercises) — cyan when active.
-const wzAbtn = (active) => `w-full min-h-[60px] px-4 py-3.5 rounded-lg border-2 cursor-pointer flex items-center gap-3.5 text-left transition-colors ${active ? "border-primary bg-[rgba(var(--accent-rgb),.06)]" : "border-border bg-surface2"}`;
+// Large scannable selection row (activity levels) — cyan when active.
+// ⚠️ A COLUMN, NOT A ROW (S202). The step band underneath needs the full card
+// width; nested inside the old `items-center` row it sat in the text column,
+// indented past a 26px icon and squeezed against the check badge, which is what
+// made a three-line wrap out of "7,500–11,000 · about +875 cal/day".
+const wzAbtn = (active) => `w-full min-h-[60px] px-4 py-3.5 rounded-lg border-2 cursor-pointer flex flex-col items-stretch text-left transition-colors ${active ? "border-primary bg-[rgba(var(--accent-rgb),.06)]" : "border-border bg-surface2"}`;
 // Shared widget classes for the workout steps (Strength + Cardio): quick-fill
 // panels, per-day cards, etc.
 const WZW = {
@@ -3189,23 +3193,54 @@ function StepActivity({ data, onChange, onBack, onNext, trackerSteps }) {
           const active = data.activityLevel===a.id;
           return (
           <div key={a.id} className="mb-2.5">
-            <div className="flex items-center gap-1">
+            <div className="flex items-start gap-1">
               <button className={`${wzAbtn(active)} flex-1`} onClick={()=>{onChange("activityLevel",a.id);setActiveInfo(null);}}>
-                <Icon name={a.iconName} size={26} color="var(--color-primary,#08DCE0)" className="shrink-0" />
-                <div className="min-w-0">
-                  <div className={`font-bold text-[.97rem] ${active?"text-primary":"text-fg"}`}>{a.label}</div>
-                  <div className="text-[.76rem] text-muted leading-snug">{a.desc}</div>
-                  {/* "Most people here" — a hint, never a rule. A step number read
-                      as a rule has no answer for a wheelchair user, and under-ranks
-                      standing-still work (cashier, security, hairdresser). */}
-                  <div className="text-[.7rem] text-primary/80 font-semibold leading-snug mt-0.5 tabular-nums">
-                    Most people here: {a.steps}
-                    {haveBmr && <span className="text-muted font-normal"> · about +{addOn(a.multiplier).toLocaleString()} cal/day</span>}
+                <div className="flex items-center gap-3.5 w-full">
+                  <Icon name={a.iconName} size={26} color="var(--color-primary,#08DCE0)" className="shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className={`font-bold text-[.97rem] ${active?"text-primary":"text-fg"}`}>{a.label}</div>
+                    <div className="text-[.76rem] text-muted leading-snug">{a.desc}</div>
                   </div>
+                  {active && <span className="shrink-0 w-7 h-7 rounded-full bg-[rgba(var(--accent-rgb),.15)] text-primary flex items-center justify-center"><Icon name="check" size={15} color="currentColor" /></span>}
                 </div>
-                {active && <span className="ml-auto shrink-0 w-7 h-7 rounded-full bg-[rgba(var(--accent-rgb),.15)] text-primary flex items-center justify-center"><Icon name="check" size={15} color="currentColor" /></span>}
+                {/* ── The step band (S202, Kevin: "make it very visible") ──────
+                    ⚠️ IT WAS ALREADY VISIBLE, AND THAT WAS THE PROBLEM. Nothing
+                    was hidden behind the ⓘ — the ⓘ panel has never carried a step
+                    number at all — but this was the SMALLEST text in the row
+                    (.7rem, last in reading order) rendered in `text-primary/80`,
+                    which in the LIGHT theme computes to 3.40:1 on surface2. That
+                    is a WCAG AA fail, and LOWER contrast than the muted
+                    description line directly above it: the app was rendering the
+                    answer as the least readable thing in the box. "Can it be
+                    visible" was an accessibility report, not a preference.
+                    Promoted to its own bordered, accent-tinted band — the same
+                    treatment the tracker average above the list already uses —
+                    with the figure in `text-fg` rather than a tinted accent, so
+                    it is high-contrast in BOTH themes rather than only in dark.
+                    ⚠️ "Most people here" stays, verbatim. A step count read as a
+                    RULE has no answer for a wheelchair user and under-ranks
+                    standing-still work (cashier, security, hairdresser) — which
+                    is why the number is a correlate the copy hedges, and why the
+                    hedge must survive the number getting bigger.
+                    ⚠️ The cal/day figure gets its own line. Sharing one line was
+                    the second reason this did not read: a single 11px line
+                    carrying two different claims, wrapping to three on a phone. */}
+                <div className="mt-2.5 w-full rounded-lg px-3 py-2 border"
+                  style={{ background: "rgba(var(--accent-rgb),.10)", borderColor: "rgba(var(--accent-rgb),.28)" }}>
+                  <div className="text-[.6rem] font-bold uppercase tracking-wider text-primary">Most people here</div>
+                  <div className="mt-0.5 text-[1rem] font-extrabold text-fg tabular-nums leading-tight">
+                    {a.steps} <span className="text-[.78rem] font-semibold text-muted">steps/day</span>
+                  </div>
+                  {a.stepsNote && <div className="text-[.72rem] text-muted leading-snug">{a.stepsNote}</div>}
+                  {haveBmr && (
+                    <div className="mt-1 text-[.74rem] text-muted tabular-nums">
+                      Adds about <span className="font-bold text-fg">+{addOn(a.multiplier).toLocaleString()}</span> cal/day
+                    </div>
+                  )}
+                </div>
               </button>
-              <button className={`shrink-0 w-8 h-8 rounded-full border flex items-center justify-center text-sm cursor-pointer ${activeInfo===a.id?"border-primary text-primary bg-[rgba(var(--accent-rgb),.08)]":"border-border text-muted bg-surface2"}`}
+              <button aria-label={`What "${a.label}" means`}
+                className={`shrink-0 mt-3 w-8 h-8 rounded-full border flex items-center justify-center text-sm cursor-pointer ${activeInfo===a.id?"border-primary text-primary bg-[rgba(var(--accent-rgb),.08)]":"border-border text-muted bg-surface2"}`}
                 onClick={(e)=>{e.stopPropagation();setActiveInfo(activeInfo===a.id?null:a.id);}}>i</button>
             </div>
             {activeInfo===a.id && (

@@ -76,7 +76,55 @@ ok("the ladder has the five known rungs", LADDER.length === 5 && LADDER[0].id ==
   // ⚠️ label is rendered by five other screens in single-line rows with no wrap
   // guard; a step range there pushes the value off the row.
   ok("no step figure leaked into label", LADDER.every((a) => !/\d{3}/.test(a.label)), LADDER.map((a) => a.label));
-  ok("the wizard words it as a hint, not a rule", /Most people here: \{a\.steps\}/.test(FIELDS));
+  // ── how the band is PRESENTED (S202, Kevin: "make it very visible") ──────
+  // ⚠️ THIS USED TO ASSERT `Most people here: {a.steps}` ON ONE LINE, and that
+  // exact shape was the defect. The line was real and needed no tap — but it was
+  // the smallest text in the row, last in reading order, in `text-primary/80`,
+  // which computes to 3.40:1 on surface2 in the LIGHT theme: a WCAG AA fail, and
+  // lower contrast than the muted description directly above it. So the assertion
+  // is rewritten around the INTENT it was protecting (a hedge, never a rule) plus
+  // the presentation facts that made it unreadable, rather than the literal
+  // markup — which is what would otherwise force the next person to delete it.
+  const BAND = (FIELDS.match(/\{\/\* \u2500\u2500 The step band[\s\S]*?\n {16}<\/div>/) || [""])[0];
+  ok("the step band exists as its own block", BAND.length > 200, BAND.length);
+  // ⚠️ ASSERT ON THE MARKUP, NOT THE PROSE. The comment above this band NAMES the
+  // class that caused the bug (`text-primary/80`) so the next reader knows what
+  // not to do — and the first version of the check below matched that sentence
+  // and failed on a correct file. A rule about rendered output must be tested
+  // against rendered output.
+  const MARKUP = BAND.slice(BAND.indexOf("*/}") + 3).replace(/\n\s*/g, " ");
+  ok("stripped the explanatory comment", MARKUP.length > 150 && !/WCAG/.test(MARKUP), MARKUP.slice(0, 120));
+  ok("the wizard still words it as a hint, not a rule", /Most people here/.test(MARKUP));
+  ok("...in the same block as the figure it hedges", /\{a\.steps\}/.test(MARKUP));
+  // The figure must be high-contrast in BOTH themes. A fractional-opacity accent
+  // on a tinted surface is exactly what failed in light mode.
+  ok("the step figure is rendered in the full-contrast foreground colour",
+     /text-fg[^"]*"[^>]*>\s*\{a\.steps\}/.test(MARKUP), MARKUP.slice(0, 400));
+  ok("no faded-accent text anywhere in the band", !/text-primary\/\d/.test(MARKUP), MARKUP);
+  // It must not be the smallest thing in the row again. The description is
+  // .76rem; the figure has to beat it.
+  const figSize = Number((BAND.replace(/\n\s*/g, " ").match(/text-\[([\d.]+)rem\][^>]*>\s*\{a\.steps\}/) || [])[1]);
+  ok("the step figure is larger than the description line above it", figSize >= 0.9, figSize);
+  // Two claims on one 11px line, wrapping to three on a phone, was the other half
+  // of why it did not read.
+  // ⚠️ THE FIRST VERSION OF THIS CHECK SURVIVED ITS OWN MUTATION. It asked only
+  // whether `addOn` appeared somewhere after `{a.steps}` — which stays true when
+  // the cal/day figure is crammed BACK onto the steps line, because the separate
+  // block below still matches. The rule is about ONE element, so it must be
+  // asserted against that element: slice from the figure to the `</div>` closing it.
+  const FIG = (MARKUP.match(/\{a\.steps\}[\s\S]*?<\/div>/) || [""])[0];
+  ok("isolated the element holding the step figure", FIG.length > 20 && FIG.length < 300, FIG);
+  ok("the cal/day figure has its own line, not shared with the steps", !/addOn/.test(FIG), FIG);
+  ok("...and it is still shown", /addOn\(a\.multiplier\)/.test(MARKUP));
+  // Splitting the band from its qualifier is only safe if the qualifier is still
+  // shown — otherwise "or heavy lifting" and "or all-day heavy labour" vanish.
+  ok("the qualifier is rendered, not dropped by the split", /\{a\.stepsNote\}/.test(BAND));
+  ok("...and every rung that needs one has one",
+     LADDER.filter((a) => /lifting|labour/.test(a.desc + (a.stepsNote || ""))).length >= 2,
+     LADDER.map((a) => a.stepsNote || null));
+  // A step figure in `label` still breaks five other single-line screens, and the
+  // split moved text around — so re-check it did not land there.
+  ok("the split did not leak a figure into label", LADDER.every((a) => !/\d{3}/.test(a.label)));
   ok("the everyday-steps exclusion is carried once, above the list",
      /Everyday steps only/.test(FIELDS) && (FIELDS.match(/Everyday steps only/g) || []).length === 1);
   ok("the tracker is used when we have it", /trackerSteps && trackerSteps\.avg > 0/.test(FIELDS));
