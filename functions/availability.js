@@ -58,6 +58,42 @@ const TRAFFIC_AWARE_TIERS = ["coach", "coach_max", "coach_ultra"];
 // exists only in the custom claim — see the note at the paid check below.
 const ADMIN_UIDS = ["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"];
 function isAdminUid(uid) { return ADMIN_UIDS.includes(uid); }
+
+// ─── Which plans include the map features (S202, Kevin: Option B) ───────────
+// Drive-time warnings and "On my way" are COACH-AND-ABOVE, and below that the
+// feature does not exist rather than existing in a degraded form.
+//
+// ⚠️ THIS REPLACES A SPLIT, IT DOES NOT ADD TO ONE. Until now the boundary ran
+// THROUGH the feature: geocoding for everyone, traffic-aware routing for paid,
+// so a free trainer got a rough warning. Kevin's call is that the whole feature
+// starts at Coach. The alternative that was rejected — gate the GEOCODING —
+// is the S199u bug: geocoding is the prerequisite, so gating it leaves the panel
+// and the button on screen producing nothing, and silence here reads as "your
+// schedule is fine".
+//
+// ⚠️ THE geoKey/routesKey SPLIT INSIDE driveTime.js STAYS. It is tempting to
+// collapse the two now that only paid callers get through — and that is exactly
+// the S199v mistake: `missIrrelevant` in geocode() branches on which provider
+// produced a miss, and removing a distinction silently disarms every guard that
+// branched on it. Entry is gated; the plumbing is untouched.
+//
+// MUST equal DRIVE_FEATURE_TIERS in src/sessions.js, which only hides the entry
+// points. scripts/test-on-my-way.mjs reads both lists and fails on a drift.
+async function trainerHasDriveFeatures(db, trainerUid) {
+  if (!trainerUid) return false;
+  if (isAdminUid(trainerUid)) return true;
+  try {
+    const t = (await db.doc(`users/${trainerUid}`).get()).data() || {};
+    return t.subscriptionStatus === "active"
+      && TRAFFIC_AWARE_TIERS.includes(String(t.subscriptionTier || "base").toLowerCase());
+  } catch {
+    // ⚠️ A FAILED READ IS "NO". The old code treated it as "free estimator" and
+    // carried on, which was right when the answer only chose between two
+    // qualities of the same answer. It now decides whether the feature exists,
+    // and a read blip must not hand out a paid feature.
+    return false;
+  }
+}
 const INBOX_KEY = "caliq-inbox";
 // ⚠️ THE READER'S CLOCK, NOT THE FOUNDER'S (S200). Every booking notification
 // formatted in a hard-coded America/New_York, so a Denver trainer accepting a
@@ -484,6 +520,17 @@ exports.sessionTravel = onCall(
     if (to - from > 45 * 86400000) throw new HttpsError("invalid-argument", "That range is too wide.");
 
     const db = admin.firestore();
+    // ⚠️ NOT ON THIS PLAN → A CLEAN "no", NOT A THROW (S202, Option B). The app
+    // hides the panel, so a well-behaved client never gets here; this is the
+    // real gate behind that. It returns rather than throwing because the
+    // browser's catch deliberately paints "couldn't check your schedule" on any
+    // failure — silence on this feature reads as an all-clear — and a plan
+    // boundary is not an outage. Refusing BEFORE the collection scan also means
+    // an ungated caller cannot spend the reads.
+    if (!(await trainerHasDriveFeatures(db, uid))) {
+      return { available: false, warnings: [], legs: [], trafficAware: false,
+        trafficAvailable: false, checkedPairs: 0, unknownPairs: 0, pairsWithoutAddress: 0 };
+    }
     // ⚠️ ONE EQUALITY, NO RANGE — the window is applied in CODE. Combining
     // `trainerUid ==` with a range on `startAt` needs a composite index, and a
     // feature that 500s until someone remembers to deploy one is worse than a
@@ -540,14 +587,15 @@ exports.sessionTravel = onCall(
     // prompt for a feature he had paid Google for and enabled himself. The
     // trap is documented verbatim in functions/aichat.js:54-58; this was the
     // one gate that did not go through it.
-    let paid = isAdminUid(uid);
-    if (!paid) {
-      try {
-        const me = (await db.doc(`users/${uid}`).get()).data() || {};
-        paid = me.subscriptionStatus === "active" && TRAFFIC_AWARE_TIERS.includes(
-          String(me.subscriptionTier || "base").toLowerCase());
-      } catch { /* a profile read failure just means the free estimator */ }
-    }
+    // ⚠️ EVERY CALLER THAT REACHES HERE IS ALREADY COACH-OR-ABOVE (the gate at
+    // the top of this function), so this is true — but it is NOT deleted, and
+    // the two must not be merged into one. `paid` chooses TRAFFIC-AWARE vs the
+    // straight line; the gate above chooses whether the FEATURE EXISTS. They
+    // answer different questions and only happen to agree today. Collapsing two
+    // classes of caller into one is precisely how S199v disarmed a retry damper
+    // — 128 lookups where there had been 1 — so the distinction stays written
+    // down even while the answer is constant.
+    const paid = true;
     // Geocoding for everyone, traffic-aware routing for paid (S199u). The single
     // `key` used to gate both, so a free trainer's addresses never reached Google
     // — and the free straight-line WARNING, which is meant to be universal,
@@ -756,6 +804,21 @@ exports.sessionOnMyWay = onCall(
     const verdict = onMyWayDecision(session, uid, now);
     if (!verdict.ok) throw new HttpsError(verdict.code, verdict.reason);
 
+    // ⚠️ THE PLAN GATE SITS HERE — BEFORE THE WRITE AND BEFORE THE PUSH (S202).
+    // Placed any later it would still refuse, but only after stamping an ETA on
+    // the session and buzzing the other person about a journey the app is not
+    // going to keep showing them. A refusal has to happen before it has done
+    // anything.
+    // ⚠️ THE TRAINER'S PLAN, EVEN WHEN THE CLIENT TAPPED. The client subscribes
+    // to nothing that includes this; the coaching workspace is what is sold. So
+    // a Coach's client may say they are on the way, and a non-Coach's client may
+    // not — matching the tier rule the ETA quality already used, and matching
+    // what the app shows each of them.
+    if (!(await trainerHasDriveFeatures(db, session.trainerUid))) {
+      throw new HttpsError("failed-precondition",
+        "“On my way” isn’t part of this plan.");
+    }
+
     // A repeat inside the cooldown returns what is already stored: no Routes
     // call, no second push, and — importantly — no write, so the "sent at"
     // stamp the cooldown itself is measured from cannot be pushed forward by
@@ -781,15 +844,12 @@ exports.sessionOnMyWay = onCall(
     // on the caller would mean a paying coach's client got the worse estimate
     // for the same session, which is not a boundary anyone would draw on
     // purpose.
-    const trainerUid = String(session.trainerUid || "");
-    let paid = isAdminUid(trainerUid);
-    if (!paid && trainerUid) {
-      try {
-        const t = (await db.doc(`users/${trainerUid}`).get()).data() || {};
-        paid = t.subscriptionStatus === "active" && TRAFFIC_AWARE_TIERS.includes(
-          String(t.subscriptionTier || "base").toLowerCase());
-      } catch { /* a profile read failure just means the free estimator */ }
-    }
+    // Already established by the gate above — the same profile read, so it is
+    // not repeated. Kept as a named value rather than inlined `true` for the
+    // reason spelled out in sessionTravel: "may this caller use the feature" and
+    // "may this caller have traffic-aware numbers" are different questions that
+    // happen to share an answer today (S199v).
+    const paid = true;
 
     let est = null;
     if (verdict.destination) {

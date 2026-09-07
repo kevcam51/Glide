@@ -29,6 +29,39 @@ export const bySoonest = (a, b) => (a.startAt || 0) - (b.startAt || 0);
 export const sessionEndMs = (s) => (s.startAt || 0) + (s.durationMin || SESSION_DEFAULT_MIN) * 60000;
 export const isPastSession = (s, now = Date.now()) => sessionEndMs(s) <= now;
 
+// ─── Which plans include the map features (S202, Kevin: Option B) ───────────
+// Drive-time warnings and "On my way" are COACH-AND-ABOVE. Below that the
+// feature does not appear at all — no panel, no button, no degraded version.
+//
+// ⚠️ WHY HIDE RATHER THAN STARVE. The obvious-looking alternative was to gate
+// the GEOCODING and leave the feature on screen, and that is the bug S199u
+// already fixed once: geocoding is the PREREQUISITE, not the premium half — a
+// drive cannot be measured between two addresses nobody has resolved to
+// coordinates. Gating it leaves the panel and the button rendering and silently
+// producing nothing, and this feature's silence reads as "your schedule is
+// fine". Hiding the whole feature is an honest upsell; starving it is a safety
+// check that quietly stopped working.
+//
+// ⚠️ THE TRAINER'S PLAN DECIDES, FOR BOTH PEOPLE. A client buys nothing here —
+// the coaching workspace is the thing being sold — so a Coach's client can tap
+// "On my way" and a non-Coach's client cannot, regardless of what the client
+// themselves is subscribed to. Same rule the ETA quality already used.
+//
+// MUST equal TRAFFIC_AWARE_TIERS in functions/availability.js, which is the REAL
+// gate; this only hides entry points so nobody walks into a wall (the shape
+// canBillSessions/sessionBillingGate.js already set). scripts/test-on-my-way.mjs
+// reads both lists and fails if they drift.
+export const DRIVE_FEATURE_TIERS = ["coach", "coach_max", "coach_ultra"];
+
+// Does this profile's plan include them? PURE — admin is a UID and is applied by
+// the caller, exactly as canBillSessions does it, because a profile-doc role of
+// "admin" does not exist on any real document (S199g).
+export function planHasDriveFeatures(profile) {
+  const p = profile || {};
+  return p.subscriptionStatus === "active"
+    && DRIVE_FEATURE_TIERS.includes(String(p.subscriptionTier || "base").toLowerCase());
+}
+
 // ─── "On my way" (S201) ─────────────────────────────────────────────────────
 // The ETA a person shares by tapping one button, and nothing else. The WRITE is
 // server-only (functions/availability.js sessionOnMyWay) — `onMyWay` is

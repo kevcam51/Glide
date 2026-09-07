@@ -48,7 +48,9 @@ const NOW = Date.UTC(2026, 8, 6, 14, 0);   // a fixed clock, so nothing here is 
 // helpers are extracted by source rather than required — but they are extracted
 // WHOLE and EXECUTED, so a mutation to the shipping body fails this file.
 function lift(src, name) {
-  const m = src.match(new RegExp(`\\nfunction ${name}\\([\\s\\S]*?\\n\\}`));
+  // `async ` too — trainerHasDriveFeatures is one, and a lifter that silently
+  // could not see it would have quietly dropped the whole plan-gate section.
+  const m = src.match(new RegExp(`\\n(?:async )?function ${name}\\([\\s\\S]*?\\n\\}`));
   if (!m) throw new Error(`could not lift ${name}`);
   return m[0];
 }
@@ -356,6 +358,138 @@ ok("validPoint rejects NaN", D.validPoint({ lat: NaN, lng: 0 }) === null);
   const guard = body.slice(0, body.indexOf("const db = admin.firestore()"));
   ok("...and the guard runs before the document is addressed",
      /invalid-argument/.test(guard), true);
+}
+
+// ── 9c. the plan gate (S202, Kevin: Option B) ───────────────────────────────
+// The whole feature is Coach-and-above. Below that it does not appear — no
+// panel, no button, no degraded version.
+//
+// ⚠️ THE REJECTED ALTERNATIVE IS THE ONE TO GUARD AGAINST. Gating the GEOCODING
+// instead leaves the panel and the button rendering and silently producing
+// nothing — the S199u bug — and this feature's silence reads as "your schedule
+// is fine". So these assertions check that the gate is on ENTRY, not on the key.
+{
+  const server = (AVAIL.match(/const TRAFFIC_AWARE_TIERS = \[([^\]]*)\]/) || [])[1];
+  const client = (SESSIONS.match(/export const DRIVE_FEATURE_TIERS = \[([^\]]*)\]/) || [])[1];
+  ok("both sides declare the qualifying plans", !!server && !!client, [server, client]);
+  const norm = (x) => (x || "").replace(/["'\s]/g, "");
+  ok("...and the two lists are identical — the app must hide exactly what the server refuses",
+     norm(server) === norm(client), [norm(server), norm(client)]);
+  ok("Connect is deliberately NOT included", !/\bconnect\b/.test(norm(client)), norm(client));
+
+  // The server predicate, lifted and RUN.
+  const gate = new Function(`
+    const TRAFFIC_AWARE_TIERS = [${server}];
+    const ADMIN_UIDS = ["ADMIN"];
+    function isAdminUid(uid) { return ADMIN_UIDS.includes(uid); }
+    ${lift(AVAIL, "trainerHasDriveFeatures").replace("async function", "async function")}
+    return trainerHasDriveFeatures;
+  `)();
+  const dbOf = (profile, throws) => ({ doc: () => ({ get: async () => {
+    if (throws) throw new Error("firestore blip");
+    return { data: () => profile };
+  } }) });
+  ok("a coach on an active plan is allowed",
+     await gate(dbOf({ subscriptionStatus: "active", subscriptionTier: "coach" }), "t1") === true);
+  ok("coach_max is allowed",
+     await gate(dbOf({ subscriptionStatus: "active", subscriptionTier: "coach_max" }), "t1") === true);
+  ok("a CANCELLED coach subscription is refused",
+     await gate(dbOf({ subscriptionStatus: "canceled", subscriptionTier: "coach" }), "t1") === false);
+  ok("a TRIALING coach subscription is refused",
+     await gate(dbOf({ subscriptionStatus: "trial", subscriptionTier: "coach" }), "t1") === false);
+  ok("the Connect tier is refused",
+     await gate(dbOf({ subscriptionStatus: "active", subscriptionTier: "connect" }), "t1") === false);
+  ok("a free trainer is refused", await gate(dbOf({}), "t1") === false);
+  ok("the owner UID is allowed without a profile read", await gate(dbOf(null), "ADMIN") === true);
+  ok("no trainer at all is refused", await gate(dbOf({}), "") === false);
+  // ⚠️ A read blip must not hand out a paid feature. The OLD code caught the
+  // same read and carried on with the free estimator, which was right when the
+  // answer only chose between two qualities of one answer; it now decides
+  // whether the feature exists.
+  ok("a failed profile read is NO, not a free pass",
+     await gate(dbOf(null, true), "t1") === false);
+  // Case shouldn't matter — the stored tier is whatever billing.js wrote.
+  ok("tier matching is case-insensitive",
+     await gate(dbOf({ subscriptionStatus: "active", subscriptionTier: "COACH" }), "t1") === true);
+}
+{
+  // ORDER IS THE WHOLE POINT for the action. A refusal that lands after the
+  // write has stamped an ETA and buzzed the other person is not a refusal.
+  const body = AVAIL.slice(AVAIL.indexOf("exports.sessionOnMyWay"));
+  const gateAt = body.indexOf("trainerHasDriveFeatures");
+  ok("sessionOnMyWay checks the plan", gateAt > 0);
+  ok("...before it writes the ETA", gateAt < body.indexOf("ref.set("), [gateAt, body.indexOf("ref.set(")]);
+  ok("...and before it notifies anyone", gateAt < body.indexOf("sendPushTo"), [gateAt, body.indexOf("sendPushTo")]);
+  ok("...and before it spends a Routes call", gateAt < body.indexOf("estimateDriveFrom"));
+  // sessionTravel refuses by RETURNING, not throwing: the browser's catch paints
+  // "couldn't check your schedule" on any failure, and a plan boundary is not an
+  // outage.
+  const tBody = AVAIL.slice(AVAIL.indexOf("exports.sessionTravel"), AVAIL.indexOf("exports.sessionOnMyWay"));
+  const tGate = tBody.indexOf("trainerHasDriveFeatures");
+  ok("sessionTravel checks the plan", tGate > 0);
+  ok("...and answers with a clean unavailable rather than throwing",
+     /available: false/.test(tBody.slice(tGate, tGate + 400)), tBody.slice(tGate, tGate + 400));
+  ok("...before it scans the sessions collection",
+     tGate < tBody.indexOf('collection("sessions")'), [tGate, tBody.indexOf('collection("sessions")')]);
+}
+{
+  // The app side: every OnMyWay mount passes an explicit answer, and the default
+  // is OFF so a new mount site cannot ship the feature by omission.
+  ok("OnMyWay defaults to disabled", /enabled = false \}/.test(APP), true);
+  ok("...and renders nothing when disabled", /if \(!enabled\) return null;/.test(APP));
+  const mounts = APP.match(/<OnMyWay[\s\S]{0,260}?\/>/g) || [];
+  ok("found every OnMyWay mount", mounts.length === 3, mounts.length);
+  for (const m of mounts) {
+    ok(`a mount passes an explicit enabled: ${m.slice(0, 46).replace(/\s+/g, " ")}`, /enabled=\{/.test(m), m);
+  }
+  // The calendar must not CALL sessionTravel when the plan excludes it — the
+  // catch there paints an error banner, so a server refusal would look like an
+  // outage on a schedule that is fine.
+  ok("the travel effect refuses to call when the plan excludes it",
+     /if \(!myDrive \|\|[\s\S]{0,120}?\{ setTravel\(null\); return; \}/.test(APP), true);
+  // ...and `myDrive` leads the guard, so a falsy plan answer short-circuits
+  // before anything else is even evaluated.
+  ok("...with the plan answer first in the guard", /\{\s*if \(!myDrive \|\|/.test(APP.replace(/\n\s*\/\/[^\n]*/g, "")), true);
+  ok("...and re-runs when the answer arrives", /\}, \[meUid, travelSig, myDrive\]\);/.test(APP));
+  // Tri-state: null means "not known yet" and must not be read as allowed.
+  ok("the calendar's plan answer starts unknown, not allowed",
+     /const \[myDrive, setMyDrive\] = useState\(null\);/.test(APP));
+}
+
+// ── 9d. the pricing grid is a PROMISE, so it must match the gate ────────────
+// A row that says a plan includes drive time, on a plan the server refuses, is a
+// bill someone paid for a feature that never appears. The grid columns are
+// [Free, Connect, Coach, Coach Max].
+{
+  const rows = [
+    "Drive time between sessions, with traffic",
+    "Warns you when you can't make it across town",
+  ];
+  for (const label of rows) {
+    const m = APP.match(new RegExp(`\\["${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}", ([^\\]]*)\\]`));
+    ok(`the grid has a row for "${label.slice(0, 34)}…"`, !!m, label);
+    if (!m) continue;
+    const cols = m[1].split(",").map((x) => x.trim());
+    ok(`…and it is NOT sold on Free: ${label.slice(0, 24)}`, cols[0] === "false", cols);
+    // The one that actually changed, and the one a future edit is most likely
+    // to put back: Connect must not be sold a feature the server refuses.
+    ok(`…and NOT sold on Connect: ${label.slice(0, 24)}`, cols[1] === "false", cols);
+    ok(`…and IS sold on Coach and above: ${label.slice(0, 24)}`,
+       cols[2] === "true" && cols[3] === "true", cols);
+  }
+  const omw = APP.match(/\["\u201cOn my way\u201d[^"]*", ([^\]]*)\]/);
+  ok("the grid sells \u201cOn my way\u201d", !!omw, omw && omw[1]);
+  if (omw) {
+    const cols = omw[1].split(",").map((x) => x.trim());
+    ok("...on Coach and above only", cols.join() === "false,false,true,true", cols);
+  }
+  // A row with no tooltip renders bare; the grid explains every other line.
+  ok("...and explains what it is", /one tap works out how long you\u2019ll be/i.test(APP)
+     || /arriving around 9:05/.test(APP), true);
+  // The upsell that is now false — everyone who reaches that panel already
+  // bought the thing it offered.
+  ok("the panel no longer offers traffic to people who already have it",
+     !/Traffic-aware times come with any paid plan/.test(APP), true);
 }
 
 // ── 10. the client's read of an ETA ─────────────────────────────────────────

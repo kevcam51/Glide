@@ -17,7 +17,7 @@ import { bookSession, updateSession, cancelSession, markNoShow, waiveSession, su
   stripeFeeCents, feeComparison,
   subscribeMyEarnings, earningsSummary, chargeStatusLabel, centsToUsd,
   clientStateInfo,
-  canSayOnMyWay, onMyWayStatus } from "./sessions.js";
+  canSayOnMyWay, onMyWayStatus, planHasDriveFeatures } from "./sessions.js";
 import { auth, functions, signOutAndClearCache} from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -18278,6 +18278,19 @@ const OWNER_UID = "G7QUZ8Kat1fgyoMjdGKz4DYoVHi1";
 // automatic charging and earnings are behind this.
 const canBillSessions = (uid) => uid === OWNER_UID;
 
+// Does this TRAINER's plan include the map features — drive-time warnings and
+// "On my way"? (S202, Kevin: Option B — hide the feature below Coach rather than
+// leave it on screen producing nothing.)
+//
+// ⚠️ ALWAYS THE TRAINER'S PROFILE, EVEN WHEN A CLIENT IS LOOKING. The client
+// buys nothing here; the coaching workspace is what is sold. Passing the
+// client's own profile would hide the button on a paying coach's session, which
+// is the opposite of the intended boundary.
+// ⚠️ THIS ONLY HIDES ENTRY POINTS. functions/availability.js is the real gate —
+// same division of labour as canBillSessions and sessionBillingGate.js.
+const hasDriveFeatures = (trainerProfile, trainerUid) =>
+  trainerUid === OWNER_UID || planHasDriveFeatures(trainerProfile);
+
 // Friendly one-liner for a manual "sync now" result. Deliberately reports when
 // nothing NEW arrived: Glide can only pull what Trainerize already has, and a
 // watch that hasn't pushed today's data yet is the common case — saying "synced"
@@ -21043,7 +21056,12 @@ function onMyWayError(e) {
   return "Couldn't send that just now — try again in a moment.";
 }
 
-function OnMyWay({ session: s, meUid, otherName, compact = false }) {
+// ⚠️ `enabled` IS REQUIRED AND DEFAULTS TO OFF (S202, Option B). Every caller
+// passes the TRAINER's plan answer; defaulting to on would mean a new mount site
+// silently ships the feature to plans that do not include it, which is exactly
+// the class of mistake a paywall cannot afford. Off also covers "not loaded
+// yet", so the button never flashes in and out.
+function OnMyWay({ session: s, meUid, otherName, compact = false, enabled = false }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [note, setNote] = useState("");
@@ -21054,6 +21072,10 @@ function OnMyWay({ session: s, meUid, otherName, compact = false }) {
 
   const status = onMyWayStatus(s, meUid, now);
   const canSay = canSayOnMyWay(s, now);
+  // Not on this trainer's plan → the feature is not here at all. Including the
+  // READ side: a stored ETA can outlive a downgrade, and showing one on a plan
+  // that can no longer produce another would be a feature that works once.
+  if (!enabled) return null;
   if (!status && !canSay) return null;
 
   // ⚠️ ONE JOURNEY PER SESSION, ON PURPOSE. The record is a single
@@ -21211,6 +21233,13 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
   // estimate needs a key the browser must never hold and a cache every device
   // should share. Null until asked; { warnings, legs, trafficAware } after.
   const [travel, setTravel] = useState(null);
+  // Does this trainer's plan include the map features? (S202, Option B.)
+  // ⚠️ TRI-STATE, AND null MATTERS. `false` means "not on your plan"; `null`
+  // means the profile has not loaded yet. Starting at `false` would be a lie for
+  // one render — and worse, it would let the travel effect below run, settle,
+  // and then re-run when the answer arrived, spending a Routes call before we
+  // knew whether we were allowed to.
+  const [myDrive, setMyDrive] = useState(null);
 
   useEffect(() => { if (!meUid) return; return subscribeMySessions(meUid, setSessions); }, [meUid]);
   useEffect(() => { if (!meUid) return; return subscribeMyBlocks(meUid, setBlocks); }, [meUid]);
@@ -21224,7 +21253,14 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     getProfile(meUid).then((p) => {
       const pol = policyOf(p); setPolicy(pol); setPolicyDraft(pol);
       setAvailPublic((p && p.availabilityPublic) === true);
-    }).catch(() => {});
+      setMyDrive(hasDriveFeatures(p, meUid));
+    }).catch(() => {
+      // ⚠️ A FAILED READ IS "NO", NOT "UNKNOWN FOREVER". Left at null the panel
+      // simply never appears, which is the safe direction: the alternative is
+      // calling a callable that will refuse and painting the "couldn't check
+      // your schedule" banner on a trainer whose schedule is fine.
+      setMyDrive(false);
+    });
   }, [meUid]);
   useEffect(() => {
     window.storage.get(CAL_COLORS_KEY)
@@ -21241,7 +21277,13 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     .map((s) => `${s.id}:${s.startAt}:${s.durationMin}:${s.location || ""}`).sort().join("|"),
     [sessions, meUid]);
   useEffect(() => {
-    if (!meUid || travelSig.split("|").filter(Boolean).length < 2) { setTravel(null); return; }
+    // ⚠️ NOT ON THIS PLAN → NEVER ASK (S202). The catch below deliberately paints
+    // "couldn't check your schedule" on any failure, because silence on this
+    // feature reads as an all-clear — which means a server-side plan refusal
+    // would show every non-Coach trainer a permanent error about a schedule that
+    // is perfectly fine. The gate has to stop the CALL, not handle its answer.
+    // `myDrive == null` is "not known yet" and waits.
+    if (!myDrive || !meUid || travelSig.split("|").filter(Boolean).length < 2) { setTravel(null); return; }
     let alive = true;
     const from = Date.now();
     const t = setTimeout(() => {
@@ -21260,7 +21302,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
         });
     }, 600);
     return () => { alive = false; clearTimeout(t); };
-  }, [meUid, travelSig]);
+  }, [meUid, travelSig, myDrive]);
 
   const setClientColor = (uid, color) => {
     const next = { ...calColors, [uid]: color };
@@ -21784,12 +21826,15 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
               {travel.trafficAware
                 ? "Drive times include current traffic."
                 : "Drive times are straight-line estimates — no traffic, so treat them as the best case."}
-              {/* Only when traffic-aware times EXIST and this account simply
-                  isn't on a plan that includes them. Saying "upgrade for
-                  traffic" while nobody has it would be selling a thing that
-                  does not yet work. */}
+              {/* ⚠️ THIS USED TO READ "Traffic-aware times come with any paid
+                  plan." — an upsell aimed at trainers below Coach who could
+                  still see the panel. Under Option B (S202) nobody below Coach
+                  reaches this screen at all, so everyone reading it has already
+                  bought the thing it was selling. Straight-line numbers here now
+                  mean the traffic lookup did not come back for these legs, which
+                  is an explanation, not an offer. */}
               {!travel.trafficAware && travel.trafficAvailable
-                ? " Traffic-aware times come with any paid plan." : ""}
+                ? " Traffic data didn’t come back for these legs — it’ll try again on the next check." : ""}
             </div>
           </div>
         )}
@@ -21909,7 +21954,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
           meName={meName}
           hasCard={(() => { const c = clients.find((x) => x.uid === detail.clientUid);
             return !!(c && c.sessionPaymentMethod && c.sessionPaymentMethod.id); })()}
-          canBill={canBillSessions(meUid)}
+          canBill={canBillSessions(meUid)} driveOn={!!myDrive}
           color={colorOf(detail.clientUid)} onSetColor={setClientColor}
           onClose={() => setDetail(null)} onEdit={() => openEditForm(detail)}
           onOpenClient={onOpenClientPlan ? () => { onOpenClientPlan(detail.clientUid); } : null}
@@ -21940,7 +21985,7 @@ const calToLocalInput = (ms) => {
 };
 
 // One booked session, and everything the trainer can do about it.
-function CalSessionSheet({ session: s, nameOf, now, busy, meUid, meName, hasCard = true, canBill = false, color, onSetColor, onClose, onEdit, onOpenClient, onCancelOne, onCancelSeries, onNoShow, onWaive }) {
+function CalSessionSheet({ session: s, nameOf, now, busy, meUid, meName, hasCard = true, canBill = false, driveOn = false, color, onSetColor, onClose, onEdit, onOpenClient, onCancelOne, onCancelSeries, onNoShow, onWaive }) {
   const [confirm, setConfirm] = useState("");
   const [pickColor, setPickColor] = useState(false);
   const past = sessionEndMs(s) <= now;
@@ -22009,7 +22054,7 @@ function CalSessionSheet({ session: s, nameOf, now, busy, meUid, meName, hasCard
             is the surface it matters on most. Same component as the Sessions
             panel: one place decides when it may be said and what it promises. */}
         {!past && s.status !== "cancelled" && (
-          <OnMyWay session={s} meUid={meUid} otherName={nameOf(s.clientUid)} />
+          <OnMyWay session={s} meUid={meUid} otherName={nameOf(s.clientUid)} enabled={driveOn} />
         )}
 
         <div className="flex flex-wrap gap-1.5">
@@ -22709,11 +22754,19 @@ const PLAN_FEATURES = {
       ["Card on file & automatic session billing", false, true, true, true],
       ["No-show and waive controls on delivered sessions", false, true, true, true],
       ["Earnings ledger — what was charged, and what didn't", false, true, true, true],
-      // S197k — drive time. Kevin's S190b call: a plan feature, not a separate
-      // upcharge, so the Google Routes bill lands only on paying accounts.
-      // Every paid plan carries session booking, so every paid plan gets it.
-      ["Drive time between sessions, with traffic", false, true, true, true],
-      ["Warns you when you can't make it across town", false, true, true, true],
+      // ⚠️ MOVED FROM CONNECT TO COACH (S202, Kevin: Option B). These used to be
+      // "any paid plan", with a free straight-line version below that. Kevin's
+      // call is that the map features start at Coach and simply do not appear
+      // below it — an honest upsell rather than a degraded one. The rejected
+      // alternative was gating the GEOCODING and leaving them visible, which is
+      // the S199u bug: geocoding is the prerequisite, so the panel renders and
+      // silently says nothing, and silence here reads as "your schedule is fine".
+      // These three columns must agree with DRIVE_FEATURE_TIERS (src/sessions.js)
+      // and TRAFFIC_AWARE_TIERS (functions/availability.js) — the grid is a
+      // promise, and scripts/test-on-my-way.mjs checks it against them.
+      ["Drive time between sessions, with traffic", false, false, true, true],
+      ["Warns you when you can't make it across town", false, false, true, true],
+      ["“On my way” — one tap sends your client a live ETA", false, false, true, true],
     ]},
     { section: "AI assistant — everything in Free, plus:", rows: [
       // S179f (Kevin): teams sit at Coach, not Connect — managing people who
@@ -22836,6 +22889,8 @@ const PLAN_TIPS = {
     "If you travel to clients, Glidna works out how long the drive between two sessions actually takes \u2014 traffic included, at the time you'd be making it.",
   "Warns you when you can't make it across town":
     "Book two sessions too close together and Glidna says so, with the numbers: how long the gap is, how long the drive is, and how short you are.",
+  "“On my way” — one tap sends your client a live ETA":
+    "Heading to a session? One tap works out how long you'll be and tells your client \u2014 \"about 12 min out, arriving around 9:05\". Your location is used once to work out the time and is never stored or shared; only the ETA is. Works both ways, so a client driving to you can send one too.",
   "Connect clients from Trainerize":
     "Attach a Trainerize client to their Glidna account and their stats, body composition, workouts and watch data sync across automatically. Free covers 15 connected clients.",
   "Session booking & cancellation policy":
@@ -25672,7 +25727,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
         const t = await getProfile(tUid).catch(() => null);
         if (!alive) return;
         clearInterval(id);
-        setTrainerInfo({ uid: tUid, name: (t && (t.displayName || [t.firstName, t.lastName].filter(Boolean).join(" "))) || "Your trainer" });
+        setTrainerInfo({ uid: tUid, name: (t && (t.displayName || [t.firstName, t.lastName].filter(Boolean).join(" "))) || "Your trainer", drive: hasDriveFeatures(t, tUid) });
       } catch { /* keep trying until the attempts run out */ }
     }, 1200);
     return () => { alive = false; clearInterval(id); };
@@ -25859,7 +25914,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       const tUid = p && p.assignedTrainerId;
       if (tUid) {
         const t = await getProfile(tUid).catch(() => null);
-        setTrainerInfo({ uid: tUid, name: (t && (t.displayName || [t.firstName, t.lastName].filter(Boolean).join(" "))) || "Your trainer" });
+        setTrainerInfo({ uid: tUid, name: (t && (t.displayName || [t.firstName, t.lastName].filter(Boolean).join(" "))) || "Your trainer", drive: hasDriveFeatures(t, tUid) });
       } else setTrainerInfo(null);
       setProfileLoadFailed(false);
       return true;
@@ -26504,7 +26559,11 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
                 This card is the one thing on their home screen about today's
                 session, so an ETA that only lived behind two taps in the
                 Sessions panel would mostly go unseen. */}
+            {/* ⚠️ THE TRAINER'S PLAN, NOT THE CLIENT'S (S202). `trainerInfo.drive`
+                is read off the trainer profile this screen already fetches. A
+                client subscribes to nothing that includes this. */}
             <OnMyWay session={nextSession} meUid={meUid}
+              enabled={!!(trainerInfo && trainerInfo.drive)}
               otherName={trainerInfo ? trainerInfo.name : "Your trainer"} />
           </div>
         )}
@@ -29798,11 +29857,18 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
   const [policy, setPolicy] = useState(DEFAULT_SESSION_POLICY);
   const [editPolicy, setEditPolicy] = useState(false);
   const [policyDraft, setPolicyDraft] = useState(DEFAULT_SESSION_POLICY);
+  // Whether "On my way" is on this trainer's plan (S202, Option B). Read off the
+  // SAME profile fetch the policy already makes — no extra request, and no new
+  // access: this panel has always read the trainer's profile, and a client is
+  // allowed to (the trainer-directory rule, S59).
+  // ⚠️ Starts FALSE, not null: a failed read must hide the button rather than
+  // offer one whose callable will refuse.
+  const [driveOn, setDriveOn] = useState(false);
   useEffect(() => {
     if (!trainerUid) return;
     let alive = true;
     getProfile(trainerUid)
-      .then((p) => { if (alive) { const pol = policyOf(p); setPolicy(pol); setPolicyDraft(pol); } })
+      .then((p) => { if (alive) { const pol = policyOf(p); setPolicy(pol); setPolicyDraft(pol); setDriveOn(hasDriveFeatures(p, trainerUid)); } })
       .catch(() => { /* keep the safe default */ });
     return () => { alive = false; };
   }, [trainerUid]);
@@ -30064,7 +30130,7 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
           nothing until the session is close enough for it to be a true
           statement, so it does not sit on next month's booking. */}
       {!opts.past && !opts.cancelled && (
-        <OnMyWay session={s} meUid={meUid} otherName={otherName} compact />
+        <OnMyWay session={s} meUid={meUid} otherName={otherName} compact enabled={driveOn} />
       )}
       {!opts.past && !opts.cancelled && (
         <div className="mt-2 flex gap-1.5 flex-wrap">
@@ -32028,7 +32094,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
                 // thing the Notification Center promises you can do.
                 { key: "sessionBilling", label: "Session billing", desc: "When a session is charged or a balance settles" },
                 { key: "sessionReminders", label: "Session reminders", desc: "Before a booked session — set your lead times on the calendar page" },
-                { key: "sessionOnMyWay", label: "\u201cOn my way\u201d alerts", desc: "When a client sets off for a session and shares an ETA" },
+                { key: "sessionOnMyWay", label: "“On my way” alerts", desc: "When a client sets off for a session and shares an ETA" },
                 { key: "mealReviews", label: "Meals to check", desc: "When a client tags a meal and sends it over" },
               ]
             : [
@@ -32041,7 +32107,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
                 { key: "referralRewards", label: "Referral rewards", desc: "When credit you've earned is ready to claim" },
                 { key: "sessionBilling", label: "Session billing", desc: "When you're charged for a session" },
                 { key: "sessionReminders", label: "Session reminders", desc: "Before a booked session — set your lead times below" },
-                { key: "sessionOnMyWay", label: "\u201cOn my way\u201d alerts", desc: "When your trainer sets off and shares an ETA" },
+                { key: "sessionOnMyWay", label: "“On my way” alerts", desc: "When your trainer sets off and shares an ETA" },
                 { key: "mealReviews", label: "Meal check-backs", desc: "When your trainer confirms or corrects a meal you tagged" },
               ];
           const Toggle = ({ on, disabled, onClick }) => (

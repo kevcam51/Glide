@@ -172,10 +172,25 @@ ok("the booking sheet names blocked time as blocked time",
 // alone, so `profile.role === "admin"` is false for every real document — the
 // owner's included. The traffic-aware gate read exactly that and so the one
 // account meant to bypass the tier check never did.
-ok("the traffic-aware gate identifies admin by UID",
-   /let paid = isAdminUid\(uid\);/.test(AVAIL));
+// ⚠️ RE-AIMED, NOT DELETED (S202). The rule moved: the tier read that used to
+// sit inline in sessionTravel is now `trainerHasDriveFeatures`, shared with
+// sessionOnMyWay, because Option B turned "which quality of answer" into
+// "whether the feature exists at all". The INVARIANT is unchanged, so the
+// assertion follows it rather than being dropped — a regex left pointing at
+// deleted code is how S200e's stale check ended up guarding the wrong gate.
+// The EXECUTABLE version (the predicate lifted and run against every tier,
+// including the admin path and a failed read) lives in scripts/test-on-my-way.mjs.
+ok("the plan gate identifies admin by UID",
+   /if \(isAdminUid\(trainerUid\)\) return true;/.test(AVAIL));
+// ⚠️ AGAINST CODE, NOT PROSE. The comment above the gate NAMES the pattern that
+// was wrong (`me.role === "admin"`) so the next reader knows what not to write —
+// and a blanket negative match failed on a correct file because of it. Same
+// mistake, twice in one session; strip the comments first.
 ok("...and no longer by a profile-doc role",
-   !/paid = me\.role === "admin"/.test(AVAIL));
+   !/role === "admin"/.test(AVAIL.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "")));
+ok("...and it is the single gate both map callables use",
+   (AVAIL.match(/await trainerHasDriveFeatures\(/g) || []).length === 2,
+   (AVAIL.match(/await trainerHasDriveFeatures\(/g) || []).length);
 ok("...with the UID list matching the one every other function uses",
    /const ADMIN_UIDS = \["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"\];/.test(AVAIL));
 
