@@ -16141,18 +16141,39 @@ function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, bfAvai
           Kevin) — a scale is easiest, calipers take more effort and are
           generally more accurate. Only methods with readings are offered, and
           the row is hidden entirely when there's only one (nothing to choose). */}
+      {/* ⚠️ THIS CONTROL LOOKED LIKE DECORATION (S200z, Kevin: "it gives me
+          options to pick from: scale, calipers or tape. But I have no idea what
+          clicking on either option does. This section seems out of place.").
+          It is not decoration — it decides WHICH body-fat number the whole app
+          uses for fat mass, lean mass, the derived goal weight and, since
+          S200y, which method the trend is plotted from. The old label named a
+          field; it never said it was a choice, never said the choice mattered,
+          and never showed what each option would give. Now each button carries
+          its own latest reading, so the disagreement Kevin was worried about is
+          the thing you are choosing between. */}
       {onSetBfSource && (bfAvailable || []).length > 1 && (
-        <div className="rounded-lg bg-surface2 p-3 flex flex-wrap items-center gap-2">
-          <span className="text-[.7rem] font-bold uppercase tracking-wide text-muted">Fat &amp; lean mass from</span>
-          {(bfAvailable || []).map((k) => (
-            <button key={k} onClick={() => onSetBfSource(k)}
-              title={`Use ${BF_METHOD_NAME[k]} for fat & lean mass`}
-              className={`rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer ${
-                primaryBfSource === k ? "bg-primaryfill text-primaryfg border-0"
-                                      : "bg-transparent text-fg border border-border"}`}>
-              {BF_METHOD_SHORT[k]}
-            </button>
-          ))}
+        <div className="rounded-lg bg-surface2 p-3">
+          <div className="text-[.72rem] font-bold text-fg mb-1">Which reading should the app trust?</div>
+          <div className="text-[.7rem] text-muted leading-snug mb-2">
+            These methods disagree by several points on the same body — that is normal, not an error.
+            Pick the one you take most often; everything else follows it.
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {(bfAvailable || []).map((k) => {
+              const rows = (bfBySource && bfBySource[k]) || [];
+              const latest = rows.length ? rows[rows.length - 1] : null;
+              const val = latest && (latest.bf != null ? latest.bf : latest.y);
+              return (
+                <button key={k} onClick={() => onSetBfSource(k)}
+                  title={`Use ${BF_METHOD_NAME[k]} for fat & lean mass, the goal weight derived from it, and the trend`}
+                  className={`rounded-md px-2.5 py-1.5 text-xs font-semibold cursor-pointer ${
+                    primaryBfSource === k ? "bg-primaryfill text-primaryfg border-0"
+                                          : "bg-transparent text-fg border border-border"}`}>
+                  {BF_METHOD_SHORT[k]}{val != null ? ` · ${val}%` : ""}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
       <div className="text-[10px] text-muted italic">
@@ -24047,12 +24068,26 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
   };
   useEffect(() => { autoGrowTextarea(); }, [draft, open]);
 
+  // ⚠️ MESSAGES SENT WHILE IT IS THINKING ARE QUEUED, NOT REFUSED (S201, Kevin:
+  // "I don't want a point where a client is just sitting there waiting for a
+  // response instead of the fact that they could also be typing and possibly
+  // send a message or two while the AI is thinking").
+  //
+  // The textarea was already live — only Send was disabled — so people could
+  // type a follow-up and then find they could not send it, which is the worse
+  // half of the two. Queued turns are BATCHED into the next send rather than
+  // replayed one at a time: the model sees the whole follow-up together, which
+  // reads better and costs one API call instead of N against the daily budget.
+  const queuedRef = useRef([]);
   const send = async (overrideText, opts) => {
     // overrideText is a string only for programmatic sends (e.g. paste-from-AI
     // import). When called as an onClick handler the arg is an event — ignore it.
     const isOverride = typeof overrideText === "string";
     const text = (isOverride ? overrideText : draft).trim();
-    const imgs = isOverride ? [] : pendingImages;
+    // A programmatic send carries no composer images — EXCEPT the queue drain,
+    // which hands back the photos that arrived while the turn was running and
+    // would otherwise be silently dropped (S201).
+    const imgs = isOverride ? ((opts && opts.images) || []) : pendingImages;
     // fresh: start the thread from empty rather than from `messages`. newChat()
     // resets that state, but this closure still holds the PREVIOUS array — so a
     // send fired straight after it would carry the old conversation (and its
@@ -24062,6 +24097,16 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
     // under, and the client the turn is relayed with. A voice note routed to a
     // chat other than the open one passes all of them explicitly.
     const fresh = !!(opts && opts.fresh);
+    // Mid-turn: park it, show it in the thread so it visibly landed, and let the
+    // current answer finish. A queued message that vanishes from the box with
+    // nothing to show for it reads as a dropped message.
+    if (busy && !fresh && (text || (imgs && imgs.length))) {
+      queuedRef.current = [...queuedRef.current, { text, images: imgs }];
+      setMessages((prev) => [...prev, { role: "user", content: text, images: imgs.length ? imgs : undefined, queued: true }]);
+      if (!isOverride) setDraft("");
+      setPendingImages([]);
+      return;
+    }
     const base = opts && Array.isArray(opts.base) ? opts.base : (fresh ? [] : messages);
     const chatId = (opts && opts.chatId) || activeChatId;
     const target = opts && "target" in opts ? opts.target : sendTarget();
@@ -24189,6 +24234,20 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
     }
     setBusy(false);
     setSearching(false);
+    // Drain whatever arrived while this turn was running, as ONE follow-up.
+    if (queuedRef.current.length) {
+      const q = queuedRef.current;
+      queuedRef.current = [];
+      const joined = q.map((x) => x.text).filter(Boolean).join("\n\n");
+      const qImgs = q.flatMap((x) => x.images || []);
+      // Drop the optimistic "queued" bubbles — send() re-adds the combined turn,
+      // so leaving them would show the same text twice.
+      setMessages((prev) => {
+        const kept = prev.filter((m) => !m.queued);
+        setTimeout(() => send(joined, { base: kept, images: qImgs }), 0);
+        return kept;
+      });
+    }
   };
 
   // Paste-from-AI import: the user pastes a reply from ChatGPT/Claude/etc, and
@@ -24614,7 +24673,14 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                 // whichever was wider and the other floated off-center. Pinning
                 // the width lets the photo fill it edge-to-edge with the caption
                 // directly underneath — one tidy card instead of two ragged parts.
-                <div key={i} className={(m.role === "user" ? bubbleUser : bubbleAI) + ((m.images && m.images.length) || m.image ? " w-[min(74%,250px)]" : "")}>
+                <div key={i} className={(m.role === "user" ? bubbleUser : bubbleAI) + ((m.images && m.images.length) || m.image ? " w-[min(74%,250px)]" : "") + (m.queued ? " opacity-70" : "")}>
+                  {/* A queued message has landed but not been read yet. Showing
+                      it identically to a sent one would be the honest-looking
+                      lie — it is waiting, and the person should be able to see
+                      that rather than wonder why there is no reply (S201). */}
+                  {m.queued && (
+                    <div className="text-[.6rem] font-semibold uppercase tracking-wide text-muted mb-1">Queued — will be read next</div>
+                  )}
                   {(() => {
                     const mImgs = m.images || (m.image ? [m.image] : []);
                     if (!mImgs.length) return null;
@@ -24952,7 +25018,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                 style={{ fontFamily: "var(--font-sans)" }}
                 className="order-first basis-full w-full resize-none box-border min-h-[46px] max-h-[140px] rounded-xl border border-border bg-surface2 px-3.5 py-3 text-[.95rem] leading-relaxed text-fg outline-none placeholder:text-muted"
                 onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
-              <button onClick={send} disabled={busy || recording || transcribing || (!draft.trim() && !pendingImages.length)} aria-label="Send"
+              <button onClick={send} disabled={recording || transcribing || (!draft.trim() && !pendingImages.length)} aria-label="Send"
                 className="ml-auto rounded-xl border-none bg-primaryfill px-6 py-2.5 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50 disabled:cursor-default">
                 {busy ? "…" : "Send"}
               </button>
