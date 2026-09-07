@@ -30254,7 +30254,12 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
     let alive = true;
     getProfile(trainerUid)
       .then((p) => { if (alive) { const pol = policyOf(p); setPolicy(pol); setPolicyDraft(pol); setDriveOn(hasDriveFeatures(p, trainerUid)); } })
-      .catch(() => { /* keep the safe default */ });
+      // ⚠️ THE OWNER'S ANSWER NEEDS NO PROFILE (S206), and the calendar had the
+      // same hole. The server grants by UID before it reads anything, so
+      // deriving "no" from a read that failed disagrees with the gate this
+      // mirrors — silently, and on the one account that can never legitimately
+      // be refused. Everyone else keeps the safe default.
+      .catch(() => { if (alive) setDriveOn(trainerUid === OWNER_UID); });
     return () => { alive = false; };
   }, [trainerUid]);
 

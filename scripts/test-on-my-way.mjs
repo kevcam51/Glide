@@ -427,8 +427,15 @@ ok("validPoint rejects NaN", D.validPoint({ lat: NaN, lng: 0 }) === null);
   // The owner must not be silently locked out of his own feature by a blip.
   // ⚠️ The server grants by UID BEFORE reading any profile, so deriving "no"
   // from a failed read disagrees with the gate this mirrors.
-  ok("a failed profile read does not lock the owner out",
+  // ⚠️ BOTH SURFACES, COUNTED. The calendar and the Sessions panel each make
+  // their own profile read, and fixing one is how the first version of this
+  // left the other silently broken.
+  ok("a failed profile read does not lock the owner out of the calendar",
      /setMyDrive\(meUid === OWNER_UID\);/.test(APP), true);
+  ok("...nor out of the Sessions panel",
+     /setDriveOn\(trainerUid === OWNER_UID\);/.test(APP), true);
+  ok("...and no read-failure path silently answers 'no' for him",
+     !/setDriveOn\(false\)\)?;\s*\}\);/.test(APP), true);
 }
 
 // ── 9. the notification has somewhere to land ───────────────────────────────
