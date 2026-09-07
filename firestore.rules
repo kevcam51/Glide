@@ -265,7 +265,15 @@ service cloud.firestore {
                 // client is never exposed by them being writable here.
                 'noShow', 'waived',
                 // Recurrence bookkeeping — which series a session belongs to.
-                'seriesId', 'seriesIndex'];
+                'seriesId', 'seriesIndex',
+                // WHERE this session happens (S203): 'trainer' = the trainer's
+                // saved place, 'client' = the client's, absent = somewhere they
+                // agreed between themselves, or online. It only ever says which
+                // saved address `location` was filled from, so it carries no
+                // money and no access — but it is validated below all the same,
+                // because the drive estimate and the "who is travelling" copy
+                // both read it, and a free-text value would render as one.
+                'meetAt'];
       }
       // Fields a CLIENT is allowed to touch — cancelling their own session and
       // nothing else (they can't move it, re-price it, or un-cancel it).
@@ -349,7 +357,14 @@ service cloud.firestore {
 
       allow read: if isParticipant() || isAdmin();
 
+      // Only the two real answers, or absent. Never free text.
+      function meetAtValid() {
+        return !request.resource.data.keys().hasAny(['meetAt'])
+          || request.resource.data.meetAt in ['trainer', 'client'];
+      }
+
       allow create: if isSignedIn()
+        && meetAtValid()
         && request.resource.data.keys().hasOnly(bookingFields())
         && request.resource.data.keys().hasAll(['participants', 'trainerUid', 'clientUid', 'startAt', 'durationMin', 'status'])
         // Only the trainer books, and only for a client really linked to them.
@@ -393,6 +408,7 @@ service cloud.firestore {
       // never rewrite whose session it is.
       allow update: if isParticipant()
         && request.auth.uid == resource.data.trainerUid
+        && meetAtValid()
         && changed().hasOnly(bookingFields())
         && identityIntact()
         && cancelStampHonest()

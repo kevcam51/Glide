@@ -351,6 +351,13 @@ exports.respondToBookingRequest = onCall(
     // working. Read outside the transaction: it is a default, not an invariant,
     // and a stale answer is no worse than the empty string it replaces.
     let lastLocationForClient = "";
+    // ⚠️ AND WHOSE PLACE IT WAS (S203). The address alone is not enough any
+    // more: `meetAt` is what tells the drive estimate which way anyone is
+    // travelling, and Accept is a single tap with no field to set it in. Carried
+    // from the same prior session the address comes from, so the two can never
+    // disagree — an inherited address with no inherited direction would render
+    // as "as agreed" over a place that is very much one side's.
+    let lastMeetAtForClient = "";
     if (accept && booking) {
       try {
         const prior = await db.collection("sessions")
@@ -360,7 +367,11 @@ exports.respondToBookingRequest = onCall(
           const v = doc.data() || {};
           if (v.trainerUid !== uid || !v.location) return;
           const at = Number(v.startAt) || 0;
-          if (at > bestAt) { bestAt = at; lastLocationForClient = String(v.location).slice(0, 120); }
+          if (at > bestAt) {
+            bestAt = at;
+            lastLocationForClient = String(v.location).slice(0, 120);
+            lastMeetAtForClient = (v.meetAt === "trainer" || v.meetAt === "client") ? v.meetAt : "";
+          }
         });
       } catch { /* a default that could not be read is just the empty one */ }
     }
@@ -446,6 +457,9 @@ exports.respondToBookingRequest = onCall(
           // this reason; the one-tap Accept has no field to type into, so it
           // inherits the same way.
           title: "", location: lastLocationForClient,
+          // Omitted when unknown — firestore.rules refuses an empty string, and
+          // absent is the honest value for "nobody said".
+          ...(lastMeetAtForClient ? { meetAt: lastMeetAtForClient } : {}),
           priceCents,
           createdBy: uid, createdAt: now, updatedAt: now,
         });

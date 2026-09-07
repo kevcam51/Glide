@@ -17,6 +17,7 @@
 import { db } from "./firebase";
 import {
   doc, collection, addDoc, updateDoc, deleteDoc, getDocs, query, where, onSnapshot, writeBatch,
+  deleteField,
 } from "firebase/firestore";
 
 export const SESSION_DEFAULT_MIN = 60;
@@ -28,6 +29,81 @@ export const bySoonest = (a, b) => (a.startAt || 0) - (b.startAt || 0);
 // still upcoming — it hasn't happened yet as far as the client is concerned).
 export const sessionEndMs = (s) => (s.startAt || 0) + (s.durationMin || SESSION_DEFAULT_MIN) * 60000;
 export const isPastSession = (s, now = Date.now()) => sessionEndMs(s) <= now;
+
+// ─── Saved meeting addresses (S203, Kevin) ──────────────────────────────────
+// Two saved places, one per person: where a CLIENT wants to be trained, and
+// where a TRAINER wants clients to come. Each is set by its owner, whenever they
+// like, and a session then picks WHICH of the two it is at — so the drive
+// estimate knows which way anyone is travelling.
+//
+// ⚠️ STORED IN EACH PERSON'S OWN kv, NOT ON THE PROFILE DOC, AND THAT IS A
+// PRIVACY DECISION RATHER THAN A FILING ONE. The profile doc would have been
+// less code — it is already loaded on both screens — but `users/{uid}` is read
+// by ANY SIGNED-IN USER for a trainer (the directory rule that lets a client
+// resolve their coach by invite code, S59). A trainer who trains out of their
+// home would have had their home address readable by every account on the
+// platform. kv is owner + admin + the owner's own trainer chain, which is
+// exactly the audience this needs and nobody else.
+//
+// ⚠️ AND A CLIENT NEVER NEEDS TO READ THEIR TRAINER'S COPY. When a session is
+// booked at the trainer's place the address is COPIED ONTO THE SESSION, and
+// `sessions` is participant-read — so the client sees where to go from the
+// booking itself. Nothing has to widen for the feature to work.
+//
+// Needs no firestore.rules change: kv access already grants a trainer read/write
+// of their own client's namespace (which is how the shared plan works).
+export const MEETING_ADDRESS_KEY = "caliq-meeting-address";
+export const MAX_ADDRESS_LEN = 120;   // matches the session `location` bound
+
+// Shape: { address, label, updatedAt }. `label` is optional and cosmetic
+// ("Home", "The studio") — the address is the thing that gets geocoded.
+export function cleanMeetingAddress(raw) {
+  const o = raw && typeof raw === "object" ? raw : {};
+  const address = String(o.address || "").trim().slice(0, MAX_ADDRESS_LEN);
+  if (!address) return null;
+  return {
+    address,
+    label: String(o.label || "").trim().slice(0, 40),
+    updatedAt: Number(o.updatedAt) || 0,
+  };
+}
+
+// Parse whatever came out of kv. Tolerates the raw string a future/older writer
+// might leave, so a bad row degrades to "no address" instead of throwing into a
+// booking sheet.
+export function parseMeetingAddress(row) {
+  if (!row) return null;
+  try {
+    const v = typeof row === "string" ? row : row.value;
+    if (!v) return null;
+    const parsed = JSON.parse(v);
+    return cleanMeetingAddress(typeof parsed === "string" ? { address: parsed } : parsed);
+  } catch { return null; }
+}
+
+// ─── Where a session actually happens (S203) ────────────────────────────────
+// Three states, and the third is a real answer rather than a gap:
+//   "trainer" — at the trainer's saved place; the CLIENT travels
+//   "client"  — at the client's saved place; the TRAINER travels
+//   ""        — nothing chosen: a place they already agreed between themselves,
+//               or an online session. Kevin's call, and it stays the default so
+//               every session booked before this existed still reads correctly.
+export const MEET_AT = { TRAINER: "trainer", CLIENT: "client" };
+export const isMeetAt = (v) => v === MEET_AT.TRAINER || v === MEET_AT.CLIENT;
+
+// Who is travelling to whom, in words, for the person looking at it.
+// Returns null when nobody was designated — which must read as "as agreed",
+// never as "unknown", because for an online session there is nothing to know.
+export function meetAtLabel(meetAt, { viewerIsTrainer, otherName } = {}) {
+  const who = otherName || (viewerIsTrainer ? "your client" : "your trainer");
+  if (meetAt === MEET_AT.TRAINER) {
+    return viewerIsTrainer ? "At your place" : `At ${who}\u2019s place`;
+  }
+  if (meetAt === MEET_AT.CLIENT) {
+    return viewerIsTrainer ? `At ${who}\u2019s place` : "At your place";
+  }
+  return null;
+}
 
 // ─── Which plans include the map features (S202, Kevin: Option B) ───────────
 // Drive-time warnings and "On my way" are COACH-AND-ABOVE. Below that the
@@ -129,7 +205,7 @@ export function onMyWayStatus(s, meUid, now = Date.now()) {
 // Book a session. Only a trainer can call this successfully — the rules check
 // that request.auth.uid === trainerUid AND that the client is really theirs.
 export async function bookSession(trainerUid, clientUid, {
-  startAt, durationMin = SESSION_DEFAULT_MIN, title = "", location = "", priceCents = 0,
+  startAt, durationMin = SESSION_DEFAULT_MIN, title = "", location = "", priceCents = 0, meetAt = "",
 }, { allowOverlap = false, skipId = "" } = {}) {
   await guardOverlap(trainerUid, [Number(startAt)], durationMin, { allowOverlap, skipId });
   const now = Date.now();
@@ -142,6 +218,12 @@ export async function bookSession(trainerUid, clientUid, {
     title: String(title || "").slice(0, 80),
     location: String(location || "").slice(0, 120),
     priceCents: Math.max(0, Math.round(Number(priceCents) || 0)),
+    // ⚠️ OMITTED WHEN UNSET, NEVER WRITTEN AS "". firestore.rules validates
+    // `meetAt in ['trainer','client']` whenever the KEY is present, so an empty
+    // string is refused — and it would be wrong anyway: absent means "a place
+    // they agreed between themselves, or online", which is a real answer rather
+    // than a blank one.
+    ...(isMeetAt(meetAt) ? { meetAt } : {}),
     createdBy: trainerUid, createdAt: now, updatedAt: now,
   });
   return ref.id;
@@ -322,6 +404,9 @@ export async function bookSeries(trainerUid, clientUid, base,
       title: String(base.title || "").slice(0, 80),
       location: String(base.location || "").slice(0, 120),
       priceCents: Math.max(0, Math.round(Number(base.priceCents) || 0)),
+      // Every occurrence of a standing slot is at the same place — that is what
+      // makes it a standing slot.
+      ...(isMeetAt(base.meetAt) ? { meetAt: base.meetAt } : {}),
       seriesId, seriesIndex: i,
       createdBy: trainerUid, createdAt: now, updatedAt: now,
     });
@@ -369,6 +454,14 @@ export async function updateSession(sessionId, fields, { trainerUid = "", allowO
   const patch = { updatedAt: Date.now() };
   for (const k of ["startAt", "durationMin", "title", "location", "priceCents"]) {
     if (fields[k] !== undefined) patch[k] = fields[k];
+  }
+  // ⚠️ RESCHEDULING CAN MOVE THE PLACE TOO, and the rules validate the value on
+  // update as well as create — so an invalid one is dropped here rather than
+  // failing the whole save. Clearing it back to "as agreed" is a real edit, so
+  // an explicit "" deletes the field instead of being ignored.
+  if (fields.meetAt !== undefined) {
+    if (isMeetAt(fields.meetAt)) patch.meetAt = fields.meetAt;
+    else patch.meetAt = deleteField();
   }
   // MOVING a session can land on top of something exactly as easily as booking
   // one, and this path had no check either (S199q). Guarded only when the TIME

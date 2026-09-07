@@ -17,7 +17,9 @@ import { bookSession, updateSession, cancelSession, markNoShow, waiveSession, su
   stripeFeeCents, feeComparison,
   subscribeMyEarnings, earningsSummary, chargeStatusLabel, centsToUsd,
   clientStateInfo,
-  canSayOnMyWay, onMyWayStatus, planHasDriveFeatures } from "./sessions.js";
+  canSayOnMyWay, onMyWayStatus, planHasDriveFeatures,
+  MEETING_ADDRESS_KEY, MAX_ADDRESS_LEN, cleanMeetingAddress, parseMeetingAddress,
+  MEET_AT, isMeetAt, meetAtLabel } from "./sessions.js";
 import { auth, functions, signOutAndClearCache} from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -20994,6 +20996,126 @@ const calColorFor = (uid, overrides) => {
 // person at a glance, which is the one thing the colours exist to prevent.
 const CAL_BLOCK_COLOR = "#7e9a9a";
 
+// ─── Where I train (S203, Kevin) ────────────────────────────────────────────
+// One saved address per person, set whenever they like. A CLIENT saves where
+// they want to be trained; a TRAINER saves where they want clients to come. A
+// session then says which of the two it is at, so the drive estimate knows which
+// way anyone is travelling.
+//
+// ⚠️ IT LIVES IN THE OWNER'S OWN kv, NOT ON THE PROFILE DOC. `users/{uid}` is
+// readable by ANY signed-in user for a trainer (the directory rule a client
+// needs to resolve their coach) — so a trainer who trains from home would have
+// published their home address to every account on the platform. kv is owner +
+// admin + the owner's trainer chain, which is exactly the right audience. See
+// the note on MEETING_ADDRESS_KEY in src/sessions.js.
+function MeetingAddressPanel({ isTrainer, onClose, onSaved }) {
+  useBodyScrollLock(true);
+  useBackClose(true, onClose);
+  const [addr, setAddr] = useState("");
+  const [label, setLabel] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    window.storage.get(MEETING_ADDRESS_KEY)
+      .then((r) => { if (!alive) return; const m = parseMeetingAddress(r);
+        if (m) { setAddr(m.address); setLabel(m.label || ""); } setLoaded(true); })
+      // ⚠️ A MISSING KEY THROWS in window.storage while getForUser returns null
+      // (S197s), so "never saved one" arrives here as an error. Only a REAL
+      // failure should say so — otherwise every first-time visit opens on a
+      // red banner.
+      .catch((e) => { if (!alive) return;
+        if (!(e && e.code === "not-found")) setErr("Couldn't load your saved address.");
+        setLoaded(true); });
+    return () => { alive = false; };
+  }, []);
+
+  const save = async () => {
+    if (busy) return;
+    setBusy(true); setErr(""); setMsg("");
+    const next = cleanMeetingAddress({ address: addr, label, updatedAt: Date.now() });
+    try {
+      if (next) await window.storage.set(MEETING_ADDRESS_KEY, JSON.stringify(next));
+      else await window.storage.delete(MEETING_ADDRESS_KEY);   // clearing it is a real choice
+      setMsg(next ? "Saved." : "Address removed.");
+      onSaved && onSaved(next);
+      setTimeout(() => setMsg(""), 2200);
+    } catch (e) {
+      console.error("meeting address save failed", e);
+      // ⚠️ NEVER SAY "SAVED" WHEN IT DID NOT. The same class of bug S197 fixed
+      // three times over: a write that failed and reported success.
+      setErr("Couldn't save that — check your connection and try again.");
+    }
+    setBusy(false);
+  };
+
+  const inp = "w-full min-w-0 bg-surface2 border border-border rounded-lg px-3 py-2.5 text-fg text-[.95rem] outline-none placeholder:text-muted";
+  return createPortal(
+    <div onClick={onClose} data-theme="pro" style={{ fontFamily: "var(--font-sans)" }}
+      className="fixed inset-0 z-[1600] flex items-end sm:items-center justify-center bg-black/60 px-4 py-6">
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-[460px] rounded-card border border-border bg-surface p-4 text-fg">
+        <div className="flex items-start justify-between gap-2 mb-1">
+          <div className="font-display text-lg tracking-wide text-primary inline-flex items-center gap-2">
+            <Icon name="pin" size={18} color="var(--accent)" />
+            {isTrainer ? "Where you train clients" : "Where you train"}
+          </div>
+          <button onClick={onClose} aria-label="Close"
+            className="shrink-0 rounded-full border border-border bg-surface2 w-8 h-8 flex items-center justify-center cursor-pointer">
+            <Icon name="close" size={14} color="var(--muted)" />
+          </button>
+        </div>
+        <div className="text-[.78rem] text-muted leading-snug mb-3">
+          {isTrainer
+            ? "Your usual place — a studio, a gym, a park. When you book a session here, this address fills in automatically and your client can see where to go."
+            : "Where you'd like to be trained — your home, your building's gym, a park. Your trainer can pick this when they book, so you don't have to send it every time."}
+        </div>
+
+        <div className="mb-2">
+          <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted">Address</div>
+          <input value={addr} maxLength={MAX_ADDRESS_LEN} onChange={(e) => setAddr(e.target.value)}
+            placeholder="e.g. 1111 Lincoln Rd, Miami Beach, FL 33139" className={inp} />
+          {/* ⚠️ A FULL STREET ADDRESS OR NO DRIVE ESTIMATE (S199u/v). Both
+              geocoders happily answer a neighbourhood with its CENTROID — a pin
+              that is nobody's front door — and the precision check then refuses
+              it, so a vague entry silently produces no ETA at all. Saying so
+              here is cheaper than the person wondering why the time never shows. */}
+          <div className="mt-1 text-[.68rem] text-muted leading-snug">
+            Street number, street, city — a neighbourhood name on its own can&rsquo;t be pinned accurately enough for a drive time.
+          </div>
+        </div>
+        <div className="mb-3">
+          <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted">Call it something (optional)</div>
+          <input value={label} maxLength={40} onChange={(e) => setLabel(e.target.value)}
+            placeholder={isTrainer ? "The studio" : "Home"} className={inp} />
+        </div>
+
+        <div className="rounded-md px-2.5 py-2 mb-3 text-[.72rem] text-muted leading-snug"
+          style={{ background: "rgba(var(--accent-rgb),.07)" }}>
+          {isTrainer
+            ? "Only you and your clients' bookings use this — it isn't shown on your public invite page."
+            : "Only you and your trainer can see this."}
+        </div>
+
+        {err && <div className="mb-2 text-[.78rem] text-danger">{err}</div>}
+        {msg && <div className="mb-2 text-[.78rem] text-success">{msg}</div>}
+        <div className="flex gap-2">
+          <button onClick={save} disabled={busy || !loaded}
+            className="rounded-lg bg-primaryfill px-4 py-2.5 text-sm font-bold text-primaryfg cursor-pointer disabled:opacity-50">
+            {busy ? "Saving…" : "Save address"}
+          </button>
+          <button onClick={onClose}
+            className="rounded-lg border border-border bg-transparent px-3 py-2.5 text-sm text-muted cursor-pointer">Close</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // ─── "On my way" (S201) ─────────────────────────────────────────────────────
 // One tap, one GPS fix, an ETA the other person can see. Kevin asked for the
 // Amazon live-tracking map; a PWA cannot get BACKGROUND location — the driver
@@ -21240,6 +21362,11 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
   // and then re-run when the answer arrived, spending a Routes call before we
   // knew whether we were allowed to.
   const [myDrive, setMyDrive] = useState(null);
+  // The two saved places a session can be at (S203). Mine is read once; a
+  // client's is fetched when they are picked in the booking sheet — a trainer
+  // with sixty clients must not pay sixty reads to open a calendar.
+  const [myAddr, setMyAddr] = useState(null);
+  const [clientAddrs, setClientAddrs] = useState({});   // uid -> address | null
 
   useEffect(() => { if (!meUid) return; return subscribeMySessions(meUid, setSessions); }, [meUid]);
   useEffect(() => { if (!meUid) return; return subscribeMyBlocks(meUid, setBlocks); }, [meUid]);
@@ -21266,7 +21393,22 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     window.storage.get(CAL_COLORS_KEY)
       .then((r) => { try { setCalColors(JSON.parse((r && r.value) || "{}") || {}); } catch { setCalColors({}); } })
       .catch(() => {});
+    window.storage.get(MEETING_ADDRESS_KEY)
+      .then((r) => setMyAddr(parseMeetingAddress(r)))
+      .catch(() => setMyAddr(null));   // absence throws here (S197s)
   }, []);
+  // Fetch a client's saved place the first time they are selected, and remember
+  // the answer — including a NULL answer, so "they haven't saved one" is not
+  // re-fetched on every keystroke in the sheet.
+  const wantAddrFor = form && form.kind !== "block" ? form.clientUid : "";
+  useEffect(() => {
+    if (!wantAddrFor || clientAddrs[wantAddrFor] !== undefined) return;
+    let alive = true;
+    getForUser(wantAddrFor, MEETING_ADDRESS_KEY)
+      .then((r) => { if (alive) setClientAddrs((m) => ({ ...m, [wantAddrFor]: parseMeetingAddress(r) })); })
+      .catch(() => { if (alive) setClientAddrs((m) => ({ ...m, [wantAddrFor]: null })); });
+    return () => { alive = false; };
+  }, [wantAddrFor, clientAddrs]);
 
   // ⚠️ KEYED ON THE SESSIONS, NOT THE VIEW. Asking about a fixed horizon rather
   // than the visible range means flipping month/week/day does not re-ask, and
@@ -21434,7 +21576,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     setConfirmOverlap(null); setForm({
       id: s.id, clientUid: s.clientUid, when: calToLocalInput(s.startAt),
       durationMin: String(s.durationMin || SESSION_DEFAULT_MIN),
-      title: s.title || "", location: s.location || "",
+      title: s.title || "", location: s.location || "", meetAt: s.meetAt || "",
       price: s.priceCents ? String(s.priceCents / 100) : "", repeat: "none", count: "8",
     });
   };
@@ -21516,13 +21658,13 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     setBusy(true);
     try {
       if (form.id) {
-        await updateSession(form.id, { startAt, durationMin, title: form.title, location: form.location, priceCents });
+        await updateSession(form.id, { startAt, durationMin, title: form.title, location: form.location, meetAt: form.meetAt, priceCents });
         setMsg("Session updated.");
       } else {
         // The confirm gate above has already run and been satisfied, so the
         // shared guard would only ask the same question twice. skipId keeps a
         // reschedule from finding itself.
-        const ids = await bookSeries(meUid, form.clientUid, { startAt, durationMin, title: form.title, location: form.location, priceCents },
+        const ids = await bookSeries(meUid, form.clientUid, { startAt, durationMin, title: form.title, location: form.location, meetAt: form.meetAt, priceCents },
           { repeat: form.repeat, count: form.count, allowOverlap: true, skipId: form.id || "" });
         setMsg(ids.length > 1 ? `${ids.length} sessions booked.` : "Session booked.");
       }
@@ -21970,6 +22112,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
       )}
       {form && (
         <CalBookingSheet form={form} setForm={setForm} clients={clients} busy={busy} err={err} lastLocationFor={lastLocationFor}
+          myAddr={myAddr} clientAddr={clientAddrs[form.clientUid]}
           canBill={canBillSessions(meUid)}
           onClose={() => { setForm(null); setErr(""); setConfirmOverlap(null); }} onSubmit={submit} nameOf={nameOf} />
       )}
@@ -22011,6 +22154,14 @@ function CalSessionSheet({ session: s, nameOf, now, busy, meUid, meName, hasCard
             <div className="text-[1.05rem] font-extrabold truncate">{nameOf(s.clientUid)}</div>
             <div className="text-[.8rem] text-muted">{fmtSessionWhen(s.startAt)} · {s.durationMin || SESSION_DEFAULT_MIN} min</div>
             {(s.title || s.location) && <div className="text-[.78rem] text-muted mt-0.5">{[s.title, s.location].filter(Boolean).join(" · ")}</div>}
+            {/* Whose place, in the viewer's own words (S203). Absent meetAt
+                prints nothing at all — "as agreed" is not news. */}
+            {meetAtLabel(s.meetAt, { viewerIsTrainer: true, otherName: nameOf(s.clientUid) }) && (
+              <div className="text-[.72rem] text-primary mt-0.5 inline-flex items-center gap-1">
+                <Icon name="car" size={11} color="var(--accent)" />
+                {meetAtLabel(s.meetAt, { viewerIsTrainer: true, otherName: nameOf(s.clientUid) })}
+              </div>
+            )}
           </div>
           <button onClick={onClose} aria-label="Close" className="shrink-0 rounded-full border border-border bg-surface2 w-8 h-8 flex items-center justify-center cursor-pointer">
             <Icon name="close" size={14} color="var(--muted)" />
@@ -22213,7 +22364,7 @@ function CalBlockSheet({ block: b, busy, onClose, onDelete }) {
   );
 }
 
-function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit, nameOf, canBill = false, lastLocationFor }) {
+function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit, nameOf, canBill = false, lastLocationFor, myAddr = null, clientAddr = undefined }) {
   const inp = "w-full min-w-0 bg-surface2 border border-border rounded-lg px-2.5 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted";
   const lbl = "mb-1 text-[11px] font-bold uppercase tracking-wide text-muted";
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -22388,6 +22539,71 @@ function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit,
             </div>
           )}
         </div>
+        {/* ── Where is it? (S203, Kevin) ──────────────────────────────────────
+            Two saved places and a third answer that is not a gap. Picking one
+            fills the address in, and — the point of the whole thing — records
+            WHICH way anyone is travelling, so the drive estimate has a
+            direction. Leaving it alone keeps every session that already exists
+            reading exactly as it did.
+            ⚠️ THE ADDRESS IS COPIED, NOT REFERENCED. If it merely pointed at the
+            saved profile value, editing that address later would silently
+            rewrite where last month's delivered sessions were held — and the
+            client was told a different place at the time. A booking is a record
+            of what was agreed, so it keeps its own copy. */}
+        {!isBlock && (
+          <div className="mb-2.5">
+            <div className={lbl}>Where is it?</div>
+            <div className="flex gap-1.5 flex-wrap">
+              {[
+                { id: MEET_AT.TRAINER, label: "My place", addr: myAddr },
+                { id: MEET_AT.CLIENT, label: `${(nameOf(form.clientUid) || "Client").split(" ")[0]}'s place`, addr: clientAddr },
+                { id: "", label: "As agreed / online", addr: undefined },
+              ].map((o) => {
+                const on = (form.meetAt || "") === o.id;
+                // A saved place nobody has saved cannot be chosen — and saying
+                // WHY beats a button that looks broken.
+                const missing = o.id !== "" && !o.addr;
+                const loading = o.id === MEET_AT.CLIENT && clientAddr === undefined;
+                return (
+                  <button key={o.id || "none"} type="button" disabled={missing && !loading}
+                    onClick={() => setForm((f) => ({ ...f, meetAt: o.id,
+                      // Fill the address from the choice, but never clobber
+                      // something typed by hand: "As agreed" leaves the box
+                      // alone, because that is the case where the trainer types
+                      // a one-off place or a Zoom link.
+                      location: o.id && o.addr ? o.addr.address : f.location }))}
+                    className="rounded-lg border px-2.5 py-2 text-xs font-semibold cursor-pointer disabled:cursor-default text-left"
+                    style={{
+                      borderColor: on ? "var(--accent)" : "var(--border)",
+                      background: on ? "rgba(var(--accent-rgb),.10)" : "transparent",
+                      color: missing && !loading ? "var(--muted)" : "var(--text)",
+                      opacity: missing && !loading ? 0.55 : 1,
+                    }}>
+                    {o.label}
+                    {o.addr && o.addr.label ? <span className="block font-normal text-[.66rem] text-muted">{o.addr.label}</span> : null}
+                    {loading ? <span className="block font-normal text-[.66rem] text-muted">checking…</span> : null}
+                    {missing && !loading ? <span className="block font-normal text-[.66rem] text-muted">none saved</span> : null}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-1 text-[.68rem] text-muted leading-snug">
+              {form.meetAt === MEET_AT.TRAINER
+                ? `${(nameOf(form.clientUid) || "Your client").split(" ")[0]} travels to you — they'll be able to send you an ETA.`
+                : form.meetAt === MEET_AT.CLIENT
+                  ? "You travel to them — this is the drive Glidna checks against your other bookings."
+                  : "Nothing recorded — for a place you've already agreed, or an online session."}
+            </div>
+            {/* The dead end this would otherwise be: a trainer who has never
+                saved a place taps "My place", nothing happens, and there is no
+                hint that the fix lives in a menu two taps away. */}
+            {!myAddr && (
+              <div className="mt-1 text-[.68rem] text-muted leading-snug">
+                You haven&rsquo;t saved your own place yet — add it under <b className="text-fg">≡ → Where I train clients</b>.
+              </div>
+            )}
+          </div>
+        )}
         {isBlock && (
           <div className="mb-2.5 text-[.72rem] text-muted">
             Nobody is booked and nothing is charged. Clients who can see your availability see this
@@ -26554,6 +26770,12 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
                 {[nextSession.title, nextSession.location].filter(Boolean).join(" · ")
                   || `${nextSession.durationMin || SESSION_DEFAULT_MIN} min with ${trainerInfo ? trainerInfo.name : "your trainer"}`}
               </div>
+              {meetAtLabel(nextSession.meetAt, { viewerIsTrainer: false, otherName: trainerInfo && trainerInfo.name }) && (
+                <div className="mt-0.5 text-[.78rem] text-primary inline-flex items-center gap-1">
+                  <Icon name="car" size={12} color="var(--accent)" />
+                  {meetAtLabel(nextSession.meetAt, { viewerIsTrainer: false, otherName: trainerInfo && trainerInfo.name })}
+                </div>
+              )}
             </button>
             {/* The client's own "on my way", and where they READ the trainer's.
                 This card is the one thing on their home screen about today's
@@ -29864,6 +30086,24 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
   // ⚠️ Starts FALSE, not null: a failed read must hide the button rather than
   // offer one whose callable will refuse.
   const [driveOn, setDriveOn] = useState(false);
+  // The two saved places a session can be at (S203). Both are read once — this
+  // panel is scoped to a single trainer/client pair, so there is nothing to
+  // re-fetch as the form changes.
+  const [myAddrP, setMyAddrP] = useState(null);
+  const [peerAddrP, setPeerAddrP] = useState(undefined);
+  useEffect(() => {
+    let alive = true;
+    window.storage.get(MEETING_ADDRESS_KEY)
+      .then((r) => { if (alive) setMyAddrP(parseMeetingAddress(r)); })
+      .catch(() => { if (alive) setMyAddrP(null); });   // absence throws (S197s)
+    // Only a trainer books here, so the "other" address is the client's — and
+    // kv already grants a trainer read of their own client's namespace.
+    if (!isTrainer || !clientUid) { setPeerAddrP(null); return () => { alive = false; }; }
+    getForUser(clientUid, MEETING_ADDRESS_KEY)
+      .then((r) => { if (alive) setPeerAddrP(parseMeetingAddress(r)); })
+      .catch(() => { if (alive) setPeerAddrP(null); });
+    return () => { alive = false; };
+  }, [isTrainer, clientUid]);
   useEffect(() => {
     if (!trainerUid) return;
     let alive = true;
@@ -29994,10 +30234,10 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
   const newPriceCents = policy.standardPriceCents > 0 ? policy.standardPriceCents : defaultPriceCents;
   const openNew = () => { setEditingId(null); setErr(""); setOverlapOk(null); setForm({
     when: toLocalInput(defaultSlot()), durationMin: String(SESSION_DEFAULT_MIN),
-    title: "", location: "", price: newPriceCents ? String(newPriceCents / 100) : "" }); };
+    title: "", location: "", meetAt: "", price: newPriceCents ? String(newPriceCents / 100) : "" }); };
   const openEdit = (s) => { setEditingId(s.id); setErr(""); setOverlapOk(null); setForm({
     when: toLocalInput(s.startAt), durationMin: String(s.durationMin || SESSION_DEFAULT_MIN),
-    title: s.title || "", location: s.location || "", price: s.priceCents ? String(s.priceCents / 100) : "" }); };
+    title: s.title || "", location: s.location || "", meetAt: s.meetAt || "", price: s.priceCents ? String(s.priceCents / 100) : "" }); };
 
   const submit = async () => {
     if (busy || !form) return;
@@ -30018,11 +30258,11 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
     setBusy(true); setErr("");
     try {
       if (editingId) {
-        await updateSession(editingId, { startAt, durationMin, title: form.title, location: form.location, priceCents },
+        await updateSession(editingId, { startAt, durationMin, title: form.title, location: form.location, meetAt: form.meetAt, priceCents },
           { trainerUid, allowOverlap: overlapOk === key });
         setMsg("Session updated.");
       } else {
-        await bookSession(trainerUid, clientUid, { startAt, durationMin, title: form.title, location: form.location, priceCents },
+        await bookSession(trainerUid, clientUid, { startAt, durationMin, title: form.title, location: form.location, meetAt: form.meetAt, priceCents },
           { allowOverlap: overlapOk === key });
         setMsg("Session booked.");
       }
@@ -30079,6 +30319,12 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
       </div>
       {(s.title || s.location) && (
         <div className="mt-0.5 text-[.8rem] text-muted">{[s.title, s.location].filter(Boolean).join(" · ")}</div>
+      )}
+      {meetAtLabel(s.meetAt, { viewerIsTrainer: isTrainer, otherName }) && (
+        <div className="mt-0.5 text-[.74rem] text-primary inline-flex items-center gap-1">
+          <Icon name="car" size={11} color="var(--accent)" />
+          {meetAtLabel(s.meetAt, { viewerIsTrainer: isTrainer, otherName })}
+        </div>
       )}
       {opts.cancelled && (
         <div className="mt-1 text-[.74rem] text-danger">
@@ -30446,6 +30692,45 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
               <div className={lbl}>Where (optional)</div>
               <input placeholder="e.g. Studio, or a Zoom link" value={form.location}
                 onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))} className={inp} />
+            </div>
+            {/* ⚠️ THE SAME CHOICE AS THE CALENDAR SHEET, DELIBERATELY (S203).
+                These are the two places a trainer books from, and a booking made
+                here that could not record WHERE would be a session the drive
+                estimate has no direction for — the exact half-built state that
+                makes a feature look broken on one screen and fine on another. */}
+            <div className="mb-2">
+              <div className={lbl}>Where is it?</div>
+              <div className="flex gap-1.5 flex-wrap">
+                {[
+                  { id: MEET_AT.TRAINER, label: "My place", addr: myAddrP },
+                  { id: MEET_AT.CLIENT, label: `${(otherName || "Client").split(" ")[0]}'s place`, addr: peerAddrP },
+                  { id: "", label: "As agreed / online", addr: undefined },
+                ].map((o) => {
+                  const on = (form.meetAt || "") === o.id;
+                  const loading = o.id === MEET_AT.CLIENT && peerAddrP === undefined;
+                  const missing = o.id !== "" && !o.addr;
+                  return (
+                    <button key={o.id || "none"} type="button" disabled={missing && !loading}
+                      onClick={() => setForm((f) => ({ ...f, meetAt: o.id,
+                        location: o.id && o.addr ? o.addr.address : f.location }))}
+                      className="rounded-lg border px-2.5 py-2 text-xs font-semibold cursor-pointer disabled:cursor-default text-left"
+                      style={{ borderColor: on ? "var(--accent)" : "var(--border)",
+                        background: on ? "rgba(var(--accent-rgb),.10)" : "transparent",
+                        color: missing && !loading ? "var(--muted)" : "var(--text)",
+                        opacity: missing && !loading ? 0.55 : 1 }}>
+                      {o.label}
+                      {o.addr && o.addr.label ? <span className="block font-normal text-[.66rem] text-muted">{o.addr.label}</span> : null}
+                      {loading ? <span className="block font-normal text-[.66rem] text-muted">checking…</span> : null}
+                      {missing && !loading ? <span className="block font-normal text-[.66rem] text-muted">none saved</span> : null}
+                    </button>
+                  );
+                })}
+              </div>
+              {!myAddrP && (
+                <div className="mt-1 text-[.68rem] text-muted leading-snug">
+                  You haven&rsquo;t saved your own place yet — add it under <b className="text-fg">≡ → Where I train clients</b>.
+                </div>
+              )}
             </div>
             <div className="text-[11px] text-muted mb-2">
               The price is recorded on the session for your records. Nothing is charged automatically yet.
@@ -31864,6 +32149,20 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
   const [showAdmin, setShowAdmin] = useState(false);      // S90 admin all-users dashboard
   const [showAppReqs, setShowAppReqs] = useState(false);  // S140 app requests (admin)
   const [showMyNotes, setShowMyNotes] = useState(false);  // S91 trainer general notes
+  const [showAddr, setShowAddr] = useState(false);        // S203 saved meeting address
+  const [savedAddr, setSavedAddr] = useState(undefined);  // undefined = not read yet
+  // Read once the menu is actually opened — not on mount. The menu is rendered
+  // on every screen, so loading this eagerly would be one Firestore read per
+  // page load for a value most sessions never look at.
+  useEffect(() => {
+    if (!open || savedAddr !== undefined) return;
+    let alive = true;
+    window.storage.get(MEETING_ADDRESS_KEY)
+      .then((r) => { if (alive) setSavedAddr(parseMeetingAddress(r)); })
+      // Absence throws here (S197s); either way there is nothing saved to show.
+      .catch(() => { if (alive) setSavedAddr(null); });
+    return () => { alive = false; };
+  }, [open, savedAddr]);
   const [showTeam, setShowTeam] = useState(false);        // S116 head trainer <-> sub-trainers
   const [showConnectAI, setShowConnectAI] = useState(false); // S118 MCP connector how-to
   const [showAuto, setShowAuto] = useState(false);        // S93 scheduled AI automations
@@ -32212,6 +32511,27 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
           <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
         </button>
         {showConnectAI && <ConnectAIPanel onClose={() => setShowConnectAI(false)} />}
+
+        {/* Where I train (S203, Kevin: "we gotta make it pretty easy to find it").
+            BOTH ROLES, deliberately: a client saves where they want to be
+            trained and a trainer saves where clients should come, and the
+            booking sheet then picks between the two. The subtitle shows the
+            saved value so the row answers the question without being opened —
+            "have I set this?" is the whole reason someone taps it. */}
+        <button style={item} onClick={() => setShowAddr(true)}>
+          <Icon name="pin" size={19} color="var(--accent)" />
+          <span>{isTrainer ? "Where I train clients" : "Where I train"}</span>
+          <span style={{ marginLeft: "auto", color: savedAddr === undefined ? "var(--muted)" : (savedAddr ? "var(--text-secondary)" : "var(--accent)"),
+            fontSize: ".68rem", fontWeight: savedAddr ? 400 : 800, maxWidth: 150, overflow: "hidden",
+            textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {savedAddr === undefined ? "" : savedAddr ? (savedAddr.label || savedAddr.address) : "ADD"}
+          </span>
+        </button>
+        {showAddr && (
+          <MeetingAddressPanel isTrainer={isTrainer}
+            onSaved={(a) => setSavedAddr(a)}
+            onClose={() => setShowAddr(false)} />
+        )}
 
         {/* My notes (trainer) — general notes; per-client notes live on the client cards (S91) */}
         {isTrainer && (

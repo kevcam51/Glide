@@ -474,6 +474,38 @@ await check("trainer books a session as part of a repeating series", assertSucce
 await check("client cannot re-point a session at another series", assertFails(updateDoc(sess(c1, "s26"),
   { seriesId: "someone_elses", updatedAt: Date.now() })));
 
+// ---- S203: where the session is held ---------------------------------------
+// `meetAt` says WHICH saved address `location` was filled from — the trainer's
+// or the client's — so the drive estimate knows which way anyone is travelling.
+// Absent is a real answer (a place they agreed between themselves, or online)
+// and is the default for every session booked before this existed.
+console.log("\nSESSIONS — where it's held (meetAt):");
+await check("trainer books at their own place", assertSucceeds(setDoc(sess(head, "s40"),
+  booking({ meetAt: "trainer" }))));
+await check("trainer books at the client's place", assertSucceeds(setDoc(sess(head, "s41"),
+  booking({ meetAt: "client" }))));
+await check("a booking with no meetAt is still fine (agreed, or online)", assertSucceeds(setDoc(sess(head, "s42"),
+  booking())));
+await check("trainer moves a session to the other place", assertSucceeds(updateDoc(sess(head, "s40"),
+  { meetAt: "client", location: "12 Client Rd", updatedAt: Date.now() })));
+// ⚠️ FREE TEXT IS REFUSED. It is only ever a pointer at one of two saved
+// addresses; anything else renders as "who is travelling" copy that is a lie.
+await check("a made-up meetAt is DENIED", assertFails(setDoc(sess(head, "bad40"),
+  booking({ meetAt: "the park" }))));
+await check("an empty-string meetAt is DENIED", assertFails(setDoc(sess(head, "bad41"),
+  booking({ meetAt: "" }))));
+await check("a non-string meetAt is DENIED", assertFails(setDoc(sess(head, "bad42"),
+  booking({ meetAt: 3 }))));
+await check("a junk meetAt cannot be slipped in on UPDATE either", assertFails(updateDoc(sess(head, "s41"),
+  { meetAt: "somewhere else", updatedAt: Date.now() })));
+// ⚠️ THE CLIENT MUST NOT SET IT. Where a session is held is the trainer's call
+// (they are the only one who can create or reschedule one), and a client who
+// could flip it to "client" would silently redirect their trainer's drive.
+await check("a CLIENT cannot set meetAt", assertFails(updateDoc(sess(c1, "s41"),
+  { meetAt: "trainer", updatedAt: Date.now() })));
+await check("...not even a valid one on their own session", assertFails(updateDoc(sess(c1, "s42"),
+  { meetAt: "client", updatedAt: Date.now() })));
+
 // ---- S101c: charge ledger + test-mode flag ---------------------------------
 console.log("\nCHARGE LEDGER — participants read, nobody client-writes:");
 await testEnv.withSecurityRulesDisabled(async (c) => {
