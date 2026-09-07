@@ -39,7 +39,28 @@ ok("a tape reading counts", hasMeasurement({ ...book, waist: 34 }));
 ok("...any site, not just waist", hasMeasurement({ ...book, calf: 15 }));
 ok("a caliper reading counts", hasMeasurement({ ...book, calAbdomen: 18 }));
 ok("...the female sites too", hasMeasurement({ ...book, calSuprailiac: 12 }));
-ok("a scan body-fat reading counts", hasMeasurement({ ...book, scanBf: 21.4 }));
+// ⚠️ bodyFatManual, NOT scanBf (S200y). This assertion was GREEN against a bug:
+// MEASURED_ANY_FIELD listed "scanBf", a key no save path has ever written, so
+// the test proved the list contained a field and nothing more — a day whose only
+// entry was a scale reading did not count as measured anywhere. The check below
+// is the one that would have caught it.
+ok("a scale body-fat reading counts", hasMeasurement({ ...book, bodyFatManual: 21.4 }));
+ok("...and the key nothing writes does NOT", !hasMeasurement({ ...book, scanBf: 21.4 }));
+// Every name in the list must be a field some save path actually writes, or it
+// is decoration that silently narrows what counts as a measurement.
+{
+  const list = (APP.match(/const MEASURED_ANY_FIELD = \[[\s\S]*?\];/) || [""])[0]
+    .replace(/\/\/[^\n]*/g, "");
+  const names = [...list.matchAll(/"([a-zA-Z]+)"/g)].map((m) => m[1]);
+  const written = new Set([
+    ...[...(APP.match(/const MEASUREMENT_FIELDS = \[[\s\S]*?\];/) || [""])[0].matchAll(/"([a-zA-Z]+)"/g)].map((m) => m[1]),
+    ...[...(APP.match(/const CALIPER_FIELDS_M = \[[\s\S]*?\];/) || [""])[0].matchAll(/"([a-zA-Z]+)"/g)].map((m) => m[1]),
+    ...[...(APP.match(/const CALIPER_FIELDS_F = \[[\s\S]*?\];/) || [""])[0].matchAll(/"([a-zA-Z]+)"/g)].map((m) => m[1]),
+    "bodyFatManual",
+  ]);
+  const orphans = names.filter((n2) => !written.has(n2));
+  ok("no measured-field name is one nothing ever writes", orphans.length === 0, orphans);
+}
 
 // ── things that are not readings ────────────────────────────────────────────
 // Zero is what an emptied field leaves behind, and a negative is nonsense.
