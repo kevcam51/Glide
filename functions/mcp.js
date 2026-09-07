@@ -427,7 +427,14 @@ function buildServer(ctx, profile, db, scopes) {
         + `accounts (pass clientId) and the trainer's own plan files (pass localPlanId, never both at `
         + `once) — a plan file is usually a real client who simply has no app account, and every read `
         + `and write works the same on them. find_client searches both in one call and tells you which `
-        + `kind each match is.`
+        + `kind each match is. `
+        // ⚠️ THE CONNECTOR HAS NO SYSTEM PROMPT, so a rule the in-app assistant
+        // gets for free reaches an outside model only if it is stated here
+        // (S200u). A calorie number a model reasons out in prose is a
+        // prescription even when no tool wrote it.
+        + `NEVER recommend eating below 1,200 calories a day, or set a target there, for anyone — `
+        + `it is this app's hard floor and every calculation in it respects it. If a bigger deficit `
+        + `is wanted, it comes from movement, not from less food.`
         + (ctx.isTrainer && ctx.seatCap !== null
           ? ` Paid plans include a monthly allowance of distinct people the AI works on. If a tool `
             + `refuses because someone "isn't one of this month's AI clients yet", tell the user it `

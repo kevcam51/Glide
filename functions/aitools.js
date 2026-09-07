@@ -652,6 +652,13 @@ async function appendHistory(db, uid, planId, ctx, action) {
 // ── calorie/macro targets (matches src/App.jsx computeClientCalories +
 // the dashboard macro defaults). The scheduled-exercise add-back is omitted —
 // it's a small adjustment and zero for the common all-rest-days plan. ──────────
+// ⚠️ MUST MATCH MIN_DAILY_CAL in src/App.jsx — functions/ cannot import from
+// src/ (see the observedTdee mirror note), so this is a deliberate second copy
+// and scripts/test-calorie-floor.mjs pins the two together. Kevin's standard:
+// no formula, screen or AI reply may PRESCRIBE below this.
+const MIN_DAILY_CAL = 1200;
+const atLeastMinCal = (n) => Math.max(MIN_DAILY_CAL, Math.round(Number(n) || 0));
+
 const ACTIVITY_MULT = { sedentary: 1.2, light: 1.375, moderate: 1.55, very: 1.725, extra: 1.9 };
 // Age from an OPTIONAL date of birth (S110g) — keeps age current on its own.
 // MUST match src/App.jsx ageFromDob()/effectiveAge().
@@ -769,7 +776,7 @@ function nutritionTargets(d) {
       // lb per week → 0/250/500/1000 cal/day. Unset = 1 lb/wk, the long-standing
       // default. This MUST track the app: if the server assumes a different
       // deficit, the AI quotes a target no screen shows and mis-scores adherence.
-      cal = Math.max(1200, Math.round(tdee - dailyDeficit(d) + (eatback ? weeklyPlanBurn(d) / 7 : 0)));
+      cal = atLeastMinCal(tdee - dailyDeficit(d) + (eatback ? weeklyPlanBurn(d) / 7 : 0));
     }
   }
   // ⚠️ THE MANUAL OVERRIDE WINS, AND THIS NEVER KNEW (S199). data.calorieTarget
@@ -780,7 +787,12 @@ function nutritionTargets(d) {
   // explicitly replaced. Applied OUTSIDE the formula block on purpose: a typed
   // target stands even on a plan too incomplete to compute one, which is
   // exactly how the dashboard behaves.
-  if (Number(d.calorieTarget) > 0) cal = Math.round(Number(d.calorieTarget));
+  // ⚠️ AND THE OVERRIDE IS FLOORED TOO (S200u). It used to be applied AFTER the
+  // floor and outside it, so a number typed into the dashboard prescribed itself
+  // unclamped through get_nutrition_targets, get_profile, coach_summary's
+  // adherence scoring and the MCP connector. Executed against this function, a
+  // typed 1 came back as a 1 cal/day prescription with macros divided out of it.
+  if (Number(d.calorieTarget) > 0) cal = atLeastMinCal(d.calorieTarget);
   const mt = d.macroTargets || {};
   // Protein basis is a per-plan user choice (App.jsx proteinBasisOf): 1.0 g/lb
   // (default) or 0.7 g/lb. Keep the AI's target in sync with the app.
@@ -2630,7 +2642,7 @@ async function runTool(name, input, ctx) {
       goalWeightLbs: data.goalWeight != null ? Number(data.goalWeight) : null,
       note: t.calorieTarget == null
         ? "Calorie target unavailable — the plan is missing gender/age/height."
-        : "Calorie target is the baseline diet target (excludes scheduled-exercise calories)."
+        : `Calorie target is the baseline diet target (excludes scheduled-exercise calories). NEVER recommend eating below ${MIN_DAILY_CAL} cal/day, whatever the maths says — if a bigger deficit is wanted it comes from movement, not from less food.`
           + (data.wearableAdjust && (data.deficitMode || "eatback") !== "accelerate"
             ? " Tracker adjustment is ON: on days the person's watch synced its measured burn, the app's day target is (measured resting+active − 500) instead of this baseline."
             : ""),

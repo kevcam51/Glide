@@ -121,6 +121,29 @@ const cssVarColor = (expr) => {
 // consumed only by StepActivity.
 // ⚠️ One rung per line: scripts/test-activity-suggestion.mjs lifts this array by
 // regex and a reformat breaks the extraction.
+// ⚠️ THE FLOOR IS A PRODUCT STANDARD, NOT A DETAIL (Kevin, S200u): "these
+// formulas and responses do not go below the 1200 mark and we should make that a
+// standard. Users should come up with their own creative ways to work around the
+// 1200 limit."
+//
+// It was a bare literal repeated at a dozen call sites, and an audit found what
+// that costs: the MANUAL target override (data.calorieTarget) was applied
+// OUTSIDE the floor at every single read, so a number typed into one field
+// prescribed itself unclamped to the dashboard ring, the macro split, the
+// calendar, the trainer roster, the AI, coach_summary and the MCP connector.
+// Executed against the shipping server function, a typed 1 came back as a
+// 1 cal/day prescription with macros divided out of it.
+//
+// So: `atLeastMinCal` is the ONE way to produce a prescribed intake. A read that
+// does its own Math.max is fine; a read that forgets is the bug this exists to
+// stop, and scripts/test-calorie-floor.mjs crosses the override with the floor
+// specifically because the old suite only ever tested them apart.
+//
+// ⚠️ functions/ CANNOT import from src/ (see the observedTdee mirror note), so
+// functions/aitools.js carries its own copy and a test pins the two together.
+const MIN_DAILY_CAL = 1200;
+const atLeastMinCal = (n) => Math.max(MIN_DAILY_CAL, Math.round(Number(n) || 0));
+
 const ACTIVITY_LEVELS = [
   { id:"sedentary", label:"Sedentary",         iconName:"person", desc:"Desk or driving job, sitting most of the day",              steps:"under 5,000 steps",     multiplier:1.2   },
   { id:"light",     label:"Lightly Active",    iconName:"walk", desc:"Some walking and errands, on your feet now and then",       steps:"5,000–7,500 steps",     multiplier:1.375 },
@@ -3980,9 +4003,13 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   // number below it — and when the deficit math lands under it, the page says
   // so and pivots the advice to consistent training, not deeper restriction.
   const floorHit = goalMode === "lose" && rawDeficit < 1200;
+  // ⚠️ ALL THREE BRANCHES, not just the deficit one (S200u). A very small,
+  // sedentary person's maintenance can itself land under 1,200, so "stay
+  // healthy" and "build muscle" could each print a sub-floor number on the one
+  // screen written for beginners.
   const target = !ready ? null
-    : goalMode === "build" ? Math.round(tdee + 250 + weeklyBurn / 7)   // lean surplus + fuel the training
-    : goalMode === "health" ? Math.round(tdee + weeklyBurn / 7)        // maintenance: eat what you burn
+    : goalMode === "build" ? floor(tdee + 250 + weeklyBurn / 7)   // lean surplus + fuel the training
+    : goalMode === "health" ? floor(tdee + weeklyBurn / 7)        // maintenance: eat what you burn
     : floor(rawDeficit);
   const protein = Math.round(Number(data.macroTargets?.protein) || w) || null;
   const cups = w ? Math.round((w * 0.5) / 8) : null;
@@ -12269,6 +12296,19 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const [macroPanelOpen, setMacroPanelOpen] = useState(false); // Macros & Micros dropdown (collapsed by default)
   const [editTarget, setEditTarget] = useState(false); // manual calorie-target editor open
   const [targetDraft, setTargetDraft] = useState("");  // manual calorie-target draft
+  const [sheetTargetMsg, setSheetTargetMsg] = useState("");
+  // The sheet's own commit, floored and SPOKEN — silently storing 1,200 when
+  // someone typed 900 changes their number without telling them (S200u).
+  const commitSheetTarget = () => {
+    const v = parseInt(targetDraft, 10);
+    if (!(v > 0)) return;
+    onSetCalorieTarget(v);
+    setSheetTargetMsg(v < MIN_DAILY_CAL
+      ? `${v.toLocaleString()} is below ${MIN_DAILY_CAL.toLocaleString()} — too low to plan around, so we've set it to ${MIN_DAILY_CAL.toLocaleString()}. For a bigger gap than that, take it from movement rather than food.`
+      : "");
+    if (v >= MIN_DAILY_CAL) setEditTarget(false);
+    setTargetDraft("");
+  };
   const [showMeasure, setShowMeasure] = useState(false); // body measurements / body-fat modal
   const [mtDraft, setMtDraft] = useState({ protein:"", carbs:"", fat:"" });   // grams draft
   const [mtMode, setMtMode] = useState("grams"); // "grams" | "pct" — how you enter targets
@@ -12466,7 +12506,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
 
   // A manually-set target (data.calorieTarget) is the coach's/user's own number —
   // it wins over the calculation AND the tracker adjustment (an explicit choice).
-  const manualTarget = Number(data.calorieTarget) > 0 ? Math.round(Number(data.calorieTarget)) : null;
+  const manualTarget = Number(data.calorieTarget) > 0 ? atLeastMinCal(data.calorieTarget) : null;
   const target = manualTarget != null ? manualTarget : computedTargetForNote;
   const logged = dailyLog.calories || 0;
   const remaining = target - logged;         // signed — negative once over target
@@ -13806,21 +13846,30 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                   ) : (
                     <div onClick={(e)=>e.stopPropagation()} style={{display:"flex",flexDirection:"column",gap:"8px"}}>
                       <div style={{fontSize:".72rem",color:"var(--muted)"}}>Enter the daily calorie target you want to use. Your macros will adjust to it.</div>
+                      {/* ⚠️ SAY IT BEFORE THEY TYPE IT (S200u). This field used to
+                          accept any positive number — 900, or 1 — while the field
+                          in the Daily Calorie Targets card refused the identical
+                          number and explained why. Whether the safety floor held
+                          depended on which of two inputs someone happened to tap. */}
+                      <div style={{fontSize:".68rem",color:"var(--muted)"}}>Minimum {MIN_DAILY_CAL.toLocaleString()} — anything lower isn&rsquo;t safe to plan around, so it&rsquo;ll be set to {MIN_DAILY_CAL.toLocaleString()}.</div>
                       <div style={{display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap"}}>
                         <input type="number" inputMode="numeric" autoFocus value={targetDraft} placeholder="e.g. 2000"
                           onChange={(e)=>setTargetDraft(e.target.value)}
-                          onKeyDown={(e)=>{ if(e.key==="Enter"){ const v=parseInt(targetDraft); if(v>0){ onSetCalorieTarget(v); setEditTarget(false); } } }}
+                          onKeyDown={(e)=>{ if(e.key==="Enter"){ commitSheetTarget(); } }}
                           style={{width:"120px",padding:"9px 11px",borderRadius:"8px",border:"1.5px solid var(--accent)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".9rem"}} />
                         <span style={{fontSize:".78rem",color:"var(--muted)"}}>cal</span>
-                        <button onClick={()=>{ const v=parseInt(targetDraft); if(v>0){ onSetCalorieTarget(v); setEditTarget(false); } }}
+                        <button onClick={commitSheetTarget}
                           style={{padding:"9px 14px",fontSize:".82rem",fontWeight:700,borderRadius:"8px",border:"none",background:"var(--accent-fill)",color:"#0b0b12",cursor:"pointer"}}>Save target</button>
                         {manualTarget != null && (
                           <button onClick={()=>{ onSetCalorieTarget(null); setEditTarget(false); }}
                             style={{padding:"9px 12px",fontSize:".82rem",borderRadius:"8px",border:"1px solid var(--border)",background:"transparent",color:"var(--muted)",cursor:"pointer"}}>Use calculated</button>
                         )}
-                        <button onClick={()=>setEditTarget(false)}
+                        <button onClick={()=>{ setEditTarget(false); setSheetTargetMsg(""); }}
                           style={{padding:"9px 10px",fontSize:".82rem",borderRadius:"8px",border:"none",background:"transparent",color:"var(--muted)",cursor:"pointer"}}>Cancel</button>
                       </div>
+                      {sheetTargetMsg && (
+                        <div style={{fontSize:".72rem",lineHeight:1.45,color:"var(--yellow)"}}>{sheetTargetMsg}</div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -17945,7 +17994,7 @@ function computeClientCalories(d) {
   const auto = Math.max(1200, Math.round(tdee - dailyDeficitOf(d) + (isEatback(d) ? (cardio + strength) / 7 : 0)));
   // A manually-set target (data.calorieTarget — the coach's/user's own number)
   // overrides the calculation everywhere it's used.
-  const target = Number(d.calorieTarget) > 0 ? Math.round(Number(d.calorieTarget)) : auto;
+  const target = Number(d.calorieTarget) > 0 ? atLeastMinCal(d.calorieTarget) : auto;
   return { tdee, target };
 }
 
@@ -34177,7 +34226,11 @@ export default function App() {
               onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} onLogFoods={onLogFoodsFromCalendar} onSetPlanned={onSetPlanned} onPlanDays={onPlanDays} onEatPlanned={onEatPlanned} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid} premium={mePremium} role={role} onOpenMealPlanner={() => setShowMealPlanner(true)}
               onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; n.macroTargetsEditedAt=Date.now(); return n; })}
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
-              onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p}; if(n>0) x.calorieTarget=Math.round(n); else delete x.calorieTarget; return x; })}
+              onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p};
+                // The single writer of the manual override, so the floor belongs
+                // here — but NOT only here: a value stored before S200u is
+                // already on disk, so every read floors too (S200u).
+                if(n>0) x.calorieTarget=atLeastMinCal(n); else delete x.calorieTarget; return x; })}
               dayCalsAll={dayCalsAll}
               onSetActivityLevel={(id)=>setDataAndSave(p=>({...p, activityLevel: id,
                 // The anti-clobber marker is stamped by stampLocalEdits (S200g).
