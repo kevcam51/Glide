@@ -21008,6 +21008,93 @@ const CAL_BLOCK_COLOR = "#7e9a9a";
 // published their home address to every account on the platform. kv is owner +
 // admin + the owner's trainer chain, which is exactly the right audience. See
 // the note on MEETING_ADDRESS_KEY in src/sessions.js.
+// ─── Address field with suggestions (S207, Kevin) ───────────────────────────
+// A plain text input that offers Google's address suggestions as you type.
+//
+// ⚠️ IT IS A TEXT INPUT FIRST AND A TYPEAHEAD SECOND, and every failure path
+// keeps it that way. The suggestion service can be down, rate-limited, or — as
+// on the day this shipped — not yet enabled on the Cloud project, and in every
+// one of those cases the callable answers with an empty list rather than an
+// error. Nobody is ever prevented from typing an address, and nothing red
+// appears because a convenience did not load.
+//
+// ⚠️ WHY IT MATTERS MORE THAN CONVENIENCE. "Coconut Grove" and "the gym" are
+// exactly what people type, and both geocoders answer them with the middle of
+// somewhere — which the S199u/v precision guard then correctly refuses, so the
+// drive estimate silently produces nothing. Picking a real suggestion is what
+// makes the address resolvable, so this is a fix for that failure at its source.
+//
+// ⚠️ EVERY REQUEST IS BILLABLE, so the debounce is a cost control as much as a
+// UX one, and a pick must not immediately re-query the text it just inserted.
+const ADDR_DEBOUNCE_MS = 350;
+function AddressInput({ value, onChange, placeholder, className, id, autoFocus = false, maxLength }) {
+  const [sugs, setSugs] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  // Text we just wrote ourselves (a pick, or the caller filling the field from a
+  // saved place). Querying it would spend a request to suggest what is already
+  // there, and would re-open the list over a field the person has finished with.
+  const selfSet = useRef("");
+  const seq = useRef(0);
+
+  useEffect(() => {
+    const q = String(value || "").trim();
+    if (!open || q.length < 3 || q === selfSet.current) { setSugs([]); return; }
+    const mine = ++seq.current;
+    const t = setTimeout(() => {
+      callPlacesAutocomplete({ input: q })
+        // ⚠️ ONLY THE NEWEST ANSWER WINS. Typing outruns the network, so an
+        // earlier slower reply would otherwise land on top of a later one and
+        // show suggestions for a prefix the person has already moved past.
+        .then((r) => { if (mine === seq.current) setSugs(((r && r.data && r.data.suggestions) || []).slice(0, 5)); })
+        .catch(() => { if (mine === seq.current) setSugs([]); });
+    }, ADDR_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [value, open]);
+
+  const pick = (s) => {
+    selfSet.current = s.value;
+    onChange(s.value);
+    setSugs([]); setOpen(false); setActive(-1);
+  };
+
+  return (
+    <div className="relative">
+      <input id={id} autoFocus={autoFocus} maxLength={maxLength} className={className}
+        placeholder={placeholder} value={value}
+        autoComplete="off"
+        onChange={(e) => { selfSet.current = ""; setOpen(true); setActive(-1); onChange(e.target.value); }}
+        onFocus={() => setOpen(true)}
+        // A blur that fires before the click would close the list out from under
+        // the finger, so the close is deferred past the tap.
+        onBlur={() => setTimeout(() => setOpen(false), 160)}
+        onKeyDown={(e) => {
+          if (!sugs.length) return;
+          if (e.key === "ArrowDown") { e.preventDefault(); setActive((i) => Math.min(i + 1, sugs.length - 1)); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); setActive((i) => Math.max(i - 1, -1)); }
+          else if (e.key === "Enter" && active >= 0) { e.preventDefault(); pick(sugs[active]); }
+          else if (e.key === "Escape") { setOpen(false); setSugs([]); }
+        }} />
+      {open && sugs.length > 0 && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-[30] rounded-lg border border-border bg-surface overflow-hidden"
+          style={{ boxShadow: "0 8px 24px rgba(0,0,0,.45)" }}>
+          {sugs.map((s, i) => (
+            <button key={s.value + i} type="button"
+              // onMouseDown, not onClick: the input's blur fires first otherwise
+              // and the list is gone before the click lands.
+              onMouseDown={(e) => { e.preventDefault(); pick(s); }}
+              className="w-full text-left px-3 py-2 cursor-pointer border-0 block"
+              style={{ background: i === active ? "rgba(var(--accent-rgb),.12)" : "transparent" }}>
+              <span className="block text-[.84rem] text-fg leading-tight">{s.main}</span>
+              {s.secondary ? <span className="block text-[.72rem] text-muted leading-tight">{s.secondary}</span> : null}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MeetingAddressPanel({ isTrainer, onClose, onSaved }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);
@@ -21076,7 +21163,7 @@ function MeetingAddressPanel({ isTrainer, onClose, onSaved }) {
 
         <div className="mb-2">
           <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted">Address</div>
-          <input value={addr} maxLength={MAX_ADDRESS_LEN} onChange={(e) => setAddr(e.target.value)}
+          <AddressInput value={addr} maxLength={MAX_ADDRESS_LEN} onChange={setAddr}
             placeholder="e.g. 1111 Lincoln Rd, Miami Beach, FL 33139" className={inp} />
           {/* ⚠️ A FULL STREET ADDRESS OR NO DRIVE ESTIMATE (S199u/v). Both
               geocoders happily answer a neighbourhood with its CENTROID — a pin
@@ -22638,7 +22725,8 @@ function CalBookingSheet({ form, setForm, clients, busy, err, onClose, onSubmit,
           {!isBlock && (
             <div>
               <div className={lbl}>Location</div>
-              <input className={inp} value={form.location} onChange={(e) => set("location", e.target.value)}
+              <AddressInput className={inp} value={form.location} onChange={(v) => set("location", v)}
+                maxLength={MAX_ADDRESS_LEN}
                 placeholder="Studio, or an address to check drive time" />
             </div>
           )}
@@ -23574,6 +23662,8 @@ const callSessionTravel = httpsCallable(functions, "sessionTravel");   // drive 
 // "On my way" (S201). One GPS fix goes up, an ETA comes back; the position is
 // never stored — see functions/availability.js sessionOnMyWay.
 const callSessionOnMyWay = httpsCallable(functions, "sessionOnMyWay");
+// Address suggestions (S207). Proxied so the Maps key stays server-side.
+const callPlacesAutocomplete = httpsCallable(functions, "placesAutocomplete");
 const callListAppRequests = httpsCallable(functions, "listAppRequests");        // S140 admin
 const callSetAppRequestStatus = httpsCallable(functions, "setAppRequestStatus"); // S140 admin
 const callAdminOverview = httpsCallable(functions, "adminOverview"); // admin all-users dashboard (S90)
@@ -30840,8 +30930,9 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
             </div>
             <div className="mb-2">
               <div className={lbl}>Where (optional)</div>
-              <input placeholder="e.g. Studio, or a Zoom link" value={form.location}
-                onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))} className={inp} />
+              <AddressInput placeholder="e.g. Studio, or a Zoom link" value={form.location}
+                maxLength={MAX_ADDRESS_LEN}
+                onChange={(v) => setForm((f) => ({ ...f, location: v }))} className={inp} />
             </div>
             {/* ⚠️ THE SAME CHOICE AS THE CALENDAR SHEET, DELIBERATELY (S203).
                 These are the two places a trainer books from, and a booking made

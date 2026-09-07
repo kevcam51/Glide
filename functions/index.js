@@ -218,6 +218,10 @@ exports.sessionOnMyWay = require("./availability").sessionOnMyWay;
 // search, merged with USDA + Open Food Facts. See functions/foodsearch.js for
 // the (Kevin) FatSecret account + secret setup. No-op until the secrets are set.
 exports.foodSearch = require("./foodsearch").foodSearch;
+// Address autocomplete (S207) — a PROXY, so the Maps key stays server-side.
+// Requires "Places API (New)" enabled on the project; degrades to an empty
+// list until it is, so the address fields stay plain text inputs.
+exports.placesAutocomplete = require("./places").placesAutocomplete;
 
 // MCP connector (S112, Phase 1 — READ-ONLY): exposes Glide as a remote MCP
 // server so a user's OWN Claude can read their Glide data. Stateless Streamable
