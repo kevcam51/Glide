@@ -178,6 +178,50 @@ ok("...and reports which method it used", /bodyFatSource, tapeSource,/.test(AI))
   ok("the Bailey row is still displayed on its own", /label: "Tape · Bailey"/.test(APP));
 }
 
+// ── 6. the rest of the audit (S200y) ──────────────────────────────────────
+{
+  // The claim that made honest disagreement look like a defect. Nothing here is
+  // ±2%: skinfolds are ±3-5, Navy ±3-4, a consumer scale can sit 5 out.
+  ok("the ±2% accuracy claim is gone", !/estimate \(±2%\)/.test(APP));
+  ok("...replaced with the real error bars", /estimate \(±3–4 points\)/.test(APP));
+  ok("...and says methods disagree by design", /Different methods disagree by design/.test(APP));
+
+  // The Navy equation was validated on the NARROWEST waist for women; telling
+  // them to measure at the navel over-measures, and each inch is 1.0-1.4 points.
+  ok("women get the natural-waist landmark", /waistFemale: "The narrowest part of your waist/.test(APP));
+
+  // A field no save path writes — so a day whose only entry was a scale reading
+  // did not count as "measured" anywhere this list is consulted.
+  // Scoped to the LIST — `edit.scanBf` elsewhere is a live flag in the edit UI
+  // choosing which handler to call, and is unrelated.
+  {
+    const list = (APP.match(/const MEASURED_ANY_FIELD = \[[\s\S]*?\];/) || [""])[0];
+    ok("the dead scanBf key is out of the measured-field list", !/"scanBf"/.test(list.replace(/\/\/[^\n]*/g, "")));
+    ok("...and the field a save path actually writes is in it", /"bodyFatManual"/.test(list));
+  }
+
+  // ⚠️ THE JP3 QUADRATIC TURNS OVER past ~258 mm — more fat returns a LOWER
+  // number, which is the direction nobody questions.
+  ok("calipers refuse outside the derivation range",
+     (APP.match(/if \(!\(sum >= 10 && sum <= 200\)\) return null;/g) || []).length === 2);
+  {
+    const huge = { calChest: 90, calAbdomen: 95, calThigh: 90, waist: 44, neck: 17, hips: 46, forearm: 12, wrist: 7.5 };
+    ok("...so an out-of-range sum returns nothing rather than a low number",
+       S.caliperBF(MAN, huge) === null, S.caliperBF(MAN, huge));
+  }
+
+  // A rejected number used to vanish while the panel said "Saved." — leaving the
+  // OLD value in the record, still feeding the estimate.
+  ok("out-of-range entries are named, not dropped", /Not saved — out of range: \$\{rejected\.join\(", "\)\}/.test(APP));
+  ok("...and nothing is saved or cleared until they are fixed",
+     /return;   \/\/ drafts kept, so the correction is still on screen/.test(APP));
+
+  // The trend chart drew a change of instrument as a change of body fat.
+  ok("the trend plots one method, not whichever was present that day",
+     /const bfSource = d\.bfPrimarySource \|\| null;/.test(APP)
+     && /bfSource === "caliper" \? mm\.caliperBF/.test(APP));
+}
+
 console.log(fails === 0
   ? `  PASS  body fat (${checks} assertions)`
   : `  ${fails}/${checks} FAILED`);

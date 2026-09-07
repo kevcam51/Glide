@@ -734,7 +734,10 @@ const CALIPER_FIELDS_F = ["calTriceps", "calSuprailiac", "calThigh"];
 const CALIPER_ALL = ["calChest", "calAbdomen", "calThigh", "calTriceps", "calSuprailiac"];
 // Every field that counts as "measured": tape, calipers, or a scan reading.
 const MEASURED_ANY_FIELD = ["waist", "hips", "neck", "thigh", "calf", "forearm", "wrist",
-  "calChest", "calAbdomen", "calThigh", "calTriceps", "calSuprailiac", "scanBf"];
+  // ⚠️ bodyFatManual, NOT "scanBf" (S200y) — no save path has ever written a
+  // `scanBf` key, so a day whose ONLY entry was a scale reading did not count as
+  // "measured" anywhere this list is consulted.
+  "calChest", "calAbdomen", "calThigh", "calTriceps", "calSuprailiac", "bodyFatManual"];
 const CALIPER_LABELS = { calChest: "Chest", calAbdomen: "Abdomen", calThigh: "Thigh",
   calTriceps: "Triceps", calSuprailiac: "Suprailiac" };
 const caliperFieldsFor = (d) => (d.gender === "female" ? CALIPER_FIELDS_F : CALIPER_FIELDS_M);
@@ -750,7 +753,13 @@ const CALIPER_SITE_HELP = {
 const CALIPER_TECHNIQUE = "Pinch skin + fat (not muscle), set the caliper ~1 cm from your fingers, and read after 1–2 seconds. Always the RIGHT side of the body; take 2–3 reads and average.";
 // Where to run the tape for each site.
 const TAPE_SITE_HELP = {
+  // ⚠️ THE LANDMARK IS NOT THE SAME FOR BOTH (S200y). The Navy equation was
+  // validated on the natural waist — the narrowest point — for women, and at the
+  // navel for men. Telling a woman to measure at the navel over-measures by an
+  // inch or two on most bodies, and each inch is worth +1.0 to +1.4 points of
+  // body fat. The formula was never wrong; the instruction was.
   waist: "Around the belly button, relaxed — don't suck in.",
+  waistFemale: "The narrowest part of your waist, usually just above the belly button — relaxed, don't suck in.",
   hips: "The widest point around the buttocks.",
   neck: "Just below the Adam's apple; slope the tape slightly down at the front.",
   thigh: "The widest point of the upper thigh.",
@@ -784,11 +793,17 @@ function caliperBF(d, m) {
     const a = n(m.calChest), b = n(m.calAbdomen), c = n(m.calThigh);
     if (!a || !b || !c) return null;
     sum = a + b + c;
+    // ⚠️ THE QUADRATIC TURNS OVER (S200y). Past a sum of roughly 258 mm the
+    // curve inverts, so MORE fat returns a LOWER percentage — a confidently
+    // wrong number, in the direction nobody would question. Outside the range
+    // the equation was derived on, refuse instead of extrapolating.
+    if (!(sum >= 10 && sum <= 200)) return null;
     bd = 1.10938 - 0.0008267 * sum + 0.0000016 * sum * sum - 0.0002574 * age;
   } else if (d.gender === "female") {
     const a = n(m.calTriceps), b = n(m.calSuprailiac), c = n(m.calThigh);
     if (!a || !b || !c) return null;
     sum = a + b + c;
+    if (!(sum >= 10 && sum <= 200)) return null;   // see the male branch (S200y)
     bd = 1.0994921 - 0.0009929 * sum + 0.0000023 * sum * sum - 0.0001392 * age;
   } else return null;
   if (!(bd > 0)) return null;
@@ -16217,8 +16232,24 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   // caliper site + the computed body-fat %), so the trend graph can follow any
   // of them over time.
   const chartable = [...MEASUREMENT_FIELDS, ...CALIPER_ALL].filter((f) => entries.filter((e) => Number(e[f]) > 0).length >= 2);
-  const bfPoints = showBF ? entries.map((e) => ({ date: e.date, timestamp: e.timestamp, weight: measurementMetrics(d, e).bodyFatPct }))
-    .filter((p) => p.weight != null) : [];
+  // ⚠️ ONE METHOD PER LINE (S200y). This plotted `bodyFatPct`, which is whichever
+  // source happened to be present that day — so a week with a scale reading and a
+  // week with calipers drew a "change" of several points that was purely a change
+  // of instrument. The trend is the whole reason this chart exists, and it was
+  // the one thing it could not be trusted for. Same defect S183r fixed on the
+  // other body-comp chart; this one was missed.
+  //
+  // Restricted to the plan's primary source, so every point on the line is the
+  // same measurement taken the same way.
+  const bfSource = d.bfPrimarySource || null;
+  const bfPoints = showBF ? entries.map((e) => {
+      const mm = measurementMetrics(d, e);
+      const v = bfSource === "caliper" ? mm.caliperBF
+        : bfSource === "scale" ? mm.manualBF
+        : bfSource === "tape" ? mm.tapeBF
+        : mm.bodyFatPct;
+      return { date: e.date, timestamp: e.timestamp, weight: v, source: mm.bodyFatSource };
+    }).filter((p) => p.weight != null) : [];
   if (showBF && bfPoints.length >= 2) chartable.unshift("bodyFat");
   const activeMetric = chartable.includes(metric) ? metric : chartable[0] || null;
   const points = activeMetric === "bodyFat" ? bfPoints
@@ -16313,16 +16344,32 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
     // Also commit a typed-but-unlogged weight, so tapping "Save" never drops it.
     const wLogged = flushWeight();
     const vals = {};
+    // ⚠️ A NUMBER OUTSIDE THE RANGE WAS DROPPED IN SILENCE, AND THE PANEL SAID
+    // "Saved." (S200y). So a corrected waist typed in centimetres, or a caliper
+    // reading with a slipped decimal, vanished — while the OLD value stayed in
+    // the record and kept feeding the body-fat estimate. The person believed
+    // they had fixed it. Rejections are now named, and nothing is saved and
+    // nothing is cleared until they are dealt with.
+    const rejected = [];
+    const label = (f) => MEASUREMENT_LABELS[f] || f;
     for (const f of MEASUREMENT_FIELDS) {
+      if (drafts[f] === undefined || drafts[f] === "") continue;
       const v = Math.round(Number(drafts[f]) * 10) / 10;
-      if (drafts[f] !== undefined && drafts[f] !== "" && v >= 3 && v <= 90) vals[f] = v;
+      if (v >= 3 && v <= 90) vals[f] = v; else rejected.push(label(f));
     }
     for (const f of caliperFieldsFor(d)) { // skinfolds in mm
+      if (drafts[f] === undefined || drafts[f] === "") continue;
       const v = Math.round(Number(drafts[f]) * 10) / 10;
-      if (drafts[f] !== undefined && drafts[f] !== "" && v >= 2 && v <= 100) vals[f] = v;
+      if (v >= 2 && v <= 100) vals[f] = v; else rejected.push(label(f));
     }
-    const bf = Math.round(Number(drafts.bodyFatManual) * 10) / 10; // scale/scanner %
-    if (drafts.bodyFatManual !== undefined && drafts.bodyFatManual !== "" && bf >= 3 && bf <= 70) vals.bodyFatManual = bf;
+    if (drafts.bodyFatManual !== undefined && drafts.bodyFatManual !== "") {
+      const bf = Math.round(Number(drafts.bodyFatManual) * 10) / 10; // scale/scanner %
+      if (bf >= 3 && bf <= 70) vals.bodyFatManual = bf; else rejected.push("Body fat %");
+    }
+    if (rejected.length) {
+      setMsg(`Not saved — out of range: ${rejected.join(", ")}. Tape is in inches, calipers in mm.`);
+      return;   // drafts kept, so the correction is still on screen
+    }
     if (!Object.keys(vals).length) {
       // Weight-only saves are fine now — only nag if nothing at all was entered.
       if (!wLogged) setMsg("Enter a weight, body-fat %, a caliper reading, or a tape measurement.");
@@ -16495,7 +16542,16 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                 )}
               </div>
             )}
-            <div className="mt-1.5 text-[11px] text-muted">Tape body fat is an estimate (±2%) — the trend matters more than the exact number.</div>
+            {/* ⚠️ ±2% WAS THE REASON A NORMAL SPREAD READ AS A BUG (S200y,
+                Kevin: "all these numbers are so far off from each other").
+                Nothing here is that accurate: skinfolds are ±3–5, Navy tape
+                ±3–4, and a consumer scale can sit 5 points out and biased.
+                Claiming ±2% made honest disagreement look like a defect and
+                cost real trust in the app. */}
+            <div className="mt-1.5 text-[11px] text-muted">
+              Body fat from tape or calipers is an estimate (±3–4 points), and a scale can sit 5 points off either way.
+              Different methods disagree by design — pick one and follow it over time. The trend is the signal, not the number.
+            </div>
           </div>
         ) : showBF ? (
           <div className="mb-3 rounded-lg bg-surface2 p-3 text-sm text-muted">

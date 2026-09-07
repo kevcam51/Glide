@@ -939,11 +939,17 @@ function caliperBF(d, m) {
     const a = n(m.calChest), b = n(m.calAbdomen), c = n(m.calThigh);
     if (!a || !b || !c) return null;
     sum = a + b + c;
+    // ⚠️ THE QUADRATIC TURNS OVER (S200y). Past a sum of roughly 258 mm the
+    // curve inverts, so MORE fat returns a LOWER percentage — a confidently
+    // wrong number, in the direction nobody would question. Outside the range
+    // the equation was derived on, refuse instead of extrapolating.
+    if (!(sum >= 10 && sum <= 200)) return null;
     bd = 1.10938 - 0.0008267 * sum + 0.0000016 * sum * sum - 0.0002574 * age;
   } else if (d.gender === "female") {
     const a = n(m.calTriceps), b = n(m.calSuprailiac), c = n(m.calThigh);
     if (!a || !b || !c) return null;
     sum = a + b + c;
+    if (!(sum >= 10 && sum <= 200)) return null;   // see the male branch (S200y)
     bd = 1.0994921 - 0.0009929 * sum + 0.0000023 * sum * sum - 0.0001392 * age;
   } else return null;
   if (!(bd > 0)) return null;
