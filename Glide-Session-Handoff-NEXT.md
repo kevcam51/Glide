@@ -37,11 +37,40 @@ the live ruleset refused `meetAt` (verified against production: permission-
 denied). Shipping the app first would have put a booking form in front of every
 trainer whose "My place" choice fails to save. Rules → functions → push.
 
+### S204 — the row moves up, locks without a trainer, and arrival ships
+
+- **The address row is now fifth**, straight after Calendar, with the other
+  session rows (it was eleventh of thirteen). Pinned by POSITION relative to its
+  neighbours, not a line number, so an unrelated edit cannot silently demote it.
+- **Clients always had the row** — it has been role-aware from the start; only
+  the label differs.
+- **It locks for a client with no trainer.** Their address is only read by their
+  own trainer, so before they join one it goes nowhere: disabled, NO TRAINER,
+  and a reason. ⚠️ **The gate is role-asymmetric on purpose** — a trainer has no
+  coach and never will, so `!hasCoach` alone would lock every trainer out of
+  their own address. A mutation test enforces that.
+- **"I'm here"** — the other end of the journey, same callable (the participant
+  check, the window and the plan gate are the ones arriving needs).
+  ⚠️ **No GPS on that path**: arriving is a statement, not a measurement.
+  ⚠️ **`arrivedAt` is written as an explicit `null` on a new departure.**
+  `set(..., {merge:true})` merges nested maps RECURSIVELY, so omitting it would
+  keep the previous arrival — every re-departure stamped "arrived" forever.
+  Readers test truthiness, never key presence.
+
+⚠️ **NOT YET EXERCISED LIVE: the arrival branch**, because no test account is on
+a Coach tier. Unit-tested and mutation-checked five ways; Kevin's account passes
+the gate by UID and can run it.
+
 **Left undone, deliberately, both Kevin's call:** capturing an address at SIGNUP
 (the role chooser asks only for a name, and an address field there is a drop-off
 risk before anyone trusts the app), and restricting "On my way" to whichever
 side is designated as travelling (a trainer can genuinely be late to their OWN
 studio, so it stays available to both).
+
+⚠️ **TWO "FAILURES" DURING LIVE TESTING WERE THE DESIGN WORKING**, and both cost
+a round of chasing: the button is hidden on a session more than 240 minutes out
+(the lead window), and hidden for a free trainer (the Coach gate). Check the
+clock and the tier before debugging this feature.
 
 ⚠️ **A PARALLEL SESSION SHIPPED S201b WHILE THIS WAS BEING BUILT.** origin/main
 had moved two commits (the age roll-forward); this work was rebased onto it.
