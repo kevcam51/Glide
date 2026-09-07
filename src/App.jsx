@@ -21183,6 +21183,53 @@ function onMyWayError(e) {
 // silently ships the feature to plans that do not include it, which is exactly
 // the class of mistake a paywall cannot afford. Off also covers "not loaded
 // yet", so the button never flashes in and out.
+// What to tell the sender AFTER it went. PURE and module-level so it can be run.
+//
+// ⚠️ "Sent." WAS TRUE OF THE WRONG THING (S206). The callable reports whether a
+// push actually buzzed, and a pre-flight audit found every outcome collapsing
+// into one cheerful message — so a trainer whose client has never enabled push
+// was told "they can see you're 12 min away" and reasonably relied on it to
+// explain being late. The in-app row IS always written (appendFeed runs before
+// any preference or subscription check), so the honest split is *how* they will
+// see it, not *whether*.
+function onMyWaySentNote(d, otherName, hadFix) {
+  const who = otherName || "They";
+  const eta = d && d.minutes != null;
+  const knows = `${who} know${who === "They" ? "" : "s"} you're on the way.`;
+  // ⚠️ DO NOT GUESS WHY THERE IS NO ETA (S206). This used to infer it from
+  // whether the browser got a fix, so EVERY server-side cause — an address the
+  // geocoder cannot place precisely, a Routes hiccup, a key problem — printed
+  // "this session has no address" on a session whose address is visible on the
+  // very same screen. Three of four audit lenses flagged it independently: it
+  // sends you debugging the wrong thing. The callable reports `noDestination`,
+  // so the only guess left is the one the browser genuinely owns.
+  const head = eta
+    ? `Sent — ${who} can see you're about ${d.minutes} min away.`
+    : !hadFix
+      ? `Sent — ${knows} No arrival time: location wasn't shared.`
+      : d && d.noDestination
+        ? `Sent — ${knows} No arrival time: this session has no address.`
+        : `Sent — ${knows} Couldn't work out a drive time for that address — check it's a full street address.`;
+  // Only the two skips that mean "no buzz". A successful send, or an unknown
+  // outcome, says nothing extra — an unnecessary caveat is its own noise.
+  // ⚠️ A REPLAY IS NOT A SEND (S206). Inside the 60s cooldown the server writes
+  // nothing, calls nothing and pushes nothing — it hands back the stored answer.
+  // Reporting that as "Sent" is exactly wrong during the natural test loop:
+  // tap, get no ETA, fix the address, tap again, and be told it worked.
+  if (d && d.repeated) {
+    return eta
+      ? `Already sent a moment ago — ${who} can still see about ${d.minutes} min.`
+      : "Already sent a moment ago. Give it a minute before sending a new time.";
+  }
+  if (d && d.pushSkipped === "no-subs") {
+    return `${head} They'll see it next time they open Glidna — they haven't turned on notifications.`;
+  }
+  if (d && d.pushSkipped === "prefs") {
+    return `${head} It's in their Glidna notifications — they've muted push alerts for this.`;
+  }
+  return head;
+}
+
 function OnMyWay({ session: s, meUid, otherName, compact = false, enabled = false }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -21218,9 +21265,15 @@ function OnMyWay({ session: s, meUid, otherName, compact = false, enabled = fals
     if (busy) return;
     setBusy(true); setErr(""); setNote("");
     try {
-      await callSessionOnMyWay({ sessionId: s.id, arrived: true });
-      setNote(`${otherName || "They"} know you're here.`);
-      setTimeout(() => setNote(""), 6000);
+      const r = await callSessionOnMyWay({ sessionId: s.id, arrived: true });
+      const d = (r && r.data) || {};
+      const who = otherName || "They";
+      setNote(d.pushSkipped === "no-subs"
+        ? `${who} will see it next time they open Glidna — they haven't turned on notifications.`
+        : d.pushSkipped === "prefs"
+          ? `${who} have it in their Glidna notifications — push alerts are muted.`
+          : `${who} know you're here.`);
+      setTimeout(() => setNote(""), 9000);
     } catch (e) {
       console.error("arrival failed", e);
       setErr(onMyWayError(e));
@@ -21238,12 +21291,8 @@ function OnMyWay({ session: s, meUid, otherName, compact = false, enabled = fals
     try {
       const r = await callSessionOnMyWay({ sessionId: s.id, ...(fix || {}) });
       const d = (r && r.data) || {};
-      setNote(d.minutes != null
-        ? `Sent — ${otherName || "they"} can see you're about ${d.minutes} min away.`
-        : !fix
-          ? `Sent — ${otherName || "they"} know you're on the way. No arrival time: location wasn't shared.`
-          : `Sent — ${otherName || "they"} know you're on the way. No arrival time: this session has no address.`);
-      setTimeout(() => setNote(""), 6000);
+      setNote(onMyWaySentNote(d, otherName, !!fix));
+      setTimeout(() => setNote(""), 9000);
     } catch (e) {
       console.error("on-my-way failed", e);
       setErr(onMyWayError(e));
@@ -21424,7 +21473,11 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
       // simply never appears, which is the safe direction: the alternative is
       // calling a callable that will refuse and painting the "couldn't check
       // your schedule" banner on a trainer whose schedule is fine.
-      setMyDrive(false);
+      // ⚠️ EXCEPT FOR THE OWNER, WHOSE ANSWER NEEDS NO PROFILE (S206). The
+      // server grants by UID before it reads anything, so deriving "no" from a
+      // read that failed disagrees with the gate it is mirroring — and it fails
+      // silently, on the one account that can never legitimately be refused.
+      setMyDrive(meUid === OWNER_UID);
     });
   }, [meUid]);
   useEffect(() => {
@@ -21490,6 +21543,19 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     window.storage.set(CAL_COLORS_KEY, JSON.stringify(next)).catch(() => {});
   };
   const colorOf = useCallback((uid) => calColorFor(uid, calColors), [calColors]);
+  // ⚠️ THE OPEN SHEET WAS A FROZEN SNAPSHOT (S206). `detail` was set once from
+  // the tapped block and never re-read, so anything written while it was open
+  // came back nowhere: tapping "On my way" stored an ETA and notified the
+  // client, and the sheet went on offering "On my way" — no sent state, and
+  // "I'm here" could never appear at all, on the surface this feature exists
+  // for. `sessions` is already live via subscribeMySessions; the sheet just
+  // has to read from it. Falls back to the frozen copy so a session that
+  // vanishes from the list (cancelled, filtered) closes cleanly instead of
+  // blanking mid-interaction.
+  const liveDetail = useMemo(
+    () => (detail ? (sessions || []).find((x) => x.id === detail.id) || detail : null),
+    [detail, sessions],
+  );
 
   // Whether clients can see free/busy. Off by default, and it is a single
   // trainer-wide switch rather than a per-client one (Kevin's decision) — a
@@ -22130,7 +22196,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
       </div>
 
       {detail && (
-        <CalSessionSheet session={detail} nameOf={nameOf} now={now} busy={busy} meUid={meUid}
+        <CalSessionSheet session={liveDetail} nameOf={nameOf} now={now} busy={busy} meUid={meUid}
           meName={meName}
           hasCard={(() => { const c = clients.find((x) => x.uid === detail.clientUid);
             return !!(c && c.sessionPaymentMethod && c.sessionPaymentMethod.id); })()}

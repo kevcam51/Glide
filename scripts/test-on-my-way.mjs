@@ -329,6 +329,108 @@ ok("validPoint rejects NaN", D.validPoint({ lat: NaN, lng: 0 }) === null);
   ok("and so does no error at all", /try again/i.test(onMyWayError(null)));
 }
 
+// ── 8c. the sender is told the TRUTH about delivery (S206) ──────────────────
+// ⚠️ FOUND BY A PRE-FLIGHT AUDIT, BEFORE THE OWNER'S FIRST LIVE TAP. sendPushTo
+// reports {sent} / {skipped:"prefs"} / {skipped:"no-subs"} and every outcome was
+// being collapsed into one cheerful "Sent." — so a trainer whose client has
+// never enabled push was told "they can see you're 12 min away" and would
+// reasonably rely on that to explain being late.
+// The in-app row is ALWAYS written (appendFeed runs before any preference or
+// subscription check), so the honest split is HOW they will see it, not WHETHER.
+{
+  const src = APP.match(/function onMyWaySentNote\(d, otherName, hadFix\) \{[\s\S]*?\n\}/)[0];
+  const note = new Function(`${src}; return onMyWaySentNote;`)();
+  const eta = { minutes: 12, etaAt: 1 };
+  ok("a delivered ETA reads plainly", /12 min away/.test(note({ ...eta, pushed: true }, "Casey", true)));
+  ok("...with no unnecessary caveat", !/open Glidna|muted/.test(note({ ...eta, pushed: true }, "Casey", true)));
+  // The two outcomes that mean "no buzz".
+  const noSubs = note({ ...eta, pushSkipped: "no-subs" }, "Casey", true);
+  ok("no push subscription is disclosed", /open Glidna/.test(noSubs), noSubs);
+  ok("...without claiming it failed — they DO see it in-app", !/fail|error|couldn/i.test(noSubs), noSubs);
+  const muted = note({ ...eta, pushSkipped: "prefs" }, "Casey", true);
+  ok("a muted preference is disclosed", /muted/.test(muted), muted);
+  ok("...and named as their choice, not a fault", /muted push alerts/.test(muted), muted);
+  // An UNKNOWN outcome must not invent a caveat.
+  ok("an unknown delivery outcome says nothing extra",
+     !/open Glidna|muted/.test(note({ ...eta }, "Casey", true)));
+  // The no-ETA halves still say WHY.
+  ok("a denied location still explains itself", /location wasn't shared/.test(note({}, "Casey", false)));
+  // ⚠️ UPDATED, NOT WEAKENED (S206). This used to pass `{}` and expect "no
+  // address" — which encoded the very guess that was wrong: an absent
+  // `noDestination` meant "the server did not say", and printing "no address"
+  // for it is what misdirected the reader. The session that really has none now
+  // has to say so.
+  ok("a session with no address explains itself", /no address/.test(note({ noDestination: true }, "Casey", true)));
+  ok("no message ever prints a null or undefined",
+     ["Casey", ""].every((n) => [true, false].every((f) =>
+       [{}, eta, { ...eta, pushSkipped: "no-subs" }].every((d) =>
+         !/null|undefined|NaN/.test(note(d, n, f))))));
+
+  // ⚠️ THE "WHY" MUST COME FROM THE SERVER, NOT A GUESS (S206). Inferring it
+  // from whether the browser got a fix printed "this session has no address" for
+  // every server-side cause — a geocoder that cannot place the address
+  // precisely, a Routes hiccup, a key problem — on a session whose address is
+  // visible on the same screen. Three audit lenses flagged it independently.
+  ok("a session that really has no address says so",
+     /no address/.test(note({ noDestination: true }, "Casey", true)));
+  ok("...but a geocode failure does NOT claim the address is missing",
+     !/no address/.test(note({ noDestination: false }, "Casey", true)),
+     note({ noDestination: false }, "Casey", true));
+  ok("...it names the real problem instead",
+     /full street address/.test(note({ noDestination: false }, "Casey", true)));
+  ok("a denied fix still outranks both", /location wasn't shared/.test(note({ noDestination: false }, "Casey", false)));
+  // A cooldown replay is not a send — reporting it as one is exactly wrong in
+  // the natural loop: tap, no ETA, fix the address, tap again, be told it worked.
+  ok("a replay is not reported as a fresh send",
+     /Already sent/.test(note({ repeated: true, minutes: 12 }, "Casey", true)));
+  ok("...and does not also claim delivery", !/^Sent/.test(note({ repeated: true, minutes: 12 }, "Casey", true)));
+  ok("...even with no ETA to replay", /Already sent/.test(note({ repeated: true }, "Casey", true)));
+
+  // The server must actually REPORT it, or the wording has nothing to read.
+  const body = AVAIL.slice(AVAIL.indexOf("exports.sessionOnMyWay"));
+  ok("the callable reports whether it buzzed", /pushed: !!\(push && push\.sent > 0\)/.test(body));
+  ok("...and why it did not", /pushSkipped: \(push && push\.skipped\) \|\| null/.test(body));
+  // ⚠️ AND IT MUST STILL NOT THROW. A notification that could not be delivered
+  // must never fail the tap — the ETA is stored either way.
+  // ⚠️ COUNT BOTH, DO NOT JUST MATCH ONE. The first version of this asserted the
+  // pattern appeared "somewhere in sessionOnMyWay" — and stayed green when the
+  // DEPARTURE catch was reverted to `.catch(() => {})`, because the ARRIVAL one
+  // still matched. A guard that exists in two places has to be counted in two
+  // places.
+  ok("BOTH pushes catch to a value, so neither can fail the tap",
+     (body.match(/\.catch\(\(e\) => \(\{ skipped: "error"/g) || []).length === 2,
+     (body.match(/\.catch\(\(e\) => \(\{ skipped: "error"/g) || []).length);
+  ok("...and no push is left swallowing its result",
+     !/sendPushTo\([\s\S]{0,400}?\.catch\(\(\) => \{\}\)/.test(body), true);
+  // Undebuggable was the other half of the finding: the logs could not answer
+  // "did it send?" either.
+  ok("the outcome is logged, so the logs can answer it", /console\.log\("onMyWay push"/.test(body));
+  ok("...for the arrival too", /console\.log\("onMyWay arrival push"/.test(body));
+}
+
+// ── 8d. the open sheet is LIVE, not a snapshot (S206) ───────────────────────
+// ⚠️ THE ONE REAL BUG THE PRE-FLIGHT AUDIT FOUND. `detail` was set once from the
+// tapped calendar block and never re-read, so everything this feature writes
+// came back nowhere: tapping "On my way" stored the ETA and notified the client,
+// while the sheet went on offering "On my way" — and "I'm here", which only
+// renders once a status exists, could never appear AT ALL. On the surface the
+// code itself calls "the surface it matters on most".
+{
+  ok("the calendar sheet reads from the live session list",
+     /const liveDetail = useMemo\(/.test(APP), true);
+  ok("...keyed on both the tapped id and the live list",
+     /\[detail, sessions\],/.test(APP), true);
+  ok("...and the sheet is handed the live copy, not the frozen one",
+     /<CalSessionSheet session=\{liveDetail\}/.test(APP), true);
+  ok("...falling back so a vanished session closes cleanly rather than blanking",
+     /\.find\(\(x\) => x\.id === detail\.id\) \|\| detail/.test(APP), true);
+  // The owner must not be silently locked out of his own feature by a blip.
+  // ⚠️ The server grants by UID BEFORE reading any profile, so deriving "no"
+  // from a failed read disagrees with the gate this mirrors.
+  ok("a failed profile read does not lock the owner out",
+     /setMyDrive\(meUid === OWNER_UID\);/.test(APP), true);
+}
+
 // ── 9. the notification has somewhere to land ───────────────────────────────
 // The failure S200q had to fix fifteen times: a push that opens the app and
 // does nothing. test-notif-routes.mjs harvests the tag automatically; this pins

@@ -886,11 +886,13 @@ exports.sessionOnMyWay = onCall(
         const me = (await db.doc(`users/${uid}`).get()).data() || {};
         nm = me.displayName || [me.firstName, me.lastName].filter(Boolean).join(" ") || "";
       } catch { /* the message reads fine without it */ }
-      await sendPushTo(db, verdict.otherUid, {
+      const apush = await sendPushTo(db, verdict.otherUid, {
         ...onMyWayArrivalMessage(nm, session.meetAt, verdict.otherUid === session.trainerUid),
         tag: `session-onmyway-${sessionId}`, url: "/?notif=session-onmyway",
-      }, "sessionOnMyWay").catch(() => {});
-      return { ok: true, arrived: true, arrivedAt: now };
+      }, "sessionOnMyWay").catch((e) => ({ skipped: "error", why: e && e.message }));
+      console.log("onMyWay arrival push", JSON.stringify({ sessionId, delivery: apush }));
+      return { ok: true, arrived: true, arrivedAt: now,
+        pushed: !!(apush && apush.sent > 0), pushSkipped: (apush && apush.skipped) || null };
     }
 
     // A repeat inside the cooldown returns what is already stored: no Routes
@@ -970,16 +972,33 @@ exports.sessionOnMyWay = onCall(
     // shown — so this cannot join the fifteen dead pushes S200q had to fix.
     // scripts/test-notif-routes.mjs harvests this tag automatically and fails
     // if it ever stops routing.
-    await sendPushTo(db, verdict.otherUid, {
+    // ⚠️ THE RESULT WAS THROWN AWAY, AND THAT MADE THE FEATURE UNDEBUGGABLE
+    // (S206). `sendPushTo` reports {sent} / {skipped:"prefs"} / {skipped:"no-subs"}
+    // and every one of those was collapsed into the same silent success — so
+    // "the push never arrived" and "the push arrived fine" produced byte-
+    // identical logs AND a byte-identical message to the sender. On a feature
+    // whose whole job is telling someone you are coming, that is the one thing
+    // it must not be vague about.
+    // Still `.catch`ed to a value, never thrown: a notification that could not
+    // be delivered must not fail the tap. The ETA is stored either way, and the
+    // recipient's in-app feed row is written by appendFeed BEFORE any of the
+    // preference or subscription checks — so they always see it in the app.
+    const push = await sendPushTo(db, verdict.otherUid, {
       ...msg, tag: `session-onmyway-${sessionId}`, url: "/?notif=session-onmyway",
     // Its OWN preference, not "session reminders": a countdown nobody asked for
     // and a person telling you they have left are different things, and someone
     // who silenced the automated ones still wants to know their trainer is ten
     // minutes out. One new key, one new row — the shape the Notification Center
     // was built for.
-    }, "sessionOnMyWay").catch(() => {});
+    }, "sessionOnMyWay").catch((e) => ({ skipped: "error", why: e && e.message }));
+    console.log("onMyWay push", JSON.stringify({ sessionId, delivery: push }));
 
     return { ok: true, minutes, etaAt, source: (est && est.source) || null,
+             // ⚠️ WHETHER IT ACTUALLY BUZZED. Reported so the sender is told the
+             // truth rather than a cheerful "Sent" over a notification that was
+             // never delivered — they may be relying on it to explain being late.
+             pushed: !!(push && push.sent > 0),
+             pushSkipped: (push && push.skipped) || null,
              // So the UI can say WHY there is no number instead of showing a gap.
              noDestination: !verdict.destination, noFix: !d.lat && !d.lng };
   },
