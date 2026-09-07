@@ -138,6 +138,46 @@ ok("...and reports which method it used", /bodyFatSource, tapeSource,/.test(AI))
      /sort\(\(a, b\) => \(b\.timestamp \|\| 0\) - \(a\.timestamp \|\| 0\)\)\[0\]/.test(APP));
 }
 
+// ── 5. Bailey, kept and completed (S200w, Kevin's own source) ─────────────
+// Kevin supplied the four tape equations and Bailey's derived numbers. The
+// equations in the code already matched his source exactly; this pins them so a
+// future "correction" cannot drift them, and checks the parts that were missing.
+{
+  const S2 = new Function(`${fnOf(APP, "baileyCorrectWeight")}\n${fnOf(APP, "baileyLeanRange")}\n${balanced(APP, APP.indexOf("const BAILEY_TARGET_BF ="))};\n${balanced(APP, APP.indexOf("const BAILEY_LBM_BY_HEIGHT ="))};\nreturn { baileyCorrectWeight, baileyLeanRange };`)();
+
+  // ⚠️ KEVIN'S OWN WORKED EXAMPLES. If a future edit "fixes" a coefficient,
+  // these fail with his numbers rather than with an abstraction.
+  const ex = (d, m) => S.baileyBF(d, m);
+  ok("men ≤30: 34 + ½·36 − 3·11 − 7 = 12",
+     ex({ gender:"male", age:"25" }, { waist:34, hips:36, forearm:11, wrist:7 }) === 12);
+  ok("men >30: 40 + ½·40 − 2.7·10.75 − 7 ≈ 24",
+     Math.abs(ex({ gender:"male", age:"40" }, { waist:40, hips:40, forearm:10.75, wrist:7 }) - 24) < 0.1);
+  // 23.05 exactly; IEEE gives 23.0499… so it rounds to 23 — which is the answer
+  // Kevin's own worked example states, so the code and the source agree.
+  ok("women ≤30: 36 + 0.8·21 − 2·12 − 5.75 = 23",
+     ex({ gender:"female", age:"25" }, { hips:36, thigh:21, calf:12, wrist:5.75 }) === 23);
+  ok("women >30: 39 + 23 − 2·13.5 − 6 = 29",
+     ex({ gender:"female", age:"40" }, { hips:39, thigh:23, calf:13.5, wrist:6 }) === 29);
+
+  // Bailey's correct weight: men lean/.85, women lean/.78 — his Ann/Jack table.
+  ok("Jack: 131 lbs lean → 154 lbs at 15%", S2.baileyCorrectWeight("male", 131) === 154);
+  ok("Ann: 98 lbs lean → 126 lbs at 22%", Math.abs(S2.baileyCorrectWeight("female", 98) - 126) <= 1);
+  ok("...and it refuses without a lean mass", S2.baileyCorrectWeight("male", 0) === null);
+  ok("...or an unknown gender", S2.baileyCorrectWeight("other", 131) === null);
+
+  // The lean-mass reference table, spot-checked against the published rows.
+  ok("5'10\" man reads 139–157", String(S2.baileyLeanRange({ gender:"male", heightFt:5, heightIn:10 })) === "139,157");
+  ok("5'4\" woman reads 83–100", String(S2.baileyLeanRange({ gender:"female", heightFt:5, heightIn:4 })) === "83,100");
+  // The table genuinely has no men under 5'3" or women over 6'0" — absent, not zero.
+  ok("a height the table does not cover returns nothing",
+     S2.baileyLeanRange({ gender:"male", heightFt:5, heightIn:0 }) === null);
+
+  ok("both are shown, and named as Bailey's", /Bailey&rsquo;s correct weight/.test(APP)
+     && /Bailey&rsquo;s range for your height/.test(APP));
+  // Kevin asked to KEEP Bailey — S200v only stopped it diluting the tape number.
+  ok("the Bailey row is still displayed on its own", /label: "Tape · Bailey"/.test(APP));
+}
+
 console.log(fails === 0
   ? `  PASS  body fat (${checks} assertions)`
   : `  ${fails}/${checks} FAILED`);

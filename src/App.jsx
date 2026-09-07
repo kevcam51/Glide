@@ -870,6 +870,51 @@ function leeMuscleMassLbs(d, weightLbsOverride) {
   return Math.round(smmKg / 0.453592);
 }
 
+// ── Covert Bailey's own derived numbers (S200w, Kevin) ─────────────────────
+//
+// The four tape equations above are Bailey's, verbatim, and they reproduce his
+// worked examples: a man over 30 with a 40in waist, 40in hips, 10.75in forearm
+// and 7in wrist gives 40 + 20 − 29.03 − 7 ≈ 24%.
+//
+// These are the rest of what Bailey does with that percentage. They are HIS
+// definitions, not the app's, and every screen showing one says so — the point
+// of keeping a named method is that a trainer can tell a client where the number
+// came from and defend it.
+//
+// ⚠️ NOTE THE DIFFERENT TARGET. The app's existing goalWeightFromLeanMass uses
+// the client's OWN goal body fat; Bailey's "correct weight" uses his fixed
+// reference points — 15% for men, 22% for women — which is why the two can
+// disagree, and why both are shown rather than one silently replacing the other.
+const BAILEY_TARGET_BF = { male: 15, female: 22 };
+function baileyCorrectWeight(gender, leanLbs) {
+  const lean = Number(leanLbs) || 0;
+  const t = BAILEY_TARGET_BF[gender];
+  if (!(lean > 0) || !t) return null;
+  return Math.round(lean / (1 - t / 100));   // men lean/.85, women lean/.78
+}
+
+// Bailey's lean-body-mass reference ranges by height, "compiled from tests of
+// active men and women who were close to the ideal body fat percentages"
+// (15% men / 22% women). Not a target — a sanity check, and the thing that tells
+// the "heavy lean" person from the "skinny fat" one, which is the whole reason
+// Bailey publishes it.
+const BAILEY_LBM_BY_HEIGHT = {
+  60: { female: [74, 86] },                     61: { female: [76, 90] },
+  62: { female: [78, 94] },                     63: { male: [94, 115], female: [82, 98] },
+  64: { male: [99, 119], female: [83, 100] },   65: { male: [106, 125], female: [87, 105] },
+  66: { male: [115, 132], female: [90, 110] },  67: { male: [119, 137], female: [94, 117] },
+  68: { male: [125, 140], female: [98, 122] },  69: { male: [131, 149], female: [103, 127] },
+  70: { male: [139, 157], female: [109, 129] }, 71: { male: [144, 166], female: [113, 136] },
+  72: { male: [149, 179], female: [117, 140] }, 73: { male: [153, 191] },
+  74: { male: [157, 199] },                     75: { male: [161, 204] },
+  76: { male: [166, 212] },
+};
+function baileyLeanRange(d) {
+  const inches = Math.round((Number(d.heightFt) || 0) * 12 + (Number(d.heightIn) || 0));
+  const row = BAILEY_LBM_BY_HEIGHT[inches];
+  return (row && row[d.gender]) || null;
+}
+
 // One measurement entry → all derived metrics (nulls where inputs are missing).
 // bodyFatPct = average of whichever of Bailey/Navy computed (they cross-check
 // each other); goalWeightFromLeanMass = Bailey's lean mass ÷ (1 − target BF%).
@@ -910,7 +955,10 @@ function measurementMetrics(d, m) {
   const goalWeightFromLeanMass = leanMassLbs && targetBf && targetBf > 1 && targetBf < 60
     ? Math.round(leanMassLbs / (1 - targetBf / 100)) : null;
   return { baileyBF: bailey, navyBF: navy, caliperBF: caliper, manualBF: manual, tapeBF: tapeAvg, tapeSource,
-    bodyFatPct: avg, bodyFatSource, waistToHeight: whtr, leanMassLbs, fatMassLbs, muscleMassLbs, goalWeightFromLeanMass };
+    bodyFatPct: avg, bodyFatSource, waistToHeight: whtr, leanMassLbs, fatMassLbs, muscleMassLbs, goalWeightFromLeanMass,
+    baileyCorrectWeight: baileyCorrectWeight(d.gender, leanMassLbs),
+    baileyLeanRange: baileyLeanRange(d),
+    baileyTargetBf: BAILEY_TARGET_BF[d.gender] || null };
 }
 
 // Merge tape values into the date's measurements entry (one entry per date —
@@ -16405,7 +16453,21 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
               )}
               {metrics.leanMassLbs != null && (
                 <div><span className="font-display text-2xl">{metrics.leanMassLbs}</span>
-                  <span className="ml-1.5 text-xs text-muted">lbs lean mass</span></div>
+                  <span className="ml-1.5 text-xs text-muted">lbs lean mass
+                    {/* Bailey publishes a range of lean mass per height for
+                        people already at a healthy body fat. It is a sanity
+                        check, not a target — it is what tells a "heavy lean"
+                        person from a "skinny fat" one (S200w). */}
+                    {metrics.baileyLeanRange && (
+                      <> · Bailey&rsquo;s range for your height {metrics.baileyLeanRange[0]}–{metrics.baileyLeanRange[1]} lbs</>
+                    )}
+                  </span></div>
+              )}
+              {metrics.baileyCorrectWeight != null && (
+                <div><span className="font-display text-2xl text-primary">{metrics.baileyCorrectWeight}</span>
+                  <span className="ml-1.5 text-xs text-muted">
+                    lbs — Bailey&rsquo;s correct weight (your lean mass at {metrics.baileyTargetBf}% fat)
+                  </span></div>
               )}
               {metrics.fatMassLbs != null && (
                 <div><span className="font-display text-2xl text-warn">{metrics.fatMassLbs}</span>
