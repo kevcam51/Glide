@@ -118,6 +118,60 @@ const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n,
      !/return ownKvNotes\.filter\(\(n\) => !n\.aboutUid && !n\.aboutPlanId\)\.map/.test(APP));
 }
 
+// ── the check-in sheet's note buttons (S200n) ─────────────────────────────
+// THE SECOND ROUTE TO THE SAME COMPLAINT, and this one announced success.
+// appendNote routed on the word "private" with no idea who was writing, and
+// privGet/privSet always address the SIGNED-IN user's privkv — a store read by
+// exactly one screen, NotesPanel in "client" mode. So a TRAINER tapped "Keep
+// private", got a green "Saved to your private notes", and the note landed
+// where no trainer screen has ever looked.
+//
+// ⚠️ AND THE OBVIOUS FIX MOVES THE BUG. Sending it to the trainer's own kv makes
+// it show under "My notes" — but it is a note about THAT CLIENT'S DAY, and the
+// Notes panel opened from the client filters on aboutUid === clientUid. Same
+// complaint, one screen over. So it routes through the app's one notes rule.
+{
+  const cut = (re, what) => { const m = APP.match(re); if (!m) throw new Error("missing " + what); return m[0]; };
+  const noteStoreFor = new Function(`${cut(/function noteStoreFor\([\s\S]*?\n\}/, "noteStoreFor")}; return noteStoreFor;`)();
+
+  // What each button does, per who is looking. "Keep private" = shared:false.
+  ok("a client keeping it private still gets the owner-only store",
+     noteStoreFor("client", false) === "priv");
+  ok("a client sharing sends it to their trainer",
+     noteStoreFor("client", true) === "sharedOwn");
+  // THE BUG, stated as itself: this used to be "priv" for a trainer too.
+  ok("a trainer keeping it private files it AGAINST THAT CLIENT, where they will look",
+     noteStoreFor("trainer-client", false) === "aboutClient");
+  ok("a trainer sharing puts it in the client's own notes",
+     noteStoreFor("trainer-client", true) === "clientShared");
+  ok("on a local plan file it is filed against the plan",
+     noteStoreFor("trainer-plan", false) === "aboutPlan");
+  ok("...and a plan file has no account to share with", noteStoreFor("trainer-plan", true) === "aboutPlan");
+
+  const fn = cut(/async function appendNote\([\s\S]*?\n\}/, "appendNote");
+  ok("appendNote takes the context instead of guessing",
+     /async function appendNote\(\{ body, shared, mode, meUid, meName, clientUid, planId \}\)/.test(fn));
+  ok("...and delegates to the one routing rule", /noteStoreFor\(mode \|\| "client", !!shared\)/.test(fn)
+     && /buildNote\(\{ body: text, store,/.test(fn));
+  ok("the old visibility-only routing is gone", !/if \(visibility === "private"\)/.test(fn));
+  ok("it can write to a client's account when sharing", /setForUser\(clientUid, NOTES_KEY/.test(fn));
+
+  // ⚠️ ONE CAP, AND IT IS THE LOWER ONE. This path kept 500 while every AI write
+  // caps at 100, so a 500-note list survived only until the next AI note
+  // truncated it — silently losing 400.
+  ok("the cap agrees with the AI's", /slice\(0, 100\)/.test(fn) && !/slice\(0, 500\)/.test(fn));
+  ok("...and a failed save is no longer silent", /console\.error\("check-in note save failed"/.test(fn));
+
+  // The words have to match the action, or it is the old bug with new storage:
+  // "Shared with your trainer" was shown to the person who IS the trainer.
+  ok("the sheet knows whose it is", /const isCoach = noteMode !== "client";/.test(APP));
+  ok("a coach is not told it went to their own trainer", /Shared with \$\{otherName\|\|"your client"\}/.test(APP));
+  ok("...and the share button is hidden where there is nobody to share with",
+     /noteMode !== "trainer-plan" && \(/.test(APP));
+  ok("the context is derived where all three facts live",
+     /mode: activeRemoteUid \? "trainer-client" : \(role === ROLES\.CLIENT \? "client" : "trainer-plan"\)/.test(APP));
+}
+
 console.log(fails === 0
   ? `  PASS  notes routing (${checks} assertions)`
   : `  ${fails}/${checks} FAILED`);

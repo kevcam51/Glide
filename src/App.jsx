@@ -4145,7 +4145,7 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   );
 }
 
-function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTotal, loggingStreak, dayCalsAll, onReset, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, onSetBfSource, defaultView = "detailed", onSetPlanViewDefault,
+function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTotal, loggingStreak, dayCalsAll, onReset, checkInNoteCtx, onEdit, onUpdateCardio, onUpdateStrength, onSaveCheckIn, onDeleteCheckIn, onSetDeficitMode, onSetWearableAdjust, onSetFitnessGoal, onSaveMeasurements, onDeleteMeasurement, onSetGoalWeight, onToggleBodyFat, onSetBfSource, defaultView = "detailed", onSetPlanViewDefault,
   // Coaching notes are the coach's (S199j). Defaults CLOSED so a caller that
   // forgets the prop hides them rather than leaking them — the safe direction
   // for a privacy gate is the one that fails quiet, not the one that fails open.
@@ -4407,7 +4407,12 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
       {viewMode === "pro" && (
         <>
           <StreakBadges checkIns={data.checkIns || []} logAdherence={logAdherence} loggedDaysTotal={loggedDaysTotal} loggingStreak={loggingStreak} />
-          <DailyCheckIn data={data} onSaveCheckIn={onSaveCheckIn} meUid={meUid} meName={meName} dayCalsAll={dayCalsAll} />
+          {/* The note buttons in this sheet write to a real store, and which
+              store depends on WHO is writing and about whom — a trainer's
+              "keep private" is not a client's (S200n). */}
+          <DailyCheckIn data={data} onSaveCheckIn={onSaveCheckIn} meUid={meUid} meName={meName} dayCalsAll={dayCalsAll}
+            noteMode={(checkInNoteCtx || {}).mode} noteClientUid={(checkInNoteCtx || {}).clientUid}
+            notePlanId={(checkInNoteCtx || {}).planId} otherName={(checkInNoteCtx || {}).otherName} />
           {(data.checkIns || []).length >= 1 && (
             <div onClick={() => setShowWeightModal(true)} style={{ cursor: "pointer" }}
               title="Tap to manage weigh-ins">
@@ -14837,7 +14842,10 @@ function CheckInCalendar({ checkIns, selected, onSelect }) {
   );
 }
 
-function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll }) {
+function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll, noteMode = "client", noteClientUid, notePlanId, otherName }) {
+  // Whose sheet this is. "client" is the person's own check-in; the other three
+  // modes mean a coach is looking at somebody else's day (S200n).
+  const isCoach = noteMode !== "client";
   const [notesOpen, setNotesOpen] = useState(false);   // expanded editor
   const [noteSaveMsg, setNoteSaveMsg] = useState("");
   const today = useTodayKey();                          // live — rolls over at midnight
@@ -14875,7 +14883,7 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll }) {
   // When the date changes, pre-fill the form from any existing entry for that
   // date (so saving edits it), or reset to a blank entry for a new date.
   useEffect(() => {
-    setNoteSaveMsg(""); // a "Shared with your trainer" confirmation belongs to the day it was for
+    setNoteSaveMsg(""); // a "Shared with…" confirmation belongs to the day it was for
     const ex = (data.checkIns || []).find(c => c.date === checkDate);
     if (ex) {
       setWeight(ex.weight != null ? String(ex.weight) : "");
@@ -15070,22 +15078,32 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll }) {
               Saved with this check-in. You can also keep it in Notes:
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {/* ⚠️ BOTH BUTTONS WERE WRONG FOR A TRAINER (S200n). "Keep private"
+                  wrote to privkv, which no trainer screen reads; "Share with
+                  trainer" told the person who IS the trainer that it had been
+                  shared with their trainer. The action and the words now come
+                  from the same place: who is writing, and about whom. */}
               <button disabled={!notes.trim()}
-                onClick={async()=>{ const ok=await appendNote({body:notes,visibility:"private",meUid,meName});
-                  setNoteSaveMsg(ok?"Saved to your private notes":"Couldn't save that note"); }}
+                onClick={async()=>{ const ok=await appendNote({body:notes,shared:false,mode:noteMode,meUid,meName,clientUid:noteClientUid,planId:notePlanId});
+                  setNoteSaveMsg(ok?(isCoach?"Saved to your notes — only you can see it":"Saved to your private notes"):"Couldn't save that note"); }}
                 style={{flex:"1 1 150px",padding:"10px",borderRadius:9,border:"1px solid var(--border)",
                   background:"transparent",color:notes.trim()?"var(--text)":"var(--muted)",fontFamily:"inherit",
                   fontSize:".8rem",fontWeight:700,cursor:notes.trim()?"pointer":"default",opacity:notes.trim()?1:.55}}>
-                Keep private
+                {isCoach ? "Keep private to me" : "Keep private"}
               </button>
+              {/* A local plan file has no account on the other end, so there is
+                  nobody to share with — offering it would be a button that
+                  cannot do what it says. */}
+              {noteMode !== "trainer-plan" && (
               <button disabled={!notes.trim()}
-                onClick={async()=>{ const ok=await appendNote({body:notes,visibility:"shared",meUid,meName});
-                  setNoteSaveMsg(ok?"Shared with your trainer":"Couldn't save that note"); }}
+                onClick={async()=>{ const ok=await appendNote({body:notes,shared:true,mode:noteMode,meUid,meName,clientUid:noteClientUid,planId:notePlanId});
+                  setNoteSaveMsg(ok?(isCoach?`Shared with ${otherName||"your client"}`:"Shared with your trainer"):"Couldn't save that note"); }}
                 style={{flex:"1 1 150px",padding:"10px",borderRadius:9,border:"1px solid var(--accent)",
                   background:"rgba(var(--accent-rgb),.1)",color:"var(--accent)",fontFamily:"inherit",
                   fontSize:".8rem",fontWeight:700,cursor:notes.trim()?"pointer":"default",opacity:notes.trim()?1:.55}}>
-                Share with trainer
+                {isCoach ? `Share with ${otherName||"client"}` : "Share with trainer"}
               </button>
+              )}
             </div>
             {noteSaveMsg && <div style={{fontSize:".76rem",color:"var(--green)",fontWeight:700}}>{noteSaveMsg}</div>}
             <button onClick={()=>setNotesOpen(false)}
@@ -28288,23 +28306,45 @@ function redactThread(thread, note) {
   return { thread: out, redacted };
 }
 
-async function appendNote({ body, visibility, meUid, meName }) {
+// The check-in sheet's note writer (S200n).
+//
+// ⚠️ IT USED TO ROUTE ON THE WORD "private", WITH NO IDEA WHO WAS WRITING.
+// privGet/privSet always address the SIGNED-IN user's privkv, and privkv is read
+// by exactly one screen — NotesPanel in "client" mode. So a TRAINER inside any
+// plan tapped "Keep private", got a green "Saved to your private notes", and the
+// note landed somewhere no trainer screen has ever read. A second, independent
+// route to Kevin's "I saved a note and nothing pops up" (S200m was the first),
+// and this one announced success.
+//
+// ⚠️ AND THE OBVIOUS FIX MOVES THE BUG RATHER THAN FIXING IT. Sending a
+// trainer's note to their own kv makes it appear under "My notes" — but it is a
+// note about THIS CLIENT'S DAY, and the Notes panel opened from that client
+// filters on `aboutUid === clientUid`. The trainer would look where the note
+// belongs and still not find it: the same complaint, one screen over.
+//
+// So this now takes the context and delegates to the SAME pair the Notes panel
+// uses — noteStoreFor picks the store, buildNote stamps the aboutUid/aboutPlanId
+// that makes it findable. One routing rule for notes in this app, not two.
+async function appendNote({ body, shared, mode, meUid, meName, clientUid, planId }) {
   const text = String(body || "").trim();
   if (!text) return false;
-  const note = { id: `n${Date.now()}${Math.floor(Math.random() * 1000)}`,
-    title: noteAutoTitle(text), body: text, authorUid: meUid || "", authorName: meName || "",
-    visibility: visibility === "private" ? "private" : "shared",
-    createdAt: Date.now(), updatedAt: Date.now() };
+  const store = noteStoreFor(mode || "client", !!shared);
+  const note = buildNote({ body: text, store, authorUid: meUid, authorName: meName, clientUid, planId });
   try {
-    if (visibility === "private") {
-      const cur = parseNotes(await privGet(NOTES_KEY));
-      await privSet(NOTES_KEY, JSON.stringify([note, ...cur].slice(0, 500)));
+    // ⚠️ 100, NOT 500 (S200n). Every AI write caps at 100 (functions/aitools.js
+    // `cap`), so a 500-note list survived here only until the next AI note
+    // truncated it to 100 — silently losing 400. One cap, and it is the lower.
+    const add = (cur) => JSON.stringify([note, ...parseNotes(cur)].slice(0, 100));
+    if (store === "priv") await privSet(NOTES_KEY, add(await privGet(NOTES_KEY)));
+    else if (store === "clientShared") {
+      const r = await getForUser(clientUid, NOTES_KEY);
+      await setForUser(clientUid, NOTES_KEY, add(r && r.value));
     } else {
-      const cur = parseNotes(await window.storage.get(NOTES_KEY).then((v) => v && v.value).catch(() => null));
-      await window.storage.set(NOTES_KEY, JSON.stringify([note, ...cur].slice(0, 500)));
+      const r = await window.storage.get(NOTES_KEY).then((v) => v && v.value).catch(() => null);
+      await window.storage.set(NOTES_KEY, add(r));
     }
     return true;
-  } catch (e) { return false; }
+  } catch (e) { console.error("check-in note save failed", e && e.message); return false; }
 }
 // ─── Sessions (S100, docs/SESSIONS-BILLING-PLAN.md) ─────────────────────────
 // Phase 1 of the scheduling pillar: real trainer↔client appointments. The
@@ -33582,6 +33622,15 @@ export default function App() {
         ? ((connectedClients.find((c) => c.uid === activeRemoteUid) || {}).name || "")
         : ""))
     : "";
+  // Which notes store the check-in sheet's buttons should write to (S200n).
+  // Derived here because this is the only place that holds all three facts:
+  // who is looking, whose plan it is, and which plan. Mirrors moveLegacyNote.
+  const checkInNoteCtx = {
+    mode: activeRemoteUid ? "trainer-client" : (role === ROLES.CLIENT ? "client" : "trainer-plan"),
+    clientUid: activeRemoteUid || undefined,
+    planId: activeId,
+    otherName: resetSubjectName || "",
+  };
   const chrome = (
     <>
       {/* A save that did not happen, said out loud. Portaled and fixed so it is
@@ -33917,7 +33966,7 @@ export default function App() {
             defaultView={role === ROLES.CLIENT ? (data.planViewDefault || "simple") : "detailed"}
             canSeeNotes={isTrainerHome}
             hasCoach={role === ROLES.CLIENT && meHasCoach} coachName={meCoachName} onNeedCoachName={loadCoachName}
-            subjectName={resetSubjectName} isRemoteClient={!!activeRemoteUid}
+            subjectName={resetSubjectName} isRemoteClient={!!activeRemoteUid} checkInNoteCtx={checkInNoteCtx}
             /* Was `activeRemoteUid ? … : undefined`, so ONLY a trainer viewing a
                client could set which view that plan opens in — the client whose
                plan it is could flip it for the session and never make it stick.

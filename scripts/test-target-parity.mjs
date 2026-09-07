@@ -306,6 +306,13 @@ const base = {
     // which is the whole point of that change ("persuasion, not permission").
     // Checked by reading the function, not by trusting the prop name.
     /hasCoach=\{role === ROLES\.CLIENT && meHasCoach\}/,
+    // ROUTING, not capability (S200n): picks which NOTES STORE the check-in
+    // sheet's buttons write to. Both roles get both buttons and both can save;
+    // what differs is WHERE, because a client's private note belongs in their
+    // owner-only privkv and a trainer's belongs filed against the client they
+    // are writing about — a trainer's note in privkv is read by no screen at
+    // all, which is the bug this line fixes rather than a restriction it adds.
+    /mode: activeRemoteUid \? "trainer-client" : \(role === ROLES\.CLIENT \? "client" : "trainer-plan"\),/,
   ];
   const lines = APP.split("\n");
   const unknown = [];
