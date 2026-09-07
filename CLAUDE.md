@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**1,412 assertions across 27 suites**, S202).
+- `npm run test:units` — the JS unit suites (**1,463 assertions across 28 suites**, S203).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -42,7 +42,7 @@ unified platform that complements and eventually replaces these.
   emulator needs Java (Temurin JDK). A local JDK is installed at `~/.glide-jdk` (Temurin 21, no
   brew/sudo on this machine) — run with it via:
   `JAVA_HOME="$HOME/.glide-jdk/jdk-21.0.11+10/Contents/Home" PATH="$JAVA_HOME/bin:$PATH" npm run test:rules`
-  (**230 tests pass** — verified S199m; this line said 61 for many sessions after the suite had
+  (**240 tests pass** — verified S203; this line said 61 for many sessions after the suite had
   nearly quadrupled, so re-run it rather than trusting the number).
 
 ## Important files
@@ -102,6 +102,22 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S203 (Sep 7): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S202)" first.**
+> Tip `58006d9`. **1,463 unit assertions across 28 suites + 240 rules tests**,
+> rules PUBLISHED, functions deployed, bundle marker-diffed live. Shipped
+> **saved meeting addresses** (a client's and a trainer's, one menu row each,
+> both roles) and **which of the two a session is at** (`meetAt`), so the drive
+> estimate knows who travels to whom. Nothing chosen = agreed in person, or
+> online.
+> ⚠️ **The address lives in the owner's own kv, NOT the profile doc** — a
+> trainer profile is readable by ANY signed-in user, so a home-training trainer
+> would have published their home address. ⚠️ **It is COPIED onto the booking**,
+> or editing it later would rewrite where past sessions were held. ⚠️ **`meetAt`
+> is absent, never `""`** — the rules validate the key whenever present.
+> ⚠️ **This needed a RULES PUBLISH, and the frontend was held until it landed** —
+> shipping first would have put a booking form in front of trainers whose choice
+> fails to save. Rules → functions → push._
+>
 > _**S202 (Sep 7): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S202)" first.** Tip
 > `f753e0a`, pushed and deployed (the bundle was marker-diffed on glidna.com, not
 > assumed), **1,412 unit assertions across 27 suites** green. Shipped the S201

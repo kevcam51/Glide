@@ -2,10 +2,46 @@
 
 ## ▶️ START HERE (S202) — PUSHED AND DEPLOYED
 
-Tip `3621da4`. Build + `check:undef` clean, **1,412 unit assertions across 27
-suites, all green**. The four `availability.js` functions deployed (count the
-`Successful update` lines — four); both bundles confirmed live on glidna.com by
-marker-diff, not assumed.
+Tip `58006d9`. Build + `check:undef` clean, **1,463 unit assertions across 28
+suites** and **240 rules tests**, all green. Rules PUBLISHED, the four
+`availability.js` functions deployed, bundle confirmed live by marker-diff.
+
+### Saved meeting addresses + which place a session is at (S203)
+
+A client saves where they want to be trained, a trainer saves where clients
+should come — one menu row for both roles, "Where I train" / "Where I train
+clients", showing the saved value or **ADD**. Every booking then says which of
+the two it is at (`meetAt`), so the drive estimate knows which way anyone
+travels. No choice is a real answer: a place they agreed, or an online session.
+
+⚠️ **THE ADDRESS IS IN THE OWNER'S OWN kv, NOT ON THE PROFILE DOC.** The profile
+was less code and would have been a leak: `users/{uid}` is readable by ANY
+signed-in user when the role is head/sub trainer (the directory rule a client
+needs to resolve their coach, S59), so a trainer who trains from home would have
+published their home address platform-wide. kv is owner + admin + the owner's
+trainer chain. A client never needs the trainer's copy — the address is copied
+onto the session, and sessions are participant-read.
+
+⚠️ **COPIED ONTO THE BOOKING, NEVER REFERENCED.** If a session pointed at the
+saved value, editing that address later would rewrite where past sessions were
+held, after the client was told somewhere else.
+
+⚠️ **`meetAt` IS ABSENT, NEVER `""`.** firestore.rules validates it whenever the
+KEY is present, so an empty string fails the whole booking — every writer omits
+it (bookSession, bookSeries, and the server Accept, which inherits the direction
+from the SAME prior session the address comes from).
+
+⚠️ **THIS NEEDED A RULES PUBLISH and the frontend was HELD until it landed** —
+`sessions` create/update are a strict `hasOnly(bookingFields())` allowlist, so
+the live ruleset refused `meetAt` (verified against production: permission-
+denied). Shipping the app first would have put a booking form in front of every
+trainer whose "My place" choice fails to save. Rules → functions → push.
+
+**Left undone, deliberately, both Kevin's call:** capturing an address at SIGNUP
+(the role chooser asks only for a name, and an address field there is a drop-off
+risk before anyone trusts the app), and restricting "On my way" to whichever
+side is designated as travelling (a trainer can genuinely be late to their OWN
+studio, so it stays available to both).
 
 ⚠️ **A PARALLEL SESSION SHIPPED S201b WHILE THIS WAS BEING BUILT.** origin/main
 had moved two commits (the age roll-forward); this work was rebased onto it.
