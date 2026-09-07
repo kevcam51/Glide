@@ -2,10 +2,10 @@
 
 ## ▶️ START HERE (S202) — PUSHED AND DEPLOYED
 
-Tip `f753e0a`. Build + `check:undef` clean, **1,357 unit assertions across 27
-suites, all green**. `sessionOnMyWay` created and the other three
-`availability.js` functions redeployed; the new bundle is confirmed live on
-glidna.com (marker-diffed, not assumed).
+Tip `3621da4`. Build + `check:undef` clean, **1,412 unit assertions across 27
+suites, all green**. The four `availability.js` functions deployed (count the
+`Successful update` lines — four); both bundles confirmed live on glidna.com by
+marker-diff, not assumed.
 
 ⚠️ **A PARALLEL SESSION SHIPPED S201b WHILE THIS WAS BEING BUILT.** origin/main
 had moved two commits (the age roll-forward); this work was rebased onto it.
@@ -42,11 +42,28 @@ it; a test fails if you do.
 
 **Decisions worth not re-litigating:**
 
-- Gating follows the split S199u already drew: geocoding free for everyone,
-  traffic-aware Routes for paid Coach tiers — decided by the **TRAINER's** tier,
-  not the caller's, because keying it on the caller would give a paying coach's
-  client the worse estimate for the same session. **Kevin has not been asked;
-  this is the consistent default, not his ruling.**
+- ⚠️ **THE MAP FEATURES START AT COACH (Kevin's ruling, Option B).** Drive-time
+  warnings AND "On my way" are Coach-and-above, and below that they **do not
+  appear at all** — no panel, no button, no degraded version. He asked whether
+  upgraded tiers should get "the map related stuff, including the geocoding";
+  the answer that shipped is *hide the feature*, not *starve it*.
+  **Gating the GEOCODING is the S199u bug and must stay rejected**: geocoding is
+  the PREREQUISITE, not the premium half, so gating it leaves the panel and the
+  button rendering and silently producing nothing — and silence on this feature
+  reads as "your schedule is fine". Verified prices, for the record: geocoding
+  is $5/1,000 after **10,000 free a month**, cached 180 days and shared across
+  every trainer; traffic-aware Routes is **~2× the unit price and half the free
+  cap** (5,000 vs 10,000). The expensive half is the traffic, not the map.
+  ⚠️ **The geoKey/routesKey split inside driveTime.js STAYS**, and both callables
+  keep a named `paid`, even though every caller that now gets through is paid.
+  Collapsing two classes of caller into one is precisely the S199v mistake that
+  disarmed a retry damper — 128 lookups where there had been 1.
+- **The TRAINER's plan decides, for both people.** A client subscribes to nothing
+  that includes this, so a Coach's client can tap "On my way" and a non-Coach's
+  client cannot. Server (`trainerHasDriveFeatures`) is the real gate; the app
+  only hides entry points — the canBillSessions/sessionBillingGate.js shape.
+  A **failed profile read is "no"**: it used to mean "use the free estimator",
+  which was fine when it only chose between two qualities of one answer.
 - **One journey per session**, the shape the scope specified. While the other
   person is en route you read their ETA instead of getting a button — right for
   the case this exists for (if your trainer is driving to your house, you are at
@@ -56,6 +73,25 @@ it; a test fails if you do.
 - Its own notification type (`sessionOnMyWay`), not "session reminders": someone
   who silenced the automated countdown still wants to know their trainer is ten
   minutes out.
+
+### Also shipped: the activity-level step band
+
+Kevin: *"can the estimated steps be visible without clicking the I button?"*
+⚠️ **THEY ALREADY WERE, AND NOTHING WAS EVER BEHIND THE ⓘ** — that panel has
+never held a step number. `a.steps` renders in exactly one place in the app
+(StepActivity) and needs no tap. The report was "present and it does not read",
+which turned out to be a measurable defect: it was the SMALLEST text in the row
+(.7rem, last in reading order) in `text-primary/80`, which in the **light theme**
+computes to **3.40:1** — a WCAG AA fail, and *lower contrast than the muted
+description line above it*. Measured after the fix: **10.9:1 at 16px**, in a real
+browser. An accessibility fix that happens to look better, not a taste change.
+⚠️ **The NUMBERS did not move** — `steps` was split into `steps`+`stepsNote` for
+layout only. The same bands are duplicated in `functions/aitools.js`
+`set_personal_info` (the MCP connector has no system prompt, so that string is
+its only guidance) and a test tiles the ranges so no step count belongs to
+nobody. `ACTIVITY_LEVELS` must stay ONE RUNG PER LINE — test-activity-suggestion
+lifts it by regex — and `label` must stay byte-for-byte (five other screens
+render it in single-line rows with no wrap guard).
 
 ### ⚠️ Three defects this session's OWN work introduced
 
@@ -76,7 +112,28 @@ fix's own bugs are the ones nobody is looking for.
   3:00, and the client still read "12 minutes away". `onMyWayStatus` now defers
   to `canSayOnMyWay`, so saying it and showing it cannot disagree.
 
-### ⚠️ And a test that passed for the wrong reason
+### ⚠️ And tests that passed for the wrong reason — FOUR of them
+
+This kept happening, in two mirror-image shapes, and both are worth recognising
+on sight:
+
+**A negative assertion with no positive control.** Two mutations survived the
+first pass of `test-on-my-way.mjs` because the bad-fix cases used a fake
+geocoder that THREW — so `null` came back whether the guard ran or not. Deleting
+the null-island and off-globe guards left the file green. Fixed with a WORKING
+destination geocoder, a lookup counter ("and nothing was looked up"), and a
+control case proving a good fix through the same harness does estimate.
+
+**A rule about rendered output, asserted against prose.** Twice, in two
+different files, a check matched the COMMENT that names the pattern it forbids
+(`text-primary/80`, `role === "admin"`) and failed on a correct file. Strip
+comments before a negative match.
+
+And the same lesson in the browser: the A/B control for the plan gate looked
+like a failure and was not — I was reading a cancelled session ten hours in the
+past, where hiding the button is correct. **Without the control I would have
+shipped believing the wrong thing;** with it, and only after re-checking WHICH
+session the sheet was showing, the real A/B was clean.
 
 `scripts/test-on-my-way.mjs` is 111 assertions, every predicate LIFTED FROM THE
 SHIPPING SOURCE AND RUN, then mutation-checked 16 ways. **Two mutations survived

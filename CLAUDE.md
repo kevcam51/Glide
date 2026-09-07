@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**1,357 assertions across 27 suites**, S202).
+- `npm run test:units` — the JS unit suites (**1,412 assertions across 27 suites**, S202).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -104,7 +104,7 @@ enabled (Blaze has no default spending cap).
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
 > _**S202 (Sep 7): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S202)" first.** Tip
 > `f753e0a`, pushed and deployed (the bundle was marker-diffed on glidna.com, not
-> assumed), **1,357 unit assertions across 27 suites** green. Shipped the S201
+> assumed), **1,412 unit assertions across 27 suites** green. Shipped the S201
 > in-progress item: **"On my way" + ETA** — one tap takes a single GPS fix,
 > computes drive time to the session's address, and tells the other side "about
 > 12 min out, arriving around 12:34". Either direction.
@@ -122,6 +122,17 @@ enabled (Blaze has no default spending cap).
 > mutations survived my first test pass because a negative assertion used a fake
 > that threw** — `null` came back whether the guard ran or not. A negative
 > assertion needs a positive control._
+> _**Then Kevin ruled on gating: the MAP FEATURES START AT COACH (Option B).**
+> Drive-time warnings and "On my way" are Coach-and-above and do not appear at
+> all below it. ⚠️ **Gating the GEOCODING instead is the S199u bug and stays
+> rejected** — geocoding is the prerequisite, so gating it leaves the panel and
+> the button rendering and silently producing nothing. Geocoding: 10,000 free a
+> month then $5/1,000, cached 180 days and shared across trainers.
+> Traffic-aware Routes: ~2× the price AND half the free cap. The expensive half
+> is the traffic, not the map. The **trainer's** plan decides for both people;
+> the server is the real gate and the app only hides entry points.
+> Also shipped: the activity-level step band, which was **already visible and
+> failing WCAG AA at 3.40:1 in the light theme** — now 10.9:1, measured._
 >
 > _**S201 (Sep 6): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S201)" first.** Tip
 > `cb25eaa`, all pushed and deployed, **1,211 unit assertions across 24 suites** green.
