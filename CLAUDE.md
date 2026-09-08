@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**1,653 assertions across 29 suites**, S210).
+- `npm run test:units` — the JS unit suites (**1,818 assertions across 31 suites**, S211).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -48,7 +48,7 @@ unified platform that complements and eventually replaces these.
   emulator needs Java (Temurin JDK). A local JDK is installed at `~/.glide-jdk` (Temurin 21, no
   brew/sudo on this machine) — run with it via:
   `JAVA_HOME="$HOME/.glide-jdk/jdk-21.0.11+10/Contents/Home" PATH="$JAVA_HOME/bin:$PATH" npm run test:rules`
-  (**245 tests pass** — verified S205; this line said 61 for many sessions after the suite had
+  (**272 tests pass** — verified S209; this line said 61 for many sessions after the suite had
   nearly quadrupled, so re-run it rather than trusting the number).
 
 ## Important files
@@ -108,6 +108,35 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S211 (Sep 7): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S211)" first.**
+> Rules PUBLISHED, four functions deployed, pushed. **1,818 unit assertions
+> across 31 suites + 272 rules tests**; build, `check:undef` and `check:weak`
+> clean; **79 functions on current module code**.
+> ⚠️ **A parallel session used S209 AND S210 while this was being built** — this
+> work is S211. Go by SHA, not by number. Shipped both of
+> Kevin's S208 queue items: **a client can say the trainer didn't show up**, and
+> **a session ledger** browsable by year / month / week-of-month / day.
+> ⚠️ **The report HOLDS the charge, it does not zero it** — a client-asserted
+> zero is a free-training button. The trainer resolves it by waiving (agreed) or
+> writing `trainerNoShowDenied` ("I was there", which bills it and tells them).
+> Unanswered = never billed, deliberately. ⚠️ **One round only**: re-filing after
+> a denial would re-freeze the charge forever, so the button AND the rules refuse
+> it. ⚠️ **The trainer cannot touch the claim** — the client's three fields are
+> absent from `bookingFields()`. ⚠️ **The ledger adds NO query and NO index** —
+> it reads the array the calendar already subscribes to; a `startAt` range would
+> need the composite index `availability.js`/`calendarFeed.js` both avoid.
+> Reschedules needed the server: `startAtHistory`, appended by the new
+> `onSessionAudit` trigger, idempotent on `event.id`.
+> ⚠️ **Three lessons:** `changed().hasOnly(...)` alone let through any write whose
+> only real change was `updatedAt` — and a years-old emulator assertion ("CLIENT
+> waives their own session") **started passing** because its fixture was already
+> waived; slicing a rule to the next `;` cuts it in half when a comment contains
+> one; and an `inline-flex` status line does not end its row.
+> ⚠️ **`npm run check:weak` (new in S210) flagged one of my own assertions on its
+> first run** — it matched two readers, so it would have stayed green with one
+> broken. Two more it cannot see (strings duplicated across two screens) were
+> counted by hand. Run it; it is a report, not a gate._
+>
 > _**S203 (Sep 7): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S202)" first.**
 > Tip `58006d9`. **1,463 unit assertions across 28 suites + 240 rules tests**,
 > rules PUBLISHED, functions deployed, bundle marker-diffed live. Shipped

@@ -19,7 +19,9 @@ import { bookSession, updateSession, cancelSession, markNoShow, waiveSession, su
   clientStateInfo,
   canSayOnMyWay, onMyWayStatus, planHasDriveFeatures,
   MEETING_ADDRESS_KEY, MAX_ADDRESS_LEN, cleanMeetingAddress, parseMeetingAddress,
-  MEET_AT, isMeetAt, meetAtLabel } from "./sessions.js";
+  MEET_AT, isMeetAt, meetAtLabel,
+  canReportTrainerNoShow, trainerNoShowState, reportTrainerNoShow, denyTrainerNoShow,
+  sessionLedger, rescheduleHistory } from "./sessions.js";
 import { auth, functions, signOutAndClearCache} from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -21485,6 +21487,17 @@ function calBillingState(s, now) {
       ? { label: "Cancelled by you", tone: "muted" }
       : { label: "Cancelled by client", tone: "muted" };
   }
+  // ⚠️ THE DISPUTE OUTRANKS EVERYTHING EXCEPT A CANCELLATION (S211). An open
+  // "my trainer didn't show up" holds the charge in
+  // functions/sessionSettle.js — so a screen that went on saying "Delivered —
+  // will be billed" would be describing a charge that is not coming, to the one
+  // person who can release it.
+  {
+    const dispute = trainerNoShowState(s);
+    if (dispute === "open") return { label: "Disputed — no-show reported", tone: "danger" };
+    if (dispute === "waived") return { label: "You didn't show — no charge", tone: "muted" };
+    if (dispute === "denied" && !s.settled) return { label: "You said you were there — will be billed", tone: "warn" };
+  }
   if (s.waived) return { label: "Waived", tone: "muted" };
   if (s.settled === "charged") return { label: "Charged", tone: "success" };
   if (s.settled === "package") return { label: "Covered by package", tone: "success" };
@@ -21531,6 +21544,10 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
   // (see src/sessions.js) so the billing sweep never has to learn to skip it.
   const [blocks, setBlocks] = useState([]);
   const [blockDetail, setBlockDetail] = useState(null);
+  // The ledger's own narrowing (S211): a search box plus year → month → week of
+  // month. Held as ONE object so a keystroke and a chip can't disagree about
+  // which of them is current, and so clearing is one setState.
+  const [ledgerFilter, setLedgerFilter] = useState({ q: "", year: null, month: null, week: null });
   // Per-client colour overrides, and whether clients may see free/busy at all.
   const [calColors, setCalColors] = useState({});
   const [availPublic, setAvailPublic] = useState(false);
@@ -21715,7 +21732,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
   // first paint the scroll container has no laid-out height yet, so setting
   // scrollTop synchronously is silently discarded.
   useEffect(() => {
-    if (view === "month") return;
+    if (view === "month" || view === "ledger") return;
     const id = requestAnimationFrame(() => {
       if (gridRef.current) gridRef.current.scrollTop = CAL_DAY_START * CAL_HOUR_PX;
     });
@@ -22067,6 +22084,161 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
     );
   };
 
+  // ── the ledger (S211) ─────────────────────────────────────────────────────
+  // Kevin: "every logged session kept for life, browsable by year / month /
+  // week of month / day, typeable or scrollable, including cancelled and
+  // rescheduled ones."
+  //
+  // ⚠️ NO NEW QUERY AND NO NEW INDEX. `mine` is already the trainer's entire
+  // session history — `subscribeMySessions` filters on
+  // `participants array-contains me` and nothing else, and sessions are never
+  // deleted. Adding `where('startAt','>=',…)` to that would demand a composite
+  // index, which is the trap functions/availability.js and calendarFeed.js both
+  // document; every narrowing below is pure JS, in src/sessions.js, where it
+  // can be tested.
+  //
+  // ⚠️ Computed ONLY while the ledger is open. It rebuilds a search string per
+  // session and `now` ticks every minute, so leaving it live would do that work
+  // on every calendar screen, forever, for nobody.
+  const ledger = useMemo(
+    () => (view === "ledger" ? sessionLedger(mine, { ...ledgerFilter, nameOf, now }) : null),
+    [view, mine, ledgerFilter, nameOf, now],
+  );
+  const LEDGER_TONE = { success: "var(--green)", warn: "var(--yellow)", danger: "var(--red)", muted: "var(--muted)" };
+  const setLedgerPart = (patch) => setLedgerFilter((f) => ({ ...f, ...patch }));
+
+  const ledgerView = () => {
+    if (!ledger) return null;
+    const t = ledger.totals;
+    const smallChip = (active) => `px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer border ${
+      active ? "border-primary text-primaryfg bg-primary" : "border-border text-muted bg-transparent"}`;
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="rounded-card border border-border bg-surface p-3">
+          <input value={ledgerFilter.q}
+            onChange={(e) => setLedgerPart({ q: e.target.value })}
+            placeholder="Search — a name, a month, a year, “cancelled”, a price…"
+            className="w-full min-w-0 bg-surface2 border border-border rounded-lg px-3 py-2 text-fg text-[.92rem] outline-none placeholder:text-muted" />
+
+          {/* YEAR → MONTH → WEEK, each list built from what the search left, so
+              a chip that would show nothing is never offered. */}
+          <div className="mt-2.5 flex flex-wrap gap-1.5 items-center">
+            <span className="text-[10px] font-bold uppercase tracking-wide text-muted mr-0.5">Year</span>
+            <button className={smallChip(ledger.year === null)}
+              onClick={() => setLedgerPart({ year: null, month: null, week: null })}>All</button>
+            {ledger.years.map((y) => (
+              <button key={y} className={smallChip(ledger.year === y)}
+                onClick={() => setLedgerPart({ year: ledger.year === y ? null : y, month: null, week: null })}>{y}</button>
+            ))}
+          </div>
+          {ledger.year !== null && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5 items-center">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-muted mr-0.5">Month</span>
+              <button className={smallChip(ledger.month === null)}
+                onClick={() => setLedgerPart({ month: null, week: null })}>All</button>
+              {ledger.months.map((m) => (
+                <button key={m.m} className={smallChip(ledger.month === m.m)}
+                  onClick={() => setLedgerPart({ month: ledger.month === m.m ? null : m.m, week: null })}>
+                  {m.label.slice(0, 3)} <span className="opacity-60">{m.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {ledger.month !== null && ledger.weeks.length > 1 && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5 items-center">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-muted mr-0.5">Week</span>
+              <button className={smallChip(ledger.week === null)} onClick={() => setLedgerPart({ week: null })}>All</button>
+              {ledger.weeks.map((w) => (
+                <button key={w.w} className={smallChip(ledger.week === w.w)}
+                  onClick={() => setLedgerPart({ week: ledger.week === w.w ? null : w.w })}>
+                  {w.label} <span className="opacity-60">{w.count}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* What this slice adds up to. ⚠️ "Delivered value" IS NOT money
+            collected — a no-show bills a percentage this document doesn't
+            store, a waive bills nothing, and a disputed session bills nothing
+            yet, so all three are left out and the caption says so. Real money
+            lives in Earnings, which reads sessionCharges. */}
+        <div className="rounded-card border border-border bg-surface p-3">
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[.78rem]">
+            <span className="text-fg"><b>{t.all}</b> {t.all === 1 ? "session" : "sessions"}</span>
+            <span className="text-muted"><b className="text-fg">{t.delivered}</b> delivered</span>
+            {t.cancelled > 0 && <span className="text-muted"><b className="text-fg">{t.cancelled}</b> cancelled</span>}
+            {t.rescheduled > 0 && <span className="text-muted"><b className="text-fg">{t.rescheduled}</b> rescheduled</span>}
+            {t.noShow > 0 && <span style={{ color: "var(--yellow)" }}><b>{t.noShow}</b> client no-show</span>}
+            {(t.disputed > 0 || t.trainerNoShow > 0) && (
+              <span style={{ color: "var(--red)" }}><b>{t.disputed + t.trainerNoShow}</b> no-show reported</span>
+            )}
+          </div>
+          {t.deliveredCents > 0 && (
+            <div className="mt-1.5 text-[.72rem] text-muted">
+              Delivered value <span className="text-fg font-bold">{money(t.deliveredCents)}</span> — booked prices,
+              excluding waived, no-show and disputed sessions. What was actually collected is in Earnings.
+            </div>
+          )}
+        </div>
+
+        {!ledger.rows.length ? (
+          <div className="rounded-card border border-border bg-surface p-5 text-center">
+            <div className="font-display text-lg tracking-wider text-primary mb-1">Nothing here</div>
+            <div className={subCls}>
+              {ledgerFilter.q ? "No session matches that. Try a client's name, a month, or “cancelled”."
+                : "Every session you book stays in this ledger for good — including the ones that were cancelled or moved."}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-card border border-border bg-surface p-3">
+            {ledger.groups.map((g) => (
+              <div key={g.key}>
+                {g.newMonth && (
+                  <div className="mt-3 first:mt-0 mb-1 text-[11px] font-bold uppercase tracking-wide text-primary">{g.monthLabel}</div>
+                )}
+                <div className="mt-1.5 mb-1 text-[.72rem] font-semibold text-muted">{g.label}</div>
+                {g.rows.map((r) => (
+                  <button key={r.id} onClick={() => setDetail(r.s)}
+                    className="w-full flex items-start gap-2.5 px-2 py-2 rounded-lg bg-surface2 mb-1.5 text-left cursor-pointer border-0">
+                    <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: colorOf(r.s.clientUid) }} />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[.86rem] font-semibold truncate">{r.name}</span>
+                      <span className="block text-[.72rem] text-muted truncate">
+                        {calTimeLabel(r.startAt)} · {r.s.durationMin || SESSION_DEFAULT_MIN} min
+                        {r.s.title ? ` · ${r.s.title}` : ""}
+                      </span>
+                      <span className="block text-[.7rem] font-semibold" style={{ color: LEDGER_TONE[r.outcome.tone] }}>
+                        {r.outcome.label}
+                      </span>
+                      {/* The whole reason `startAtHistory` exists: a session
+                          that was moved used to look exactly like one booked
+                          where it finally landed. */}
+                      {r.movedFrom.length > 0 && (
+                        <span className="block text-[.68rem] text-muted">
+                          Moved {r.movedFrom.length === 1 ? "once" : `${r.movedFrom.length} times`} · booked for {fmtSessionWhen(r.movedFrom[0])}
+                        </span>
+                      )}
+                    </span>
+                    {r.s.priceCents > 0 && (
+                      <span className="text-[.8rem] font-semibold shrink-0">{money(r.s.billableCents != null ? r.s.billableCents : r.s.priceCents)}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            ))}
+            {ledger.truncated && (
+              <div className="mt-3 rounded-lg bg-surface2 px-3 py-2 text-[.74rem] text-muted leading-snug">
+                Showing the {ledger.shown} most recent of {ledger.rows.length}. Pick a year or type a name
+                to reach the rest — nothing is ever removed from this ledger.
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const days = view === "week"
     ? Array.from({ length: 7 }, (_, i) => calAddDays(calStartOfWeek(anchor), i))
     : [anchor];
@@ -22099,7 +22271,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
             whole point of the counts is that those are different.
             And both counts are shown when both are set: they are separately
             actionable, and the address one is the fixable half. */}
-        {travel && (travel.failed || travel.unknownPairs > 0 || travel.pairsWithoutAddress > 0) && (
+        {view !== "ledger" && travel && (travel.failed || travel.unknownPairs > 0 || travel.pairsWithoutAddress > 0) && (
           <div className="mb-2 rounded-lg border border-border bg-surface2 px-3 py-2 text-[.72rem] leading-snug text-muted">
             {travel.failed ? (
               <>Couldn&rsquo;t check your drive times just now — this isn&rsquo;t an all-clear. Reopen the calendar to try again.</>
@@ -22118,7 +22290,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
             )}
           </div>
         )}
-        {travel && travel.warnings && travel.warnings.length > 0 && (
+        {view !== "ledger" && travel && travel.warnings && travel.warnings.length > 0 && (
           <div className="mb-4 rounded-card border p-3"
             style={travel.warnings.some((w) => w.kind !== "tight")
               ? { borderColor: "var(--red,#f87171)", background: "rgba(248,113,113,.08)" }
@@ -22187,7 +22359,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
           <>
             <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
               <div className="flex gap-1.5">
-                {["month", "week", "day"].map((v) => (
+                {["month", "week", "day", "ledger"].map((v) => (
                   <button key={v} onClick={() => switchView(v)} className={chip(view === v)}>
                     {v[0].toUpperCase() + v.slice(1)}
                   </button>
@@ -22204,11 +22376,16 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
               </div>
             </div>
 
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <button className={navBtn} onClick={() => shift(-1)} aria-label="Previous">‹</button>
-              <div className="font-bold text-[.95rem]">{periodLabel}</div>
-              <button className={navBtn} onClick={() => shift(1)} aria-label="Next">›</button>
-            </div>
+            {/* The ledger has no "period" to step through — it is browsed by
+                the chips inside it, so a ‹ › pair here would move something the
+                screen isn't showing. */}
+            {view !== "ledger" && (
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <button className={navBtn} onClick={() => shift(-1)} aria-label="Previous">‹</button>
+                <div className="font-bold text-[.95rem]">{periodLabel}</div>
+                <button className={navBtn} onClick={() => shift(1)} aria-label="Next">›</button>
+              </div>
+            )}
 
             {err && <div className="mb-2 text-xs text-danger">{err}</div>}
             {msg && <div className="mb-2 text-xs text-success">{msg}</div>}
@@ -22261,9 +22438,9 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
               </div>
             )}
 
-            {view === "month" ? monthGrid() : timeGrid(days)}
+            {view === "ledger" ? ledgerView() : view === "month" ? monthGrid() : timeGrid(days)}
 
-            {!mine.length && (
+            {view !== "ledger" && !mine.length && (
               <div className="mt-4 rounded-card border border-border bg-surface p-5">
                 <div className="font-display text-lg tracking-wider text-primary mb-1">Nothing booked yet</div>
                 <div className={subCls}>Tap any slot above to book your first session. Book a standing weekly slot in one go with the Repeat option.</div>
@@ -22271,7 +22448,7 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
               </div>
             )}
 
-            {upcoming.length > 0 && (
+            {view !== "ledger" && upcoming.length > 0 && (
               <div className="mt-4 rounded-card border border-border bg-surface p-4">
                 <div className="text-[11px] font-bold uppercase tracking-wide text-muted mb-2">Coming up</div>
                 {upcoming.map((s) => (
@@ -22303,7 +22480,8 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
           onCancelOne={() => act(() => cancelSession(detail.id, meUid), "Session cancelled.")}
           onCancelSeries={() => act(async () => { const n = await cancelSeriesFrom(detail, meUid); return n; }, "Series cancelled.")}
           onNoShow={() => act(() => markNoShow(detail.id, !detail.noShow), detail.noShow ? "No-show cleared." : "Marked as a no-show.")}
-          onWaive={() => act(() => waiveSession(detail.id, !detail.waived), detail.waived ? "This will be charged." : "Charge waived.")} />
+          onWaive={() => act(() => waiveSession(detail.id, !detail.waived), detail.waived ? "This will be charged." : "Charge waived.")}
+          onDenyNoShow={(on) => act(() => denyTrainerNoShow(detail.id, on), on ? "They've been told it'll be billed." : "Back to unanswered.")} />
       )}
       {blockDetail && (
         <CalBlockSheet block={blockDetail} busy={busy}
@@ -22328,8 +22506,9 @@ const calToLocalInput = (ms) => {
 };
 
 // One booked session, and everything the trainer can do about it.
-function CalSessionSheet({ session: s, nameOf, now, busy, meUid, meName, hasCard = true, canBill = false, driveOn = false, color, onSetColor, onClose, onEdit, onOpenClient, onCancelOne, onCancelSeries, onNoShow, onWaive }) {
+function CalSessionSheet({ session: s, nameOf, now, busy, meUid, meName, hasCard = true, canBill = false, driveOn = false, color, onSetColor, onClose, onEdit, onOpenClient, onCancelOne, onCancelSeries, onNoShow, onWaive, onDenyNoShow }) {
   const [confirm, setConfirm] = useState("");
+  const dispute = trainerNoShowState(s);
   const [pickColor, setPickColor] = useState(false);
   const past = sessionEndMs(s) <= now;
   const settled = !!s.settled && s.settled !== "hold";
@@ -22389,7 +22568,56 @@ function CalSessionSheet({ session: s, nameOf, now, busy, meUid, meName, hasCard
           <span className={`text-[.78rem] font-semibold ${toneCls}`}>{state.label}</span>
           {s.priceCents > 0 && <span className="text-[.9rem] font-bold">{money(s.billableCents != null ? s.billableCents : s.priceCents)}</span>}
         </div>
+        {/* The client says the trainer never turned up (S211). It sits ABOVE
+            everything else on this sheet because it is holding the money: the
+            settle sweep skips this session entirely until one of the two
+            buttons below is pressed. */}
+        {dispute && (
+          <div className="mb-3 rounded-lg px-3 py-2.5"
+            style={{ background: dispute === "open" ? "rgba(248,113,113,.10)" : "var(--s2)",
+              border: `1px solid ${dispute === "open" ? "rgba(248,113,113,.35)" : "var(--border)"}` }}>
+            <div className="text-[.78rem] font-bold text-fg mb-1">
+              {dispute === "open" ? `${nameOf(s.clientUid)} says you didn't show up`
+                : dispute === "waived" ? "You agreed you didn't show up"
+                  : "You said you were there"}
+            </div>
+            {s.trainerNoShowNote && (
+              <div className="text-[.74rem] text-muted leading-snug mb-1">&ldquo;{s.trainerNoShowNote}&rdquo;</div>
+            )}
+            <div className="text-[.72rem] text-muted leading-snug">
+              {dispute === "open"
+                ? "Nothing will be billed for this session until you answer."
+                : dispute === "waived" ? "No charge for this one."
+                  : "It'll be billed as normal, and they've been told."}
+              {s.trainerNoShowAt ? ` Reported ${fmtSessionWhen(s.trainerNoShowAt)}.` : ""}
+            </div>
+            {!settled && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {dispute !== "waived" && (
+                  <button className={btn} onClick={onWaive} disabled={busy}>
+                    {dispute === "open" ? "They're right — no charge" : "Waive it after all"}
+                  </button>
+                )}
+                {dispute !== "denied" && (
+                  <button className={btn} onClick={() => onDenyNoShow && onDenyNoShow(true)} disabled={busy || dispute === "waived"}>
+                    I was there — bill it
+                  </button>
+                )}
+                {dispute === "denied" && (
+                  <button className={btn} onClick={() => onDenyNoShow && onDenyNoShow(false)} disabled={busy}>Undo</button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         {s.seriesId && <div className="text-[.72rem] text-muted mb-2">Part of a repeating series.</div>}
+        {/* Where this session has been. Moving one used to leave no trace at
+            all — the old time was simply overwritten (S211). */}
+        {rescheduleHistory(s).length > 0 && (
+          <div className="text-[.72rem] text-muted mb-2">
+            Rescheduled {rescheduleHistory(s).length === 1 ? "once" : `${rescheduleHistory(s).length} times`} · originally {fmtSessionWhen(rescheduleHistory(s)[0])}
+          </div>
+        )}
         {/* The billing state above can read "Delivered — will be billed" while
             nothing is capable of billing it. Say which it is. (Kevin, S196d) */}
         {canBill && !hasCard && s.status !== "cancelled" && !s.waived && Number(s.priceCents) > 0 && (
@@ -22410,7 +22638,10 @@ function CalSessionSheet({ session: s, nameOf, now, busy, meUid, meName, hasCard
 
         <div className="flex flex-wrap gap-1.5">
           {!past && s.status !== "cancelled" && <button className={btn} onClick={onEdit} disabled={busy}>Reschedule</button>}
-          {past && !settled && s.status !== "cancelled" && (
+          {/* Hidden while a dispute is live: the card above already offers the
+              same two decisions in the words that apply, and two Waive buttons
+              on one sheet is a way to press the wrong one. */}
+          {past && !settled && !dispute && s.status !== "cancelled" && (
             <>
               <button className={btn} onClick={onNoShow} disabled={busy || !!s.waived}>{s.noShow ? "Not a no-show" : "Mark no-show"}</button>
               <button className={btn} onClick={onWaive} disabled={busy}>{s.waived ? "Charge it" : "Waive charge"}</button>
@@ -30542,6 +30773,41 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
     finally { setBusy(false); }
   };
 
+  // ─── "My trainer didn't show up" (S211) ───────────────────────────────────
+  // The client's half of a no-show. Filing it HOLDS the charge rather than
+  // cancelling it (see src/sessions.js) — so the copy says "won't be billed
+  // until your trainer answers", never "you won't be charged", which would be a
+  // promise this button cannot keep on its own.
+  const [reportFor, setReportFor] = useState("");   // session id whose report form is open
+  const [reportNote, setReportNote] = useState("");
+  const sendReport = async (id) => {
+    setBusy(true); setErr("");
+    try {
+      await reportTrainerNoShow(id, true, reportNote);
+      setReportFor(""); setReportNote("");
+      setMsg("Reported. Your trainer has been told, and it won't be billed until they answer.");
+      setTimeout(() => setMsg(""), 4000);
+    } catch (e) {
+      console.error("no-show report failed", e);
+      setErr("Couldn't send that. Try again, or message your trainer.");
+    } finally { setBusy(false); }
+  };
+  const withdrawReport = async (id) => {
+    setBusy(true); setErr("");
+    try { await reportTrainerNoShow(id, false); setMsg("Report withdrawn."); setTimeout(() => setMsg(""), 2500); }
+    catch { setErr("Couldn't update that. Try again."); }
+    finally { setBusy(false); }
+  };
+  const denyReport = async (id, on) => {
+    setBusy(true); setErr("");
+    try {
+      await denyTrainerNoShow(id, on);
+      setMsg(on ? "They've been told it'll be billed." : "Back to unanswered — nothing will be billed.");
+      setTimeout(() => setMsg(""), 3000);
+    } catch { setErr("Couldn't update that session."); }
+    finally { setBusy(false); }
+  };
+
   const doCancel = async (id) => {
     setBusy(true);
     try { await cancelSession(id, meUid); setMsg("Session cancelled."); setTimeout(() => setMsg(""), 2000); }
@@ -30583,17 +30849,134 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
       {opts.past && !opts.cancelled && (() => {
         const settled = !!s.settled && s.settled !== "hold";
         const feeCents = Math.round((Number(s.billableCents != null ? s.billableCents : s.priceCents) || 0) * (govPolicy.noShowChargePct || 0) / 100);
+        // The client's "you didn't show up" (S211). It outranks every other
+        // label here because it is the one that decides whether this session
+        // bills at all — see functions/sessionSettle.js classifyForBilling.
+        const dispute = trainerNoShowState(s);
+        const disputeCopy = {
+          open: { text: isTrainer ? "Disputed — no-show reported" : "Reported — waiting on your trainer", color: "var(--red)", icon: "alert" },
+          waived: { text: isTrainer ? "You didn't show — no charge" : "No charge — your trainer agreed", color: "var(--muted)", icon: "close" },
+          denied: { text: isTrainer ? "You said you were there" : `${otherName || "Your trainer"} says they were there`, color: "var(--yellow)", icon: "alert" },
+        }[dispute && !(dispute === "denied" && settled) ? dispute : ""];
         return (
           <>
             <div className="mt-1 text-[.74rem] inline-flex items-center gap-1"
-              style={{ color: s.waived ? "var(--muted)" : s.noShow ? "var(--yellow)" : "var(--green)" }}>
-              <Icon name={s.waived ? "close" : s.noShow ? "alert" : "check"} size={12} color="currentColor" />
-              {s.waived ? "Waived — no charge" : s.noShow ? `No-show — billing ${money(feeCents)}` : "Completed"}
+              style={{ color: disputeCopy ? disputeCopy.color : s.waived ? "var(--muted)" : s.noShow ? "var(--yellow)" : "var(--green)" }}>
+              <Icon name={disputeCopy ? disputeCopy.icon : s.waived ? "close" : s.noShow ? "alert" : "check"} size={12} color="currentColor" />
+              {disputeCopy ? disputeCopy.text
+                : s.waived ? "Waived — no charge" : s.noShow ? `No-show — billing ${money(feeCents)}` : "Completed"}
             </div>
+
+            {/* What the report actually means for the money, said the same way
+                to both people — and never as "you won't be charged", which is a
+                promise the report alone cannot keep. */}
+            {dispute && (
+              <div className="mt-1 rounded-md px-2.5 py-2"
+                style={{ background: dispute === "open" ? "rgba(248,113,113,.10)" : "rgba(255,255,255,.03)" }}>
+                {s.trainerNoShowNote && (
+                  <div className="text-[.74rem] text-fg leading-snug mb-1">&ldquo;{s.trainerNoShowNote}&rdquo;</div>
+                )}
+                <div className="text-[.7rem] text-muted leading-snug">
+                  {dispute === "open"
+                    ? (isTrainer
+                      ? "Nothing will be billed for this session until you answer."
+                      : "Nothing will be billed while this is open. Your trainer can agree, or say they were there.")
+                    : dispute === "waived"
+                      ? "No charge for this session."
+                      : (isTrainer
+                        ? "It'll be billed as normal — they've been told."
+                        : "It'll be billed under the terms you agreed to. Message them if that's not right.")}
+                </div>
+                {/* THE TRAINER ANSWERS. Waiving is the existing control, reused
+                    on purpose: agreeing with the client is exactly "charge
+                    nothing for this", and the ledger should record it as one
+                    decision rather than two. */}
+                {isTrainer && !settled && (
+                  <div className="mt-1.5 flex gap-1.5 flex-wrap">
+                    {dispute !== "waived" && (
+                      <button onClick={() => setWaived(s.id, true)} disabled={busy}
+                        className="rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-semibold text-fg cursor-pointer disabled:opacity-40">
+                        {dispute === "open" ? "They're right — no charge" : "Waive it after all"}
+                      </button>
+                    )}
+                    {dispute === "open" && (
+                      <button onClick={() => denyReport(s.id, true)} disabled={busy}
+                        className="rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-semibold text-fg cursor-pointer disabled:opacity-40">
+                        I was there — bill it
+                      </button>
+                    )}
+                    {dispute === "denied" && (
+                      <button onClick={() => denyReport(s.id, false)} disabled={busy}
+                        className="rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-semibold text-muted cursor-pointer disabled:opacity-40">
+                        Undo
+                      </button>
+                    )}
+                  </div>
+                )}
+                {/* The client may take it back — a wrong session is the likeliest
+                    mistake, and a claim you cannot withdraw is one people don't
+                    make at all. Only while it is still unanswered. */}
+                {!isTrainer && dispute === "open" && (
+                  <div className="mt-1.5">
+                    <button onClick={() => withdrawReport(s.id)} disabled={busy}
+                      className="rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-semibold text-muted cursor-pointer disabled:opacity-40">
+                      I got it wrong — withdraw
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* THE CLIENT REPORTS. Only on a session that has actually started
+                and hasn't been billed yet — canReportTrainerNoShow decides, and
+                the same bounds are in firestore.rules, so a stale build can't
+                offer a write that will be refused. */}
+            {!isTrainer && !dispute && canReportTrainerNoShow(s, meUid, now) && (
+              reportFor === s.id ? (
+                <div className="mt-1.5 rounded-md px-2.5 py-2" style={{ background: "rgba(248,113,113,.08)" }}>
+                  <div className="text-[.74rem] text-fg leading-snug mb-1.5">
+                    Tell {otherName || "your trainer"} they didn&apos;t show up for this session? They&apos;ll be notified,
+                    and it won&apos;t be billed until they answer.
+                  </div>
+                  <input value={reportNote} onChange={(e) => setReportNote(e.target.value.slice(0, 200))}
+                    placeholder="What happened? (optional)" className={inp} />
+                  <div className="mt-1.5 flex gap-1.5 flex-wrap">
+                    <button onClick={() => sendReport(s.id)} disabled={busy}
+                      className="rounded-md border-0 bg-danger px-2.5 py-1 text-xs font-bold text-white cursor-pointer disabled:opacity-40">Send report</button>
+                    <button onClick={() => { setReportFor(""); setReportNote(""); }}
+                      className="rounded-md border border-border bg-transparent px-2.5 py-1 text-xs text-muted cursor-pointer">Never mind</button>
+                  </div>
+                </div>
+              ) : (
+                // ⚠️ WRAPPED, NOT BARE. The status line above it is
+                // `inline-flex`, so an inline-block button placed straight
+                // after it shares the row and reads as part of the label
+                // ("Completed My trainer didn't show up").
+                <div className="mt-1.5">
+                  <button onClick={() => { setReportFor(s.id); setReportNote(""); }} disabled={busy}
+                    className="rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-semibold text-muted cursor-pointer disabled:opacity-40">
+                    My trainer didn&apos;t show up
+                  </button>
+                </div>
+              )
+            )}
+            {/* No report to make and none open: either it has already been
+                billed, or the trainer has answered a previous one. Both times a
+                flag would change nothing, so say what does. Driven by the same
+                predicate as the button, so the two can never both be absent. */}
+            {!isTrainer && !dispute && !canReportTrainerNoShow(s, meUid, now)
+              && s.status !== "cancelled" && Number(s.priceCents) > 0 && (
+              <div className="mt-1 text-[.68rem] text-muted">
+                Something wrong with this one? Message {otherName || "your trainer"} — it&apos;s past the point Glidna can hold it.
+              </div>
+            )}
+
             {/* The trainer's only chance to correct a delivered session before
                 it bills. Once it's settled the money has moved, so the controls
-                go away rather than pretending they still do something. */}
-            {isTrainer && !settled && (
+                go away rather than pretending they still do something.
+                Hidden while a dispute is live — the card above already offers
+                the same two decisions in the words that apply there. */}
+            {isTrainer && !settled && !dispute && (
               <div className="mt-1.5 flex gap-1.5 flex-wrap">
                 <button onClick={() => setNoShow(s.id, !s.noShow)} disabled={busy || !!s.waived}
                   className="rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-semibold cursor-pointer disabled:opacity-40"
@@ -30607,7 +30990,7 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
                 </button>
               </div>
             )}
-            {isTrainer && !settled && s.noShow && (
+            {isTrainer && !settled && !dispute && s.noShow && (
               <div className="mt-1 text-[.7rem] text-muted">
                 Billed at your {govPolicy.noShowChargePct}% no-show rate{policyDrifted ? " (the rate this client agreed to)" : ""}.
               </div>

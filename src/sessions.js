@@ -515,6 +515,95 @@ export function waiveSession(sessionId, on = true) {
   return updateDoc(doc(db, "sessions", sessionId), { waived: !!on, updatedAt: Date.now() });
 }
 
+// ─── "My trainer didn't show up" — the other half of a no-show (S209) ───────
+//
+// `noShow` above is the TRAINER saying the CLIENT was absent. There was no
+// counterpart, so the one absence a client cannot do anything about was the one
+// they were billed for in full: the session is stamped `completedAt` by the
+// sweep whether or not anyone turned up, and a delivered session bills.
+//
+// ⚠️ A CLIENT'S REPORT HOLDS THE CHARGE — IT DOES NOT ZERO IT. Making the claim
+// itself cancel the money would be a free-training button: one tap per session,
+// no evidence, nothing for the trainer to answer. So the report does the one
+// thing that is unarguable — it stops an automatic charge going out over a
+// disagreement nobody has looked at — and hands the decision to the two people
+// who were (or weren't) there:
+//
+//   • trainer agrees  → they WAIVE it (the existing control). No charge, and
+//     the report stays on the record so the ledger can show why.
+//   • trainer disagrees → `trainerNoShowDenied`, the hold lifts, it bills under
+//     the terms the client agreed to, and the CLIENT IS TOLD before it does.
+//   • nobody answers  → it stays unbilled. That is the deliberate direction to
+//     fail in, and it matches this file's standing rule: when we can't tell
+//     what happened, the client wins.
+//
+// ⚠️ Only ever WRITTEN by the client (firestore.rules pins the writer to
+// `clientUid`), and only about a session that has actually started and hasn't
+// been billed yet — a claim about next Tuesday isn't a claim, and a claim about
+// money that has already moved needs a refund, not a flag.
+export function canReportTrainerNoShow(s, meUid, now = Date.now()) {
+  if (!s || !meUid || s.clientUid !== meUid) return false;   // the client's own session only
+  if (s.status === "cancelled") return false;                // nobody was due to show up
+  if (!(Number(s.startAt) <= now)) return false;             // it hasn't happened yet
+  if (s.settled) return false;                               // already settled — message them instead
+  // ⚠️ ONCE THE TRAINER HAS ANSWERED, THE BUTTON IS GONE — AND THAT IS THE
+  // POINT. A client who could withdraw a denied report and file it again would
+  // re-freeze the charge every time, forever: report → "I was there" → withdraw
+  // → report, and the session is never billed. The trainer's answer ends the
+  // in-app round; the next step is Messages, a refund, or their card issuer.
+  // firestore.rules refuses it too, so this is not the only thing stopping it.
+  if (s.trainerNoShowDenied === true) return false;
+  return true;
+}
+
+// The three states a report can be in, in one place, so the client's copy, the
+// trainer's copy and the billing engine can't describe it differently.
+//   open      — reported, unanswered: nothing bills.
+//   waived    — the trainer agreed: nothing bills, ever.
+//   denied    — the trainer says they were there: it bills as normal.
+//   null      — no report.
+export function trainerNoShowState(s) {
+  if (!s || s.trainerNoShow !== true) return null;
+  if (s.waived === true) return "waived";
+  if (s.trainerNoShowDenied === true) return "denied";
+  return "open";
+}
+// The billing consequence, phrased exactly as the settle engine decides it.
+// ⚠️ MIRRORS classifyForBilling IN functions/sessionSettle.js, GUARD ORDER
+// INCLUDED — a waive and a trainer-cancelled session both settle the question
+// before the report is even looked at, so a copy that only checked the two
+// report fields would tell a trainer their money was held when it isn't.
+// scripts/test-trainer-no-show.mjs runs both and demands they agree on every
+// shape.
+export const trainerNoShowHoldsBilling = (s) =>
+  !!s && s.waived !== true
+  && !(s.status === "cancelled" && s.cancelledBy !== s.clientUid)
+  && s.trainerNoShow === true && s.trainerNoShowDenied !== true;
+
+// The client files (or withdraws) the report. `trainerNoShowAt` is pinned to
+// server time by the rules exactly like `cancelledAt`, because "when did you
+// say this" is the only thing that makes the claim checkable afterwards.
+export function reportTrainerNoShow(sessionId, on = true, note = "") {
+  const now = Date.now();
+  return updateDoc(doc(db, "sessions", sessionId), on
+    ? {
+      trainerNoShow: true,
+      trainerNoShowAt: now,
+      trainerNoShowNote: String(note || "").slice(0, 200),
+      updatedAt: now,
+    }
+    // Withdrawing keeps the timestamp field valid rather than deleting it — the
+    // rules validate `trainerNoShowAt` against server time WHENEVER it changes,
+    // and a stale one left behind on a re-report would fail that check.
+    : { trainerNoShow: false, trainerNoShowAt: now, trainerNoShowNote: "", updatedAt: now });
+}
+
+// The trainer's answer: "I was there." Only ever unblocks a charge that the
+// client's report is holding, so it is theirs to write and nobody else's.
+export function denyTrainerNoShow(sessionId, on = true) {
+  return updateDoc(doc(db, "sessions", sessionId), { trainerNoShowDenied: !!on, updatedAt: Date.now() });
+}
+
 // Cancel — either side. The rules let a client write ONLY these fields, so the
 // same call works for both roles.
 export function cancelSession(sessionId, byUid, reason = "") {
@@ -586,6 +675,195 @@ export function sessionsByDay(sessions) {
   }
   Object.values(out).forEach((arr) => arr.sort(bySoonest));
   return out;
+}
+
+// ─── The session ledger (S209, Kevin) ───────────────────────────────────────
+//
+// "Every logged session kept for life, browsable by year / month / week of
+// month / day, typeable or scrollable, including cancelled and rescheduled
+// ones."
+//
+// ⚠️ THIS IS A QUERY AND A UI, NOT A STORE. Sessions are never deleted
+// (`allow delete: if isAdmin()`, and cancelling sets `status` rather than
+// removing the doc), so the whole history is already on the client — the
+// calendar subscribes to it with `participants array-contains me`. The ledger
+// therefore reads the array the calendar already holds and adds no query,
+// no listener and no index.
+//
+// ⚠️ AND IT DELIBERATELY DOES NOT ADD ONE. `array-contains` plus a range on
+// `startAt` needs a composite index, which is the exact trap
+// functions/availability.js and calendarFeed.js document; both filter in code
+// instead. So does this. Every narrowing below is pure JS over an array.
+//
+// ⚠️ "Rescheduled" needs the server. Moving a session overwrites `startAt`, so
+// until S209 the old time was simply gone. `startAtHistory` is appended by
+// functions/sessionAudit.js with the Admin SDK and is absent from
+// firestore.rules' bookingFields(), i.e. neither participant can write or edit
+// it — an audit trail either side could forge is worth less than none.
+export const LEDGER_MONTHS = ["January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"];
+
+// Week OF THE MONTH, by date, not by calendar week: days 1–7 are week 1. A
+// Sunday-based calendar week would put "week 1" partly in the previous month,
+// which is a different question from the one Kevin asked.
+export const weekOfMonth = (ms) => Math.floor((new Date(ms).getDate() - 1) / 7) + 1;
+export const weekOfMonthLabel = (w) => `Week ${w} (${(w - 1) * 7 + 1}–${w === 5 ? "31" : w * 7})`;
+
+const ymdKey = (ms) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+// What happened to this session, from the TRAINER's side (this is their book).
+// One function so the row, the day total and the period summary can never tell
+// three different stories about the same session.
+export function ledgerOutcome(s, now = Date.now()) {
+  if (s.status === "cancelled") {
+    const who = s.cancelledBy === s.clientUid ? "client" : s.cancelledBy === s.trainerUid ? "you" : null;
+    return { key: "cancelled", label: who ? `Cancelled by ${who}` : "Cancelled", tone: "muted" };
+  }
+  const dispute = trainerNoShowState(s);
+  if (dispute === "open") return { key: "disputed", label: "Disputed — client says you didn't show", tone: "danger" };
+  if (dispute === "waived") return { key: "trainer_no_show", label: "You didn't show — no charge", tone: "muted" };
+  if (dispute === "denied" && !s.settled) return { key: "denied", label: "Disputed — you said you were there", tone: "warn" };
+  if (s.waived === true) return { key: "waived", label: "Waived — no charge", tone: "muted" };
+  if (s.settled === "charged") return { key: "charged", label: "Charged", tone: "success" };
+  if (s.settled === "package") return { key: "package", label: "Covered by package", tone: "success" };
+  if (s.settled === "hold") return { key: "hold", label: "Payment failed", tone: "danger" };
+  if (s.settled === "waived" || s.settled === "free") return { key: "no_charge", label: "No charge", tone: "muted" };
+  if (s.settled) return { key: "settled", label: "Settled", tone: "muted" };
+  if (s.noShow === true) return { key: "no_show", label: "Client no-show", tone: "warn" };
+  if (s.completedAt || sessionEndMs(s) <= now) return { key: "delivered", label: "Delivered", tone: "warn" };
+  return { key: "scheduled", label: "Scheduled", tone: "muted" };
+}
+
+// Every previous start time this session has had, oldest first. Written only by
+// functions/sessionAudit.js as `[{ from, at, eid }]`; `from` is the start time
+// it was moved AWAY from, so the first entry is the originally booked slot.
+export const rescheduleHistory = (s) =>
+  (Array.isArray(s && s.startAtHistory) ? s.startAtHistory : [])
+    .map((e) => Number(e && e.from))
+    .filter((n) => Number.isFinite(n) && n > 0);
+
+// One searchable string per session. Typing "cancelled", "March", "2025", a
+// client's name, a price or a location all have to find the same rows, so they
+// all go in the same haystack rather than into six special cases.
+function ledgerHaystack(s, name, outcome) {
+  const d = new Date(s.startAt || 0);
+  return [
+    name, s.title, s.location, outcome.label, outcome.key.replace(/_/g, " "),
+    d.getFullYear(), LEDGER_MONTHS[d.getMonth()], LEDGER_MONTHS[d.getMonth()].slice(0, 3),
+    d.getDate(), ymdKey(s.startAt || 0),
+    d.toLocaleDateString("en-US", { weekday: "long" }),
+    Number(s.priceCents) > 0 ? `$${(Number(s.priceCents) / 100).toFixed(2)}` : "",
+    s.seriesId ? "repeating series" : "",
+    rescheduleHistory(s).length ? "rescheduled moved" : "",
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+// The whole ledger in one pure call: what can be picked, what matches, and what
+// it adds up to. Pure and exported so scripts/test-session-ledger.mjs can RUN
+// it — a filter chain checked by reading it is a filter chain that drifts.
+//
+// `year`/`month`/`week` are null for "all". The option lists are derived from
+// the SEARCH-filtered set, so a chip that would show nothing is never offered.
+// How many rows are actually BUILT INTO GROUPS for rendering. The totals below
+// are counted over every match, so the summary stays true — this bounds the DOM
+// only. A trainer with years of work behind them would otherwise render several
+// thousand buttons on one screen the first time they opened the ledger, and the
+// answer to "I need one from 2024" is a year chip or the search box, not a
+// four-minute scroll.
+export const LEDGER_PAGE = 300;
+export function sessionLedger(sessions, opts = {}) {
+  const { q = "", year = null, month = null, week = null, now = Date.now(), limit = LEDGER_PAGE } = opts;
+  const nameOf = typeof opts.nameOf === "function" ? opts.nameOf : () => "";
+  const needle = String(q || "").trim().toLowerCase();
+
+  const all = (Array.isArray(sessions) ? sessions : [])
+    .filter((s) => s && Number(s.startAt) > 0)
+    .map((s) => {
+      const outcome = ledgerOutcome(s, now);
+      const name = nameOf(s.clientUid) || "";
+      const d = new Date(s.startAt);
+      return {
+        s, id: s.id, name, outcome,
+        startAt: s.startAt, y: d.getFullYear(), m: d.getMonth(), w: weekOfMonth(s.startAt),
+        dayKey: ymdKey(s.startAt),
+        movedFrom: rescheduleHistory(s),
+        hay: ledgerHaystack(s, name, outcome),
+      };
+    });
+
+  // Search first: it decides which years/months/weeks are worth offering.
+  const found = needle ? all.filter((r) => r.hay.includes(needle)) : all;
+
+  const years = [...new Set(found.map((r) => r.y))].sort((a, b) => b - a);
+  // ⚠️ A CHOSEN YEAR THAT NO LONGER EXISTS MUST NOT SILENTLY FILTER EVERYTHING.
+  // Typing a search that excludes the selected year would otherwise leave an
+  // empty screen with a chip highlighted that isn't in the list any more.
+  const yearSel = years.includes(year) ? year : null;
+  const inYear = yearSel === null ? found : found.filter((r) => r.y === yearSel);
+
+  // ⚠️ NO MONTHS UNTIL A YEAR IS CHOSEN. "September" across three years is not
+  // a period anyone means, and offering it would put a chip on screen whose
+  // selection the rows below could not explain.
+  const months = yearSel === null ? [] : [...new Set(inYear.map((r) => r.m))].sort((a, b) => b - a)
+    .map((m) => ({ m, label: LEDGER_MONTHS[m], count: inYear.filter((r) => r.m === m).length }));
+  const monthSel = (yearSel !== null && months.some((x) => x.m === month)) ? month : null;
+  const inMonth = monthSel === null ? inYear : inYear.filter((r) => r.m === monthSel);
+
+  const weeks = [...new Set(inMonth.map((r) => r.w))].sort((a, b) => a - b)
+    .map((w) => ({ w, label: weekOfMonthLabel(w), count: inMonth.filter((r) => r.w === w).length }));
+  const weekSel = (monthSel !== null && weeks.some((x) => x.w === week)) ? week : null;
+  const rows = (weekSel === null ? inMonth : inMonth.filter((r) => r.w === weekSel))
+    .sort((a, b) => b.startAt - a.startAt);   // newest first: a ledger is read backwards
+
+  // Day buckets, newest first, each flagged when it opens a new month so the
+  // scroller can print one divider instead of repeating the month on every day.
+  const groups = [];
+  let lastMonth = null;
+  const shown = rows.slice(0, Math.max(1, limit));
+  for (const r of shown) {
+    let g = groups[groups.length - 1];
+    if (!g || g.key !== r.dayKey) {
+      const mk = `${r.y}-${r.m}`;
+      groups.push(g = {
+        key: r.dayKey, startAt: r.startAt, rows: [],
+        label: new Date(r.startAt).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }),
+        monthLabel: `${LEDGER_MONTHS[r.m]} ${r.y}`,
+        newMonth: mk !== lastMonth,
+      });
+      lastMonth = mk;
+    }
+    g.rows.push(r);
+  }
+
+  const is = (k) => (r) => r.outcome.key === k;
+  const delivered = rows.filter((r) => ["delivered", "charged", "package", "hold", "no_charge", "settled", "waived", "no_show"].includes(r.outcome.key));
+  // ⚠️ "Delivered value" IS NOT "money collected" and must never be labelled as
+  // it. A no-show bills a PERCENTAGE the session doc doesn't store, a waive
+  // bills nothing, and a disputed session bills nothing yet — so all three are
+  // excluded and the real money lives in Earnings, which reads sessionCharges.
+  const counted = delivered.filter((r) => !["waived", "no_show"].includes(r.outcome.key));
+  return {
+    years, months, weeks, rows, groups,
+    // How much of `rows` reached `groups`. The screen has to be able to say so
+    // out loud — a list that silently stops at 300 looks like a ledger that
+    // forgot everything before it.
+    shown: shown.length, truncated: shown.length < rows.length,
+    year: yearSel, month: monthSel, week: weekSel,
+    totals: {
+      all: rows.length,
+      delivered: delivered.length,
+      cancelled: rows.filter(is("cancelled")).length,
+      noShow: rows.filter(is("no_show")).length,
+      disputed: rows.filter((r) => r.outcome.key === "disputed" || r.outcome.key === "denied").length,
+      trainerNoShow: rows.filter(is("trainer_no_show")).length,
+      rescheduled: rows.filter((r) => r.movedFrom.length > 0).length,
+      deliveredCents: counted.reduce((a, r) =>
+        a + Math.max(0, Number(r.s.billableCents != null ? r.s.billableCents : r.s.priceCents) || 0), 0),
+    },
+  };
 }
 
 // ─── Cancellation policy + prepaid packs (S100b, Kevin's rules) ─────────────
@@ -1171,3 +1449,4 @@ export function chargeStatusLabel(status) {
     released: "Returned to queue",
   })[status] || status || "—";
 }
+

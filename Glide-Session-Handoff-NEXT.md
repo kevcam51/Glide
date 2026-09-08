@@ -1,13 +1,208 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S208) — PUSHED AND DEPLOYED
+## ▶️ START HERE (S211) — PUSHED AND DEPLOYED
+
+Rules PUBLISHED, four functions deployed, frontend pushed. **1,818 unit
+assertions across 31 suites + 272 rules tests**, build, `check:undef` and
+`check:weak` all clean, **79 functions on current module code**.
+
+⚠️ **NUMBERING: a parallel session used S209 AND S210 while this was being
+built** (the "On my way" cost bounds, and the weak-assertion audit — both folded
+in below). This work is S211. **Go by SHA, not by number.**
+
+Kevin's two S208 queue items are done. Nothing is half-finished.
+
+### 1. "My trainer didn't show up" — the client's half of a no-show (S211)
+
+`noShow` was the trainer marking the CLIENT absent. There was no counterpart, so
+the one absence a client could do nothing about was the one they paid full price
+for: `sessionsMarkCompleted` stamps `completedAt` whether or not anyone turned
+up, and a delivered session bills.
+
+⚠️ **IT HOLDS THE CHARGE, IT DOES NOT ZERO IT — and that is the whole design.**
+A client-asserted zero is a free-training button: one tap per session, no
+evidence, nothing for the trainer to answer. So the report does the one
+unarguable thing — it stops an automatic charge going out over a disagreement
+nobody has looked at — and the trainer resolves it:
+
+  • **agrees** → they waive it (the existing control; the report stays on the
+    record so the ledger can show why it was free),
+  • **disagrees** → `trainerNoShowDenied`, the hold lifts, it bills, and the
+    **client is told before it does**,
+  • **nobody answers** → it stays unbilled forever. That is the correct
+    direction to fail in, and it is `sessionSettle.js`'s own standing rule:
+    when we cannot tell what happened, the client wins.
+
+⚠️ **ONE ROUND ONLY.** A client who could withdraw a denied report and re-file
+would re-freeze the charge every time — report → "I was there" → withdraw →
+report, and the session is never billed. `canReportTrainerNoShow` returns false
+once `trainerNoShowDenied` is set, **and firestore.rules refuses it too**; do not
+"restore" the button.
+
+⚠️ **THE TRAINER CANNOT TOUCH THE CLAIM.** `trainerNoShow`/`At`/`Note` are
+absent from `bookingFields()` on purpose, so the person the claim is about can
+neither edit nor delete it. Only `trainerNoShowDenied` is theirs — and it is the
+one field here that can INCREASE a charge, which is why it is not the client's.
+
+⚠️ **THE GUARD SITS AFTER THE TRAINER-CANCEL GUARD** in `classifyForBilling`, not
+before it. A trainer-cancelled session is already free; calling it "disputed"
+would put an item in the held count that nothing can ever resolve.
+
+⚠️ **AND THE CLAIM TRANSACTION NOW RE-JUDGES, NOT JUST RE-READS.** It checked
+only `settled`, so anything that made a session unbillable between the candidate
+scan and the charge was billed anyway — a waive typed while the sweep ran, and
+now a report filed in that gap. It re-runs `classifyForBilling` on the fresh doc;
+that can only ever drop an item, never add one or raise a price.
+
+### 2. The trainer session ledger (S211)
+
+Calendar → **Ledger**, beside Month/Week/Day. Search box plus year → month →
+week-of-month chips (each list built from what the search left, with counts),
+grouped by day, newest first, every outcome labelled — cancelled by whom, waived,
+client no-show, disputed, rescheduled.
+
+⚠️ **NO NEW QUERY AND NO NEW INDEX, deliberately.** `subscribeMySessions` already
+holds the trainer's entire history (`participants array-contains me`, and
+sessions are never deleted). Adding a `startAt` range to it would demand the
+composite index `availability.js` and `calendarFeed.js` both document and both
+avoid. Every narrowing is pure JS in `sessionLedger()` — `src/sessions.js`, run
+by `scripts/test-session-ledger.mjs`.
+
+⚠️ **"RESCHEDULED" NEEDED THE SERVER.** Moving a session overwrote `startAt`; the
+old time was simply gone. `functions/sessionAudit.js` appends `startAtHistory`
+with the Admin SDK — **idempotent on `event.id`**, because triggers are delivered
+at least once and deduping on the timestamp would also swallow a genuine move
+back to a slot the session has held before. It is absent from `bookingFields()`:
+an audit trail either side could forge is worth less than none.
+
+⚠️ **"Delivered value" IS NOT money collected**, and the caption says so. A
+no-show bills a percentage the session doc does not store, a waive bills nothing,
+a dispute bills nothing yet — all three are excluded. Real money is Earnings,
+which reads `sessionCharges`.
+
+⚠️ The rendered list is capped at 300 rows and **says when it is capped**; the
+TOTALS are counted over every match, or the summary would quietly become a
+summary of the first page.
+
+### ✅ Verified LIVE against the published rules and the deployed trigger
+
+Not inferred from a successful deploy — exercised:
+
+- trainer writes `trainerNoShowDenied` → **allowed** (it was refused before the
+  publish, which is what proves the new ruleset is actually released);
+- trainer files a report against themselves → **permission-denied**;
+- trainer writes `startAtHistory` → **permission-denied**;
+- a real $0 probe session booked, **moved twice** → `startAtHistory` carried both
+  entries with the ORIGINAL booking first, and a **retitle added nothing** (the
+  quiet path holds — this trigger sees every write to every session); the ledger
+  read it back as "Moved 2 times"; probe cancelled afterwards.
+- Ledger on real prod data: 53 sessions, 11 delivered, 42 cancelled, delivered
+  value $820; search narrowed to 42 on "cancelled"; the drill-down produced
+  `Week 1 (1–7) 8 · Week 2 (8–14) 3 · …`; a row opened the session sheet.
+
+⚠️ One inert leftover on the test trainer's account: session `KNM3LAinZzfj7F2TC5b2`
+carries `trainerNoShowDenied: false` with no report. It is read only when
+`trainerNoShow` is true, so it changes nothing.
+
+### ⚠️ Traps this session paid for
+
+- **`hasOnly()` IS NOT ENOUGH ON ITS OWN.** The first version of the client's
+  rule was `changed().hasOnly(clientReportFields())`, which passes any write
+  whose only real change is `updatedAt` — and the long-standing emulator
+  assertion **"CLIENT waives their own session" started SUCCEEDING**, because its
+  fixture was already waived so the diff was `updatedAt` alone. A years-old test
+  caught a hole I had just made. The rule now demands
+  `changed().hasAny(['trainerNoShow'])`. **When you add an `allow update`,
+  re-run the whole emulator suite and read WHICH assertions changed, not just
+  whether it passed.**
+- **`npm run check:weak` (S210) flagged one of my own assertions immediately** —
+  `/where\("participants", "array-contains", uid\)/.test(SESSIONS)` matches two
+  readers, so it would have stayed green with one broken. Counted now. Two
+  more it cannot see (`.includes()` on strings that live on BOTH the Sessions
+  panel and the calendar sheet) were counted by hand for the same reason, and
+  both were mutation-checked.
+- **Slicing a rule to the next `;` cuts it in half** the moment a comment inside
+  it contains one ("one round in the app; after that…"). Strip comments before
+  asserting on rules text — the same trap `codeOnly()` exists for in App.jsx.
+- **An `inline-flex` status line does not end the row.** The report button sat on
+  the same line as the label above it ("Completed My trainer didn't show up")
+  until it was wrapped in a block `div`. Found by reading rendered text in a
+  browser, not by reading the JSX.
+
+---
+
+### Folded in from S209/S210 (already live — do not redo)
+
+**S209 — "On my way" is bounded, not just rate-limited.** The 60-second cooldown
+bounds the RATE, not the TOTAL, so tapping every 61 seconds for an hour was ~60
+traffic-aware Routes calls on ONE session — the dearer **Pro** SKU (5,000 free a
+month, then $10/1,000, against Essentials' 10,000 then $5). Three bounds now:
+rate (`ON_MY_WAY_MIN_GAP_MS`, 60s), total (`ON_MY_WAY_MAX_ETAS`, 10 per
+journey), and eligibility (Coach tier · 240-min window · a destination, which
+hides the button).
+⚠️ **BOTH BOUNDS REPLAY, NEITHER REFUSES.** The stored ETA is still the truest
+thing available, and refusing would leave someone unable to tell their client
+anything at all. The point is to stop spending, not to stop the message — and
+the UI says WHICH bound was hit, because "give it a minute" is useless advice
+when waiting will never help again.
+⚠️ **The counter is PER SENDER.** Both people can travel across one session's
+life, so the second journey must not inherit a count it did not spend.
+⚠️ Caught by `check:undef`, not by a human: a failed edit script left a call to
+`onMyWayTapCount` with the function never written. It loaded fine and would have
+thrown on the first real tap.
+
+**S210 — 14 assertions that would have stayed green through a real regression.**
+`npm run check:weak` is a standing check: it reports any `/pattern/.test(SOURCE)`
+whose pattern matches 2+ times. **A report, not a gate**; it reads zero today.
+⚠️ **THE RULE: a guard that exists in TWO places must be COUNTED in two, not
+merely found.** A 14-agent mutation audit broke every occurrence individually
+and re-ran the suite: **all fourteen were genuinely weak, no false positives.**
+What they were letting through included Start Over reverting to a one-tap
+unconfirmed wipe, `sessionTravel` losing its `trainerUid == uid` scoping (the
+query that returns other clients' **addresses**), `meetAt` dropped from
+`bookingFields()` (which refuses every booking that sets it), and the weight
+chart drawing straight into a planned goal.
+**The two fixes, and when each is wrong:** COUNT the occurrences where every site
+must carry the guard; ANCHOR to the owning block where the other matches are
+unrelated and volatile. Justify the choice in place, per assertion.
+⚠️ **Two of that session's own MUTATIONS were wrong before the tests were** — a
+`replace(…, 1)` hit an unrelated "Try again", and another used real curly quotes
+against source storing escapes. Both looked like a surviving mutation and were
+no-ops. **Verify the mutation actually applied before believing what it tells
+you.**
+
+### Waiting on Kevin (not blocking any work)
+
+1. **Save his own address** (≡ → Where I train clients). The "My place" chip is
+   disabled until he does — ⚠️ it keys off the TRAINER's saved address, not the
+   client's, and he guessed the other way round when he hit it.
+2. **A client enabling notifications once**, if a real lock-screen push is ever
+   to be observed. `skipped: "no-subs"` in the logs is not a fault: the bell/feed
+   row is written by `appendFeed` BEFORE any preference or subscription check,
+   which is why the client still sees it in-app.
+3. ⚠️ **A second "I'm here" tap produces NO log line.** Arriving twice is one
+   arrival — the callable returns early on `prev.arrivedAt`. Do not "fix" it.
+
+### ⏳ Queue
+
+Empty. Ask Kevin.
+
+### ⚠️ Standing risk when Kevin tests
+
+He is the ONLY trainer for whom `canBillSessions` is true, on the LIVE Stripe
+key (`sessionSettle.js` only uses the test key when the CLIENT profile carries
+`sessionBillingTest`). **Test sessions must be priced 0.**
+
+---
+
+## Previously: START HERE (S208) — PUSHED AND DEPLOYED
 
 Tip `f7d8137`, working tree clean and level with origin/main. Build +
 `check:undef` clean, **1,634 unit assertions across 29 suites** and **245 rules
 tests**, all green. Rules published, **all 78 functions on current module code**,
 every bundle marker-diffed live. Nothing is half-finished.
 
-### ⏳ THE QUEUE KEVIN JUST GAVE (nothing started)
+### ⏳ THE QUEUE KEVIN GAVE IN S208 — ✅ BOTH DONE IN S211 (see the top of this file)
 
 1. **A client needs a way to say the trainer did NOT show up.** He asked for a
    button confirming the trainer IS there; I argued the useful half is the

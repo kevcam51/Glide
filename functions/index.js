@@ -250,6 +250,10 @@ exports.sessionsMarkCompleted = require("./sessions").sessionsMarkCompleted;
 // for work booked after the fact, silently, is the most disputable write this
 // system makes — so the disclosure is a trigger, not a promise the app keeps.
 exports.onSessionBackdated = require("./sessions").onSessionBackdated;
+// The session audit trail (S209): records every reschedule (nothing else did —
+// moving a session simply overwrote its old time), and carries a client's
+// "my trainer didn't show up" to the trainer and their answer back.
+exports.onSessionAudit = require("./sessionAudit").onSessionAudit;
 // Session reminders (S187): "starts in 30 minutes", at whatever lead times each
 // side picked — and as many of them as they want.
 exports.sessionReminderPush = require("./sessionReminders").sessionReminderPush;

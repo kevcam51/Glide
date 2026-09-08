@@ -264,6 +264,14 @@ service cloud.firestore {
                 // reduce or zero what is charged, never increase it, so the
                 // client is never exposed by them being writable here.
                 'noShow', 'waived',
+                // The trainer's ANSWER to a client's "you didn't show up"
+                // (S211): "I was there." It lifts the billing hold that report
+                // places, so unlike the two above it can INCREASE what is
+                // charged — which is why it is the trainer's field and the
+                // report itself is not. The client's own report fields are
+                // deliberately absent from this list, so a trainer cannot
+                // delete or edit the claim being made against them.
+                'trainerNoShowDenied',
                 // Recurrence bookkeeping — which series a session belongs to.
                 'seriesId', 'seriesIndex',
                 // WHERE this session happens (S203): 'trainer' = the trainer's
@@ -279,6 +287,14 @@ service cloud.firestore {
       // nothing else (they can't move it, re-price it, or un-cancel it).
       function clientCancelFields() {
         return ['status', 'cancelledBy', 'cancelledAt', 'cancelReason', 'updatedAt'];
+      }
+      // The OTHER thing a client may say about their own session: that the
+      // trainer never turned up (S211). Kept as its own list rather than folded
+      // into the cancel one, because these two writes are allowed under
+      // opposite conditions — a cancellation is only legal BEFORE the session,
+      // a no-show report only AFTER it.
+      function clientReportFields() {
+        return ['trainerNoShow', 'trainerNoShowAt', 'trainerNoShowNote', 'updatedAt'];
       }
       function isParticipant() {
         return isSignedIn() && request.auth.uid in resource.data.participants;
@@ -306,6 +322,19 @@ service cloud.firestore {
           || (request.resource.data.cancelledAt is number
               && request.resource.data.cancelledAt >= request.time.toMillis() - 300000
               && request.resource.data.cancelledAt <= request.time.toMillis() + 300000);
+      }
+      // Same reasoning as cancelStampHonest, for the report's own clock (S211).
+      // "When did you say the trainer didn't show" is the only thing that makes
+      // the claim checkable later — a client who could backdate it could file a
+      // report against a session that had already been billed and make it look
+      // like it came in first. Pinned to server time with the same symmetric
+      // ±5 min of device-clock slack, and re-checked on every write of the
+      // field, so withdrawing and re-filing restamps rather than replaying.
+      function reportStampHonest() {
+        return !changed().hasAny(['trainerNoShowAt'])
+          || (request.resource.data.trainerNoShowAt is number
+              && request.resource.data.trainerNoShowAt >= request.time.toMillis() - 300000
+              && request.resource.data.trainerNoShowAt <= request.time.toMillis() + 300000);
       }
       // ⚠️ WHO cancelled decides who pays. `cancelledBy` was unguarded while
       // `cancelledAt` was carefully pinned — so a client could write
@@ -401,7 +430,8 @@ service cloud.firestore {
         && request.resource.data.get('priceCents', 0) <= 500000
         // A booking can't be born already judged.
         && request.resource.data.get('noShow', false) == false
-        && request.resource.data.get('waived', false) == false;
+        && request.resource.data.get('waived', false) == false
+        && request.resource.data.get('trainerNoShowDenied', false) == false;
 
       // TRAINER: may reschedule, re-price, retitle, cancel, or mark a delivered
       // session as a no-show / waived — but never write a billing field and
@@ -421,6 +451,7 @@ service cloud.firestore {
         && request.resource.data.status in ['scheduled', 'cancelled']
         && request.resource.data.get('noShow', false) is bool
         && request.resource.data.get('waived', false) is bool
+        && request.resource.data.get('trainerNoShowDenied', false) is bool
         && request.resource.data.durationMin is number
         && request.resource.data.durationMin > 0
         && request.resource.data.durationMin <= 480;
@@ -435,6 +466,41 @@ service cloud.firestore {
         && cancelledByHonest()
         && stillCancellable()
         && request.resource.data.status == 'cancelled';
+
+      // CLIENT: report that the TRAINER didn't show up (S211), or withdraw it.
+      // The only client write that touches money, and it only ever HOLDS a
+      // charge — it can never move one, raise one, or make one go away by
+      // itself. The trainer answers it (waive = agreed, trainerNoShowDenied =
+      // "I was there"), and neither of those fields is writable from here.
+      //
+      // Bounded to a session that has actually STARTED and has not been settled:
+      // a report filed in advance isn't a report, and one filed after the money
+      // moved needs a refund rather than a flag — which is what the app tells
+      // them instead.
+      allow update: if isParticipant()
+        && request.auth.uid == resource.data.clientUid
+        && changed().hasOnly(clientReportFields())
+        // ⚠️ AND IT MUST ACTUALLY BE A REPORT. `hasOnly` alone let through any
+        // write whose only real change was `updatedAt` — which is how the
+        // existing "CLIENT waives their own session" test started PASSING when
+        // this rule landed: `waived` was already true on that fixture, so the
+        // diff was updatedAt and nothing else, and the whole assertion stopped
+        // proving anything. It also would have let a client staple 200
+        // characters of `trainerNoShowNote` onto a session nobody disputed.
+        && changed().hasAny(['trainerNoShow'])
+        && identityIntact()
+        && reportStampHonest()
+        && resource.data.get('status', '') != 'cancelled'
+        && resource.data.get('startAt', 0) <= request.time.toMillis()
+        && !('settled' in resource.data)
+        // ⚠️ AND NOT AFTER THE TRAINER HAS ANSWERED. Without this, withdraw +
+        // re-file re-freezes the charge, and the loop has no end: every
+        // denial can be undone by the person it was addressed to. One round
+        // in the app; after that it is a conversation, not a flag.
+        && resource.data.get('trainerNoShowDenied', false) != true
+        && request.resource.data.get('trainerNoShow', false) is bool
+        && request.resource.data.get('trainerNoShowNote', '') is string
+        && request.resource.data.get('trainerNoShowNote', '').size() <= 200;
 
       // Deleting would erase billing history — cancel instead. Admin only.
       allow delete: if isAdmin();

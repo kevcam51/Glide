@@ -417,6 +417,113 @@ await check("CLIENT waives their own session", assertFails(updateDoc(sess(c1, "s
 await check("booking cannot be created already marked no-show", assertFails(setDoc(sess(head, "bad20"), booking({ noShow: true }))));
 await check("booking cannot be created already waived", assertFails(setDoc(sess(head, "bad21"), booking({ waived: true }))));
 
+// ---- S211: the OTHER no-show — the client says the trainer didn't show up ---
+// `noShow` above is the trainer marking the client absent. This is the
+// counterpart, and it is the only client write in this collection that touches
+// money: it HOLDS the charge (functions/sessionSettle.js classifyForBilling)
+// until the trainer either waives it or writes `trainerNoShowDenied`. So the
+// rules have to pin four things — who may file it, that the session has
+// actually happened, that it isn't already settled, and that the trainer can
+// neither forge it nor delete it.
+console.log("\nTRAINER NO-SHOW REPORT — the client's claim, and who can touch it:");
+const HOUR = 3600000;
+await testEnv.withSecurityRulesDisabled(async (c) => {
+  // delivered and unsettled — the shape a real report is filed against
+  await setDoc(doc(c.firestore(), "sessions", "ns1"),
+    booking({ startAt: Date.now() - 2 * HOUR, completedAt: Date.now() - HOUR }));
+  await setDoc(doc(c.firestore(), "sessions", "ns2"),
+    booking({ startAt: Date.now() - 2 * HOUR, completedAt: Date.now() - HOUR }));
+  // still upcoming
+  await setDoc(doc(c.firestore(), "sessions", "ns3"), booking({ startAt: Date.now() + 2 * HOUR }));
+  // already settled — the money has moved
+  await setDoc(doc(c.firestore(), "sessions", "ns4"),
+    booking({ startAt: Date.now() - 2 * HOUR, completedAt: Date.now() - HOUR, settled: "charged" }));
+  // cancelled — nobody was due to show up
+  await setDoc(doc(c.firestore(), "sessions", "ns5"),
+    booking({ startAt: Date.now() - 2 * HOUR, status: "cancelled", cancelledBy: C1, cancelledAt: Date.now() - 3 * HOUR }));
+});
+await check("client reports the trainer didn't show up", assertSucceeds(updateDoc(sess(c1, "ns1"),
+  { trainerNoShow: true, trainerNoShowAt: Date.now(), trainerNoShowNote: "Waited 25 minutes", updatedAt: Date.now() })));
+await check("client withdraws it again", assertSucceeds(updateDoc(sess(c1, "ns1"),
+  { trainerNoShow: false, trainerNoShowAt: Date.now(), trainerNoShowNote: "", updatedAt: Date.now() })));
+await check("a note is optional", assertSucceeds(updateDoc(sess(c1, "ns2"),
+  { trainerNoShow: true, trainerNoShowAt: Date.now(), updatedAt: Date.now() })));
+
+// WHEN. A claim about a session that hasn't started is not a claim about
+// anything, and one filed after the money moved needs a refund, not a flag.
+await check("client reports a session that hasn't happened yet", assertFails(updateDoc(sess(c1, "ns3"),
+  { trainerNoShow: true, trainerNoShowAt: Date.now(), updatedAt: Date.now() })));
+await check("client reports an ALREADY SETTLED session", assertFails(updateDoc(sess(c1, "ns4"),
+  { trainerNoShow: true, trainerNoShowAt: Date.now(), updatedAt: Date.now() })));
+await check("client reports a CANCELLED session", assertFails(updateDoc(sess(c1, "ns5"),
+  { trainerNoShow: true, trainerNoShowAt: Date.now(), updatedAt: Date.now() })));
+
+// WHEN THEY SAID IT. Backdating the report is the same class of attack as
+// backdating a cancellation: it would let a claim be filed against a session
+// that had already been billed and made to look as though it came in first.
+await check("client BACKDATES the report timestamp", assertFails(updateDoc(sess(c1, "ns2"),
+  { trainerNoShow: true, trainerNoShowAt: Date.now() - 3 * 86400000, updatedAt: Date.now() })));
+await check("client POST-DATES the report timestamp", assertFails(updateDoc(sess(c1, "ns2"),
+  { trainerNoShow: true, trainerNoShowAt: Date.now() + 3 * 86400000, updatedAt: Date.now() })));
+
+// WHO. The trainer must not be able to erase or rewrite the claim against
+// them — the client's fields are deliberately absent from bookingFields().
+await check("TRAINER clears the client's report", assertFails(updateDoc(sess(head, "ns2"),
+  { trainerNoShow: false, updatedAt: Date.now() })));
+await check("TRAINER files a report against themselves", assertFails(updateDoc(sess(head, "ns1"),
+  { trainerNoShow: true, trainerNoShowAt: Date.now(), updatedAt: Date.now() })));
+await check("TRAINER rewrites the client's note", assertFails(updateDoc(sess(head, "ns2"),
+  { trainerNoShowNote: "they are lying", updatedAt: Date.now() })));
+await check("an unrelated client cannot report someone else's session", assertFails(updateDoc(sess(c2ctx, "ns2"),
+  { trainerNoShow: true, trainerNoShowAt: Date.now(), updatedAt: Date.now() })));
+
+// The trainer's ANSWER is theirs, and only theirs — it lifts the hold, so it is
+// the one field here that can INCREASE what is charged.
+await check("trainer says they were there", assertSucceeds(updateDoc(sess(head, "ns2"),
+  { trainerNoShowDenied: true, updatedAt: Date.now() })));
+await check("CLIENT cannot answer on the trainer's behalf", assertFails(updateDoc(sess(c1, "ns2"),
+  { trainerNoShowDenied: false, updatedAt: Date.now() })));
+await check("booking cannot be created already denied", assertFails(setDoc(sess(head, "bad22"),
+  booking({ trainerNoShowDenied: true }))));
+await check("booking cannot be created already reported", assertFails(setDoc(sess(head, "bad23"),
+  booking({ trainerNoShow: true, trainerNoShowAt: Date.now() }))));
+
+// A report is not a licence to edit the booking. Only the four report fields.
+await check("client cannot re-price a session while reporting it", assertFails(updateDoc(sess(c1, "ns1"),
+  { trainerNoShow: true, trainerNoShowAt: Date.now(), priceCents: 0, updatedAt: Date.now() })));
+await check("client cannot move a session while reporting it", assertFails(updateDoc(sess(c1, "ns1"),
+  { trainerNoShow: true, trainerNoShowAt: Date.now(), startAt: Date.now() + 86400000, updatedAt: Date.now() })));
+await check("client cannot waive their own charge while reporting", assertFails(updateDoc(sess(c1, "ns1"),
+  { trainerNoShow: true, trainerNoShowAt: Date.now(), waived: true, updatedAt: Date.now() })));
+await check("a 400-character note is refused", assertFails(updateDoc(sess(c1, "ns1"),
+  { trainerNoShow: true, trainerNoShowAt: Date.now(), trainerNoShowNote: "x".repeat(400), updatedAt: Date.now() })));
+// ⚠️ THE REGRESSION THAT ALMOST SHIPPED. The first version of this rule was
+// `changed().hasOnly(clientReportFields())` and nothing more — so any write
+// whose only real change was `updatedAt` passed it, and the "CLIENT waives
+// their own session" assertion above silently started SUCCEEDING (its fixture
+// was already waived, so the diff was updatedAt alone). The rule now demands
+// that `trainerNoShow` itself moves.
+await check("client bumps updatedAt with no report attached", assertFails(updateDoc(sess(c1, "ns1"),
+  { updatedAt: Date.now() })));
+await check("client staples a note onto a session nobody disputed", assertFails(updateDoc(sess(c1, "ns1"),
+  { trainerNoShowNote: "anything at all", updatedAt: Date.now() })));
+
+// ⚠️ AND ONE ROUND ONLY. `ns2` has been denied by the trainer above. If a
+// client could withdraw and re-file, every denial would be undone by the person
+// it was addressed to and the session could never be billed at all.
+await check("client re-files a report the trainer already answered", assertFails(updateDoc(sess(c1, "ns2"),
+  { trainerNoShow: false, trainerNoShowAt: Date.now(), updatedAt: Date.now() })));
+await check("...and cannot file a fresh one on it either", assertFails(updateDoc(sess(c1, "ns2"),
+  { trainerNoShow: true, trainerNoShowAt: Date.now(), trainerNoShowNote: "again", updatedAt: Date.now() })));
+
+// ---- S211: the reschedule trail is the SERVER's, or it is not evidence ------
+await check("trainer cannot write the reschedule trail", assertFails(updateDoc(sess(head, "ns1"),
+  { startAtHistory: [{ from: 1, at: 2, eid: "x" }], updatedAt: Date.now() })));
+await check("client cannot write the reschedule trail", assertFails(updateDoc(sess(c1, "ns1"),
+  { startAtHistory: [], updatedAt: Date.now() })));
+await check("booking cannot be created carrying a trail", assertFails(setDoc(sess(head, "bad24"),
+  booking({ startAtHistory: [{ from: 1, at: 2, eid: "x" }] }))));
+
 // ---- S186: the price of finished work is frozen -----------------------------
 // Weekly mode leaves up to seven days between the client's action and the
 // charge; re-pricing inside that window billed an amount nobody agreed to.

@@ -217,6 +217,29 @@ function classifyForBilling(v) {
   // is never charged. An absent cancelledBy also lands here and is treated as
   // not-billable, because when we can't tell who cancelled, the client wins.
   if (v.status === "cancelled" && v.cancelledBy !== v.clientUid) return null;
+  // ⚠️ AN OPEN "MY TRAINER DIDN'T SHOW UP" IS NEVER BILLED (S211). `noShow`
+  // above is the trainer saying the CLIENT was absent; this is the counterpart,
+  // and it is the one absence the client could previously do nothing about —
+  // the completion sweep stamps `completedAt` whether or not anyone turned up,
+  // and a delivered session bills in full.
+  //
+  // It HOLDS rather than zeroes, deliberately. Zeroing on the client's word
+  // alone would be a free-training button; holding stops an automatic charge
+  // going out over a disagreement nobody has looked at, and hands the decision
+  // back to the two people involved: the trainer either waives it (agreed —
+  // caught by the branch above) or writes `trainerNoShowDenied` ("I was
+  // there"), which lets it bill again and tells the client it will.
+  //
+  // If neither happens it stays unbilled forever, and that is the correct
+  // direction to fail in — the same rule as the cancelledBy guard above: when
+  // we cannot tell what happened, the client wins. `disputed` rather than null
+  // so runSettle can COUNT it; a silent skip is how this kind of hold rots.
+  //
+  // ⚠️ PLACED AFTER THE TRAINER-CANCEL GUARD, NOT BEFORE IT. A session the
+  // trainer cancelled is already free; calling it "disputed" instead would
+  // put an item in the held count that nothing can ever resolve, and a held
+  // count that only grows is one people stop reading.
+  if (v.trainerNoShow === true && v.trainerNoShowDenied !== true) return "disputed";
   if (v.completedAt) return "session";
   if (v.status === "cancelled" && Number(v.cancelledAt) >= Number(v.startAt)) return "session";
   if (v.status === "cancelled") return "cancel";
@@ -419,17 +442,23 @@ async function runSettle({ dryRun = false, force = false } = {}) {
   ]);
   const candidates = new Map();
   const arrears = [];
+  let disputed = 0;
   for (const d of [...done, ...canc]) {
     if (candidates.has(d.id) || d.settled) continue;
     const kind = classifyForBilling(d);
     if (!kind) continue;
     if (kind === "waived") { if (!dryRun) await db.doc(`sessions/${d.id}`).update({ settled: "waived", settledAt: now }).catch(() => {}); continue; }
+    // Held by an unanswered client report. NOT marked settled — the moment the
+    // trainer answers it must become billable again, and `settled` is the one
+    // field that would make that impossible.
+    if (kind === "disputed") { disputed++; continue; }
     candidates.set(d.id, { ...d, kind });
     if (now - obligationAt({ ...d, kind }) > ARREARS_AFTER_MS) arrears.push(d.id);
   }
   // Aged, still-unbilled work is a fact the trainer needs to see, not a silence.
   if (arrears.length) console.warn(`sessionsSettle: ARREARS — ${arrears.length} item(s) unsettled >21d: ${arrears.slice(0, 20).join(",")}`);
-  if (!candidates.size) return { groups: 0, charged: 0, packageOnly: 0, declined: 0, skipped: 0, reclaimed, arrears: arrears.length };
+  if (disputed) console.warn(`sessionsSettle: ${disputed} session(s) held by an unanswered trainer-no-show report`);
+  if (!candidates.size) return { groups: 0, charged: 0, packageOnly: 0, declined: 0, skipped: 0, reclaimed, arrears: arrears.length, disputed };
 
   // Group by trainer→client pair.
   const groups = new Map();
@@ -438,7 +467,7 @@ async function runSettle({ dryRun = false, force = false } = {}) {
     (groups.get(k) || groups.set(k, []).get(k)).push(s);
   }
 
-  const out = { groups: groups.size, charged: 0, packageOnly: 0, declined: 0, skipped: 0, reclaimed, arrears: arrears.length, details: [] };
+  const out = { groups: groups.size, charged: 0, packageOnly: 0, declined: 0, skipped: 0, reclaimed, arrears: arrears.length, disputed, details: [] };
   for (const [key, items] of groups) {
     try {
       const r = await settleGroup(db, items, { now, nowDate, force, dryRun });
@@ -582,7 +611,20 @@ async function settleGroup(db, items, { now, nowDate, force, dryRun }) {
   const ledgerRef = db.collection("sessionCharges").doc();
   const claim = await db.runTransaction(async (tx) => {
     const fresh = await Promise.all(billable.map((b) => tx.get(db.doc(`sessions/${b.s.id}`))));
-    const live = billable.filter((b, i) => fresh[i].exists && !fresh[i].data().settled);
+    // ⚠️ RE-READ MEANS RE-JUDGE (S211). This used to check only `settled`, so
+    // anything that made a session unbillable BETWEEN the candidate scan and
+    // this transaction was charged anyway — a waive typed while the sweep was
+    // running, and now a client's "my trainer didn't show up", which the scan
+    // above honours and this claim would otherwise have overridden minutes
+    // later. Re-classifying can only ever drop an item, never add one or raise
+    // a price: `b.cents` was priced before and is not recomputed here.
+    const live = billable.filter((b, i) => {
+      if (!fresh[i].exists) return false;
+      const d = fresh[i].data();
+      if (d.settled) return false;
+      const k = classifyForBilling(d);
+      return k === "session" || k === "cancel";
+    });
     if (!live.length) return null;
     const profRef = db.doc(`users/${clientUid}`);
     const prof = (await tx.get(profRef)).data() || {};
