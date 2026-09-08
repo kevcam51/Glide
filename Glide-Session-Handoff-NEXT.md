@@ -1,6 +1,131 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S213) — PUSHED (frontend only)
+## ▶️ START HERE (S214) — PUSHED (frontend only)
+
+No rules, no functions, no deploy. **2,062 assertions across 34 suites + 272
+rules tests**; build, `check:undef`, `check:weak` clean.
+
+Kevin: *"fix the today target bug. and any other issues you found."*
+
+### The root cause, which was ONE prop pair
+
+`DailyDashboard`'s `target` follows the **viewed day** — through
+`dayIdx → todayTotalBurn → burnShown`, and through the viewed day's log →
+`wearableTdee`. That is CORRECT for the ring and the "remaining" number: it
+answers *"what may I eat today"*. It was being handed to the What if… sandbox as
+`todayTarget` **and** `intakeFor={targetForRate}`, and the sandbox asks two
+questions that have no "today":
+
+- **judging history** — every past logged day was filtered against whichever day
+  happened to be on screen. On an eat-back plan with Mon/Wed/Fri training, the
+  same 2,050-cal day was absent from the make-up list on a training day and
+  "+402 over" on a rest day, and `makeUpPlan` then prescribed **4.3× the
+  repayment** for it. No navigation needed — opening the app on a Monday rather
+  than a Tuesday did it, and an unset `deficitMode` means eat-back, i.e. the
+  default.
+- **projecting forward** — the viewed day's burn cancels out of the PACE
+  projection but not out of typed or day-by-day, so 2,200/day read −407 or −98
+  depending on the date: **5.3 lbs apart on the 2-month tile** for an input
+  nobody touched. With a tracker reporting 700 active calories, 12 lbs.
+
+⚠️ **AND PACE MODE WAS ONLY DAY-INDEPENDENT ABOVE THE FLOOR.** Once
+`intakeFor(rate)` clamps at 1,200 but `intakeFor(0)` does not, the burn stops
+cancelling — 239 cal/day apart on a small-frame plan. A fix confined to the
+typed/week modes would have left that class wrong, which is why **both sides of
+the balance** had to move to one basis, not just `maintain`.
+
+### The fix
+
+New module-level **`planEnergy(d)`** → `{bmr, tdee, weeklyBurn, eatbackPerDay}`,
+**`planIntakeForRate(d, r)`** (the flat rate ladder) and **`overDaysFrom()`**.
+The simulator computes from the PLAN; both contaminated props are **deleted**,
+not patched — leaving either in scope leaves the bug one edit away.
+
+⚠️ **THE BASIS IS THE ONE THE APP ALREADY USES.** `computeClientCalories(d).target`
+backs the calendar month tint, the week rows, the stored `hitTarget`, the
+check-in auto-answer, Progress Snapshot's adherence and the server's
+`nutritionTargets`. `DailyDashboard.target` was the only per-weekday target in
+the app and the only one that leaked into history. Moving the simulator onto the
+existing basis makes six surfaces agree; moving the other five would have made
+six disagree with the server.
+
+⚠️ **`computeClientCalories` WAS REFACTORED ONTO THE SAME HELPER AND IS
+BYTE-IDENTICAL — PROVEN OVER 226,806 PLANS**, not argued. Six readers depend on
+it. Re-run that comparison before touching it again.
+
+⚠️ **`planEnergy` IS DELIBERATELY MORE LENIENT** than `computeClientCalories` —
+no gender gate, no bmr gate — because the Daily Calorie Targets card renders its
+pace chips on `isFinite(tdee) && tdee > 0`, and `calcBMR` falls through to the
+female branch without a gender. A later "tidy-up" that unifies the gates would
+silently zero those chips. **A test exists for no other reason; do not delete it
+as redundant.**
+
+⚠️ **`OVER_TOLERANCE` (5%) IS NOW NAMED, WITH SIX READERS.** The make-up list was
+the one written without it, so a day the calendar had just painted green was
+offered with a repayment plan attached. **Membership uses the tolerance; the
+DEBT does not** — forgiving 5% of an overage is the same class of bug as a
+silent clamp. The `>= 1.05` in `fmtLbs` is a singular/plural threshold and is
+deliberately NOT bound to it.
+
+### Also fixed (all found by the same review)
+
+- **"Custom ·  cal/min" with a HOLE, on all ten pickers, since S183j.** The
+  creator stores a `met` and deliberately writes no `calPerMin`. ⚠️ **JSX drops
+  an undefined child, so the user never saw the word "undefined"** — a test
+  asserting `/undefined/` passes against the live bug. New
+  `customExerciseSubtitle(ex, data)` asks `exBurn` (which handles both shapes)
+  and quotes the same 30-minute reference the creator's own preview shows.
+  `ExercisePicker` gained an optional `data` prop, threaded at all ten mounts.
+- **The sandbox dropped the "floored" label** the launching card has had since
+  S198z, so on a small frame three different paces printed 1,200 with three
+  different weekly losses under them — and in day-by-day they collapsed to a
+  byte-identical week, because blanks price at the chip.
+- **A runaway burn rendered a NEGATIVE bodyweight as fact** — 12,000 in the extra
+  field made the 2-month tile state "−19.4 lbs". It now says "off the scale".
+- **"or cal" said "or" while the code ADDED it.** Now "+ cal / also burned".
+- Two stale comments that caused defects: the custom-exercise block still
+  documented the pre-S183j `calPerMin` model, and the dashboard card claimed
+  "the same four numbers … same maths" as Results — seven rates, different
+  maths, measured 608 cal apart.
+
+### ⚠️ Traps this session paid for
+
+- **TWO OF MY OWN NEGATIVE CONTROLS ASSERTED PARITY, WHICH IS INVARIANT UNDER
+  THE MUTATIONS THEY APPLIED.** `planEnergy` feeds both the ladder and the
+  target, so doubling the eat-back share moved them together and the control
+  stayed green. Each control now asserts the one property its mutation breaks,
+  and the suite first checks the REAL code satisfies that property.
+- **An assertion matched the comment that names the string it forbids** — again
+  (`no bare * 1.05` vs the comment above `OVER_TOLERANCE`). Strip comments.
+- A pinned assertion in `test-makeup-plan.mjs` went stale because the rule it
+  pinned genuinely changed; it was strengthened rather than just re-pointed.
+
+### ⚠️ Still open — deliberately NOT bundled
+
+- **`SummaryTab`:5564** computes `floor(tdee − cut + avgBurnPerDay)` — cardio
+  only, and not gated on `isEatback` — forty lines above its own mode-aware
+  `targetCals`. It CHANGES A DISPLAYED NUMBER, so it wants its own commit with a
+  before/after. `planEnergy` is what it should call.
+- **The "How Your Target Is Calculated" ladder stops summing when the floor
+  binds** (`targetNoBurn` is pre-floored, `target` floored at the end): rows read
+  1,524 / −1,000 / "= 1,200" / "+238" / "1,200". And the floor disclosure sits
+  inside a branch a read-only or manual-target plan never renders.
+- **`functions/aitools.js`:3529** reports a new custom exercise's burn with the
+  pre-S183k kcal/kg/hr shortcut — the AI says 363 cal/30 min where `exBurn` then
+  shows 304, from the same tool call. **Needs a deploy** (`npm run deploy-set
+  aitools.js`), which is why it is not in this commit.
+- **:13654** says "Based on your body's daily burn of {tdee}" under chips
+  computed from `trackerTdee` + `burnShown` — a number the grid may not have used.
+- Eight bare `Math.max(1200, …)` literals remain despite `atLeastMinCal`; the
+  ladder bug above is what that anti-pattern produces. A clean standalone sweep.
+- **The honest upgrade, for the roadmap:** nothing on a day document records what
+  the user was TOLD to eat that day, which is why no basis available today is
+  historically faithful. Stamping `targetCal` at log time, going forward only,
+  makes every judging surface exact and converges from the flat basis.
+
+---
+
+## Previously: START HERE (S213) — PUSHED (frontend only)
 
 No rules, no functions, no deploy — `src/App.jsx` + tests only, so the push IS
 the release. **1,985 unit assertions across 33 suites + 272 rules tests**;

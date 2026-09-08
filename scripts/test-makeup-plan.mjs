@@ -98,7 +98,18 @@ ok("the scale cost is reported honestly (3,500 cal ~ 1 lb)",
    Math.abs(makeUpPlan({ over: 3500, days: 1, share: 1, target: 2500 }).lbs - 1) < 0.001);
 
 // ── the screen has to honour what the function returns ────────────────────
-ok("only days that actually went over are offered", /\.filter\(\(x\) => x\.cals > tgt\)/.test(APP));
+// S214: the rule moved into the module-level overDaysFrom, and it gained the
+// 5% tolerance the calendar tint / hitTarget / adherence already apply — a day
+// those screens had just called on track was being offered here with a
+// repayment plan attached.
+ok("only days that actually went over are offered",
+   /\.filter\(\(x\) => x\.cals > tgt \* OVER_TOLERANCE\)/.test(APP));
+// ⚠️ AND THE DEBT IS NOT FORGIVEN THE 5%. The tolerance decides WHETHER a day
+// counts, never what it costs — paying back only the excess above 1.05× would
+// under-report every make-up plan by 5% of a day's target, the same class of
+// bug as a silent clamp.
+ok("...but the debt is measured against the target itself, not the tolerance",
+   /over: Math\.round\(c - tgt\)/.test(APP));
 ok("the slider spans the whole range", /min="0" max="100" step="5" value=\{muShare\}/.test(APP));
 ok("...and both ends are labelled", /<span>Eat less<\/span>/.test(APP) && /<span>Train more<\/span>/.test(APP));
 ok("the floor warning is shown, not swallowed", /mu\.floorHit && \(/.test(APP));

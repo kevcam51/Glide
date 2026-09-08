@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**1,985 assertions across 33 suites**, S213).
+- `npm run test:units` — the JS unit suites (**2,062 assertions across 34 suites**, S214).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -108,6 +108,36 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S214 (Sep 8): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S214)" first.**
+> Frontend only. **2,062 assertions across 34 suites + 272 rules tests**; build,
+> `check:undef`, `check:weak` clean.
+> ⚠️ **ONE BASIS FOR "WHAT DOES THIS PLAN LET YOU EAT".** `DailyDashboard`'s
+> `target` follows the VIEWED DAY (through `dayIdx → burnShown` and the viewed
+> day's log → `wearableTdee`) — correct for the ring, wrong for anything
+> historical — and it was being handed to the What if… sandbox as `todayTarget`
+> and `intakeFor`. So every past logged day was judged by whichever day was on
+> screen (a 4.3× swing in the prescribed make-up), and the typed/day-by-day
+> projections moved up to 700 cal/day for an input nobody touched. New
+> module-level **`planEnergy` / `planIntakeForRate` / `overDaysFrom`**; the
+> simulator computes from the PLAN and both contaminated props are DELETED.
+> ⚠️ **`computeClientCalories` was refactored onto the same helper and is
+> byte-identical — proven over 226,806 plans**, because six surfaces read it.
+> ⚠️ **`planEnergy` is deliberately MORE LENIENT** (no gender/bmr gate) than
+> `computeClientCalories`; "tidying" the gates down would silently zero the
+> Daily Calorie Targets pace chips. A test exists solely to stop that.
+> ⚠️ **`OVER_TOLERANCE` (5%) is now named, with six readers** — the make-up list
+> was the one written without it, offering days the calendar had just painted
+> green. **Membership uses the tolerance; the debt does not.**
+> Also fixed: custom exercises rendered "Custom ·  cal/min" with a HOLE on all
+> ten pickers since S183j (JSX drops an undefined child — so a test asserting
+> /undefined/ passes against the bug); the sandbox dropped the "floored" label,
+> so three paces printed 1,200 with different headlines; a runaway burn rendered
+> a NEGATIVE bodyweight as fact; and "or cal" said "or" while it added.
+> ⚠️ **Two of my own negative controls asserted PARITY, which is invariant under
+> the mutations they applied** — `planEnergy` feeds both sides, so doubling the
+> eat-back share moved them together and the control stayed green. A control
+> that cannot go red proves nothing._
+>
 > _**S213 (Sep 8): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S213)" first.**
 > Frontend only — no rules, no functions, no deploy; the push IS the release.
 > **1,985 assertions across 33 suites + 272 rules tests**; build, `check:undef`

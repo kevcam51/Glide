@@ -148,6 +148,17 @@ const cssVarColor = (expr) => {
 // functions/aitools.js carries its own copy and a test pins the two together.
 const MIN_DAILY_CAL = 1200;
 const atLeastMinCal = (n) => Math.max(MIN_DAILY_CAL, Math.round(Number(n) || 0));
+// ⚠️ ONE RULE FOR "DID THIS LOGGED DAY GO OVER?" (S214). 5% is the app's
+// standing tolerance — 2,050 against a 2,000 target is not a blow-out, and a
+// screen that says it was is one people stop trusting. It lived as a bare
+// `* 1.05` in FIVE places and the sixth reader (the What if… make-up list) was
+// written without it, so a day the calendar had just painted green was
+// simultaneously offered as "+174 over" with a repayment plan attached.
+// Named here so all six move together.
+// ⚠️ NOT to be confused with the `>= 1.05` in fmtLbs — that is a
+// singular/plural rounding threshold, and binding it here would start printing
+// "1 lbs" the day anyone tunes this number.
+const OVER_TOLERANCE = 1.05;
 
 const ACTIVITY_LEVELS = [
   { id:"sedentary", label:"Sedentary",         iconName:"person", desc:"Desk or driving job, sitting most of the day",              steps:"Under 5,000",     multiplier:1.2   },
@@ -3488,11 +3499,18 @@ function calcStrengthBurn(met, weightLbs, minutes, data) {
 
 // ── Custom-exercise support ─────────────────────────────────────────────────
 // A plan can carry user-created exercises in data.customExercises (shape from
-// CustomExerciseCreator: { id:"custom_…", label, icon:"⭐", calPerMin, cat,
-// isCustom:true, type:"cardio"|"strength" }). These helpers fold them into the
-// catalog lookups + burn math so a custom id renders its label and computes burn
-// everywhere (wizard, Results, dashboards), not just where it was created.
-// Custom exercises burn by their user calPerMin estimate (met is 0 for them).
+// CustomExerciseCreator: { id:"custom_…", label, iconName, met, refWeightLbs,
+// cat, note, isCustom:true, type:"cardio"|"strength" }). These helpers fold them
+// into the catalog lookups + burn math so a custom id renders its label and
+// computes burn everywhere (wizard, Results, dashboards), not just where it was
+// created.
+// ⚠️ THEY BURN BY MET, NOT BY calPerMin — this comment said the opposite until
+// S214, and a picker written from it printed "Custom ·  cal/min" with a hole
+// where the number should be. Since S183j the creator stores a MET (so the burn
+// scales to whoever is doing it) and deliberately writes NO calPerMin; only
+// PRE-S183j records carry a flat calPerMin, with met:0. exBurn checks met first
+// and falls back to calPerMin for exactly those legacy rows and for heart-rate
+// cardio — see the note on exBurn itself, which is the truth here.
 function customOf(customExercises, type) {
   return (Array.isArray(customExercises) ? customExercises : []).filter(e => e && e.type === type);
 }
@@ -3508,7 +3526,8 @@ function findStrengthEx(id, customExercises) {
     || customOf(customExercises, "strength").find(e => e.id === id)
     || REST_ST;
 }
-// Burn for any resolved exercise — custom uses calPerMin × minutes; standard uses MET.
+// Burn for any resolved exercise. MET first (it scales to the person); calPerMin
+// is the fallback for PRE-S183j customs and for heart-rate cardio — see below.
 // ── One burn formula for EVERY exercise (S183k, Kevin) ──────────────────────
 // A MET is "how many times your RESTING metabolism this costs". The textbook
 // shortcut treats 1 MET as 1 kcal per kg per hour, which is really an average
@@ -3550,6 +3569,27 @@ function exBurn(ex, weightLbs, minutes, data) {
   if (ex.calPerMin) return Math.round(Number(ex.calPerMin) * minutes);
   return 0;
 }
+
+// The one-line description under a custom exercise in the picker (S214).
+//
+// ⚠️ BOTH SHAPES, AND NEITHER FIELD IS GUARANTEED. Since S183j the creator
+// stores a `met` and deliberately writes NO calPerMin, so `{ex.calPerMin}
+// cal/min` rendered "Custom ·  cal/min" — a hole and a double space, NOT the
+// word "undefined", because JSX drops an undefined child. (Any test asserting
+// /undefined/ therefore passes against the live bug.) Pre-S183j records carry
+// the opposite pair (calPerMin, with met:0), so a met-only render would print
+// "MET 0" on those. exBurn already handles both, in the same order the app
+// actually costs them — so ASK IT rather than reading a field, and quote the
+// same 30-minute reference the creator's own preview shows, so the number in
+// the picker is the number they saw when they made it.
+function customExerciseSubtitle(ex, data) {
+  const w = Number((data || {}).weightLbs) || 0;
+  const per30 = w > 0 ? exBurn(ex, w, 30, data) : 0;
+  if (per30 > 0) return `Custom · ≈ ${per30.toLocaleString()} cal for 30 min`;
+  if (Number(ex.met) > 0) return `Custom · ${ex.met} MET`;
+  if (Number(ex.calPerMin) > 0) return `Custom · ${ex.calPerMin} cal/min`;
+  return "Custom";
+}
 // A cardio session is EITHER a normal exercise ({type,duration}) OR a heart-rate
 // entry ({type:"hr", hr, duration}). This resolves either to the exercise-like
 // object exBurn/label code expects: an HR entry gets a calPerMin from the Keytel
@@ -3576,7 +3616,7 @@ function cardioExFor(session, data) {
 // exercise. Picking it calls onPickHr (the parent converts the session to
 // {type:"hr",…}) rather than the normal exercise onChange.
 const HR_CARDIO_OPTION = { id: "hr", label: "Heart Rate", note: "log by heart-rate zone", isHr: true };
-function ExercisePicker({ kind, value, onChange, onPickHr, customExercises }) {
+function ExercisePicker({ kind, value, onChange, onPickHr, customExercises, data }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const custom = customOf(customExercises, kind);
@@ -3635,7 +3675,7 @@ function ExercisePicker({ kind, value, onChange, onPickHr, customExercises }) {
                       <span style={{ display: "block", fontSize: ".86rem", fontWeight: active ? 700 : 600,
                         color: active ? "var(--accent)" : "var(--text)" }}>{ex.label}</span>
                       {ex.isHr && <span style={{ display: "block", fontSize: ".66rem", color: "var(--muted)" }}>{ex.note}</span>}
-                      {ex.isCustom && <span style={{ display: "block", fontSize: ".66rem", color: "var(--muted)" }}>Custom · {ex.calPerMin} cal/min</span>}
+                      {ex.isCustom && <span style={{ display: "block", fontSize: ".66rem", color: "var(--muted)" }}>{customExerciseSubtitle(ex, data)}</span>}
                     </span>
                     {active && <Icon name="check" size={15} color="var(--accent)" />}
                   </button>
@@ -3732,7 +3772,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
           <div className={WZW.panel}>
             <div className="mb-4">
               <label className={WZ.label}>Exercise</label>
-              <ExercisePicker kind="strength" value={fillType} onChange={setFillType} customExercises={data.customExercises} />
+              <ExercisePicker kind="strength" value={fillType} onChange={setFillType} customExercises={data.customExercises} data={data} />
             </div>
             <div className="mb-4">
               <label className={WZ.label}>Duration</label>
@@ -3855,7 +3895,7 @@ function StepStrength({ data, onChange, onBack, onNext }) {
                         )}
                         <div className="mb-4">
                           <label className={WZ.label}>Exercise</label>
-                          <ExercisePicker kind="strength" value={sess.type} onChange={val=>updSession(day,idx,"type",val)} customExercises={data.customExercises} />
+                          <ExercisePicker kind="strength" value={sess.type} onChange={val=>updSession(day,idx,"type",val)} customExercises={data.customExercises} data={data} />
                         </div>
                         <div className="mb-4">
                           <label className={WZ.label}>Duration</label>
@@ -4031,7 +4071,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
           <div className={WZW.panel}>
             <div className="mb-4">
               <label className={WZ.label}>Exercise to apply</label>
-              <ExercisePicker kind="cardio" value={fillType} onChange={setFillType} customExercises={data.customExercises} />
+              <ExercisePicker kind="cardio" value={fillType} onChange={setFillType} customExercises={data.customExercises} data={data} />
             </div>
             <div className="mb-4">
               <label className={WZ.label}>Duration</label>
@@ -4122,7 +4162,7 @@ function StepCardio({ data, onChange, onBack, onNext }) {
                                     onClick={()=>setWorkout(day,idx,{type:"hr",hr:0,duration:sess.duration||30})}><Icon name="heartRate" size={13} color="var(--accent)" />By heart rate</button>
                                 )}
                               </div>
-                              <ExercisePicker kind="cardio" value={sess.type} onChange={val=>updateWorkout(day,idx,"type",val)} onPickHr={()=>setWorkout(day,idx,{type:"hr",hr:0,duration:sess.duration||30})} customExercises={data.customExercises} />
+                              <ExercisePicker kind="cardio" value={sess.type} onChange={val=>updateWorkout(day,idx,"type",val)} onPickHr={()=>setWorkout(day,idx,{type:"hr",hr:0,duration:sess.duration||30})} customExercises={data.customExercises} data={data} />
                             </div>
                             {sess.type!=="rest" && (
                               <div className="mb-4">
@@ -5038,7 +5078,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
                                       onClick={()=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"hr",hr:0,duration:sess.duration||30};onUpdateCardio(day,0,"_replace",arr);}}><Icon name="heartRate" size={13} color="var(--accent)" />By heart rate</button>
                                   )}
                                 </div>
-                                <ExercisePicker kind="cardio" value={sess.type} onChange={val=>onUpdateCardio(day,idx,"type",val)} onPickHr={()=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"hr",hr:0,duration:sess.duration||30};onUpdateCardio(day,0,"_replace",arr);}} customExercises={data.customExercises} />
+                                <ExercisePicker kind="cardio" value={sess.type} onChange={val=>onUpdateCardio(day,idx,"type",val)} onPickHr={()=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"hr",hr:0,duration:sess.duration||30};onUpdateCardio(day,0,"_replace",arr);}} customExercises={data.customExercises} data={data} />
                               </div>
                               {sess.type!=="rest" && (
                                 <div className="field" style={{marginBottom:0}}>
@@ -5192,7 +5232,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
                                       onClick={()=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"hr",hr:0,duration:sess.duration||30};onUpdateCardio(day,0,"_replace",arr);}}><Icon name="heartRate" size={13} color="var(--accent)" />By heart rate</button>
                                   )}
                                 </div>
-                                <ExercisePicker kind="cardio" value={sess.type} onChange={val=>onUpdateCardio(day,idx,"type",val)} onPickHr={()=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"hr",hr:0,duration:sess.duration||30};onUpdateCardio(day,0,"_replace",arr);}} customExercises={data.customExercises} />
+                                <ExercisePicker kind="cardio" value={sess.type} onChange={val=>onUpdateCardio(day,idx,"type",val)} onPickHr={()=>{const arr=[...(data.cardio[day]||[])];arr[idx]={type:"hr",hr:0,duration:sess.duration||30};onUpdateCardio(day,0,"_replace",arr);}} customExercises={data.customExercises} data={data} />
                               </div>
                               {sess.type!=="rest" && (
                                 <div className="field" style={{marginBottom:0}}>
@@ -5899,7 +5939,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
                       )}
                       <div className="field">
                         <label>Exercise</label>
-                        <ExercisePicker kind="strength" value={sess.type} onChange={val=>onUpdateStrength(day,idx,"type",val)} customExercises={data.customExercises} />
+                        <ExercisePicker kind="strength" value={sess.type} onChange={val=>onUpdateStrength(day,idx,"type",val)} customExercises={data.customExercises} data={data} />
                       </div>
                       <div className="field" style={{marginBottom:0}}>
                         <label>Duration</label>
@@ -11300,7 +11340,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             const isStart = startKey && k === startKey;
             // Adherence tint: green if calories were at/under target, amber if over.
             const cal = pre ? null : dayCals[k];
-            const over = calTarget && cal != null && cal > 0 && cal > calTarget * 1.05;
+            const over = calTarget && cal != null && cal > 0 && cal > calTarget * OVER_TOLERANCE;
             const onTrack = calTarget && cal != null && cal > 0 && !over;
             const bg = k === sel ? "rgba(var(--accent-rgb),.12)"
               : over ? "rgba(251,191,36,.13)"
@@ -11342,7 +11382,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
             const ci = ciByDate[k]; const isToday = k === todayKey;
             const pre = beforeStart(k); const isStart = startKey && k === startKey;
             const cal = pre ? null : dayCals[k];
-            const over = calTarget && cal != null && cal > 0 && cal > calTarget * 1.05;
+            const over = calTarget && cal != null && cal > 0 && cal > calTarget * OVER_TOLERANCE;
             const onTrack = calTarget && cal != null && cal > 0 && !over;
             // Left accent conveys calorie adherence (green at/under, amber over).
             const accent = pre ? null : (over ? "var(--yellow)" : onTrack ? "var(--green)" : null);
@@ -12121,7 +12161,41 @@ function makeUpPlan({ over, days, share, target, floor = 1200 }) {
   };
 }
 
-function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, todayTarget, onClose }) {
+// Which logged days actually went over, and by how much (S214).
+//
+// ⚠️ THE TARGET IS THE PLAN'S, NOT THE DAY-ON-SCREEN'S. This filter used to run
+// against DailyDashboard's `target`, which follows viewDate through dayIdx →
+// burnShown and through the viewed day's log → wearableTdee. On any eat-back
+// plan with non-uniform training — the DEFAULT, since an unset deficitMode
+// means eat-back — the same 2,050-calorie day was "fine" while you looked at a
+// training day and "402 over" while you looked at a rest day, and makeUpPlan
+// then prescribed 4.3× the repayment for it. Nobody had to navigate anywhere:
+// opening the app on a Monday rather than a Tuesday was enough.
+//
+// ⚠️ AND THE 5% TOLERANCE IS NOT OPTIONAL. The calendar tint, the week rows,
+// the stored `hitTarget`, the check-in auto-answer and Progress Snapshot all
+// forgive 5%; a bare `>` here offered days those screens had just called on
+// track.
+//
+// ⚠️ MEMBERSHIP USES THE TOLERANCE, THE DEBT DOES NOT. `over` is measured
+// against the target itself — the tolerance decides WHETHER a day counts, not
+// what it costs. Paying back only the excess above 1.05× would quietly
+// under-report every make-up plan by 5% of a day's target, which is the same
+// class of bug as a silent clamp.
+function overDaysFrom(dayCalsAll, planTarget, limit = 30) {
+  const tgt = Number(planTarget) || 0;
+  if (!dayCalsAll || !tgt) return [];
+  return Object.entries(dayCalsAll)
+    .map(([date, cals]) => {
+      const c = Number(cals) || 0;
+      return { date, cals: c, over: Math.round(c - tgt) };
+    })
+    .filter((x) => x.cals > tgt * OVER_TOLERANCE)
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+    .slice(0, limit);
+}
+
+function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
   useBodyScrollLock(true);
   // ⚠️ THE EXERCISE SHEET SHARES THIS BACK BUTTON (S213). ExercisePicker opens a
   // BottomSheet, which registers its OWN useBackClose — so one device-Back
@@ -12131,6 +12205,37 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
   useBackClose(true, () => { if (sheetCount > 0) return; onClose(); });
   const d = data || {};
   const w = Number(weightLbs) || Number(d.weightLbs) || 0;
+  // ⚠️ THESE USED TO ARRIVE AS PROPS FROM THE DASHBOARD'S PER-DAY CHAIN, AND
+  // THAT WAS TWO BUGS (S214). `todayTarget` judged history by whichever day was
+  // on screen; `intakeFor` was `targetForRate`, which carries that same day's
+  // burn — and it cancels out of the PACE projection but not out of the typed
+  // or day-by-day ones, so a number the user never touched moved by up to 700
+  // cal/day (12 lbs on the 2-month tile) just from stepping the date.
+  // Computed from the PLAN here instead, so there is nothing left to
+  // contaminate: this modal judges days from months ago and projects weeks
+  // forward, and neither question has a "today".
+  //
+  // ⚠️ BOTH SIDES OF THE BALANCE MUST SHARE ONE BASIS. Flattening `maintain`
+  // alone would have moved the bug INTO pace mode, which is the one mode that
+  // is correct today.
+  const intakeFor = (r) => planIntakeForRate(d, r);
+  // ⚠️ SAY WHEN THE FLOOR IS DOING THE TALKING. The chips route through
+  // atLeastMinCal, so on a small frame at a fast pace two different paces print
+  // the SAME 1,200 while the headline under them reports different weekly
+  // losses — and in day-by-day they collapse to a byte-identical week, because
+  // blank days are priced at the chip. The card that launches this modal has
+  // labelled that case "floored" since S198z; the sandbox dropped the label and
+  // kept the number. A silent clamp is its own bug (CLAUDE.md).
+  const flooredAtRate = (r) => {
+    const e = planEnergy(d);
+    return isFinite(e.tdee) && e.tdee > 0
+      && e.tdee - Math.round(((Number(r) || 0) * 3500) / 7) + e.eatbackPerDay < MIN_DAILY_CAL;
+  };
+  // The one number every screen judges a logged day against — the calendar's
+  // month tint and week rows, the stored hitTarget, the check-in auto-answer,
+  // Progress Snapshot's adherence, and the server's nutritionTargets. It
+  // honours a manual data.calorieTarget because computeClientCalories does.
+  const planTarget = (computeClientCalories(d) || {}).target || 0;
   const maintain = intakeFor(0);
   // What the cardio maths reads. `cardioExFor` and HeartRatePicker both take
   // their weight from `data`, not from the `weightLbs` prop, so without this
@@ -12172,20 +12277,13 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
   const [muShare, setMuShare] = useState(50);   // % of the make-up from TRAINING
 
   // Only days that were actually logged, newest first, and only the ones that
-  // went OVER — there is nothing to make up for a day that did not.
-  const overDays = useMemo(() => {
-    const tgt = Number(todayTarget) || 0;
-    if (!dayCalsAll || !tgt) return [];
-    return Object.entries(dayCalsAll)
-      .map(([date, cals]) => ({ date, cals: Number(cals) || 0 }))
-      .filter((x) => x.cals > tgt)
-      .sort((a, b) => (a.date < b.date ? 1 : -1))
-      .slice(0, 30);
-  }, [dayCalsAll, todayTarget]);
+  // went OVER — there is nothing to make up for a day that did not. Both deps
+  // are plain VALUES; passing a bound target function instead would recompute
+  // on every render of a 2,800-line component.
+  const overDays = useMemo(() => overDaysFrom(dayCalsAll, planTarget), [dayCalsAll, planTarget]);
   const muPicked = overDays.find((x) => x.date === muDate) || null;
   const mu = muPicked
-    ? makeUpPlan({ over: muPicked.cals - Number(todayTarget), days: muDays,
-        share: muShare / 100, target: Number(todayTarget) })
+    ? makeUpPlan({ over: muPicked.over, days: muDays, share: muShare / 100, target: planTarget })
     : null;
 
   // ── What the added cardio costs ──────────────────────────────────────────
@@ -12341,7 +12439,10 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
                     {RATE_SHORT[r]}
                   </div>
                   <div style={{ fontFamily: "'Sora',sans-serif", fontSize: ".92rem",
-                    color: on ? "var(--accent)" : "var(--text)" }}>{intakeFor(r).toLocaleString()}</div>
+                    color: flooredAtRate(r) ? "var(--yellow)" : on ? "var(--accent)" : "var(--text)" }}>{intakeFor(r).toLocaleString()}</div>
+                  {flooredAtRate(r) && (
+                    <div style={{ fontSize: ".5rem", color: "var(--yellow)" }}>floored</div>
+                  )}
                 </button>
               );
             })}
@@ -12473,7 +12574,7 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
                 back to the Rest Day entry and it would silently read 0 cal. */}
             <ExercisePicker kind="cardio" value={session.type}
               onChange={goExercise}
-              onPickHr={goHr} customExercises={d.customExercises} />
+              onPickHr={goHr} customExercises={d.customExercises} data={hrData} />
             {session.type === "rest" && (
               <div style={{ fontSize: ".62rem", color: "var(--muted)", marginTop: "5px" }}>
                 Rest day — nothing added. Pick a cardio session to see what it&rsquo;s worth.
@@ -12500,12 +12601,12 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
             <div style={{ fontSize: ".58rem", color: "var(--muted)", marginTop: "2px", textAlign: "center" }}>how often</div>
           </div>
           <div>
-            <input type="number" inputMode="numeric" placeholder="or cal" value={extraBurn}
-              aria-label="Your own calorie burn"
+            <input type="number" inputMode="numeric" placeholder="+ cal" value={extraBurn}
+              aria-label="Extra calories burned, added on top"
               onChange={(e) => setExtraBurn(e.target.value)} style={{ ...input, width: "92px" }} />
             <div style={{ fontSize: ".58rem", color: simRejected(extraBurn) ? "var(--yellow)" : "var(--muted)",
               marginTop: "2px", textAlign: "center" }}>
-              {simRejected(extraBurn) ? "check this" : "own number"}
+              {simRejected(extraBurn) ? "check this" : "also burned"}
             </div>
           </div>
         </div>
@@ -12553,8 +12654,9 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
                 </div>
                 {/* ⚠️ NOT "your body burns". `maintain` is intakeFor(0) — the
                     intake that HOLDS the weight, which in eat-back mode already
-                    contains the day's scheduled training. Calling it basal
-                    expenditure was a false statement about a real number. */}
+                    contains the WEEK's scheduled training spread across seven
+                    days. Calling it basal expenditure was a false statement
+                    about a real number. */}
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ color: "var(--muted)" }}>To hold steady{per}</span>
                   <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--muted)" }}>{(isWeek ? maintain * 7 : maintain).toLocaleString()} cal</span>
@@ -12588,11 +12690,19 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
                       <div style={{ fontFamily: "'Sora',sans-serif", fontSize: ".95rem", color: "var(--accent)" }}>
                         {dir === "lose" ? "−" : "+"}{Math.abs(lbsIn(days)).toFixed(1)}
                       </div>
-                      {w > 0 && (
+                      {/* ⚠️ A LINEAR MODEL WILL HAPPILY PROJECT A NEGATIVE
+                          BODYWEIGHT. Type 12,000 into the extra-burn field and
+                          the 2-month tile stated "−19.4 lbs" as this person's
+                          weight. The 3,500-cal rule has stopped describing a
+                          body well before that, so the tile says so instead of
+                          asserting a number. */}
+                      {w > 0 && (w - lbsIn(days) > 0 ? (
                         <div style={{ fontSize: ".55rem", color: "var(--muted)" }}>
                           {(w - lbsIn(days)).toFixed(1)} lbs
                         </div>
-                      )}
+                      ) : (
+                        <div style={{ fontSize: ".55rem", color: "var(--yellow)" }}>off the scale</div>
+                      ))}
                     </div>
                   ))}
                 </div>
@@ -12629,15 +12739,24 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
               {overDays.length > 0 && (
                 <div style={{ marginTop: "14px", paddingTop: "12px", borderTop: "1px solid var(--border)" }}>
                   <div style={lbl}>Make up a big day</div>
-                  <div style={{ fontSize: ".72rem", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: "8px" }}>
+                  <div style={{ fontSize: ".72rem", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: "4px" }}>
                     Pick a day you went over and choose how to pay it back.
+                  </div>
+                  {/* Say which number these days were judged against, so the
+                      screen states its basis instead of leaving someone to
+                      reverse-engineer it — and so it visibly ties to the
+                      calendar, which paints the same days. */}
+                  <div style={{ fontSize: ".66rem", color: "var(--muted)", lineHeight: 1.45, marginBottom: "8px" }}>
+                    Measured against your plan&rsquo;s everyday target of{" "}
+                    <b style={{ color: "var(--text-secondary)" }}>{planTarget.toLocaleString()}</b> cal — the same
+                    one the calendar colours your days with.
                   </div>
                   <select value={muDate} onChange={(e) => setMuDate(e.target.value)} style={{ ...input, marginBottom: "8px" }}>
                     <option value="">Choose a day…</option>
                     {overDays.map((x) => (
                       <option key={x.date} value={x.date}>
                         {new Date(x.date + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
-                        {" — "}{x.cals.toLocaleString()} cal ({"+"}{(x.cals - Number(todayTarget)).toLocaleString()} over)
+                        {" — "}{x.cals.toLocaleString()} cal ({"+"}{x.over.toLocaleString()} over)
                       </option>
                     ))}
                   </select>
@@ -13458,13 +13577,21 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         </div>
       </div>
       {/* ── Daily calorie targets (S198n, Kevin's ask) ───────────────────────
-          The same four numbers as "Daily Targets" on the personalised plan
-          page, brought to the screen people actually live on. Same maths —
-          floor(tdee − cut) — deliberately, because two screens quoting
-          different daily targets is worse than one screen not quoting it.
-          The rate the plan is ACTUALLY set to is marked, so this reads as
-          "here is where you are, and here is what the others would be"
-          rather than as four numbers with no anchor. */}
+          The same rate ladder as "Daily Targets" on the personalised plan
+          page, brought to the screen people actually live on. The rate the plan
+          is ACTUALLY set to is marked, so this reads as "here is where you are,
+          and here is what the others would be" rather than as numbers with no
+          anchor.
+          ⚠️ THIS COMMENT USED TO CLAIM "the same four numbers … same maths —
+          floor(tdee − cut)" AS THE RESULTS CARD, AND ALL THREE HALVES WERE
+          FALSE (S214): there are SEVEN rates here, not four; these run through
+          targetForRate, which adds the VIEWED DAY's workout burn in eat-back
+          mode and prefers a tracker reading; and Results uses floor(tdee − cut)
+          with no burn and no mode at all. Measured on one plan: Results said
+          2,326 for 1 lb/wk while this card said 2,934 on a Monday and 2,326 on
+          a Sunday. That per-day behaviour is CORRECT here — this card answers
+          "what may I eat today" — but a comment asserting a parity that does
+          not exist is what sends the next reader to change the wrong screen. */}
       {isFinite(tdee) && tdee > 0 && (() => {
         // ── Grouped by DIRECTION (S198z, Kevin) ───────────────────────────
         // One flat row of six mixed the two directions together and leaned on a
@@ -15056,7 +15183,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                         <button style={{background:"transparent",border:"none",color:"var(--accent)",fontSize:".74rem",fontWeight:700,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:"4px"}}
                           onClick={()=>{const arr=[...(data.cardio[dayName]||[])];arr[i]={type:"hr",hr:0,duration:w.duration||30};onUpdateCardio(dayName,0,"_replace",arr);}}><Icon name="heartRate" size={13} color="var(--accent)" />By heart rate</button>
                       </div>
-                      <ExercisePicker kind="cardio" value={w.type} onChange={val=>onUpdateCardio(dayName,i,"type",val)} onPickHr={()=>{const arr=[...(data.cardio[dayName]||[])];arr[i]={type:"hr",hr:0,duration:w.duration||30};onUpdateCardio(dayName,0,"_replace",arr);}} customExercises={data.customExercises} />
+                      <ExercisePicker kind="cardio" value={w.type} onChange={val=>onUpdateCardio(dayName,i,"type",val)} onPickHr={()=>{const arr=[...(data.cardio[dayName]||[])];arr[i]={type:"hr",hr:0,duration:w.duration||30};onUpdateCardio(dayName,0,"_replace",arr);}} customExercises={data.customExercises} data={data} />
                       <select value={(todayCardio.workouts[i]||{}).duration||30} onChange={e=>onUpdateCardio(dayName,i,"duration",Number(e.target.value))}
                         style={{width:"100%",padding:"10px",borderRadius:"8px",border:"1.5px solid var(--border)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".84rem",marginTop:"6px"}}>
                         {DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
@@ -15096,7 +15223,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               </div>
               {editingWorkout===`s${i}` && (
                 <div style={{padding:"10px 0 12px",borderBottom:"1px solid var(--border)",animation:"fadeUp .15s ease both"}}>
-                  <ExercisePicker kind="strength" value={s.type} onChange={val=>onUpdateStrength(dayName,i,"type",val)} customExercises={data.customExercises} />
+                  <ExercisePicker kind="strength" value={s.type} onChange={val=>onUpdateStrength(dayName,i,"type",val)} customExercises={data.customExercises} data={data} />
                   <select value={s.duration||60} onChange={e=>onUpdateStrength(dayName,i,"duration",Number(e.target.value))}
                     style={{width:"100%",padding:"10px",borderRadius:"8px",border:"1.5px solid var(--border)",background:"var(--s2)",color:"var(--text)",fontFamily:"inherit",fontSize:".84rem",marginTop:"6px"}}>
                     {ST_DURATIONS.map(m=><option key={m} value={m}>{m} minutes</option>)}
@@ -15241,7 +15368,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
 
       {showSim && (
         <CalorieSimulator data={data} weightLbs={weightLbs} planRate={planRate}
-          intakeFor={targetForRate} dayCalsAll={dayCalsAll} todayTarget={target}
+          dayCalsAll={dayCalsAll}
           onClose={()=>setShowSim(false)} />
       )}
 
@@ -15316,7 +15443,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
             ...base,
             calories: base.calories != null ? base.calories : (kc > 0 ? kc : null),
             // Same rule as adherence and the calendar tint. Never overwrites an answer.
-            hitTarget: base.hitTarget != null ? base.hitTarget : (kc > 0 && target > 0 ? kc <= target * 1.05 : null),
+            hitTarget: base.hitTarget != null ? base.hitTarget : (kc > 0 && target > 0 ? kc <= target * OVER_TOLERANCE : null),
             workedOut: base.workedOut ?? null,
             mood: ciMood != null ? ciMood : (base.mood ?? null),
             notes: ciNote.trim() ? ciNote.trim() : (base.notes || ""),
@@ -15695,7 +15822,7 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll, noteMode
     const loggedCals = dayCalsAll && dayCalsAll[checkDate];
     if (loggedCals > 0 && (!ex || ex.hitTarget == null)) {
       const target = (computeClientCalories(data) || {}).target;
-      if (target > 0) setHitTarget(loggedCals <= target * 1.05);
+      if (target > 0) setHitTarget(loggedCals <= target * OVER_TOLERANCE);
       if (!ex || ex.calories == null) setCalories(String(loggedCals));
     }
   }, [checkDate, dayCalsAll]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -18726,31 +18853,71 @@ const wearableTdee = (d, log) => {
   return Math.round(resting + active);
 };
 
+// ── The plan's flat energy (S214) ───────────────────────────────────────────
+// One place answers "what does this plan burn, and what does a week of its
+// training come to", so every screen quoting a daily target quotes the same
+// arithmetic.
+//
+// ⚠️ IT TAKES ONLY THE PLAN — no log, no weekday, no "today". That is the
+// guarantee, not a convenience: a number used to judge a day from six months
+// ago, or to project two months forward, must not change because of which day
+// the dashboard happens to have open. DailyDashboard's own `targetForRate`
+// deliberately DOES follow the viewed day — it answers "what may I eat today" —
+// and handing that function to historical analysis is exactly what this helper
+// exists to stop.
+//
+// ⚠️ `eatbackPerDay` IS THE WEEK DIVIDED BY SEVEN, UNROUNDED. Rounding here
+// instead of at the end drifts a calorie off computeClientCalories and starts
+// the two screens disagreeing again.
+//
+// ⚠️ DELIBERATELY MORE LENIENT THAN computeClientCalories: no gender gate, no
+// bmr gate. calcBMR falls through to the female branch without a gender, and
+// the Daily Calorie Targets card renders on `isFinite(tdee) && tdee > 0` — so a
+// stricter gate here would silently zero that card's pace chips. Do not "tidy"
+// the gates down into this function.
+function planEnergy(d) {
+  const dd = d || {};
+  const w = Number(dd.weightLbs) || 0;
+  const actObj = ACTIVITY_LEVELS.find((a) => a.id === dd.activityLevel) || ACTIVITY_LEVELS[0];
+  const bmr = calcBMR(dd.gender, w, Number(dd.heightFt), Number(dd.heightIn), effectiveAge(dd));
+  const tdee = Math.round(bmr * actObj.multiplier);
+  const allStrEx = [REST_ST, ...STRENGTH_EXERCISES, ...customOf(dd.customExercises, "strength")];
+  let cardio = 0, strength = 0;
+  DAYS.forEach((day) => {
+    (Array.isArray((dd.cardio || {})[day]) ? dd.cardio[day] : []).forEach((sess) => {
+      cardio += exBurn(cardioExFor(sess, dd), w, sess.duration, dd);
+    });
+    (Array.isArray((dd.strength || {})[day]) ? dd.strength[day] : []).forEach((sess) => {
+      strength += exBurn(allStrEx.find((e) => e.id === sess.type) || REST_ST, w, sess.duration, dd);
+    });
+  });
+  const weeklyBurn = cardio + strength;
+  return { bmr, tdee, weeklyBurn, eatbackPerDay: isEatback(dd) ? weeklyBurn / 7 : 0 };
+}
+
+// What this plan lets you eat at a given weekly rate — the SAME answer on a
+// training day and a rest day, because it is a property of the plan.
+// Deliberately ignores `data.calorieTarget`: this is the rate LADDER (what each
+// pace would allow), and the card says separately which number is in force.
+function planIntakeForRate(d, r) {
+  const e = planEnergy(d);
+  if (!isFinite(e.tdee) || e.tdee <= 0) return 0;
+  return atLeastMinCal(e.tdee - Math.round(((Number(r) || 0) * 3500) / 7) + e.eatbackPerDay);
+}
+
 function computeClientCalories(d) {
   if (!d) return null;
   const w = Number(d.weightLbs);
   if (!w || !d.gender) return null;
-  const actObj = ACTIVITY_LEVELS.find((a) => a.id === d.activityLevel) || ACTIVITY_LEVELS[0];
-  const bmr = calcBMR(d.gender, w, Number(d.heightFt), Number(d.heightIn), effectiveAge(d));
-  if (!bmr || !isFinite(bmr)) return null;
-  const tdee = Math.round(bmr * actObj.multiplier);
-  const allStrEx = [REST_ST, ...STRENGTH_EXERCISES, ...customOf(d.customExercises, "strength")];
-  let cardio = 0, strength = 0;
-  DAYS.forEach((day) => {
-    (Array.isArray((d.cardio || {})[day]) ? d.cardio[day] : []).forEach((s) => {
-      const co = cardioExFor(s, d);
-      cardio += exBurn(co, w, s.duration, d);
-    });
-    (Array.isArray((d.strength || {})[day]) ? d.strength[day] : []).forEach((s) => {
-      const ex = allStrEx.find((e) => e.id === s.type) || REST_ST;
-      strength += exBurn(ex, w, s.duration, d);
-    });
-  });
-  const auto = Math.max(1200, Math.round(tdee - dailyDeficitOf(d) + (isEatback(d) ? (cardio + strength) / 7 : 0)));
+  const e = planEnergy(d);
+  if (!e.bmr || !isFinite(e.bmr)) return null;
+  // The plan-level target is just its own rate off the shared ladder. Deriving
+  // it any other way is how the two drifted apart in the first place.
+  const auto = planIntakeForRate(d, weeklyRateOf(d));
   // A manually-set target (data.calorieTarget — the coach's/user's own number)
   // overrides the calculation everywhere it's used.
   const target = Number(d.calorieTarget) > 0 ? atLeastMinCal(d.calorieTarget) : auto;
-  return { tdee, target };
+  return { tdee: e.tdee, target };
 }
 
 // The platform owner (Kevin). Trainerize v1 runs on his single shared API token,
@@ -33870,7 +34037,7 @@ export default function App() {
     const target = (computeClientCalories(data) || {}).target;
     const cals = Object.values(dayCalsAll);
     if (!(target > 0) || !cals.length) return null;
-    const onTarget = cals.filter((kc) => kc <= target * 1.05).length;
+    const onTarget = cals.filter((kc) => kc <= target * OVER_TOLERANCE).length;
     return { pct: Math.round((onTarget / cals.length) * 100), days: cals.length };
   }, [dayCalsAll, data]);
   const [recentWearable, setRecentWearable] = useState(null); // latest day (≤3 back) with tracker data — {daysAgo, wearable}
