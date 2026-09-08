@@ -1,249 +1,84 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S202) — PUSHED AND DEPLOYED
+## ▶️ START HERE (S208) — PUSHED AND DEPLOYED
 
-Tip `58006d9`. Build + `check:undef` clean, **1,463 unit assertions across 28
-suites** and **240 rules tests**, all green. Rules PUBLISHED, the four
-`availability.js` functions deployed, bundle confirmed live by marker-diff.
+Tip `5642bfc`. Build + `check:undef` clean, **1,634 unit assertions across 29
+suites** and **245 rules tests**, all green. Rules published, functions deployed,
+every bundle marker-diffed live.
 
-### Saved meeting addresses + which place a session is at (S203)
+### ⏳ THE QUEUE KEVIN JUST GAVE (nothing started)
 
-A client saves where they want to be trained, a trainer saves where clients
-should come — one menu row for both roles, "Where I train" / "Where I train
-clients", showing the saved value or **ADD**. Every booking then says which of
-the two it is at (`meetAt`), so the drive estimate knows which way anyone
-travels. No choice is a real answer: a place they agreed, or an online session.
+1. **A client needs a way to say the trainer did NOT show up.** He asked for a
+   button confirming the trainer IS there; I argued the useful half is the
+   reverse and he agreed to add it. Today `noShow` is trainer-only — a trainer
+   marks a CLIENT absent — and there is no counterpart. ⚠️ This touches BILLING
+   (a trainer no-show should not bill the client), so read
+   `functions/sessionSettle.js` and the S186 invariants before designing it.
+2. **A trainer session ledger / audit trail.** Kevin's words: every logged
+   session kept for life, browsable per trainer by year / month / week of month
+   / day, typeable or scrollable, **including cancelled and rescheduled ones**.
+   ⚠️ The data is already there — `sessions` documents are never deleted
+   (`allow delete: if isAdmin()`, and cancelling sets `status`, it does not
+   remove). So this is a QUERY + UI problem, not a storage one. ⚠️ Watch the
+   composite-index trap documented in `functions/availability.js` and
+   `calendarFeed.js`: `participants array-contains` + a range on `startAt` needs
+   an index, and this codebase deliberately filters in code instead.
 
-⚠️ **THE ADDRESS IS IN THE OWNER'S OWN kv, NOT ON THE PROFILE DOC.** The profile
-was less code and would have been a leak: `users/{uid}` is readable by ANY
-signed-in user when the role is head/sub trainer (the directory rule a client
-needs to resolve their coach, S59), so a trainer who trains from home would have
-published their home address platform-wide. kv is owner + admin + the owner's
-trainer chain. A client never needs the trainer's copy — the address is copied
-onto the session, and sessions are participant-read.
+### What shipped this arc (S203–S208)
 
-⚠️ **COPIED ONTO THE BOOKING, NEVER REFERENCED.** If a session pointed at the
-saved value, editing that address later would rewrite where past sessions were
-held, after the client was told somewhere else.
+- **Saved meeting addresses** (S203) — one per person, menu row for both roles.
+  ⚠️ In the OWNER'S OWN kv, never the profile doc: a trainer profile is readable
+  by ANY signed-in user, so a home-training trainer would have published their
+  home address. ⚠️ COPIED onto the booking, never referenced.
+- **`meetAt`** (S203) — which of the two places a session is at. Needed a RULES
+  PUBLISH; the frontend was held until it landed.
+- **Map features start at Coach** (S202, Kevin's Option B) — hide the feature,
+  do not starve it. ⚠️ Gating the GEOCODING instead is the S199u bug and stays
+  rejected.
+- **"On my way" + ETA + "I'm here"** (S201/S204/S206).
+- **Address autocomplete** (S207/S208) — a PROXY, because Google key
+  restrictions are exclusive and a browser key would have broken the
+  server-side Geocoding and Routes the same key already does.
 
-⚠️ **`meetAt` IS ABSENT, NEVER `""`.** firestore.rules validates it whenever the
-KEY is present, so an empty string fails the whole booking — every writer omits
-it (bookSession, bookSeries, and the server Accept, which inherits the direction
-from the SAME prior session the address comes from).
+### ⚠️ Confirmed working on Kevin's own account
 
-⚠️ **THIS NEEDED A RULES PUBLISH and the frontend was HELD until it landed** —
-`sessions` create/update are a strict `hasOnly(bookingFields())` allowlist, so
-the live ruleset refused `meetAt` (verified against production: permission-
-denied). Shipping the app first would have put a booking form in front of every
-trainer whose "My place" choice fails to save. Rules → functions → push.
+He tapped it: the **ETA appeared**, and he saw the session notification as the
+trainer. Two things still unconfirmed: whether the RECIPIENT's phone actually
+buzzed (delivery is now logged, so the next tap answers it), and the **"I'm
+here" arrival branch end to end**.
 
-### S204 — the row moves up, locks without a trainer, and arrival ships
+⚠️ **"My place" was greyed out for him and he guessed wrong about why** — it is
+disabled when the *trainer* has no saved address, not the client. He had saved
+one on the TEST account, not his own.
 
-- **The address row is now fifth**, straight after Calendar, with the other
-  session rows (it was eleventh of thirteen). Pinned by POSITION relative to its
-  neighbours, not a line number, so an unrelated edit cannot silently demote it.
-- **Clients always had the row** — it has been role-aware from the start; only
-  the label differs.
-- **It locks for a client with no trainer.** Their address is only read by their
-  own trainer, so before they join one it goes nowhere: disabled, NO TRAINER,
-  and a reason. ⚠️ **The gate is role-asymmetric on purpose** — a trainer has no
-  coach and never will, so `!hasCoach` alone would lock every trainer out of
-  their own address. A mutation test enforces that.
-- **"I'm here"** — the other end of the journey, same callable (the participant
-  check, the window and the plan gate are the ones arriving needs).
-  ⚠️ **No GPS on that path**: arriving is a statement, not a measurement.
-  ⚠️ **`arrivedAt` is written as an explicit `null` on a new departure.**
-  `set(..., {merge:true})` merges nested maps RECURSIVELY, so omitting it would
-  keep the previous arrival — every re-departure stamped "arrived" forever.
-  Readers test truthiness, never key presence.
+### ⚠️ Traps this arc paid for
 
-⚠️ **THE ARRIVAL BRANCH STILL HAS NOT BEEN TAPPED END-TO-END** — no test account
-sits on a Coach tier and the CLI cannot grant one (no generic Firestore write,
-and creating a service-account key for it is not worth it). What WAS closed is
-the part that actually carried the risk: `firestore.rules.test.js` now MEASURES
-the nested-map merge against real Firestore (S205), and the trap is confirmed —
-an omitted key survives a merge, an explicit `null` clears it, and the null
-remains PRESENT, so a reader testing `"arrivedAt" in w` would still say
-"arrived". Truthiness is the only correct read.
+- **A guard that exists in TWO places must be COUNTED in two, not matched
+  once.** This bit me THREE times in one session — the push `.catch`, the
+  stale-response guard, and the owner-lockout fix, each of which stayed green
+  while one of its two arms was broken.
+- **A rule about rendered output must be tested against rendered output.**
+  Three checks matched the COMMENT that names the thing they forbid.
+  `codeOnly()` in `scripts/test-meeting-address.mjs` is the fix.
+- **A negative assertion needs a positive control.** Two mutations survived
+  because the bad-input case used a fake that THREW — `null` came back whether
+  the guard ran or not.
+- **`set(..., {merge:true})` merges nested maps RECURSIVELY.** Omitting a key
+  inside a map does NOT clear it. Now MEASURED against real Firestore in
+  `firestore.rules.test.js` rather than reasoned about.
+- **`firebase login:list` reports a stale identity.** It said "Logged in as
+  kevin@…" while every call failed. Fix: `firebase login --reauth --no-localhost`.
+- **Two "failures" during live testing were the design**: the button is hidden
+  more than 240 minutes out, and hidden for a non-Coach trainer. Check the clock
+  and the tier before debugging.
 
-### S205 — the three open items closed
+### ⚠️ Standing risk when Kevin tests
 
-- **Verified the Maps pricing properly** (it had been single-sourced). Three
-  independent readings of Google's raw SKU HTML plus a refutation pass, all
-  agreeing: Geocoding 10,000 free/month then $5.00/1,000; Compute Routes
-  Essentials 10,000 then $5.00; **Compute Routes Pro 5,000 then $10.00**.
-  ⚠️ **EVERY ROUTES CALL WE MAKE BILLS Pro**, because `TRAFFIC_AWARE` is a Pro
-  feature and Routes bills ONE SKU per request at the highest tier any requested
-  feature belongs to. So traffic costs 2x the unit price AND half the free
-  allowance — ~4x worse at the point you start paying. Deliberate.
-  ⚠️ **Three OTHER features silently promote a request to Pro**: 11-25
-  intermediate waypoints, `optimizeWaypointOrder`, and location modifiers
-  (sideOfRoad / heading / vehicleStopover). Our body carries none; a test now
-  fails if one appears, because adding one would double the bill for callers who
-  never wanted traffic.
-- **"On my way" is now hidden from a client at their OWN place** (both app and
-  server). ⚠️ **Asymmetric on purpose**: a trainer's saved place is where they
-  WORK and they commute to it — running late to your own studio is exactly the
-  case this exists for — while a client's is where they ARE. Restricting the
-  host in general would remove a real use; restricting a client at their own
-  address removes only nonsense. A mutation test fails if someone "fixes" the
-  asymmetry.
-- **No address at signup, a contextual prompt instead.** A client who never
-  opens the menu never saves a place, so their trainer's "their place" option
-  stays greyed out forever and neither knows why. The next-session card now
-  carries one line — "Want {trainer} to come to you?" — shown only when they
-  have a trainer, a session, and nothing saved, and gone for good once saved.
-  Verified as a full loop: client saves → the trainer's picker flips from "none
-  saved" to selectable and fills the address.
-
-**Left undone, deliberately, both Kevin's call:** capturing an address at SIGNUP
-(the role chooser asks only for a name, and an address field there is a drop-off
-risk before anyone trusts the app), and restricting "On my way" to whichever
-side is designated as travelling (a trainer can genuinely be late to their OWN
-studio, so it stays available to both).
-
-⚠️ **TWO "FAILURES" DURING LIVE TESTING WERE THE DESIGN WORKING**, and both cost
-a round of chasing: the button is hidden on a session more than 240 minutes out
-(the lead window), and hidden for a free trainer (the Coach gate). Check the
-clock and the tier before debugging this feature.
-
-⚠️ **A PARALLEL SESSION SHIPPED S201b WHILE THIS WAS BEING BUILT.** origin/main
-had moved two commits (the age roll-forward); this work was rebased onto it.
-`package.json` conflicted because both sides appended a suite to `test:units` —
-resolved as a union, both suites present, no duplicates. `src/App.jsx`
-auto-merged and their `test-age-rollforward.mjs` still passes, which is what
-says the merge did not eat their feature. Go by SHA, not by label.
-
-### ✅ SHIPPED — "On my way" + ETA (the S201 in-progress item)
-
-One tap on an upcoming session takes a single GPS fix, computes drive time to
-the session's address, and tells the other person "X is on the way — about 12
-min out, arriving around 12:34". Either direction; whoever taps is moving.
-`sessionOnMyWay` in `functions/availability.js`, and ONE `OnMyWay` component in
-`src/App.jsx` serving three surfaces (trainer calendar sheet, shared Sessions
-panel, client next-session card).
-
-**The two traps the S201 handoff flagged, both closed:**
-
-- `estimateDriveFrom(db, {lat,lng}, toAddr, …)` in `functions/driveTime.js`
-  geocodes ONLY the destination. A test counts geocoder calls — exactly one, and
-  the origin's coordinates appear in none of them.
-- **The ETA is stored, the position is not.** The session carries
-  `onMyWay: { by, at, minutes, etaAt, source }`. It also skips `drivecache` on
-  purpose: that key is (origin, destination, weekday, hour), so caching a live
-  position would write coordinates into a shared uid-less doc for a cache that
-  could never hit.
-
-⚠️ **`onMyWay` IS DELIBERATELY ABSENT FROM `firestore.rules bookingFields()`** —
-server-written only, so neither side can type an arrival time from a console,
-and **no rules publish was needed**: `changed()` is a diff of affected keys, so
-a field nobody edits never appears in it. Do not "complete" bookingFields with
-it; a test fails if you do.
-
-**Decisions worth not re-litigating:**
-
-- ⚠️ **THE MAP FEATURES START AT COACH (Kevin's ruling, Option B).** Drive-time
-  warnings AND "On my way" are Coach-and-above, and below that they **do not
-  appear at all** — no panel, no button, no degraded version. He asked whether
-  upgraded tiers should get "the map related stuff, including the geocoding";
-  the answer that shipped is *hide the feature*, not *starve it*.
-  **Gating the GEOCODING is the S199u bug and must stay rejected**: geocoding is
-  the PREREQUISITE, not the premium half, so gating it leaves the panel and the
-  button rendering and silently producing nothing — and silence on this feature
-  reads as "your schedule is fine". Verified prices, for the record: geocoding
-  is $5/1,000 after **10,000 free a month**, cached 180 days and shared across
-  every trainer; traffic-aware Routes is **~2× the unit price and half the free
-  cap** (5,000 vs 10,000). The expensive half is the traffic, not the map.
-  ⚠️ **The geoKey/routesKey split inside driveTime.js STAYS**, and both callables
-  keep a named `paid`, even though every caller that now gets through is paid.
-  Collapsing two classes of caller into one is precisely the S199v mistake that
-  disarmed a retry damper — 128 lookups where there had been 1.
-- **The TRAINER's plan decides, for both people.** A client subscribes to nothing
-  that includes this, so a Coach's client can tap "On my way" and a non-Coach's
-  client cannot. Server (`trainerHasDriveFeatures`) is the real gate; the app
-  only hides entry points — the canBillSessions/sessionBillingGate.js shape.
-  A **failed profile read is "no"**: it used to mean "use the free estimator",
-  which was fine when it only chose between two qualities of one answer.
-- **One journey per session**, the shape the scope specified. While the other
-  person is en route you read their ETA instead of getting a button — right for
-  the case this exists for (if your trainer is driving to your house, you are at
-  home). It is a limit only where BOTH sides travel to a third place. Fixing
-  that means a record per participant, i.e. a data-shape change to a live
-  billing document — Kevin's call, not a silent widening.
-- Its own notification type (`sessionOnMyWay`), not "session reminders": someone
-  who silenced the automated countdown still wants to know their trainer is ten
-  minutes out.
-
-### Also shipped: the activity-level step band
-
-Kevin: *"can the estimated steps be visible without clicking the I button?"*
-⚠️ **THEY ALREADY WERE, AND NOTHING WAS EVER BEHIND THE ⓘ** — that panel has
-never held a step number. `a.steps` renders in exactly one place in the app
-(StepActivity) and needs no tap. The report was "present and it does not read",
-which turned out to be a measurable defect: it was the SMALLEST text in the row
-(.7rem, last in reading order) in `text-primary/80`, which in the **light theme**
-computes to **3.40:1** — a WCAG AA fail, and *lower contrast than the muted
-description line above it*. Measured after the fix: **10.9:1 at 16px**, in a real
-browser. An accessibility fix that happens to look better, not a taste change.
-⚠️ **The NUMBERS did not move** — `steps` was split into `steps`+`stepsNote` for
-layout only. The same bands are duplicated in `functions/aitools.js`
-`set_personal_info` (the MCP connector has no system prompt, so that string is
-its only guidance) and a test tiles the ranges so no step count belongs to
-nobody. `ACTIVITY_LEVELS` must stay ONE RUNG PER LINE — test-activity-suggestion
-lifts it by regex — and `label` must stay byte-for-byte (five other screens
-render it in single-line rows with no wrap guard).
-
-### ⚠️ Three defects this session's OWN work introduced
-
-All three were in code I had just written, which is the S186/S196b pattern: a
-fix's own bugs are the ones nobody is looking for.
-
-- **A one-millisecond disagreement.** The server used `now > endAt` while
-  `isPastSession` is `end <= now`, so at the exact end instant the button hid
-  while the server still accepted the tap. **Comparing the two CONSTANTS found
-  nothing — they matched all along.** It took cross-checking both predicates
-  across a range of offsets, which is now a loop in the test.
-- **The bare word "internal" on a client's screen.** A Firebase callable's
-  `message` IS its code when the server supplies none, so passing it through
-  renders a status code as an apology — the exact defect S196b fixed once on the
-  booking Accept. **Found by tapping the button in a browser, not by reading the
-  code**, and only visible because the function was not yet deployed.
-- **A reschedule left a stale note.** Tap at 12:50 for a 1:00 session, move it to
-  3:00, and the client still read "12 minutes away". `onMyWayStatus` now defers
-  to `canSayOnMyWay`, so saying it and showing it cannot disagree.
-
-### ⚠️ And tests that passed for the wrong reason — FOUR of them
-
-This kept happening, in two mirror-image shapes, and both are worth recognising
-on sight:
-
-**A negative assertion with no positive control.** Two mutations survived the
-first pass of `test-on-my-way.mjs` because the bad-fix cases used a fake
-geocoder that THREW — so `null` came back whether the guard ran or not. Deleting
-the null-island and off-globe guards left the file green. Fixed with a WORKING
-destination geocoder, a lookup counter ("and nothing was looked up"), and a
-control case proving a good fix through the same harness does estimate.
-
-**A rule about rendered output, asserted against prose.** Twice, in two
-different files, a check matched the COMMENT that names the pattern it forbids
-(`text-primary/80`, `role === "admin"`) and failed on a correct file. Strip
-comments before a negative match.
-
-And the same lesson in the browser: the A/B control for the plan gate looked
-like a failure and was not — I was reading a cancelled session ten hours in the
-past, where hiding the button is correct. **Without the control I would have
-shipped believing the wrong thing;** with it, and only after re-checking WHICH
-session the sheet was showing, the real A/B was clean.
-
-`scripts/test-on-my-way.mjs` is 111 assertions, every predicate LIFTED FROM THE
-SHIPPING SOURCE AND RUN, then mutation-checked 16 ways. **Two mutations survived
-the first pass**: deleting the null-island and off-globe guards left the file
-green, because the bad-fix assertions used a fake geocoder that THREW — so
-`null` came back whether the guard ran or not. Fixed with a working destination
-geocoder, a lookup counter ("and nothing was looked up"), and a control case
-proving a GOOD fix through the same harness does estimate. **A negative
-assertion needs a positive control, or it is asserting that the harness is
-broken.**
+He is the ONLY trainer for whom `canBillSessions` is true, so a test session
+with a price AND a client with a card on file is charged for real by the hourly
+sweep — on the LIVE Stripe key (`sessionSettle.js` only uses the test key when
+the CLIENT profile carries `sessionBillingTest`). **Test sessions must be priced
+0.**
 
 ---
 
