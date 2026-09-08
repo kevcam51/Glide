@@ -201,7 +201,19 @@ for (const [label, value] of [["missing", undefined], ["null", null], ["empty", 
 {
   ok("the reset button no longer calls onReset directly",
      !/className="edit-bar-reset" onClick=\{onReset\}/.test(APP));
-  ok("...it opens a confirm instead", /setConfirmReset\(true\)/.test(APP));
+  // ⚠️ ANCHORED TO THE START OVER BUTTON. `setConfirmReset(true)` also appears on
+// an unrelated surface, so a bare match stayed green when THIS handler was
+// changed to call onReset() directly — restoring the one-tap unconfirmed wipe
+// this whole file exists to prevent. Not a count: the other occurrence is
+// someone else's feature and may legitimately come and go.
+// ⚠️ ANCHORED TO THE START OVER BUTTON ITSELF. Two earlier attempts were both
+// too loose: a bare /setConfirmReset\(true\)/ matched an unrelated "Reset link"
+// button on another screen, and an `||` fallback did the same — each stayed
+// green while THIS handler was changed to call onReset() directly, restoring the
+// one-tap unconfirmed wipe this whole file exists to prevent. Not a count: the
+// other occurrence is someone else's feature and may legitimately come and go.
+ok("...it opens a confirm instead",
+   /edit-bar-reset" onClick=\{\(\)=>\{\s*setConfirmReset\(true\);/.test(APP), true);
   ok("...and only the confirm's own button resets",
      /onClick=\{\(\)=>\{ setConfirmReset\(false\); onReset\(\); \}\}/.test(APP));
   ok("...with a Cancel that resets nothing",

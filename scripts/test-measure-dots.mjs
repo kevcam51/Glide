@@ -119,7 +119,7 @@ ok("the set is built through hasMeasurement, not from entry existence",
   // The chart must USE it, draw the plan dashed, and count none of it.
   ok("the chart splits through the shared function",
      /const \{ real: sorted, planned \} = splitWeighIns\(checkIns\);/.test(APP));
-  ok("the plan is dashed, not solid", /strokeDasharray="5 4"/.test(APP));
+  ok("the plan is dashed, not solid", /strokeDasharray="5 4" strokeLinecap="round"/.test(APP));
   ok("...anchored to the last real reading so it reads as a continuation",
      /\[sorted\[sorted\.length - 1\], \.\.\.planned\]/.test(APP));
   ok("...and the x-axis makes room for it", /const slots = sorted\.length \+ planned\.length;/.test(APP));
@@ -127,7 +127,7 @@ ok("the set is built through hasMeasurement, not from entry existence",
   // The numbers are all derived from `sorted`, which excludes the plan — and the
   // tap-to-edit hit targets are too, so a target cannot be edited as a weigh-in.
   ok("only real readings are tappable", /\{onEditPoint && sorted\.map\(/.test(APP));
-  ok("the dashed line says what it is", /— not measured/.test(APP));
+  ok("the dashed line says what it is", /your plan \u00b7 \$\{planned\.length\} targets`\} \u2014 not measured/.test(APP));
 }
 
 // ── do the macros add up to the day? (S200c) ───────────────────────────────

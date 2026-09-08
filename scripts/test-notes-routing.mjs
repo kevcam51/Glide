@@ -103,8 +103,12 @@ const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n,
   const outs = AI.match(/visibleIn = /g) || [];
   ok("every destination has one", outs.length >= 5, outs.length);
   ok("...and it is actually returned", (AI.match(/title: note\.title, storedAs, visibleIn/g) || []).length === 2);
-  ok("the about-client wording warns it is NOT under My notes",
-     /NOT under your own/.test(AI));
+  // ⚠️ BOTH about-someone-else destinations carry the warning — a plan file and
+  // a client's card — so a bare match stayed green if either lost it, and a
+  // trainer would be told their note is under "My notes" when it is not.
+  ok("the about-client wording warns it is NOT under My notes — on BOTH destinations",
+     (AI.match(/NOT under your own/g) || []).length === 2,
+     (AI.match(/NOT under your own/g) || []).length);
   ok("the prompt requires quoting it back", /using the visibleIn the tool returns/.test(CHAT));
 }
 

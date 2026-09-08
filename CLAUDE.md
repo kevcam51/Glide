@@ -32,12 +32,18 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**1,650 assertions across 29 suites**, S209).
+- `npm run test:units` — the JS unit suites (**1,653 assertions across 29 suites**, S210).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
   NOT created when a worktree is made. Fix once per worktree: `(cd functions && npm install)`.
 - `npm run check:undef` — fails on any undefined reference in `src/` or `functions/` (S197t).
+- `npm run check:weak` — reports test assertions that would stay GREEN if a
+  regression broke ONE of several identical occurrences of what they check
+  (S210). ⚠️ **A guard that exists in TWO places must be COUNTED in two, not
+  merely found** — this exact mistake was made four times in one session, each
+  time in code that had just been written and believed tested. A report, not a
+  gate; it currently reads zero.
 - `npm run test:rules` — Firestore security-rules tests against the Firebase emulator. The
   emulator needs Java (Temurin JDK). A local JDK is installed at `~/.glide-jdk` (Temurin 21, no
   brew/sudo on this machine) — run with it via:

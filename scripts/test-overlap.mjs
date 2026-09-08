@@ -149,14 +149,24 @@ const AVAIL = readFileSync(join(ROOT, "functions", "availability.js"), "utf8");
 ok("the accept path checks for an overlap before claiming", /reason: "overlap"/.test(AVAIL));
 ok("...and refuses rather than booking on top", /That overlaps a session you already have/.test(AVAIL));
 ok("...using one equality, with the window filtered in code",
-   /where\("trainerUid", "==", uid\)/.test(AVAIL));
+   // ⚠️ SCOPED TO THE sessionTravel QUERY. The same equality appears on the
+   // trainerBlocks read in the accept path, so a bare match stayed green when
+   // the scoping was dropped from the one that returns client ADDRESSES.
+   /collection\("sessions"\)\.where\("trainerUid", "==", uid\)/.test(AVAIL));
 ok("...and it considers the trainer's own blocked time",
    /collection\("trainerBlocks"\)\.where\("trainerUid", "==", uid\)/.test(AVAIL));
 ok("...naming a block as a block when it refuses",
    /time you&#39;ve blocked out|time you've blocked out/.test(AVAIL));
 ok("accepting one slot says the other offered times are released",
    /free again/.test(AVAIL));
-ok("only pairs where a drive could matter are COUNTED", /RELEVANT_GAP_MIN/.test(AVAIL));
+// ⚠️ ASSERT THE NUMBER, NOT THE TOKEN. The name appears at its definition and at
+// its use, so a bare match survived setting it to 1e9 — which silently makes
+// every pair "relevant" and puts a permanent unchecked-connections notice on a
+// schedule that is fine.
+ok("only pairs where a drive could matter are COUNTED",
+   /const RELEVANT_GAP_MIN = (\d+);/.test(AVAIL)
+   && Number(AVAIL.match(/const RELEVANT_GAP_MIN = (\d+);/)[1]) <= 24 * 60,
+   AVAIL.match(/const RELEVANT_GAP_MIN = (\d+);/) && AVAIL.match(/const RELEVANT_GAP_MIN = (\d+);/)[1]);
 // ⚠️ ...but the ESTIMATE still runs for every pair. Bounding the estimate meant
 // a >4h-apart impossible drive produced no warning AND no coverage note — a
 // blank calendar on a schedule the same code would otherwise call infeasible.
@@ -166,7 +176,13 @@ ok("...while the estimate is NOT skipped by the ceiling",
 ok("a trainer who uses no locations at all is not nagged",
    /if \(!sessions\.some\(\(s\) => s\.location\)\) noAddress = 0;/.test(AVAIL));
 ok("the booking sheet names blocked time as blocked time",
-   /time you've blocked out/.test(APP) && /allBlocks/.test(APP));
+   // ⚠️ COUNT THE PHRASE AND PIN THE PREDICATE. It appears in BOTH branches of
+   // the overlap notice, and `allBlocks` appears at its definition as well as
+   // its use — so a bare match stayed green through three separate regressions,
+   // including collapsing the ternary back to the pre-fix wording.
+   (APP.match(/time you've blocked out/g) || []).length === 2
+   && /const allBlocks = hits\.every\(\(h\) => String\(h\.other && h\.other\.id\)\.startsWith\("blk:"\)\);/.test(APP),
+   (APP.match(/time you've blocked out/g) || []).length);
 // ⚠️ ADMIN IS A UID, NEVER A PROFILE ROLE. createProfile only ever writes
 // "client" or "head_trainer" and index.js mirrors admin into the custom CLAIM
 // alone, so `profile.role === "admin"` is false for every real document — the

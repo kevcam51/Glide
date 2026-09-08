@@ -123,7 +123,12 @@ ok("undefined is not a place", !M.isMeetAt(undefined));
 
 // ── the rules actually allow (and bound) it ─────────────────────────────────
 {
-  ok("meetAt is an allowed booking field", /'meetAt'\]/.test(RULES), true);
+  // ⚠️ ANCHORED TO THE LIST IT MUST BE IN. `'meetAt']` also appears in
+  // meetAtValid()'s own check, so a bare match stayed green when the field was
+  // dropped from bookingFields() — which would refuse every booking that sets it.
+  const bookingFields = (RULES.match(/function bookingFields\(\)[\s\S]*?\n      \}/) || [""])[0];
+  ok("isolated bookingFields()", bookingFields.length > 80, bookingFields.length);
+  ok("meetAt is an allowed booking field", /'meetAt'/.test(bookingFields), bookingFields);
   ok("...and is validated to the two real answers",
      /request\.resource\.data\.meetAt in \['trainer', 'client'\]/.test(RULES), true);
   ok("...on create", /&& meetAtValid\(\)\s*\n\s*&& request\.resource\.data\.keys\(\)\.hasOnly/.test(RULES), true);

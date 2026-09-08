@@ -184,7 +184,7 @@ ok("...and reports which method it used", /bodyFatSource, tapeSource,/.test(AI))
   // ±2%: skinfolds are ±3-5, Navy ±3-4, a consumer scale can sit 5 out.
   ok("the ±2% accuracy claim is gone", !/estimate \(±2%\)/.test(APP));
   ok("...replaced with the real error bars", /estimate \(±3–4 points\)/.test(APP));
-  ok("...and says methods disagree by design", /Different methods disagree by design/.test(APP));
+  ok("...and says methods disagree by design", /Different methods disagree by design \u2014 pick one and follow it over time/.test(APP));
 
   // The Navy equation was validated on the NARROWEST waist for women; telling
   // them to measure at the navel over-measures, and each inch is 1.0-1.4 points.

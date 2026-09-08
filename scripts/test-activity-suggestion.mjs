@@ -188,7 +188,22 @@ ok("a future-dated stamp does not mute it indefinitely",
 
 // ── the app wires it the way this file assumes ────────────────────────────
 ok("the card calls the module-level rule, not an inline copy",
-   /activityRungSuggestion\(\{/.test(APP) && !/const cur = ACTIVITY_LEVELS\.find\(\(a\) => a\.id === data\.activityLevel\)/.test(APP));
+   // ⚠️ COUNT, DO NOT MATCH. The name appears in the DEFINITION and at the CALL
+   // site, so a bare match stayed green when the call was replaced by an inline
+   // copy with no cooldown — the exact regression this assertion exists to stop.
+   (APP.match(/activityRungSuggestion\(/g) || []).length === 2
+   && !/const cur = ACTIVITY_LEVELS\.find\(\(a\) => a\.id === data\.activityLevel\)/.test(APP),
+   (APP.match(/activityRungSuggestion\(/g) || []).length);
+// ⚠️ AND THE COUNT ALONE IS NOT ENOUGH: neutering the call in place
+// (`useMemo(() => (null && { … }))`) keeps both occurrences and stops the card
+// ever asking, so the suggestion silently never appears. Pin the memo itself.
+ok("...and that call IS the memo the card reads",
+   /const activitySuggestion = useMemo\(\(\) => activityRungSuggestion\(\{/.test(APP), true);
+// A copy hiding behind a different name still has to redo the nearest-rung
+// search, which is the part it cannot avoid writing.
+ok("...with no second rung search anywhere in the file",
+   (APP.match(/let best = ACTIVITY_LEVELS\[0\], bestErr = Infinity;/g) || []).length === 1,
+   (APP.match(/let best = ACTIVITY_LEVELS\[0\], bestErr = Infinity;/g) || []).length);
 ok("the memo re-runs when the decision is recorded", /\}\), \[observed, data\.activityLevel, data\.activityCheck, tdee\]\);/.test(APP));
 ok("accepting records the cooldown", /activityCheck: \{ at: Date\.now\(\), to: id, decision: "accepted" \}/.test(APP));
 ok("dismissing records the cooldown", /activityCheck: \{ at: Date\.now\(\), to: id, decision: "dismissed" \}/.test(APP));

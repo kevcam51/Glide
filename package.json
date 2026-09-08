@@ -14,7 +14,8 @@
     "check:undef": "node scripts/check-undef.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project calorieiq-rules-test \"node firestore.rules.test.js\"",
     "check:stale": "node scripts/check-stale-functions.mjs",
-    "deploy-set": "node scripts/deploy-set.mjs"
+    "deploy-set": "node scripts/deploy-set.mjs",
+    "check:weak": "node scripts/check-weak-assertions.mjs"
   },
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",

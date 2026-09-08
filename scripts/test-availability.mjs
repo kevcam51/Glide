@@ -91,7 +91,16 @@ const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n,
 {
   ok("the composer binds the server's reply", /const res = await callSendTrainerRequest\(\{/.test(APP));
   ok("...reads droppedSlots off it", /setDroppedCount\(Number\(\(res && res\.data && res\.data\.droppedSlots\) \|\| 0\)\)/.test(APP));
-  ok("...and says so on the confirmation", /had already passed/.test(APP));
+  // ⚠️ COUNTED AND REACHABLE. A bare match was satisfied by either half of the
+  // singular/plural pair, so emptying the PLURAL branch — the common case, 2+
+  // dropped — left the client reading a headless fragment while the suite
+  // stayed green. And counting alone still permits the whole notice being
+  // switched off with both strings in the file, which is the S200e shape: a
+  // regex satisfied by text that can never render.
+  ok("...and says so on the confirmation, in both branches and reachably",
+     (APP.match(/had already passed/g) || []).length === 2
+     && /\{droppedCount > 0 && \(/.test(APP),
+     (APP.match(/had already passed/g) || []).length);
   // The prompt froze times client-side: it named every slot the client picked
   // while the buttons render only the survivors, and it was formatted in the
   // ASKER's zone, so a London client's trainer read 9:00 above a 4:00 button.
@@ -111,7 +120,12 @@ const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n,
   // now lives in an executable predicate; test-sessions-gate.mjs runs it.
   ok("...so the panel says so instead of rendering nothing",
      /showSessions && sessionsPanelState\(trainerInfo, profileLoadFailed\)\.body === "error"/.test(APP));
-  ok("...with a way out", /Try again/.test(APP));
+  // ⚠️ NOT a bare /Try again/ — the phrase appears a dozen times across unrelated
+// error cards, so the assertion passed no matter what happened to THIS one.
+// Anchored to the handler that makes this particular retry work; counting would
+// be wrong here, since the other eleven are unrelated and will churn.
+ok("...with a way out",
+   /setProfileLoadFailed\(false\); loadTrainerInfo\(\); \}\}[\s\S]{0,320}Try again/.test(APP), true);
 }
 
 // ── the trainer's inbox must not lose or silently ignore anything ──────────

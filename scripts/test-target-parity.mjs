@@ -119,8 +119,14 @@ const base = {
   // your previous reading" against it, and the measurements day-walker opened a
   // future target as a record of a day that has not happened. A rule applied in
   // four places and forgotten in the two visible ones is not a rule.
-  ok("the weight CHART excludes planned targets",
-     /filter\(c => c\.weight && !c\.isFuturePlan\)/.test(APP));
+  // ⚠️ COUNTED, NOT MATCHED. FIVE readers share this exact filter, so a bare
+  // match stayed green while any one of them dropped it — including the chart
+  // itself, which is the site this assertion names. The count is the point: the
+  // comment above says a rule applied in four places and forgotten in the two
+  // visible ones is not a rule, and only a count can enforce that.
+  ok("the weight CHART excludes planned targets — and so do all five readers",
+     (APP.match(/filter\(c => c\.weight && !c\.isFuturePlan\)/g) || []).length === 5,
+     (APP.match(/filter\(c => c\.weight && !c\.isFuturePlan\)/g) || []).length);
   ok("the measurements day-walker excludes them too",
      /!\(Number\(c\.weight\) > 0\) \|\| c\.isFuturePlan\) continue;/.test(APP));
   // Pin the SET: a new reader of checkIns.weight has to say why it may include

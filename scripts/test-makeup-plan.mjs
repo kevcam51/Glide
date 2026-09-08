@@ -100,7 +100,7 @@ ok("the scale cost is reported honestly (3,500 cal ~ 1 lb)",
 // ── the screen has to honour what the function returns ────────────────────
 ok("only days that actually went over are offered", /\.filter\(\(x\) => x\.cals > tgt\)/.test(APP));
 ok("the slider spans the whole range", /min="0" max="100" step="5" value=\{muShare\}/.test(APP));
-ok("...and both ends are labelled", /Eat less/.test(APP) && /Train more/.test(APP));
+ok("...and both ends are labelled", /<span>Eat less<\/span>/.test(APP) && /<span>Train more<\/span>/.test(APP));
 ok("the floor warning is shown, not swallowed", /mu\.floorHit && \(/.test(APP));
 ok("...naming what moved to training", /mu\.movedToTraining\.toLocaleString\(\)/.test(APP));
 ok("the burn is translated into time on the exercise they picked", /≈ \{muMinutes\} min of \{pickedEx\.label\}/.test(APP));

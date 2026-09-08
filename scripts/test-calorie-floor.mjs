@@ -92,7 +92,13 @@ ok("SimplePlanView floors all three goal modes",
 // ── a clamp that does not speak is its own bug ────────────────────────────
 ok("the second typed-target field warns before you type", /Minimum \{MIN_DAILY_CAL\.toLocaleString\(\)\}/.test(APP));
 ok("...and says so after, if it moved your number", /is below \$\{MIN_DAILY_CAL\.toLocaleString\(\)\}/.test(APP));
-ok("...and points at the lever that does work", /take it from movement rather than food/.test(APP));
+// ⚠️ TWO SURFACES CARRY THIS, and a bare match let either lose it silently: the
+// sheet's own explanation and the clamp toast that fires when a typed number is
+// raised to the floor. A person who only ever sees one of them still needs the
+// lever named.
+ok("...and points at the lever that does work, on BOTH surfaces",
+   (APP.match(/take it from movement rather than food/g) || []).length === 2,
+   (APP.match(/take it from movement rather than food/g) || []).length);
 
 // ── the model is told, because prose is a prescription too ────────────────
 ok("both system prompts state the floor",
