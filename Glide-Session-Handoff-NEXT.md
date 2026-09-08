@@ -66,10 +66,27 @@ without writing or notifying, so no second log is correct.
 disabled when the *trainer* has no saved address, not the client. He had saved
 one on the TEST account, not his own.
 
+### Cost bounds on "On my way" (S209, Kevin's question)
+
+Each tap outside the cooldown buys ONE traffic-aware Routes call, which is the
+dearer **Pro** SKU: 5,000 free a month, then $10/1,000. Three bounds now:
+
+- **rate** — 60s cooldown (`ON_MY_WAY_MIN_GAP_MS`), replays the stored ETA
+- **total** — 10 estimates per journey (`ON_MY_WAY_MAX_ETAS`), replays too
+- **eligibility** — Coach tier, the 240-minute window, and a destination
+
+⚠️ **BOTH BOUNDS REPLAY, THEY NEVER REFUSE.** The stored ETA is still the truest
+thing available, and refusing would leave someone unable to tell their client
+anything. The point is to stop spending, not to stop the message — and the UI
+says which bound was hit, because "give it a minute" is useless advice when
+waiting will never help again.
+⚠️ The counter is **per sender**: both people can travel across one session's
+life, and the second journey must not inherit a count it did not spend.
+
 ### ⚠️ Traps this arc paid for
 
 - **A guard that exists in TWO places must be COUNTED in two, not matched
-  once.** This bit me THREE times in one session — the push `.catch`, the
+  once.** This bit me FOUR times in one session — the push `.catch`, the
   stale-response guard, and the owner-lockout fix, each of which stayed green
   while one of its two arms was broken.
 - **A rule about rendered output must be tested against rendered output.**

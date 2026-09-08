@@ -733,6 +733,24 @@ const ON_MY_WAY_LEAD_MIN = 240;
 // and a push, so a double-tap or an impatient retry reuses the stored answer
 // instead of re-billing Google and buzzing the other person twice.
 const ON_MY_WAY_MIN_GAP_MS = 60000;
+// ⚠️ AND A CEILING ON THE WHOLE JOURNEY (S209, Kevin: "we should probably limit
+// the use of that button to limit the amount of API calls"). The 60-second
+// cooldown bounds the RATE, not the TOTAL — tapping every 61 seconds for an hour
+// is ~60 traffic-aware Routes calls on one session, and traffic-aware is the
+// dearer Pro SKU (5,000 free a month, then $10/1,000). Ten is past any honest
+// use: you refresh an ETA when traffic turns, a handful of times.
+const ON_MY_WAY_MAX_ETAS = 10;
+
+// How many paid estimates this journey has already bought. PURE.
+// ⚠️ The SENDER's own taps only. The other participant setting off is a
+// different journey and must not inherit a count they did not spend.
+function onMyWayTapCount(prev, uid) {
+  if (!prev || prev.by !== uid) return 0;
+  return Number(prev.taps) || 0;
+}
+function onMyWayAtCap(prev, uid) {
+  return onMyWayTapCount(prev, uid) >= ON_MY_WAY_MAX_ETAS;
+}
 
 // May this person say they are on the way to this session, right now?
 // PURE, and exported so it can be run rather than pattern-matched.
@@ -899,9 +917,14 @@ exports.sessionOnMyWay = onCall(
     // call, no second push, and — importantly — no write, so the "sent at"
     // stamp the cooldown itself is measured from cannot be pushed forward by
     // the taps it is suppressing.
-    if (onMyWayThrottled(prev, uid, now)) {
+    // ⚠️ BOTH BOUNDS REPLAY RATHER THAN REFUSE — the rate limit and the ceiling.
+    // The stored ETA is still the truest thing we have, and refusing would leave
+    // someone unable to tell their client anything at all. The point is to stop
+    // spending money, not to stop the message.
+    if (onMyWayThrottled(prev, uid, now) || onMyWayAtCap(prev, uid)) {
       return { ok: true, repeated: true, minutes: prev.minutes ?? null,
-        etaAt: prev.etaAt ?? null, source: prev.source || null };
+        etaAt: prev.etaAt ?? null, source: prev.source || null,
+        capped: onMyWayAtCap(prev, uid) };
     }
 
     // ── the ETA ────────────────────────────────────────────────────────────
@@ -949,7 +972,11 @@ exports.sessionOnMyWay = onCall(
       // who gets there, leaves to fetch something and sets off back. Written as
       // null rather than deleted because a nested delete needs a dotted-path
       // update, and every reader already treats falsy as "not arrived".
-      onMyWay: { by: uid, at: now, minutes, etaAt, source: (est && est.source) || null, arrivedAt: null },
+      onMyWay: { by: uid, at: now, minutes, etaAt, source: (est && est.source) || null, arrivedAt: null,
+        // What this journey has cost so far. Counts the SENDER's own taps only,
+        // so the other side setting off starts its own count rather than
+        // inheriting a spent one.
+        taps: onMyWayTapCount(prev, uid) + 1 },
       // NOT `updatedAt`: that field belongs to the booking, and moving it for a
       // travel note would make an untouched session look freshly edited.
     }, { merge: true });
@@ -1006,6 +1033,9 @@ exports.sessionOnMyWay = onCall(
 
 exports.onMyWayDecision = onMyWayDecision;
 exports.onMyWayThrottled = onMyWayThrottled;
+exports.onMyWayAtCap = onMyWayAtCap;
+exports.onMyWayTapCount = onMyWayTapCount;
+exports.ON_MY_WAY_MAX_ETAS = ON_MY_WAY_MAX_ETAS;
 exports.onMyWayMessage = onMyWayMessage;
 exports.onMyWayArrivalMessage = onMyWayArrivalMessage;
 exports.ON_MY_WAY_LEAD_MIN = ON_MY_WAY_LEAD_MIN;

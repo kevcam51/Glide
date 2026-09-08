@@ -385,6 +385,50 @@ ok("validPoint rejects NaN", D.validPoint({ lat: NaN, lng: 0 }) === null);
      /Already sent/.test(note({ repeated: true, minutes: 12 }, "Casey", true)));
   ok("...and does not also claim delivery", !/^Sent/.test(note({ repeated: true, minutes: 12 }, "Casey", true)));
   ok("...even with no ETA to replay", /Already sent/.test(note({ repeated: true }, "Casey", true)));
+  // ⚠️ THE CAP IS DIFFERENT NEWS FROM THE COOLDOWN. "Give it a minute" is
+  // useless advice when waiting will never help again.
+  const capped = note({ repeated: true, capped: true, minutes: 9 }, "Casey", true);
+  ok("hitting the ceiling says the updates have STOPPED", /last ETA update/.test(capped), capped);
+  ok("...and does not tell them to wait a minute", !/a minute/.test(capped), capped);
+  ok("...while still showing what the client can see", /9 min/.test(capped), capped);
+  ok("a capped journey with no ETA still reads as a sentence",
+     /No more ETA updates/.test(note({ repeated: true, capped: true }, "Casey", true)));
+}
+
+// ── 8e. the whole journey is bounded, not just the rate (S209) ──────────────
+// ⚠️ Kevin: "we should probably limit the use of that button to limit the amount
+// of API calls". The 60s cooldown bounds the RATE; without a ceiling, tapping
+// every 61 seconds for an hour is ~60 traffic-aware Routes calls on ONE session,
+// and traffic-aware is the dearer Pro SKU (5,000 free/month, then $10/1,000).
+{
+  const src = AVAIL.match(/function onMyWayTapCount[\s\S]*?\n\}\nfunction onMyWayAtCap[\s\S]*?\n\}/)[0];
+  const M = new Function(`const ON_MY_WAY_MAX_ETAS = ${(AVAIL.match(/const ON_MY_WAY_MAX_ETAS = (\d+)/) || [])[1]};
+    ${src}; return { onMyWayTapCount, onMyWayAtCap, ON_MY_WAY_MAX_ETAS };`)();
+  ok("a fresh journey is not capped", !M.onMyWayAtCap(null, "t1"));
+  ok("nine refreshes are still allowed", !M.onMyWayAtCap({ by: "t1", taps: 9 }, "t1"));
+  ok("the tenth is the last", M.onMyWayAtCap({ by: "t1", taps: 10 }, "t1"));
+  ok("the ceiling is generous enough for honest use", M.ON_MY_WAY_MAX_ETAS >= 5, M.ON_MY_WAY_MAX_ETAS);
+  // ⚠️ THE OTHER SIDE MUST NOT INHERIT A COUNT THEY DID NOT SPEND. Both people
+  // can travel across a session's life (a trainer to a park, then a client to
+  // the next one), and the second journey starts fresh.
+  ok("the other participant starts their own count", !M.onMyWayAtCap({ by: "t1", taps: 50 }, "c1"));
+  ok("a missing counter reads as zero", M.onMyWayTapCount({ by: "t1" }, "t1") === 0);
+  ok("a junk counter reads as zero", M.onMyWayTapCount({ by: "t1", taps: "lots" }, "t1") === 0);
+
+  const capBody = AVAIL.slice(AVAIL.indexOf("exports.sessionOnMyWay"));
+  // ⚠️ THE CONDITION, NOT JUST THE MENTION. `capped: onMyWayAtCap(...)` inside
+  // the RETURN kept this green when the ceiling was dropped from the `if` — the
+  // same two-places-one-match trap for the fourth time in this session. Anchor
+  // to the guard itself.
+  ok("the callable's early-return guard includes the ceiling",
+     /if \(onMyWayThrottled\(prev, uid, now\) \|\| onMyWayAtCap\(prev, uid\)\) \{/.test(capBody), true);
+  ok("...before it spends a Routes call",
+     capBody.indexOf("onMyWayAtCap") < capBody.indexOf("estimateDriveFrom"), true);
+  // ⚠️ REPLAY, NEVER REFUSE. Refusing would leave someone unable to tell their
+  // client anything at all; the point is to stop spending, not to stop the
+  // message.
+  ok("...and replays rather than refusing", /capped: onMyWayAtCap\(prev, uid\)/.test(capBody));
+  ok("every successful estimate increments the count", /taps: onMyWayTapCount\(prev, uid\) \+ 1/.test(capBody));
 
   // The server must actually REPORT it, or the wording has nothing to read.
   const body = AVAIL.slice(AVAIL.indexOf("exports.sessionOnMyWay"));
@@ -729,8 +773,14 @@ ok("validPoint rejects NaN", D.validPoint({ lat: NaN, lng: 0 }) === null);
   // ⚠️ THE BUG THIS ALMOST SHIPPED WITH: set(..., {merge:true}) merges nested
   // maps RECURSIVELY, so omitting arrivedAt on a new departure would leave the
   // previous one in place — a fresh journey stamped "arrived" forever.
-  ok("a new departure explicitly CLEARS the arrival",
-     /arrivedAt: null \}/.test(body), true);
+  // ⚠️ ANCHORED TO THE DEPARTURE WRITE, not to a trailing brace — the S209 tap
+  // counter was added to the same object and broke a `arrivedAt: null }` match
+  // while the behaviour was unchanged. Assert the field is in THAT write.
+  {
+    const write = (body.match(/onMyWay: \{ by: uid, at: now, minutes[\s\S]*?\+ 1 \},/) || [""])[0];
+    ok("isolated the departure write", write.length > 40, write.length);
+    ok("a new departure explicitly CLEARS the arrival", /arrivedAt: null/.test(write), write);
+  }
   ok("the plan gate still runs before arriving can notify anyone",
      body.indexOf("trainerHasDriveFeatures") < body.indexOf("d.arrived === true"), true);
 

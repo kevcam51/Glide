@@ -21304,6 +21304,15 @@ function onMyWaySentNote(d, otherName, hadFix) {
   // Reporting that as "Sent" is exactly wrong during the natural test loop:
   // tap, get no ETA, fix the address, tap again, and be told it worked.
   if (d && d.repeated) {
+    // ⚠️ THE CAP AND THE COOLDOWN ARE DIFFERENT NEWS. "Give it a minute" is
+    // useless advice when waiting will never help again — a person who has
+    // refreshed ten times on one journey needs to know the number has stopped
+    // updating, not to try again shortly.
+    if (d.capped) {
+      return eta
+        ? `${who} can still see about ${d.minutes} min — that's the last ETA update for this session.`
+        : "No more ETA updates for this session — they already know you're on the way.";
+    }
     return eta
       ? `Already sent a moment ago — ${who} can still see about ${d.minutes} min.`
       : "Already sent a moment ago. Give it a minute before sending a new time.";
