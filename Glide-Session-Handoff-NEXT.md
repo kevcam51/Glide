@@ -1,6 +1,127 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S211) — PUSHED AND DEPLOYED
+## ▶️ START HERE (S213) — PUSHED (frontend only)
+
+No rules, no functions, no deploy — `src/App.jsx` + tests only, so the push IS
+the release. **1,985 unit assertions across 33 suites + 272 rules tests**;
+build, `check:undef` and `check:weak` clean.
+
+⚠️ **NUMBERING AGAIN: a parallel session took S212 mid-build** (`c5f1f87`, the
+weigh-in section's own weight — charted, listed, and behind every mass). This
+work is S213 and was rebased onto it. **Go by SHA.** `package.json`'s
+`test:units` collided the way it always does — two sessions each appending a
+suite — and was **resolved as a UNION, not a pick**; both `test-lean-mass.mjs`
+and `test-what-if-week.mjs` are in the chain and both are green. Check that
+first if the count ever drops.
+⚠️ The S212 session left the handoff at S211; its own block was never written.
+
+### Kevin's two asks, in the "What if…" sandbox (Daily Targets card → What if…)
+
+**1. "Day by day" — seven Mon-to-Sun calorie boxes**, a THIRD mode beside the
+two that ship ("Pick a pace", "One number", both untouched — he explicitly
+allowed keeping the single number). His words: *"not everybody's going to eat
+the same exact calories every single day, so we want a realistic scale of what
+overeating and undereating on each day can do to the week… find out how much
+they'll lose or gain based on that."*
+
+⚠️ **A BLANK DAY IS PRICED AT THE GOAL PACE.** Not zero, and deliberately not
+the mean of the days that WERE typed. Zero invents a deficit nobody described;
+the mean turns one typed 3,500 into a 3,500-a-day week — the opposite of the
+answer someone came for. So "Saturday is my big one" is ONE number to type, and
+every untouched day re-prices itself the moment the pace chip changes. Verified
+live: typing Sat 3,500 on a 1,950 goal moved the answer −1.0 → **−0.6 lb/week**.
+
+⚠️ **ONE ARITHMETIC PATH.** The week is the basis (`weekBalance = weekIntake −
+burnPerDay*7 − maintain*7`) and the other two modes are literally `intake * 7`,
+so their numbers are bit-identical to before. Pinned by a sweep over 106,015
+combinations of the **LIFTED SHIPPING EXPRESSIONS** — see the trap below, the
+first version of that sweep proved nothing.
+
+⚠️ **THE 1,200 CHECK HAD TO BECOME PER-DAY AND NAME THE DAYS.** A week of
+2100/2100/2100/900/900/900/2100 averages 1,586, so a scalar check never fires
+while three days sit 300 under the floor. Nothing the user types is clamped —
+this sandbox DISPLAYS rather than prescribes, which is what licenses that.
+
+**2. Cardio only, "all of the same options" as the workout burn section.** The
+old `<select>` (cardio + strength + custom) is now `ExercisePicker kind="cardio"`
+— full 52-entry catalog in the searchable sheet, real icons, the plan's custom
+CARDIO, heart-rate mode in AND out, the `DURATIONS` list, the live burn readout.
+⚠️ Custom **STRENGTH** exercises used to reach the list through the "Custom"
+group and are now structurally unreachable — deleting only the `STRENGTH_GROUPS`
+spread is the easy half-fix. ⚠️ `CustomExerciseCreator` is deliberately NOT
+ported: it calls `onChange("customExercises", …)`, i.e. it WRITES to the plan,
+and this modal promises at the top that it changes nothing.
+
+### 🩹 A live white screen, fixed on the way in (pre-existing, S200r)
+
+`muMinutes` read `pickedEx` **fourteen lines above its own `const`**. Opening the
+modal was safe (`muDate` starts `""`, so `&&` short-circuits), but selecting ANY
+day in "Make up a big day" made `mu` truthy, `pickedEx` evaluated in its temporal
+dead zone, and — with **no error boundary anywhere in `src/`** — the whole React
+tree unmounted.
+⚠️ **`npm run check:undef` CANNOT SEE THIS CLASS.** It filters on `no-undef`, and
+`pickedEx` IS declared, just later. The positional assertion in
+`scripts/test-what-if-week.mjs` is the only guard. Do not enable eslint
+`no-use-before-define` globally to fix that — it reports ~40 harmless
+module-level hits across App.jsx and is its own session.
+
+### ⚠️ Traps this session paid for
+
+- **AN ADVERSARIAL REVIEW OF MY OWN CHANGE FOUND SIX REAL DEFECTS I HAD JUST
+  WRITTEN**, none of which the build or the first test pass caught: a typo'd
+  `60000` was silently re-priced at the goal while the box still displayed it
+  (a typed surplus replaced by its opposite); "Biggest/lightest" ranked only the
+  TYPED days and so named the wrong day; the row delta and the row COLOUR used
+  different baselines, so a green row read "+550"; a 5-minute heart-rate chip
+  left the duration `<select>` displaying "10 minutes" while everything computed
+  on 5; heart rate priced at zero on an age-less plan while the card directly
+  above it showed real calories.
+- **TWO OF MY OWN TESTS WERE DECORATIVE, IN THE TWO WAYS THIS REPO ALREADY
+  DOCUMENTS.** The parity sweep compared two expressions **written in the test
+  file** — an identity of integer arithmetic, true of nothing in `App.jsx`; six
+  mutations of the real engine left it green. And `/kind="cardio"/` matched its
+  own COMMENT (`SIM`, not `SIM_CODE`) — the S208 trap, in the file whose own
+  header warns about it. **Lift the shipping expression and RUN it; strip
+  comments before asserting on anything that renders.** Every guard here is now
+  mutation-tested: each was broken individually and the suite confirmed red.
+- **`check:weak` cannot see a `.includes()`/`.test()` whose string has two render
+  sites.** "check this number" appears on the day row AND the one-number field;
+  reverting one left the suite green. COUNT them.
+- **A subagent deleted `.env.local` from the worktree mid-session.** It is
+  gitignored, so nothing flagged it — the dev server just started failing with
+  `auth/invalid-api-key`. Restored from the main checkout. If local dev suddenly
+  cannot reach Firebase, check that the file still exists before debugging auth.
+
+### ⚠️ Pre-existing and NOT fixed — flagged, not silently expanded into
+
+**The prop named `todayTarget` is not today's target — it is the CURRENTLY-VIEWED
+day's.** The call site passes `target`, which flows through `burnShown`/`dayIdx`,
+both derived from `viewDate`. So `overDays` judges every historical logged day
+against whichever day the dashboard happens to be showing. On any plan with a
+non-flat weekly target — eat-back with scheduled training, i.e. **every plan with
+`deficitMode` unset** — that produces both false positives and false negatives,
+and then `makeUpPlan` prescribes repayment for calories the client never overate.
+Kevin has been told; it is a separate task.
+
+Also still open from S211's review, unchanged: `ExercisePicker` renders
+"Custom · undefined cal/min" for any custom exercise created since S183j.
+
+### Verified in a real browser (isolated harness, reverted)
+
+⚠️ Port 5173 was held by another session's dev server, and this worktree's app
+cannot sign in on a different port. So the REAL component was mounted on a
+temporary `/?whatif=1` route — the same isolation pattern `/?showcase=1` already
+uses — with fixture props. **The harness was fully reverted; `git diff` shows
+only the feature.** Exercised: all three modes and non-destructive round-tripping
+between them; the seven inputs; blanks reading "on your goal"; the 1,586-average
+week naming "Thu, Fri and Sat"; amber borders on the sub-1,200 days; the cardio
+sheet (no strength leak, custom cardio present); heart-rate in and out; the
+duration snap; and — the one that mattered — **selecting a day in "Make up a big
+day" without white-screening**.
+
+---
+
+## Previously: START HERE (S211) — PUSHED AND DEPLOYED
 
 Rules PUBLISHED, four functions deployed, frontend pushed. **1,818 unit
 assertions across 31 suites + 272 rules tests**, build, `check:undef` and

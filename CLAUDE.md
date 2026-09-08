@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**1,818 assertions across 31 suites**, S211).
+- `npm run test:units` — the JS unit suites (**1,985 assertions across 33 suites**, S213).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -108,6 +108,35 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S213 (Sep 8): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S213)" first.**
+> Frontend only — no rules, no functions, no deploy; the push IS the release.
+> **1,985 assertions across 33 suites + 272 rules tests**; build, `check:undef`
+> and `check:weak` clean. ⚠️ **A parallel session took S212 mid-build** (the
+> weigh-in section's own weight); this is S213, rebased onto it, and
+> `package.json`'s `test:units` was resolved as a **UNION** — both new suites are
+> in the chain. Go by SHA.
+> Shipped Kevin's two asks in the **"What if…" sandbox**: a **"Day by day"**
+> mode with seven Mon–Sun calorie boxes beside the two that already ship, and a
+> **cardio-only** exercise picker matching the wizard's cardio step.
+> ⚠️ **A blank day is priced at the GOAL PACE** — not zero, not the mean of the
+> typed days; both alternatives answer the opposite question. ⚠️ **One
+> arithmetic path**: the week is the basis and the two shipped modes are
+> `intake * 7`, so their numbers are bit-identical. ⚠️ **The 1,200 check is
+> per-day and NAMES the days** — a week averaging 1,586 can hide three 900s;
+> nothing typed is clamped, because this sandbox displays rather than prescribes.
+> 🩹 **Fixed a live white screen** (pre-existing, S200r): `muMinutes` read
+> `pickedEx` above its own `const`, so picking a day in "Make up a big day" threw
+> a TDZ ReferenceError and unmounted the app. **`check:undef` cannot see that
+> class** — `no-undef` is silent when the binding exists but comes later.
+> ⚠️ **Three lessons, all about my own work:** an adversarial review of the
+> change found six real defects it had just introduced; the parity sweep compared
+> two expressions **written in the test file** and proved nothing about App.jsx;
+> and `/kind="cardio"/` matched its own comment (`SIM` instead of `SIM_CODE`) —
+> the S208 trap, in the file whose header warns about it. Mutation-test every
+> guard. ⚠️ A subagent **deleted `.env.local`** from the worktree; it is
+> gitignored so nothing flagged it, and dev just started failing with
+> `auth/invalid-api-key`._
+>
 > _**S211 (Sep 7): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S211)" first.**
 > Rules PUBLISHED, four functions deployed, pushed. **1,818 unit assertions
 > across 31 suites + 272 rules tests**; build, `check:undef` and `check:weak`
