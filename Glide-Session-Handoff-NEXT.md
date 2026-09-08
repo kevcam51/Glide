@@ -2,9 +2,10 @@
 
 ## ▶️ START HERE (S208) — PUSHED AND DEPLOYED
 
-Tip `5642bfc`. Build + `check:undef` clean, **1,634 unit assertions across 29
-suites** and **245 rules tests**, all green. Rules published, functions deployed,
-every bundle marker-diffed live.
+Tip `f7d8137`, working tree clean and level with origin/main. Build +
+`check:undef` clean, **1,634 unit assertions across 29 suites** and **245 rules
+tests**, all green. Rules published, **all 78 functions on current module code**,
+every bundle marker-diffed live. Nothing is half-finished.
 
 ### ⏳ THE QUEUE KEVIN JUST GAVE (nothing started)
 
