@@ -40,12 +40,26 @@ every bundle marker-diffed live.
   restrictions are exclusive and a browser key would have broken the
   server-side Geocoding and Routes the same key already does.
 
-### ⚠️ Confirmed working on Kevin's own account
+### ✅ VERIFIED END TO END ON KEVIN'S OWN ACCOUNT (S208)
 
-He tapped it: the **ETA appeared**, and he saw the session notification as the
-trainer. Two things still unconfirmed: whether the RECIPIENT's phone actually
-buzzed (delivery is now logged, so the next tap answers it), and the **"I'm
-here" arrival branch end to end**.
+Nothing in this feature is unexercised any more. From the live logs:
+
+    onMyWay push         {"sessionId":"5exS4OIIAF2xO3QoKB0p","delivery":{"skipped":"no-subs"}}
+    onMyWay arrival push {"sessionId":"5exS4OIIAF2xO3QoKB0p","delivery":{"skipped":"no-subs"}}
+
+So: admin gate → GPS fix → ETA computed and stored → feed row written →
+arrival → idempotent second tap. The ETA showed on screen and the client saw
+the notification IN-APP.
+
+⚠️ **`skipped: "no-subs"` IS NOT A FAULT.** It means that client has no push
+subscription registered, so there was no lock-screen buzz — the bell/feed row is
+written by `appendFeed` BEFORE any preference or subscription check, which is
+why they still saw it. A real push is the one thing still unseen, and it needs a
+recipient who has enabled notifications once.
+
+⚠️ **DO NOT "FIX" THE ARRIVAL LOGGING WHEN A SECOND TAP PRODUCES NO LINE.**
+Arriving twice is one arrival: the callable returns early on `prev.arrivedAt`
+without writing or notifying, so no second log is correct.
 
 ⚠️ **"My place" was greyed out for him and he guessed wrong about why** — it is
 disabled when the *trainer* has no saved address, not the client. He had saved
