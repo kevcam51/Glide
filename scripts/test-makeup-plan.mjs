@@ -103,7 +103,10 @@ ok("the slider spans the whole range", /min="0" max="100" step="5" value=\{muSha
 ok("...and both ends are labelled", /<span>Eat less<\/span>/.test(APP) && /<span>Train more<\/span>/.test(APP));
 ok("the floor warning is shown, not swallowed", /mu\.floorHit && \(/.test(APP));
 ok("...naming what moved to training", /mu\.movedToTraining\.toLocaleString\(\)/.test(APP));
-ok("the burn is translated into time on the exercise they picked", /≈ \{muMinutes\} min of \{pickedEx\.label\}/.test(APP));
+// S213: the picker is cardio-only now, so the label can be a heart rate — and
+// "833 min OF 148 bpm" is not English. The two forms are one expression.
+ok("the burn is translated into time on the exercise they picked",
+   /≈ \{muMinutes\} min \{pickedEx\.isHr \? `at \$\{pickedEx\.label\}` : `of \$\{pickedEx\.label\}`\}/.test(APP));
 ok("one big day is put in proportion rather than dramatised", /isn&rsquo;t a setback unless it becomes the pattern/.test(APP));
 
 // ── negative controls ─────────────────────────────────────────────────────

@@ -11993,6 +11993,91 @@ function WeightDayLogger({ date, existing, onSave }) {
 // the note on data.observedTdee). Said out loud at the bottom rather than
 // presented as a promise.
 const CAL_PER_LB = 3500;
+
+// ─── The "Day by day" week (S213, Kevin) ────────────────────────────────────
+// "Not everybody's going to eat the same exact calories every single day, so we
+// want a realistic scale of what overeating and undereating on each day does to
+// the week." Both helpers are module-level, take their bounds as DEFAULTED
+// PARAMETERS and close over nothing, so scripts/test-what-if-week.mjs can lift
+// them out of this file and RUN them (the harness idiom — a regex against
+// source passes just as happily against `if (false)`).
+
+// One typed field → a number, or null for "they didn't say".
+//
+// ⚠️ null IS NOT ZERO, and that distinction is the whole feature. A blank
+// Tuesday means "same as usual", not "fasted"; treating it as 0 would invent a
+// 2,000-calorie deficit the person never described.
+//
+// ⚠️ AND `Math.round(Number(x) || 0)` — the pattern this replaces — LETS
+// INFINITY THROUGH. `1e400` is a perfectly typeable value in a number input,
+// and it rendered "Infinity lbs" on the projection tiles.
+function simNum(raw, max = 50000) {
+  if (raw === null || raw === undefined) return null;
+  const s = String(raw).replace(/[,\s]/g, "");
+  if (!s) return null;                     // blank — not zero
+  const n = Number(s);
+  if (!Number.isFinite(n)) return null;    // "abc", "1e400"
+  if (n < 0 || n > max) return null;       // negatives, and numbers nobody eats
+  return Math.round(n);
+}
+// Did they type something the parser threw away? A blank and a rejected entry
+// both parse to null, but they must not LOOK the same: a day showing "21000"
+// while the row beside it says "on your goal" silently replaces a surplus with
+// its opposite, which is the one thing a what-if screen must never do.
+function simRejected(raw) {
+  return String(raw === null || raw === undefined ? "" : raw).trim() !== "" && simNum(raw) === null;
+}
+
+// Seven days (numbers or nulls) → what the week actually comes to.
+//
+// ⚠️ A BLANK DAY IS PRICED AT `fallback`, WHICH THE CALLER SETS TO THE GOAL
+// PACE. Not zero, and deliberately not the mean of the days that WERE typed:
+// typing 3,500 into Saturday alone would then assume 3,500 every day and
+// project a huge surplus — the exact opposite of the answer someone came for.
+// Pricing blanks at the goal means "Saturday is my big day, the rest are
+// normal" is one number to type, and every untouched day re-prices itself when
+// the pace changes.
+//
+// ⚠️ NOTHING HERE IS CLAMPED. `effective` carries the 900 somebody typed,
+// because this sandbox DISPLAYS rather than PRESCRIBES (CLAUDE.md's 1,200
+// standard: "showing that someone ATE 900 is correct and must not be fixed").
+// `lowDays` exists so the screen can NAME those days instead — a mean hides
+// them, and a silent clamp is its own bug.
+function weekPlan(vals, { fallback = 0, floor = 1200 } = {}) {
+  const v = Array.from({ length: 7 }, (_, i) => (vals && vals[i] != null ? vals[i] : null));
+  const fb = Math.round(Number(fallback) || 0);
+  const effective = v.map((x) => (x === null ? fb : x));
+  const enteredIdx = [];
+  const lowDays = [];
+  let hiIdx = -1, loIdx = -1;
+  for (let i = 0; i < 7; i++) {
+    if (v[i] !== null) enteredIdx.push(i);
+    // ⚠️ RANKED OVER `effective`, NOT OVER WHAT WAS TYPED. Every other number on
+    // that panel prices a blank day at the goal; ranking only the typed days
+    // made this the one line that could be plainly false — type your two heavy
+    // days on a loss plan and it announced the LIGHTEST of them as the lightest
+    // day of the week, while five untouched days sat lower.
+    if (hiIdx < 0 || effective[i] > effective[hiIdx]) hiIdx = i;
+    if (loIdx < 0 || effective[i] < effective[loIdx]) loIdx = i;
+    if (effective[i] < floor) lowDays.push(i);
+  }
+  return {
+    values: v, effective, enteredIdx, enteredCount: enteredIdx.length,
+    weekIntake: effective.reduce((a, b) => a + b, 0),
+    lowDays, hiIdx, loIdx,
+    spread: hiIdx >= 0 && loIdx >= 0 && effective[hiIdx] !== effective[loIdx],
+  };
+}
+
+// "Thu" · "Thu and Sat" · "Thu, Sat and Sun" · "every day".
+function joinDays(idxs, names) {
+  if (!idxs || !idxs.length) return "";
+  if (idxs.length >= 7) return "every day";
+  const n = idxs.map((i) => names[i]);
+  if (n.length === 1) return n[0];
+  return `${n.slice(0, -1).join(", ")} and ${n[n.length - 1]}`;
+}
+
 // Making up an over-eating day (S200r, Kevin) — the arithmetic, kept pure.
 //
 // "Let's say they ate 5,000 when they were supposed to eat 2,500. How much
@@ -12038,16 +12123,47 @@ function makeUpPlan({ over, days, share, target, floor = 1200 }) {
 
 function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, todayTarget, onClose }) {
   useBodyScrollLock(true);
-  useBackClose(true, onClose);
+  // ⚠️ THE EXERCISE SHEET SHARES THIS BACK BUTTON (S213). ExercisePicker opens a
+  // BottomSheet, which registers its OWN useBackClose — so one device-Back
+  // popstate fires both listeners and would close the picker AND the whole
+  // simulator, throwing away a fully typed week. `sheetCount` is a module-level
+  // counter, read live inside the callback so there is nothing to go stale.
+  useBackClose(true, () => { if (sheetCount > 0) return; onClose(); });
   const d = data || {};
   const w = Number(weightLbs) || Number(d.weightLbs) || 0;
   const maintain = intakeFor(0);
+  // What the cardio maths reads. `cardioExFor` and HeartRatePicker both take
+  // their weight from `data`, not from the `weightLbs` prop, so without this
+  // merge a heart-rate estimate would sit on a different weight than every
+  // other number in this modal.
+  const hrData = { ...d, weightLbs: w || d.weightLbs };
+  // ⚠️ THE TWO HALVES OF HEART-RATE CARDIO DISAGREED ABOUT A MISSING AGE.
+  // HeartRatePicker defaults it (`effectiveAge(data) || 30`) and prints a real
+  // calorie estimate; `hrCaloriesPerMin` returns 0 for an absent age, so
+  // cardioExFor priced the very same session at nothing — the card said
+  // "≈ 200 cal" while the projection below it counted zero and hid the Cardio
+  // row entirely. One assumption, used by both. Only the HR path sees it: the
+  // MET path reads age through restingKcalPerMin, and injecting one there would
+  // move burn numbers on every age-less plan.
+  const hrAgeData = effectiveAge(hrData) > 0 ? hrData : { ...hrData, age: 30, ageSetAt: 0 };
 
-  const [useCustom, setUseCustom] = useState(false);
+  // "pace" = a rate chip · "typed" = one number for every day · "week" = seven.
+  // ⚠️ THREE INDEPENDENT SLOTS, AND SWITCHING MODE CLEARS NOTHING. `rate`,
+  // `customIntake` and `weekCals` each keep their own value; the toggle only
+  // changes which one is READ. Somebody comparing "my pace" against "my real
+  // week" flips back and forth, and losing seven typed days to a tap on the
+  // wrong pill would be the sharpest edge in the screen.
+  const [mode, setMode] = useState("pace");
   const [rate, setRate] = useState(RATE_OPTS.includes(planRate) ? planRate : 0);
   const [customIntake, setCustomIntake] = useState("");
-  const [exId, setExId] = useState("");
-  const [exMin, setExMin] = useState("30");
+  const [weekCals, setWeekCals] = useState(() => ["", "", "", "", "", "", ""]);   // index 0 = Monday
+  // ⚠️ A SESSION OBJECT, NOT AN ID. Heart-rate cardio is a different SHAPE
+  // ({type:"hr", hr, duration}), not another entry in the list, so every switch
+  // REPLACES this whole object — merging `type:"hr"` onto an exercise leaves a
+  // session that prices as neither. "rest" is the real catalog entry for "no
+  // training": findCardioEx never returns null (it falls back to Rest Day), so
+  // an empty id would render "Rest Day" anyway, just without meaning it.
+  const [session, setSession] = useState({ type: "rest", duration: 30 });
   const [extraBurn, setExtraBurn] = useState("");
   const [daysPerWeek, setDaysPerWeek] = useState(7);
   // ── Make up a big day (S200r) ────────────────────────────────────────────
@@ -12071,43 +12187,87 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
     ? makeUpPlan({ over: muPicked.cals - Number(todayTarget), days: muDays,
         share: muShare / 100, target: Number(todayTarget) })
     : null;
-  // Translate the daily burn into the exercise they already picked above, so
-  // "burn 833 a day" becomes a length of time rather than a number.
-  const muMinutes = mu && pickedEx && w > 0
-    ? Math.round(mu.burnPerDay / Math.max(1, exBurn(pickedEx, w, 60, d) / 60))
-    : null;
 
-  // Every exercise the plan can reach, grouped the way the pickers group them —
-  // cardio by equipment, strength by movement pattern, custom last.
-  const exGroups = useMemo(() => {
-    const custom = [...customOf(d.customExercises, "cardio"), ...customOf(d.customExercises, "strength")];
-    return [
-      ...CARDIO_GROUPS.map((g) => ({ group: g.group, items: g.options })),
-      ...STRENGTH_GROUPS.map((cat) => ({ group: cat, items: STRENGTH_EXERCISES.filter((e) => e.cat === cat) })),
-      ...(custom.length ? [{ group: "Custom", items: custom }] : []),
-    ].filter((g) => g.items && g.items.length);
-  }, [d.customExercises]);
-  const pickedEx = useMemo(() => {
-    for (const g of exGroups) { const hit = g.items.find((e) => e.id === exId); if (hit) return hit; }
-    return null;
-  }, [exGroups, exId]);
-
-  const minutes = Math.max(0, Math.round(Number(exMin) || 0));
-  const sessionBurn = pickedEx && minutes > 0 ? exBurn(pickedEx, w, minutes, d) : 0;
-  const manualBurn = Math.max(0, Math.round(Number(extraBurn) || 0));
+  // ── What the added cardio costs ──────────────────────────────────────────
+  // Cardio only (S213, Kevin) — the same catalog, search, icons, heart-rate
+  // mode and durations as the wizard's cardio step, because that is where
+  // people already know how to pick one. `cardioExFor` resolves BOTH shapes:
+  // a normal exercise by id, and a heart-rate session into a synthetic entry
+  // whose calPerMin comes from the Keytel formula.
+  const pickedEx = cardioExFor(session, hrAgeData);
+  const dur = Number(session.duration) || 0;
+  // ⚠️ exBurn TAKES FOUR ARGUMENTS. The fourth anchors 1 MET to this person's
+  // own BMR; dropping it silently falls back to a kcal/kg/hr shortcut and
+  // produces a number that disagrees with every other screen in the app.
+  const sessionBurn = session.type === "rest" ? 0 : exBurn(pickedEx, w, dur, hrData);
+  const manualBurn = simNum(extraBurn) ?? 0;
   // Training a few days a week is not the same as training daily, and a
   // projection that quietly assumes daily would overstate every plan that isn't.
   const burnPerDay = Math.round(((sessionBurn + manualBurn) * daysPerWeek) / 7);
+  // Burn per minute, for translating a make-up plan into a length of time.
+  const perMin = session.type === "rest" ? 0 : exBurn(pickedEx, w, 60, hrData) / 60;
 
-  const typed = Math.round(Number(customIntake) || 0);
-  const intake = useCustom ? (typed > 0 ? typed : 0) : intakeFor(rate);
-  const ready = intake > 0;
+  // ⚠️ MUST STAY BELOW `pickedEx` (S213). This line read `pickedEx` fourteen
+  // lines ABOVE its own `const` until now — a temporal dead zone that threw
+  // `ReferenceError: Cannot access 'pickedEx' before initialization` the moment
+  // anyone chose a day in the make-up dropdown. There is no error boundary in
+  // this app, so that was a white screen, and `check:undef` cannot see it
+  // (`pickedEx` IS declared, just later). Do not move this back up.
+  // ⚠️ AND NO `Math.max(1, …)` ON THE DIVISOR. That floor turned a zero-burn
+  // exercise into "≈ 833 min of Rest Day" — raw calories printed as minutes —
+  // which now matters far more, because Rest Day is the DEFAULT state.
+  const muMinutes = mu && perMin > 0 ? Math.round(mu.burnPerDay / perMin) : null;
+
+  // ── What they eat: one engine, three ways of saying it ───────────────────
+  // ⚠️ THE WEEK IS THE BASIS, AND THE OTHER TWO MODES ARE THE SAME SUM. Pace
+  // and one-number weeks are literally `intake * 7`, so every number they
+  // already produce is bit-identical — this is a re-expression, not a change.
+  const paceTarget = intakeFor(rate);
+  const typed = simNum(customIntake) ?? 0;          // deliberately UNCLAMPED — see below
+  const parsed = weekCals.map((x) => simNum(x));
+  const wp = weekPlan(parsed, { fallback: paceTarget });
+  const intake = mode === "pace" ? paceTarget
+    : mode === "typed" ? typed
+      : Math.round(wp.weekIntake / 7);
+  const weekIntake = mode === "week" ? wp.weekIntake : intake * 7;
+  // A week with nothing typed is a perfectly good answer — every day sits on
+  // the goal pace — so only the one-number mode can be "not filled in yet".
+  const ready = mode === "typed" ? typed > 0 : true;
   // Negative = a deficit = weight comes off.
-  const balance = ready ? intake - burnPerDay - maintain : 0;
+  // ⚠️ MULTIPLY THE ALREADY-ROUNDED `burnPerDay` BY 7, never an unrounded
+  // weekly burn: the rounding is what keeps the two shipped modes identical to
+  // the calorie they show today.
+  const weekBalance = weekIntake - burnPerDay * 7 - maintain * 7;
+  const balance = ready ? weekBalance / 7 : 0;
   const lbsIn = (days) => (-balance * days) / CAL_PER_LB;   // positive = lost
   const HORIZONS = [[7, "1 week"], [14, "2 weeks"], [30, "1 month"], [60, "2 months"]];
   const dir = balance < -20 ? "lose" : balance > 20 ? "gain" : "hold";
   const fmtLbs = (n) => `${Math.abs(n).toFixed(1)} lb${Math.abs(n) >= 1.05 || Math.abs(n) < 0.95 ? "s" : ""}`;
+  // ⚠️ HOLDING STEADY MOVES WHEN CARDIO IS ADDED. The engine's balance is
+  // `weekIntake - burnPerDay*7 - maintain*7`, so once section 2 has anything in
+  // it the break-even for a day is maintain + burnPerDay, not maintain. Comparing
+  // the rows against `maintain` alone painted every day amber ("over") while the
+  // headline underneath said LOSING — the rows contradicting the answer they sit
+  // above. Same ±20 dead band as `dir`, so the two can never disagree.
+  const holdSteady = maintain + burnPerDay;
+  const dayTone = (v) => (v < holdSteady - 20 ? "var(--green)" : v > holdSteady + 20 ? "var(--yellow)" : "var(--muted)");
+  const setDay = (i, val) => setWeekCals((prev) => prev.map((x, ix) => (ix === i ? val : x)));
+  // ⚠️ THE TWO PICKERS DO NOT OFFER THE SAME DURATIONS. HeartRatePicker's chips
+  // include 5 minutes; the exercise <select> (DURATIONS) starts at 10. Carrying
+  // a 5 straight across left the select with no matching <option>, and React
+  // then selects the first one — so it DISPLAYED "10 minutes" while every
+  // number was still computed from 5. Snap to the nearest offered length.
+  const toDuration = (m) => (DURATIONS.includes(m) ? m
+    : DURATIONS.reduce((best, x) => (Math.abs(x - m) < Math.abs(best - m) ? x : best), DURATIONS[0]));
+  const goHr = () => setSession((s2) => ({ type: "hr", hr: 0, duration: s2.duration || 30 }));
+  const goExercise = (id) => setSession((s2) => ({ type: id, duration: toDuration(Number(s2.duration) || 30) }));
+  // ⚠️ ANY typed day, INCLUDING a rejected one — otherwise the escape hatch is
+  // greyed out in exactly the state you need it: a box holding a number the
+  // parser refused.
+  const anyTyped = weekCals.some((x) => String(x || "").trim() !== "");
+  const showsExerciseBurn = sessionBurn > 0 && session.type !== "hr";
+  const isWeek = mode === "week";
+  const per = isWeek ? " (week)" : "";
 
   const lbl = { fontSize: ".62rem", color: "var(--muted)", textTransform: "uppercase",
     letterSpacing: ".5px", fontWeight: 800, marginBottom: "5px" };
@@ -12142,28 +12302,37 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
 
         {/* ── 1. What you eat ─────────────────────────────────────────────── */}
         <div style={lbl}>1 · What you eat</div>
-        <div style={{ display: "flex", gap: "5px", marginBottom: "8px" }}>
-          {[[false, "Pick a pace"], [true, "Type a number"]].map(([v, t]) => (
-            <button key={t} onClick={() => setUseCustom(v)}
-              style={{ flex: 1, padding: "7px", borderRadius: "8px", cursor: "pointer", fontFamily: "inherit",
-                fontSize: ".74rem", fontWeight: 700,
-                border: useCustom === v ? "1.5px solid var(--accent)" : "1px solid var(--border)",
-                background: useCustom === v ? "rgba(var(--accent-rgb),.10)" : "transparent",
-                color: useCustom === v ? "var(--accent)" : "var(--muted)" }}>{t}</button>
+        <div role="group" aria-label="What you eat" style={{ display: "flex", gap: "5px", marginBottom: "8px" }}>
+          {[["pace", "Pick a pace"], ["typed", "One number"], ["week", "Day by day"]].map(([v, t]) => (
+            <button key={v} onClick={() => setMode(v)} aria-pressed={mode === v}
+              style={{ flex: 1, padding: "7px 3px", borderRadius: "8px", cursor: "pointer", fontFamily: "inherit",
+                fontSize: ".70rem", fontWeight: 700,
+                border: mode === v ? "1.5px solid var(--accent)" : "1px solid var(--border)",
+                background: mode === v ? "rgba(var(--accent-rgb),.10)" : "transparent",
+                color: mode === v ? "var(--accent)" : "var(--muted)" }}>{t}</button>
           ))}
         </div>
-        {useCustom ? (
+        {mode === "typed" && (
           <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
             <input type="number" inputMode="numeric" autoFocus placeholder="e.g. 2,100" value={customIntake}
+              aria-label="Calories a day"
               onChange={(e) => setCustomIntake(e.target.value)} style={{ ...input, width: "130px" }} />
             <span style={{ fontSize: ".78rem", color: "var(--muted)" }}>cal a day</span>
+            {simRejected(customIntake) && (
+              <span style={{ fontSize: ".68rem", color: "var(--yellow)", fontWeight: 700 }}>check this number</span>
+            )}
           </div>
-        ) : (
+        )}
+        {/* The pace grid serves BOTH modes that use it: on its own it is the
+            answer, and in day-by-day it is the goal AND the price of every day
+            left blank — so it stays one control with one number, and changing
+            it re-prices every untouched day live. */}
+        {mode !== "typed" && (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "5px" }}>
             {[...RATE_OPTS].sort((a, b) => b - a).map((r) => {
               const on = Math.abs(rate - r) < 0.01;
               return (
-                <button key={r} onClick={() => setRate(r)}
+                <button key={r} onClick={() => setRate(r)} aria-pressed={on}
                   style={{ padding: "7px 3px", borderRadius: "8px", cursor: "pointer", textAlign: "center",
                     fontFamily: "inherit",
                     border: on ? "1.5px solid var(--accent)" : "1px solid var(--border)",
@@ -12179,41 +12348,179 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
           </div>
         )}
 
-        {/* ── 2. What you burn on top ─────────────────────────────────────── */}
-        <div style={{ ...lbl, marginTop: "15px" }}>2 · Training you add (optional)</div>
-        <select value={exId} onChange={(e) => setExId(e.target.value)} style={{ ...input, marginBottom: "7px" }}>
-          <option value="">— no exercise —</option>
-          {exGroups.map((g) => (
-            <optgroup key={g.group} label={g.group}>
-              {g.items.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
-            </optgroup>
-          ))}
-        </select>
-        <div style={{ display: "flex", gap: "7px", flexWrap: "wrap", alignItems: "center" }}>
-          <div>
-            <input type="number" inputMode="numeric" value={exMin} onChange={(e) => setExMin(e.target.value)}
-              style={{ ...input, width: "78px" }} />
-            <div style={{ fontSize: ".58rem", color: "var(--muted)", marginTop: "2px", textAlign: "center" }}>minutes</div>
+        {/* ── Day by day (S213, Kevin) ─────────────────────────────────────
+            "Not everybody eats the same exact calories every single day." Seven
+            boxes, Monday first, each free to be anything — the point is to see
+            what a heavy Saturday and a light Tuesday actually come to over a
+            week, instead of pretending one number covers all seven.
+            ⚠️ ONLY THE DIFFERENT DAYS NEED TYPING. A blank day is priced at the
+            goal pace above, so "Saturday is my big one" is a single entry. */}
+        {mode === "week" && (
+          <div style={{ marginTop: "9px" }}>
+            <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.45, margin: "0 0 7px" }}>
+              Most people don&rsquo;t eat the same every day. Type only the days that are different — the rest stay on your goal.
+            </div>
+            <div style={{ fontSize: ".66rem", color: "var(--muted)", marginBottom: "6px" }}>
+              Holding steady is about <b style={{ color: "var(--text-secondary)" }}>{holdSteady.toLocaleString()}</b> a day
+              {burnPerDay > 0 && <> with the cardio above</>}.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+              {DAYS.map((dayName, i) => {
+                const val = parsed[i];
+                const low = wp.effective[i] < 1200;
+                return (
+                  <div key={dayName} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ width: "38px", fontSize: ".7rem", fontWeight: 700, color: "var(--text-secondary)" }}>
+                      {DAY_SHORT[i]}
+                    </span>
+                    <input type="number" inputMode="numeric" min="0" max="50000" step="50"
+                      aria-label={`${dayName} calories`} placeholder={paceTarget.toLocaleString()}
+                      value={weekCals[i]} onChange={(e) => setDay(i, e.target.value)}
+                      style={{ ...input, width: "96px", textAlign: "right",
+                        border: (val !== null && low) || simRejected(weekCals[i])
+                          ? "1.5px solid var(--yellow)" : "1px solid var(--border)" }} />
+                    <span style={{ flex: 1, textAlign: "right", fontSize: ".62rem" }}>
+                      {val === null && simRejected(weekCals[i]) ? (
+                        <span style={{ color: "var(--yellow)", fontWeight: 700 }}>check this number</span>
+                      ) : val === null ? (
+                        <span style={{ color: "var(--muted)" }}>on your goal</span>
+                      ) : (
+                        // ⚠️ THE NUMBER AND THE COLOUR MUST USE THE SAME
+                        // BASELINE. Colouring against `holdSteady` while
+                        // printing a delta against `maintain` made a green row
+                        // read "+550" — two contradictory statements about the
+                        // same day, one word apart.
+                        <span style={{ color: dayTone(val), fontWeight: 700 }}>
+                          {Math.abs(val - holdSteady) <= 20 ? "even"
+                            : `${val > holdSteady ? "+" : "−"}${Math.abs(val - holdSteady).toLocaleString()}`}
+                        </span>
+                      )}
+                      {low && (
+                        <span style={{ marginLeft: "5px", fontSize: ".55rem", textTransform: "uppercase",
+                          letterSpacing: ".3px", color: "var(--yellow)" }}>low</span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: ".68rem", color: "var(--text-secondary)", marginTop: "8px", lineHeight: 1.45 }}>
+              Averages <b>{Math.round(wp.weekIntake / 7).toLocaleString()}</b> a day ·{" "}
+              <b>{wp.weekIntake.toLocaleString()}</b> for the week
+              {wp.enteredCount < 7 && <> · {wp.enteredCount} of 7 typed, the rest on your goal</>}
+            </div>
+            {wp.spread && (
+              <div style={{ fontSize: ".66rem", color: "var(--muted)", marginTop: "4px" }}>
+                Biggest {DAY_SHORT[wp.hiIdx]} {wp.effective[wp.hiIdx].toLocaleString()} · lightest{" "}
+                {DAY_SHORT[wp.loIdx]} {wp.effective[wp.loIdx].toLocaleString()}
+              </div>
+            )}
+            <div style={{ textAlign: "right", marginTop: "5px" }}>
+              <button onClick={() => setWeekCals(["", "", "", "", "", "", ""])} disabled={!anyTyped}
+                style={{ background: "transparent", border: "none", fontFamily: "inherit", fontSize: ".66rem",
+                  cursor: anyTyped ? "pointer" : "default",
+                  color: anyTyped ? "var(--accent)" : "var(--muted)" }}>
+                Reset to my pace
+              </button>
+            </div>
           </div>
+        )}
+
+        {/* ── 2. What you burn on top ───────────────────────────────────────
+            CARDIO ONLY (S213, Kevin: "make it be just cardio for the exercise
+            selection… look and act just like the workout burn section… I want
+            all of the same options"). So this is ExercisePicker kind="cardio" —
+            the same 52-entry catalog in a searchable sheet with the same icons,
+            the same heart-rate mode in and out, the same DURATIONS list and the
+            same live burn readout as the wizard's cardio step.
+            ⚠️ NOT ported: the per-day week, "add another session", and
+            CustomExerciseCreator — that last one WRITES to the plan
+            (onChange("customExercises", …)), and this modal promises at the top
+            that nothing here changes your plan. Custom cardio the plan already
+            has still appears, because customExercises is threaded through. */}
+        <div style={{ ...lbl, marginTop: "15px" }}>2 · Cardio you add (optional)</div>
+        {session.type === "hr" ? (
+          <>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+              <div style={{ ...lbl, marginBottom: 0 }}>Cardio by heart rate</div>
+              <button onClick={() => goExercise("outdoor_jog")}
+                style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--accent)",
+                  fontSize: ".7rem", textDecoration: "underline", fontFamily: "inherit" }}>
+                Pick an exercise instead
+              </button>
+            </div>
+            {/* It carries its own duration chips AND its own calorie readout,
+                so neither is rendered again below — printing both would show
+                the same burn twice with different rounding. */}
+            <HeartRatePicker data={hrAgeData} hr={session.hr} duration={session.duration}
+              onChange={({ hr, duration }) => setSession({ type: "hr", hr, duration })} />
+          </>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+              <div style={{ ...lbl, marginBottom: 0 }}>Exercise</div>
+              {session.type !== "rest" && (
+                <button onClick={goHr}
+                  style={{ background: "transparent", border: "none", cursor: "pointer", color: "var(--accent)",
+                    fontSize: ".7rem", fontWeight: 600, fontFamily: "inherit",
+                    display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                  <Icon name="heartRate" size={13} color="var(--accent)" />By heart rate
+                </button>
+              )}
+            </div>
+            {/* customExercises MUST be threaded: without it the plan's own
+                custom cardio neither lists nor resolves — findCardioEx falls
+                back to the Rest Day entry and it would silently read 0 cal. */}
+            <ExercisePicker kind="cardio" value={session.type}
+              onChange={goExercise}
+              onPickHr={goHr} customExercises={d.customExercises} />
+            {session.type === "rest" && (
+              <div style={{ fontSize: ".62rem", color: "var(--muted)", marginTop: "5px" }}>
+                Rest day — nothing added. Pick a cardio session to see what it&rsquo;s worth.
+              </div>
+            )}
+            {session.type !== "rest" && (
+              <>
+                <div style={{ ...lbl, marginTop: "9px" }}>Duration</div>
+                <select aria-label="Duration" value={session.duration}
+                  onChange={(e) => setSession((s2) => ({ ...s2, duration: Number(e.target.value) }))}
+                  style={input}>
+                  {DURATIONS.map((m) => <option key={m} value={m}>{m} minutes</option>)}
+                </select>
+              </>
+            )}
+          </>
+        )}
+        <div style={{ display: "flex", gap: "7px", flexWrap: "wrap", alignItems: "center", marginTop: "9px" }}>
           <div>
             <select value={daysPerWeek} onChange={(e) => setDaysPerWeek(Number(e.target.value))}
-              style={{ ...input, width: "108px" }}>
+              aria-label="How often" style={{ ...input, width: "108px" }}>
               {[1, 2, 3, 4, 5, 6, 7].map((n) => <option key={n} value={n}>{n}× a week</option>)}
             </select>
             <div style={{ fontSize: ".58rem", color: "var(--muted)", marginTop: "2px", textAlign: "center" }}>how often</div>
           </div>
           <div>
             <input type="number" inputMode="numeric" placeholder="or cal" value={extraBurn}
+              aria-label="Your own calorie burn"
               onChange={(e) => setExtraBurn(e.target.value)} style={{ ...input, width: "92px" }} />
-            <div style={{ fontSize: ".58rem", color: "var(--muted)", marginTop: "2px", textAlign: "center" }}>own number</div>
+            <div style={{ fontSize: ".58rem", color: simRejected(extraBurn) ? "var(--yellow)" : "var(--muted)",
+              marginTop: "2px", textAlign: "center" }}>
+              {simRejected(extraBurn) ? "check this" : "own number"}
+            </div>
           </div>
         </div>
-        {(sessionBurn > 0 || manualBurn > 0) && (
+        {/* ⚠️ THE SEPARATOR IS CONDITIONAL ON SOMETHING COMING BEFORE IT. In
+            heart-rate mode the first clause is suppressed (the picker prints its
+            own estimate), so an unconditional " · " rendered a line that began
+            with an orphan middot — or, at 7× a week, an empty div. */}
+        {(showsExerciseBurn || manualBurn > 0 || (burnPerDay > 0 && daysPerWeek !== 7)) && (
           <div style={{ fontSize: ".68rem", color: "var(--muted)", marginTop: "6px" }}>
-            {sessionBurn > 0 && <>{pickedEx.label} {minutes} min ≈ <b style={{ color: "var(--orange)" }}>{sessionBurn.toLocaleString()}</b> cal</>}
-            {sessionBurn > 0 && manualBurn > 0 && " + "}
+            {showsExerciseBurn && <>{pickedEx.label} {dur} min ≈ <b style={{ color: "var(--orange)" }}>{sessionBurn.toLocaleString()}</b> cal</>}
+            {showsExerciseBurn && manualBurn > 0 && " + "}
             {manualBurn > 0 && <>your own <b style={{ color: "var(--orange)" }}>{manualBurn.toLocaleString()}</b> cal</>}
-            {daysPerWeek !== 7 && <> · {daysPerWeek}× a week averages <b style={{ color: "var(--orange)" }}>{burnPerDay.toLocaleString()}</b> cal a day</>}
+            {burnPerDay > 0 && daysPerWeek !== 7 && (
+              <>{(showsExerciseBurn || manualBurn > 0) ? " · " : ""}{daysPerWeek}× a week averages <b style={{ color: "var(--orange)" }}>{burnPerDay.toLocaleString()}</b> cal a day</>
+            )}
           </div>
         )}
 
@@ -12223,26 +12530,34 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
             <div style={{ fontSize: ".8rem", color: "var(--muted)" }}>Type a calorie number to see what it would do.</div>
           ) : (
             <>
+              {/* Day by day is answered as a WEEK, because that is the unit the
+                  seven numbers describe — an average would hide the very
+                  variation the mode exists to show. The arithmetic underneath
+                  is identical either way. */}
               <div style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: ".78rem" }}>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ color: "var(--muted)" }}>You eat</span>
-                  <span style={{ fontFamily: "'Sora',sans-serif" }}>{intake.toLocaleString()} cal</span>
+                  <span style={{ color: "var(--muted)" }}>You eat{per}</span>
+                  <span style={{ fontFamily: "'Sora',sans-serif" }}>{(isWeek ? weekIntake : intake).toLocaleString()} cal</span>
                 </div>
                 {burnPerDay > 0 && (
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ color: "var(--muted)" }}>Training burns</span>
-                    <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--orange)" }}>−{burnPerDay.toLocaleString()} cal</span>
+                    <span style={{ color: "var(--muted)" }}>Cardio burns{per}</span>
+                    <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--orange)" }}>−{(isWeek ? burnPerDay * 7 : burnPerDay).toLocaleString()} cal</span>
                   </div>
                 )}
                 <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--border)", paddingTop: "4px" }}>
-                  <span style={{ fontWeight: 700 }}>= Net for the day</span>
+                  <span style={{ fontWeight: 700 }}>= Net for the {isWeek ? "week" : "day"}</span>
                   <span style={{ fontFamily: "'Sora',sans-serif", fontWeight: 800, color: "var(--accent)" }}>
-                    {(intake - burnPerDay).toLocaleString()} cal
+                    {(isWeek ? weekIntake - burnPerDay * 7 : intake - burnPerDay).toLocaleString()} cal
                   </span>
                 </div>
+                {/* ⚠️ NOT "your body burns". `maintain` is intakeFor(0) — the
+                    intake that HOLDS the weight, which in eat-back mode already
+                    contains the day's scheduled training. Calling it basal
+                    expenditure was a false statement about a real number. */}
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ color: "var(--muted)" }}>Your body burns</span>
-                  <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--muted)" }}>{maintain.toLocaleString()} cal</span>
+                  <span style={{ color: "var(--muted)" }}>To hold steady{per}</span>
+                  <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--muted)" }}>{(isWeek ? maintain * 7 : maintain).toLocaleString()} cal</span>
                 </div>
               </div>
 
@@ -12253,7 +12568,9 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
                 ) : (
                   <>
                     <div style={{ fontSize: ".68rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".6px" }}>
-                      {Math.abs(balance).toLocaleString()} cal {balance < 0 ? "under" : "over"} a day
+                      {isWeek
+                        ? <>{Math.abs(Math.round(weekBalance)).toLocaleString()} cal {weekBalance < 0 ? "under" : "over"} for the week</>
+                        : <>{Math.abs(balance).toLocaleString()} cal {balance < 0 ? "under" : "over"} a day</>}
                     </div>
                     <div style={{ fontFamily: "'Sora',sans-serif", fontSize: "1.5rem", color: "var(--accent)", margin: "2px 0" }}>
                       {dir === "lose" ? "−" : "+"}{fmtLbs(lbsIn(7))} a week
@@ -12281,10 +12598,24 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
                 </div>
               )}
 
-              {intake < 1200 && (
+              {/* ⚠️ ONE RENDER SITE, AND IN WEEK MODE IT MUST BE PER-DAY.
+                  A mean cannot see this: 2100/2100/2100/900/900/900/2100
+                  averages 1,586 and would never warn, while three days sit 300
+                  under the floor. So the days are NAMED. Nothing is clamped —
+                  this sandbox displays what someone typed rather than
+                  prescribing it, and a silent clamp is its own bug. */}
+              {(isWeek ? wp.lowDays.length > 0 : intake > 0 && intake < 1200) && (
                 <div style={{ marginTop: "9px", fontSize: ".7rem", lineHeight: 1.45, color: "var(--yellow)" }}>
                   Under 1,200 calories a day isn&rsquo;t healthy or sustainable — your plan won&rsquo;t go there.
                   If you want a bigger gap than this, take it from movement rather than food.
+                  {isWeek && <> Here that&rsquo;s {joinDays(wp.lowDays, DAY_SHORT)}.</>}
+                </div>
+              )}
+              {/* Say it out loud rather than letting someone infer that a heavy
+                  Saturday was matched by a Saturday session. */}
+              {isWeek && burnPerDay > 0 && (
+                <div style={{ marginTop: "7px", fontSize: ".62rem", color: "var(--muted)" }}>
+                  Cardio is spread evenly across the week.
                 </div>
               )}
 
@@ -12348,7 +12679,7 @@ function CalorieSimulator({ data, weightLbs, planRate, intakeFor, dayCalsAll, to
                           </div>
                           {muMinutes > 0 && pickedEx && (
                             <div style={{ fontSize: ".58rem", color: "var(--muted)", lineHeight: 1.35 }}>
-                              ≈ {muMinutes} min of {pickedEx.label}
+                              ≈ {muMinutes} min {pickedEx.isHr ? `at ${pickedEx.label}` : `of ${pickedEx.label}`}
                             </div>
                           )}
                         </div>
