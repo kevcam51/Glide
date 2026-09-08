@@ -17,16 +17,29 @@ process.env.GCLOUD_PROJECT = process.env.GCLOUD_PROJECT || "calorieiq-29762";
 // ── fake Firestore: users/{uid}/kv/{key} docs holding { k, value } ───────────
 function fakeDb() {
   const store = new Map();
+  const docAt = (path) => ({
+    async get() {
+      const v = store.get(path);
+      return { exists: v !== undefined, data: () => v };
+    },
+    async set(obj) { store.set(path, obj); },
+  });
   return {
     store,
-    doc(path) {
-      return {
-        async get() {
-          const v = store.get(path);
-          return { exists: v !== undefined, data: () => v };
-        },
-        async set(obj) { store.set(path, obj); },
-      };
+    doc: docAt,
+    // ⚠️ THE DOUBLE HAS TO MODEL WHAT THE CODE ACTUALLY DOES (S212d). The
+    // wearable write moved from a whole-document `.set()` to a transactional
+    // read-modify-write, because the app writes the same day-log document from
+    // React state and whichever landed second erased the other — a meal logged
+    // on an open dashboard wiped the tracker block and the adjusted calorie
+    // target with it. Without runTransaction here the suite threw rather than
+    // testing it, which is the honest failure: a double that omits the primitive
+    // under test can only ever agree with the old code.
+    async runTransaction(fn) {
+      return fn({
+        get: (ref) => ref.get(),
+        set: (ref, obj) => { ref.set(obj); },
+      });
     },
   };
 }

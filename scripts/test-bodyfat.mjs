@@ -217,9 +217,18 @@ ok("...and reports which method it used", /bodyFatSource, tapeSource,/.test(AI))
      /return;   \/\/ drafts kept, so the correction is still on screen/.test(APP));
 
   // The trend chart drew a change of instrument as a change of body fat.
+  // ⚠️ STRENGTHENED IN S212d. This used to pin `d.bfPrimarySource || null`, which
+  // fixed the case where somebody had CHOSEN a method and left the default —
+  // nobody has — falling through to mm.bodyFatPct, i.e. whichever method existed
+  // that day. So the chart the S200y note calls "the one thing it could not be
+  // trusted for" was still mixing methods for almost every user. The line now
+  // resolves an implicit primary from the history, so it is one method either way.
   ok("the trend plots one method, not whichever was present that day",
-     /const bfSource = d\.bfPrimarySource \|\| null;/.test(APP)
-     && /bfSource === "caliper" \? mm\.caliperBF/.test(APP));
+     /bfSource === "caliper" \? mm\.caliperBF/.test(APP));
+  ok("...and no longer falls back to the mixed per-day value when nobody has chosen",
+     !/const bfSource = d\.bfPrimarySource \|\| null;/.test(APP)
+     && /const avail = \["scale", "caliper", "tape"\]\.filter\(has\);/.test(APP)
+     && /return \(pref && avail\.includes\(pref\)\) \? pref : \(avail\[0\] \|\| null\);/.test(APP));
 }
 
 console.log(fails === 0

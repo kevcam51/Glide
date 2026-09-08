@@ -269,5 +269,131 @@ ok("...and reports the weight its lean mass came from",
      bl[0] !== Math.round(220 * (1 - B.measurementMetrics(KEV, KEV.measurements[0]).bodyFatPct / 100)), bl);
 }
 
+// ── 9. the Full Plan can log a weight at all (S212b) ──────────────────────
+// The SAME panel, opened from Results, was passed no onLogWeight — so the whole
+// Weight box was absent there while the dashboard and the client's home had it.
+// A third place the weight was simply missing, on the one screen whose job is
+// body metrics: you could correct a past weigh-in and not record today's.
+{
+  const results = srcOf(APP, "Results");
+  ok("the Results lift is bounded", !results.includes("function MeasurementsModal") && results.length > 5000, results.length);
+  const call = results.slice(results.indexOf("showMeasureModal && "), results.indexOf("showMeasureModal && ") + 2200);
+  ok("Results passes onLogWeight to the measurements panel", /onLogWeight=\{/.test(call), call.slice(0, 300));
+  ok("...through the SAME writer as onEditWeighIn, so both land in one place",
+     /onLogWeight=\{\(v, dateKey\) => \{ writeWeighIn\(dateKey, v\); \}\}/.test(call) && /onEditWeighIn=\{writeWeighIn\}/.test(call));
+  // Every mount of the panel that can write a weigh-in must offer both, or the
+  // gap just moves to whichever one was forgotten.
+  const mounts = [...APP.matchAll(/<MeasurementsModal[\s\S]{0,1400}?\/>/g)].map((m) => m[0]);
+  ok("NEG: there are three mounts to keep in step", mounts.length === 3, mounts.length);
+  for (const [i, m] of mounts.entries()) {
+    ok(`mount ${i + 1} offers both logging and correcting a weigh-in`,
+       /onLogWeight=/.test(m) && /onEditWeighIn=/.test(m), m.slice(0, 160));
+  }
+}
+
+// ── 10. the derived goal weight cannot jump in one tap (S212b) ────────────
+// lean ÷ (1 − goal BF%) exceeds the CURRENT weight for anyone already leaner
+// than their goal body fat — i.e. every client who gets there — and the button
+// replaced a fat-loss goal with that larger number on a single unconfirmed tap.
+{
+  const modal = srcOf(APP, "MeasurementsModal");
+  ok("the button now arms a confirm rather than writing", /onClick=\{\(\) => setGoalConfirm\(true\)\}/.test(modal));
+  ok("...and the confirm names the goal being replaced", /Replace your goal weight of/.test(modal));
+  ok("...and only the confirm calls onSetGoalWeight",
+     (modal.match(/onSetGoalWeight\(suggested\)/g) || []).length === 1);
+  ok("the direction against the reading's own weight is stated", /this reading was taken at/.test(modal));
+  ok("being already leaner than the goal is called out, not offered in silence",
+     /at or below your \{goalBf\}% goal body fat/.test(modal) && /putting fat back on/.test(modal));
+  // The arithmetic that makes it a trap, stated so nobody "simplifies" the warning away.
+  const LEAN = { gender: "male", age: "40", heightFt: 5, heightIn: 10, weightLbs: 190, goalBodyFat: "15",
+    checkIns: [ci("2026-09-01", 190)],
+    measurements: [{ date: "2026-09-01", timestamp: 1, calChest: 12, calAbdomen: 19, calThigh: 12 }] };
+  const m = S.measurementMetrics(LEAN, LEAN.measurements[0]);
+  ok("NEG: a client leaner than their goal derives a goal weight ABOVE their current weight",
+     m.bodyFatPct < 15 && m.goalWeightFromLeanMass > 190, { bf: m.bodyFatPct, goal: m.goalWeightFromLeanMass, at: m.weightLbs });
+}
+
+// ── 11. simulations are uncapped; CONVERTING one is not (S212c) ──────────
+// Kevin: "allow as many simulation plans as needed but limit the regular plans
+// and connected plans... the trainer can convert the simulation to one of the
+// regular plan slots". The first half already shipped in S179b — createProfile
+// exempts sims and functions/roster.js countRoster filters them out. The
+// conversion did not check anything, so the cap had a front door and an open
+// side one: make sims all day at 15 of 15, convert them one at a time.
+{
+  const ROSTER = readFileSync(join(ROOT, "functions", "roster.js"), "utf8");
+  ok("the server cap still ignores simulations when counting",
+     /filter\(\(p\) => p && !p\.isSimulation\)/.test(ROSTER));
+  ok("...and creating a simulation is still exempt client-side",
+     /if \(!\(opts && opts\.isSimulation\) && rosterCap && rosterCap\.full\)/.test(APP));
+  const conv = APP.slice(APP.indexOf("const convertSimulation = "), APP.indexOf("const convertSimulation = ") + 900);
+  ok("converting now refuses when the roster is full",
+     /if \(rosterCap && rosterCap\.full\) \{[\s\S]{0,160}setRosterBlocked\(true\)/.test(conv), conv.slice(0, 200));
+  ok("...and returns BEFORE clearing the flag, so nothing is half-converted",
+     conv.indexOf("return;") < conv.indexOf("isSimulation: false"));
+  // ⚠️ The guard is only as fresh as the number it reads.
+  ok("the cap is re-read on the REAL-plan count, not just how many profiles exist",
+     /profiles\.length, profiles\.filter\(\(p\) => p && !p\.isSimulation\)\.length\]/.test(APP));
+  ok("NEG: profiles.length alone cannot see a conversion",
+     (() => { const before = [{ id: "a", isSimulation: true }, { id: "b" }];
+       const after = before.map((p) => (p.id === "a" ? { ...p, isSimulation: false } : p));
+       return before.length === after.length
+         && before.filter((p) => !p.isSimulation).length !== after.filter((p) => !p.isSimulation).length; })());
+}
+
+// ── 12. a simulation is a sales projection, not a tracked person (S212c) ──
+// Kevin: "nothing more than showing a potential client their potential... We
+// won't allow any other real functions or inputs." The five wizard steps and the
+// projection stay; everything that records a real body over time goes, and the
+// AI cannot touch it. Converting is the one door out, and it spends a slot.
+{
+  const results = srcOf(APP, "Results");
+  ok("check-ins are off on a simulation", /\{!isSimulation && \(\s*<DailyCheckIn/.test(results));
+  ok("...as is the weigh-in chart and its editor",
+     /\{!isSimulation && \(data\.checkIns \|\| \[\]\)\.length >= 1 &&/.test(results)
+     && /\{showWeightModal && !isSimulation &&/.test(results));
+  ok("...and the body-measurements panel, both its card and its modal",
+     /\{onSaveMeasurements && !isSimulation && \(/.test(results)
+     && /\{showMeasureModal && !isSimulation && \(\(\) => \{/.test(results));
+
+  const dash = srcOf(APP, "DailyDashboard");
+  ok("DailyDashboard is told whether it is a sim", /^function DailyDashboard\(\{[\s\S]{0,400}?isSimulation = false,/.test(dash));
+  ok("...and it is actually passed one", /<DailyDashboard [^>]*isSimulation=\{activeIsSim\}/.test(APP));
+  ok("the Calendar button is gone on a sim", /\{!isSimulation && \(\s*<button onClick=\{\(\) => setShowCalendar\(true\)\}/.test(dash));
+  ok("...the date header stops being a second door to it",
+     /onClick=\{\(\)=>\{ if \(!isSimulation\) setShowCalendar\(true\); \}\}/.test(dash));
+  // ⚠️ Hiding two buttons is what a user sees; the state guard is what makes it true.
+  ok("...and the calendar cannot render even if the state flips anyway",
+     /if \(showCalendar && !isSimulation\) \{/.test(dash));
+  ok("the weigh-in / measurements tile is gone, and so is its modal",
+     /\{!tileHidden\("weight"\) && !isSimulation &&/.test(dash)
+     && /\{showMeasure && onSaveMeasurements && !isSimulation && \(\(\) => \{/.test(dash));
+
+  // A sim must not be droppable into a real client's account — converting is the
+  // only door, and converting is what spends a roster slot.
+  ok("the link picker no longer offers simulations",
+     /profiles\.filter\(\(lp\) => lp && !lp\.isSimulation\)\.map\(\(lp\) => \(/.test(APP));
+  ok("...and its empty state counts the SAME set it renders",
+     /profiles\.filter\(\(lp\) => lp && !lp\.isSimulation\)\.length === 0 \? \(/.test(APP));
+  ok("NEG: an all-simulation trainer is told why, not shown an empty box",
+     /Only simulations here — convert one to a plan first/.test(APP));
+
+  // The AI: refused at the ONE resolution point, so all twelve plan-data tools,
+  // both Accept callables and the MCP connector are covered by one gate.
+  ok("a localPlanId pointing at a simulation is refused",
+     /if \(wantedRow\.isSimulation\) \{[\s\S]{0,80}?return \{ error:/.test(AI));
+  ok("...at the single resolution point, not per-tool",
+     (AI.match(/if \(wantedRow\.isSimulation\)/g) || []).length === 1);
+  ok("...and the refusal happens BEFORE planOverride is set",
+     AI.indexOf("wantedRow.isSimulation") < AI.indexOf("planOverride = wantedPid;"));
+  ok("list_local_plans no longer hands out ids the tools will refuse",
+     /index\.filter\(\(p\) => p && p\.id && !p\.isSimulation\)/.test(AI));
+  // find_client deliberately KEEPS them — "who is Sarah?" is better answered
+  // "that's a simulation" than "nobody matched" — but must not promise a write.
+  ok("find_client still surfaces a simulation", /name: nm, isSimulation: !!p\.isSimulation/.test(AI));
+  ok("...but no longer tells the model to write into one",
+     !/Say so before writing anything into it/.test(AI) && /Do not retry with localPlanId/.test(AI));
+}
+
 console.log(`${checks - fails}/${checks} lean/muscle-mass assertions passed`);
 if (fails) process.exit(1);

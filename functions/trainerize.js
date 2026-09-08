@@ -113,6 +113,30 @@ async function kvSetJSON(db, uid, key, obj) {
   await db.doc(`users/${uid}/kv/${encodeURIComponent(key)}`).set({ k: key, value: JSON.stringify(obj) });
 }
 
+// Transactional read-modify-write of ONE DAY-LOG document (S212d).
+//
+// ⚠️ THE SYNC AND THE APP BOTH WROTE THE WHOLE DOCUMENT. syncClientHealth read a
+// day log, set `.wearable`, and `.set()` the entire object back; `persistLog`
+// does the same from React state. Whichever landed second won everything, so a
+// meal logged from an already-open dashboard erased the tracker block that had
+// just arrived — and with it the tracker-adjusted calorie target, silently,
+// until the next sweep half an hour later. This file already had the pattern
+// (planTxnWrap, right below); the day-log path never used it.
+async function dayLogTxn(db, uid, key, fn) {
+  const ref = db.doc(`users/${uid}/kv/${encodeURIComponent(key)}`);
+  let out;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    let log = null;
+    try { log = snap.exists ? JSON.parse(snap.data().value || "null") : null; } catch { log = null; }
+    if (!log || typeof log !== "object") log = { calories: 0, water: 0, weight: 0, meals: [] };
+    out = fn(log);
+    if (out && out.__abort) return;
+    tx.set(ref, { k: key, value: JSON.stringify(log) });
+  });
+  return out;
+}
+
 // Transactional read-modify-write of ONE plan wrapper — the same helper as
 // aitools.js planTxnWrap, mirrored here rather than imported, matching how the
 // kv helpers above are already mirrored. It matters MORE here than there: this
@@ -423,14 +447,20 @@ async function syncClientHealth(db, uid, pid, tzUserId, auth, days) {
       // Steps are never part of a typed calorie figure, so folding them in adds
       // data without touching the number the person entered.
       if (Number(w.steps) > 0 && !(Number(prev.steps) > 0)) {
-        log.wearable = { ...prev, steps: w.steps };
-        await kvSetJSON(db, uid, logKey, log);
+        await dayLogTxn(db, uid, logKey, (cur) => { cur.wearable = { ...prev, steps: w.steps }; });
         written++;
       }
       continue;
     }
-    log.wearable = next;
-    await kvSetJSON(db, uid, logKey, log);
+    // ⚠️ MERGE THE ONE FIELD THIS SYNC OWNS, not the whole document (S212d).
+    // `wearableOnly` marks a day the tracker created and the person never
+    // touched, so the coach surfaces can tell "logged" from "wore a watch".
+    await dayLogTxn(db, uid, logKey, (cur) => {
+      cur.wearable = next;
+      const touched = (Array.isArray(cur.meals) && cur.meals.length) || Number(cur.calories) > 0
+        || Number(cur.water) > 0 || Number(cur.weight) > 0;
+      if (touched) delete cur.wearableOnly; else cur.wearableOnly = true;
+    });
     written++;
     if (!firstDate || date < firstDate) firstDate = date;
     if (!lastDate || date > lastDate) lastDate = date;
@@ -699,10 +729,16 @@ async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDat
   // time on every run, and the age would never roll at all. Caught by the
   // test-tz-snapshot guard that enumerates what mapSnapshot writes.
   if (prev.ageEditedAt) delete snapApply.ageSetAt;
+  // Hoisted (S212d): the check-in seeding further down needs the same answer, and
+  // scoping it to the plan-level guard is what let that block overwrite the very
+  // reading this guard exists to protect.
+  //
+  // `!c.isFuturePlan` (S212d): a plotted GOAL is future-dated, so it always won
+  // this reduce and permanently deleted snapApply.weightLbs — the Trainerize
+  // weight sync silently stopped for that client the day a target was set.
+  const newestLocal = (Array.isArray(prev.checkIns) ? prev.checkIns : []).reduce((acc, c) =>
+    (c && c.date && !c.isFuturePlan && c.weight != null && (!acc || c.date > acc)) ? c.date : acc, null);
   if (snapApply.weightLbs != null) {
-    const cis = Array.isArray(prev.checkIns) ? prev.checkIns : [];
-    const newestLocal = cis.reduce((acc, c) =>
-      (c && c.date && c.weight != null && (!acc || c.date > acc)) ? c.date : acc, null);
     // >= not >: when BOTH have a reading for the same day, the one entered here
     // is the deliberate, later action — a trainer correcting a client's weight
     // today should not be reverted by Trainerize's own stat for today, which is
@@ -721,8 +757,20 @@ async function applySnapshotAndSyncs(db, targetUid, planId, u, snap, lastStatDat
         mood: null, notes: "Imported from Trainerize", bodyFat: null, loggedBy: "trainer", isFuturePlan: false };
       cis.push(ci);
     }
-    ci.weight = Number(snap.weightLbs);
-    if (snap.bodyFat) ci.bodyFat = Number(snap.bodyFat);
+    // ⚠️ THE SAME PROTECTION THE PLAN-LEVEL FIELD ALREADY HAS (S212d). Eight
+    // lines above, `>=` deliberately keeps a trainer's own correction for today
+    // from being reverted by Trainerize's stat for today — and then this
+    // overwrote the very check-in that correction lives in, so the number went
+    // back anyway one layer down. The guard protected `d.weightLbs` and not the
+    // record it is derived from.
+    const localWins = newestLocal && lastStatDate && newestLocal >= lastStatDate
+      && ci.loggedBy !== "trainerize";
+    if (!localWins || ci.weight == null) ci.weight = Number(snap.weightLbs);
+    // Body fat likewise: the plan-level field is in LOCAL_EDIT_WINS and dropped
+    // when bodyFatEditedAt is set, but the per-day reading had no such guard —
+    // so two halves of one quantity were governed by opposite rules, and an
+    // imported scale number silently replaced a caliper reading taken by hand.
+    if (snap.bodyFat && !(localWins && ci.bodyFat != null)) ci.bodyFat = Number(snap.bodyFat);
     cis.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     d.checkIns = cis;
     if (d.startWeightLbs == null || d.startWeightLbs === "") d.startWeightLbs = Number(snap.weightLbs);

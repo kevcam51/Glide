@@ -152,9 +152,18 @@ const SCOPE_FOR_TOOL = {
 // so the line matters: mark an additive tool destructive and every meal log
 // nags; miss an overwriting one and it silently replaces a client's targets.
 // ADDITIVE (hint stays false): log_meal(s), log_water, log_workout, log_check_in,
-// log_measurements, log_weigh_in (merges into a same-day entry since S86),
 // create_note, create_plan, add_custom_exercise, send_client_request.
+//
+// ⚠️ log_weigh_in AND log_measurements WERE ON THE ADDITIVE LINE AND ARE NOT
+// ADDITIVE (S212d). "Merges into a same-day entry" described how the OTHER
+// fields survive — but the weight itself is replaced (`entry.weight = v`), and
+// so is the plan's current weight and, for measurements, the body-fat snapshot
+// `d.bodyFat`. So an evening "log my weigh-in, 178" silently destroyed a 182.4
+// logged that morning, with Claude showing the light confirmation the hint asked
+// for. The rule at the top of this comment is the test, and both fail it.
 const DESTRUCTIVE_TOOLS = new Set([
+  "log_weigh_in",           // replaces that day's weight AND the plan's current weight
+  "log_measurements",       // replaces that day's tape values and the body-fat snapshot
   "remove_meal",            // deletes an entry outright
   "set_workout_schedule",   // REPLACES the week for any category supplied
   "switch_plan",            // changes which plan is active

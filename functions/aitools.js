@@ -908,6 +908,15 @@ function profileSummary(d, canSeeNotes) {
 // the metric for scale-averse clients. Age/gender variants auto-selected.
 function baileyBF(d, m) {
   const age = effectiveAge(d);
+  // ⚠️ THE S200v AGE GUARD REACHED caliperBF AND NOT THIS (S212d). effectiveAge
+  // falls back to 0, and both Bailey variants branch on `age > 30` — so a plan
+  // with no age silently took the UNDER-30 coefficient (3× forearm for men,
+  // 0.8× thigh for women) and returned a confident percentage the app itself
+  // refuses to show. The AI and the MCP connector were the only surfaces still
+  // quoting it, which is precisely the "scanner 20, caliper 15, tape 11" spread
+  // Kevin reported in S200v — reintroduced on the server after being fixed on
+  // the client. A mirror is only a mirror if the fix lands on both faces.
+  if (!(age >= 15 && age <= 100)) return null;
   const g = d.gender;
   const n = (v) => (v > 0 ? Number(v) : null);
   if (g === "male") {
@@ -1032,19 +1041,31 @@ function measurementMetrics(d, m) {
   const bailey = baileyBF(d, m);
   const navy = navyBF(d, m);
   const caliper = caliperBF(d, m);
-  const manual = Number(m.bodyFatManual) > 0 ? Math.round(Number(m.bodyFatManual) * 10) / 10 : null;
+  // Bounded like the other three formulas — mirrors src/App.jsx (S212d).
+  const manualRaw = Number(m.bodyFatManual) > 0 ? Math.round(Number(m.bodyFatManual) * 10) / 10 : null;
+  const manual = manualRaw != null && manualRaw > 1 && manualRaw < 75 ? manualRaw : null;
   // Navy over Bailey, and the same precedence the app uses — see the notes on
   // both in src/App.jsx measurementMetrics (S200v).
   const tapeAvg = navy != null ? navy : bailey;
   const tapeSource = navy != null ? "navy" : bailey != null ? "bailey" : null;
-  const avg = manual != null ? manual : caliper != null ? caliper : tapeAvg;
-  const bodyFatSource = manual != null ? "scale" : caliper != null ? "caliper" : tapeAvg != null ? "tape" : null;
+  // Honours d.bfPrimarySource, mirroring src/App.jsx measurementMetrics (S212d).
+  // Without it the assistant and the MCP connector reported a lean mass computed
+  // from a different method than the app's own charts — the same figure, two
+  // products, two answers.
+  const byMethod = { scale: manual, caliper, tape: tapeAvg };
+  const pref = d && d.bfPrimarySource;
+  const prefVal = pref ? byMethod[pref] : null;
+  const avg = prefVal != null ? prefVal
+    : manual != null ? manual : caliper != null ? caliper : tapeAvg;
+  const bodyFatSource = prefVal != null ? pref
+    : manual != null ? "scale" : caliper != null ? "caliper" : tapeAvg != null ? "tape" : null;
   const whtr = whtrOf(d, m);
   // The weight THIS DAY was measured at — not today's (see weightOnDate).
   const wSrc = weightOnDate(d, m && m.date);
   const weight = wSrc.lbs || 0;
   const bf = avg;
   const leanMassLbs = weight > 0 && bf != null ? Math.round(weight * (1 - bf / 100)) : null;
+  const fatMassLbs = leanMassLbs != null ? Math.round(weight) - leanMassLbs : null;
   // Bailey goal weight = lean mass ÷ (1 − target BF%): a physiologically
   // derived goal instead of a guessed number (docs/METRICS-PLAN.md group 6).
   const targetBf = Number(d.goalBodyFat) || null;
@@ -1054,8 +1075,34 @@ function measurementMetrics(d, m) {
   // is reading rather than quoting a bare percentage the app may disagree with.
   return { baileyBF: bailey, navyBF: navy, caliperBF: caliper, manualBF: manual,
     bodyFatPct: avg, bodyFatSource, tapeSource, waistToHeight: whtr,
-    leanMassLbs, goalWeightFromLeanMass,
+    leanMassLbs, fatMassLbs, goalWeightFromLeanMass,
     weightLbs: weight || null, weightDate: wSrc.date, weightSource: wSrc.source };
+}
+
+// The newest day the person actually LOGGED something (S212d).
+//
+// ⚠️ A DAY-LOG DOCUMENT IS NOT PROOF SOMEONE OPENED THE APP. The Trainerize
+// wearable sync creates one for every date a tracker reported, up to 90 days
+// back — so a client who has never opened Glidna showed a last-log date of
+// today on every coach surface, and never appeared in "needs attention". The
+// sync marks those `wearableOnly`, so they can be told apart; a bare descending
+// limit(1) over the KEYS cannot see inside the document at all. Reads a short
+// descending page and takes the newest with real content instead.
+async function lastRealLogDate(db, ownerUid, prefix) {
+  try {
+    const logs = await db.collection(`users/${ownerUid}/kv`)
+      .where("k", ">=", prefix).where("k", "<=", prefix + "\uf8ff")
+      .orderBy("k", "desc").limit(20).get();
+    for (const l of logs.docs) {
+      const row = l.data() || {};
+      let lg = {}; try { lg = JSON.parse(row.value || "{}") || {}; } catch (e) { lg = {}; }
+      if (lg.wearableOnly) continue;
+      const real = (Array.isArray(lg.meals) && lg.meals.length) || Number(lg.calories) > 0
+        || Number(lg.water) > 0 || Number(lg.weight) > 0 || Number(lg.protein) > 0;
+      if (real) return (row.k || "").slice(-10);
+    }
+  } catch (e) { /* best effort — a missing date reads as "never logged" */ }
+  return null;
 }
 
 // Admin UID (matches functions/index.js, aichat.js, mcp.js and firestore.rules
@@ -2062,7 +2109,10 @@ async function runTool(name, input, ctx) {
     const nums = await idNumMap(db, ctx.callerUid);
     const days = (ts) => ts ? Math.floor((Date.now() - ts) / 86400000) : null;
     return {
-      plans: index.filter((p) => p && p.id).map((p) => ({
+      // Simulations are omitted: the plan-data tools refuse them (see the
+      // localPlanId gate in runTool), so listing them here would hand the model
+      // ids it can only fail on — and it would keep retrying them.
+      plans: index.filter((p) => p && p.id && !p.isSimulation).map((p) => ({
         localPlanId: p.id,
         ref: refCode(p.id),
         num: nums[p.id] || null,   // the "#6" shown on the trainer's home
@@ -2155,13 +2205,7 @@ async function runTool(name, input, ctx) {
       // descending limit(1) query (this used to download every daily-log doc
       // the client ever wrote, per client, per call).
       const prefix = `caliq-log-${id}-`;
-      let last = null;
-      try {
-        const logs = await db.collection(`users/${doc.id}/kv`)
-          .where("k", ">=", prefix).where("k", "<=", prefix + "")
-          .orderBy("k", "desc").limit(1).get();
-        logs.forEach((l) => { const k = l.data().k || ""; last = k.slice(-10); });
-      } catch (e) { /* ignore */ }
+      const last = await lastRealLogDate(db, doc.id, prefix);   // skips tracker-only days (S212d)
       let daysSince = null;
       if (last) {
         const today = new Date();
@@ -2266,10 +2310,7 @@ async function runTool(name, input, ctx) {
           // , not "" — an empty upper bound makes the range match only a
           // key equal to the prefix, so this quietly returned nothing and the
           // last-log date never appeared (the S85 gotcha, live again here).
-          const logs = await db.collection(`users/${ownerUid}/kv`)
-            .where("k", ">=", prefix).where("k", "<=", prefix + "")
-            .orderBy("k", "desc").limit(1).get();
-          logs.forEach((l) => { m.lastLogDate = (l.data().k || "").slice(-10); });
+          m.lastLogDate = await lastRealLogDate(db, ownerUid, prefix);   // skips tracker-only days (S212d)
         } catch (e) { /* best-effort disambiguation */ }
       }
     }
@@ -2282,7 +2323,9 @@ async function runTool(name, input, ctx) {
           ? "Several people match. Ask the user which one, describing them by a human detail (email, current weight, or last-log date) — NEVER the raw id."
             + (kinds.size > 1 ? " NOTE: these span BOTH a connected account and one of the trainer's own plan files — that is exactly the case to ask about, because writing to the wrong one is invisible to them." : "")
           : matches[0].isSimulation
-            ? "Heads up: the only match is a SIMULATION (a sandbox projection, not a real logged plan). Say so before writing anything into it."
+            ? "The only match is a SIMULATION — a sandbox projection for a prospect, not a plan anyone is tracking. "
+              + "Nothing can be read from or written to it here and the plan tools will refuse its id: say so, and say that the trainer "
+              + "edits it from its setup steps in the app and converts it to a real plan when the prospect signs up. Do not retry with localPlanId."
             : undefined,
     };
   }
@@ -2332,12 +2375,7 @@ async function runTool(name, input, ctx) {
         });
       } catch (e) { /* ignore */ }
       // true latest log date (one cheap desc/limit-1 query) → days since
-      let lastLog = null;
-      try {
-        const ls = await db.collection(`users/${ownerUid}/kv`)
-          .where("k", ">=", prefix).where("k", "<=", prefix + "\uf8ff").orderBy("k", "desc").limit(1).get();
-        ls.forEach((l) => { lastLog = (l.data().k || "").slice(-10); });
-      } catch (e) { /* ignore */ }
+      const lastLog = await lastRealLogDate(db, ownerUid, prefix);   // skips tracker-only days (S212d)
       const daysSince = lastLog
         ? Math.round((endMs - new Date(lastLog + "T00:00:00Z").getTime()) / 86400000) : null;
       const cur = Number(data.weightLbs) || null;
@@ -2379,8 +2417,14 @@ async function runTool(name, input, ctx) {
     const ownIndex = (await kvGetJSON(db, ctx.callerUid, "caliq-index")) || [];
     const candidates = [];
     for (const docSnap of snap.docs) candidates.push({ kind: "client", docSnap });
+    // ⚠️ SIMULATIONS ARE NOT PEOPLE WHO NEED ATTENTION (S212d). A sim is a sales
+    // projection built from a prospect's typed numbers; it has no logging, so it
+    // lands in every "hasn't logged in N days" bucket and pushes real clients
+    // down the list. Worse, the row carries a localPlanId that every plan tool
+    // now refuses, so the assistant offers to act on it and cannot. This was the
+    // one roster tool the S212c filter missed.
     for (const p of Array.isArray(ownIndex) ? ownIndex : []) {
-      if (p && p.id) candidates.push({ kind: "local_plan", p });
+      if (p && p.id && !p.isSimulation) candidates.push({ kind: "local_plan", p });
     }
     const total = candidates.length;
     const pageItems = candidates.slice(offset, offset + PAGE);
@@ -2475,8 +2519,21 @@ async function runTool(name, input, ctx) {
     if (input.clientId) return { error: "Use clientId OR localPlanId, not both." };
     const wantedPid = String(input.localPlanId);
     const localIndex = (await kvGetJSON(db, ctx.callerUid, "caliq-index")) || [];
-    if (!localIndex.some((p) => p && p.id === wantedPid)) {
+    const wantedRow = localIndex.find((p) => p && p.id === wantedPid);
+    if (!wantedRow) {
       return { error: "No local plan with that id — call list_local_plans to see the trainer's local files." };
+    }
+    // ⚠️ A SIMULATION IS NOT AN ACCOUNT THE ASSISTANT WORKS ON (S212c, Kevin).
+    // It is a sales projection for a prospect: the five wizard inputs in, the
+    // potential out, and nothing tracked. Refusing HERE — at the single
+    // resolution point S87 established — covers every plan-data tool, both
+    // Accept callables and the MCP connector in one place, rather than twelve
+    // tools each remembering. Converting the sim is what makes it real, and
+    // that spends a roster slot.
+    if (wantedRow.isSimulation) {
+      return { error: "That file is a SIMULATION — a sandbox projection for a prospect, not a plan anyone is tracking. "
+        + "The trainer edits it from its five setup steps in the app, and converts it to a real plan when the prospect signs up. "
+        + "Nothing can be logged to or changed in it from here." };
     }
     planOverride = wantedPid;
   }
@@ -2823,7 +2880,28 @@ async function runTool(name, input, ctx) {
       const t = d.goalRangeLow; d.goalRangeLow = d.goalRangeHigh; d.goalRangeHigh = t; // swap if reversed
     }
     if (input.activityLevel && ACTIVITY_MULT[input.activityLevel]) { d.activityLevel = input.activityLevel; changes.push(`activity ${input.activityLevel}`); }
-    if (input.bodyFatPct != null) { const b = clampNum(input.bodyFatPct, 2, 70, true); if (b) { d.bodyFat = b; changes.push("body fat"); } }
+    // ⚠️ THE SNAPSHOT ALONE IS NOT DURABLE (S212d). `d.bodyFat` is recomputed
+    // from the NEWEST measurement entry every time the app opens the plan
+    // (repairedBodyFat), so a body fat written only here was silently reverted
+    // the next time anyone looked at it — the assistant said "done", the number
+    // was gone, and nothing reported a failure. A scan reading belongs in the
+    // measurement store, which is what the app reads and what the charts plot.
+    if (input.bodyFatPct != null) {
+      const b = clampNum(input.bodyFatPct, 2, 70, true);
+      if (b) {
+        d.bodyFat = b; changes.push("body fat");
+        // Record it where the app actually reads it (S212d) — merged into that day's
+        // measurement entry as a scale/scanner reading, exactly as the app does.
+        if (!Array.isArray(d.measurements)) d.measurements = [];
+        const mDate = ctx.today;
+        const mSame = d.measurements.find((e) => e && e.date === mDate);
+        const mEntry = { date: mDate, timestamp: checkInTimestamp(mDate),
+          loggedBy: (ctx.isTrainer && uid !== ctx.callerUid) ? "trainer" : "client",
+          ...(mSame || {}), bodyFatManual: b };
+        mEntry.timestamp = checkInTimestamp(mDate);
+        d.measurements = [...d.measurements.filter((e) => e && e.date !== mDate), mEntry];
+      }
+    }
     if (input.goalBodyFatPct != null) { const b = clampNum(input.goalBodyFatPct, 2, 70, true); if (b) { d.goalBodyFat = b; changes.push("goal body fat"); } }
     // The write half of the same gate. `trainerNotes` is not offered in a
     // client's tool schema, but a schema is a suggestion to a model, not a
@@ -2952,7 +3030,18 @@ async function runTool(name, input, ctx) {
       workedOut: null, mood: null, notes: "", bodyFat: null, loggedBy, isFuturePlan: false,
       ...(sameDay || {}) };
     if (mood != null) entry.mood = mood;
-    if (bf != null) { entry.bodyFat = bf; d.bodyFat = bf; }
+    if (bf != null) {
+      entry.bodyFat = bf; d.bodyFat = bf;
+      // Record it where the app actually reads it (S212d) — merged into that day's
+      // measurement entry as a scale/scanner reading, exactly as the app does.
+      if (!Array.isArray(d.measurements)) d.measurements = [];
+      const mDate = ctx.today;
+      const mSame = d.measurements.find((e) => e && e.date === mDate);
+      const mEntry = { date: mDate, timestamp: checkInTimestamp(mDate), loggedBy,
+        ...(mSame || {}), bodyFatManual: bf };
+      mEntry.timestamp = checkInTimestamp(mDate);
+      d.measurements = [...d.measurements.filter((e) => e && e.date !== mDate), mEntry];
+    }
     if (notes != null) entry.notes = notes;
     if (hit != null) entry.hitTarget = hit;
     entry.timestamp = checkInTimestamp(date);
@@ -2969,6 +3058,16 @@ async function runTool(name, input, ctx) {
   if (name === "log_measurements") {
     const re = /^\d{4}-\d{2}-\d{2}$/;
     const date = re.test(input.date || "") ? input.date : ctx.today;
+    // ⚠️ NO FUTURE TAPE READINGS (S212d). A measurement is an observation of a
+    // body on a day. `data.measurements` carries no isFuturePlan flag and every
+    // reader takes the newest entry by timestamp, so a future-dated one would
+    // become the headline body fat, the lean/fat masses and the derived goal
+    // weight — and overwrite d.bodyFat. The app blocks this on both its write
+    // paths; the AI and MCP connector must not be the way around it.
+    if (date > ctx.today) {
+      return { error: "That date is in the future. A tape measurement records a body on a day that has happened — "
+        + "log it on or before today, or use set_personal_info to record a GOAL." };
+    }
     // Sanity-clamp each provided field (inches); ignore junk values.
     const vals = {};
     for (const f of MEASUREMENT_FIELDS) {
@@ -3019,6 +3118,9 @@ async function runTool(name, input, ctx) {
       if (m.baileyBF != null) out.baileyBF = m.baileyBF;
       if (m.navyBF != null) out.navyBF = m.navyBF;
       if (m.bodyFatPct != null) out.bodyFatPct = m.bodyFatPct;
+      // The METHOD travels with every percentage (S212d) — without it the model
+      // had no way to tell a scale reading from a tape estimate and compared them.
+      if (m.bodyFatSource) out.bodyFatMethod = m.bodyFatSource;
       if (m.waistToHeight != null) out.waistToHeight = m.waistToHeight;
       // The weight each entry's lean mass was computed FROM, so the assistant can
       // tell a real change from a carried-forward one (S212).
@@ -3032,6 +3134,13 @@ async function runTool(name, input, ctx) {
     if (latest && oldest && latest !== oldest) {
       for (const f of [...MEASUREMENT_FIELDS, "bodyFatPct", "waistToHeight"]) {
         if (latest[f] != null && oldest[f] != null) {
+          // ⚠️ ONLY WHEN BOTH ENDS USED THE SAME INSTRUMENT (S212d). Tape numbers
+          // are tape numbers, but bodyFatPct is whichever method that entry had —
+          // so a client who bought a smart scale halfway through the window got a
+          // "body fat change" that was a change of instrument, reported to the
+          // assistant as fact with nothing marking it. A scale and a tape can sit
+          // 5 points apart on the same body: that is a fabricated 5-point result.
+          if (f === "bodyFatPct" && latest.bodyFatMethod !== oldest.bodyFatMethod) continue;
           change[f] = Math.round((latest[f] - oldest[f]) * 100) / 100;
         }
       }
@@ -3440,7 +3549,11 @@ async function runTool(name, input, ctx) {
     // everything derived from current weight moved with it: pounds to go, the
     // goal timeline, the calorie target, the trainer's roster card. The app's
     // own weigh-in has guarded this since S86; the AI path never learned it.
-    const laterExists = d.checkIns.some((c) => c && c.date && c.date > date && Number(c.weight) > 0);
+    // `!c.isFuturePlan` (S212d) — a plotted future GOAL is not a weigh-in, and
+    // without this term one made laterExists permanently true, so an AI- or
+    // MCP-logged weigh-in could never become the current weight. Same miss as
+    // the app's two writers; see src/App.jsx ClientHome.logWeight.
+    const laterExists = d.checkIns.some((c) => c && c.date && !c.isFuturePlan && c.date > date && Number(c.weight) > 0);
     if (!laterExists) d.weightLbs = v;
     // MERGE into an existing same-date check-in — a wholesale replace here used
     // to wipe a same-day workout/notes/body-fat (log_workout at 9am, weigh-in
@@ -3449,7 +3562,11 @@ async function runTool(name, input, ctx) {
     const entry = { date, timestamp: checkInTimestamp(date), weight: v, calories: null, hitTarget: null,
       workedOut: null, mood: null, notes: "", bodyFat: null, loggedBy, isFuturePlan: false,
       ...(sameDay || {}) };
+    // Re-stamped after the spread (S212d): merging onto a day that was PLANNED
+    // first would otherwise inherit isFuturePlan:true and hide the weigh-in from
+    // every reader that filters plotted goals.
     entry.weight = v;
+    entry.isFuturePlan = date > ctx.today;
     entry.timestamp = checkInTimestamp(date);
     d.checkIns = [...d.checkIns.filter((c) => c && c.date !== date), entry];
     return {};

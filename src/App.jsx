@@ -1017,6 +1017,71 @@ function weightOnDate(d, dateKey) {
   return { lbs: pick.w, date: pick.k,
     source: pick.k === dateKey ? "sameDay" : onOrBefore ? "carriedBack" : "carriedForward" };
 }
+// Which tape formula this person's history is actually on (S212d).
+//
+// ⚠️ "TAPE" IS TWO METHODS WEARING ONE LABEL. `tapeAvg = navy ?? bailey` is a
+// per-ENTRY fallback, so a date with a neck measurement is Navy and a date
+// without it is Bailey — and both were pushed into a single "Body fat % · tape"
+// series. Bailey reads several points lower for a muscular build (the whole
+// reason S200v demoted it), so forgetting the neck one week drew a multi-point
+// "fat loss" that was a change of formula. Same defect S183r/S200y fixed for the
+// scale-vs-caliper case; the tape line was left mixing internally.
+// Navy wins when the history has any, since it is the validated regression.
+function dominantTapeSource(d, entries) {
+  let navy = 0, bailey = 0;
+  for (const e of entries || []) {
+    const mm = measurementMetrics(d, e);
+    if (mm.tapeSource === "navy") navy++; else if (mm.tapeSource === "bailey") bailey++;
+  }
+  return navy > 0 ? "navy" : bailey > 0 ? "bailey" : null;
+}
+
+// Remove a WEIGH-IN without removing the day (S212d).
+//
+// ⚠️ THE ✕ SAID "Delete this weigh-in" AND DELETED THE WHOLE CHECK-IN. A check-in
+// is the day's record — the workout flag, the mood, the notes, a body-fat
+// reading — and every deleter dropped the entry outright, on one unconfirmed tap,
+// in a list whose sibling control promises the opposite ("tap one to correct it").
+// A mis-tap silently erased a workout logged that morning, and nothing said so.
+// The day survives unless the weigh-in was all it held.
+function removeWeighIn(checkIns, ts) {
+  const list = Array.isArray(checkIns) ? checkIns : [];
+  const target = list.find((c) => c && c.timestamp === ts);
+  if (!target) return list;
+  const carriesMore = target.workedOut != null || target.mood != null
+    || (target.notes && String(target.notes).trim() !== "")
+    || target.bodyFat != null || target.calories != null || target.hitTarget != null;
+  if (!carriesMore) return list.filter((c) => c && c.timestamp !== ts);
+  return list.map((c) => (c && c.timestamp === ts ? { ...c, weight: null } : c));
+}
+
+// Is this a plausible reading for this field? (S212d)
+//
+// ⚠️ THE BOUNDS EXISTED IN ONE WRITE PATH OF FIVE. MeasurementsModal.save()
+// rejected tape outside 3–90 in, calipers outside 2–100 mm and a scan reading
+// outside 3–70% — and named what it refused, which S200y added precisely because
+// a silent drop let someone believe they had corrected a number. Every other
+// writer to the same store applied only `> 0`: the chart point editor, both
+// day-detail row editors and the calendar's day grid. So a waist typed in
+// centimetres, or 185 for 18.5, went straight in through four of five doors.
+const MEASURE_BOUNDS = { bodyFatManual: [3, 70] };
+const measureBoundsFor = (f) => MEASURE_BOUNDS[f]
+  || (CALIPER_ALL.includes(f) ? [2, 100] : MEASUREMENT_FIELDS.includes(f) ? [3, 90] : null);
+const measureUnitFor = (f) => (f === "bodyFatManual" ? "%" : CALIPER_ALL.includes(f) ? "mm" : "in");
+const measureInRange = (f, v) => {
+  const b = measureBoundsFor(f);
+  return !b || (Number(v) >= b[0] && Number(v) <= b[1]);
+};
+
+// Pounds, as a person writes them (S212d). `current - goal` is a float
+// subtraction, and three surfaces printed it raw — "Lose 20.400000000000006 lbs
+// total", including the share card that exists to be screenshotted and sent to a
+// prospect. Trailing ".0" is dropped so a whole number stays whole.
+const fmtLbs = (n) => {
+  const v = Math.round(Number(n) * 10) / 10;
+  return Number.isFinite(v) ? String(v) : "";
+};
+
 // One measurement entry → all derived metrics (nulls where inputs are missing).
 // bodyFatPct = average of whichever of Bailey/Navy computed (they cross-check
 // each other); goalWeightFromLeanMass = Bailey's lean mass ÷ (1 − target BF%).
@@ -1024,7 +1089,14 @@ function measurementMetrics(d, m) {
   const bailey = baileyBF(d, m);
   const navy = navyBF(d, m);
   const caliper = caliperBF(d, m);
-  const manual = Number(m.bodyFatManual) > 0 ? Math.round(Number(m.bodyFatManual) * 10) / 10 : null;
+  // ⚠️ BOUNDED LIKE THE OTHER THREE (S212d). The caliper, Bailey and Navy
+  // formulas all clamp their output to 1–75%; the scale/scanner reading was
+  // taken verbatim AND wins the precedence — and only one of the five write
+  // paths validated it. A slipped decimal (185 for 18.5) produced a body fat of
+  // 185%, and from it a lean mass of −157 lbs and a derived goal weight in the
+  // negative, printed with the same confidence as a real one.
+  const manualRaw = Number(m.bodyFatManual) > 0 ? Math.round(Number(m.bodyFatManual) * 10) / 10 : null;
+  const manual = manualRaw != null && manualRaw > 1 && manualRaw < 75 ? manualRaw : null;
   // ⚠️ NAVY, NOT AN AVERAGE OF NAVY AND BAILEY (S200v). Bailey adds and subtracts
   // INCHES and calls the result a percent — no height, no weight anywhere in it —
   // so it measures frame and muscularity as much as fat. Measured on the shipping
@@ -1044,19 +1116,40 @@ function measurementMetrics(d, m) {
   const tapeSource = navy != null ? "navy" : bailey != null ? "bailey" : null;
   // Effective body fat: prefer the most direct source the user gave —
   // a scale/scanner reading, then calipers, then the tape estimate.
-  const avg = manual != null ? manual : caliper != null ? caliper : tapeAvg;
-  const bodyFatSource = manual != null ? "scale" : caliper != null ? "caliper" : tapeAvg != null ? "tape" : null;
+  // ⚠️ THE METHOD CHIP SAYS "everything else follows it" — AND ONLY THE CHARTS
+  // DID (S212d). `d.bfPrimarySource` is the person's explicit answer to "which
+  // reading should the app trust?", honoured by bodyCompData and ignored here —
+  // so the headline body fat, lean mass, fat mass, the Bailey correct weight and
+  // the lean-mass-derived goal weight were all computed from a DIFFERENT method
+  // than the charts on the same screen, and the two disagreed by up to ~18 lb of
+  // lean mass. A control that silently governs half of what it promises is worse
+  // than no control.
+  //
+  // The stored choice only wins when that method actually produced a number for
+  // THIS entry; otherwise the old most-direct precedence still answers, so a day
+  // measured only with tape is not blanked because calipers are preferred.
+  const byMethod = { scale: manual, caliper, tape: tapeAvg };
+  const pref = d && d.bfPrimarySource;
+  const prefVal = pref ? byMethod[pref] : null;
+  const avg = prefVal != null ? prefVal
+    : manual != null ? manual : caliper != null ? caliper : tapeAvg;
+  const bodyFatSource = prefVal != null ? pref
+    : manual != null ? "scale" : caliper != null ? "caliper" : tapeAvg != null ? "tape" : null;
   const whtr = whtrOf(d, m);
   // The weight THIS DAY was measured at — not today's (see weightOnDate). An
   // entry with no date (the live preview, as you type) has no day to resolve, so
   // it correctly falls back to the current weight.
   const wSrc = weightOnDate(d, m && m.date);
   const weight = wSrc.lbs || 0;
+  // ⚠️ FAT IS DERIVED FROM LEAN, NOT ROUNDED SEPARATELY (S212d). Rounded
+  // independently, both halves could round the same way and the two chips shown
+  // either side of the stated weight stopped adding up to it — "200 lbs · lean
+  // 171 · fat 30". Splitting once keeps the arithmetic true on screen.
   const leanMassLbs = weight > 0 && avg != null ? Math.round(weight * (1 - avg / 100)) : null;
   // Fat mass = weight × BF% (exact given BF%). Muscle mass = Lee-2000 estimate
   // (needs only height/weight/age/sex, so it shows even without a BF% reading —
   // and, for the same reason, it moves ONLY when the weight does).
-  const fatMassLbs = weight > 0 && avg != null ? Math.round(weight * (avg / 100)) : null;
+  const fatMassLbs = leanMassLbs != null ? Math.round(weight) - leanMassLbs : null;
   const muscleMassLbs = leeMuscleMassLbs(d, weight);
   const targetBf = Number(d.goalBodyFat) || null;
   const goalWeightFromLeanMass = leanMassLbs && targetBf && targetBf > 1 && targetBf < 60
@@ -1076,6 +1169,12 @@ function measurementMetrics(d, m) {
 // Mutates d; both write paths (ClientHome savePlanDataMutation and the App's
 // setDataAndSave) call this so the merge logic lives once.
 function mergeMeasurements(d, vals, dateKey, loggedBy) {
+  // ⚠️ THE BACKSTOP FOR THE CALENDAR GRID'S DATE BOUND (S212d). A tape reading
+  // is an observation of a body on a day; there is no future one. The calendar
+  // hides the grid ahead of today and the modal's picker caps at today, but a
+  // guard living only on the callers is not a boundary — every measurement write
+  // in the app funnels through here, so the rule is enforced here as well.
+  if (dateKey && dateKey > ymdLocal()) return null;
   const list = Array.isArray(d.measurements) ? d.measurements : [];
   const sameDay = list.find((e) => e && e.date === dateKey);
   const entry = { date: dateKey, timestamp: new Date(dateKey + "T12:00:00").getTime(),
@@ -1085,7 +1184,16 @@ function mergeMeasurements(d, vals, dateKey, loggedBy) {
   const m = measurementMetrics(d, entry);
   // Only sync the plan's body-fat field when the user hasn't opted out of the
   // estimate (some people track tape numbers only — don't touch bodyFat then).
-  if (m.bodyFatPct != null && !d.hideBodyFat) d.bodyFat = m.bodyFatPct;
+  //
+  // ⚠️ AND ONLY FROM THE NEWEST ENTRY (S212d). `d.bodyFat` is the plan's CURRENT
+  // body fat — it feeds lean mass, the wizard's card, the trainer dashboards and
+  // the AI. This wrote it from whatever date was just touched, so correcting a
+  // typo in a reading from March re-pointed today's body fat to March's number.
+  // Every edit path reaches here: the modal's back-dated save, a chart point
+  // edit, each day-detail field row, and the calendar day view.
+  const newest = d.measurements.reduce((a, e) =>
+    (e && e.date && (!a || e.date > a)) ? e.date : a, null);
+  if (m.bodyFatPct != null && !d.hideBodyFat && entry.date === newest) d.bodyFat = m.bodyFatPct;
   return entry;
 }
 
@@ -3139,7 +3247,15 @@ function StepGoalWeight({ data, onChange, onBack, onNext }) {
               const monthsFast = bfToLose > 0 ? Math.round(bfToLose / 1.0) : null;
               // Fat lbs to lose to hit goal BF%
               const currentFatLbs = current * (startBf / 100);
-              const goalFatLbs = current * (goalBf / 100); // simplified - LBM preserved
+              // ⚠️ AT THE GOAL WEIGHT, NOT THE CURRENT ONE (S212d). The comment
+              // said "LBM preserved" and the code priced goal fat at TODAY'S
+              // weight, which is the one assumption that cannot hold: if lean
+              // mass is preserved the goal weight is lean/(1 − goalBf), and it is
+              // lower. The overstatement grows with the gap — and it disagreed
+              // with goalWeightFromLeanMass, which does it correctly.
+              const leanLbs = current * (1 - startBf / 100);
+              const goalWeightLbs = goalBf < 100 ? leanLbs / (1 - goalBf / 100) : current;
+              const goalFatLbs = goalWeightLbs * (goalBf / 100);
               const fatLbsToLose = Math.round(currentFatLbs - goalFatLbs);
               return (
                 <>
@@ -4719,10 +4835,20 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
           {/* The note buttons in this sheet write to a real store, and which
               store depends on WHO is writing and about whom — a trainer's
               "keep private" is not a client's (S200n). */}
-          <DailyCheckIn data={data} onSaveCheckIn={onSaveCheckIn} meUid={meUid} meName={meName} dayCalsAll={dayCalsAll}
-            noteMode={(checkInNoteCtx || {}).mode} noteClientUid={(checkInNoteCtx || {}).clientUid}
-            notePlanId={(checkInNoteCtx || {}).planId} otherName={(checkInNoteCtx || {}).otherName} />
-          {(data.checkIns || []).length >= 1 && (
+          {/* ── A SIMULATION DOES NOT TRACK A PERSON (S212c, Kevin) ────────
+              A sim is a sales tool: a prospect's numbers in, their potential
+              out. It is not a record of anyone, so everything that logs a real
+              body OVER TIME is off — check-ins, weigh-ins and the body-measurement
+              panel here; the calendar and the weight tile on the dashboard.
+              What stays is the five wizard steps and the projection they feed,
+              which is the whole pitch. Converting the sim is what turns it into
+              something worth tracking — and that spends a roster slot. */}
+          {!isSimulation && (
+            <DailyCheckIn data={data} onSaveCheckIn={onSaveCheckIn} onSaveMeasurements={onSaveMeasurements} meUid={meUid} meName={meName} dayCalsAll={dayCalsAll}
+              noteMode={(checkInNoteCtx || {}).mode} noteClientUid={(checkInNoteCtx || {}).clientUid}
+              notePlanId={(checkInNoteCtx || {}).planId} otherName={(checkInNoteCtx || {}).otherName} />
+          )}
+          {!isSimulation && (data.checkIns || []).length >= 1 && (
             <div onClick={() => setShowWeightModal(true)} style={{ cursor: "pointer" }}
               title="Tap to manage weigh-ins">
               <ProgressChart checkIns={data.checkIns} goalWeight={data.goalWeight} currentWeight={data.weightLbs}
@@ -4733,7 +4859,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
               </div>
             </div>
           )}
-          {showWeightModal && (
+          {showWeightModal && !isSimulation && (
             <WeightChartModal checkIns={data.checkIns || []} goalWeight={data.goalWeight}
               currentWeight={data.weightLbs} rangeLow={data.goalRangeLow} rangeHigh={data.goalRangeHigh}
               startWeight={data.startWeightLbs}
@@ -4748,8 +4874,9 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
               }}
               onClose={() => setShowWeightModal(false)} />
           )}
-          {/* Body measurements — tape → body fat, no scale needed (S92) */}
-          {onSaveMeasurements && (
+          {/* Body measurements — tape → body fat, no scale needed (S92).
+              Off for a simulation: see the note above. */}
+          {onSaveMeasurements && !isSimulation && (
             <div className="card" style={{ padding: "14px 16px", marginBottom: "16px", cursor: "pointer",
               display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}
               onClick={() => setShowMeasureModal(true)} title="Tape measurements — track progress without the scale">
@@ -4767,18 +4894,34 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
               <span style={{ color: "var(--muted)", fontSize: "1rem" }}>›</span>
             </div>
           )}
-          {showMeasureModal && (
+          {showMeasureModal && !isSimulation && (() => {
+            const writeWeighIn = (dateKey, weight) => {
+              const ex = (data.checkIns || []).find((c) => c.date === dateKey);
+              if (weight == null) { if (ex && onDeleteCheckIn) onDeleteCheckIn(ex.timestamp); return; }
+              onSaveCheckIn && onSaveCheckIn({ ...(ex || {}), date: dateKey,
+                timestamp: (ex && ex.timestamp) || new Date(dateKey + "T12:00:00").getTime(), weight });
+            };
+            return (
+            // ⚠️ `onLogWeight` (S212b, Kevin). Without it the panel renders with
+            // NO weight box at all — the same screen, opened from the Daily
+            // Dashboard or the client's own home, has one. So the Full Plan was
+            // a third place the weight was simply missing, on the one panel
+            // whose whole job is body metrics: you could correct a past weigh-in
+            // here, and not record today's.
+            //
+            // It writes through the SAME writeWeighIn as onEditWeighIn, so a
+            // weight logged here and one corrected here land in one place, and
+            // the panel's own date picker (which defaults to today and can be
+            // back-dated) decides the day — exactly as it does from the
+            // dashboard.
             <MeasurementsModal data={data} onSave={onSaveMeasurements}
               onDelete={onDeleteMeasurement} onSetGoalWeight={onSetGoalWeight}
               onToggleBodyFat={onToggleBodyFat} onSetBfSource={onSetBfSource}
-              onEditWeighIn={(dateKey, weight) => {
-                const ex = (data.checkIns || []).find((c) => c.date === dateKey);
-                if (weight == null) { if (ex && onDeleteCheckIn) onDeleteCheckIn(ex.timestamp); return; }
-                onSaveCheckIn && onSaveCheckIn({ ...(ex || {}), date: dateKey,
-                  timestamp: (ex && ex.timestamp) || new Date(dateKey + "T12:00:00").getTime(), weight });
-              }}
+              onLogWeight={(v, dateKey) => { writeWeighIn(dateKey, v); }}
+              onEditWeighIn={writeWeighIn}
               onClose={() => setShowMeasureModal(false)} />
-          )}
+            );
+          })()}
           <AICoach data={data} tdee={tdee} totalBurn={totalBurn} totalStrBurn={totalStrBurn} activeDays={activeDays} activeStrDays={activeStrDays} />
 
           {/* ── Trainer Notes — the coach's, and only the coach's (S199j) ──
@@ -4900,7 +5043,29 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
         </>
       )}
 
-      {/* ── Ideal Body Weight Card (always visible) ── */}
+      {/* ── Ideal Body Weight Card ──
+          ⚠️ "ALWAYS VISIBLE" INCLUDED WITH NO HEIGHT OR GENDER (S212d). Every
+          number on it divides by height: with height blank, heightM is 0, BMI is
+          Infinity — and bmiCategory has no non-finite branch, so Infinity fell
+          through every comparison to "Obese", in red, next to an ideal range of
+          0–0 lbs. Devine and Robinson pick their constants with
+          `gender === "male" ? … : …`, so an unset gender silently took the FEMALE
+          formula and printed it as this person's ideal weight.
+          A plan can be half-built — S24 fixed a crash on exactly that path — so
+          the card now asks for what it needs instead of inventing an answer. */}
+      {!(totalInches > 0 && Number(weightLbs) > 0 && (gender === "male" || gender === "female")) ? (
+        <div className="ibw-card">
+          <div className="ibw-toggle" style={{cursor:"default"}}>
+            <div className="ibw-toggle-left">
+              <span className="ibw-toggle-title" style={{display:"inline-flex",alignItems:"center",gap:"7px"}}><Icon name="ruler" size={17} color="var(--accent)" />Ideal Body Weight</span>
+              <span className="ibw-toggle-summary">
+                Add {[!(totalInches > 0) && "height", !(Number(weightLbs) > 0) && "weight",
+                     !(gender === "male" || gender === "female") && "gender"].filter(Boolean).join(", ")} to see this
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className="ibw-card">
         <div className="ibw-toggle" onClick={()=>setShowIBW(v=>!v)}>
           <div className="ibw-toggle-left">
@@ -4990,6 +5155,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
         </div>
         )}
       </div>
+      )}
 
       <div className="rtabs">
         {TABS.map((t,i)=>(
@@ -5592,7 +5758,7 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
         <Row label="Activity" value={actObj.label} />
         <Row label="BMI" value={bmi.toFixed(1)} color={bmi < 25 ? "var(--green)" : "var(--yellow)"} />
         <Row label="Healthy Range" value={`${ibwLowLbs}–${ibwHighLbs} lbs`} color="var(--green)" />
-        {hasGoal && <Row label="Goal Weight" value={`${goalWeight} lbs (−${toLose} lbs)`} color="var(--accent)" />}
+        {hasGoal && <Row label="Goal Weight" value={`${goalWeight} lbs (−${fmtLbs(toLose)} lbs)`} color="var(--accent)" />}
       </div>
 
       {/* Calorie Targets */}
@@ -7564,7 +7730,7 @@ function TimelineTab({ data, tdee, totalBurn }) {
             {fullName(data)||"Client"}: <span style={{color:"var(--accent)"}}>{current} → {goal} lbs</span>
           </div>
           <div className="gb-sub">
-            Lose <strong style={{color:"var(--orange)"}}>{toLose} lbs total</strong>
+            Lose <strong style={{color:"var(--orange)"}}>{fmtLbs(toLose)} lbs total</strong>
             {hasCardio && <span style={{color:"var(--accent)"}}> · Swipe charts to see compliance scenarios</span>}
           </div>
         </div>
@@ -11042,6 +11208,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
   const [dayWear, setDayWear] = useState({});             // date -> {active,steps,total,source,manual} | null
   const [measOpen, setMeasOpen] = useState(false);        // day view: measurements drawer
   const [measDraft, setMeasDraft] = useState({});         // day view: in-progress tape values
+  const [measErr, setMeasErr] = useState("");             // a refused reading, named (S212d)
   const [measMetric, setMeasMetric] = useState(null);     // day view: which site the trend shows
   // Drop half-typed tape values when the selected day changes, so a number meant
   // for Monday can't appear pre-filled under Tuesday and be saved to it on blur.
@@ -11175,7 +11342,11 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
     // Prefer the loaded truth (did calories/meals exist); fall back to "a document
     // exists" only until this month's days have loaded, so dots don't flicker in.
     const food = k in dayAte ? dayAte[k] : loggedDays.includes(k);
-    return { food, weight: !!(ci && ci.weight), workout: !!(ci && ci.workedOut),
+    // ⚠️ `!ci.isFuturePlan` (S212d): the legend calls this dot "weigh-in", and a
+    // plotted GOAL sits in the same `weight` slot — so a target drew a dot
+    // claiming the client stepped on a scale on a day that hasn't happened.
+    // The planned figure still shows in the day view, where it is labelled.
+    return { food, weight: !!(ci && ci.weight && !ci.isFuturePlan), workout: !!(ci && ci.workedOut),
       sched: scheduledFor(k) > 0, session: !!(sessionsOnDay[k] && sessionsOnDay[k].length),
       tracker: !!dayWear[k], measured: measuredDates.has(k) };
   };
@@ -11425,7 +11596,9 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                         : new Date(sessionsOnDay[k][0].startAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
                     </span>
                   )}
-                  {ci && ci.weight && <span style={{ color: "var(--blue)" }}><Icon name="scale" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{ci.weight}</span>}
+                  {ci && ci.weight && (ci.isFuturePlan
+                    ? <span style={{ color: "var(--muted)" }} title="Planned target — not a weigh-in"><Icon name="target" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{ci.weight} planned</span>
+                    : <span style={{ color: "var(--blue)" }}><Icon name="scale" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />{ci.weight}</span>)}
                   {ci && ci.workedOut && <span style={{ color: "var(--orange)" }}><Icon name="dumbbell" size={11} color="currentColor" style={{display:"inline-block",verticalAlign:"middle",marginRight:3}} />done</span>}
                   {/* The week list is where a week gets planned, and a measuring
                       day was invisible in it (S199x). Shows the waist when there
@@ -11851,7 +12024,20 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                   pick (S161, Kevin). mergeMeasurements is already date-keyed and
                   merges into any existing entry, so logging a single site here
                   can't wipe the others recorded that day. */}
-              {onSaveMeasurementsFor && (() => {
+              {/* ⚠️ NOT ON A FUTURE DAY (S212d, found by the completeness critic).
+                  The isFuturePlan rule was enumerated against check-ins and never
+                  against `data.measurements`, which carries no such flag and no
+                  date bound — while this grid sits directly under a day view the
+                  calendar will happily open weeks ahead. A tape number entered
+                  there became the NEWEST entry by timestamp, so it drove the
+                  headline body-fat readout, the lean/fat masses, the derived goal
+                  weight, and mergeMeasurements' write of `d.bodyFat` — from a
+                  measurement of a body that does not exist yet.
+                  The measurements MODAL has always been bounded (`max={ymdLocal()}`
+                  on its date picker); this path never was. Blocked at the door
+                  rather than flagged after the fact, because there is no such
+                  thing as a future tape reading. */}
+              {onSaveMeasurementsFor && sel <= todayKey && (() => {
                 const entries = [...(data.measurements || [])]
                   .filter((e) => e && e.date).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
                 const dayEntry = entries.find((e) => e.date === sel) || {};
@@ -11864,6 +12050,18 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                   if (str === "") return;
                   const v = parseFloat(str);
                   if (!(v > 0)) return;
+                  // The fifth write path into the measurement store, and the
+                  // fourth that applied only `> 0` (S212d). A waist typed in
+                  // centimetres reads ~91 and lands as 91 INCHES, which drives a
+                  // Navy body fat that is nonsense. Refused by name rather than
+                  // dropped in silence — the S200y rule.
+                  if (!measureInRange(f, v)) {
+                    const b = measureBoundsFor(f);
+                    setMeasErr(`${MEASUREMENT_LABELS[f] || f} must be between ${b[0]} and ${b[1]} ${measureUnitFor(f)} — not saved.`);
+                    setTimeout(() => setMeasErr(""), 6000);
+                    return;
+                  }
+                  setMeasErr("");
                   onSaveMeasurementsFor(sel, { [f]: v });
                   setMeasDraft((prev) => { const n = { ...prev }; delete n[f]; return n; });
                 };
@@ -11882,6 +12080,9 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
                   <div style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 12 }}>
                     <div style={{ fontSize: ".72rem", fontWeight: 700, textTransform: "uppercase",
                       letterSpacing: ".5px", color: "var(--muted)", marginBottom: 8 }}>Body measurements (in)</div>
+                    {measErr && (
+                      <div style={{ fontSize: ".72rem", color: "var(--yellow)", marginBottom: 8, lineHeight: 1.45 }}>{measErr}</div>
+                    )}
                     {MEASUREMENT_GROUPS.map((g, gi) => (
                       <div key={g.key} style={{ marginTop: gi ? 12 : 0 }}>
                         <div style={{ fontSize: ".68rem", fontWeight: 700, color: "var(--text-secondary)", marginBottom: 2 }}>{g.label}</div>
@@ -12846,6 +13047,9 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
 }
 
 function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
+  // A sandbox projection, not a person being tracked (S212c) — see the note in
+  // Results. Turns off the calendar and the weigh-in / measurements tile.
+  isSimulation = false,
   // ⚠️ THIS WAS NEVER A PROP, AND THE BODY READ IT ANYWAY (S160 → fixed S197t).
   // Tapping "Progress Snapshot" on any plan with 2+ weigh-ins threw
   // `ReferenceError: logAdherence is not defined` and WHITE-SCREENED THE APP.
@@ -13142,8 +13346,12 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // day being viewed, and the label says whether it was measured that day or
   // carried over. Crucially it never looks FORWARD: viewing Tuesday must not
   // show Thursday's weigh-in, or history rewrites itself as you scroll back.
+  // ⚠️ `!c.isFuturePlan` (S212d). The 20-line note above is about weight
+  // PROVENANCE, and the filter it rests on let a plotted goal through: once its
+  // date passed, `carried` served the target as "Last weighed <date>" — a number
+  // nobody ever stood on a scale for, presented as the client's weight.
   const weighIns = (Array.isArray(data.checkIns) ? data.checkIns : [])
-    .filter((c) => c && c.date && c.weight != null);
+    .filter((c) => c && c.date && c.weight != null && !c.isFuturePlan);
   const dayCheckIn = weighIns.find((c) => c.date === (viewDate || "")) || null;
   const carried = dayCheckIn ? null : weighIns
     .filter((c) => !viewDate || c.date < viewDate)
@@ -13435,7 +13643,11 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const toLose = hasGoal ? Number(weightLbs) - Number(goalWeight) : null;
   const currentWeight = dailyLog.weight || Number(weightLbs);
 
-  if (showCalendar) {
+  // ⚠️ THE STATE GUARD, NOT JUST THE BUTTONS (S212c). Hiding the two entry
+  // points is what a user sees; this is what makes it true. Any other path that
+  // flips showCalendar — a deep link, a restored state, a future caller — still
+  // cannot open a logging surface on a sandbox projection.
+  if (showCalendar && !isSimulation) {
     return (
       <div className="dash">
         <CalendarView data={data} tdee={tdee} onClose={() => setShowCalendar(false)}
@@ -13468,8 +13680,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         <button onClick={()=>onStepDay&&onStepDay(-1)} aria-label="Previous day"
           style={{background:"transparent",border:"1px solid var(--border)",borderRadius:9,width:34,height:34,
             color:"var(--text)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>‹</button>
-        <button onClick={()=>setShowCalendar(true)}
-          style={{background:"transparent",border:"none",cursor:"pointer",padding:"2px 4px",minWidth:0}}>
+        <button onClick={()=>{ if (!isSimulation) setShowCalendar(true); }}
+          style={{background:"transparent",border:"none",cursor:isSimulation?"default":"pointer",padding:"2px 4px",minWidth:0}}>
           <div className="dash-date" style={{marginBottom:0}}>
             {new Date(viewDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}
           </div>
@@ -13503,12 +13715,14 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           Back to today
         </button>
       )}      <div className="dash-greeting">{firstName ? `Hey ${firstName}` : "Your Daily Plan"}</div>
-      <button onClick={() => setShowCalendar(true)}
-        style={{ display:"flex", alignItems:"center", gap:"7px", margin:"0 auto 16px", padding:"9px 16px", fontSize:".82rem", fontWeight:700,
-          borderRadius:"10px", cursor:"pointer", border:"1px solid var(--border)",
-          background:"var(--s2)", color:"var(--text)" }}>
-        <Icon name="calendar" size={16} color="var(--accent)" />Calendar
-      </button>
+      {!isSimulation && (
+        <button onClick={() => setShowCalendar(true)}
+          style={{ display:"flex", alignItems:"center", gap:"7px", margin:"0 auto 16px", padding:"9px 16px", fontSize:".82rem", fontWeight:700,
+            borderRadius:"10px", cursor:"pointer", border:"1px solid var(--border)",
+            background:"var(--s2)", color:"var(--text)" }}>
+          <Icon name="calendar" size={16} color="var(--accent)" />Calendar
+        </button>
+      )}
 
       {/* Streak */}
       <div className="dash-streak">
@@ -14268,7 +14482,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         </div>}
         {/* Today's Weight — full-width tile (moved from Quick Log); opens the
             body-fat & measurements hub (weight, body fat %, tape). */}
-        {!tileHidden("weight") && <div className="dash-cta" style={{gridColumn:"1 / -1",cursor:onSaveMeasurements?"pointer":"default",borderColor:"var(--border)"}}
+        {!tileHidden("weight") && !isSimulation && <div className="dash-cta" style={{gridColumn:"1 / -1",cursor:onSaveMeasurements?"pointer":"default",borderColor:"var(--border)"}}
           onClick={onSaveMeasurements?()=>setShowMeasure(true):undefined}>
           <div className="dash-cta-icon" style={{display:"flex",justifyContent:"center"}}><Icon name="scale" size={23} color="var(--muted)" /></div>
           <div className="dash-cta-val">{dayWeight?dayWeight.toFixed(1):"—"}<span style={{fontSize:".5em",color:"var(--muted)",marginLeft:"3px"}}>lbs</span></div>
@@ -15372,7 +15586,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           onClose={()=>setShowSim(false)} />
       )}
 
-      {showMeasure && onSaveMeasurements && (() => {
+      {showMeasure && onSaveMeasurements && !isSimulation && (() => {
         // One dated writer, shared by the modal's own date picker and by the
         // tap-to-edit on the weight chart: merge by date so a same-day workout,
         // note or mood survives. onDeleteCheckIn needs the timestamp, not the date.
@@ -15756,7 +15970,7 @@ function CheckInCalendar({ checkIns, selected, onSelect }) {
   );
 }
 
-function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll, noteMode = "client", noteClientUid, notePlanId, otherName }) {
+function DailyCheckIn({ data, onSaveCheckIn, onSaveMeasurements, meUid, meName, dayCalsAll, noteMode = "client", noteClientUid, notePlanId, otherName }) {
   // Whose sheet this is. "client" is the person's own check-in; the other three
   // modes mean a coach is looking at somebody else's day (S200n).
   const isCoach = noteMode !== "client";
@@ -15842,6 +16056,16 @@ function DailyCheckIn({ data, onSaveCheckIn, meUid, meName, dayCalsAll, noteMode
       isFuturePlan: isFuture,
     };
     onSaveCheckIn(checkin);
+    // ⚠️ THE BODY-FAT BOX WAS WRITE-ONLY (S212d). `checkin.bodyFat` is written
+    // here, pre-filled back into this same form, preserved by two calendar
+    // writers — and read by NOTHING ELSE in the app or on the server. Not the
+    // headline readout, not the charts, not lean mass, not the AI. Someone typed
+    // their DEXA result into a field labelled "Body Fat % (optional)" and it went
+    // nowhere. The app's real store for a scan reading is a measurement entry's
+    // bodyFatManual, so that is where it goes now — same date, merged, so it
+    // joins the scale series and every derived mass.
+    const bf = bodyFatLog ? Number(bodyFatLog) : null;
+    if (bf > 0 && onSaveMeasurements && !isFuture) onSaveMeasurements({ bodyFatManual: bf }, checkDate);
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
@@ -16160,7 +16384,7 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
       </div>
       {hasGoal && (
         <div style={{fontSize:".85rem",color:"var(--muted)",marginBottom:"8px"}}>
-          {weightLbs} → {goalWeight} lbs · {toLose} lbs to go
+          {weightLbs} → {goalWeight} lbs · {fmtLbs(toLose)} lbs to go
         </div>
       )}
       <div className="share-card-footer">Screenshot this card or tap share below</div>
@@ -16258,7 +16482,12 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}}>
         <div>
           <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",letterSpacing:"2px",color:"var(--accent)",display:"flex",alignItems:"center",gap:"8px"}}><Icon name="chart" size={18} color="var(--accent)" />Progress</div>
-          <div style={{fontSize:".74rem",color:"var(--muted)"}}>{sorted.length} {sorted.length === 1 ? pointNoun : pointNoun.endsWith("y") ? pointNoun.slice(0, -1) + "ies" : pointNoun + "s"}{pointNoun === "weigh-in" ? ` · ${checkIns.length} ${checkIns.length === 1 ? "check-in" : "check-ins"}` : ""}{onEditPoint ? " · tap a dot to edit" : ""}</div>
+          {/* ⚠️ THE SYNTHESIZED START POINT IS NOT A READING (S212d).
+              WeightChartModal prepends the plan's starting weight so a single
+              weigh-in still draws a line; unmarked, it was counted here as a
+              second weigh-in and drawn with the same solid dot, so "2 weigh-ins"
+              described one. It carries `synthetic: true` now. */}
+          <div style={{fontSize:".74rem",color:"var(--muted)"}}>{sorted.filter(c => !c.synthetic).length} {sorted.filter(c => !c.synthetic).length === 1 ? pointNoun : pointNoun.endsWith("y") ? pointNoun.slice(0, -1) + "ies" : pointNoun + "s"}{pointNoun === "weigh-in" ? ` · ${checkIns.length} ${checkIns.length === 1 ? "check-in" : "check-ins"}` : ""}{onEditPoint ? " · tap a dot to edit" : ""}</div>
           {planned.length > 0 && (
             <div style={{fontSize:".7rem",color:"var(--muted)",display:"flex",alignItems:"center",gap:"5px",marginTop:"2px"}}>
               <svg width="18" height="4" style={{overflow:"visible",flex:"none"}} aria-hidden="true">
@@ -16411,8 +16640,13 @@ function ProgressChart({ checkIns, goalWeight, currentWeight, logAdherence, show
         )}
         {goal && (
           <div style={{textAlign:"center"}}>
-            <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.2rem",color:"var(--accent)"}}>{Math.max(0, (endW - goal)).toFixed(1)}</div>
-            <div style={{fontSize:".65rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>{unit} to goal</div>
+            {/* ⚠️ Math.max(0, endW - goal) MADE EVERY GAIN GOAL READ 0.0 (S212d).
+                The app supports gaining in as many places as losing — the calorie
+                card offers ½/1/2 lb in both directions — so a client bulking from
+                150 to 165 was told, on the chart tracking exactly that, that they
+                had 0.0 lbs to go. The distance is the magnitude either way. */}
+            <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.2rem",color:"var(--accent)"}}>{Math.abs(endW - goal).toFixed(1)}</div>
+            <div style={{fontSize:".65rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>{unit} to {goal > endW ? "gain" : "goal"}</div>
           </div>
         )}
       </div>
@@ -16445,8 +16679,12 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
   let chartCheckIns = checkIns || [];
   if (weighIns.length === 1 && start && start !== w) {
     const firstTs = weighIns[0].timestamp || Date.now();
+    // ⚠️ MARKED AS SYNTHETIC (S212d). This is the plan's starting weight drawn so
+    // a single weigh-in still makes a line — not a reading. Unmarked, ProgressChart
+    // counted it in "N weigh-ins", drew it with the same solid dot, and dated the
+    // whole change to the day before the only real measurement.
     chartCheckIns = [{ date: new Date(firstTs - 86400000).toISOString().slice(0, 10),
-      timestamp: firstTs - 86400000, weight: start, hitTarget: null }, ...(checkIns || [])];
+      timestamp: firstTs - 86400000, weight: start, hitTarget: null, synthetic: true }, ...(checkIns || [])];
   }
   // Rendered through a portal to document.body so it anchors to the viewport,
   // not to a transformed ancestor (the .page-transition wrapper keeps a CSS
@@ -16666,7 +16904,13 @@ function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, bfAvai
   const [edit, setEdit] = useState(null); // { date, t, value } when editing a weigh-in
   const wAll = [...(weighIns || [])].filter((w) => w && w.t).sort((a, b) => a.t - b.t);
   const bAll = [...(bfReads || [])].filter((b) => b && b.t).sort((a, b) => a.t - b.t);
-  if (wAll.length < 2 && bAll.length < 2) return (
+  // ⚠️ ANY method with a history counts, not just the primary one (S212d).
+  // `bAll` is the primary series alone, so someone with four caliper readings and
+  // a scale reading first in the fixed order got the "nothing to chart yet"
+  // placeholder — and with it lost the very chooser that would have fixed it.
+  const anyBf = Math.max(bAll.length, ...["scale", "caliper", "tape"]
+    .map((k) => (((bfBySource && bfBySource[k]) || []).length)));
+  if (wAll.length < 2 && anyBf < 2) return (
     <div className="rounded-lg bg-surface2 p-4 text-center text-[.82rem] leading-relaxed text-muted">
       {wAll.length === 1
         ? <>Nice — <b className="text-fg">1 weigh-in</b> logged. Log <b className="text-fg">one more on a different day</b> and your Bodyweight &amp; Muscle charts appear here. Add a body-fat reading (scale, calipers, or tape) to also chart fat &amp; lean mass.</>
@@ -16692,8 +16936,13 @@ function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, bfAvai
   const bfCharts = methods.length
     ? methods.map((m) => ({ key: "bf", label: methods.length === 1 ? "Body fat %" : m.label,
         unit: "%", color: m.color, src: m.rows, id: "bf-" + m.key,
-        editable: m.key === "scale", scanBf: m.key === "scale" }))
-    : [{ key: "bf", label: "Body fat %", unit: "%", color: "var(--yellow)", src: b, id: "bf" }];
+        editable: m.key === "scale", scanBf: m.key === "scale",
+        // ⚠️ The hint every OTHER chart got in S212 (see MetricLineChart). Without
+        // it a body-fat series with one reading renders nothing at all, while the
+        // footnote below still describes the charts as though they were there.
+        hint: `Two ${BF_METHOD_SHORT[m.key] ? BF_METHOD_SHORT[m.key].toLowerCase() : ""} readings on different days draw this line.` }))
+    : [{ key: "bf", label: "Body fat %", unit: "%", color: "var(--yellow)", src: b, id: "bf",
+        hint: "Log a body-fat reading — scale, calipers or tape — on two different days and the trend appears here." }];
   // ⚠️ EVERY HINT NAMES THE MISSING INPUT (S212). Bodyweight always keeps its
   // card — it is the chart people come here for, and a silent absence reads as
   // "this app doesn't chart my weight". Muscle/fat/lean only explain themselves
@@ -16726,14 +16975,18 @@ function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, bfAvai
       {edit && onEditWeighIn && (
         <div className="rounded-lg bg-surface2 p-3 border border-primary">
           <div className="mb-2 text-sm font-semibold">
-            Edit weigh-in · {new Date(edit.t).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+            {/* ⚠️ ONE PANEL, TWO QUANTITIES (S212d). It is reused for the scale
+                body-fat series, where the value is a PERCENTAGE written to
+                bodyFatManual — and it said "Edit weigh-in" with "lbs" beside the
+                box, inviting someone to type their weight into their body fat. */}
+            Edit {edit.scanBf ? "body fat" : "weigh-in"} · {new Date(edit.t).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <input type="number" inputMode="decimal" step="0.1" autoFocus value={edit.value}
               onChange={(e) => setEdit((s) => ({ ...s, value: e.target.value }))}
               onKeyDown={(e) => { if (e.key === "Enter") { const v = Math.round(Number(edit.value) * 10) / 10; if (v > 0) (edit.scanBf ? onEditScanBf : onEditWeighIn)(edit.date, v); setEdit(null); } }}
               className="w-[110px] bg-surface border border-border rounded-lg px-2.5 py-2 text-fg text-sm outline-none" />
-            <span className="text-xs text-muted">lbs</span>
+            <span className="text-xs text-muted">{edit.scanBf ? "%" : "lbs"}</span>
             <button onClick={() => { const v = Math.round(Number(edit.value) * 10) / 10; if (v > 0) (edit.scanBf ? onEditScanBf : onEditWeighIn)(edit.date, v); setEdit(null); }}
               className="rounded-lg bg-primaryfill px-3.5 py-2 text-sm font-bold text-primaryfg cursor-pointer">Save</button>
             <button onClick={() => { (edit.scanBf ? onEditScanBf : onEditWeighIn)(edit.date, null); setEdit(null); }}
@@ -16852,6 +17105,8 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
 
   const [drafts, setDrafts] = useState({});
   const [msg, setMsg] = useState("");
+  // Two taps to move the goal weight (S212b) — see the derived-goal block below.
+  const [goalConfirm, setGoalConfirm] = useState(false);
   const [metric, setMetric] = useState("waist");
   const [helpCal, setHelpCal] = useState(false); // "where to measure" (calipers) open
   const [helpTape, setHelpTape] = useState(false); // "where to measure" (tape) open
@@ -16876,12 +17131,30 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   //
   // Restricted to the plan's primary source, so every point on the line is the
   // same measurement taken the same way.
-  const bfSource = d.bfPrimarySource || null;
+  // ⚠️ AND THE DEFAULT WAS THE MIXED ONE (S212d). `d.bfPrimarySource` is unset
+  // until somebody taps a chip — which most people never do — so this fell
+  // through to `mm.bodyFatPct`, i.e. whichever method happened to exist that day.
+  // A week with a scale reading next to a week with calipers drew a change of
+  // several points that was purely a change of instrument, on the chart whose
+  // entire purpose is the trend. Resolve an implicit primary from what the
+  // history actually contains, exactly as bodyCompData does, so the line is one
+  // method even when nobody has chosen one.
+  const bfSource = (() => {
+    const has = (k) => entries.some((e) => {
+      const mm = measurementMetrics(d, e);
+      return (k === "scale" ? mm.manualBF : k === "caliper" ? mm.caliperBF : mm.tapeBF) != null;
+    });
+    const avail = ["scale", "caliper", "tape"].filter(has);
+    const pref = d.bfPrimarySource;
+    return (pref && avail.includes(pref)) ? pref : (avail[0] || null);
+  })();
+  const trendTapeMethod = dominantTapeSource(d, showBF ? entries : []);
   const bfPoints = showBF ? entries.map((e) => {
       const mm = measurementMetrics(d, e);
       const v = bfSource === "caliper" ? mm.caliperBF
         : bfSource === "scale" ? mm.manualBF
-        : bfSource === "tape" ? mm.tapeBF
+        // One tape formula down the line, same rule as the body-comp chart (S212d).
+        : bfSource === "tape" ? (mm.tapeSource === trendTapeMethod ? mm.tapeBF : null)
         : mm.bodyFatPct;
       return { date: e.date, timestamp: e.timestamp, weight: v, source: mm.bodyFatSource };
     }).filter((p) => p.weight != null) : [];
@@ -16897,10 +17170,34 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   // this one was not, so the same gesture did nothing on half the charts.
   const [pointEdit, setPointEdit] = useState(null); // { field, date, t, value }
   const metricEditable = !!activeMetric && activeMetric !== "bodyFat";
+  // The day-detail rows write to the same store as Save, and applied only `> 0`
+  // (S212d). Returns false when refused, so the editor stays open on the number.
+  const commitField = (field, raw, dateKey) => {
+    const v = Math.round(Number(raw) * 10) / 10;
+    if (!(v > 0)) return false;
+    if (!measureInRange(field, v)) {
+      const b = measureBoundsFor(field);
+      const name = field === "bodyFatManual" ? "Body fat %" : (MEASUREMENT_LABELS[field] || CALIPER_LABELS[field] || field);
+      setMsg(`Not saved — ${name} must be between ${b[0]} and ${b[1]} ${measureUnitFor(field)}.`);
+      setTimeout(() => setMsg(""), 6000);
+      return false;
+    }
+    onSave({ [field]: v }, dateKey);
+    return true;
+  };
+
   const commitPointEdit = () => {
     if (!pointEdit) return;
     const v = Math.round(Number(pointEdit.value) * 10) / 10;
-    if (v > 0) onSave({ [pointEdit.field]: v }, pointEdit.date);
+    if (!(v > 0)) { setPointEdit(null); return; }
+    // Same bounds, and the same refusal-by-name, as the Save button (S212d).
+    if (!measureInRange(pointEdit.field, v)) {
+      const b = measureBoundsFor(pointEdit.field);
+      setMsg(`Not saved — ${chartLabel(pointEdit.field)} must be between ${b[0]} and ${b[1]} ${measureUnitFor(pointEdit.field)}.`);
+      setTimeout(() => setMsg(""), 6000);
+      return;   // the panel stays open with the number still on screen
+    }
+    onSave({ [pointEdit.field]: v }, pointEdit.date);
     setPointEdit(null);
   };
 
@@ -16938,13 +17235,15 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
     // scale and calipers can sit 5% apart on the same body) so they are only
     // comparable to THEMSELVES over time.
     const bfBySource = { scale: [], caliper: [], tape: [] };
+    const tapeMethod = dominantTapeSource(d, showBF ? entries : []);
     if (showBF) for (const e of entries) {
       if (!(e.timestamp > 0)) continue;
       const mm = measurementMetrics(d, e);
       const row = (bf) => ({ t: e.timestamp, date: e.date, bf });
       if (mm.manualBF != null) bfBySource.scale.push(row(mm.manualBF));
       if (mm.caliperBF != null) bfBySource.caliper.push(row(mm.caliperBF));
-      if (mm.tapeBF != null) bfBySource.tape.push(row(mm.tapeBF));
+      // ONE tape formula down the line — see dominantTapeSource (S212d).
+      if (mm.tapeBF != null && mm.tapeSource === tapeMethod) bfBySource.tape.push(row(mm.tapeBF));
     }
     for (const k of Object.keys(bfBySource)) bfBySource[k].sort((a, b) => a.t - b.t);
     // Fat & lean mass need ONE method, held constant across the whole history —
@@ -16958,13 +17257,24 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
     const bfPref = d.bfPrimarySource;
     const primaryBfSource = (bfPref && bfAvailable.includes(bfPref)) ? bfPref : (bfAvailable[0] || null);
     const bfReads = primaryBfSource ? bfBySource[primaryBfSource] : [];
-    const carryBf = (t) => { let v = null; for (const x of bfReads) { if (x.t <= t) v = x.bf; else break; } return v; };
+    // ⚠️ COMPARE THE DAY, NOT THE INSTANT (S212d). This paired a weigh-in with a
+    // body-fat reading by timestamp, and the two are stamped on different noon
+    // bases: measurements use LOCAL noon (mergeMeasurements) while check-ins
+    // written by the calendar use UTC noon. In Eastern time that is a 4–5 hour
+    // gap, so a weigh-in and a measurement taken the SAME DAY could sort the
+    // wrong way round and the day's fat/lean point silently fell back to the
+    // previous reading — or vanished, when it was the first.
+    const carryBf = (t, dayKey) => {
+      let v = null;
+      for (const x of bfReads) { if (x.t <= t || (dayKey && x.date && x.date <= dayKey)) v = x.bf; else break; }
+      return v;
+    };
     // wi.weight IS weightOnDate(d, wi.date) — a weigh-in is the observation that
     // function resolves to — so these charts and the per-day readout in the
     // history below are the same arithmetic on the same weight. That equality is
     // asserted in scripts/test-lean-mass.mjs; it is the whole point of S212.
     const wRows = weighIns.map((wi) => {
-      const bf = carryBf(wi.t);
+      const bf = carryBf(wi.t, wi.date);
       return {
         ...wi,
         muscle: leeMuscleMassLbs(d, wi.weight),
@@ -17198,15 +17508,56 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
               if (metrics.navyBF != null) parts.push(`Navy ${metrics.navyBF}%`);
               return parts.length > 1 ? <div className="mt-1 text-[11px] text-muted">{parts.join(" · ")}</div> : null;
             })()}
-            {suggested && onSetGoalWeight && (
-              <div className="mt-2 flex items-center gap-2 flex-wrap text-sm">
-                <span className="text-muted">At {Number(d.goalBodyFat)}% body fat you'd weigh ~<b className="text-fg">{suggested} lbs</b></span>
-                {suggested !== curGoal && (
-                  <button onClick={() => { onSetGoalWeight(suggested); setMsg(`Goal weight set to ${suggested} lbs (from your lean mass).`); }}
-                    className="rounded-md border border-border bg-transparent px-2 py-1 text-xs font-semibold text-fg cursor-pointer">Use as goal weight</button>
-                )}
-              </div>
-            )}
+            {/* ── The lean-mass-derived goal weight ─────────────────────────
+                ⚠️ THIS COULD RAISE A FAT-LOSS GOAL IN ONE UNCONFIRMED TAP
+                (S212b, Kevin). lean ÷ (1 − goal BF%) is larger than the current
+                weight for anyone ALREADY LEANER than their goal body fat, and
+                that is not a rare corner — it is every client who reaches their
+                target. Measured on real numbers: 190 lbs at 14.5% with a 15%
+                goal offers "~201 lbs · Use as goal weight" on a plan whose goal
+                is 175, and one tap replaced it. The arithmetic was right and
+                the button was a trap: reaching that number on the scale means
+                ADDING fat.
+                Nothing is hidden — someone in a deliberate lean-bulk may want
+                exactly this — but the direction is now stated, the
+                already-leaner case is called out, and it takes a second tap
+                that names the goal being replaced. */}
+            {suggested && onSetGoalWeight && (() => {
+              const goalBf = Number(d.goalBodyFat);
+              const fromW = metrics.weightLbs;
+              const delta = fromW ? suggested - fromW : null;
+              const alreadyLeaner = metrics.bodyFatPct != null && metrics.bodyFatPct <= goalBf;
+              return (
+                <div className="mt-2 flex flex-col gap-1 text-sm">
+                  <span className="text-muted">
+                    At {goalBf}% body fat you&rsquo;d weigh ~<b className="text-fg">{suggested} lbs</b>
+                    {delta ? <> — {Math.abs(delta)} lbs <b className="text-fg">{delta > 0 ? "above" : "below"}</b> the {fromW} lbs this reading was taken at</> : null}
+                  </span>
+                  {alreadyLeaner && (
+                    <span className="text-[.72rem] leading-snug" style={{ color: "var(--yellow)" }}>
+                      You&rsquo;re already at {metrics.bodyFatPct}% — at or below your {goalBf}% goal body fat.
+                      Weighing {suggested} lbs at {goalBf}% would mean putting fat back on, so this is
+                      almost certainly not the goal weight you want. Lower your goal body fat instead.
+                    </span>
+                  )}
+                  {suggested !== curGoal && (goalConfirm ? (
+                    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary bg-surface px-2.5 py-2">
+                      <span className="text-[.78rem] text-fg">
+                        {curGoal ? <>Replace your goal weight of <b>{curGoal} lbs</b> with <b>{suggested} lbs</b>?</>
+                                 : <>Set your goal weight to <b>{suggested} lbs</b>?</>}
+                      </span>
+                      <button onClick={() => { onSetGoalWeight(suggested); setGoalConfirm(false); setMsg(`Goal weight set to ${suggested} lbs (from your lean mass at ${goalBf}% body fat).`); }}
+                        className="rounded-md border-none bg-primaryfill px-2.5 py-1 text-xs font-bold text-primaryfg cursor-pointer">Set it</button>
+                      <button onClick={() => setGoalConfirm(false)}
+                        className="rounded-md border border-border bg-transparent px-2 py-1 text-xs text-fg cursor-pointer">Cancel</button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setGoalConfirm(true)}
+                      className="self-start rounded-md border border-border bg-transparent px-2 py-1 text-xs font-semibold text-fg cursor-pointer">Use as goal weight</button>
+                  ))}
+                </div>
+              );
+            })()}
             {/* ⚠️ ±2% WAS THE REASON A NORMAL SPREAD READ AS A BUG (S200y,
                 Kevin: "all these numbers are so far off from each other").
                 Nothing here is that accurate: skinfolds are ±3–5, Navy tape
@@ -17293,10 +17644,16 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
               <div className="text-xs text-muted">Set gender on the profile to use calipers or the tape estimate.</div>
             )}
             {/* Live "we do the math" preview — computed from what's typed now. */}
-            {live && (live.caliperBF != null || live.manualBF != null) && (
+            {live && live.bodyFatPct != null && (
               <div className="mt-2 rounded-lg bg-primaryfill/10 px-3 py-2 text-sm flex items-center gap-2 flex-wrap" style={{ background: "rgba(var(--accent-rgb),.08)" }}>
-                <span className="font-display text-lg text-primary">{live.caliperBF != null ? live.caliperBF : live.manualBF}%</span>
-                <span className="text-xs text-muted">estimated body fat {live.caliperBF != null ? "from your calipers" : "from your scale"} — saves when you tap Save</span>
+                {/* ⚠️ PREVIEWS WHAT WILL ACTUALLY SAVE (S212d). This showed the
+                    caliper number in preference to the scale one — the exact
+                    reverse of measurementMetrics' precedence — so typing both
+                    previewed 15% and stored 22%, and the person believed the
+                    number they had just watched appear. Reads the same function
+                    the save uses rather than reproducing a rule beside it. */}
+                <span className="font-display text-lg text-primary">{live.bodyFatPct}%</span>
+                <span className="text-xs text-muted">estimated body fat {live.bodyFatSource === "scale" ? "from your scale" : live.bodyFatSource === "caliper" ? "from your calipers" : "from your tape"} — saves when you tap Save</span>
               </div>
             )}
           </div>
@@ -17312,8 +17669,15 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         </div>
         {helpTape && (
           <div className="mb-2 rounded-lg bg-surface2 p-2.5 text-[11px] text-muted flex flex-col gap-1">
+            {/* ⚠️ `waistFemale` WAS DEAD CODE (S212d). S200y added it because the
+                Navy equation was validated on the natural waist for women and the
+                navel over-measures by an inch or two — "each inch is worth +1.0 to
+                +1.4 points of body fat" — then every reader kept indexing
+                TAPE_SITE_HELP by the raw field name, so every woman was still shown
+                the male navel instruction. The formula was fixed and the
+                instruction that feeds it was not. */}
             {MEASUREMENT_FIELDS.map((f) => (
-              <div key={f}><b className="text-fg">{MEASUREMENT_LABELS[f]}:</b> {TAPE_SITE_HELP[f]}</div>
+              <div key={f}><b className="text-fg">{MEASUREMENT_LABELS[f]}:</b> {(f === "waist" && d.gender === "female" && TAPE_SITE_HELP.waistFemale) || TAPE_SITE_HELP[f]}</div>
             ))}
             <div className="mt-1 italic">Keep the tape snug and level, not squeezing. Body fat % is figured for you from these.</div>
           </div>
@@ -17425,8 +17789,15 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
 
                 {showBF && openEntry && (() => {
                   const m = measurementMetrics(d, openEntry);
+                  // ⚠️ SAME INSTRUMENT ON BOTH ENDS (S212d). This walked back to
+                  // the first entry with ANY body fat, so a caliper reading was
+                  // compared with last month's scale reading and the difference —
+                  // several points of instrument, not of fat — was rendered as
+                  // "−4.2% since last" in green. The panel ten lines below lists
+                  // every method separately for exactly this reason.
                   const prevBf = (() => { for (let i = openIdx - 1; i >= 0; i--) {
-                    const pm = measurementMetrics(d, entries[i]); if (pm.bodyFatPct != null) return pm.bodyFatPct; } return null; })();
+                    const pm = measurementMetrics(d, entries[i]);
+                    if (pm.bodyFatPct != null && pm.bodyFatSource === m.bodyFatSource) return pm.bodyFatPct; } return null; })();
                   if (m.bodyFatPct == null) return null;
                   return (
                     <div className="mt-2.5 rounded-lg bg-surface2 px-2.5 py-2">
@@ -17456,7 +17827,10 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                         <div className="mt-1 text-[.62rem] text-muted">
                           From {m.weightLbs} lbs
                           {m.weightSource === "sameDay" ? " weighed that day"
-                            : m.weightDate ? ` (last weigh-in, ${new Date(m.weightDate + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })})`
+                            // "last" is wrong when the weight was carried BACKWARD —
+                            // a measurement taken before any weigh-in resolves to the
+                            // EARLIEST one, which is later than the day on screen (S212d).
+                            : m.weightDate ? ` (${m.weightSource === "carriedForward" ? "first weigh-in" : "last weigh-in"}, ${new Date(m.weightDate + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })})`
                             : " (plan's current weight — no weigh-ins logged)"}
                           {" "}× {m.bodyFatSource === "scale" ? "your scale reading" : m.bodyFatSource === "caliper" ? "the caliper reading" : "the tape estimate"}.
                           {m.muscleMassLbs != null && " Muscle is a Lee-2000 estimate from height, weight, age and sex — it does not read your calipers or tape, so it moves only when your weight does."}
@@ -17475,7 +17849,10 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                         const methods = [
                           { k: "scale",   label: "Scale / scanner", v: m.manualBF },
                           { k: "caliper", label: "Calipers",        v: m.caliperBF },
-                          { k: "tape",    label: "Tape (average)",  v: m.tapeBF },
+                          // Not an average since S200v — it is Navy, or Bailey only
+                          // when Navy cannot compute. Printed directly above the two
+                          // values it was claiming to average (S212d).
+                          { k: "tape",    label: m.tapeSource === "navy" ? "Tape (Navy)" : "Tape (Bailey)",  v: m.tapeBF },
                           { k: "bailey",  label: "Tape · Bailey",   v: m.baileyBF, sub: true },
                           { k: "navy",    label: "Tape · Navy",     v: m.navyBF,   sub: true },
                         ].filter((x) => x.v != null);
@@ -17573,7 +17950,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                                   <span className="ml-2 text-[.64rem] text-muted">
                                     {wSrc.source === "sameDay" ? "weighed that day"
                                       : wSrc.date
-                                      ? <>no weigh-in this day · carried from {new Date(wSrc.date + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}</>
+                                      ? <>no weigh-in this day · {wSrc.source === "carriedForward" ? "from your first" : "carried from"} {new Date(wSrc.date + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}</>
                                       : "no weigh-in this day · plan's current weight"}
                                   </span>
                                 </>
@@ -17584,7 +17961,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                         {scan != null && row("__scanBf", "Body fat (scan)", scan, "%",
                           priorScan ? scan - Number(priorScan.bodyFatManual) : null,
                           priorScan ? priorScan.date : null,
-                          (v) => onSave({ bodyFatManual: v }, dayKey))}
+                          (v) => commitField("bodyFatManual", v, dayKey))}
                       </div>
                     </div>
                   );
@@ -17603,11 +17980,11 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                                 <input type="number" inputMode="decimal" step="0.1" autoFocus value={fieldEdit.value}
                                   onChange={(ev) => setFieldEdit({ field: r.f, value: ev.target.value })}
                                   onKeyDown={(ev) => {
-                                    if (ev.key === "Enter") { const v = Math.round(Number(fieldEdit.value) * 10) / 10; if (v > 0) onSave({ [r.f]: v }, openEntry.date); setFieldEdit(null); }
+                                    if (ev.key === "Enter") { if (commitField(r.f, fieldEdit.value, openEntry.date)) setFieldEdit(null); }
                                     if (ev.key === "Escape") setFieldEdit(null);
                                   }}
                                   className="w-20 rounded-md border border-border bg-surface px-2 py-1 text-[.82rem] text-fg outline-none" />
-                                <button onClick={() => { const v = Math.round(Number(fieldEdit.value) * 10) / 10; if (v > 0) onSave({ [r.f]: v }, openEntry.date); setFieldEdit(null); }}
+                                <button onClick={() => { if (commitField(r.f, fieldEdit.value, openEntry.date)) setFieldEdit(null); }}
                                   className="cursor-pointer rounded-md border-none bg-primaryfill px-2.5 py-1 text-[.72rem] font-bold text-primaryfg">Save</button>
                                 <button onClick={() => setFieldEdit(null)}
                                   className="cursor-pointer border-none bg-transparent px-1 text-[.72rem] text-muted">Cancel</button>
@@ -17743,7 +18120,11 @@ function AICoach({ data, tdee, totalBurn, totalStrBurn, activeDays, activeStrDay
         .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)).slice(-14);
       const adherence = adherenceOf(checkIns);
       const weightTrend = recent.length >= 2
-        ? `Started at ${recent[0].weight} lbs, most recent ${recent[recent.length-1].weight} lbs (${(recent[0].weight - recent[recent.length-1].weight).toFixed(1)} lbs change over ${recent.length} check-ins)`
+        // ⚠️ NEW MINUS OLD (S212d). This was OLD − NEW and called "change", so a
+        // client who GAINED 4 lbs was described to the model as "−4.0 lbs change"
+        // and coached as though they were losing. Every other surface uses
+        // new − old (ProgressChart's `change`, TrainerAnalytics' `wowDelta`).
+        ? `Started at ${recent[0].weight} lbs, most recent ${recent[recent.length-1].weight} lbs (${(recent[recent.length-1].weight - recent[0].weight).toFixed(1)} lbs change over ${recent.length} check-ins)`
         : "No check-in history yet";
       const avgMood = recent.filter(c=>c.mood!=null).length > 0
         ? (recent.filter(c=>c.mood!=null).reduce((s,c)=>s+c.mood,0) / recent.filter(c=>c.mood!=null).length).toFixed(1)
@@ -20328,11 +20709,18 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                           Pick a local plan to link to this client:
                         </div>
                         <div className="flex flex-col gap-1 max-h-[170px] overflow-auto">
-                          {profiles.length === 0 ? (
+                          {/* ⚠️ COUNTS THE SAME SET THE LIST RENDERS (S212c). A
+                              simulation cannot be linked — converting it is the only
+                              door, and that is what spends a roster slot — so a
+                              trainer holding nothing but sims must be told that,
+                              not shown an empty box under "Pick a local plan". */}
+                          {profiles.filter((lp) => lp && !lp.isSimulation).length === 0 ? (
                             <div className="text-[.78rem] text-muted">
-                              No local plans yet — create one under "All clients" first.
+                              {profiles.length
+                                ? "Only simulations here — convert one to a plan first, then it can be linked."
+                                : "No local plans yet — create one under \"All clients\" first."}
                             </div>
-                          ) : profiles.map((lp) => (
+                          ) : profiles.filter((lp) => lp && !lp.isSimulation).map((lp) => (
                             <button key={lp.id} className={mBtnCls} disabled={linkBusy}
                               onClick={() => setPendingLink({ clientUid: c.uid, localId: lp.id, label: lp.customName || lp.name || "Unnamed plan" })}>
                               {lp.customName || lp.name || "Unnamed plan"}{lp.weight ? ` · ${lp.weight} lbs` : ""}
@@ -27399,8 +27787,16 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       if (!backdated && crossedGoal(prev, v, d.goalWeight)) celebrate("goal");
       if (d.startWeightLbs == null || d.startWeightLbs === "") d.startWeightLbs = prev;
       // Only a weigh-in that is the most recent one may claim "current weight".
+      // ⚠️ `!c.isFuturePlan` (S212d). A PLOTTED GOAL lives in the same `weight`
+      // slot with a FUTURE date, so without this term a target set once made
+      // `laterExists` permanently true and current weight could never advance
+      // again: every later weigh-in recorded correctly, the chart moved, and the
+      // hero number, lbs-to-go, the ETA, the trainer roster and the BMR feeding
+      // the calorie target all stayed frozen at the old value forever.
+      // syncWeightFromCheckIns has carried this rule since S199 — three writers
+      // never learned it.
       const laterExists = (Array.isArray(d.checkIns) ? d.checkIns : [])
-        .some((c) => c && c.date && c.date > dayKey && Number(c.weight) > 0);
+        .some((c) => c && c.date && !c.isFuturePlan && c.date > dayKey && Number(c.weight) > 0);
       if (!laterExists) d.weightLbs = v;
       // Record in check-in history — the app's weight-history source (feeds the
       // progress chart + trainer view). One entry per day: MERGE into today's
@@ -27413,7 +27809,14 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
         weight: v, calories: null, hitTarget: null, workedOut: null, mood: null, notes: "",
         bodyFat: null, loggedBy: "client", isFuturePlan: false,
         ...(sameDay || {}), };
+      // ⚠️ THE SPREAD PUTS THE EXISTING ENTRY LAST, SO ITS FLAGS WIN (S212d).
+      // A day that was PLANNED first carries isFuturePlan:true; merging a real
+      // weigh-in onto it inherited that flag, and the weigh-in became invisible
+      // to every reader that filters plotted goals — including, now, the four
+      // guards above. Re-stamped after the spread, like weight and timestamp,
+      // which are re-stamped for exactly this reason.
       merged.weight = v; // the new weigh-in always wins
+      merged.isFuturePlan = dayKey > ymdLocal();
       merged.timestamp = new Date(dayKey + "T12:00:00").getTime();
       d.checkIns = [...d.checkIns.filter(c => c && c.date !== dayKey), merged];
     });
@@ -27459,7 +27862,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       const ok = await savePlanDataMutation((d) => {
         if (!Array.isArray(d.checkIns)) return;
         removed = d.checkIns.find(c => c.timestamp === ts) || null;
-        d.checkIns = d.checkIns.filter(c => c.timestamp !== ts);
+        d.checkIns = removeWeighIn(d.checkIns, ts);   // the day survives (S212d)
         const remaining = d.checkIns.filter(c => c.weight && !c.isFuturePlan).sort((a, b) => a.timestamp - b.timestamp);
         if (remaining.length) d.weightLbs = remaining[remaining.length - 1].weight;
         else if (d.startWeightLbs) d.weightLbs = d.startWeightLbs;
@@ -28353,6 +28756,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
               savedFoods={savedFoods} onToggleSaveFood={onToggleSaveFood}
               onRemoveRecentFood={onRemoveRecentFood} onRemoveSavedFood={onRemoveSavedFood}
               onLogFoods={onLogFoods}
+              onSaveMeasurementsFor={(dateKey, vals) => saveMeasurements(vals, dateKey)}
               meUid={meUid} premium={premium} role={role} />
           </div>
         </div>,
@@ -28900,8 +29304,18 @@ function syncWeightFromCheckIns(next, checkin) {
     .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
   const latest = weighIns[weighIns.length - 1];
   if (latest && latest.date === checkin.date) {
+    // ⚠️ SEED THE BASELINE FROM THE WEIGHT BEFORE THIS ONE (S212d). The other two
+    // weigh-in writers seed startWeightLbs from the plan's PREVIOUS weight — the
+    // number typed in the wizard — and this one seeded it from the new weigh-in
+    // itself. So the same 195 lbs typed into the Daily Dashboard read "▼ 5 lbs
+    // since start" and typed into the Full Plan check-in read "0 lbs since
+    // start", on a plan set up at 200. One quantity, two rules, chosen by which
+    // box the person happened to use — and it feeds ClientHome's "since start",
+    // the chart's synthesized start segment and the coach's total-lbs-lost
+    // aggregate. The wizard's weight is where they started; keep it.
+    const prev = Number(next.weightLbs) || Number(checkin.weight);
     next.weightLbs = Number(checkin.weight);
-    if (next.startWeightLbs == null || next.startWeightLbs === "") next.startWeightLbs = Number(checkin.weight);
+    if (next.startWeightLbs == null || next.startWeightLbs === "") next.startWeightLbs = prev;
   }
   return next;
 }
@@ -33367,10 +33781,16 @@ async function exportMyData({ meName, meEmail, role, hasCoach }) {
     // What the reader needs to make sense of it without our source code.
     keyGuide: {
       "caliq-plans": "Your plans and which one is active",
-      "caliq-{planId}": "A plan: your stats, goals, targets, workout schedule, check-ins",
+      // ⚠️ NAMES A KEY THAT DOES NOT EXIST (S212d). `caliq-measurements` appears
+      // nowhere else in src/ or functions/ — nothing writes it and nothing reads
+      // it. Measurements, weigh-ins and every body-fat field live INSIDE the plan
+      // document, so a reader following this guide went looking for a file that
+      // was never there and concluded their body data had not been exported.
+      // The whole point of the guide is to be true without our source code.
+      "caliq-{planId}": "A plan: your stats, goals, targets, workout schedule, check-ins (weigh-ins), "
+        + "measurements (tape + caliper readings) and your body-fat readings",
       "caliq-log-{planId}-{YYYY-MM-DD}": "One day: meals, calories, macros, water, tracker data",
       "caliq-history-{planId}": "Activity feed for that plan",
-      "caliq-measurements": "Body measurements and body-fat readings",
       "caliq-foods": "Your saved food library",
       "caliq-requests": "To-dos from your trainer",
       "caliq-notes": "Your notes",
@@ -34059,7 +34479,11 @@ export default function App() {
       .then((r) => { if (alive) setRosterCap((r && r.data) || null); })
       .catch(() => { if (alive) setRosterCap(null); });  // never block on a failed read
     return () => { alive = false; };
-  }, [meUid, role, profiles.length]);
+    // ⚠️ THE REAL-PLAN COUNT, NOT JUST profiles.length (S212c). A conversion
+    // turns a sim into a plan without changing how many profiles exist, so on
+    // `profiles.length` alone the cap was never re-read after one — and the
+    // next conversion was judged against a stale count that still had room.
+  }, [meUid, role, profiles.length, profiles.filter((p) => p && !p.isSimulation).length]);
 
   // Claim a referral once (S181). Fire-and-forget: the server ignores unknown
   // codes, self-referrals and anyone already attributed, so a bad link can
@@ -34958,7 +35382,23 @@ export default function App() {
 
   // Convert a simulation into a real local plan (clears the sandbox flag so it
   // moves out of "Simulations" and into "Local Plans", ready to link to a client).
+  //
+  // ⚠️ THIS IS THE DOOR THE ROSTER CAP WAS MISSING (S212c, Kevin: "the trainer
+  // can convert the simulation to one of the regular plan slots"). Simulations
+  // are deliberately UNCAPPED — createProfile exempts them and countRoster in
+  // functions/roster.js filters them out — so a trainer at 15 of 15 could make
+  // sims all day and convert them one at a time, and every conversion became a
+  // real plan file with nothing checking. The cap was enforced on the front
+  // door and open at the side one.
+  //
+  // Converting SPENDS a slot, which is exactly Kevin's model: a sim is a sales
+  // tool, and turning a prospect into a client is the thing the plan is for.
   const convertSimulation = (id) => {
+    if (rosterCap && rosterCap.full) {
+      setRosterBlocked(true);
+      window.setTimeout(() => setRosterBlocked(false), 8000);
+      return;
+    }
     setProfiles(prev => {
       const up = prev.map(p => p.id === id ? { ...p, isSimulation: false } : p);
       saveIndex(up);
@@ -35500,8 +35940,10 @@ export default function App() {
       setDataAndSave((p) => {
         const n = { ...p };
         // Confetti when this weigh-in CROSSES the goal (Kevin's pick #3).
+        // `!c.isFuturePlan` — see the note in ClientHome.logWeight (S212d). Here it
+        // also silenced the goal-crossing confetti, which can only fire on the newest.
         const isNewest = viewDate >= (Array.isArray(n.checkIns) ? n.checkIns : [])
-          .reduce((a, c) => (c && c.date && c.weight != null && (!a || c.date > a)) ? c.date : a, "");
+          .reduce((a, c) => (c && c.date && !c.isFuturePlan && c.weight != null && (!a || c.date > a)) ? c.date : a, "");
         if (isNewest && crossedGoal(n.weightLbs, value, n.goalWeight)) celebrate("goal");
         if (n.startWeightLbs == null || n.startWeightLbs === "") n.startWeightLbs = Number(n.weightLbs) || value;
         if (isNewest) n.weightLbs = value;   // back-dating must not rewrite the current weight
@@ -35511,7 +35953,10 @@ export default function App() {
           hitTarget: null, workedOut: null, mood: null, notes: "", bodyFat: null,
           loggedBy: role === ROLES.CLIENT ? "client" : "trainer", isFuturePlan: viewDate > todayKey,
           ...(cis.find((c) => c && c.date === viewDate) || {}) };
+        // Re-stamped after the spread — a previously PLANNED day would otherwise
+        // hand its isFuturePlan:true to the real weigh-in (S212d).
         entry.weight = value; entry.timestamp = ts;
+        entry.isFuturePlan = viewDate > todayKey;
         n.checkIns = [...cis.filter((c) => c && c.date !== viewDate), entry];
         return n;
       });
@@ -36431,7 +36876,7 @@ export default function App() {
           {step===3 && <StepCardio     data={data} onChange={update} onBack={()=>setStepAndSave(2)} onNext={()=>setStepAndSave(4)}/>}
           {step===4 && <StepStrength   data={data} onChange={update} onBack={()=>setStepAndSave(3)} onNext={()=>setStepAndSave(5)}/>}
           {step===5 && showDash && (
-            <DailyDashboard hiddenTiles={hiddenTiles} onSetHiddenTiles={onSetHiddenTiles}
+            <DailyDashboard hiddenTiles={hiddenTiles} onSetHiddenTiles={onSetHiddenTiles} isSimulation={activeIsSim}
               logAdherence={logAdherence}
               viewDate={viewDate} viewIsToday={viewIsToday} todayKeyProp={todayKey}
               onStepDay={(n)=>{ const d=new Date(viewDate+"T12:00:00"); d.setDate(d.getDate()+n); setViewDate(ymdLocal(d)); }}
@@ -36491,7 +36936,7 @@ export default function App() {
                 return syncWeightFromCheckIns({...p, checkIns:[...others, checkin]}, checkin);
               })}
               onDeleteCheckIn={(ts)=>setDataAndSave(p=>{
-                const checkIns = (p.checkIns||[]).filter(c => c.timestamp !== ts);
+                const checkIns = removeWeighIn(p.checkIns, ts);   // the day survives (S212d)
                 const remaining = checkIns.filter(c => c.weight && !c.isFuturePlan).sort((a,b)=>a.timestamp-b.timestamp);
                 const next = {...p, checkIns};
                 if (remaining.length) next.weightLbs = remaining[remaining.length-1].weight;
@@ -36537,7 +36982,7 @@ export default function App() {
               return syncWeightFromCheckIns({...p, checkIns:[...others, checkin]}, checkin);
             })}
             onDeleteCheckIn={(ts)=>setDataAndSave(p=>{
-              const checkIns = (p.checkIns||[]).filter(c => c.timestamp !== ts);
+              const checkIns = removeWeighIn(p.checkIns, ts);   // the day survives (S212d)
               // Re-point current weight to the latest remaining weigh-in, or back
               // to the starting weight if no weigh-ins remain (matches ClientHome).
               const remaining = checkIns.filter(c => c.weight && !c.isFuturePlan).sort((a,b)=>a.timestamp-b.timestamp);

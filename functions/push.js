@@ -358,8 +358,13 @@ exports.weighInReminderPush = onSchedule(
     const r = await runReminderPass(db, "weighInReminders", async (uid, plan) => {
       const wrap = await kvJSON(db, uid, `caliq-${plan}`);
       const checkIns = (wrap && wrap.data && Array.isArray(wrap.data.checkIns)) ? wrap.data.checkIns : [];
+      // ⚠️ `!c.isFuturePlan` (S212d). A plotted GOAL carries a future date, so it
+      // always won Math.max and put `latest` in the FUTURE — making the "days
+      // since your last weigh-in" arithmetic negative and suppressing the weekly
+      // nudge permanently, for exactly the person who set a target and then
+      // stopped weighing in.
       const weighTs = checkIns
-        .filter((c) => c && Number(c.weight) > 0 && c.date)
+        .filter((c) => c && Number(c.weight) > 0 && c.date && !c.isFuturePlan)
         .map((c) => new Date(c.date + "T12:00:00").getTime())
         .filter((t) => Number.isFinite(t));
       const latest = weighTs.length ? Math.max(...weighTs) : null;
