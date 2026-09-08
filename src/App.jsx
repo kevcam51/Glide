@@ -968,6 +968,44 @@ function baileyLeanRange(d) {
   return (row && row[d.gender]) || null;
 }
 
+// The weight in force on a given DAY — the one number every mass figure is
+// built from (S212, Kevin: "his lean body mass has stayed the same every time.
+// Why is that?").
+//
+// ⚠️ EVERY DERIVED MASS USED TO BE COMPUTED FROM `d.weightLbs`, THE PLAN'S
+// CURRENT WEIGHT, NO MATTER WHICH DAY WAS BEING LOOKED AT. That single
+// substitution produced exactly what Kevin saw:
+//   • Muscle mass (Lee-2000) takes weight, height, age and sex and NOTHING
+//     from a caliper or a tape — so with weight pinned to one value it was
+//     mathematically IDENTICAL on every measurement, forever. Not stable: frozen.
+//   • Lean and fat mass are weight × (1 − BF%) and weight × BF%, so a
+//     measurement from three months ago was scored against today's scale.
+// And it disagreed with the charts, which already used each weigh-in's OWN
+// weight — the same day could read two different lean masses on two screens.
+//
+// Resolution order is nearest REAL observation, never an invention: the last
+// weigh-in on or before the day, else the earliest weigh-in there is (for a
+// measurement taken before anyone stepped on a scale), else the plan's current
+// weight. Future plotted targets are not observations and are excluded.
+// Returns { lbs, date, source } so a screen can SAY where the number came from.
+function weightOnDate(d, dateKey) {
+  const cur = Number(d && d.weightLbs) || 0;
+  const outCur = { lbs: cur > 0 ? cur : null, date: null, source: "current" };
+  const rows = [];
+  for (const c of (d && d.checkIns) || []) {
+    if (!c || c.isFuturePlan || !(Number(c.weight) > 0)) continue;
+    const k = c.date || (c.timestamp ? ymdLocal(new Date(c.timestamp)) : "");
+    if (k) rows.push({ k, w: Math.round(Number(c.weight) * 10) / 10 });
+  }
+  if (!rows.length) return outCur;
+  rows.sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
+  if (!dateKey) return outCur;
+  let onOrBefore = null;
+  for (const r of rows) { if (r.k <= dateKey) onOrBefore = r; else break; }
+  const pick = onOrBefore || rows[0];
+  return { lbs: pick.w, date: pick.k,
+    source: pick.k === dateKey ? "sameDay" : onOrBefore ? "carriedBack" : "carriedForward" };
+}
 // One measurement entry → all derived metrics (nulls where inputs are missing).
 // bodyFatPct = average of whichever of Bailey/Navy computed (they cross-check
 // each other); goalWeightFromLeanMass = Bailey's lean mass ÷ (1 − target BF%).
@@ -998,10 +1036,15 @@ function measurementMetrics(d, m) {
   const avg = manual != null ? manual : caliper != null ? caliper : tapeAvg;
   const bodyFatSource = manual != null ? "scale" : caliper != null ? "caliper" : tapeAvg != null ? "tape" : null;
   const whtr = whtrOf(d, m);
-  const weight = Number(d.weightLbs) || 0;
+  // The weight THIS DAY was measured at — not today's (see weightOnDate). An
+  // entry with no date (the live preview, as you type) has no day to resolve, so
+  // it correctly falls back to the current weight.
+  const wSrc = weightOnDate(d, m && m.date);
+  const weight = wSrc.lbs || 0;
   const leanMassLbs = weight > 0 && avg != null ? Math.round(weight * (1 - avg / 100)) : null;
   // Fat mass = weight × BF% (exact given BF%). Muscle mass = Lee-2000 estimate
-  // (needs only height/weight/age/sex, so it shows even without a BF% reading).
+  // (needs only height/weight/age/sex, so it shows even without a BF% reading —
+  // and, for the same reason, it moves ONLY when the weight does).
   const fatMassLbs = weight > 0 && avg != null ? Math.round(weight * (avg / 100)) : null;
   const muscleMassLbs = leeMuscleMassLbs(d, weight);
   const targetBf = Number(d.goalBodyFat) || null;
@@ -1009,6 +1052,9 @@ function measurementMetrics(d, m) {
     ? Math.round(leanMassLbs / (1 - targetBf / 100)) : null;
   return { baileyBF: bailey, navyBF: navy, caliperBF: caliper, manualBF: manual, tapeBF: tapeAvg, tapeSource,
     bodyFatPct: avg, bodyFatSource, waistToHeight: whtr, leanMassLbs, fatMassLbs, muscleMassLbs, goalWeightFromLeanMass,
+    // WHICH weight every mass above was built from, so a screen can name it
+    // instead of leaving the reader to guess (S212).
+    weightLbs: weight || null, weightDate: wSrc.date, weightSource: wSrc.source,
     baileyCorrectWeight: baileyCorrectWeight(d.gender, leanMassLbs),
     baileyLeanRange: baileyLeanRange(d),
     baileyTargetBf: BAILEY_TARGET_BF[d.gender] || null };
@@ -16036,9 +16082,31 @@ function WeightChartModal({ checkIns, goalWeight, currentWeight, rangeLow, range
 
 // One metric → one side-scrolling line chart with date labels. points =
 // [{ t, v, date }] sorted ascending. onEditPoint(point) makes the dots tappable.
-function MetricLineChart({ points, label, unit, color, onEditPoint }) {
+function MetricLineChart({ points, label, unit, color, onEditPoint, emptyHint }) {
   const data = [...(points || [])].filter((p) => p && p.t && p.v != null).sort((a, b) => a.t - b.t);
-  if (data.length < 2) return null;
+  // ⚠️ A CHART THAT RETURNS NULL IS INDISTINGUISHABLE FROM ONE THAT DOES NOT
+  // EXIST (S212, Kevin: "I didn't really see a line graph for someone's weight").
+  // With one weigh-in and two body-fat readings this section rendered a stack of
+  // charts with the BODYWEIGHT one silently missing — nothing said the weight was
+  // excluded, or what would bring it back. A chart that carries an `emptyHint`
+  // now keeps its heading and says what it is waiting for.
+  if (data.length < 2) {
+    if (!emptyHint) return null;
+    return (
+      <div className="rounded-lg bg-surface2 p-3">
+        <div className="mb-1 flex items-baseline justify-between gap-2">
+          <span style={{ fontFamily: "'Sora',sans-serif", letterSpacing: "1px", color, fontSize: ".92rem" }}>{label}</span>
+          {data.length === 1 && (
+            <span className="text-[.7rem]" style={{ color: "var(--text-secondary)" }}>
+              {data[0].v}{unit === "%" ? "%" : ` ${unit}`}
+              <span style={{ color: "var(--muted)" }}> on {new Date(data[0].t).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+            </span>
+          )}
+        </div>
+        <div className="text-[.72rem] leading-snug text-muted">{emptyHint}</div>
+      </div>
+    );
+  }
   const H = 172, PAD = { top: 18, right: 20, bottom: 40, left: 38 };
   const pxPerPoint = 64;
   const W = PAD.left + PAD.right + Math.max(1, data.length - 1) * pxPerPoint;
@@ -16168,11 +16236,23 @@ function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, bfAvai
         unit: "%", color: m.color, src: m.rows, id: "bf-" + m.key,
         editable: m.key === "scale", scanBf: m.key === "scale" }))
     : [{ key: "bf", label: "Body fat %", unit: "%", color: "var(--yellow)", src: b, id: "bf" }];
+  // ⚠️ EVERY HINT NAMES THE MISSING INPUT (S212). Bodyweight always keeps its
+  // card — it is the chart people come here for, and a silent absence reads as
+  // "this app doesn't chart my weight". Muscle/fat/lean only explain themselves
+  // once the weigh-ins ARE there, because until then the Bodyweight card has
+  // already said the same thing and four copies of it is noise.
+  const haveWeighIns = w.length >= 2;
   const CHARTS = [
-    { key: "weight", label: "Bodyweight", unit: "lbs", color: "var(--accent)", src: w, editable: true },
-    { key: "muscle", label: "Muscle mass", unit: "lbs", color: "var(--green)", src: w },
-    { key: "fat", label: "Fat mass", unit: "lbs", color: "var(--orange)", src: w },
-    { key: "lean", label: "Lean mass", unit: "lbs", color: "var(--purple)", src: w },
+    { key: "weight", label: "Bodyweight", unit: "lbs", color: "var(--accent)", src: w, editable: true,
+      hint: wAll.length
+        ? `Two weigh-ins on different days draw the line${spanDays ? " — try a longer timeframe, or log another" : ". Log one more and it appears here"}.`
+        : "Log a weight above and your bodyweight trend appears here." },
+    { key: "muscle", label: "Muscle mass", unit: "lbs", color: "var(--green)", src: w,
+      hint: haveWeighIns ? "Needs height, age and gender on the plan — the Lee-2000 estimate is built from those plus your weight." : null },
+    { key: "fat", label: "Fat mass", unit: "lbs", color: "var(--orange)", src: w,
+      hint: haveWeighIns ? "Needs a body-fat reading (scale, calipers or tape) to split your weight into fat and lean." : null },
+    { key: "lean", label: "Lean mass", unit: "lbs", color: "var(--purple)", src: w,
+      hint: haveWeighIns ? "Needs a body-fat reading (scale, calipers or tape) to split your weight into fat and lean." : null },
     ...bfCharts,
   ];
   const seriesOf = (c) => c.src.map((r) => ({ t: r.t, date: r.date, v: r[c.key] != null ? r[c.key] : (c.key === "bf" ? r.bf : null) })).filter((p) => p.v != null);
@@ -16207,6 +16287,7 @@ function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, bfAvai
       )}
       {CHARTS.map((c) => (
         <MetricLineChart key={c.id || c.key} points={seriesOf(c)} label={c.label} unit={c.unit} color={c.color}
+          emptyHint={c.hint}
           onEditPoint={c.editable && (c.scanBf ? onEditScanBf : onEditWeighIn)
             ? (p) => setEdit({ date: p.date, t: p.t, value: String(p.v), scanBf: !!c.scanBf }) : undefined} />
       ))}
@@ -16250,7 +16331,9 @@ function BodyCompCharts({ weighIns, bfReads, bfBySource, primaryBfSource, bfAvai
         </div>
       )}
       <div className="text-[10px] text-muted italic">
-        Muscle mass is a Lee-2000 estimate (±~6 lb). Fat &amp; lean mass use{" "}
+        Muscle mass is a Lee-2000 estimate (±~6 lb) from your height, weight, age and sex — it has no
+        body-fat term at all, so it tracks your weight and will not move on a caliper or tape reading alone.
+        Fat &amp; lean mass are that day&rsquo;s weight split by{" "}
         {primaryBfSource ? <>the readings from <b>{BF_METHOD_NAME[primaryBfSource]}</b> only</> : <>your body-fat readings</>}
         {" "}— methods aren&apos;t mixed, because a scale, calipers and a tape can disagree by several percent on the same body.
         {methods.length > 1 ? " Each method is charted separately for the same reason." : ""}
@@ -16373,8 +16456,13 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   // lean (fat/lean use the nearest BF% reading on or before that weigh-in); bfReads
   // are the actual body-fat readings. Dates come straight from the check-in / entry.
   const bodyCompData = (() => {
+    // ⚠️ `!c.isFuturePlan` (S212). A plotted future GOAL is stored in the same
+    // `weight` slot with isFuturePlan:true, and this was one of the readers that
+    // never learned the rule — so a target sat on the Bodyweight line as though
+    // it had been weighed, and generated a Lee-2000 muscle-mass point for a body
+    // that does not exist yet. Every other weigh-in reader in the file filters it.
     const weighIns = [...(d.checkIns || [])]
-      .filter((c) => c && Number(c.weight) > 0)
+      .filter((c) => c && Number(c.weight) > 0 && !c.isFuturePlan)
       .map((c) => ({
         t: c.timestamp || new Date(((c.date) || "") + "T12:00:00").getTime(),
         date: c.date || (c.timestamp ? ymdLocal(new Date(c.timestamp)) : ""),
@@ -16413,6 +16501,10 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
     const primaryBfSource = (bfPref && bfAvailable.includes(bfPref)) ? bfPref : (bfAvailable[0] || null);
     const bfReads = primaryBfSource ? bfBySource[primaryBfSource] : [];
     const carryBf = (t) => { let v = null; for (const x of bfReads) { if (x.t <= t) v = x.bf; else break; } return v; };
+    // wi.weight IS weightOnDate(d, wi.date) — a weigh-in is the observation that
+    // function resolves to — so these charts and the per-day readout in the
+    // history below are the same arithmetic on the same weight. That equality is
+    // asserted in scripts/test-lean-mass.mjs; it is the whole point of S212.
     const wRows = weighIns.map((wi) => {
       const bf = carryBf(wi.t);
       return {
@@ -16534,8 +16626,19 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
       sinceFirst: first && first !== e ? val - Number(first[f]) : null };
   }) })).filter((g) => g.rows.length));
 
-  const summarize = (e) => {
+  // ⚠️ THE WEIGHT LEADS (S212, Kevin: "I didn't see the weight, I saw body fat
+  // percentages and the measurements. It looks like the weight is excluded from
+  // all of these saved things"). It genuinely was: this summarised the
+  // measurement ENTRY, and a weigh-in is not stored there — it is a check-in
+  // keyed by the same date. A day that had both showed only half of itself.
+  // A weigh-in taken that day is stated plainly; a carried-forward weight is
+  // marked as such, because pretending a person stepped on the scale is worse
+  // than saying nothing.
+  const summarize = (x) => {
+    const e = x.entry;
     const parts = [];
+    if (x.ci && Number(x.ci.weight) > 0) parts.push(`${Math.round(Number(x.ci.weight) * 10) / 10} lbs`);
+    if (!e) return parts.length ? `${parts[0]} · weigh-in only` : "—";
     const bf = showBF ? measurementMetrics(d, e).bodyFatPct : null;
     if (bf != null) parts.push(`${bf}% BF`);
     CALIPER_ALL.filter((f) => e[f] != null).forEach((f) => parts.push(`${CALIPER_LABELS[f]} ${e[f]}mm`));
@@ -16583,6 +16686,16 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         {/* Latest body-composition readout (only when body-fat estimate is on) */}
         {showBF && metrics && (metrics.bodyFatPct != null || metrics.waistToHeight != null) ? (
           <div className="mb-3 rounded-lg bg-surface2 p-3">
+            {/* ⚠️ THE HEADLINE HAD NO DATE ON IT (S212) — it reads as "now",
+                but it is the newest READING, which may be weeks old, and every
+                mass under it is that day's weight times that day's body fat.
+                Saying which day and which weight is what makes the number
+                checkable instead of merely confident. */}
+            <div className="mb-1.5 text-[.62rem] uppercase tracking-wide text-muted">
+              Latest reading
+              {latest && latest.date ? ` · ${new Date(latest.date + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}` : ""}
+              {metrics.weightLbs != null ? ` · at ${metrics.weightLbs} lbs${metrics.weightSource === "sameDay" ? "" : metrics.weightDate ? ` (weighed ${new Date(metrics.weightDate + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })})` : " (current)"}` : ""}
+            </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1 items-baseline">
               {metrics.bodyFatPct != null && (
                 <div><span className="font-display text-2xl">{metrics.bodyFatPct}%</span>
@@ -16616,7 +16729,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
               )}
               {metrics.muscleMassLbs != null && (
                 <div><span className="font-display text-2xl text-success">{metrics.muscleMassLbs}</span>
-                  <span className="ml-1.5 text-xs text-muted">lbs muscle (est.)</span></div>
+                  <span className="ml-1.5 text-xs text-muted">lbs muscle (Lee-2000 est. — from height, weight, age &amp; sex, not your calipers)</span></div>
               )}
             </div>
             {(() => {
@@ -16811,7 +16924,7 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                     className="min-w-0 flex-1 cursor-pointer border-none bg-transparent p-0 text-left text-[.82rem] text-fg">
                     <span className="text-muted">{new Date(x.ts).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
                     <span className={`ml-2 font-semibold ${x.entry ? "" : "text-muted"}`}>
-                      {x.entry ? summarize(x.entry) : `${x.ci.weight} lbs · weigh-in only`}
+                      {summarize(x)}
                     </span>
                   </button>
                   {onDelete && x.entry && (
@@ -16874,7 +16987,23 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                             never rendered. Nothing errored; they were just invisible. */}
                         {m.leanMassLbs != null && <span className="text-[.68rem] text-muted">lean {m.leanMassLbs} lbs</span>}
                         {m.fatMassLbs != null && <span className="text-[.68rem] text-muted">fat {m.fatMassLbs} lbs</span>}
+                        {m.muscleMassLbs != null && <span className="text-[.68rem] text-muted">muscle {m.muscleMassLbs} lbs</span>}
                       </div>
+                      {/* ⚠️ SAY WHICH WEIGHT (S212). Lean, fat and muscle are all
+                          weight × something, so without naming the weight they
+                          came from there is no way to tell a real change from a
+                          carried-forward one — which is exactly how a figure that
+                          never moves goes unnoticed. */}
+                      {m.weightLbs != null && (
+                        <div className="mt-1 text-[.62rem] text-muted">
+                          From {m.weightLbs} lbs
+                          {m.weightSource === "sameDay" ? " weighed that day"
+                            : m.weightDate ? ` (last weigh-in, ${new Date(m.weightDate + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })})`
+                            : " (plan's current weight — no weigh-ins logged)"}
+                          {" "}× {m.bodyFatSource === "scale" ? "your scale reading" : m.bodyFatSource === "caliper" ? "the caliper reading" : "the tape estimate"}.
+                          {m.muscleMassLbs != null && " Muscle is a Lee-2000 estimate from height, weight, age and sex — it does not read your calipers or tape, so it moves only when your weight does."}
+                        </div>
+                      )}
                       {/* EVERY method that produced a number that day, named
                           (S198u, Kevin: "I do not see the body fat % from the
                           tape measure and caliper"). The headline figure is
@@ -16922,12 +17051,19 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                   const dayKey = openDay.date;
                   const ci = openDay.ci;
                   const priorCi = [...(d.checkIns || [])]
-                    .filter((c) => c && Number(c.weight) > 0 && c.date < dayKey)
+                    .filter((c) => c && Number(c.weight) > 0 && !c.isFuturePlan && c.date < dayKey)
                     .sort((a, b) => (a.date < b.date ? 1 : -1))[0] || null;
                   const scan = openEntry && Number(openEntry.bodyFatManual) > 0 ? Number(openEntry.bodyFatManual) : null;
                   const priorScan = (() => { for (let i = openIdx - 1; i >= 0; i--) {
                     if (Number(entries[i].bodyFatManual) > 0) return entries[i]; } return null; })();
-                  if (!ci && scan == null) return null;
+                  // ⚠️ NO EARLY RETURN (S212). This block used to disappear
+                  // entirely on a day with no same-day weigh-in — which is most
+                  // measurement days, since people tape on a schedule and weigh on
+                  // another. The whole section vanished, so the day read as though
+                  // weight were not part of the record at all. The weight that
+                  // ACTUALLY drove this day's lean, fat and muscle figures is now
+                  // always shown, and says which day it was taken on.
+                  const wSrc = weightOnDate(d, dayKey);
                   const row = (key, label, val, unit, delta, prevDate, onCommit) => {
                     const editing = fieldEdit && fieldEdit.field === key;
                     return (
@@ -16969,6 +17105,24 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                           priorCi ? Number(ci.weight) - Number(priorCi.weight) : null,
                           priorCi ? priorCi.date : null,
                           (v) => onEditWeighIn(dayKey, v))}
+                        {!(ci && onEditWeighIn) && (
+                          <div className="flex items-baseline justify-between gap-2 rounded-lg bg-surface2 px-2.5 py-1.5">
+                            <span className="text-[.78rem] text-muted" style={{ minWidth: 74 }}>Weight</span>
+                            <span className="flex-1 text-right">
+                              {wSrc.lbs ? (
+                                <>
+                                  <span className="text-[.85rem] font-bold text-muted">{wSrc.lbs} lbs</span>
+                                  <span className="ml-2 text-[.64rem] text-muted">
+                                    {wSrc.source === "sameDay" ? "weighed that day"
+                                      : wSrc.date
+                                      ? <>no weigh-in this day · carried from {new Date(wSrc.date + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })}</>
+                                      : "no weigh-in this day · plan's current weight"}
+                                  </span>
+                                </>
+                              ) : <span className="text-[.72rem] text-muted">no weigh-in on or before this day</span>}
+                            </span>
+                          </div>
+                        )}
                         {scan != null && row("__scanBf", "Body fat (scan)", scan, "%",
                           priorScan ? scan - Number(priorScan.bodyFatManual) : null,
                           priorScan ? priorScan.date : null,

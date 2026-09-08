@@ -998,6 +998,35 @@ function whtrOf(d, m) {
   return Math.round((waist / heightIn) * 100) / 100;
 }
 
+// The weight in force on a given DAY — mirrors src/App.jsx weightOnDate (S212).
+// Every mass figure below is weight × something, and this used to be the plan's
+// CURRENT weight for every entry regardless of when it was taken, so a
+// three-month-old measurement was scored against today's scale and the assistant
+// quoted a lean mass no screen agreed with. Nearest real observation only: last
+// weigh-in on or before the day, else the earliest there is, else current weight.
+// A plotted future target is not an observation.
+function weightOnDate(d, dateKey) {
+  const cur = Number(d && d.weightLbs) || 0;
+  const outCur = { lbs: cur > 0 ? cur : null, date: null, source: "current" };
+  const rows = [];
+  for (const c of (d && d.checkIns) || []) {
+    if (!c || c.isFuturePlan || !(Number(c.weight) > 0)) continue;
+    // `date` only — the app's copy falls back to ymdLocal(timestamp) for the
+    // viewer's own timezone, which the server has no business guessing. Every
+    // check-in the app writes carries a date; one without simply does not
+    // participate, which is safer than filing it on the wrong day.
+    const k = c.date || "";
+    if (k) rows.push({ k, w: Math.round(Number(c.weight) * 10) / 10 });
+  }
+  if (!rows.length || !dateKey) return outCur;
+  rows.sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
+  let onOrBefore = null;
+  for (const r of rows) { if (r.k <= dateKey) onOrBefore = r; else break; }
+  const pick = onOrBefore || rows[0];
+  return { lbs: pick.w, date: pick.k,
+    source: pick.k === dateKey ? "sameDay" : onOrBefore ? "carriedBack" : "carriedForward" };
+}
+
 // One measurement entry → all derived metrics (null where inputs are missing).
 function measurementMetrics(d, m) {
   const bailey = baileyBF(d, m);
@@ -1011,7 +1040,9 @@ function measurementMetrics(d, m) {
   const avg = manual != null ? manual : caliper != null ? caliper : tapeAvg;
   const bodyFatSource = manual != null ? "scale" : caliper != null ? "caliper" : tapeAvg != null ? "tape" : null;
   const whtr = whtrOf(d, m);
-  const weight = Number(d.weightLbs) || 0;
+  // The weight THIS DAY was measured at — not today's (see weightOnDate).
+  const wSrc = weightOnDate(d, m && m.date);
+  const weight = wSrc.lbs || 0;
   const bf = avg;
   const leanMassLbs = weight > 0 && bf != null ? Math.round(weight * (1 - bf / 100)) : null;
   // Bailey goal weight = lean mass ÷ (1 − target BF%): a physiologically
@@ -1023,7 +1054,8 @@ function measurementMetrics(d, m) {
   // is reading rather than quoting a bare percentage the app may disagree with.
   return { baileyBF: bailey, navyBF: navy, caliperBF: caliper, manualBF: manual,
     bodyFatPct: avg, bodyFatSource, tapeSource, waistToHeight: whtr,
-    leanMassLbs, goalWeightFromLeanMass };
+    leanMassLbs, goalWeightFromLeanMass,
+    weightLbs: weight || null, weightDate: wSrc.date, weightSource: wSrc.source };
 }
 
 // Admin UID (matches functions/index.js, aichat.js, mcp.js and firestore.rules
@@ -2988,6 +3020,10 @@ async function runTool(name, input, ctx) {
       if (m.navyBF != null) out.navyBF = m.navyBF;
       if (m.bodyFatPct != null) out.bodyFatPct = m.bodyFatPct;
       if (m.waistToHeight != null) out.waistToHeight = m.waistToHeight;
+      // The weight each entry's lean mass was computed FROM, so the assistant can
+      // tell a real change from a carried-forward one (S212).
+      if (m.weightLbs != null) { out.weightLbs = m.weightLbs; out.weightIsFromDate = m.weightDate; }
+      if (m.leanMassLbs != null) out.leanMassLbs = m.leanMassLbs;
       return out;
     });
     const latest = entries[0] || null;
@@ -3004,7 +3040,11 @@ async function runTool(name, input, ctx) {
     return { entries, changeOverWindow: Object.keys(change).length ? change : null,
       leanMassLbs: cur.leanMassLbs, goalWeightFromLeanMass: cur.goalWeightFromLeanMass,
       goalBodyFatPct: Number(d.goalBodyFat) || null,
-      note: "waistToHeight > 0.5 = elevated health risk; under 0.5 is the goal. Body-fat %s are tape ESTIMATES (±2%) — the trend matters more than the absolute number." };
+      leanMassFromWeightLbs: cur.weightLbs, leanMassFromWeighInDate: cur.weightDate,
+      // ⚠️ The old note here claimed ±2%, which S200y corrected on every screen
+      // and missed here — so the assistant was defending a precision the app
+      // itself denies. Nothing is that accurate (S212).
+      note: "waistToHeight > 0.5 = elevated health risk; under 0.5 is the goal. Body fat from tape or calipers is an estimate (±3–4 points) and a consumer scale can sit 5 points off — the trend within ONE method matters, not the absolute number or a comparison between methods. leanMassLbs = the weight on leanMassFromWeighInDate × (1 − body fat %); it is NOT a muscle measurement." };
   }
 
   if (name === "log_water") {
