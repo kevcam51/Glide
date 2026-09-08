@@ -110,7 +110,24 @@ ok("...only text and structuredFormat", /suggestions\.placePrediction\.text,sugg
 ok("no session token, because no Place Details call is made",
    !/sessionToken/.test(PLACES) && !/places\/[^"]*\?fields/.test(PLACES));
 ok("...and Place Details is genuinely never called", !/v1\/places\/\$\{/.test(PLACES));
-ok("results are biased to addresses, not businesses", /includedPrimaryTypes/.test(PLACES));
+// ⚠️ TYPES ARE DELIBERATELY UNRESTRICTED NOW (S208). The first version asked
+// only for street_address/premise/subpremise/route, and Kevin reported exactly
+// the consequence: it could not find "general locations in my area" — a named
+// gym, a park, a building — which is where a mobile trainer actually works.
+// Google returns a full formatted address for an establishment anyway, so what
+// lands in the field is still geocodable.
+ok("suggestions are NOT narrowed to street addresses", !/includedPrimaryTypes/.test(PLACES), true);
+// Biased to the person's own saved place so their city outranks an
+// identically-named street elsewhere. A bias, never a restriction.
+ok("results are biased toward where this person trains", /locationBias/.test(PLACES));
+ok("...as a bias, never a restriction", !/locationRestriction/.test(PLACES), true);
+ok("...centred on their own saved address", /biasCenterFor\(admin\.firestore\(\), uid, raw\)/.test(PLACES));
+ok("...and it asks for no browser location to do it", !/geolocation|navigator/.test(PLACES), true);
+// Best-effort: no saved address, or one that will not resolve, means unbiased
+// results rather than no results.
+ok("no saved address still returns suggestions", /\.\.\.\(bias \? \{ locationBias/.test(PLACES), true);
+ok("a failed bias lookup is swallowed", /catch \{ return null; \}/.test(PLACES), true);
+ok("the bias radius is a metro, not a street", P.BIAS_RADIUS_M >= 20000 && P.BIAS_RADIUS_M <= 100000, P.BIAS_RADIUS_M);
 
 // ── the key never reaches the browser ───────────────────────────────────────
 // The whole reason this is a proxy: Google key restrictions are EXCLUSIVE, so a

@@ -49,6 +49,8 @@
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
+const admin = require("firebase-admin");
+const { geocode } = require("./driveTime");
 
 const GOOGLE_MAPS_API_KEY = defineSecret("GOOGLE_MAPS_API_KEY");
 const REGION = "us-central1";
@@ -57,6 +59,30 @@ const MIN_CHARS = 3;      // below this the suggestions are noise, and each cost
 const MAX_INPUT = 200;
 const MAX_RESULTS = 5;
 const TIMEOUT_MS = 4000;  // a suggestion that arrives after the next keystroke is worthless
+// How far around the person's own saved place to prefer results. Wide enough to
+// cover a metro area they might train across, tight enough that it actually
+// reorders anything — this is a BIAS, never a restriction, so somewhere outside
+// it still appears, just lower down.
+const BIAS_RADIUS_M = 50000;
+const MEETING_ADDRESS_KEY = "caliq-meeting-address";
+
+// Where this person is likely typing about. Their own saved meeting address is
+// the only signal we have that costs nothing and asks for nothing — no browser
+// location prompt for a text field.
+// ⚠️ The geocode is CACHED (180 days, shared) by driveTime.js, so this is a
+// Firestore read rather than a lookup, and it is best-effort: no saved address,
+// or an address that will not resolve, simply means unbiased results.
+async function biasCenterFor(db, uid, apiKey) {
+  try {
+    const doc = await db.doc(`users/${uid}/kv/${encodeURIComponent(MEETING_ADDRESS_KEY)}`).get();
+    if (!doc.exists) return null;
+    const raw = JSON.parse(doc.data().value || "{}");
+    const addr = raw && typeof raw === "object" ? raw.address : raw;
+    if (!addr) return null;
+    const hit = await geocode(db, String(addr), apiKey);
+    return hit && isFinite(hit.lat) ? { latitude: hit.lat, longitude: hit.lng } : null;
+  } catch { return null; }
+}
 
 // Pull the display strings out of a v1 autocomplete response, and NOTHING else.
 // Exported and pure so the shape can be tested without a network.
@@ -113,6 +139,8 @@ exports.placesAutocomplete = onCall(
     // as "no key" rather than as a broken one.
     if (!raw.startsWith("AIza")) return { suggestions: [], configured: false };
 
+    const bias = await biasCenterFor(admin.firestore(), uid, raw);
+
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     try {
@@ -129,10 +157,19 @@ exports.placesAutocomplete = onCall(
         },
         body: JSON.stringify({
           input: q,
-          // Street addresses, not businesses or bus stops — this field is "where
-          // is the session", and a POI name geocodes far less reliably than an
-          // address does.
-          includedPrimaryTypes: ["street_address", "premise", "subpremise", "route"],
+          // ⚠️ TYPES ARE NO LONGER RESTRICTED (S208, Kevin: "it struggles to find
+          // general locations in my area... more than just addresses"). The
+          // first version asked only for street_address/premise/subpremise/route
+          // on the reasoning that a POI geocodes less reliably than an address —
+          // true, but it made the field unable to find the places a mobile
+          // trainer actually works at: a named gym, a park, a building. Google
+          // returns a full formatted address for an establishment anyway, so the
+          // thing that lands in the field is still geocodable.
+          //
+          // Biased to where this person already trains, so their own city wins
+          // over an identically-named street two states away. A BIAS, not a
+          // restriction: somewhere genuinely elsewhere still appears, lower down.
+          ...(bias ? { locationBias: { circle: { center: bias, radius: BIAS_RADIUS_M } } } : {}),
         }),
       });
       if (!r.ok) {
@@ -153,4 +190,5 @@ exports.placesAutocomplete = onCall(
 
 exports.parseSuggestions = parseSuggestions;
 exports.worthAsking = worthAsking;
+exports.BIAS_RADIUS_M = BIAS_RADIUS_M;
 exports.MIN_CHARS = MIN_CHARS;
