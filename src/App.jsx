@@ -13031,6 +13031,19 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // when `burned > 0`, so it shows NOTHING AT ALL. Without a body to price
   // against, the only honest cardio control is the one that takes the calories
   // directly.
+  // ⚠️ WHOSE PLAN IS THIS? Standalone means somebody who is NOT in the app — a
+  // prospect on a street corner — so it speaks about "them". Everywhere else this
+  // modal is looking at a plan belonging to whoever opened it (a client's own, or
+  // the client a coach has open), and the whole app addresses that in the second
+  // person: "Nothing here changes YOUR plan" has been the subtitle for sessions.
+  //
+  // ⚠️ FOUND BY SIGNING IN AS A CLIENT AND READING IT BACK. The third-person copy
+  // written for the street demo told a client "their plan eats that back" about
+  // their own plan. Half the user base is clients.
+  const th = standalone ? "their" : "your";
+  const Th = standalone ? "Their" : "Your";
+  const they = standalone ? "they" : "you";
+  const theyd = standalone ? "they&rsquo;d" : "you&rsquo;d";
   const canPrice = w > 0;
   const fillKindEff = canPrice ? fillKind : SIM_MANUAL;
   // ── The scenario calendar's edits — local, like everything else here ─────
@@ -13054,7 +13067,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const fillReady = fillDays.length > 0 && (fillKindEff !== SIM_MANUAL || (simNum(fillCal) ?? 0) > 0);
   const noWeightNote = (
     <div style={{ fontSize: ".66rem", color: "var(--muted)", lineHeight: 1.5, marginBottom: "10px" }}>
-      Add their weight up top and you can pick real exercises &mdash; we can&rsquo;t price a jog without
+      Add {th} weight up top and you can pick real exercises &mdash; we can&rsquo;t price a jog without
       knowing who&rsquo;s jogging. Or just type the calories a session burns.
     </div>
   );
@@ -13199,11 +13212,11 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const weightField = (
     <>
       <div style={{ ...lbl, marginTop: "9px" }}>
-        Their weight <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>(optional)</span>
+        {Th} weight <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>(optional)</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
         <input type="number" inputMode="numeric" min="0" max="2000" step="1"
-          aria-label="Their weight in pounds" placeholder="e.g. 185"
+          aria-label={`${Th} weight in pounds`} placeholder="e.g. 185"
           value={wOverride} onChange={(e) => setWOverride(e.target.value)}
           style={{ ...numInput, width: "110px",
             border: simRejected(wOverride, 2000) ? "1.5px solid var(--yellow)" : "1px solid var(--border)" }} />
@@ -13222,7 +13235,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
       <div style={lbl}>{label}</div>
       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
         <input type="number" inputMode="numeric" min="0" max={SIM_BURN_MAX} step="50"
-          aria-label="Their daily burn in calories" placeholder={planUsable ? Math.round(baseTdee).toLocaleString() : "e.g. 2,400"}
+          aria-label={`${Th} daily burn in calories`} placeholder={planUsable ? Math.round(baseTdee).toLocaleString() : "e.g. 2,400"}
           value={mOverride} onChange={(e) => setMOverride(e.target.value)}
           style={{ ...numInput, width: "128px",
             border: simRejected(mOverride, SIM_BURN_MAX) ? "1.5px solid var(--yellow)" : "1px solid var(--border)" }} />
@@ -13295,14 +13308,14 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
         {!usable ? (
           <>
             <div style={{ ...panelS, marginBottom: "10px" }}>
-              {burnField("Start with their daily burn")}
+              {burnField(`Start with ${th} daily burn`)}
               <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.45, margin: "8px 0 12px" }}>
-                What their body uses in a day to hold their weight, before any training you add
+                What {th} body uses in a day to hold {th} weight, before any training you add
                 below. A rough number is fine &mdash; you can change it any time.
               </div>
               {weightField}
               <div style={{ fontSize: ".66rem", color: "var(--muted)", lineHeight: 1.45, marginTop: "7px" }}>
-                Only needed to price real exercises and to show what they&rsquo;d weigh.
+                Only needed to price real exercises and to show what {theyd} weigh.
               </div>
             </div>
             {!planUsable && !standalone && (
@@ -13333,7 +13346,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
             {SIM_RATES.filter((t) => t.group === "maintain").map((t) => rateBtn(t, true))}
           </div>
           <button onClick={() => setEditBurn((v) => !v)} aria-pressed={editBurn}
-            aria-label="Change their daily burn"
+            aria-label={`Change ${th} daily burn`}
             style={{ flex: "0 0 auto", width: "46px", borderRadius: "9px", cursor: "pointer",
               border: editBurn || mNum !== null ? "1.5px solid var(--accent)" : "1px solid var(--border)",
               background: editBurn || mNum !== null ? "rgba(var(--accent-rgb),.12)" : "var(--s2)",
@@ -13343,18 +13356,18 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
         </div>
         {(editBurn || mNum !== null) && (
           <div style={{ ...panelS, padding: "10px", marginTop: "7px", marginBottom: 0 }}>
-            {burnField(mNum !== null ? "Using your own number" : "Their daily burn")}
+            {burnField(mNum !== null ? "Using your own number" : `${Th} daily burn`)}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
               gap: "8px", marginTop: "7px", fontSize: ".66rem", color: "var(--muted)", lineHeight: 1.45 }}>
               <span>
                 {mNum === null
-                  ? <>Worked out from their stats as <b style={{ color: "var(--text-secondary)" }}>{Math.round(baseTdee || 0).toLocaleString()}</b> cal.</>
+                  ? <>Worked out from {th} stats as <b style={{ color: "var(--text-secondary)" }}>{Math.round(baseTdee || 0).toLocaleString()}</b> cal.</>
                   : <>Every pace above is worked from this.</>}
               </span>
               {mNum !== null && (
                 <button onClick={() => { setMOverride(""); setEditBurn(false); }}
                   style={{ ...linkS, flex: "0 0 auto" }}>
-                  {planUsable ? "Back to their plan's number" : "Clear"}
+                  {planUsable ? `Back to ${th} plan's number` : "Clear"}
                 </button>
               )}
             </div>
@@ -13367,14 +13380,14 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
             {standalone && weightField}
             {standalone && (
               <div style={{ fontSize: ".64rem", color: "var(--muted)", lineHeight: 1.45, marginTop: "5px" }}>
-                Their weight unlocks real exercises below and shows what they&rsquo;d weigh as they go.
+                {Th} weight unlocks real exercises below and shows what {theyd} weigh as {they} go.
               </div>
             )}
             {mNum !== null && eatback && trainWeek > 0 && (
               <div style={{ marginTop: "6px", fontSize: ".66rem", color: "var(--muted)", lineHeight: 1.45 }}>
                 Maintain reads <b style={{ color: "var(--text-secondary)" }}>{maintain.toLocaleString()}</b> &mdash;
                 your {mNum.toLocaleString()} plus the <b style={{ color: "var(--orange)" }}>{Math.round(trainWeek / 7).toLocaleString()}</b> a
-                day of training below, which their plan eats back.
+                day of training below, which {th} plan eats back.
               </div>
             )}
           </div>
@@ -13664,7 +13677,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                   <div style={{ marginTop: "9px", fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.5 }}>
                     A flat 3,500-calories-per-pound calculator would say{" "}
                     <b style={{ color: "var(--text-secondary)" }}>{Math.abs(horizonFlat.lost).toFixed(0)}</b>.
-                    Their burn falls as they get lighter, and this counts that.
+                    {Th} burn falls as {they} get lighter, and this counts that.
                   </div>
                 )}
                 {horizonProj.train > 0 && (
@@ -13672,8 +13685,8 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                     Training over that stretch: about{" "}
                     <b style={{ color: "var(--orange)" }}>{(Math.round(horizonProj.train / 1000) * 1000).toLocaleString()}</b> cal.
                     {eatback
-                      ? <> Their plan eats that back, so it buys food rather than a faster result.</>
-                      : <> Their plan doesn&rsquo;t eat it back, so it comes straight off the deficit.</>}
+                      ? <> {Th} plan eats that back, so it buys food rather than a faster result.</>
+                      : <> {Th} plan doesn&rsquo;t eat it back, so it comes straight off the deficit.</>}
                   </div>
                 )}
                 {horizonProj.halted > 0 && (
@@ -13703,11 +13716,11 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                   lineHeight: 1.5 }}>
                   {!canFollow
                     ? <>{mNum !== null
-                        ? <>This holds their burn at <b style={{ color: "var(--text-secondary)" }}>{mNum.toLocaleString()}</b> the whole way.</>
-                        : <>This holds their burn steady the whole way.</>}
+                        ? <>This holds {th} burn at <b style={{ color: "var(--text-secondary)" }}>{mNum.toLocaleString()}</b> the whole way.</>
+                        : <>This holds {th} burn steady the whole way.</>}
                       {" "}A real burn falls as weight comes off, so a stretch this long runs optimistic
                       {horizon >= 90 && <> &mdash; and the further out you go, the more so</>}.
-                      {" "}Add their weight, height, age and how active they are and it can follow the burn down.</>
+                      {" "}Add {th} weight, height, age and how active {they} are and it can follow the burn down.</>
                     : horizon >= 365
                       ? <>A year is a long way to project. This follows the burn down as weight comes off, but bodies
                         also turn the dial down beyond what weight alone explains, and nobody eats to plan for twelve
@@ -13739,7 +13752,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
               about a plan that does not exist — found by opening the standalone
               modal, not by reading. */}
           {standalone
-            ? <>Add the training they&rsquo;d actually do. Nothing here is saved.</>
+            ? <>Add the training {theyd} actually do. Nothing here is saved.</>
             : <>Starts from the week already in your plan. Change it however you like &mdash; your plan stays exactly as it is.</>}
         </div>
 
@@ -14237,7 +14250,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
             weight comes off — so this doesn&rsquo;t drift the way a flat calculator does.
             {canFollow
               ? <> Bodies still turn the dial down beyond what weight alone explains, so the first weeks are the firmest part.</>
-              : <> {mNum !== null ? "This holds their burn at " + mNum.toLocaleString() + " the whole way — add their weight, height, age and how active they are and it can follow the burn down." : "Add their weight and it can follow the burn down as they lose."}</>}
+              : <> {mNum !== null ? `This holds ${th} burn at ` + mNum.toLocaleString() + ` the whole way — add ${th} weight, height, age and how active ${they} are and it can follow the burn down.` : `Add ${th} weight and it can follow the burn down as ${they} lose.`}</>}
           </div>
         </div>
         </>)}

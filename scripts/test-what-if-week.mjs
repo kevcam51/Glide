@@ -324,6 +324,32 @@ const PLANS = [
   ok("an implausible burn is used exactly as typed", M.simIntakeForRate({}, 0, 0, 9000) === 9000);
 }
 
+// ── 4b2. whose plan is this? (S217) ────────────────────────────────────────
+// ⚠️ FOUND BY SIGNING IN AS A CLIENT AND READING IT BACK. The third-person copy
+// written for the street demo — "their plan eats that back" — was being shown to
+// a client looking at THEIR OWN plan. Half the user base is clients, and the rest
+// of this app has addressed them in the second person for sessions ("Nothing here
+// changes YOUR plan" is the subtitle directly above).
+ok("the pronoun is decided once, from the mode",
+   /const th = standalone \? "their" : "your";/.test(SIM_CODE)
+   && /const Th = standalone \? "Their" : "Your";/.test(SIM_CODE)
+   && /const they = standalone \? "they" : "you";/.test(SIM_CODE)
+   && /const theyd = standalone \? "they&rsquo;d" : "you&rsquo;d";/.test(SIM_CODE));
+// ⚠️ AND NO RENDERED STRING MAY HARDCODE EITHER SIDE OF IT. A single missed
+// literal is the whole bug back, on whichever screen happens to hit that line.
+{
+  const rendered = SIM_CODE
+    .replace(/const th = [^\n]*/, "").replace(/const Th = [^\n]*/, "")
+    .replace(/const they = [^\n]*/, "").replace(/const theyd = [^\n]*/, "");
+  const stray = (rendered.match(/(?:"|>|\s)[Tt]heir\b/g) || []);
+  ok("no rendered string hardcodes the third person", stray.length === 0, stray);
+  ok("...nor the second person, which would break the street demo",
+     !/>[^<]*\byour plan&rsquo;s number/.test(rendered) && !/"Start with your daily burn"/.test(rendered));
+}
+// The subtitle already worked this way and must keep doing so.
+ok("the subtitle still switches on the same mode",
+   /standalone \? "Nothing is saved\." : "Nothing here changes your plan\."/.test(SIM_CODE));
+
 // ── 4c. the screen around the typed burn ───────────────────────────────────
 ok("the modal takes a standalone mode", /function CalorieSimulator\(\{ data, weightLbs, planRate, dayCalsAll, onClose, standalone = false \}\)/.test(SIM_CODE));
 ok("...and an unusable plan or a bare sandbox opens on the burn question",
@@ -341,7 +367,7 @@ ok("the burn field is defined once and rendered twice",
 // a second button inside it is invalid HTML and the inner one swallows the
 // outer's click on some browsers. Asserted by lifting rateBtn and showing the
 // pencil is not in it.
-ok("the Maintain chip carries a pencil", /aria-label="Change their daily burn"/.test(SIM_CODE));
+ok("the Maintain chip carries a pencil", /aria-label=\{`Change \$\{th\} daily burn`\}/.test(SIM_CODE));
 ok("...which is not nested inside the chip", !/setEditBurn/.test(liftDecl(APP, "rateBtn")));
 // ⚠️ THE WEIGHT MUST SURVIVE THE OPENER (found by driving it, not by reading).
 // Typing the burn replaces the opener with the full screen, and the weight field
@@ -354,11 +380,11 @@ ok("the weight field is written once and reachable after the opener",
    && /\{standalone && weightField\}/.test(SIM_CODE),
    (SIM_CODE.match(/\{weightField\}/g) || []).length);
 ok("...and one tap puts the plan's own number back",
-   /setMOverride\(""\); setEditBurn\(false\);/.test(SIM_CODE) && /Back to their plan/.test(SIM_CODE));
+   /setMOverride\(""\); setEditBurn\(false\);/.test(SIM_CODE) && /Back to \$\{th\} plan's number/.test(SIM_CODE));
 // ⚠️ EAT-BACK MAKES "MAINTAIN" AND "THEIR BURN" TWO DIFFERENT NUMBERS. Typing
 // 2,400 and reading 2,492 one line above looks like a bug unless it is named.
 ok("the gap between the typed burn and the Maintain chip is disclosed",
-   /mNum !== null && eatback && trainWeek > 0 && \(/.test(SIM_CODE) && /which their plan eats back/.test(SIM_CODE));
+   /mNum !== null && eatback && trainWeek > 0 && \(/.test(SIM_CODE) && /which \{th\} plan eats back/.test(SIM_CODE));
 // ⚠️ A PICKER THAT ACCEPTS INPUT AND SILENTLY DISCARDS IT. restingKcalPerMin
 // opens `if (!w) return 0`, so with no weight a 45-minute run prices at zero and
 // the day header — which only renders a burn when burned > 0 — shows NOTHING.
@@ -631,7 +657,8 @@ ok("...and a blank day is the pace AT THAT WEIGHT, which is what keeps it inert"
 // has no BMR behind it, and no weight means no MET can be priced.
 ok("it only follows the body when there is a body to follow",
    /const canFollow = w > 0 && mNum === null && planUsable;/.test(SIM_CODE));
-ok("...and says which of those it is doing", /This holds their burn at/.test(SIM_CODE) && /Add their weight and it can follow the burn down/.test(SIM_CODE));
+ok("...and says which of those it is doing",
+   /This holds \$\{th\} burn at/.test(SIM_CODE) && /Add \$\{th\} weight and it can follow the burn down/.test(SIM_CODE));
 // ⚠️ THE OLD FOOTNOTE BECAME FALSE. It said the projection "drifts optimistic",
 // which is exactly what it no longer does — prose contradicting the number four
 // inches above it is the S216b SummaryTab bug in advance.
@@ -870,7 +897,7 @@ ok("the calendar writes nothing either", !/onChange\(/.test(SIM_CODE) && !/stora
   // plan there is none of. Found by opening the standalone modal, not by reading.
   ok("...and both sentences are mode-aware",
      /standalone \? "Nothing is saved\." : "Nothing here changes your plan\."/.test(SIM_CODE)
-     && /\{standalone\s*\n?\s*\? <>Add the training they&rsquo;d actually do/.test(SIM_CODE));
+     && /\{standalone\s*\n?\s*\? <>Add the training \{theyd\} actually do/.test(SIM_CODE));
 }
 
 // ── 8. the manual-calorie session — a third shape, priced here ──────────────
