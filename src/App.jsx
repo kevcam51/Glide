@@ -20481,8 +20481,27 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // this exposes no real client to anyone. It exists so this flow can be
   // exercised without Kevin being the only person able to click it.
   const TZ_TEST_UID = "fP1rohsbKBaoJezm98F1UwYZDZD2";
-  const tzIsOwner = meUid === OWNER_UID || meUid === TZ_TEST_UID;
+  // ⚠️ WAS THE WHOLE GATE (S215c). Every Trainerize control hung off this UID
+  // test because there was one shared credential — the owner's — so letting
+  // anyone else in would have shown them HIS roster. Per-trainer credentials
+  // exist now, so the question becomes "has THIS trainer connected their own
+  // account?", answered by the server. The owner keeps the UID path because his
+  // group still runs on the Secret Manager values with no stored row.
+  const [tzStatus, setTzStatus] = useState(null);   // { allowed, connected, ... }
+  const tzIsOwner = meUid === OWNER_UID || meUid === TZ_TEST_UID
+    || !!(tzStatus && tzStatus.connected);
+  useEffect(() => {
+    if (!meUid) return;
+    let alive = true;
+    callTrainerizeStatus({}).then((r) => { if (alive) setTzStatus((r && r.data) || null); })
+      .catch(() => { if (alive) setTzStatus(null); });   // never block the page on it
+    return () => { alive = false; };
+  }, [meUid]);
   const [tzAuto, setTzAuto] = useState(true);
+  const [tzGroupDraft, setTzGroupDraft] = useState("");
+  const [tzTokenDraft, setTzTokenDraft] = useState("");
+  const [tzConnBusy, setTzConnBusy] = useState(false);
+  const [tzConnMsg, setTzConnMsg] = useState("");
   useEffect(() => {
     if (!tzIsOwner) return;
     (async () => {
@@ -21498,7 +21517,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
               Clients &amp; Plans
             </div>
             <div className={`${subCls} mt-1`}>
-              <b className="text-fg">{rosterCap.count} of {rosterCap.cap}</b> used on the free plan
+              <b className="text-fg">{rosterCap.count} of {rosterCap.cap}</b> used on {rosterCap.cappedPlan || "the free plan"}
               {rosterCap.connected > 0 || rosterCap.plans > 0
                 ? ` — ${rosterCap.connected} connected client${rosterCap.connected === 1 ? "" : "s"}, ${rosterCap.plans} plan file${rosterCap.plans === 1 ? "" : "s"}.`
                 : "."}
@@ -21514,7 +21533,7 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
             )}
             {rosterBlocked && (
               <div className="mt-2 rounded-lg border border-[var(--yellow,#fbbf24)] bg-[rgba(251,191,36,.08)] px-3 py-2 text-[.78rem] leading-relaxed text-fg">
-                You're at {rosterCap.cap} of {rosterCap.cap} — upgrade to add another plan file. Simulations don't count toward the limit.
+                You're at {rosterCap.cap} of {rosterCap.cap} on {rosterCap.cappedPlan || "the free plan"} — upgrade to add another plan file. Simulations don't count toward the limit.
               </div>
             )}
             {rosterPlans && <PlanPicker role={meRole} onClose={() => setRosterPlans(false)} />}
@@ -22013,11 +22032,80 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
             These lived inside the Local Plans body, which is collapsed by
             default, so "My watch data" was invisible until you happened to
             tap Show (S160, Kevin: "I don't know where my watch data is"). */}
+        {/* ── Connect your own Trainerize account (S215c) ──────────────────
+            Shown to any trainer whose plan includes it and who has not connected
+            yet. The card above stays owner/connected-only, because there is
+            nothing to show until a credential exists. */}
+        {tzStatus && tzStatus.allowed && !tzStatus.connected && !tzIsOwner && (
+          <div className={cardCls}>
+            <div className={`${sectionTitleCls} whitespace-nowrap flex items-center gap-2 mb-1`}>
+              <Icon name="watch" size={18} color="var(--accent)" />Connect Trainerize
+            </div>
+            <div className={`${subCls} mb-2`}>
+              Bring your clients across — their stats, body composition, completed workouts and watch
+              data sync automatically, every 30 minutes. Your Group ID and API token are in your
+              Trainerize settings.
+            </div>
+            {/* ⚠️ SAY THE PART WE DO NOT CONTROL, UP FRONT. API access is a
+                Studio-or-higher TRAINERIZE plan feature, so some trainers on a
+                paid Glidna plan still cannot use this. Finding that out after
+                paying us is how refund arguments start. */}
+            <div className="mb-2 rounded-md px-2.5 py-2 text-[.72rem] leading-snug"
+              style={{ background: "rgba(251,191,36,.10)", color: "var(--text)" }}>
+              Needs <b>API access on your Trainerize plan</b> (Studio or higher). That&apos;s
+              Trainerize&apos;s requirement, not ours — if you don&apos;t have it, nothing here will work.
+            </div>
+            <div className="flex flex-col gap-2">
+              <input value={tzGroupDraft} onChange={(e) => setTzGroupDraft(e.target.value)}
+                placeholder="Trainerize Group ID" inputMode="numeric"
+                className="rounded-lg border border-border bg-surface px-2.5 py-2 text-sm text-fg outline-none" />
+              {/* type=password so a shoulder-surfer or a screen-share doesn't
+                  capture it; it is a bearer credential for a whole roster. */}
+              <input value={tzTokenDraft} onChange={(e) => setTzTokenDraft(e.target.value)}
+                placeholder="API token" type="password" autoComplete="off"
+                className="rounded-lg border border-border bg-surface px-2.5 py-2 text-sm text-fg outline-none" />
+              <div className="flex items-center gap-2 flex-wrap">
+                <button disabled={tzConnBusy || !tzGroupDraft.trim() || !tzTokenDraft.trim()}
+                  onClick={async () => {
+                    setTzConnBusy(true); setTzConnMsg("");
+                    try {
+                      const r = await callConnectTrainerize({ groupId: tzGroupDraft.trim(), token: tzTokenDraft.trim() });
+                      const n = (r && r.data && r.data.clientCount) || 0;
+                      // The count is the receipt: it proves the credential
+                      // reached THEIR roster, without showing anything from it.
+                      setTzConnMsg(`Connected — ${n} client${n === 1 ? "" : "s"} found in your Trainerize account.`);
+                      setTzGroupDraft(""); setTzTokenDraft("");
+                      const st = await callTrainerizeStatus({});
+                      setTzStatus((st && st.data) || null);
+                    } catch (e) {
+                      setTzConnMsg((e && e.message) || "Couldn't connect — check the details and try again.");
+                    } finally { setTzConnBusy(false); }
+                  }}
+                  className={mPrimaryCls}>{tzConnBusy ? "Checking…" : "Connect"}</button>
+                {tzConnMsg && <span className="text-[.75rem] text-muted flex-1 min-w-[160px]">{tzConnMsg}</span>}
+              </div>
+            </div>
+          </div>
+        )}
         {onTrainerizeImport && tzIsOwner && (
           <div className={cardCls}>
             <div className={`${sectionTitleCls} whitespace-nowrap flex items-center gap-2 mb-1`}>
               <Icon name="watch" size={18} color="var(--accent)" />Tracker &amp; sync
             </div>
+            {/* Disconnect lives with the connection it undoes. No plan check on
+                the way out — never trap someone with a stored credential. */}
+            {tzStatus && tzStatus.connected && (
+              <div className={`${subCls} mb-1.5 flex items-center gap-2 flex-wrap`}>
+                <span>Trainerize connected · {tzStatus.groupIdMasked}
+                  {tzStatus.clientCount ? ` · ${tzStatus.clientCount} clients` : ""}</span>
+                <button onClick={async () => {
+                    await callDisconnectTrainerize({}).catch(() => {});
+                    const st = await callTrainerizeStatus({}).catch(() => null);
+                    setTzStatus((st && st.data) || null);
+                  }}
+                  className="bg-transparent border-0 p-0 text-[.72rem] text-danger underline cursor-pointer">Disconnect</button>
+              </div>
+            )}
             {onTrainerizeImport && tzIsOwner && (
               <div className="mt-1.5 flex flex-col gap-1.5 items-start">
                 <button onClick={toggleTzAuto}
@@ -25388,9 +25476,18 @@ const PLAN_FEATURES = {
       // pitch tool, not a person, and since S212c they carry no tracking at all.
       ["Clients & plan files", "15", "15", "Unlimited", "Unlimited"],
       ["Sales simulations", "Unlimited", "Unlimited", "Unlimited", "Unlimited"],
-      // S198e (Kevin): a trial connects up to 15 Trainerize clients, then asks
-      // for an upgrade. Stated here so hitting the wall is not a surprise.
-      ["Connect clients from Trainerize", "15", "15", "Unlimited", "Unlimited"],
+      // ⚠️ MOVED OUT OF "free forever" AND OFF EVERY COLUMN BUT COACH+ (S215c).
+      // This row read "15 / Unlimited / Unlimited / Unlimited" while every
+      // Trainerize entry point was locked to the platform owner's UID — there
+      // was ONE shared credential, so nobody else could have used it at any
+      // price. Per-trainer credentials now exist, and the feature is Coach and
+      // above alongside the rest of the business tooling.
+      //
+      // ⚠️ AND IT CARRIES A CAVEAT WE DO NOT CONTROL. API access is a
+      // Studio-or-higher TRAINERIZE plan feature (docs/TRAINERIZE-API.md:138),
+      // so some Coach subscribers genuinely cannot switch it on. Saying so in
+      // the row is cheaper than a refund argument.
+      ["Sync your clients from Trainerize*", false, false, true, true],
       ["Coaching analytics — who needs attention", true, true, true, true],
       ["To-dos, nudges & requests — both ways", true, true, true, true],
       ["Invite Hub — link, QR, email invites, referrals", true, true, true, true],
@@ -25567,10 +25664,10 @@ const PLAN_TIPS = {
     "Book two sessions too close together and Glidna says so, with the numbers: how long the gap is, how long the drive is, and how short you are.",
   "“On my way” — one tap sends your client a live ETA":
     "Heading to a session? One tap works out how long you'll be and tells your client \u2014 \"about 12 min out, arriving around 9:05\". Your location is used once to work out the time and is never stored or shared; only the ETA is. Works both ways, so a client driving to you can send one too.",
-  "Connect clients from Trainerize":
-    "Attach a Trainerize client to their Glidna account and their stats, body composition, workouts and watch data sync across automatically. Free covers 15 connected clients.",
+  "Sync your clients from Trainerize*":
+    "Connect your own Trainerize account and your clients' stats, body composition, completed workouts and watch data sync across automatically, every 30 minutes. *Needs API access on your Trainerize plan (Studio or higher) \u2014 that is Trainerize's requirement, not ours.",
   "Session booking & cancellation policy":
-    "Book, reschedule and cancel sessions with your clients, and publish a cancellation policy they see up front. Included on every paid plan \u2014 scheduling tools alone cost $16+/month elsewhere.",
+    "Book, reschedule and cancel sessions with your clients, and publish a cancellation policy they see up front. Part of Glidna Coach \u2014 scheduling tools alone cost $16+/month elsewhere.",
   "Your clients get automatic logging reminders":
     "Glidna nudges your clients when they haven't logged or haven't weighed in \u2014 so they stay consistent without you chasing them.",
   "Build a team of sub-trainers":
@@ -25672,7 +25769,7 @@ const PLAN_TIPS = {
   "Send client to-dos straight from chat":
     "Ask it to nudge someone and the to-do lands on that client's home screen.",
   "AI-coached clients each month":
-    "How many different people the AI can work on in a month \u2014 separate from your roster, which is unlimited on every paid plan. This counts only the people you actually put the AI to work on, and it resets on the 1st.",
+    "How many different people the AI can work on in a month \u2014 separate from your roster, which is 15 on Connect and unlimited from Coach up. This counts only the people you actually put the AI to work on, and it resets on the 1st.",
 
   // ── Coach Elite / Apex ───────────────────────────────────────────────────
   "Our biggest AI allowance \u2014 built for all-day use":
@@ -25969,6 +26066,10 @@ const callSendInvite = httpsCallable(functions, "sendInvite"); // email invites 
 // "Couldn't reach Trainerize" even though the server was still working, and often
 // finished. Match the server's budget so the browser waits for the real answer.
 const callTrainerizeImport = httpsCallable(functions, "trainerizeImport", { timeout: 300000 }); // Trainerize roster importer (v1)
+// S215c — a trainer connects their OWN Trainerize account (Coach and above).
+const callTrainerizeStatus = httpsCallable(functions, "trainerizeStatus");
+const callConnectTrainerize = httpsCallable(functions, "connectTrainerize", { timeout: 60000 });
+const callDisconnectTrainerize = httpsCallable(functions, "disconnectTrainerize");
 const callPasskeyRegOptions = httpsCallable(functions, "passkeyRegisterOptions"); // Face ID setup (S87)
 const callPasskeyRegVerify = httpsCallable(functions, "passkeyRegisterVerify");
 // Scheduled AI automations (S93, workflow Phase 2 UI). Backend = functions/workflows.js.

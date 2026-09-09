@@ -86,6 +86,57 @@ const TEST_ROSTER = [
   { id: 990003, firstName: "Testcase", lastName: "Charlie", email: "charlie@example.test", status: "inactive" },
 ];
 const isTestUid = (uid) => TEST_UIDS.includes(uid);
+// Coach and above — the same predicate booking uses, imported rather than
+// restated so the two can never drift (S215c).
+const { bookingAllowed } = require("./roster");
+
+// ── S215c: PER-TRAINER TRAINERIZE CREDENTIALS (Kevin) ───────────────────────
+//
+// Until now there was ONE credential — TRAINERIZE_GROUP_ID + TRAINERIZE_API_TOKEN
+// in Secret Manager, Kevin's own Trainerize group — which is exactly why every
+// entry point was locked to the owner UID. Opening the gate on tiers alone would
+// not have given trainers their own rosters: it would have handed every Coach
+// subscriber Kevin's client list and their PII. That is the S85 reviewer catch,
+// and it is the whole reason this store exists before the gate moves.
+//
+// ⚠️ WHERE THIS MAY NOT LIVE. NOT in users/{uid}/kv — firestore.rules grants that
+// subtree to the owner AND their trainer chain (canAccessUserData), so a head
+// trainer could read a sub-trainer's API token. A Trainerize Group token is a
+// bearer credential for someone's whole client roster.
+//
+// So: a TOP-LEVEL collection with NO match block in firestore.rules at all.
+// Firestore denies by default, which makes it reachable only through the Admin
+// SDK — the same shape webauthnCreds already uses for passkey material.
+//
+// ⚠️ AND IT IS NEVER READ BACK OUT. connectTrainerize writes it; the sync paths
+// read it server-side; nothing returns it to a client, ever. The status callable
+// returns a boolean and a masked group id, never the token — the same rule
+// CLAUDE.md states for secrets in a transcript.
+const TZ_CREDS = "trainerizeCreds";
+
+// Trainerize scopes access by credential, so a token IS the roster it can see.
+async function credsFor(db, uid) {
+  const snap = await db.doc(`${TZ_CREDS}/${uid}`).get();
+  const d = snap.exists ? snap.data() : null;
+  return d && d.groupId && d.token ? d : null;
+}
+
+// The Basic header this trainer's calls should use.
+//
+// ⚠️ THE OWNER FALLS BACK TO THE SHARED SECRET, and that is deliberate rather
+// than lazy: Kevin's Trainerize group is already wired to the Secret Manager
+// values and his imported clients depend on it. Making him re-enter his own
+// token to keep working would be a migration with a live roster behind it. Any
+// other trainer MUST have their own — there is no shared fallback for them, so a
+// missing credential fails closed.
+async function authFor(db, uid, sharedGroupId, sharedToken) {
+  const own = await credsFor(db, uid);
+  if (own) return Buffer.from(`${own.groupId}:${own.token}`).toString("base64");
+  if (ADMIN_UIDS.includes(uid) && sharedGroupId && sharedToken) {
+    return Buffer.from(`${sharedGroupId}:${sharedToken}`).toString("base64");
+  }
+  return null;
+}
 
 async function requireAdmin(uid) {
   if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
@@ -958,9 +1009,32 @@ exports.trainerizeImport = onCall(
     // Listing is the only thing the test account may do; everything below the
     // list block still calls requireAdmin, so writes remain owner-only.
     const listOnly = request.data && request.data.mode === "list";
-    if (listOnly) await requireRosterRead(uid); else await requireAdmin(uid);
-    const auth = Buffer.from(`${TRAINERIZE_GROUP_ID.value()}:${TRAINERIZE_API_TOKEN.value()}`).toString("base64");
     const db = admin.firestore();
+    // ── S215c: the gate is now the PLAN plus a credential of your own ────────
+    // requireAdmin/requireRosterRead existed because there was one shared token;
+    // a trainer with their own credential is only ever reaching their own
+    // Trainerize group, so the check becomes "are you on a plan that includes
+    // this, and have you connected an account?"
+    //
+    // ⚠️ THE OWNER AND THE TEST UID KEEP THEIR OLD PATHS. Kevin's roster runs on
+    // the Secret Manager values, and the test account is served synthetic data
+    // and never reaches Trainerize at all.
+    const prof = (await db.doc(`users/${uid || "_"}`).get()).data() || {};
+    if (!(ADMIN_UIDS.includes(uid) || isTestUid(uid))) {
+      if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+      if (!bookingAllowed({ ...prof, uid })) {
+        throw new HttpsError("permission-denied",
+          "Connecting Trainerize is part of Glidna Coach. Upgrade in the app to sync your clients across.",
+          { reason: "trainerize-not-on-plan" });
+      }
+    }
+    const auth = isTestUid(uid) ? "test"
+      : await authFor(db, uid, TRAINERIZE_GROUP_ID.value(), TRAINERIZE_API_TOKEN.value());
+    if (!auth) {
+      throw new HttpsError("failed-precondition",
+        "Connect your Trainerize account first — you'll need your Group ID and an API token from "
+        + "your Trainerize settings.", { reason: "trainerize-not-connected" });
+    }
 
     // Preview mode: roster + already-imported flags, NO writes (the picker).
     if (listOnly) {
@@ -1009,19 +1083,126 @@ exports.trainerizeImport = onCall(
 // run refreshes weight/body stats/goals + the last 14 days of nutrition, so a
 // meal or weigh-in that lands in Trainerize shows up in Glide within ~30 min.
 // Cost: ~3-4 API calls/client/run — a rounding error against the 1000/min cap.
+// ── Connect / disconnect a trainer's own Trainerize account (S215c) ─────────
+//
+// Gated to Coach and above, using the same predicate as booking so the ladder
+// cannot drift. ⚠️ It is sold as "if your Trainerize plan includes API access" —
+// docs/TRAINERIZE-API.md:138 records that API access is a Studio-or-higher
+// Trainerize feature, so this is genuinely unavailable to some trainers through
+// no fault of ours. Saying so up front is cheaper than a refund argument.
+exports.connectTrainerize = onCall(
+  { region: "us-central1", maxInstances: 10, cors: true, timeoutSeconds: 60 },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+    const db = admin.firestore();
+    const prof = (await db.doc(`users/${uid}`).get()).data() || {};
+    if (!bookingAllowed({ ...prof, uid })) {
+      throw new HttpsError("failed-precondition",
+        "Connecting Trainerize is part of Glidna Coach. Upgrade in the app and your clients, "
+        + "their body stats, workouts and watch data will sync across automatically.",
+        { reason: "trainerize-not-on-plan" });
+    }
+    const groupId = String((request.data || {}).groupId || "").trim();
+    const token = String((request.data || {}).token || "").trim();
+    if (!groupId || !token) throw new HttpsError("invalid-argument", "Enter your Trainerize Group ID and API token.");
+
+    // ⚠️ PROVE IT BEFORE STORING IT. An unverified credential fails at 3am inside
+    // a scheduled sync, where the only symptom is data that quietly stops
+    // arriving — the exact shape of the S199r secret-rotation outage. One real
+    // call now turns that into an error the person is standing in front of.
+    const auth = Buffer.from(`${groupId}:${token}`).toString("base64");
+    let roster;
+    try {
+      roster = await fetchRoster(auth);
+    } catch (e) {
+      // ⚠️ NEVER ECHO THE CREDENTIAL, and never the raw upstream body — it can
+      // carry the request back to us. Say which of the two plausible causes it is.
+      const msg = String((e && e.message) || "");
+      throw new HttpsError("failed-precondition",
+        /401|403|unauthor|forbidden/i.test(msg)
+          ? "Trainerize refused those details. Check the Group ID and token, and that your "
+            + "Trainerize plan includes API access (Studio or higher)."
+          : "Couldn't reach Trainerize just now. Try again in a moment.",
+        { reason: "trainerize-verify-failed" });
+    }
+    await db.doc(`${TZ_CREDS}/${uid}`).set({
+      groupId, token, addedAt: Date.now(), lastVerifiedAt: Date.now(), clientCount: roster.length,
+    });
+    // The count is the receipt — it proves the credential reached THEIR roster,
+    // without returning anything from it.
+    return { ok: true, clientCount: roster.length };
+  });
+
+exports.disconnectTrainerize = onCall(
+  { region: "us-central1", maxInstances: 10, cors: true },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+    // No plan check on the way OUT — never trap someone with a stored credential
+    // because their subscription lapsed. Same rule sessionBillingGate.js states
+    // for removing a saved card.
+    await admin.firestore().doc(`${TZ_CREDS}/${uid}`).delete();
+    return { ok: true };
+  });
+
+// What the settings screen renders. Returns whether a credential exists and a
+// MASKED group id — never the token, and never the group id in full.
+exports.trainerizeStatus = onCall(
+  { region: "us-central1", maxInstances: 10, cors: true },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+    const db = admin.firestore();
+    const prof = (await db.doc(`users/${uid}`).get()).data() || {};
+    const own = await credsFor(db, uid);
+    return {
+      allowed: bookingAllowed({ ...prof, uid }),
+      connected: !!own,
+      groupIdMasked: own ? String(own.groupId).slice(-4).padStart(8, "•") : null,
+      clientCount: own ? (own.clientCount || null) : null,
+      lastVerifiedAt: own ? (own.lastVerifiedAt || null) : null,
+      // The owner keeps working on the Secret Manager values without a stored row.
+      usingSharedOwnerToken: !own && ADMIN_UIDS.includes(uid),
+    };
+  });
+
 exports.trainerizeAutoSync = onSchedule(
   { schedule: "every 30 minutes", secrets: [TRAINERIZE_GROUP_ID, TRAINERIZE_API_TOKEN],
     timeoutSeconds: 300, region: "us-central1" },
   async () => {
-    const uid = ADMIN_UIDS[0]; // single-tenant v1: Kevin's account owns the token
     const db = admin.firestore();
+    // ── S215c: EVERY connected trainer, not just the owner ───────────────────
+    // This hardcoded ADMIN_UIDS[0] because there was one credential. Now the
+    // roster is whoever has stored their own, plus the owner (who runs on the
+    // Secret Manager values and has no stored row).
+    //
+    // ⚠️ ONE TRAINER'S FAILURE MUST NOT END THE RUN. Each is wrapped
+    // individually: a revoked token, a lapsed Trainerize plan or a rate limit on
+    // one account used to be indistinguishable from the scheduler being down for
+    // everyone. Errors are counted and named, and the sweep continues.
+    const owners = new Set(ADMIN_UIDS);
+    try {
+      const snap = await db.collection(TZ_CREDS).get();
+      snap.forEach((d) => owners.add(d.id));
+    } catch (e) { console.error("trainerizeAutoSync: could not list connected trainers:", e && e.message); }
+
+    let ran = 0, skipped = 0, failed = 0;
+    for (const uid of owners) {
     // Kill switch: the trainer-home toggle writes caliq-tz-autosync {enabled}.
     // Missing/anything-but-false = ON (default). Off = skip the whole run.
     const pref = await kvGetJSON(db, uid, "caliq-tz-autosync");
-    if (pref && pref.enabled === false) { console.log("trainerizeAutoSync: disabled by toggle — skipped"); return; }
+    if (pref && pref.enabled === false) { skipped++; continue; }
+    // ⚠️ RE-CHECKED EVERY RUN, not just at connect time. A subscription that
+    // lapses must stop the background sync — otherwise a cancelled Coach keeps
+    // pulling their roster forever on a credential we are still holding.
+    const prof = (await db.doc(`users/${uid}`).get()).data() || {};
+    if (!ADMIN_UIDS.includes(uid) && !bookingAllowed({ ...prof, uid })) { skipped++; continue; }
     const ids = await syncTargetIds(db, uid);
-    if (!ids.length) { console.log("trainerizeAutoSync: no imported or linked Trainerize clients — nothing to sync (run the import to restore)"); return; }
-    const auth = Buffer.from(`${TRAINERIZE_GROUP_ID.value()}:${TRAINERIZE_API_TOKEN.value()}`).toString("base64");
+    if (!ids.length) { skipped++; continue; }
+    const auth = await authFor(db, uid, TRAINERIZE_GROUP_ID.value(), TRAINERIZE_API_TOKEN.value());
+    if (!auth) { skipped++; continue; }
+    ran++;
     try {
       // ⚠️ writeSnapshot:false — THE BACKGROUND RUN CARRIES WATCH DATA ONLY
       // (S200h, Kevin: "I do not want anything input in trainerize, other than
@@ -1035,8 +1216,14 @@ exports.trainerizeAutoSync = onSchedule(
       // working tracker sync and a silently broken one log identically.
       console.log("trainerizeAutoSync", JSON.stringify({ synced: r.total, updated: r.updated, mealDays: r.mealDaysTotal, healthDays: r.healthDaysTotal, workoutDays: r.workoutDaysTotal }));
     } catch (e) {
-      console.error("trainerizeAutoSync failed:", e && e.message);
+      // ⚠️ NO uid IN THE LOG. Cloud Logging is not a private channel, and the
+      // reason histogram is what makes a sweep readable anyway (the S196 lesson
+      // — the settle sweep built a per-group reason and threw it away).
+      failed++;
+      console.error("trainerizeAutoSync: one trainer failed:", e && e.message);
     }
+    }
+    console.log("trainerizeAutoSync", JSON.stringify({ trainers: owners.size, ran, skipped, failed }));
   }
 );
 

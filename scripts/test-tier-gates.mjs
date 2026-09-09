@@ -207,5 +207,91 @@ ok("the 'nothing to connect' line is gone", !/Nothing to connect, nothing to swi
      /\["Scheduled AI automations — wake up to today's plan", false, false, true, true\]/.test(APP));
 }
 
+// ── 7. Trainerize is per-trainer now, and gated (S215c) ───────────────────
+// ⚠️ IT WAS NEVER A TIER FEATURE. There was ONE credential — the owner's group
+// token in Secret Manager — which is why every entry point was locked to his
+// UID. Opening the gate on tiers alone would not have given trainers their own
+// rosters; it would have handed every Coach subscriber the owner's client list.
+{
+  const TZ = readFileSync(join(ROOT, "functions", "trainerize.js"), "utf8");
+  const IDX = readFileSync(join(ROOT, "functions", "index.js"), "utf8");
+  const RUL = RULES;
+
+  ok("a per-trainer credential store exists", /const TZ_CREDS = "trainerizeCreds";/.test(TZ));
+  // ⚠️ THE STORE'S SECURITY IS THE ABSENCE OF A RULE. firestore.rules denies by
+  // default, so a collection with no match block is Admin-SDK only — the shape
+  // webauthnCreds already uses. A match block appearing here would open it.
+  ok("...with NO firestore.rules block, so it is Admin-SDK only",
+     !/trainerizeCreds/.test(RUL));
+  ok("...and NOT in kv, which the trainer chain can read",
+     !/kv[^\n]*trainerizeCreds|trainerizeCreds[^\n]*kv/.test(TZ));
+
+  ok("connect validates against Trainerize before storing", /roster = await fetchRoster\(auth\);/.test(TZ));
+  ok("...and never echoes the credential or the upstream body on failure",
+     /Trainerize refused those details/.test(TZ) && !/e\.message\s*\}\)\s*;?\s*\/\/ echo/.test(TZ));
+  ok("status returns a MASKED group id, never the token",
+     /groupIdMasked: own \? String\(own\.groupId\)\.slice\(-4\)/.test(TZ)
+     && !/token: own\.token/.test(TZ));
+  ok("disconnect has NO plan check — never trap a stored credential",
+     /disconnectTrainerize[\s\S]{0,700}?TZ_CREDS[^\n]*delete\(\)/.test(TZ));
+
+  ok("the import is gated to Coach and above", /reason: "trainerize-not-on-plan"/.test(TZ));
+  ok("...and refuses when no account is connected", /reason: "trainerize-not-connected"/.test(TZ));
+  ok("the owner still runs on the shared secret, so his roster is not migrated",
+     /if \(ADMIN_UIDS\.includes\(uid\) && sharedGroupId && sharedToken\)/.test(TZ));
+  ok("...and every other trainer fails CLOSED without their own", /return null;\n\}/.test(TZ));
+
+  // The scheduled sweep was single-tenant by construction.
+  ok("autoSync no longer hardcodes the owner", !/const uid = ADMIN_UIDS\[0\]; \/\/ single-tenant/.test(TZ));
+  ok("...it iterates every connected trainer", /const owners = new Set\(ADMIN_UIDS\);/.test(TZ));
+  ok("...re-checks the plan every run, so a lapsed sub stops syncing",
+     /!ADMIN_UIDS\.includes\(uid\) && !bookingAllowed\(\{ \.\.\.prof, uid \}\)\) \{ skipped\+\+; continue; \}/.test(TZ));
+  ok("...and one trainer's failure does not end the sweep",
+     /failed\+\+;/.test(TZ) && /trainers: owners\.size, ran, skipped, failed/.test(TZ));
+  ok("...without putting a uid in Cloud Logging",
+     !/console\.error\("trainerizeAutoSync[^"]*", *uid/.test(TZ));
+
+  ok("the three callables are exported", /exports\.connectTrainerize/.test(IDX)
+     && /exports\.disconnectTrainerize/.test(IDX) && /exports\.trainerizeStatus/.test(IDX));
+
+  // And the page stops selling it to people who cannot have it.
+  ok("the grid row is Coach+ and no longer 'free forever'",
+     /\["Sync your clients from Trainerize\*", false, false, true, true\]/.test(APP));
+  ok("...and names the Trainerize-plan caveat we do not control",
+     /Studio or higher\) \\u2014 that is Trainerize's requirement, not ours/.test(APP));
+  ok("NEG: the old unlimited row is gone",
+     !/\["Connect clients from Trainerize", "15", "Unlimited"/.test(APP));
+
+  // Two claims S215 made false elsewhere on the page.
+  ok("the booking tip no longer says 'every paid plan'",
+     !/cancellation policy they see up front\. Included on every paid plan/.test(APP));
+  ok("the seats tip no longer calls the roster unlimited on every paid plan",
+     /which is 15 on Connect and unlimited from Coach up/.test(APP));
+  ok("the roster banner names the plan instead of assuming free",
+     /used on \{rosterCap\.cappedPlan \|\| "the free plan"\}/.test(APP));
+}
+
+// ── 8. the app can actually reach it (S215c) ──────────────────────────────
+{
+  ok("the three callables are wired in the app",
+     /callTrainerizeStatus = httpsCallable\(functions, "trainerizeStatus"\)/.test(APP)
+     && /callConnectTrainerize = httpsCallable\(functions, "connectTrainerize"/.test(APP)
+     && /callDisconnectTrainerize = httpsCallable\(functions, "disconnectTrainerize"\)/.test(APP));
+  // ⚠️ THE UID TEST USED TO BE THE WHOLE GATE. If it still is, the feature is
+  // built and unreachable — which is exactly the state the audit found it in.
+  ok("the Trainerize UI is no longer owner-only",
+     /tzIsOwner = meUid === OWNER_UID \|\| meUid === TZ_TEST_UID\s*\n\s*\|\| !!\(tzStatus && tzStatus\.connected\);/.test(APP));
+  ok("...and the owner keeps his UID path, so his roster is not migrated",
+     /tzIsOwner = meUid === OWNER_UID \|\| meUid === TZ_TEST_UID/.test(APP));
+  ok("the connect panel is shown on plan, and only before connecting",
+     /tzStatus && tzStatus\.allowed && !tzStatus\.connected && !tzIsOwner &&/.test(APP));
+  ok("the token field is a password input — it is a bearer credential",
+     /placeholder="API token" type="password" autoComplete="off"/.test(APP));
+  ok("the Trainerize-plan caveat is stated before they type anything",
+     /API access on your Trainerize plan<\/b> \(Studio or higher\)/.test(APP));
+  ok("a status read never blocks the page", /\.catch\(\(\) => \{ if \(alive\) setTzStatus\(null\); \}\);/.test(APP));
+  ok("disconnect is offered where the connection is shown", /Disconnect<\/button>/.test(APP));
+}
+
 console.log(`${checks - fails}/${checks} tier-gate assertions passed`);
 if (fails) process.exit(1);

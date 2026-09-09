@@ -1263,6 +1263,55 @@ $8.99. Gating ~30 micros would be beaten on both count and price. Barcode is
 weaker still: only MFP paywalls it, and it cost them real reputational damage.
 The honest client-side upgrade story stays AI + the coach relationship.
 
+## S215c — Trainerize goes multi-tenant, and moves to Coach+ (Kevin, Sep 9 2026) — ✅ BUILT
+
+**Kevin:** "I do think we should probably consider allowing trainerize sync to
+those that are at coach or above as well... The trainer has access is really only
+useful for those that I think have the studio plan."
+
+⚠️ **IT WAS NEVER A TIER FEATURE, AND COULD NOT HAVE BEEN.** There was ONE
+credential — `TRAINERIZE_GROUP_ID` + `TRAINERIZE_API_TOKEN` in Secret Manager,
+the owner's own Trainerize group — which is why every entry point was locked to
+his UID. Opening the gate on tiers alone would not have given trainers their own
+rosters: it would have handed **every Coach subscriber the owner's client list and
+their PII**. That is the S85 reviewer catch, and it is why the credential store
+had to exist before the gate could move.
+
+Meanwhile the grid sold it as "15 / Unlimited / Unlimited / Unlimited" — free
+forever, to everyone. Nobody could use it at any price.
+
+**The store.** `trainerizeCreds/{uid}`, a top-level collection with **NO match
+block in firestore.rules** — Firestore denies by default, so it is Admin-SDK only,
+the same shape `webauthnCreds` uses for passkey material. Explicitly NOT
+`users/{uid}/kv`, which `canAccessUserData` grants to the owner AND their trainer
+chain: a head trainer could otherwise read a sub-trainer's API token.
+
+**Verified before it is stored.** `connectTrainerize` makes one real
+`getClientList` call and refuses to save a credential that does not work — an
+unverified token fails at 3am inside a scheduled sync, where the only symptom is
+data quietly not arriving (the S199r outage shape). The client count comes back as
+a receipt; the token never does, and `trainerizeStatus` returns a masked group id.
+
+**The sweep is multi-tenant.** `trainerizeAutoSync` hardcoded `ADMIN_UIDS[0]`. It
+now iterates every connected trainer, **re-checks the plan on every run** (a
+lapsed subscription stops the sync rather than pulling a roster forever on a
+credential we still hold), and wraps each trainer individually — one revoked token
+must not end the sweep for everyone. Logs a reason histogram, no uids.
+
+**The owner is not migrated.** `authFor()` falls back to the Secret Manager values
+for `ADMIN_UIDS` only. Kevin's roster keeps working untouched; every other trainer
+fails closed without their own credential.
+
+⚠️ **A CAVEAT WE DO NOT CONTROL.** API access is a **Studio-or-higher Trainerize
+plan** feature (docs/TRAINERIZE-API.md:138), so some paying Coach subscribers
+still cannot use this. Stated on the grid row and again above the input, before
+they type anything — finding out after paying us is how refund arguments start.
+Worth re-confirming with Trainerize; our reference is v03.
+
+**Disconnect has no plan check.** Never trap someone with a stored credential
+because their subscription lapsed — the rule `sessionBillingGate.js` already
+states for removing a saved card.
+
 ## S215b — Connect gets its OWN AI budget (Kevin, Sep 9 2026) — ✅ BUILT
 
 **The bug.** `tierFor()` tested only `/max/` and `/ultra/`, so Connect fell
