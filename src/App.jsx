@@ -4385,7 +4385,7 @@ function SimulationSummary({ data, totalBurn, totalStrBurn = 0 }) {
 // Plain-English view of the Full Plan for people who don't know TDEE/BMR/macros.
 // Same numbers as the detailed tabs (target mirrors computeClientCalories), just
 // translated into everyday words. Toggled from Results; choice sticks per device.
-function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, workoutDaysCount, onSetFitnessGoal, onShowDetailed }) {
+function SimplePlanView({ data, tdee, hasGoal, totalBurn, totalStrBurn, workoutDaysCount, onSetFitnessGoal, onShowDetailed }) {
   const w = Number(data.weightLbs) || 0;
   const ready = isFinite(tdee) && tdee > 0 && w > 0;
   const weeklyBurn = totalBurn + totalStrBurn;
@@ -4398,22 +4398,27 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
   // The 1,200 floor is a HARD honesty rule (Kevin's call): we never show a
   // number below it — and when the deficit math lands under it, the page says
   // so and pivots the advice to consistent training, not deeper restriction.
-  const floorHit = goalMode === "lose" && rawDeficit < 1200;
+  const floorHit = goalMode === "lose" && rawDeficit < MIN_DAILY_CAL;
   // ⚠️ ALL THREE BRANCHES, not just the deficit one (S200u). A very small,
   // sedentary person's maintenance can itself land under 1,200, so "stay
   // healthy" and "build muscle" could each print a sub-floor number on the one
   // screen written for beginners.
+  // ⚠️ atLeastMinCal, NOT A LOCAL floor() (S216). The helper it replaced did
+  // not round, and two of these three branches add `weeklyBurn / 7` — so a plan
+  // whose week does not divide by seven printed a FRACTIONAL calorie target on
+  // the one screen written for beginners ("2,450.429"). The shared helper floors
+  // and rounds, which is what every other target in the app does.
   const target = !ready ? null
-    : goalMode === "build" ? floor(tdee + 250 + weeklyBurn / 7)   // lean surplus + fuel the training
-    : goalMode === "health" ? floor(tdee + weeklyBurn / 7)        // maintenance: eat what you burn
-    : floor(rawDeficit);
+    : goalMode === "build" ? atLeastMinCal(tdee + 250 + weeklyBurn / 7)   // lean surplus + fuel the training
+    : goalMode === "health" ? atLeastMinCal(tdee + weeklyBurn / 7)        // maintenance: eat what you burn
+    : atLeastMinCal(rawDeficit);
   const protein = Math.round(Number(data.macroTargets?.protein) || w) || null;
   const cups = w ? Math.round((w * 0.5) / 8) : null;
   const lbsToGo = hasGoal ? Math.round((w - goal) * 10) / 10 : null;
   const lbsToGain = goal && goal > w ? Math.round((goal - w) * 10) / 10 : null;
-  // ETA: with the floor active the REAL daily deficit is burn − 1200 intake.
+  // ETA: with the floor active the REAL daily deficit is burn − the floor.
   const weeklyDeficit = floorHit
-    ? Math.max(0, Math.round(tdee + (eatback ? weeklyBurn / 7 : weeklyBurn / 7) - 1200)) * 7
+    ? Math.max(0, Math.round(tdee + (eatback ? weeklyBurn / 7 : weeklyBurn / 7) - MIN_DAILY_CAL)) * 7
     : weeklyDeficitOf(data, weeklyBurn);
   const rate = Math.round((weeklyDeficit / 3500) * 10) / 10;
   const wks = goalMode === "lose" && hasGoal ? weeksToGoal(lbsToGo, weeklyDeficit)
@@ -4479,7 +4484,7 @@ function SimplePlanView({ data, tdee, floor, hasGoal, totalBurn, totalStrBurn, w
             Eating right around what you burn keeps your weight steady and your energy up. Here the win isn't a number going down — it's showing up consistently: training, protein, sleep, water.
           </>) : floorHit ? (<>
             Your body burns about <span style={numS}>{tdee.toLocaleString()}</span> calories a day. The usual math would put your target <strong style={{ color: "var(--text)" }}>below 1,200 calories — too low to be healthy or sustainable</strong>, so we won't go there.
-            Your number stays at <span style={numS}>{(1200).toLocaleString()}</span>, and the real lever for you isn't eating less — it's <strong style={{ color: "var(--text)" }}>consistent, frequent workouts</strong>. Movement creates the deficit safely while you still eat enough to function, keep muscle, and stick with it.
+            Your number stays at <span style={numS}>{MIN_DAILY_CAL.toLocaleString()}</span>, and the real lever for you isn't eating less — it's <strong style={{ color: "var(--text)" }}>consistent, frequent workouts</strong>. Movement creates the deficit safely while you still eat enough to function, keep muscle, and stick with it.
           </>) : (<>
             Your body burns about <span style={numS}>{tdee.toLocaleString()}</span> calories a day just living, moving, and doing what you already do — based on your age, size, and activity.
             Eating a bit less than you burn makes your body use stored fat to cover the difference. That's all weight loss is.
@@ -4632,7 +4637,6 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
   const actObj = ACTIVITY_LEVELS.find(a=>a.id===activityLevel) || ACTIVITY_LEVELS[0];
   const bmr    = calcBMR(gender, Number(weightLbs), Number(heightFt), Number(heightIn), effectiveAge(data));
   const tdee   = Math.round(bmr * actObj.multiplier);
-  const floor  = n => Math.max(n, 1200);
 
   // ── Ideal Body Weight calculations ──
   const totalInches = Number(heightFt) * 12 + Number(heightIn);
@@ -4842,7 +4846,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
       )}
 
       {simpleView ? (
-        <SimplePlanView data={data} tdee={tdee} floor={floor} hasGoal={hasGoal}
+        <SimplePlanView data={data} tdee={tdee} hasGoal={hasGoal}
           totalBurn={totalBurn} totalStrBurn={totalStrBurn}
           workoutDaysCount={workoutDaysCount} onSetFitnessGoal={onSetFitnessGoal}
           onShowDetailed={()=>setSimpleView(false)} />
@@ -5215,7 +5219,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
             {targets.map(t=>(
               <div className="dcard" key={t.label}>
                 <div className="dc-lbl">{t.goalLabel}</div>
-                <div className={`dc-val ${t.cls}`}>{floor(tdee-t.cut).toLocaleString()}</div>
+                <div className={`dc-val ${t.cls}`}>{atLeastMinCal(tdee-t.cut).toLocaleString()}</div>
                 <div className="dc-unit">cal/day from diet</div>
                 <div className="dc-note">{t.cut>0?`−${t.cut}/day`:"No deficit"}</div>
               </div>
@@ -5343,7 +5347,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
                 <div className="exp-row" key={t.label}>
                   <div className={`exp-dot ${t.cls}`}></div>
                   <div>
-                    <span style={{fontWeight:600}}>{floor(tdee-t.cut).toLocaleString()} cal/day from diet alone</span>
+                    <span style={{fontWeight:600}}>{atLeastMinCal(tdee-t.cut).toLocaleString()} cal/day from diet alone</span>
                     <span className="exp-row-sub"> — you're {t.cut} calories under your maintenance each day, which adds up to losing <strong>{t.label.replace("/wk"," of body weight every week")}</strong>.</span>
                   </div>
                 </div>
@@ -5671,7 +5675,6 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
           activeStrDays={activeStrDays}
           avgBurnPerDay={avgBurnPerDay}
           avgStrPerDay={avgStrPerDay}
-          floor={floor}
           targets={targets}
           ibwLowLbs={ibwLowLbs}
           ibwHighLbs={ibwHighLbs}
@@ -5760,7 +5763,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
 
 function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
   totalBurn, totalStrBurn, activeDays, activeStrDays, avgBurnPerDay, avgStrPerDay,
-  floor, targets, ibwLowLbs, ibwHighLbs, bmi, onSetDeficitMode, onSetWearableAdjust }) {
+  targets, ibwLowLbs, ibwHighLbs, bmi, onSetDeficitMode, onSetWearableAdjust }) {
 
   const { firstName, lastName, gender, age, weightLbs, heightFt, heightIn, goalWeight } = data;
   const hasGoal = goalWeight && Number(goalWeight) < Number(weightLbs);
@@ -11951,7 +11954,7 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
     // aggregates run on).
     const dayTrackerTdee = wearableTdee(data, dayLog);
     const target = dayTrackerTdee
-      ? Math.max(1200, dayTrackerTdee - dailyDeficitOf(data))
+      ? atLeastMinCal(dayTrackerTdee - dailyDeficitOf(data))
       : (calTarget || (tdee ? Math.round(tdee) : null));
     const goStep = (n) => { const p = parseKey(sel); setSel(keyOf(p.y, p.m, p.d + n)); };
     // Quick typed calories: Add (tagged to a meal type if chosen → a meal entry,
@@ -12397,7 +12400,7 @@ function simRejected(raw) {
 // standard: "showing that someone ATE 900 is correct and must not be fixed").
 // `lowDays` exists so the screen can NAME those days instead — a mean hides
 // them, and a silent clamp is its own bug.
-function weekPlan(vals, { fallback = 0, floor = 1200 } = {}) {
+function weekPlan(vals, { fallback = 0, floor = MIN_DAILY_CAL } = {}) {
   const v = Array.from({ length: 7 }, (_, i) => (vals && vals[i] != null ? vals[i] : null));
   const fb = Math.round(Number(fallback) || 0);
   const effective = v.map((x) => (x === null ? fb : x));
@@ -12448,7 +12451,7 @@ function joinDays(idxs, names) {
 //
 // `share` is the fraction of the make-up coming from TRAINING (0 = all from
 // eating, 1 = all from training).
-function makeUpPlan({ over, days, share, target, floor = 1200 }) {
+function makeUpPlan({ over, days, share, target, floor = MIN_DAILY_CAL }) {
   const total = Math.max(0, Math.round(Number(over) || 0));
   const n = Math.max(1, Math.round(Number(days) || 1));
   const sh = Math.min(1, Math.max(0, Number(share)));
@@ -13000,7 +13003,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
           <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
             {DAYS.map((dayName, i) => {
               const val = parsed[i];
-              const low = wp.effective[i] < 1200;
+              const low = wp.effective[i] < MIN_DAILY_CAL;
               return (
                 <div key={dayName} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <span style={{ width: "38px", fontSize: ".7rem", fontWeight: 700, color: "var(--text-secondary)" }}>
@@ -14210,8 +14213,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const commitCustomTarget = () => {
     const n = Math.round(Number(customCal));
     if (!(n > 0)) return;
-    if (n < 1200) {
-      onSetCalorieTarget && onSetCalorieTarget(1200);
+    if (n < MIN_DAILY_CAL) {
+      onSetCalorieTarget && onSetCalorieTarget(MIN_DAILY_CAL);
       setCustomMsg({ warn: true, text: `${n.toLocaleString()} is below 1,200 — too low to be healthy or sustainable, so we've set it to 1,200. If you want a bigger deficit than that, take it from movement: more workout days, longer sessions, more steps.` });
     } else {
       onSetCalorieTarget && onSetCalorieTarget(n);
@@ -14419,7 +14422,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         ];
         const rateName = (t) => (t ? `${t.sign}${t.lbl}` : "");
         // Floored means the honest answer for this rate is "we won't go there".
-        const flooredAt = (r) => rawTargetForRate(r) < 1200;
+        const flooredAt = (r) => rawTargetForRate(r) < MIN_DAILY_CAL;
         const shownRate = previewing ? previewRate : planRate;
         const shownFloored = flooredAt(shownRate);
         return (
@@ -15277,7 +15280,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                     {RATE_OPTS.map((r) => {
                       const active = planRate === r;
                       const cals = targetForRate(r);
-                      const floored = cals <= 1200 && rawTargetForRate(r) < 1200;
+                      const floored = cals <= MIN_DAILY_CAL && rawTargetForRate(r) < MIN_DAILY_CAL;
                       return (
                         <button key={r} onClick={(e)=>{e.stopPropagation(); onSetWeeklyRate(r);}}
                           style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"10px",width:"100%",
@@ -15298,7 +15301,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                   </div>
                   {/* The 1,200 floor is a standing honesty rule (S90b) — say so rather
                       than showing a pace that silently can't happen. */}
-                  {rawTargetForRate(planRate) < 1200 && (
+                  {rawTargetForRate(planRate) < MIN_DAILY_CAL && (
                     <div style={{fontSize:".72rem",color:"var(--yellow)",marginTop:"7px",lineHeight:1.45}}>
                       This pace would put you under 1,200 cal, so the target holds at the 1,200 floor — you'd lose slower than {RATE_SHORT[planRate]}. Training more beats eating less here.
                     </div>
@@ -16919,7 +16922,7 @@ function SharePlanCard({ data, tdee, totalBurn, totalStrBurn }) {
   // the target while the "Weekly burn" line right below counted both, so a
   // strength-only plan's shared card understated the target vs every screen.
   // (Eat-back mode only; accelerate keeps the raw deficit.)
-  const targetCals = Math.max(1200, tdee - dailyDeficitOf(data) + (isEatback(data) ? Math.round((totalBurn + totalStrBurn) / 7) : 0));
+  const targetCals = atLeastMinCal(tdee - dailyDeficitOf(data) + (isEatback(data) ? Math.round((totalBurn + totalStrBurn) / 7) : 0));
 
   const handleShare = async () => {
     // Emoji stay HERE on purpose (Kevin's call): this string is shared out to

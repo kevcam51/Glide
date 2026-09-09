@@ -234,9 +234,13 @@ const oldRow = (d, cut) => {
 ok("no per-rate row still adds a cardio-only average",
    (CODE.match(/floor\(tdee\s*-\s*t\.cut\s*\+\s*avgBurnPerDay\)/g) || []).length === 0,
    (CODE.match(/floor\(tdee\s*-\s*t\.cut\s*\+\s*avgBurnPerDay\)/g) || []).length);
+// ⚠️ S216: the local `floor` helper (an unrounded second copy of the shared one)
+// is gone, so these two read atLeastMinCal. What is asserted is unchanged — the
+// tab still subtracts the cut from tdee and adds NO burn, because that
+// counterfactual is its whole subject.
 ok("the No Cardio tab KEEPS its diet-only arithmetic (the counterfactual is its subject)",
-   (CODE.match(/floor\(tdee\s*-\s*t\.cut\)/g) || []).length === 2,
-   (CODE.match(/floor\(tdee\s*-\s*t\.cut\)/g) || []).length);
+   (CODE.match(/atLeastMinCal\(tdee\s*-\s*t\.cut\)/g) || []).length === 2,
+   (CODE.match(/atLeastMinCal\(tdee\s*-\s*t\.cut\)/g) || []).length);
 ok("the shared ladder is used for the per-rate rows", /const intakeAt = \(r\) => planIntakeForRate\(data, r\);/.test(CODE));
 ok("...and rendered through a guard that never prints 0", /const intakeTxt = \(r\)/.test(CODE) && /intakeTxt\(t\.rate\)/.test(CODE));
 ok("the Summary rows call it too", /planIntakeForRate\(data, t\.rate\)/.test(CODE));

@@ -31,7 +31,13 @@ const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n,
 // Lift and RUN the shipping function — a transcription would drift.
 const src = APP.match(/function makeUpPlan\(\{[\s\S]*?\n\}/);
 if (!src) { console.log("  FAIL: makeUpPlan not found"); process.exit(1); }
-const makeUpPlan = new Function(`const CAL_PER_LB = 3500;\n${src[0]}\nreturn makeUpPlan;`)();
+// ⚠️ THE FLOOR DEFAULT IS THE SHARED CONSTANT NOW (S216), so the lift has to
+// carry it. `floor` is still a PARAMETER — every assertion below that passes one
+// keeps working — but a lift that injects only CAL_PER_LB throws the moment a
+// caller omits it, which is the normal case.
+const MIN_SRC = APP.match(/const MIN_DAILY_CAL = \d+;/);
+if (!MIN_SRC) { console.log("  FAIL: MIN_DAILY_CAL not found"); process.exit(1); }
+const makeUpPlan = new Function(`const CAL_PER_LB = 3500;\n${MIN_SRC[0]}\n${src[0]}\nreturn makeUpPlan;`)();
 
 // Kevin's own example, and the shape everything else is checked against.
 const ATE = 5000, TARGET = 2500, OVER = ATE - TARGET;

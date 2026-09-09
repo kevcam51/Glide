@@ -86,8 +86,91 @@ ok("no read takes the override raw any more",
    && !/Number\(data\.calorieTarget\) > 0 \? Math\.round\(Number\(data\.calorieTarget\)\)/.test(APP));
 // ⚠️ The beginner screen had two branches that skipped the floor helper defined
 // for them — maintenance for a very small person can itself land under 1,200.
+// ⚠️ S216: that helper was a LOCAL `n => Math.max(n, 1200)` and is gone; these
+// three branches call the shared atLeastMinCal, which also ROUNDS. Two of them
+// add `weeklyBurn / 7`, so before this they could print a fractional calorie
+// target ("2,450.429") on the one screen written for beginners.
 ok("SimplePlanView floors all three goal modes",
-   /goalMode === "build" \? floor\(/.test(APP) && /goalMode === "health" \? floor\(/.test(APP));
+   (APP.match(/goalMode === "build" \? atLeastMinCal\(/g) || []).length === 1
+   && (APP.match(/goalMode === "health" \? atLeastMinCal\(/g) || []).length === 1
+   && /: atLeastMinCal\(rawDeficit\);/.test(APP));
+
+// ── ONE named floor, and no bare literal left to drift from it (S216) ──────
+// CLAUDE.md: "Use the shared constant rather than a fresh Math.max(1200, …)".
+// The S215 ladder bug is exactly what the anti-pattern produces — one literal
+// applied at a different point in a chain than the others.
+{
+  const code = APP.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  // ⚠️ DIGITS ONLY IN THE LOOKAROUND. Excluding "," and "." as well — the obvious
+  // way to skip "120000" and "1,200" — also excludes `Math.max(1200, …)`, which
+  // is the one shape this whole assertion exists to catch. The first version of
+  // this check did exactly that and passed on a file still full of them.
+  const hits = [...code.matchAll(/(?<!\d)1200(?!\d)/g)]
+    .map((m) => code.slice(Math.max(0, m.index - 90), m.index + 20).replace(/\s+/g, " "));
+  // ⚠️ CLASSIFIED, NOT KEYWORD-FILTERED. A bare 1200 is legal in this file only
+  // where it is not a calorie: the constant's own declaration, a calcium RDA in
+  // MILLIGRAMS, and toast timeouts in MILLISECONDS. Everything else is a second
+  // opinion about the floor.
+  const legal = [
+    ["the constant's declaration", /const MIN_DAILY_CAL = 1200;/],
+    ["a calcium RDA in mg", /amount:\(over50/],
+    ["a millisecond timeout", /,\s*1200\);/],
+  ];
+  const stray = hits.filter((h) => !legal.some(([, re]) => re.test(h)));
+  ok("no bare 1,200 is left doing the floor's job in src/App.jsx", stray.length === 0, stray);
+  ok("...the declaration is one of the survivors, exactly once",
+     hits.filter((h) => legal[0][1].test(h)).length === 1);
+  ok("...and so is the calcium RDA, which is milligrams",
+     hits.filter((h) => legal[1][1].test(h)).length === 1);
+  ok("...and the constant is declared exactly once",
+     (code.match(/const MIN_DAILY_CAL = 1200;/g) || []).length === 1);
+  // The clamps and comparisons that were literals now go through the name.
+  ok("the tracker-adjusted day target floors through the helper",
+     /atLeastMinCal\(dayTrackerTdee - dailyDeficitOf\(data\)\)/.test(code));
+  ok("the share card does too",
+     /const targetCals = atLeastMinCal\(tdee - dailyDeficitOf\(data\)/.test(code));
+  ok("the No Cardio rows do too", (code.match(/atLeastMinCal\(tdee-t\.cut\)/g) || []).length === 2);
+  ok("the typed-target clamp does too",
+     /if \(n < MIN_DAILY_CAL\) \{/.test(code) && /onSetCalorieTarget\(MIN_DAILY_CAL\)/.test(code));
+  // ⚠️ COUNTED. Three places ask "would this pace go under the floor" — the
+  // chooser grid, the sheet's per-rate list and its footnote — and a `.test()`
+  // stays green with two of them left on a literal.
+  ok("...and every 'is this pace floored' comparison",
+     (code.match(/rawTargetForRate\((?:r|planRate)\) < MIN_DAILY_CAL/g) || []).length === 3,
+     (code.match(/rawTargetForRate\((?:r|planRate)\) < MIN_DAILY_CAL/g) || []).length);
+  ok("the sandbox's low-day marker does too", /wp\.effective\[i\] < MIN_DAILY_CAL/.test(code));
+  // ⚠️ THE TWO PURE HELPERS KEEP `floor` AS A PARAMETER — they are lifted and RUN
+  // by two suites, and a caller wanting a different bound must still be able to
+  // pass one. Only the DEFAULT became the shared constant.
+  ok("weekPlan still takes its bound, defaulted to the constant",
+     /function weekPlan\(vals, \{ fallback = 0, floor = MIN_DAILY_CAL \} = \{\}\)/.test(code));
+  ok("makeUpPlan too", /function makeUpPlan\(\{ over, days, share, target, floor = MIN_DAILY_CAL \}\)/.test(code));
+  // ⚠️ AND THE LOCAL `floor` HELPER IS GONE. It was `n => Math.max(n, 1200)` —
+  // a second floor that did NOT round, so two SimplePlanView branches adding
+  // `weeklyBurn / 7` printed a fractional calorie target.
+  ok("no second, unrounded floor helper survives", !/const floor\s*=\s*n =>/.test(code));
+  {
+    // The symptom, on a real plan: tdee 3,069 with 684 cal of weekly cardio.
+    const oldFloor = (n) => Math.max(n, 1200);
+    const atLeast = (n) => Math.max(1200, Math.round(Number(n) || 0));
+    const build = 3069 + 250 + 684 / 7;
+    ok("control: the unrounded helper really did print a fractional target",
+       oldFloor(build).toLocaleString() === "3,416.714", oldFloor(build).toLocaleString());
+    ok("...and the shared one prints a calorie", atLeast(build).toLocaleString() === "3,417");
+    // ⚠️ AND IT IS STILL A FLOOR, not just a rounder.
+    ok("...while still refusing to go under the floor", atLeast(900) === 1200 && atLeast(1199.6) === 1200);
+  }
+  // NEGATIVE CONTROLS: the scan can see a planted literal, in the shapes that
+  // matter, and does not fire on numbers that merely contain it.
+  const scan = (t) => [...t.matchAll(/(?<!\d)1200(?!\d)/g)].length;
+  ok("control: the scan catches a planted clamp", scan("const x = Math.max(1200, y);") === 1);
+  ok("control: ...and a planted comparison", scan("if (raw < 1200) {") === 1);
+  ok("control: it does not fire on 120000 or 11200", scan("120000 11200") === 0);
+  // ⚠️ AND THE OLD LOOKAROUND REALLY WAS BLIND TO THE CLAMP.
+  const oldScan = (t) => [...t.matchAll(/(?<![\d,.])1200(?![\d,.])/g)].length;
+  ok("control: the comma-excluding version misses Math.max(1200, …)",
+     oldScan("const x = Math.max(1200, y);") === 0 && scan("const x = Math.max(1200, y);") === 1);
+}
 
 // ── a clamp that does not speak is its own bug ────────────────────────────
 ok("the second typed-target field warns before you type", /Minimum \{MIN_DAILY_CAL\.toLocaleString\(\)\}/.test(APP));
