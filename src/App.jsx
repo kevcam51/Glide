@@ -4679,11 +4679,16 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
   // Simpler: show position relative to range
   const inRange = Number(weightLbs) >= ibwLowLbs && Number(weightLbs) <= ibwHighLbs;
 
+  // `rate` is the ladder position; `cut` is the same thing as a daily number and
+  // is still PRINTED ("500 calories under maintenance"). They must agree —
+  // Math.round(rate*3500/7) === cut on every row, pinned by a test. Carried
+  // rather than derived as cut/500 at each call site: adding a 1.5 lb/wk or a
+  // surplus row would otherwise produce a wrong rate everywhere at once.
   const targets = [
-    { label:"Maintain", cut:0,    cls:"c-acc", goalLabel:"Maintain"    },
-    { label:"½ lb/wk",  cut:250,  cls:"c-grn", goalLabel:"½ lb/week"  },
-    { label:"1 lb/wk",  cut:500,  cls:"c-yel", goalLabel:"1 lb/week"  },
-    { label:"2 lbs/wk", cut:1000, cls:"c-red", goalLabel:"2 lbs/week" },
+    { label:"Maintain", cut:0,    rate:0,   cls:"c-acc", goalLabel:"Maintain"    },
+    { label:"½ lb/wk",  cut:250,  rate:0.5, cls:"c-grn", goalLabel:"½ lb/week"  },
+    { label:"1 lb/wk",  cut:500,  rate:1,   cls:"c-yel", goalLabel:"1 lb/week"  },
+    { label:"2 lbs/wk", cut:1000, rate:2,   cls:"c-red", goalLabel:"2 lbs/week" },
   ];
 
   const dayData = DAYS.map(day=>{
@@ -4723,6 +4728,33 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
     ...dayData.filter(d=>d.burned>0).map(d=>d.day),
     ...strengthDayData.filter(d=>d.burned>0).map(d=>d.day),
   ]).size;
+
+  // ── Every per-rate "cal/day" on this page is the plan's own ladder (S215) ──
+  // The SAME function computeClientCalories, the Daily Dashboard, the share
+  // card, the calendar tint and the server's nutritionTargets all quote. It was
+  // `floor(tdee − cut [+ avgBurnPerDay])` in three places, which ignored
+  // deficitMode AND every strength session: on one lifting plan the Summary
+  // card printed "1 lb/week 2,082" and, forty lines below itself,
+  // "Target calories 1,806".
+  //
+  // ⚠️ THE "+ CARDIO" TAB IS NOT AN EXCEPTION, though its label looks like one.
+  // "avg +N cardio" scopes WHICH burn was added; it never says whether the plan
+  // adds any at all — and in accelerate mode the honest cardio-scoped answer is
+  // +0, because the user's own toggle says the burn buys the goal date. Worse,
+  // on a STRENGTH-ONLY eat-back plan avgBurnPerDay is 0, so that grid was
+  // byte-identical to the No Cardio grid and both read 1,806 against a real
+  // target of 2,001. A tab whose scope variable is zero cannot claim scope.
+  //
+  // ⚠️ FLAT BY CONTRACT — no weekday, no log. The Day-by-Day cells below
+  // deliberately do NOT call this; see the comment there. Handing a per-day
+  // chain to plan-level analysis is the S214 bug, and handing the plan-level
+  // answer to a per-day cell is the same bug pointing the other way.
+  const planEatback = isEatback(data);
+  const planTrainingPerDay = Math.round(planEnergy(data).weeklyBurn / 7);
+  const intakeAt = (r) => planIntakeForRate(data, r);
+  // A plan too incomplete to compute renders "NaN" today; a bare unify would
+  // render "0", which reads as a prescription. Neither is acceptable.
+  const intakeTxt = (r) => { const v = intakeAt(r); return v > 0 ? v.toLocaleString() : "—"; };
   const TABS = [
     "No Cardio",
     "+ Cardio",
@@ -5175,17 +5207,27 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
             <div className="hero-detail">BMR {Math.round(bmr).toLocaleString()} × {actObj.multiplier} ({actObj.label})</div>
           </div>
 
-          <div className="sec-title">Daily Targets</div>
+          {/* The counterfactual IS this tab's subject, so the arithmetic stays
+              diet-only. What changes is the CLAIM: "Daily Targets" read as the
+              plan's targets on a plan that adds training back. */}
+          <div className="sec-title">Daily Targets (Diet Only)</div>
           <div className="dgrid">
             {targets.map(t=>(
               <div className="dcard" key={t.label}>
                 <div className="dc-lbl">{t.goalLabel}</div>
                 <div className={`dc-val ${t.cls}`}>{floor(tdee-t.cut).toLocaleString()}</div>
-                <div className="dc-unit">cal/day</div>
+                <div className="dc-unit">cal/day from diet</div>
                 <div className="dc-note">{t.cut>0?`−${t.cut}/day`:"No deficit"}</div>
               </div>
             ))}
           </div>
+          {planTrainingPerDay > 0 && (
+            <p style={{fontSize:".72rem",color:"var(--muted)",marginTop:"8px",lineHeight:1.5}}>
+              {planEatback
+                ? <>Diet alone. Your plan adds back about <strong style={{color:"var(--orange)"}}>{planTrainingPerDay} cal/day</strong> from training, so your actual target is <strong style={{color:"var(--accent)"}}>{intakeTxt(weeklyRateOf(data))} cal/day</strong> — see Summary.</>
+                : <>Diet alone — and on this plan that IS your target: your training speeds up the goal date instead of adding food (Summary → Nutrition Approach).</>}
+            </p>
+          )}
 
           <div className="sec-title">Daily Breakdown</div>
           <p style={{fontSize:".75rem",color:"var(--muted)",marginBottom:"10px"}}>Tap any day to add or change cardio — results update instantly.</p>
@@ -5301,7 +5343,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
                 <div className="exp-row" key={t.label}>
                   <div className={`exp-dot ${t.cls}`}></div>
                   <div>
-                    <span style={{fontWeight:600}}>Eat {floor(tdee-t.cut).toLocaleString()} cal/day</span>
+                    <span style={{fontWeight:600}}>{floor(tdee-t.cut).toLocaleString()} cal/day from diet alone</span>
                     <span className="exp-row-sub"> — you're {t.cut} calories under your maintenance each day, which adds up to losing <strong>{t.label.replace("/wk"," of body weight every week")}</strong>.</span>
                   </div>
                 </div>
@@ -5319,7 +5361,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
           <div className="hero">
             <div className="hero-lbl">{name?`${name}'s`:"Your"} Base Maintenance</div>
             <div className="hero-val">{tdee.toLocaleString()}</div>
-            <div className="hero-unit">cal/day baseline (cardio adds eating room)</div>
+            <div className="hero-unit">{planEatback ? "cal/day baseline — training adds eating room" : "cal/day baseline — training speeds the goal date"}</div>
           </div>
 
           <div className="csumm">
@@ -5335,24 +5377,34 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
             </div>
           </div>
 
-          <div className="sec-title">Avg Daily Targets (With Cardio)</div>
+          {/* ⚠️ THE PLAN'S LADDER, NOT A CARDIO-ONLY ONE (S215). Cardio's share
+              stays named in the note and in the Weekly Cardio row above, so the
+              tab keeps its teaching job — only the TOTAL stops being half-true. */}
+          <div className="sec-title">Daily Targets on This Plan</div>
           <div className="dgrid">
-            {targets.map(t=>{
-              const eat = floor(tdee-t.cut+avgBurnPerDay);
-              return (
-                <div className="dcard" key={t.label}>
-                  <div className="dc-lbl">{t.goalLabel}</div>
-                  <div className={`dc-val ${t.cls}`}>{eat.toLocaleString()}</div>
-                  <div className="dc-unit">avg cal/day</div>
-                  <div className="dc-note">avg +{avgBurnPerDay} cardio</div>
+            {targets.map(t=>(
+              <div className="dcard" key={t.label}>
+                <div className="dc-lbl">{t.goalLabel}</div>
+                <div className={`dc-val ${t.cls}`}>{intakeTxt(t.rate)}</div>
+                <div className="dc-unit">avg cal/day</div>
+                <div className="dc-note">
+                  {planEatback
+                    ? (planTrainingPerDay > 0 ? `incl. +${planTrainingPerDay}/day training` : "no training scheduled")
+                    : "training speeds the goal"}
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
+          {planEatback && avgStrPerDay > 0 && (
+            <p style={{fontSize:".72rem",color:"var(--muted)",marginTop:"8px",lineHeight:1.5}}>
+              Made of <strong style={{color:"var(--orange)"}}>+{avgBurnPerDay}/day cardio</strong> and{" "}
+              <strong style={{color:"var(--blue)"}}>+{avgStrPerDay}/day strength</strong>. Editing a session below moves the cardio half.
+            </p>
+          )}
 
           <div className="sec-title">Day-by-Day Targets</div>
           <p style={{fontSize:".75rem",color:"var(--muted)",marginBottom:"10px"}}>Tap any day to change the exercise or duration — calories update instantly.</p>
-          {dayData.map(({day,sessions:daySessions,burned})=>{
+          {dayData.map(({day,sessions:daySessions,burned}, di)=>{
             const allSessions = Array.isArray(data.cardio[day]) ? data.cardio[day] : [];
             const isRest = allSessions.length === 0;
             const isOpen = openResultDay === day;
@@ -5429,7 +5481,15 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
                   {targets.map(t=>(
                     <div className="drc-cell" key={t.label}>
                       <div className="drc-cell-lbl">{t.goalLabel}</div>
-                      <div className={`drc-cell-val ${t.cls}`}>{floor(tdee - t.cut + burned).toLocaleString()}</div>
+                      {/* ⚠️ PER-DAY, SO IT TAKES THE DASHBOARD'S SHAPE — that
+                          day's cardio PLUS that day's strength, mode-gated.
+                          NOT planIntakeForRate: that is flat by contract, and
+                          using it here would be the S214 bug pointing the other
+                          way. This cell and the Daily Dashboard prescribe for
+                          the SAME calendar day; they were 341 cal apart on a
+                          lifting plan's Monday because this one counted only
+                          cardio and ignored the plan's approach entirely. */}
+                      <div className={`drc-cell-val ${t.cls}`}>{atLeastMinCal(tdee - t.cut + (planEatback ? burned + ((strengthDayData[di] || {}).burned || 0) : 0)).toLocaleString()}</div>
                     </div>
                   ))}
                 </div>
@@ -5440,7 +5500,9 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
           <div className="explainer-box">
             <div className="exp-title">How does cardio change things?</div>
             <p className="exp-body">
-              Your maintenance is still <strong style={{color:"var(--accent)"}}>{tdee.toLocaleString()} cal/day</strong>. But on days you do cardio, you burn extra calories — which means you can <em>eat more that day</em> and still stay in a deficit. Think of cardio as buying yourself extra food room.
+              {planEatback
+                ? <>Your maintenance is still <strong style={{color:"var(--accent)"}}>{tdee.toLocaleString()} cal/day</strong>. But on days you train, you burn extra calories — which means you can <em>eat more that day</em> and still stay in a deficit. Think of training as buying yourself extra food room.</>
+                : <>Your maintenance is still <strong style={{color:"var(--accent)"}}>{tdee.toLocaleString()} cal/day</strong>. On this plan your training does <em>not</em> change what you eat — the target holds and the burn <strong>pulls your goal date closer</strong> instead. Change that in Summary → Nutrition Approach.</>}
             </p>
             {activeDays>0 && (
               <div className="exp-callout">
@@ -5449,13 +5511,12 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
             )}
             <div className="exp-rows">
               {targets.filter(t=>t.cut>0).map(t=>{
-                const avgEat = floor(tdee-t.cut+avgBurnPerDay);
                 return (
                   <div className="exp-row" key={t.label}>
                     <div className={`exp-dot ${t.cls}`}></div>
                     <div>
-                      <span style={{fontWeight:600}}>~{avgEat.toLocaleString()} cal/day average</span>
-                      <span className="exp-row-sub"> to lose <strong>{t.label.replace("/wk"," per week")}</strong>. On active days you eat more; on rest days a little less.</span>
+                      <span style={{fontWeight:600}}>~{intakeTxt(t.rate)} cal/day average</span>
+                      <span className="exp-row-sub"> to lose <strong>{t.label.replace("/wk"," per week")}</strong>. {planEatback ? "On training days you eat more; on rest days a little less." : "The same every day — your training moves the date, not the plate."}</span>
                     </div>
                   </div>
                 );
@@ -5591,7 +5652,6 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
           avgStrPerDay={avgStrPerDay}
           totalCardio={totalBurn}
           onUpdateStrength={onUpdateStrength}
-          floor={n=>Math.max(n,1200)}
         />
       )}
 
@@ -5712,9 +5772,19 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
   // Daily Dashboard, so the plan summary never contradicts the tracker.
   // Both nutrition approaches are computed so the chooser can show real numbers.
   const eatback = isEatback(data);
-  const targetEat = floor(tdee - dailyDeficitOf(data) + avgBurnPerDay + avgStrPerDay); // burn buys food
-  const targetAcc = floor(tdee - dailyDeficitOf(data));                                // burn buys speed
+  const planRateS = weeklyRateOf(data);
+  // ⚠️ THE CHOOSER SHOWS BOTH OUTCOMES, AND planIntakeForRate READS THE PLAN'S
+  // OWN MODE — so ask it about a COPY. A spread, not a third parameter: a
+  // parameter grows a second code path through the shared helper, and its
+  // default path has to stay byte-identical or the parity test that keeps six
+  // screens agreeing stops meaning anything.
+  // ⚠️ AND IT DIVIDES THE WEEK ONCE, UNROUNDED. `Math.round(cardio/7) +
+  // Math.round(strength/7)` disagreed with computeClientCalories by a calorie
+  // on 9.4% of realistic plans — enough for this card to contradict itself.
+  const targetEat = planIntakeForRate({ ...data, deficitMode: "eatback" }, planRateS);
+  const targetAcc = planIntakeForRate({ ...data, deficitMode: "accelerate" }, planRateS);
   const targetCals = eatback ? targetEat : targetAcc;
+  const calTxt = (v) => (v > 0 ? v.toLocaleString() : "—");
   const mtS = data.macroTargets || {};
   const proteinG = mtS.protein != null ? Number(mtS.protein) : Math.round(Number(weightLbs) * proteinBasisOf(data));
   const fatG = mtS.fat != null ? Number(mtS.fat) : Math.round(Math.round(targetCals * 0.28) / 9);
@@ -5767,8 +5837,12 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
         <Row label="BMR" value={`${Math.round(bmr).toLocaleString()} cal`} />
         <Row label={`TDEE (${actObj.label})`} value={`${tdee.toLocaleString()} cal`} color="var(--accent)" />
         {targets.filter(t=>t.cut>0).map(t=>(
-          <Row key={t.label} label={t.goalLabel} value={`${floor(tdee - t.cut + avgBurnPerDay).toLocaleString()} cal`} color={`var(${t.cls==="c-grn"?"--green":t.cls==="c-yel"?"--yellow":"--red"})`} />
+          <Row key={t.label} label={t.goalLabel} value={`${calTxt(planIntakeForRate(data, t.rate))} cal`} color={`var(${t.cls==="c-grn"?"--green":t.cls==="c-yel"?"--yellow":"--red"})`} />
         ))}
+        {/* Which of the rows above is actually in force. Without it the card
+            lists four paces and the reader has to guess; with it, this row and
+            "Target calories" below are the same number BY CONSTRUCTION. */}
+        <Row label="Your plan's pace" value={`${RATE_SHORT[planRateS] || ""} · ${calTxt(targetCals)} cal`} color="var(--accent)" />
       </div>
 
       {/* Weekly Activity */}
@@ -5807,7 +5881,7 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
       </div>
 
       {/* Macros at 1 lb/wk */}
-      <div className="sec-title">Macros (1 lb/wk deficit)</div>
+      <div className="sec-title">Macros ({RATE_LABEL[planRateS] || "your pace"})</div>
       <div className="card" style={{padding:"14px 16px"}}>
         <Row label="Target calories" value={`${targetCals.toLocaleString()} cal`} color="var(--accent)" />
         <Row label="Protein" value={`${proteinG}g`} color="var(--pink)" />
@@ -13385,9 +13459,23 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // tracker adjustment and today's log has wearable data, the watch's measured
   // burn replaces the whole estimate (see wearableTdee).
   const trackerTdee = wearableTdee(data, dailyLog);
-  const computedTargetForNote = trackerTdee
-    ? Math.max(1200, trackerTdee - dailyDeficitOf(data))
-    : Math.max(1200, tdee - dailyDeficitOf(data) + (isEatback(data) ? burnShown : 0));
+  // ⚠️ TWO JOBS, TWO VALUES (S215). The raw* numbers are the "How Your Target Is
+  // Calculated" ladder's running totals and must stay UNFLOORED, or the visible
+  // arithmetic stops adding up: a pre-floored subtotal printed
+  // "1,524 − 1,000 = 1,200" and then "1,200 + 238 = 1,200" — two breaks in five
+  // rows, for exactly the small-frame person the floor exists to protect. The
+  // target* numbers are OFFERED as choosable targets, so they stay floored: a
+  // prescription never goes below MIN_DAILY_CAL. Same final values as before —
+  // every input is already an integer, so atLeastMinCal's round is a no-op.
+  const rawNoBurn = tdee - dailyDeficitOf(data);
+  const rawTarget = trackerTdee
+    ? trackerTdee - dailyDeficitOf(data)
+    : rawNoBurn + (isEatback(data) ? burnShown : 0);
+  // How much the floor had to lift it. Zero means the floor did not bind, and
+  // the ladder then shows no floor row at all — the old rendering invented a
+  // clamp on plans where none applied.
+  const floorLift = Math.max(0, MIN_DAILY_CAL - rawTarget);
+  const computedTargetForNote = atLeastMinCal(rawTarget);
   // Pace (S95): the plan's chosen weekly rate + what each option would actually
   // let you eat today, so the picker shows outcomes rather than jargon. Mirrors
   // computedTargetForNote exactly — raw* is pre-floor, so we can tell the user
@@ -13400,7 +13488,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
       ? trackerTdee - def
       : tdee - def + (eatbackOn ? burnShown : 0);
   };
-  const targetForRate = (r) => Math.max(1200, rawTargetForRate(r));
+  const targetForRate = (r) => atLeastMinCal(rawTargetForRate(r));
 
   // A manually-set target (data.calorieTarget) is the coach's/user's own number —
   // it wins over the calculation AND the tracker adjustment (an explicit choice).
@@ -13421,12 +13509,85 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // target — the screens disagreed. Same root cause as the Progress Snapshot
   // reading 0 next to a 384 tile.
   const scheduledBurn = burnShown;
-  const targetNoBurn   = Math.max(1200, tdee - dailyDeficitOf(data));
-  const targetWithBurn = Math.max(1200, tdee - dailyDeficitOf(data) + scheduledBurn);
+  // Both are PRESCRIPTIONS (the two chooser buttons, and the "target + burn"
+  // pill), so both stay floored. Values unchanged.
+  const targetNoBurn   = atLeastMinCal(rawNoBurn);
+  const targetWithBurn = atLeastMinCal(rawNoBurn + scheduledBurn);
   // With the tracker adjustment live the watch's measured burn REPLACES the whole
   // estimate, so it already contains activity — offering "add the burn on top"
   // there would double-count it. Same reason a manual target hides the choice.
   const canChooseBurnMode = !!onSetDeficitMode && !trackerTdee && manualTarget == null;
+
+  // ── One ladder, two sheets (S215) ──────────────────────────────────────────
+  // "How Your Target Is Calculated" is rendered in TWO places and they had
+  // already drifted — the burn-mode sheet's copy has no tracker row at all, so
+  // on a tracker day it opened "Your body's daily burn 2,826" while the target
+  // in force came from a measured 2,555: a 911-cal contradiction inside one
+  // sheet. Built once here instead.
+  //
+  // ⚠️ THE FLOOR IS A ROW, NOT A SILENT CLAMP. When it changes the answer it
+  // says so and by how much (CLAUDE.md: a silent clamp is its own bug), and
+  // when it does NOT bind there is no row — the old rendering invented one.
+  //
+  // ⚠️ AND NOTE ROW 3'S LABEL: "= After the deficit", never "= Target …". It
+  // can read 524 on the way to 1,200, and DISPLAYING a sub-1,200 subtotal is
+  // not PRESCRIBING one. The unfloor and this wording ship together or not at
+  // all.
+  const targetLadderRows = () => {
+    const def = dailyDeficitOf(data);
+    const showBurnRow = !trackerTdee && burnShown > 0;
+    const rows = [];
+    rows.push(trackerTdee
+      ? { k: "basis", l: "Tracker measured burn", v: `${trackerTdee.toLocaleString()} cal`, c: "var(--text)", icon: "watch" }
+      : { k: "basis", l: "Your body's daily burn (TDEE)", v: `${tdee.toLocaleString()} cal`, c: "var(--text)" });
+    rows.push({ k: "rate", l: RATE_SENTENCE(planRate),
+      v: planRate === 0 ? "−0 cal" : planRate < 0 ? `+${Math.abs(def).toLocaleString()} cal` : `−${def.toLocaleString()} cal`,
+      c: planRate === 0 ? "var(--muted)" : planRate < 0 ? "var(--text)" : "var(--red)" });
+    // Only worth a subtotal when a row below actually changes it; otherwise it
+    // just repeats Today's Target one line early.
+    if (!trackerTdee && (showBurnRow || floorLift > 0))
+      rows.push({ k: "sub", l: "= After the deficit", v: `${rawNoBurn.toLocaleString()} cal`, c: "var(--text)", total: true });
+    if (showBurnRow)
+      rows.push({ k: "burn", l: `Calories from exercise${eatbackOn ? "" : " (not added)"}`,
+        v: eatbackOn ? `+${burnShown.toLocaleString()} cal` : "+0 cal",
+        c: eatbackOn ? "var(--green)" : "var(--muted)" });
+    if (floorLift > 0)
+      rows.push({ k: "floor", l: `${MIN_DAILY_CAL.toLocaleString()} minimum applied`,
+        v: `+${floorLift.toLocaleString()} cal`, c: "var(--yellow)" });
+    rows.push({ k: "total", l: "Today's Target", v: `${computedTargetForNote.toLocaleString()} cal`,
+      c: "var(--accent)", total: true,
+      sub: (canChooseBurnMode && scheduledBurn > 0)
+        ? (eatbackOn ? "includes today's workout burn" : "does NOT include workout burn") : null });
+    return rows;
+  };
+  const TargetLadder = () => (
+    <>
+      {targetLadderRows().map((r, ix, arr) => (
+        <div key={r.k} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
+          padding: r.k === "total" ? "8px 0" : "6px 0",
+          borderBottom: ix === arr.length - 1 ? "none" : "1px solid var(--border)",
+          fontSize: r.k === "total" ? ".88rem" : ".82rem", fontWeight: r.total ? 700 : 400 }}>
+          <span style={{ color: r.total ? "var(--text)" : "var(--muted)", display: "inline-flex", alignItems: "center", gap: "5px" }}>
+            {r.icon && <Icon name={r.icon} size={13} color="var(--accent)" />}
+            <span>{r.l}{r.sub && (
+              <span style={{ display: "block", fontSize: ".68rem", fontWeight: 600, color: eatbackOn ? "var(--green)" : "var(--muted)" }}>{r.sub}</span>
+            )}</span>
+          </span>
+          <span style={{ fontFamily: "'Sora',sans-serif", fontSize: r.k === "total" ? "1.1rem" : "1rem",
+            fontWeight: r.total ? 800 : 400, color: r.c }}>{r.v}</span>
+        </div>
+      ))}
+      {floorLift > 0 && (
+        <div style={{ marginTop: "8px", padding: "9px 10px", borderRadius: "9px",
+          border: "1px solid var(--yellow)", background: "rgba(251,191,36,.10)",
+          fontSize: ".72rem", color: "var(--text-secondary)", lineHeight: 1.5 }}>
+          The maths lands at <strong style={{ color: "var(--text)" }}>{rawTarget.toLocaleString()} cal</strong> — too low to be
+          healthy or sustainable, so the target holds at the {MIN_DAILY_CAL.toLocaleString()} floor. Eating less isn&rsquo;t the
+          lever here: <strong style={{ color: "var(--text)" }}>burning more is</strong>.
+        </div>
+      )}
+    </>
+  );
 
   // Deficit / surplus under the wheel = TARGET − EATEN (S104c). This is the
   // number Kevin means by "deficit": how far UNDER his daily target he is —
@@ -13990,9 +14151,25 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               </div>
             </div>
           ) : (
+            /* ⚠️ NAME THE BASIS THE CHIPS ACTUALLY USED (S215). This said
+                "your body's daily burn of {tdee}" unconditionally, but the chips
+                are targetForRate — whose basis is the TRACKER's measured burn
+                when there is one, and tdee + today's training burn in eat-back
+                mode. So on a tracker day it cited a figure appearing in none of
+                them, and on a training day it was short by the whole burn.
+                ⚠️ DO NOT "FIX" THIS BY FLATTENING THE CHIPS. This card is
+                SUPPOSED to follow the viewed day — it answers "what may I eat
+                today" — and an earlier parity claim here already sent a reader
+                to change the wrong screen. The chips were right; the footnote
+                lied. "on this day" is what stops the correct per-day movement
+                reading as instability. */
             <div style={{fontSize:".62rem",color:"var(--muted)",marginTop:"7px",lineHeight:1.4}}>
-              Based on your body’s daily burn of {Math.round(tdee).toLocaleString()} cal.
-              Targets are floored at 1,200 cal/day for safety, and are estimates — individual needs vary.
+              {trackerTdee
+                ? <>Based on your tracker’s measured burn of {trackerTdee.toLocaleString()} cal on this day.</>
+                : eatbackOn && burnShown > 0
+                  ? <>Based on your body’s daily burn of {Math.round(tdee).toLocaleString()} cal plus the {burnShown.toLocaleString()} cal you burned training on this day.</>
+                  : <>Based on your body’s daily burn of {Math.round(tdee).toLocaleString()} cal.</>}
+              {" "}Targets are floored at {MIN_DAILY_CAL.toLocaleString()} cal/day for safety, and are estimates — individual needs vary.
             </div>
           )}
         </div>
@@ -14418,7 +14595,20 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         })}
         {/* Mini breakdown so the two numbers are explainable, not magic. The
             "=" rows spell out each running total (S99, Kevin): what the deficit
-            leaves you, and the full amount you could eat with today's burn. */}
+            leaves you, and the full amount you could eat with today's burn.
+            ⚠️ GATED ON canChooseBurnMode (S215). It used to be an UNGATED
+            sibling of the chooser it explains, so a tracker user opened this
+            sheet to "Your body's daily burn 2,826" while their target came from
+            a measured 2,555 — a 911-cal contradiction inside one sheet — and a
+            manual-target user got a walkthrough of a number not in force,
+            underneath a chooser that had hidden itself.
+            ⚠️ AND THE RUNNING TOTALS ARE RAW. The two BUTTONS above are
+            prescriptions and stay floored; these rows are arithmetic, and a
+            floored subtotal made them print "1,200 + 238 = 1,200". */}
+        {canChooseBurnMode && (() => {
+          const rawWith = rawNoBurn + scheduledBurn;
+          const lift = Math.max(0, MIN_DAILY_CAL - rawWith);
+          return (
         <div style={{marginTop:"6px",borderTop:"1px solid var(--border)",paddingTop:"10px"}}>
           {[["Your body's daily burn (TDEE)", `${tdee.toLocaleString()} cal`, "var(--text)", false],
             [RATE_SENTENCE(planRate),
@@ -14426,8 +14616,9 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                : planRate < 0 ? `+${Math.abs(dailyDeficitOf(data)).toLocaleString()} cal`
                : `−${dailyDeficitOf(data).toLocaleString()} cal`,
              planRate < 0 ? "var(--text)" : "var(--red)", false],
-            ["= Target before exercise", `${targetNoBurn.toLocaleString()} cal`, "var(--text)", true],
+            ["= After the deficit", `${rawNoBurn.toLocaleString()} cal`, "var(--text)", true],
             ["Burned training today", `+${scheduledBurn.toLocaleString()} cal`, "var(--orange)", false],
+            ...(lift > 0 ? [[`${MIN_DAILY_CAL.toLocaleString()} minimum applied`, `+${lift.toLocaleString()} cal`, "var(--yellow)", false]] : []),
             ["= Total with today's burn", `${targetWithBurn.toLocaleString()} cal`, "var(--accent)", true]
           ].map(([l,v,c,tot],i)=>(
             <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",
@@ -14441,6 +14632,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
             This also updates your Full Plan, projections and coaching — it's one setting, shown in both places.
           </div>
         </div>
+          );
+        })()}
       </BottomSheet>
 
       {/* Quick stats — tappable */}
@@ -14636,56 +14829,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               ) : (
                 <>
                   <div style={{fontWeight:700,fontSize:".88rem",marginBottom:"10px",color:"var(--accent)",display:"flex",alignItems:"center",gap:"7px"}}><Icon name="target" size={16} color="var(--accent)" />How Your Target Is Calculated</div>
-                  {trackerTdee ? (
-                    <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                      <span style={{color:"var(--muted)",display:"inline-flex",alignItems:"center",gap:"5px"}}><Icon name="watch" size={13} color="var(--accent)" />Tracker measured burn</span>
-                      <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{trackerTdee.toLocaleString()} cal</span>
-                    </div>
-                  ) : (
-                    <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                      <span style={{color:"var(--muted)"}}>Your body's daily burn (TDEE)</span>
-                      <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{tdee.toLocaleString()} cal</span>
-                    </div>
-                  )}
-                  <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                    <span style={{color:"var(--muted)"}}>{RATE_SENTENCE(planRate)}</span>
-                    <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:planRate===0?"var(--muted)":planRate<0?"var(--text)":"var(--red)"}}>
-                      {planRate === 0 ? "−0 cal"
-                        : planRate < 0 ? `+${Math.abs(dailyDeficitOf(data))} cal`
-                        : `−${dailyDeficitOf(data)} cal`}
-                    </span>
-                  </div>
-                  {/* Running total after the deficit (S99, Kevin) — the number the
-                      deficit leaves you, before exercise enters the picture. With
-                      the tracker override there's no exercise row below, so this
-                      would just repeat Today's Target — skipped there. */}
-                  {!trackerTdee && (
-                    <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem",fontWeight:700}}>
-                      <span style={{color:"var(--text)"}}>= Target before exercise</span>
-                      <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",fontWeight:800}}>{targetNoBurn.toLocaleString()} cal</span>
-                    </div>
-                  )}
-                  {/* Calories from exercise (Kevin) — only meaningful when the burn
-                      actually moves the target, i.e. eat-back and no tracker override. */}
-                  {!trackerTdee && (
-                    <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid var(--border)",fontSize:".82rem"}}>
-                      {/* burnShown, not todayTotalBurn (S99): with a tracker and no
-                          scheduled workout this row said "+0" while the target above
-                          included the tracker's burn — the ladder didn't add up. */}
-                      <span style={{color:"var(--muted)"}}>Calories from exercise{eatbackOn ? "" : " (not added)"}</span>
-                      <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:eatbackOn?"var(--green)":"var(--muted)"}}>
-                        {eatbackOn ? `+${burnShown.toLocaleString()}` : `+0`} cal
-                      </span>
-                    </div>
-                  )}
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"8px 0",fontSize:".88rem",fontWeight:700}}>
-                    <span>Today's Target{canChooseBurnMode && scheduledBurn > 0 && (
-                      <span style={{display:"block",fontSize:".68rem",fontWeight:600,color:eatbackOn?"var(--green)":"var(--muted)"}}>
-                        {eatbackOn ? "includes today's workout burn" : "does NOT include workout burn"}
-                      </span>
-                    )}</span>
-                    <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1.1rem",color:"var(--accent)"}}>{target.toLocaleString()} cal</span>
-                  </div>
+                  <TargetLadder />
                 </>
               )}
               {/* Pace picker (S95, Kevin) — the deficit was a hardcoded 1 lb/week

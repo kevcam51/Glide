@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**2,062 assertions across 34 suites**, S214).
+- `npm run test:units` — the JS unit suites (**2,157 assertions across 35 suites**, S215).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -108,6 +108,44 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S215 (Sep 8): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S215)" first.**
+> ⚠️ **UNPUSHED, AND THE 18-FUNCTION `aitools.js` SET IS UNDEPLOYED.** Deploy
+> BEFORE pushing (`npm run deploy-set aitools.js`, deploy exactly what it
+> prints) or Vercel ships the visible half while the AI still quotes the old
+> burn. **2,157 assertions across 35 suites + 272 rules tests**; build,
+> `check:undef`, `check:weak` clean.
+> ⚠️ **RESULTS PRINTED A TARGET NOBODY WAS ON.** Three rows rendered
+> `floor(tdee − cut + avgBurnPerDay)`: cardio-only and blind to `deficitMode`.
+> The Summary card said "1 lb/week 2,062" while, forty lines below itself,
+> "Target calories" said something else. The "+ Cardio" tab was NOT a scoped
+> exception — on a STRENGTH-ONLY eat-back plan `avgBurnPerDay` is 0, so that
+> grid was byte-identical to the "No Cardio" grid and both understated the
+> target. All three now call `planIntakeForRate`. ⚠️ **~66% of realistic plans
+> see a Results number move** (median 80 cal) — always TOWARD what
+> `computeClientCalories`, the dashboard, the share card, the calendar and the
+> AI already showed.
+> ⚠️ **TWO CARVE-OUTS, ON PURPOSE:** the Day-by-Day cells stay PER-DAY (routing
+> them through the flat helper would be the S214 bug pointing the other way) and
+> the "No Cardio" tab keeps its diet-only arithmetic, because that
+> counterfactual is the tab's whole subject. Both carry comments saying so.
+> ⚠️ **THE TARGET LADDER STOPPED ADDING UP WHEN THE FLOOR BOUND** —
+> "1,524 / −1,000 / = 1,200 / +238 / 1,200". `targetNoBurn` was pre-floored while
+> the target was floored at the end. Raw running totals now, the floor is its own
+> ROW, and row 3 is "= After the deficit" — never "= Target …", because it can
+> show 524 and displaying a sub-1,200 subtotal is not prescribing one.
+> ⚠️ **A SECOND ladder existed in the burn-mode sheet, UNGATED** — a tracker user
+> opened it to "your body's daily burn 2,826" while their target came from a
+> measured 2,555. Gated on the chooser it explains.
+> Also: the server's `add_custom_exercise` quoted a burn 19–33% above what every
+> screen then showed (and stored a MET that did not reproduce the caller's
+> cal/min); `restingKcalPerMin` is hoisted in `aitools.js` so both callers share
+> it. ⚠️ **A test fixture WITHOUT gender/age/height passes against that bug** —
+> the fallback is arithmetically identical to the old shortcut.
+> ⚠️ **Two lessons:** a lazy `[\s\S]*?\n\};` lifter swallowed 3,600 characters
+> because `isEatback` is a one-liner — the suites now use a brace-balanced
+> `liftDecl`; and a ladder test that REBUILDS the row logic passes while the real
+> builder breaks, so it lifts and runs `targetLadderRows` itself._
+>
 > _**S214 (Sep 8): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S214)" first.**
 > Frontend only. **2,062 assertions across 34 suites + 272 rules tests**; build,
 > `check:undef`, `check:weak` clean.

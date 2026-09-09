@@ -144,12 +144,49 @@ const ok = (name, cond, extra) => { checks++; if (!cond) { fails++; console.log(
   ok("add_custom_exercise ok", r.ok === true && !!r.exercise.id, r);
   const firstId = r.exercise.id;
   ok("custom exercise persisted", read("u1", "caliq-self").data.customExercises.length === 1);
-  ok("burnPer30min reported", typeof r.burnPer30min === "number", r.burnPer30min);
+  // ⚠️ A VALUE, NOT A TYPE (S215). `typeof === "number"` passed at 380 and it
+  // passes at 296 — so it was green while the tool quoted a burn 28% above what
+  // exBurn then showed on every screen, from the same call that created the
+  // exercise. The number below is exBurn's own answer for this fixture
+  // (186 lb / 30 / 5'6" female at MET 9), so the reply and the app agree by
+  // construction.
+  ok("burnPer30min is the burn every screen will show", r.burnPer30min === 296, r.burnPer30min);
+  // ⚠️ AND THE STORED RECORD, which outlives the reply: an emoji `icon` the
+  // house style forbids and exerciseCategory cannot read, versus an iconName.
+  {
+    const stored = read("u1", "caliq-self").data.customExercises[0];
+    ok("stored as a MET, so the burn adapts to whoever does it", stored.met === 9);
+    ok("stored with a house icon name, not an emoji", stored.iconName === "dumbbell" && !stored.icon, stored);
+    ok("no emoji anywhere in the stored record", !/\p{Extended_Pictographic}/u.test(JSON.stringify(stored)), stored);
+    ok("records the weight it was framed against", stored.refWeightLbs === 186, stored.refWeightLbs);
+  }
   const beforeDupe = JSON.stringify(read("u1", "caliq-self"));
   r = await runTool("add_custom_exercise", { name: "sled push", type: "strength", met: 9 }, ctx);
   ok("dedupe reuses the id", r.ok === true && r.exercise.id === firstId, r);
   ok("dedupe wrote nothing", JSON.stringify(read("u1", "caliq-self")) === beforeDupe);
   ok("dedupe says so", /Already exists/.test(r.note || ""), r.note);
+
+  // ⚠️ THE calPerMin ROUND TRIP. "About 10 cal/min" used to be divided by the
+  // population shortcut, storing a MET that did NOT reproduce the rate the
+  // caller asked for — and unlike the reply, a wrong stored MET is permanent.
+  reset();
+  r = await runTool("add_custom_exercise", { name: "Rope Slams", type: "cardio", calPerMin: 10 }, ctx);
+  ok("calPerMin is accepted", r.ok === true, r);
+  {
+    const stored = read("u1", "caliq-self").data.customExercises[0];
+    // 10 cal/min x 30 min = 300, whatever the body doing it.
+    ok("the stored MET reproduces the rate that was asked for",
+       Math.abs(r.burnPer30min - 300) <= 2, { met: stored.met, burnPer30min: r.burnPer30min });
+    ok("...and it is stored as a MET, not a flat rate", stored.met > 0 && stored.calPerMin === undefined, stored);
+  }
+
+  // ⚠️ GRACEFUL DEGRADATION — AND NEVER THE ONLY FIXTURE. Without gender/age/
+  // height the resting rate falls back to the population shortcut, which is
+  // arithmetically identical to the old code — so a stats-less fixture passes
+  // against the live bug and proves nothing on its own.
+  seed("u1", "caliq-self", { data: { weightLbs: 200 }, step: 5 });
+  r = await runTool("add_custom_exercise", { name: "Mystery Drill", type: "cardio", met: 8 }, ctx);
+  ok("an incomplete profile still gets an answer", r.ok === true && r.burnPer30min === 363, r.burnPer30min);
 
   // ── set_workout_schedule ────────────────────────────────────────────────
   reset();

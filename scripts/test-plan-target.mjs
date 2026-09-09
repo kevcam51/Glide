@@ -38,24 +38,61 @@ import { dirname, join } from "path";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
 
+// ⚠️ A BRACE-BALANCED LIFTER, NOT A LAZY REGEX. `const isEatback = (d) => …;` is
+// a one-liner, so a `[\s\S]*?\n\};` pattern ran on to the NEXT function's
+// closing brace — 3,600 characters, including a whole other declaration, which
+// is a SyntaxError the moment both are lifted.
+// ⚠️ AND A FUNCTION'S PARAMETER LIST MUST BE SKIPPED FIRST. Its parens close at
+// depth 0, and `function makeUpPlan({ over, days, … })` even closes a BRACE
+// there — counting body braces from the declaration returned the signature and
+// nothing else.
+function liftDecl(src, name) {
+  // Indentation-tolerant: these are sometimes module-level and sometimes
+  // declared inside a component body.
+  const re = new RegExp("\\n([ \\t]*)(?:function " + name + "\\(|const " + name + "\\s*=)");
+  const m = src.match(re);
+  if (!m) throw new Error("could not lift " + name);
+  const start = m.index + 1 + m[1].length;
+  const isFn = src.startsWith("function", start);
+  let i = start, depth = 0, opened = false, q = null;
+  const skipString = () => { const qq = src[i]; for (i++; i < src.length; i++) { if (src[i] === "\\") { i++; continue; } if (src[i] === qq) return; } };
+  if (isFn) {                          // step over the parameter list
+    while (i < src.length && src[i] !== "(") i++;
+    let pd = 0;
+    for (; i < src.length; i++) {
+      const c = src[i];
+      if (c === '"' || c === "'" || c === "`") { skipString(); continue; }
+      if (c === "(") pd++;
+      else if (c === ")") { pd--; if (pd === 0) { i++; break; } }
+    }
+  }
+  for (; i < src.length; i++) {
+    const c = src[i];
+    if (c === '"' || c === "'" || c === "`") { skipString(); continue; }
+    if (c === "/" && src[i + 1] === "/") { while (i < src.length && src[i] !== "\n") i++; continue; }
+    if (isFn) {
+      if (c === "{") { depth++; opened = true; }
+      else if (c === "}") { depth--; if (opened && depth === 0) return src.slice(start, i + 1); }
+    } else {
+      if ("([{".indexOf(c) >= 0) depth++;
+      else if (")]}".indexOf(c) >= 0) depth--;
+      else if (c === ";" && depth === 0) return src.slice(start, i + 1);
+    }
+  }
+  throw new Error("unterminated " + name);
+}
+
 let fails = 0, checks = 0;
 const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n, x !== undefined ? JSON.stringify(x) : ""); } };
 
 // ── lift the real thing ─────────────────────────────────────────────────────
 const CONSTS = ["DAYS", "REST_ST", "STRENGTH_EXERCISES", "CARDIO_GROUPS", "ALL_CARDIO",
-  "ACTIVITY_LEVELS", "MIN_DAILY_CAL", "HR_ZONES", "RATE_OPTS", "OVER_TOLERANCE"];
+  "ACTIVITY_LEVELS", "MIN_DAILY_CAL", "HR_ZONES", "RATE_OPTS", "OVER_TOLERANCE", "PARTIAL_DAY_MIN"];
 const FNS = ["calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx", "hrCaloriesPerMin",
   "restingKcalPerMin", "calcBurn", "cardioExFor", "exBurn", "isEatback", "dailyDeficitOf", "weeklyRateOf",
   "planEnergy", "planIntakeForRate", "computeClientCalories", "overDaysFrom", "makeUpPlan"];
 const grab = (re, n) => { const m = APP.match(re); if (!m) throw new Error(`could not lift ${n}`); return m[0]; };
-const source = () =>
-  CONSTS.map((n) => grab(new RegExp(`\\nconst ${n} *=[\\s\\S]*?;\\n`), n)).join("")
-  + grab(/\nconst atLeastMinCal[^\n]*\n/, "atLeastMinCal")
-  + FNS.map((n) => {
-      const m = APP.match(new RegExp(`\\n(?:const ${n} = \\([\\s\\S]*?\\n\\};|function ${n}\\([\\s\\S]*?\\n\\})`));
-      if (!m) throw new Error(`could not lift ${n}`);
-      return m[0];
-    }).join("");
+const source = () => [...CONSTS, "atLeastMinCal", ...FNS].map((n) => liftDecl(APP, n)).join("\n");
 const build = (src) => new Function(`${src}; return { planEnergy, planIntakeForRate, computeClientCalories, overDaysFrom, makeUpPlan, weeklyRateOf, OVER_TOLERANCE, atLeastMinCal };`)();
 const M = build(source());
 

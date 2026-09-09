@@ -713,12 +713,30 @@ function calcBMR(gender, weightLbs, heightFt, heightIn, age) {
     ? 10 * kg + 6.25 * cm - 5 * age + 5
     : 10 * kg + 6.25 * cm - 5 * age - 161;
 }
-// Weekly calories burned by the plan's scheduled cardio + strength — the exact
-// mirror of App.jsx computeClientCalories' burn loop (per-session Math.round of
-// MET × kg × hours; custom exercises burn calPerMin × minutes). Kept in sync so
-// the AI's calorie target MATCHES every app screen — without this the AI told
-// clients a target ~the daily burn lower than their dashboard showed, and
-// coach_summary scored faithful clients as "over target".
+// 1 MET = THIS person's resting rate, not the 1 kcal/kg/hr population shortcut
+// (S183k). MUST match restingKcalPerMin in src/App.jsx — same two-argument
+// signature so the two can be diffed by eye.
+//
+// ⚠️ IT LIVED AS A CLOSURE INSIDE weeklyPlanBurn UNTIL S215, WHICH IS EXACTLY
+// WHY add_custom_exercise COULD NOT CALL IT and re-implemented the old shortcut
+// instead: the tool reported 363 cal per 30 min where every screen then showed
+// 304, from the same call that created the exercise.
+//
+// The incomplete-profile fallback is arithmetically IDENTICAL to that shortcut
+// (met × ((w × 0.453592) / 60) × 30 === met × w × 0.453592 × 0.5), so a
+// stats-less plan sees no change at all — which is also why a test fixture
+// without gender/age/height PASSES AGAINST THE LIVE BUG.
+function restingKcalPerMin(d, weightLbs) {
+  const w = Number(weightLbs) || Number((d || {}).weightLbs) || 0;
+  if (!w) return 0;
+  const dd = d || {};
+  const age = effectiveAge(dd);
+  if (dd.gender && Number(age) > 0 && Number(dd.heightFt) > 0) {
+    const bmr = calcBMR(dd.gender, w, Number(dd.heightFt), Number(dd.heightIn) || 0, age);
+    if (bmr > 0 && isFinite(bmr)) return bmr / 1440;   // kcal per minute at rest
+  }
+  return (w * 0.453592) / 60;   // 1 MET ≈ 1 kcal/kg/hr
+}
 // Weekly fat-loss rate → daily calorie deficit. MIRRORS App.jsx weeklyRateOf /
 // dailyDeficitOf (0 / 0.5 / 1 / 2 lb per week → 0 / 250 / 500 / 1000 cal/day;
 // 1 lb of fat ≈ 3500 cal). Unset/invalid = 1 lb/wk, which is what every plan
@@ -759,23 +777,15 @@ function hrCalPerMin(hr, gender, weightLbs, age) {
   return Math.max(0, kcalMin);
 }
 
+// Weekly calories burned by the plan's scheduled cardio + strength — the exact
+// mirror of App.jsx computeClientCalories' burn loop. Kept in sync so the AI's
+// calorie target MATCHES every app screen — without this the AI told clients a
+// target ~the daily burn lower than their dashboard showed, and coach_summary
+// scored faithful clients as "over target".
 function weeklyPlanBurn(d) {
-  const w = Number(d.weightLbs) || 0;
   const custom = {};
   (Array.isArray(d.customExercises) ? d.customExercises : []).forEach((e) => { if (e && e.id) custom[e.id] = e; });
-  // S183k: 1 MET = THIS person's resting rate, not the 1 kcal/kg/hr population
-  // shortcut. MUST match restingKcalPerMin in src/App.jsx — if the server and
-  // the app disagree the AI quotes a target no screen shows (the S86 lesson).
-  const restMin = (() => {
-    const wl = Number(d.weightLbs) || 0;
-    if (!wl) return 0;
-    const age = effectiveAge(d);
-    if (d.gender && Number(age) > 0 && Number(d.heightFt) > 0) {
-      const bmr = calcBMR(d.gender, wl, Number(d.heightFt), Number(d.heightIn) || 0, age);
-      if (bmr > 0 && isFinite(bmr)) return bmr / 1440;
-    }
-    return (wl * 0.453592) / 60;
-  })();
+  const restMin = restingKcalPerMin(d, d.weightLbs);
   const burnOf = (s) => {
     if (!s || !s.duration) return 0;
     if (s.type === "hr") return Math.round(hrCalPerMin(s.hr, d.gender, d.weightLbs, effectiveAge(d)) * s.duration);
@@ -3616,11 +3626,20 @@ async function runTool(name, input, ctx) {
     if (!label) return { error: "Provide an exercise name." };
     // MET is preferred (it scales with bodyweight); calPerMin is still accepted
     // so older callers keep working, and is converted using this plan's weight.
-    const wLbs = Number((await activePlanData(db, uid, planOverride)).data.weightLbs) || 0;
+    // The whole plan, not just the weight: the resting rate below needs
+    // gender/age/height to be this PERSON's rather than the population average.
+    const planD = (await activePlanData(db, uid, planOverride)).data || {};
+    const wLbs = Number(planD.weightLbs) || 0;
+    const restMin = restingKcalPerMin(planD, wLbs);
     const rawMet = Number(input.met) || 0;
     const rawCpm = Number(input.calPerMin) || 0;
+    // ⚠️ CONVERT calPerMin THROUGH THE SAME RESTING RATE THE BURN USES. Dividing
+    // by the population shortcut stored a MET that, run back through exBurn,
+    // did NOT reproduce the rate the caller asked for — "about 10 cal/min"
+    // became 7.1 MET and every screen then showed ~7.5 cal/min. The damage was
+    // in the STORED value, so it outlived the reply.
     let met = rawMet > 0 ? rawMet
-      : (rawCpm > 0 && wLbs > 0 ? (rawCpm * 60) / (wLbs * 0.453592) : 0);
+      : (rawCpm > 0 && restMin > 0 ? rawCpm / restMin : 0);
     met = Math.max(1, Math.min(20, Math.round(met * 10) / 10));
     if (!rawMet && !rawCpm) {
       return { error: "Provide a met (intensity, 1–20) — or calPerMin and I'll convert it." };
@@ -3633,7 +3652,11 @@ async function runTool(name, input, ctx) {
       const existing = d.customExercises.find((e) => e && e.type === exType && (e.label || "").toLowerCase() === label.toLowerCase());
       // Already there: hand back its id and write nothing.
       if (existing) return { __abort: true, existing: { id: existing.id, label: existing.label, type: exType } };
-      const ex = { id: randId("custom_"), label, icon: "⭐", met,
+      // ⚠️ iconName, NOT an emoji `icon` (Kevin's S88b rule, and exerciseCategory
+      // in src/App.jsx reads iconName — an emoji here fell through to the
+      // generic glyph and put a character in the UI the house style forbids).
+      const ex = { id: randId("custom_"), label, iconName: exType === "cardio" ? "run" : "dumbbell", met,
+        refWeightLbs: wLbs || null,
         cat: exType === "cardio" ? "Custom Cardio" : "Custom Strength", note: "Custom exercise — AI-estimated", isCustom: true, type: exType };
       d.customExercises.push(ex);
       return { ex };
@@ -3644,7 +3667,11 @@ async function runTool(name, input, ctx) {
     // Report the burn for THIS plan so the answer is concrete ("~250 cal in
     // 30 min") rather than a MET number nobody thinks in.
     return { ok: true, exercise: { id: res.ex.id, label: res.ex.label, type: exType, met },
-      burnPer30min: wLbs > 0 ? Math.round(met * wLbs * 0.453592 * 0.5) : null,
+      // ⚠️ THE SAME RATE EVERY SCREEN USES. This was
+      // `met * wLbs * 0.453592 * 0.5` — the pre-S183k population shortcut — so
+      // the tool quoted 363 cal for 30 min and exBurn then showed 304 on every
+      // screen, 19% apart, from the same call that created the exercise.
+      burnPer30min: restMin > 0 ? Math.round(met * restMin * 30) : null,
       note: "Intensity is stored as a MET, so the calorie burn adapts to whoever does it." };
   }
 

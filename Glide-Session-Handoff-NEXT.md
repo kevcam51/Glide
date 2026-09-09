@@ -1,6 +1,126 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S214) — PUSHED (frontend only)
+## ▶️ START HERE (S215) — ⚠️ COMMITTED, NOT DEPLOYED, NOT PUSHED
+
+**2,157 assertions across 35 suites + 272 rules tests**; build, `check:undef`,
+`check:weak` clean. `firestore.rules` untouched — no publish.
+
+    1. DEPLOY FIRST   npm run deploy-set aitools.js   → deploy exactly what it prints (18)
+    2. THEN PUSH      (Vercel ships the frontend within the minute)
+
+⚠️ **THAT ORDER IS NOT OPTIONAL.** Push first and the app shows the corrected
+numbers while the AI is still quoting a custom-exercise burn a third too high.
+Re-run `deploy-set` rather than pasting the list below — it is 18 functions
+today, `mcp` among them, so the connector picks the change up with no
+hand-mirroring.
+
+Kevin: *"fix any other issues"* — the four flagged at the end of S214.
+
+### 1. Results printed a target nobody was on
+
+Three rows rendered `floor(tdee − cut + avgBurnPerDay)`: **cardio-only, and
+blind to `deficitMode`**. So on an accelerate plan they were HIGH by the cardio
+average (that plan's burn buys the goal DATE, not food) and on any lifting plan
+LOW by the strength average. Measured on one plan, the Summary card printed a
+rate row and, forty lines below itself, a different "Target calories".
+
+⚠️ **THE "+ CARDIO" TAB WAS NOT A LEGITIMATELY SCOPED EXCEPTION**, though its
+"avg +N cardio" label reads like one. The label scopes WHICH burn was added; it
+never says whether the plan adds any. And on a **strength-only eat-back plan
+`avgBurnPerDay` is 0**, so that grid was byte-identical to the "No Cardio" grid
+and both understated the real target — a tab whose scope variable is zero cannot
+claim scope as a defence. All three now call `planIntakeForRate`, and cardio's
+share stays visible as a named component ("Made of +110/day cardio and +146/day
+strength"), so the tab keeps its teaching job.
+
+⚠️ **~66% OF REALISTIC PLANS SEE A RESULTS NUMBER MOVE** (median 80 cal, p90
+225). Always TOWARD the number `computeClientCalories`, the Daily Dashboard, the
+share card, the calendar tint and the server already showed. Nothing stored
+changes; a client who screenshotted the old figure will see a different one.
+
+⚠️ **TWO CARVE-OUTS, DELIBERATE AND COMMENTED:**
+- **Day-by-Day cells stay PER-DAY** — that day's cardio *plus* that day's
+  strength, mode-gated. `planIntakeForRate` is flat by contract; routing a
+  per-day cell through it would be the S214 bug pointing the other way. (They
+  were 341 cal from the dashboard's own Monday before this.)
+- **The "No Cardio" tab keeps its diet-only arithmetic** — that counterfactual
+  IS the tab's subject. Only the CLAIM changed ("Daily Targets (Diet Only)",
+  "cal/day from diet") plus one line naming the plan's real target.
+
+### 2. The target ladder stopped adding up when the floor bound
+
+`targetNoBurn` was pre-floored while the target was floored once at the end, so
+a small frame read **"1,524 / −1,000 / = 1,200 / +238 / 1,200"** — two visible
+breaks in five rows, for exactly the person the floor exists to protect.
+
+Raw running totals now, and **the floor is its own ROW** naming what it lifted.
+⚠️ **Row 3 is "= After the deficit", never "= Target …"** — it can read 524, and
+DISPLAYING a sub-1,200 subtotal on the way to 1,200 is not PRESCRIBING one. The
+unfloor and that wording ship together or not at all. The two chooser buttons
+and the pill stay floored: they are prescriptions.
+⚠️ And where the floor does NOT bind, there is now **no floor row** — the old
+rendering invented a clamp on plans that never hit one.
+
+⚠️ **A SECOND LADDER EXISTED IN THE BURN-MODE SHEET, UNGATED.** Its `})}` closed
+the `canChooseBurnMode` map, leaving the walkthrough an ungated sibling — so a
+tracker user opened it to "Your body's daily burn 2,826" while their target came
+from a measured 2,555, a 911-cal contradiction inside one sheet, and a
+manual-target user got a walkthrough of a number not in force. Now gated.
+
+### 3. The footnote named a number the chips had not used
+
+"Based on your body's daily burn of {tdee}" sat under chips computed from the
+TRACKER's measured burn, or from tdee + that day's training. ⚠️ **The fix is the
+footnote, not the chips** — that card is supposed to follow the viewed day, and
+an earlier parity claim there already sent a reader to change the wrong screen.
+
+### 4. The server quoted a burn no screen would ever show
+
+`add_custom_exercise` reported `met × lb × 0.453592 × 0.5` — the pre-S183k
+population shortcut — so it said 363 cal per 30 min and `exBurn` then showed 304
+on every screen, **from the same call that created the exercise** (19–33% across
+real bodies). `restingKcalPerMin` is now hoisted in `aitools.js` and shared, and
+the `calPerMin` path converts through it too — that half was worse, because a
+wrong STORED MET outlives the reply ("about 10 cal/min" stored 6.6 MET and every
+screen then showed ~7.5). Also stopped writing an emoji `icon` the app cannot
+read; it writes `iconName` + `refWeightLbs`.
+
+⚠️ **A FIXTURE WITHOUT gender/age/height PASSES AGAINST THAT BUG** — the
+incomplete-profile fallback is arithmetically identical to the old shortcut. The
+suite has such a fixture, and it must never be the only one.
+
+### ⚠️ Traps this session paid for
+
+- **A LAZY LIFTER SWALLOWED 3,600 CHARACTERS.** `const isEatback = (d) => …;` is
+  a ONE-LINER, so `[\s\S]*?\n\};` ran to the next function's closing brace and
+  took a whole other declaration with it — a SyntaxError once both were lifted,
+  and silently 18,000 characters of unintended source for `dailyDeficitOf`. And
+  a `function`'s PARAMETER list closes at depth 0, so brace-counting from the
+  declaration returned only the signature. Both suites now use a brace-balanced
+  `liftDecl` that skips the parameter list and tolerates indentation.
+- **A LADDER TEST THAT REBUILDS THE ROW LOGIC PASSES WHILE THE REAL BUILDER
+  BREAKS.** The first version transcribed it; it now lifts `targetLadderRows`
+  and runs it with the component scope injected, and five mutations of the
+  shipped builder were confirmed red.
+- **A GUARD ASSERTED BY PRESENCE IS NOT ASSERTED.** `/minimum applied/` stayed
+  green with the row's condition replaced by `if (false)` — the floor would have
+  silently stopped being disclosed. Assert the gate drives the push.
+- **An over-broad emoji scan failed on somebody else's code** — the Results body
+  has carried a wizard step glyph for years. Scope to what the change added.
+
+### Still open — flagged, not fixed
+
+- `SummaryTab`'s Nutrition Approach goal DATE hardcodes 3500 in `weeksToGoal`, so
+  a 2 lb/wk plan is dated at 1 lb/wk — 20 weeks where the truth is 10.
+- `NutrientsTab` carries the same ≤1-cal double-round; it is already mode-gated
+  and already includes strength, so it is correct on the axes this change was
+  about, and it does not receive `data`.
+- Seven bare `Math.max(1200, …)` literals remain despite `atLeastMinCal`. The
+  ladder bug above is exactly what that anti-pattern produces.
+
+---
+
+## Previously: START HERE (S214) — PUSHED (frontend only)
 
 No rules, no functions, no deploy. **2,062 assertions across 34 suites + 272
 rules tests**; build, `check:undef`, `check:weak` clean.
