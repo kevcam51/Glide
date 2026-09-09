@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium, setAiOptOut, aiChoiceMade, ensureTimezone } from "./profile.js";
 import { getForUser, setForUser, mergeForUser, deleteForUser, listForUser, listEntriesForUser, latestKeyForUser, subscribeForUser } from "./clientData.js";
 import { mergePlanWrap } from "./planMerge.js";
-import { estimateObservedTdee } from "./observedTdee.js";
+import { estimateObservedTdee, TUNING as TDEE_TUNING } from "./observedTdee.js";
 import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads, exportMyThreads } from "./messaging.js";
 import { pushStatus, enablePush, disablePush } from "./push.js";
 import { privGet, privSet, privSubscribe, privListEntries } from "./privateStore.js";
@@ -12381,8 +12381,13 @@ function simNum(raw, max = 50000) {
 // both parse to null, but they must not LOOK the same: a day showing "21000"
 // while the row beside it says "on your goal" silently replaces a surplus with
 // its opposite, which is the one thing a what-if screen must never do.
-function simRejected(raw) {
-  return String(raw === null || raw === undefined ? "" : raw).trim() !== "" && simNum(raw) === null;
+// ⚠️ IT HAS TO BE ABLE TO SHARE THE FIELD'S OWN CEILING (S217). It called
+// simNum with the DEFAULT 50,000 cap, so a field parsed at a tighter cap — the
+// typed daily burn is capped at 20,000 — would refuse a number and then render
+// no warning, which is precisely the silent swallow this function exists to
+// prevent, one layer down. Defaulted, so every existing call site is unchanged.
+function simRejected(raw, max) {
+  return String(raw === null || raw === undefined ? "" : raw).trim() !== "" && simNum(raw, max) === null;
 }
 
 // Seven days (numbers or nulls) → what the week actually comes to.
@@ -12584,16 +12589,45 @@ function simWeekBurn(week, weightLbs, resolveData, burnData) {
 // stay floored; "is this rate floored" needs the number before the floor, and
 // computing it twice from two expressions is how a ladder stops adding up
 // (S215).
-function simRawIntakeForRate(d, weeklyBurn, r) {
-  const tdee = planEnergy(d).tdee;
+// ⚠️ THE OVERRIDE REPLACES `tdee`, NOT THE WHOLE BASE (S217, Kevin: "allow the
+// maintenance button to be clickable… and of course, if the maintenance number
+// changes then by default, the app will manipulate the surplus and deficit
+// numbers to match"). Replacing `tdee + eatback` would FREEZE the eat-back term,
+// so adding cardio in section 2 would stop moving the chips — and the line this
+// modal prints one section below ("More cardio means more food at the same
+// pace") would become false directly under the control it describes.
+//
+// ⚠️ AND THE NO-OVERRIDE CASE IS BIT-IDENTICAL, BY CONSTRUCTION AND BY SWEEP.
+// Number(undefined) is NaN and NaN > 0 is false; Number(null) is 0 and 0 > 0 is
+// false — so an absent override takes planEnergy's own tdee and the remaining
+// arithmetic is character-for-character what shipped. scripts/test-what-if-week.mjs
+// runs both forms against planIntakeForRate and requires them equal at every rate.
+function simRawIntakeForRate(d, weeklyBurn, r, tdeeOverride) {
+  const ov = Number(tdeeOverride);
+  const tdee = ov > 0 ? Math.round(ov) : planEnergy(d).tdee;
   if (!isFinite(tdee) || tdee <= 0) return null;
   return tdee - Math.round(((Number(r) || 0) * 3500) / 7)
     + (isEatback(d) ? (Number(weeklyBurn) || 0) / 7 : 0);
 }
-function simIntakeForRate(d, weeklyBurn, r) {
-  const raw = simRawIntakeForRate(d, weeklyBurn, r);
+function simIntakeForRate(d, weeklyBurn, r, tdeeOverride) {
+  const raw = simRawIntakeForRate(d, weeklyBurn, r, tdeeOverride);
   return raw === null ? 0 : atLeastMinCal(raw);
 }
+
+// What a typed daily burn is allowed to be.
+//
+// ⚠️ THE PARSER CAP AND THE PLAUSIBLE BAND ARE DIFFERENT JOBS. The cap is what
+// simNum will accept at all; the band is what the screen is willing to call a
+// human being's daily burn without saying something. Nothing typed is CLAMPED —
+// this sandbox displays rather than prescribes — so an unusual number is
+// flagged and then used exactly as typed.
+//
+// ⚠️ THE BAND IS observedTdee's OWN, IMPORTED RATHER THAN COPIED. That module
+// already refuses a measured expenditure outside 1,000–6,000; two features
+// disagreeing about what counts as a plausible TDEE is how a person gets told
+// their number is fine on one screen and impossible on the next.
+const SIM_BURN_MAX = 20000;
+const simBurnOdd = (n) => n !== null && (n < TDEE_TUNING.PLAUSIBLE_MIN || n > TDEE_TUNING.PLAUSIBLE_MAX);
 
 // The pace grid, grouped by DIRECTION (Kevin, S216: "in the What if section we
 // need to add − to the calories that are meant for weight loss").
@@ -12612,16 +12646,47 @@ const SIM_RATES = [
   { lbl: "1 lb/wk",  rate: -1,   group: "gain",     sign: "+" },
   { lbl: "2 lbs/wk", rate: -2,   group: "gain",     sign: "+" },
 ];
-function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
+function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, standalone = false }) {
   useBodyScrollLock(true);
   // ⚠️ THE EXERCISE SHEET SHARES THIS BACK BUTTON (S213). ExercisePicker opens a
   // BottomSheet, which registers its OWN useBackClose — so one device-Back
   // popstate fires both listeners and would close the picker AND the whole
   // simulator, throwing away a fully typed week. `sheetCount` is a module-level
   // counter, read live inside the callback so there is nothing to go stale.
-  useBackClose(true, () => { if (sheetCount > 0) return; onClose(); });
+  // ⚠️ AND IT MUST NOT BIN A TYPED SCENARIO ON A STRAY TAP (S217). The overlay
+  // root is `onClick={onClose}`, so one mis-tap on the dimmed backdrop threw away
+  // a fully typed week — cheap when the modal held one pace chip, expensive now
+  // that it holds seven days, a week of cardio and a typed burn. `dirtyRef` is
+  // read live inside the callback so there is nothing to go stale; the ✕ keeps
+  // its direct, unguarded path, because that is an explicit "I am done".
+  const dirtyRef = useRef(false);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const askClose = () => { if (dirtyRef.current) setConfirmClose(true); else onClose(); };
+  useBackClose(true, () => { if (sheetCount > 0) return; askClose(); });
   const d = data || {};
-  const w = Number(weightLbs) || Number(d.weightLbs) || 0;
+  // ── The numbers a sandbox with no client runs on (S217, Kevin) ───────────
+  // "What if I just meet someone on the street and wanna give them a general
+  // estimate of maintenance calories that I put in and then of course the app
+  // itself can create the deficit and surplus automatically."
+  //
+  // ⚠️ THESE ARE THE SAME TWO FIELDS IN BOTH MODES. Inside a client's plan they
+  // start empty and OVERRIDE the plan's numbers; with no client they are the
+  // only numbers there are. One mechanism, so a coach who learns it on the
+  // street already knows it inside a client — and so there is one ladder rather
+  // than a second one for the no-plan case.
+  const [mOverride, setMOverride] = useState("");   // their daily burn, typed
+  const [wOverride, setWOverride] = useState("");   // their weight, typed (optional)
+  const mNum = simNum(mOverride, SIM_BURN_MAX);
+  const wNum = simNum(wOverride, 2000);
+  const w = Number(weightLbs) || Number(d.weightLbs) || wNum || 0;
+  // ⚠️ AN INCOMPLETE PLAN USED TO RENDER SEVEN ZEROES. planEnergy returns a NaN
+  // tdee without a gender/height/age, simIntakeForRate then returns 0 for every
+  // rate, and the whole card read "0 cal/day" with an answer of "That holds your
+  // weight steady." The opener below is the honest screen for that state too —
+  // it asks for the one number that makes the rest work.
+  const baseTdee = planEnergy(d).tdee;
+  const planUsable = isFinite(baseTdee) && baseTdee > 0;
+  const usable = mNum !== null || planUsable;
   // The one number every screen judges a LOGGED day against — the calendar's
   // month tint and week rows, the stored hitTarget, the check-in auto-answer,
   // Progress Snapshot's adherence, and the server's nutritionTargets. It honours
@@ -12654,6 +12719,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
   const [rate, setRate] = useState(RATE_OPTS.includes(planRate) ? planRate : 0);
   const [weekCals, setWeekCals] = useState(() => ["", "", "", "", "", "", ""]);   // index 0 = Monday
   const [everyDay, setEveryDay] = useState("");
+  const [editBurn, setEditBurn] = useState(false);   // the Maintain chip's pencil
 
   // ── 2 · The week of cardio ───────────────────────────────────────────────
   // Seeded once, from the plan's real week. `seed` is kept so the planner can be
@@ -12694,7 +12760,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
   const trainWeek = cardioWeek + strengthWeek;
   const cardioChanged = JSON.stringify(simCardio) !== JSON.stringify(seed);
 
-  const intakeFor = (r) => simIntakeForRate(d, trainWeek, r);
+  const intakeFor = (r) => simIntakeForRate(d, trainWeek, r, mNum);
   // ⚠️ SAY WHEN THE FLOOR IS DOING THE TALKING. On a small frame at a fast pace
   // two different paces print the SAME 1,200 while the headline under them
   // reports different weekly losses — and every blank day is priced at the chip,
@@ -12702,7 +12768,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
   // this modal has labelled that case "floored" since S198z; a silent clamp is
   // its own bug (CLAUDE.md).
   const flooredAtRate = (r) => {
-    const raw = simRawIntakeForRate(d, trainWeek, r);
+    const raw = simRawIntakeForRate(d, trainWeek, r, mNum);
     return raw !== null && raw < MIN_DAILY_CAL;
   };
   const maintain = intakeFor(0);
@@ -12755,12 +12821,14 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
   // greyed out in exactly the state you need it: a box holding a number the
   // parser refused.
   const anyTyped = weekCals.some((x) => String(x || "").trim() !== "");
+  // Everything the close guard is protecting, in one place.
+  dirtyRef.current = anyTyped || cardioChanged || mNum !== null || wNum !== null;
   const everyDayNum = simNum(everyDay);
   const applyEveryDay = () => { if (everyDayNum !== null) setWeekCals(["", "", "", "", "", "", ""].map(() => String(everyDayNum))); };
 
   // ── The planner's edits — all local, none of them reach the plan ─────────
   const mapDay = (day, fn) => setSimCardio((prev) => ({ ...prev, [day]: fn(Array.isArray(prev[day]) ? prev[day] : []) }));
-  const addSession = (day) => mapDay(day, (l) => [...l, { type: "outdoor_jog", duration: 30 }]);
+  const addSession = (day) => mapDay(day, (l) => [...l, canPrice ? { type: "outdoor_jog", duration: 30 } : { type: SIM_MANUAL, cal: "" }]);
   const removeSession = (day, i) => mapDay(day, (l) => l.filter((_, ix) => ix !== i));
   // ⚠️ A SESSION OBJECT, NOT AN ID. Heart-rate cardio and a manual entry are
   // different SHAPES ({type:"hr", hr, duration} / {type:"manual", cal}), so every
@@ -12777,11 +12845,26 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
   const toDuration = (m) => (DURATIONS.includes(m) ? m
     : DURATIONS.reduce((best, x) => (Math.abs(x - m) < Math.abs(best - m) ? x : best), DURATIONS[0]));
 
+  // ⚠️ A PICKER THAT ACCEPTS INPUT AND SILENTLY DISCARDS IT IS THE S213 BUG WITH
+  // THE SIGN FLIPPED. `restingKcalPerMin` opens `if (!w) return 0`, and
+  // `hrCaloriesPerMin` needs a weight too — so with no weight typed, a
+  // 45-minute run prices at exactly 0, and the day header only renders a burn
+  // when `burned > 0`, so it shows NOTHING AT ALL. Without a body to price
+  // against, the only honest cardio control is the one that takes the calories
+  // directly.
+  const canPrice = w > 0;
+  const fillKindEff = canPrice ? fillKind : SIM_MANUAL;
   const toggleFillDay = (day) => setFillDays((p) => (p.includes(day) ? p.filter((x) => x !== day) : [...p, day]));
-  const fillReady = fillDays.length > 0 && (fillKind !== SIM_MANUAL || (simNum(fillCal) ?? 0) > 0);
+  const fillReady = fillDays.length > 0 && (fillKindEff !== SIM_MANUAL || (simNum(fillCal) ?? 0) > 0);
+  const noWeightNote = (
+    <div style={{ fontSize: ".66rem", color: "var(--muted)", lineHeight: 1.5, marginBottom: "10px" }}>
+      Add their weight up top and you can pick real exercises &mdash; we can&rsquo;t price a jog without
+      knowing who&rsquo;s jogging. Or just type the calories a session burns.
+    </div>
+  );
   const applyFill = () => {
     if (!fillReady) return;
-    const sess = fillKind === SIM_MANUAL
+    const sess = fillKindEff === SIM_MANUAL
       ? { type: SIM_MANUAL, cal: simNum(fillCal) ?? 0 }
       : { type: fillType, duration: fillDuration };
     setSimCardio((prev) => {
@@ -12912,6 +12995,37 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
       </button>
     );
   };
+  // ⚠️ ONE FIELD, TWO PLACES. The opener asks for this number before anything
+  // can render; the pencil edits the same number afterwards. Two copies would
+  // drift in their validation, and the validation is the interesting part.
+  const burnField = (label) => (
+    <>
+      <div style={lbl}>{label}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <input type="number" inputMode="numeric" min="0" max={SIM_BURN_MAX} step="50"
+          aria-label="Their daily burn in calories" placeholder={planUsable ? Math.round(baseTdee).toLocaleString() : "e.g. 2,400"}
+          value={mOverride} onChange={(e) => setMOverride(e.target.value)}
+          style={{ ...numInput, width: "128px",
+            border: simRejected(mOverride, SIM_BURN_MAX) ? "1.5px solid var(--yellow)" : "1px solid var(--border)" }} />
+        <span style={{ fontSize: ".72rem", color: "var(--muted)" }}>
+          {simRejected(mOverride, SIM_BURN_MAX)
+            ? <b style={{ color: "var(--yellow)" }}>check this number</b>
+            : "cal a day"}
+        </span>
+      </div>
+      {/* ⚠️ FLAGGED, NEVER CLAMPED. This sandbox displays what somebody typed
+          rather than prescribing it — the same rule that lets a sub-1,200 day
+          show as itself. The band is observedTdee's own, so two features cannot
+          disagree about what a plausible daily burn is. */}
+      {simBurnOdd(mNum) && (
+        <div style={{ marginTop: "5px", fontSize: ".66rem", color: "var(--yellow)", lineHeight: 1.45 }}>
+          {mNum.toLocaleString()} is outside the usual {TDEE_TUNING.PLAUSIBLE_MIN.toLocaleString()}&ndash;{TDEE_TUNING.PLAUSIBLE_MAX.toLocaleString()} range
+          for a day&rsquo;s burn. We&rsquo;ll still use it &mdash; just check it&rsquo;s the number you meant.
+        </div>
+      )}
+    </>
+  );
+
   const rateHeading = (txt) => (
     <div style={{ fontSize: ".56rem", color: "var(--muted)", textTransform: "uppercase",
       letterSpacing: ".8px", fontWeight: 800, margin: "9px 0 4px" }}>{txt}</div>
@@ -12923,7 +13037,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
   );
 
   return createPortal(
-    <div onClick={onClose}
+    <div onClick={askClose}
       style={{ fontFamily: "var(--font-sans)", position: "fixed", inset: 0, zIndex: 1500,
         display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.6)",
         padding: "16px", paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
@@ -12944,8 +13058,55 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
           </button>
         </div>
         <div style={{ fontSize: ".72rem", color: "var(--muted)", marginBottom: "13px", lineHeight: 1.45 }}>
-          Play with the numbers. Nothing here changes your plan.
+          {/* "changes your plan" names a plan that does not exist when there is
+              no client. The promise is the same one either way: nothing here is
+              written anywhere. */}
+          Play with the numbers. {standalone ? "Nothing is saved." : "Nothing here changes your plan."}
         </div>
+
+        {/* ── The opener (S217, Kevin) ─────────────────────────────────────
+            "What if I just meet someone on the street and wanna give them a
+            general estimate of maintenance calories that I put in and then of
+            course the app itself can create the deficit and surplus
+            automatically."
+            One number and the whole screen comes alive. It is also the honest
+            screen for an INCOMPLETE plan, which used to render seven chips
+            reading "0 cal/day" under an answer of "That holds your weight
+            steady." */}
+        {!usable ? (
+          <>
+            <div style={{ ...panelS, marginBottom: "10px" }}>
+              {burnField("Start with their daily burn")}
+              <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.45, margin: "8px 0 12px" }}>
+                What their body uses in a day to hold their weight, before any training you add
+                below. A rough number is fine &mdash; you can change it any time.
+              </div>
+              <div style={lbl}>Their weight <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>(optional)</span></div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <input type="number" inputMode="numeric" min="0" max="2000" step="1"
+                  aria-label="Their weight in pounds" placeholder="e.g. 185"
+                  value={wOverride} onChange={(e) => setWOverride(e.target.value)}
+                  style={{ ...numInput, width: "110px",
+                    border: simRejected(wOverride, 2000) ? "1.5px solid var(--yellow)" : "1px solid var(--border)" }} />
+                <span style={{ fontSize: ".72rem", color: "var(--muted)" }}>
+                  {simRejected(wOverride, 2000) ? <b style={{ color: "var(--yellow)" }}>check this number</b> : "lbs"}
+                </span>
+              </div>
+              <div style={{ fontSize: ".66rem", color: "var(--muted)", lineHeight: 1.45, marginTop: "7px" }}>
+                Only needed to price real exercises and to show what they&rsquo;d weigh.
+              </div>
+            </div>
+            {!planUsable && !standalone && (
+              <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.5, marginBottom: "10px" }}>
+                This plan is missing the gender, height or age the burn is worked out from, so
+                there is nothing to start from yet. Type a number and everything below works.
+              </div>
+            )}
+            <div style={{ fontSize: ".62rem", color: "var(--muted)", lineHeight: 1.45 }}>
+              Estimates only, on the standard 3,500 cal &asymp; 1 lb rule.
+            </div>
+          </>
+        ) : (<>
 
         {/* ── 1 · What you eat ───────────────────────────────────────────── */}
         <div style={lbl}>1 &middot; What you eat</div>
@@ -12953,9 +13114,56 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
             the answer, and beside the seven boxes it is the price of every day
             left blank — so it stays ONE control with one number, and changing it
             re-prices every untouched day live. */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "6px" }}>
-          {SIM_RATES.filter((t) => t.group === "maintain").map((t) => rateBtn(t, true))}
+        {/* ⚠️ THE PENCIL IS THE CHIP'S SIBLING, NOT ITS CHILD (S217, Kevin: "allow
+            the maintenance button to be clickable so then a user can play around
+            with different maintenance numbers"). The chip is a <button> acting as
+            a radio; nesting a second button inside it is invalid HTML and the
+            inner one swallows the outer's click on some browsers. */}
+        <div style={{ display: "flex", alignItems: "stretch", gap: "6px" }}>
+          <div style={{ flex: 1 }}>
+            {SIM_RATES.filter((t) => t.group === "maintain").map((t) => rateBtn(t, true))}
+          </div>
+          <button onClick={() => setEditBurn((v) => !v)} aria-pressed={editBurn}
+            aria-label="Change their daily burn"
+            style={{ flex: "0 0 auto", width: "46px", borderRadius: "9px", cursor: "pointer",
+              border: editBurn || mNum !== null ? "1.5px solid var(--accent)" : "1px solid var(--border)",
+              background: editBurn || mNum !== null ? "rgba(var(--accent-rgb),.12)" : "var(--s2)",
+              display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Icon name="edit" size={15} color={editBurn || mNum !== null ? "var(--accent)" : "var(--muted)"} />
+          </button>
         </div>
+        {(editBurn || mNum !== null) && (
+          <div style={{ ...panelS, padding: "10px", marginTop: "7px", marginBottom: 0 }}>
+            {burnField(mNum !== null ? "Using your own number" : "Their daily burn")}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+              gap: "8px", marginTop: "7px", fontSize: ".66rem", color: "var(--muted)", lineHeight: 1.45 }}>
+              <span>
+                {mNum === null
+                  ? <>Worked out from their stats as <b style={{ color: "var(--text-secondary)" }}>{Math.round(baseTdee || 0).toLocaleString()}</b> cal.</>
+                  : <>Every pace above is worked from this.</>}
+              </span>
+              {mNum !== null && (
+                <button onClick={() => { setMOverride(""); setEditBurn(false); }}
+                  style={{ ...linkS, flex: "0 0 auto" }}>
+                  {planUsable ? "Back to their plan's number" : "Clear"}
+                </button>
+              )}
+            </div>
+            {/* ⚠️ EAT-BACK MAKES "MAINTAIN" AND "THEIR BURN" TWO DIFFERENT
+                NUMBERS, AND THE SCREEN HAS TO SAY WHICH IS WHICH. The chip is
+                what they EAT to hold weight, which on an eat-back plan already
+                contains the week's training; the field is what their BODY uses
+                before that training. Typing 2,400 and reading 2,492 on the chip
+                one line above looks like a bug unless the gap is named. */}
+            {mNum !== null && eatback && trainWeek > 0 && (
+              <div style={{ marginTop: "6px", fontSize: ".66rem", color: "var(--muted)", lineHeight: 1.45 }}>
+                Maintain reads <b style={{ color: "var(--text-secondary)" }}>{maintain.toLocaleString()}</b> &mdash;
+                your {mNum.toLocaleString()} plus the <b style={{ color: "var(--orange)" }}>{Math.round(trainWeek / 7).toLocaleString()}</b> a
+                day of training below, which their plan eats back.
+              </div>
+            )}
+          </div>
+        )}
         {rateHeading("Weight loss")}
         {rateRow("loss")}
         {rateHeading("Weight gain")}
@@ -13078,7 +13286,13 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
             because customExercises is threaded through. */}
         <div style={{ ...lbl, marginTop: "18px" }}>2 &middot; Your week of cardio</div>
         <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.45, marginBottom: "9px" }}>
-          Starts from the week already in your plan. Change it however you like &mdash; your plan stays exactly as it is.
+          {/* ⚠️ THERE IS NO PLAN TO START FROM WHEN NOBODY IS ATTACHED. The
+              in-plan sentence promises a seed that does not exist and reassures
+              about a plan that does not exist — found by opening the standalone
+              modal, not by reading. */}
+          {standalone
+            ? <>Add the training they&rsquo;d actually do. Nothing here is saved.</>
+            : <>Starts from the week already in your plan. Change it however you like &mdash; your plan stays exactly as it is.</>}
         </div>
 
         <button onClick={() => setShowFill((v) => !v)} style={toggleS}>
@@ -13090,16 +13304,18 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
 
         {showFill && (
           <div style={panelS}>
-            <div role="group" aria-label="What to apply" style={{ display: "flex", gap: "5px", marginBottom: "10px" }}>
-              <button onClick={() => setFillKind("exercise")} aria-pressed={fillKind === "exercise"}
-                style={pillS(fillKind === "exercise")}>Pick an exercise</button>
-              {/* Kevin, S216: "this also needs to be in the quick fill section as
-                  well… this will make it so a user can just manually enter 400
-                  calories for all days or how ever many days they want." */}
-              <button onClick={() => setFillKind(SIM_MANUAL)} aria-pressed={fillKind === SIM_MANUAL}
-                style={pillS(fillKind === SIM_MANUAL)}>Just type calories</button>
-            </div>
-            {fillKind === SIM_MANUAL ? (
+            {canPrice ? (
+              <div role="group" aria-label="What to apply" style={{ display: "flex", gap: "5px", marginBottom: "10px" }}>
+                <button onClick={() => setFillKind("exercise")} aria-pressed={fillKind === "exercise"}
+                  style={pillS(fillKind === "exercise")}>Pick an exercise</button>
+                {/* Kevin, S216: "this also needs to be in the quick fill section as
+                    well… this will make it so a user can just manually enter 400
+                    calories for all days or how ever many days they want." */}
+                <button onClick={() => setFillKind(SIM_MANUAL)} aria-pressed={fillKind === SIM_MANUAL}
+                  style={pillS(fillKind === SIM_MANUAL)}>Just type calories</button>
+              </div>
+            ) : noWeightNote}
+            {fillKindEff === SIM_MANUAL ? (
               <div style={{ marginBottom: "11px" }}>
                 <div style={lbl}>Calories burned</div>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -13212,6 +13428,12 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
                                 {simRejected(sess.cal) ? <b style={{ color: "var(--yellow)" }}>check this number</b> : "cal"}
                               </span>
                             </div>
+                          </>
+                        ) : !canPrice ? (
+                          <>
+                            {noWeightNote}
+                            <button onClick={() => putSession(day, idx, { type: SIM_MANUAL, cal: "" })}
+                              style={{ ...linkS, textDecoration: "underline" }}>Type the calories instead</button>
                           </>
                         ) : sess.type === "hr" ? (
                           <>
@@ -13554,6 +13776,28 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
             so a long projection drifts optimistic — treat the first week or two as the useful part.
           </div>
         </div>
+        </>)}
+
+        {/* ⚠️ A STRAY BACKDROP TAP MUST NOT BIN A TYPED SCENARIO. Rendered last
+            so it sits above the rest of the sheet; the ✕ is unguarded on
+            purpose, because that is an explicit "I am done". */}
+        {confirmClose && (
+          <div style={{ marginTop: "13px", padding: "11px", borderRadius: "10px",
+            background: "var(--s2)", border: "1px solid var(--yellow)" }}>
+            <div style={{ fontSize: ".76rem", fontWeight: 700, marginBottom: "3px" }}>Discard this scenario?</div>
+            <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.45, marginBottom: "9px" }}>
+              Nothing here is saved, so closing loses what you typed.
+            </div>
+            <div style={{ display: "flex", gap: "7px" }}>
+              <button onClick={() => setConfirmClose(false)}
+                style={{ ...primaryS(true), flex: 1 }}>Keep going</button>
+              <button onClick={onClose}
+                style={{ flex: 1, padding: "10px", borderRadius: "9px", cursor: "pointer", fontFamily: "inherit",
+                  fontSize: ".76rem", fontWeight: 700, border: "1px solid var(--border)",
+                  background: "transparent", color: "var(--muted)" }}>Discard</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>,
     document.body
@@ -19994,7 +20238,7 @@ const IdBadge = ({ id, n, className = "" }) => {
   );
 };
 
-function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onRosterChanged, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, meUid, meName, meRole, notifPrefs, onSetNotifPrefs, rosterCap, rosterBlocked, tzTrialCapped = false }) {
+function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpenClientPlan, onLinked, onRosterChanged, onCopyToLocal, onRename, onNewPlan, onNewSimulation, onConvertSimulation, onDeletePlan, onTrainerizeImport, onWhatIf, meUid, meName, meRole, notifPrefs, onSetNotifPrefs, rosterCap, rosterBlocked, tzTrialCapped = false }) {
   const [rosterPlans, setRosterPlans] = useState(false);   // plan picker from the roster banner (S179b)
   const [details, setDetails] = useState({}); // id -> { tdee, target }
   // AI-client seats (S176f): who the AI has worked on this month vs the plan's
@@ -20964,6 +21208,25 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         <BrandLogo />
       </div>
       <div className="max-w-[640px] mx-auto px-4 pt-6 pb-28">
+        {/* What if… with no client (S217, Kevin: "I think having it only within a
+            client's profile does slow down that process of being able to show
+            somebody the cool feature that this app has").
+            ⚠️ FIRST CHILD OF THE CONTAINER, NOT THE LOCAL PLANS ACTION ROW. That
+            row lives inside `{plansOpen && …}` and Local Plans is COLLAPSED by
+            default, so a button there is invisible to a trainer who has never
+            opened it — and invisible to a brand-new trainer with no clients at
+            all, which is exactly the person this is for. */}
+        <button onClick={onWhatIf}
+          className="w-full text-left bg-surface border border-border rounded-card p-4 mb-4 cursor-pointer">
+          <span className="inline-flex items-center gap-2 text-fg font-semibold text-sm">
+            <Icon name="chart" size={16} color="var(--accent)" />What if&hellip;
+          </span>
+          <span className="block text-xs text-muted mt-1 leading-relaxed">
+            Show anyone their numbers in 30 seconds. Type what their body burns and the
+            targets work themselves out &mdash; no client needed.
+          </span>
+        </button>
+
         {/* S119 (#4): a brand-new trainer used to see NOTHING here — the whole
             card was hidden when the roster was empty, so their actual first job
             (invite a client) had no affordance on this screen at all. */}
@@ -27864,6 +28127,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   const [showChart, setShowChart] = useState(false); // progress chart popup open
   const [showMeasure, setShowMeasure] = useState(false); // body-measurements popup open
   const [showCalendar, setShowCalendar] = useState(false); // full calendar (back-dating) overlay
+  const [showWhatIfC, setShowWhatIfC] = useState(false);  // What if… on this client's own plan (S217)
   useBodyScrollLock(showCalendar); // ClientHome's calendar is a portal OVERLAY (scrolls internally) — lock the page behind it
   const [recentFoods, setRecentFoods] = useState([]); // recent foods for the calendar's quick re-add chips
   const [savedFoods, setSavedFoods] = useState([]);   // the client's own starred library (account-level, all plans)
@@ -28756,6 +29020,15 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
               className="inline-flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
               <Icon name="calendar" size={13} color="var(--accent)" />Calendar
             </button>
+            {/* What if… on a client's own home (S217). ⚠️ PLAN-BOUND, not the
+                standalone one in `chrome`: the app already knows this person's
+                numbers, so opening a blank "type their daily burn" at them would
+                be asking a question it can answer. It also gives a client's own
+                home a working "Make up a big day" for the first time. */}
+            <button onClick={() => setShowWhatIfC(true)} title="Try different calories and training — nothing is saved"
+              className="inline-flex items-center gap-1.5 px-3 py-2.5 min-h-[44px] text-xs font-semibold rounded-lg border border-border bg-transparent text-fg cursor-pointer whitespace-nowrap">
+              <Icon name="chart" size={13} color="var(--accent)" />What if&hellip;
+            </button>
             <button onClick={() => load()} title="Reload the latest from your plan"
               className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-transparent text-muted cursor-pointer whitespace-nowrap">
               ↻ Refresh
@@ -29329,6 +29602,12 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
       {/* Full calendar (back-dating) — log food/weight/workouts on any date.
           Portaled to escape the page-transition transform trap; :root css vars
           (already injected above) + give it the brand look. */}
+      {showWhatIfC && (
+        <CalorieSimulator data={planData || {}} weightLbs={Number((planData || {}).weightLbs) || 0}
+          planRate={weeklyRateOf(planData || {})}
+          dayCalsAll={Object.fromEntries(compDays.map((x) => [x.date, x.calories]))}
+          onClose={() => setShowWhatIfC(false)} />
+      )}
       {showCalendar && createPortal(
         <div className="fixed inset-0 z-[1396] overflow-y-auto"
           style={{ background: "var(--bg)", color: "var(--text)", fontFamily: "var(--font-sans)" }}>
@@ -34427,7 +34706,7 @@ async function deliverFile(json, filename) {
   return true;
 }
 
-function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onCalendar, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme, accentPref, onSetAccent, teamLocked, onReferrals }) {
+function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, trial, subActive, notifPrefs, onSetNotifPrefs, onHome, onDashboard, onClients, onCalendar, onEarnings, onNameSaved, aiOptOut, onSetAiOptOut, idleSignOut, onSetIdleSignOut, isAdminUid, themePref, onSetTheme, accentPref, onSetAccent, teamLocked, onReferrals, onWhatIf }) {
   const [editing, setEditing] = useState(false);
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");
@@ -34630,6 +34909,17 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
             the way the Invite Hub is. */}
         <button style={item} onClick={() => { onClose(); setTimeout(() => onReferrals && onReferrals(), 0); }}>
           <Icon name="invite" size={19} color="var(--accent)" /> <span>Refer &amp; earn</span>
+        </button>
+
+        {/* What if… without a client (S217, Kevin: "Is it possible to put that
+            button on the users home screen, and not require it to be tied under
+            a specific clients?"). Every role — a client wants to try numbers on
+            themselves as much as a trainer wants to try them on a stranger.
+            ⚠️ THE setTimeout IS NOT DECORATION. The drawer is zIndex 1401 and the
+            modal 1500; opening in the same tick renders the sheet under a drawer
+            that is still closing. Same shape as Refer & earn directly above. */}
+        <button style={item} onClick={() => { onClose(); setTimeout(() => onWhatIf && onWhatIf(), 0); }}>
+          <Icon name="chart" size={19} color="var(--accent)" /> <span>What if&hellip;</span>
         </button>
 
         {/* Plans & pricing — always visible (S90, Kevin's ask): before this,
@@ -35082,6 +35372,7 @@ export default function App() {
   // Weekly Meal Planner (S180): open/closed + the auto-apply standing order.
   const [showMealPlanner, setShowMealPlanner] = useState(false);
   const [showReferrals, setShowReferrals] = useState(false);   // Refer & earn (S181)
+  const [showWhatIf, setShowWhatIf] = useState(false);         // What if… with no client (S217)
   // Auto-apply: keep the next 14 days filled from the one template with
   // autoApply on. OWN account only (never fires while a trainer is inside a
   // client's plan), idempotent via the appliedThrough high-water mark, and
@@ -37298,12 +37589,24 @@ export default function App() {
       {/* Refer & earn (S181) — lives in chrome so it opens from any screen,
           for every role, exactly like the side menu that launches it. */}
       <ReferralPanel open={showReferrals} onClose={() => setShowReferrals(false)} role={role} />
+      {/* What if… with nobody attached (S217) — in `chrome` for the same reason
+          Refer & earn is: it opens from any screen, for every role.
+          ⚠️ CONDITIONALLY MOUNTED, NEVER GIVEN AN `open` PROP. CalorieSimulator
+          calls useBodyScrollLock(true) and useBackClose(true, …) unconditionally,
+          so copying ReferralPanel's open-prop shape one line above would lock the
+          page's scroll and swallow the device Back button for the whole session.
+          ⚠️ AND planRate={1} SO IT OPENS ON A REAL DEFICIT — at rate 0 the first
+          thing a prospect reads is "That holds your weight steady." */}
+      {showWhatIf && (
+        <CalorieSimulator standalone planRate={1} onClose={() => setShowWhatIf(false)} />
+      )}
       <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} role={role} meName={meName} meEmail={meEmail}
         aiOptOut={meAiOptOut} onSetAiOptOut={onSetAiOptOut}
         idleSignOut={idleSignOut} onSetIdleSignOut={onSetIdleSignOut}
         isTrainer={isTrainerHome} hasCoach={meHasCoach} trial={meTrial} subActive={meSubStatus === "active"}
         teamLocked={!!(rosterCap && rosterCap.teamsLocked)}
         onReferrals={() => setShowReferrals(true)}
+        onWhatIf={() => setShowWhatIf(true)}
         themePref={themePref} onSetTheme={setTheme}
         accentPref={accentPref} onSetAccent={setAccent}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
@@ -37374,6 +37677,7 @@ export default function App() {
         onRename={renameProfile}
         onNewPlan={()=>createProfile(null)}
         onNewSimulation={()=>createProfile(null,{isSimulation:true})}
+        onWhatIf={()=>setShowWhatIf(true)}
         onConvertSimulation={convertSimulation}
         onDeletePlan={removeLocalProfileById}
         onTrainerizeImport={importFromTrainerize} onRosterChanged={reloadProfilesIndex}

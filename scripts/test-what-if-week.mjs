@@ -105,7 +105,7 @@ const FNS = ["calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx"
 const EXPORTS = ["simNum", "simRejected", "weekPlan", "joinDays", "seedSimCardio", "simSessionBurn",
   "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "planEnergy",
   "planIntakeForRate", "computeClientCalories", "cardioExFor", "exBurn", "isEatback", "SIM_RATES",
-  "SIM_MANUAL", "MIN_DAILY_CAL", "CAL_PER_LB", "DAYS", "DAY_SHORT"];
+  "SIM_MANUAL", "MIN_DAILY_CAL", "CAL_PER_LB", "DAYS", "DAY_SHORT", "atLeastMinCal"];
 const source = () => [...CONSTS, "atLeastMinCal", ...FNS].map((n) => liftDecl(APP, n)).join("\n");
 const build = (src) => new Function(`${src}; return { ${EXPORTS.join(", ")} };`)();
 const M = build(source());
@@ -260,6 +260,149 @@ const PLANS = [
   ok("control: pre-flooring would hide every floored rate", preFloored(small, burn, 2) >= 1200 && M.simRawIntakeForRate(small, burn, 2) < 1200);
 }
 
+// ── 4b. a TYPED daily burn (S217, Kevin) ───────────────────────────────────
+// "What if I just meet someone on the street and wanna give them a general
+// estimate of maintenance calories that I put in and then of course the app
+// itself can create the deficit and surplus automatically."
+//
+// ⚠️ THE WHOLE POINT IS THAT IT IS THE SAME LADDER. A second one for the
+// no-plan case is how two screens start quoting different numbers for the same
+// person — which is the defect S214 and S215 were both about.
+{
+  // The no-override case must be BIT-IDENTICAL, and every falsy shape has to
+  // fall through: Number(undefined) is NaN, Number(null) and Number("") are 0.
+  let bad = null, n = 0;
+  for (const [name, d] of PLANS) {
+    const burn = M.planEnergy(d).weeklyBurn;
+    for (const r of [-2, -1, -0.5, 0, 0.5, 1, 2]) {
+      for (const fall of [undefined, null, "", 0, "abc", -5, NaN, false]) {
+        n++;
+        const a = M.simIntakeForRate(d, burn, r, fall);
+        const b = M.planIntakeForRate(d, r);
+        if (a !== b) { bad = { name, r, fall: String(fall), sim: a, plan: b }; break; }
+      }
+      if (bad) break;
+    }
+    if (bad) break;
+  }
+  ok(`an absent or unusable override changes nothing (${n} plan × rate × falsy pairs)`, !bad, bad);
+
+  // ...and a real one moves the answer, or the sweep above proves nothing.
+  const d = P();
+  const burn = M.planEnergy(d).weeklyBurn;
+  ok("control: a typed burn DOES move the ladder",
+     M.simIntakeForRate(d, burn, 1, 2000) !== M.simIntakeForRate(d, burn, 1),
+     { typed: M.simIntakeForRate(d, burn, 1, 2000), plan: M.simIntakeForRate(d, burn, 1) });
+
+  // ⚠️ IT REPLACES `tdee`, NOT `tdee + eatback`. If it froze the whole base,
+  // adding cardio would stop moving the chips — while the answer panel one
+  // section below still said "More cardio means more food at the same pace".
+  const eat = P();                                   // eat-back by default
+  ok("with a typed burn, more cardio still buys more food in eat-back mode",
+     M.simIntakeForRate(eat, 2100, 1, 2400) > M.simIntakeForRate(eat, 700, 1, 2400),
+     { more: M.simIntakeForRate(eat, 2100, 1, 2400), less: M.simIntakeForRate(eat, 700, 1, 2400) });
+  ok("...by exactly the extra week, divided once",
+     M.simIntakeForRate(eat, 2100, 1, 2400) - M.simIntakeForRate(eat, 700, 1, 2400) === Math.round(2400 + 2100 / 7 - 500) - Math.round(2400 + 700 / 7 - 500));
+  const acc = P({ deficitMode: "accelerate" });
+  ok("...and in accelerate mode the typed number IS maintenance, exactly",
+     M.simIntakeForRate(acc, 2100, 0, 2400) === 2400 && M.simIntakeForRate(acc, 0, 0, 2400) === 2400);
+  // ⚠️ NEGATIVE CONTROL: the base-replacing version really would freeze it.
+  const frozen = (base, r) => M.atLeastMinCal(base - Math.round((r * 3500) / 7));
+  ok("control: replacing the whole base really would stop cardio moving the chips",
+     frozen(2400, 1) === frozen(2400, 1) && M.simIntakeForRate(eat, 2100, 1, 2400) !== frozen(2400, 1));
+
+  // A plan too incomplete to compute is exactly what the typed number rescues.
+  ok("an unusable plan still answers once a burn is typed",
+     M.simIntakeForRate({}, 0, 1) === 0 && M.simIntakeForRate({}, 0, 1, 2400) === 1900,
+     { without: M.simIntakeForRate({}, 0, 1), with: M.simIntakeForRate({}, 0, 1, 2400) });
+  ok("...and the floor still binds on a typed number",
+     M.simIntakeForRate({}, 0, 2, 1300) === 1200 && M.simRawIntakeForRate({}, 0, 2, 1300) === 300);
+  // ⚠️ NOTHING TYPED IS CLAMPED — the band is a WARNING, not a refusal, because
+  // this sandbox displays rather than prescribes.
+  ok("an implausible burn is used exactly as typed", M.simIntakeForRate({}, 0, 0, 9000) === 9000);
+}
+
+// ── 4c. the screen around the typed burn ───────────────────────────────────
+ok("the modal takes a standalone mode", /function CalorieSimulator\(\{ data, weightLbs, planRate, dayCalsAll, onClose, standalone = false \}\)/.test(SIM_CODE));
+ok("...and an unusable plan or a bare sandbox opens on the burn question",
+   /const usable = mNum !== null \|\| planUsable;/.test(SIM_CODE) && /\{!usable \? \(/.test(SIM_CODE));
+ok("...where planUsable is the plan's OWN tdee, not the override",
+   /const planUsable = isFinite\(baseTdee\) && baseTdee > 0;/.test(SIM_CODE)
+   && /const baseTdee = planEnergy\(d\)\.tdee;/.test(SIM_CODE));
+// ⚠️ ONE FIELD, TWO PLACES — the opener and the pencil. Two copies would drift
+// in their validation, and the validation is the interesting part.
+ok("the burn field is defined once and rendered twice",
+   (SIM_CODE.match(/const burnField = \(label\) =>/g) || []).length === 1
+   && (SIM_CODE.match(/\{burnField\(/g) || []).length === 2,
+   (SIM_CODE.match(/\{burnField\(/g) || []).length);
+// ⚠️ A SIBLING, NOT A CHILD. The chip is a <button> acting as a radio; nesting
+// a second button inside it is invalid HTML and the inner one swallows the
+// outer's click on some browsers. Asserted by lifting rateBtn and showing the
+// pencil is not in it.
+ok("the Maintain chip carries a pencil", /aria-label="Change their daily burn"/.test(SIM_CODE));
+ok("...which is not nested inside the chip", !/setEditBurn/.test(liftDecl(APP, "rateBtn")));
+ok("...and one tap puts the plan's own number back",
+   /setMOverride\(""\); setEditBurn\(false\);/.test(SIM_CODE) && /Back to their plan/.test(SIM_CODE));
+// ⚠️ EAT-BACK MAKES "MAINTAIN" AND "THEIR BURN" TWO DIFFERENT NUMBERS. Typing
+// 2,400 and reading 2,492 one line above looks like a bug unless it is named.
+ok("the gap between the typed burn and the Maintain chip is disclosed",
+   /mNum !== null && eatback && trainWeek > 0 && \(/.test(SIM_CODE) && /which their plan eats back/.test(SIM_CODE));
+// ⚠️ A PICKER THAT ACCEPTS INPUT AND SILENTLY DISCARDS IT. restingKcalPerMin
+// opens `if (!w) return 0`, so with no weight a 45-minute run prices at zero and
+// the day header — which only renders a burn when burned > 0 — shows NOTHING.
+ok("the exercise pickers are gated on knowing whose body it is",
+   /const canPrice = w > 0;/.test(SIM_CODE) && /const fillKindEff = canPrice \? fillKind : SIM_MANUAL;/.test(SIM_CODE));
+ok("...quick fill uses the gated value, not the raw state",
+   !/fillKind === SIM_MANUAL \?/.test(SIM_CODE) && /fillKindEff === SIM_MANUAL \?/.test(SIM_CODE));
+ok("...a new session defaults to the shape that can be priced",
+   /canPrice \? \{ type: "outdoor_jog", duration: 30 \} : \{ type: SIM_MANUAL, cal: "" \}/.test(SIM_CODE));
+// ⚠️ COUNTED. TWO places drop the pickers — quick fill and the per-day editor —
+// and a note in only one of them leaves the other looking broken.
+ok("...and the reason is written once and shown in both places",
+   (SIM_CODE.match(/const noWeightNote = /g) || []).length === 1
+   && (SIM_CODE.match(/\bnoWeightNote\b/g) || []).length === 3,
+   (SIM_CODE.match(/\bnoWeightNote\b/g) || []).length);
+// ⚠️ THE BACKDROP IS onClick={onClose}. One mis-tap used to bin a fully typed
+// week; it now holds seven days, a week of cardio and a typed burn.
+ok("a stray backdrop tap cannot discard a typed scenario",
+   /<div onClick=\{askClose\}/.test(SIM_CODE) && /const askClose = \(\) => \{ if \(dirtyRef\.current\) setConfirmClose\(true\); else onClose\(\); \};/.test(SIM_CODE));
+ok("...device Back goes through the same guard", /if \(sheetCount > 0\) return; askClose\(\);/.test(SIM_CODE));
+ok("...the dirty flag covers every input the modal holds",
+   /dirtyRef\.current = anyTyped \|\| cardioChanged \|\| mNum !== null \|\| wNum !== null;/.test(SIM_CODE));
+ok("...and the close button keeps its direct path",
+   /<button onClick=\{onClose\} aria-label="Close"/.test(SIM_CODE));
+// ⚠️ NEVER re-price somebody's logged history against a number invented on a
+// street corner. planTarget stays the PLAN's.
+ok("the make-up section is still judged by the plan's own target",
+   /const planTarget = \(computeClientCalories\(d\) \|\| \{\}\)\.target \|\| 0;/.test(SIM_CODE)
+   && !/computeClientCalories\([^)]*mNum/.test(SIM_CODE));
+// The plausible band is observedTdee's, imported rather than copied.
+ok("the plausible band comes from observedTdee, not a second opinion",
+   /TUNING as TDEE_TUNING/.test(APP) && /TDEE_TUNING\.PLAUSIBLE_MIN/.test(SIM_CODE) && /TDEE_TUNING\.PLAUSIBLE_MAX/.test(SIM_CODE));
+
+// ── 4d. the three doors ────────────────────────────────────────────────────
+// ⚠️ CONDITIONALLY MOUNTED, NEVER GIVEN AN `open` PROP. useBodyScrollLock(true)
+// and useBackClose(true, …) are unconditional inside the modal, so an
+// always-mounted copy would lock the page's scroll and swallow the device Back
+// button for the whole session.
+ok("the standalone mount is conditional", /\{showWhatIf && \(\s*\n?\s*<CalorieSimulator standalone/.test(codeOnly(APP)));
+ok("...and is not handed an open prop", !/<CalorieSimulator[^>]*\bopen=/.test(codeOnly(APP)));
+// ⚠️ planRate={1} so a prospect's first read is a real deficit rather than
+// "That holds your weight steady."
+ok("...and opens on a real pace", /<CalorieSimulator standalone planRate=\{1\}/.test(codeOnly(APP)));
+ok("the side menu offers it to every role, not just trainers",
+   /onWhatIf && onWhatIf\(\), 0\); \}\}>/.test(codeOnly(APP))
+   && !/isTrainer && onWhatIf/.test(codeOnly(APP)));
+ok("...through the same deferred open Refer & earn uses (the drawer sits under the sheet)",
+   /onClose\(\); setTimeout\(\(\) => onWhatIf && onWhatIf\(\), 0\);/.test(codeOnly(APP)));
+ok("the trainer's home carries it too", /onWhatIf=\{\(\)=>setShowWhatIf\(true\)\}/.test(codeOnly(APP)));
+ok("a client's own home opens it PLAN-BOUND, not blank",
+   /\{showWhatIfC && \(/.test(codeOnly(APP)) && /planRate=\{weeklyRateOf\(planData \|\| \{\}\)\}/.test(codeOnly(APP)));
+ok("...and hands it the days the compliance strip already built",
+   /dayCalsAll=\{Object\.fromEntries\(compDays\.map\(\(x\) => \[x\.date, x\.calories\]\)\)\}/.test(codeOnly(APP)));
+// The in-plan button is untouched — Kevin: "of course, keep it under specific clients."
+ok("the in-plan entry point survives", /<button onClick=\{\(\)=>setShowSim\(true\)\}/.test(codeOnly(APP)));
+
 // ── 5. seeding the planner must not double-count the plan's own training ────
 // ⚠️ THE BUG THE SEEDING INVITES. The planner starts from data.cardio so it
 // opens on reality — but in eat-back mode `intakeFor` ALREADY carries the whole
@@ -393,6 +536,13 @@ const PLANS = [
   ok("...and no cardio setter is threaded in", !/onSetCardio|setData|onSave/.test(SIM_CODE));
   ok("the sandbox still promises it changes nothing", /Nothing here changes your plan/.test(SIM_CODE));
   ok("...and says so again where the planner lives", /your plan stays exactly as it is/.test(SIM_CODE));
+  // ⚠️ AND NEITHER SENTENCE MAY NAME A PLAN THAT DOES NOT EXIST (S217). With
+  // nobody attached, "starts from the week already in your plan" promises a seed
+  // there is none of, and "nothing here changes your plan" reassures about a
+  // plan there is none of. Found by opening the standalone modal, not by reading.
+  ok("...and both sentences are mode-aware",
+     /standalone \? "Nothing is saved\." : "Nothing here changes your plan\."/.test(SIM_CODE)
+     && /\{standalone\s*\n?\s*\? <>Add the training they&rsquo;d actually do/.test(SIM_CODE));
 }
 
 // ── 8. the manual-calorie session — a third shape, priced here ──────────────
@@ -597,7 +747,11 @@ ok("the plan-writing custom-exercise creator is NOT ported", !/CustomExerciseCre
   // seven day inputs, "set every day to", quick fill's calories, and a per-day
   // manual session. Fixing one and leaving three is the shape check:weak exists
   // to catch.
-  ok("every numeric box in the modal uses it", (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 4,
+  // ⚠️ SIX SINCE S217: the seven day inputs share one, plus "set every day to",
+  // quick fill's calories, a per-day manual session, the typed daily burn and
+  // the typed weight. Fixing one and leaving five is the shape check:weak exists
+  // to catch — this count is the only thing that notices.
+  ok("every numeric box in the modal uses it", (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 6,
      (SIM_CODE.match(/\.\.\.numInput/g) || []).length);
   // ⚠️ ONE right-aligned style, and it is `numInput`'s own declaration. A
   // second `{...input, textAlign:"right"}` anywhere else is a box that kept the
@@ -620,11 +774,21 @@ ok("the week total is shown, not just the average", /for the week/.test(SIM_CODE
 // numeric box — and `.test()` stayed green when one was reverted to "on your
 // goal", silently replacing a typed surplus with its opposite.
 ok("a refused number says so on every box that takes one",
-   (SIM_CODE.match(/check this number/g) || []).length === 4,
+   (SIM_CODE.match(/check this number/g) || []).length === 6,
    (SIM_CODE.match(/check this number/g) || []).length);
 ok("...and the reset stays reachable when the only entry was refused",
    /const anyTyped = weekCals\.some/.test(SIM_CODE) && /disabled=\{!anyTyped\}/.test(SIM_CODE));
 ok("the inputs' own max matches the parser's", (SIM_CODE.match(/max="50000"/g) || []).length === 4);
+// ⚠️ AND THE TWO TIGHTER FIELDS PASS THEIR CEILING TO BOTH HALVES. simRejected
+// called simNum with the DEFAULT 50,000 cap, so a burn typed above 20,000 would
+// be refused by the parser and then render no warning — the silent swallow this
+// suite already guards, one layer down.
+ok("the typed burn parses and warns at the SAME ceiling",
+   /simNum\(mOverride, SIM_BURN_MAX\)/.test(SIM_CODE)
+   && (SIM_CODE.match(/simRejected\(mOverride, SIM_BURN_MAX\)/g) || []).length === 2,
+   (SIM_CODE.match(/simRejected\(mOverride, SIM_BURN_MAX\)/g) || []).length);
+ok("...and so does the typed weight",
+   /simNum\(wOverride, 2000\)/.test(SIM_CODE) && /simRejected\(wOverride, 2000\)/.test(SIM_CODE));
 // ⚠️ ONE render site for the floor warning — two would let one of them drift.
 ok("the 1,200 warning has exactly one render site",
    (SIM_CODE.match(/isn&rsquo;t healthy or sustainable/g) || []).length === 1,

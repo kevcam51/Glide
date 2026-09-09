@@ -212,8 +212,17 @@ const P = (over = {}) => ({
   const SIM = APP.slice(SIM_A, SIM_B);
   const code = (src) => src.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
   const SIM_CODE = code(SIM);
-  ok("the signature drops both contaminated props",
-     /function CalorieSimulator\(\{ data, weightLbs, planRate, dayCalsAll, onClose \}\)/.test(APP));
+  // ⚠️ ASSERT THE ABSENCE, NOT THE WHOLE SIGNATURE. Pinning the exact parameter
+  // list made this fail the moment a legitimate prop was added (S217's
+  // `standalone`), which trains the next reader to "fix" it by pasting in the
+  // new list — and a paste is exactly how `todayTarget` would come back.
+  {
+    const sig = APP.match(/function CalorieSimulator\(\{[^}]*\}\)/)[0];
+    ok("the simulator still takes the plan, not the dashboard's per-day chain",
+       /\bdata\b/.test(sig) && /\bweightLbs\b/.test(sig) && /\bplanRate\b/.test(sig) && /\bdayCalsAll\b/.test(sig), sig);
+    ok("...and neither contaminated prop is back in the signature",
+       !/todayTarget/.test(sig) && !/intakeFor/.test(sig), sig);
+  }
   ok("todayTarget is gone from the component", !/todayTarget/.test(SIM_CODE));
   ok("...and from the element that mounts it", !/todayTarget=/.test(APP));
   ok("...as is the injected intakeFor", !/intakeFor=\{/.test(APP));
@@ -224,10 +233,23 @@ const P = (over = {}) => ({
   // ladder is a property of the PLAN, never of the day on screen.
   // scripts/test-what-if-week.mjs runs both and requires them bit-identical on
   // an untouched planner.
+  // ⚠️ S217 added a FOURTH argument — a typed daily burn, which is how a coach
+  // runs the numbers for someone who has no plan at all. What matters here is
+  // unchanged and is the whole point of S214: the ladder is a property of the
+  // PLAN (or of a number a human typed), never of the day on screen.
   ok("the sandbox builds its ladder from the plan, not from the viewed day",
-     /const intakeFor = \(r\) => simIntakeForRate\(d, trainWeek, r\);/.test(SIM_CODE));
+     /const intakeFor = \(r\) => simIntakeForRate\(d, trainWeek, r, mNum\);/.test(SIM_CODE));
+  ok("...and the override is a TYPED number, never a per-day one",
+     /const mNum = simNum\(mOverride, SIM_BURN_MAX\);/.test(SIM_CODE)
+     && !/mNum = [^\n]*(dayIdx|burnShown|wearableTdee|todayTarget)/.test(SIM_CODE));
   ok("...and that ladder is planIntakeForRate's own arithmetic",
-     /function simRawIntakeForRate\(d, weeklyBurn, r\) \{[\s\S]*?planEnergy\(d\)\.tdee[\s\S]*?Math\.round\(\(\(Number\(r\) \|\| 0\) \* 3500\) \/ 7\)[\s\S]*?isEatback\(d\)/.test(code(APP)));
+     /function simRawIntakeForRate\(d, weeklyBurn, r, tdeeOverride\) \{[\s\S]*?planEnergy\(d\)\.tdee[\s\S]*?Math\.round\(\(\(Number\(r\) \|\| 0\) \* 3500\) \/ 7\)[\s\S]*?isEatback\(d\)/.test(code(APP)));
+  // ⚠️ AND THE OVERRIDE REPLACES `tdee`, NOT `tdee + eatback`. Freezing the whole
+  // base would stop the chips moving when cardio is added in section 2 — while
+  // the line one section below still read "More cardio means more food at the
+  // same pace", directly under the control it had just stopped describing.
+  ok("...with the override standing in for tdee alone",
+     /const tdee = ov > 0 \? Math\.round\(ov\) : planEnergy\(d\)\.tdee;/.test(code(APP)));
   ok("...and judges history by the plan target", /const planTarget = \(computeClientCalories\(d\) \|\| \{\}\)\.target \|\| 0;/.test(SIM_CODE));
   ok("the over-day memo calls the shared rule", /overDaysFrom\(dayCalsAll, planTarget\)/.test(SIM_CODE));
   ok("...with plain-value deps", /\[dayCalsAll, planTarget\]/.test(SIM_CODE));
