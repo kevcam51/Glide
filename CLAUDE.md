@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**2,469 assertions across 37 suites**, S216b).
+- `npm run test:units` — the JS unit suites (**2,539 assertions across 37 suites**, S217).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -108,6 +108,38 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S217 (Sep 9): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S217)"
+> first.** Pushed and marker-diffed live. Frontend only. **2,539 assertions
+> across 37 suites**; build, `check:undef`, `check:weak` clean.
+> Two of Kevin's three asks shipped; **the multi-month calendar is DESIGNED BUT
+> NOT BUILT** (§3 of the handoff has the shape and his two unanswered questions).
+> **"What if…" now works with NO CLIENT** — side menu, the top of the trainer's
+> home, and a client's own home (plan-bound there) — and the **Maintain chip is
+> editable**, so typing a daily burn re-derives every deficit and surplus chip.
+> ⚠️ **ONE MECHANISM, NOT TWO FEATURES:** `maintain` was already `intakeFor(0)`,
+> so a typed maintenance is a SUBSTITUTION into the existing ladder (a fourth
+> defaulted arg on `simRawIntakeForRate`). A second ladder for the no-plan case
+> would break the sweep that keeps this modal and the dashboard agreeing.
+> ⚠️ **THE OVERRIDE REPLACES `tdee`, NOT `tdee + eatback`** — freezing the base
+> stops cardio moving the chips while the line below still says it does.
+> ⚠️ **WITHOUT A WEIGHT A REAL EXERCISE PRICES AT ZERO** (`restingKcalPerMin`
+> opens `if (!w) return 0`), and the day header hides a zero burn — so the
+> pickers are replaced by the manual-calorie field. S213 with the sign flipped.
+> **The projection now follows the body down** (Kevin approved it explicitly):
+> new module-level `simProject` re-prices maintenance weekly.
+> ⚠️ **THE FLAT 3,500 RULE OVERSTATES A YEAR BY 40%** — 52.1 lbs vs 37.1 on the
+> app's own equations, i.e. 167.9 lbs vs 182.9.
+> ⚠️ **BUT IT IS INVISIBLE ON AN UNTOUCHED SCREEN, BY CONSTRUCTION** — a blank
+> day is priced at the pace and the pace re-prices with the weight, so the
+> deficit stays exactly `cut`. The four tiles verified byte-identical live.
+> ⚠️ **`lbsIn(days)` APPEARED THREE TIMES IN ONE TILE** — number, guard and
+> projected weight — and no test can see a partial rewire, because the two
+> expressions are equal until somebody types a day.
+> ⚠️ **Traps:** `window.storage.set` stores `value` VERBATIM and the app always
+> passes a JSON **string** (a console-written object made the trainer home read
+> "0 plans"); a lift slicing to the next `;` returned HALF of `lbsIn` once it
+> grew braces; and an agent's "worst 0.18 lb" re-measured here at **0.66**._
+>
 > _**S216b (Sep 9): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S216b)"
 > first.** Pushed. Frontend only — no rules, no functions, no deploy; the push
 > IS the release. **2,469 assertions across 37 suites**; build, `check:undef` and

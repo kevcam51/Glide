@@ -1,6 +1,139 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S216b) — THE QUEUE IS DONE, PUSHED (frontend only)
+## ▶️ START HERE (S217) — TWO OF KEVIN'S THREE ASKS SHIPPED; THE CALENDAR IS NEXT
+
+Two commits pushed (`f75056b`, `11cabca`), deploy marker-diffed on glidna.com.
+**2,539 assertions across 37 suites**; build, `check:undef`, `check:weak` clean.
+Frontend only — no rules, no functions.
+
+**The standalone What if… is done. The multi-month calendar is designed but NOT
+BUILT** — the shape is in §3 below, and Kevin has already approved the projection
+change it rides on.
+
+### 1 · What if… without a client, and a maintenance number you can type — SHIPPED
+
+Kevin: *"What if I just meet someone on the street and wanna give them a general
+estimate of maintenance calories that I put in and then of course the app itself
+can create the deficit and surplus automatically… allow the maintenance button to
+be clickable… and of course, if the maintenance number changes then by default,
+the app will manipulate the surplus and deficit numbers to match."*
+
+⚠️ **IT IS ONE MECHANISM, NOT TWO FEATURES, AND THAT IS WHY IT IS SAFE.**
+`maintain` was already `intakeFor(0)`, so a typed maintenance is a SUBSTITUTION
+into the existing ladder: `simRawIntakeForRate` gained a fourth defaulted argument
+and two call sites pass it. Do not add a second ladder for the no-plan case — the
+84-pair sweep that keeps this modal and the dashboard quoting the same daily
+target depends on there being one.
+
+⚠️ **THE OVERRIDE REPLACES `tdee`, NOT `tdee + eatback`.** Freezing the whole base
+stops the chips moving when cardio is added in section 2 — while the line one
+section below still reads "More cardio means more food at the same pace",
+directly under the control it just stopped describing. A test pins this.
+
+⚠️ **EAT-BACK MAKES "THEIR BURN" AND "MAINTAIN" TWO DIFFERENT NUMBERS.** Type
+2,400 on a plan with training and Maintain reads 2,492. The screen names the gap;
+without that line it reads as a bug. On the street there is no training, so they
+are equal — which is Kevin's actual case.
+
+⚠️ **WITHOUT A WEIGHT, A REAL EXERCISE PRICES AT ZERO.** `restingKcalPerMin` opens
+`if (!w) return 0`, and the day header only renders a burn when `burned > 0` — so
+a 45-minute run would show NOTHING AT ALL. The pickers are replaced by the
+manual-calorie field with the reason stated. The S213 bug with the sign flipped.
+
+Three doors, one mount: the side menu (every role), the TOP of the trainer's home
+(⚠️ **not** the Local Plans action row — collapsed by default, so invisible to a
+trainer with no clients, who is exactly the person this is for), and a client's
+own home (⚠️ **plan-bound**, not blank — which also gives a client's home a
+working "Make up a big day" for the first time). The in-plan button is untouched.
+⚠️ The standalone mount is **conditional and takes no `open` prop** —
+`useBodyScrollLock(true)` and `useBackClose(true, …)` are unconditional inside the
+modal, so copying `ReferralPanel`'s shape one line above would lock the page
+scroll and swallow device Back for the whole session.
+
+### 2 · The projection follows the body down — SHIPPED (Kevin approved it explicitly)
+
+⚠️ **THE FLAT 3,500-CAL RULE IS WRONG OVER A YEAR AND WRONG IN THE FLATTERING
+DIRECTION.** On the app's own equations, a 220 lb man eating a fixed 2,555: the
+flat rule overstates 2% at a month, 5% at two, 19% at six, **40% at twelve** —
+52.1 lbs against 37.1, i.e. 167.9 lbs against 182.9. New module-level
+`simProject` walks a week at a time, re-pricing maintenance and the training burn.
+
+⚠️ **ONE PATH, NOT AN "ADAPTIVE MODE".** When the burn cannot follow the body — no
+weight, or a typed daily burn with no BMR behind it — `weekHold` returns the same
+number every week and the walk reduces to the flat arithmetic exactly.
+
+⚠️ **ON AN UNTOUCHED SCREEN IT IS INVISIBLE, BY CONSTRUCTION** — a blank day is
+priced at the pace and the pace re-prices with the weight, so the deficit stays
+exactly `cut`. Verified in the app: the four tiles read byte-identical. It bites
+only where the flat rule was wrong: a typed fixed 2,555 moves two months 8.8 → 8.4.
+
+⚠️ **`lbsIn(days)` APPEARED THREE TIMES INSIDE ONE TILE** — the number, the "off
+the scale" guard and the projected weight. Rewiring the obvious one leaves a tile
+reading "−3.1" above "205.7 lbs", and **no regression test can see it**, because
+both expressions are equal by construction until someone types a day. Counted.
+
+⚠️ **THE OLD FOOTNOTE BECAME FALSE** the moment the engine adapted ("a long
+projection drifts optimistic" is exactly what it no longer does) — the S216b
+SummaryTab bug in advance. Replaced.
+
+### 3 · THE CALENDAR — designed, approved in principle, NOT BUILT
+
+Kevin: *"Can we create an option to put a calendar that has a full month and allow
+a trainer or a client to run a scenario by entering the calories for every single
+day for 1 month 2 months or even up to a year."*
+
+The shape, from a five-approach design panel (winner: smallest-diff; grafts from
+the ergonomics and honesty lenses):
+
+- A collapsed row under the seven Mon–Sun boxes: **"Plan further out — a month to
+  a year"**. Horizon chips 1 · 2 · 3 · 6 · 12 months.
+- ⚠️ **EVERY DAY IS ALREADY FILLED IN BEFORE YOU TOUCH IT** — a date inherits its
+  WEEKDAY's box, and a blank weekday inherits the pace. The seven boxes are the
+  SOURCE and the calendar is an EXCEPTION LAYER, which is what stops this being
+  365 hostile inputs. Only the exceptions get typed.
+- Tap a date to type a one-off; **"Set a stretch"** paints a date range (the
+  holiday, the cruise) in three taps, with undo.
+- Changing the pace chip re-prices every untouched day live.
+- The answer block gains pounds, ending weight, the date, and **the training burn
+  over the stretch** — the half of Kevin's ask nothing on the screen provides today.
+- ⚠️ It rides `simProject`, which already exists and is already tested.
+  `dayIntake` is the only new input: `override(date) ?? weekdayBox ?? paceAtWeight(lbs)`.
+
+**Two questions Kevin has not answered** (asked; he moved on to "commit and then
+do the calendar part after"). Both have a recommendation and neither blocks a
+first build:
+1. On the street with only a typed burn, show the full year flat-and-labelled?
+   **Recommend yes** — he asked for the year, and the label is a natural "let's
+   set you up properly" moment.
+2. Confirm the inherit-by-default entry model above. **Recommend yes.**
+
+⚠️ **DO NOT LET THE CALENDAR WRITE.** The modal's promise is what licenses it to
+display a typed sub-1,200 day. A scenario evaporating on close is deliberate: a
+scenario keyed to the wrong client is worse than a lost one. If Kevin later wants
+"Start their plan →", that is `createProfile(null, {isSimulation:true})` and its
+own change.
+
+### ⚠️ Traps this session paid for
+
+- **`window.storage.set(key, value)` STORES `value` VERBATIM, and the whole app
+  passes a JSON STRING.** Poking test data in from the console as a native object
+  wrote a document the app's own `get` could not parse — the trainer home read
+  "0 plans" until both keys were rewritten with `JSON.stringify`.
+- **A LIFT THAT SLICES TO THE NEXT `;` CANNOT SURVIVE A MULTI-STATEMENT BODY.**
+  `const lbsIn = (days) => [^;]*;` silently returned HALF the new body once
+  `lbsIn` grew braces — the S211 trap, in a suite whose own header warns about it.
+- **A NEGATIVE CONTROL THAT CANNOT SEE ITS OWN SHAPE.** The bare-1,200 scan used
+  a lookaround excluding commas, which also skips `Math.max(1200, …)` — the one
+  shape it existed for. It passed on a file still full of them.
+- **AN AGENT'S MEASURED NUMBER IS STILL WORTH RE-MEASURING.** The design panel
+  reported "worst 0.18 lb" on the untouched tiles; re-run here it is **0.66 lb**,
+  on a fixture set it had not used. Directionally right, precisely wrong.
+- **DRIVE IT, DO NOT READ IT.** Section 2 promised "starts from the week already
+  in your plan" to a standalone sandbox with no plan. Only opening it found that.
+
+---
+
+## Previously: START HERE (S216b) — DONE AND PUSHED
 
 Six commits. **2,469 assertions across 37 suites**; build, `check:undef` and
 `check:weak` clean. No rules, no functions, no deploy — the push IS the release,
