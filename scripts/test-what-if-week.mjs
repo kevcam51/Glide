@@ -502,6 +502,11 @@ ok("the single-session picker it fed is gone too", !/const \[session, setSession
 // ── 12. a full weekly cardio planner, inside the modal ──────────────────────
 ok("all seven days are listed", (SIM_CODE.match(/DAYS\.map\(/g) || []).length >= 2);
 ok("each day opens on its own", /const \[openDay, setOpenDay\]/.test(SIM_CODE));
+// ⚠️ A REAL <button>, NOT A DIV WITH role="button". StepCardio's day header is a
+// div; copying it would have announced a button that keyboard focus can never
+// reach, which is worse than no role at all.
+ok("the day header is focusable, not a div wearing a role",
+   /<button type="button" style=\{dayHeadS\}/.test(SIM_CODE) && !/role="button"/.test(SIM_CODE));
 ok("quick fill is at the top", SIM_CODE.indexOf("Quick Fill") < SIM_CODE.indexOf("const sessions = Array.isArray(simCardio[day])"));
 ok("quick fill applies to the days that were picked", /const applyFill = /.test(SIM_CODE) && /toggleFillDay/.test(SIM_CODE));
 ok("...with the wizard's presets", /"MWF"/.test(SIM_CODE) && /"All 7"/.test(SIM_CODE));

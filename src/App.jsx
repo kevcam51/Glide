@@ -12860,7 +12860,12 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
   // These mirror WZW.dayCard / dayHeader / dayChip / toggle / panel by hand.
   const dayCardS = { border: "1px solid var(--border)", borderRadius: "10px", background: "var(--s2)",
     marginBottom: "6px", overflow: "hidden" };
-  const dayHeadS = { display: "flex", alignItems: "center", gap: "9px", padding: "9px 10px", cursor: "pointer" };
+  // ⚠️ A REAL <button>, NOT A DIV WITH role="button". StepCardio's day header is
+  // a div, and copying it would have announced a button that keyboard focus can
+  // never reach — worse than no role at all.
+  const dayHeadS = { display: "flex", alignItems: "center", gap: "9px", padding: "9px 10px", cursor: "pointer",
+    width: "100%", boxSizing: "border-box", textAlign: "left", background: "transparent", border: "none",
+    color: "inherit", fontFamily: "inherit", fontSize: "inherit" };
   const dayChipS = { minWidth: "38px", textAlign: "center", fontSize: ".6rem", fontWeight: 800,
     textTransform: "uppercase", letterSpacing: ".4px", color: "var(--accent)",
     background: "rgba(var(--accent-rgb),.10)", borderRadius: "6px", padding: "3px 0" };
@@ -13161,7 +13166,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
           const isOpen = openDay === day;
           return (
             <div key={day} style={dayCardS}>
-              <div style={dayHeadS} onClick={() => setOpenDay(isOpen ? null : day)} role="button"
+              <button type="button" style={dayHeadS} onClick={() => setOpenDay(isOpen ? null : day)}
                 aria-expanded={isOpen} aria-label={`${day} cardio`}>
                 <span style={dayChipS}>{DAY_SHORT[i]}</span>
                 <span style={{ flex: 1, fontSize: ".76rem", display: "inline-flex", alignItems: "center", gap: "5px",
@@ -13174,7 +13179,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose }) {
                   {burned > 0 ? `~${burned.toLocaleString()} cal` : ""}
                 </span>
                 <span style={{ fontSize: ".65rem", color: "var(--muted)" }}>{isOpen ? "▲" : "▼"}</span>
-              </div>
+              </button>
               {isOpen && (
                 <div style={{ padding: "0 10px 10px", borderTop: "1px solid var(--border)" }}>
                   {sessions.map((sess, idx) => {
