@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**2,587 assertions across 37 suites**, S217).
+- `npm run test:units` — the JS unit suites (**2,681 assertions across 38 suites**, S217).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -135,7 +135,11 @@ enabled (Blaze has no default spending cap).
 > ⚠️ **`lbsIn(days)` APPEARED THREE TIMES IN ONE TILE** — number, guard and
 > projected weight — and no test can see a partial rewire, because the two
 > expressions are equal until somebody types a day.
-> **And the scenario CALENDAR shipped** (`0e9bcbf`, committed, push pending): a
+> ⚠️ **REBASED OVER A PARALLEL SESSION'S S215/S215b/S215c** (Coach Connect tiers,
+> Trainerize multi-tenant) which landed mid-build — **go by SHA, not by session
+> number**; `package.json` was resolved as a UNION (38 suites) and the merged app
+> was re-driven in the browser, because a clean rebase is not a working app.
+> **And the scenario CALENDAR shipped**: a
 > month to a year, day by day, under the seven boxes.
 > ⚠️ **365 EMPTY INPUTS IS THE FEATURE FAILING** — a date inherits its WEEKDAY's
 > box and a blank weekday inherits the pace, so the year is filled in before it

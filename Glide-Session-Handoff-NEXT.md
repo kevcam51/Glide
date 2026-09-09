@@ -2,10 +2,19 @@
 
 ## ▶️ START HERE (S217) — ALL THREE OF KEVIN'S ASKS SHIPPED
 
-Four commits. The first three are pushed (`f75056b`, `11cabca`, `7a409b3`) and
-were marker-diffed live on glidna.com; **the calendar (`0e9bcbf`) is committed and
-awaiting Kevin's go-ahead to push**. **2,587 assertions across 37 suites**; build,
-`check:undef`, `check:weak` clean. Frontend only — no rules, no functions.
+Four commits, all pushed; the first three were marker-diffed live on glidna.com.
+**2,681 assertions across 38 suites**; build, `check:undef`, `check:weak` clean.
+Frontend only — no rules, no functions.
+
+⚠️ **A PARALLEL SESSION LANDED S215/S215b/S215c (Coach Connect tiers, Trainerize
+multi-tenant) WHILE THIS WAS BEING BUILT** — three commits, ~1,100 lines, touching
+`src/App.jsx`, `firestore.rules`, five `functions/` files and `package.json`.
+**GO BY SHA, NOT BY SESSION NUMBER**: their "S215" is not the S215 in this file's
+history. The rebase was clean — their App.jsx hunks all sit at line 20484 and
+below-none, mine end at 13364 — and `package.json`'s `test:units` came through as
+a **UNION** (38 suites; `test-goal-date` and `test-tier-gates` both present,
+verified by name rather than by count). The merged app was re-driven in the
+browser afterwards, because "it rebased cleanly" is not "it works".
 
 ### 1 · What if… without a client, and a maintenance number you can type — SHIPPED
 
