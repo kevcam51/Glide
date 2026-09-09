@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**2,539 assertions across 37 suites**, S217).
+- `npm run test:units` — the JS unit suites (**2,587 assertions across 37 suites**, S217).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -135,10 +135,24 @@ enabled (Blaze has no default spending cap).
 > ⚠️ **`lbsIn(days)` APPEARED THREE TIMES IN ONE TILE** — number, guard and
 > projected weight — and no test can see a partial rewire, because the two
 > expressions are equal until somebody types a day.
+> **And the scenario CALENDAR shipped** (`0e9bcbf`, committed, push pending): a
+> month to a year, day by day, under the seven boxes.
+> ⚠️ **365 EMPTY INPUTS IS THE FEATURE FAILING** — a date inherits its WEEKDAY's
+> box and a blank weekday inherits the pace, so the year is filled in before it
+> opens and only the EXCEPTIONS get typed. The seven boxes are the SOURCE; the
+> calendar is an EXCEPTION LAYER. It borrows the app's calendar GRAMMAR but not
+> `CalendarView`, which is built to read and write real logs.
+> ⚠️ **IT FIXED `parsed[i % 7]`**, which priced day 0 as MONDAY — on a Wednesday
+> a heavy Saturday landed on the projection's Thursday.
+> ⚠️ **THE FLAT COMPARISON IS THE SAME WALK WITH THE BODY FROZEN**, so the
+> selling point cannot drift from the number it sells against.
 > ⚠️ **Traps:** `window.storage.set` stores `value` VERBATIM and the app always
 > passes a JSON **string** (a console-written object made the trainer home read
 > "0 plans"); a lift slicing to the next `;` returned HALF of `lbsIn` once it
-> grew braces; and an agent's "worst 0.18 lb" re-measured here at **0.66**._
+> grew braces; an agent's "worst 0.18 lb" re-measured here at **0.66**; and TWO
+> copy bugs were found only by OPENING the thing — a standalone sandbox promised
+> "starts from the week already in your plan", and the year claimed to follow a
+> body it did not have._
 >
 > _**S216b (Sep 9): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S216b)"
 > first.** Pushed. Frontend only — no rules, no functions, no deploy; the push

@@ -1,14 +1,11 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S217) — TWO OF KEVIN'S THREE ASKS SHIPPED; THE CALENDAR IS NEXT
+## ▶️ START HERE (S217) — ALL THREE OF KEVIN'S ASKS SHIPPED
 
-Two commits pushed (`f75056b`, `11cabca`), deploy marker-diffed on glidna.com.
-**2,539 assertions across 37 suites**; build, `check:undef`, `check:weak` clean.
-Frontend only — no rules, no functions.
-
-**The standalone What if… is done. The multi-month calendar is designed but NOT
-BUILT** — the shape is in §3 below, and Kevin has already approved the projection
-change it rides on.
+Four commits. The first three are pushed (`f75056b`, `11cabca`, `7a409b3`) and
+were marker-diffed live on glidna.com; **the calendar (`0e9bcbf`) is committed and
+awaiting Kevin's go-ahead to push**. **2,587 assertions across 37 suites**; build,
+`check:undef`, `check:weak` clean. Frontend only — no rules, no functions.
 
 ### 1 · What if… without a client, and a maintenance number you can type — SHIPPED
 
@@ -76,42 +73,51 @@ both expressions are equal by construction until someone types a day. Counted.
 projection drifts optimistic" is exactly what it no longer does) — the S216b
 SummaryTab bug in advance. Replaced.
 
-### 3 · THE CALENDAR — designed, approved in principle, NOT BUILT
+### 3 · The scenario calendar: a month to a year, day by day — SHIPPED
 
-Kevin: *"Can we create an option to put a calendar that has a full month and allow
-a trainer or a client to run a scenario by entering the calories for every single
-day for 1 month 2 months or even up to a year."*
+Kevin: *"…allow a trainer or a client to run a scenario by entering the calories
+for every single day for 1 month 2 months or even up to a year."* He also asked
+whether to reuse the existing calendar; the answer taken was **borrow the grammar,
+not the component** — Monday-first padding, square cells, `‹ ›` either side of the
+month, so the two read as one app, but `CalendarView` is built around reading and
+writing real logs and this one writes nothing.
 
-The shape, from a five-approach design panel (winner: smallest-diff; grafts from
-the ergonomics and honesty lenses):
+⚠️ **365 EMPTY INPUTS IS THE FEATURE FAILING, SO NOTHING IS EVER EMPTY.** A date
+inherits its WEEKDAY's box from the seven above, and a blank weekday inherits the
+pace — the year is filled in before it is opened and only the EXCEPTIONS get
+typed. **The seven boxes are the source; the calendar is an exception layer.** Tap
+a date, type a number, choose how many days it runs for; one step of undo.
 
-- A collapsed row under the seven Mon–Sun boxes: **"Plan further out — a month to
-  a year"**. Horizon chips 1 · 2 · 3 · 6 · 12 months.
-- ⚠️ **EVERY DAY IS ALREADY FILLED IN BEFORE YOU TOUCH IT** — a date inherits its
-  WEEKDAY's box, and a blank weekday inherits the pace. The seven boxes are the
-  SOURCE and the calendar is an EXCEPTION LAYER, which is what stops this being
-  365 hostile inputs. Only the exceptions get typed.
-- Tap a date to type a one-off; **"Set a stretch"** paints a date range (the
-  holiday, the cruise) in three taps, with undo.
-- Changing the pace chip re-prices every untouched day live.
-- The answer block gains pounds, ending weight, the date, and **the training burn
-  over the stretch** — the half of Kevin's ask nothing on the screen provides today.
-- ⚠️ It rides `simProject`, which already exists and is already tested.
-  `dayIntake` is the only new input: `override(date) ?? weekdayBox ?? paceAtWeight(lbs)`.
+⚠️ **ONE RESOLVER** — `simScenarioDay(date) = override ?? weekday box ?? pace` —
+so the tiles, the grid cells and the stretch answer cannot disagree about what a
+day is worth. It rides `simProject`; `dayIntake` is the only new input.
 
-**Two questions Kevin has not answered** (asked; he moved on to "commit and then
-do the calendar part after"). Both have a recommendation and neither blocks a
-first build:
-1. On the street with only a typed burn, show the full year flat-and-labelled?
-   **Recommend yes** — he asked for the year, and the label is a natural "let's
-   set you up properly" moment.
-2. Confirm the inherit-by-default entry model above. **Recommend yes.**
+⚠️ **IT FIXED A REAL BUG ON THE WAY IN.** `dayIntake` was `parsed[i % 7]`, pricing
+day 0 as MONDAY — so on a Wednesday a heavy Saturday landed on the projection's
+Thursday. Right numbers, wrong days, and no total could reveal it.
 
-⚠️ **DO NOT LET THE CALENDAR WRITE.** The modal's promise is what licenses it to
-display a typed sub-1,200 day. A scenario evaporating on close is deliberate: a
-scenario keyed to the wrong client is worse than a lost one. If Kevin later wants
-"Start their plan →", that is `createProfile(null, {isSimulation:true})` and its
-own change.
+⚠️ **DAYS OUTSIDE THE STRETCH SHOW NO NUMBER AND TAKE NO TAP** — a number there
+invites a value no total counts: the silent swallow, as a grid.
+
+⚠️ **THE FLAT COMPARISON IS THE SAME WALK WITH THE BODY FROZEN**, so the selling
+point cannot drift from the number it sells against; shown only once it is worth a
+pound. Verified live: an untouched year reads −52.1 with NO comparison (the walk
+IS the flat number when every day is priced at a re-pricing pace); a fixed 2,555
+typed into all seven days becomes "−38.2 lbs · around 182 lbs" with *"a flat
+3,500-calories-per-pound calculator would say 54"*. A painted 7-day holiday at
+3,800 costs 1.3 lbs over the year rather than the flat rule's 2.5 — the
+second-order effect of ending heavier and burning more.
+
+⚠️ **THE HONESTY ESCALATES WITH THE STRETCH, AND NAMES WHICH MODE IT IS IN.** A
+line true at a month is not true at a year — and the year copy originally claimed
+"this follows the burn down" in the one configuration where it cannot (a typed
+burn has no body). Found by DRIVING it.
+
+⚠️ **SUB-1,200 DAYS ARE COUNTED AND NAMED, NEVER AVERAGED AWAY OR CLAMPED.**
+
+**Kevin's two open questions were resolved by taking the recommendations**: the
+full year IS shown on a typed burn, flat and labelled; and the inherit-by-default
+entry model is what shipped.
 
 ### ⚠️ Traps this session paid for
 
