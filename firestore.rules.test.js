@@ -279,6 +279,58 @@ const booking = (over = {}) => ({
 });
 const c2ctx = ctx(C2);
 
+// ── S215: booking is Coach and above ───────────────────────────────────────
+// Kevin moved session booking off Coach Connect. Sessions are created by
+// CLIENT-SIDE writes, so firestore.rules is the only thing actually stopping a
+// Connect trainer from booking — the button in the app is a courtesy.
+//
+// ⚠️ THE SUBSTRING TRAP IS THE POINT OF HALF OF THESE. "coach_connect" CONTAINS
+// "coach", and this codebase has shipped that bug before (mcp.js planFor,
+// PRICING.md S171). A rule that tested for "coach" first would grant booking to
+// exactly the tier this change removes it from, and every other assertion here
+// would still pass.
+console.log("\nSESSIONS — who may book (S215):");
+{
+  const NEW = new Date("2026-10-01T00:00:00Z");   // created AFTER the cutoff
+  const OLD = new Date("2026-08-01T00:00:00Z");   // existing account
+  const mk = (uid, over) => ({ uid, email: uid + "@x.co", role: "head_trainer",
+    assignedTrainerId: null, headTrainerId: uid, createdAt: NEW, ...over });
+  const CB = "cli_book";
+  await testEnv.withSecurityRulesDisabled(async (c) => {
+    const db = c.firestore();
+    await setDoc(doc(db, "users", "tr_free"),    mk("tr_free"));
+    await setDoc(doc(db, "users", "tr_connect"), mk("tr_connect", { subscriptionStatus: "active", subscriptionTier: "coach_connect" }));
+    await setDoc(doc(db, "users", "tr_coach"),   mk("tr_coach",   { subscriptionStatus: "active", subscriptionTier: "coach" }));
+    await setDoc(doc(db, "users", "tr_elite"),   mk("tr_elite",   { subscriptionStatus: "active", subscriptionTier: "coach_max" }));
+    await setDoc(doc(db, "users", "tr_trial"),   mk("tr_trial",   { trialStartedAt: new Date(), trialLengthDays: 30 }));
+    await setDoc(doc(db, "users", "tr_oldconn"), mk("tr_oldconn", { createdAt: OLD, subscriptionStatus: "active", subscriptionTier: "coach_connect" }));
+    // One client linked to every one of them, so isTrainerOf never decides these.
+    for (const t of ["tr_free","tr_connect","tr_coach","tr_elite","tr_trial","tr_oldconn"]) {
+      await setDoc(doc(db, "users", CB + "_" + t), { uid: CB + "_" + t, email: "x@x.co", role: "client",
+        assignedTrainerId: t, headTrainerId: null });
+    }
+  });
+  const bookAs = (t) => setDoc(sess(ctx(t), "bk_" + t), booking({
+    participants: [t, CB + "_" + t], trainerUid: t, clientUid: CB + "_" + t,
+    startAt: Date.now() + 86400000, createdBy: t }));
+
+  await check("Coach may book", assertSucceeds(bookAs("tr_coach")));
+  await check("Coach Elite may book", assertSucceeds(bookAs("tr_elite")));
+  await check("a trialling trainer may book — a trial is the whole product", assertSucceeds(bookAs("tr_trial")));
+  await check("a trainer who predates the cutoff keeps booking on Connect", assertSucceeds(bookAs("tr_oldconn")));
+  await check("ATTACK: a NEW Coach Connect trainer may NOT book", assertFails(bookAs("tr_connect")));
+  await check("ATTACK: a free trainer may NOT book", assertFails(bookAs("tr_free")));
+
+  // ⚠️ THE SIDE DOORS (S215). Gating session CREATE alone left four other ways
+  // to reach the scheduling side. Blocking out time is the one that lives in the
+  // rules; the other three are callables and are gated in their own files.
+  const blockAs = (t) => setDoc(doc(ctx(t), "trainerBlocks", "blk_" + t),
+    { trainerUid: t, startAt: Date.now() + 86400000, durationMin: 60, title: "Lunch" });
+  await check("Coach may block out their own time", assertSucceeds(blockAs("tr_coach")));
+  await check("ATTACK: a NEW Coach Connect trainer may NOT block time", assertFails(blockAs("tr_connect")));
+  await check("ATTACK: a free trainer may NOT block time", assertFails(blockAs("tr_free")));
+}
+
 console.log("\nSESSIONS — booking ALLOWED:");
 await check("trainer books a session with own client", assertSucceeds(setDoc(sess(head, "s1"), booking())));
 await check("trainer reads that session", assertSucceeds(getDoc(sess(head, "s1"))));

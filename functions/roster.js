@@ -61,22 +61,90 @@ const CAP_FROM_MS = Date.parse("2026-08-07T00:00:00Z");
 const toMs = (v) => (v && typeof v.toMillis === "function" ? v.toMillis()
   : typeof v === "number" ? v : (typeof v === "string" ? Date.parse(v) : null));
 
+// ── S215 (Kevin): CONNECT IS CAPPED TOO ─────────────────────────────────────
+//
+// Connect used to be uncapped on the roster, and the pricing page said so. That
+// came from S176's "limit only what we pay for" — connected clients cost pennies,
+// so there was nothing to protect. Kevin's call reverses it on packaging grounds:
+// Connect is the ENTRY rung, and a tier that carries an unlimited roster leaves
+// the $19.99 → $49 jump selling nothing but in-app AI.
+//
+// ⚠️ THIS IS THE ONE CHANGE HERE THAT COULD TAKE SOMETHING AWAY, so it is dated.
+// Every account that existed before the ship date keeps an unlimited roster on
+// Connect forever — the same instrument CAP_FROM_MS already uses for Free, and
+// the same rule teamsAllowed states as "never a take-away". A fixed constant, not
+// a deploy-time value, so the boundary is deterministic and auditable.
+//
+// It is deliberately generous: it grandfathers by ACCOUNT age, not subscription
+// age, so someone who signed up last month and buys Connect next year still keeps
+// unlimited. With the real Connect population at ~zero that costs nothing, and it
+// makes it impossible to cut off a paying customer by accident — which is the
+// failure that actually matters. `entitlements.unlimitedRoster` is the manual
+// override if one ever needs granting individually.
+const CONNECT_CAP_FROM_MS = Date.parse("2026-09-09T00:00:00Z");
+
+// Does this tier string mean a Connect plan? Connect / Coach Connect.
+// ⚠️ ORDER-FREE ON PURPOSE. Everywhere else in the codebase this ladder is a
+// chain of includes() where "coach_connect" contains "coach" and the connect
+// test MUST come first (the mcp.js planFor hazard, PRICING.md S171). Asking the
+// one question directly cannot be reordered wrong by a later edit.
+function isConnectTier(tier) {
+  return String(tier || "").toLowerCase().includes("connect");
+}
+
 // Is this trainer subject to the cap at all?
 function capApplies(profile) {
   if (!profile) return false;
   if (profile.role === "admin" || ADMIN_UIDS.includes(profile.uid)) return false;
-  if (profile.subscriptionStatus === "active") return false;          // any paid tier
   if (profile.entitlements && profile.entitlements.premium === true) return false;
+  if (profile.entitlements && profile.entitlements.unlimitedRoster === true) return false;
+  const created = toMs(profile.createdAt);
+  // Grandfathered against the ORIGINAL free cap: predates it, or predates our
+  // stamping createdAt at all (never punish a missing field).
+  if (created === null || created < CAP_FROM_MS) return false;
+  if (profile.subscriptionStatus === "active") {
+    // Coach and above: uncapped, unchanged. Connect: capped, unless the account
+    // predates the day Connect became a capped tier.
+    if (!isConnectTier(profile.subscriptionTier)) return false;
+    return created >= CONNECT_CAP_FROM_MS;
+  }
   // On trial = the whole product, roster included.
   const startMs = toMs(profile.trialStartedAt);
   if (startMs && Date.now() < startMs + (profile.trialLengthDays || 30) * 86400000) return false;
-  // Grandfathered: predates the cap.
-  const created = toMs(profile.createdAt);
-  if (created !== null && created < CAP_FROM_MS) return false;
-  // No createdAt at all means an early account from before we stamped it —
-  // treat as grandfathered rather than punishing a missing field.
-  if (created === null) return false;
   return true;
+}
+
+// ── S215 (Kevin): SESSION BOOKING IS COACH AND ABOVE ────────────────────────
+//
+// Connect is the plugin tier — bring your own AI, run your roster from it. It
+// used to carry booking as well, which is the other half of why the jump to
+// Coach had little left to sell. Scheduling is now Coach+.
+//
+// ⚠️ Booking, NOT BILLING. Taking card payments is a separate question governed
+// by sessionBillingGate.js, which is an allowlist of one and has nothing to do
+// with tiers. Nothing here changes who can charge; this decides who can put a
+// session on a calendar at all.
+//
+// ⚠️ AND NOT RETROACTIVELY. Same dated grandfather as the roster cap, for the
+// same reason: a trainer with sessions already on their calendar must never open
+// the app to find they cannot book the next one. Mirrored in firestore.rules
+// mayBook() — the app only hides the entry points, the rules are the gate.
+const BOOKING_FROM_MS = CONNECT_CAP_FROM_MS;
+
+function bookingAllowed(profile) {
+  if (!profile) return false;
+  if (profile.role === "admin" || ADMIN_UIDS.includes(profile.uid)) return true;
+  if (profile.entitlements && profile.entitlements.premium === true) return true;
+  const created = toMs(profile.createdAt);
+  if (created === null || created < BOOKING_FROM_MS) return true;   // never a take-away
+  if (profile.subscriptionStatus === "active") {
+    if (isConnectTier(profile.subscriptionTier)) return false;      // Connect: no booking
+    return String(profile.subscriptionTier || "").toLowerCase().includes("coach");
+  }
+  // Trial = the whole product, so a trialling trainer can book.
+  const startMs = toMs(profile.trialStartedAt);
+  if (startMs && Date.now() < startMs + (profile.trialLengthDays || 30) * 86400000) return true;
+  return false;   // free
 }
 
 // Sub-trainer TEAMS are a Coach-tier capability (S179f, Kevin — raised from
@@ -224,6 +292,10 @@ exports.myRosterStatus = onCall({ region: REGION, maxInstances: 10 }, async (req
   return {
     count: n.total, connected: n.connected, plans: n.plans,
     capped, cap: capped ? FREE_ROSTER_CAP : null,
+    // Which PLAN the cap belongs to, so the banner can name it instead of always
+    // saying "the free plan" — Connect is capped too since S215.
+    cappedPlan: capped ? (isConnectTier(prof.subscriptionTier) ? "Coach Connect" : "the free plan") : null,
+    booking: bookingAllowed({ ...prof, uid }),
     teamsLocked: !teamsAllowed({ ...prof, uid }),
     full: capped && n.total >= FREE_ROSTER_CAP,
     remaining: capped ? Math.max(0, FREE_ROSTER_CAP - n.total) : null,
@@ -231,5 +303,8 @@ exports.myRosterStatus = onCall({ region: REGION, maxInstances: 10 }, async (req
 });
 
 module.exports.FREE_ROSTER_CAP = FREE_ROSTER_CAP;
+module.exports.CONNECT_CAP_FROM_MS = CONNECT_CAP_FROM_MS;
 module.exports.capApplies = capApplies;
 module.exports.teamsAllowed = teamsAllowed;
+module.exports.bookingAllowed = bookingAllowed;
+module.exports.isConnectTier = isConnectTier;

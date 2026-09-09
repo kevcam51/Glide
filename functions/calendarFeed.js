@@ -28,6 +28,10 @@ const admin = require("firebase-admin");
 const crypto = require("crypto");
 
 const REGION = "us-central1";
+
+// Same predicate as roster.js and firestore.rules mayBook() — the calendar feed
+// is part of the scheduling side, which is Coach and above since S215.
+const { bookingAllowed } = require("./roster");
 const PUBLIC_BASE = `https://${REGION}-calorieiq-29762.cloudfunctions.net/calendarFeed`;
 // How much history to carry. Enough for a client to look back over a training
 // block, not so much that the feed grows without bound.
@@ -174,6 +178,18 @@ exports.calendarFeedLink = onCall(
     const db = admin.firestore();
     const ref = db.doc(`users/${uid}`);
     const cur = (await ref.get()).data() || {};
+    // ⚠️ MINTING ONLY (S215). A feed URL is a bearer credential that lives in
+    // someone's calendar app forever, so a trainer who ALREADY subscribed must
+    // keep working even if their plan lapses — revoking here would silently rot
+    // an integration they set up while paying, with no error anyone can see. So
+    // this refuses to mint a NEW token and leaves an existing one alone; the feed
+    // itself just runs dry, because sessions can no longer be created.
+    if (!cur.calendarFeedToken && !bookingAllowed({ ...cur, uid })) {
+      throw new HttpsError("failed-precondition",
+        "Calendar subscriptions come with Glidna Coach, alongside session booking. "
+        + "Upgrade in the app and your sessions will appear in the calendar you already use.",
+        { reason: "booking-not-on-plan" });
+    }
     let token = cur.calendarFeedToken;
     const reset = (request.data || {}).reset === true;
     if (!token || reset) {

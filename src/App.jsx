@@ -21851,8 +21851,16 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                         <button className={`${mBtnCls} inline-flex items-center gap-1.5`} onClick={() => setNotesFor(c)}>
                           <Icon name="file" size={16} color="var(--accent)" />Notes
                         </button>
+                        {/* ⚠️ `booking`, NOT `capped` (S215). These were one test
+                            because a capped roster and no booking were the same
+                            population — free trainers. Since Connect became capped
+                            AND lost booking they are different questions, and a
+                            Coach on an unlimited roster must never be sent to the
+                            plan picker by a cap test that no longer means what it
+                            did. The server decides both (roster.js bookingAllowed);
+                            this only hides the door — firestore.rules is the gate. */}
                         <button className={`${mBtnCls} inline-flex items-center gap-1.5`}
-                          onClick={() => ((rosterCap && rosterCap.capped) ? setRosterPlans(true) : setSessionsFor(c))}>
+                          onClick={() => ((rosterCap && rosterCap.booking === false) ? setRosterPlans(true) : setSessionsFor(c))}>
                           <Icon name="calendar" size={16} color="var(--accent)" />Sessions
                           {(sessionCounts[c.uid] || 0) > 0 && (
                             <span className="rounded-full bg-primaryfill px-1.5 text-[.66rem] font-bold text-primaryfg">{sessionCounts[c.uid]}</span>
@@ -25270,15 +25278,19 @@ const PLAN_MENU = {
   ],
   trainer: [
     { tier: "connect", name: "Coach Connect", month: "$19.99", year: "$199", yearNote: "2 months free",
-      blurb: "Already live in Claude or ChatGPT? Run your roster from it — your own AI reads and writes every client's plan. Up to 15 AI-coached clients a month, plus session booking and unlimited clients. No in-app AI." },
+      blurb: "Already live in Claude or ChatGPT? Run your roster from it — your own AI reads and writes every client's plan. Up to 15 clients, and the AI can work with all of them. No in-app AI, no session booking." },
     { tier: "base", name: "Glidna Coach", month: "$49", year: "$490", yearNote: "2 months free",
       // Was "The full coaching workspace + AI assistant" — which contradicted the
-      // grid directly beneath it, where the whole workspace reads "free forever",
-      // and the code sides with the grid (the ONLY subscription gate is the AI
-      // layer). Selling what you already give away is how refund arguments start.
-      blurb: "The AI assistant for your roster: build programs, set targets and log for clients by chat. Up to 25 AI-coached clients a month, and everything in Coach Connect. The coaching workspace itself stays free." },
+      // grid directly beneath it, where the whole workspace reads "free forever".
+      // ⚠️ AND THE CORRECTION HAS ITSELF GONE STALE (S215). "the ONLY subscription
+      // gate is the AI layer" was true when it was written and is not now: since
+      // S215 the roster cap reaches Connect and session booking is Coach and
+      // above, so this tier sells scheduling and an unlimited roster as well as
+      // the assistant. Saying the workspace "stays free" would now be the
+      // overstatement, in the other direction.
+      blurb: "The AI assistant for your roster, plus the scheduling side of the business: session booking, your calendar and an unlimited roster. Up to 25 AI-coached clients a month. Everything in Coach Connect is included." },
     { tier: "max", name: "Coach Elite", month: "$79", year: "$790", yearNote: "2 months free",
-      blurb: "Room to run the AI across your whole roster every day — around 200 conversations, up to 35 AI-coached clients a month, and everything in Coach Connect." },
+      blurb: "Room to run the AI across your whole roster every day — around 200 conversations and up to 35 AI-coached clients a month. Everything in Glidna Coach is included, scheduling and all." },
   ],
 };
 
@@ -25357,10 +25369,20 @@ const PLAN_FEATURES = {
   ],
   trainer: [
     { section: "The basics — free forever", rows: [
-      ["Clients & plan files", "15", "Unlimited", "Unlimited", "Unlimited"],
+      // ⚠️ CONNECT IS 15, NOT UNLIMITED (S215, Kevin). Connect used to carry an
+      // unlimited roster under S176's "limit only what we pay for". Kevin's call
+      // reverses it on packaging grounds: Connect is the entry rung, and the
+      // $19.99 → $49 step needs to sell more than in-app AI. Enforced by
+      // capApplies() in functions/roster.js; accounts that existed before the
+      // change keep unlimited forever, which is why this says "15" rather than
+      // pretending nobody is grandfathered.
+      // Sales simulations are excluded from the count on EVERY tier — they are a
+      // pitch tool, not a person, and since S212c they carry no tracking at all.
+      ["Clients & plan files", "15", "15", "Unlimited", "Unlimited"],
+      ["Sales simulations", "Unlimited", "Unlimited", "Unlimited", "Unlimited"],
       // S198e (Kevin): a trial connects up to 15 Trainerize clients, then asks
       // for an upgrade. Stated here so hitting the wall is not a surprise.
-      ["Connect clients from Trainerize", "15", "Unlimited", "Unlimited", "Unlimited"],
+      ["Connect clients from Trainerize", "15", "15", "Unlimited", "Unlimited"],
       ["Coaching analytics — who needs attention", true, true, true, true],
       ["To-dos, nudges & requests — both ways", true, true, true, true],
       ["Invite Hub — link, QR, email invites, referrals", true, true, true, true],
@@ -25377,22 +25399,25 @@ const PLAN_FEATURES = {
       ["Your own AI reads & writes every client's plan", false, true, true, true],
       ["Whole roster from your AI — no in-app AI needed", false, true, true, true],
       ["Everything in Free, plus the full plugin", false, true, true, true],
-      // S179e (Kevin): business tooling is paid — "your health and your data
-      // are free; tools that make you money are paid." Any paid plan gets both.
-      ["Session booking & cancellation policy", false, true, true, true],
+      // ⚠️ SCHEDULING MOVED OFF CONNECT (S215, Kevin) — every row below is now
+      // Coach and above. S179e's "any paid plan gets both" no longer holds:
+      // Connect is the plugin, and running a booked business is what Coach is.
+      // Enforced by bookingAllowed() in functions/roster.js AND by mayBook() in
+      // firestore.rules — sessions are client-side writes, so the rules are the
+      // real gate and the app only hides the button.
+      ["Session booking & cancellation policy", false, false, true, true],
       // S196e — the whole sessions/calendar arc (S185-S196) shipped without a
       // single line on this page. A dozen real coach features were invisible to
       // the person deciding whether to pay for the coach tier, which is the
       // same "shipped but never advertised" hole S178i found in the free tier.
-      ["Roster calendar — month, week & day", false, true, true, true],
-      ["Repeating sessions — weekly, fortnightly, monthly", false, true, true, true],
-      ["Block out your own time", false, true, true, true],
-      ["Clients see your free slots & request a time", false, true, true, true],
-      ["Session reminders, at the lead times you pick", false, true, true, true],
-      ["Your sessions in Google, Apple or Outlook Calendar", false, true, true, true],
-      ["Card on file & automatic session billing", false, true, true, true],
-      ["No-show and waive controls on delivered sessions", false, true, true, true],
-      ["Earnings ledger — what was charged, and what didn't", false, true, true, true],
+      ["Roster calendar — month, week & day", false, false, true, true],
+      ["Repeating sessions — weekly, fortnightly, monthly", false, false, true, true],
+      ["Block out your own time", false, false, true, true],
+      ["Clients see your free slots & request a time", false, false, true, true],
+      ["Session reminders, at the lead times you pick", false, false, true, true],
+      ["Your sessions in Google, Apple or Outlook Calendar", false, false, true, true],
+      ["No-show and waive controls on delivered sessions", false, false, true, true],
+      ["Earnings ledger — what was charged, and what didn't", false, false, true, true],
       // ⚠️ MOVED FROM CONNECT TO COACH (S202, Kevin: Option B). These used to be
       // "any paid plan", with a free straight-line version below that. Kevin's
       // call is that the map features start at Coach and simply do not appear
@@ -25518,6 +25543,9 @@ const PLAN_TIPS = {
     "Both you and your client choose your own reminders, and you can have several \u2014 a day before and ten minutes before. Nobody sets anyone else's.",
   "Your sessions in Google, Apple or Outlook Calendar":
     "Subscribe once and your sessions appear in the calendar you already use. Reschedule in Glidna and the event moves. (Google refreshes subscribed calendars on its own schedule, often a few hours.)",
+  // ⚠️ NOT ON THE GRID (S215) — canBillSessions() is an allowlist of one uid, so
+  // card payments are live for nobody but the owner. Kept here, unreferenced, so
+  // the wording is ready the day the allowlist opens and the row goes back.
   "Card on file & automatic session billing":
     "Clients save a card once, and completed sessions are charged automatically \u2014 per session, weekly, fortnightly, or not at all if you'd rather invoice yourself. Their cancellation terms are frozen when they agree to them.",
   "No-show and waive controls on delivered sessions":
@@ -25783,7 +25811,6 @@ function PlanPicker({ role, onClose }) {
         <div className="text-center text-muted" style={{ fontSize: ".76rem", lineHeight: 1.5, marginTop: "-4px" }}>
           Works <span className="text-fg font-semibold">alongside</span> whatever you already use
           {isTrainer ? " — your coaching platform, your calendar, your own AI." : " — your favourite tracker, your watch, your own AI."}
-          {" "}Nothing to connect, nothing to switch.
         </div>
         {canPreview && (
           <div>

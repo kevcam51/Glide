@@ -1263,6 +1263,51 @@ $8.99. Gating ~30 micros would be beaten on both count and price. Barcode is
 weaker still: only MFP paywalls it, and it cost them real reputational damage.
 The honest client-side upgrade story stays AI + the coach relationship.
 
+## S215 — Coach Connect gets a 15 roster and loses booking (Kevin, Sep 9 2026) — ✅ BUILT
+
+**Decision.** Coach Connect is capped at **15 clients + plan files**, the same pool
+as Free, and **session booking moves to Coach and above**. Sales simulations stay
+**unlimited on every tier** — since S212c they carry no tracking at all, so they
+are a pitch tool rather than a person.
+
+⚠️ **THIS SUPERSEDES S176's "Coach Connect has NO client limit"** and the S179e
+line that any paid plan gets booking. Do not restore either from the sections
+above — they are older, and this one is Kevin's explicit call.
+
+**Why.** Connect is the entry rung. With an unlimited roster AND booking, the
+$19.99 → $49 step sold nothing but in-app AI, which is exactly the cannibalisation
+Kevin raised three times (S169g, S176, S178). Coach now sells scheduling and an
+unlimited roster as well as the assistant.
+
+**Never a take-away.** Both gates are dated (`CONNECT_CAP_FROM_MS`, Sep 9 2026)
+and grandfather by ACCOUNT age, not subscription age — deliberately over-generous,
+because the failure that matters is cutting off someone who is paying.
+`entitlements.unlimitedRoster` is the manual override.
+
+**Enforced in five places, because one was not enough:**
+| Door | Gate |
+|---|---|
+| `sessions` create (client-side write) | `firestore.rules` `mayBook()` |
+| `trainerBlocks` create (client-side write) | `firestore.rules` `mayBook()` |
+| `respondToBookingRequest` | `functions/availability.js` — ⚠️ **writes with the Admin SDK, so rules do NOT apply** |
+| `trainerAvailability` | same file — a client must never be walked into asking for a time that will be refused |
+| `calendarFeedLink` | `functions/calendarFeed.js` — refuses to MINT a new token; never revokes one already in someone's calendar app |
+
+**Roster truth after this:** Free 15 · Connect 15 · Coach ∞ · Elite ∞ · Apex ∞.
+Simulations ∞ everywhere. Distinct from the AI-seat ladder (Connect 15 · Coach 25
+· Elite 35 · Apex 55) — the two were being quoted in one breath on the plan card,
+which is what made the page read as self-contradictory.
+
+**Still open, from the S215 claims audit (32 confirmed mismatches):**
+- ⚠️ **`tierFor()` gives a `coach_connect` subscriber the full `trainer` budget** —
+  200k tokens + 30 searches/day, identical to Coach at $49, while the grid says
+  Connect has no in-app AI. Same on the client side ($4.99 Connect draws Premium's
+  45k). This is the real cannibalisation and it is NOT fixed here.
+- Trainerize sync, card-on-file billing and the earnings ledger are each gated by
+  a **one-UID allowlist**, not a tier, yet sold on the grid. The card-on-file row
+  was removed in S215; the other two remain.
+
+
 ## S179h — Premium ceiling fixed, automations move down, differentiators promoted
 
 ### Premium was UNDERWATER at its own cap (found by running the numbers)

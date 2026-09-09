@@ -30,6 +30,14 @@ const VAPID_PRIVATE_KEY = defineSecret("VAPID_PRIVATE_KEY");
 // that cannot work at all.
 const GOOGLE_MAPS_API_KEY = defineSecret("GOOGLE_MAPS_API_KEY");
 const REGION = "us-central1";
+
+// ⚠️ THE RULES DO NOT COVER THIS FILE (S215). firestore.rules mayBook() gates
+// session CREATE — but only for client-side writes. respondToBookingRequest
+// creates a session with the Admin SDK (tx.set on a sessions doc), which bypasses
+// rules entirely, so a Connect trainer who could not book from the calendar could
+// still book by accepting a client's request. A gate that covers one of two doors
+// is not a gate. Same predicate as roster.js, imported rather than restated.
+const { bookingAllowed } = require("./roster");
 const MAX_WINDOW_DAYS = 45;     // how far ahead a client may look
 // Beyond this gap between two sessions, no realistic drive makes the pair
 // infeasible — so a pair further apart than this is not a "connection" worth
@@ -158,6 +166,13 @@ exports.trainerAvailability = onCall(
     }
 
     const trainer = (await db.doc(`users/${trainerUid}`).get()).data() || {};
+    // ⚠️ AND THE FRONT OF THE SAME FUNNEL (S215). Showing free slots to a trainer
+    // who cannot accept them walks the CLIENT into asking for a time that will be
+    // refused — the worst version of a paywall, paid for by someone who is not
+    // even the customer. Reported as "not visible", exactly as the trainer's own
+    // toggle being off is: the client is never told anything about their
+    // trainer's billing, which is the S186 rule.
+    if (!bookingAllowed({ ...trainer, uid: trainerUid })) return { visible: false, busy: [] };
     // Off by default (Kevin's decision: one per-trainer toggle, not per-client).
     // When it's off the client can still ASK for a time — they just do it
     // blind, which is how booking worked before this existed.
@@ -231,6 +246,20 @@ exports.respondToBookingRequest = onCall(
     if (!requestId) throw new HttpsError("invalid-argument", "Which request?");
 
     const db = admin.firestore();
+    // Booking is Coach and above (S215). Checked BEFORE the request is claimed,
+    // for the same reason the link and rate checks are: a throw after the claim
+    // destroys the request — marked answered, no session, no notification, and
+    // no way for either side to retry. DENYING is fine; the item stays open so
+    // the trainer can still deny it by hand.
+    if (accept) {
+      const meProf = (await db.doc(`users/${uid}`).get()).data() || {};
+      if (!bookingAllowed({ ...meProf, uid })) {
+        throw new HttpsError("failed-precondition",
+          "Session booking is part of Glidna Coach. Upgrade in the app to accept times and "
+          + "put sessions on your calendar — your client's request stays here until you do.",
+          { reason: "booking-not-on-plan" });
+      }
+    }
     const inboxRef = db.doc(`users/${uid}/kv/${INBOX_KEY}`);
 
     // ⚠️ VALIDATE FIRST, CLAIM SECOND, AND PUT THE CLAIM BACK IF THE BOOKING

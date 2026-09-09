@@ -19,6 +19,46 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(uid)).data;
     }
 
+    // ── S215: SESSION BOOKING IS COACH AND ABOVE (Kevin) ────────────────────
+    //
+    // Connect is the plugin tier — bring your own AI. Booking moved to Coach+ so
+    // the $19.99 → $49 jump sells something besides in-app AI.
+    //
+    // ⚠️ THIS IS THE REAL GATE. Sessions are created by CLIENT-SIDE writes, not
+    // through a callable, so hiding the button in the app stops nobody with a
+    // console open. Mirrors bookingAllowed() in functions/roster.js — the two
+    // must move together.
+    //
+    // ⚠️ AND IT FAILS OPEN, DELIBERATELY. A missing profile, an absent field or a
+    // pre-cutoff account all resolve to "may book". Every default below points
+    // the same way, because the failure this must not have is a paying trainer
+    // who opens the calendar and cannot book — a packaging gate is not worth
+    // locking someone out of the product over.
+    function bookingCutoff() { return timestamp.date(2026, 9, 9); }
+    function mayBookFrom(p) {
+      return p.get('entitlements', {}).get('premium', false) == true
+        // Never a take-away: any account older than the cutoff keeps booking.
+        // ⚠️ A MISSING createdAt DEFAULTS TO ANCIENT, NOT TO NOW. roster.js
+        // treats `created === null` as grandfathered ("never punish a missing
+        // field"); defaulting to request.time here would have said the opposite
+        // and denied booking to every account we never stamped — which is every
+        // account created before we started stamping. The two copies of this
+        // rule have to fail the same way, not just decide the same way.
+        || p.get('createdAt', timestamp.date(2000, 1, 1)) < bookingCutoff()
+        // A trial is the whole product, booking included.
+        || (p.get('trialStartedAt', null) != null
+            && request.time < p.get('trialStartedAt', request.time)
+                              + duration.value(p.get('trialLengthDays', 30), 'd'))
+        // Paid: Coach and above. Connect tested FIRST — "coach_connect" contains
+        // "coach", the substring hazard this codebase has been bitten by before.
+        || (p.get('subscriptionStatus', '') == 'active'
+            && !p.get('subscriptionTier', '').lower().matches('.*connect.*')
+            && p.get('subscriptionTier', '').lower().matches('.*coach.*'));
+    }
+    function mayBook(uid) {
+      return isAdmin() || !profileExists(uid) || mayBookFrom(profileData(uid));
+    }
+
     // assignedTrainerId of ownerUid, or null if the profile or the field is
     // missing. The exists() guard + .get(...,null) default keep this from
     // throwing on a missing profile or absent/null field (which would
@@ -393,6 +433,7 @@ service cloud.firestore {
       }
 
       allow create: if isSignedIn()
+        && mayBook(request.resource.data.trainerUid)   // Coach and above (S215)
         && meetAtValid()
         && request.resource.data.keys().hasOnly(bookingFields())
         && request.resource.data.keys().hasAll(['participants', 'trainerUid', 'clientUid', 'startAt', 'durationMin', 'status'])
@@ -530,6 +571,7 @@ service cloud.firestore {
       // having — the get() costs one read on a write that happens a few times a
       // week, which is the cheapest possible place to pay for it.
       allow create: if isSignedIn()
+        && mayBook(request.auth.uid)   // scheduling is Coach and above (S215)
         && request.resource.data.keys().hasOnly(blockFields())
         && request.resource.data.keys().hasAll(['trainerUid', 'startAt', 'durationMin'])
         && request.resource.data.trainerUid == request.auth.uid
