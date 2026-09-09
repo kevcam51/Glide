@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**2,195 assertions across 36 suites**, S215).
+- `npm run test:units` — the JS unit suites (**2,469 assertions across 37 suites**, S216b).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -108,8 +108,48 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
-> _**S216 (Sep 9): READ `Glide-Session-Handoff-NEXT.md` §"START HERE (S216)" —
-> it is a QUEUE, nothing is started, and the tree is clean at `82b3fc9`.**
+> _**S216b (Sep 9): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S216b)"
+> first.** Pushed. Frontend only — no rules, no functions, no deploy; the push
+> IS the release. **2,469 assertions across 37 suites**; build, `check:undef` and
+> `check:weak` clean. Kevin's whole S216 queue is closed.
+> The **"What if…" modal is ONE PAGE** now: the three tabs are gone, the loss
+> paces carry **minus signs** (the sandbox had reintroduced the flat layout the
+> dashboard card rejected in S198z), "One number" is folded in as an explained
+> **"Same every day?"** action, the day inputs no longer sit under the spinner
+> arrows, and "how often" + "also burned" are replaced by a **full weekly cardio
+> planner** — Quick Fill plus seven editable days, with a **manual-calorie
+> session** in both. "Make up a big day" is unchanged.
+> ⚠️ **IT STILL WRITES NOTHING, PROVEN IN PRODUCTION** — the planner is local
+> state DEEP-COPIED from `data.cardio`; editing it left the plan byte-identical
+> in Firestore. That promise is what licenses the screen to display a typed
+> sub-1,200 number.
+> ⚠️ **SEEDING FROM THE REAL WEEK INVITES A DOUBLE COUNT — that is the whole
+> arithmetic problem.** In eat-back mode `intakeFor` already carries the week's
+> training, so subtracting the planner again would make a 1 lb/wk plan claim
+> ~1.8 the moment the modal opened. `burnWeek` is 0 in eat-back and the whole
+> week in accelerate. Measured live: +1,200 cal of cardio raised the daily goal
+> 2,569 → 2,740 and left the projection at exactly −1.0 lb/wk.
+> ⚠️ **ACCELERATE NOW COUNTS THE WEEK IT WAS IGNORING** (−1.0 → −1.2 on the
+> reference plan) — the same arithmetic SummaryTab already dates that goal with.
+> ⚠️ **A MANUAL SESSION IS A THIRD SHAPE, LOCAL ONLY** — `cardioExFor` prices it
+> at ZERO, which is also why the ladder is `simIntakeForRate`; a suite runs it
+> against `planIntakeForRate` over 84 rate × plan pairs and requires
+> bit-identical on an untouched planner.
+> Also, each its own commit: **`SummaryTab`'s goal date stopped hardcoding
+> 3500** (a 2 lb/wk plan was dated at 1 — and the prose one line above said
+> "steady ~1 lb/wk" too; a non-losing plan now has NO eat-back date rather than
+> an invented one); **`NutrientsTab` moved onto `planIntakeForRate`**, taking
+> five props with it; and **every bare `Math.max(1200, …)` now reads
+> `MIN_DAILY_CAL`** — which killed Results' local unrounded `floor` helper and
+> with it a live bug printing "3,416.714" as the beginners' screen hero number.
+> ⚠️ **Traps:** `window.storage.set` stores `value` VERBATIM and the app always
+> passes a JSON **string** — poking test data in as a native object made the
+> trainer home read "0 plans"; and the first bare-1,200 scan used
+> `(?<![\d,.])1200` which cannot see `Math.max(1200, …)`, the one shape it
+> existed for._
+>
+> _**S216 (Sep 9) — THIS QUEUE IS CLOSED; S216b above shipped all of it. Kept
+> for Kevin's own words, which are the spec.**
 > Kevin's asks, after using the S213 What if… build: fold its THREE TABS into one
 > page; put minus signs on the weight-loss pace chips; move the day-by-day
 > numbers off the spinner arrows; and replace the "how often" + "own number"

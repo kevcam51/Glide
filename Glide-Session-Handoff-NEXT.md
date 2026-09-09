@@ -1,6 +1,144 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S216) — KEVIN'S QUEUE, NOTHING STARTED
+## ▶️ START HERE (S216b) — THE QUEUE IS DONE, PUSHED (frontend only)
+
+Six commits. **2,469 assertions across 37 suites**; build, `check:undef` and
+`check:weak` clean. No rules, no functions, no deploy — the push IS the release,
+and Kevin gave the go-ahead. The S216 queue below (Kevin's verbatim asks) is
+closed: all four items shipped, each of the three loose ends as its own commit.
+
+Kevin's asks and what each became:
+
+### 1. The "What if…" modal is ONE PAGE with a week of cardio in it
+
+- **The three tabs are gone.** "Pick a pace" / "One number" / "Day by day" were
+  three ways of saying the same sum — pace and one-number weeks were literally
+  `intake * 7`. The pace grid stays at the top because it is *also* the price of
+  every blank day; the seven boxes sit under it.
+- **"One number" is explained and folded in.** It meant "assume I eat the same N
+  every day". Kevin not recognising the label was the verdict on the label, not
+  on the capability, so it is now a **"Same every day?"** panel that fills all
+  seven boxes and says what it does.
+- **Minus signs on the loss paces**, in the same anatomy as the Daily Calorie
+  Targets card: maintenance alone on top, then a signed row under each direction
+  heading. ⚠️ The sandbox had **reintroduced the flat layout that card rejected
+  in S198z** — "2 lbs/wk" beside "+1 lb/wk" meaning opposite things.
+- **A full weekly cardio planner**, Quick Fill (with presets) plus seven
+  individually-editable days, modelled on `StepCardio`, plus a **manual-calorie
+  session** offered in Quick Fill and in both branches of the per-day editor.
+  "how often" and "+ cal / also burned" are gone.
+- **Make up a big day is untouched**, except that its "≈ N min of X" reference
+  exercise now comes from the planner's week instead of the single picker that
+  no longer exists.
+
+⚠️ **THE MODAL STILL WRITES NOTHING, AND IT IS PROVEN IN PRODUCTION.** The
+planner is local state, **deep copied** from `data.cardio` so an edit cannot
+reach the plan by reference. Verified live: setting Tuesday to a rest day inside
+the sandbox, adding and removing sessions, and quick-filling three days all left
+`data.cardio` byte-identical in Firestore. That promise is the entire licence for
+this screen to display a typed sub-1,200 number.
+
+⚠️ **SEEDING FROM THE REAL WEEK INVITES A DOUBLE COUNT, AND THAT IS THE WHOLE
+ARITHMETIC PROBLEM.** In eat-back mode `intakeFor` ALREADY carries the week's
+training spread over seven days — that is what eat-back *means* — so subtracting
+the planner's burn again would turn a 1 lb/wk plan into a claimed ~1.8 the moment
+the modal opened, with nothing on screen touched. `burnWeek` is zero in eat-back
+and the whole week in accelerate. **Measured live: adding 1,200 cal of cardio to
+an eat-back plan raised the daily goal 2,569 → 2,740 and left the projection at
+exactly −1.0 lb a week.**
+
+⚠️ **ACCELERATE NOW COUNTS THE WEEK IT WAS IGNORING.** The old sandbox subtracted
+only the session you added, so an accelerate plan's own training was invisible to
+it. It is the same arithmetic `SummaryTab` already dates that goal with
+(rate × 3500 + the whole weekly burn), strength included. On the reference plan
+the projection went −1.0 → −1.2 lb/wk. **This is a real number change on
+accelerate plans; nothing stored moves.**
+
+⚠️ **A MANUAL SESSION IS A THIRD SHAPE AND IT LIVES ONLY IN THE SANDBOX.**
+`cardioExFor` knows `{type:id}` and `{type:"hr"}`; a `{type:"manual", cal}` falls
+back to Rest Day and prices at **zero**, and the real plan cannot store one. It
+is priced in `simSessionBurn` — which is also why the ladder is
+**`simIntakeForRate`** rather than a call to `planIntakeForRate` on a copy. The
+suite runs both across 84 rate × plan pairs and requires them **bit-identical**
+on an untouched planner; that equality is what stops this modal and the dashboard
+quoting different daily targets.
+
+⚠️ **THE ENGINE SUBTRACTS THE WEEK, NOT A ROUNDED DAY TIMES SEVEN.** The old
+rounding existed to keep the two scalar modes identical to the weekly one; with
+one mode left it only put "Cardio this week 684" a hundred pixels above
+"Training burns (week) −686" — two numbers for the same sessions in one card.
+
+Small ones in the same commit: the day inputs are right-aligned, so their 10px of
+right padding put the digits **under the browser's spinner arrows** (Kevin's
+report) — 30px now, on all four numeric boxes; a blank manual session reads "No
+calories typed yet" rather than claiming a zero; an empty cardio week says so
+instead of printing a row of orange zeroes; the day header is a real `<button>`
+rather than a div wearing `role="button"`.
+
+### 2. The three loose ends, one commit each
+
+1. **`SummaryTab`'s goal DATE hardcoded 3500.** Every plan was dated at 1 lb/week
+   — 20 lbs at 2 lb/wk was told twenty weeks where the plan's own arithmetic says
+   ten, four lines under a row reading "Your plan's pace · 2 lbs/wk".
+   ⚠️ **The prose carried the same false claim one line above the date**
+   ("easier diet, steady ~1 lb/wk"), so an arithmetic-only fix would have left the
+   card contradicting its own new number.
+   ⚠️ **And a maintenance or gaining plan now has NO eat-back date** — `weeksToGoal`
+   refuses a non-positive deficit, so the row reads "—" with a line naming the
+   pace that caused it. The old literal manufactured a confident date for a plan
+   that was never going to get there by eating. Verified live both ways.
+2. **`NutrientsTab`'s ≤1-cal double-round.** It divided the week TWICE
+   (`Math.round(cardio/7) + Math.round(strength/7)`); it now calls
+   `planIntakeForRate`. ⚠️ **Five props went with it** — `tdee`, `floor`,
+   `avgBurnPerDay`, `avgStrPerDay`, `deficitMode` existed only to be reassembled
+   into that ladder, and leaving them in scope leaves the rebuild one edit away.
+   The chooser keeps a **rate** now, not a daily cut; a test pins the two columns
+   of the `targets` table together.
+3. **Every bare `Math.max(1200, …)` / `< 1200`** now reads `MIN_DAILY_CAL` or
+   `atLeastMinCal` — fifteen sites. ⚠️ **`weekPlan` and `makeUpPlan` keep `floor`
+   as a PARAMETER** (two suites lift and RUN them); only the default became the
+   constant, and `test-makeup-plan.mjs` had to learn to lift it.
+   ⚠️ **Removing Results' local `floor` helper fixed a live display bug**: it was
+   `n => Math.max(n, 1200)`, which does NOT round, and two `SimplePlanView`
+   branches add `weeklyBurn / 7` — so the beginners' screen printed its hero
+   number as **"3,416.714"** on any plan whose week does not divide by seven.
+
+### ⚠️ Traps this session paid for
+
+- **`window.storage.set(key, value)` STORES `value` VERBATIM, and the whole app
+  passes a JSON STRING.** Poking test data in from the browser console with a
+  native object writes a document the app's own `get` cannot parse — the trainer
+  home read "0 plans" until both keys were rewritten with `JSON.stringify`. If you
+  edit kv by hand, stringify, and read back with a tolerant parser before
+  believing what you see.
+- **A NEGATIVE CONTROL THAT CANNOT SEE THE SHAPE IT GUARDS.** The new bare-1,200
+  scan used `(?<![\d,.])1200(?![\d,.])` — the obvious way to skip "120000" and
+  "1,200" — which also skips **`Math.max(1200, …)`**, the one shape the assertion
+  exists for. It passed on a file still full of them. Digits only in the
+  lookaround now, with a control that plants the clamp and proves the old pattern
+  misses it.
+- **TWO OF MY OWN EXPECTED VALUES WERE WRONG, AND THE TEST CAUGHT ME.** "35 lbs at
+  2 lb/wk is 10 weeks" (it is 17.5 — the handoff's 20→10 case is a 20 lb goal),
+  and `RATE_SHORT[2]` is "2 lb/wk", not "2 lbs/wk" (only the dashboard's own
+  `rates` table spells it with the s). Assert against the lifted constant, not
+  against memory.
+- **A MUTATION THAT CHANGES NOTHING PROVES NOTHING.** Two of the mutations run
+  against the new guards came back green and were both arithmetically identical
+  to the original (`round(int + round(f))` is `round(int + f)`; the cardio catalog's
+  fallback entry is `rest` with `met: 0`). A green mutation is a claim about the
+  mutation, not about the test.
+
+### Still open — flagged, not fixed
+
+- Nothing from Kevin's queue. The only judgement call left for him is the one
+  named above: **accelerate-mode plans now project faster in the sandbox** because
+  it counts their scheduled training, which the old build ignored. It agrees with
+  `SummaryTab`'s accelerate goal date, so the two screens now match — but a client
+  who screenshotted the old figure will see a different one.
+
+---
+
+## Previously: START HERE (S216) — THE QUEUE THIS SESSION WORKED
 
 Tip `82b3fc9`, clean tree, level with origin. Everything below S215 is shipped,
 deployed and verified live — **this section is all new work**.
