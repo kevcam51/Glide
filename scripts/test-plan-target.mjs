@@ -217,7 +217,17 @@ const P = (over = {}) => ({
   ok("todayTarget is gone from the component", !/todayTarget/.test(SIM_CODE));
   ok("...and from the element that mounts it", !/todayTarget=/.test(APP));
   ok("...as is the injected intakeFor", !/intakeFor=\{/.test(APP));
-  ok("the sandbox builds its ladder from the plan", /const intakeFor = \(r\) => planIntakeForRate\(d, r\);/.test(SIM_CODE));
+  // ⚠️ S216: the sandbox now carries its own WEEK OF CARDIO, so its ladder is
+  // `planIntakeForRate` with that week substituted for data.cardio — it cannot
+  // call planIntakeForRate on a copy, because a {type:"manual"} session prices
+  // to zero through the shared helpers. What matters here is unchanged: the
+  // ladder is a property of the PLAN, never of the day on screen.
+  // scripts/test-what-if-week.mjs runs both and requires them bit-identical on
+  // an untouched planner.
+  ok("the sandbox builds its ladder from the plan, not from the viewed day",
+     /const intakeFor = \(r\) => simIntakeForRate\(d, trainWeek, r\);/.test(SIM_CODE));
+  ok("...and that ladder is planIntakeForRate's own arithmetic",
+     /function simRawIntakeForRate\(d, weeklyBurn, r\) \{[\s\S]*?planEnergy\(d\)\.tdee[\s\S]*?Math\.round\(\(\(Number\(r\) \|\| 0\) \* 3500\) \/ 7\)[\s\S]*?isEatback\(d\)/.test(code(APP)));
   ok("...and judges history by the plan target", /const planTarget = \(computeClientCalories\(d\) \|\| \{\}\)\.target \|\| 0;/.test(SIM_CODE));
   ok("the over-day memo calls the shared rule", /overDaysFrom\(dayCalsAll, planTarget\)/.test(SIM_CODE));
   ok("...with plain-value deps", /\[dayCalsAll, planTarget\]/.test(SIM_CODE));
@@ -226,7 +236,7 @@ const P = (over = {}) => ({
   // overDaysFrom must sit ABOVE the component or test-what-if-week's slice swallows it.
   ok("overDaysFrom is module-level, above the component", APP.indexOf("function overDaysFrom(") < SIM_A);
   // The floored label the launching card has had since S198z.
-  ok("a floored pace chip says so", /flooredAtRate\(r\) && \(/.test(SIM_CODE) && /floored/.test(SIM));
+  ok("a floored pace chip says so", /const low = flooredAtRate\(t\.rate\);/.test(SIM_CODE) && /floored/.test(SIM));
 }
 
 // ── 7. custom exercises describe themselves honestly ────────────────────────

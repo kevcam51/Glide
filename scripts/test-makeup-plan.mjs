@@ -116,8 +116,11 @@ ok("the floor warning is shown, not swallowed", /mu\.floorHit && \(/.test(APP));
 ok("...naming what moved to training", /mu\.movedToTraining\.toLocaleString\(\)/.test(APP));
 // S213: the picker is cardio-only now, so the label can be a heart rate — and
 // "833 min OF 148 bpm" is not English. The two forms are one expression.
+// ⚠️ S216: the single session picker is GONE — the reference session is taken
+// from the sandbox's week of cardio instead (`refEx`), so this reads the new
+// name. The rendering itself is unchanged, and so is the reason for it.
 ok("the burn is translated into time on the exercise they picked",
-   /≈ \{muMinutes\} min \{pickedEx\.isHr \? `at \$\{pickedEx\.label\}` : `of \$\{pickedEx\.label\}`\}/.test(APP));
+   /≈ \{muMinutes\} min \{refEx\.isHr \? `at \$\{refEx\.label\}` : `of \$\{refEx\.label\}`\}/.test(APP));
 ok("one big day is put in proportion rather than dramatised", /isn&rsquo;t a setback unless it becomes the pattern/.test(APP));
 
 // ── negative controls ─────────────────────────────────────────────────────
