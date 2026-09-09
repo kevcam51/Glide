@@ -108,6 +108,26 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S216 (Sep 9): READ `Glide-Session-Handoff-NEXT.md` §"START HERE (S216)" —
+> it is a QUEUE, nothing is started, and the tree is clean at `82b3fc9`.**
+> Kevin's asks, after using the S213 What if… build: fold its THREE TABS into one
+> page; put minus signs on the weight-loss pace chips; move the day-by-day
+> numbers off the spinner arrows; and replace the "how often" + "own number"
+> fields with a **full weekly cardio planner inside the modal** — Quick Fill plus
+> seven individually-editable days, modelled on `StepCardio` — with a new
+> **manual calorie** session shape available both per-day and in Quick Fill.
+> "Make up a big day" stays. He also could not tell what **"One number"** was for
+> (it means "assume I eat the same N every day"); fold it in as a "set every day
+> to…" action rather than a tab.
+> ⚠️ **THE CONSTRAINT THAT IS THE WHOLE DESIGN PROBLEM: THAT MODAL WRITES
+> NOTHING**, and that promise is what licenses it to display a typed sub-1,200
+> number. `StepCardio` writes straight to `data.cardio`; the sandbox planner must
+> be LOCAL state seeded from the plan. Do not thread a setter in to save effort.
+> Also cleared to fix, each its own commit: `SummaryTab`'s goal DATE hardcodes
+> 3500 so a 2 lb/wk plan is dated at 1 lb/wk (20 weeks where the truth is 10);
+> `NutrientsTab`'s ≤1-cal double-round; and seven bare `Math.max(1200, …)`
+> literals._
+>
 > _**S215 (Sep 8): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S215)" first.**
 > Deployed (18 functions, `aitools.js` set) BEFORE the push, `check:stale` clean
 > at 79, live bundle marker-diffed. ⚠️ **That order is not optional** — push

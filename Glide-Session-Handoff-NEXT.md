@@ -1,6 +1,163 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S215) — DEPLOYED AND PUSHED
+## ▶️ START HERE (S216) — KEVIN'S QUEUE, NOTHING STARTED
+
+Tip `82b3fc9`, clean tree, level with origin. Everything below S215 is shipped,
+deployed and verified live — **this section is all new work**.
+
+⚠️ The previous session ended because its context filled, NOT because anything
+was half-done. No stashes, no uncommitted edits, no undeployed functions.
+
+---
+
+### 1. Redesign the "What if…" modal into ONE page (the big one)
+
+Kevin, verbatim, after using the S213 build:
+
+> *"in the What if section we need to add - to the calories that are meant for
+> weight loss."*
+>
+> *"I have no idea what the one number section is and how it is useful. You might
+> need to give me a short explanation of this section."*
+>
+> *"in the day by day section I think it is a good start. in the text box the
+> numbers are way too close to the arrows, can we move the numbers over to the
+> left a little bit. Also, we need the cardio selection option to be for every
+> day and we need it to be set up almost exactly like it is in the weekly cardio
+> plan section. Quick fill option at the top, that works exactly the same, and
+> all of the days listed down below that can be edited separately. The difference
+> with this page is that it is focused on getting the calorie information and
+> using it to help with the daily calorie goals to calculate the potential weight
+> loss or weight gain. This can all honestly be on the Pick a pace page and we
+> probably do not need 3 separate tabs."*
+>
+> *"we can remove the how often and also burned section because now that we will
+> be using the full weekly cardio plan screen that will be how we manage all of
+> the calorie for the week to give the app the estimate it needs. only thing we
+> will need to is a manual calorie entry option for the exercise options right
+> under the heart rate section so we can just manually type the calorie burn we
+> want. this also needs to be in the quick fill section as well."*
+>
+> *"the quick fill section will make it easy to just do certain days of the week
+> with exercise and still be able to see the daily calorie goal along side the
+> exercise calories. this will make it so a user can just manually enter 400
+> calories for all days or how ever many days they want. Or they can plan out
+> each day separately and find out the calorie burn for each one by one. Making
+> the Weekly cardio plan, plus the changes to work with the daily calorie
+> numbers is the perfect fit."*
+>
+> *"I really like the Make up a big day option at the bottom. we can keep that."*
+
+**What that means, item by item:**
+
+- **DROP THE 3-TAB TOGGLE.** "Pick a pace" / "One number" / "Day by day" becomes
+  one scrolling page. The pace grid stays at the top (it is also the price of a
+  blank day — see the S213 block below).
+- **MINUS SIGNS ON LOSS PACES.** The grid currently renders loss unsigned and
+  gain "+"-prefixed, side by side. ⚠️ The dashboard card's own comment (search
+  `RATE_SHORT` / the `t.sign` block) records that exact layout as REJECTED for
+  making "2 lbs/wk" and "+1 lb/wk" mean opposite things — the sandbox
+  reintroduced it. Kevin is asking for the fix that card already has.
+- **"ONE NUMBER" — EXPLAIN IT, THEN FOLD IT IN.** It means "assume I eat the
+  same N calories every day". It is the fastest way to answer "what if I just
+  ate 2,000 flat?" without typing seven boxes. Kevin did not recognise it, which
+  is the real verdict on its label. Folding it into the day-by-day grid as a
+  **"set every day to…"** action keeps the capability and loses the tab.
+- **DAY-BY-DAY INPUT PADDING.** The numbers sit against the spinner arrows. Add
+  right padding to the seven `type="number"` inputs (they are `textAlign:
+  "right"`, `width: 96px`).
+- **A FULL WEEKLY CARDIO PLANNER, INSIDE THE MODAL.** Quick Fill at the top that
+  works exactly like the wizard's, then all seven days listed and individually
+  editable. Model it on `StepCardio` (`src/App.jsx`, search
+  `function StepCardio`) — quick fill is `showFill`/`fillType`/`fillDuration`/
+  `fillDays`/`toggleFillDay`/`applyFill`, and the per-day list is the
+  `WZW.dayCard` block.
+- **REMOVE** the "how often" (`daysPerWeek`) select and the "+ cal / also
+  burned" (`extraBurn`) field — the weekly planner replaces both.
+- **ADD A MANUAL CALORIE SESSION**, "right under the heart rate section": a
+  third session shape alongside exercise and heart-rate, where you just type the
+  burn. Needed in the per-day editor AND in Quick Fill (so "400 calories on
+  these 4 days" is two taps).
+- **KEEP "Make up a big day"** exactly as it is.
+
+⚠️ **THE HARD CONSTRAINT, AND IT IS THE WHOLE DESIGN PROBLEM: THIS MODAL WRITES
+NOTHING.** Its subtitle promises "Nothing here changes your plan", its props
+carry no setter, and that promise is what licenses it to display a typed
+sub-1,200 number at all. `StepCardio` writes straight to `data.cardio` via
+`onChange`. So the planner inside the sandbox must be **local component state** —
+seeded from the plan's real `data.cardio` so it starts from reality, then edited
+freely without touching the plan. Do not thread a setter in to save effort.
+
+⚠️ **A MANUAL-CALORIE SESSION IS A THIRD SHAPE.** Today a cardio session is
+`{type:"<id>", duration}` or `{type:"hr", hr, duration}`, resolved by
+`cardioExFor` and priced by `exBurn`. A `{type:"manual", cal}` shape is fine
+LOCALLY in the sandbox, but `cardioExFor`/`exBurn` do not know it — price it in
+the sandbox's own reducer and do not teach the shared helpers a shape the real
+plan cannot store, unless you also do the wizard.
+
+⚠️ **THE ENGINE IS ALREADY WEEKLY AND MUST STAY ONE PATH.** `weekBalance =
+weekIntake − burnPerDay*7 − maintain*7`, and the three intake modes are the same
+sum. The new planner replaces where `burnPerDay` comes from — it does NOT need a
+second arithmetic path. `scripts/test-what-if-week.mjs` sweeps 106,015
+combinations of the LIFTED shipping expressions to keep pace mode bit-identical;
+expect to update it and keep that sweep.
+
+**Where things are** (tip `82b3fc9`): `CalorieSimulator` is `src/App.jsx`
+**12473–13123** (~650 lines). Section markers: `1 · What you eat` (12677), the
+mode toggle (12679), the day-by-day block (12727), `2 · Cardio you add` (12817),
+`how often` (12876), `also burned` (12884), the answer (12903), `Make up a big
+day` (13016). `StepCardio` is at 4134.
+
+---
+
+### 2. The three loose ends Kevin has approved closing
+
+He said: *"I don't understand the still open things but if you need to close it
+out and finish it please feel free to."* So these are cleared to fix — but each
+is its OWN commit, because the first changes a displayed date.
+
+1. **`SummaryTab`'s Nutrition Approach goal DATE hardcodes 3500 in
+   `weeksToGoal`**, so a 2 lb/wk plan is dated at 1 lb/wk — **20 weeks where the
+   truth is 10**. This is a wrong date on a card people plan around, and it is
+   the most user-visible of the three. Search `weeksToGoal` in `SummaryTab`.
+2. **`NutrientsTab` carries the same ≤1-cal double-round** as SummaryTab had
+   (`Math.round(cardio/7) + Math.round(strength/7)` instead of dividing the week
+   once). It is ALREADY mode-gated and ALREADY includes strength — i.e. correct
+   on the axes S215 was about — and it does not receive `data`, so it needs the
+   prop threading before it can call `planIntakeForRate`.
+3. **Seven bare `Math.max(1200, …)` literals remain** despite `atLeastMinCal` /
+   `MIN_DAILY_CAL`. CLAUDE.md names this exact anti-pattern, and the S215 ladder
+   bug is precisely what it produces — one literal applied at a different point
+   in a chain than the others.
+
+---
+
+### ⚠️ Read before touching any of it
+
+- **`planIntakeForRate` is FLAT BY CONTRACT** — no weekday, no log. The
+  Day-by-Day *Results* cells and the Daily Dashboard deliberately do NOT use it.
+  Routing a per-day surface through it is the S214 bug pointing backwards; both
+  carve-outs carry comments saying so.
+- **The sandbox displays, it does not prescribe.** Nothing the user types is
+  clamped; sub-1,200 days are NAMED instead. That only stays defensible while
+  the modal writes nothing.
+- **Two sessions have been pushing to this repo in parallel all week.** S209/S210
+  and S212b-d both landed mid-build. Expect to rebase, expect `package.json`'s
+  `test:units` to conflict, and **resolve it as a UNION, never a pick** — then
+  re-run the whole suite and re-count, because a FALLING assertion count means a
+  suite aborted rather than passed.
+- **Test-harness rules this arc paid for repeatedly:** lift the shipping source
+  and RUN it (never transcribe, never pattern-match alone); strip comments before
+  asserting on anything that renders; COUNT occurrences when a guard has more
+  than one home; and mutate every guard to confirm it goes red — two controls
+  last session asserted a property that was invariant under their own mutation
+  and sat green. `scripts/test-plan-target.mjs` and
+  `scripts/test-results-targets.mjs` carry a brace-balanced `liftDecl` worth
+  copying; the naive regex version silently swallowed 3,600 characters.
+
+---
+
+## Previously: START HERE (S215) — DEPLOYED AND PUSHED
 
 **2,195 assertions across 36 suites + 272 rules tests**; build, `check:undef`,
 `check:weak` clean. The 18-function `aitools.js` set was deployed BEFORE the
