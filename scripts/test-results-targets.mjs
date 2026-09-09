@@ -293,6 +293,74 @@ ok("prescriptions still floor through atLeastMinCal",
      (added.match(/\p{Extended_Pictographic}/gu) || []).join(""));
 }
 
+// ── 3b. the Nutrients tab is on the same ladder (S216) ─────────────────────
+// It was the last per-rate number in Results still assembling the ladder by
+// hand: `floor(tdee − cut + Math.round(cardio/7) + Math.round(strength/7))`.
+// Already mode-gated and already counting strength — correct on the axes S215
+// was about — but rounding each half of the week SEPARATELY put it up to a
+// calorie away from computeClientCalories, on the tab whose whole job is to
+// divide that number into grams.
+{
+  const a = CODE.indexOf("function NutrientsTab(");
+  const b = CODE.indexOf("\nfunction ", a + 10);
+  ok("found the NutrientsTab body", a > 0 && b > a);
+  const NUT = CODE.slice(a, b);
+  ok("its target is the shared ladder", /const targetCals = planIntakeForRate\(data, rateChoice\);/.test(NUT));
+  // ⚠️ COUNTED. Every one of the five props it used to rebuild that ladder from
+  // has to be gone, or the next edit reassembles it.
+  ok("...and nothing is left to rebuild it from",
+     ["tdee", "floor", "avgBurnPerDay", "avgStrPerDay", "deficitMode"]
+       .every((v) => !new RegExp("\\b" + v + "\\b").test(NUT)),
+     ["tdee", "floor", "avgBurnPerDay", "avgStrPerDay", "deficitMode"].filter((v) => new RegExp("\\b" + v + "\\b").test(NUT)));
+  // ⚠️ SCOPED TO THE ELEMENT, NOT TO 600 CHARACTERS AFTER IT. SurplusTab is the
+  // next sibling and still takes avgBurnPerDay legitimately.
+  {
+    const i = CODE.indexOf("<NutrientsTab");
+    const el = CODE.slice(i, CODE.indexOf("/>", i));
+    ok("...nor at the call site", i > 0 && !/avgBurnPerDay=|avgStrPerDay=|\bfloor=|\btdee=|deficitMode=/.test(el), el.slice(0, 400));
+    ok("...which now hands over the whole plan instead", /\bdata=\{data\}/.test(el));
+  }
+  ok("the chooser keeps a RATE now, not a daily cut", /const \[rateChoice, setRateChoice\] = useState\(1\);/.test(NUT));
+  ok("...and the buttons set and compare it", /rateChoice===t\.rate/.test(NUT) && /setRateChoice\(t\.rate\)/.test(NUT));
+  ok("...so the protein basis follows the rate", /rateChoice > 0 \? 1\.0 : 0\.8/.test(NUT));
+  ok("...and so does the micronutrient relevance", /const isCutting = rateChoice > 0;/.test(NUT));
+  // ⚠️ THE CHOICES DID NOT CHANGE — the table has carried both columns since
+  // S95 and 0/250/500/1000 IS 0/½/1/2 lb a week. If they ever stop matching,
+  // this tab silently starts answering a different question from its own label.
+  const tbl = CODE.match(/const targets = \[[\s\S]*?\n  \];/)[0];
+  const pairs = [...tbl.matchAll(/cut:(\d+),\s*rate:([\d.]+)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+  ok("the chooser offers four paces", pairs.length === 4, pairs);
+  ok("...and every cut IS its rate's daily deficit",
+     pairs.every(([cut, rate]) => cut === Math.round((rate * 3500) / 7)), pairs);
+  // And the number it lands on is the plan's own, run rather than asserted.
+  {
+    const d = base({ ...withCardio([D[1], D[3]]), ...withStrength([D[0], D[2]]) });
+    for (const [, rate] of pairs) {
+      ok(`Nutrients at ${rate} lb/wk IS the ladder`,
+         M.planIntakeForRate(d, rate) === M.atLeastMinCal(M.planEnergy(d).tdee - Math.round((rate * 3500) / 7) + M.planEnergy(d).eatbackPerDay));
+    }
+    // ⚠️ NEGATIVE CONTROL, ON THE SHIPPED ROUNDER. Dividing each half of the
+    // week separately drifts by a whole calorie whenever the two remainders add
+    // past a half — small enough to survive a reading, big enough to make this
+    // tab and the dashboard quote different targets.
+    const once   = (tdee, cut, c, s) => M.atLeastMinCal(tdee - cut + (c + s) / 7);
+    const twice  = (tdee, cut, c, s) => M.atLeastMinCal(tdee - cut + Math.round(c / 7) + Math.round(s / 7));
+    ok("control: 100 cardio + 100 strength really is a calorie apart",
+       twice(2500, 500, 100, 100) !== once(2500, 500, 100, 100),
+       { twice: twice(2500, 500, 100, 100), once: once(2500, 500, 100, 100) });
+    // How often, across burns a real plan actually produces.
+    let drifted = 0, total = 0;
+    for (let c = 0; c <= 3000; c += 37) {
+      for (let sB = 0; sB <= 3000; sB += 41) {
+        total++;
+        if (twice(2500, 500, c, sB) !== once(2500, 500, c, sB)) drifted++;
+      }
+    }
+    ok(`control: it drifts on a real share of plans (${Math.round((drifted / total) * 100)}% of ${total})`,
+       drifted / total > 0.05, { drifted, total });
+  }
+}
+
 // ── 4. negative controls ────────────────────────────────────────────────────
 {
   const d = base({ ...withCardio([D[1], D[3]]), ...withStrength([D[0], D[2], D[4]]) });

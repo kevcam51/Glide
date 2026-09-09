@@ -5589,19 +5589,18 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
       {/* ─ Nutrients ─ */}
       {tab === (hasGoal ? 3 : 2) && (
         <NutrientsTab
+          // ⚠️ THE WHOLE PLAN, BECAUSE THE TARGET COMES FROM planIntakeForRate
+          // NOW. The five props it replaced — tdee, floor, avgBurnPerDay,
+          // avgStrPerDay and deficitMode — were only ever assembled back into
+          // that same ladder by hand, one rounding apart from it.
+          data={data}
           weightLbs={Number(weightLbs)}
           gender={gender}
           age={Number(age)}
-          tdee={tdee}
-          totalBurn={totalBurn}
           name={name}
           macroTargets={data.macroTargets}
-          deficitMode={data.deficitMode}
           proteinPerLb={data.proteinPerLb}
           targets={targets}
-          floor={floor}
-          avgBurnPerDay={avgBurnPerDay}
-          avgStrPerDay={avgStrPerDay}
           activeDays={activeDays}
           activeStrDays={activeStrDays}
           dayData={dayData}
@@ -7038,17 +7037,29 @@ function SurplusTab({ tdee, totalBurn, avgBurnPerDay, activeDays, name }) {
 
 // ─── Nutrients Tab ────────────────────────────────────────────────────────────
 
-function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, floor, avgBurnPerDay, avgStrPerDay = 0,
-  activeDays = 0, activeStrDays = 0, dayData = [], strengthDayData = [], macroTargets, deficitMode, proteinPerLb }) {
-  const [deficitChoice, setDeficitChoice] = useState(500);
+function NutrientsTab({ data, weightLbs, gender, age, name, targets,
+  activeDays = 0, activeStrDays = 0, dayData = [], strengthDayData = [], macroTargets, proteinPerLb }) {
+  // ⚠️ A RATE, NOT A DAILY CUT (S216). The chooser's own `targets` table has
+  // carried both since S95, and the two are the same choices — 0 / 250 / 500 /
+  // 1000 IS 0 / ½ / 1 / 2 lb a week. Keeping the rate is what lets this tab ask
+  // the shared ladder rather than rebuild it.
+  const [rateChoice, setRateChoice] = useState(1);
   const [openMicro, setOpenMicro] = useState(null);
   const [openFoodCat, setOpenFoodCat] = useState(null);
 
-  // Calorie target for chosen deficit (with avg cardio + strength burn added)
-  const avgTotalBurn = avgBurnPerDay + avgStrPerDay;
-  // Eat-back mode adds the average workout burn to the eating target;
-  // accelerate mode keeps the raw deficit (burn speeds the date instead).
-  const targetCals = floor(tdee - deficitChoice + (deficitMode !== "accelerate" ? avgTotalBurn : 0));
+  // ⚠️ THE SHARED LADDER, NOT A LOCAL REBUILD. This line was
+  // `floor(tdee − cut + Math.round(cardio/7) + Math.round(strength/7))` — it
+  // was already mode-gated and already counted strength, so it was correct on
+  // the axes S215 was about, but rounding each half of the week separately put
+  // it up to a calorie away from computeClientCalories on 9.4% of realistic
+  // plans. planIntakeForRate divides the week ONCE, unrounded, which is the
+  // same reason SummaryTab stopped doing this by hand.
+  //
+  // ⚠️ AND IT DELIBERATELY IGNORES A MANUAL data.calorieTarget, because this is
+  // the rate LADDER — "what would each pace allow" — not the number in force.
+  // That is planIntakeForRate's documented contract and it is why this tab asks
+  // it rather than computeClientCalories.
+  const targetCals = planIntakeForRate(data, rateChoice);
 
   // ── Macro calculations ──
   // Coach/client-set custom targets (data.macroTargets) take precedence over
@@ -7058,7 +7069,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
   // Honor the plan's protein-basis choice (data.proteinPerLb) if set; otherwise the
   // maintenance/loss default (0.8g maintenance, 1.0g loss for muscle sparing).
   const proteinMultiplier = Number(proteinPerLb) === 0.7 || Number(proteinPerLb) === 1.0
-    ? Number(proteinPerLb) : (deficitChoice > 0 ? 1.0 : 0.8);
+    ? Number(proteinPerLb) : (rateChoice > 0 ? 1.0 : 0.8);
   const proteinG  = mtN.protein != null ? Number(mtN.protein) : Math.round(weightLbs * proteinMultiplier);
   const proteinCal = proteinG * 4;
 
@@ -7083,7 +7094,7 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
   const over40    = age >= 40;
   const over50    = age >= 50;
   const over70    = age >= 70;
-  const isCutting = deficitChoice > 0;
+  const isCutting = rateChoice > 0;
   const isHeavyCardio = activeDays >= 4;
   const doesEndurance = dayData.some(d=>(d.sessions||[]).some(s=>["treadmill_run","treadmill_jog","outdoor_jog","outdoor_run","cycling_vig","swim_hard","rowing_hard"].includes(s?.type)));
   const isHeavySweater = isHeavyCardio || dayData.some(d=>(d.sessions||[]).some(s=>["hiit","boxing_bag","kickboxing","jump_rope","jump_rope_fast","assault_bike","crossfit"].includes(s?.type)));
@@ -7270,9 +7281,9 @@ function NutrientsTab({ weightLbs, gender, age, tdee, totalBurn, name, targets, 
           {targets.map(t => (
             <button
               key={t.label}
-              className={`nutr-goal-btn${deficitChoice===t.cut?" active":""}`}
-              style={deficitChoice===t.cut?{borderColor:`var(${t.cls==="c-acc"?"--accent":t.cls==="c-grn"?"--green":t.cls==="c-yel"?"--yellow":"--red"})`,color:`var(${t.cls==="c-acc"?"--accent":t.cls==="c-grn"?"--green":t.cls==="c-yel"?"--yellow":"--red"})`}:{}}
-              onClick={()=>setDeficitChoice(t.cut)}
+              className={`nutr-goal-btn${rateChoice===t.rate?" active":""}`}
+              style={rateChoice===t.rate?{borderColor:`var(${t.cls==="c-acc"?"--accent":t.cls==="c-grn"?"--green":t.cls==="c-yel"?"--yellow":"--red"})`,color:`var(${t.cls==="c-acc"?"--accent":t.cls==="c-grn"?"--green":t.cls==="c-yel"?"--yellow":"--red"})`}:{}}
+              onClick={()=>setRateChoice(t.rate)}
             >{t.goalLabel}</button>
           ))}
         </div>
