@@ -5793,12 +5793,28 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
     : Math.round(Math.max(0, targetCals - proteinG * 4 - fatCal) / 4);
   const waterOz = Math.round(Number(weightLbs) * 0.5);
 
-  // Timelines, one per approach — honest math: eat-back keeps a steady 3,500
-  // cal/wk deficit (~1 lb/wk) no matter the training; accelerate stacks the
-  // full weekly burn on top of the diet deficit.
+  // Timelines, one per approach — honest math: eat-back keeps the plan's own
+  // weekly deficit no matter the training; accelerate stacks the full weekly
+  // burn on top of it.
+  //
+  // ⚠️ THE PLAN'S RATE, NOT A HARDCODED 3,500 (S216). This card dated EVERY plan
+  // at 1 lb/week: a client set to 2 lb/wk was told 20 weeks where the truth is
+  // 10, on the card people plan around and next to a "Your plan's pace ·
+  // 2 lbs/wk" row four lines above it. `weeklyRateOf` is the single source the
+  // targets, the projections and the server all read; SimulationSummary has
+  // multiplied by it since S95 and this card was simply never updated.
+  //
+  // ⚠️ AND A MAINTENANCE OR GAINING PLAN NOW HAS NO EAT-BACK DATE, WHICH IS THE
+  // POINT. weeksToGoal refuses a non-positive deficit, so instead of inventing
+  // one it returns null and the row reads "—" with a line saying why. The old
+  // 3,500 produced a confident date for a plan that was never going to get
+  // there by eating.
   const weeklyBurnAll = (totalBurn || 0) + (totalStrBurn || 0);
-  const wksEat = hasGoal ? weeksToGoal(toLose, 3500) : null;
-  const wksAcc = hasGoal ? weeksToGoal(toLose, 3500 + weeklyBurnAll) : null;
+  const weeklyDeficitS = planRateS * 3500;
+  const wksEat = hasGoal ? weeksToGoal(toLose, weeklyDeficitS) : null;
+  const wksAcc = hasGoal ? weeksToGoal(toLose, weeklyDeficitS + weeklyBurnAll) : null;
+  // How to say this plan's pace in a sentence. "steady ~Maintain" is not English.
+  const pacePhrase = planRateS === 0 ? "holding your weight steady" : `a steady ~${RATE_SHORT[planRateS]}`;
   const goalDate = (wks) => wks
     ? new Date(Date.now() + wks * 7 * 86400000).toLocaleDateString(undefined, { month: "short", year: "numeric" })
     : null;
@@ -5899,7 +5915,7 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
           Your workouts burn ~{Math.round(weeklyBurnAll).toLocaleString()} cal/week. Choose how to spend it:
         </div>
         {[
-          { id: "eatback", iconName: "meal", title: "Eat More", desc: "Workout burn is added to your daily calories — easier diet, steady ~1 lb/wk.",
+          { id: "eatback", iconName: "meal", title: "Eat More", desc: `Workout burn is added to your daily calories — easier diet, ${pacePhrase}.`,
             line: `${targetEat.toLocaleString()} cal/day${hasGoal && wksEat ? ` · goal ${goalDate(wksEat)}` : ""}` },
           { id: "accelerate", iconName: "bolt", title: "Faster Results", desc: "Keep the tighter target — your workouts speed up the goal date instead.",
             line: `${targetAcc.toLocaleString()} cal/day${hasGoal && wksAcc ? ` · goal ${goalDate(wksAcc)}` : ""}` },
@@ -5969,6 +5985,18 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
             {weeklyBurnAll > 0 && <Row label={<span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name="bolt" size={13} color="var(--accent)" />Faster Results pace{!eatback ? " (active)" : ""}</span>}
               value={friendlyTime(wksAcc)} color={!eatback ? "var(--green)" : "var(--muted-light)"} />}
             {weeklyBurnAll > 0 && wksEat && wksAcc && <Row label="Difference" value={friendlyTime(wksEat - wksAcc)} color="var(--accent)" />}
+            {/* ⚠️ SAY WHY THERE IS NO DATE INSTEAD OF PRINTING A DASH. A plan set
+                to maintain, or to gain, has no deficit for eating to work with —
+                so weeksToGoal refuses, and the honest answer is what to change,
+                not an em-dash. This case only exists because the card stopped
+                assuming 1 lb/week. */}
+            {!wksEat && (
+              <div style={{ fontSize: ".76rem", color: "var(--muted)", lineHeight: 1.5, marginTop: 8 }}>
+                Your plan&rsquo;s pace is <strong style={{ color: "var(--text-secondary)" }}>{RATE_SHORT[planRateS] || "maintenance"}</strong>,
+                so eating alone never reaches {goalWeight} lbs.
+                {wksAcc ? " Faster Results gets there on the training burn alone." : " Pick a losing pace to see a date."}
+              </div>
+            )}
           </div>
         </>
       )}
