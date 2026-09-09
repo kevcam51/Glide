@@ -12629,6 +12629,45 @@ function simIntakeForRate(d, weeklyBurn, r, tdeeOverride) {
 const SIM_BURN_MAX = 20000;
 const simBurnOdd = (n) => n !== null && (n < TDEE_TUNING.PLAUSIBLE_MIN || n > TDEE_TUNING.PLAUSIBLE_MAX);
 
+// ─── The long scenario: a month to a year, day by day (S217, Kevin) ─────────
+// "Can we create an option to put a calendar that has a full month and allow a
+// trainer or a client to run a scenario by entering the calories for every
+// single day for 1 month 2 months or even up to a year."
+//
+// ⚠️ 365 NUMBER INPUTS IS A HOSTILE SCREEN, SO NOTHING IS EVER EMPTY. A date
+// inherits its WEEKDAY's box from the seven above, and a blank weekday inherits
+// the pace — so the whole year is filled in before it is opened and only the
+// EXCEPTIONS get typed: the holiday, the cruise, the wedding. The seven boxes
+// are the source; this is an exception layer over them.
+const SIM_HORIZONS = [[30, "1 month"], [60, "2 months"], [90, "3 months"], [182, "6 months"], [365, "1 year"]];
+
+// Which of the seven Mon-first boxes a date belongs to. `DAYS` starts on Monday
+// and getDay() starts on Sunday.
+const simWeekdayIdx = (dateKey) => (new Date(dateKey + "T12:00:00").getDay() + 6) % 7;
+
+// Day 0 of a scenario is TODAY, whatever weekday that happens to be. Noon is the
+// house convention for parsing a date key, shared with every other date helper
+// here (measured: a midnight base walks identically, even in a zone that changes
+// its clocks at midnight — the convention is for consistency, not for a bug).
+//
+// ⚠️ THE OLD `parsed[i % 7]` PRICED DAY 0 AS MONDAY. On a Wednesday, a heavy
+// Saturday typed into the seven boxes landed on the projection's Thursday — the
+// numbers were right and the DAYS were wrong, which no total could reveal.
+function simDateAt(startKey, i) {
+  const d = new Date(startKey + "T12:00:00");
+  d.setDate(d.getDate() + i);
+  return ymdLocal(d);
+}
+
+// What one date is worth: an explicit override, else that weekday's box, else
+// the pace. Pure, and takes the pace as a NUMBER so it can be lifted and run.
+function simScenarioDay(dateKey, overrides, week, pace) {
+  const ov = (overrides || {})[dateKey];
+  if (ov != null) return ov;
+  const v = (week || [])[simWeekdayIdx(dateKey)];
+  return v != null ? v : pace;
+}
+
 // Walking a scenario forward, re-pricing the body as the weight moves (S217).
 //
 // Kevin: "Can we still have the same formulas to kind of estimate how many
@@ -12656,9 +12695,9 @@ const simBurnOdd = (n) => n !== null && (n < TDEE_TUNING.PLAUSIBLE_MIN || n > TD
 // was ignoring the 1,200 floor.
 //
 // Pure and closure-free so scripts/ can lift it and RUN it.
-function simProject({ days, startLbs, weekHold, dayIntake, minLbs = 60 }) {
+function simProject({ days, startLbs, weekHold, dayIntake, weekTrain, minLbs = 60 }) {
   const start = Number(startLbs) || 0;
-  let w = start, halted = 0, eaten = 0, spent = 0;
+  let w = start, halted = 0, eaten = 0, spent = 0, train = 0;
   for (let i = 0; i < days; i += 7) {
     const chunk = Math.min(7, days - i);
     const hold = weekHold(w);
@@ -12668,13 +12707,19 @@ function simProject({ days, startLbs, weekHold, dayIntake, minLbs = 60 }) {
     for (let k = 0; k < chunk; k++) intake += dayIntake(i + k, w);
     eaten += intake;
     spent += (hold / 7) * chunk;
+    // ⚠️ ACCUMULATED AT THIS WEEK'S WEIGHT, LIKE EVERYTHING ELSE — a lighter body
+    // burns less doing the same session, so a year's training total computed at
+    // the starting weight is the same lie as a year's loss computed there.
+    // Reported as a STATEMENT, never as a term in the balance: in eat-back mode
+    // it is already inside `hold`.
+    if (weekTrain) train += (weekTrain(w) / 7) * chunk;
     w -= ((hold / 7) * chunk - intake) / CAL_PER_LB;
     // ⚠️ ONLY WHEN WE STARTED FROM A REAL WEIGHT. With none known the walk still
     // answers "how many pounds", which needs no starting weight — and `w` going
     // negative there is just the running total, not a claim about a body.
     if (start > 0 && w <= minLbs) { halted = i + chunk; break; }
   }
-  return { end: w, lost: start - w, halted, eaten, spent };
+  return { end: w, lost: start - w, halted, eaten, spent, train };
 }
 
 // The pace grid, grouped by DIRECTION (Kevin, S216: "in the What if section we
@@ -12768,6 +12813,19 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const [weekCals, setWeekCals] = useState(() => ["", "", "", "", "", "", ""]);   // index 0 = Monday
   const [everyDay, setEveryDay] = useState("");
   const [editBurn, setEditBurn] = useState(false);   // the Maintain chip's pencil
+  // ── The long scenario (S217) ─────────────────────────────────────────────
+  // ⚠️ CAPTURED ONCE, ON MOUNT. `ymdLocal()` read per render would roll the whole
+  // scenario forward a day at midnight underneath somebody mid-plan, and every
+  // date they had typed would silently mean a different day.
+  const [startKey] = useState(() => ymdLocal());
+  const [calOpen, setCalOpen] = useState(false);
+  const [horizon, setHorizon] = useState(30);
+  const [dayOverrides, setDayOverrides] = useState({});   // "YYYY-MM-DD" -> cal
+  const [calCur, setCalCur] = useState(() => { const p = new Date(); return { y: p.getFullYear(), m: p.getMonth() }; });
+  const [editDate, setEditDate] = useState(null);
+  const [editCal, setEditCal] = useState("");
+  const [editSpan, setEditSpan] = useState(1);
+  const [undoSnap, setUndoSnap] = useState(null);
 
   // ── 2 · The week of cardio ───────────────────────────────────────────────
   // Seeded once, from the plan's real week. `seed` is kept so the planner can be
@@ -12878,14 +12936,18 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // A blank day is the pace AT THAT WEIGHT — which is why an untouched screen
   // projects exactly what it did before: the deficit stays `cut` for ever.
   const paceAtWeight = (lbs) => simIntakeForRate(atWeight(lbs), trainWeekAt(lbs), rate, mNum);
-  const dayIntake = (i, lbs) => { const v = parsed[i % 7]; return v !== null ? v : paceAtWeight(lbs); };
+  // ⚠️ THE CALENDAR IS AN EXCEPTION LAYER OVER THE SEVEN BOXES, NOT A SECOND
+  // SOURCE — an override wins, else that date's weekday box, else the pace. One
+  // function, so the tiles, the horizon block and the grid cells can never
+  // disagree about what a day is worth.
+  const dayIntake = (i, lbs) => simScenarioDay(simDateAt(startKey, i), dayOverrides, parsed, paceAtWeight(lbs));
   const projFor = (days) => simProject({ days, startLbs: w, weekHold, dayIntake });
   const projAt = useMemo(() => {
     const out = {};
     for (const n of [7, 14, 30, 60]) out[n] = projFor(n);
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [w, mNum, rate, weekCals.join("|"), JSON.stringify(simCardio), d, trainWeek]);
+  }, [w, mNum, rate, weekCals.join("|"), JSON.stringify(simCardio), JSON.stringify(dayOverrides), startKey, d, trainWeek]);
   // ⚠️ ONE READER FOR ALL FOUR RENDER SITES. `lbsIn(days)` appeared THREE TIMES
   // INSIDE ONE TILE — the number, the "off the scale" guard and the projected
   // weight — so rewiring the obvious one leaves a tile reading "−3.1" above
@@ -12894,6 +12956,34 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const lbsIn = (days) => { const p = projAt[days] || projFor(days); return p ? p.lost : 0; };
   const endLbs = (days) => { const p = projAt[days] || projFor(days); return p && !p.halted ? p.end : null; };
   const HORIZONS = [[7, "1 week"], [14, "2 weeks"], [30, "1 month"], [60, "2 months"]];
+  // The chosen horizon, walked once — plus the SAME walk with the body frozen,
+  // which is exactly "what a flat 3,500-cal calculator would say". One engine,
+  // two configurations, so the comparison cannot drift from the number.
+  const horizonProj = useMemo(() => (calOpen ? simProject({
+    days: horizon, startLbs: w, weekHold, dayIntake, weekTrain: trainWeekAt,
+  }) : null),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [calOpen, horizon, w, mNum, rate, weekCals.join("|"), JSON.stringify(simCardio), JSON.stringify(dayOverrides), startKey, d, trainWeek]);
+  const horizonFlat = useMemo(() => (calOpen ? simProject({
+    days: horizon, startLbs: w, weekHold: () => weekHold(w), dayIntake: (i) => dayIntake(i, w),
+  }) : null),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [calOpen, horizon, w, mNum, rate, weekCals.join("|"), JSON.stringify(simCardio), JSON.stringify(dayOverrides), startKey, d, trainWeek]);
+  const endKey = simDateAt(startKey, horizon - 1);
+  // ⚠️ NAMED, NOT AVERAGED. A horizon that averages 1,900 can still hold a dozen
+  // 900-calorie days; only the pace is floored, so nothing else can be.
+  const lowDates = useMemo(() => {
+    const out = [];
+    for (let i = 0; i < horizon; i++) {
+      const k = simDateAt(startKey, i);
+      const ov = dayOverrides[k];
+      const box = parsed[simWeekdayIdx(k)];
+      const v = ov != null ? ov : box;
+      if (v != null && v < MIN_DAILY_CAL) out.push(k);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [horizon, startKey, JSON.stringify(dayOverrides), weekCals.join("|")]);
   const dir = balance < -20 ? "lose" : balance > 20 ? "gain" : "hold";
   const fmtLbs = (n) => `${Math.abs(n).toFixed(1)} lb${Math.abs(n) >= 1.05 || Math.abs(n) < 0.95 ? "s" : ""}`;
   // ⚠️ HOLDING STEADY MOVES WITH THE TRAINING THE LADDER HAS NOT ALREADY PAID
@@ -12910,7 +13000,8 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // parser refused.
   const anyTyped = weekCals.some((x) => String(x || "").trim() !== "");
   // Everything the close guard is protecting, in one place.
-  dirtyRef.current = anyTyped || cardioChanged || mNum !== null || wNum !== null;
+  dirtyRef.current = anyTyped || cardioChanged || mNum !== null || wNum !== null
+    || Object.keys(dayOverrides).length > 0;
   const everyDayNum = simNum(everyDay);
   const applyEveryDay = () => { if (everyDayNum !== null) setWeekCals(["", "", "", "", "", "", ""].map(() => String(everyDayNum))); };
 
@@ -12942,6 +13033,23 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // directly.
   const canPrice = w > 0;
   const fillKindEff = canPrice ? fillKind : SIM_MANUAL;
+  // ── The scenario calendar's edits — local, like everything else here ─────
+  const paintDays = (fromKey, span, value) => {
+    setUndoSnap({ ...dayOverrides });
+    setDayOverrides((prev) => {
+      const out = { ...prev };
+      for (let i = 0; i < Math.max(1, span); i++) {
+        const k = simDateAt(fromKey, i);
+        if (value === null) delete out[k]; else out[k] = value;
+      }
+      return out;
+    });
+  };
+  const monthStep = (n) => setCalCur((c) => {
+    const m = c.m + n;
+    return { y: c.y + Math.floor(m / 12), m: ((m % 12) + 12) % 12 };
+  });
+
   const toggleFillDay = (day) => setFillDays((p) => (p.includes(day) ? p.filter((x) => x !== day) : [...p, day]));
   const fillReady = fillDays.length > 0 && (fillKindEff !== SIM_MANUAL || (simNum(fillCal) ?? 0) > 0);
   const noWeightNote = (
@@ -13083,6 +13191,29 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
       </button>
     );
   };
+  // ⚠️ THE WEIGHT NEEDS A HOME AFTER THE OPENER (found by driving it). Typing the
+  // burn replaces the opener with the full screen, and the weight field went with
+  // it — so a coach who typed the burn first had no route back to the one number
+  // that unlocks real exercises and the "what they'd weigh" line, short of
+  // clearing the burn to get the opener back. It lives in the pencil panel too.
+  const weightField = (
+    <>
+      <div style={{ ...lbl, marginTop: "9px" }}>
+        Their weight <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>(optional)</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        <input type="number" inputMode="numeric" min="0" max="2000" step="1"
+          aria-label="Their weight in pounds" placeholder="e.g. 185"
+          value={wOverride} onChange={(e) => setWOverride(e.target.value)}
+          style={{ ...numInput, width: "110px",
+            border: simRejected(wOverride, 2000) ? "1.5px solid var(--yellow)" : "1px solid var(--border)" }} />
+        <span style={{ fontSize: ".72rem", color: "var(--muted)" }}>
+          {simRejected(wOverride, 2000) ? <b style={{ color: "var(--yellow)" }}>check this number</b> : "lbs"}
+        </span>
+      </div>
+    </>
+  );
+
   // ⚠️ ONE FIELD, TWO PLACES. The opener asks for this number before anything
   // can render; the pencil edits the same number afterwards. Two copies would
   // drift in their validation, and the validation is the interesting part.
@@ -13169,17 +13300,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                 What their body uses in a day to hold their weight, before any training you add
                 below. A rough number is fine &mdash; you can change it any time.
               </div>
-              <div style={lbl}>Their weight <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>(optional)</span></div>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <input type="number" inputMode="numeric" min="0" max="2000" step="1"
-                  aria-label="Their weight in pounds" placeholder="e.g. 185"
-                  value={wOverride} onChange={(e) => setWOverride(e.target.value)}
-                  style={{ ...numInput, width: "110px",
-                    border: simRejected(wOverride, 2000) ? "1.5px solid var(--yellow)" : "1px solid var(--border)" }} />
-                <span style={{ fontSize: ".72rem", color: "var(--muted)" }}>
-                  {simRejected(wOverride, 2000) ? <b style={{ color: "var(--yellow)" }}>check this number</b> : "lbs"}
-                </span>
-              </div>
+              {weightField}
               <div style={{ fontSize: ".66rem", color: "var(--muted)", lineHeight: 1.45, marginTop: "7px" }}>
                 Only needed to price real exercises and to show what they&rsquo;d weigh.
               </div>
@@ -13243,6 +13364,12 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                 contains the week's training; the field is what their BODY uses
                 before that training. Typing 2,400 and reading 2,492 on the chip
                 one line above looks like a bug unless the gap is named. */}
+            {standalone && weightField}
+            {standalone && (
+              <div style={{ fontSize: ".64rem", color: "var(--muted)", lineHeight: 1.45, marginTop: "5px" }}>
+                Their weight unlocks real exercises below and shows what they&rsquo;d weigh as they go.
+              </div>
+            )}
             {mNum !== null && eatback && trainWeek > 0 && (
               <div style={{ marginTop: "6px", fontSize: ".66rem", color: "var(--muted)", lineHeight: 1.45 }}>
                 Maintain reads <b style={{ color: "var(--text-secondary)" }}>{maintain.toLocaleString()}</b> &mdash;
@@ -13361,6 +13488,239 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
             </button>
           </div>
         </div>
+
+
+        {/* ── Plan further out (S217, Kevin) ───────────────────────────────
+            "…entering the calories for every single day for 1 month 2 months or
+            even up to a year if they're really that interested in doing that."
+            ⚠️ COLLAPSED BY DEFAULT. Most people want the week; the year is for
+            somebody who came for it, and an always-open month grid would push
+            the answer off the bottom of every phone. */}
+        <button onClick={() => setCalOpen((v) => !v)} style={{ ...toggleS, marginTop: "14px" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "7px" }}>
+            <Icon name="calendar" size={14} color="var(--accent)" />
+            Plan further out &mdash; a month to a year {calOpen ? "▲" : "▼"}
+          </span>
+        </button>
+
+        {calOpen && (
+          <div style={panelS}>
+            <div style={lbl}>How far out</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: "5px", marginBottom: "10px" }}>
+              {SIM_HORIZONS.map(([days, label]) => (
+                <button key={days} onClick={() => setHorizon(days)} aria-pressed={horizon === days}
+                  style={{ ...pillS(horizon === days), padding: "7px 2px", fontSize: ".64rem" }}>{label}</button>
+              ))}
+            </div>
+            {/* ⚠️ SAY THAT IT IS ALREADY FILLED IN, or the grid reads as 365
+                boxes waiting to be typed — which is the thing this design exists
+                to avoid. */}
+            <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.5, marginBottom: "10px" }}>
+              Every day is already filled in from the seven boxes above &mdash; a date follows its own
+              weekday, and a blank weekday follows your pace. Tap a day only to change it: the holiday,
+              the trip, the wedding.
+            </div>
+
+            {/* The month grid. Same shape as the app's own calendar — Monday
+                first, square cells, ‹ › between the month — so the two read as
+                one app, but this one writes nothing and holds a scenario. */}
+            {(() => {
+              const first = new Date(calCur.y, calCur.m, 1);
+              const startPad = (first.getDay() + 6) % 7;
+              const daysIn = new Date(calCur.y, calCur.m + 1, 0).getDate();
+              const cells = [];
+              for (let i = 0; i < startPad; i++) cells.push(null);
+              for (let dd = 1; dd <= daysIn; dd++) cells.push(dd);
+              while (cells.length % 7) cells.push(null);
+              const kOf = (dd) => ymdLocal(new Date(calCur.y, calCur.m, dd));
+              const navBtnS = { width: 30, height: 30, borderRadius: 8, cursor: "pointer",
+                border: "1px solid var(--border)", background: "var(--s2)", color: "var(--text)", fontSize: "1rem" };
+              return (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                    <button style={navBtnS} onClick={() => monthStep(-1)} aria-label="Previous month">‹</button>
+                    <div style={{ fontWeight: 800, fontSize: ".86rem" }}>
+                      {first.toLocaleDateString(undefined, { month: "long", year: "numeric" })}
+                    </div>
+                    <button style={navBtnS} onClick={() => monthStep(1)} aria-label="Next month">›</button>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: "3px" }}>
+                    {DAY_SHORT.map((dn) => (
+                      <div key={dn} style={{ textAlign: "center", fontSize: ".56rem", color: "var(--muted)", textTransform: "uppercase" }}>{dn[0]}</div>
+                    ))}
+                    {cells.map((dd, ix) => {
+                      if (!dd) return <div key={ix} />;
+                      const k = kOf(dd);
+                      // ⚠️ OUTSIDE THE HORIZON IS NOT PART OF THE SCENARIO. Showing
+                      // a number there would invite someone to type one that no
+                      // total counts — the silent swallow, as a calendar.
+                      const inRange = k >= startKey && k <= endKey;
+                      const val = inRange ? simScenarioDay(k, dayOverrides, parsed, paceTarget) : null;
+                      const isOv = dayOverrides[k] != null;
+                      const low = val !== null && val < MIN_DAILY_CAL;
+                      const sel = editDate === k;
+                      return (
+                        <button key={ix} onClick={() => { setEditDate(k); setEditCal(dayOverrides[k] != null ? String(dayOverrides[k]) : ""); setEditSpan(1); }}
+                          disabled={!inRange}
+                          aria-label={`${k}${val !== null ? `, ${val} calories` : ""}`}
+                          style={{ aspectRatio: "1", borderRadius: "7px", padding: "1px", cursor: inRange ? "pointer" : "default",
+                            opacity: inRange ? 1 : 0.28,
+                            border: sel ? "1.5px solid var(--accent)" : low ? "1px solid var(--yellow)"
+                              : isOv ? "1px solid var(--accent)" : "1px solid var(--border)",
+                            background: sel ? "rgba(var(--accent-rgb),.14)" : isOv ? "rgba(var(--accent-rgb),.07)" : "var(--surface)",
+                            color: "var(--text)", display: "flex", flexDirection: "column",
+                            alignItems: "center", justifyContent: "center", gap: "1px" }}>
+                          <span style={{ fontSize: ".62rem", fontWeight: k === startKey ? 800 : 500,
+                            color: k === startKey ? "var(--accent)" : "var(--text)" }}>{dd}</span>
+                          {val !== null && (
+                            <span style={{ fontSize: ".47rem", lineHeight: 1,
+                              color: low ? "var(--yellow)" : isOv ? "var(--accent)" : "var(--muted)" }}>
+                              {val >= 1000 ? (val / 1000).toFixed(1).replace(/\.0$/, "") + "k" : val}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
+
+            {/* Tapping a day: type it, or paint a stretch forward from it.
+                ⚠️ A STRETCH RUNS FORWARD FROM THE DAY YOU TAPPED rather than
+                asking for two dates — "the cruise starts on the 24th and lasts a
+                week" is how people actually say it, and it is one tap plus a
+                number instead of two date pickers on a phone. */}
+            {editDate && (
+              <div style={{ marginTop: "10px", padding: "10px", borderRadius: "9px",
+                background: "var(--s2)", border: "1px solid var(--border)" }}>
+                <div style={{ ...lbl, marginBottom: "6px" }}>
+                  {new Date(editDate + "T12:00:00").toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                  <input type="number" inputMode="numeric" min="0" max="50000" step="50"
+                    aria-label="Calories on this day" placeholder={String(simScenarioDay(editDate, {}, parsed, paceTarget))}
+                    value={editCal} onChange={(e) => setEditCal(e.target.value)}
+                    style={{ ...numInput, width: "104px",
+                      border: simRejected(editCal) ? "1.5px solid var(--yellow)" : "1px solid var(--border)" }} />
+                  <span style={{ fontSize: ".7rem", color: "var(--muted)" }}>cal, for</span>
+                  <select value={editSpan} onChange={(e) => setEditSpan(Number(e.target.value))}
+                    aria-label="How many days" style={{ ...input, width: "96px" }}>
+                    {[1, 2, 3, 4, 5, 7, 10, 14].map((n2) => (
+                      <option key={n2} value={n2}>{n2} day{n2 === 1 ? "" : "s"}</option>
+                    ))}
+                  </select>
+                </div>
+                {simRejected(editCal) && (
+                  <div style={{ fontSize: ".66rem", color: "var(--yellow)", fontWeight: 700, marginTop: "5px" }}>check this number</div>
+                )}
+                <div style={{ display: "flex", gap: "6px", marginTop: "9px", flexWrap: "wrap" }}>
+                  <button onClick={() => { const n2 = simNum(editCal); if (n2 === null) return; paintDays(editDate, editSpan, n2); setEditDate(null); }}
+                    disabled={simNum(editCal) === null} style={{ ...primaryS(simNum(editCal) !== null), flex: 1, minWidth: "120px" }}>
+                    Set {editSpan === 1 ? "this day" : `${editSpan} days`}
+                  </button>
+                  <button onClick={() => { paintDays(editDate, editSpan, null); setEditDate(null); }}
+                    style={{ padding: "10px 12px", borderRadius: "9px", border: "1px solid var(--border)",
+                      background: "transparent", color: "var(--muted)", fontFamily: "inherit",
+                      fontSize: ".74rem", fontWeight: 700, cursor: "pointer" }}>Back to normal</button>
+                  <button onClick={() => setEditDate(null)}
+                    style={{ ...linkS, padding: "10px 4px" }}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {/* ⚠️ PAINTING A FORTNIGHT IS EASY TO DO BY ACCIDENT AND TEDIOUS TO
+                UNDO BY HAND. One step back is enough; more would need a stack
+                nobody asked for. */}
+            {undoSnap && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                gap: "8px", marginTop: "8px", fontSize: ".66rem", color: "var(--muted)" }}>
+                <span>{Object.keys(dayOverrides).length} day{Object.keys(dayOverrides).length === 1 ? "" : "s"} changed from the usual.</span>
+                <button onClick={() => { setDayOverrides(undoSnap); setUndoSnap(null); }} style={linkS}>Undo</button>
+              </div>
+            )}
+
+            {/* The answer for the chosen stretch. */}
+            {horizonProj && (
+              <div style={{ marginTop: "12px", paddingTop: "11px", borderTop: "1px solid var(--border)" }}>
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: ".62rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".5px" }}>
+                    Over {(SIM_HORIZONS.find(([n2]) => n2 === horizon) || [0, ""])[1]}
+                  </div>
+                  <div style={{ fontFamily: "'Sora',sans-serif", fontSize: "1.5rem", color: "var(--accent)", margin: "2px 0" }}>
+                    {horizonProj.lost >= 0 ? "−" : "+"}{fmtLbs(horizonProj.lost)}
+                  </div>
+                  <div style={{ fontSize: ".7rem", color: "var(--text-secondary)" }}>
+                    {w > 0 && !horizonProj.halted
+                      ? <>around <b>{Math.round(horizonProj.end).toLocaleString()} lbs</b> by {new Date(endKey + "T12:00:00").toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</>
+                      : <>by {new Date(endKey + "T12:00:00").toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}</>}
+                  </div>
+                </div>
+                {/* ⚠️ THE COMPARISON IS THE SELLING POINT, NOT A DISCLAIMER. Same
+                    walk with the body frozen IS what a flat calculator says, so
+                    the two can never drift apart. Only shown once it is worth a
+                    pound, or it would be noise on a short stretch. */}
+                {horizonFlat && Math.abs(horizonFlat.lost - horizonProj.lost) >= 1 && (
+                  <div style={{ marginTop: "9px", fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.5 }}>
+                    A flat 3,500-calories-per-pound calculator would say{" "}
+                    <b style={{ color: "var(--text-secondary)" }}>{Math.abs(horizonFlat.lost).toFixed(0)}</b>.
+                    Their burn falls as they get lighter, and this counts that.
+                  </div>
+                )}
+                {horizonProj.train > 0 && (
+                  <div style={{ marginTop: "7px", fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.5 }}>
+                    Training over that stretch: about{" "}
+                    <b style={{ color: "var(--orange)" }}>{(Math.round(horizonProj.train / 1000) * 1000).toLocaleString()}</b> cal.
+                    {eatback
+                      ? <> Their plan eats that back, so it buys food rather than a faster result.</>
+                      : <> Their plan doesn&rsquo;t eat it back, so it comes straight off the deficit.</>}
+                  </div>
+                )}
+                {horizonProj.halted > 0 && (
+                  <div style={{ marginTop: "9px", fontSize: ".7rem", color: "var(--yellow)", lineHeight: 1.45 }}>
+                    This runs off the bottom of the scale before the stretch is up &mdash; the numbers stopped
+                    describing a body somewhere around week {Math.ceil(horizonProj.halted / 7)}.
+                  </div>
+                )}
+                {lowDates.length > 0 && (
+                  <div style={{ marginTop: "9px", fontSize: ".7rem", color: "var(--yellow)", lineHeight: 1.45 }}>
+                    {lowDates.length} day{lowDates.length === 1 ? "" : "s"} in this stretch {lowDates.length === 1 ? "is" : "are"} under
+                    1,200 calories &mdash; that isn&rsquo;t healthy or sustainable, and a plan won&rsquo;t go there.
+                    If you want a bigger gap, take it from movement rather than food.
+                  </div>
+                )}
+                {/* ⚠️ THE LONGER THE STRETCH, THE LESS IT IS A DATE. Escalated
+                    rather than stated once, because a line that is honest at a
+                    month is not honest at a year. */}
+                {/* ⚠️ IT MUST DESCRIBE WHAT THE ENGINE IS ACTUALLY DOING, NOT WHAT
+                    IT DOES AT ITS BEST. With a typed burn — the street case —
+                    there is no body to follow, so the walk is flat; a line
+                    claiming "this follows the burn down" would be false in
+                    exactly the configuration a prospect is looking at. Found by
+                    opening it, not by reading it. */}
+                <div style={{ marginTop: "9px", fontSize: ".64rem",
+                  color: horizon >= 90 && !canFollow ? "var(--yellow)" : horizon >= 365 ? "var(--yellow)" : "var(--muted)",
+                  lineHeight: 1.5 }}>
+                  {!canFollow
+                    ? <>{mNum !== null
+                        ? <>This holds their burn at <b style={{ color: "var(--text-secondary)" }}>{mNum.toLocaleString()}</b> the whole way.</>
+                        : <>This holds their burn steady the whole way.</>}
+                      {" "}A real burn falls as weight comes off, so a stretch this long runs optimistic
+                      {horizon >= 90 && <> &mdash; and the further out you go, the more so</>}.
+                      {" "}Add their weight, height, age and how active they are and it can follow the burn down.</>
+                    : horizon >= 365
+                      ? <>A year is a long way to project. This follows the burn down as weight comes off, but bodies
+                        also turn the dial down beyond what weight alone explains, and nobody eats to plan for twelve
+                        months. Use it to compare two ways of eating, not to promise a number.</>
+                      : horizon >= 90
+                        ? <>{(SIM_HORIZONS.find(([n2]) => n2 === horizon) || [0, ""])[1]} out, this is a direction rather than a date.
+                          The first month or two is the part to hold anyone to.</>
+                        : <>The first weeks are the firmest part of any projection.</>}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── 2 · Your week of cardio ──────────────────────────────────────
             CARDIO ONLY (S213, Kevin: "make it be just cardio for the exercise

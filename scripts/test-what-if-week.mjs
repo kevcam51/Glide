@@ -96,16 +96,18 @@ function liftDecl(src, name) {
 
 // ── lift the shipping helpers and RUN them ──────────────────────────────────
 const CONSTS = ["DAYS", "DAY_SHORT", "REST_ST", "STRENGTH_EXERCISES", "CARDIO_GROUPS", "ALL_CARDIO",
-  "ACTIVITY_LEVELS", "MIN_DAILY_CAL", "HR_ZONES", "RATE_OPTS", "OVER_TOLERANCE", "CAL_PER_LB", "SIM_MANUAL", "SIM_RATES"];
+  "ACTIVITY_LEVELS", "MIN_DAILY_CAL", "HR_ZONES", "RATE_OPTS", "OVER_TOLERANCE", "CAL_PER_LB", "SIM_MANUAL", "SIM_RATES", "SIM_HORIZONS"];
 const FNS = ["calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx", "hrCaloriesPerMin",
   "restingKcalPerMin", "calcBurn", "cardioExFor", "exBurn", "isEatback", "dailyDeficitOf", "weeklyRateOf",
   "planEnergy", "planIntakeForRate", "computeClientCalories",
   "simNum", "simRejected", "weekPlan", "joinDays",
-  "seedSimCardio", "simSessionBurn", "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simProject"];
+  "seedSimCardio", "simSessionBurn", "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simProject",
+  "ymdLocal", "simWeekdayIdx", "simDateAt", "simScenarioDay"];
 const EXPORTS = ["simNum", "simRejected", "weekPlan", "joinDays", "seedSimCardio", "simSessionBurn",
   "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "planEnergy",
   "planIntakeForRate", "computeClientCalories", "cardioExFor", "exBurn", "isEatback", "SIM_RATES",
-  "SIM_MANUAL", "MIN_DAILY_CAL", "CAL_PER_LB", "DAYS", "DAY_SHORT", "atLeastMinCal", "simProject"];
+  "SIM_MANUAL", "MIN_DAILY_CAL", "CAL_PER_LB", "DAYS", "DAY_SHORT", "atLeastMinCal", "simProject",
+  "simWeekdayIdx", "simDateAt", "simScenarioDay", "SIM_HORIZONS"];
 const source = () => [...CONSTS, "atLeastMinCal", ...FNS].map((n) => liftDecl(APP, n)).join("\n");
 const build = (src) => new Function(`${src}; return { ${EXPORTS.join(", ")} };`)();
 const M = build(source());
@@ -341,6 +343,16 @@ ok("the burn field is defined once and rendered twice",
 // pencil is not in it.
 ok("the Maintain chip carries a pencil", /aria-label="Change their daily burn"/.test(SIM_CODE));
 ok("...which is not nested inside the chip", !/setEditBurn/.test(liftDecl(APP, "rateBtn")));
+// ⚠️ THE WEIGHT MUST SURVIVE THE OPENER (found by driving it, not by reading).
+// Typing the burn replaces the opener with the full screen, and the weight field
+// went with it — leaving no route to the one number that unlocks real exercises
+// and the "what they'd weigh" line, short of clearing the burn to get the opener
+// back. Written once, shown in both places.
+ok("the weight field is written once and reachable after the opener",
+   (SIM_CODE.match(/const weightField = \(/g) || []).length === 1
+   && (SIM_CODE.match(/\{weightField\}/g) || []).length === 1
+   && /\{standalone && weightField\}/.test(SIM_CODE),
+   (SIM_CODE.match(/\{weightField\}/g) || []).length);
 ok("...and one tap puts the plan's own number back",
    /setMOverride\(""\); setEditBurn\(false\);/.test(SIM_CODE) && /Back to their plan/.test(SIM_CODE));
 // ⚠️ EAT-BACK MAKES "MAINTAIN" AND "THEIR BURN" TWO DIFFERENT NUMBERS. Typing
@@ -367,8 +379,11 @@ ok("...and the reason is written once and shown in both places",
 ok("a stray backdrop tap cannot discard a typed scenario",
    /<div onClick=\{askClose\}/.test(SIM_CODE) && /const askClose = \(\) => \{ if \(dirtyRef\.current\) setConfirmClose\(true\); else onClose\(\); \};/.test(SIM_CODE));
 ok("...device Back goes through the same guard", /if \(sheetCount > 0\) return; askClose\(\);/.test(SIM_CODE));
+// ⚠️ A PAINTED YEAR IS THE MOST EXPENSIVE THING THIS MODAL CAN HOLD, so the
+// scenario overrides have to be in the flag too — otherwise the one state worth
+// guarding is the one the guard cannot see.
 ok("...the dirty flag covers every input the modal holds",
-   /dirtyRef\.current = anyTyped \|\| cardioChanged \|\| mNum !== null \|\| wNum !== null;/.test(SIM_CODE));
+   /dirtyRef\.current = anyTyped \|\| cardioChanged \|\| mNum !== null \|\| wNum !== null\s*\n?\s*\|\| Object\.keys\(dayOverrides\)\.length > 0;/.test(SIM_CODE));
 ok("...and the close button keeps its direct path",
    /<button onClick=\{onClose\} aria-label="Close"/.test(SIM_CODE));
 // ⚠️ NEVER re-price somebody's logged history against a number invented on a
@@ -622,6 +637,162 @@ ok("...and says which of those it is doing", /This holds their burn at/.test(SIM
 // inches above it is the S216b SummaryTab bug in advance.
 ok("the footnote no longer claims the drift it just fixed",
    !/drifts optimistic/.test(SIM_CODE) && /doesn&rsquo;t drift the way a flat calculator does/.test(SIM_CODE));
+
+// ── 5d. the long scenario: a month to a year (S217, Kevin) ─────────────────
+// "…allow a trainer or a client to run a scenario by entering the calories for
+// every single day for 1 month 2 months or even up to a year."
+//
+// ⚠️ 365 EMPTY INPUTS IS THE FEATURE FAILING. Every day is already filled from
+// the seven boxes; the calendar is an EXCEPTION LAYER, and these run the real
+// resolver to prove the layering order.
+{
+  ok("the horizons run from a month to a year",
+     M.SIM_HORIZONS.map(([n]) => n).join() === "30,60,90,182,365", M.SIM_HORIZONS.map(([n]) => n));
+
+  // ⚠️ DAY 0 IS TODAY, WHATEVER WEEKDAY THAT IS. `parsed[i % 7]` priced day 0 as
+  // MONDAY, so on a Wednesday a heavy Saturday landed on the projection's
+  // Thursday — right numbers, wrong days, and no total could reveal it.
+  ok("Monday is box 0", M.simWeekdayIdx("2026-09-07") === 0);
+  ok("Sunday is box 6", M.simWeekdayIdx("2026-09-13") === 6);
+  ok("...every weekday maps to its own box, exactly once",
+     new Set(["2026-09-07","2026-09-08","2026-09-09","2026-09-10","2026-09-11","2026-09-12","2026-09-13"]
+       .map(M.simWeekdayIdx)).size === 7);
+  ok("...and the box order IS the label order",
+     M.DAY_SHORT[M.simWeekdayIdx("2026-09-09")] === "Wed");
+  // control: the old expression really did put day 0 on Monday
+  ok("control: `i % 7` really did ignore what day it is", (0 % 7) === 0 && M.simWeekdayIdx("2026-09-09") === 2);
+
+  // Walking dates forward, in LOCAL time — the S45 rule.
+  ok("day 0 is the start itself", M.simDateAt("2026-09-09", 0) === "2026-09-09");
+  ok("...and it walks", M.simDateAt("2026-09-09", 1) === "2026-09-10");
+  ok("...across a month boundary", M.simDateAt("2026-09-30", 1) === "2026-10-01");
+  ok("...across a year boundary", M.simDateAt("2026-12-31", 1) === "2027-01-01");
+  ok("...across a leap day", M.simDateAt("2028-02-28", 1) === "2028-02-29");
+  ok("...and a full year lands a year later", M.simDateAt("2026-09-09", 365) === "2027-09-09");
+  // Noon is the house convention for parsing a date key (every other helper in
+  // this file uses T12:00:00), and it is kept for consistency with them.
+  // ⚠️ BUT IT IS NOT WHAT MAKES THIS CORRECT, AND SAYING SO WOULD BE A FALSE
+  // RATIONALE: measured under America/New_York and under America/Santiago —
+  // which moves its clocks AT midnight — a midnight base walks 400 days
+  // identically, because setDate preserves the wall clock. What actually has to
+  // hold is the property below, so that is what is asserted.
+  {
+    let bad = null;
+    for (let i = 0; i < 400; i++) {
+      const k = M.simDateAt("2026-01-01", i);
+      if (M.simDateAt(k, 1) !== M.simDateAt("2026-01-01", i + 1)) { bad = { i, k }; break; }
+    }
+    ok("400 consecutive days step cleanly, DST included", !bad, bad);
+  }
+
+  // ── the layering order, which is the whole design ───────────────────────
+  {
+    const week = [null, 2000, null, null, null, 3500, null];   // Tue 2000, Sat 3500
+    const ovr = { "2026-09-12": 4200 };                        // that Saturday only
+    ok("an override wins over its weekday box",
+       M.simScenarioDay("2026-09-12", ovr, week, 1900) === 4200);
+    ok("...a weekday box wins over the pace",
+       M.simScenarioDay("2026-09-08", ovr, week, 1900) === 2000);
+    ok("...and an untouched day is the pace",
+       M.simScenarioDay("2026-09-09", ovr, week, 1900) === 1900);
+    ok("a LATER Saturday still follows the box, not the one-off",
+       M.simScenarioDay("2026-09-19", ovr, week, 1900) === 3500);
+    // ⚠️ A TYPED ZERO IS AN ANSWER, NOT AN ABSENCE — a fast is a real thing to
+    // model, and `??`/`||` confusion here would silently price it at the pace.
+    ok("a typed zero survives as zero, in both layers",
+       M.simScenarioDay("2026-09-12", { "2026-09-12": 0 }, week, 1900) === 0
+       && M.simScenarioDay("2026-09-09", {}, [0,null,null,null,null,null,null], 1900) === 1900
+       && M.simScenarioDay("2026-09-07", {}, [0,null,null,null,null,null,null], 1900) === 0);
+    ok("junk degrades to the pace", M.simScenarioDay("2026-09-09", null, null, 1900) === 1900);
+  }
+
+  // ── it feeds the SAME walk, so the stretch cannot disagree with the tiles ─
+  {
+    const hold = 2400 * 7;
+    const week = [null, null, null, null, null, null, null];
+    const plain = M.simProject({ days: 30, startLbs: 0, weekHold: () => hold,
+      dayIntake: (i) => M.simScenarioDay(M.simDateAt("2026-09-09", i), {}, week, 1900) });
+    ok("an untouched stretch is just the pace, every day", plain.eaten === 1900 * 30);
+    // One 4,200 day changes the total by exactly the difference — no more.
+    const one = M.simProject({ days: 30, startLbs: 0, weekHold: () => hold,
+      dayIntake: (i) => M.simScenarioDay(M.simDateAt("2026-09-09", i), { "2026-09-12": 4200 }, week, 1900) });
+    ok("...and one painted day moves it by exactly that day", one.eaten - plain.eaten === 4200 - 1900);
+    ok("...which is 0.66 lb of the loss", Math.abs((plain.lost - one.lost) - (4200 - 1900) / CAL_PER_LB) < 1e-9);
+    // A painted stretch of seven.
+    const ovr7 = {};
+    for (let i = 0; i < 7; i++) ovr7[M.simDateAt("2026-09-24", i)] = 3200;
+    const holiday = M.simProject({ days: 60, startLbs: 0, weekHold: () => hold,
+      dayIntake: (i) => M.simScenarioDay(M.simDateAt("2026-09-09", i), ovr7, week, 1900) });
+    const base60 = M.simProject({ days: 60, startLbs: 0, weekHold: () => hold,
+      dayIntake: (i) => M.simScenarioDay(M.simDateAt("2026-09-09", i), {}, week, 1900) });
+    ok("a painted holiday week costs exactly seven days of the difference",
+       holiday.eaten - base60.eaten === (3200 - 1900) * 7);
+    // ⚠️ AND A STRETCH PAINTED OUTSIDE THE HORIZON MUST NOT COUNT.
+    const far = {}; for (let i = 0; i < 7; i++) far[M.simDateAt("2027-06-01", i)] = 3200;
+    const outside = M.simProject({ days: 60, startLbs: 0, weekHold: () => hold,
+      dayIntake: (i) => M.simScenarioDay(M.simDateAt("2026-09-09", i), far, week, 1900) });
+    ok("...and days beyond the stretch change nothing", outside.eaten === base60.eaten);
+  }
+
+  // ── the training total, which is the half of the ask nothing provided ────
+  {
+    const p = M.simProject({ days: 28, startLbs: 200, weekHold: () => 2400 * 7,
+      dayIntake: () => 2000, weekTrain: () => 1400 });
+    ok("the training burn accumulates across the stretch", Math.abs(p.train - 1400 * 4) < 1e-9, p.train);
+    ok("...and is absent, not zero-by-accident, when nothing is passed",
+       M.simProject({ days: 28, startLbs: 200, weekHold: () => 2400 * 7, dayIntake: () => 2000 }).train === 0);
+    // ⚠️ IT IS A STATEMENT, NOT A TERM IN THE BALANCE — in eat-back mode it is
+    // already inside `hold`, so adding it would double-count the whole stretch.
+    const withT = M.simProject({ days: 28, startLbs: 200, weekHold: () => 2400 * 7, dayIntake: () => 2000, weekTrain: () => 1400 });
+    const without = M.simProject({ days: 28, startLbs: 200, weekHold: () => 2400 * 7, dayIntake: () => 2000 });
+    ok("...and it does not touch the pounds", withT.lost === without.lost);
+  }
+}
+
+// ── 5e. the calendar on screen ─────────────────────────────────────────────
+ok("it is collapsed until asked for", /const \[calOpen, setCalOpen\] = useState\(false\);/.test(SIM_CODE)
+   && /Plan further out &mdash; a month to a year/.test(SIM_CODE));
+ok("...and offers a month to a year", /SIM_HORIZONS\.map\(\(\[days, label\]\) =>/.test(SIM_CODE));
+// ⚠️ CAPTURED ON MOUNT. ymdLocal() per render rolls the whole scenario forward a
+// day at midnight and every typed date silently means a different day.
+ok("the scenario's day 0 is captured once", /const \[startKey\] = useState\(\(\) => ymdLocal\(\)\);/.test(SIM_CODE));
+ok("...and every day price goes through the one resolver",
+   /const dayIntake = \(i, lbs\) => simScenarioDay\(simDateAt\(startKey, i\), dayOverrides, parsed, paceAtWeight\(lbs\)\);/.test(SIM_CODE));
+ok("...so nothing prices a day by position in the week any more", !/parsed\[i % 7\]/.test(SIM_CODE));
+// ⚠️ A CELL OUTSIDE THE STRETCH SHOWS NO NUMBER AND TAKES NO TAP — a number
+// there invites a value no total counts, which is the silent swallow as a grid.
+ok("days outside the stretch are inert",
+   /const inRange = k >= startKey && k <= endKey;/.test(SIM_CODE) && /disabled=\{!inRange\}/.test(SIM_CODE));
+ok("the grid is Monday-first, like the app's own calendar",
+   /const startPad = \(first\.getDay\(\) \+ 6\) % 7;/.test(SIM_CODE) && /DAY_SHORT\.map\(\(dn\) =>/.test(SIM_CODE));
+ok("a stretch is painted forward from the day you tapped", /paintDays\(editDate, editSpan, n2\)/.test(SIM_CODE));
+ok("...a day can be put back to normal", /paintDays\(editDate, editSpan, null\)/.test(SIM_CODE));
+ok("...and one step of undo exists", /setDayOverrides\(undoSnap\); setUndoSnap\(null\);/.test(SIM_CODE));
+// ⚠️ THE FLAT COMPARISON IS THE SAME WALK WITH THE BODY FROZEN, so the selling
+// point can never drift from the number it is selling against.
+ok("the flat comparison is the same engine, frozen",
+   /weekHold: \(\) => weekHold\(w\), dayIntake: \(i\) => dayIntake\(i, w\)/.test(SIM_CODE));
+ok("...and is only shown once it is worth a pound",
+   /Math\.abs\(horizonFlat\.lost - horizonProj\.lost\) >= 1/.test(SIM_CODE));
+ok("the training total is reported over the stretch", /weekTrain: trainWeekAt/.test(SIM_CODE)
+   && /Training over that stretch/.test(SIM_CODE));
+// ⚠️ THE HONESTY ESCALATES WITH THE HORIZON — a line that is true at a month is
+// not true at a year.
+ok("what the screen says about itself scales with the stretch",
+   /horizon >= 365/.test(SIM_CODE) && /horizon >= 90/.test(SIM_CODE)
+   && /Use it to compare two ways of eating, not to promise a number/.test(SIM_CODE));
+// ⚠️ AND IT DESCRIBES WHAT THE ENGINE IS ACTUALLY DOING, NOT WHAT IT DOES AT ITS
+// BEST. With a typed burn — the street case, i.e. the one a prospect sees — there
+// is no body to follow and the walk is flat, so a line claiming "this follows the
+// burn down" would be false in exactly that configuration.
+ok("...and never claims to follow a body it does not have",
+   /\{!canFollow\s*\n?\s*\? <>\{mNum !== null/.test(SIM_CODE)
+   && /A real burn falls as weight comes off, so a stretch this long runs optimistic/.test(SIM_CODE));
+ok("...and a year is flagged in the warning colour", /horizon >= 365 \? "var\(--yellow\)" : "var\(--muted\)"/.test(SIM_CODE));
+ok("a scenario that runs off the scale says so rather than asserting a body",
+   /horizonProj\.halted > 0 && \(/.test(SIM_CODE));
+// It still writes nothing.
+ok("the calendar writes nothing either", !/onChange\(/.test(SIM_CODE) && !/storage\./.test(SIM_CODE));
 
 // ── 6. the engine itself is unchanged ───────────────────────────────────────
 // Dropping the two scalar modes removed two ways of SAYING the same sum, not a
@@ -908,7 +1079,7 @@ ok("the plan-writing custom-exercise creator is NOT ported", !/CustomExerciseCre
   // quick fill's calories, a per-day manual session, the typed daily burn and
   // the typed weight. Fixing one and leaving five is the shape check:weak exists
   // to catch — this count is the only thing that notices.
-  ok("every numeric box in the modal uses it", (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 6,
+  ok("every numeric box in the modal uses it", (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 7,
      (SIM_CODE.match(/\.\.\.numInput/g) || []).length);
   // ⚠️ ONE right-aligned style, and it is `numInput`'s own declaration. A
   // second `{...input, textAlign:"right"}` anywhere else is a box that kept the
@@ -931,11 +1102,11 @@ ok("the week total is shown, not just the average", /for the week/.test(SIM_CODE
 // numeric box — and `.test()` stayed green when one was reverted to "on your
 // goal", silently replacing a typed surplus with its opposite.
 ok("a refused number says so on every box that takes one",
-   (SIM_CODE.match(/check this number/g) || []).length === 6,
+   (SIM_CODE.match(/check this number/g) || []).length === 7,
    (SIM_CODE.match(/check this number/g) || []).length);
 ok("...and the reset stays reachable when the only entry was refused",
    /const anyTyped = weekCals\.some/.test(SIM_CODE) && /disabled=\{!anyTyped\}/.test(SIM_CODE));
-ok("the inputs' own max matches the parser's", (SIM_CODE.match(/max="50000"/g) || []).length === 4);
+ok("the inputs' own max matches the parser's", (SIM_CODE.match(/max="50000"/g) || []).length === 5);
 // ⚠️ AND THE TWO TIGHTER FIELDS PASS THEIR CEILING TO BOTH HALVES. simRejected
 // called simNum with the DEFAULT 50,000 cap, so a burn typed above 20,000 would
 // be refused by the parser and then render no warning — the silent swallow this
@@ -946,11 +1117,17 @@ ok("the typed burn parses and warns at the SAME ceiling",
    (SIM_CODE.match(/simRejected\(mOverride, SIM_BURN_MAX\)/g) || []).length);
 ok("...and so does the typed weight",
    /simNum\(wOverride, 2000\)/.test(SIM_CODE) && /simRejected\(wOverride, 2000\)/.test(SIM_CODE));
-// ⚠️ ONE render site for the floor warning — two would let one of them drift.
-ok("the 1,200 warning has exactly one render site",
-   (SIM_CODE.match(/isn&rsquo;t healthy or sustainable/g) || []).length === 1,
+// ⚠️ TWO RENDER SITES SINCE S217, AND THEY ARE DIFFERENT STATEMENTS: one about
+// the seven-day week, one about the chosen stretch. Counted so a third cannot
+// appear unnoticed, and each is pinned to its own PER-DAY list below — an
+// average cannot see a dozen 900-calorie days inside a stretch that means 1,900.
+ok("the 1,200 warning has exactly two render sites, the week and the stretch",
+   (SIM_CODE.match(/isn&rsquo;t healthy or sustainable/g) || []).length === 2,
    (SIM_CODE.match(/isn&rsquo;t healthy or sustainable/g) || []).length);
-ok("...and it names the days", /joinDays\(wp\.lowDays, DAY_SHORT\)/.test(SIM_CODE));
+ok("...the week one names the days", /joinDays\(wp\.lowDays, DAY_SHORT\)/.test(SIM_CODE));
+ok("...the stretch one counts them", /\{lowDates\.length > 0 && \(/.test(SIM_CODE));
+ok("...and neither is judged on an average",
+   !/weekIntake \/ 7[^\n]*< 1200/.test(SIM_CODE) && !/horizonProj\.(eaten|lost)[^\n]*MIN_DAILY_CAL/.test(SIM_CODE));
 // ⚠️ ASSERT THE GATE, NOT JUST THE BODY. Swapping the condition to judge the
 // weekly MEAN keeps the day names in the source and hides three 900-calorie days
 // behind a 1,586 average — the exact defect this suite claims to guard.
