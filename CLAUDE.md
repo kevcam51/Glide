@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**2,157 assertions across 35 suites**, S215).
+- `npm run test:units` — the JS unit suites (**2,195 assertions across 36 suites**, S215).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -109,10 +109,10 @@ enabled (Blaze has no default spending cap).
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
 > _**S215 (Sep 8): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S215)" first.**
-> ⚠️ **UNPUSHED, AND THE 18-FUNCTION `aitools.js` SET IS UNDEPLOYED.** Deploy
-> BEFORE pushing (`npm run deploy-set aitools.js`, deploy exactly what it
-> prints) or Vercel ships the visible half while the AI still quotes the old
-> burn. **2,157 assertions across 35 suites + 272 rules tests**; build,
+> Deployed (18 functions, `aitools.js` set) BEFORE the push, `check:stale` clean
+> at 79, live bundle marker-diffed. ⚠️ **That order is not optional** — push
+> first and the app shows corrected numbers while the AI still quotes the old
+> burn. **2,195 assertions across 36 suites + 272 rules tests**; build,
 > `check:undef`, `check:weak` clean.
 > ⚠️ **RESULTS PRINTED A TARGET NOBODY WAS ON.** Three rows rendered
 > `floor(tdee − cut + avgBurnPerDay)`: cardio-only and blind to `deficitMode`.

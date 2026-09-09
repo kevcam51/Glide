@@ -1,18 +1,24 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S215) — ⚠️ COMMITTED, NOT DEPLOYED, NOT PUSHED
+## ▶️ START HERE (S215) — DEPLOYED AND PUSHED
 
-**2,157 assertions across 35 suites + 272 rules tests**; build, `check:undef`,
-`check:weak` clean. `firestore.rules` untouched — no publish.
+**2,195 assertions across 36 suites + 272 rules tests**; build, `check:undef`,
+`check:weak` clean. The 18-function `aitools.js` set was deployed BEFORE the
+push (18 `Successful update` lines counted); `check:stale` reads **79 functions
+on current module code**; the live bundle was marker-diffed on glidna.com.
+`firestore.rules` untouched — no publish was needed.
 
-    1. DEPLOY FIRST   npm run deploy-set aitools.js   → deploy exactly what it prints (18)
-    2. THEN PUSH      (Vercel ships the frontend within the minute)
+⚠️ **DEPLOY-BEFORE-PUSH IS NOT OPTIONAL HERE** and was followed: push first and
+the app shows corrected numbers while the AI still quotes a custom-exercise burn
+a third too high. Always re-run `npm run deploy-set aitools.js` rather than
+pasting a list — it is 18 functions today, `mcp` among them, so the connector
+picks the change up with no hand-mirroring.
 
-⚠️ **THAT ORDER IS NOT OPTIONAL.** Push first and the app shows the corrected
-numbers while the AI is still quoting a custom-exercise burn a third too high.
-Re-run `deploy-set` rather than pasting the list below — it is 18 functions
-today, `mcp` among them, so the connector picks the change up with no
-hand-mirroring.
+⚠️ **REBASED OVER A PARALLEL SESSION'S `8a0a89d` (S212b-d, the body-composition
+audit), which touched the SAME `Results` and `SummaryTab` regions.** Only
+`package.json` conflicted (resolved as a UNION again — 36 suites), but App.jsx
+auto-merged inside the overlapping regions, so both sides were verified
+afterwards by presence-count and by running each other's suites. Go by SHA.
 
 Kevin: *"fix any other issues"* — the four flagged at the end of S214.
 
