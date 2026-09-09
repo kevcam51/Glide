@@ -25895,7 +25895,7 @@ const PLAN_FEATURES = {
       ["Session reminders, at the lead times you pick", false, false, true, true],
       ["Your sessions in Google, Apple or Outlook Calendar", false, false, true, true],
       ["No-show and waive controls on delivered sessions", false, false, true, true],
-      ["Earnings ledger — what was charged, and what didn't", false, false, true, true],
+
       // ⚠️ MOVED FROM CONNECT TO COACH (S202, Kevin: Option B). These used to be
       // "any paid plan", with a free straight-line version below that. Kevin's
       // call is that the map features start at Coach and simply do not appear
@@ -26029,6 +26029,10 @@ const PLAN_TIPS = {
     "Clients save a card once, and completed sessions are charged automatically \u2014 per session, weekly, fortnightly, or not at all if you'd rather invoice yourself. Their cancellation terms are frozen when they agree to them.",
   "No-show and waive controls on delivered sessions":
     "A session that already happened is still yours to judge. Charge the no-show rate your client agreed to, or waive it entirely \u2014 both only ever reduce what's charged.",
+  // ⚠️ NOT ON THE GRID (S215d) — the ledger reads sessionCharges, which the settle
+  // dispatcher only writes for uids on the sessionBillingGate allowlist, so it is
+  // empty for everyone else. Kept, unreferenced, beside the card-on-file wording
+  // for the day session payments open up.
   "Earnings ledger — what was charged, and what didn't":
     "Every settlement in one list: what was collected, what's still pending, and anything that was declined \u2014 so money that hasn't landed is visible rather than assumed.",
   "Drive time between sessions, with traffic":

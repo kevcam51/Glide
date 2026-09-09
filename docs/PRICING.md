@@ -1263,6 +1263,28 @@ $8.99. Gating ~30 micros would be beaten on both count and price. Barcode is
 weaker still: only MFP paywalls it, and it cost them real reputational damage.
 The honest client-side upgrade story stays AI + the coach relationship.
 
+## S215d — the earnings ledger comes off the grid (Kevin, Sep 9 2026) — ✅ BUILT
+
+**Kevin: "should we remove the earnings ledger from the grid?"** Yes, and for a
+sharper reason than card-on-file.
+
+Card-on-file was false in every column — `canBillSessions()` is an allowlist of
+one uid. The ledger is worse: it reads `sessionCharges/{cid}`, and those docs are
+written ONLY by the settle dispatcher, which returns
+`{outcome:"skipped", why:"billing-not-enabled"}` before any charge for every uid
+outside that allowlist (`sessionSettle.js:508`). So it is not a feature someone is
+gated out of — **for anyone but the owner the screen renders EMPTY, permanently**,
+and would go on doing so after they paid for Coach expecting it.
+
+**They are one feature.** Session payments are built and working (S185–S196) and
+allowlisted until Stripe Connect revenue splits land. Both rows come off together
+and both tooltips are KEPT, unreferenced, so the wording is ready the day the
+allowlist opens.
+
+⚠️ **If you want to signal it's coming, do it outside the entitlement grid.** A
+grid says what you get; a checkmark for something nobody can use is the exact
+class of claim the S215 audit was cleaning up.
+
 ## S215c — Trainerize goes multi-tenant, and moves to Coach+ (Kevin, Sep 9 2026) — ✅ BUILT
 
 **Kevin:** "I do think we should probably consider allowing trainerize sync to

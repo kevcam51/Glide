@@ -124,15 +124,28 @@ ok("Connect's roster row says 15, not Unlimited",
    /\["Clients & plan files", "15", "15", "Unlimited", "Unlimited"\]/.test(APP));
 ok("simulations are stated as unlimited on every tier",
    /\["Sales simulations", "Unlimited", "Unlimited", "Unlimited", "Unlimited"\]/.test(APP));
-ok("every session row moved off Connect",
-   (APP.match(/\["(Session booking & cancellation policy|Roster calendar — month, week & day|Repeating sessions — weekly, fortnightly, monthly|Block out your own time|Clients see your free slots & request a time|Session reminders, at the lead times you pick|Your sessions in Google, Apple or Outlook Calendar|No-show and waive controls on delivered sessions|Earnings ledger — what was charged, and what didn't)", false, false, true, true\]/g) || []).length === 9);
+// ⚠️ EIGHT, NOT NINE — the ledger row was REMOVED entirely in S215d, not moved.
+// This assertion caught that change itself, which is the point of counting
+// rather than merely finding.
+ok("every remaining session row moved off Connect",
+   (APP.match(/\["(Session booking & cancellation policy|Roster calendar — month, week & day|Repeating sessions — weekly, fortnightly, monthly|Block out your own time|Clients see your free slots & request a time|Session reminders, at the lead times you pick|Your sessions in Google, Apple or Outlook Calendar|No-show and waive controls on delivered sessions)", false, false, true, true\]/g) || []).length === 8);
 ok("NEG: no session row still shows a tick under Connect",
    !/\["Session booking & cancellation policy", false, true/.test(APP)
    && !/\["Roster calendar — month, week & day", false, true/.test(APP));
 ok("the blurb no longer quotes two different numbers as one",
    !/Up to 15 AI-coached clients a month, plus session booking and unlimited clients/.test(APP));
+// ⚠️ TWO ROWS, ONE FEATURE. Session payments are built and working, allowlisted
+// to a single uid until Stripe Connect lands. Card-on-file was false in every
+// column; the ledger is worse — it reads sessionCharges, which the settle
+// dispatcher only writes for allowlisted uids, so for anyone else the screen
+// renders EMPTY permanently. Neither belongs on a grid that says what you get.
 ok("card-on-file is off the grid — it is an allowlist of one, not a tier",
    !/\["Card on file & automatic session billing"/.test(APP));
+ok("...and so is the earnings ledger, which would render empty forever",
+   !/\["Earnings ledger/.test(APP));
+ok("NEG: both tooltips are KEPT, so the wording is ready when billing opens",
+   /"Card on file & automatic session billing":/.test(APP)
+   && /"Earnings ledger — what was charged, and what didn't":/.test(APP));
 ok("the 'nothing to connect' line is gone", !/Nothing to connect, nothing to switch/.test(APP));
 
 // ── 6. Connect's AI budget is its own, and solvent (S215b) ────────────────
