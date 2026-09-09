@@ -25270,7 +25270,7 @@ async function startCheckout(plan, audience) {
 const PLAN_MENU = {
   client: [
     { tier: "connect", name: "Glidna Connect", month: "$4.99", year: "$49.99", yearNote: "2 months free",
-      blurb: "Already live in Claude or ChatGPT? Connect Glidna to it — your own AI logs your meals and reads your data. No in-app AI." },
+      blurb: "Already live in Claude or ChatGPT? Connect Glidna to it — your own AI logs your meals and reads your data. The in-app assistant works too, on a smaller daily allowance." },
     { tier: "base", name: "Glidna Premium", month: "$14.99", year: "$119.99", yearNote: "33% off",
       blurb: "The AI coach: chat, photo & voice logging, AI meal estimates — a generous daily allowance. Includes everything in Connect. All your tracking stays free either way." },
     { tier: "max", name: "Glidna Elite", month: "$29.99", year: "$299.99", yearNote: "2 months free",
@@ -25278,7 +25278,7 @@ const PLAN_MENU = {
   ],
   trainer: [
     { tier: "connect", name: "Coach Connect", month: "$19.99", year: "$199", yearNote: "2 months free",
-      blurb: "Already live in Claude or ChatGPT? Run your roster from it — your own AI reads and writes every client's plan. Up to 15 clients, and the AI can work with all of them. No in-app AI, no session booking." },
+      blurb: "Already live in Claude or ChatGPT? Run your roster from it — your own AI reads and writes every client's plan. Up to 15 clients, and the AI can work with all of them. The in-app assistant works too, on a smaller allowance. No session booking." },
     { tier: "base", name: "Glidna Coach", month: "$49", year: "$490", yearNote: "2 months free",
       // Was "The full coaching workspace + AI assistant" — which contradicted the
       // grid directly beneath it, where the whole workspace reads "free forever".
@@ -25334,31 +25334,39 @@ const PLAN_FEATURES = {
     { section: "Connect — for people who already live in Claude or ChatGPT", rows: [
       ["Your own AI logs meals & reads your data", false, true, true, true],
       ["Everything in Free, plus the full plugin", false, true, true, true],
-      ["No in-app AI — you bring your own", false, true, true, true],
+      // ⚠️ WAS "No in-app AI — you bring your own" (S215b). It described the
+      // INTENT of the tier and never the code: Connect was silently drawing the
+      // budget of the tier above it. Kevin's call is that Connect keeps in-app
+      // AI — the roster cap is the lever, not the allowance — so the honest row
+      // is the smaller daily allowance, stated two rows down, not a denial.
+      ["In-app AI too — a smaller daily allowance", false, true, true, true],
     ]},
     { section: "AI coach — everything in Free, plus:", rows: [
       // S180: the Meal Planner — the additive paid feature (new value behind
       // the wall, nothing free taken away). Trial gets it like everything else.
-      ["Weekly meal planner — plan meals like workouts", false, false, true, true],
-      ["24/7 AI coach chat (knows YOUR data)", false, false, true, true],
-      ["Log meals by chat — just describe them", false, false, true, true],
-      ["Photo meal logging — snap your plate", false, false, true, true],
-      ["Voice logging — speak instead of type", false, false, true, true],
-      ["AI food estimates in the tracker", false, false, true, true],
-      ["AI builds your workout program", false, false, true, true],
-      ["Turn TikTok / IG / YouTube links into workouts & meals", false, false, true, true],
+      ["Weekly meal planner — plan meals like workouts", false, true, true, true],
+      ["24/7 AI coach chat (knows YOUR data)", false, true, true, true],
+      ["Log meals by chat — just describe them", false, true, true, true],
+      ["Photo meal logging — snap your plate", false, true, true, true],
+      ["Voice logging — speak instead of type", false, true, true, true],
+      ["AI food estimates in the tracker", false, true, true, true],
+      ["AI builds your workout program", false, true, true, true],
+      ["Turn TikTok / IG / YouTube links into workouts & meals", false, true, true, true],
       // S184: web search. Advertised with its allowance cost attached, in the
       // same row group as the allowance itself — Kevin's requirement was that
       // people learn searching spends more BEFORE they trigger one.
-      ["Web search — it asks first, then cites its sources", false, false, true, true],
-      ["Import from ChatGPT / Claude", false, false, true, true],
-      ["Set up your whole plan by conversation", false, false, true, true],
-      ["Cut / bulk / maintenance phases by chat", false, false, true, true],
-      ["Past chats — save, revisit & continue", false, false, true, true],
+      ["Web search — it asks first, then cites its sources", false, true, true, true],
+      ["Import from ChatGPT / Claude", false, true, true, true],
+      ["Set up your whole plan by conversation", false, true, true, true],
+      ["Cut / bulk / maintenance phases by chat", false, true, true, true],
+      ["Past chats — save, revisit & continue", false, true, true, true],
       // S179h: automations move down to Premium (Elite/Apex keep more).
       ["Scheduled AI automations — wake up to today's plan", false, false, true, true],
-      ["AI conversations per day", "—", "—", "~30 (more on request)", "~100"],
-      ["Web searches per day", "—", "—", "12", "25"],
+      // ⚠️ NOT "—" (S215b). Connect was falling through to the tier above and
+      // getting the FULL client budget — 45k, the same as Premium at $14.99 —
+      // while this row said it had none. It now has its own, sized to $4.99.
+      ["AI conversations per day", "—", "~16", "~30 (more on request)", "~100"],
+      ["Web searches per day", "—", "6", "12", "25"],
     ]},
     { section: "Elite — everything in Premium, plus:", rows: [
       ["Four automations a day, not two", false, false, false, true],
@@ -25445,13 +25453,14 @@ const PLAN_FEATURES = {
       ["Set targets & manage client plans by chat", false, false, true, true],
       ["Photo & voice meal logging", false, false, true, true],
       ["Turn TikTok / IG / YouTube links into programs", false, false, true, true],
-      ["Web search — it asks first, then cites its sources", false, false, true, true],
-      ["AI edits your local plans & simulations", false, false, true, true],
-      ["Send client to-dos straight from chat", false, false, true, true],
-      ["Past chats — save, revisit & continue", false, false, true, true],
+      ["Web search — it asks first, then cites its sources", false, true, true, true],
+      ["AI edits your local plans & simulations", false, true, true, true],
+      ["Send client to-dos straight from chat", false, true, true, true],
+      ["Past chats — save, revisit & continue", false, true, true, true],
       ["Scheduled AI automations — wake up to a roster summary", false, false, true, true],
-      ["AI conversations per day", "—", "—", "~133", "~200"],
-      ["Web searches per day", "—", "—", "30", "50"],
+      // See the client grid: Coach Connect was drawing Coach's full 200k (S215b).
+      ["AI conversations per day", "—", "~66", "~133", "~200"],
+      ["Web searches per day", "—", "15", "30", "50"],
       // S176f seats: distinct people the AI works on per month. The roster
       // itself stays unlimited on every tier — this row counts only AI-coached
       // people. ONE number per tier (S178b): seats are tracked once across
@@ -25588,8 +25597,8 @@ const PLAN_TIPS = {
     "Tell your own Claude or ChatGPT \u201clog my lunch\u201d and it writes straight into Glidna, then reads your week back to you. Most fitness connectors can only read \u2014 this one writes.",
   "Everything in Free, plus the full plugin":
     "Every free feature, plus your own AI connected to your Glidna data at full speed.",
-  "No in-app AI \u2014 you bring your own":
-    "Connect has no AI coach inside the Glidna app \u2014 your own AI subscription does that work. If you'd rather chat, log by photo and use voice inside Glidna, that's the tier above.",
+  "In-app AI too \u2014 a smaller daily allowance":
+    "Connect is built around your own Claude or ChatGPT, but the in-app assistant works too \u2014 on a smaller daily allowance than Coach. Enough for ordinary use; the connector is where the tier earns its keep.",
 
   // ── Client AI ────────────────────────────────────────────────────────────
   "24/7 AI coach chat (knows YOUR data)":

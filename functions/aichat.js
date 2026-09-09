@@ -81,6 +81,26 @@ const BUDGETS = { trial: 45000, client: 45000, assisted: 45000,
   // still buys headroom over base; Apex (400k) is unchanged above it.
   trainer: 200000,
   trainerTrial: 100000,
+  // ── S215b: Connect gets a budget SIZED TO WHAT IT CHARGES (Kevin) ─────────
+  //
+  // ⚠️ CONNECT USED TO FALL THROUGH TO THE TIER ABOVE IT. tierFor() tested only
+  // /max/ and /ultra/, so a `coach_connect` subscriber landed on `trainer` —
+  // 200k/day, byte-identical to Coach at $49 — while the pricing grid said
+  // Connect had no in-app AI at all. The client side was worse: `connect` at
+  // $4.99 drew the full 45k, the same as Premium at $14.99.
+  //
+  // The fix is NOT a punishment and NOT an upsell lever. Kevin's read is right
+  // that the S215 roster cap already settled the cannibalisation worry — a big
+  // roster can no longer buy the cheap tier. What remains is SOLVENCY, the rule
+  // docs/PRICING.md has held since S169g: every tier profitable at its own
+  // ceiling. At 200k a $19.99 tier costs ~$28/month at ceiling against ~$19.11
+  // net — about −$9. That is the same failure S179h found when Premium went
+  // underwater at 100k, and it was fixed the same way.
+  //
+  // Sized so nobody real ever meets it: 100k ≈ 66 conversations a day against a
+  // typical 8. It is a backstop, not a limit anyone feels.
+  connect: 25000,          // client Connect $4.99  — ~16 conversations/day
+  trainerConnect: 100000,  // Coach Connect $19.99 — ~66 conversations/day
   clientMax: 150000, trainerMax: 300000,
   // Ultra (S92): data-triggered heavy-user tiers, surfaced via the boost upsell.
   clientUltra: 250000, trainerUltra: 450000 };   // S171: Apex 400k->450k (every trainer step is now +50%)
@@ -132,6 +152,7 @@ const WEB_SEARCH_MAX_USES = 3;
 // counting it.
 const SEARCH_BUDGETS = {
   trial: 12, client: 12, assisted: 12, clientMax: 25, clientUltra: 40,
+  connect: 6, trainerConnect: 15,   // sized with the token budgets above (S215b)
   trainerTrial: 15, trainer: 30, trainerMax: 50, trainerUltra: 70,
 };
 // web_search_20260318 with dynamic filtering (Claude writes code that filters
@@ -201,9 +222,17 @@ function tierFor(profile) {
   const active = profile && profile.subscriptionStatus === "active";
   const isUltra = active && /ultra/.test(t);
   const isMax = active && /max/.test(t);
+  // ⚠️ CONNECT MUST BE TESTED BEFORE THE FALL-THROUGH, AND AFTER max/ultra.
+  // There is no "coach_connect_max", so order against those two does not matter
+  // here — but the fall-through does: without this line Connect lands on the
+  // tier ABOVE it, which is exactly the bug (S215b). Tested with a regex on the
+  // whole tier string rather than includes(), for the same reason roster.js
+  // isConnectTier does: it cannot be reordered wrong by a later edit.
+  const isConnect = active && /connect/.test(t);
   if (role === "head_trainer" || role === "sub_trainer" || role === "admin") {
     if (isUltra) return "trainerUltra";
     if (isMax) return "trainerMax";
+    if (isConnect) return "trainerConnect";
     // On trial → the fuller trainerTrial allowance (they manage clients from day
     // one). trialExpiredFor() still locks the AI once the trial actually ends.
     if (profile && profile.subscriptionStatus === "trial") return "trainerTrial";
@@ -211,6 +240,7 @@ function tierFor(profile) {
   }
   if (isUltra) return "clientUltra";
   if (isMax) return "clientMax";
+  if (isConnect) return "connect";
   // client: trainer-assisted (linked) gets a higher budget than self-serve;
   // a still-in-trial / non-active subscription gets the trial budget.
   if (profile && profile.subscriptionStatus && profile.subscriptionStatus !== "active"
@@ -1387,6 +1417,14 @@ const BOOST_STEP_BASE = 15000;   // client/assisted/trial: 45k → 60k → 75k
 const BOOSTS_PER_DAY = {
   client: 2, assisted: 2, trial: 2, trainer: 2,
   trainerMax: 2, clientMax: 1, trainerUltra: 2, clientUltra: 1,
+  // ⚠️ Coach Connect BOOSTS, client Connect DOES NOT — and the difference is
+  // arithmetic, not favouritism (S215b). A boost is a fixed +15k. Coach Connect:
+  // 100k → 115k ≈ $16.2/mo against $19.11 net, still ~+$3. Client Connect at
+  // $4.99: 25k → 40k ≈ $5.6/mo against $4.55 net, which is UNDERWATER — so
+  // offering it would be selling a button that loses money every time it is
+  // pressed. `connect` is deliberately absent; membership of this map is what
+  // isBoostable reads, so absence is the switch.
+  trainerConnect: 2,
 };
 exports.requestBudgetBoost = onCall({ region: "us-central1", maxInstances: 10 }, async (request) => {
   const uid = request.auth && request.auth.uid;

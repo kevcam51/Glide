@@ -38,6 +38,11 @@ const { sendPushTo, VAPID_PRIVATE_KEY } = require("./push");
 const WORKFLOW_CAP = {
   client: 2, assisted: 2, clientMax: 4, clientUltra: 6,
   trainer: 2, trainerMax: 5, trainerUltra: 8,
+  // Stated rather than left to `|| 0` below (S215b). Connect gained its own
+  // tier keys when its AI budget was separated from Coach's, and automations are
+  // Premium/Coach and above on the pricing grid — so zero is the intended
+  // answer here, not a map that happens to be missing an entry.
+  connect: 0, trainerConnect: 0,
 };
 // Admin is by UID (see aichat.isAdminUid) — a profile doc never carries
 // role:"admin", so the old `profile.role === "admin"` check here was dead and

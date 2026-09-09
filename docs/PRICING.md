@@ -1263,6 +1263,47 @@ $8.99. Gating ~30 micros would be beaten on both count and price. Barcode is
 weaker still: only MFP paywalls it, and it cost them real reputational damage.
 The honest client-side upgrade story stays AI + the coach relationship.
 
+## S215b — Connect gets its OWN AI budget (Kevin, Sep 9 2026) — ✅ BUILT
+
+**The bug.** `tierFor()` tested only `/max/` and `/ultra/`, so Connect fell
+through to the tier ABOVE it: `coach_connect` drew `trainer` (200k/day, identical
+to Coach at $49) and client `connect` drew 45k (identical to Premium at $14.99) —
+while the grid said Connect had no in-app AI at all. Reachable, not theoretical:
+`isPremium()` is true for any active sub, so the chat rendered unlocked.
+
+**Kevin's call, and it corrects mine.** I proposed zeroing Connect's AI as an
+upsell lever. He pushed back: the S215 roster cap is the lever, and limiting AI
+on top would just be punitive. He is right — the cannibalisation worry (a big
+roster buying the cheap tier) died with the 15-client cap.
+
+**What remains is SOLVENCY**, the rule this doc has held since S169g: every tier
+profitable at its own ceiling. At 200k a $19.99 tier costs ~$28/mo against ~$19.11
+net — about **−$9**. Same failure S179h found when Premium went underwater, fixed
+the same way: size the budget to the price, not to the tier above.
+
+| Tier | Budget | Searches | Ceiling cost/mo | Net | Margin |
+|---|---:|---:|---:|---:|---:|
+| Connect $4.99 | 25k (~16 conv) | 6 | ~$3.5 | $4.55 | ~+$1 |
+| Coach Connect $19.99 | 100k (~66 conv) | 15 | ~$14 | $19.11 | ~+$5 |
+| Coach $49 | 200k (~133) | 30 | ~$28 | $47.28 | ~+$19 |
+
+Sized so nobody real meets it — 66 conversations a day against a typical 8. A
+backstop, not a limit anyone feels.
+
+**Boosts:** Coach Connect yes (100k → 115k still clears, ~+$3). Client Connect
+**no** — a fixed +15k on 25k costs ~$5.6 against $4.55 net, so the button would
+lose money every time it was pressed. Absence from `BOOSTS_PER_DAY` is the switch.
+
+**Automations:** stated as `0` for both Connect tiers in `WORKFLOW_CAP` rather
+than left to a missing key. Matches the grid, which has always had them at
+Premium/Coach and above.
+
+⚠️ **THIS REPOSITIONS CONNECT.** The tier now advertises in-app AI on a smaller
+allowance, where it used to say "No in-app AI — you bring your own". Seventeen
+capability rows flipped to include Connect. If the intent was ever that Connect
+carries NO in-app AI, this is the change to revisit — the budget lever is one
+constant per tier.
+
 ## S215 — Coach Connect gets a 15 roster and loses booking (Kevin, Sep 9 2026) — ✅ BUILT
 
 **Decision.** Coach Connect is capped at **15 clients + plan files**, the same pool

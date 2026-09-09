@@ -135,5 +135,77 @@ ok("card-on-file is off the grid — it is an allowlist of one, not a tier",
    !/\["Card on file & automatic session billing"/.test(APP));
 ok("the 'nothing to connect' line is gone", !/Nothing to connect, nothing to switch/.test(APP));
 
+// ── 6. Connect's AI budget is its own, and solvent (S215b) ────────────────
+// ⚠️ CONNECT USED TO FALL THROUGH TO THE TIER ABOVE IT. tierFor() tested only
+// /max/ and /ultra/, so coach_connect landed on `trainer` — 200k/day, identical
+// to Coach at $49 — and client `connect` drew the full 45k, identical to Premium
+// at $14.99. Both were reachable: isPremium() is true for any active sub, so the
+// chat rendered unlocked.
+//
+// Kevin's call: the roster cap is the lever, not the allowance — so Connect KEEPS
+// in-app AI, sized to what it charges. docs/PRICING.md has required every tier to
+// be profitable at its own ceiling since S169g, and 200k costs ~$28/mo against
+// Connect's ~$19.11 net.
+{
+  const AI = readFileSync(join(ROOT, "functions", "aichat.js"), "utf8");
+  const WF = readFileSync(join(ROOT, "functions", "workflows.js"), "utf8");
+  function bal(x, i) { let d = 0, st = false;
+    for (let j = i; j < x.length; j++) { if (x[j] === "{") { d++; st = true; }
+      else if (x[j] === "}") { d--; if (st && d === 0) return x.slice(i, j + 1); } } }
+  const B = bal(AI, AI.indexOf("const BUDGETS = "));
+  const S = new Function(bal(AI, AI.indexOf("function rewardTier(")) + "\n"
+    + bal(AI, AI.indexOf("function rewardTierActive(")) + "\n"
+    + "const BUDGETS=" + B.slice(B.indexOf("{")) + ";\n"
+    + bal(AI, AI.indexOf("function tierFor(")) + "\nreturn { tierFor, BUDGETS };")();
+  const T = (role, tier) => S.tierFor({ role, subscriptionStatus: "active", subscriptionTier: tier });
+
+  ok("Coach Connect gets its OWN tier, not Coach's", T("head_trainer", "coach_connect") === "trainerConnect");
+  ok("client Connect gets its own too", T("client", "connect") === "connect");
+  ok("Coach is untouched", T("head_trainer", "coach") === "trainer" && S.BUDGETS.trainer === 200000);
+  ok("Coach Elite is untouched", T("head_trainer", "coach_max") === "trainerMax");
+  ok("Coach Apex is untouched", T("head_trainer", "coach_ultra") === "trainerUltra");
+  ok("Premium is untouched", T("client", "premium") === "client" && S.BUDGETS.client === 45000);
+  ok("NEG: coach_connect no longer resolves to the tier above it",
+     T("head_trainer", "coach_connect") !== T("head_trainer", "coach"));
+  ok("NEG: ...nor does client connect", T("client", "connect") !== T("client", "premium"));
+
+  // Solvency, as arithmetic rather than assertion. Basis from docs/PRICING.md:
+  // $0.47/day per 100k budget-tokens, 30 days.
+  const monthlyCost = (tokens) => (tokens / 100000) * 0.47 * 30;
+  const NET = { trainerConnect: 19.11, connect: 4.55, trainer: 47.28 };
+  for (const t of ["trainerConnect", "connect"]) {
+    const m = NET[t] - monthlyCost(S.BUDGETS[t]);
+    ok(`${t} is profitable at its own ceiling`, m > 0, { tier: t, budget: S.BUDGETS[t], margin: +m.toFixed(2) });
+  }
+  ok("NEG: at the OLD budget Coach Connect was underwater — the reason for the change",
+     NET.trainerConnect - monthlyCost(S.BUDGETS.trainer) < 0,
+     +(NET.trainerConnect - monthlyCost(S.BUDGETS.trainer)).toFixed(2));
+  ok("NEG: ...and so was client Connect at 45k",
+     NET.connect - monthlyCost(45000) < 0);
+  ok("Coach stays comfortably profitable", NET.trainer - monthlyCost(S.BUDGETS.trainer) > 15);
+
+  // A boost is a fixed +15k, so it has to be checked at the boosted ceiling too.
+  ok("Coach Connect may boost, and still clears at +15k",
+     /trainerConnect: 2,/.test(AI) && NET.trainerConnect - monthlyCost(S.BUDGETS.trainerConnect + 15000) > 0);
+  ok("client Connect may NOT boost — a +15k step puts it underwater",
+     !/\bconnect: \d/.test(AI.slice(AI.indexOf("const BOOSTS_PER_DAY"), AI.indexOf("const BOOSTS_PER_DAY") + 700))
+     && NET.connect - monthlyCost(S.BUDGETS.connect + 15000) < 0);
+  ok("automations are stated as zero for both Connect tiers, not left to a missing key",
+     /connect: 0, trainerConnect: 0,/.test(WF));
+
+  // And the page now says what the code does.
+  ok("the grid states Connect's allowance instead of a dash",
+     /\["AI conversations per day", "—", "~16", "~30 \(more on request\)", "~100"\]/.test(APP)
+     && /\["AI conversations per day", "—", "~66", "~133", "~200"\]/.test(APP));
+  ok("...and its web searches", /\["Web searches per day", "—", "6", "12", "25"\]/.test(APP)
+     && /\["Web searches per day", "—", "15", "30", "50"\]/.test(APP));
+  ok("the 'No in-app AI' row is gone — it was never true",
+     !/\["No in-app AI — you bring your own"/.test(APP));
+  ok("...and neither blurb still claims it",
+     !/blurb: "[^"]*No in-app AI/.test(APP), (APP.match(/blurb: "[^"]*No in-app AI[^"]*"/g) || [])[0]);
+  ok("automations stay OFF for Connect on the grid, matching WORKFLOW_CAP",
+     /\["Scheduled AI automations — wake up to today's plan", false, false, true, true\]/.test(APP));
+}
+
 console.log(`${checks - fails}/${checks} tier-gate assertions passed`);
 if (fails) process.exit(1);
