@@ -101,11 +101,11 @@ const FNS = ["calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx"
   "restingKcalPerMin", "calcBurn", "cardioExFor", "exBurn", "isEatback", "dailyDeficitOf", "weeklyRateOf",
   "planEnergy", "planIntakeForRate", "computeClientCalories",
   "simNum", "simRejected", "weekPlan", "joinDays",
-  "seedSimCardio", "simSessionBurn", "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate"];
+  "seedSimCardio", "simSessionBurn", "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simProject"];
 const EXPORTS = ["simNum", "simRejected", "weekPlan", "joinDays", "seedSimCardio", "simSessionBurn",
   "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "planEnergy",
   "planIntakeForRate", "computeClientCalories", "cardioExFor", "exBurn", "isEatback", "SIM_RATES",
-  "SIM_MANUAL", "MIN_DAILY_CAL", "CAL_PER_LB", "DAYS", "DAY_SHORT", "atLeastMinCal"];
+  "SIM_MANUAL", "MIN_DAILY_CAL", "CAL_PER_LB", "DAYS", "DAY_SHORT", "atLeastMinCal", "simProject"];
 const source = () => [...CONSTS, "atLeastMinCal", ...FNS].map((n) => liftDecl(APP, n)).join("\n");
 const build = (src) => new Function(`${src}; return { ${EXPORTS.join(", ")} };`)();
 const M = build(source());
@@ -419,11 +419,17 @@ ok("the in-plan entry point survives", /<button onClick=\{\(\)=>setShowSim\(true
   ok("...and it is the true week", /const weekBalance = weekIntake - burnWeek - maintain \* 7;/.test(SIM_CODE));
   ok("...the per-day figure is a rounding OF it, not the other way round",
      /const burnPerDay = Math\.round\(burnWeek \/ 7\);/.test(SIM_CODE));
+  // ⚠️ `lbsIn` IS DELIBERATELY NOT LIFTED ANY MORE. Since S217 it reads the
+  // projector rather than multiplying the balance, and the old `[^;]*` pattern
+  // silently returned HALF of its new body — the S211 "slice to the next
+  // semicolon" trap. What this block is about is the weekly BALANCE; the flat
+  // reference below is what the projector must reproduce at day 0, and
+  // scripts/test-what-if-week.mjs proves that separately by running simProject.
   const engine = new Function("weekIntake", "burnWeek", "maintain", "CAL_PER_LB", `
     ${SIM_CODE.match(/const weekBalance = [^\n]*/)[0]}
     ${SIM_CODE.match(/const balance = weekBalance \/ 7;/)[0]}
-    ${SIM_CODE.match(/const lbsIn = \(days\) => [^;]*;/)[0]}
     ${SIM_CODE.match(/const dir = balance [^\n]*/)[0]}
+    const lbsIn = (days) => (-balance * days) / CAL_PER_LB;
     return { balance, dir, lbs: [7, 14, 30, 60].map(lbsIn) };
   `);
   const project = (d, rate, week, doubleCount) => {
@@ -472,16 +478,167 @@ ok("the in-plan entry point survives", /<button onClick=\{\(\)=>setShowSim\(true
   }
 }
 
+// ── 5b. the projector: the same formula, re-run as the weight moves (S217) ──
+// Kevin: "Can we still have the same formulas to kind of estimate how many
+// calories someone will burn for a couple weeks. Months or a year."
+//
+// ⚠️ THE FLAT RULE IS WRONG OVER A YEAR AND WRONG IN THE FLATTERING DIRECTION.
+// Everything below is RUN against the shipping simProject.
+{
+  // The flat reference: what the screen showed before, and what the walk must
+  // still produce whenever the burn cannot follow the body.
+  const flat = (holdPerDay, intake, days) => ((holdPerDay - intake) * days) / CAL_PER_LB;
+
+  // ── it reduces to the flat model when nothing can move ──────────────────
+  {
+    let bad = null, n = 0;
+    for (const hold of [1800, 2400, 3055, 4200]) {
+      for (const intake of [1200, 1900, 2555, 3000, 5000]) {
+        for (const days of [7, 14, 30, 60, 90, 182, 365]) {
+          n++;
+          const p = M.simProject({ days, startLbs: 0, weekHold: () => hold * 7, dayIntake: () => intake });
+          const want = flat(hold, intake, days);
+          if (Math.abs(p.lost - want) > 1e-9) { bad = { hold, intake, days, got: p.lost, want }; break; }
+        }
+        if (bad) break;
+      }
+      if (bad) break;
+    }
+    ok(`a constant hold reproduces the flat arithmetic exactly (${n} combinations)`, !bad, bad);
+  }
+
+  // ── the invariant that makes this safe to ship: an UNTOUCHED screen ──────
+  // A blank day is priced at the pace, and the pace re-prices with the weight,
+  // so the daily deficit stays exactly `cut` at every weight.
+  {
+    const cut = 500;
+    let worst = 0;
+    for (const start of [105, 140, 170, 220, 300]) {
+      for (const days of [7, 14, 30, 60]) {
+        // hold falls with weight; the pace falls with it, keeping the gap at `cut`
+        const holdAt = (lbs) => Math.round(1200 + lbs * 9) * 7;
+        const p = M.simProject({ days, startLbs: start, weekHold: holdAt,
+          dayIntake: (i, lbs) => holdAt(lbs) / 7 - cut });
+        worst = Math.max(worst, Math.abs(p.lost - (cut * days) / CAL_PER_LB));
+      }
+    }
+    ok("...and a re-pricing pace keeps the deficit exactly at the chosen rate", worst < 1e-9, worst);
+  }
+
+  // ── where it moves is where the flat rule is wrong ──────────────────────
+  // 220 lb man, moderate, eating a FIXED 2,555 — the shape a typed calendar
+  // models. The app's own equations, run.
+  {
+    const dM = { gender: "male", age: 35, heightFt: 6, heightIn: 0, weightLbs: 220, activityLevel: "moderate" };
+    const holdAt = (lbs) => M.planEnergy({ ...dM, weightLbs: lbs }).tdee * 7;
+    const walk = (days) => M.simProject({ days, startLbs: 220, weekHold: holdAt, dayIntake: () => 2555 });
+    const flatAt = (days) => flat(M.planEnergy(dM).tdee, 2555, days);
+    ok("a week is the same either way", Math.abs(walk(7).lost - flatAt(7)) < 0.02, { walk: walk(7).lost, flat: flatAt(7) });
+    ok("two months is already 5% apart", flatAt(60) / walk(60).lost > 1.04 && flatAt(60) / walk(60).lost < 1.07,
+       { walk: +walk(60).lost.toFixed(1), flat: +flatAt(60).toFixed(1) });
+    ok("a year is ~40% apart, and the walk is the smaller number",
+       walk(365).lost < flatAt(365) && flatAt(365) / walk(365).lost > 1.3,
+       { walk: +walk(365).lost.toFixed(1), flat: +flatAt(365).toFixed(1) });
+    // ⚠️ THE SENTENCE THIS EXISTS FOR: 167.9 vs 182.9 for the same man.
+    ok("...which is 15 lbs of bodyweight at twelve months",
+       Math.abs((220 - flatAt(365)) - 167.9) < 0.3 && Math.abs(walk(365).end - 182.9) < 0.3,
+       { flatEnd: +(220 - flatAt(365)).toFixed(1), walkEnd: +walk(365).end.toFixed(1) });
+    ok("the end weight IS the start minus the pounds", Math.abs(walk(60).end - (220 - walk(60).lost)) < 1e-9);
+  }
+
+  // ── it refuses rather than guessing, and halts rather than inventing ─────
+  ok("an unusable plan returns null, not a number",
+     M.simProject({ days: 30, startLbs: 180, weekHold: () => null, dayIntake: () => 2000 }) === null);
+  ok("...and a NaN hold is refused too",
+     M.simProject({ days: 30, startLbs: 180, weekHold: () => NaN, dayIntake: () => 2000 }) === null);
+  {
+    // A runaway burn used to state a NEGATIVE bodyweight as fact.
+    const p = M.simProject({ days: 365, startLbs: 180, weekHold: () => 2000 * 7, dayIntake: () => 0 });
+    ok("an impossible scenario halts instead of projecting a negative body", p.halted > 0 && p.end > 0, p);
+    ok("...within the first weeks, not after a year of walking", p.halted < 365, p.halted);
+  }
+  {
+    // With no starting weight the pounds still answer — that needs no body.
+    const p = M.simProject({ days: 60, startLbs: 0, weekHold: () => 2400 * 7, dayIntake: () => 1900 });
+    ok("no starting weight still answers in pounds", Math.abs(p.lost - flat(2400, 1900, 60)) < 1e-9);
+    ok("...and never halts, because there is no body to run out of", p.halted === 0);
+  }
+  ok("a surplus comes back negative, the same sign convention as before",
+     M.simProject({ days: 30, startLbs: 180, weekHold: () => 2000 * 7, dayIntake: () => 2500 }).lost < 0);
+  ok("a partial final week is not counted as a whole one",
+     Math.abs(M.simProject({ days: 10, startLbs: 0, weekHold: () => 2100 * 7, dayIntake: () => 1600 }).lost
+              - flat(2100, 1600, 10)) < 1e-9);
+  ok("it also reports what was eaten and spent, for the burn total",
+     M.simProject({ days: 7, startLbs: 0, weekHold: () => 2100 * 7, dayIntake: () => 1600 }).eaten === 1600 * 7);
+
+  // ── NEGATIVE CONTROLS ───────────────────────────────────────────────────
+  // A walk that never re-reads the hold is the flat model wearing a loop.
+  const frozen = (days, startLbs, holdAt, intake) => {
+    const hold = holdAt(startLbs); let w = startLbs;
+    for (let i = 0; i < days; i += 7) { const c = Math.min(7, days - i); w -= ((hold / 7) * c - intake * c) / CAL_PER_LB; }
+    return startLbs - w;
+  };
+  {
+    const dM = { gender: "male", age: 35, heightFt: 6, heightIn: 0, weightLbs: 220, activityLevel: "moderate" };
+    const holdAt = (lbs) => M.planEnergy({ ...dM, weightLbs: lbs }).tdee * 7;
+    ok("control: a frozen hold really does overstate the year",
+       frozen(365, 220, holdAt, 2555) > M.simProject({ days: 365, startLbs: 220, weekHold: holdAt, dayIntake: () => 2555 }).lost + 10);
+    ok("control: ...and is indistinguishable at a week",
+       Math.abs(frozen(7, 220, holdAt, 2555) - M.simProject({ days: 7, startLbs: 220, weekHold: holdAt, dayIntake: () => 2555 }).lost) < 0.02);
+  }
+}
+
+// ── 5c. the walk is wired into ALL FOUR render sites ────────────────────────
+// ⚠️ `lbsIn(days)` APPEARED THREE TIMES INSIDE ONE TILE — the number, the
+// "off the scale" guard and the projected weight. Rewiring the obvious one
+// leaves a tile reading "−3.1" above "205.7 lbs" on a 210 lb plan, and no
+// regression test can see it, because both expressions are equal by
+// construction whenever nothing is typed. So it is COUNTED.
+ok("nothing multiplies the flat balance out to pounds any more",
+   !/\(-balance \* days\) \/ CAL_PER_LB/.test(SIM_CODE));
+ok("the pounds come from the walk", /const lbsIn = \(days\) => \{ const p = projAt\[days\] \|\| projFor\(days\); return p \? p\.lost : 0; \};/.test(SIM_CODE));
+ok("...and so does the projected weight, rather than a subtraction",
+   /const endLbs = \(days\) =>/.test(SIM_CODE)
+   && (SIM_CODE.match(/endLbs\(days\)/g) || []).length === 2,   // the guard and the value
+   (SIM_CODE.match(/endLbs\(days\)/g) || []).length);
+ok("...so no tile still subtracts the pounds off the start weight",
+   !/w - lbsIn\(days\)/.test(SIM_CODE));
+ok("the four horizons are memoised, not walked per render",
+   /const projAt = useMemo\(/.test(SIM_CODE));
+// ⚠️ THE WALK'S HOLD MUST BE THE SAME TERM `weekBalance` SUBTRACTS, or the card
+// carries two break-even numbers. Floored, times seven, plus the burn the ladder
+// has not already paid for.
+ok("the walk holds steady on the same expression the answer panel does",
+   /return simIntakeForRate\(dw, tw, 0, mNum\) \* 7 \+ \(isEatback\(dw\) \? 0 : tw\);/.test(SIM_CODE));
+ok("...and a blank day is the pace AT THAT WEIGHT, which is what keeps it inert",
+   /const paceAtWeight = \(lbs\) => simIntakeForRate\(atWeight\(lbs\), trainWeekAt\(lbs\), rate, mNum\);/.test(SIM_CODE));
+// ⚠️ WITH NO BODY TO RE-PRICE IT GOES CONSTANT ON PURPOSE — a typed daily burn
+// has no BMR behind it, and no weight means no MET can be priced.
+ok("it only follows the body when there is a body to follow",
+   /const canFollow = w > 0 && mNum === null && planUsable;/.test(SIM_CODE));
+ok("...and says which of those it is doing", /This holds their burn at/.test(SIM_CODE) && /Add their weight and it can follow the burn down/.test(SIM_CODE));
+// ⚠️ THE OLD FOOTNOTE BECAME FALSE. It said the projection "drifts optimistic",
+// which is exactly what it no longer does — prose contradicting the number four
+// inches above it is the S216b SummaryTab bug in advance.
+ok("the footnote no longer claims the drift it just fixed",
+   !/drifts optimistic/.test(SIM_CODE) && /doesn&rsquo;t drift the way a flat calculator does/.test(SIM_CODE));
+
 // ── 6. the engine itself is unchanged ───────────────────────────────────────
 // Dropping the two scalar modes removed two ways of SAYING the same sum, not a
 // second sum. The lifted lines still have to behave like the scalar engine that
 // shipped.
 {
+  // ⚠️ `lbsIn` IS DELIBERATELY NOT LIFTED ANY MORE. Since S217 it reads the
+  // projector rather than multiplying the balance, and the old `[^;]*` pattern
+  // silently returned HALF of its new body — the S211 "slice to the next
+  // semicolon" trap. What this block is about is the weekly BALANCE; the flat
+  // reference below is what the projector must reproduce at day 0, and
+  // scripts/test-what-if-week.mjs proves that separately by running simProject.
   const engine = new Function("weekIntake", "burnWeek", "maintain", "CAL_PER_LB", `
     ${SIM_CODE.match(/const weekBalance = [^\n]*/)[0]}
     ${SIM_CODE.match(/const balance = weekBalance \/ 7;/)[0]}
-    ${SIM_CODE.match(/const lbsIn = \(days\) => [^;]*;/)[0]}
     ${SIM_CODE.match(/const dir = balance [^\n]*/)[0]}
+    const lbsIn = (days) => (-balance * days) / CAL_PER_LB;
     return { balance, dir, lbs: [7, 14, 30, 60].map(lbsIn) };
   `);
   let mismatch = null, n = 0;

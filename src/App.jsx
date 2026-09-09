@@ -12629,6 +12629,54 @@ function simIntakeForRate(d, weeklyBurn, r, tdeeOverride) {
 const SIM_BURN_MAX = 20000;
 const simBurnOdd = (n) => n !== null && (n < TDEE_TUNING.PLAUSIBLE_MIN || n > TDEE_TUNING.PLAUSIBLE_MAX);
 
+// Walking a scenario forward, re-pricing the body as the weight moves (S217).
+//
+// Kevin: "Can we still have the same formulas to kind of estimate how many
+// calories someone will burn for a couple weeks. Months or a year."
+//
+// ⚠️ THE FLAT 3,500-CAL-PER-POUND RULE IS FINE FOR A FORTNIGHT AND WRONG FOR A
+// YEAR, IN THE FLATTERING DIRECTION. Measured on the app's own equations — a
+// 220 lb man eating a fixed 2,555 — the flat rule overstates by 2% at a month,
+// 5% at two, 19% at six and 40% at twelve: 52.1 lbs against 37.1, i.e. it says
+// he weighs 167.9 when Mifflin-St Jeor says 182.9. That is not a hedge, it is a
+// wrong answer on a screen a coach uses to close somebody. This is the SAME
+// formula re-run as the weight comes off, not a new one.
+//
+// ⚠️ AND IT IS ONE PATH, NOT TWO. When the burn cannot follow the weight — no
+// weight known, or a typed daily burn, which has no body behind it — `weekHold`
+// simply returns the same number every week and the walk reduces to the flat
+// arithmetic exactly. There is no "adaptive mode" branch to drift.
+//
+// ⚠️ ON AN UNTOUCHED SCREEN IT IS INVISIBLE, BY CONSTRUCTION. A blank day is
+// priced at the pace, and the pace re-prices with the weight, so the daily
+// deficit stays exactly `cut` at every weight and the answer is the flat one to
+// the decimal. Measured across the four shipped horizons: 107 of 112 rate ×
+// plan cases identical, and the five that move are one very small floor-bound
+// plan moving by at most 0.66 lb — toward the truth, because the flat number
+// was ignoring the 1,200 floor.
+//
+// Pure and closure-free so scripts/ can lift it and RUN it.
+function simProject({ days, startLbs, weekHold, dayIntake, minLbs = 60 }) {
+  const start = Number(startLbs) || 0;
+  let w = start, halted = 0, eaten = 0, spent = 0;
+  for (let i = 0; i < days; i += 7) {
+    const chunk = Math.min(7, days - i);
+    const hold = weekHold(w);
+    // Refuse rather than guess — the plan is too incomplete to walk.
+    if (hold === null || !isFinite(hold)) return null;
+    let intake = 0;
+    for (let k = 0; k < chunk; k++) intake += dayIntake(i + k, w);
+    eaten += intake;
+    spent += (hold / 7) * chunk;
+    w -= ((hold / 7) * chunk - intake) / CAL_PER_LB;
+    // ⚠️ ONLY WHEN WE STARTED FROM A REAL WEIGHT. With none known the walk still
+    // answers "how many pounds", which needs no starting weight — and `w` going
+    // negative there is just the running total, not a claim about a body.
+    if (start > 0 && w <= minLbs) { halted = i + chunk; break; }
+  }
+  return { end: w, lost: start - w, halted, eaten, spent };
+}
+
 // The pace grid, grouped by DIRECTION (Kevin, S216: "in the What if section we
 // need to add − to the calories that are meant for weight loss").
 //
@@ -12804,7 +12852,47 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // Negative = a deficit = weight comes off.
   const weekBalance = weekIntake - burnWeek - maintain * 7;
   const balance = weekBalance / 7;
-  const lbsIn = (days) => (-balance * days) / CAL_PER_LB;   // positive = lost
+  // ── Walking it forward, with the body re-priced as the weight moves ──────
+  // ⚠️ EVERY INPUT TO THE WALK IS THE SAME EXPRESSION THE SCREEN ALREADY SHOWS.
+  // `weekHold` reproduces exactly what `weekBalance` subtracts — the floored
+  // maintain, times seven, plus the burn the ladder has not already paid for —
+  // so at day 0 the two agree term for term. Using the RAW maintain here would
+  // put two break-even numbers on one card, and CLAUDE.md's floor clause says a
+  // projection must be computed from the number the plan will actually deliver.
+  //
+  // ⚠️ AND WHEN THERE IS NO BODY TO RE-PRICE, THESE GO CONSTANT ON PURPOSE. A
+  // typed daily burn has no BMR behind it and no weight means no MET can be
+  // priced — so the walk reduces to the flat arithmetic rather than inventing a
+  // curve out of nothing.
+  const canFollow = w > 0 && mNum === null && planUsable;
+  const atWeight = (lbs) => (canFollow ? { ...d, weightLbs: lbs } : d);
+  const trainWeekAt = (lbs) => (canFollow
+    ? simWeekBurn(simCardio, lbs, { ...hrAgeData, weightLbs: lbs }, { ...hrData, weightLbs: lbs })
+      + planEnergy({ ...d, weightLbs: lbs, cardio: {} }).weeklyBurn
+    : trainWeek);
+  const weekHold = (lbs) => {
+    const dw = atWeight(lbs), tw = trainWeekAt(lbs);
+    if (simRawIntakeForRate(dw, tw, 0, mNum) === null) return null;
+    return simIntakeForRate(dw, tw, 0, mNum) * 7 + (isEatback(dw) ? 0 : tw);
+  };
+  // A blank day is the pace AT THAT WEIGHT — which is why an untouched screen
+  // projects exactly what it did before: the deficit stays `cut` for ever.
+  const paceAtWeight = (lbs) => simIntakeForRate(atWeight(lbs), trainWeekAt(lbs), rate, mNum);
+  const dayIntake = (i, lbs) => { const v = parsed[i % 7]; return v !== null ? v : paceAtWeight(lbs); };
+  const projFor = (days) => simProject({ days, startLbs: w, weekHold, dayIntake });
+  const projAt = useMemo(() => {
+    const out = {};
+    for (const n of [7, 14, 30, 60]) out[n] = projFor(n);
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [w, mNum, rate, weekCals.join("|"), JSON.stringify(simCardio), d, trainWeek]);
+  // ⚠️ ONE READER FOR ALL FOUR RENDER SITES. `lbsIn(days)` appeared THREE TIMES
+  // INSIDE ONE TILE — the number, the "off the scale" guard and the projected
+  // weight — so rewiring the obvious one leaves a tile reading "−3.1" above
+  // "205.7 lbs" on a 210 lb plan, and no regression test can see it because both
+  // expressions are equal by construction when nothing is typed.
+  const lbsIn = (days) => { const p = projAt[days] || projFor(days); return p ? p.lost : 0; };
+  const endLbs = (days) => { const p = projAt[days] || projFor(days); return p && !p.halted ? p.end : null; };
   const HORIZONS = [[7, "1 week"], [14, "2 weeks"], [30, "1 month"], [60, "2 months"]];
   const dir = balance < -20 ? "lose" : balance > 20 ? "gain" : "hold";
   const fmtLbs = (n) => `${Math.abs(n).toFixed(1)} lb${Math.abs(n) >= 1.05 || Math.abs(n) < 0.95 ? "s" : ""}`;
@@ -13630,14 +13718,19 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                   <div style={{ fontFamily: "'Sora',sans-serif", fontSize: ".95rem", color: "var(--accent)" }}>
                     {dir === "lose" ? "−" : "+"}{Math.abs(lbsIn(days)).toFixed(1)}
                   </div>
-                  {/* ⚠️ A LINEAR MODEL WILL HAPPILY PROJECT A NEGATIVE BODYWEIGHT.
-                      Type a huge burn in and the 2-month tile stated "−19.4 lbs"
-                      as this person's weight. The 3,500-cal rule has stopped
-                      describing a body well before that, so the tile says so
-                      instead of asserting a number. */}
-                  {w > 0 && (w - lbsIn(days) > 0 ? (
+                  {/* ⚠️ THE WALK'S OWN END WEIGHT, NOT `w - lbsIn(days)`. That
+                      subtraction is only correct while the model is flat, so
+                      leaving it here would print a weight that disagrees with
+                      the pounds directly above it the moment the burn started
+                      following the body down.
+                      ⚠️ AND A LINEAR MODEL WILL HAPPILY PROJECT A NEGATIVE
+                      BODYWEIGHT: type a huge burn in and the 2-month tile stated
+                      "−19.4 lbs" as this person's weight. `simProject` halts
+                      instead, and the tile says so rather than asserting a
+                      number the 3,500-cal rule stopped earning long before. */}
+                  {w > 0 && (endLbs(days) > 0 ? (
                     <div style={{ fontSize: ".55rem", color: "var(--muted)" }}>
-                      {(w - lbsIn(days)).toFixed(1)} lbs
+                      {endLbs(days).toFixed(1)} lbs
                     </div>
                   ) : (
                     <div style={{ fontSize: ".55rem", color: "var(--yellow)" }}>off the scale</div>
@@ -13771,9 +13864,20 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
               )}
             </div>
           )}
+          {/* ⚠️ THE OLD FOOTNOTE BECAME FALSE THE MOMENT THE ENGINE ADAPTED. It
+              said "a long projection drifts optimistic" — which is precisely what
+              this no longer does, and leaving it would be the S216b SummaryTab
+              bug in advance: prose contradicting the number four inches above it.
+              What is still true is the part bodyweight cannot explain: metabolic
+              adaptation beyond the weight itself (functions/observedTdee.js puts
+              it at roughly 90 cal/day after a large loss), and the fact that
+              nobody eats to plan indefinitely. */}
           <div style={{ marginTop: "11px", fontSize: ".62rem", color: "var(--muted)", lineHeight: 1.45 }}>
-            Estimates only, on the standard 3,500 cal ≈ 1 lb rule. Real bodies adapt as weight comes off,
-            so a long projection drifts optimistic — treat the first week or two as the useful part.
+            Estimates only. A pound of fat is about 3,500 calories, and the burn is re-worked as the
+            weight comes off — so this doesn&rsquo;t drift the way a flat calculator does.
+            {canFollow
+              ? <> Bodies still turn the dial down beyond what weight alone explains, so the first weeks are the firmest part.</>
+              : <> {mNum !== null ? "This holds their burn at " + mNum.toLocaleString() + " the whole way — add their weight, height, age and how active they are and it can follow the burn down." : "Add their weight and it can follow the burn down as they lose."}</>}
           </div>
         </div>
         </>)}
