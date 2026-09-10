@@ -380,8 +380,43 @@ ok("...and an unusable plan or a bare sandbox opens on the burn question",
 ok("...and the branch is NOT a function of the live field",
    !/const usable = [^\n]*mNum/.test(SIM_CODE));
 ok("...leaving the opener is an explicit commit",
-   /const commitBurn = \(\) => \{ if \(mNum !== null\) setBurnOpened\(true\); \};/.test(SIM_CODE)
+   /const commitBurn = \(\) => \{ if \(mNum !== null\) \{ setBurnOpened\(true\); setEditBurn\(true\); \} \};/.test(SIM_CODE)
    && /<button onClick=\{commitBurn\} disabled=\{mNum === null\}/.test(SIM_CODE));
+// ⚠️ THE SAME BUG HAD A SECOND HOME, AND THE FIRST FIX DID NOT REACH IT. The
+// pencil panel one section down was gated `(editBurn || mNum !== null)`, so a
+// user who had already committed a number, then selected it and backspaced it
+// away, flipped mNum to null mid-edit and UNMOUNTED the input under their
+// cursor — Kevin's exact report, one panel lower, reachable without ever seeing
+// the opener. It also made the pencil a dead control: with a number in play both
+// toggle states rendered the same panel, so tapping it did nothing.
+//
+// A BRANCH THAT MOUNTS A FIELD MAY NOT BE A FUNCTION OF THAT FIELD'S LIVE VALUE.
+// The gate is the committed flag alone; the commit sets it explicitly.
+const MOUNT_GATES = (SIM_CODE.match(/^\s*\{[^\n]*&&\s*\($/gm) || []).map((l) => l.trim());
+ok("...and the pencil panel's gate is the committed flag alone",
+   MOUNT_GATES.includes("{editBurn && (")
+   && !MOUNT_GATES.some((g) => /editBurn/.test(g) && /mNum/.test(g)),
+   MOUNT_GATES.filter((g) => /editBurn/.test(g)));
+// Negative control: the shape that shipped must be caught by that check. (The
+// button's three COLOUR keys still read mNum and are left alone — a colour
+// mounts nothing, and "an override is in play" is worth showing while shut.)
+ok("...(control) the old gate would be caught",
+   ["{(editBurn || mNum !== null) && ("].some((g) => /editBurn/.test(g) && /mNum/.test(g)));
+// The gates that MAY read the live field are the ones that mount no field of
+// their own — a warning line, a revert button and a note. Enumerated rather than
+// described, so a fourth one has to be argued for rather than slipped in.
+{
+  const liveGates = (SIM_CODE.match(/^\s*\{[^\n]*(?:mNum|wNum|mOverride|wOverride)[^\n]*&&\s*\($/gm) || [])
+    .map((l) => l.trim());
+  const expected = [
+    "{simBurnOdd(mNum) && (",
+    "{mNum !== null && (",
+    "{mNum !== null && eatback && trainWeek > 0 && (",
+  ];
+  ok("...and every other live-field gate mounts nothing typeable",
+     liveGates.length === expected.length && expected.every((g, i) => liveGates[i] === g),
+     liveGates);
+}
 ok("...which Enter also does, because the phone keyboard's key is right there",
    /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); commitBurn\(\); \}/.test(SIM_CODE));
 // ⚠️ ONE-WAY. If clearing the field could flip `usable` back, the pencil panel

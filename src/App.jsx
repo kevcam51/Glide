@@ -12781,6 +12781,9 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // same bug pointing the other way. `burnOpened` is only ever set by the
   // commit, and only ever cleared by the explicit Clear button.
   const [burnOpened, setBurnOpened] = useState(false);
+  // Declared here rather than beside the other view state because `commitBurn`
+  // below closes over it.
+  const [editBurn, setEditBurn] = useState(false);   // the Maintain chip's pencil
   const mNum = simNum(mOverride, SIM_BURN_MAX);
   const wNum = simNum(wOverride, 2000);
   const w = Number(weightLbs) || Number(d.weightLbs) || wNum || 0;
@@ -12792,7 +12795,10 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const baseTdee = planEnergy(d).tdee;
   const planUsable = isFinite(baseTdee) && baseTdee > 0;
   const usable = burnOpened || planUsable;
-  const commitBurn = () => { if (mNum !== null) setBurnOpened(true); };
+  // ⚠️ THE COMMIT OPENS THE PENCIL PANEL EXPLICITLY. Leaving `editBurn` false and
+  // letting the panel render off `mNum !== null` is what put the S217 focus bug in
+  // its second home: see the gate below.
+  const commitBurn = () => { if (mNum !== null) { setBurnOpened(true); setEditBurn(true); } };
   // The one number every screen judges a LOGGED day against — the calendar's
   // month tint and week rows, the stored hitTarget, the check-in auto-answer,
   // Progress Snapshot's adherence, and the server's nutritionTargets. It honours
@@ -12825,7 +12831,6 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const [rate, setRate] = useState(RATE_OPTS.includes(planRate) ? planRate : 0);
   const [weekCals, setWeekCals] = useState(() => ["", "", "", "", "", "", ""]);   // index 0 = Monday
   const [everyDay, setEveryDay] = useState("");
-  const [editBurn, setEditBurn] = useState(false);   // the Maintain chip's pencil
   // ── The long scenario (S217) ─────────────────────────────────────────────
   // ⚠️ CAPTURED ONCE, ON MOUNT. `ymdLocal()` read per render would roll the whole
   // scenario forward a day at midnight underneath somebody mid-plan, and every
@@ -13412,7 +13417,16 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
             <Icon name="edit" size={15} color={editBurn || mNum !== null ? "var(--accent)" : "var(--muted)"} />
           </button>
         </div>
-        {(editBurn || mNum !== null) && (
+        {/* ⚠️ THE GATE IS `editBurn` ALONE, AND THAT IS THE WHOLE POINT. It used to
+            read `editBurn || mNum !== null`, so selecting a committed number and
+            backspacing it away flipped `mNum` to null mid-edit and UNMOUNTED the
+            input being typed into — the exact bug Kevin reported in the opener,
+            living a second time one panel down. A BRANCH THAT MOUNTS A FIELD MAY
+            NOT BE A FUNCTION OF THAT FIELD'S LIVE VALUE. It also made the pencil a
+            dead control: with a number in play both toggle states rendered the
+            same panel. The visual keys below may still read `mNum` — they mount
+            nothing. */}
+        {editBurn && (
           <div style={{ ...panelS, padding: "10px", marginTop: "7px", marginBottom: 0 }}>
             {burnField(mNum !== null ? "Using your own number" : `${Th} daily burn`)}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
