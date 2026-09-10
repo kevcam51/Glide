@@ -171,11 +171,11 @@ const ACTIVITY_LEVELS = [
 const CARDIO_GROUPS = [
   { group:"🏃 Treadmill & Walking", options:[
     { id:"walk_flat",        label:"Treadmill Walk – Flat",        icon:"🚶", met:3.5  },
-    { id:"incline_walk_5",   label:"Incline Walk 5%",              icon:"🚶", met:4.5  },
-    { id:"incline_walk_8",   label:"Incline Walk 8%",              icon:"⛰️", met:6.0  },
-    { id:"incline_walk_10",  label:"Incline Walk 10%",             icon:"⛰️", met:7.0  },
-    { id:"incline_walk_12",  label:"Incline Walk 12%",             icon:"🏔️", met:7.5  },
-    { id:"incline_walk_15",  label:"Incline Walk 15%",             icon:"🏔️", met:8.5  },
+    { id:"incline_walk_5",   label:"Incline Walk 5%",              icon:"🚶", met:5.4  },
+    { id:"incline_walk_8",   label:"Incline Walk 8%",              icon:"⛰️", met:6.6  },
+    { id:"incline_walk_10",  label:"Incline Walk 10%",             icon:"⛰️", met:7.4  },
+    { id:"incline_walk_12",  label:"Incline Walk 12%",             icon:"🏔️", met:8.3  },
+    { id:"incline_walk_15",  label:"Incline Walk 15%",             icon:"🏔️", met:9.5  },
     { id:"treadmill_jog",    label:"Treadmill Jog (~5 mph)",       icon:"🏃", met:8.3  },
     { id:"treadmill_run",    label:"Treadmill Run (~6–7 mph)",     icon:"🏅", met:10.0 },
     { id:"treadmill_sprint", label:"Sprint Intervals",             icon:"⚡", met:12.5 },
@@ -210,22 +210,22 @@ const CARDIO_GROUPS = [
     { id:"swim_easy",        label:"Swimming – Easy",              icon:"🏊", met:5.0  },
     { id:"swim_mod",         label:"Swimming – Moderate",          icon:"🏊", met:7.0  },
     { id:"swim_hard",        label:"Swimming – Hard",              icon:"🏊", met:9.8  },
-    { id:"water_aerobics",   label:"Water Aerobics",               icon:"💧", met:4.0  },
+    { id:"water_aerobics",   label:"Water Aerobics",               icon:"💧", met:5.3  },
   ]},
   { group:"🥊 HIIT, Boxing & Jump Rope", options:[
     { id:"hiit",             label:"HIIT Cardio",                  icon:"🔥", met:12.0 },
     { id:"boxing_bag",       label:"Heavy Bag Boxing",             icon:"🥊", met:9.8  },
     { id:"shadow_boxing",    label:"Shadow Boxing",                icon:"🥋", met:7.5  },
-    { id:"kickboxing",       label:"Kickboxing Class",             icon:"🥊", met:8.0  },
+    { id:"kickboxing",       label:"Kickboxing Class",             icon:"🥊", met:10.3  },
     { id:"jump_rope",        label:"Jump Rope – Moderate",         icon:"🪢", met:11.0 },
     { id:"jump_rope_fast",   label:"Jump Rope – Fast/Double",      icon:"⚡", met:13.0 },
-    { id:"trampoline",       label:"Trampoline Jumping",           icon:"🤸", met:4.5  },
+    { id:"trampoline",       label:"Trampoline Jumping",           icon:"🤸", met:3.5  },
   ]},
   { group:"🏀 Sports & Outdoor", options:[
     { id:"basketball",       label:"Basketball – Game",            icon:"🏀", met:8.0  },
     { id:"bball_drills",     label:"Basketball – Drills",          icon:"🏀", met:4.5  },
     { id:"soccer",           label:"Soccer / Football",            icon:"⚽", met:8.0  },
-    { id:"tennis",           label:"Tennis – Singles",             icon:"🎾", met:7.3  },
+    { id:"tennis",           label:"Tennis – Singles",             icon:"🎾", met:8.0  },
     { id:"pickleball",       label:"Pickleball",                   icon:"🏓", met:6.0  },
     { id:"volleyball",       label:"Volleyball",                   icon:"🏐", met:4.0  },
     { id:"flag_football",    label:"Flag Football",                icon:"🏈", met:7.0  },
@@ -235,7 +235,7 @@ const CARDIO_GROUPS = [
     { id:"rollerblading",    label:"Rollerblading",                icon:"🛼", met:7.0  },
     { id:"dancing",          label:"Dance Cardio / Zumba",         icon:"💃", met:6.5  },
     { id:"martial_arts",     label:"Martial Arts",                 icon:"🥋", met:10.0 },
-    { id:"wrestling",        label:"Wrestling / Grappling",        icon:"🤼", met:8.0  },
+    { id:"wrestling",        label:"Wrestling / Grappling",        icon:"🤼", met:6.0  },
   ]},
   { group:"😴 Rest", options:[
     { id:"rest", label:"Rest Day", icon:"😴", met:0 },
@@ -3657,30 +3657,39 @@ function findStrengthEx(id, customExercises) {
 }
 // Burn for any resolved exercise. MET first (it scales to the person); calPerMin
 // is the fallback for PRE-S183j customs and for heart-rate cardio — see below.
-// ── One burn formula for EVERY exercise (S183k, Kevin) ──────────────────────
-// A MET is "how many times your RESTING metabolism this costs". The textbook
-// shortcut treats 1 MET as 1 kcal per kg per hour, which is really an average
-// young adult male — so the same shortcut over-states burn for women, for older
-// people, and for anyone whose resting rate is simply lower.
+// ── One burn formula for EVERY exercise (S183k, corrected S218) ─────────────
+// A MET is "how many times your RESTING metabolism this costs", and the obvious
+// move — which S183k made — is to anchor it to THIS person's own BMR instead of
+// a population average. The stated reasoning was that the textbook rate is "an
+// average young adult male, so it over-states burn for women, for older people".
 //
-// We already ask for sex, age and height to compute BMR, so the honest version
-// costs nothing extra: anchor 1 MET to THIS person's own resting rate. Every
-// exercise, built-in or custom, then runs through the identical formula and
-// adapts to whoever is doing it.
+// ⚠️ THAT REASONING IS HALF RIGHT, AND THE HALF THAT IS WRONG DEFLATED EVERY
+// BURN IN THE APP (Kevin, S218: a 12% incline walk "looked extremely low").
+// The premise is true: 3.5 mL/kg/min really does over-state resting VO2 for many
+// adults. But you cannot correct for that by rescaling a PUBLISHED MET, because
+// Compendium MET values are themselves DEFINED as multiples of that same 3.5
+// standard. Multiplying one by an individual BMR mixes two conventions and
+// double-counts the personalisation — MET x kg already scales with body size, so
+// scaling again by BMR/kg (which FALLS as weight rises) bends the answer down
+// hardest for the heaviest people. Measured: -10% for a 180lb man of 30, -24% at
+// 250lb, -29% for a 200lb woman of 50. Filling in your profile made your burn
+// DROP ~15%, because the incomplete-profile path used the standard rate.
 //
-// Falls back to the classic shortcut when a profile is incomplete, and that
-// fallback is arithmetically IDENTICAL to the old formula — an unfinished plan
-// sees no change at all.
+// Nor is the absolute energy cost of the work personal in that way: carrying
+// 200lb up a 12% grade at 3mph costs what it costs.
+//
+// So this is the ACSM/Compendium definition, which is what the MET numbers in
+// this file are calibrated against and what treadmills, watches and every other
+// app report: 1 MET = 3.5 mL O2/kg/min, and 1 L of O2 ~ 5 kcal, giving
+// MET x 3.5 x kg / 200 kcal per minute.
+//
+// ⚠️ `data` IS DELIBERATELY UNUSED AND MUST STAY IN THE SIGNATURE. Keeping it
+// avoids touching all seven call sites, and its presence is the reminder that
+// the baseline no longer depends on the profile — which is the entire fix.
 function restingKcalPerMin(data, weightLbs) {
   const w = Number(weightLbs) || Number((data || {}).weightLbs) || 0;
   if (!w) return 0;
-  const d = data || {};
-  const age = effectiveAge(d);
-  if (d.gender && Number(age) > 0 && Number(d.heightFt) > 0) {
-    const bmr = calcBMR(d.gender, w, Number(d.heightFt), Number(d.heightIn) || 0, age);
-    if (bmr > 0 && isFinite(bmr)) return bmr / 1440;   // kcal per minute at rest
-  }
-  return (w * 0.453592) / 60;   // 1 MET ≈ 1 kcal/kg/hr
+  return (w * 0.453592) * 3.5 / 200;   // kcal/min at 1 MET (ACSM)
 }
 
 function exBurn(ex, weightLbs, minutes, data) {

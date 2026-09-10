@@ -713,29 +713,42 @@ function calcBMR(gender, weightLbs, heightFt, heightIn, age) {
     ? 10 * kg + 6.25 * cm - 5 * age + 5
     : 10 * kg + 6.25 * cm - 5 * age - 161;
 }
-// 1 MET = THIS person's resting rate, not the 1 kcal/kg/hr population shortcut
-// (S183k). MUST match restingKcalPerMin in src/App.jsx — same two-argument
-// signature so the two can be diffed by eye.
+// 1 MET = the ACSM/Compendium standard rate (S183k, corrected S218).
+// ⚠️ MUST MATCH restingKcalPerMin in src/App.jsx — same two-argument signature
+// so the two can be diffed by eye, and a unit test compares them character for
+// character.
+// A MET is "how many times your RESTING metabolism this costs", and the obvious
+// move — which S183k made — is to anchor it to THIS person's own BMR instead of
+// a population average. The stated reasoning was that the textbook rate is "an
+// average young adult male, so it over-states burn for women, for older people".
 //
-// ⚠️ IT LIVED AS A CLOSURE INSIDE weeklyPlanBurn UNTIL S215, WHICH IS EXACTLY
-// WHY add_custom_exercise COULD NOT CALL IT and re-implemented the old shortcut
-// instead: the tool reported 363 cal per 30 min where every screen then showed
-// 304, from the same call that created the exercise.
+// ⚠️ THAT REASONING IS HALF RIGHT, AND THE HALF THAT IS WRONG DEFLATED EVERY
+// BURN IN THE APP (Kevin, S218: a 12% incline walk "looked extremely low").
+// The premise is true: 3.5 mL/kg/min really does over-state resting VO2 for many
+// adults. But you cannot correct for that by rescaling a PUBLISHED MET, because
+// Compendium MET values are themselves DEFINED as multiples of that same 3.5
+// standard. Multiplying one by an individual BMR mixes two conventions and
+// double-counts the personalisation — MET x kg already scales with body size, so
+// scaling again by BMR/kg (which FALLS as weight rises) bends the answer down
+// hardest for the heaviest people. Measured: -10% for a 180lb man of 30, -24% at
+// 250lb, -29% for a 200lb woman of 50. Filling in your profile made your burn
+// DROP ~15%, because the incomplete-profile path used the standard rate.
 //
-// The incomplete-profile fallback is arithmetically IDENTICAL to that shortcut
-// (met × ((w × 0.453592) / 60) × 30 === met × w × 0.453592 × 0.5), so a
-// stats-less plan sees no change at all — which is also why a test fixture
-// without gender/age/height PASSES AGAINST THE LIVE BUG.
+// Nor is the absolute energy cost of the work personal in that way: carrying
+// 200lb up a 12% grade at 3mph costs what it costs.
+//
+// So this is the ACSM/Compendium definition, which is what the MET numbers in
+// this file are calibrated against and what treadmills, watches and every other
+// app report: 1 MET = 3.5 mL O2/kg/min, and 1 L of O2 ~ 5 kcal, giving
+// MET x 3.5 x kg / 200 kcal per minute.
+//
+// ⚠️ `data` IS DELIBERATELY UNUSED AND MUST STAY IN THE SIGNATURE. Keeping it
+// avoids touching all seven call sites, and its presence is the reminder that
+// the baseline no longer depends on the profile — which is the entire fix.
 function restingKcalPerMin(d, weightLbs) {
   const w = Number(weightLbs) || Number((d || {}).weightLbs) || 0;
   if (!w) return 0;
-  const dd = d || {};
-  const age = effectiveAge(dd);
-  if (dd.gender && Number(age) > 0 && Number(dd.heightFt) > 0) {
-    const bmr = calcBMR(dd.gender, w, Number(dd.heightFt), Number(dd.heightIn) || 0, age);
-    if (bmr > 0 && isFinite(bmr)) return bmr / 1440;   // kcal per minute at rest
-  }
-  return (w * 0.453592) / 60;   // 1 MET ≈ 1 kcal/kg/hr
+  return (w * 0.453592) * 3.5 / 200;   // kcal/min at 1 MET (ACSM)
 }
 // Weekly fat-loss rate → daily calorie deficit. MIRRORS App.jsx weeklyRateOf /
 // dailyDeficitOf (0 / 0.5 / 1 / 2 lb per week → 0 / 250 / 500 / 1000 cal/day;

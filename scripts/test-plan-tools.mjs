@@ -150,7 +150,12 @@ const ok = (name, cond, extra) => { checks++; if (!cond) { fails++; console.log(
   // exercise. The number below is exBurn's own answer for this fixture
   // (186 lb / 30 / 5'6" female at MET 9), so the reply and the app agree by
   // construction.
-  ok("burnPer30min is the burn every screen will show", r.burnPer30min === 296, r.burnPer30min);
+  // ⚠️ 296 -> 399 IN S218, AND THE ASSERTION IS UNCHANGED IN SPIRIT. The baseline
+  // moved from "1 MET = this person's BMR/min" to the ACSM definition the MET
+  // numbers are actually calibrated against (MET x 3.5 x kg / 200), which is what
+  // stopped every burn in the app reading 8-29% light. The pin is still exBurn's
+  // own answer for this fixture, so the reply and the app agree by construction.
+  ok("burnPer30min is the burn every screen will show", r.burnPer30min === 399, r.burnPer30min);
   // ⚠️ AND THE STORED RECORD, which outlives the reply: an emoji `icon` the
   // house style forbids and exerciseCategory cannot read, versus an iconName.
   {
@@ -180,13 +185,17 @@ const ok = (name, cond, extra) => { checks++; if (!cond) { fails++; console.log(
     ok("...and it is stored as a MET, not a flat rate", stored.met > 0 && stored.calPerMin === undefined, stored);
   }
 
-  // ⚠️ GRACEFUL DEGRADATION — AND NEVER THE ONLY FIXTURE. Without gender/age/
-  // height the resting rate falls back to the population shortcut, which is
-  // arithmetically identical to the old code — so a stats-less fixture passes
-  // against the live bug and proves nothing on its own.
+  // ⚠️ THE WARNING THAT USED TO LIVE HERE IS OBSOLETE, AND THAT IS THE POINT.
+  // It read: "without gender/age/height the resting rate falls back to the
+  // population shortcut ... so a stats-less fixture passes against the live bug
+  // and proves nothing on its own." There is no fallback branch any more — S218
+  // made the baseline weight-only for everybody — so a stats-less fixture now
+  // exercises the SAME arithmetic as a complete one. Kept as a shape check that
+  // a bare plan still answers.
   seed("u1", "caliq-self", { data: { weightLbs: 200 }, step: 5 });
   r = await runTool("add_custom_exercise", { name: "Mystery Drill", type: "cardio", met: 8 }, ctx);
-  ok("an incomplete profile still gets an answer", r.ok === true && r.burnPer30min === 363, r.burnPer30min);
+  ok("a stats-less plan still gets an answer, on the same arithmetic",
+     r.ok === true && r.burnPer30min === 381, r.burnPer30min);
 
   // ── set_workout_schedule ────────────────────────────────────────────────
   reset();
