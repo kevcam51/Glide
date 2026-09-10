@@ -99,8 +99,17 @@ const BUDGETS = { trial: 45000, client: 45000, assisted: 45000,
   //
   // Sized so nobody real ever meets it: 100k ≈ 66 conversations a day against a
   // typical 8. It is a backstop, not a limit anyone feels.
-  connect: 25000,          // client Connect $4.99  — ~16 conversations/day
-  trainerConnect: 100000,  // Coach Connect $19.99 — ~66 conversations/day
+  // ⚠️ S215e: RE-SIZED ONCE WEB SEARCH WAS COUNTED. S215b sized these from the
+  // margin table in docs/PRICING.md, which counts TOKENS ONLY — search is billed
+  // separately at $10/1,000 (docs/WEB-SEARCH.md) and was never folded into the
+  // "profitable at its own ceiling" rule. With it counted, Connect lost $0.78/mo
+  // at base with no boosts at all. Every allowance in this file and in
+  // SEARCH_BUDGETS is now solved so that
+  //     net − (budget + boosts)·rate − searches·$0.01·30  ≥  $1
+  // at the AVERAGE measured token rate, and scripts/test-tier-solvency.mjs fails
+  // if anyone raises one past its price again.
+  connect: 18000,          // client Connect $4.99  — ~12 conversations/day
+  trainerConnect: 90000,   // Coach Connect $19.99 — ~60 conversations/day
   clientMax: 150000, trainerMax: 300000,
   // Ultra (S92): data-triggered heavy-user tiers, surfaced via the boost upsell.
   clientUltra: 250000, trainerUltra: 450000 };   // S171: Apex 400k->450k (every trainer step is now +50%)
@@ -151,8 +160,13 @@ const WEB_SEARCH_MAX_USES = 3;
 // wording in the app TRUE: you cannot honestly tell someone that if nothing is
 // counting it.
 const SEARCH_BUDGETS = {
-  trial: 12, client: 12, assisted: 12, clientMax: 25, clientUltra: 40,
-  connect: 6, trainerConnect: 15,   // sized with the token budgets above (S215b)
+  // ⚠️ S215e: these were the OTHER half of the miss. A search costs 1c on top of
+  // tokens, so 25 searches a day is $7.50/month — a third of Client Elite's
+  // margin — and nothing was checking it. Solved alongside the token budgets;
+  // the coach tiers were already comfortable and are unchanged.
+  // Trial numbers are acquisition cost, not a priced tier, and stay put.
+  trial: 12, client: 8, assisted: 8, clientMax: 15, clientUltra: 30,
+  connect: 3, trainerConnect: 10,
   trainerTrial: 15, trainer: 30, trainerMax: 50, trainerUltra: 70,
 };
 // web_search_20260318 with dynamic filtering (Claude writes code that filters
@@ -1424,7 +1438,10 @@ const BOOSTS_PER_DAY = {
   // offering it would be selling a button that loses money every time it is
   // pressed. `connect` is deliberately absent; membership of this map is what
   // isBoostable reads, so absence is the switch.
-  trainerConnect: 2,
+  // ⚠️ ONE, NOT TWO (S215e). Two fixed +15k boosts on top of 90k is 130k, which
+  // costs more than Coach Connect's $19.11 net once search is counted. One boost
+  // still gives a heavy month somewhere to go.
+  trainerConnect: 1,
 };
 exports.requestBudgetBoost = onCall({ region: "us-central1", maxInstances: 10 }, async (request) => {
   const uid = request.auth && request.auth.uid;

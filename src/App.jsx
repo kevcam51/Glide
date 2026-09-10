@@ -25910,8 +25910,8 @@ const PLAN_FEATURES = {
       // ⚠️ NOT "—" (S215b). Connect was falling through to the tier above and
       // getting the FULL client budget — 45k, the same as Premium at $14.99 —
       // while this row said it had none. It now has its own, sized to $4.99.
-      ["AI conversations per day", "—", "~16", "~30 (more on request)", "~100"],
-      ["Web searches per day", "—", "6", "12", "25"],
+      ["AI conversations per day", "—", "~12", "~30 (more on request)", "~100"],
+      ["Web searches per day", "—", "3", "8", "15"],
     ]},
     { section: "Elite — everything in Premium, plus:", rows: [
       ["Four automations a day, not two", false, false, false, true],
@@ -26013,8 +26013,8 @@ const PLAN_FEATURES = {
       ["Past chats — save, revisit & continue", false, true, true, true],
       ["Scheduled AI automations — wake up to a roster summary", false, false, true, true],
       // See the client grid: Coach Connect was drawing Coach's full 200k (S215b).
-      ["AI conversations per day", "—", "~66", "~133", "~200"],
-      ["Web searches per day", "—", "15", "30", "50"],
+      ["AI conversations per day", "—", "~60", "~133", "~200"],
+      ["Web searches per day", "—", "10", "30", "50"],
       // S176f seats: distinct people the AI works on per month. The roster
       // itself stays unlimited on every tier — this row counts only AI-coached
       // people. ONE number per tier (S178b): seats are tracked once across

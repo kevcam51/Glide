@@ -483,6 +483,12 @@ client tier; leaving it at 40k would have inverted it to less than Premium.
 Basis: measured live cost $3.8–6.1 per 1M budget-tokens (avg ~$4.70), ~1,500
 budget-tokens ≈ one conversation ≈ 0.7¢. "Ceiling" = the cap burned all 30 days.
 
+⚠️ **THIS TABLE COUNTS TOKENS ONLY — see S215e.** Web search is billed separately
+at $10/1,000 on top of every figure below, and folding it in put four tiers
+underwater. Do not size an allowance from this table alone; run
+`node scripts/test-tier-solvency.mjs`, which computes both halves from the
+shipping constants.
+
 | Tier | Revenue | Ceiling cost/day | Ceiling cost/mo | Margin at ceiling |
 |---|---:|---:|---:|---:|
 | Premium 100k | $14.99 | $0.47 | ~$14 | ≈ break-even |
@@ -1262,6 +1268,55 @@ review assumed — MFP paywalls them but Cronometer gives away 80+ free at
 $8.99. Gating ~30 micros would be beaten on both count and price. Barcode is
 weaker still: only MFP paywalls it, and it cost them real reputational damage.
 The honest client-side upgrade story stays AI + the coach relationship.
+
+## S215e — web search enters the ceiling maths, four tiers re-sized (Kevin, Sep 9 2026) — ✅ BUILT
+
+**Kevin: "make sure the prices don't make us lose money."**
+
+⚠️ **THE CEILING RULE WAS ONLY EVER APPLIED TO TOKENS.** Search is billed at
+$10/1,000 on top (docs/WEB-SEARCH.md), and S184 sized SEARCH_BUDGETS against
+TYPICAL use (~15% of exchanges search) — never against "profitable at its own
+ceiling". Counted properly, at the average measured token rate:
+
+| Tier | was, base | was, +boosts |
+|---|---:|---:|
+| Connect $4.99 | **−$0.78** | −$0.78 |
+| Premium $14.99 | +$4.31 | +$0.09 |
+| Client Elite $29.99 | +$0.17 | **−$1.95** |
+| Client Apex $49.99 | +$0.99 | **−$1.13** |
+| Coach Connect $19.99 | +$0.51 | **−$3.72** |
+
+Connect lost money at BASE, with no boosts at all. ⚠️ **And S215b had just re-sized
+Connect from the token-only table**, inheriting the same blind spot — the fix
+carried the bug forward.
+
+**A boost is a fixed +15k, so a tier has to be priced at its BOOSTED ceiling.**
+Three of the four failures only appear once boosts are counted.
+
+**Re-sized** so every tier clears its boosted ceiling by ≥$1 at the average rate:
+
+| | tokens/day | searches/day | boosts/day |
+|---|---:|---:|---:|
+| Connect | 25k → **18k** (~12 conv) | 6 → **3** | 0 |
+| Premium | 45k (unchanged) | 12 → **8** | 2 |
+| Client Elite | 150k (unchanged) | 25 → **15** | 1 |
+| Client Apex | 250k (unchanged) | 40 → **30** | 1 |
+| Coach Connect | 100k → **90k** (~60 conv) | 15 → **10** | 2 → **1** |
+| Coach / Elite / Apex | unchanged | unchanged | unchanged |
+
+The coach ladder proper was always comfortable and is untouched. Trial numbers are
+acquisition cost, not a priced tier, and stay put.
+
+**Every buyer-facing number moved with it** — the conversations and web-search
+rows on both plan grids. An allowance edit that does not reach the grid turns a
+real number into a false promise, which is the class of defect the S215 audit
+existed to clear.
+
+**`scripts/test-tier-solvency.mjs` is the guard.** It recomputes every tier from
+the shipping constants — tokens AND search, base AND boosted — fails below $1 of
+margin, and carries negative controls proving the OLD numbers lost money and that
+token-only maths hides all three. It also checks the grid states what the code
+gives, so the two cannot drift apart again.
 
 ## S215d — the earnings ledger comes off the grid (Kevin, Sep 9 2026) — ✅ BUILT
 
