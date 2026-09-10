@@ -1,150 +1,176 @@
 # Glidna — Next-Session Handoff (start here)
 
-## ▶️ START HERE (S217) — ALL THREE OF KEVIN'S ASKS SHIPPED
+## ▶️ START HERE (S217) — ALL THREE OF KEVIN'S ASKS SHIPPED, PLUS FOUR ROUNDS OF HIS FEEDBACK
 
-Four commits, all pushed; the first three were marker-diffed live on glidna.com.
-**2,681 assertions across 38 suites**; build, `check:undef`, `check:weak` clean.
-Frontend only — no rules, no functions.
+Everything below is pushed and live on glidna.com (marker-diffed, not assumed).
+**2,752 assertions across 39 suites**; build, `check:undef`, `check:weak` clean.
+Frontend only — no rules, no functions, no deploy: the push IS the release.
 
-⚠️ **A PARALLEL SESSION LANDED S215/S215b/S215c (Coach Connect tiers, Trainerize
-multi-tenant) WHILE THIS WAS BEING BUILT** — three commits, ~1,100 lines, touching
-`src/App.jsx`, `firestore.rules`, five `functions/` files and `package.json`.
-**GO BY SHA, NOT BY SESSION NUMBER**: their "S215" is not the S215 in this file's
-history. The rebase was clean — their App.jsx hunks all sit at line 20484 and
-below-none, mine end at 13364 — and `package.json`'s `test:units` came through as
-a **UNION** (38 suites; `test-goal-date` and `test-tier-gates` both present,
-verified by name rather than by count). The merged app was re-driven in the
-browser afterwards, because "it rebased cleanly" is not "it works".
+⚠️ **A PARALLEL SESSION HAS BEEN PUSHING TO `main` ALL SESSION** — S215, S215b,
+S215c, S215d, S215e (Coach Connect tiers, Trainerize multi-tenant, the earnings
+ledger, web-search ceiling maths). **GO BY SHA, NOT BY SESSION NUMBER**: their
+"S215" is unrelated to the S215 in this file's history. Three rebases, all clean —
+their App.jsx work lives at line 20000+, this session's in `CalorieSimulator`
+(~12700–14300) — and `package.json`'s `test:units` was resolved as a **UNION**
+every time, verified by suite NAME rather than by count. Re-drive the app after
+any rebase: "it rebased cleanly" is not "it works".
 
-### 1 · What if… without a client, and a maintenance number you can type — SHIPPED
+### What shipped, in the order Kevin asked for it
 
-Kevin: *"What if I just meet someone on the street and wanna give them a general
-estimate of maintenance calories that I put in and then of course the app itself
-can create the deficit and surplus automatically… allow the maintenance button to
-be clickable… and of course, if the maintenance number changes then by default,
-the app will manipulate the surplus and deficit numbers to match."*
+1. **The "What if…" modal is ONE PAGE** with a full weekly cardio planner, minus
+   signs on the loss paces, and a manual-calorie session shape. (S216, below.)
+2. **What if… works with NO CLIENT** — the ≡ menu, the top of the trainer's home,
+   and a client's own home (plan-bound there). **The Maintain chip is editable**:
+   type a daily burn and every deficit and surplus chip re-derives.
+3. **The projection follows the body down** — `simProject` re-prices maintenance
+   weekly instead of freezing it.
+4. **A month-to-a-year scenario calendar**, pre-filled from the seven day boxes.
+5. Then four rounds of Kevin using it: the voice, the surplus, the rest-day
+   button, the focus bug, and the centred numbers.
 
-⚠️ **IT IS ONE MECHANISM, NOT TWO FEATURES, AND THAT IS WHY IT IS SAFE.**
-`maintain` was already `intakeFor(0)`, so a typed maintenance is a SUBSTITUTION
-into the existing ladder: `simRawIntakeForRate` gained a fourth defaulted argument
-and two call sites pass it. Do not add a second ladder for the no-plan case — the
-84-pair sweep that keeps this modal and the dashboard quoting the same daily
-target depends on there being one.
+### ⚠️ THE INVARIANTS — none of these are style choices
 
-⚠️ **THE OVERRIDE REPLACES `tdee`, NOT `tdee + eatback`.** Freezing the whole base
-stops the chips moving when cardio is added in section 2 — while the line one
-section below still reads "More cardio means more food at the same pace",
-directly under the control it just stopped describing. A test pins this.
+- **THE MODAL WRITES NOTHING.** Verified against Firestore, not just read: editing
+  the planner, painting a year and overriding the burn all left `data.cardio`
+  byte-identical. That promise is the only reason the screen may DISPLAY a typed
+  sub-1,200 number (CLAUDE.md's floor forbids PRESCRIBING one).
+- **ONE LADDER.** `simIntakeForRate(d, weeklyBurn, r, tdeeOverride)` is
+  `planIntakeForRate` with two substitutions. A test sweeps them bit-identical
+  across every plan × rate × falsy-override. Do not add a second ladder for the
+  no-plan case.
+- **THE OVERRIDE REPLACES `tdee`, NOT `tdee + eatback`.** Freezing the whole base
+  stops cardio moving the chips while the line one section below still says it
+  does.
+- **NO DOUBLE COUNT.** In eat-back mode `intakeFor` already carries the week's
+  training, so `burnWeek` is 0 there and the whole week in accelerate.
+- **THE SEVEN BOXES ARE THE SOURCE; THE CALENDAR IS AN EXCEPTION LAYER.**
+  `simScenarioDay(date) = override ?? weekday box ?? pace`. That is what stops it
+  being 365 hostile inputs.
+- **A BRANCH CONDITION MAY NOT BE A FUNCTION OF A LIVE INPUT FIELD** — see the
+  focus bug below. `usable` is `burnOpened || planUsable`, committed, one-way.
 
-⚠️ **EAT-BACK MAKES "THEIR BURN" AND "MAINTAIN" TWO DIFFERENT NUMBERS.** Type
-2,400 on a plan with training and Maintain reads 2,492. The screen names the gap;
-without that line it reads as a bug. On the street there is no training, so they
-are equal — which is Kevin's actual case.
+### ⚠️ THE FOUR BUGS KEVIN FOUND BY USING IT, AND WHY NOTHING CAUGHT THEM
 
-⚠️ **WITHOUT A WEIGHT, A REAL EXERCISE PRICES AT ZERO.** `restingKcalPerMin` opens
-`if (!w) return 0`, and the day header only renders a burn when `burned > 0` — so
-a 45-minute run would show NOTHING AT ALL. The pickers are replaced by the
-manual-calorie field with the reason stated. The S213 bug with the sign flipped.
+Every one was invisible to both test techniques in this repo. **This is the most
+valuable thing in this handoff.**
 
-Three doors, one mount: the side menu (every role), the TOP of the trainer's home
-(⚠️ **not** the Local Plans action row — collapsed by default, so invisible to a
-trainer with no clients, who is exactly the person this is for), and a client's
-own home (⚠️ **plan-bound**, not blank — which also gives a client's home a
-working "Make up a big day" for the first time). The in-plan button is untouched.
-⚠️ The standalone mount is **conditional and takes no `open` prop** —
-`useBodyScrollLock(true)` and `useBackClose(true, …)` are unconditional inside the
-modal, so copying `ReferralPanel`'s shape one line above would lock the page
-scroll and swallow device Back for the whole session.
+1. **"as soon as i type it kicks me out"** — `usable` was derived from the LIVE
+   parsed field, so the first digit flipped the branch, UNMOUNTED the input being
+   typed into and dropped focus. One keystroke was all anyone could enter: the
+   core entry flow, unusable.
+   ⚠️ **The live verification set the field with ONE synthetic event carrying the
+   FINAL value** (`setter.call(el,'2400'); dispatchEvent(new Event('input'))`). A
+   human emits one event per keystroke and passes through "2", "24", "240". Any
+   defect that depends on an INTERMEDIATE value, on FOCUS, or on element IDENTITY
+   across renders is invisible to that. **Drive inputs with real keystrokes
+   (`computer.type` after `el.focus()`), not with a value setter.**
+2. **"their plan" shown to a client about their own plan** — found only by signing
+   in as the test client (`client.uitest@calorieiq-test.com` / `TestPass123`).
+   The pronoun follows `standalone` now, and the suite scans for ANY hardcoded
+   "their" rather than the strings it knows about.
+3. **A surplus told the user "a real burn falls as weight comes off"** — the
+   projection always worked both ways; the PROSE was written for someone losing.
+   Five caveats now read `gaining`, taken from the projection and on the same ±20
+   dead band as `dir`.
+4. **`they&rsquo;d` rendered literally** — JSX decodes entities in TEXT but not
+   inside an interpolated JS string. The suite now scans every string literal in
+   the component for a trapped entity.
 
-### 2 · The projection follows the body down — SHIPPED (Kevin approved it explicitly)
+**Two more of my own, both found by reading the rendered sheet:** "the
+weight**goes on**" with no space (JSX strips the newline before an expression —
+the five pre-existing cases all used the leading-space-inside-a-fragment idiom;
+only mine did not), and a five-digit 35,000 clipping once centring took padding
+from both sides.
 
-⚠️ **THE FLAT 3,500-CAL RULE IS WRONG OVER A YEAR AND WRONG IN THE FLATTERING
-DIRECTION.** On the app's own equations, a 220 lb man eating a fixed 2,555: the
-flat rule overstates 2% at a month, 5% at two, 19% at six, **40% at twelve** —
-52.1 lbs against 37.1, i.e. 167.9 lbs against 182.9. New module-level
-`simProject` walks a week at a time, re-pricing maintenance and the training burn.
-
-⚠️ **ONE PATH, NOT AN "ADAPTIVE MODE".** When the burn cannot follow the body — no
-weight, or a typed daily burn with no BMR behind it — `weekHold` returns the same
-number every week and the walk reduces to the flat arithmetic exactly.
-
-⚠️ **ON AN UNTOUCHED SCREEN IT IS INVISIBLE, BY CONSTRUCTION** — a blank day is
-priced at the pace and the pace re-prices with the weight, so the deficit stays
-exactly `cut`. Verified in the app: the four tiles read byte-identical. It bites
-only where the flat rule was wrong: a typed fixed 2,555 moves two months 8.8 → 8.4.
-
-⚠️ **`lbsIn(days)` APPEARED THREE TIMES INSIDE ONE TILE** — the number, the "off
-the scale" guard and the projected weight. Rewiring the obvious one leaves a tile
-reading "−3.1" above "205.7 lbs", and **no regression test can see it**, because
-both expressions are equal by construction until someone types a day. Counted.
-
-⚠️ **THE OLD FOOTNOTE BECAME FALSE** the moment the engine adapted ("a long
-projection drifts optimistic" is exactly what it no longer does) — the S216b
-SummaryTab bug in advance. Replaced.
-
-### 3 · The scenario calendar: a month to a year, day by day — SHIPPED
-
-Kevin: *"…allow a trainer or a client to run a scenario by entering the calories
-for every single day for 1 month 2 months or even up to a year."* He also asked
-whether to reuse the existing calendar; the answer taken was **borrow the grammar,
-not the component** — Monday-first padding, square cells, `‹ ›` either side of the
-month, so the two read as one app, but `CalendarView` is built around reading and
-writing real logs and this one writes nothing.
-
-⚠️ **365 EMPTY INPUTS IS THE FEATURE FAILING, SO NOTHING IS EVER EMPTY.** A date
-inherits its WEEKDAY's box from the seven above, and a blank weekday inherits the
-pace — the year is filled in before it is opened and only the EXCEPTIONS get
-typed. **The seven boxes are the source; the calendar is an exception layer.** Tap
-a date, type a number, choose how many days it runs for; one step of undo.
-
-⚠️ **ONE RESOLVER** — `simScenarioDay(date) = override ?? weekday box ?? pace` —
-so the tiles, the grid cells and the stretch answer cannot disagree about what a
-day is worth. It rides `simProject`; `dayIntake` is the only new input.
-
-⚠️ **IT FIXED A REAL BUG ON THE WAY IN.** `dayIntake` was `parsed[i % 7]`, pricing
-day 0 as MONDAY — so on a Wednesday a heavy Saturday landed on the projection's
-Thursday. Right numbers, wrong days, and no total could reveal it.
-
-⚠️ **DAYS OUTSIDE THE STRETCH SHOW NO NUMBER AND TAKE NO TAP** — a number there
-invites a value no total counts: the silent swallow, as a grid.
-
-⚠️ **THE FLAT COMPARISON IS THE SAME WALK WITH THE BODY FROZEN**, so the selling
-point cannot drift from the number it sells against; shown only once it is worth a
-pound. Verified live: an untouched year reads −52.1 with NO comparison (the walk
-IS the flat number when every day is priced at a re-pricing pace); a fixed 2,555
-typed into all seven days becomes "−38.2 lbs · around 182 lbs" with *"a flat
-3,500-calories-per-pound calculator would say 54"*. A painted 7-day holiday at
-3,800 costs 1.3 lbs over the year rather than the flat rule's 2.5 — the
-second-order effect of ending heavier and burning more.
-
-⚠️ **THE HONESTY ESCALATES WITH THE STRETCH, AND NAMES WHICH MODE IT IS IN.** A
-line true at a month is not true at a year — and the year copy originally claimed
-"this follows the burn down" in the one configuration where it cannot (a typed
-burn has no body). Found by DRIVING it.
-
-⚠️ **SUB-1,200 DAYS ARE COUNTED AND NAMED, NEVER AVERAGED AWAY OR CLAMPED.**
-
-**Kevin's two open questions were resolved by taking the recommendations**: the
-full year IS shown on a typed burn, flat and labelled; and the inherit-by-default
-entry model is what shipped.
-
-### ⚠️ Traps this session paid for
+### ⚠️ Process traps this session paid for
 
 - **`window.storage.set(key, value)` STORES `value` VERBATIM, and the whole app
-  passes a JSON STRING.** Poking test data in from the console as a native object
-  wrote a document the app's own `get` could not parse — the trainer home read
+  passes a JSON STRING.** Writing test data from the console as a native object
+  produced a document the app's own `get` could not parse — the trainer home read
   "0 plans" until both keys were rewritten with `JSON.stringify`.
 - **A LIFT THAT SLICES TO THE NEXT `;` CANNOT SURVIVE A MULTI-STATEMENT BODY.**
   `const lbsIn = (days) => [^;]*;` silently returned HALF the new body once
-  `lbsIn` grew braces — the S211 trap, in a suite whose own header warns about it.
-- **A NEGATIVE CONTROL THAT CANNOT SEE ITS OWN SHAPE.** The bare-1,200 scan used
-  a lookaround excluding commas, which also skips `Math.max(1200, …)` — the one
+  `lbsIn` grew braces — the S211 trap, in a suite whose own header warns of it.
+- **A NEGATIVE CONTROL THAT CANNOT SEE ITS OWN SHAPE.** The bare-1,200 scan used a
+  lookaround excluding commas, which also skips `Math.max(1200, …)` — the one
   shape it existed for. It passed on a file still full of them.
-- **AN AGENT'S MEASURED NUMBER IS STILL WORTH RE-MEASURING.** The design panel
-  reported "worst 0.18 lb" on the untouched tiles; re-run here it is **0.66 lb**,
-  on a fixture set it had not used. Directionally right, precisely wrong.
-- **DRIVE IT, DO NOT READ IT.** Section 2 promised "starts from the week already
-  in your plan" to a standalone sandbox with no plan. Only opening it found that.
+- **A `{/* */}` COMMENT IS NOT A JSX ATTRIBUTE OR A BARE SIBLING.** Twice: between
+  attributes, and as the first child of `{cond && ( … )}`. Both are SyntaxErrors;
+  put the comment on the line above the element.
+- **AN AGENT'S MEASURED NUMBER IS STILL WORTH RE-MEASURING.** A design panel
+  reported "worst 0.18 lb"; re-run here it was **0.66**, on a fixture set it had
+  not used.
+- **A GREEN MUTATION IS NOT ALWAYS A GAP.** Two came back green and were both
+  arithmetically EQUIVALENT (`round(int + round(f))` is `round(int + f)`; a
+  midnight date base walks 400 days identically, measured in a zone that changes
+  clocks at midnight). Check before "fixing" — and correct the comment that
+  claimed otherwise rather than leaving a false rationale.
+- **PWA CACHE.** Kevin twice could not see shipped work. A deploy is not visible
+  until the installed app is fully closed and reopened. Marker-diff the live
+  bundle, then say that.
+
+### What the bug hunt found, and what was done about it
+
+A multi-lens hunt over `CalorieSimulator` (focus/remount/intermediate-value,
+loses-work, blocks-the-flow), every finding put to independent skeptics. **Two
+were fixed here; the rest are listed so the next session can pick them up with
+the reasoning intact.** Refuted findings are not listed.
+
+**FIXED — `00d5287` The typing bug had a second home.** The pencil panel was
+gated `(editBurn || mNum !== null)`, so committing a number, selecting it and
+backspacing it away flipped `mNum` to null mid-edit and UNMOUNTED the input under
+the cursor. **Kevin's exact bug, one panel down, reachable without ever seeing
+the opener — I fixed the opener and stopped looking.** Reproduced on the shipped
+code in the browser (last backspace → `isConnected:false`, focus gone) and
+re-proven fixed. It also made the pencil a dead control; the commit opens the
+panel explicitly now.
+
+**FIXED — `e628131` The discard question rendered below the fold.** It is the
+last child of the 88vh scroll box — measured 2,072px of sheet in a 630px
+viewport — so a backdrop tap from the top put the question ~1,440px out of sight
+and the modal simply appeared not to close. It scrolls in **centred**, because
+"nearest" parked it against the bottom edge where the z-1650 Ask-Glidna launcher
+clipped the Discard button (measured 29x6px).
+
+**OPEN — worth Kevin's opinion, not mine:**
+- **The ✕ calls `onClose` directly**, so the explicit close skips the guard the
+  backdrop and the device Back both raise. Defensible either way — an accidental
+  backdrop tap is worth questioning and a deliberate ✕ arguably is not — so it
+  was left alone. It is also a 25x25 target near the notch.
+- **The launcher floats over this modal at all** (z-1650 vs z-1500). Raising the
+  sheet is NOT a safe unilateral fix: its own sub-sheets sit at 1600 and would go
+  under it. The house precedent is the launcher standing down, as it already does
+  for the voice bar.
+
+**OPEN — real, unfixed, in rough priority order:**
+1. **Typing a weight flips Quick Fill from "Just type calories" to an exercise**,
+   discarding the calories already entered.
+2. **`type="number"` yields `""` for anything it cannot parse**, so a pasted
+   "2,400" is swallowed silently — and `simRejected` can therefore never fire on
+   the text it was written to catch.
+3. **"Set N days" paints past the horizon**: the extra days are stored, counted
+   in the "N days changed" banner, and then the grid refuses to open them. ⚠️ Two
+   skeptics called the obvious fix HARMFUL — `paintDays` is the shared recovery
+   path — so read their reasoning before touching it.
+4. **The dirty-close guard spends the modal's only history entry**, so a second
+   device Back can leave the app.
+5. **`dirtyRef` ignores uncommitted drafts and the pace/horizon choices**, so a
+   backdrop mis-tap can discard work the guard thinks is not there.
+6. **The sheet never joins the app's `--kb` keyboard mechanism** (S197), so on
+   iOS you can type into a field drawn under the keyboard.
+7. **`noWeightNote` tells an in-plan user to "add your weight up top"** while the
+   weight field is gated behind `standalone` — the note and the gate disagree.
+8. Smaller: a heart-rate switch carries a duration `HeartRatePicker` has no chip
+   for; a 5-minute session leaves the Duration `<select>` with no matching
+   option; the day accordion collapses a card above your scroll position; every
+   day box flashes a sub-1,200 warning on its first keystroke.
+
+### Still open
+
+- **`SIM_HORIZONS` blank-day pricing at long range is deliberate**: a blank day
+  re-prices at the pace AT THAT WEIGHT, which is what keeps an untouched screen
+  bit-identical to the old flat numbers. Do not "simplify" it to a fixed pace.
+- Nothing else of Kevin's is outstanding.
 
 ---
 

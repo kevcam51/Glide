@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**2,681 assertions across 38 suites**, S217).
+- `npm run test:units` — the JS unit suites (**2,752 assertions across 39 suites**, S217).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -109,11 +109,11 @@ enabled (Blaze has no default spending cap).
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
 > _**S217 (Sep 9): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S217)"
-> first.** Pushed and marker-diffed live. Frontend only. **2,539 assertions
-> across 37 suites**; build, `check:undef`, `check:weak` clean.
-> Two of Kevin's three asks shipped; **the multi-month calendar is DESIGNED BUT
-> NOT BUILT** (§3 of the handoff has the shape and his two unanswered questions).
-> **"What if…" now works with NO CLIENT** — side menu, the top of the trainer's
+> first.** Pushed and marker-diffed live. Frontend only — no rules, no
+> functions, no deploy: the push IS the release. **2,752 assertions across 39
+> suites**; build, `check:undef`, `check:weak` clean. **All three of Kevin's
+> asks shipped, plus four rounds of him using the result.**
+> **"What if…" works with NO CLIENT** — the ≡ menu, the top of the trainer's
 > home, and a client's own home (plan-bound there) — and the **Maintain chip is
 > editable**, so typing a daily burn re-derives every deficit and surplus chip.
 > ⚠️ **ONE MECHANISM, NOT TWO FEATURES:** `maintain` was already `intakeFor(0)`,
@@ -123,40 +123,50 @@ enabled (Blaze has no default spending cap).
 > ⚠️ **THE OVERRIDE REPLACES `tdee`, NOT `tdee + eatback`** — freezing the base
 > stops cardio moving the chips while the line below still says it does.
 > ⚠️ **WITHOUT A WEIGHT A REAL EXERCISE PRICES AT ZERO** (`restingKcalPerMin`
-> opens `if (!w) return 0`), and the day header hides a zero burn — so the
-> pickers are replaced by the manual-calorie field. S213 with the sign flipped.
-> **The projection now follows the body down** (Kevin approved it explicitly):
-> new module-level `simProject` re-prices maintenance weekly.
-> ⚠️ **THE FLAT 3,500 RULE OVERSTATES A YEAR BY 40%** — 52.1 lbs vs 37.1 on the
-> app's own equations, i.e. 167.9 lbs vs 182.9.
-> ⚠️ **BUT IT IS INVISIBLE ON AN UNTOUCHED SCREEN, BY CONSTRUCTION** — a blank
-> day is priced at the pace and the pace re-prices with the weight, so the
-> deficit stays exactly `cut`. The four tiles verified byte-identical live.
-> ⚠️ **`lbsIn(days)` APPEARED THREE TIMES IN ONE TILE** — number, guard and
-> projected weight — and no test can see a partial rewire, because the two
-> expressions are equal until somebody types a day.
-> ⚠️ **REBASED OVER A PARALLEL SESSION'S S215/S215b/S215c** (Coach Connect tiers,
-> Trainerize multi-tenant) which landed mid-build — **go by SHA, not by session
-> number**; `package.json` was resolved as a UNION (38 suites) and the merged app
-> was re-driven in the browser, because a clean rebase is not a working app.
-> **And the scenario CALENDAR shipped**: a
-> month to a year, day by day, under the seven boxes.
+> opens `if (!w) return 0`), so the pickers give way to the manual-calorie field.
+> **The projection follows the body down** — `simProject` re-prices maintenance
+> weekly. ⚠️ **THE FLAT 3,500 RULE OVERSTATES A YEAR BY 40%** (52.1 lbs vs 37.1),
+> ⚠️ **and it is invisible on an untouched screen BY CONSTRUCTION** — a blank day
+> is priced at the pace, the pace re-prices with the weight, so the deficit stays
+> exactly `cut` (107/112 fixtures identical, worst 0.66 lb).
+> **The scenario CALENDAR shipped**: a month to a year, day by day.
 > ⚠️ **365 EMPTY INPUTS IS THE FEATURE FAILING** — a date inherits its WEEKDAY's
-> box and a blank weekday inherits the pace, so the year is filled in before it
-> opens and only the EXCEPTIONS get typed. The seven boxes are the SOURCE; the
-> calendar is an EXCEPTION LAYER. It borrows the app's calendar GRAMMAR but not
-> `CalendarView`, which is built to read and write real logs.
-> ⚠️ **IT FIXED `parsed[i % 7]`**, which priced day 0 as MONDAY — on a Wednesday
-> a heavy Saturday landed on the projection's Thursday.
-> ⚠️ **THE FLAT COMPARISON IS THE SAME WALK WITH THE BODY FROZEN**, so the
-> selling point cannot drift from the number it sells against.
+> box and a blank weekday inherits the pace. The seven boxes are the SOURCE; the
+> calendar is an EXCEPTION LAYER. It borrows the app's calendar GRAMMAR, not
+> `CalendarView`, which reads and writes real logs.
+> ⚠️ **REBASED THREE TIMES OVER A PARALLEL SESSION'S S215/b/c/d/e** — **go by
+> SHA, not session number**; `test:units` resolved as a UNION each time, verified
+> by suite NAME.
+> **⚠️ THEN KEVIN FOUND FOUR BUGS BY USING IT — none visible to either test
+> technique in this repo, and this is the most valuable lesson of the session:**
+> (1) **"as soon as i type it kicks me out"** — `usable` was derived from the
+> LIVE parsed field, so the first digit flipped the branch and UNMOUNTED the
+> input being typed into. **A BRANCH CONDITION MAY NOT BE A FUNCTION OF A LIVE
+> INPUT FIELD**; it is committed state (`burnOpened`) now, one-way.
+> ⚠️ **The live check set the field with ONE synthetic event carrying the FINAL
+> value**, so it never passed through "2" or "24" — **focus, remount and
+> intermediate-value defects are invisible to a value setter. Drive inputs with
+> real keystrokes.** (2) **"their plan" shown to a client about their own plan**,
+> found only by signing in AS the client — pronouns follow `standalone` now.
+> (3) **A surplus told the user "a real burn falls as weight comes off"** — the
+> projection always worked both ways; the PROSE was written for someone losing.
+> (4) **`they&rsquo;d` rendered literally** — JSX decodes entities in TEXT, not
+> inside an interpolated JS string.
+>   ⚠️ **THEN A MULTI-LENS HUNT FOUND THE FIRST ONE AGAIN, ONE PANEL DOWN** — the
+> pencil panel was gated `(editBurn || mNum !== null)`, so clearing a committed
+> number unmounted the input under the cursor. **I fixed the opener and stopped
+> looking.** Also fixed: the discard confirm rendered ~1,440px below the fold of
+> a 2,072px sheet, so a backdrop tap looked like the modal ignoring you. The rest
+> of the hunt's surviving findings are listed in the handoff with their reasoning
+> — including two the skeptics called HARMFUL to "fix" naively.
 > ⚠️ **Traps:** `window.storage.set` stores `value` VERBATIM and the app always
 > passes a JSON **string** (a console-written object made the trainer home read
 > "0 plans"); a lift slicing to the next `;` returned HALF of `lbsIn` once it
-> grew braces; an agent's "worst 0.18 lb" re-measured here at **0.66**; and TWO
-> copy bugs were found only by OPENING the thing — a standalone sandbox promised
-> "starts from the week already in your plan", and the year claimed to follow a
-> body it did not have._
+> grew braces; a bare-1,200 scan excluded commas and so could not see
+> `Math.max(1200, …)`, the one shape it existed for; a `{/* */}` comment is
+> neither a JSX attribute nor a bare `&&` child; an agent's "worst 0.18 lb"
+> re-measured here at **0.66**; and two green mutations were arithmetically
+> EQUIVALENT, not gaps._
 >
 > _**S216b (Sep 9): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S216b)"
 > first.** Pushed. Frontend only — no rules, no functions, no deploy; the push
