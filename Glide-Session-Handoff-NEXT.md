@@ -122,7 +122,14 @@ backspacing it away flipped `mNum` to null mid-edit and UNMOUNTED the input unde
 the cursor. **Kevin's exact bug, one panel down, reachable without ever seeing
 the opener — I fixed the opener and stopped looking.** Reproduced on the shipped
 code in the browser (last backspace → `isConnected:false`, focus gone) and
-re-proven fixed. It also made the pencil a dead control; the commit opens the
+re-proven fixed.
+⚠️ **EMPTY WAS NOT THE ONLY TRIGGER, AND THAT IS WHY THE GATE IS THE FIX RATHER
+THAN A GUARD ON EMPTY.** Anything that drives `simNum` to null does it — typing
+FORWARD past `SIM_BURN_MAX` ("2400" → "24000"), or a "-" or "e" — and it took the
+"check this number" warning down with it, so an out-of-range number could never
+be flagged. Verified after the fix, in both the opener and the panel: 24000,
+240000, -5, 2e9 and "" all keep the node mounted and focused, and the warning
+renders for every out-of-range value. It also made the pencil a dead control; the commit opens the
 panel explicitly now.
 
 **FIXED — `e628131` The discard question rendered below the fold.** It is the
@@ -160,7 +167,12 @@ clipped the Discard button (measured 29x6px).
    iOS you can type into a field drawn under the keyboard.
 7. **`noWeightNote` tells an in-plan user to "add your weight up top"** while the
    weight field is gated behind `standalone` — the note and the gate disagree.
-8. Smaller: a heart-rate switch carries a duration `HeartRatePicker` has no chip
+   The weight field is also unreachable at all after the opener on an in-plan
+   sandbox, which is the same disagreement from the other side.
+8. **Clearing the weight to retype it makes the summary announce "No cardio in
+   this week yet"** while the seven day rows below still show the sessions — the
+   summary is priced from the weight, the rows are not.
+9. Smaller: a heart-rate switch carries a duration `HeartRatePicker` has no chip
    for; a 5-minute session leaves the Duration `<select>` with no matching
    option; the day accordion collapses a card above your scroll position; every
    day box flashes a sub-1,200 warning on its first keystroke.
