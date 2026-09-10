@@ -12755,6 +12755,16 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const dirtyRef = useRef(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const askClose = () => { if (dirtyRef.current) setConfirmClose(true); else onClose(); };
+  // ⚠️ THE CONFIRM IS THE LAST CHILD OF AN 88vh SCROLL BOX, AND THIS SHEET IS
+  // LONG — paces, a week of cardio, seven days, a year of calendar. Somebody who
+  // typed at the top and then tapped the backdrop got a confirmation rendered
+  // thousands of pixels below the fold: the modal simply did not close, with no
+  // visible reason and no second gesture that helps. Bring it to them.
+  // ⚠️ CENTRE, NOT "nearest". The floating Ask-Glidna launcher lives on z-1650,
+  // above this z-1500 sheet, and "nearest" parks the confirm against the sheet's
+  // bottom edge — measured overlapping the Discard button's corner by 29x6px.
+  const confirmRef = useRef(null);
+  useEffect(() => { if (confirmClose) confirmRef.current?.scrollIntoView({ block: "center" }); }, [confirmClose]);
   useBackClose(true, () => { if (sheetCount > 0) return; askClose(); });
   const d = data || {};
   // ── The numbers a sandbox with no client runs on (S217, Kevin) ───────────
@@ -14357,7 +14367,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
             so it sits above the rest of the sheet; the ✕ is unguarded on
             purpose, because that is an explicit "I am done". */}
         {confirmClose && (
-          <div style={{ marginTop: "13px", padding: "11px", borderRadius: "10px",
+          <div ref={confirmRef} style={{ marginTop: "13px", padding: "11px", borderRadius: "10px",
             background: "var(--s2)", border: "1px solid var(--yellow)" }}>
             <div style={{ fontSize: ".76rem", fontWeight: 700, marginBottom: "3px" }}>Discard this scenario?</div>
             <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.45, marginBottom: "9px" }}>

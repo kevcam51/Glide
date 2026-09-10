@@ -485,6 +485,15 @@ ok("...and the reason is written once and shown in both places",
 ok("a stray backdrop tap cannot discard a typed scenario",
    /<div onClick=\{askClose\}/.test(SIM_CODE) && /const askClose = \(\) => \{ if \(dirtyRef\.current\) setConfirmClose\(true\); else onClose\(\); \};/.test(SIM_CODE));
 ok("...device Back goes through the same guard", /if \(sheetCount > 0\) return; askClose\(\);/.test(SIM_CODE));
+// ⚠️ AND THE CONFIRM HAS TO BE WHERE THEY CAN SEE IT. It is the last child of an
+// 88vh scroll box holding paces, a week of cardio, seven days and a year of
+// calendar — measured at 2,072px in a 630px viewport, so a backdrop tap from the
+// top rendered the question ~1,440px below the fold. The modal just did not
+// close, with no visible reason.
+ok("...and the discard question is brought to them",
+   /const confirmRef = useRef\(null\);/.test(SIM_CODE)
+   && /useEffect\(\(\) => \{ if \(confirmClose\) confirmRef\.current\?\.scrollIntoView\(\{ block: "center" \}\)/.test(SIM_CODE)
+   && /\{confirmClose && \(\s*<div ref=\{confirmRef\}/.test(SIM_CODE));
 // ⚠️ A PAINTED YEAR IS THE MOST EXPENSIVE THING THIS MODAL CAN HOLD, so the
 // scenario overrides have to be in the flag too — otherwise the one state worth
 // guarding is the one the guard cannot see.
