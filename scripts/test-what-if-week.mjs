@@ -330,11 +330,21 @@ const PLANS = [
 // a client looking at THEIR OWN plan. Half the user base is clients, and the rest
 // of this app has addressed them in the second person for sessions ("Nothing here
 // changes YOUR plan" is the subtitle directly above).
+// ⚠️ AN HTML ENTITY INSIDE AN INTERPOLATED JS STRING RENDERS AS ITSELF. JSX
+// decodes &rsquo; in TEXT only, so "they&rsquo;d" appeared on screen verbatim.
+// Scanned rather than spot-checked, because the next such string will be written
+// by someone who has never hit it.
+{
+  const strings = (SIM_CODE.match(/"[^"\n]*"/g) || []).concat(SIM_CODE.match(/`[^`\n]*`/g) || []);
+  const bad = strings.filter((x) => /&(rsquo|lsquo|mdash|ndash|hellip|middot|amp|nbsp|asymp);/.test(x));
+  ok("no HTML entity is trapped inside a JS string literal", bad.length === 0, bad);
+  ok("...the pronoun helper uses the real character", /"they\u2019d" : "you\u2019d"/.test(SIM_CODE) || /they’d/.test(SIM_CODE));
+}
 ok("the pronoun is decided once, from the mode",
    /const th = standalone \? "their" : "your";/.test(SIM_CODE)
    && /const Th = standalone \? "Their" : "Your";/.test(SIM_CODE)
    && /const they = standalone \? "they" : "you";/.test(SIM_CODE)
-   && /const theyd = standalone \? "they&rsquo;d" : "you&rsquo;d";/.test(SIM_CODE));
+   && /const theyd = standalone \? "they’d" : "you’d";/.test(SIM_CODE));
 // ⚠️ AND NO RENDERED STRING MAY HARDCODE EITHER SIDE OF IT. A single missed
 // literal is the whole bug back, on whichever screen happens to hit that line.
 {
@@ -353,7 +363,37 @@ ok("the subtitle still switches on the same mode",
 // ── 4c. the screen around the typed burn ───────────────────────────────────
 ok("the modal takes a standalone mode", /function CalorieSimulator\(\{ data, weightLbs, planRate, dayCalsAll, onClose, standalone = false \}\)/.test(SIM_CODE));
 ok("...and an unusable plan or a bare sandbox opens on the burn question",
-   /const usable = mNum !== null \|\| planUsable;/.test(SIM_CODE) && /\{!usable \? \(/.test(SIM_CODE));
+   /const usable = burnOpened \|\| planUsable;/.test(SIM_CODE) && /\{!usable \? \(/.test(SIM_CODE));
+// ⚠️ THE OPENER MAY NOT VANISH WHILE SOMEBODY IS TYPING IN IT. Kevin, on his
+// phone: "as soon as i type it kicks me out and the curser is no longer allowing
+// me to type." `usable` was derived from the LIVE parsed field, so the first
+// digit made simNum("2") valid, flipped the branch, UNMOUNTED the input being
+// typed into and dropped focus after one keystroke.
+//
+// ⚠️ AND NO TEST IN THIS FILE COULD HAVE SEEN IT, WHICH IS THE LESSON. The unit
+// suites lift pure functions and grep source — they cannot see React. The live
+// verification set the field with ONE synthetic event carrying the FINAL value
+// ("2400"), so it never passed through the intermediate "2" that breaks it. Any
+// defect that depends on an intermediate state, on focus, or on element identity
+// across renders is invisible to both techniques. What CAN be pinned is the
+// shape: the branch condition must not be a function of the live field.
+ok("...and the branch is NOT a function of the live field",
+   !/const usable = [^\n]*mNum/.test(SIM_CODE));
+ok("...leaving the opener is an explicit commit",
+   /const commitBurn = \(\) => \{ if \(mNum !== null\) setBurnOpened\(true\); \};/.test(SIM_CODE)
+   && /<button onClick=\{commitBurn\} disabled=\{mNum === null\}/.test(SIM_CODE));
+ok("...which Enter also does, because the phone keyboard's key is right there",
+   /if \(e\.key === "Enter"\) \{ e\.preventDefault\(\); commitBurn\(\); \}/.test(SIM_CODE));
+// ⚠️ ONE-WAY. If clearing the field could flip `usable` back, the pencil panel
+// would bounce a standalone sandbox to the opener mid-edit — the same bug
+// pointing the other way. Only the explicit Clear may reopen it.
+ok("...and only the explicit start-over reopens it",
+   (SIM_CODE.match(/setBurnOpened\(false\)/g) || []).length === 1
+   && /if \(!planUsable\) setBurnOpened\(false\);/.test(SIM_CODE),
+   (SIM_CODE.match(/setBurnOpened\(false\)/g) || []).length);
+ok("...and nothing else writes that flag",
+   (SIM_CODE.match(/setBurnOpened\(/g) || []).length === 2,
+   (SIM_CODE.match(/setBurnOpened\(/g) || []).length);
 ok("...where planUsable is the plan's OWN tdee, not the override",
    /const planUsable = isFinite\(baseTdee\) && baseTdee > 0;/.test(SIM_CODE)
    && /const baseTdee = planEnergy\(d\)\.tdee;/.test(SIM_CODE));

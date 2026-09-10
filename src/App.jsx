@@ -12769,6 +12769,18 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // than a second one for the no-plan case.
   const [mOverride, setMOverride] = useState("");   // their daily burn, typed
   const [wOverride, setWOverride] = useState("");   // their weight, typed (optional)
+  // ⚠️ THE OPENER MAY NOT VANISH WHILE SOMEBODY IS TYPING IN IT (Kevin, S217:
+  // "as soon as i type it kicks me out and the curser is no longer allowing me
+  // to type"). `usable` used to be derived from the LIVE parsed field, so the
+  // very first digit made simNum("2") valid, flipped the branch, UNMOUNTED the
+  // input being typed into and threw away focus after one keystroke. The field
+  // is a DRAFT; leaving the opener is an explicit act.
+  //
+  // ⚠️ AND IT IS ONE-WAY. If clearing the field could flip `usable` back, the
+  // pencil panel would bounce a standalone sandbox to the opener mid-edit — the
+  // same bug pointing the other way. `burnOpened` is only ever set by the
+  // commit, and only ever cleared by the explicit Clear button.
+  const [burnOpened, setBurnOpened] = useState(false);
   const mNum = simNum(mOverride, SIM_BURN_MAX);
   const wNum = simNum(wOverride, 2000);
   const w = Number(weightLbs) || Number(d.weightLbs) || wNum || 0;
@@ -12779,7 +12791,8 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // it asks for the one number that makes the rest work.
   const baseTdee = planEnergy(d).tdee;
   const planUsable = isFinite(baseTdee) && baseTdee > 0;
-  const usable = mNum !== null || planUsable;
+  const usable = burnOpened || planUsable;
+  const commitBurn = () => { if (mNum !== null) setBurnOpened(true); };
   // The one number every screen judges a LOGGED day against — the calendar's
   // month tint and week rows, the stored hitTarget, the check-in auto-answer,
   // Progress Snapshot's adherence, and the server's nutritionTargets. It honours
@@ -13054,7 +13067,10 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const th = standalone ? "their" : "your";
   const Th = standalone ? "Their" : "Your";
   const they = standalone ? "they" : "you";
-  const theyd = standalone ? "they&rsquo;d" : "you&rsquo;d";
+  // ⚠️ THE LITERAL CHARACTER, NOT THE ENTITY. JSX decodes &rsquo; in TEXT but not
+  // inside an interpolated JS string, so "they&rsquo;d" rendered on screen as
+  // exactly that. Found by reading the rendered sheet back, not the diff.
+  const theyd = standalone ? "they’d" : "you’d";
   const canPrice = w > 0;
   // ⚠️ "REST DAY" IS NOT AN EXERCISE, SO IT IS NOT GATED ON KNOWING A WEIGHT —
   // clearing a day needs no body to price. Only the two shapes that DO get
@@ -13254,9 +13270,13 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
     <>
       <div style={lbl}>{label}</div>
       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+        {/* ⚠️ Enter COMMITS, because on a phone the keyboard's blue key is right
+            there and reaching for a button below the fold is not. Harmless once
+            past the opener: committing an already-committed field is a no-op. */}
         <input type="number" inputMode="numeric" min="0" max={SIM_BURN_MAX} step="50"
           aria-label={`${Th} daily burn in calories`} placeholder={planUsable ? Math.round(baseTdee).toLocaleString() : "e.g. 2,400"}
           value={mOverride} onChange={(e) => setMOverride(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitBurn(); } }}
           style={{ ...numInput, width: "128px",
             border: simRejected(mOverride, SIM_BURN_MAX) ? "1.5px solid var(--yellow)" : "1px solid var(--border)" }} />
         <span style={{ fontSize: ".72rem", color: "var(--muted)" }}>
@@ -13338,6 +13358,12 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                 Only needed to price real exercises and to show what {theyd} weigh.
               </div>
             </div>
+            {/* ⚠️ THE COMMIT IS THE WHOLE FIX. Nothing about this screen may change
+                while the field is being typed into, so leaving it is a tap. */}
+            <button onClick={commitBurn} disabled={mNum === null}
+              style={{ ...primaryS(mNum !== null), width: "100%", marginBottom: "10px" }}>
+              Show me the numbers
+            </button>
             {!planUsable && !standalone && (
               <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.5, marginBottom: "10px" }}>
                 This plan is missing the gender, height or age the burn is worked out from, so
@@ -13384,10 +13410,14 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                   ? <>Worked out from {th} stats as <b style={{ color: "var(--text-secondary)" }}>{Math.round(baseTdee || 0).toLocaleString()}</b> cal.</>
                   : <>Every pace above is worked from this.</>}
               </span>
+              {/* ⚠️ THE ONLY WAY BACK TO THE OPENER, AND IT IS DELIBERATE. On a
+                  plan this just drops the override; with no plan there is nothing
+                  left to show, so it returns to the one question that makes the
+                  screen work rather than leaving a grid of zeroes. */}
               {mNum !== null && (
-                <button onClick={() => { setMOverride(""); setEditBurn(false); }}
+                <button onClick={() => { setMOverride(""); setEditBurn(false); if (!planUsable) setBurnOpened(false); }}
                   style={{ ...linkS, flex: "0 0 auto" }}>
-                  {planUsable ? `Back to ${th} plan's number` : "Clear"}
+                  {planUsable ? `Back to ${th} plan's number` : "Start over"}
                 </button>
               )}
             </div>
