@@ -1,5 +1,91 @@
 # Glidna — Next-Session Handoff (start here)
 
+## ▶️ START HERE (S218) — THREE THINGS KEVIN HIT ON HIS iPAD, AND THE BURN MATHS
+
+**2,816 assertions across 41 suites**; build, `check:undef` clean.
+⚠️ **FUNCTIONS WERE DEPLOYED BEFORE THE PUSH** — this changed `aitools.js` and
+`exercises.js`, so pushing first would have shipped an app whose numbers the AI
+still disagreed with. `npm run deploy-set aitools.js` = 18 functions.
+
+### 1. "It constantly says an update is available" — and Update never cleared it
+
+The trigger was `controllerchange`, which is **not a new version**, and it was
+wrong in BOTH directions:
+- **False positive:** iOS evicts and restarts service workers; every re-claim
+  fired the banner, so Update reloaded into the same banner forever.
+- **False negative, and worse:** `public/sw.js` is a static file Vite copies
+  verbatim, so **a normal deploy leaves it byte-identical** — verified against
+  the live site, unchanged since August. No new worker, no controllerchange: the
+  banner could never once have announced a real release. It was decorative.
+
+Now it compares the **deployed entry chunk** against the running one (Vite
+content-hashes it, so the filename is the build identity), and Update deletes the
+cached shell before reloading — because sw.js races navigations against a 1.2s
+timeout, so a plain reload can be answered with the very HTML just proven stale.
+
+⚠️ **THE PROBE WAS DEAD WHEN FIRST WRITTEN AND NOTHING THREW.** `[^"]+\/assets\/`
+requires a character before "/assets/", and the src starts with it. Same shape as
+the bare-1,200 scan that could not see `Math.max(1200, …)`. Caught only by running
+the regex against real built HTML. **The suite keeps a negative control.**
+
+⚠️ **PROD-ONLY CODE NEEDS A PROD SERVER.** `.claude/launch.json` now has
+`glidna-prod-preview` (`vite preview`, port 4173) — build, serve, register the
+worker, drive it. That is how this was verified rather than reasoned about.
+Known gap: the banner lives inside the signed-in tree, so a signed-out user is
+never told.
+
+### 2. The typeable numbers were clipped by the spinner arrows
+
+S216 answered this same complaint with **26px of symmetric padding, and that is
+what caused it**: the arrows eat the right end, the padding then eats both ends,
+leaving 74px of content for an 80px "e.g. 2,400". Padding around the arrows was
+the wrong shape of answer — they are removed in the sheet (`.sim-sheet`), so text
+gets the whole box (74px → 102px). Reads as an iPad bug because it is one: iPhone
+Safari never draws spin buttons; iPad Safari is desktop-class and does.
+
+### 3. ⚠️ THE BURN MATHS WERE LOW FOR EVERYONE — READ `docs/MET-AUDIT-S218.md`
+
+Kevin's 12% incline walk: **285 → 395 cal.** Two causes, and the table was the
+smaller one.
+
+**THE BASELINE (every exercise).** `restingKcalPerMin` multiplied a MET by the
+person's **BMR per minute**. S183k's premise was right — 3.5 mL/kg/min does
+overstate resting VO₂ — but the conclusion does not follow: **Compendium METs are
+DEFINED as multiples of that same standard**, so this mixed two conventions and
+double-counted the personalisation. `MET × kg` already scales with size; scaling
+again by BMR/kg, which FALLS as weight rises, bent it down hardest for the
+heaviest people: −10% at 180lb, −24% at 250lb, −29% for a 200lb woman of 50.
+**Completing a profile made the burn DROP ~15%**, because the incomplete path
+used the standard rate. Now `MET × 3.5 × kg / 200` in BOTH `src/App.jsx` and
+`functions/aitools.js`. **Kevin approved it knowing every client moves:** training
+burn +19–41%, eat-back targets +71 to +126 cal/day.
+
+**TEN METs.** The incline family is DERIVED from the ACSM graded-walking equation
+at 3.0 mph and the test **recomputes it**, so lowering one means arguing with the
+physiology. Two came DOWN (wrestling 8.0→6.0, trampoline 4.5→3.5).
+
+⚠️ **THE 132 STRENGTH VALUES WERE DELIBERATELY NOT "CORRECTED".** The Compendium
+only carries coarse bands for resistance training, so per-exercise METs at this
+granularity have no published answer. The suite asserts the BAND (2.5–9.0), not
+each value. **Do not "finish the audit" by inventing per-exercise precision.**
+
+⚠️ **FIVE ENTRIES ARE WAITING ON KEVIN, NOT ON A SESSION** — `boxing_bag` 9.8 vs
+a Compendium 5.5 is the big one, and a coached heavy-bag round arguably is not
+that activity. Listed in the audit doc.
+
+⚠️ **`functions/exercises.js` SAID "Generated, not hand-authored" WITH NO
+GENERATOR IN THE REPO, AND HAD ALREADY DRIFTED** (entry order no longer matched
+App.jsx). `npm run gen:exercises` + `scripts/test-exercise-mirror.mjs` now fail on
+a stale mirror, and the two `restingKcalPerMin` copies are compared **character
+for character**.
+
+⚠️ **KNOWN SIDE EFFECT, RECORDED NOT PATCHED.** Custom exercises created before
+this stored a MET framed by the OLD baseline, so they now burn ~15–20% more than
+the cal/min originally typed. A correct migration is impossible — the record has
+no memory of whose BMR framed it.
+
+---
+
 ## ▶️ START HERE (S217) — ALL THREE OF KEVIN'S ASKS SHIPPED, PLUS FOUR ROUNDS OF HIS FEEDBACK
 
 Everything below is pushed and live on glidna.com (marker-diffed, not assumed).

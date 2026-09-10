@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**2,752 assertions across 39 suites**, S217).
+- `npm run test:units` — the JS unit suites (**2,816 assertions across 41 suites**, S218).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -108,6 +108,45 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S218 (Sep 10): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S218)"
+> first, and `docs/MET-AUDIT-S218.md` before touching any burn maths.**
+> **2,816 assertions across 41 suites.** ⚠️ **FUNCTIONS DEPLOYED BEFORE THE
+> PUSH** — `aitools.js`/`exercises.js` changed, so push-first would have shipped
+> an app the AI disagreed with.
+> ⚠️ **EVERY EXERCISE BURN WAS 8–29% LOW, AND COMPLETING A PROFILE MADE IT
+> DROP.** `restingKcalPerMin` multiplied a MET by the person's BMR/min. S183k's
+> premise was right (3.5 mL/kg/min overstates resting VO₂) but the conclusion
+> does not follow: **Compendium METs are DEFINED as multiples of that standard**,
+> so it mixed conventions and double-counted — `MET × kg` already scales with
+> size, and scaling again by BMR/kg (which FALLS with weight) bent it down
+> hardest for the heaviest clients. Now `MET × 3.5 × kg / 200` in BOTH files.
+> **Kevin approved it knowing every client moves** (+19–41% burn, +71–126
+> cal/day on eat-back targets). His 12% incline test: 285 → 395.
+> ⚠️ **TEN METs CORRECTED, TWO OF THEM DOWNWARD** — accuracy is not "bigger
+> numbers". Incline is DERIVED from the ACSM equation and the test RECOMPUTES it.
+> ⚠️ **THE 132 STRENGTH VALUES WERE DELIBERATELY LEFT** — the Compendium has only
+> coarse bands there, so per-exercise precision would be invented. The suite
+> asserts the band. **Five cardio entries wait on KEVIN, not a session**
+> (`boxing_bag` 9.8 vs 5.5 above all).
+> ⚠️ **`functions/exercises.js` SAID "generated" WITH NO GENERATOR AND HAD
+> DRIFTED** — `npm run gen:exercises` + a mirror test now fail when it is stale,
+> and the two `restingKcalPerMin` copies are diffed character for character.
+> ⚠️ **THE PWA "UPDATE AVAILABLE" BANNER WAS DECORATIVE AND ALSO LOOPED.** Its
+> trigger was `controllerchange`, which is not a version: iOS restarts workers
+> (so it fired forever and Update never cleared it), and `public/sw.js` is static
+> so a normal deploy leaves it BYTE-IDENTICAL — it could never announce a real
+> release. It now compares the deployed entry chunk to the running one, and
+> Update deletes the cached shell first (navigations race a 1.2s timeout, so a
+> plain reload can be served the stale HTML it just rejected).
+> ⚠️ **PROD-ONLY CODE NEEDS A PROD SERVER** — `.claude/launch.json`
+> `glidna-prod-preview`. Verified by building, serving and driving it.
+> ⚠️ **A REGEX THAT CANNOT MATCH ITS OWN TARGET FAILS SILENTLY** — the version
+> probe shipped dead for ten minutes (`[^"]+\/assets\/` needs a char before
+> "/assets/"; the src starts with it). Same shape as the bare-1,200 scan. Caught
+> by RUNNING it against real HTML; a negative control now guards it.
+> Also: the What if… boxes drop the native spinner instead of padding around it —
+> S216's 26px padding was itself what clipped the placeholders._
+>
 > _**S217 (Sep 9): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S217)"
 > first.** Pushed and marker-diffed live. Frontend only — no rules, no
 > functions, no deploy: the push IS the release. **2,752 assertions across 39
