@@ -134,8 +134,34 @@ ok("level walking stays at the Compendium value for 2.8-3.2 mph", metOf("walk_fl
   ok("the incline ladder rises monotonically", ladder.every((v, i) => i === 0 || v > ladder[i - 1]), ladder);
 }
 
+// ── Running (S218b) ─────────────────────────────────────────────────────────
+// ⚠️ KEVIN: "the cardio exercises out of the most important are the ones that are
+// a little bit more simple, like walking and running." Walking was derived from
+// the ACSM equation in the first pass; RUNNING was not looked at, and was 4-12%
+// light. For LEVEL running the Compendium carries measured speed-specific values,
+// which beat a prediction equation — so these are the measured numbers, not ACSM.
+ok("a 5 mph jog is the Compendium measured value", metOf("treadmill_jog") === 8.3);
+ok("...and the outdoor jog agrees with it", metOf("outdoor_jog") === metOf("treadmill_jog"));
+ok("a ~6-7 mph run sits between the 6 and 7 mph values", metOf("treadmill_run") === 10.5);
+ok("a ~7-8 mph run is the 7.5 mph value", metOf("outdoor_run") === 11.8);
+// The whole running ladder has to rise, and every rung must beat the steepest walk.
+{
+  const run = ["treadmill_jog", "treadmill_run", "outdoor_run", "treadmill_sprint"].map(metOf);
+  ok("the running ladder rises", run.every((v, i) => i === 0 || v > run[i - 1]), run);
+  // ⚠️ I FIRST ASSERTED A JOG MUST BEAT THE STEEPEST WALK. IT MUST NOT, AND THE
+  // SUITE CAUGHT ME. Walking a 15% grade (9.5) is harder than jogging level at
+  // 5 mph (8.3) — the ACSM equations say so and anyone who has done both knows
+  // it. Pinning the TRUE relation instead, so nobody "fixes" it back.
+  ok("a steep incline walk legitimately outranks a level jog",
+     metOf("incline_walk_15") > metOf("treadmill_jog"),
+     { walk15: metOf("incline_walk_15"), jog: metOf("treadmill_jog") });
+}
+
 // ── The other corrected entries ──────────────────────────────────────────────
 ok("water aerobics is the Compendium value", metOf("water_aerobics") === 5.3);
+ok("cycling moderate is the 150W value", metOf("cycling_mod") === 7.0);
+ok("cycling vigorous is the 200W value", metOf("cycling_vig") === 10.5);
+ok("in-line skating is the Compendium leisurely value", metOf("rollerblading") === 7.5);
 // ⚠️ kickboxing AND martial_arts READ THE SAME COMPENDIUM ENTRY (moderate-pace striking arts), so any gap between them is arbitrary. They were
 // 8.0 and 10.0; both are now the published 10.3.
 ok("kickboxing is the Compendium value", metOf("kickboxing") === 10.3);

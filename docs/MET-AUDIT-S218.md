@@ -106,6 +106,50 @@ This is the one number in the catalogue that is reasoned rather than cited. If a
 coached bag session in practice runs closer to continuous work, 9–10 is
 defensible and the assertion is one line to change.
 
+## The systematic pass — all 53 cardio entries
+
+Kevin: *"the cardio exercises out of the most important are the ones that are a
+little bit more simple, like walking and running. Have you gone through all of the
+exercises and looked at all the METs?"*
+
+**Honest answer at the time: no.** Walking was derived properly from the ACSM
+equation; everything else was spot-checked, and **running was never looked at** —
+the direct counterpart to the walking work. It was 4–12% light.
+
+Every cardio entry has now been checked against a reference. Corrected:
+
+| id | was | now | basis |
+|---|---|---|---|
+| `treadmill_run` | 10.0 | 10.5 | Compendium 6 mph 9.8 / 7 mph 11.0 — the label spans both |
+| `outdoor_run` | 11.0 | 11.8 | Compendium running 7.5 mph |
+| `cycling_mod` | 6.8 | 7.0 | Compendium stationary 150W moderate |
+| `cycling_vig` | 10.0 | 10.5 | Compendium stationary 200W vigorous |
+| `rollerblading` | 7.0 | 7.5 | Compendium in-line skating, leisurely |
+
+**Running uses the Compendium's measured speed values, not the ACSM equation.**
+For *graded walking* the equation is strictly better, because the Compendium
+lumps all of 6–15% grade into one number. For *level running* the Compendium has
+speed-specific measured values, which beat a prediction. That is why a 5 mph jog
+stays at **8.3** where the equation would have said 8.7.
+
+Checked and deliberately left:
+
+- `rowing_hard` 10.0 — the app's easy/moderate/hard ladder maps three tiers onto
+  the Compendium's four (light 3.5, moderate 7.0, vigorous 8.5, very vigorous
+  12.0). 10.0 sitting between the top two is right. *My own first reference table
+  called this "+18% off" by comparing it to the wrong tier.*
+- `jump_rope_fast` 13.0 — Compendium fast pace is 12.3, but the label says
+  "Fast/Double" and double-unders are harder.
+- Seven entries with **no published equivalent at all** — `hiit`, `assault_bike`,
+  `versa_climber`, `jacob_ladder`, `ski_erg`, `shadow_boxing`, `elliptical_vig`.
+  These are house values. They are labelled as such rather than dressed up.
+
+### A false assumption the suite caught
+
+I added an assertion that a jog must outrank the steepest incline walk. **It must
+not.** Walking a 15% grade (9.5) is harder than jogging level at 5 mph (8.3) —
+both equations say so. The true relation is pinned instead.
+
 ## The mirror had already drifted
 
 `functions/exercises.js` said *"Generated, not hand-authored"* — with **no

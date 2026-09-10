@@ -177,7 +177,7 @@ const CARDIO_GROUPS = [
     { id:"incline_walk_12",  label:"Incline Walk 12%",             icon:"🏔️", met:8.3  },
     { id:"incline_walk_15",  label:"Incline Walk 15%",             icon:"🏔️", met:9.5  },
     { id:"treadmill_jog",    label:"Treadmill Jog (~5 mph)",       icon:"🏃", met:8.3  },
-    { id:"treadmill_run",    label:"Treadmill Run (~6–7 mph)",     icon:"🏅", met:10.0 },
+    { id:"treadmill_run",    label:"Treadmill Run (~6–7 mph)",     icon:"🏅", met:10.5 },
     { id:"treadmill_sprint", label:"Sprint Intervals",             icon:"⚡", met:12.5 },
   ]},
   { group:"🔄 Elliptical", options:[
@@ -193,8 +193,8 @@ const CARDIO_GROUPS = [
   ]},
   { group:"🚴 Cycling", options:[
     { id:"cycling_easy",     label:"Cycling – Easy",               icon:"🚴", met:5.5  },
-    { id:"cycling_mod",      label:"Cycling – Moderate",           icon:"🚴", met:6.8  },
-    { id:"cycling_vig",      label:"Cycling – Vigorous",           icon:"💨", met:10.0 },
+    { id:"cycling_mod",      label:"Cycling – Moderate",           icon:"🚴", met:7.0  },
+    { id:"cycling_vig",      label:"Cycling – Vigorous",           icon:"💨", met:10.5 },
     { id:"spin_class",       label:"Spin Class",                   icon:"🔥", met:8.5  },
   ]},
   { group:"🚣 Rowing & Machines", options:[
@@ -231,8 +231,8 @@ const CARDIO_GROUPS = [
     { id:"flag_football",    label:"Flag Football",                icon:"🏈", met:8.0  },
     { id:"hiking",           label:"Hiking",                       icon:"🥾", met:6.0  },
     { id:"outdoor_jog",      label:"Outdoor Jog (~5 mph)",         icon:"🏃", met:8.3  },
-    { id:"outdoor_run",      label:"Outdoor Run (~7–8 mph)",       icon:"🏅", met:11.0 },
-    { id:"rollerblading",    label:"Rollerblading",                icon:"🛼", met:7.0  },
+    { id:"outdoor_run",      label:"Outdoor Run (~7–8 mph)",       icon:"🏅", met:11.8 },
+    { id:"rollerblading",    label:"Rollerblading",                icon:"🛼", met:7.5  },
     { id:"dancing",          label:"Dance Cardio / Zumba",         icon:"💃", met:7.3  },
     { id:"martial_arts",     label:"Martial Arts",                 icon:"🥋", met:10.3 },
     { id:"wrestling",        label:"Wrestling / Grappling",        icon:"🤼", met:6.0  },
