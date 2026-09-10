@@ -393,6 +393,21 @@ ok("...leaving the opener is an explicit commit",
 // A BRANCH THAT MOUNTS A FIELD MAY NOT BE A FUNCTION OF THAT FIELD'S LIVE VALUE.
 // The gate is the committed flag alone; the commit sets it explicitly.
 const MOUNT_GATES = (SIM_CODE.match(/^\s*\{[^\n]*&&\s*\($/gm) || []).map((l) => l.trim());
+// ⚠️ THE SPINNER IS REMOVED, NOT PADDED AROUND (Kevin, S218: "the example numbers
+// are being cut off by the up and down arrow in the box"). S216 answered the same
+// complaint with 26px of symmetric padding, which is what CAUSED this: the arrows
+// eat the right end of the box and the padding then eats both ends, leaving 74px
+// of content for an 80px placeholder. Measured after the fix: 0 of 10 boxes clip
+// their placeholder, all still centred, and the widest legal value still fits.
+ok("...and the sandbox sheet drops the native number spinner",
+   /\.sim-sheet input\[type="number"\]::-webkit-inner-spin-button/.test(APP)
+   && /\.sim-sheet input\[type="number"\] \{ -moz-appearance: textfield; appearance: textfield; \}/.test(APP)
+   && /className="sim-sheet"/.test(SIM_CODE));
+ok("...so the padding that dodged it is gone, and every box still reads one object",
+   /const numInput = \{ \.\.\.input, textAlign: "center", padding: "9px 12px" \};/.test(SIM_CODE)
+   && !/padding: "9px 26px"/.test(SIM_CODE)
+   && (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 7,
+   (SIM_CODE.match(/\.\.\.numInput/g) || []).length);
 ok("...and the pencil panel's gate is the committed flag alone",
    MOUNT_GATES.includes("{editBurn && (")
    && !MOUNT_GATES.some((g) => /editBurn/.test(g) && /mNum/.test(g)),
@@ -1233,7 +1248,13 @@ ok("the plan-writing custom-exercise creator is NOT ported", !/CustomExerciseCre
   const parts = pad[1].split(/\s+/);
   const [top, side] = parts;
   ok("...the padding is symmetric, so the optical centre is honest", parts.length === 2, pad[1]);
-  ok("...and generous enough to clear the spinner", parseFloat(side) >= 24, pad[1]);
+  // ⚠️ NO LONGER "GENEROUS ENOUGH TO CLEAR THE SPINNER" (S218). That assertion
+  // demanded >= 24px, and the 26px it was pinning is exactly what clipped the
+  // placeholders: 126px box - 52px padding = 74px of content for an 80px
+  // "e.g. 2,400". The spinner is removed at the sheet now, so the requirement
+  // inverts — the padding must be SMALL enough to leave the text its room.
+  ok("...and small enough to leave the placeholder room, now nothing overlaps it",
+     parseFloat(side) <= 14, pad[1]);
   ok("...vertical padding is unchanged", top === "9px", pad[1]);
   ok("the digits sit in the middle of the box", /textAlign: "center"/.test(decl[0]));
   // ⚠️ AND EVERY BOX IS WIDE ENOUGH FOR THE WIDEST LEGAL VALUE. Centring costs

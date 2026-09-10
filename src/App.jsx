@@ -1227,6 +1227,19 @@ function repairedBodyFat(d) {
 // ─── CSS ──────────────────────────────────────────────────────────────────────
 
 const css = `
+/* ⚠️ THE SPINNER IS REMOVED IN THE SANDBOX SHEET, NOT PADDED AROUND (Kevin, S218:
+   "in the what if section in the text boxes the example numbers are being cut off
+   by the up and down arrow in the box"). S216 answered the same complaint with
+   26px of symmetric padding, which is why "e.g. 2,400" no longer fits — the arrows
+   eat the right end of a 96-128px box AND the padding then eats both ends, so the
+   placeholder had nowhere to go. iPad Safari is desktop-class and draws them; iOS
+   iPhone Safari never did, which is why this reads as an iPad bug.
+   The arrows are a poor target on touch anyway and every one of these fields
+   takes a typed number, so dropping them gives the text the whole box back. */
+.sim-sheet input[type="number"]::-webkit-outer-spin-button,
+.sim-sheet input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.sim-sheet input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
 
 /* ── Reset ── */
@@ -13202,12 +13215,12 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // read as jammed against the spinner; centring puts the digits in the middle of
   // the box, which is what he was describing both times.
   //
-  // ⚠️ THE PADDING STAYS SYMMETRIC AND STAYS GENEROUS. The browser draws the
-  // up/down spinner INSIDE the content box at the right end, so it eats layout
-  // and pulls centred text left; equal padding on both sides keeps the optical
-  // centre honest, and 26px keeps the digits clear of the arrows on a 96px box.
+  // ⚠️ THE PADDING IS SYMMETRIC AND NOW MODEST. It was 26px to hold the digits
+  // clear of the spinner; the sheet's `.sim-sheet` rule removes the spinner, so
+  // that clearance is dead weight that was clipping the placeholders. Equal
+  // padding on both sides still keeps the optical centre honest.
   // ALL SEVEN typeable boxes read this one object, so they cannot drift apart.
-  const numInput = { ...input, textAlign: "center", padding: "9px 26px" };
+  const numInput = { ...input, textAlign: "center", padding: "9px 12px" };
   // ⚠️ INLINE STYLES ON THE LEGACY var(--…) TOKENS, NOT THE WIZARD'S TAILWIND
   // CLASSES. This modal is portalled to document.body, OUTSIDE every
   // data-theme="pro" wrapper, so WZW's bg-surface2 / text-fg would resolve
@@ -13341,7 +13354,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
         display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.6)",
         padding: "16px", paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
         paddingBottom: "calc(16px + env(safe-area-inset-bottom,0px))" }}>
-      <div onClick={(e) => e.stopPropagation()}
+      <div onClick={(e) => e.stopPropagation()} className="sim-sheet"
         style={{ width: "100%", maxWidth: "560px", maxHeight: "88vh", overflowY: "auto",
           background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "16px",
           padding: "16px", color: "var(--text)" }}>
