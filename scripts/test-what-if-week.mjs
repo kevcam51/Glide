@@ -1182,11 +1182,30 @@ ok("the plan-writing custom-exercise creator is NOT ported", !/CustomExerciseCre
   ok("there is one shared numeric-input style", !!decl);
   const pad = decl[0].match(/padding:\s*"([^"]+)"/);
   ok("...and it sets its own padding", !!pad, decl[0]);
-  const [top, right, bottom, left] = pad[1].split(/\s+/);
-  ok("...right-aligned text is pushed clear of the spinner", parseFloat(right) >= 26, pad[1]);
-  ok("...and it is the RIGHT side that grew, not the left", parseFloat(right) > parseFloat(left), pad[1]);
-  ok("...vertical padding is unchanged", top === "9px" && bottom === "9px", pad[1]);
-  ok("the style is right-aligned, which is what makes the padding matter", /textAlign: "right"/.test(decl[0]));
+  // ⚠️ CENTRED SINCE S217, WHICH SUPERSEDES THE RIGHT-PADDING FIX. What has to
+  // stay true is unchanged and is the thing Kevin described twice: the digits are
+  // not jammed against the browser's spinner arrows. Centring achieves it by
+  // putting them in the middle rather than by pushing them off one edge.
+  const parts = pad[1].split(/\s+/);
+  const [top, side] = parts;
+  ok("...the padding is symmetric, so the optical centre is honest", parts.length === 2, pad[1]);
+  ok("...and generous enough to clear the spinner", parseFloat(side) >= 24, pad[1]);
+  ok("...vertical padding is unchanged", top === "9px", pad[1]);
+  ok("the digits sit in the middle of the box", /textAlign: "center"/.test(decl[0]));
+  // ⚠️ AND EVERY BOX IS WIDE ENOUGH FOR THE WIDEST LEGAL VALUE. Centring costs
+  // the padding on BOTH sides, so a five-digit 35,000 — simNum's own ceiling —
+  // clipped in the 108px day boxes. Measured in the browser, not reasoned about.
+  {
+    const pad = 26 * 2, border = 2, digit = 8.4;   // .88rem DM Sans, measured
+    const widths = [...SIM_CODE.matchAll(/\.\.\.numInput, width: "(\d+)px"/g)].map((m) => Number(m[1]));
+    ok("every numeric box is declared with a width", widths.length >= 6, widths);
+    ok("...and all of them fit five digits", widths.every((w) => w - pad - border >= digit * 5), widths);
+  }
+  // ⚠️ SCOPED TO INPUT STYLES. Three things in this sheet are legitimately
+  // right-aligned and must stay so: the +/− delta beside each day row, and the
+  // two link rows ("Reset to my pace", "Back to my plan's week"). An over-broad
+  // scan fails on somebody else's correct code.
+  ok("...and no INPUT is right-aligned any more", !/\.\.\.input, textAlign: "right"/.test(SIM_CODE));
   // ⚠️ COUNTED, NOT FOUND. FOUR number boxes take a right-aligned figure — the
   // seven day inputs, "set every day to", quick fill's calories, and a per-day
   // manual session. Fixing one and leaving three is the shape check:weak exists
@@ -1197,12 +1216,12 @@ ok("the plan-writing custom-exercise creator is NOT ported", !/CustomExerciseCre
   // to catch — this count is the only thing that notices.
   ok("every numeric box in the modal uses it", (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 7,
      (SIM_CODE.match(/\.\.\.numInput/g) || []).length);
-  // ⚠️ ONE right-aligned style, and it is `numInput`'s own declaration. A
-  // second `{...input, textAlign:"right"}` anywhere else is a box that kept the
-  // 10px padding and put its digits back under the arrows.
-  ok("...and no second right-aligned style was hand-rolled beside it",
-     (SIM_CODE.match(/\.\.\.input, textAlign: "right"/g) || []).length === 1,
-     (SIM_CODE.match(/\.\.\.input, textAlign: "right"/g) || []).length);
+  // ⚠️ ONE alignment style, and it is `numInput`'s own declaration. A second
+  // hand-rolled `{...input, textAlign: …}` anywhere else is a box that kept the
+  // default padding and put its digits back under the arrows.
+  ok("...and no second alignment was hand-rolled beside it",
+     (SIM_CODE.match(/\.\.\.input, textAlign:/g) || []).length === 1,
+     (SIM_CODE.match(/\.\.\.input, textAlign:/g) || []).length);
   // Negative control: the style this replaced really did put the digits under
   // the arrows.
   const before = { padding: "9px 10px" };

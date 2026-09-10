@@ -13180,7 +13180,19 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // over to the left a little bit"). The browser draws the up/down arrows INSIDE
   // the box at the right edge, on top of a 10px padding, so the digits sat
   // underneath them.
-  const numInput = { ...input, textAlign: "right", padding: "9px 30px 9px 10px" };
+  // ⚠️ CENTRED, WHICH SUPERSEDES THE S216 RIGHT-PADDING FIX (Kevin: first "the
+  // numbers are way too close to the arrows, can we move the numbers over to the
+  // left a little bit", then "the type able numbers in the box need to be
+  // centered. I do not think any of them are"). Right-aligned-with-padding still
+  // read as jammed against the spinner; centring puts the digits in the middle of
+  // the box, which is what he was describing both times.
+  //
+  // ⚠️ THE PADDING STAYS SYMMETRIC AND STAYS GENEROUS. The browser draws the
+  // up/down spinner INSIDE the content box at the right end, so it eats layout
+  // and pulls centred text left; equal padding on both sides keeps the optical
+  // centre honest, and 26px keeps the digits clear of the arrows on a 96px box.
+  // ALL SEVEN typeable boxes read this one object, so they cannot drift apart.
+  const numInput = { ...input, textAlign: "center", padding: "9px 26px" };
   // ⚠️ INLINE STYLES ON THE LEGACY var(--…) TOKENS, NOT THE WIZARD'S TAILWIND
   // CLASSES. This modal is portalled to document.body, OUTSIDE every
   // data-theme="pro" wrapper, so WZW's bg-surface2 / text-fg would resolve
@@ -13500,10 +13512,14 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                   <span style={{ width: "38px", fontSize: ".7rem", fontWeight: 700, color: "var(--text-secondary)" }}>
                     {DAY_SHORT[i]}
                   </span>
+                  {/* ⚠️ WIDE ENOUGH FOR THE WIDEST LEGAL VALUE. Centring costs 26px
+                      of padding on BOTH sides, and at 108px a five-digit 35,000 —
+                      simNum's own ceiling — clipped by a pixel. Measured, not
+                      guessed. */}
                   <input type="number" inputMode="numeric" min="0" max="50000" step="50"
                     aria-label={`${dayName} calories`} placeholder={paceTarget.toLocaleString()}
                     value={weekCals[i]} onChange={(e) => setDay(i, e.target.value)}
-                    style={{ ...numInput, width: "108px",
+                    style={{ ...numInput, width: "120px",
                       border: (val !== null && low) || simRejected(weekCals[i])
                         ? "1.5px solid var(--yellow)" : "1px solid var(--border)" }} />
                   <span style={{ flex: 1, textAlign: "right", fontSize: ".62rem" }}>
