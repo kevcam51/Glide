@@ -136,9 +136,27 @@ ok("level walking stays at the Compendium value for 2.8-3.2 mph", metOf("walk_fl
 
 // ── The other corrected entries ──────────────────────────────────────────────
 ok("water aerobics is the Compendium value", metOf("water_aerobics") === 5.3);
+// ⚠️ kickboxing AND martial_arts READ THE SAME COMPENDIUM ENTRY (moderate-pace striking arts), so any gap between them is arbitrary. They were
+// 8.0 and 10.0; both are now the published 10.3.
 ok("kickboxing is the Compendium value", metOf("kickboxing") === 10.3);
-// ⚠️ IT ALSO USED TO SIT BELOW martial_arts, WHICH IS THE SAME ACTIVITY CLASS.
-ok("...and no longer sits below general martial arts", metOf("kickboxing") >= metOf("martial_arts"));
+ok("...and general martial arts, its own source entry, matches it", metOf("martial_arts") === 10.3);
+// The striking family has to make sense as a ladder: shadow boxing is genuinely
+// lighter than bag work, and neither approaches competitive ring work.
+{
+  const ladder = ["shadow_boxing", "boxing_bag", "kickboxing"].map(metOf);
+  ok("the striking ladder is non-decreasing", ladder.every((v, i) => i === 0 || v >= ladder[i - 1]), ladder);
+}
+// ⚠️ HEAVY BAG IS A JUDGEMENT, ANCHORED — NOT A LOOKUP. The Compendium's
+// "punching bag" 5.5 is casual intermittent work, not a coached round; "sparring"
+// is 7.8 and "in ring" 12.8. A SCHEDULED 30-minute bag session is rounds with
+// rest, so it sits just above sparring and nowhere near ring work. It was 9.8,
+// which is continuous hard effort for the whole duration.
+ok("heavy bag sits between sparring and ring work", metOf("boxing_bag") === 8.0);
+ok("...and above shadow boxing, which is genuinely lighter", metOf("boxing_bag") > metOf("shadow_boxing"));
+ok("swimming easy is the Compendium freestyle light/moderate value", metOf("swim_easy") === 5.8);
+ok("jump rope moderate is the Compendium value", metOf("jump_rope") === 11.8);
+ok("dance cardio is the Compendium aerobic-dance value", metOf("dancing") === 7.3);
+ok("flag football is the Compendium touch/flag value", metOf("flag_football") === 8.0);
 ok("tennis singles is the singles value, not 'tennis, general'", metOf("tennis") === 8.0);
 // Both directions: accuracy is not "make the numbers bigger".
 ok("wrestling came DOWN to the Compendium value", metOf("wrestling") === 6.0);

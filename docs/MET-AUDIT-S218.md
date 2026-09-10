@@ -59,38 +59,52 @@ recomputes them.
 
 | id | was | now | basis |
 |---|---|---|---|
-| incline_walk_5 | 4.5 | 5.4 | ACSM @3.0 mph (Compendium 17210 = 5.3) |
+| incline_walk_5 | 4.5 | 5.4 | ACSM @3.0 mph (Compendium uphill 1–5% grade = 5.3) |
 | incline_walk_8 | 6.0 | 6.6 | ACSM @3.0 mph |
 | incline_walk_10 | 7.0 | 7.4 | ACSM @3.0 mph |
 | incline_walk_12 | 7.5 | **8.3** | ACSM @3.0 mph — the one Kevin reported |
 | incline_walk_15 | 8.5 | 9.5 | ACSM @3.0 mph |
-| water_aerobics | 4.0 | 5.3 | Compendium 18230 |
-| kickboxing | 8.0 | 10.3 | Compendium 15255 — and it sat *below* `martial_arts` 10.0, same activity class |
+| water_aerobics | 4.0 | 5.3 | Compendium water aerobics |
+| kickboxing | 8.0 | 10.3 | Compendium moderate-pace striking arts — and it sat *below* `martial_arts` 10.0, the same entry |
 | tennis | 7.3 | 8.0 | label says Singles; 7.3 is "tennis, general" |
-| wrestling | 8.0 | **6.0** | Compendium 15700 — app was HIGH |
-| trampoline | 4.5 | **3.5** | Compendium 15580 — app was HIGH |
+| wrestling | 8.0 | **6.0** | Compendium wrestling — app was HIGH |
+| trampoline | 4.5 | **3.5** | Compendium trampoline — app was HIGH |
 
 Two came **down**. Accuracy is not "make the numbers bigger".
 
-## What I did NOT change, and why — these want a trainer's ruling
+## The judgment calls — Kevin ruled: "set these to whatever is most accurate"
 
-I only changed values I would defend against a published source. These deviate
-but involve real judgment, so they are yours to call:
+Handed back rather than left open. These have no clean lookup, so each is stated
+with its anchor.
 
-| id | app | reference | note |
+| id | was | now | basis |
 |---|---|---|---|
-| `boxing_bag` | 9.8 | Compendium "punching bag" 5.5 | Biggest gap in the catalogue. But a coached heavy-bag round is arguably not the Compendium's activity. **Worth your view.** |
-| `swim_easy` | 5.0 | freestyle light/moderate 5.8 | −14% |
-| `jump_rope` | 11.0 | rope jumping, moderate 11.8 | −7% |
-| `dancing` | 6.5 | aerobic dance, general 7.3 | −11% |
-| `flag_football` | 7.0 | touch/flag football 8.0 | −13% |
+| `boxing_bag` | 9.8 | **8.0** | see below |
+| `martial_arts` | 10.0 | 10.3 | the *same* Compendium entry `kickboxing` reads (moderate-pace striking arts), so a gap between them was arbitrary |
+| `swim_easy` | 5.0 | 5.8 | Compendium freestyle, slow / light-moderate |
+| `jump_rope` | 11.0 | 11.8 | Compendium rope jumping, moderate |
+| `dancing` | 6.5 | 7.3 | Compendium aerobic dance, general |
+| `flag_football` | 7.0 | 8.0 | Compendium football, touch/flag, general |
 
-**The 132 strength values were deliberately not "corrected".** The Compendium
-only carries coarse bands for resistance training (light/moderate ≈3.5,
-vigorous ≈6.0, circuit ≈8.0). Per-exercise METs at this granularity do not exist
-in the literature, so the app's finer gradations are a reasonable house model,
-not something with a published answer to check against. The suite asserts the
-**band** (2.5–9.0), not each value.
+### Heavy bag — a judgment, anchored, not a lookup
+
+The Compendium carries three boxing entries: **punching bag 5.5**, **sparring
+7.8**, **in ring 12.8**.
+
+Neither end is right for what this catalogue means by "Heavy Bag Boxing":
+
+- **5.5 is too low.** It describes casual, intermittent bag work, not a coached
+  round. Taking it literally would have cut the burn nearly in half.
+- **9.8 was too high.** That is essentially *continuous hard effort for the whole
+  scheduled duration*. A 30-minute bag session is rounds with rest.
+
+**8.0** sits just above sparring (7.8) and well below ring work (12.8), and it
+has to clear `shadow_boxing` (7.5), which is genuinely lighter — you are not
+absorbing impact. The suite pins both the value and that ordering.
+
+This is the one number in the catalogue that is reasoned rather than cited. If a
+coached bag session in practice runs closer to continuous work, 9–10 is
+defensible and the assertion is one line to change.
 
 ## The mirror had already drifted
 
