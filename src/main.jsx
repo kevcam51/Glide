@@ -98,30 +98,80 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
     // VERSION (S198m, Kevin: "I wanted to refresh the page so I can see if the
     // button popped up"). sw.js calls skipWaiting() + clients.claim(), so a new
     // worker takes over as soon as it is fetched — but the page already open
-    // keeps running the JavaScript it loaded with, and nothing said so. On a
-    // phone that had not been force-closed in days, that meant looking at
-    // yesterday's app while being told to "reload and check".
+    // keeps running the JavaScript it loaded with, and nothing said so.
     //
-    // updateViaCache:'none' stops the browser serving sw.js itself from cache,
-    // which is what made the check unreliable in the first place.
-    const hadController = !!navigator.serviceWorker.controller
-    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
-      .then((reg) => {
-        const check = () => { try { reg.update() } catch { /* offline */ } }
-        // Check now, and every time the app comes back to the foreground —
-        // which for a PWA is the moment someone is most likely to be looking
-        // for something that just shipped.
-        check()
-        document.addEventListener('visibilitychange', () => { if (!document.hidden) check() })
-        window.__glidnaCheckUpdate = check
-      })
-      .catch(() => {})
-    // A controller change with no PREVIOUS controller is just this page's first
-    // registration, not an update — only the second one means we are stale.
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!hadController) return
+    // ⚠️ THE TRIGGER USED TO BE `controllerchange`, AND THAT WAS WRONG IN BOTH
+    // DIRECTIONS (S218, Kevin on his iPad: "it constantly says that an update is
+    // available, and when i select update the message for an update being
+    // available still pops up").
+    //
+    //   FALSE POSITIVE: a controller change is not a new version. iOS/iPadOS
+    //   evicts and restarts service workers aggressively, and each re-claim
+    //   fired the banner. Tapping Update reloaded, the same thing happened
+    //   again, and nothing the user could do would ever clear it — because the
+    //   thing being announced had not happened in the first place.
+    //
+    //   FALSE NEGATIVE, AND THE MORE EMBARRASSING HALF: public/sw.js is a static
+    //   file that Vite copies verbatim, so a NORMAL DEPLOY LEAVES IT
+    //   BYTE-IDENTICAL — verified against the live site, unchanged since August.
+    //   No new worker means no controllerchange, which means this banner could
+    //   never once have announced a real release.
+    //
+    // So ask the question the banner claims to be answering: is the deployed
+    // entry chunk the one this page is running? Vite content-hashes it, so the
+    // filename IS the build identity. Cheap (a few KB of HTML), decisive, and
+    // it cannot be fooled by the worker restarting.
+    const runningEntry = document.querySelector('script[type="module"][src*="/assets/"]')?.getAttribute('src') || null
+
+    let lastCheck = 0
+    const announce = () => {
+      if (window.__glidnaUpdateReady) return
       window.__glidnaUpdateReady = true
       window.dispatchEvent(new CustomEvent('glidna:update-ready'))
-    })
+    }
+    const check = async () => {
+      const now = Date.now()
+      if (now - lastCheck < 30000) return   // app-switching shouldn't hammer it
+      lastCheck = now
+      try { const reg = await navigator.serviceWorker.getRegistration(); reg?.update() } catch { /* offline */ }
+      if (!runningEntry) return             // can't compare, so never cry wolf
+      try {
+        // Not mode:'navigate' and not /assets/, so sw.js passes this straight to
+        // the network (see its fetch handler) — no cached shell can answer it.
+        const res = await fetch('/', { cache: 'no-store' })
+        if (!res.ok) return
+        const html = await res.text()
+        // ⚠️ `[^"]*` BEFORE /assets/, NOT `[^"]+`. The src IS "/assets/index-….js" with
+        // nothing in front of it, so a `+` here matches nothing Vite emits — the probe
+        // would have been silently dead, which is the same shape of mistake as the
+        // bare-1,200 scan that could not see Math.max(1200, …). Caught by running it
+        // against the real built HTML and the live site rather than by reading it.
+        const m = html.match(/<script[^>]*\stype="module"[^>]*\ssrc="([^"]*\/assets\/[^"]+)"/)
+        if (m && m[1] !== runningEntry) announce()
+      } catch { /* offline, or the probe failed — say nothing */ }
+    }
+
+    // updateViaCache:'none' stops the browser serving sw.js itself from cache.
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {})
+
+    check()
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) check() })
+    // A controller change is no longer the signal, but it IS a reasonable moment
+    // to go and ask — cost is one conditional HTML fetch.
+    navigator.serviceWorker.addEventListener('controllerchange', () => { lastCheck = 0; check() })
+    window.__glidnaCheckUpdate = () => { lastCheck = 0; return check() }
+
+    // ⚠️ RELOADING IS NOT ENOUGH ON ITS OWN. sw.js serves navigations
+    // network-first but RACED against a 1.2s timeout, so on a slow radio the
+    // reload can be answered by the cached shell — the very HTML we just
+    // established is out of date. Drop the shell first so the reload has to go
+    // to the network. Hashed assets are immutable and are deliberately kept.
+    window.__glidnaApplyUpdate = async () => {
+      try {
+        const keys = await caches.keys()
+        await Promise.all(keys.filter((k) => k.startsWith('glidna-shell')).map((k) => caches.delete(k)))
+      } catch { /* best-effort — reload anyway */ }
+      window.location.reload()
+    }
   })
 }

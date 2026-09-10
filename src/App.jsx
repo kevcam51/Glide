@@ -20311,9 +20311,16 @@ function useRefreshOnResume(fn, minGapMs = 20000) {
 // threshold runs the loader. Touch-only by design — desktop has no such gesture
 // and would just add stray handlers. Passive listeners keep scrolling smooth;
 // we never preventDefault, so the browser's own overscroll still feels native.
-// A new version is live and this page is still running the old one. Says so,
-// and reloads on tap — never on its own, because yanking the page mid-sentence
-// is its own bug (S198m).
+// A new version is live and this page is still running the old one. Says so, and
+// reloads on tap — never on its own, because yanking the page mid-sentence is its
+// own bug (S198m).
+//
+// ⚠️ "IS LIVE" IS NOW MEANT LITERALLY (S218). The event behind this used to be
+// `controllerchange`, which is not a new version — it fired whenever iOS
+// restarted the service worker, so the banner reappeared forever and Update
+// could never clear it. main.jsx now compares the DEPLOYED entry chunk against
+// the running one before firing, and Update drops the cached shell so the reload
+// cannot be answered with the same stale HTML.
 function UpdateBanner() {
   const [ready, setReady] = useState(() => typeof window !== "undefined" && !!window.__glidnaUpdateReady);
   useEffect(() => {
@@ -20330,7 +20337,7 @@ function UpdateBanner() {
       background: "var(--surface,#121b1e)", color: "var(--text,#eafcfc)",
       boxShadow: "0 6px 24px rgba(0,0,0,.45)", fontSize: ".84rem", fontWeight: 600 }}>
       <span>A newer version of Glidna is ready.</span>
-      <button onClick={() => window.location.reload()}
+      <button onClick={() => { const f = window.__glidnaApplyUpdate; if (f) f(); else window.location.reload(); }}
         style={{ border: "none", borderRadius: 999, padding: "6px 12px", cursor: "pointer",
           background: "var(--accent-fill,#08dce0)", color: "var(--color-primaryfg,#04211f)",
           fontWeight: 800, fontSize: ".8rem", whiteSpace: "nowrap" }}>
