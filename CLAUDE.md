@@ -32,7 +32,7 @@ unified platform that complements and eventually replaces these.
 
 - `npm run dev` — local dev server (Vite, usually http://localhost:5173).
 - `npm run build` — production build; must pass before committing.
-- `npm run test:units` — the JS unit suites (**2,816 assertions across 41 suites**, S218).
+- `npm run test:units` — the JS unit suites (**2,832 assertions across 41 suites**, S218).
   Re-count rather than quoting this: it moved twice in one afternoon.
   ⚠️ **In a fresh git worktree this fails with `MODULE_NOT_FOUND: firebase-admin`** — three of
   the suites `require` from `functions/`, and `functions/node_modules` is gitignored, so it is
@@ -110,7 +110,7 @@ enabled (Blaze has no default spending cap).
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
 > _**S218 (Sep 10): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S218)"
 > first, and `docs/MET-AUDIT-S218.md` before touching any burn maths.**
-> **2,816 assertions across 41 suites.** ⚠️ **FUNCTIONS DEPLOYED BEFORE THE
+> **2,832 assertions across 41 suites.** ⚠️ **FUNCTIONS DEPLOYED BEFORE THE
 > PUSH** — `aitools.js`/`exercises.js` changed, so push-first would have shipped
 > an app the AI disagreed with.
 > ⚠️ **EVERY EXERCISE BURN WAS 8–29% LOW, AND COMPLETING A PROFILE MADE IT
@@ -122,7 +122,13 @@ enabled (Blaze has no default spending cap).
 > hardest for the heaviest clients. Now `MET × 3.5 × kg / 200` in BOTH files.
 > **Kevin approved it knowing every client moves** (+19–41% burn, +71–126
 > cal/day on eat-back targets). His 12% incline test: 285 → 395.
-> ⚠️ **TEN METs CORRECTED, TWO OF THEM DOWNWARD** — accuracy is not "bigger
+> ⚠️ **THE FIRST MET PASS WAS NOT SYSTEMATIC AND KEVIN CAUGHT IT** — running was
+> never checked though walking was, and it ran 4–12% light. All 53 cardio entries
+> are now referenced. **Running uses MEASURED Compendium values, not the ACSM
+> equation** (the equation only beats the table for GRADED walking, where the
+> Compendium lumps 6–15% into one number). Seven entries have no published
+> equivalent and are labelled house values; `boxing_bag` 8.0 is reasoned, not
+> cited. ⚠️ **FIFTEEN METs CORRECTED, THREE OF THEM DOWNWARD** — accuracy is not "bigger
 > numbers". Incline is DERIVED from the ACSM equation and the test RECOMPUTES it.
 > ⚠️ **THE 132 STRENGTH VALUES WERE DELIBERATELY LEFT** — the Compendium has only
 > coarse bands there, so per-exercise precision would be invented. The suite

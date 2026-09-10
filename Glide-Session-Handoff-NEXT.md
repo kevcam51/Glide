@@ -2,7 +2,7 @@
 
 ## ▶️ START HERE (S218) — THREE THINGS KEVIN HIT ON HIS iPAD, AND THE BURN MATHS
 
-**2,816 assertions across 41 suites**; build, `check:undef` clean.
+**2,832 assertions across 41 suites**; build, `check:undef` clean.
 ⚠️ **FUNCTIONS WERE DEPLOYED BEFORE THE PUSH** — this changed `aitools.js` and
 `exercises.js`, so pushing first would have shipped an app whose numbers the AI
 still disagreed with. `npm run deploy-set aitools.js` = 18 functions.
@@ -60,7 +60,21 @@ used the standard rate. Now `MET × 3.5 × kg / 200` in BOTH `src/App.jsx` and
 `functions/aitools.js`. **Kevin approved it knowing every client moves:** training
 burn +19–41%, eat-back targets +71 to +126 cal/day.
 
-**TEN METs.** The incline family is DERIVED from the ACSM graded-walking equation
+**FIFTEEN METs, ACROSS TWO PASSES.** ⚠️ **THE FIRST PASS WAS NOT SYSTEMATIC AND
+KEVIN CAUGHT IT** — "have you gone through all of the exercises and look at all
+the met's?" No: walking was derived properly, everything else spot-checked, and
+**RUNNING was never looked at** though it is the direct counterpart. It was 4–12%
+light. All 53 cardio entries are now checked against a reference.
+⚠️ **RUNNING USES MEASURED COMPENDIUM VALUES, NOT THE ACSM EQUATION.** For graded
+WALKING the equation is strictly better (the Compendium lumps 6–15% grade into one
+number); for LEVEL RUNNING the Compendium has speed-specific measured values,
+which beat a prediction — so a 5 mph jog stays 8.3 where the equation says 8.7.
+Applying ACSM everywhere would be mechanical, not accurate.
+⚠️ **SEVEN ENTRIES HAVE NO PUBLISHED EQUIVALENT AT ALL** (hiit, assault_bike,
+versa_climber, jacob_ladder, ski_erg, shadow_boxing, elliptical_vig) — house
+values, labelled as such. `boxing_bag` 8.0 is REASONED, not cited: bracketed by
+Compendium sparring 7.8 and in-ring 12.8, and it must clear shadow boxing 7.5.
+The incline family is DERIVED from the ACSM graded-walking equation
 at 3.0 mph and the test **recomputes it**, so lowering one means arguing with the
 physiology. Two came DOWN (wrestling 8.0→6.0, trampoline 4.5→3.5).
 
