@@ -389,7 +389,12 @@ ok("the gap between the typed burn and the Maintain chip is disclosed",
 // opens `if (!w) return 0`, so with no weight a 45-minute run prices at zero and
 // the day header — which only renders a burn when burned > 0 — shows NOTHING.
 ok("the exercise pickers are gated on knowing whose body it is",
-   /const canPrice = w > 0;/.test(SIM_CODE) && /const fillKindEff = canPrice \? fillKind : SIM_MANUAL;/.test(SIM_CODE));
+   /const canPrice = w > 0;/.test(SIM_CODE)
+   && /const fillKindEff = canPrice \|\| fillKind === "rest" \? fillKind : SIM_MANUAL;/.test(SIM_CODE));
+// ⚠️ REST IS NOT AN EXERCISE, so it is NOT gated on knowing a weight — clearing a
+// day needs no body to price. Only the two shapes that DO get forced to manual.
+ok("...but clearing a day is not, because it needs no body",
+   /canPrice \|\| fillKind === "rest"/.test(SIM_CODE));
 ok("...quick fill uses the gated value, not the raw state",
    !/fillKind === SIM_MANUAL \?/.test(SIM_CODE) && /fillKindEff === SIM_MANUAL \?/.test(SIM_CODE));
 ok("...a new session defaults to the shape that can be priced",
@@ -814,7 +819,36 @@ ok("what the screen says about itself scales with the stretch",
 // burn down" would be false in exactly that configuration.
 ok("...and never claims to follow a body it does not have",
    /\{!canFollow\s*\n?\s*\? <>\{mNum !== null/.test(SIM_CODE)
-   && /A real burn falls as weight comes off, so a stretch this long runs optimistic/.test(SIM_CODE));
+   && /A real burn \{gaining \? "rises as weight goes on" : "falls as weight comes off"\}/.test(SIM_CODE));
+
+// ── 5f. the caveats follow the DIRECTION, not just the horizon (S217) ──────
+// Kevin: "if I select calorie numbers that put clients in a surplus I would like
+// to see the estimated amount of… overall weight that they'll be gaining."
+// ⚠️ THE PROJECTION ALWAYS WORKED IN BOTH DIRECTIONS — `dir` and `fmtLbs` have
+// handled a surplus since S198z. What did NOT was the PROSE: "a real burn falls
+// as weight comes off" is false for somebody gaining, and it sat directly under
+// a "+8.6 lbs" tile.
+ok("the direction is taken from the projection, not the pace chip",
+   /const gaining = balance > 20;/.test(SIM_CODE));
+// ⚠️ SAME ±20 DEAD BAND AS `dir`, or the headline and the caveat under it can
+// disagree about which way somebody is going.
+ok("...on the same dead band as the headline", /const dir = balance < -20 \? "lose" : balance > 20 \? "gain"/.test(SIM_CODE));
+// ⚠️ COUNTED. Five caveats name a direction; one left hardcoded is a false
+// sentence under a true number, which is the S216b SummaryTab shape again.
+ok("every direction-dependent caveat reads from it",
+   (SIM_CODE.match(/\{gaining \?/g) || []).length === 6,
+   (SIM_CODE.match(/\{gaining \?/g) || []).length);
+ok("...and none of them still hardcodes losing",
+   !/burn falls as \{they\} get lighter/.test(SIM_CODE)
+   && !/A real burn falls as weight comes off,/.test(SIM_CODE)
+   && !/re-worked as the weight\s*\n?\s*comes off/.test(SIM_CODE));
+// The projection itself is unchanged and still answers both ways.
+{
+  const gain = M.simProject({ days: 30, startLbs: 150, weekHold: () => 2400 * 7, dayIntake: () => 2900 });
+  ok("a surplus comes back as a gain", gain.lost < 0 && Math.abs(gain.lost + (500 * 30) / CAL_PER_LB) < 1e-9, gain.lost);
+  ok("...and the end weight goes UP", gain.end > 150);
+  ok("...and it never halts on the way up", gain.halted === 0);
+}
 ok("...and a year is flagged in the warning colour", /horizon >= 365 \? "var\(--yellow\)" : "var\(--muted\)"/.test(SIM_CODE));
 ok("a scenario that runs off the scale says so rather than asserting a body",
    /horizonProj\.halted > 0 && \(/.test(SIM_CODE));
@@ -1015,6 +1049,21 @@ ok("the day header is focusable, not a div wearing a role",
 ok("quick fill is at the top", SIM_CODE.indexOf("Quick Fill") < SIM_CODE.indexOf("const sessions = Array.isArray(simCardio[day])"));
 ok("quick fill applies to the days that were picked", /const applyFill = /.test(SIM_CODE) && /toggleFillDay/.test(SIM_CODE));
 ok("...with the wizard's presets", /"MWF"/.test(SIM_CODE) && /"All 7"/.test(SIM_CODE));
+// ⚠️ A UNIVERSAL REST BUTTON IS THE OTHER HALF OF QUICK FILL (Kevin, S217: "I
+// want to be able to show calories burned if I want to and also immediately
+// remove all of the exercises or calories burned so they can see the
+// difference"). The whole point is the A/B — put 200 a day on Mon–Fri, show the
+// numbers, wipe it, show them again — and wiping was seven visits to seven cards.
+ok("quick fill can clear days, not only fill them",
+   /<button onClick=\{\(\) => setFillKind\("rest"\)\} aria-pressed=\{fillIsRest\}/.test(SIM_CODE));
+// ⚠️ REST IS AN EMPTY DAY, NOT A {type:"rest"} SESSION. A session would render a
+// day card with a picker in it, summarised as "Rest Day · 30m"; an empty list is
+// what "no training" actually is, and it is what seedSimCardio produces.
+ok("...and clearing writes an empty day, not a rest-shaped session",
+   /out\[day\] = fillIsRest \? \[\] : \[\{ \.\.\.sess \}\];/.test(SIM_CODE));
+ok("...and the button says which of the two it will do",
+   /\{fillIsRest \? "Clear" : "Apply to"\}/.test(SIM_CODE));
+ok("...and it needs no calorie or exercise field", /\{fillIsRest \? \(/.test(SIM_CODE));
 ok("...and it refuses to apply to no days", /const fillReady = fillDays\.length > 0/.test(SIM_CODE));
 // ⚠️ COUNTED, NOT FOUND. The manual option has THREE homes — the quick-fill
 // chooser and both branches of the per-day editor (from an exercise, and from

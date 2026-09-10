@@ -13040,12 +13040,26 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // ⚠️ FOUND BY SIGNING IN AS A CLIENT AND READING IT BACK. The third-person copy
   // written for the street demo told a client "their plan eats that back" about
   // their own plan. Half the user base is clients.
+  // ⚠️ THE CAVEATS WERE WRITTEN FOR SOMEBODY LOSING, AND HALF THE PACES GAIN
+  // (Kevin, S217: "if I select calorie numbers that put clients in a surplus I
+  // would like to see the estimated amount of… overall weight that they'll be
+  // gaining"). "A real burn falls as weight comes off" is simply FALSE for a
+  // surplus — the burn RISES as weight goes on, and the flat rule overstates the
+  // change in BOTH directions for the same reason.
+  // ⚠️ DECIDED FROM THE PROJECTION, NOT FROM THE PACE CHIP: a gaining chip with a
+  // typed deficit week still loses, and the caveat has to describe the answer on
+  // screen rather than the button that was pressed. Same ±20 dead band as `dir`,
+  // so the two can never contradict each other.
+  const gaining = balance > 20;
   const th = standalone ? "their" : "your";
   const Th = standalone ? "Their" : "Your";
   const they = standalone ? "they" : "you";
   const theyd = standalone ? "they&rsquo;d" : "you&rsquo;d";
   const canPrice = w > 0;
-  const fillKindEff = canPrice ? fillKind : SIM_MANUAL;
+  // ⚠️ "REST DAY" IS NOT AN EXERCISE, SO IT IS NOT GATED ON KNOWING A WEIGHT —
+  // clearing a day needs no body to price. Only the two shapes that DO get
+  // forced to the manual field.
+  const fillKindEff = canPrice || fillKind === "rest" ? fillKind : SIM_MANUAL;
   // ── The scenario calendar's edits — local, like everything else here ─────
   const paintDays = (fromKey, span, value) => {
     setUndoSnap({ ...dayOverrides });
@@ -13065,6 +13079,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
 
   const toggleFillDay = (day) => setFillDays((p) => (p.includes(day) ? p.filter((x) => x !== day) : [...p, day]));
   const fillReady = fillDays.length > 0 && (fillKindEff !== SIM_MANUAL || (simNum(fillCal) ?? 0) > 0);
+  const fillIsRest = fillKindEff === "rest";
   const noWeightNote = (
     <div style={{ fontSize: ".66rem", color: "var(--muted)", lineHeight: 1.5, marginBottom: "10px" }}>
       Add {th} weight up top and you can pick real exercises &mdash; we can&rsquo;t price a jog without
@@ -13073,12 +13088,17 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   );
   const applyFill = () => {
     if (!fillReady) return;
+    // ⚠️ REST IS AN EMPTY DAY, NOT A ZERO-CALORIE SESSION (Kevin, S217: "can I
+    // also select Monday through Friday rest day to kind of cancel out or remove
+    // the entries that I made"). A `{type:"rest"}` session would render a day
+    // card with a picker in it and read as "Rest Day · 30m"; an empty list is
+    // what "no training that day" actually is, and it is what the seed uses.
     const sess = fillKindEff === SIM_MANUAL
       ? { type: SIM_MANUAL, cal: simNum(fillCal) ?? 0 }
       : { type: fillType, duration: fillDuration };
     setSimCardio((prev) => {
       const out = { ...prev };
-      fillDays.forEach((day) => { out[day] = [{ ...sess }]; });
+      fillDays.forEach((day) => { out[day] = fillIsRest ? [] : [{ ...sess }]; });
       return out;
     });
     setFillDays([]);
@@ -13676,8 +13696,8 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                 {horizonFlat && Math.abs(horizonFlat.lost - horizonProj.lost) >= 1 && (
                   <div style={{ marginTop: "9px", fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.5 }}>
                     A flat 3,500-calories-per-pound calculator would say{" "}
-                    <b style={{ color: "var(--text-secondary)" }}>{Math.abs(horizonFlat.lost).toFixed(0)}</b>.
-                    {Th} burn falls as {they} get lighter, and this counts that.
+                    <b style={{ color: "var(--text-secondary)" }}>{Math.abs(horizonFlat.lost).toFixed(0)}</b>.{" "}
+                    {Th} burn {gaining ? "rises" : "falls"} as {they} get {gaining ? "heavier" : "lighter"}, and this counts that.
                   </div>
                 )}
                 {horizonProj.train > 0 && (
@@ -13718,12 +13738,12 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                     ? <>{mNum !== null
                         ? <>This holds {th} burn at <b style={{ color: "var(--text-secondary)" }}>{mNum.toLocaleString()}</b> the whole way.</>
                         : <>This holds {th} burn steady the whole way.</>}
-                      {" "}A real burn falls as weight comes off, so a stretch this long runs optimistic
+                      {" "}A real burn {gaining ? "rises as weight goes on" : "falls as weight comes off"}, so a stretch this long overstates the {gaining ? "gain" : "loss"}
                       {horizon >= 90 && <> &mdash; and the further out you go, the more so</>}.
                       {" "}Add {th} weight, height, age and how active {they} are and it can follow the burn down.</>
                     : horizon >= 365
-                      ? <>A year is a long way to project. This follows the burn down as weight comes off, but bodies
-                        also turn the dial down beyond what weight alone explains, and nobody eats to plan for twelve
+                      ? <>A year is a long way to project. This {gaining ? "follows the burn up as weight goes on" : "follows the burn down as weight comes off"}, but
+                        bodies also move the dial beyond what weight alone explains, and nobody eats to plan for twelve
                         months. Use it to compare two ways of eating, not to promise a number.</>
                       : horizon >= 90
                         ? <>{(SIM_HORIZONS.find(([n2]) => n2 === horizon) || [0, ""])[1]} out, this is a direction rather than a date.
@@ -13765,18 +13785,32 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
 
         {showFill && (
           <div style={panelS}>
-            {canPrice ? (
-              <div role="group" aria-label="What to apply" style={{ display: "flex", gap: "5px", marginBottom: "10px" }}>
-                <button onClick={() => setFillKind("exercise")} aria-pressed={fillKind === "exercise"}
-                  style={pillS(fillKind === "exercise")}>Pick an exercise</button>
-                {/* Kevin, S216: "this also needs to be in the quick fill section as
-                    well… this will make it so a user can just manually enter 400
-                    calories for all days or how ever many days they want." */}
-                <button onClick={() => setFillKind(SIM_MANUAL)} aria-pressed={fillKind === SIM_MANUAL}
-                  style={pillS(fillKind === SIM_MANUAL)}>Just type calories</button>
+            <div role="group" aria-label="What to apply" style={{ display: "flex", gap: "5px", marginBottom: "10px" }}>
+              {canPrice && (
+                <button onClick={() => setFillKind("exercise")} aria-pressed={fillKindEff === "exercise"}
+                  style={pillS(fillKindEff === "exercise")}>Pick an exercise</button>
+              )}
+              {/* Kevin, S216: "this also needs to be in the quick fill section as
+                  well… this will make it so a user can just manually enter 400
+                  calories for all days or how ever many days they want." */}
+              <button onClick={() => setFillKind(SIM_MANUAL)} aria-pressed={fillKindEff === SIM_MANUAL}
+                style={pillS(fillKindEff === SIM_MANUAL)}>Just type calories</button>
+              {/* Kevin, S217: "I want to be able to show calories burned if I want
+                  to and also immediately remove all of the exercises or calories
+                  burned so they can see the difference." The whole point is the
+                  A/B — put 200 a day on Mon–Fri, show the numbers, wipe it, show
+                  them again. Wiping had to be seven separate visits to seven day
+                  cards. */}
+              <button onClick={() => setFillKind("rest")} aria-pressed={fillIsRest}
+                style={pillS(fillIsRest)}>Rest days</button>
+            </div>
+            {!canPrice && !fillIsRest && noWeightNote}
+            {fillIsRest ? (
+              <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.5, marginBottom: "11px" }}>
+                Clears whatever is on the days you pick &mdash; no session, no calories. Use it to show the
+                same week with the training taken back out.
               </div>
-            ) : noWeightNote}
-            {fillKindEff === SIM_MANUAL ? (
+            ) : fillKindEff === SIM_MANUAL ? (
               <div style={{ marginBottom: "11px" }}>
                 <div style={lbl}>Calories burned</div>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -13832,7 +13866,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
               ))}
             </div>
             <button onClick={applyFill} disabled={!fillReady} style={primaryS(fillReady)}>
-              Apply to {fillDays.length || "0"} day{fillDays.length !== 1 ? "s" : ""}
+              {fillIsRest ? "Clear" : "Apply to"} {fillDays.length || "0"} day{fillDays.length !== 1 ? "s" : ""}
             </button>
           </div>
         )}
@@ -14246,10 +14280,14 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
               it at roughly 90 cal/day after a large loss), and the fact that
               nobody eats to plan indefinitely. */}
           <div style={{ marginTop: "11px", fontSize: ".62rem", color: "var(--muted)", lineHeight: 1.45 }}>
-            Estimates only. A pound of fat is about 3,500 calories, and the burn is re-worked as the
-            weight comes off — so this doesn&rsquo;t drift the way a flat calculator does.
+            {/* ⚠️ THE EXPLICIT {" "} IS LOAD-BEARING. JSX strips the newline and
+                indentation before an expression, so "…as the weight" followed by
+                a bare {gaining ? …} on the next line renders "the weightgoes on".
+                Found by reading the surplus case back, not by reading the diff. */}
+            Estimates only. A pound is about 3,500 calories, and the burn is re-worked as the weight{" "}
+            {gaining ? "goes on" : "comes off"} — so this doesn&rsquo;t drift the way a flat calculator does.
             {canFollow
-              ? <> Bodies still turn the dial down beyond what weight alone explains, so the first weeks are the firmest part.</>
+              ? <> Bodies still move the dial beyond what weight alone explains, so the first weeks are the firmest part.</>
               : <> {mNum !== null ? `This holds ${th} burn at ` + mNum.toLocaleString() + ` the whole way — add ${th} weight, height, age and how active ${they} are and it can follow the burn down.` : `Add ${th} weight and it can follow the burn down as ${they} lose.`}</>}
           </div>
         </div>
