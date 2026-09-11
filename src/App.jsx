@@ -27973,6 +27973,85 @@ function RichText({ text }) {
 
 // Downscale a chosen photo to a JPEG data URL (max ~1024px long edge) to keep
 // upload size + vision token cost down for photo meal logging (Session 65).
+// ─── A clip becomes a few photographs (S223) ────────────────────────────────
+// Kevin's wearable-camera idea. Sending VIDEO to a model is the expensive way to
+// do this — a minute of footage is thousands of frames and the cost runs to
+// dollars a day per person. Sending three good STILLS costs about two cents and
+// answers the same question, because what the model needs is a clear look at the
+// plate, not the motion between looks.
+//
+// So the clip never leaves the phone. The browser decodes it, this picks the
+// frames worth sending, and only those go anywhere.
+//
+// ⚠️ THE SCORING AND THE CHOOSING ARE PURE ON PURPOSE. Everything that touches a
+// <video> or a <canvas> is untestable in Node, so the two decisions that are
+// actually algorithmic — is this frame any good, and which of the good ones do
+// we keep — take plain numbers and return plain numbers. They are lifted and run
+// by scripts/test-video-frames.mjs.
+
+// How much detail is in a frame, and how bright it is. Edge energy (the mean
+// absolute difference to the pixel right and below) stands in for sharpness: a
+// motion-blurred or out-of-focus plate has little of it, a crisp one has plenty.
+// Cheap enough to run on a dozen thumbnails while someone waits.
+function scoreFrame(data, w, h) {
+  if (!data || w < 3 || h < 3) return { sharp: 0, lum: 0 };
+  const lumAt = (i) => data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+  let edges = 0, light = 0, n = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = (y * w + x) * 4;
+      const g = lumAt(i);
+      edges += Math.abs(g - lumAt(i + 4)) + Math.abs(g - lumAt(i + w * 4));
+      light += g;
+      n++;
+    }
+  }
+  return n ? { sharp: edges / (n * 2), lum: light / n } : { sharp: 0, lum: 0 };
+}
+
+// Choose which frames to actually send.
+//
+// ⚠️ SHARPEST-THREE IS THE WRONG ANSWER, and that is the whole reason this is a
+// function rather than a sort. The sharpest frames in a clip are usually
+// ADJACENT — the same half-second of the same plate — so a naive top-3 sends one
+// photograph three times and pays three times for it. Frames must be spread
+// across the clip to add anything.
+//
+// ⚠️ AND A DARK FRAME CAN BE "SHARP". Sensor noise in a near-black frame is all
+// edges; it scores well and shows nothing. Both ends are rejected before ranking,
+// not after.
+function pickFrames(cands, { want = 3, minGapSec = 0.8, minLum = 18, maxLum = 245 } = {}) {
+  const usable = (cands || []).filter((c) =>
+    c && Number.isFinite(c.t) && Number.isFinite(c.sharp)
+    && c.lum >= minLum && c.lum <= maxLum);
+  if (!usable.length) return [];
+  const byBest = [...usable].sort((a, b) => b.sharp - a.sharp);
+  const out = [];
+  for (const c of byBest) {
+    if (out.length >= want) break;
+    if (out.every((o) => Math.abs(o.t - c.t) >= minGapSec)) out.push(c);
+  }
+  // ⚠️ NEVER RETURN NOTHING WHEN SOMETHING IS USABLE. With a clip shorter than
+  // the gap, every candidate collides with the first pick and the loop above
+  // yields exactly one — which is correct. But if the gap were ever raised past
+  // the clip length the loop could still yield one, and zero would mean a person
+  // watched a video "upload" and get silently ignored.
+  if (!out.length) out.push(byBest[0]);
+  return out.sort((a, b) => a.t - b.t);   // chronological reads better in chat
+}
+
+// When to sample. Deliberately skips the outer eighth at each end: clips start
+// while the phone is still moving and end as it is being lowered, so those
+// frames are reliably the worst in the file.
+function frameTimes(duration, probes = 12) {
+  const d = Number(duration);
+  if (!(d > 0)) return [];
+  if (d <= 1) return [d / 2];
+  const from = d * 0.125, to = d * 0.875, span = to - from;
+  const n = Math.max(2, Math.min(probes, Math.round(d * 2)));
+  return Array.from({ length: n }, (_, i) => from + (span * i) / (n - 1));
+}
+
 function downscaleImage(file, maxDim = 1024, quality = 0.8) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -27996,6 +28075,83 @@ function downscaleImage(file, maxDim = 1024, quality = 0.8) {
 }
 // Full-screen photo viewer (S102d, Kevin): tap any photo thumbnail to see it
 // large; tap anywhere (or ✕) to close. Portal — escapes the transform trap.
+// Decode a clip in the browser and hand back the few frames worth sending.
+// Everything here is DOM work; the decisions live in scoreFrame/pickFrames above.
+//
+// ⚠️ EVERY WAIT IS BOUNDED. A codec the browser cannot decode does not throw —
+// it simply never fires the event being waited on, and an unbounded await would
+// leave someone staring at a spinner with no error and no way back. A clip that
+// cannot be read has to FAIL, visibly and quickly, so the caller can say "send a
+// photo instead".
+function framesFromVideo(file, { want = 3, probes = 12, maxDim = 1024, quality = 0.8 } = {}) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement("video");
+    v.muted = true; v.playsInline = true; v.preload = "auto"; v.crossOrigin = "anonymous";
+    let done = false;
+    const finish = (fn, arg) => {
+      if (done) return; done = true;
+      try { URL.revokeObjectURL(url); } catch (e) { /* already gone */ }
+      fn(arg);
+    };
+    const fail = (msg) => finish(reject, new Error(msg));
+    const once = (target, ev, ms) => new Promise((res, rej) => {
+      const t = setTimeout(() => { target.removeEventListener(ev, on); rej(new Error(`${ev} timed out`)); }, ms);
+      const on = () => { clearTimeout(t); target.removeEventListener(ev, on); res(); };
+      target.addEventListener(ev, on, { once: true });
+    });
+
+    v.addEventListener("error", () => fail("That video couldn't be read."), { once: true });
+
+    (async () => {
+      await once(v, "loadedmetadata", 15000);
+      const dur = Number(v.duration);
+      const vw = v.videoWidth, vh = v.videoHeight;
+      if (!(dur > 0) || !vw || !vh) throw new Error("no usable video track");
+      // A seek on a video with no decoded data never completes in some browsers.
+      try { await once(v, "loadeddata", 15000); } catch (e) { /* some fire only on seek */ }
+
+      // Score candidates on thumbnails — a 160px-wide frame carries all the edge
+      // information this needs and costs a fraction of the full draw.
+      const tw = 160, th = Math.max(3, Math.round((vh / vw) * tw));
+      const probe = document.createElement("canvas");
+      probe.width = tw; probe.height = th;
+      const pctx = probe.getContext("2d", { willReadFrequently: true });
+
+      const cands = [];
+      for (const t of frameTimes(dur, probes)) {
+        try {
+          v.currentTime = Math.min(t, Math.max(0, dur - 0.05));
+          await once(v, "seeked", 8000);
+          pctx.drawImage(v, 0, 0, tw, th);
+          const { sharp, lum } = scoreFrame(pctx.getImageData(0, 0, tw, th).data, tw, th);
+          cands.push({ t: v.currentTime, sharp, lum });
+        } catch (e) { /* one bad seek must not lose the clip */ }
+      }
+      if (!cands.length) throw new Error("couldn't read any frames");
+
+      const chosen = pickFrames(cands, { want });
+      const scale = Math.min(1, maxDim / Math.max(vw, vh));
+      const out = document.createElement("canvas");
+      out.width = Math.round(vw * scale); out.height = Math.round(vh * scale);
+      const octx = out.getContext("2d");
+      const urls = [];
+      for (const c of chosen) {
+        try {
+          v.currentTime = c.t;
+          await once(v, "seeked", 8000);
+          octx.drawImage(v, 0, 0, out.width, out.height);
+          urls.push(out.toDataURL("image/jpeg", quality));
+        } catch (e) { /* skip a frame we cannot redraw */ }
+      }
+      if (!urls.length) throw new Error("couldn't save any frames");
+      finish(resolve, urls);
+    })().catch((e) => fail(e && e.message ? e.message : "That video couldn't be read."));
+
+    v.src = url;
+  });
+}
+
 function PhotoViewer({ src, onClose }) {
   if (!src) return null;
   return createPortal(
@@ -28644,6 +28800,9 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
   // camera (then remembered per device), and always available via the ⓘ button.
   // Better photos → measurably better AI macro estimates.
   const [photoTips, setPhotoTips] = useState(false);
+  // Decoding a clip takes a few seconds on a phone and blocks the main thread,
+  // so the composer has to say what it is doing or the app looks frozen (S223).
+  const [scanning, setScanning] = useState(false);
   const [openTip, setOpenTip] = useState(null); // which photo tip's read-more is expanded
   const photoTipsSeen = () => { try { return localStorage.getItem("glide-photo-tips-seen") === "1"; } catch { return true; } };
   const markPhotoTipsSeen = () => { try { localStorage.setItem("glide-photo-tips-seen", "1"); } catch {} };
@@ -28654,18 +28813,42 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
   const tipsGotIt = () => { markPhotoTipsSeen(); setPhotoTips(false); if (fileRef.current) fileRef.current.click(); };
   const tipsClose = () => { markPhotoTipsSeen(); setPhotoTips(false); };
   const onFile = async (e) => {
-    const files = [...(e.target.files || [])].filter((f) => f.type.startsWith("image/"));
+    const picked = [...(e.target.files || [])];
+    const images = picked.filter((f) => f.type.startsWith("image/"));
+    // Clips from a GoPro, glasses, or the camera roll (S223). Only the FRAMES
+    // ever leave the device — the clip itself is decoded here and discarded.
+    const videos = picked.filter((f) => f.type.startsWith("video/"));
     e.target.value = ""; // allow re-picking the same file
-    if (!files.length) { if (e.target.files && e.target.files.length) setError("Please choose an image."); return; }
+    if (!images.length && !videos.length) {
+      if (picked.length) setError("Please choose a photo or a video.");
+      return;
+    }
     setError("");
     try {
       const room = Math.max(0, 20 - pendingImages.length);
       if (!room) { setError("20 photos max per message."); return; }
-      const scaled = await Promise.all(files.slice(0, room).map((f) => downscaleImage(f)));
-      setPendingImages((prev) => [...prev, ...scaled].slice(0, 20));
-      if (files.length > room) setError("20 photos max per message — extra photos were skipped.");
+      const scaled = await Promise.all(images.slice(0, room).map((f) => downscaleImage(f)));
+      let frames = [];
+      if (videos.length && scaled.length < room) {
+        setScanning(true);
+        try {
+          // ⚠️ ONE CLIP AT A TIME, and only the first. Decoding runs on the main
+          // thread — several at once would lock the app up on a phone for the
+          // length of all of them, with nothing on screen explaining why.
+          frames = await framesFromVideo(videos[0], { want: Math.min(3, room - scaled.length) });
+          if (videos.length > 1) setError("One video at a time — the rest were skipped.");
+        } catch (err) {
+          // Named plainly: a codec this browser cannot decode is not the
+          // person's fault and they need to know what to do instead.
+          setError("Couldn't read that video. Try a photo of the plate instead.");
+        } finally { setScanning(false); }
+      }
+      const next = [...scaled, ...frames];
+      if (next.length) setPendingImages((prev) => [...prev, ...next].slice(0, 20));
+      if (images.length > room) setError("20 photos max per message — extra photos were skipped.");
     }
     catch { setError("Couldn't read that photo. Try another."); }
+    finally { setScanning(false); }
   };
 
   // Voice input (Session 79): record from the mic, transcribe via Whisper
@@ -29765,6 +29948,17 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                 <span className="min-w-0 truncate">Working on <b className="text-fg">{subject.name}</b> — the plan you have open</span>
               </div>
             )}
+            {/* Decoding happens on the main thread, so without this the app
+                simply stops responding for a few seconds with nothing to
+                explain it (S223). It also says what is being sent, because
+                "we're reading your video" and "we're uploading your video" are
+                very different promises and only one of them is true. */}
+            {scanning && (
+              <div className="mb-2 flex items-center gap-2 rounded-lg bg-surface2 px-3 py-2 text-[.78rem] text-muted">
+                <Icon name="sync" size={14} color="var(--accent)" style={{ animation: "spin 1s linear infinite" }} />
+                Reading your video — picking the clearest few frames to send.
+              </div>
+            )}
             {pendingImages.length > 0 && (
               <div className="mb-2 flex items-center gap-2 flex-wrap">
                 {pendingImages.map((im, ix) => (
@@ -29797,7 +29991,9 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
               </div>
             )}
             <div className="flex flex-wrap items-center gap-2">
-              <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={onFile} />
+              {/* video/* joins image/* (S223). The picker now offers clips as
+                  well as photos; only the frames this pulls out are ever sent. */}
+              <input ref={fileRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={onFile} />
               <button onClick={pickImage} disabled={busy || recording || transcribing} aria-label="Add a photo" title="Photo of your meal"
                 className="flex items-center justify-center rounded-xl border border-border bg-surface2 px-3 py-2.5 text-fg cursor-pointer disabled:opacity-50 hover:text-primary">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-[22px] h-[22px]">
