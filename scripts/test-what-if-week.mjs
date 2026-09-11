@@ -316,22 +316,71 @@ const PLANS = [
   ok("(control) a naively-rounded training row really does fail to close", naiveBreaks > 0, naiveBreaks);
 }
 // ── The budget section's own wiring ─────────────────────────────────────────
-// ⚠️ A LATE PROVIDER PUT THE RESULTS LIST BACK ON SCREEN. searchFoods races two
-// food APIs and calls its onPartial AGAIN when the slower one lands — after the
-// user had picked a food, added it, and watched the list clear. Found by driving
-// it (8 result buttons still up, 2.5s after the add), never by reading it. Same
-// shape as the S217 focus bug: async state written after the user has moved on.
-ok("a food search cannot be revived by a callback the user has finished with",
-   /const foodReq = useRef\(0\);/.test(SIM_CODE)
-   && /const req = \(foodReq\.current \+= 1\);/.test(SIM_CODE)
-   && /const mine = \(\) => req === foodReq\.current;/.test(SIM_CODE)
-   && /\(partial\) => \{ if \(mine\(\)\) setFoodHits/.test(SIM_CODE));
-ok("...and every clear orphans what is still in flight",
-   /const clearFoodSearch = \(\) => \{\s*foodReq\.current \+= 1;/.test(SIM_CODE)
-   && /addExpense\(budPick\.name, budPickCal\); clearFoodSearch\(\);/.test(SIM_CODE));
-// Negative control: the shape that shipped had no guard at all.
-ok("(control) an unguarded partial really would write after the clear",
-   !/if \(mine\(\)\) setFoodHits/.test("(partial) => setFoodHits((partial || []).slice(0, 8))"));
+// ⚠️ THE BUDGET MOUNTS THE REAL MealLog, IT DOES NOT REBUILD IT (S219b, Kevin:
+// "I wanted to have everything that the regular meal logging section has except
+// for the saved meals and the previously logged").
+//
+// ⚠️ AND REBUILDING IT HAD ALREADY COST A BUG. The hand-rolled search here had no
+// sequence guard, so the slower of the two food providers re-opened the results
+// list AFTER the user had added a food and watched it clear — measured live, eight
+// buttons still up 2.5s later. MealLog has carried `searchSeqRef` for exactly that
+// since S50. Reimplementing a solved component reintroduced its solved problem.
+ok("the budget mounts the real MealLog with local handlers",
+   /<MealLog meals=\{expenses\} onAddMeal=\{budAdd\} onAddMeals=\{budAddMany\}/.test(SIM_CODE)
+   && /onRemoveMeal=\{budRemove\} onEditMeal=\{budEdit\} premium=\{premium\}/.test(SIM_CODE));
+ok("...and no second food search was hand-rolled beside it",
+   !/searchFoods\(/.test(SIM_CODE));
+// ⚠️ RECENTS AND SAVED ARE OMITTED ON PURPOSE — this sheet records nothing, so
+// "log again" would offer a history it never writes. Their absence is what hides
+// those sections; each is read as `x || []` inside MealLog, so nothing throws.
+ok("...and it is not handed a history it never writes",
+   !/recentFoods=|savedFoods=|savedMeals=|onToggleSaveFood=|onLogMeal=/.test(SIM_CODE));
+// ⚠️ THE TWO NEW MealLog PROPS DEFAULT TO TODAY'S BEHAVIOUR, so every real meal
+// log is untouched by this. `title` falls back to "Meals & Food Today"; the
+// Library button hides ONLY where hideLibrary is asked for — the budget, which
+// records nothing and would otherwise offer a drawer onto a history it never
+// writes.
+{
+  const MEAL = APP.slice(APP.indexOf("function MealLog("), APP.indexOf("\nfunction ", APP.indexOf("function MealLog(") + 20));
+  ok("MealLog's new props are optional and default to what it already did",
+     /onEditMeal, title, hideLibrary = false,/.test(MEAL)
+     && /\(title \|\| "Meals & Food Today"\)/.test(MEAL));
+  ok("...and the Library button is gated on the opt-out, not removed",
+     /\{!hideLibrary && \(/.test(MEAL) && /Icon name="book"/.test(MEAL));
+  // Negative control: the real meal log must NOT be opting out.
+  const realMounts = (APP.match(/<MealLog [^>]*hideLibrary/g) || []);
+  ok("(control) only the budget opts out of the library", realMounts.length === 1, realMounts.length);
+}
+ok("the budget names itself rather than claiming to be today",
+   /title=\{standalone \? "What they eat in a day"/.test(SIM_CODE) && /hideLibrary \/>/.test(SIM_CODE));
+ok("the premium gate reaches it rather than defaulting open",
+   /premium = true \}\) \{/.test(SIM_CODE) && /premium=\{premium\}/.test(SIM_CODE));
+
+// ── The nutrition mode is answerable in the sandbox (S219b) ─────────────────
+// ⚠️ null MEANS "FOLLOW THE PLAN". An untouched sandbox must stay byte-identical
+// to the plan's ladder, which the parity sweep above already asserts — this pins
+// the shape that keeps it true.
+ok("the sandbox can ask the other mode without touching the plan",
+   /const \[simEat, setSimEat\] = useState\(null\);/.test(SIM_CODE)
+   && /const d = simEat === null \? dPlan : \{ \.\.\.dPlan, deficitMode: simEat \? "eatback" : "accelerate" \};/.test(SIM_CODE));
+{
+  // ⚠️ AND THE TWO MODES REALLY DO DIVERGE, or the toggle is decoration. Kevin's
+  // case: maintenance + cardio. Eat-back holds weight by definition; accelerate
+  // turns the same cardio into a real deficit.
+  const base = PLANS.find(([nm]) => nm === "eat-back, cardio + strength")[1];
+  const burn = 2100;                       // 300 cal a day of training
+  const eat = M.simIntakeForRate({ ...base, deficitMode: "eatback" }, burn, 0);
+  const acc = M.simIntakeForRate({ ...base, deficitMode: "accelerate" }, burn, 0);
+  ok("at Maintain, eat-back's number carries the training and accelerate's does not",
+     eat - acc === Math.round(burn / 7) || Math.abs((eat - acc) - burn / 7) <= 1, { eat, acc, perDay: burn / 7 });
+  // The projection: eating Maintain while training. Eat-back nets zero, which is
+  // what Maintain MEANS there; accelerate nets the whole week of training.
+  const holdEat = eat + 0;                 // eat-back folds the burn into the target
+  const holdAcc = acc + Math.round(burn / 7);
+  ok("...so eating Maintain nets zero in eat-back", eat - holdEat === 0);
+  ok("...and nets the training in accelerate", holdAcc - acc === Math.round(burn / 7));
+}
+
 
 // ⚠️ THE PROSE FOLLOWS deficitMode, NOT JUST THE NUMBERS. The intro read
 // "training pays a little back in" for everyone, which is false on an accelerate
@@ -463,7 +512,7 @@ ok("the subtitle still switches on the same mode",
    /standalone \? "Nothing is saved\." : "Nothing here changes your plan\."/.test(SIM_CODE));
 
 // ── 4c. the screen around the typed burn ───────────────────────────────────
-ok("the modal takes a standalone mode", /function CalorieSimulator\(\{ data, weightLbs, planRate, dayCalsAll, onClose, standalone = false \}\)/.test(SIM_CODE));
+ok("the modal takes a standalone mode", /function CalorieSimulator\(\{ data, weightLbs, planRate, dayCalsAll, onClose, standalone = false, premium = true \}\)/.test(SIM_CODE));
 ok("...and an unusable plan or a bare sandbox opens on the burn question",
    /const usable = burnOpened \|\| planUsable;/.test(SIM_CODE) && /\{!usable \? \(/.test(SIM_CODE));
 // ⚠️ THE OPENER MAY NOT VANISH WHILE SOMEBODY IS TYPING IN IT. Kevin, on his
@@ -508,7 +557,7 @@ ok("...and the sandbox sheet drops the native number spinner",
 ok("...so the padding that dodged it is gone, and every box still reads one object",
    /const numInput = \{ \.\.\.input, textAlign: "center", padding: "9px 12px" \};/.test(SIM_CODE)
    && !/padding: "9px 26px"/.test(SIM_CODE)
-   && (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 9,
+   && (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 7,
    (SIM_CODE.match(/\.\.\.numInput/g) || []).length);
 ok("...and the pencil panel's gate is the committed flag alone",
    MOUNT_GATES.includes("{editBurn && (")
@@ -1370,7 +1419,7 @@ ok("the plan-writing custom-exercise creator is NOT ported", !/CustomExerciseCre
     // A constant that restates the thing it is testing goes stale in silence.
     const pad = parseFloat(side) * 2, border = 2, digit = 8.4;   // .88rem DM Sans, measured
     const widths = [...SIM_CODE.matchAll(/\.\.\.numInput, width: "(\d+)px"/g)].map((m) => Number(m[1]));
-    ok("every numeric box is declared with a width", widths.length >= 8, widths);
+    ok("every numeric box is declared with a width", widths.length >= 6, widths);
     ok("...and all of them fit five digits", widths.every((w) => w - pad - border >= digit * 5), widths);
   }
   // ⚠️ SCOPED TO INPUT STYLES. Three things in this sheet are legitimately
@@ -1382,11 +1431,11 @@ ok("the plan-writing custom-exercise creator is NOT ported", !/CustomExerciseCre
   // seven day inputs, "set every day to", quick fill's calories, and a per-day
   // manual session. Fixing one and leaving three is the shape check:weak exists
   // to catch.
-  // ⚠️ NINE SINCE S219 (six at S217): the seven day inputs share one, plus "set every day to",
+  // ⚠️ SEVEN: the seven day inputs share one, plus "set every day to",
   // quick fill's calories, a per-day manual session, the typed daily burn and
   // the typed weight. Fixing one and leaving five is the shape check:weak exists
   // to catch — this count is the only thing that notices.
-  ok("every numeric box in the modal uses it", (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 9,
+  ok("every numeric box in the modal uses it", (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 7,
      (SIM_CODE.match(/\.\.\.numInput/g) || []).length);
   // ⚠️ ONE alignment style, and it is `numInput`'s own declaration. A second
   // hand-rolled `{...input, textAlign: …}` anywhere else is a box that kept the

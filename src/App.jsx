@@ -9729,7 +9729,7 @@ function dayLabelFor(key, todayKey) {
   return new Date(q[0], q[1] - 1, q[2]).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
-function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood, savedFoods, onToggleSaveFood, onRemoveSavedFood, savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onReadDay, onListLoggedDays, dateKey, hideMicros, onDayStep, dayLabel, canGoNext, planned, onSetPlanned, onPlanDays, onEatPlanned, premium = true, role }) {
+function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, title, hideLibrary = false, recentFoods, onRemoveRecentFood, savedFoods, onToggleSaveFood, onRemoveSavedFood, savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onReadDay, onListLoggedDays, dateKey, hideMicros, onDayStep, dayLabel, canGoNext, planned, onSetPlanned, onPlanDays, onEatPlanned, premium = true, role }) {
   const [name, setName] = useState("");
   const [brand, setBrand] = useState(""); // brand of a picked food (e.g. "Kirkland Signature") — shown under the name
   const [cals, setCals] = useState("");
@@ -10931,7 +10931,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
                   style={{ ...dayNavBtn, opacity: canGoNext ? 1 : .35, cursor: canGoNext ? "pointer" : "default" }}>›</button>
               </span>
             </span>
-          ) : "Meals & Food Today"}
+          ) : (title || "Meals & Food Today")}
         </div>
         {/* No margin-left:auto (S160, Kevin): on a phone this row wraps, and an
             auto margin kept shoving the controls flush right on their own line —
@@ -10947,12 +10947,19 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recen
           {/* Browse the whole library (every meal, grouped) — the add-form's
               button opens it scoped to one meal instead. stopPropagation: the
               header row itself toggles "View all". */}
-          <button onClick={(e) => { e.stopPropagation(); setLib({ mealType: null }); }} title="Your food library"
-            style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"6px 10px", borderRadius:"999px",
-              border:"1px solid var(--border)", background:"transparent", color:"var(--muted)",
-              fontSize:".74rem", fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
-            <Icon name="book" size={13} color="var(--accent)" /> Library
-          </button>
+          {/* ⚠️ HIDDEN WHERE THERE IS NO LIBRARY TO BROWSE (S219b). The What if…
+              budget mounts this component but records nothing, so recents and
+              saved foods are deliberately not passed — leaving a "Library" button
+              that opens an empty drawer and implies a history the sheet never
+              writes. Defaults false, so every real meal log is untouched. */}
+          {!hideLibrary && (
+            <button onClick={(e) => { e.stopPropagation(); setLib({ mealType: null }); }} title="Your food library"
+              style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"6px 10px", borderRadius:"999px",
+                border:"1px solid var(--border)", background:"transparent", color:"var(--muted)",
+                fontSize:".74rem", fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+              <Icon name="book" size={13} color="var(--accent)" /> Library
+            </button>
+          )}
           {/* Header control: open ALL meals (or close). */}
           <span style={{ display:"inline-flex", alignItems:"center", gap:"5px", padding:"6px 11px",
             borderRadius:"999px", border:"1px solid var(--accent)",
@@ -12790,7 +12797,7 @@ const SIM_RATES = [
   { lbl: "1 lb/wk",  rate: -1,   group: "gain",     sign: "+" },
   { lbl: "2 lbs/wk", rate: -2,   group: "gain",     sign: "+" },
 ];
-function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, standalone = false }) {
+function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, standalone = false, premium = true }) {
   useBodyScrollLock(true);
   // ⚠️ THE EXERCISE SHEET SHARES THIS BACK BUTTON (S213). ExercisePicker opens a
   // BottomSheet, which registers its OWN useBackClose — so one device-Back
@@ -12817,7 +12824,23 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const confirmRef = useRef(null);
   useEffect(() => { if (confirmClose) confirmRef.current?.scrollIntoView({ block: "center" }); }, [confirmClose]);
   useBackClose(true, () => { if (sheetCount > 0) return; askClose(); });
-  const d = data || {};
+  // ⚠️ THE SANDBOX CAN ASK THE OTHER QUESTION (S219b, Kevin: "when I have the
+  // client at maintenance and add the cardio I do not see the weight loss at the
+  // bottom. There should be some weight loss if someone is doing cardio and
+  // eating at maintenance").
+  //
+  // He is describing ACCELERATE, and this sheet silently assumed EAT-BACK — the
+  // app's default, and the only thing a plan-less sandbox could assume. In
+  // eat-back, Maintain RISES by the training, so eating Maintain holds weight BY
+  // DEFINITION and a zero projection is the right answer to a question he was not
+  // asking. The mode being invisible and unchangeable was the real bug.
+  //
+  // ⚠️ null MEANS "FOLLOW THE PLAN", so an untouched sandbox stays byte-identical
+  // to the plan's own ladder and the parity sweep still holds. Overriding one
+  // field on a copy leaves weight, cardio and custom exercises exactly as set.
+  const [simEat, setSimEat] = useState(null);
+  const dPlan = data || {};
+  const d = simEat === null ? dPlan : { ...dPlan, deficitMode: simEat ? "eatback" : "accelerate" };
   // ── The numbers a sandbox with no client runs on (S217, Kevin) ───────────
   // "What if I just meet someone on the street and wanna give them a general
   // estimate of maintenance calories that I put in and then of course the app
@@ -12907,22 +12930,20 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // to show a day that eats far under 1,200 without prescribing one.
   const [budOpen, setBudOpen] = useState(true);
   const [expenses, setExpenses] = useState([]);     // {id, name, cal} — LOCAL ONLY
-  const [expCal, setExpCal] = useState("");
-  const [expName, setExpName] = useState("");
-  const [foodQ, setFoodQ] = useState("");
-  const [foodHits, setFoodHits] = useState([]);
-  const [foodBusy, setFoodBusy] = useState(false);
-  const [foodErr, setFoodErr] = useState("");
-  const [budPick, setBudPick] = useState(null);     // a hit waiting for an amount
-  const [budAmt, setBudAmt] = useState("");
-  // ⚠️ searchFoods CALLS BACK MORE THAN ONCE. It races two providers and emits a
-  // partial list as each resolves, so the slower one lands AFTER the user has
-  // picked a food and moved on — which put the whole results list back on screen
-  // underneath an expense they had already added. Found by driving it, not by
-  // reading it. Every clear bumps this token; a callback holding a stale one is
-  // ignored. (Same shape as the S217 focus bug: async state written after the
-  // user has left.)
-  const foodReq = useRef(0);
+  // ⚠️ THE REAL MealLog, DRIVEN BY LOCAL STATE (S219b, Kevin: "I wanted to have
+  // everything that the regular meal logging section has except for the saved
+  // meals and the previously logged"). Reused rather than rebuilt, so the budget
+  // gets the food database, macros, meal types, the AI estimate, the barcode
+  // scanner and editing for free — and cannot drift from the real one.
+  //
+  // ⚠️ REBUILDING IT ALREADY COST ME A BUG. My hand-rolled search had no
+  // sequence guard, so the slower food provider re-opened the results list after
+  // the user had added and moved on. MealLog has had `searchSeqRef` for exactly
+  // that since S50 — the reimplementation reintroduced a solved problem.
+  //
+  // Recents/saved are omitted ON PURPOSE: this sheet saves nothing, so offering
+  // "log again" would promise a history it never writes.
+  const expSeq = useRef(0);
   // ── The long scenario (S217) ─────────────────────────────────────────────
   // ⚠️ CAPTURED ONCE, ON MOUNT. `ymdLocal()` read per render would roll the whole
   // scenario forward a day at midnight underneath somebody mid-plan, and every
@@ -13023,41 +13044,14 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const budPaceLbl = (SIM_RATES.find((t) => t.rate === rate) || {}).lbl || "";
   // Identical call to paceTarget's — one ladder, not a second opinion.
   const budget = bud.budget;
-  const spent = expenses.reduce((t, e) => t + (Number(e.cal) || 0), 0);
+  const spent = expenses.reduce((t, e) => t + (Number(e.calories) || 0), 0);
   const budLeft = budget - spent;
   const budPct = budget > 0 ? Math.round((spent / budget) * 100) : 0;
-  const addExpense = (name, cal) => {
-    const c = Math.round(Number(cal) || 0);
-    if (!(c > 0)) return;
-    setExpenses((xs) => [...xs, { id: `e${Date.now()}${xs.length}`, name: (name || "").trim() || `${c.toLocaleString()} cal`, cal: c }]);
-  };
-  // Per-100g foods (USDA/OFF) scale by grams; per-serving foods (FatSecret
-  // "1 scoop") scale by the number of servings — the same split applyServing uses.
-  const budPickCal = budPick
-    ? Math.round((Number(budPick.kcal) || 0) * (budPick.per === "serving"
-        ? (parseFloat(budAmt) || 0)
-        : (parseFloat(budAmt) || 0) / 100))
-    : 0;
-  const clearFoodSearch = () => {
-    foodReq.current += 1;               // orphans anything still in flight
-    setFoodHits([]); setFoodQ(""); setBudPick(null); setFoodErr("");
-  };
-  const runFoodSearch = async () => {
-    const q = foodQ.trim();
-    if (!q) return;
-    const req = (foodReq.current += 1);
-    const mine = () => req === foodReq.current;
-    setFoodBusy(true); setFoodErr(""); setFoodHits([]); setBudPick(null);
-    try {
-      const r = await searchFoods(q, (partial) => { if (mine()) setFoodHits((partial || []).slice(0, 8)); });
-      if (!mine()) return;
-      const hits = (r || []).slice(0, 8);
-      setFoodHits(hits);
-      if (!hits.length) setFoodErr("Nothing came back \u2014 try a simpler name, or just type the calories.");
-    } catch {
-      if (mine()) setFoodErr("Couldn\u2019t reach the food database \u2014 just type the calories instead.");
-    } finally { if (mine()) setFoodBusy(false); }
-  };
+  const budAdd = (m) => setExpenses((xs) => [...xs, { ...m, id: `e${++expSeq.current}` }]);
+  const budAddMany = (list) => setExpenses((xs) => [...xs,
+    ...(Array.isArray(list) ? list : []).map((m) => ({ ...m, id: `e${++expSeq.current}` }))]);
+  const budRemove = (id) => setExpenses((xs) => xs.filter((x) => x.id !== id));
+  const budEdit = (id, patch) => setExpenses((xs) => xs.map((x) => (x.id === id ? { ...x, ...patch, id } : x)));
 
   // ── What they eat: seven days, and the pace prices the blanks ────────────
   // ⚠️ THE WEEK WAS ALREADY THE BASIS. Dropping "Pick a pace" and "One number"
@@ -14241,6 +14235,45 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
             Daily goal at this pace <b style={{ color: "var(--accent)" }}>{paceTarget.toLocaleString()}</b> cal
             {flooredAtRate(rate) && <> (held at the 1,200 floor)</>}
           </div>
+          {/* ── What the cardio BUYS (S219b, Kevin) ────────────────────────────
+              "I don't know if the calorie from activity/cardio is counting toward
+              the total calorie burn. When I have the client at maintenance and add
+              the cardio I do not see the weight loss at the bottom."
+              It was counting — but in eat-back, which is the app's default and the
+              only thing a plan-less sandbox can assume, counting it RAISES the
+              Maintain number, so eating Maintain holds weight by definition. The
+              mode was doing all the work and was invisible. Now it is a question
+              the sandbox can answer both ways. */}
+          <div style={{ marginTop: "8px", paddingTop: "8px", borderTop: "1px solid var(--border)" }}>
+            <div style={{ fontSize: ".62rem", letterSpacing: ".6px", color: "var(--muted)", marginBottom: "5px" }}>
+              WHAT THE TRAINING BUYS
+            </div>
+            <div style={{ display: "flex", gap: "6px" }}>
+              {[[true, "More food"], [false, "Faster loss"]].map(([on, label]) => (
+                <button key={label} onClick={() => setSimEat(on)} aria-pressed={eatback === on}
+                  style={{ flex: 1, padding: "8px 6px", borderRadius: "9px", cursor: "pointer",
+                    fontFamily: "inherit", fontSize: ".72rem", fontWeight: 700,
+                    border: eatback === on ? "1.5px solid var(--accent)" : "1px solid var(--border)",
+                    background: eatback === on ? "rgba(var(--accent-rgb),.12)" : "var(--s2)",
+                    color: eatback === on ? "var(--accent)" : "var(--text-secondary)" }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div style={{ marginTop: "5px", fontSize: ".65rem", color: "var(--muted)", lineHeight: 1.45 }}>
+              {eatback
+                ? <>The burn is added to what {they} can eat, so {th} weight holds and the training makes the diet easier. Eating the Maintain number means no loss &mdash; that is what it means here.</>
+                : <>{Th} food stays where it is, so every calorie {they} burn is a calorie off. Training at Maintain now shows a real loss below.</>}
+            </div>
+            {/* Only offer the way back when there IS a plan to go back to. */}
+            {!standalone && simEat !== null && isEatback(dPlan) !== eatback && (
+              <div style={{ textAlign: "right", marginTop: "5px" }}>
+                <button onClick={() => setSimEat(null)} style={{ ...linkS }}>
+                  Back to {th} plan&rsquo;s approach
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         {cardioChanged && (
           <div style={{ textAlign: "right", marginTop: "5px" }}>
@@ -14330,97 +14363,18 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
               <div style={{ fontSize: ".62rem", letterSpacing: ".6px", color: "var(--muted)", marginBottom: "6px" }}>
                 GOING OUT
               </div>
-              {expenses.length === 0 && (
-                <div style={{ fontSize: ".7rem", color: "var(--muted)", lineHeight: 1.45, paddingBottom: "4px" }}>
-                  Nothing spent yet. Add food below and watch the budget come down.
-                </div>
-              )}
-              {expenses.map((e) => (
-                <div key={e.id} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: ".76rem", padding: "3px 0" }}>
-                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</span>
-                  <b style={{ color: "var(--yellow)" }}>&minus;{e.cal.toLocaleString()}</b>
-                  <button onClick={() => setExpenses((xs) => xs.filter((x) => x.id !== e.id))}
-                    aria-label={`Remove ${e.name}`}
-                    style={{ background: "transparent", border: "none", cursor: "pointer", padding: "2px", lineHeight: 0 }}>
-                    <Icon name="close" size={12} color="var(--muted)" />
-                  </button>
-                </div>
-              ))}
-
-              {/* Type a number, or a name and a number — the "imaginary calorie
-                  options" half of the ask. */}
-              <div style={{ display: "flex", gap: "6px", marginTop: "8px", alignItems: "center" }}>
-                <input value={expName} onChange={(ev) => setExpName(ev.target.value)}
-                  placeholder="Pizza, 2 slices" aria-label="What was eaten"
-                  style={{ ...input, flex: 1, minWidth: 0 }} />
-                <input type="number" inputMode="numeric" min="0" step="10"
-                  value={expCal} onChange={(ev) => setExpCal(ev.target.value)}
-                  onKeyDown={(ev) => { if (ev.key === "Enter") { ev.preventDefault(); addExpense(expName, expCal); setExpName(""); setExpCal(""); } }}
-                  placeholder="cal" aria-label="Calories"
-                  style={{ ...numInput, width: "96px" }} />
-                <button onClick={() => { addExpense(expName, expCal); setExpName(""); setExpCal(""); }}
-                  disabled={!(Number(expCal) > 0)}
-                  style={{ ...primaryS(Number(expCal) > 0), flex: "0 0 auto", padding: "9px 12px", fontSize: ".74rem" }}>
-                  Add
-                </button>
-              </div>
-
-              {/* The food database, same source the meal log uses. */}
-              <div style={{ display: "flex", gap: "6px", marginTop: "7px", alignItems: "center" }}>
-                <input value={foodQ} onChange={(ev) => setFoodQ(ev.target.value)}
-                  onKeyDown={(ev) => { if (ev.key === "Enter") { ev.preventDefault(); runFoodSearch(); } }}
-                  placeholder="or search a food…" aria-label="Search the food database"
-                  style={{ ...input, flex: 1, minWidth: 0 }} />
-                <button onClick={runFoodSearch} disabled={foodBusy || !foodQ.trim()}
-                  style={{ ...primaryS(!!foodQ.trim() && !foodBusy), flex: "0 0 auto", padding: "9px 12px", fontSize: ".74rem" }}>
-                  {foodBusy ? "…" : "Search"}
-                </button>
-              </div>
-              {foodErr && (
-                <div style={{ marginTop: "5px", fontSize: ".66rem", color: "var(--yellow)", lineHeight: 1.45 }}>{foodErr}</div>
-              )}
-              {foodHits.length > 0 && !budPick && (
-                <div style={{ marginTop: "6px", maxHeight: "162px", overflowY: "auto" }}>
-                  {foodHits.map((f, n) => (
-                    <button key={`${f.name}-${n}`} onClick={() => { setBudPick(f); setBudAmt(f.per === "serving" ? "1" : "100"); }}
-                      style={{ display: "block", width: "100%", textAlign: "left", cursor: "pointer",
-                        background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px",
-                        padding: "7px 9px", marginBottom: "4px", fontFamily: "inherit", color: "var(--text)" }}>
-                      <div style={{ fontSize: ".73rem" }}>{f.name}</div>
-                      <div style={{ fontSize: ".63rem", color: "var(--muted)", marginTop: "1px" }}>
-                        {f.brand ? `${f.brand} · ` : ""}{Math.round(f.kcal || 0).toLocaleString()} cal
-                        {f.per === "serving" ? " a serving" : " per 100g"}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {budPick && (
-                <div style={{ marginTop: "6px", padding: "9px", borderRadius: "9px",
-                  background: "var(--s2)", border: "1px solid var(--accent)" }}>
-                  <div style={{ fontSize: ".73rem", marginBottom: "6px" }}>{budPick.name}</div>
-                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                    <input type="number" inputMode="decimal" min="0" step={budPick.per === "serving" ? "0.5" : "10"}
-                      value={budAmt} onChange={(ev) => setBudAmt(ev.target.value)}
-                      aria-label={budPick.per === "serving" ? "Servings" : "Grams"}
-                      style={{ ...numInput, width: "96px" }} />
-                    <span style={{ fontSize: ".7rem", color: "var(--muted)", flex: 1 }}>
-                      {budPick.per === "serving" ? "servings" : "grams"}
-                      {" "}&middot; <b style={{ color: "var(--yellow)" }}>{budPickCal.toLocaleString()}</b> cal
-                    </span>
-                    <button onClick={() => { addExpense(budPick.name, budPickCal); clearFoodSearch(); }}
-                      disabled={!(budPickCal > 0)}
-                      style={{ ...primaryS(budPickCal > 0), flex: "0 0 auto", padding: "9px 12px", fontSize: ".74rem" }}>
-                      Add
-                    </button>
-                    <button onClick={() => setBudPick(null)} aria-label="Cancel"
-                      style={{ background: "transparent", border: "none", cursor: "pointer", padding: "4px", lineHeight: 0 }}>
-                      <Icon name="close" size={13} color="var(--muted)" />
-                    </button>
-                  </div>
-                </div>
-              )}
-
+              {/* ⚠️ THE REAL COMPONENT, NOT A COPY OF IT. Everything the dashboard's
+                  meal log has — food database, macros, meal types, AI estimate,
+                  barcode, editing — arrives here by construction and stays in step
+                  with it forever.
+                  ⚠️ DELIBERATELY NOT PASSED: recentFoods / savedFoods / savedMeals
+                  and their handlers, plus every day-stepping and plan-ahead prop.
+                  This sheet writes nothing, so "log again" would offer a history it
+                  never records. Their absence is what hides those sections — each
+                  is read as `x || []` inside, so nothing throws. */}
+              <MealLog meals={expenses} onAddMeal={budAdd} onAddMeals={budAddMany}
+                onRemoveMeal={budRemove} onEditMeal={budEdit} premium={premium}
+                title={standalone ? "What they eat in a day" : `What ${th} day looks like`} hideLibrary />
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: "9px", paddingTop: "7px",
                 borderTop: "1px solid var(--border)", fontSize: ".84rem" }}>
                 <b>{budLeft >= 0 ? "Left to spend" : "Over budget by"}</b>
@@ -17321,7 +17275,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
       </BottomSheet>
 
       {showSim && (
-        <CalorieSimulator data={data} weightLbs={weightLbs} planRate={planRate}
+        <CalorieSimulator data={data} weightLbs={weightLbs} planRate={planRate} premium={premium}
           dayCalsAll={dayCalsAll}
           onClose={()=>setShowSim(false)} />
       )}
@@ -30663,7 +30617,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
           Portaled to escape the page-transition transform trap; :root css vars
           (already injected above) + give it the brand look. */}
       {showWhatIfC && (
-        <CalorieSimulator data={planData || {}} weightLbs={Number((planData || {}).weightLbs) || 0}
+        <CalorieSimulator data={planData || {}} premium={premium} weightLbs={Number((planData || {}).weightLbs) || 0}
           planRate={weeklyRateOf(planData || {})}
           dayCalsAll={Object.fromEntries(compDays.map((x) => [x.date, x.calories]))}
           onClose={() => setShowWhatIfC(false)} />
@@ -38658,7 +38612,7 @@ export default function App() {
           ⚠️ AND planRate={1} SO IT OPENS ON A REAL DEFICIT — at rate 0 the first
           thing a prospect reads is "That holds your weight steady." */}
       {showWhatIf && (
-        <CalorieSimulator standalone planRate={1} onClose={() => setShowWhatIf(false)} />
+        <CalorieSimulator standalone planRate={1} premium={mePremium} onClose={() => setShowWhatIf(false)} />
       )}
       <SideMenu open={menuOpen} onClose={() => setMenuOpen(false)} role={role} meName={meName} meEmail={meEmail}
         aiOptOut={meAiOptOut} onSetAiOptOut={onSetAiOptOut}
