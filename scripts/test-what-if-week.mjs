@@ -583,9 +583,15 @@ ok("the premium gate reaches it rather than defaulting open",
   // things like food or if their calorie number goes below their maintenance …
   // it starts turning red and it's negative."
   ok("income reads green and food reads red",
-     /MONEY IN/.test(BANK) && /MONEY OUT/.test(BANK)
-     && /color: "var\(--green\)" \}\}>\{bank\.body\.toLocaleString\(\)\}/.test(BANK)
-     && /color: "var\(--red\)" \}\}>−\{bank\.food\.toLocaleString\(\)\}/.test(BANK));
+     /MONEY \(CAL\) IN/.test(BANK) && /MONEY \(CAL\) OUT/.test(BANK)
+     && /color: "var\(--green\)" \}\}>\{calN\(bank\.body\)\}/.test(BANK)
+     && /color: "var\(--red\)" \}\}>−\{calN\(bank\.food\)\}/.test(BANK));
+  // Kevin, S220c: "whenever money is stated in this section can we make sure in
+  // () we put cal next to it." One helper renders it, so no row can drop it.
+  ok("...and every amount carries its unit",
+     /const calN = \(v\) => \(/.test(SIM_CODE)
+     && (BANK.match(/calN\(/g) || []).length >= 12
+     && !/\{bank\.(body|earned|deposit|cut|kept)\.toLocaleString\(\)\}/.test(BANK));
   ok("...and an overdrawn account turns red, headline included",
      /bankCredit \? "var\(--green\)" : "var\(--red\)"/.test(BANK) && /Overdrawn/.test(BANK) && !/Overdrawn by|In the red by/.test(BANK));
   // ⚠️ THE SIGN OF THE WEIGHT COMES FROM `bankDir`, WHICH IS `net`. Taking it
@@ -596,14 +602,14 @@ ok("the premium gate reaches it rather than defaulting open",
      && /bankDir === "lose" \? "−" : "\+"/.test(BANK)
      && !/bankCredit \? "−" : "\+"/.test(BANK));
   ok("...and it reconciles the two out loud when they disagree",
-     /over\s+budget, but still/.test(BANK) && /just slower than/.test(BANK)
+     /over\s+\n?\s*the goal, but still/.test(BANK) && /just slower than this pace asked for/.test(BANK)
      && /That is the debt:/.test(BANK));
   ok("...including the case where the budget IS the burn",
      /\{bankSame && </.test(BANK) && /const bankSame = bank\.cut === 0 && bank\.kept === 0 && !bank\.floored/.test(SIM_CODE));
   // The deposit is visible on both sides in accelerate — hiding it would delete
   // the one thing this page teaches from half the plans.
   ok("accelerate shows the deposit paid in and then kept back",
-     /Training pays in/.test(BANK) && /Kept back for a sooner goal/.test(BANK));
+     /Training pays in/.test(BANK) && /Training kept back for a sooner goal/.test(BANK));
   ok("the 1,200 floor keeps its own row here too",
      /Held at the 1,200 floor/.test(BANK) && /MIN_DAILY_CAL - bank\.sub/.test(BANK));
   // Displaying a sub-1,200 day is correct; prescribing one is not (CLAUDE.md).
@@ -614,9 +620,154 @@ ok("the premium gate reaches it rather than defaulting open",
   // The projection is the SAME engine the plan page walks, and it deliberately
   // does not list `rate` — proven above that `net` cannot move with it.
   ok("the bank projection reuses simProject and the plan's own weekHold",
-     /simProject\(\{ days: n\[0\], startLbs: w, weekHold, dayIntake: \(\) => spent \}\)/.test(SIM_CODE));
+     /simProject\(\{ days: n\[0\], startLbs: w, weekHold, dayIntake: \(\) => bankSpend \}\)/.test(SIM_CODE));
   ok("...and it halts rather than projecting a body through zero",
      /bankEndLbs\(days\) > 0 \?/.test(BANK) && /off the scale/.test(BANK));
+}
+
+// ── Money made today, the two bars, and the streak (S220c, Kevin) ───────────
+// "We can add the deficit section in the earned today section … that should be
+// a positive number because that is money going in the bank … Money (cal) Made
+// Today: the deficit number + the training payment number."
+//
+// ⚠️ HIS SECOND WORKED EXAMPLE BANKS THE DEFICIT TWICE. $3,000 maintain + $250
+// deficit + $250 cardio − $3,100 eaten reads as $400 saved, but the body burned
+// 3,250 and took in 3,100, so 150 is what actually went in. A deficit is only
+// money once it goes UNSPENT — so it is shown as a + into savings, and the
+// total it feeds is what today banks IF the goal is met, not what is already
+// in the account. The savings that drive the scale stay `net`.
+{
+  let bad = null, flooredSeen = 0, n = 0;
+  for (const [name, d] of PLANS) {
+    const planBurn = M.planEnergy(d).weeklyBurn;
+    for (const burn of [0, planBurn, 1400, 4200]) {
+      for (const r of [-2, -1, -0.5, 0, 0.5, 1, 2]) {
+        for (const ov of [undefined, 1800, 2400, 3600]) {
+          n++;
+          const b = M.simBankRows(d, burn, r, ov, 2000);
+          const made = b.earned - b.budget;
+          const floorGap = Math.max(0, M.MIN_DAILY_CAL - b.sub);
+          if (floorGap > 0) flooredSeen++;
+          // The savings ladder closes: deficit + kept-back, less whatever the
+          // 1,200 floor handed back.
+          if (made !== b.cut + b.kept - floorGap) bad = { name, burn, r, ov, made, ...b, floorGap };
+          if (bad) break;
+        }
+        if (bad) break;
+      }
+      if (bad) break;
+    }
+    if (bad) break;
+  }
+  ok(`money made today is the deficit plus what is kept back (${n} cases)`, !bad, bad);
+  // ⚠️ AND THE COMPONENT MUST DERIVE IT THE SAME WAY. The sweep above proves the
+  // IDENTITY; only this pins the expression the screen actually prints. Written
+  // as `cut + kept` it would over-report what a floored plan banks — a row
+  // claiming savings the 1,200 floor already handed back.
+  ok("...and the screen derives it from the two totals, not by re-adding",
+     /const bankMade = bank\.earned - bank\.budget;/.test(SIM_CODE)
+     && !/const bankMade = bank\.cut \+ bank\.kept/.test(SIM_CODE));
+  ok("(control) and the floored case was actually exercised", flooredSeen > 0, flooredSeen);
+  // ⚠️ KEVIN'S FORMULA IS THE ACCELERATE CASE. On an eat-back plan the training
+  // is inside the goal and therefore EATEN, not banked, so "deficit + training"
+  // would over-report what the day puts away. Deriving it from the two totals
+  // gets both modes right without a branch.
+  const eb = PLANS.find(([nm]) => nm === "eat-back, cardio + strength")[1];
+  const ac = PLANS.find(([nm]) => nm === "accelerate, cardio + strength")[1];
+  const day = Math.round(2800 / 7);
+  const a = M.simBankRows(eb, 2800, 1, undefined, 2000);
+  const c = M.simBankRows(ac, 2800, 1, undefined, 2000);
+  ok("eat-back banks the deficit alone — the training is eaten, not saved",
+     a.earned - a.budget === a.cut, { made: a.earned - a.budget, cut: a.cut });
+  ok("...and accelerate banks the deficit PLUS the training, which is Kevin's formula",
+     c.earned - c.budget === c.cut + day, { made: c.earned - c.budget, want: c.cut + day });
+}
+{
+  // ⚠️ THE STREAK TOTAL IS THE WALK'S OWN, NOT `net × days`. The body re-prices
+  // as the weight comes off, and this is the one screen built to invite reading
+  // a year off it — S217 measured the flat rule overstating a year by ~40%.
+  const d = PLANS.find(([nm]) => nm === "eat-back, cardio + strength")[1];
+  const burn = M.planEnergy(d).weeklyBurn;
+  const food = 1700;
+  const weekHold = (lbs) => {
+    const dw = { ...d, weightLbs: lbs };
+    if (M.simRawIntakeForRate(dw, burn, 0, undefined) === null) return null;
+    return M.simIntakeForRate(dw, burn, 0, undefined) * 7 + (M.isEatback(dw) ? 0 : burn);
+  };
+  const p = M.simProject({ days: 365, startLbs: 170, weekHold, dayIntake: () => food });
+  const walked = Math.round(p.spent - p.eaten);
+  const flat = (M.simBankRows(d, burn, 0, undefined, food).net) * 365;
+  ok("a year of the streak is walked, not multiplied", walked > 0 && walked < flat, { walked, flat });
+  // Negative control: if the two agreed, the adaptive engine would be doing
+  // nothing here and the assertion above would be decoration.
+  ok("(control) and the flat number really is the optimistic one",
+     flat - walked > 1000, { walked, flat, gap: flat - walked });
+  // The pounds and the calories have to tell the same story.
+  ok("...and the pounds come from the same walk",
+     Math.abs(p.lost - walked / M.CAL_PER_LB) < 0.05, { lost: p.lost, walked });
+  const short = M.simProject({ days: 7, startLbs: 170, weekHold, dayIntake: () => food });
+  ok("...while a single week is still essentially the flat answer",
+     Math.abs(Math.round(short.spent - short.eaten) - M.simBankRows(d, burn, 0, undefined, food).net * 7) < 60);
+}
+{
+  const BANK = SIM_CODE.slice(SIM_CODE.lastIndexOf('{page === "bank" && ('));
+  // Kevin: "Balance, which we should be called goal, then a bar under that says
+  // limit, which will be the total Earned today number."
+  ok("the food list sits over two bars, goal then limit",
+     /bankBar\("GOAL", bank\.budget, bankGoalPct, bankOverGoal,/.test(BANK)
+     && /bankBar\("LIMIT", bank\.earned, bankLimitPct, bankOverLimit,/.test(BANK));
+  // ⚠️ THE BARS ARE WHAT MAKE THE TWO NUMBERS LEGIBLE AT A GLANCE: goal red
+  // while limit is still green IS "over budget but still losing". So each must
+  // colour from its OWN comparison, never from the shared balance.
+  ok("...each judged against its own number",
+     /const bankOverGoal = bank\.food > bank\.budget;/.test(SIM_CODE)
+     && /const bankOverLimit = bank\.food > bank\.earned;/.test(SIM_CODE));
+  ok("...and one helper draws both, so they cannot drift apart",
+     /const bankBar = \(label, total, pct, over, note\) => \(/.test(SIM_CODE)
+     && /background: over \? "var\(--red\)" : "var\(--green\)"/.test(SIM_CODE)
+     && /color: over \? "var\(--red\)" : "var\(--muted\)"/.test(SIM_CODE));
+  // The deficit is a PLUS, under its own heading — his ask, without letting it
+  // read as a term in the limit.
+  ok("the deficit reads as money going in, not as a cost",
+     /STRAIGHT TO SAVINGS \(CAL\)/.test(BANK)
+     && /<span>Deficit &mdash; lose \{budPaceLbl\}<\/span>/.test(BANK)
+     && /color: "var\(--green\)" \}\}>\+\{calN\(bank\.cut\)\}/.test(BANK));
+  ok("...and the limit is named as what it is",
+     /Earned today &mdash; the limit/.test(BANK)
+     && /Everything \{they\} can spend today without the weight going on/.test(BANK));
+
+  // ── Same every day ──────────────────────────────────────────────────────
+  ok("a day can be typed instead of built out of foods",
+     /Same every day &mdash; type one number instead/.test(BANK)
+     && /const bankSpend = bankEveryNum !== null \? bankEveryNum : spent;/.test(SIM_CODE));
+  // ⚠️ TWO SOURCES FOR ONE NUMBER IS HOW A SCREEN STARTS DISAGREEING WITH
+  // ITSELF. Typed wins, and it says so rather than silently dropping a food
+  // list somebody had already filled in.
+  ok("...and it says which source is in force",
+     /bankEveryNum !== null && expenses\.length > 0 && \(/.test(BANK)
+     && /being\s*\n?\s*ignored while that is set/.test(BANK));
+  ok("...and every reader of the day uses the same one",
+     !/simBankRows\(d, trainWeek, rate, mNum, spent\)/.test(SIM_CODE)
+     && /dayIntake: \(\) => bankSpend/.test(SIM_CODE));
+
+  // ── Plan further out ────────────────────────────────────────────────────
+  ok("the streak is a savings balance over a horizon",
+     /Plan further out/.test(BANK) && /SIM_HORIZONS\.map/.test(BANK)
+     && /const bankBanked = bankLong \? Math\.round\(bankLong\.spent - bankLong\.eaten\) : 0;/.test(SIM_CODE));
+  ok("...and it is the walk's own total, never net times days",
+     !/bank\.net \* bankHorizon|bank\.net \* days/.test(SIM_CODE));
+  // ⚠️ THE "ROOM TO SPEND LATER" FRAMING ONLY HOLDS WITH SOMETHING IN THE
+  // ACCOUNT. Offering a blowout to somebody already in debt is S217's bug.
+  ok("...and the spend-it-later offer is gated on there being savings",
+     /bankBanked > CAL_PER_LB/.test(BANK)
+     && /this is the account running down rather/.test(BANK));
+  ok("...and it says when the walk stopped rather than projecting past it",
+     /bankLong\.halted > 0 && \(/.test(BANK));
+  // ⚠️ AND THE HEADER NAMES THE PERIOD THE WALK COVERED, not the one that was
+  // asked for. "Banked over 1 year" above a 308-day figure is a label
+  // disagreeing with the number beside it.
+  ok("...and the header names the period actually walked",
+     /\{bankLong\.halted > 0\s*\n?\s*\? `\$\{bankLong\.halted\} days`/.test(BANK));
 }
 
 // ── The nutrition mode is answerable in the sandbox (S219b) ─────────────────
@@ -820,7 +971,7 @@ ok("...and the sandbox sheet drops the native number spinner",
 ok("...so the padding that dodged it is gone, and every box still reads one object",
    /const numInput = \{ \.\.\.input, textAlign: "center", padding: "9px 12px" \};/.test(SIM_CODE)
    && !/padding: "9px 26px"/.test(SIM_CODE)
-   && (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 7,
+   && (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 8,
    (SIM_CODE.match(/\.\.\.numInput/g) || []).length);
 ok("...and the pencil panel's gate is the committed flag alone",
    MOUNT_GATES.includes("{editBurn && (")
@@ -927,7 +1078,7 @@ ok("...and the discard question is brought to them",
 // scenario overrides have to be in the flag too — otherwise the one state worth
 // guarding is the one the guard cannot see.
 ok("...the dirty flag covers every input the modal holds",
-   /dirtyRef\.current = anyTyped \|\| cardioChanged \|\| mNum !== null \|\| wNum !== null\s*\n?\s*\|\| Object\.keys\(dayOverrides\)\.length > 0 \|\| expenses\.length > 0;/.test(SIM_CODE));
+   /dirtyRef\.current = anyTyped \|\| cardioChanged \|\| mNum !== null \|\| wNum !== null\s*\n?\s*\|\| Object\.keys\(dayOverrides\)\.length > 0 \|\| expenses\.length > 0\s*\n?\s*\|\| String\(bankEveryDay \|\| ""\)\.trim\(\) !== "";/.test(SIM_CODE));
 ok("...and the close button keeps its direct path",
    /<button onClick=\{onClose\} aria-label="Close"/.test(SIM_CODE));
 // ⚠️ NEVER re-price somebody's logged history against a number invented on a
@@ -1702,7 +1853,7 @@ ok("the plan-writing custom-exercise creator is NOT ported", !/CustomExerciseCre
   // quick fill's calories, a per-day manual session, the typed daily burn and
   // the typed weight. Fixing one and leaving five is the shape check:weak exists
   // to catch — this count is the only thing that notices.
-  ok("every numeric box in the modal uses it", (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 7,
+  ok("every numeric box in the modal uses it", (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 8,
      (SIM_CODE.match(/\.\.\.numInput/g) || []).length);
   // ⚠️ ONE alignment style, and it is `numInput`'s own declaration. A second
   // hand-rolled `{...input, textAlign: …}` anywhere else is a box that kept the
@@ -1725,7 +1876,7 @@ ok("the week total is shown, not just the average", /for the week/.test(SIM_CODE
 // numeric box — and `.test()` stayed green when one was reverted to "on your
 // goal", silently replacing a typed surplus with its opposite.
 ok("a refused number says so on every box that takes one",
-   (SIM_CODE.match(/check this number/g) || []).length === 7,
+   (SIM_CODE.match(/check this number/g) || []).length === 8,
    (SIM_CODE.match(/check this number/g) || []).length);
 ok("...and the reset stays reachable when the only entry was refused",
    /const anyTyped = weekCals\.some/.test(SIM_CODE) && /disabled=\{!anyTyped\}/.test(SIM_CODE));

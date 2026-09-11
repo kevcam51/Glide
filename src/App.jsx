@@ -13047,6 +13047,23 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // all of it or take fourteen props, and the food somebody typed would vanish
   // on the way across. Switching pages keeps the whole scenario.
   const [page, setPage] = useState("plan");
+  // ── "Same every day" and "Plan further out", as the bank asks them (S220c) ─
+  // Kevin: "I do wanna add the section called 'same every day' and also the
+  // 'plan further out' in the bank account section as well … show how eating a
+  // deficit or burning an excessive amount of calories can start to add up over
+  // time … if you're on a good streak for a whole month you're probably gonna
+  // lose a lot of weight and technically you'll have a lot more space to eat
+  // more food at a later date."
+  //
+  // ⚠️ NEITHER IS THE PLAN PAGE'S CONTROL WEARING A NEW LABEL. The bank page
+  // already answers "a day like this, every day", so seven day boxes would say
+  // the same thing seven times; what it was missing is a way to state the day
+  // WITHOUT building it out of foods. And "further out" here is a savings
+  // BALANCE over a horizon, not a per-date editor — the question is how the
+  // deposits compound, which a calendar of overrides does not answer.
+  const [bankEveryOpen, setBankEveryOpen] = useState(false);
+  const [bankEveryDay, setBankEveryDay] = useState("");
+  const [bankHorizon, setBankHorizon] = useState(30);
   // The sheet is an 88vh scroll box; landing halfway down a page you just opened
   // reads as the button not having worked.
   const sheetRef = useRef(null);
@@ -13176,7 +13193,12 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const budEdit = (id, patch) => setExpenses((xs) => xs.map((x) => (x.id === id ? { ...x, ...patch, id } : x)));
 
   // ── The same numbers, read as an account (S220) ──────────────────────────
-  const bank = simBankRows(d, trainWeek, rate, mNum, spent);
+  // ⚠️ A TYPED DAY WINS OVER THE FOOD LIST, AND THE SCREEN SAYS SO. Two sources
+  // for one number is how a screen starts disagreeing with itself; silently
+  // adding them would double-count a day somebody entered twice.
+  const bankEveryNum = simNum(bankEveryDay, SIM_BURN_MAX);
+  const bankSpend = bankEveryNum !== null ? bankEveryNum : spent;
+  const bank = simBankRows(d, trainWeek, rate, mNum, bankSpend);
   const bankCredit = bank.balance >= 0;
   // ⚠️ THE SAME ±20 DEAD BAND `dir` USES. Two directions computed with two
   // thresholds is how one line says "holding" while the line under it prints a
@@ -13187,6 +13209,20 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // because it is the cleanest version of the whole metaphor.
   const bankSame = bank.cut === 0 && bank.kept === 0 && !bank.floored;
   const bankHasSetAside = bank.cut !== 0 || bank.kept > 0 || bank.floored;
+  // ── What today banks if they hit the goal (S220c, Kevin) ─────────────────
+  // "Money (cal) Made Today: the deficit number + the training payment number."
+  //
+  // ⚠️ DERIVED FROM THE TWO TOTALS, so it cannot disagree with either, and so it
+  // stays true in BOTH modes. `earned − budget` is the deficit on an eat-back
+  // plan — where the training is inside the goal and therefore eaten, not
+  // banked — and the deficit PLUS the training on an accelerate one, which is
+  // Kevin's formula exactly. It also absorbs the 1,200 floor: a floored plan
+  // banks less than it set out to, and the row above says so.
+  const bankMade = bank.earned - bank.budget;
+  const bankOverGoal = bank.food > bank.budget;
+  const bankOverLimit = bank.food > bank.earned;
+  const bankGoalPct = bank.budget > 0 ? Math.round((bank.food / bank.budget) * 100) : 0;
+  const bankLimitPct = bank.earned > 0 ? Math.round((bank.food / bank.earned) * 100) : 0;
 
   // ── What they eat: seven days, and the pace prices the blanks ────────────
   // ⚠️ THE WEEK WAS ALREADY THE BASIS. Dropping "Pick a pace" and "One number"
@@ -13256,13 +13292,25 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // `rate` to these deps would just be noise pretending to be caution.
   const bankProjAt = useMemo(() => {
     const out = {};
-    if (!(spent > 0)) return out;
-    for (const n of HORIZONS) out[n[0]] = simProject({ days: n[0], startLbs: w, weekHold, dayIntake: () => spent });
+    if (!(bankSpend > 0)) return out;
+    for (const n of HORIZONS) out[n[0]] = simProject({ days: n[0], startLbs: w, weekHold, dayIntake: () => bankSpend });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, spent, w, mNum, JSON.stringify(simCardio), d, trainWeek]);
+  }, [page, bankSpend, w, mNum, JSON.stringify(simCardio), d, trainWeek]);
   const bankLbsIn = (days) => { const q = bankProjAt[days]; return q ? q.lost : 0; };
   const bankEndLbs = (days) => { const q = bankProjAt[days]; return q && !q.halted ? q.end : null; };
+  // ── The savings balance over a horizon (S220c) ───────────────────────────
+  // ⚠️ THE TOTAL IS THE WALK'S OWN, NOT `net × days`. The body re-prices as the
+  // weight moves, so a flat multiplication overstates a year by ~40% (S217) —
+  // and this is precisely the screen that invites somebody to read a year off
+  // it. simProject already returns what was burned and what was eaten; the
+  // difference between them IS the deposit, adaptive for free.
+  const bankLong = useMemo(() => ((page === "bank" && bankSpend > 0)
+    ? simProject({ days: bankHorizon, startLbs: w, weekHold, dayIntake: () => bankSpend })
+    : null),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [page, bankHorizon, bankSpend, w, mNum, JSON.stringify(simCardio), d, trainWeek]);
+  const bankBanked = bankLong ? Math.round(bankLong.spent - bankLong.eaten) : 0;
   // The chosen horizon, walked once — plus the SAME walk with the body frozen,
   // which is exactly "what a flat 3,500-cal calculator would say". One engine,
   // two configurations, so the comparison cannot drift from the number.
@@ -13308,7 +13356,8 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const anyTyped = weekCals.some((x) => String(x || "").trim() !== "");
   // Everything the close guard is protecting, in one place.
   dirtyRef.current = anyTyped || cardioChanged || mNum !== null || wNum !== null
-    || Object.keys(dayOverrides).length > 0 || expenses.length > 0;
+    || Object.keys(dayOverrides).length > 0 || expenses.length > 0
+    || String(bankEveryDay || "").trim() !== "";
   const everyDayNum = simNum(everyDay);
   const applyEveryDay = () => { if (everyDayNum !== null) setWeekCals(["", "", "", "", "", "", ""].map(() => String(everyDayNum))); };
 
@@ -13515,6 +13564,31 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const bankTotS = { display: "flex", justifyContent: "space-between", marginTop: "7px", paddingTop: "7px",
     borderTop: "1px solid var(--border)", fontSize: ".84rem" };
   const bankHeadS = { fontSize: ".62rem", letterSpacing: ".6px", fontWeight: 800, margin: "11px 0 5px" };
+  // ⚠️ EVERY AMOUNT ON THIS PAGE CARRIES ITS UNIT (Kevin, S220c: "whenever money
+  // is stated in this section can we make sure in () we put cal next to it").
+  // The metaphor is the whole point of the screen, and the moment it works a
+  // reader is thinking in dollars — so the number has to keep saying what it
+  // actually is. One helper, so no row can quietly drop it.
+  const calN = (v) => (
+    <>{Math.round(Math.abs(v)).toLocaleString()}
+      <span style={{ fontSize: ".74em", color: "var(--muted)", fontWeight: 600 }}> (cal)</span></>
+  );
+  // One of the two bars under the food list. `over` drives BOTH the colour and
+  // the note, so a red bar can never sit above reassuring text.
+  const bankBar = (label, total, pct, over, note) => (
+    <div style={{ marginTop: "11px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+        <b style={{ fontSize: ".64rem", letterSpacing: ".6px", color: "var(--muted)" }}>{label}</b>
+        <b style={{ fontSize: ".84rem", color: over ? "var(--red)" : "var(--green)" }}>{calN(total)}</b>
+      </div>
+      <div style={{ marginTop: "5px", height: "8px", borderRadius: "4px", background: "var(--s3)", overflow: "hidden" }}>
+        <div style={{ width: `${Math.max(0, Math.min(100, pct))}%`, height: "100%",
+          background: over ? "var(--red)" : "var(--green)", transition: "width .2s" }} />
+      </div>
+      <div style={{ marginTop: "4px", fontSize: ".64rem", lineHeight: 1.45,
+        color: over ? "var(--red)" : "var(--muted)" }}>{note}</div>
+    </div>
+  );
   const linkS = { background: "transparent", border: "none", cursor: "pointer", color: "var(--accent)",
     fontSize: ".7rem", fontWeight: 600, fontFamily: "inherit", padding: 0,
     display: "inline-flex", alignItems: "center", gap: "4px" };
@@ -14844,31 +14918,32 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
         </>)}
 
         {/* ── The bank account (S220, Kevin) ───────────────────────────────
-            "I want this to be where I can show clients to treat their daily
-            calorie intake as if it's their bank account … whatever we select
-            will be their base bank account number. Whenever we add some kind of
-            calorie burning exercise that will then be extra 'money' or calories
-            in their bank account, and when we start adding calories from food …
-            it'll count as the bank account losing money."
+            "Treat their daily calorie intake as if it's their bank account …
+            exercise … extra 'money' … food … the bank account losing money …
+            shows them how much debt they're in and how much body weight they're
+            gonna gain."
 
-            Same chips and the same week of cardio above it — "this next screen
-            should look almost identical to the first screen" — and a different
-            question underneath.
+            THE TWO NUMBERS, WHICH IS THE WHOLE DESIGN. LIMIT is what the body
+            actually burns — spend past it and the weight goes on. GOAL is the
+            limit minus what was set aside for the pace. Kevin's own notes say
+            exactly this ("$3,000 Daily Limit" rising with cardio only, and a
+            table of goals underneath at −250 / −500 / −1,000), and it is why
+            the page reports both: somebody 300 past the GOAL on a 1 lb/wk plan
+            is overdrawn and still losing, and a screen with one number lies
+            about one of those.
 
-            ⚠️ TWO NUMBERS, BECAUSE THERE ARE TWO QUESTIONS AND ONLY ONE OF THEM
-            IS ABOUT WEIGHT. `balance` is the account: what is left of the pace
-            they CHOSE. `net` is the body: what is left of what they actually
-            burn. On a 1 lb/wk plan somebody 300 over budget is overdrawn AND
-            still losing, and a screen that printed "the weight goes on" there
-            would be S217's bug — prose written for one direction, false in the
-            other. So the statement reports the account, the block under it
-            reports the scale, and a line reconciles them out loud.
+            ⚠️ THE DEFICIT IS A TRANSFER, NOT INCOME (S220c). Kevin asked for it
+            as a positive — "that is money going in the bank" — and it is, but it
+            moves OUT of what can be spent, not ON TOP of it. His second worked
+            example adds it to the day's income AND counts it as saved, which
+            banks the same 250 twice: $3,000 maintain + $250 deficit + $250
+            cardio − $3,100 eaten reads as $400 saved when the body burned 3,250
+            and took in 3,100, so 150 is what actually went in. A deficit is only
+            money once it goes unspent. So it sits under its own heading, still
+            a +, and the total it feeds is what today banks IF the goal is met.
 
-            ⚠️ RED AND GREEN ARE KEVIN'S, EXPLICITLY: "anytime there's calorie
-            burning from exercise or the clients number that they've selected …
-            that will automatically stay green and every time we add things like
-            food or if their calorie number goes below their maintenance … it
-            starts turning red". Income green, food red, overdrawn red. */}
+            ⚠️ RED AND GREEN ARE KEVIN'S: income green, food and an overdrawn
+            account red. Every amount carries "(cal)". */}
         {page === "bank" && (
           <div style={{ marginTop: "16px", borderTop: "1px solid var(--border)", paddingTop: "13px" }}>
 
@@ -14884,9 +14959,9 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                 {bankCredit ? "" : "−"}{Math.abs(bank.balance).toLocaleString()}
               </div>
               <div style={{ fontSize: ".63rem", color: "var(--muted)" }}>
-                calories
+                (cal)
                 {bank.food > 0 && bank.balance !== 0 && (
-                  <> &middot; {Math.abs(bank.balance * 7).toLocaleString()} {bankCredit ? "saved" : "in the red"} over
+                  <> &middot; {Math.abs(bank.balance * 7).toLocaleString()} (cal) {bankCredit ? "saved" : "in the red"} over
                     a week of days like this</>
                 )}
               </div>
@@ -14897,138 +14972,180 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                 PURPOSE. Paid in, then kept back — that is literally what "the
                 burn buys a sooner goal date" means, and hiding the pair would
                 delete the one thing this page exists to teach (exercise is
-                income) from half the plans. The two lines cancel to exactly the
-                number on the chip above. */}
+                income) from half the plans. */}
             <div style={{ ...panelS, marginBottom: "8px" }}>
-              <div style={{ ...bankHeadS, marginTop: 0, color: "var(--green)" }}>MONEY IN</div>
+              <div style={{ ...bankHeadS, marginTop: 0, color: "var(--green)" }}>MONEY (CAL) IN</div>
               <div style={bankRowS}>
                 <span>{Th} body burns</span>
-                <b style={{ color: "var(--green)" }}>{bank.body.toLocaleString()}</b>
+                <b style={{ color: "var(--green)" }}>{calN(bank.body)}</b>
               </div>
               {bank.deposit > 0 && (
                 <div style={bankRowS}>
                   <span>Training pays in</span>
-                  <b style={{ color: "var(--green)" }}>+{bank.deposit.toLocaleString()}</b>
+                  <b style={{ color: "var(--green)" }}>+{calN(bank.deposit)}</b>
                 </div>
               )}
               <div style={bankTotS}>
-                <b>Earned today</b>
-                <b style={{ color: "var(--green)" }}>{bank.earned.toLocaleString()}</b>
+                <b>Earned today &mdash; the limit</b>
+                <b style={{ color: "var(--green)" }}>{calN(bank.earned)}</b>
+              </div>
+              <div style={{ marginTop: "4px", fontSize: ".64rem", color: "var(--muted)", lineHeight: 1.45 }}>
+                Everything {they} can spend today without the weight going on.
               </div>
 
               {bankHasSetAside ? (
                 <>
-                  <div style={{ ...bankHeadS, color: "var(--yellow)" }}>TOWARD THE GOAL</div>
+                  <div style={{ ...bankHeadS, color: "var(--yellow)" }}>STRAIGHT TO SAVINGS (CAL)</div>
                   {bank.cut > 0 && (
                     <div style={bankRowS}>
-                      <span>Set aside to lose {budPaceLbl}</span>
-                      <b style={{ color: "var(--yellow)" }}>−{bank.cut.toLocaleString()}</b>
+                      <span>Deficit &mdash; lose {budPaceLbl}</span>
+                      <b style={{ color: "var(--green)" }}>+{calN(bank.cut)}</b>
                     </div>
                   )}
                   {bank.cut < 0 && (
                     <div style={bankRowS}>
-                      <span>Added to gain {budPaceLbl}</span>
-                      <b style={{ color: "var(--green)" }}>+{Math.abs(bank.cut).toLocaleString()}</b>
+                      <span>Drawn out to gain {budPaceLbl}</span>
+                      <b style={{ color: "var(--yellow)" }}>−{calN(bank.cut)}</b>
                     </div>
                   )}
                   {bank.kept > 0 && (
                     <div style={bankRowS}>
-                      <span>Kept back for a sooner goal</span>
-                      <b style={{ color: "var(--yellow)" }}>−{bank.kept.toLocaleString()}</b>
+                      <span>Training kept back for a sooner goal</span>
+                      <b style={{ color: "var(--green)" }}>+{calN(bank.kept)}</b>
                     </div>
                   )}
-                  {/* ⚠️ THE FLOOR IS ITS OWN ROW, NEVER A SILENT CLAMP (CLAUDE.md). */}
+                  {/* ⚠️ THE FLOOR IS ITS OWN ROW, NEVER A SILENT CLAMP (CLAUDE.md),
+                      and here it REDUCES the deposit: a plan held at 1,200 banks
+                      less than the pace asked for, and saying so is the point. */}
                   {bank.floored && (
                     <div style={{ ...bankRowS, color: "var(--yellow)" }}>
                       <span>Held at the 1,200 floor</span>
-                      <b>+{(MIN_DAILY_CAL - bank.sub).toLocaleString()}</b>
+                      <b>−{calN(MIN_DAILY_CAL - bank.sub)}</b>
                     </div>
                   )}
                   <div style={bankTotS}>
-                    <b>{Th} budget for today</b>
-                    <b style={{ color: "var(--accent)" }}>{bank.budget.toLocaleString()}</b>
+                    <b>Money (cal) made today</b>
+                    <b style={{ color: bankMade >= 0 ? "var(--green)" : "var(--yellow)" }}>
+                      {bankMade >= 0 ? "" : "−"}{calN(bankMade)}
+                    </b>
+                  </div>
+                  <div style={{ marginTop: "4px", fontSize: ".64rem", color: "var(--muted)", lineHeight: 1.45 }}>
+                    Banked before {they} spend a thing &mdash; as long as {they} land on the goal below.
+                    {!eatback && trainWeek > 0 && <> On this plan the training is kept back rather than eaten,
+                      so it banks too.</>}
                   </div>
                 </>
               ) : (
                 <div style={{ marginTop: "6px", fontSize: ".65rem", color: "var(--muted)", lineHeight: 1.45 }}>
-                  Nothing set aside at Maintain &mdash; what {they} earn is the whole budget.
+                  Nothing set aside at Maintain &mdash; the limit and the goal are the same number, so every
+                  calorie {they} don&rsquo;t spend is the saving.
                 </div>
               )}
             </div>
 
-            {/* ── What gets spent ───────────────────────────────────────────
-                The same MealLog the budget page mounts, so the food database,
-                macros, meal types, AI estimate, barcode and editing all arrive
-                by construction. Saved meals and recents stay out: this sheet
-                writes nothing. */}
+            {/* ── What gets spent ─────────────────────────────────────────── */}
             <div style={{ ...panelS, marginBottom: "8px" }}>
-              <div style={{ ...bankHeadS, marginTop: 0, color: "var(--red)" }}>MONEY OUT</div>
-              {/* ⚠️ PREVIOUSLY LOGGED IS ALLOWED HERE, AND ONLY HERE (S220, Kevin:
+              <div style={{ ...bankHeadS, marginTop: 0, color: "var(--red)" }}>MONEY (CAL) OUT</div>
+
+              {/* ── Same every day (S220c, Kevin) ───────────────────────────
+                  A day stated rather than built. The bank page already asks
+                  "what if every day looked like this", so this is the same
+                  question with one box instead of a food list. */}
+              <button onClick={() => setBankEveryOpen((v) => !v)} aria-expanded={bankEveryOpen}
+                style={{ ...toggleS, marginBottom: "8px" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "7px" }}>
+                  <Icon name="target" size={14} color="var(--accent)" />
+                  Same every day &mdash; type one number instead {bankEveryOpen ? "▲" : "▼"}
+                </span>
+              </button>
+              {bankEveryOpen && (
+                <div style={{ ...panelS, padding: "11px" }}>
+                  <div style={lbl}>What {they} eat in a day</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <input type="number" inputMode="numeric" min="0" max={SIM_BURN_MAX} step="50"
+                      aria-label={`What ${they} eat in a day, in calories`} placeholder={bank.budget.toLocaleString()}
+                      value={bankEveryDay} onChange={(e) => setBankEveryDay(e.target.value)}
+                      style={{ ...numInput, width: "128px",
+                        border: simRejected(bankEveryDay, SIM_BURN_MAX) ? "1.5px solid var(--yellow)" : "1px solid var(--border)" }} />
+                    <span style={{ fontSize: ".72rem", color: "var(--muted)" }}>
+                      {simRejected(bankEveryDay, SIM_BURN_MAX)
+                        ? <b style={{ color: "var(--yellow)" }}>check this number</b> : "(cal) a day"}
+                    </span>
+                    {bankEveryNum !== null && (
+                      <button onClick={() => setBankEveryDay("")} style={{ ...linkS, marginLeft: "auto" }}>Clear</button>
+                    )}
+                  </div>
+                  <div style={{ marginTop: "6px", fontSize: ".65rem", color: "var(--muted)", lineHeight: 1.45 }}>
+                    Quicker than building a day out of foods when you just want to show the arithmetic.
+                  </div>
+                </div>
+              )}
+              {/* ⚠️ SAY WHICH SOURCE IS IN FORCE. A typed number silently beating
+                  a food list somebody had already filled in is the same bug as a
+                  silent clamp: the screen would stop matching what they entered. */}
+              {bankEveryNum !== null && expenses.length > 0 && (
+                <div style={{ marginBottom: "8px", fontSize: ".66rem", color: "var(--yellow)", lineHeight: 1.45 }}>
+                  Using the typed {bankEveryNum.toLocaleString()} (cal). The {expenses.length} food
+                  {expenses.length === 1 ? "" : "s"} below {expenses.length === 1 ? "is" : "are"} being
+                  ignored while that is set &mdash; clear it to go back to them.
+                </div>
+              )}
+
+              {/* ⚠️ PREVIOUSLY LOGGED IS ALLOWED HERE, AND ONLY HERE (S220b, Kevin:
                   "for a connected client I think we can allow the food previously
-                  logged section to be there … so they can look at things that
-                  they're eating, the things that they've tracked, to see how it
-                  affects their bank account"). It amends his S219b "except for
-                  the saved meals and the previously logged", whose reason was
-                  that this sheet must not SAVE anything — and reading the list
-                  does not.
+                  logged section to be there").
                   ⚠️ THE PROMISE HOLDS BECAUSE NO WRITER IS THREADED. `recentFoods`
-                  is read-only inside MealLog; the list is written by App's own
-                  onAddMeal, and this mount's is `budAdd`, which appends to local
-                  state and dies with the sheet. onRemoveRecentFood, savedFoods,
-                  savedMeals and every save handler stay out — FoodLibrary gates
-                  its star and delete controls on exactly those props, so their
-                  absence is what makes the panel read-only.
-                  ⚠️ AND ONLY WITH A CLIENT ATTACHED. A standalone sandbox has no
-                  plan behind it, so there is no history to offer.
-                  ⚠️ `hideLibrary` STAYS ON. It gates the header "Library" pill,
-                  which opens the whole saved library unscoped — still not wanted
-                  here. The "Previously logged" button inside the add-form is a
-                  different control, gated only on having something to show, and
-                  it is scoped to the meal being added to. */}
+                  is read-only inside MealLog; this mount's onAddMeal is `budAdd`,
+                  which appends to local state that dies with the sheet.
+                  ⚠️ `hideLibrary` STAYS ON — it gates the header "Library" pill,
+                  which opens the whole saved library unscoped. */}
               <MealLog meals={expenses} onAddMeal={budAdd} onAddMeals={budAddMany}
                 onRemoveMeal={budRemove} onEditMeal={budEdit} premium={premium}
                 title="What gets spent today"
                 recentFoods={standalone ? undefined : recentFoods} hideLibrary />
-              <div style={bankTotS}>
-                <b>Balance</b>
-                <b style={{ color: bankCredit ? "var(--green)" : "var(--red)" }}>
-                  {bankCredit ? "" : "−"}{Math.abs(bank.balance).toLocaleString()}
-                </b>
-              </div>
-              {/* The account draining is the one thing a column of numbers cannot show. */}
-              <div style={{ marginTop: "7px", height: "7px", borderRadius: "4px", background: "var(--s3)", overflow: "hidden" }}>
-                <div style={{ width: `${Math.max(0, Math.min(100, budPct))}%`, height: "100%",
-                  background: bankCredit ? "var(--green)" : "var(--red)", transition: "width .2s" }} />
-              </div>
+
+              {/* ── The two bars (S220c, Kevin) ─────────────────────────────
+                  "Balance, which we should be called goal, then a bar under that
+                  says limit, which will be the total Earned today number."
+                  Two bars is what makes the two numbers legible at a glance: the
+                  goal can be red while the limit is still green, and that gap is
+                  exactly "over budget but still losing". */}
+              {bankBar("GOAL", bank.budget, bankGoalPct, bankOverGoal,
+                bankOverGoal
+                  ? <>{(bank.food - bank.budget).toLocaleString()} (cal) past it &mdash; the pace slips, but check the limit below before calling it a gain.</>
+                  : <>What&rsquo;s available to spend and still lose weight. {(bank.budget - bank.food).toLocaleString()} (cal) left.</>)}
+              {bankBar("LIMIT", bank.earned, bankLimitPct, bankOverLimit,
+                bankOverLimit
+                  ? <>{(bank.food - bank.earned).toLocaleString()} (cal) past what {th} body burns &mdash; this is where the weight goes on.</>
+                  : <>Spend past this and the weight goes on. {(bank.earned - bank.food).toLocaleString()} (cal) of room.</>)}
             </div>
 
             {/* ── And what it does to the scale ─────────────────────────────
                 ⚠️ COMPUTED FROM `net`, NEVER FROM THE SIGN OF THE BALANCE.
-                Being over budget is not the same as gaining weight, and saying
-                so would be wrong on every deficit plan. */}
-            <div style={{ ...panelS, marginBottom: 0 }}>
+                Being over budget is not the same as gaining weight. */}
+            <div style={{ ...panelS, marginBottom: "8px" }}>
               <div style={{ ...lbl, marginBottom: "6px" }}>What this does to the scale</div>
               {bank.food === 0 ? (
                 <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.45 }}>
-                  Add what {they} eat above and the account starts draining. Nothing here is
-                  saved &mdash; it is a whiteboard.
+                  Add what {they} eat above &mdash; or type one number &mdash; and the account starts
+                  draining. Nothing here is saved; it is a whiteboard.
                 </div>
               ) : (
                 <>
                   <div style={bankRowS}>
                     <span style={{ color: "var(--muted)" }}>{Th} body spends</span>
-                    <b>{bank.earned.toLocaleString()}</b>
+                    <b>{calN(bank.earned)}</b>
                   </div>
                   <div style={bankRowS}>
                     <span style={{ color: "var(--muted)" }}>{They} eat</span>
-                    <b style={{ color: "var(--red)" }}>−{bank.food.toLocaleString()}</b>
+                    <b style={{ color: "var(--red)" }}>−{calN(bank.food)}</b>
                   </div>
                   <div style={bankTotS}>
                     <b>{bankDir === "gain" ? "Borrowed against the scale"
-                      : bankDir === "lose" ? "Real saving" : "Break-even"}</b>
+                      : bankDir === "lose" ? "Actually banked today" : "Break-even"}</b>
                     <b style={{ color: bankDir === "gain" ? "var(--red)"
                       : bankDir === "lose" ? "var(--green)" : "var(--muted)" }}>
-                      {bankDir === "gain" ? "−" : ""}{Math.abs(bank.net).toLocaleString()}
+                      {bankDir === "gain" ? "−" : ""}{calN(bank.net)}
                     </b>
                   </div>
 
@@ -15059,9 +15176,6 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                             color: bankDir === "lose" ? "var(--green)" : "var(--red)" }}>
                             {bankDir === "lose" ? "−" : "+"}{Math.abs(bankLbsIn(days)).toFixed(1)}
                           </div>
-                          {/* The walk's own end weight, and it halts rather than
-                              projecting a body through zero — same guard the plan
-                              page's tiles carry. */}
                           {w > 0 && (bankEndLbs(days) > 0 ? (
                             <div style={{ fontSize: ".55rem", color: "var(--muted)" }}>{bankEndLbs(days).toFixed(1)} lbs</div>
                           ) : (
@@ -15073,28 +15187,27 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                   )}
 
                   {/* ⚠️ THE RECONCILIATION IS THE POINT OF THE WHOLE PANEL. Over
-                      budget and still losing is the common case on a deficit
-                      plan, and it is exactly the case a one-number screen gets
-                      wrong. */}
+                      the goal and still losing is the ORDINARY state of a client
+                      on a deficit plan, and it is exactly the case a one-number
+                      screen gets wrong. */}
                   <div style={{ marginTop: "9px", fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.5 }}>
                     {bankDir === "hold"
                       ? <>{They} eat exactly what {they} burn, so the scale does not move. The pace
-                        above moves the budget, never the body.</>
+                        above moves the goal, never the body.</>
                       : bankCredit && bankDir === "lose"
-                        ? <>Inside the budget and under what {th} body burns &mdash; money in the bank
-                          and weight coming off.</>
+                        ? <>Inside the goal and under the limit &mdash; money in the bank and weight
+                          coming off.</>
                         : !bankCredit && bankDir === "lose"
-                          ? <><b style={{ color: "var(--red)" }}>{Math.abs(bank.balance).toLocaleString()}</b> over
-                            budget, but still <b style={{ color: "var(--green)" }}>{bank.net.toLocaleString()}</b> under
-                            what {th} body burns &mdash; so the weight still comes off, just slower than
-                            this pace asked for.</>
+                          ? <><b style={{ color: "var(--red)" }}>{Math.abs(bank.balance).toLocaleString()}</b> (cal) over
+                            the goal, but still <b style={{ color: "var(--green)" }}>{bank.net.toLocaleString()}</b> (cal) under
+                            the limit &mdash; so the weight still comes off, just slower than this pace asked for.</>
                           : !bankCredit
-                            ? <>Past the budget and past what {th} body burns. That is the debt:{" "}
-                              <b style={{ color: "var(--red)" }}>{Math.abs(bank.net).toLocaleString()}</b> a day
+                            ? <>Past the goal and past the limit. That is the debt:{" "}
+                              <b style={{ color: "var(--red)" }}>{Math.abs(bank.net).toLocaleString()}</b> (cal) a day
                               borrowed against the scale, and it gets paid back in weight.</>
-                            : <>Inside the budget &mdash; and on a gaining plan the budget is a surplus,
-                              so the weight going on is the plan working.</>}
-                    {bankSame && <> Here the budget <b>is</b> the burn, so the balance above and the
+                            : <>Inside the goal &mdash; and on a gaining plan the goal is a surplus, so the
+                              weight going on is the plan working.</>}
+                    {bankSame && <> Here the goal <b>is</b> the limit, so the balance above and the
                       saving are the same number.</>}
                   </div>
 
@@ -15102,10 +15215,99 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                       (CLAUDE.md). Nothing is clamped — this sheet writes nothing. */}
                   {bank.food < MIN_DAILY_CAL && (
                     <div style={{ marginTop: "8px", fontSize: ".68rem", color: "var(--yellow)", lineHeight: 1.45 }}>
-                      {bank.food.toLocaleString()} is under 1,200 for the day. Showing it is fine &mdash;
+                      {bank.food.toLocaleString()} (cal) is under 1,200 for the day. Showing it is fine &mdash;
                       planning it is not. A bigger gap should come out of movement rather than food.
                     </div>
                   )}
+                </>
+              )}
+            </div>
+
+            {/* ── Plan further out (S220c, Kevin) ───────────────────────────
+                "Show how eating a deficit or burning an excessive amount of
+                calories can start to add up over time … if you're on a good
+                streak for a whole month you're probably gonna lose a lot of
+                weight and technically you'll have a lot more space to eat more
+                food at a later date … we can get you down to a good weight and
+                then you can gain a little bit to enjoy yourself and then go
+                right back down because you know how to manage your calorie bank
+                account."
+                ⚠️ A BALANCE, NOT A CALENDAR. The plan page's version of this
+                name is a day-by-day exception editor; the question HERE is how
+                the deposits compound, which a grid of overrides does not answer.
+                ⚠️ AND THE TOTAL IS THE WALK'S OWN. A flat `net × days`
+                overstates a year by ~40% (S217), on the one screen built to
+                invite reading a year off it. */}
+            <div style={{ ...panelS, marginBottom: 0 }}>
+              <div style={{ ...lbl, marginBottom: "6px" }}>Plan further out</div>
+              <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.45, marginBottom: "9px" }}>
+                What a streak of days like this puts in the bank.
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: "5px", marginBottom: "10px" }}>
+                {SIM_HORIZONS.map(([days, label]) => (
+                  <button key={days} onClick={() => setBankHorizon(days)} aria-pressed={bankHorizon === days}
+                    style={{ padding: "8px 2px", borderRadius: "8px", cursor: "pointer", fontFamily: "inherit",
+                      fontSize: ".64rem", fontWeight: 700,
+                      border: bankHorizon === days ? "1.5px solid var(--accent)" : "1px solid var(--border)",
+                      background: bankHorizon === days ? "rgba(var(--accent-rgb),.12)" : "var(--s2)",
+                      color: bankHorizon === days ? "var(--accent)" : "var(--text-secondary)" }}>{label}</button>
+                ))}
+              </div>
+              {!bankLong ? (
+                <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.45 }}>
+                  Add what {they} eat above and this fills in.
+                </div>
+              ) : (
+                <>
+                  <div style={bankRowS}>
+                    {/* ⚠️ NAME THE PERIOD THE WALK ACTUALLY COVERED. It halts when
+                        the arithmetic stops being able to describe a body, so a
+                        header still promising "1 year" over a 308-day number is
+                        a label disagreeing with the figure beside it. */}
+                    <span style={{ color: "var(--muted)" }}>
+                      {bankBanked >= 0 ? "Banked" : "Borrowed"} over{" "}
+                      {bankLong.halted > 0
+                        ? `${bankLong.halted} days`
+                        : (SIM_HORIZONS.find((h) => h[0] === bankHorizon) || [])[1]}
+                    </span>
+                    <b style={{ color: bankBanked >= 0 ? "var(--green)" : "var(--red)" }}>
+                      {bankBanked >= 0 ? "" : "−"}{calN(bankBanked)}
+                    </b>
+                  </div>
+                  <div style={bankTotS}>
+                    <b>That is</b>
+                    <b style={{ fontFamily: "'Sora',sans-serif", fontSize: "1.05rem",
+                      color: bankLong.lost >= 0 ? "var(--green)" : "var(--red)" }}>
+                      {bankLong.lost >= 0 ? "−" : "+"}{fmtLbs(bankLong.lost)}
+                    </b>
+                  </div>
+                  {/* ⚠️ THE "ROOM TO SPEND LATER" FRAMING ONLY HOLDS WHEN THERE IS
+                      SOMETHING IN THE ACCOUNT. Offering a blowout to somebody
+                      already in debt is the S217 mistake — prose written for one
+                      direction and left running in the other. */}
+                  <div style={{ marginTop: "9px", fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.5 }}>
+                    {bankBanked > CAL_PER_LB
+                      ? <>That is real room, not just a number: a{" "}
+                        <b style={{ color: "var(--text-secondary)" }}>{CAL_PER_LB.toLocaleString()} (cal)</b> weekend
+                        costs one pound of it and leaves {fmtLbs(bankLong.lost - 1)} of the run intact.
+                        Down first, then spend some of it on purpose &mdash; that is what knowing the
+                        account buys {they}.</>
+                      : bankBanked > 0
+                        ? <>A start. It takes {CAL_PER_LB.toLocaleString()} (cal) in the bank to be worth a pound,
+                          so a streak is what turns a good day into a result.</>
+                        : <>Nothing is going in at this rate &mdash; this is the account running down rather
+                          than up, and the weight follows it.</>}
+                  </div>
+                  {bankLong.halted > 0 && (
+                    <div style={{ marginTop: "7px", fontSize: ".66rem", color: "var(--yellow)", lineHeight: 1.45 }}>
+                      Stops at {bankLong.halted} days &mdash; past that the arithmetic is projecting a body
+                      it has stopped being able to describe.
+                    </div>
+                  )}
+                  <div style={{ marginTop: "7px", fontSize: ".62rem", color: "var(--muted)", lineHeight: 1.45 }}>
+                    The burn is re-worked as the weight moves, so this doesn&rsquo;t drift the way a flat
+                    calculator does. Nobody eats to plan every day &mdash; it is the shape that matters.
+                  </div>
                 </>
               )}
             </div>
