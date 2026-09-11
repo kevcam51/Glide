@@ -8884,6 +8884,11 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
   const [servingWeight, setServingWeight] = useState("");
   const [servingWeightSet, setServingWeightSet] = useState(0); // committed g/ml
   const [weightAddOpen, setWeightAddOpen] = useState(false);   // the add-a-weight box, collapsed by default
+  // The unit the user ASKED for while we still lacked a serving weight (S218).
+  // Held until the weight lands, then applied — so picking "g" and typing 240
+  // ends on grams, rather than dumping them back on "serving" having forgotten
+  // what they wanted.
+  const [pendingUnit, setPendingUnit] = useState(null);
   const commitServingWeight = () => {
     const v = parseFloat(servingWeight);
     if (v > 0) setServingWeightSet(v);
@@ -8948,6 +8953,19 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
   // Editable macro/cal values default to the computed ones; a manual edit sticks
   // until the qty/unit changes (which recomputes). `override` holds manual edits.
   const [override, setOverride] = useState(null); // {calories,protein,carbs,fat} or null
+  // The serving weight has landed, so the unit the user asked for before we
+  // could honour it is now possible — apply it and close the question (S218).
+  // ⚠️ DELIBERATELY BELOW BOTH `unit` AND `override` (S213): a closure that
+  // reads a `const` declared further down throws a TDZ ReferenceError the
+  // moment it runs and unmounts the entire app, and `check:undef` is blind to
+  // that class because the binding genuinely exists — just not yet.
+  useEffect(() => {
+    if (!pendingUnit || !(knownServingG > 0)) return;
+    setUnit(pendingUnit);
+    setOverride(null);       // recompute from the new basis; don't keep stale macros
+    setPendingUnit(null);
+    setWeightAddOpen(false);
+  }, [pendingUnit, knownServingG]);
   const vals = override || computed;
   const changeServing = (nextQty, nextUnit) => {
     setOverride(null); // recompute from the new serving
@@ -9043,7 +9061,28 @@ function FoodServingModal({ food: rawFood, editing, mealLabel, mealChoices, meal
             <input style={{ ...inp, flex: "1 1 90px" }} type="number" inputMode="decimal" min="0" step="0.25"
               value={qty} onChange={(e) => changeServing(e.target.value, null)} />
             {isServing ? (
-              <div style={{ ...inp, flex: "2 1 130px", display: "flex", alignItems: "center", color: "var(--muted)" }}>{food.servingLabel || "serving"}{parseFloat(qty) === 1 ? "" : "s"}</div>
+              // ⚠️ THIS WAS A <div> DRESSED AS AN INPUT (S218, Kevin: "the serving
+              // type is grayed out instead of allowing me to click on it … it's
+              // stuck at serving because that's what I saved it as"). Muted text
+              // in an input-shaped box reads as a DISABLED dropdown, and the only
+              // way out was a .72rem underlined link beneath it that nobody
+              // finds. A per-serving food really does lack a weight basis — but
+              // that is a reason to ASK for one when it is needed, not to hide
+              // the control and let the screen imply the food is locked. The
+              // dropdown is now real: choosing a weight unit opens the one-field
+              // question and lands on that unit once it is answered.
+              <select style={{ ...inp, flex: "2 1 130px", cursor: "pointer" }} value="serving"
+                onChange={(e) => {
+                  const u = e.target.value;
+                  if (u === "serving") return;
+                  setPendingUnit(u);
+                  setWeightAddOpen(true);
+                }}>
+                <option value="serving">{food.servingLabel || "serving"}{parseFloat(qty) === 1 ? "" : "s"}</option>
+                {weightUnits.map((x) => (
+                  <option key={x.u} value={x.u}>{x.label}{x.approx ? " (approx)" : ""}</option>
+                ))}
+              </select>
             ) : (
               <select style={{ ...inp, flex: "2 1 130px", cursor: "pointer" }} value={unit} onChange={(e) => changeServing(null, e.target.value)}>
                 {weightUnits.map((x) => (
@@ -18802,6 +18841,12 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
   // Two taps to move the goal weight (S212b) — see the derived-goal block below.
   const [goalConfirm, setGoalConfirm] = useState(false);
   const [metric, setMetric] = useState("waist");
+  // Which reading counts as "the start" for the per-metric history below (S218,
+  // Kevin: "compares past metrics to each other … see how far they have come
+  // from a specific starting point"). null = the earliest reading on record,
+  // which is the answer people mean when they haven't said otherwise.
+  const [baseDate, setBaseDate] = useState(null);
+  const [metricQuery, setMetricQuery] = useState("");
   const [helpCal, setHelpCal] = useState(false); // "where to measure" (calipers) open
   const [helpTape, setHelpTape] = useState(false); // "where to measure" (tape) open
 
@@ -19101,8 +19146,22 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
     const parts = [];
     if (x.ci && Number(x.ci.weight) > 0) parts.push(`${Math.round(Number(x.ci.weight) * 10) / 10} lbs`);
     if (!e) return parts.length ? `${parts[0]} · weigh-in only` : "—";
-    const bf = showBF ? measurementMetrics(d, e).bodyFatPct : null;
-    if (bf != null) parts.push(`${bf}% BF`);
+    // ⚠️ EVERY METHOD THAT PRODUCED A NUMBER, NAMED (S218, Kevin: "I do not saw
+    // some of the body fat % from the different tools used"). This printed the
+    // single `bodyFatPct` — whichever method the plan's primary-source chip
+    // elects — so a day measured by scale AND calipers AND tape showed one
+    // percentage and silently dropped the other two. Nothing was ever lost;
+    // measurementMetrics has always returned all three. The row just declined to
+    // mention them, which on screen is indistinguishable from data that failed
+    // to save. Each reading is now stated with the instrument behind it.
+    if (showBF) {
+      const mm = measurementMetrics(d, e);
+      const bfBits = [];
+      if (mm.manualBF != null) bfBits.push(`${mm.manualBF}% scale`);
+      if (mm.caliperBF != null) bfBits.push(`${mm.caliperBF}% caliper`);
+      if (mm.tapeBF != null) bfBits.push(`${mm.tapeBF}% tape`);
+      if (bfBits.length) parts.push(bfBits.join(" / "));
+    }
     CALIPER_ALL.filter((f) => e[f] != null).forEach((f) => parts.push(`${CALIPER_LABELS[f]} ${e[f]}mm`));
     MEASUREMENT_FIELDS.filter((f) => e[f] != null).forEach((f) => parts.push(`${MEASUREMENT_LABELS[f]} ${e[f]}"`));
     return parts.join(" · ") || "—";
@@ -19430,10 +19489,31 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
         {/* History list with delete */}
         {dayList.length > 0 && (
           <div className="mt-3.5">
-            <div className="mb-1.5 text-sm text-muted">
-              {showWeighInDays ? `Days (${dayList.length})` : `Entries (${entries.length})`} — tap a day to see everything recorded on it
+            {/* ⚠️ THE FILTER WAS A .7rem GREY LINK UNDER THE FOLD OF A 180px BOX
+                (S218, Kevin: "I do not saw some of the weigh measurements … I
+                want to be able click on any of the entries and have access to
+                all of the saved data"). Weigh-in-only days are still hidden by
+                default — someone can weigh daily and measure monthly, and
+                burying six measurement days under ninety weigh-ins is the worse
+                failure — but "hidden behind a control you cannot see" reads as
+                "not saved". The control is now a visible segmented switch that
+                states both counts, so what is being withheld is obvious and one
+                tap away. */}
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm text-muted">Tap a day to see everything recorded on it</div>
+              {weighInOnlyCount > 0 && (
+                <div className="flex gap-0.5 rounded-full border border-border bg-surface2 p-0.5">
+                  {[[false, `Measured (${entries.length})`], [true, `All days (${dayList.length})`]].map(([val, label]) => (
+                    <button key={String(val)} onClick={() => setShowWeighInDays(val)}
+                      className={`cursor-pointer rounded-full border-none px-2.5 py-1 text-[.7rem] font-bold ${
+                        showWeighInDays === val ? "bg-primary text-primaryfg" : "bg-transparent text-muted"}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-            <div className="flex max-h-[180px] flex-col gap-1 overflow-y-auto">
+            <div className="flex max-h-[300px] flex-col gap-1 overflow-y-auto">
               {[...(showWeighInDays ? dayList : dayList.filter((x) => x.entry))].reverse().map((x) => (
                 <div key={x.date} className="flex items-center justify-between gap-2 rounded-lg bg-surface2 px-2.5 py-1.5">
                   <button onClick={() => { setOpenDate(x.date); setFieldEdit(null); }}
@@ -19450,14 +19530,10 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                 </div>
               ))}
             </div>
-            {weighInOnlyCount > 0 && (
-              <button onClick={() => setShowWeighInDays((v) => !v)}
-                className="mt-1 cursor-pointer border-none bg-transparent p-0 text-left text-[.7rem] text-muted">
-                {showWeighInDays
-                  ? `Hide the ${weighInOnlyCount} ${weighInOnlyCount === 1 ? "day" : "days"} with only a weigh-in`
-                  : `${weighInOnlyCount} more ${weighInOnlyCount === 1 ? "day has" : "days have"} a weigh-in and nothing else · `}
-                <span className="text-primary font-semibold">{showWeighInDays ? "" : "Show"}</span>
-              </button>
+            {weighInOnlyCount > 0 && !showWeighInDays && (
+              <div className="mt-1 text-[.7rem] text-muted">
+                {weighInOnlyCount} {weighInOnlyCount === 1 ? "day has" : "days have"} a weigh-in and nothing else — see them under <span className="font-semibold text-fg">All days</span>.
+              </div>
             )}
 
             {/* ── The day itself ─────────────────────────────────────────── */}
@@ -19739,13 +19815,29 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
             {chartable.length > 0 && (
               <div className="mt-4 rounded-lg bg-surface2 p-3">
                 <div className="mb-1.5 text-[.72rem] font-bold uppercase tracking-wide text-muted">Tape &amp; caliper sites</div>
+                {/* Typing beats hunting once the chip row wraps to three lines
+                    (S218, Kevin: "type the metric they want to see in a search
+                    bar or just allow them to pick from a list"). Both, then —
+                    the chips ARE the list, and the box only appears when there
+                    are enough of them to be worth filtering. A query that
+                    matches nothing falls back to showing every chip, so the
+                    picker can never strand someone on an empty row. */}
+                {chartable.length > 6 && (
+                  <input value={metricQuery} onChange={(ev) => setMetricQuery(ev.target.value)}
+                    placeholder="Search measurements — waist, thigh, body fat…"
+                    className="mb-1.5 w-full rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs text-fg outline-none" />
+                )}
                 <div className="mb-1.5 flex flex-wrap gap-1.5">
-                  {chartable.map((f) => (
-                    <button key={f} onClick={() => { setMetric(f); setPointEdit(null); }}
-                      className={`rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer whitespace-nowrap ${activeMetric === f ? "bg-primaryfill text-primaryfg border-0" : "bg-transparent text-fg border border-border"}`}>
-                      {chartLabel(f)}
-                    </button>
-                  ))}
+                  {(() => {
+                    const q = metricQuery.trim().toLowerCase();
+                    const hits = q ? chartable.filter((f) => chartLabel(f).toLowerCase().includes(q)) : chartable;
+                    return (hits.length ? hits : chartable).map((f) => (
+                      <button key={f} onClick={() => { setMetric(f); setPointEdit(null); }}
+                        className={`rounded-md px-2.5 py-1 text-xs font-semibold cursor-pointer whitespace-nowrap ${activeMetric === f ? "bg-primaryfill text-primaryfg border-0" : "bg-transparent text-fg border border-border"}`}>
+                        {chartLabel(f)}
+                      </button>
+                    ));
+                  })()}
                 </div>
                 {/* ⚠️ ONLY A STORED NUMBER IS EDITABLE (S198y) — the same rule the
                     body-fat charts already follow. Every chip here except "Body
@@ -19785,6 +19877,83 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                     scan reading or the tape and caliper measurements for a day and it follows.
                   </div>
                 )}
+                {/* ── Every reading, and a starting point to measure from ─────
+                    S218, Kevin: "allow them to pick from a list and show them all
+                    of the past entries … a feature that compares past metrics to
+                    each other. This can help users see how far they have come
+                    from a specific starting point."
+                    A chart shows the SHAPE of a trend but will not tell you what
+                    a number was on a given day, and cannot be read off precisely
+                    — so the same series is also stated as a list. "Since start"
+                    is measured from whichever reading the user nominates, not
+                    always the first, because the useful baseline is often the day
+                    a programme began rather than the day the app was installed. */}
+                {activeMetric && (() => {
+                  const unit = chartUnit(activeMetric);
+                  const valOf = (e) => activeMetric === "bodyFat"
+                    ? measurementMetrics(d, e).bodyFatPct
+                    : (Number(e[activeMetric]) > 0 ? Number(e[activeMetric]) : null);
+                  const rows = entries.map((e) => ({ e, v: valOf(e) })).filter((r) => r.v != null);
+                  if (!rows.length) return null;
+                  const baseIdx = Math.max(0, rows.findIndex((r) => r.e.date === baseDate));
+                  const base = rows[baseIdx];
+                  const fmt = (n) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(1)}${unit}`;
+                  // Down is progress for a fat/girth measure; this panel only
+                  // ever shows those, so falling is green and rising is amber.
+                  const tone = (n) => n === 0 ? "text-muted" : n < 0 ? "text-success" : "text-warn";
+                  return (
+                    <div className="mt-3 border-t border-border pt-2.5">
+                      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-[.72rem] font-bold uppercase tracking-wide text-muted">
+                          Every {chartLabel(activeMetric).toLowerCase()} reading ({rows.length})
+                        </div>
+                        {rows.length > 1 && (
+                          <label className="flex items-center gap-1.5 text-[.68rem] text-muted">
+                            Compare from
+                            <select value={base.e.date} onChange={(ev) => setBaseDate(ev.target.value)}
+                              className="cursor-pointer rounded-md border border-border bg-surface px-1.5 py-1 text-[.68rem] text-fg outline-none">
+                              {rows.map((r) => (
+                                <option key={r.e.date} value={r.e.date}>
+                                  {new Date(r.e.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" })}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                      </div>
+                      <div className="flex max-h-[220px] flex-col gap-1 overflow-y-auto">
+                        {[...rows].reverse().map((r, ri) => {
+                          const asc = rows.length - 1 - ri;      // index in chronological order
+                          const prev = asc > 0 ? rows[asc - 1] : null;
+                          const isBase = r.e.date === base.e.date;
+                          return (
+                            <button key={r.e.date} onClick={() => { setOpenDate(r.e.date); setFieldEdit(null); }}
+                              className={`flex cursor-pointer items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 text-left ${
+                                isBase ? "border-primary bg-surface" : "border-transparent bg-surface"}`}>
+                              <span className="min-w-0 flex-1 truncate text-[.72rem] text-muted">
+                                {new Date(r.e.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                                {isBase && <span className="ml-1.5 font-bold text-primary">start</span>}
+                              </span>
+                              <span className="text-[.82rem] font-bold text-fg">{r.v}{unit}</span>
+                              <span className={`w-[62px] text-right text-[.68rem] ${prev ? tone(r.v - prev.v) : "text-muted"}`}
+                                title="Change since the previous reading">
+                                {prev ? fmt(r.v - prev.v) : "—"}
+                              </span>
+                              <span className={`w-[66px] text-right text-[.68rem] font-semibold ${isBase ? "text-muted" : tone(r.v - base.v)}`}
+                                title="Change since the reading you're comparing from">
+                                {isBase ? "—" : fmt(r.v - base.v)}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-1 flex justify-end gap-2 pr-0.5 text-[.6rem] text-muted">
+                        <span className="w-[62px] text-right">vs previous</span>
+                        <span className="w-[66px] text-right">vs start</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>
@@ -20597,18 +20766,46 @@ function UpdateBanner() {
     return () => window.removeEventListener("glidna:update-ready", on);
   }, []);
   if (!ready) return null;
+  // ⚠️ A PILL CANNOT HOLD TWO LINES (S218, Kevin: "the text was very small and it
+  // was inside of an extremely small bubble … it looked like the text didn't
+  // quite fit properly"). This was `borderRadius: 999` — a full pill — at
+  // .84rem. A pill's ends are a half-circle as tall as the box, so the moment
+  // the message wrapped (an iPad renders it wider than a phone, and the button
+  // is `nowrap`, so the span is what gives) the second line ran straight into
+  // that curve and the words sat outside the shape. Fixed on three axes: a CARD
+  // radius that stays flat behind however many lines there are, type at a size
+  // meant to be read rather than noticed, and a wrap rule that drops the button
+  // to its own row instead of crushing the sentence.
   return createPortal(
     <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)",
       bottom: "calc(18px + env(safe-area-inset-bottom,0px))", zIndex: 3200,
-      display: "flex", alignItems: "center", gap: 10, maxWidth: "min(92vw,420px)",
-      padding: "10px 14px", borderRadius: 999, border: "1px solid var(--accent,#08dce0)",
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      flexWrap: "wrap", gap: 12, width: "max-content", maxWidth: "min(92vw,460px)",
+      padding: "14px 16px", borderRadius: 18, border: "1px solid var(--accent,#08dce0)",
       background: "var(--surface,#121b1e)", color: "var(--text,#eafcfc)",
-      boxShadow: "0 6px 24px rgba(0,0,0,.45)", fontSize: ".84rem", fontWeight: 600 }}>
-      <span>A newer version of Glidna is ready.</span>
+      boxShadow: "0 8px 28px rgba(0,0,0,.5)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "1 1 200px", minWidth: 0 }}>
+        <Icon name="sync" size={20} color="var(--accent,#08dce0)" style={{ flexShrink: 0 }} />
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: "1rem", fontWeight: 800, lineHeight: 1.3 }}>Update available</div>
+          <div style={{ fontSize: ".85rem", fontWeight: 500, lineHeight: 1.35,
+            color: "var(--muted-light,#9bb8b8)", marginTop: 2 }}>
+            A newer version of Glidna is ready.
+          </div>
+        </div>
+      </div>
+      {/* ⚠️ __glidnaApplyUpdate, NOT A BARE RELOAD — KEPT THROUGH THIS RESTYLE.
+          A plain window.location.reload() re-runs the page against the SAME
+          cached worker, so the notice came straight back: Kevin, "when i select
+          update the message for an update being available still pops up". That
+          fix landed in a parallel session while this restyle was in flight, and
+          the two met as a rebase conflict here. Taking either side whole would
+          have thrown away the other; the layout is this session's, the handler
+          is theirs. */}
       <button onClick={() => { const f = window.__glidnaApplyUpdate; if (f) f(); else window.location.reload(); }}
-        style={{ border: "none", borderRadius: 999, padding: "6px 12px", cursor: "pointer",
+        style={{ border: "none", borderRadius: 999, padding: "10px 20px", cursor: "pointer",
           background: "var(--accent-fill,#08dce0)", color: "var(--color-primaryfg,#04211f)",
-          fontWeight: 800, fontSize: ".8rem", whiteSpace: "nowrap" }}>
+          fontWeight: 800, fontSize: ".92rem", whiteSpace: "nowrap", flexShrink: 0 }}>
         Update
       </button>
     </div>, document.body);
