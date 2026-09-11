@@ -330,11 +330,67 @@ ok("the budget mounts the real MealLog with local handlers",
    && /onRemoveMeal=\{budRemove\} onEditMeal=\{budEdit\} premium=\{premium\}/.test(SIM_CODE));
 ok("...and no second food search was hand-rolled beside it",
    !/searchFoods\(/.test(SIM_CODE));
-// ⚠️ RECENTS AND SAVED ARE OMITTED ON PURPOSE — this sheet records nothing, so
-// "log again" would offer a history it never writes. Their absence is what hides
-// those sections; each is read as `x || []` inside MealLog, so nothing throws.
-ok("...and it is not handed a history it never writes",
-   !/recentFoods=|savedFoods=|savedMeals=|onToggleSaveFood=|onLogMeal=/.test(SIM_CODE));
+// ⚠️ THE RULE IS "NO WRITER", NOT "NO HISTORY" (S220, Kevin: "for a connected
+// client I think we can allow the food previously logged section to be there …
+// so they can look at things that they're eating, the things that they've
+// tracked, to see how it affects their bank account"). His S219b instruction
+// kept previously-logged out because this sheet must not SAVE anything — and
+// READING that list does not save anything. What must never be threaded is a
+// writer: FoodLibrary gates its star and delete controls on exactly these
+// props, so their absence is the whole mechanism keeping the panel read-only.
+ok("no writer into the real food history is threaded in, anywhere",
+   !/onRemoveRecentFood=|savedFoods=|savedMeals=|onToggleSaveFood=|onToggleSaveMeal=|onRemoveSavedFood=|onRemoveSavedMeal=|onLogMeal=/.test(SIM_CODE));
+// ⚠️ AND WHAT A TAPPED RECENT FEEDS IS LOCAL STATE. `budAdd` appends to
+// `expenses`, which dies with the sheet — the real list is written by App's own
+// onAddMeal, which this mount never uses.
+ok("...so tapping a previously-logged food lands in local state only",
+   (SIM_CODE.match(/<MealLog meals=\{expenses\} onAddMeal=\{budAdd\}/g) || []).length === 2
+   && !/onAddMeal=\{(?!budAdd)/.test(SIM_CODE));
+// ⚠️ THE BUDGET PANEL KEEPS ITS OPT-OUT; ONLY THE BANK PAGE OPENS THE DOOR, and
+// only with a plan behind it — a standalone sandbox has no history to offer.
+ok("previously-logged reaches the bank page, gated on there being a client",
+   /recentFoods=\{standalone \? undefined : recentFoods\} hideLibrary \/>/.test(SIM_CODE));
+// ⚠️ AND THE HEADER "Library" PILL STAYS HIDDEN ON BOTH PANELS. It opens the
+// whole saved library unscoped, which is the half Kevin did not ask for; the
+// in-form "Previously logged" button is a different control, gated only on
+// having something to show. Both mounts therefore keep hideLibrary.
+ok("...without reopening the saved library pill",
+   (SIM_CODE.match(/<MealLog [^>]*hideLibrary \/>/g) || []).length === 2
+   && !/hideLibrary=\{/.test(SIM_CODE));
+ok("...and the budget panel still opts out entirely",
+   /title=\{standalone \? "What they eat in a day"[\s\S]{0,120}?hideLibrary \/>/.test(SIM_CODE));
+{
+  // ⚠️ A TAB THAT CANNOT EVER FILL IS A DEAD END. Handing over recents without
+  // the saved list must not leave a permanently-empty "Saved" tab behind.
+  const LIB = codeOnly(APP.slice(APP.indexOf("function FoodLibrary("), APP.indexOf("function MealLog(")));
+  ok("the library hides a Saved tab it has no way to fill",
+     /\.filter\(\(\[k\]\) => k !== "saved" \|\| \(mode === "meals"/.test(LIB)
+     && /\? \(!!onToggleSaveMeal \|\| savedMealsList\.length > 0\)/.test(LIB)
+     && /: \(!!onToggleSave \|\| saved\.length > 0\)\)/.test(LIB));
+  ok("...and its star and delete controls were already gated on their handlers",
+     /\{onToggleSave && \(/.test(LIB)
+     && /\{!\(inSavedTab \? onRemoveSaved : onRemoveRecent\) \? null :/.test(LIB));
+  // The Foods/Meals switch is gated on onToggleSaveMeal, so a recents-only
+  // caller gets a foods-only panel and never reaches the meal-derivation reads.
+  ok("...so a recents-only caller gets a foods-only library",
+     /\{onToggleSaveMeal && \(/.test(LIB));
+  // ⚠️ AND THE COPY MAY NOT NAME A CONTROL THAT ISN'T THERE. Without a save
+  // handler the rows render no star, so the "tap the star" line would be
+  // instructions for a button that does not exist.
+  ok("...and the footer stops naming a star it is not rendering",
+     /\? \(onToggleSave\s*\n?\s*\? `Recent foods roll over as you log new ones/.test(LIB)
+     && /: `These are the foods already logged on this plan\.`\)/.test(LIB));
+}
+{
+  // The button may only name the half it can actually open onto.
+  const MEAL2 = APP.slice(APP.indexOf("function MealLog("), APP.indexOf("\nfunction ", APP.indexOf("function MealLog(") + 20));
+  ok("the library button names only what is behind it",
+     /onToggleSaveFood \|\| \(savedFoods \|\| \[\]\)\.length \? "Previously logged & saved" : "Previously logged"/.test(MEAL2));
+}
+// Both plan-backed mounts hand the list down; the standalone one has no plan.
+ok("the two plan-backed mounts pass the client's own history",
+   (APP.match(/<CalorieSimulator[\s\S]{0,260}?recentFoods=\{recentFoods\}/g) || []).length === 2
+   && /<CalorieSimulator standalone planRate=\{1\} premium=\{mePremium\} onClose=/.test(APP));
 // ⚠️ THE TWO NEW MealLog PROPS DEFAULT TO TODAY'S BEHAVIOUR, so every real meal
 // log is untouched by this. `title` falls back to "Meals & Food Today"; the
 // Library button hides ONLY where hideLibrary is asked for — the budget, which
@@ -359,7 +415,7 @@ ok("...and it is not handed a history it never writes",
 ok("the budget names itself rather than claiming to be today",
    /title=\{standalone \? "What they eat in a day"/.test(SIM_CODE) && /hideLibrary \/>/.test(SIM_CODE));
 ok("the premium gate reaches it rather than defaulting open",
-   /premium = true \}\) \{/.test(SIM_CODE) && /premium=\{premium\}/.test(SIM_CODE));
+   /premium = true, recentFoods \}\) \{/.test(SIM_CODE) && /premium=\{premium\}/.test(SIM_CODE));
 
 // ── The bank account (S220, Kevin) ──────────────────────────────────────────
 // "Treat their daily calorie intake as if it's their bank account … whatever we
@@ -719,7 +775,7 @@ ok("the subtitle still switches on the same mode",
    /standalone \? "Nothing is saved\." : "Nothing here changes your plan\."/.test(SIM_CODE));
 
 // ── 4c. the screen around the typed burn ───────────────────────────────────
-ok("the modal takes a standalone mode", /function CalorieSimulator\(\{ data, weightLbs, planRate, dayCalsAll, onClose, standalone = false, premium = true \}\)/.test(SIM_CODE));
+ok("the modal takes a standalone mode", /function CalorieSimulator\(\{ data, weightLbs, planRate, dayCalsAll, onClose, standalone = false, premium = true, recentFoods \}\)/.test(SIM_CODE));
 ok("...and an unusable plan or a bare sandbox opens on the burn question",
    /const usable = burnOpened \|\| planUsable;/.test(SIM_CODE) && /\{!usable \? \(/.test(SIM_CODE));
 // ⚠️ THE OPENER MAY NOT VANISH WHILE SOMEBODY IS TYPING IN IT. Kevin, on his

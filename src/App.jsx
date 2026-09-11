@@ -9663,11 +9663,20 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
           </div>
         )}
 
-        {/* List selector: Saved | Previously logged (two independent lists). */}
+        {/* List selector: Saved | Previously logged (two independent lists).
+            ⚠️ A TAB THAT CAN NEVER HOLD ANYTHING IS A DEAD END (S220). A caller
+            may hand over the previously-logged list WITHOUT the saved one — the
+            What if… bank page does exactly that, because it records nothing and
+            so has no business offering a library to save into. Without this the
+            panel would show a permanently empty "Saved" tab with no way to ever
+            fill it. Every real caller passes both, so nothing else moves. */}
         <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
           {(mode === "meals"
             ? [["saved", `Saved${savedMealsList.length ? ` (${savedMealsList.length})` : ""}`], ["recent", `Previously logged${prevMealsList.length ? ` (${prevMealsList.length})` : ""}`]]
             : [["saved", `Saved${saved.length ? ` (${saved.length})` : ""}`], ["recent", `Previously logged${recents.length ? ` (${recents.length})` : ""}`]]
+          ).filter(([k]) => k !== "saved" || (mode === "meals"
+            ? (!!onToggleSaveMeal || savedMealsList.length > 0)
+            : (!!onToggleSave || saved.length > 0))
           ).map(([k, label]) => (
             <button key={k} onClick={() => { setTab(k); setConfirmDel(""); }}
               style={{ flex: 1, padding: "9px 8px", borderRadius: 9, cursor: "pointer", fontFamily: "inherit",
@@ -9742,9 +9751,16 @@ function FoodLibrary({ open, mealType, recentFoods, savedFoods, onAdd, onToggleS
                 {arr.map(row)}
               </div>
             ))}
+            {/* ⚠️ THE STAR CLAUSE ONLY HOLDS WHERE THERE IS A STAR (S220). A
+                caller with no save handler — the What if… bank page — renders
+                these rows without one, and telling somebody to tap a control
+                that is not on screen is the S217 mistake: prose written for one
+                caller and left true for none of the others. */}
             <div style={{ fontSize: ".7rem", color: "var(--muted)", lineHeight: 1.5, marginTop: 4 }}>
               Tap a food to log it with its last serving. {tab === "recent"
-                ? `Recent foods roll over as you log new ones — tap the star to keep one for good.`
+                ? (onToggleSave
+                  ? `Recent foods roll over as you log new ones — tap the star to keep one for good.`
+                  : `These are the foods already logged on this plan.`)
                 : `Saved foods stay in your library across every plan.`}
             </div>
           </>
@@ -10466,7 +10482,9 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, title
               borderRadius:"9px", border:"1px solid var(--border)", background:"var(--s2)",
               color:"var(--text)", cursor:"pointer", fontSize:".78rem", fontWeight:700, fontFamily:"inherit" }}>
             <Icon name="book" size={15} color="var(--accent)" />
-            Previously logged &amp; saved
+            {/* Names what is behind it. A caller with no saved list (the What
+                if… bank page) would otherwise promise a half that isn't there. */}
+            {onToggleSaveFood || (savedFoods || []).length ? "Previously logged & saved" : "Previously logged"}
             <span style={{ color:"var(--muted)", fontWeight:600 }}>· {n}</span>
             <span style={{ marginLeft:"auto", color:"var(--muted)" }}>›</span>
           </button>
@@ -12885,7 +12903,7 @@ const SIM_RATES = [
   { lbl: "1 lb/wk",  rate: -1,   group: "gain",     sign: "+" },
   { lbl: "2 lbs/wk", rate: -2,   group: "gain",     sign: "+" },
 ];
-function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, standalone = false, premium = true }) {
+function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, standalone = false, premium = true, recentFoods }) {
   useBodyScrollLock(true);
   // ⚠️ THE EXERCISE SHEET SHARES THIS BACK BUTTON (S213). ExercisePicker opens a
   // BottomSheet, which registers its OWN useBackClose — so one device-Back
@@ -14945,9 +14963,32 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                 writes nothing. */}
             <div style={{ ...panelS, marginBottom: "8px" }}>
               <div style={{ ...bankHeadS, marginTop: 0, color: "var(--red)" }}>MONEY OUT</div>
+              {/* ⚠️ PREVIOUSLY LOGGED IS ALLOWED HERE, AND ONLY HERE (S220, Kevin:
+                  "for a connected client I think we can allow the food previously
+                  logged section to be there … so they can look at things that
+                  they're eating, the things that they've tracked, to see how it
+                  affects their bank account"). It amends his S219b "except for
+                  the saved meals and the previously logged", whose reason was
+                  that this sheet must not SAVE anything — and reading the list
+                  does not.
+                  ⚠️ THE PROMISE HOLDS BECAUSE NO WRITER IS THREADED. `recentFoods`
+                  is read-only inside MealLog; the list is written by App's own
+                  onAddMeal, and this mount's is `budAdd`, which appends to local
+                  state and dies with the sheet. onRemoveRecentFood, savedFoods,
+                  savedMeals and every save handler stay out — FoodLibrary gates
+                  its star and delete controls on exactly those props, so their
+                  absence is what makes the panel read-only.
+                  ⚠️ AND ONLY WITH A CLIENT ATTACHED. A standalone sandbox has no
+                  plan behind it, so there is no history to offer.
+                  ⚠️ `hideLibrary` STAYS ON. It gates the header "Library" pill,
+                  which opens the whole saved library unscoped — still not wanted
+                  here. The "Previously logged" button inside the add-form is a
+                  different control, gated only on having something to show, and
+                  it is scoped to the meal being added to. */}
               <MealLog meals={expenses} onAddMeal={budAdd} onAddMeals={budAddMany}
                 onRemoveMeal={budRemove} onEditMeal={budEdit} premium={premium}
-                title="What gets spent today" hideLibrary />
+                title="What gets spent today"
+                recentFoods={standalone ? undefined : recentFoods} hideLibrary />
               <div style={bankTotS}>
                 <b>Balance</b>
                 <b style={{ color: bankCredit ? "var(--green)" : "var(--red)" }}>
@@ -17705,7 +17746,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
 
       {showSim && (
         <CalorieSimulator data={data} weightLbs={weightLbs} planRate={planRate} premium={premium}
-          dayCalsAll={dayCalsAll}
+          dayCalsAll={dayCalsAll} recentFoods={recentFoods}
           onClose={()=>setShowSim(false)} />
       )}
 
@@ -31220,7 +31261,7 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
           (already injected above) + give it the brand look. */}
       {showWhatIfC && (
         <CalorieSimulator data={planData || {}} premium={premium} weightLbs={Number((planData || {}).weightLbs) || 0}
-          planRate={weeklyRateOf(planData || {})}
+          planRate={weeklyRateOf(planData || {})} recentFoods={recentFoods}
           dayCalsAll={Object.fromEntries(compDays.map((x) => [x.date, x.calories]))}
           onClose={() => setShowWhatIfC(false)} />
       )}
