@@ -101,10 +101,10 @@ const FNS = ["calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx"
   "restingKcalPerMin", "calcBurn", "cardioExFor", "exBurn", "isEatback", "dailyDeficitOf", "weeklyRateOf",
   "planEnergy", "planIntakeForRate", "computeClientCalories",
   "simNum", "simRejected", "weekPlan", "joinDays",
-  "seedSimCardio", "simSessionBurn", "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simBudgetRows", "simProject",
+  "seedSimCardio", "simSessionBurn", "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simBudgetRows", "simBankRows", "simProject",
   "ymdLocal", "simWeekdayIdx", "simDateAt", "simScenarioDay"];
 const EXPORTS = ["simNum", "simRejected", "weekPlan", "joinDays", "seedSimCardio", "simSessionBurn",
-  "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simBudgetRows", "planEnergy",
+  "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simBudgetRows", "simBankRows", "planEnergy",
   "planIntakeForRate", "computeClientCalories", "cardioExFor", "exBurn", "isEatback", "SIM_RATES",
   "SIM_MANUAL", "MIN_DAILY_CAL", "CAL_PER_LB", "DAYS", "DAY_SHORT", "atLeastMinCal", "simProject",
   "simWeekdayIdx", "simDateAt", "simScenarioDay", "SIM_HORIZONS"];
@@ -348,13 +348,220 @@ ok("...and it is not handed a history it never writes",
   ok("...and the Library button is gated on the opt-out, not removed",
      /\{!hideLibrary && \(/.test(MEAL) && /Icon name="book"/.test(MEAL));
   // Negative control: the real meal log must NOT be opting out.
+  // ⚠️ TWO, NOT ONE, SINCE S220 — the budget panel and the bank page, which are
+  // the same sandbox asking two questions. Every mount OUTSIDE this sheet must
+  // still be absent from the list, which is what this count is really guarding.
   const realMounts = (APP.match(/<MealLog [^>]*hideLibrary/g) || []);
-  ok("(control) only the budget opts out of the library", realMounts.length === 1, realMounts.length);
+  ok("(control) only this sheet opts out of the library", realMounts.length === 2, realMounts.length);
+  ok("...and both of them are inside the simulator",
+     (SIM_CODE.match(/<MealLog [^>]*hideLibrary/g) || []).length === 2);
 }
 ok("the budget names itself rather than claiming to be today",
    /title=\{standalone \? "What they eat in a day"/.test(SIM_CODE) && /hideLibrary \/>/.test(SIM_CODE));
 ok("the premium gate reaches it rather than defaulting open",
    /premium = true \}\) \{/.test(SIM_CODE) && /premium=\{premium\}/.test(SIM_CODE));
+
+// ── The bank account (S220, Kevin) ──────────────────────────────────────────
+// "Treat their daily calorie intake as if it's their bank account … whatever we
+// select will be their base bank account number … exercise … extra 'money' …
+// food … the bank account losing money … shows them how much debt they're in
+// and how much body weight they're gonna gain."
+//
+// Two numbers, two questions, and the dangerous one is the SECOND: being over
+// budget is not the same as gaining weight, and a page that conflates them tells
+// every deficit client the opposite of the truth. simBankRows is LIFTED AND RUN
+// rather than retyped (S199k).
+{
+  let notClosing = null, forked = null, wrongNet = null, badKept = null, n = 0;
+  for (const [name, d] of PLANS) {
+    const planBurn = M.planEnergy(d).weeklyBurn;
+    for (const burn of [0, planBurn, 1200, 4200]) {
+      for (const food of [0, 900, 1800, 2600, 4000]) {
+        for (const r of [-2, -1, -0.5, 0, 0.5, 1, 2]) {
+          for (const ov of [undefined, 1800, 2400, 3600]) {
+            n++;
+            const b = M.simBankRows(d, burn, r, ov, food);
+            // 1. the statement closes on the number the pace chips print
+            if (b.body + b.deposit - b.cut - b.kept !== b.sub) notClosing = { name, burn, r, ov, food, ...b };
+            if (b.earned !== b.body + b.deposit) notClosing = { name, burn, r, ov, food, ...b };
+            // 2. the account is the budget less the food, and the budget is the
+            //    SAME call every other surface makes
+            if (b.balance !== M.simIntakeForRate(d, burn, r, ov) - food) {
+              forked = { name, burn, r, ov, food, balance: b.balance, canon: M.simIntakeForRate(d, burn, r, ov) };
+            }
+            // 3. the scale answers to the body, never to the budget
+            if (b.net !== b.earned - food) wrongNet = { name, burn, r, ov, food, ...b };
+            // 4. accelerate keeps the deposit back; eat-back spends it
+            const wantKept = M.isEatback(d) ? 0 : b.deposit;
+            if (b.kept !== wantKept) badKept = { name, burn, r, ov, kept: b.kept, wantKept };
+            if (notClosing || forked || wrongNet || badKept) break;
+          }
+          if (notClosing || forked || wrongNet || badKept) break;
+        }
+        if (notClosing || forked || wrongNet || badKept) break;
+      }
+      if (notClosing || forked || wrongNet || badKept) break;
+    }
+    if (notClosing || forked || wrongNet || badKept) break;
+  }
+  ok(`the statement always closes on the chip (${n} plan × burn × food × rate × override cases)`, !notClosing, notClosing);
+  ok("...and the balance never forks from simIntakeForRate", !forked, forked);
+  ok("...the saving is earned minus eaten, always", !wrongNet, wrongNet);
+  ok("...and accelerate pays the deposit in and keeps it back", !badKept, badKept);
+  // ⚠️ AND THE DERIVED `body` ROW AGREES WITH simBudgetRows' OWN tdee TODAY —
+  // pinned rather than assumed, because it is the fact that makes deriving it
+  // free. A mutation swapping the derivation for `b.tdee` stays green, and that
+  // is an EQUIVALENCE, not a gap in the suite (the S214 lesson). If a future
+  // change to how `sub` rounds broke it, the closure check above goes red.
+  let bodyGap = null;
+  for (const [name, d] of PLANS) {
+    for (const burn of [0, 1400, 4200]) {
+      for (const r of [-1, 0, 1, 2]) {
+        const b = M.simBankRows(d, burn, r, undefined, 2000);
+        if (b.body !== b.tdee) bodyGap = { name, burn, r, body: b.body, tdee: b.tdee };
+      }
+    }
+  }
+  ok("(pin) the derived body row equals the ladder's own tdee", !bodyGap, bodyGap);
+}
+{
+  // ⚠️ THE SAME BODY EARNS THE SAME AMOUNT EITHER WAY. deficitMode is a
+  // prescription, not physiology — if `earned` or `net` moved with it, one person
+  // would get two different answers about the scale depending on which approach
+  // their coach happened to pick. Only the BUDGET, and so the balance, may move.
+  const eb = PLANS.find(([nm]) => nm === "eat-back, cardio + strength")[1];
+  const ac = PLANS.find(([nm]) => nm === "accelerate, cardio + strength")[1];
+  let gap = null, budgetsEverDiffer = 0;
+  for (const burn of [0, 1400, 2800, 4200]) {
+    for (const r of [0, 0.5, 1, 2]) {
+      for (const food of [0, 1800, 3000]) {
+        const a = M.simBankRows(eb, burn, r, undefined, food);
+        const b = M.simBankRows(ac, burn, r, undefined, food);
+        if (a.earned !== b.earned || a.net !== b.net) gap = { burn, r, food, eb: a, ac: b };
+        if (a.balance !== b.balance) budgetsEverDiffer++;
+      }
+    }
+  }
+  ok("what the body earns does not depend on which approach the plan took", !gap, gap);
+  // Control: if the mode changed NOTHING here, the toggle on this page would be
+  // decoration and the "kept back" row a lie.
+  ok("(control) but the budget — and so the balance — really does move", budgetsEverDiffer > 0, budgetsEverDiffer);
+}
+{
+  // ⚠️ THE PACE MOVES THE BUDGET, NEVER THE BODY. The page says this in so many
+  // words, and the bank projection deliberately omits `rate` from its deps on
+  // the strength of it. If it were false, every horizon tile would be stale.
+  const d = PLANS.find(([nm]) => nm === "eat-back, cardio + strength")[1];
+  let moved = null;
+  for (const burn of [0, 1400, 4200]) {
+    for (const food of [1200, 2200, 3500]) {
+      const nets = [-2, -1, -0.5, 0, 0.5, 1, 2].map((r) => M.simBankRows(d, burn, r, undefined, food).net);
+      if (new Set(nets).size !== 1) moved = { burn, food, nets };
+    }
+  }
+  ok("the pace moves the budget, never what the scale does", !moved, moved);
+}
+{
+  // ⚠️ ALL THREE BRANCHES OF THE RECONCILIATION HAVE TO BE REACHABLE, or one of
+  // them is prose nobody will ever see and the other two are hiding a wrong case.
+  // The middle one is the whole reason this page reports two numbers: overdrawn
+  // AND still losing is the ORDINARY state of a client on a deficit plan.
+  const d = PLANS.find(([nm]) => nm === "eat-back, cardio + strength")[1];
+  const burn = M.planEnergy(d).weeklyBurn;
+  const seen = { saving: 0, overButLosing: 0, debt: 0 };
+  for (let food = 400; food <= 5000; food += 50) {
+    const b = M.simBankRows(d, burn, 1, undefined, food);
+    if (b.balance >= 0 && b.net > 20) seen.saving++;
+    if (b.balance < 0 && b.net > 20) seen.overButLosing++;
+    if (b.balance < 0 && b.net < -20) seen.debt++;
+  }
+  ok("inside the budget and losing is reachable", seen.saving > 0, seen);
+  ok("...over budget and STILL losing is reachable — the case a one-number page gets wrong",
+     seen.overButLosing > 0, seen);
+  ok("...and real debt, where the weight actually goes on, is reachable", seen.debt > 0, seen);
+  // The balance and the saving are only the same number when nothing is set
+  // aside — which is exactly when the page says so.
+  const atMaintain = M.simBankRows(d, burn, 0, undefined, 2000);
+  ok("at Maintain on an eat-back plan the two numbers coincide",
+     atMaintain.balance === atMaintain.net && atMaintain.cut === 0 && atMaintain.kept === 0);
+  const atPace = M.simBankRows(d, burn, 1, undefined, 2000);
+  ok("(control) and at a losing pace they do not", atPace.balance !== atPace.net);
+}
+{
+  // The floor keeps its own row here too (CLAUDE.md): a floored budget still
+  // drives the balance, and the gap it paid in is a positive, visible amount.
+  const d = PLANS.find(([nm]) => nm === "floor-bound small frame")[1];
+  const b = M.simBankRows(d, 0, 2, undefined, 1500);
+  ok("a floored plan still balances against the floored budget",
+     b.floored && b.budget === M.MIN_DAILY_CAL && b.balance === M.MIN_DAILY_CAL - 1500, b);
+  ok("...and the floor's own row is a real, positive number", M.MIN_DAILY_CAL - b.sub > 0, b.sub);
+  // ⚠️ AND THE SCALE STILL ANSWERS TO THE BODY, not to the floored prescription
+  // — deriving weight from a number the arithmetic did not produce would promise
+  // a result the plan cannot deliver.
+  ok("...while the saving is still measured against what the body burns",
+     b.net === b.earned - 1500 && b.net !== b.balance, b);
+}
+{
+  // Food is normalised the same way the panel above reads it, so the two pages
+  // can never print totals a calorie apart.
+  ok("food is read as a number, and nothing is read as NaN",
+     M.simBankRows(PLANS[0][1], 0, 1, undefined, undefined).food === 0
+     && M.simBankRows(PLANS[0][1], 0, 1, undefined, "1800").food === 1800);
+}
+
+// ── The bank page's own wiring ──────────────────────────────────────────────
+{
+  const BANK = SIM_CODE.slice(SIM_CODE.lastIndexOf('{page === "bank" && ('));
+  ok("the bank is its own page with its own button",
+     /const \[page, setPage\] = useState\("plan"\)/.test(SIM_CODE)
+     && /\[\["plan", "Plan", "chart"\], \["bank", "Bank account", "receipt"\]\]\.map\(/.test(SIM_CODE));
+  // ⚠️ KEVIN ASKED FOR THE TWO NOT TO BE JAMMED TOGETHER, so the plan page's own
+  // tools — seven day boxes, the year calendar, the budget panel, the answer —
+  // are gated OFF the bank page rather than merely pushed below it.
+  ok("...and the plan page's tools are gated off it",
+     (SIM_CODE.match(/\{page === "plan" && \(<>/g) || []).length === 2);
+  ok("...and switching pages lands at the top of the sheet",
+     /sheetRef\.current\?\.scrollTo\(\{ top: 0 \}\)/.test(SIM_CODE) && /className="sim-sheet" ref=\{sheetRef\}/.test(SIM_CODE));
+  // Kevin: "anytime there's calorie burning from exercise or the clients number
+  // that they've selected … will automatically stay green and every time we add
+  // things like food or if their calorie number goes below their maintenance …
+  // it starts turning red and it's negative."
+  ok("income reads green and food reads red",
+     /MONEY IN/.test(BANK) && /MONEY OUT/.test(BANK)
+     && /color: "var\(--green\)" \}\}>\{bank\.body\.toLocaleString\(\)\}/.test(BANK)
+     && /color: "var\(--red\)" \}\}>−\{bank\.food\.toLocaleString\(\)\}/.test(BANK));
+  ok("...and an overdrawn account turns red, headline included",
+     /bankCredit \? "var\(--green\)" : "var\(--red\)"/.test(BANK) && /Overdrawn/.test(BANK) && !/Overdrawn by|In the red by/.test(BANK));
+  // ⚠️ THE SIGN OF THE WEIGHT COMES FROM `bankDir`, WHICH IS `net`. Taking it
+  // from `bankCredit` would print "the weight goes on" for every client who is
+  // over budget and still comfortably losing — S217's bug, one screen along.
+  ok("the scale is driven by the burn, not by the budget",
+     /const bankDir = bank\.net > 20 \? "lose" : bank\.net < -20 \? "gain" : "hold"/.test(SIM_CODE)
+     && /bankDir === "lose" \? "−" : "\+"/.test(BANK)
+     && !/bankCredit \? "−" : "\+"/.test(BANK));
+  ok("...and it reconciles the two out loud when they disagree",
+     /over\s+budget, but still/.test(BANK) && /just slower than/.test(BANK)
+     && /That is the debt:/.test(BANK));
+  ok("...including the case where the budget IS the burn",
+     /\{bankSame && </.test(BANK) && /const bankSame = bank\.cut === 0 && bank\.kept === 0 && !bank\.floored/.test(SIM_CODE));
+  // The deposit is visible on both sides in accelerate — hiding it would delete
+  // the one thing this page teaches from half the plans.
+  ok("accelerate shows the deposit paid in and then kept back",
+     /Training pays in/.test(BANK) && /Kept back for a sooner goal/.test(BANK));
+  ok("the 1,200 floor keeps its own row here too",
+     /Held at the 1,200 floor/.test(BANK) && /MIN_DAILY_CAL - bank\.sub/.test(BANK));
+  // Displaying a sub-1,200 day is correct; prescribing one is not (CLAUDE.md).
+  ok("...and a sub-1,200 day is shown and named, never clamped",
+     /is under 1,200 for the day/.test(BANK) && !/Math\.max\(MIN_DAILY_CAL/.test(BANK));
+  ok("nothing on the bank page writes anything",
+     !/onChange\(|onSetCardio|setData\(|onSave/.test(BANK));
+  // The projection is the SAME engine the plan page walks, and it deliberately
+  // does not list `rate` — proven above that `net` cannot move with it.
+  ok("the bank projection reuses simProject and the plan's own weekHold",
+     /simProject\(\{ days: n\[0\], startLbs: w, weekHold, dayIntake: \(\) => spent \}\)/.test(SIM_CODE));
+  ok("...and it halts rather than projecting a body through zero",
+     /bankEndLbs\(days\) > 0 \?/.test(BANK) && /off the scale/.test(BANK));
+}
 
 // ── The nutrition mode is answerable in the sandbox (S219b) ─────────────────
 // ⚠️ null MEANS "FOLLOW THE PLAN". An untouched sandbox must stay byte-identical
@@ -1181,7 +1388,11 @@ ok("the calendar writes nothing either", !/onChange\(/.test(SIM_CODE) && !/stora
   // plan there is none of. Found by opening the standalone modal, not by reading.
   ok("...and both sentences are mode-aware",
      /standalone \? "Nothing is saved\." : "Nothing here changes your plan\."/.test(SIM_CODE)
-     && /\{standalone\s*\n?\s*\? <>Add the training \{theyd\} actually do/.test(SIM_CODE));
+     && /:\s*standalone\s*\n?\s*\? <>Add the training \{theyd\} actually do/.test(SIM_CODE));
+  // ⚠️ AND THE BANK PAGE GETS ITS OWN, because "starts from the week already in
+  // your plan" is not what that page is asking about.
+  ok("...and the bank page reframes the same planner as income",
+     /page === "bank"\s*\n?\s*\? <>Every session \{they\} do is money in/.test(SIM_CODE));
 }
 
 // ── 8. the manual-calorie session — a third shape, priced here ──────────────

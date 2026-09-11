@@ -12711,6 +12711,55 @@ function simBudgetRows(d, weeklyBurn, r, tdeeOverride) {
   };
 }
 
+// ── The same day, read as a bank account (S220, Kevin) ──────────────────────
+// "Treat their daily calorie intake as if it's their bank account … whatever we
+// select will be their base bank account number. Whenever we add some kind of
+// calorie burning exercise that will then be extra 'money' … and when we start
+// adding calories from food … it'll count as the bank account losing money."
+//
+// ⚠️ THE DEPOSIT IS THE SAME NUMBER IN BOTH MODES, BECAUSE A BODY HAS NO OPINION
+// ABOUT eat-back. What deficitMode decides is whether the money is then SPENDABLE
+// — so in accelerate it is paid in and immediately kept back, and the two lines
+// cancel to exactly the chip. Dropping the pair instead would hide the one thing
+// this screen exists to show (exercise is income) on half the plans.
+//
+// ⚠️ AND THE COLUMN IS CLOSED BY CONSTRUCTION, NOT BY A ROUNDING ARGUMENT.
+// `body` and `earned` are derived back out of simBudgetRows' own `sub` rather
+// than re-added from tdee. Today those two routes agree exactly — `b.train`
+// already absorbs the rounding, and the suite pins the equality — so this is
+// belt-and-braces rather than a live fix. It stays because the day somebody
+// changes how `sub` rounds, a re-added column would silently stop matching the
+// pace chips directly above it, which is the S215 ladder bug in a new costume.
+//
+// ⚠️ `balance` AND `net` ARE DIFFERENT QUESTIONS AND BOTH ARE TRUE. `balance` is
+// measured against the pace someone CHOSE; `net` against what their body
+// actually burns. Somebody 300 over budget on a 1 lb/wk plan is overdrawn and
+// still losing weight, and a screen that reports only one of those numbers will
+// lie on one side or the other.
+//
+// Module level so scripts/ can lift it and RUN it.
+function simBankRows(d, weeklyBurn, r, tdeeOverride, spent) {
+  const b = simBudgetRows(d, weeklyBurn, r, tdeeOverride);
+  const eat = isEatback(d);
+  // In eat-back the ladder already carries the training, and `b.train` is the
+  // rounding-absorbing row that makes it close — so take it from there rather
+  // than rounding the week a second time.
+  const deposit = eat ? b.train : Math.round((Number(weeklyBurn) || 0) / 7);
+  const kept = eat ? 0 : deposit;
+  const food = Math.round(Number(spent) || 0);
+  const earned = b.sub + b.cut + kept;
+  return {
+    ...b,
+    deposit, kept, food, earned,
+    body: earned - deposit,
+    // What is left of the chosen budget. Identical to the S219 budget panel's
+    // own `budget - spent`, so the two pages cannot quote different numbers.
+    balance: b.budget - food,
+    // Positive = a real deficit = weight comes off. Mode-independent.
+    net: earned - food,
+  };
+}
+
 // What a typed daily burn is allowed to be.
 //
 // ⚠️ THE PARSER CAP AND THE PLAUSIBLE BAND ARE DIFFERENT JOBS. The cap is what
@@ -12968,6 +13017,22 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // local state that dies with the sheet — which is also what licenses the list
   // to show a day that eats far under 1,200 without prescribing one.
   const [budOpen, setBudOpen] = useState(true);
+  // ── Which page of the sheet (S220, Kevin) ────────────────────────────────
+  // "This one might be beneficial to have a separate button to travel to within
+  // the what if section, because I think this is something that's a little bit
+  // separate, but I don't want to have it jammed up all in the same page as all
+  // the other stuff that we worked on."
+  //
+  // ⚠️ ONE COMPONENT, TWO PAGES — NOT TWO COMPONENTS. Every control the bank
+  // view needs (the pace chips, the typed burn, the week of cardio, the meal
+  // log) is already state in here, so a second component would either re-declare
+  // all of it or take fourteen props, and the food somebody typed would vanish
+  // on the way across. Switching pages keeps the whole scenario.
+  const [page, setPage] = useState("plan");
+  // The sheet is an 88vh scroll box; landing halfway down a page you just opened
+  // reads as the button not having worked.
+  const sheetRef = useRef(null);
+  useEffect(() => { try { sheetRef.current?.scrollTo({ top: 0 }); } catch { /* ignore */ } }, [page]);
   const [expenses, setExpenses] = useState([]);     // {id, name, cal} — LOCAL ONLY
   // ⚠️ THE REAL MealLog, DRIVEN BY LOCAL STATE (S219b, Kevin: "I wanted to have
   // everything that the regular meal logging section has except for the saved
@@ -13092,6 +13157,19 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const budRemove = (id) => setExpenses((xs) => xs.filter((x) => x.id !== id));
   const budEdit = (id, patch) => setExpenses((xs) => xs.map((x) => (x.id === id ? { ...x, ...patch, id } : x)));
 
+  // ── The same numbers, read as an account (S220) ──────────────────────────
+  const bank = simBankRows(d, trainWeek, rate, mNum, spent);
+  const bankCredit = bank.balance >= 0;
+  // ⚠️ THE SAME ±20 DEAD BAND `dir` USES. Two directions computed with two
+  // thresholds is how one line says "holding" while the line under it prints a
+  // weekly loss.
+  const bankDir = bank.net > 20 ? "lose" : bank.net < -20 ? "gain" : "hold";
+  // Is the budget ALSO the break-even number? True at Maintain on an eat-back
+  // plan, and then `balance` and `net` are the same figure — worth saying,
+  // because it is the cleanest version of the whole metaphor.
+  const bankSame = bank.cut === 0 && bank.kept === 0 && !bank.floored;
+  const bankHasSetAside = bank.cut !== 0 || bank.kept > 0 || bank.floored;
+
   // ── What they eat: seven days, and the pace prices the blanks ────────────
   // ⚠️ THE WEEK WAS ALREADY THE BASIS. Dropping "Pick a pace" and "One number"
   // removed two ways of SAYING this sum, not a second sum — both were literally
@@ -13150,6 +13228,23 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const lbsIn = (days) => { const p = projAt[days] || projFor(days); return p ? p.lost : 0; };
   const endLbs = (days) => { const p = projAt[days] || projFor(days); return p && !p.halted ? p.end : null; };
   const HORIZONS = [[7, "1 week"], [14, "2 weeks"], [30, "1 month"], [60, "2 months"]];
+  // ── The bank page walked forward (S220) ──────────────────────────────────
+  // One day, repeated: "a day like this, every day". The SAME engine and the
+  // same `weekHold` as the plan page, so the two answers cannot drift.
+  //
+  // ⚠️ IT DOES NOT DEPEND ON THE PACE, AND THAT IS THE LESSON. A body that burns
+  // 2,869 and is fed 2,800 loses the same amount whichever chip is lit — the
+  // pace moves the BUDGET, and so the balance, but never the physics. Adding
+  // `rate` to these deps would just be noise pretending to be caution.
+  const bankProjAt = useMemo(() => {
+    const out = {};
+    if (!(spent > 0)) return out;
+    for (const n of HORIZONS) out[n[0]] = simProject({ days: n[0], startLbs: w, weekHold, dayIntake: () => spent });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, spent, w, mNum, JSON.stringify(simCardio), d, trainWeek]);
+  const bankLbsIn = (days) => { const q = bankProjAt[days]; return q ? q.lost : 0; };
+  const bankEndLbs = (days) => { const q = bankProjAt[days]; return q && !q.halted ? q.end : null; };
   // The chosen horizon, walked once — plus the SAME walk with the body frozen,
   // which is exactly "what a flat 3,500-cal calculator would say". One engine,
   // two configurations, so the comparison cannot drift from the number.
@@ -13248,6 +13343,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const th = standalone ? "their" : "your";
   const Th = standalone ? "Their" : "Your";
   const they = standalone ? "they" : "you";
+  const They = standalone ? "They" : "You";
   // ⚠️ THE LITERAL CHARACTER, NOT THE ENTITY. JSX decodes &rsquo; in TEXT but not
   // inside an interpolated JS string, so "they&rsquo;d" rendered on screen as
   // exactly that. Found by reading the rendered sheet back, not the diff.
@@ -13395,6 +13491,12 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
     fontFamily: "inherit", fontSize: ".76rem", fontWeight: 700, cursor: "pointer", marginBottom: "8px" };
   const panelS = { border: "1px solid var(--border)", borderRadius: "10px", background: "var(--bg)",
     padding: "11px", marginBottom: "10px" };
+  // A bank statement is a column of label-and-amount; these are the three shapes
+  // it needs, named once so no row can drift out of line with its neighbours.
+  const bankRowS = { display: "flex", justifyContent: "space-between", fontSize: ".76rem", padding: "3px 0" };
+  const bankTotS = { display: "flex", justifyContent: "space-between", marginTop: "7px", paddingTop: "7px",
+    borderTop: "1px solid var(--border)", fontSize: ".84rem" };
+  const bankHeadS = { fontSize: ".62rem", letterSpacing: ".6px", fontWeight: 800, margin: "11px 0 5px" };
   const linkS = { background: "transparent", border: "none", cursor: "pointer", color: "var(--accent)",
     fontSize: ".7rem", fontWeight: 600, fontFamily: "inherit", padding: 0,
     display: "inline-flex", alignItems: "center", gap: "4px" };
@@ -13507,7 +13609,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
         display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.6)",
         padding: "16px", paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
         paddingBottom: "calc(16px + env(safe-area-inset-bottom,0px))" }}>
-      <div onClick={(e) => e.stopPropagation()} className="sim-sheet"
+      <div onClick={(e) => e.stopPropagation()} className="sim-sheet" ref={sheetRef}
         style={{ width: "100%", maxWidth: "560px", maxHeight: "88vh", overflowY: "auto",
           background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "16px",
           padding: "16px", color: "var(--text)" }}>
@@ -13569,8 +13671,35 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
           </>
         ) : (<>
 
+        {/* ── Two pages, one scenario (S220, Kevin) ──────────────
+            "A separate button to travel to within the what if section … I don't
+            want to have it jammed up all in the same page as all the other stuff
+            that we worked on."
+            A segmented control rather than a one-way link, because the way BACK
+            matters as much: a coach demonstrating this flips between the two. */}
+        <div role="group" aria-label="View" style={{ display: "flex", gap: "6px", marginBottom: "13px" }}>
+          {[["plan", "Plan", "chart"], ["bank", "Bank account", "receipt"]].map(([k, label, icon]) => (
+            <button key={k} onClick={() => setPage(k)} aria-pressed={page === k}
+              style={{ flex: 1, padding: "9px 6px", borderRadius: "9px", cursor: "pointer", fontFamily: "inherit",
+                fontSize: ".74rem", fontWeight: 700, display: "inline-flex", alignItems: "center",
+                justifyContent: "center", gap: "6px",
+                border: page === k ? "1.5px solid var(--accent)" : "1px solid var(--border)",
+                background: page === k ? "rgba(var(--accent-rgb),.12)" : "var(--s2)",
+                color: page === k ? "var(--accent)" : "var(--text-secondary)" }}>
+              <Icon name={icon} size={13} color={page === k ? "var(--accent)" : "var(--muted)"} />
+              {label}
+            </button>
+          ))}
+        </div>
+
         {/* ── 1 · What you eat ───────────────────────────────────────────── */}
-        <div style={lbl}>1 &middot; What you eat</div>
+        <div style={lbl}>1 &middot; {page === "bank" ? "What the account opens at" : "What you eat"}</div>
+        {page === "bank" && (
+          <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.45, marginBottom: "9px" }}>
+            Pick the number {they} bank each day. Maintain is what {th} body burns; a loss pace
+            pays some of it toward the goal before {they} see it, a gain pace adds to it.
+          </div>
+        )}
         {/* The pace grid serves two jobs at once and always has: on its own it is
             the answer, and beside the seven boxes it is the price of every day
             left blank — so it stays ONE control with one number, and changing it
@@ -13649,6 +13778,10 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
         {rateHeading("Weight gain")}
         {rateRow("gain")}
 
+        {/* ⚠️ THE SEVEN BOXES AND THE YEAR CALENDAR ARE THE PLAN PAGE'S TOOLS.
+            The bank answers "where does today leave them", which is one day
+            repeated — and Kevin asked for the two not to be jammed together. */}
+        {page === "plan" && (<>
         {/* ── Day by day (S213, Kevin) ─────────────────────────────────────
             "Not everybody eats the same exact calories every single day." Seven
             boxes, Monday first, each free to be anything — the point is to see
@@ -13991,6 +14124,8 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
           </div>
         )}
 
+        </>)}
+
         {/* ── 2 · Your week of cardio ──────────────────────────────────────
             CARDIO ONLY (S213, Kevin: "make it be just cardio for the exercise
             selection… look and act just like the workout burn section"), now for
@@ -14001,15 +14136,20 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
             the plan (onChange("customExercises", …)) and would break the promise
             in the subtitle. Custom cardio the plan already has still appears,
             because customExercises is threaded through. */}
-        <div style={{ ...lbl, marginTop: "18px" }}>2 &middot; Your week of cardio</div>
+        <div style={{ ...lbl, marginTop: "18px" }}>
+          2 &middot; {page === "bank" ? "What pays into the account" : "Your week of cardio"}
+        </div>
         <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.45, marginBottom: "9px" }}>
           {/* ⚠️ THERE IS NO PLAN TO START FROM WHEN NOBODY IS ATTACHED. The
               in-plan sentence promises a seed that does not exist and reassures
               about a plan that does not exist — found by opening the standalone
               modal, not by reading. */}
-          {standalone
-            ? <>Add the training {theyd} actually do. Nothing here is saved.</>
-            : <>Starts from the week already in your plan. Change it however you like &mdash; your plan stays exactly as it is.</>}
+          {page === "bank"
+            ? <>Every session {they} do is money in. Add one and watch the account go up &mdash;
+              take it back out and watch what that costs.</>
+            : standalone
+              ? <>Add the training {theyd} actually do. Nothing here is saved.</>
+              : <>Starts from the week already in your plan. Change it however you like &mdash; your plan stays exactly as it is.</>}
         </div>
 
         <button onClick={() => setShowFill((v) => !v)} style={toggleS}>
@@ -14323,6 +14463,8 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
             </button>
           </div>
         )}
+
+        {page === "plan" && (<>
 
         {/* ── 3 · Your daily budget (S219, Kevin) ──────────────────────────
             "Think about someone's daily calorie intake as their budget and the
@@ -14681,6 +14823,254 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
               : <> {mNum !== null ? `This holds ${th} burn at ` + mNum.toLocaleString() + ` the whole way — add ${th} weight, height, age and how active ${they} are and it can follow the burn down.` : `Add ${th} weight and it can follow the burn down as ${they} lose.`}</>}
           </div>
         </div>
+        </>)}
+
+        {/* ── The bank account (S220, Kevin) ───────────────────────────────
+            "I want this to be where I can show clients to treat their daily
+            calorie intake as if it's their bank account … whatever we select
+            will be their base bank account number. Whenever we add some kind of
+            calorie burning exercise that will then be extra 'money' or calories
+            in their bank account, and when we start adding calories from food …
+            it'll count as the bank account losing money."
+
+            Same chips and the same week of cardio above it — "this next screen
+            should look almost identical to the first screen" — and a different
+            question underneath.
+
+            ⚠️ TWO NUMBERS, BECAUSE THERE ARE TWO QUESTIONS AND ONLY ONE OF THEM
+            IS ABOUT WEIGHT. `balance` is the account: what is left of the pace
+            they CHOSE. `net` is the body: what is left of what they actually
+            burn. On a 1 lb/wk plan somebody 300 over budget is overdrawn AND
+            still losing, and a screen that printed "the weight goes on" there
+            would be S217's bug — prose written for one direction, false in the
+            other. So the statement reports the account, the block under it
+            reports the scale, and a line reconciles them out loud.
+
+            ⚠️ RED AND GREEN ARE KEVIN'S, EXPLICITLY: "anytime there's calorie
+            burning from exercise or the clients number that they've selected …
+            that will automatically stay green and every time we add things like
+            food or if their calorie number goes below their maintenance … it
+            starts turning red". Income green, food red, overdrawn red. */}
+        {page === "bank" && (
+          <div style={{ marginTop: "16px", borderTop: "1px solid var(--border)", paddingTop: "13px" }}>
+
+            {/* A bank app leads with the balance, and so does this. */}
+            <div style={{ padding: "13px", borderRadius: "12px", textAlign: "center", marginBottom: "10px",
+              background: bankCredit ? "rgba(47,224,168,.09)" : "rgba(248,113,113,.09)",
+              border: `1px solid ${bankCredit ? "var(--green)" : "var(--red)"}` }}>
+              <div style={{ fontSize: ".6rem", letterSpacing: ".7px", textTransform: "uppercase", color: "var(--muted)" }}>
+                {bank.food === 0 ? "In the account today" : bankCredit ? "Still in the account" : "Overdrawn"}
+              </div>
+              <div style={{ fontFamily: "'Sora',sans-serif", fontSize: "2rem", lineHeight: 1.15,
+                color: bankCredit ? "var(--green)" : "var(--red)" }}>
+                {bankCredit ? "" : "−"}{Math.abs(bank.balance).toLocaleString()}
+              </div>
+              <div style={{ fontSize: ".63rem", color: "var(--muted)" }}>
+                calories
+                {bank.food > 0 && bank.balance !== 0 && (
+                  <> &middot; {Math.abs(bank.balance * 7).toLocaleString()} {bankCredit ? "saved" : "in the red"} over
+                    a week of days like this</>
+                )}
+              </div>
+            </div>
+
+            {/* ── The statement ─────────────────────────────────────────────
+                ⚠️ IN ACCELERATE MODE THE DEPOSIT APPEARS ON BOTH SIDES, ON
+                PURPOSE. Paid in, then kept back — that is literally what "the
+                burn buys a sooner goal date" means, and hiding the pair would
+                delete the one thing this page exists to teach (exercise is
+                income) from half the plans. The two lines cancel to exactly the
+                number on the chip above. */}
+            <div style={{ ...panelS, marginBottom: "8px" }}>
+              <div style={{ ...bankHeadS, marginTop: 0, color: "var(--green)" }}>MONEY IN</div>
+              <div style={bankRowS}>
+                <span>{Th} body burns</span>
+                <b style={{ color: "var(--green)" }}>{bank.body.toLocaleString()}</b>
+              </div>
+              {bank.deposit > 0 && (
+                <div style={bankRowS}>
+                  <span>Training pays in</span>
+                  <b style={{ color: "var(--green)" }}>+{bank.deposit.toLocaleString()}</b>
+                </div>
+              )}
+              <div style={bankTotS}>
+                <b>Earned today</b>
+                <b style={{ color: "var(--green)" }}>{bank.earned.toLocaleString()}</b>
+              </div>
+
+              {bankHasSetAside ? (
+                <>
+                  <div style={{ ...bankHeadS, color: "var(--yellow)" }}>TOWARD THE GOAL</div>
+                  {bank.cut > 0 && (
+                    <div style={bankRowS}>
+                      <span>Set aside to lose {budPaceLbl}</span>
+                      <b style={{ color: "var(--yellow)" }}>−{bank.cut.toLocaleString()}</b>
+                    </div>
+                  )}
+                  {bank.cut < 0 && (
+                    <div style={bankRowS}>
+                      <span>Added to gain {budPaceLbl}</span>
+                      <b style={{ color: "var(--green)" }}>+{Math.abs(bank.cut).toLocaleString()}</b>
+                    </div>
+                  )}
+                  {bank.kept > 0 && (
+                    <div style={bankRowS}>
+                      <span>Kept back for a sooner goal</span>
+                      <b style={{ color: "var(--yellow)" }}>−{bank.kept.toLocaleString()}</b>
+                    </div>
+                  )}
+                  {/* ⚠️ THE FLOOR IS ITS OWN ROW, NEVER A SILENT CLAMP (CLAUDE.md). */}
+                  {bank.floored && (
+                    <div style={{ ...bankRowS, color: "var(--yellow)" }}>
+                      <span>Held at the 1,200 floor</span>
+                      <b>+{(MIN_DAILY_CAL - bank.sub).toLocaleString()}</b>
+                    </div>
+                  )}
+                  <div style={bankTotS}>
+                    <b>{Th} budget for today</b>
+                    <b style={{ color: "var(--accent)" }}>{bank.budget.toLocaleString()}</b>
+                  </div>
+                </>
+              ) : (
+                <div style={{ marginTop: "6px", fontSize: ".65rem", color: "var(--muted)", lineHeight: 1.45 }}>
+                  Nothing set aside at Maintain &mdash; what {they} earn is the whole budget.
+                </div>
+              )}
+            </div>
+
+            {/* ── What gets spent ───────────────────────────────────────────
+                The same MealLog the budget page mounts, so the food database,
+                macros, meal types, AI estimate, barcode and editing all arrive
+                by construction. Saved meals and recents stay out: this sheet
+                writes nothing. */}
+            <div style={{ ...panelS, marginBottom: "8px" }}>
+              <div style={{ ...bankHeadS, marginTop: 0, color: "var(--red)" }}>MONEY OUT</div>
+              <MealLog meals={expenses} onAddMeal={budAdd} onAddMeals={budAddMany}
+                onRemoveMeal={budRemove} onEditMeal={budEdit} premium={premium}
+                title="What gets spent today" hideLibrary />
+              <div style={bankTotS}>
+                <b>Balance</b>
+                <b style={{ color: bankCredit ? "var(--green)" : "var(--red)" }}>
+                  {bankCredit ? "" : "−"}{Math.abs(bank.balance).toLocaleString()}
+                </b>
+              </div>
+              {/* The account draining is the one thing a column of numbers cannot show. */}
+              <div style={{ marginTop: "7px", height: "7px", borderRadius: "4px", background: "var(--s3)", overflow: "hidden" }}>
+                <div style={{ width: `${Math.max(0, Math.min(100, budPct))}%`, height: "100%",
+                  background: bankCredit ? "var(--green)" : "var(--red)", transition: "width .2s" }} />
+              </div>
+            </div>
+
+            {/* ── And what it does to the scale ─────────────────────────────
+                ⚠️ COMPUTED FROM `net`, NEVER FROM THE SIGN OF THE BALANCE.
+                Being over budget is not the same as gaining weight, and saying
+                so would be wrong on every deficit plan. */}
+            <div style={{ ...panelS, marginBottom: 0 }}>
+              <div style={{ ...lbl, marginBottom: "6px" }}>What this does to the scale</div>
+              {bank.food === 0 ? (
+                <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.45 }}>
+                  Add what {they} eat above and the account starts draining. Nothing here is
+                  saved &mdash; it is a whiteboard.
+                </div>
+              ) : (
+                <>
+                  <div style={bankRowS}>
+                    <span style={{ color: "var(--muted)" }}>{Th} body spends</span>
+                    <b>{bank.earned.toLocaleString()}</b>
+                  </div>
+                  <div style={bankRowS}>
+                    <span style={{ color: "var(--muted)" }}>{They} eat</span>
+                    <b style={{ color: "var(--red)" }}>−{bank.food.toLocaleString()}</b>
+                  </div>
+                  <div style={bankTotS}>
+                    <b>{bankDir === "gain" ? "Borrowed against the scale"
+                      : bankDir === "lose" ? "Real saving" : "Break-even"}</b>
+                    <b style={{ color: bankDir === "gain" ? "var(--red)"
+                      : bankDir === "lose" ? "var(--green)" : "var(--muted)" }}>
+                      {bankDir === "gain" ? "−" : ""}{Math.abs(bank.net).toLocaleString()}
+                    </b>
+                  </div>
+
+                  <div style={{ marginTop: "11px", padding: "11px", borderRadius: "10px", background: "var(--s2)",
+                    border: "1px solid var(--border)", textAlign: "center" }}>
+                    {bankDir === "hold" ? (
+                      <div style={{ fontSize: ".85rem", fontWeight: 700 }}>That holds {th} weight steady.</div>
+                    ) : (
+                      <>
+                        <div style={{ fontSize: ".6rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".6px" }}>
+                          A day like this, every day
+                        </div>
+                        <div style={{ fontFamily: "'Sora',sans-serif", fontSize: "1.5rem", margin: "2px 0",
+                          color: bankDir === "lose" ? "var(--green)" : "var(--red)" }}>
+                          {bankDir === "lose" ? "−" : "+"}{fmtLbs(bankLbsIn(7))} a week
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {bankDir !== "hold" && (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "5px", marginTop: "9px" }}>
+                      {HORIZONS.map(([days, label]) => (
+                        <div key={days} style={{ padding: "8px 3px", borderRadius: "9px", textAlign: "center",
+                          background: "var(--s2)", border: "1px solid var(--border)" }}>
+                          <div style={{ fontSize: ".55rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".3px" }}>{label}</div>
+                          <div style={{ fontFamily: "'Sora',sans-serif", fontSize: ".95rem",
+                            color: bankDir === "lose" ? "var(--green)" : "var(--red)" }}>
+                            {bankDir === "lose" ? "−" : "+"}{Math.abs(bankLbsIn(days)).toFixed(1)}
+                          </div>
+                          {/* The walk's own end weight, and it halts rather than
+                              projecting a body through zero — same guard the plan
+                              page's tiles carry. */}
+                          {w > 0 && (bankEndLbs(days) > 0 ? (
+                            <div style={{ fontSize: ".55rem", color: "var(--muted)" }}>{bankEndLbs(days).toFixed(1)} lbs</div>
+                          ) : (
+                            <div style={{ fontSize: ".55rem", color: "var(--yellow)" }}>off the scale</div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* ⚠️ THE RECONCILIATION IS THE POINT OF THE WHOLE PANEL. Over
+                      budget and still losing is the common case on a deficit
+                      plan, and it is exactly the case a one-number screen gets
+                      wrong. */}
+                  <div style={{ marginTop: "9px", fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.5 }}>
+                    {bankDir === "hold"
+                      ? <>{They} eat exactly what {they} burn, so the scale does not move. The pace
+                        above moves the budget, never the body.</>
+                      : bankCredit && bankDir === "lose"
+                        ? <>Inside the budget and under what {th} body burns &mdash; money in the bank
+                          and weight coming off.</>
+                        : !bankCredit && bankDir === "lose"
+                          ? <><b style={{ color: "var(--red)" }}>{Math.abs(bank.balance).toLocaleString()}</b> over
+                            budget, but still <b style={{ color: "var(--green)" }}>{bank.net.toLocaleString()}</b> under
+                            what {th} body burns &mdash; so the weight still comes off, just slower than
+                            this pace asked for.</>
+                          : !bankCredit
+                            ? <>Past the budget and past what {th} body burns. That is the debt:{" "}
+                              <b style={{ color: "var(--red)" }}>{Math.abs(bank.net).toLocaleString()}</b> a day
+                              borrowed against the scale, and it gets paid back in weight.</>
+                            : <>Inside the budget &mdash; and on a gaining plan the budget is a surplus,
+                              so the weight going on is the plan working.</>}
+                    {bankSame && <> Here the budget <b>is</b> the burn, so the balance above and the
+                      saving are the same number.</>}
+                  </div>
+
+                  {/* Displaying a sub-1,200 day is correct; planning one is not
+                      (CLAUDE.md). Nothing is clamped — this sheet writes nothing. */}
+                  {bank.food < MIN_DAILY_CAL && (
+                    <div style={{ marginTop: "8px", fontSize: ".68rem", color: "var(--yellow)", lineHeight: 1.45 }}>
+                      {bank.food.toLocaleString()} is under 1,200 for the day. Showing it is fine &mdash;
+                      planning it is not. A bigger gap should come out of movement rather than food.
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         </>)}
 
         {/* ⚠️ A STRAY BACKDROP TAP MUST NOT BIN A TYPED SCENARIO. Rendered last
