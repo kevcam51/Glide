@@ -20788,6 +20788,38 @@ function stashSharedIntent() {
     window.history.replaceState({}, "", url.toString());
   } catch (e) { /* private mode / no history API */ }
 }
+// ── Photos an iPhone Shortcut sent while the app was closed (S222) ──────────
+// The share sheet route (S221) is Android-only, because Safari will not let a
+// web app receive from it. On iOS the photo comes the other way: a Shortcut
+// POSTs it to functions/mealInbox.js, which parks it in this account's own kv
+// as caliq-inbox-<id>. Same destination as a shared photo — the AI chat — so
+// the two paths converge here and the rest of the app knows only one flow.
+const INBOX_PREFIX = "caliq-inbox-";
+async function takeInboxPhotos() {
+  if (typeof window === "undefined" || !window.storage) return [];
+  let entries = [];
+  try {
+    // listEntries, not list: one range query returns the values too, and
+    // getDocs has already transferred (and billed for) them either way.
+    const res = await window.storage.listEntries(INBOX_PREFIX);
+    entries = (res && res.entries) || [];
+  } catch (e) { return []; }
+  if (!entries.length) return [];
+  const out = [];
+  for (const row of entries) {
+    try {
+      const v = JSON.parse(row.value);
+      if (v && typeof v.dataUrl === "string" && v.dataUrl.startsWith("data:image/")) out.push(v.dataUrl);
+    } catch (e) { /* a corrupt row must not strand the rest */ }
+  }
+  // ⚠️ DELETED EVEN IF NOTHING PARSED. A row we cannot read is a row that would
+  // be re-read on every launch forever, and the person would have no way to
+  // clear it from inside the app.
+  await Promise.all(entries.map((row) =>
+    window.storage.delete(row.k).catch(() => { /* best effort */ })));
+  return out;
+}
+
 // Reads the parked files, shrinks them exactly as a camera photo is shrunk, and
 // EMPTIES the cache whatever happens — a photo left behind would ride along with
 // the next share and offer to log food nobody ate.
@@ -24567,6 +24599,7 @@ const REMINDER_LEADS = [
 ];
 const DEFAULT_REMINDER_LEADS = [60];
 const callCalendarLink = httpsCallable(functions, "calendarFeedLink");
+const callMealInboxLink = httpsCallable(functions, "mealInboxLink");
 
 function SessionReminderPrefs({ notifPrefs, onSetNotifPrefs }) {
   const np = notifPrefs || {};
@@ -28082,13 +28115,22 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
   // the share and showing the locked chat tells the person what happened; the
   // alternative — refusing to read it — leaves the photo stuck in a cache with
   // the app looking like the share silently failed.
+  //
+  // TWO ROUTES, ONE DESTINATION (S222). Android shares through the share sheet
+  // into the service worker's cache; iOS cannot, so a Shortcut POSTs to
+  // functions/mealInbox.js and the photo waits in this account's own kv. Both
+  // are drained here, so nothing downstream has to know which phone it was.
   useEffect(() => {
     let alive = true;
-    takeSharedPhotos().then((urls) => {
-      if (!alive || !urls.length) return;
+    // allSettled, not all: the two sources fail independently, and a missing
+    // service worker must not swallow a photo an iPhone already delivered.
+    Promise.allSettled([takeSharedPhotos(), takeInboxPhotos()]).then((res) => {
+      if (!alive) return;
+      const urls = res.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
+      if (!urls.length) return;
       setPendingImages((prev) => [...prev, ...urls].slice(0, 20));
       setOpen(true);
-    }).catch(() => { /* nothing shared, or the cache is gone */ });
+    }).catch(() => { /* nothing waiting anywhere */ });
     return () => { alive = false; };
   }, []);
   // A reply that arrives while the chat is closed shouldn't vanish unseen — but
@@ -36327,6 +36369,144 @@ function ConnectAIPanel({ onClose, trial = null, premium = true, onUpgrade = nul
   );
 }
 
+// ─── Send meals from your phone (S222) — the iPhone half of S221 ────────────
+// S221 put Glidna in the phone's share sheet. Apple does not implement that for
+// web apps, so on an iPhone or iPad the photo has to come the other way: a
+// Shortcut posts it to a private link and it waits in the app.
+//
+// ⚠️ THE LINK IS A PASSWORD AND THE SCREEN SAYS SO. It has to be — a Shortcut
+// cannot sign in — and a person who pastes it into a shared shortcut has given
+// away write access to their food log. Saying that plainly is part of the
+// feature, not a disclaimer bolted on.
+function MealInboxPanel({ onClose }) {
+  useBodyScrollLock(true);
+  useBackClose(true, onClose);
+  const [url, setUrl] = useState(null);
+  const [err, setErr] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  const load = async (reset) => {
+    setErr("");
+    try {
+      const res = await callMealInboxLink(reset ? { reset: true } : {});
+      setUrl((res.data && res.data.url) || null);
+    } catch (e) { setErr("Couldn't get your link. Check your connection and try again."); }
+  };
+  useEffect(() => { load(false); }, []);
+
+  const copy = async () => {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true); setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard blocked — the link is on screen to select by hand */ }
+  };
+
+  const card = "rounded-lg bg-surface2 p-3";
+  return createPortal(
+    <div onClick={onClose}
+      style={{ fontFamily: "var(--font-sans)", paddingTop: "calc(16px + env(safe-area-inset-top,0px))",
+        paddingBottom: "calc(16px + env(safe-area-inset-bottom,0px))" }}
+      className="fixed inset-0 z-[1500] flex items-start justify-center bg-black/60 px-4 overflow-auto">
+      <div onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-[520px] rounded-card border border-border bg-surface p-4 text-fg my-auto">
+        <div className="mb-3 relative flex items-center justify-center px-[92px]">
+          <div className="text-[1.05rem] font-extrabold flex items-center gap-2">
+            <Icon name="camera" size={17} color="var(--accent)" />Send meals from your phone
+          </div>
+          <button onClick={onClose} aria-label="Back"
+            className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 rounded-full border border-border bg-surface2 pl-2.5 pr-3.5 py-1.5 text-xs font-bold text-fg cursor-pointer"
+            style={{ minHeight: 44 }}>
+            <Icon name="back" size={15} color="var(--accent)" />Back
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-muted leading-relaxed">
+            On <b className="text-fg">Android</b> you can already share a photo straight into Glidna from
+            any app — nothing to set up. <b className="text-fg">iPhone and iPad</b> don&rsquo;t allow that,
+            so this is the way in: a Shortcut sends the photo here, and it&rsquo;s waiting in your AI chat
+            next time you open the app.
+          </p>
+
+          <div className={card}>
+            <div className="text-[.68rem] font-bold uppercase tracking-wide text-muted mb-1.5">Your private photo link</div>
+            <div className="flex gap-2 items-center flex-wrap">
+              <code className="flex-1 min-w-[180px] text-[.72rem] text-fg bg-surface rounded-lg px-3 py-2.5 break-all">
+                {url || (err ? "—" : "Getting your link…")}
+              </code>
+              <button onClick={copy} disabled={!url}
+                className="rounded-lg bg-primaryfill px-4 text-sm font-bold text-primaryfg cursor-pointer disabled:opacity-40"
+                style={{ minHeight: 44 }}>{copied ? "Copied" : "Copy"}</button>
+            </div>
+            {err && <div className="mt-2 text-[.76rem] text-danger">{err}</div>}
+            {/* Stated where it is used, not buried at the bottom. */}
+            <div className="mt-2 text-[.72rem] leading-snug" style={{ color: "var(--yellow)" }}>
+              Treat this like a password. Anyone with it can send photos into your account.
+            </div>
+          </div>
+
+          <div className={card}>
+            <div className="text-sm font-semibold mb-2">Set it up once (about a minute)</div>
+            <ol className="text-sm text-muted leading-relaxed flex flex-col gap-1.5" style={{ paddingLeft: "1.1rem", listStyle: "decimal" }}>
+              <li>Open <b className="text-fg">Shortcuts</b> → <b className="text-fg">+</b> to make a new one.</li>
+              <li>Add <b className="text-fg">Select Photos</b>.</li>
+              {/* ⚠️ THE RESIZE IS NOT OPTIONAL — the endpoint refuses anything
+                  over 500KB, because a base64 photo has to fit in one Firestore
+                  document and there is no image library on the server to shrink
+                  it for us. A full-size iPhone photo is several times that. */}
+              <li>Add <b className="text-fg">Resize Image</b> — set the width to <b className="text-fg">1024</b>.
+                <span className="block text-[.76rem]">Don&rsquo;t skip this one; a full-size photo is too big to send.</span></li>
+              <li>Add <b className="text-fg">Get Contents of URL</b>. Paste your link, set
+                <b className="text-fg"> Method</b> to <b className="text-fg">POST</b> and
+                <b className="text-fg"> Request Body</b> to <b className="text-fg">File</b>.</li>
+              <li>Name it <b className="text-fg">Log a meal</b> and you&rsquo;re done.</li>
+            </ol>
+            <div className="mt-2 text-[.76rem] text-muted leading-snug">
+              Now it&rsquo;s in your Share sheet and you can run it from the Home Screen or by asking Siri.
+              To make it automatic: Shortcuts → <b className="text-fg">Automation</b> → when a photo is added
+              to an album you call <b className="text-fg">Meals</b>.
+            </div>
+          </div>
+
+          <div className={card}>
+            <div className="text-sm font-semibold mb-1">What happens to the photo</div>
+            <p className="text-[.8rem] text-muted leading-relaxed">
+              It waits in your AI chat until you open Glidna. <b className="text-fg">Nothing is logged
+              automatically</b> — you still see the estimate and tap to confirm, exactly as if you&rsquo;d
+              taken the photo in the app.
+            </p>
+          </div>
+
+          {confirmReset ? (
+            <div className="rounded-lg border border-primary bg-surface p-3">
+              <div className="text-[.82rem] text-fg mb-2">
+                Make a new link? The old one stops working straight away, and you&rsquo;ll need to paste the
+                new one into your Shortcut.
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button disabled={resetting}
+                  onClick={async () => { setResetting(true); await load(true); setResetting(false); setConfirmReset(false); }}
+                  className="rounded-lg border-none bg-primaryfill px-3.5 py-2 text-sm font-bold text-primaryfg cursor-pointer">
+                  {resetting ? "Making one…" : "Make a new link"}
+                </button>
+                <button onClick={() => setConfirmReset(false)}
+                  className="rounded-lg border border-border bg-transparent px-3.5 py-2 text-sm text-fg cursor-pointer">Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmReset(true)}
+              className="self-start rounded-md border border-border bg-transparent px-2.5 py-1.5 text-xs font-semibold text-muted cursor-pointer">
+              Shared it by mistake? Make a new link
+            </button>
+          )}
+        </div>
+      </div>
+    </div>, document.body);
+}
+
 // ─── Team panel (S116) — head trainer ↔ sub-trainers ────────────────────────
 // The UI for the hierarchy fix. A trainer JOINS a team by entering the head's
 // invite code (the sub always initiates, so joining is consented by design);
@@ -36736,6 +36916,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
   }, [open, savedAddr]);
   const [showTeam, setShowTeam] = useState(false);        // S116 head trainer <-> sub-trainers
   const [showConnectAI, setShowConnectAI] = useState(false); // S118 MCP connector how-to
+  const [showMealInbox, setShowMealInbox] = useState(false); // S222 iPhone Shortcut photo link
   const [showAuto, setShowAuto] = useState(false);        // S93 scheduled AI automations
   const [upgradeErr, setUpgradeErr] = useState(false);
   useBackClose(open, onClose);                        // phone Back closes the menu
@@ -37135,6 +37316,14 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
           <Icon name="sparkle" size={19} color="var(--accent)" /> <span>Connect your AI</span>
           <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
         </button>
+        {/* Send meals from your phone (S222). Sits beside Connect your AI
+            because both are "wire something outside Glidna into it", and every
+            role eats — a client needs this more than a trainer does. */}
+        <button style={item} onClick={() => setShowMealInbox(true)}>
+          <Icon name="camera" size={19} color="var(--accent)" /> <span>Send meals from your phone</span>
+          <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
+        </button>
+        {showMealInbox && <MealInboxPanel onClose={() => setShowMealInbox(false)} />}
         {/* ⚠️ `premium` IS DERIVED THE WAY planFor() DERIVES IT, not guessed.
             trialInfo() returns null for a paid, admin or grandfathered account —
             all of which the connector serves — so an EXPIRED trial is the only

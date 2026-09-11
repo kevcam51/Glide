@@ -267,6 +267,14 @@ exports.sessionReminderPush = require("./sessionReminders").sessionReminderPush;
 exports.calendarFeed = require("./calendarFeed").calendarFeed;
 exports.calendarFeedLink = require("./calendarFeed").calendarFeedLink;
 
+// ── mealInbox (S222): a photo sent from an iPhone Shortcut ──────────────────
+// Sits beside the calendar feed because it solves the same problem the same
+// way — a device that cannot sign in, so the URL carries the credential. The
+// difference is that this one WRITES, which is why it can only park a photo for
+// review and never log a meal. See the header of functions/mealInbox.js.
+exports.mealInbox = require("./mealInbox").mealInbox;
+exports.mealInboxLink = require("./mealInbox").mealInboxLink;
+
 // ── appRequests (S140): feature requests users sent through the AI ──────────
 // Admin-only, Admin-SDK reads/writes (top-level `appRequests`, no client rules —
 // same shape as `workflows`). The AI writes them via the send_app_request tool.

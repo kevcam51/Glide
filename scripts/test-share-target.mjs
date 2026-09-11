@@ -237,7 +237,33 @@ const runStash = (href) => {
 // ── 6. The app actually consumes it ─────────────────────────────────────────
 ok("the intent is captured at import, beside the other deep links",
    /stashNotifIntent\(\);\s*\n(?:\/\/[^\n]*\n)*stashSharedIntent\(\);/.test(APP));
-ok("the chat panel drains the share on mount", /takeSharedPhotos\(\)\.then\(/.test(APP));
+// ⚠️ THIS ASSERTION CAUGHT A REAL CHANGE AND THEN NEEDED UPDATING ITSELF (S222).
+// It used to match `takeSharedPhotos().then(`, which stopped being true the
+// moment the iOS inbox joined the same effect. The behaviour was still correct —
+// the assertion was describing a call SHAPE rather than the invariant. What
+// actually matters is that the share cache is drained on mount, whatever else
+// is drained alongside it.
+// ⚠️ AND `check:weak` THEN FLAGGED THE REPLACEMENT, which is the tool earning
+// its keep. A bare /takeSharedPhotos\(\)/ matches THREE times in App.jsx — the
+// declaration, a comment about it, and the actual call — so deleting the call
+// would have left this green. Anchored to the drain effect and COUNTED, it goes
+// red whether the call is removed or accidentally duplicated.
+// ⚠️ AND MY FIRST REPLACEMENT WAS ALSO WRONG. Anchoring on
+// /useEffect\(\(\) => \{\s*let alive = true;/ matched a DIFFERENT effect —
+// `let alive = true` is a common shape in this file and String.match returns the
+// first hit in the document, not the one you meant. Anchor on the call itself.
+{
+  const NEEDLE = "Promise.allSettled([takeSharedPhotos(), takeInboxPhotos()])";
+  const at = APP.indexOf(NEEDLE);
+  ok("the share cache is drained on mount, alongside the iOS inbox", at !== -1);
+  // Counted: a second drain site would attach the same photo twice.
+  ok("…from exactly one place", APP.split(NEEDLE).length - 1 === 1,
+     APP.split(NEEDLE).length - 1);
+  const around = at === -1 ? "" : APP.slice(Math.max(0, at - 500), at + 700);
+  ok("…inside a mount effect (empty dep array)",
+     /useEffect\(\(\) => \{/.test(around) && /\}, \[\]\);/.test(around), );
+  ok("…and what it finds is attached as pending photos", /setPendingImages/.test(around));
+}
 ok("…attaches them as pending photos", /setPendingImages\(\(prev\) => \[\.\.\.prev, \.\.\.urls\]/.test(APP));
 ok("…and opens itself so the person sees what arrived", /setPendingImages[\s\S]{0,120}setOpen\(true\)/.test(APP));
 ok("the attach respects the 20-photo message cap", /\.\.\.urls\]\.slice\(0, 20\)/.test(APP));
