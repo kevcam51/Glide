@@ -12915,6 +12915,14 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const [foodErr, setFoodErr] = useState("");
   const [budPick, setBudPick] = useState(null);     // a hit waiting for an amount
   const [budAmt, setBudAmt] = useState("");
+  // ⚠️ searchFoods CALLS BACK MORE THAN ONCE. It races two providers and emits a
+  // partial list as each resolves, so the slower one lands AFTER the user has
+  // picked a food and moved on — which put the whole results list back on screen
+  // underneath an expense they had already added. Found by driving it, not by
+  // reading it. Every clear bumps this token; a callback holding a stale one is
+  // ignored. (Same shape as the S217 focus bug: async state written after the
+  // user has left.)
+  const foodReq = useRef(0);
   // ── The long scenario (S217) ─────────────────────────────────────────────
   // ⚠️ CAPTURED ONCE, ON MOUNT. `ymdLocal()` read per render would roll the whole
   // scenario forward a day at midnight underneath somebody mid-plan, and every
@@ -13030,18 +13038,25 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
         ? (parseFloat(budAmt) || 0)
         : (parseFloat(budAmt) || 0) / 100))
     : 0;
+  const clearFoodSearch = () => {
+    foodReq.current += 1;               // orphans anything still in flight
+    setFoodHits([]); setFoodQ(""); setBudPick(null); setFoodErr("");
+  };
   const runFoodSearch = async () => {
     const q = foodQ.trim();
     if (!q) return;
+    const req = (foodReq.current += 1);
+    const mine = () => req === foodReq.current;
     setFoodBusy(true); setFoodErr(""); setFoodHits([]); setBudPick(null);
     try {
-      const r = await searchFoods(q, (partial) => setFoodHits((partial || []).slice(0, 8)));
+      const r = await searchFoods(q, (partial) => { if (mine()) setFoodHits((partial || []).slice(0, 8)); });
+      if (!mine()) return;
       const hits = (r || []).slice(0, 8);
       setFoodHits(hits);
       if (!hits.length) setFoodErr("Nothing came back \u2014 try a simpler name, or just type the calories.");
     } catch {
-      setFoodErr("Couldn\u2019t reach the food database \u2014 just type the calories instead.");
-    } finally { setFoodBusy(false); }
+      if (mine()) setFoodErr("Couldn\u2019t reach the food database \u2014 just type the calories instead.");
+    } finally { if (mine()) setFoodBusy(false); }
   };
 
   // ── What they eat: seven days, and the pace prices the blanks ────────────
@@ -14257,9 +14272,13 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
         {budOpen && (
           <div style={{ marginTop: "9px" }}>
             <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.45, marginBottom: "9px" }}>
+              {/* ⚠️ THE TRAINING CLAUSE FOLLOWS deficitMode. This sentence read
+                  "training pays a little back in" for everyone, which is false on
+                  an accelerate plan and contradicted the panel directly below it
+                  — the S217 mistake of writing the prose for one direction only. */}
               Money, but in calories. What {th} body burns is the income, the pace
-              is what {they} set aside, training pays a little back in, and food is
-              what gets spent.
+              is what {they} set aside,{eatback ? " training pays a little back in," : ""} and
+              food is what gets spent.{!eatback && " Training doesn\u2019t pay in on this plan \u2014 it buys a sooner goal date instead."}
             </div>
 
             {/* ── Income ─────────────────────────────────────────────────── */}
@@ -14389,7 +14408,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                       {budPick.per === "serving" ? "servings" : "grams"}
                       {" "}&middot; <b style={{ color: "var(--yellow)" }}>{budPickCal.toLocaleString()}</b> cal
                     </span>
-                    <button onClick={() => { addExpense(budPick.name, budPickCal); setBudPick(null); setFoodHits([]); setFoodQ(""); }}
+                    <button onClick={() => { addExpense(budPick.name, budPickCal); clearFoodSearch(); }}
                       disabled={!(budPickCal > 0)}
                       style={{ ...primaryS(budPickCal > 0), flex: "0 0 auto", padding: "9px 12px", fontSize: ".74rem" }}>
                       Add

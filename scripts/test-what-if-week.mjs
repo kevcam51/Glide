@@ -315,6 +315,40 @@ const PLANS = [
   }
   ok("(control) a naively-rounded training row really does fail to close", naiveBreaks > 0, naiveBreaks);
 }
+// ── The budget section's own wiring ─────────────────────────────────────────
+// ⚠️ A LATE PROVIDER PUT THE RESULTS LIST BACK ON SCREEN. searchFoods races two
+// food APIs and calls its onPartial AGAIN when the slower one lands — after the
+// user had picked a food, added it, and watched the list clear. Found by driving
+// it (8 result buttons still up, 2.5s after the add), never by reading it. Same
+// shape as the S217 focus bug: async state written after the user has moved on.
+ok("a food search cannot be revived by a callback the user has finished with",
+   /const foodReq = useRef\(0\);/.test(SIM_CODE)
+   && /const req = \(foodReq\.current \+= 1\);/.test(SIM_CODE)
+   && /const mine = \(\) => req === foodReq\.current;/.test(SIM_CODE)
+   && /\(partial\) => \{ if \(mine\(\)\) setFoodHits/.test(SIM_CODE));
+ok("...and every clear orphans what is still in flight",
+   /const clearFoodSearch = \(\) => \{\s*foodReq\.current \+= 1;/.test(SIM_CODE)
+   && /addExpense\(budPick\.name, budPickCal\); clearFoodSearch\(\);/.test(SIM_CODE));
+// Negative control: the shape that shipped had no guard at all.
+ok("(control) an unguarded partial really would write after the clear",
+   !/if \(mine\(\)\) setFoodHits/.test("(partial) => setFoodHits((partial || []).slice(0, 8))"));
+
+// ⚠️ THE PROSE FOLLOWS deficitMode, NOT JUST THE NUMBERS. The intro read
+// "training pays a little back in" for everyone, which is false on an accelerate
+// plan and contradicted the panel immediately below it — S217's mistake, where
+// five caveats written for someone losing sat under a surplus.
+ok("the budget's training income row is gated on eat-back",
+   /\{eatback && trainWeek > 0 && \(/.test(SIM_CODE));
+ok("...accelerate gets the opposite line instead", /\{!eatback && trainWeek > 0 && \(/.test(SIM_CODE));
+ok("...and the intro sentence is gated too, not written for one mode",
+   /\{eatback \? " training pays a little back in," : ""\}/.test(SIM_CODE)
+   && /\{!eatback && " ?Training doesn/.test(SIM_CODE));
+// ⚠️ WRITES NOTHING, like the rest of the sheet — the promise that licenses it
+// to show a day under 1,200 without prescribing one.
+ok("the budget's expenses are local state and reach no writer",
+   /const \[expenses, setExpenses\] = useState\(\[\]\);/.test(SIM_CODE)
+   && !/setExpenses[\s\S]{0,400}?(storage\.set|setForUser|onAddMeal|logWrite)/.test(SIM_CODE));
+
 // The floor and the raw number are separate readings of the same expression.
 {
   const small = P({ weightLbs: 105, heightFt: 4, heightIn: 11, age: 62, activityLevel: "sedentary" });
