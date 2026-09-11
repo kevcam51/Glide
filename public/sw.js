@@ -15,6 +15,16 @@
 const SHELL = "glidna-shell-v3";
 const ASSETS = "glidna-assets-v2";
 const ASSET_CAP = 60;   // trim old hashed files so the cache can't grow forever
+// Where a photo shared INTO Glidna waits between the share-sheet POST and the
+// app reading it (S221). Cache Storage rather than IndexedDB because a Response
+// already holds a Blob and the service worker is the one writing it.
+//
+// ⚠️ IT MUST BE ON THE ACTIVATE ALLOWLIST BELOW. That handler deletes every
+// cache whose name is not SHELL or ASSETS, so a worker activating between the
+// POST and the app's read would silently eat the photo — and the failure would
+// look like "sharing does nothing", intermittently, which is the worst kind.
+const SHARE = "glidna-share-v1";
+const SHARE_CAP = 20;   // the chat accepts 20 photos a message; match it
 
 self.addEventListener("install", (e) => {
   self.skipWaiting();
@@ -24,7 +34,7 @@ self.addEventListener("install", (e) => {
 self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== SHELL && k !== ASSETS).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== SHELL && k !== ASSETS && k !== SHARE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -43,6 +53,49 @@ async function trimAssets() {
 
 self.addEventListener("fetch", (e) => {
   const req = e.request;
+  // ── A photo shared INTO Glidna from the phone's share sheet (S221) ─────────
+  // The manifest points share_target here with method POST, and the service
+  // worker is the ONLY thing that can read it: the request never reaches the
+  // network, and there is no server route listening on this path.
+  //
+  // ⚠️ THIS MUST SIT ABOVE THE `method !== "GET"` GUARD. That guard returns
+  // WITHOUT calling respondWith, which hands the request to the network — where
+  // Vercel has nothing to answer a POST and the share dies on a blank page.
+  //
+  // ⚠️ AND THE REDIRECT MUST BE 303, NOT 302. A 302 preserves the method, so the
+  // browser would re-POST to "/" and the app would never boot. 303 is the code
+  // that means "now go GET this instead", which is exactly the handoff here.
+  if (req.method === "POST" && new URL(req.url).pathname === "/share-target") {
+    e.respondWith((async () => {
+      let n = 0;
+      try {
+        // ⚠️ EMPTIED BEFORE ANYTHING THAT CAN THROW, and it took a runtime test
+        // to see why. `req.formData()` REJECTS on a body with no parts, so with
+        // the clear written after the parse — the obvious order — a share
+        // carrying no image left the previous photo parked in the cache. The
+        // source-level test could not catch that: the clear was present and
+        // correct, just unreachable on the path that mattered.
+        //
+        // Clearing first also means a half-written share can never mix with the
+        // one before it, which is the failure that would actually hurt: the app
+        // offering to log a meal from somebody's earlier photo.
+        const c = await caches.open(SHARE);
+        for (const k of await c.keys()) await c.delete(k);
+        const form = await req.formData();
+        const files = form.getAll("photos")
+          .filter((f) => f && typeof f.type === "string" && f.type.startsWith("image/"))
+          .slice(0, SHARE_CAP);
+        if (files.length) {
+          await Promise.all(files.map((f, i) => c.put(
+            `/__shared/${i}`,
+            new Response(f, { headers: { "content-type": f.type || "image/jpeg" } }))));
+          n = files.length;
+        }
+      } catch { /* a malformed share should still land the person in the app */ }
+      return Response.redirect(new URL(`/?shared=${n}`, self.location.origin).toString(), 303);
+    })());
+    return;
+  }
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   // Navigations: network-first, fall back to the cached shell when offline.

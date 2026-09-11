@@ -20563,6 +20563,54 @@ function takeSaveCardIntent() {
   } catch (e) { return false; }
 }
 
+// ── A photo shared INTO Glidna from the phone's share sheet (S221) ───────────
+// The service worker catches the share_target POST, parks the files in Cache
+// Storage and redirects here as ?shared=N. This side collects them and hands
+// them to the AI chat, which already knows how to turn a photo of a plate into
+// a confirm-then-log meal card (S65/S68).
+//
+// ⚠️ THE CACHE NAME IS DUPLICATED IN public/sw.js AND CANNOT DRIFT. Two files
+// have to agree on one string, and nothing at build time checks it — if they
+// diverge, the share silently writes to one box and reads from another, which
+// looks exactly like "sharing does nothing". A test pins them together.
+const SHARE_CACHE = "glidna-share-v1";
+const SHARED_STASH = "glidna-shared";
+function stashSharedIntent() {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const n = parseInt(p.get("shared") || "", 10);
+    if (!(n > 0)) return;
+    localStorage.setItem(SHARED_STASH, String(n));
+    const url = new URL(window.location.href);
+    url.searchParams.delete("shared");
+    window.history.replaceState({}, "", url.toString());
+  } catch (e) { /* private mode / no history API */ }
+}
+// Reads the parked files, shrinks them exactly as a camera photo is shrunk, and
+// EMPTIES the cache whatever happens — a photo left behind would ride along with
+// the next share and offer to log food nobody ate.
+async function takeSharedPhotos() {
+  let n = 0;
+  try {
+    const v = localStorage.getItem(SHARED_STASH);
+    if (v) localStorage.removeItem(SHARED_STASH);
+    n = parseInt(v || "", 10) || 0;
+  } catch (e) { return []; }
+  if (!(n > 0) || typeof caches === "undefined") return [];
+  const out = [];
+  try {
+    const c = await caches.open(SHARE_CACHE);
+    for (let i = 0; i < n; i++) {
+      const res = await c.match(`/__shared/${i}`);
+      if (!res) continue;
+      // One unreadable photo must not lose the rest of the share.
+      try { out.push(await downscaleImage(await res.blob())); } catch (e) { /* skip it */ }
+    }
+    for (const k of await c.keys()) await c.delete(k);
+  } catch (e) { /* cache gone — nothing to recover */ }
+  return out;
+}
+
 // A to-do notification's destination (?todo=<id>, S197d). Same round-trip
 // problem as the card intent above — a push tap can land on the sign-in screen
 // first — so it is stashed at import and cleared as soon as it is read.
@@ -20648,6 +20696,9 @@ function takeTodoIntent() {
 stashSaveCardIntent();
 stashTodoIntent();
 stashNotifIntent();
+// Same reason, and more acutely: a share can arrive at a signed-out app, and the
+// ?shared= marker would be gone by the time anyone reaches a screen (S221).
+stashSharedIntent();
 
 // ─── What a no-card reminder's buttons do (S196e) ───────────────────────────
 // The push carries two destinations: tapping the body opens the client's card
@@ -27815,6 +27866,29 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
     chatUiState.size || localStorage.getItem("glidna-chat-size") || "compact"); // "compact" | "bar" docked | "full"
   // Mirror to module scope (survives a screen change) + storage (survives a reload).
   useEffect(() => { chatUiState.open = open; }, [open]);
+  // A photo shared in from the phone's share sheet (S221). It lands here rather
+  // than in the meal form because this panel already owns the whole journey a
+  // photo of a plate needs — identify, estimate, show a card, log on a tap
+  // (S65/S68). Anything else would be a second, worse copy of that.
+  //
+  // ⚠️ takeSharedPhotos() CLEARS THE STASH AS IT READS. That is what makes this
+  // safe despite the panel having several mount sites: whichever one renders
+  // first consumes the share, and the rest get nothing. Leaving it for a "more
+  // appropriate" screen would mean two panels both attaching the same photo.
+  //
+  // ⚠️ It runs even when `premium` is false, and that is deliberate. Consuming
+  // the share and showing the locked chat tells the person what happened; the
+  // alternative — refusing to read it — leaves the photo stuck in a cache with
+  // the app looking like the share silently failed.
+  useEffect(() => {
+    let alive = true;
+    takeSharedPhotos().then((urls) => {
+      if (!alive || !urls.length) return;
+      setPendingImages((prev) => [...prev, ...urls].slice(0, 20));
+      setOpen(true);
+    }).catch(() => { /* nothing shared, or the cache is gone */ });
+    return () => { alive = false; };
+  }, []);
   // A reply that arrives while the chat is closed shouldn't vanish unseen — but
   // "unread" has to mean NEW, not merely "the last message is the AI's". Keyed on
   // the message count seen while open, otherwise simply closing the chat after
