@@ -101,10 +101,10 @@ const FNS = ["calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx"
   "restingKcalPerMin", "calcBurn", "cardioExFor", "exBurn", "isEatback", "dailyDeficitOf", "weeklyRateOf",
   "planEnergy", "planIntakeForRate", "computeClientCalories",
   "simNum", "simRejected", "weekPlan", "joinDays",
-  "seedSimCardio", "simSessionBurn", "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simProject",
+  "seedSimCardio", "simSessionBurn", "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simBudgetRows", "simProject",
   "ymdLocal", "simWeekdayIdx", "simDateAt", "simScenarioDay"];
 const EXPORTS = ["simNum", "simRejected", "weekPlan", "joinDays", "seedSimCardio", "simSessionBurn",
-  "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "planEnergy",
+  "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simBudgetRows", "planEnergy",
   "planIntakeForRate", "computeClientCalories", "cardioExFor", "exBurn", "isEatback", "SIM_RATES",
   "SIM_MANUAL", "MIN_DAILY_CAL", "CAL_PER_LB", "DAYS", "DAY_SHORT", "atLeastMinCal", "simProject",
   "simWeekdayIdx", "simDateAt", "simScenarioDay", "SIM_HORIZONS"];
@@ -246,6 +246,74 @@ const PLANS = [
        M.simIntakeForRate(d, M.planEnergy(d).weeklyBurn, d.weeklyRate) === t.target,
        { chip: M.simIntakeForRate(d, M.planEnergy(d).weeklyBurn, d.weeklyRate), target: t.target });
   }
+}
+// ── 3 · The daily budget (S219, Kevin) ──────────────────────────────────────
+// "Think about someone's daily calorie intake as their budget … food … expenses
+// … exercise … extra income."
+//
+// The budget is a DECOMPOSITION of simIntakeForRate, so the only two things that
+// can go wrong are arithmetic ones, and both are silent: the rows stop adding up,
+// or the total forks from the number every other surface prints. Swept, not
+// spot-checked — and simBudgetRows is LIFTED AND RUN, not retyped (S199k).
+{
+  let notClosing = null, forked = null, badFloor = null, phantom = null, n = 0;
+  for (const [name, d] of PLANS) {
+    const planBurn = M.planEnergy(d).weeklyBurn;
+    for (const burn of [0, planBurn, 1200, 4200]) {
+      for (const r of [-2, -1, -0.5, 0, 0.5, 1, 2]) {
+        for (const ov of [undefined, 1800, 2400, 3600]) {
+          n++;
+          const b = M.simBudgetRows(d, burn, r, ov);
+          // 1. the ledger adds up, every time
+          if (b.tdee - b.cut + b.train !== b.sub) notClosing = { name, burn, r, ov, ...b };
+          // 2. and its total is the SAME call every other surface makes
+          const canon = M.simIntakeForRate(d, burn, r, ov);
+          if (b.budget !== canon) forked = { name, burn, r, ov, budget: b.budget, canon };
+          // 3. the floor is applied at the end and flagged, never silently
+          if (b.budget !== Math.max(M.MIN_DAILY_CAL, b.sub)) badFloor = { name, r, ...b };
+          if (b.floored !== (b.sub < M.MIN_DAILY_CAL)) badFloor = { name, r, flag: b.floored, sub: b.sub };
+          // 4. ⚠️ IN ACCELERATE MODE TRAINING IS NOT INCOME. Printing a positive
+          //    row there would misstate the prescription — that mode's promise is
+          //    that the burn buys the goal DATE, not food.
+          if (!M.isEatback(d) && b.train !== 0) phantom = { name, burn, r, train: b.train };
+          if (notClosing || forked || badFloor || phantom) break;
+        }
+        if (notClosing || forked || badFloor || phantom) break;
+      }
+      if (notClosing || forked || badFloor || phantom) break;
+    }
+    if (notClosing || forked || badFloor || phantom) break;
+  }
+  ok(`the budget ledger always adds up (${n} plan × burn × rate × override cases)`, !notClosing, notClosing);
+  ok("...and its total never forks from simIntakeForRate", !forked, forked);
+  ok("...the 1,200 floor lands on the total and is flagged, never silent", !badFloor, badFloor);
+  ok("...and accelerate mode shows no training income at all", !phantom, phantom);
+}
+{
+  // In eat-back the training row IS the week spread over seven days — the number
+  // the section claims to be showing.
+  const d = PLANS.find(([nm]) => nm === "eat-back, cardio + strength")[1];
+  let worst = 0;
+  for (const burn of [0, 700, 1400, 2800, 4200]) {
+    for (const r of [0, 0.5, 1, 2]) {
+      const b = M.simBudgetRows(d, burn, r);
+      worst = Math.max(worst, Math.abs(b.train - Math.round(burn / 7)));
+    }
+  }
+  // ⚠️ WITHIN ONE CALORIE, NOT EQUAL. The row absorbs the rounding so the ledger
+  // closes; that is the whole reason it is derived rather than computed.
+  ok("eat-back's training row is the week over seven days, to the calorie", worst <= 1, worst);
+  // Negative control: the naive row would NOT always close, or the derivation
+  // above is decoration.
+  let naiveBreaks = 0;
+  for (const tdee of [1801, 2399.5, 2400.5, 3603]) {
+    for (const burn of [1000, 1500, 2500]) {
+      const cut = Math.round((1 * 3500) / 7);
+      const sub = Math.round(tdee - cut + burn / 7);
+      if (Math.round(tdee) - cut + Math.round(burn / 7) !== sub) naiveBreaks++;
+    }
+  }
+  ok("(control) a naively-rounded training row really does fail to close", naiveBreaks > 0, naiveBreaks);
 }
 // The floor and the raw number are separate readings of the same expression.
 {
@@ -406,7 +474,7 @@ ok("...and the sandbox sheet drops the native number spinner",
 ok("...so the padding that dodged it is gone, and every box still reads one object",
    /const numInput = \{ \.\.\.input, textAlign: "center", padding: "9px 12px" \};/.test(SIM_CODE)
    && !/padding: "9px 26px"/.test(SIM_CODE)
-   && (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 7,
+   && (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 9,
    (SIM_CODE.match(/\.\.\.numInput/g) || []).length);
 ok("...and the pencil panel's gate is the committed flag alone",
    MOUNT_GATES.includes("{editBurn && (")
@@ -513,7 +581,7 @@ ok("...and the discard question is brought to them",
 // scenario overrides have to be in the flag too — otherwise the one state worth
 // guarding is the one the guard cannot see.
 ok("...the dirty flag covers every input the modal holds",
-   /dirtyRef\.current = anyTyped \|\| cardioChanged \|\| mNum !== null \|\| wNum !== null\s*\n?\s*\|\| Object\.keys\(dayOverrides\)\.length > 0;/.test(SIM_CODE));
+   /dirtyRef\.current = anyTyped \|\| cardioChanged \|\| mNum !== null \|\| wNum !== null\s*\n?\s*\|\| Object\.keys\(dayOverrides\)\.length > 0 \|\| expenses\.length > 0;/.test(SIM_CODE));
 ok("...and the close button keeps its direct path",
    /<button onClick=\{onClose\} aria-label="Close"/.test(SIM_CODE));
 // ⚠️ NEVER re-price somebody's logged history against a number invented on a
@@ -1261,9 +1329,14 @@ ok("the plan-writing custom-exercise creator is NOT ported", !/CustomExerciseCre
   // the padding on BOTH sides, so a five-digit 35,000 — simNum's own ceiling —
   // clipped in the 108px day boxes. Measured in the browser, not reasoned about.
   {
-    const pad = 26 * 2, border = 2, digit = 8.4;   // .88rem DM Sans, measured
+    // ⚠️ PADDING IS READ FROM THE DECLARATION, NOT HARDCODED. This said
+    // `26 * 2`, and S218 changed numInput to 12px — so the check had been
+    // computing against a padding the app no longer uses and was over-strict by
+    // 28px. It kept passing only because every existing box had room to spare.
+    // A constant that restates the thing it is testing goes stale in silence.
+    const pad = parseFloat(side) * 2, border = 2, digit = 8.4;   // .88rem DM Sans, measured
     const widths = [...SIM_CODE.matchAll(/\.\.\.numInput, width: "(\d+)px"/g)].map((m) => Number(m[1]));
-    ok("every numeric box is declared with a width", widths.length >= 6, widths);
+    ok("every numeric box is declared with a width", widths.length >= 8, widths);
     ok("...and all of them fit five digits", widths.every((w) => w - pad - border >= digit * 5), widths);
   }
   // ⚠️ SCOPED TO INPUT STYLES. Three things in this sheet are legitimately
@@ -1275,11 +1348,11 @@ ok("the plan-writing custom-exercise creator is NOT ported", !/CustomExerciseCre
   // seven day inputs, "set every day to", quick fill's calories, and a per-day
   // manual session. Fixing one and leaving three is the shape check:weak exists
   // to catch.
-  // ⚠️ SIX SINCE S217: the seven day inputs share one, plus "set every day to",
+  // ⚠️ NINE SINCE S219 (six at S217): the seven day inputs share one, plus "set every day to",
   // quick fill's calories, a per-day manual session, the typed daily burn and
   // the typed weight. Fixing one and leaving five is the shape check:weak exists
   // to catch — this count is the only thing that notices.
-  ok("every numeric box in the modal uses it", (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 7,
+  ok("every numeric box in the modal uses it", (SIM_CODE.match(/\.\.\.numInput/g) || []).length === 9,
      (SIM_CODE.match(/\.\.\.numInput/g) || []).length);
   // ⚠️ ONE alignment style, and it is `numInput`'s own declaration. A second
   // hand-rolled `{...input, textAlign: …}` anywhere else is a box that kept the

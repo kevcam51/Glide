@@ -12636,6 +12636,35 @@ function simIntakeForRate(d, weeklyBurn, r, tdeeOverride) {
   return raw === null ? 0 : atLeastMinCal(raw);
 }
 
+// ── The daily budget, as the ladder's own three terms (S219, Kevin) ─────────
+// "Think about someone's daily calorie intake as their budget … the food that
+// they consume can be their expenses … the exercise and activities that give
+// them calorie burn can be considered extra income."
+//
+// ⚠️ MODULE LEVEL SO A TEST CAN RUN THE SHIPPING CODE. Inline in the component
+// this arithmetic is unreachable, and a suite that RETYPES it stays green while
+// the component drifts — the S199k trap this repo paid for twice.
+//
+// ⚠️ THE ROWS MUST CLOSE ON simIntakeForRate. round(tdee) − round(cut) +
+// round(train) can land a calorie away from round(tdee − cut + train), so the
+// training row absorbs the rounding. A ledger that does not add up is the S215
+// bug ("1,524 / −1,000 / = 1,200 / +238 / 1,200"), and `budget` is the SAME call
+// every other surface makes rather than a second opinion about it.
+function simBudgetRows(d, weeklyBurn, r, tdeeOverride) {
+  const ov = Number(tdeeOverride);
+  const tdee = Math.round(ov > 0 ? ov : (planEnergy(d).tdee || 0));
+  const cut = Math.round(((Number(r) || 0) * 3500) / 7);
+  const raw = simRawIntakeForRate(d, weeklyBurn, r, tdeeOverride);
+  const sub = raw === null ? 0 : Math.round(raw);
+  return {
+    tdee, cut,
+    train: sub - tdee + cut,
+    sub,
+    floored: raw !== null && raw < MIN_DAILY_CAL,
+    budget: simIntakeForRate(d, weeklyBurn, r, tdeeOverride),
+  };
+}
+
 // What a typed daily burn is allowed to be.
 //
 // ⚠️ THE PARSER CAP AND THE PLAUSIBLE BAND ARE DIFFERENT JOBS. The cap is what
@@ -12863,6 +12892,29 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const [rate, setRate] = useState(RATE_OPTS.includes(planRate) ? planRate : 0);
   const [weekCals, setWeekCals] = useState(() => ["", "", "", "", "", "", ""]);   // index 0 = Monday
   const [everyDay, setEveryDay] = useState("");
+  // ── The calorie budget (S219, Kevin) ──────────────────────────────────────
+  // "think about someone's daily calorie intake as their budget and the food
+  // that they consume can be their expenses, and then also the exercise and
+  // activities that they have that give them calorie burn can be considered
+  // extra income that comes into their account."
+  //
+  // ⚠️ A DECOMPOSITION OF `intakeFor(rate)`, NOT A SECOND SUM. The rows are
+  // literally the three terms of simRawIntakeForRate. A budget computed its own
+  // way would be a fourth number for the thing this modal already prints twice.
+  //
+  // ⚠️ AND IT WRITES NOTHING, like everything else in here. The expenses are
+  // local state that dies with the sheet — which is also what licenses the list
+  // to show a day that eats far under 1,200 without prescribing one.
+  const [budOpen, setBudOpen] = useState(true);
+  const [expenses, setExpenses] = useState([]);     // {id, name, cal} — LOCAL ONLY
+  const [expCal, setExpCal] = useState("");
+  const [expName, setExpName] = useState("");
+  const [foodQ, setFoodQ] = useState("");
+  const [foodHits, setFoodHits] = useState([]);
+  const [foodBusy, setFoodBusy] = useState(false);
+  const [foodErr, setFoodErr] = useState("");
+  const [budPick, setBudPick] = useState(null);     // a hit waiting for an amount
+  const [budAmt, setBudAmt] = useState("");
   // ── The long scenario (S217) ─────────────────────────────────────────────
   // ⚠️ CAPTURED ONCE, ON MOUNT. `ymdLocal()` read per render would roll the whole
   // scenario forward a day at midnight underneath somebody mid-plan, and every
@@ -12947,6 +12999,50 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const burnWeek = eatback ? 0 : trainWeek;
   const burnPerDay = Math.round(burnWeek / 7);
   const paceTarget = intakeFor(rate);
+
+  // ── The budget, as the ladder's own three terms ──────────────────────────
+  // ⚠️ THE TRAINING ROW IS DERIVED SO THE LADDER CLOSES. round(tdee) − round(cut)
+  // + round(train) can land a calorie away from round(tdee − cut + train), and a
+  // ledger that does not add up is the S215 bug ("1,524 / −1,000 / = 1,200 /
+  // +238 / 1,200"). Closing on budSub keeps every row honest AND keeps the total
+  // identical to the "Daily goal at this pace" printed a section above.
+  const bud = simBudgetRows(d, trainWeek, rate, mNum);
+  const { tdee: budTdee, cut: budCut, train: budTrain, sub: budSub } = bud;
+  // ⚠️ THE FLOOR IS ITS OWN ROW, NEVER A SILENT CLAMP (CLAUDE.md). A subtotal of
+  // 524 is a true statement about the arithmetic; prescribing 524 is not.
+  const budFloored = bud.floored;
+  // The pace's own words, from the table that owns them — never a second spelling.
+  const budPaceLbl = (SIM_RATES.find((t) => t.rate === rate) || {}).lbl || "";
+  // Identical call to paceTarget's — one ladder, not a second opinion.
+  const budget = bud.budget;
+  const spent = expenses.reduce((t, e) => t + (Number(e.cal) || 0), 0);
+  const budLeft = budget - spent;
+  const budPct = budget > 0 ? Math.round((spent / budget) * 100) : 0;
+  const addExpense = (name, cal) => {
+    const c = Math.round(Number(cal) || 0);
+    if (!(c > 0)) return;
+    setExpenses((xs) => [...xs, { id: `e${Date.now()}${xs.length}`, name: (name || "").trim() || `${c.toLocaleString()} cal`, cal: c }]);
+  };
+  // Per-100g foods (USDA/OFF) scale by grams; per-serving foods (FatSecret
+  // "1 scoop") scale by the number of servings — the same split applyServing uses.
+  const budPickCal = budPick
+    ? Math.round((Number(budPick.kcal) || 0) * (budPick.per === "serving"
+        ? (parseFloat(budAmt) || 0)
+        : (parseFloat(budAmt) || 0) / 100))
+    : 0;
+  const runFoodSearch = async () => {
+    const q = foodQ.trim();
+    if (!q) return;
+    setFoodBusy(true); setFoodErr(""); setFoodHits([]); setBudPick(null);
+    try {
+      const r = await searchFoods(q, (partial) => setFoodHits((partial || []).slice(0, 8)));
+      const hits = (r || []).slice(0, 8);
+      setFoodHits(hits);
+      if (!hits.length) setFoodErr("Nothing came back \u2014 try a simpler name, or just type the calories.");
+    } catch {
+      setFoodErr("Couldn\u2019t reach the food database \u2014 just type the calories instead.");
+    } finally { setFoodBusy(false); }
+  };
 
   // ── What they eat: seven days, and the pace prices the blanks ────────────
   // ⚠️ THE WEEK WAS ALREADY THE BASIS. Dropping "Pick a pace" and "One number"
@@ -13051,7 +13147,7 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const anyTyped = weekCals.some((x) => String(x || "").trim() !== "");
   // Everything the close guard is protecting, in one place.
   dirtyRef.current = anyTyped || cardioChanged || mNum !== null || wNum !== null
-    || Object.keys(dayOverrides).length > 0;
+    || Object.keys(dayOverrides).length > 0 || expenses.length > 0;
   const everyDayNum = simNum(everyDay);
   const applyEveryDay = () => { if (everyDayNum !== null) setWeekCals(["", "", "", "", "", "", ""].map(() => String(everyDayNum))); };
 
@@ -14141,7 +14237,197 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
           </div>
         )}
 
-        {/* ── 3 · The answer ─────────────────────────────────────────────── */}
+        {/* ── 3 · Your daily budget (S219, Kevin) ──────────────────────────
+            "Think about someone's daily calorie intake as their budget and the
+            food that they consume can be their expenses, and then also the
+            exercise and activities that they have that give them calorie burn
+            can be considered extra income that comes into their account."
+            ⚠️ IN ACCELERATE MODE TRAINING IS NOT INCOME, AND PRINTING IT AS
+            INCOME WOULD MISSTATE THE PRESCRIPTION. That mode's whole promise is
+            that the burn buys the goal DATE rather than food (isEatback), so the
+            row is replaced by a line that says exactly that. */}
+        <button onClick={() => setBudOpen((v) => !v)} aria-expanded={budOpen}
+          style={{ ...lbl, marginTop: "18px", marginBottom: 0, width: "100%", textAlign: "left",
+            background: "transparent", border: "none", padding: 0, cursor: "pointer",
+            fontFamily: "inherit", display: "flex", alignItems: "center", gap: "7px" }}>
+          <Icon name="card" size={14} color="var(--accent)" />
+          <span style={{ flex: 1 }}>3 &middot; {Th} daily budget</span>
+          <span style={{ color: "var(--muted)", fontSize: ".7rem" }}>{budOpen ? "▲" : "▼"}</span>
+        </button>
+        {budOpen && (
+          <div style={{ marginTop: "9px" }}>
+            <div style={{ fontSize: ".68rem", color: "var(--muted)", lineHeight: 1.45, marginBottom: "9px" }}>
+              Money, but in calories. What {th} body burns is the income, the pace
+              is what {they} set aside, training pays a little back in, and food is
+              what gets spent.
+            </div>
+
+            {/* ── Income ─────────────────────────────────────────────────── */}
+            <div style={{ ...panelS, padding: "11px", marginBottom: 0 }}>
+              <div style={{ fontSize: ".62rem", letterSpacing: ".6px", color: "var(--muted)", marginBottom: "6px" }}>
+                COMING IN
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: ".76rem", padding: "3px 0" }}>
+                <span>{Th} body&rsquo;s daily burn</span>
+                <b>{budTdee.toLocaleString()}</b>
+              </div>
+              {budCut !== 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: ".76rem", padding: "3px 0" }}>
+                  <span>{budCut > 0 ? `Set aside to lose ${budPaceLbl}` : `Extra to gain ${budPaceLbl}`}</span>
+                  <b style={{ color: budCut > 0 ? "var(--yellow)" : "var(--green)" }}>
+                    {budCut > 0 ? "−" : "+"}{Math.abs(budCut).toLocaleString()}
+                  </b>
+                </div>
+              )}
+              {eatback && trainWeek > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: ".76rem", padding: "3px 0" }}>
+                  <span>Training pays back in</span>
+                  <b style={{ color: "var(--green)" }}>+{budTrain.toLocaleString()}</b>
+                </div>
+              )}
+              {budFloored && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: ".76rem", padding: "3px 0",
+                  color: "var(--yellow)" }}>
+                  <span>Held at the 1,200 floor</span>
+                  <b>+{(MIN_DAILY_CAL - budSub).toLocaleString()}</b>
+                </div>
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "7px", paddingTop: "7px",
+                borderTop: "1px solid var(--border)", fontSize: ".84rem" }}>
+                <b>{Th} budget for the day</b>
+                <b style={{ color: "var(--accent)" }}>{budget.toLocaleString()}</b>
+              </div>
+              {!eatback && trainWeek > 0 && (
+                <div style={{ marginTop: "6px", fontSize: ".65rem", color: "var(--muted)", lineHeight: 1.45 }}>
+                  Training isn&rsquo;t income on this plan &mdash; {they} chose to keep the
+                  deficit and let the <b style={{ color: "var(--orange)" }}>{Math.round(trainWeek / 7).toLocaleString()}</b> cal
+                  a day it burns pull the goal date closer instead.
+                </div>
+              )}
+            </div>
+
+            {/* ── Expenses ───────────────────────────────────────────────── */}
+            <div style={{ ...panelS, padding: "11px", marginTop: "8px", marginBottom: 0 }}>
+              <div style={{ fontSize: ".62rem", letterSpacing: ".6px", color: "var(--muted)", marginBottom: "6px" }}>
+                GOING OUT
+              </div>
+              {expenses.length === 0 && (
+                <div style={{ fontSize: ".7rem", color: "var(--muted)", lineHeight: 1.45, paddingBottom: "4px" }}>
+                  Nothing spent yet. Add food below and watch the budget come down.
+                </div>
+              )}
+              {expenses.map((e) => (
+                <div key={e.id} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: ".76rem", padding: "3px 0" }}>
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</span>
+                  <b style={{ color: "var(--yellow)" }}>&minus;{e.cal.toLocaleString()}</b>
+                  <button onClick={() => setExpenses((xs) => xs.filter((x) => x.id !== e.id))}
+                    aria-label={`Remove ${e.name}`}
+                    style={{ background: "transparent", border: "none", cursor: "pointer", padding: "2px", lineHeight: 0 }}>
+                    <Icon name="close" size={12} color="var(--muted)" />
+                  </button>
+                </div>
+              ))}
+
+              {/* Type a number, or a name and a number — the "imaginary calorie
+                  options" half of the ask. */}
+              <div style={{ display: "flex", gap: "6px", marginTop: "8px", alignItems: "center" }}>
+                <input value={expName} onChange={(ev) => setExpName(ev.target.value)}
+                  placeholder="Pizza, 2 slices" aria-label="What was eaten"
+                  style={{ ...input, flex: 1, minWidth: 0 }} />
+                <input type="number" inputMode="numeric" min="0" step="10"
+                  value={expCal} onChange={(ev) => setExpCal(ev.target.value)}
+                  onKeyDown={(ev) => { if (ev.key === "Enter") { ev.preventDefault(); addExpense(expName, expCal); setExpName(""); setExpCal(""); } }}
+                  placeholder="cal" aria-label="Calories"
+                  style={{ ...numInput, width: "96px" }} />
+                <button onClick={() => { addExpense(expName, expCal); setExpName(""); setExpCal(""); }}
+                  disabled={!(Number(expCal) > 0)}
+                  style={{ ...primaryS(Number(expCal) > 0), flex: "0 0 auto", padding: "9px 12px", fontSize: ".74rem" }}>
+                  Add
+                </button>
+              </div>
+
+              {/* The food database, same source the meal log uses. */}
+              <div style={{ display: "flex", gap: "6px", marginTop: "7px", alignItems: "center" }}>
+                <input value={foodQ} onChange={(ev) => setFoodQ(ev.target.value)}
+                  onKeyDown={(ev) => { if (ev.key === "Enter") { ev.preventDefault(); runFoodSearch(); } }}
+                  placeholder="or search a food…" aria-label="Search the food database"
+                  style={{ ...input, flex: 1, minWidth: 0 }} />
+                <button onClick={runFoodSearch} disabled={foodBusy || !foodQ.trim()}
+                  style={{ ...primaryS(!!foodQ.trim() && !foodBusy), flex: "0 0 auto", padding: "9px 12px", fontSize: ".74rem" }}>
+                  {foodBusy ? "…" : "Search"}
+                </button>
+              </div>
+              {foodErr && (
+                <div style={{ marginTop: "5px", fontSize: ".66rem", color: "var(--yellow)", lineHeight: 1.45 }}>{foodErr}</div>
+              )}
+              {foodHits.length > 0 && !budPick && (
+                <div style={{ marginTop: "6px", maxHeight: "162px", overflowY: "auto" }}>
+                  {foodHits.map((f, n) => (
+                    <button key={`${f.name}-${n}`} onClick={() => { setBudPick(f); setBudAmt(f.per === "serving" ? "1" : "100"); }}
+                      style={{ display: "block", width: "100%", textAlign: "left", cursor: "pointer",
+                        background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px",
+                        padding: "7px 9px", marginBottom: "4px", fontFamily: "inherit", color: "var(--text)" }}>
+                      <div style={{ fontSize: ".73rem" }}>{f.name}</div>
+                      <div style={{ fontSize: ".63rem", color: "var(--muted)", marginTop: "1px" }}>
+                        {f.brand ? `${f.brand} · ` : ""}{Math.round(f.kcal || 0).toLocaleString()} cal
+                        {f.per === "serving" ? " a serving" : " per 100g"}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {budPick && (
+                <div style={{ marginTop: "6px", padding: "9px", borderRadius: "9px",
+                  background: "var(--s2)", border: "1px solid var(--accent)" }}>
+                  <div style={{ fontSize: ".73rem", marginBottom: "6px" }}>{budPick.name}</div>
+                  <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <input type="number" inputMode="decimal" min="0" step={budPick.per === "serving" ? "0.5" : "10"}
+                      value={budAmt} onChange={(ev) => setBudAmt(ev.target.value)}
+                      aria-label={budPick.per === "serving" ? "Servings" : "Grams"}
+                      style={{ ...numInput, width: "96px" }} />
+                    <span style={{ fontSize: ".7rem", color: "var(--muted)", flex: 1 }}>
+                      {budPick.per === "serving" ? "servings" : "grams"}
+                      {" "}&middot; <b style={{ color: "var(--yellow)" }}>{budPickCal.toLocaleString()}</b> cal
+                    </span>
+                    <button onClick={() => { addExpense(budPick.name, budPickCal); setBudPick(null); setFoodHits([]); setFoodQ(""); }}
+                      disabled={!(budPickCal > 0)}
+                      style={{ ...primaryS(budPickCal > 0), flex: "0 0 auto", padding: "9px 12px", fontSize: ".74rem" }}>
+                      Add
+                    </button>
+                    <button onClick={() => setBudPick(null)} aria-label="Cancel"
+                      style={{ background: "transparent", border: "none", cursor: "pointer", padding: "4px", lineHeight: 0 }}>
+                      <Icon name="close" size={13} color="var(--muted)" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: "9px", paddingTop: "7px",
+                borderTop: "1px solid var(--border)", fontSize: ".84rem" }}>
+                <b>{budLeft >= 0 ? "Left to spend" : "Over budget by"}</b>
+                <b style={{ color: budLeft >= 0 ? "var(--green)" : "var(--red)" }}>
+                  {Math.abs(budLeft).toLocaleString()}
+                </b>
+              </div>
+              {/* A bar is the one place the metaphor pays off visually — it reads
+                  as an account draining, which a column of numbers does not. */}
+              <div style={{ marginTop: "7px", height: "7px", borderRadius: "4px", background: "var(--s3)", overflow: "hidden" }}>
+                <div style={{ width: `${Math.max(0, Math.min(100, budPct))}%`, height: "100%",
+                  background: budLeft >= 0 ? "var(--accent)" : "var(--red)", transition: "width .2s" }} />
+              </div>
+              <div style={{ marginTop: "5px", fontSize: ".65rem", color: "var(--muted)", lineHeight: 1.45 }}>
+                {spent.toLocaleString()} of {budget.toLocaleString()} spent
+                {budget > 0 && <> &middot; {budPct}%</>}
+                {budLeft < 0 && (
+                  <> &mdash; a day like this every day is a surplus, and the weight
+                    goes on rather than off.</>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── 4 · The answer ─────────────────────────────────────────────── */}
         <div style={{ marginTop: "16px", borderTop: "1px solid var(--border)", paddingTop: "13px" }}>
           {/* Answered as a WEEK, because that is the unit seven numbers describe
               — an average would hide the very variation the boxes exist to show.
