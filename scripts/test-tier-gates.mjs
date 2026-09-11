@@ -307,5 +307,95 @@ ok("the 'nothing to connect' line is gone", !/Nothing to connect, nothing to swi
   ok("disconnect is offered where the connection is shown", /Disconnect<\/button>/.test(APP));
 }
 
+// ── The connector's status badge (S220) ─────────────────────────────────────
+// Kevin asked for "trial with a 30 day count down ticker, Upgrade to activate
+// and active" at the top of Connect your AI. The badge is only worth anything
+// if it agrees with functions/mcp.js planFor(), which is what actually decides
+// whether the connector answers — a light that says "Active" over a refusing
+// endpoint is worse than no light.
+//
+// ⚠️ THIS RUNS THE SHIPPING FUNCTION, it does not re-describe it. A suite that
+// asserts on a transcribed copy stays green while App.jsx breaks (S199k), and
+// one that pattern-matches a guard stays green when the guard becomes
+// `if (false)`. Lifted brace-balanced, because a lazy `[\s\S]*?\n}` swallows
+// whatever follows (S215).
+{
+  const start = APP.indexOf("function connectorStatus");
+  ok("connectorStatus exists in App.jsx", start !== -1);
+  let depth = 0, end = -1;
+  for (let j = APP.indexOf("{", start); j < APP.length; j++) {
+    const c = APP[j];
+    if (c === "{") depth++;
+    else if (c === "}") { depth--; if (!depth) { end = j + 1; break; } }
+  }
+  ok("the lift is brace-balanced and terminated", end > start);
+  const connectorStatus = eval("(" + APP.slice(start, end).replace("function connectorStatus", "function") + ")");
+
+  const trial = (daysLeft, expired = false, lengthDays = 30) => ({ daysLeft, expired, lengthDays });
+
+  // The three states, in planFor()'s own precedence.
+  ok("a running trial reads Trial", connectorStatus(trial(23), true).key === "trial");
+  ok("a running trial counts the days down", connectorStatus(trial(23), true).detail === "23 days left");
+  ok("one day left is singular", connectorStatus(trial(1), true).detail === "1 day left");
+  ok("the last day says so rather than '0 days left'", connectorStatus(trial(0), true).detail === "Ends today");
+  ok("an EXPIRED trial reads Inactive", connectorStatus(trial(0, true), false).key === "expired");
+  ok("…and names the action", /Upgrade to activate/.test(connectorStatus(trial(0, true), false).detail));
+
+  // ⚠️ THE GRANDFATHERED CASE IS THE ONE THAT BITES. trialInfo() returns null for
+  // a paid, admin OR grandfathered account — the largest group — so deriving
+  // premium as `subActive || !trial` would paint every one of them "Inactive".
+  ok("no trial + access reads Active, not Inactive", connectorStatus(null, true).key === "active");
+
+  // The ticker is a fraction of the trial, and only a trial has one.
+  ok("the ticker is full on day 30", connectorStatus(trial(30), true).pct === 1);
+  ok("the ticker is empty on the last day", connectorStatus(trial(0), true).pct === 0);
+  ok("the ticker tracks the days between", Math.round(connectorStatus(trial(15), true).pct * 100) === 50);
+  ok("Active has no ticker to show", connectorStatus(null, true).pct === null);
+  ok("Inactive has no ticker to show", connectorStatus(trial(0, true), false).pct === null);
+
+  // ⚠️ EVERY ICON MUST EXIST. <Icon> renders an unknown name as NOTHING rather
+  // than throwing, so a typo ships a silent hole — and an assertion looking for
+  // /undefined/ passes against it, because JSX drops the child (S214).
+  const ICONS = readFileSync(new URL("../src/icons.jsx", import.meta.url), "utf8");
+  for (const st of [connectorStatus(trial(23), true), connectorStatus(null, true), connectorStatus(trial(0, true), false)]) {
+    ok(`the ${st.key} badge's "${st.icon}" icon exists`, new RegExp(`^  ${st.icon}:`, "m").test(ICONS));
+  }
+
+  // A colour per state, and never the same one twice — the badge is read at a
+  // glance before it is read as words.
+  const tones = ["trial", "active", "expired"].map((k) => (
+    k === "trial" ? connectorStatus(trial(23), true)
+      : k === "active" ? connectorStatus(null, true)
+        : connectorStatus(trial(0, true), false)).tone);
+  ok("the three states are three different colours", new Set(tones).size === 3, tones);
+  ok("a trial nearing its end turns amber", connectorStatus(trial(3), true).tone === "var(--yellow)");
+  ok("…and is still cyan with time to spare", connectorStatus(trial(20), true).tone === "var(--accent)");
+
+  // The panel renders it above everything else, which is the whole point.
+  ok("the badge renders before the explainer paragraph",
+     APP.indexOf("connectorStatus(trial, premium)") < APP.indexOf("Use Glidna from inside your own AI assistant"));
+  ok("the menu passes the derivation planFor uses, not `subActive || !trial`",
+     /premium=\{!\(trial && trial\.expired\)\}/.test(APP));
+}
+
+// ── The side-menu order Kevin asked for (S220) ───────────────────────────────
+// "Can home be the first button, calendar be the second and dashboard be the
+// third." Asserted by POSITION, because the rows are four nearly-identical
+// lines and a reorder that silently reverts would read fine in a diff.
+{
+  const nav = APP.indexOf("{/* Navigation — ORDER IS KEVIN'S");
+  ok("the navigation block is findable", nav !== -1);
+  const seg = APP.slice(nav, nav + 1600);
+  const at = (label) => seg.indexOf(`<span>${label}</span>`);
+  ok("Home is first", at("Home") !== -1 && at("Home") < at("Calendar"));
+  ok("Calendar is second", at("Calendar") < at("Dashboard"));
+  ok("Dashboard is third", at("Dashboard") < at("All clients"));
+  // ⚠️ Calendar keeps BOTH its guards through the move. It renders only for a
+  // trainer who has the handler; dropping `onCalendar` would put a dead row in
+  // front of every trainer whose screen does not supply one.
+  ok("Calendar keeps its isTrainer && onCalendar guard",
+     /\{isTrainer && onCalendar && <button style=\{item\} onClick=\{\(\) => go\(onCalendar\)\}/.test(seg));
+}
+
 console.log(`${checks - fails}/${checks} tier-gate assertions passed`);
 if (fails) process.exit(1);

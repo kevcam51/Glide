@@ -29264,7 +29264,13 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                 </div>
               </div>
             )}
-            {showConnect && <ConnectAIPanel onClose={() => setShowConnect(false)} />}
+            {/* This shortcut (the AI cap card) knows `premium` but not the trial
+                object, so the badge here states active/inactive truthfully and
+                leaves the day-countdown to the ≡ menu entry, which has it.
+                Threading `trial` through all seven AIChatPanel mounts — one of
+                them inside ClientHome — is more regression surface than a
+                secondary shortcut is worth. */}
+            {showConnect && <ConnectAIPanel onClose={() => setShowConnect(false)} premium={premium} />}
             {warn && !error && (
               <div className="self-stretch rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-[.78rem] text-warn">
                 You're nearing today's AI usage limit.
@@ -35834,7 +35840,39 @@ function ComplianceTracker({ data, target, days, hidden, onToggleHidden, onOpenT
 // nothing told a user it existed or how to switch it on. This is that surface.
 // Kept deliberately plain — the instructions have to survive being read once, on
 // a phone, by someone who has never heard of MCP.
-function ConnectAIPanel({ onClose }) {
+// ⚠️ THE BADGE MIRRORS functions/mcp.js planFor(), NOT a second opinion (S220,
+// Kevin: "an indicator at the top of the page that says trial with a 30 day
+// count down ticker, Upgrade to activate and active"). That server function is
+// what actually decides whether the connector answers, and it resolves in this
+// order: an active subscription → paid; a running trial → premium; an EXPIRED
+// trial → "free", which is the state where the connector degrades and tells the
+// user to upgrade. A status light that disagreed with the gate behind it would
+// be worse than none — someone would read "Active" while their assistant was
+// being refused. So the three states here are exactly that function's three
+// outcomes, in its order.
+function connectorStatus(trial, premium) {
+  const running = trial && !trial.expired && Number(trial.daysLeft) >= 0;
+  if (running) {
+    const d = Math.max(0, Number(trial.daysLeft) || 0);
+    const low = d <= 5;                     // same ≤5 amber threshold as the menu banner (S51)
+    return { key: "trial", label: "Trial",
+      detail: d === 0 ? "Ends today" : `${d} day${d === 1 ? "" : "s"} left`,
+      pct: trial.lengthDays > 0 ? Math.max(0, Math.min(1, d / trial.lengthDays)) : null,
+      tone: low ? "var(--yellow)" : "var(--accent)", icon: "clock" };
+  }
+  // No running trial: premium here means a paid subscription or a grandfathered
+  // account — either way the connector answers.
+  if (premium) return { key: "active", label: "Active",
+    detail: "Your connector is on", pct: null, tone: "var(--green)", icon: "check" };
+  // ⚠️ "alert", not "lock" — src/icons.jsx has no lock glyph, and <Icon> renders
+  // an undefined name as NOTHING rather than failing, so the badge would have
+  // carried a silent hole (the S214 defect: a test asserting /undefined/ passes
+  // against it because JSX drops the child entirely).
+  return { key: "expired", label: "Inactive", detail: "Upgrade to activate",
+    pct: null, tone: "var(--red)", icon: "alert" };
+}
+
+function ConnectAIPanel({ onClose, trial = null, premium = true, onUpgrade = null }) {
   useBodyScrollLock(true);
   useBackClose(true, onClose);
   const [copied, setCopied] = useState(false);
@@ -35865,6 +35903,44 @@ function ConnectAIPanel({ onClose }) {
         </div>
 
         <div className="flex flex-col gap-3">
+          {/* Status first, above everything (S220, Kevin). Someone arriving here
+              with a dead connector needs to know THAT before they re-read
+              instructions that cannot help them. */}
+          {(() => {
+            const st = connectorStatus(trial, premium);
+            return (
+              <div className="rounded-lg border p-3"
+                style={{ borderColor: st.tone, background: `color-mix(in srgb, ${st.tone} 8%, var(--s2))` }}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Icon name={st.icon} size={18} color={st.tone} />
+                    <span className="text-sm font-extrabold uppercase tracking-wide" style={{ color: st.tone }}>{st.label}</span>
+                    <span className="truncate text-[.8rem] text-muted">· {st.detail}</span>
+                  </div>
+                  {st.key === "expired" && onUpgrade && (
+                    <button onClick={onUpgrade} style={{ minHeight: 40 }}
+                      className="rounded-lg border-none bg-primaryfill px-3.5 text-[.8rem] font-bold text-primaryfg cursor-pointer">
+                      Upgrade
+                    </button>
+                  )}
+                </div>
+                {/* The ticker. Only a running trial has a fraction to show — an
+                    active or expired state has nothing counting down, and a bar
+                    stuck at full or empty would read as broken. */}
+                {st.pct != null && (
+                  <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-surface">
+                    <div className="h-full rounded-full"
+                      style={{ width: `${Math.round(st.pct * 100)}%`, background: st.tone }} />
+                  </div>
+                )}
+                {st.key === "expired" && (
+                  <div className="mt-1.5 text-[.74rem] leading-snug text-muted">
+                    Your assistant can still connect, but Glidna will refuse its requests until you upgrade.
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           <p className="text-sm text-muted leading-relaxed">
             Use Glidna from inside your own AI assistant. Ask it to log your meals, check your
             progress, or build a workout — and it writes straight into your Glidna account.
@@ -36551,11 +36627,14 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
         {showAdmin && <AdminDashboard onClose={() => setShowAdmin(false)} />}
         {showAppReqs && <AppRequestsPanel onClose={() => setShowAppReqs(false)} />}
 
-        {/* Navigation */}
+        {/* Navigation — ORDER IS KEVIN'S (S220): Home, Calendar, Dashboard, then
+            All clients. Calendar moved above Dashboard because it is the thing a
+            working trainer opens between sessions; Dashboard is a review surface
+            and reads fine one row lower. */}
         <button style={item} onClick={() => go(onHome)}><Icon name="home" size={19} color="var(--accent)" /> <span>Home</span></button>
+        {isTrainer && onCalendar && <button style={item} onClick={() => go(onCalendar)}><Icon name="calendar" size={19} color="var(--accent)" /> <span>Calendar</span></button>}
         {isTrainer && <button style={item} onClick={() => go(onDashboard)}><Icon name="dashboard" size={19} color="var(--accent)" /> <span>Dashboard</span></button>}
         {isTrainer && <button style={item} onClick={() => go(onClients)}><Icon name="clients" size={19} color="var(--accent)" /> <span>All clients</span></button>}
-        {isTrainer && onCalendar && <button style={item} onClick={() => go(onCalendar)}><Icon name="calendar" size={19} color="var(--accent)" /> <span>Calendar</span></button>}
         {/* Earnings is a BILLING surface — hidden unless this trainer may
             actually take money (S178). Booking stays free and visible. */}
         {/* Earnings is a BILLING surface — hidden unless this trainer may
@@ -36739,7 +36818,17 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
           <Icon name="sparkle" size={19} color="var(--accent)" /> <span>Connect your AI</span>
           <span style={{ marginLeft: "auto", color: "var(--muted)" }}>▸</span>
         </button>
-        {showConnectAI && <ConnectAIPanel onClose={() => setShowConnectAI(false)} />}
+        {/* ⚠️ `premium` IS DERIVED THE WAY planFor() DERIVES IT, not guessed.
+            trialInfo() returns null for a paid, admin or grandfathered account —
+            all of which the connector serves — so an EXPIRED trial is the only
+            state that loses access. Writing it as `subActive || !trial` would
+            have shown "Inactive" to every grandfathered account, which is the
+            larger group and the one most likely to be confused by it. */}
+        {showConnectAI && (
+          <ConnectAIPanel onClose={() => setShowConnectAI(false)}
+            trial={trial} premium={!(trial && trial.expired)}
+            onUpgrade={() => { setShowConnectAI(false); setShowPicker(true); }} />
+        )}
 
         {/* My notes (trainer) — general notes; per-client notes live on the client cards (S91) */}
         {isTrainer && (
