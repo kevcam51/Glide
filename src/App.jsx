@@ -19284,7 +19284,16 @@ function MeasurementsModal({ data, onSave, onDelete, onSetGoalWeight, onToggleBo
                 <div className="mt-2 flex flex-col gap-1 text-sm">
                   <span className="text-muted">
                     At {goalBf}% body fat you&rsquo;d weigh ~<b className="text-fg">{suggested} lbs</b>
-                    {delta ? <> — {Math.abs(delta)} lbs <b className="text-fg">{delta > 0 ? "above" : "below"}</b> the {fromW} lbs this reading was taken at</> : null}
+                    {/* ⚠️ ROUNDED, OR BINARY FLOATING POINT SHOWS ITS WORKING
+                        (S218). `suggested` is a whole number and `fromW` carries
+                        one decimal, so 200 − 203.6 evaluates to
+                        −3.5999999999999943 and that is exactly what rendered:
+                        "3.5999999999999943 lbs below the 203.6 lbs this reading
+                        was taken at". Found on Kevin's own live data. Same class
+                        as the unrounded "3,416.714" hero number in S216b — any
+                        subtraction of two differently-rounded weights needs to
+                        be re-rounded before it reaches a screen. */}
+                    {delta ? <> — {Math.abs(delta).toFixed(1)} lbs <b className="text-fg">{delta > 0 ? "above" : "below"}</b> the {fromW} lbs this reading was taken at</> : null}
                   </span>
                   {alreadyLeaner && (
                     <span className="text-[.72rem] leading-snug" style={{ color: "var(--yellow)" }}>
