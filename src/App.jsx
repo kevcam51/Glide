@@ -24655,12 +24655,24 @@ function CalendarSubscribe() {
   const [copied, setCopied] = useState("");
   const [err, setErr] = useState("");
   const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmOff, setConfirmOff] = useState(false);
   const get = async (reset) => {
     setBusy(true); setErr("");
     try {
       const r = await callCalendarLink({ reset: !!reset });
       setLink(r.data); setConfirmReset(false);
     } catch (e) { setErr("Couldn't get your calendar link. Try again in a moment."); }
+    setBusy(false);
+  };
+  // Turn it off entirely (S225). Reset only ever swapped one live link for
+  // another, so there was no way to end up with none — which someone who tried
+  // the feature and decided against it should be able to do.
+  const turnOff = async () => {
+    setBusy(true); setErr("");
+    try {
+      await callCalendarLink({ remove: true });
+      setLink(null); setConfirmOff(false);
+    } catch (e) { setErr("Couldn't turn it off. Try again in a moment."); }
     setBusy(false);
   };
   const copy = (text, which) => {
@@ -24721,6 +24733,30 @@ function CalendarSubscribe() {
           <div className="mt-1.5 text-[.68rem] text-muted leading-snug">
             Treat the link like a password — anyone with it can see your session times and who they're with.
           </div>
+          {/* Turning it off is a different act from resetting it, and the two
+              read differently on purpose: reset keeps you subscribed with a new
+              link, this leaves no link at all. */}
+          {confirmOff ? (
+            <div className="mt-2 rounded-lg border border-border bg-surface2 p-2.5">
+              <div className="text-[.78rem] text-fg mb-2">
+                Turn off calendar subscribing? Your link stops working and any calendar already
+                subscribed to it will stop updating. You can switch it back on whenever you like.
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={turnOff} disabled={busy}
+                  className="rounded-lg border-none bg-danger px-3 py-1.5 text-xs font-bold text-white cursor-pointer">
+                  {busy ? "Turning off…" : "Turn it off"}
+                </button>
+                <button onClick={() => setConfirmOff(false)} disabled={busy}
+                  className="rounded-lg border border-border bg-transparent px-3 py-1.5 text-xs text-fg cursor-pointer">Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmOff(true)} disabled={busy}
+              className="mt-2 cursor-pointer rounded-md border border-border bg-transparent px-2.5 py-1.5 text-[.7rem] font-semibold text-muted">
+              Don&rsquo;t want this? Turn it off
+            </button>
+          )}
         </>
       )}
       {err && <div className="mt-2 text-[.72rem] text-danger">{err}</div>}

@@ -237,6 +237,20 @@ exports.calendarFeedLink = onCall(
     // Reads the new location, and migrates a legacy token off the profile on the
     // way past (S224).
     const existing = await readToken(db, uid);
+
+    // Turn the subscription off entirely (S225). Reset has always existed, but
+    // it only ever swaps one live link for another — there was no way to end up
+    // with NO link, which matters twice: someone who tried the feature and does
+    // not want it should be able to leave no credential behind at all, and a
+    // person who believes a link leaked wants it dead rather than replaced.
+    //
+    // readToken runs FIRST, above, so a legacy token still sitting on the
+    // profile is migrated before this deletes it — otherwise "turn it off" would
+    // leave the exposed copy behind, which is the exact opposite of the ask.
+    if ((request.data || {}).remove === true) {
+      await db.doc(`${TOKENS}/${uid}`).delete().catch(() => {});
+      return { removed: true, url: null, webcal: null, rotated: false };
+    }
     // ⚠️ MINTING ONLY (S215). A feed URL is a bearer credential that lives in
     // someone's calendar app forever, so a trainer who ALREADY subscribed must
     // keep working even if their plan lapses — revoking here would silently rot

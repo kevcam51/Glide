@@ -180,5 +180,36 @@ ok("the gate and the rotated flag both read the migrated token",
 ok("the compare is still timing-safe behind a length check",
    /expected\.length === token\.length/.test(FN) && /crypto\.timingSafeEqual/.test(FN));
 
+// ── 4. Turning the subscription off (S225) ──────────────────────────────────
+// Reset only ever swapped one live link for another, so there was no way to end
+// up with none — which someone who tried the feature and decided against it
+// should be able to do, and which is also what a person wants when they think a
+// link has leaked.
+const APP = readFileSync(join(ROOT, "src/App.jsx"), "utf8");
+ok("the callable accepts a remove request", /\(request\.data \|\| \{\}\)\.remove === true/.test(FN));
+ok("…and deletes the stored token", /\$\{TOKENS\}\/\$\{uid\}`\)\.delete\(\)/.test(FN));
+ok("…returning no link rather than a fresh one", /removed: true, url: null/.test(FN));
+{
+  // Order is the whole correctness of this. readToken must run FIRST so a legacy
+  // token still on the profile is migrated before the delete — otherwise "turn
+  // it off" would delete the safe copy and leave the EXPOSED one behind, which
+  // is precisely backwards.
+  const migrateAt = FN.indexOf("const existing = await readToken(db, uid);");
+  const removeAt = FN.indexOf("remove === true");
+  const gateAt = FN.indexOf("!existing && !bookingAllowed");
+  ok("the legacy token is migrated BEFORE a remove can delete it",
+     migrateAt !== -1 && migrateAt < removeAt, { migrateAt, removeAt });
+  // And an off-plan trainer must still be able to turn theirs off — a gate that
+  // ran first would trap them with a live credential they cannot revoke.
+  ok("remove is reachable without an active plan", removeAt < gateAt, { removeAt, gateAt });
+}
+ok("the screen offers turning it off", /Don&rsquo;t want this\? Turn it off/.test(APP));
+ok("…behind a confirm, since it breaks any calendar already subscribed",
+   /Turn off calendar subscribing\?/.test(APP));
+ok("…and says it can be switched back on", /switch it back on whenever you like/.test(APP));
+ok("the app sends the remove flag", /callCalendarLink\(\{ remove: true \}\)/.test(APP));
+ok("…and clears the link locally so the screen matches the server",
+   /setLink\(null\); setConfirmOff\(false\)/.test(APP));
+
 console.log(`${checks - fails}/${checks} calendar-token assertions passed`);
 if (fails) process.exit(1);
