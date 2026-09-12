@@ -111,8 +111,14 @@ ok("...BEFORE the request is claimed, or a refusal destroys it",
 ok("publishing free slots is gated too, so a client is never walked into a refusal",
    /if \(!bookingAllowed\(\{ \.\.\.trainer, uid: trainerUid \}\)\) return \{ visible: false, busy: \[\] \};/.test(AVAIL));
 ok("the calendar feed will not mint a NEW token off-plan", /reason: "booking-not-on-plan"/.test(FEED));
+// ⚠️ THE EXPRESSION MOVED IN S224, THE RULE DID NOT. The token left the profile
+// document (it was readable by any signed-in user there), so the gate now reads
+// the migrated token instead of `cur.calendarFeedToken`. The behaviour this
+// assertion exists to protect is unchanged and still the point: a trainer whose
+// plan lapses keeps the subscription they set up while paying, because silently
+// rotting a live integration is worse than an expired feed going quiet.
 ok("...but never revokes one already in someone's calendar app",
-   /if \(!cur\.calendarFeedToken && !bookingAllowed/.test(FEED));
+   /if \(!existing && !bookingAllowed/.test(FEED));
 
 // ── 4. the app hides the door it can no longer open ───────────────────────
 ok("the Sessions button tests booking, not the roster cap",

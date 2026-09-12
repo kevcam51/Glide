@@ -33,6 +33,65 @@ const REGION = "us-central1";
 // is part of the scheduling side, which is Coach and above since S215.
 const { bookingAllowed } = require("./roster");
 const PUBLIC_BASE = `https://${REGION}-calorieiq-29762.cloudfunctions.net/calendarFeed`;
+
+// ⚠️ THE TOKEN USED TO LIVE ON THE PROFILE DOCUMENT, AND THAT WAS A REAL LEAK
+// (S224). firestore.rules makes TRAINER profiles a readable directory — any
+// signed-in user may read any head_trainer/sub_trainer document, because a client
+// has to resolve a trainer at join time (S59). Firestore read rules are
+// per-DOCUMENT: a field inside a readable document cannot be hidden.
+//
+// Only Coach-and-above trainers ever hold one of these tokens, so every token
+// that existed was sitting in exactly the class of document anyone could read.
+// The chain was one step long: a client reads `assignedTrainerId` off their own
+// profile, reads that trainer's profile, takes the token, and subscribes to the
+// feed — which carries EVERY session that trainer has, with the other person's
+// NAME in the summary and the training LOCATION beside it.
+//
+// That also quietly undid S203, which deliberately kept meeting addresses OUT of
+// the profile so a trainer who trains clients at home would not publish their
+// home address. The address still reached the feed by way of the session.
+//
+// So the token now lives in its own top-level collection with NO rules block,
+// which Firestore denies by default — the Admin-SDK-only pattern trainerizeCreds,
+// webauthnCreds and mealInboxTokens already use.
+const TOKENS = "calendarFeedTokens";
+
+// Read this user's token, moving a legacy one off the profile if that is still
+// where it lives.
+//
+// ⚠️ COPY THEN DELETE, IN THAT ORDER. Delete-first destroys a live calendar
+// subscription if the copy then fails; copy-first can at worst leave the old
+// field in place for one more request, which the next call clears. The URL is
+// unchanged either way — it carries uid and token, not a location — so nobody
+// has to re-subscribe.
+//
+// ⚠️ AND THE READ PATH MIGRATES TOO, not just the mint path. A trainer who set
+// up their subscription months ago and never opens the calendar screen again
+// would otherwise keep the exposed copy indefinitely; their calendar app polling
+// the feed is what heals them, without anyone doing anything.
+async function readToken(db, uid) {
+  const ref = db.doc(`${TOKENS}/${uid}`);
+  let rec = null;
+  try { rec = (await ref.get()).data(); } catch (e) { rec = null; }
+  if (rec && rec.token) return rec.token;
+
+  let profile = null;
+  try { profile = (await db.doc(`users/${uid}`).get()).data(); } catch (e) { profile = null; }
+  const legacy = profile && profile.calendarFeedToken;
+  if (!legacy) return null;
+  try {
+    await ref.set({ uid, token: legacy, at: Date.now(), migrated: true }, { merge: true });
+    await db.doc(`users/${uid}`).update({
+      calendarFeedToken: admin.firestore.FieldValue.delete(),
+      calendarFeedAt: admin.firestore.FieldValue.delete(),
+    });
+  } catch (e) {
+    // A failed migration must not break the feed — the token is still valid,
+    // it just stays exposed until the next attempt succeeds.
+    console.error("calendarFeed token migrate failed:", e && e.message);
+  }
+  return legacy;
+}
 // How much history to carry. Enough for a client to look back over a training
 // block, not so much that the feed grows without bound.
 const PAST_DAYS = 90;
@@ -121,9 +180,7 @@ exports.calendarFeed = onRequest(
     if (!uid || !token) { res.status(400).send("Missing calendar key."); return; }
 
     const db = admin.firestore();
-    let profile = null;
-    try { profile = (await db.doc(`users/${uid}`).get()).data(); } catch { profile = null; }
-    const expected = profile && profile.calendarFeedToken;
+    const expected = await readToken(db, uid);
     // Length check first so the comparison below is over equal-length buffers,
     // then a timing-safe compare — a feed URL is a bearer credential and
     // deserves the same care as one.
@@ -176,29 +233,35 @@ exports.calendarFeedLink = onCall(
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Please sign in.");
     const db = admin.firestore();
-    const ref = db.doc(`users/${uid}`);
-    const cur = (await ref.get()).data() || {};
+    const cur = (await db.doc(`users/${uid}`).get()).data() || {};
+    // Reads the new location, and migrates a legacy token off the profile on the
+    // way past (S224).
+    const existing = await readToken(db, uid);
     // ⚠️ MINTING ONLY (S215). A feed URL is a bearer credential that lives in
     // someone's calendar app forever, so a trainer who ALREADY subscribed must
     // keep working even if their plan lapses — revoking here would silently rot
     // an integration they set up while paying, with no error anyone can see. So
     // this refuses to mint a NEW token and leaves an existing one alone; the feed
     // itself just runs dry, because sessions can no longer be created.
-    if (!cur.calendarFeedToken && !bookingAllowed({ ...cur, uid })) {
+    if (!existing && !bookingAllowed({ ...cur, uid })) {
       throw new HttpsError("failed-precondition",
         "Calendar subscriptions come with Glidna Coach, alongside session booking. "
         + "Upgrade in the app and your sessions will appear in the calendar you already use.",
         { reason: "booking-not-on-plan" });
     }
-    let token = cur.calendarFeedToken;
+    let token = existing;
     const reset = (request.data || {}).reset === true;
     if (!token || reset) {
       token = crypto.randomBytes(20).toString("hex");
-      await ref.set({ calendarFeedToken: token, calendarFeedAt: Date.now() }, { merge: true });
+      await db.doc(`${TOKENS}/${uid}`).set({ uid, token, at: Date.now() }, { merge: true });
     }
     const url = `${PUBLIC_BASE}?u=${encodeURIComponent(uid)}&t=${token}`;
     // webcal:// makes Apple Calendar and Outlook subscribe on a single tap
     // instead of downloading a one-off snapshot that never updates again.
-    return { url, webcal: url.replace(/^https:\/\//, "webcal://"), rotated: !!reset || !cur.calendarFeedToken };
+    // ⚠️ `existing`, NOT `cur.calendarFeedToken`. That field is gone from the
+    // profile now, so the old expression was permanently truthy-negated and
+    // every call would have claimed the link had just been rotated — telling a
+    // trainer their old URL had died when it had not.
+    return { url, webcal: url.replace(/^https:\/\//, "webcal://"), rotated: !!reset || !existing };
   },
 );
