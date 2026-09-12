@@ -25493,6 +25493,18 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
   const [policy, setPolicy] = useState(DEFAULT_SESSION_POLICY);
   const [policyDraft, setPolicyDraft] = useState(DEFAULT_SESSION_POLICY);
   const [showSettings, setShowSettings] = useState(false);
+  // A one-line prompt at the top of the calendar, because Settings is collapsed
+  // by default and nobody goes looking in it for a feature they don't know
+  // exists (S227, Kevin: "maybe when they open the calendar it is somewhere at
+  // the top"). Dismissed permanently on this device once acted on or waved away
+  // — a prompt that returns forever is an advert, not a hint. Same
+  // localStorage-flag shape as the meal-photo tips (S90).
+  const calHintSeen = () => { try { return localStorage.getItem("glidna-cal-subscribe-hint") === "1"; } catch { return true; } };
+  const [showCalHint, setShowCalHint] = useState(() => !calHintSeen());
+  const dismissCalHint = () => {
+    try { localStorage.setItem("glidna-cal-subscribe-hint", "1"); } catch (e) { /* private mode */ }
+    setShowCalHint(false);
+  };
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
@@ -26314,6 +26326,26 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
           <div className="flex flex-col gap-3"><SkeletonCard rows={2} /><SkeletonCard rows={4} /></div>
         ) : (
           <>
+            {/* Above the view chips, so it is the first thing on the page —
+                which is the whole point. One line, one action, and gone for good
+                once answered either way. */}
+            {showCalHint && !showSettings && (
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-2">
+                <Icon name="calendar" size={16} color="var(--accent)" />
+                <div className="min-w-0 flex-1 text-[.78rem] text-fg">
+                  See these sessions in your own calendar
+                  <span className="block text-[.7rem] text-muted">Apple, Google or Outlook — set up once</span>
+                </div>
+                <button onClick={() => { setShowSettings(true); setPolicyDraft(policy); dismissCalHint(); }}
+                  className="rounded-lg border-none bg-primaryfill px-3 py-1.5 text-xs font-bold text-primaryfg cursor-pointer">
+                  Set it up
+                </button>
+                <button onClick={dismissCalHint} aria-label="Dismiss"
+                  className="cursor-pointer border-none bg-transparent px-1 py-1 text-muted">
+                  <Icon name="close" size={14} color="currentColor" />
+                </button>
+              </div>
+            )}
             <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
               <div className="flex gap-1.5">
                 {["month", "week", "day", "ledger"].map((v) => (
@@ -26351,9 +26383,13 @@ function TrainerCalendar({ meUid, meName, onGoClients, onOpenClientPlan, notifPr
               <div className="mb-3 flex flex-col gap-3">
                 {/* Personal first: reminders and calendar sync are about YOUR
                     day, and every trainer wants them. The policy below is about
-                    money and only some trainers can bill at all. */}
-                <SessionReminderPrefs notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs} />
+                    money and only some trainers can bill at all.
+                    Calendar sync leads (S227) because the hint at the top of this
+                    page opens this panel specifically to reach it — landing
+                    someone on reminder lead-times after they tapped "set up your
+                    calendar" is a small broken promise. */}
                 <CalendarSubscribe />
+                <SessionReminderPrefs notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs} />
 
                 {/* Can clients see when you're busy? (S195) One switch for the
                     whole book, off until it's turned on — a calendar you show

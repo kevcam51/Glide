@@ -229,5 +229,39 @@ ok("…and clears the link locally so the screen matches the server",
      menuMount < master, { menuMount, master });
 }
 
+// ── 6. The prompt on the calendar page (S227) ───────────────────────────────
+// Kevin ruled out a dedicated menu row — the side menu is already about nineteen
+// items — so the discoverable place is the top of the calendar itself, where a
+// trainer already is when the thought occurs to them.
+{
+  ok("the calendar page offers it up front",
+     /See these sessions in your own calendar/.test(APP));
+  ok("…naming the apps people actually use", /Apple, Google or Outlook/.test(APP));
+  // Above the view chips, or it is not "at the top" in any useful sense.
+  const hintAt = APP.indexOf("See these sessions in your own calendar");
+  const chipsAt = APP.indexOf('{["month", "week", "day", "ledger"].map');
+  ok("it renders ABOVE the month/week/day chips", hintAt !== -1 && hintAt < chipsAt, { hintAt, chipsAt });
+  // ⚠️ A prompt that cannot be dismissed is an advert. Both answers — acting on
+  // it and waving it away — must silence it for good on that device.
+  // check:weak flagged a single /glidna-cal-subscribe-hint/ here: it matched the
+  // read AND the write, so losing either one would have left it green. They are
+  // two different promises — the write dismisses it, the read is what makes the
+  // dismissal survive a reload — so they get an assertion each.
+  ok("dismissing it is recorded",
+     /localStorage\.setItem\("glidna-cal-subscribe-hint", "1"\)/.test(APP));
+  ok("…and read back on mount, so it stays gone after a reload",
+     /localStorage\.getItem\("glidna-cal-subscribe-hint"\) === "1"/.test(APP));
+  ok("…and acting on it also dismisses it, so it never nags twice",
+     /setShowSettings\(true\); setPolicyDraft\(policy\); dismissCalHint\(\);/.test(APP));
+  ok("…and it hides while the settings panel it opens is showing",
+     /showCalHint && !showSettings/.test(APP));
+  // Landing on reminder lead-times after tapping "set up your calendar" would be
+  // a small broken promise, so the panel opens onto the calendar card.
+  const settingsBlock = APP.slice(APP.indexOf("Personal first: reminders"), APP.indexOf("Personal first: reminders") + 1400);
+  ok("the settings panel opens onto the calendar card, not the reminders",
+     settingsBlock.indexOf("<CalendarSubscribe />") < settingsBlock.indexOf("<SessionReminderPrefs"),
+     { cal: settingsBlock.indexOf("<CalendarSubscribe />"), rem: settingsBlock.indexOf("<SessionReminderPrefs") });
+}
+
 console.log(`${checks - fails}/${checks} calendar-token assertions passed`);
 if (fails) process.exit(1);
