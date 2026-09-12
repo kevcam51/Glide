@@ -14590,7 +14590,11 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                 burn the two are byte-identical and only the sentence below
                 changes. A live control that provably cannot move anything reads
                 as broken, so say which it is. */}
-            <div style={{ display: "flex", gap: "6px", opacity: trainWeek > 0 ? 1 : 0.55 }}>
+            {/* ⚠️ 0.55 DROPPED THE LABEL TO 4.2:1 ON var(--s2), UNDER AA's 4.5 for
+                text this size. The dim is an affordance, not a licence to make
+                the words hard to read — 0.7 measures 5.9:1 and still reads as
+                stepped back. */}
+            <div style={{ display: "flex", gap: "6px", opacity: trainWeek > 0 ? 1 : 0.7 }}>
               {[[true, "More food"], [false, "Faster loss"]].map(([on, label]) => (
                 <button key={label} onClick={() => setSimEat(on)} aria-pressed={eatback === on}
                   style={{ flex: 1, padding: "8px 6px", borderRadius: "9px", cursor: "pointer",
@@ -14624,6 +14628,18 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                   {trainWeek > 0 && <> Training at Maintain now shows a real loss below.</>}</>}
             </div>
 
+            {/* ⚠️ THE WAY BACK BELONGS BESIDE THE CONTROL IT REVERTS. It had
+                drifted to the far side of the split block, a screenful below the
+                two buttons whose choice it undoes. */}
+            {/* Only offer the way back when there IS a plan to go back to. */}
+            {!standalone && simEat !== null && isEatback(dPlan) !== eatback && (
+              <div style={{ textAlign: "right", marginTop: "5px" }}>
+                <button onClick={() => setSimEat(null)} style={{ ...linkS }}>
+                  Back to {th} plan&rsquo;s approach
+                </button>
+              </div>
+            )}
+
             {/* ── How fast, and where it comes from (S220d, Kevin) ──────────
                 The pace was only reachable by scrolling back to section 1, and
                 nothing on the screen ever said how much faster "Faster loss"
@@ -14636,24 +14652,37 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
               <div style={{ fontSize: ".62rem", letterSpacing: ".6px", color: "var(--muted)", marginBottom: "5px" }}>
                 HOW FAST, AND WHERE IT COMES FROM
               </div>
+              {/* ⚠️ READ FROM SIM_RATES, NOT RE-SPELLED. These were a copied
+                  literal, so a change to the pace table — a new rung, a reworded
+                  label, a dropped sign — would have left two spellings of the
+                  same paces inside one sheet, and nothing would have failed.
+                  The filter yields exactly Maintain + the three losing rungs, in
+                  the table's own order, carrying the table's own minus sign. */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "5px" }}>
-                {[[0, "Maintain"], [0.5, "½ lb/wk"], [1, "1 lb/wk"], [2, "2 lbs/wk"]].map(([r, label]) => {
-                  const on = Math.abs(rate - r) < 0.01;
+                {SIM_RATES.filter((t) => t.group === "maintain" || t.group === "loss").map((t) => {
+                  const on = Math.abs(rate - t.rate) < 0.01;
                   return (
-                    <button key={label} onClick={() => setRate(r)} aria-pressed={on}
+                    <button key={t.group + t.rate} onClick={() => setRate(t.rate)} aria-pressed={on}
+                      aria-label={`${t.sign === "−" ? "Lose" : ""} ${t.lbl}`.trim()}
                       style={{ padding: "8px 3px", borderRadius: "8px", cursor: "pointer", fontFamily: "inherit",
                         fontSize: ".68rem", fontWeight: 700,
                         border: on ? "1.5px solid var(--accent)" : "1px solid var(--border)",
                         background: on ? "rgba(var(--accent-rgb),.12)" : "var(--s2)",
-                        color: on ? "var(--accent)" : "var(--text-secondary)" }}>{label}</button>
+                        color: on ? "var(--accent)" : "var(--text-secondary)" }}>{t.sign}{t.lbl}</button>
                   );
                 })}
               </div>
+              {/* ⚠️ ON A GAINING PACE NONE OF THESE IS LIT, and four unlit buttons
+                  over a split that describes a rate none of them names reads as
+                  broken. Say which pace is actually in force. */}
+              {rate < 0 && (
+                <div style={{ marginTop: "6px", fontSize: ".65rem", color: "var(--muted)", lineHeight: 1.45 }}>
+                  Currently on <b style={{ color: "var(--text-secondary)" }}>+{budPaceLbl}</b> &mdash; a gaining
+                  pace, which is why none of these is lit. Tap one to switch to losing, or use the chips
+                  at the top for the gaining rungs.
+                </div>
+              )}
               <div style={{ marginTop: "9px" }}>
-                {/* ⚠️ THE LABEL FLIPS WITH THE NUMBER. On a gain pace — or an
-                    eat-back plan whose training out-earns the pace — this row is
-                    food going IN, and calling that "from eating less" describes
-                    the opposite of what it is. */}
                 {/* ⚠️ THE LABEL DESCRIBES WHAT THEY ARE DOING WITH FOOD — eating
                     under or over their own burn — which is true whichever way the
                     total runs. The SIGN beside it is the contribution to that
@@ -14714,14 +14743,6 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                 )}
               </div>
             </div>
-            {/* Only offer the way back when there IS a plan to go back to. */}
-            {!standalone && simEat !== null && isEatback(dPlan) !== eatback && (
-              <div style={{ textAlign: "right", marginTop: "5px" }}>
-                <button onClick={() => setSimEat(null)} style={{ ...linkS }}>
-                  Back to {th} plan&rsquo;s approach
-                </button>
-              </div>
-            )}
           </div>
         </div>
         {cardioChanged && (

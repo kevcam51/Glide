@@ -903,7 +903,11 @@ ok("the premium gate reaches it rather than defaulting open",
   const SIM = SIM_CODE;
   ok("the empty week says so instead of leaving a dead control",
      /trainWeek === 0 && \(/.test(SIM) && /these two give the/.test(SIM)
-     && /opacity: trainWeek > 0 \? 1 : 0\.55/.test(SIM));
+     && /opacity: trainWeek > 0 \? 1 : 0\.7/.test(SIM));
+  // ⚠️ AND THE DIM MAY NOT PUT THE LABEL UNDER AA. 0.55 blended var(--text-secondary)
+  // onto var(--s2) at 4.2:1, below the 4.5 this text size needs; 0.7 measures
+  // 5.9:1. Measured in the browser, not estimated.
+  ok("...at an opacity that still passes contrast", /: 0\.7 \}\}>/.test(SIM));
   // ⚠️ NOT `disabled`: the two modes still MEAN different things on an empty
   // week, and the sentence underneath is where that is explained.
   ok("...but stays clickable, so the explanation is still reachable",
@@ -913,10 +917,32 @@ ok("the premium gate reaches it rather than defaulting open",
   // sheet would start quoting two different goals.
   ok("the loss paces are reachable without scrolling back up",
      /HOW FAST, AND WHERE IT COMES FROM/.test(SIM)
-     && /\[\[0, "Maintain"\], \[0\.5, "½ lb\/wk"\], \[1, "1 lb\/wk"\], \[2, "2 lbs\/wk"\]\]\.map/.test(SIM));
+     && /SIM_RATES\.filter\(\(t\) => t\.group === "maintain" \|\| t\.group === "loss"\)\.map/.test(SIM));
+  // ⚠️ READ FROM THE TABLE, NOT RE-SPELLED. A copied literal would leave two
+  // spellings of the same paces in one sheet the day SIM_RATES changes, and
+  // nothing would fail. Proven by RUNNING the filter, not just matching it.
+  ok("...and the labels are the pace table's own",
+     !/\[\[0, "Maintain"\]/.test(SIM) && /\{t\.sign\}\{t\.lbl\}/.test(SIM));
+  {
+    const four = M.SIM_RATES.filter((t) => t.group === "maintain" || t.group === "loss");
+    ok("(run) the filter really yields Maintain and the three losing rungs, in order",
+       four.length === 4 && four.map((t) => t.rate).join(",") === "0,0.5,1,2"
+       && four.map((t) => t.sign + t.lbl).join("|") === "Maintain|−½ lb/wk|−1 lb/wk|−2 lbs/wk",
+       four.map((t) => t.sign + t.lbl));
+  }
   ok("...and they set the SAME rate the chips at the top do",
-     /onClick=\{\(\) => setRate\(r\)\}/.test(SIM)
+     /onClick=\{\(\) => setRate\(t\.rate\)\}/.test(SIM)
      && (SIM.match(/useState\(RATE_OPTS\.includes\(planRate\)/g) || []).length === 1);
+  // ⚠️ FOUR UNLIT BUTTONS OVER A SPLIT THAT NAMES NO VISIBLE PACE READS AS
+  // BROKEN — the same complaint that started S220d, one control along.
+  // ⚠️ AND THE WAY BACK SITS BESIDE THE CONTROL IT REVERTS. It had drifted to
+  // the far side of the split block, a screenful below the two buttons whose
+  // choice it undoes.
+  ok("the mode-revert link is next to the modes, not below the split",
+     SIM.indexOf("Back to {th} plan&rsquo;s approach") < SIM.indexOf("HOW FAST, AND WHERE IT COMES FROM")
+     && SIM.indexOf("Back to {th} plan&rsquo;s approach") > SIM.indexOf("WHAT THE TRAINING BUYS"));
+  ok("...and a gaining pace says why none of them is lit",
+     /\{rate < 0 && \(/.test(SIM) && /a gaining\s*\n?\s*pace, which is why none of these is lit/.test(SIM));
   ok("the split is derived from the statement's own total",
      /const paceTrainDay = bank\.deposit;/.test(SIM)
      && /const paceFromFood = bankMade - paceTrainDay;/.test(SIM)
