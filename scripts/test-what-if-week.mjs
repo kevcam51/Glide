@@ -924,6 +924,36 @@ ok("the premium gate reaches it rather than defaulting open",
   ok("...and the labels are the pace table's own",
      !/\[\[0, "Maintain"\]/.test(SIM) && /\{t\.sign\}\{t\.lbl\}/.test(SIM));
   {
+    // ── ONE PACE TABLE IN THE WHOLE FILE (S220g) ──────────────────────────
+    // The Daily Calorie Targets card — the surface whose own button opens this
+    // sheet — carried a byte-for-byte copy of SIM_RATES. Two spellings of one
+    // list, a tap apart, either free to drift with nothing failing. It reads the
+    // shared table now, and this COUNTS the literals so a fourth copy cannot
+    // appear quietly: `group:` is the shape's fingerprint, and the other pace
+    // tables in this file (the per-day `targets` and the `paces` strip) carry
+    // neither it nor a gain direction, so they are left alone on purpose.
+    const tally = (g) => (APP.match(new RegExp(`group:\\s*"${g}"`, "g")) || []).length;
+    ok("only one table in src/App.jsx is shaped like SIM_RATES",
+       tally("maintain") === 1 && tally("loss") === 3 && tally("gain") === 3,
+       { maintain: tally("maintain"), loss: tally("loss"), gain: tally("gain") });
+    // ...and the count is of the LITERAL, so it has to match what SIM_RATES
+    // actually holds, or the guard is watching a number nobody maintains.
+    ok("...and those counts are SIM_RATES' own",
+       M.SIM_RATES.filter((t) => t.group === "maintain").length === 1
+       && M.SIM_RATES.filter((t) => t.group === "loss").length === 3
+       && M.SIM_RATES.filter((t) => t.group === "gain").length === 3);
+    // The card must be READING it, not merely not-declaring its own.
+    ok("the Daily Calorie Targets card reads the shared table",
+       /\{SIM_RATES\.filter\(\(t\)=>t\.group===g\)\.map\(\(t\)=>rateBtn\(t\)\)\}/.test(APP)
+       && /\{SIM_RATES\.filter\(\(t\)=>t\.group==="maintain"\)\.map\(\(t\)=>rateBtn\(t, true\)\)\}/.test(APP)
+       && /rateName\(SIM_RATES\.find\(r=>Math\.abs\(r\.rate-previewRate\)<0\.01\)\)/.test(APP));
+    // ⚠️ THE CARD FILTERS BY GROUP AND FINDS BY RATE, so only the order WITHIN
+    // each group is load-bearing — pinned here because "SIM_RATES is already in
+    // that order" was an assumption worth checking rather than trusting.
+    ok("...and the within-group order it renders is the one SIM_RATES carries",
+       M.SIM_RATES.filter((t) => t.group === "loss").map((t) => t.rate).join(",") === "0.5,1,2"
+       && M.SIM_RATES.filter((t) => t.group === "gain").map((t) => t.rate).join(",") === "-0.5,-1,-2",
+       M.SIM_RATES.map((t) => t.group + ":" + t.rate));
     const four = M.SIM_RATES.filter((t) => t.group === "maintain" || t.group === "loss");
     ok("(run) the filter really yields Maintain and the three losing rungs, in order",
        four.length === 4 && four.map((t) => t.rate).join(",") === "0,0.5,1,2"

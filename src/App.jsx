@@ -16399,15 +16399,14 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         // away from), then all three losing paces, then all three gaining ones,
         // each under a heading that says which is which. Both directions carry
         // the same ½ / 1 / 2 lb choices — the gain side used to stop at 1.
-        const rates = [
-          { lbl:"Maintain",  rate: 0,    group:"maintain", sign:"" },
-          { lbl:"½ lb/wk",   rate: 0.5,  group:"loss", sign:"−" },
-          { lbl:"1 lb/wk",   rate: 1,    group:"loss", sign:"−" },
-          { lbl:"2 lbs/wk",  rate: 2,    group:"loss", sign:"−" },
-          { lbl:"½ lb/wk",   rate:-0.5,  group:"gain", sign:"+" },
-          { lbl:"1 lb/wk",   rate:-1,    group:"gain", sign:"+" },
-          { lbl:"2 lbs/wk",  rate:-2,    group:"gain", sign:"+" },
-        ];
+        //
+        // The table itself is SIM_RATES, shared with the "What if…" sheet this
+        // card's own button opens (S220g). It used to be a byte-for-byte copy
+        // living here, which put two spellings of one list on two surfaces a tap
+        // apart: adding a rung, rewording a label or dropping a sign on either
+        // side would have made them disagree with nothing failing. The readers
+        // below all filter by `group` or find by `rate`, so only the order WITHIN
+        // each group matters, and SIM_RATES already carries the same one.
         const rateName = (t) => (t ? `${t.sign}${t.lbl}` : "");
         // Floored means the honest answer for this rate is "we won't go there".
         const flooredAt = (r) => rawTargetForRate(r) < MIN_DAILY_CAL;
@@ -16454,13 +16453,13 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
             );
             const row = (g) => (
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"6px"}}>
-                {rates.filter((t)=>t.group===g).map((t)=>rateBtn(t))}
+                {SIM_RATES.filter((t)=>t.group===g).map((t)=>rateBtn(t))}
               </div>
             );
             return (
               <>
                 <div style={{display:"grid",gridTemplateColumns:"1fr",gap:"6px"}}>
-                  {rates.filter((t)=>t.group==="maintain").map((t)=>rateBtn(t, true))}
+                  {SIM_RATES.filter((t)=>t.group==="maintain").map((t)=>rateBtn(t, true))}
                 </div>
                 {heading("Weight loss")}
                 {row("loss")}
@@ -16492,7 +16491,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                   style={{flex:2,padding:"8px",borderRadius:"8px",cursor:"pointer",border:"none",
                     background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)",
                     fontSize:".74rem",fontWeight:800}}>
-                  Make {rateName(rates.find(r=>Math.abs(r.rate-previewRate)<0.01))} my target
+                  Make {rateName(SIM_RATES.find(r=>Math.abs(r.rate-previewRate)<0.01))} my target
                 </button>
               )}
               <button onClick={()=>setPreviewRate(null)}
