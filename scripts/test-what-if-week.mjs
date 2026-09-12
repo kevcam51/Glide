@@ -770,6 +770,202 @@ ok("the premium gate reaches it rather than defaulting open",
      /\{bankLong\.halted > 0\s*\n?\s*\? `\$\{bankLong\.halted\} days`/.test(BANK));
 }
 
+// ── How fast, and where it comes from (S220d, Kevin) ────────────────────────
+// "I don't see much change when I click on each button" … "can a user click on
+// another 1/2, 1, and 2 pound loss option within this … and decide if they want
+// to lose 1/2, 1 or 2 pounds based on what they choose and the calories burned
+// during exercise."
+{
+  // ⚠️ THE NOTE ON SCREEN MAKES A CLAIM, SO THE CLAIM GETS PINNED. "With no
+  // training in the week these two give the same numbers" must be TRUE, or the
+  // fix for a control that looks broken is itself a lie. Every number the modes
+  // can reach is swept at zero burn.
+  let differs = null, n = 0;
+  for (const [name, base] of PLANS) {
+    const eb = { ...base, deficitMode: "eatback", cardio: {}, strength: {} };
+    const ac = { ...base, deficitMode: "accelerate", cardio: {}, strength: {} };
+    for (const r of [-2, -1, -0.5, 0, 0.5, 1, 2]) {
+      for (const ov of [undefined, 1800, 2400, 3600]) {
+        n++;
+        const a = M.simBankRows(eb, 0, r, ov, 2000);
+        const b = M.simBankRows(ac, 0, r, ov, 2000);
+        for (const k of ["tdee", "cut", "sub", "budget", "earned", "body", "deposit", "kept", "balance", "net"]) {
+          if (a[k] !== b[k]) differs = { name, r, ov, k, eatback: a[k], accelerate: b[k] };
+        }
+        if (differs) break;
+      }
+      if (differs) break;
+    }
+    if (differs) break;
+  }
+  ok(`with no training the two modes are byte-identical (${n} cases)`, !differs, differs);
+  // Control: the moment there IS training they must separate, or the buttons
+  // would be decoration everywhere rather than only on an empty week.
+  const p = P();
+  const withBurn = ["budget", "earned", "kept"].some((k) =>
+    M.simBankRows({ ...p, deficitMode: "eatback" }, 2800, 1, undefined, 2000)[k]
+    !== M.simBankRows({ ...p, deficitMode: "accelerate" }, 2800, 1, undefined, 2000)[k]);
+  ok("(control) and they separate the moment a session is added", withBurn);
+}
+{
+  // ⚠️ THE SPLIT IS A DECOMPOSITION OF `earned − budget`, NOT A SECOND SUM. Food
+  // plus movement has to equal the total, at every pace, in both modes, floored
+  // or not — otherwise the row says the loss comes from somewhere it doesn't.
+  let bad = null, n = 0;
+  for (const [name, d] of PLANS) {
+    for (const burn of [0, 1400, 2800, 4200]) {
+      for (const r of [-2, -1, -0.5, 0, 0.5, 1, 2]) {
+        for (const ov of [undefined, 1800, 2400, 3600]) {
+          n++;
+          const b = M.simBankRows(d, burn, r, ov, 2000);
+          const made = b.earned - b.budget;
+          const fromFood = made - b.deposit;
+          // The same daily deficit reached WITHOUT going through `earned`: what
+          // the body really spends (tdee plus the week over seven) less what the
+          // plan lets them eat. If the split and this ever diverge, the rows are
+          // attributing the loss to somewhere it did not come from.
+          const independent = b.tdee + Math.round(burn / 7) - b.budget;
+          if (fromFood + b.deposit !== independent) bad = { name, burn, r, ov, fromFood, dep: b.deposit, made, independent };
+          if (bad) break;
+        }
+        if (bad) break;
+      }
+      if (bad) break;
+    }
+    if (bad) break;
+  }
+  ok(`food plus movement is the whole deficit (${n} cases)`, !bad, bad);
+  // ⚠️ AND AS DISPLAYED. The rows are flipped on a surplus so the column closes;
+  // this runs that same arithmetic over every pace in both directions.
+  let openLedger = null;
+  for (const [name, d] of PLANS) {
+    for (const burn of [0, 1400, 4200]) {
+      for (const r of [-2, -1, -0.5, 0, 0.5, 1, 2]) {
+        const b = M.simBankRows(d, burn, r, undefined, 2000);
+        const made = b.earned - b.budget;
+        const sign = made >= 0 ? 1 : -1;
+        const shownFood = (made - b.deposit) * sign;
+        const shownTrain = b.deposit * sign;
+        if (shownFood + shownTrain !== Math.abs(made)) openLedger = { name, burn, r, shownFood, shownTrain, made };
+      }
+    }
+  }
+  ok("...and the two shares add to the total exactly as printed", !openLedger, openLedger);
+  // Control: the check above must be capable of failing. Attribute a calorie of
+  // the food share to movement and it has to notice.
+  ok("(control) and a mis-attributed calorie would be caught", (() => {
+    const b = M.simBankRows(P(), 2800, 1, undefined, 2000);
+    const made = b.earned - b.budget;
+    return (made - b.deposit - 1) + b.deposit !== b.tdee + Math.round(2800 / 7) - b.budget;
+  })());
+
+  // ⚠️ THE IDENTITY THAT MAKES THE MODES MEAN SOMETHING, and the answer to "how
+  // much faster is Faster loss": eat-back lands on EXACTLY the pace that was
+  // picked, accelerate lands above it by the training. Anything else and one of
+  // the two buttons is mis-sold.
+  // ⚠️ FLOORED PLANS ARE EXCLUDED BECAUSE THE IDENTITY IS FALSE THERE, NOT
+  // BECAUSE IT IS AWKWARD. A plan held at 1,200 banks LESS than the pace asked
+  // for, and the screen is required to say so — asserted separately below.
+  const p = P({ cardio: {}, strength: {} });
+  let paceOff = null, accelOff = null;
+  for (const burn of [0, 700, 2800, 4200]) {
+    for (const r of [0, 0.5, 1, 2]) {
+      const eb = M.simBankRows({ ...p, deficitMode: "eatback" }, burn, r, undefined, 2000);
+      const ac = M.simBankRows({ ...p, deficitMode: "accelerate" }, burn, r, undefined, 2000);
+      const day = Math.round(burn / 7);
+      const ebRate = ((eb.earned - eb.budget) * 7) / M.CAL_PER_LB;
+      const acRate = ((ac.earned - ac.budget) * 7) / M.CAL_PER_LB;
+      if (Math.abs(ebRate - r) > 0.01) paceOff = { burn, r, ebRate };
+      if (Math.abs(acRate - (r + (day * 7) / M.CAL_PER_LB)) > 0.01) accelOff = { burn, r, acRate };
+    }
+  }
+  ok("More food lands on exactly the pace that was picked", !paceOff, paceOff);
+  ok("...and Faster loss lands above it by whatever the training burns", !accelOff, accelOff);
+  // ⚠️ AND ON A FLOORED PLAN IT LANDS SHORT. The identity above holds only
+  // while the floor is not binding; a plan pinned at 1,200 delivers less than
+  // the chip promises, and printing "you land on exactly the pace you picked"
+  // there would promise a result the plan cannot produce (CLAUDE.md's floor
+  // clause). Reached with the small-frame fixture at 2 lb/wk.
+  const fl = PLANS.find(([nm]) => nm === "floor-bound small frame")[1];
+  const fb = M.simBankRows({ ...fl, deficitMode: "eatback" }, 0, 2, undefined, 2000);
+  const flRate = ((fb.earned - fb.budget) * 7) / M.CAL_PER_LB;
+  ok("(reachable) a floored plan lands SHORT of the pace, not on it",
+     fb.floored && fb.budget === M.MIN_DAILY_CAL && flRate < 2 - 0.01, { floored: fb.floored, flRate });
+
+  // The awkward case the copy has to name: an eat-back plan whose training
+  // out-earns the pace means eating ABOVE the base burn, with movement carrying
+  // all of it. If it were unreachable the branch would be dead prose.
+  const hot = M.simBankRows({ ...p, deficitMode: "eatback" }, 4200, 0.5, undefined, 2000);
+  ok("(reachable) training can out-earn the pace, so food goes the other way",
+     (hot.earned - hot.budget) - hot.deposit < 0, { made: hot.earned - hot.budget, dep: hot.deposit });
+}
+{
+  const SIM = SIM_CODE;
+  ok("the empty week says so instead of leaving a dead control",
+     /trainWeek === 0 && \(/.test(SIM) && /these two give the/.test(SIM)
+     && /opacity: trainWeek > 0 \? 1 : 0\.55/.test(SIM));
+  // ⚠️ NOT `disabled`: the two modes still MEAN different things on an empty
+  // week, and the sentence underneath is where that is explained.
+  ok("...but stays clickable, so the explanation is still reachable",
+     !/disabled=\{!?trainWeek/.test(SIM));
+  // Kevin: "can a user click on another 1/2, 1, and 2 pound loss option within
+  // this?" — the same `rate`, rendered twice. A second pace state is how this
+  // sheet would start quoting two different goals.
+  ok("the loss paces are reachable without scrolling back up",
+     /HOW FAST, AND WHERE IT COMES FROM/.test(SIM)
+     && /\[\[0, "Maintain"\], \[0\.5, "½ lb\/wk"\], \[1, "1 lb\/wk"\], \[2, "2 lbs\/wk"\]\]\.map/.test(SIM));
+  ok("...and they set the SAME rate the chips at the top do",
+     /onClick=\{\(\) => setRate\(r\)\}/.test(SIM)
+     && (SIM.match(/useState\(RATE_OPTS\.includes\(planRate\)/g) || []).length === 1);
+  ok("the split is derived from the statement's own total",
+     /const paceTrainDay = bank\.deposit;/.test(SIM)
+     && /const paceFromFood = bankMade - paceTrainDay;/.test(SIM)
+     && /const paceLbsWk = \(bankMade \* 7\) \/ CAL_PER_LB;/.test(SIM));
+  ok("...and the screen says what the rate actually works out to",
+     /Math\.abs\(paceLbsWk\) < 0\.05/.test(SIM) && /a week\.<\/>\}/.test(SIM));
+  // ⚠️ EVERY CLAUSE GATED ON THE STATE THAT MAKES IT TRUE. An adversarial pass
+  // found three sentences here that were composed for a losing, unfloored,
+  // eat-back plan and left running on every other — the S217 shape. Each gate
+  // is pinned, because the suite stayed green while all three were wrong.
+  ok("...and names the case where movement is carrying it alone",
+     /\{bankMade > 0 && paceTrainDay > 0 && paceFromFood < 0 && \(/.test(SIM)
+     && /above \{th\} body&rsquo;s own burn/.test(SIM));
+  ok("...so it cannot credit training on a plan that has none",
+     !/\{paceFromFood < 0 && \(/.test(SIM));
+  // A floored plan lands SHORT of the pace, so it may not be told it landed on it.
+  ok("the floor speaks before the pace promise does",
+     /\{flooredAtRate\(rate\)\s*\n?\s*\? <> The 1,200 floor is holding the goal up/.test(SIM)
+     && SIM.indexOf("floor is holding the goal up") < SIM.indexOf("land on exactly the"));
+  // ⚠️ "FASTER" IS FALSE ON A GAIN PACE — accelerate makes a gain plan SLOWER.
+  ok("...and accelerate only calls itself faster where it is",
+     /: rate > 0\s*\n?\s*\? <> The training lands on TOP of the pace/.test(SIM)
+     && /: rate === 0/.test(SIM)
+     && /comes off the surplus and \{they\} gain\s*\n?\s*more slowly/.test(SIM));
+  // The row label describes what the number IS, in both directions.
+  ok("the food row renames itself when food is going the other way",
+     /\{paceFromFood >= 0 \? "From eating less" : "From eating more"\}/.test(SIM));
+  // ⚠️ AND THE THREE NUMBERS HAVE TO CLOSE AS PRINTED. The shares are
+  // contributions to a DEFICIT; on a gain pace the total is a surplus, so
+  // without the flip the column read −620 / +120 over a total of 500 — a ledger
+  // that visibly does not add up, which is the S215 bug in miniature. Found by
+  // reading a gain pace on screen, not by any assertion here.
+  ok("...and the column is oriented to the direction it totals in",
+     /const paceSign = bankMade >= 0 \? 1 : -1;/.test(SIM)
+     && /const paceFoodShown = paceFromFood \* paceSign;/.test(SIM)
+     && /const paceTrainShown = paceTrainDay \* paceSign;/.test(SIM)
+     && /\{paceFoodShown >= 0 \? "\+" : "−"\}/.test(SIM)
+     && /\{paceTrainShown >= 0 \? "\+" : "−"\}/.test(SIM));
+  // The sessions live ABOVE this block; "below" pointed at the budget panel.
+  ok("the empty-week note points at the planner, which is above it",
+     /Add a session above and they separate/.test(SIM));
+  // ⚠️ AND THE MODE COPY MAY NOT PROMISE A LOSS AN EMPTY WEEK CANNOT PRODUCE.
+  // "Training at Maintain now shows a real loss below" sat directly under the
+  // note saying the two modes are identical — the box contradicting itself.
+  ok("...and neither mode claims a result it needs training for",
+     /\{trainWeek > 0 && <> Eating the Maintain number means no loss/.test(SIM)
+     && /\{trainWeek > 0 && <> Training at Maintain now shows a real loss below\.<\/>\}/.test(SIM));
+}
+
 // ── The nutrition mode is answerable in the sandbox (S219b) ─────────────────
 // ⚠️ null MEANS "FOLLOW THE PLAN". An untouched sandbox must stay byte-identical
 // to the plan's ladder, which the parity sweep above already asserts — this pins

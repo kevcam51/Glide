@@ -13221,6 +13221,32 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const bankMade = bank.earned - bank.budget;
   const bankOverGoal = bank.food > bank.budget;
   const bankOverLimit = bank.food > bank.earned;
+  // ── Where the loss actually comes from (S220d, Kevin) ────────────────────
+  // "A user can click on another 1/2, 1, and 2 pound loss option within this …
+  // so they can just focus on the deficit to lose weight, or they can add the
+  // exercise portion and based on the calorie burn from there they can eat more
+  // or lose faster and decide if they want to lose 1/2, 1 or 2 pounds."
+  //
+  // ⚠️ ONE EXPRESSION FOR BOTH MODES, AND IT IS THE STATEMENT'S OWN. The deficit
+  // somebody actually runs when they eat their goal is `earned − budget` — the
+  // limit, less what they are allowed to spend — which is exactly `bankMade`. In
+  // eat-back that is the pace alone, because the training was handed back as
+  // food; in accelerate it is the pace PLUS the training. So this split is a
+  // DECOMPOSITION of a number the bank page already prints rather than a second
+  // opinion about it, and it absorbs the 1,200 floor for free.
+  const paceTrainDay = bank.deposit;
+  const paceFromFood = bankMade - paceTrainDay;
+  const paceLbsWk = (bankMade * 7) / CAL_PER_LB;
+  // ⚠️ THE COLUMN ORIENTS TO WHICHEVER DIRECTION IT TOTALS IN, or it stops
+  // adding up on screen. `paceFromFood` and `paceTrainDay` are contributions to
+  // a DEFICIT; on a gain pace the total is a surplus, and printing −620 / +120
+  // over a total of 500 is a ledger that visibly does not close — the S215 bug.
+  // Flipping the pair on a surplus makes the same three numbers read +620 /
+  // −120 / 500, which is both arithmetically right and what is actually
+  // happening: the food builds the surplus, the training eats into it.
+  const paceSign = bankMade >= 0 ? 1 : -1;
+  const paceFoodShown = paceFromFood * paceSign;
+  const paceTrainShown = paceTrainDay * paceSign;
   const bankGoalPct = bank.budget > 0 ? Math.round((bank.food / bank.budget) * 100) : 0;
   const bankLimitPct = bank.earned > 0 ? Math.round((bank.food / bank.earned) * 100) : 0;
 
@@ -14519,7 +14545,16 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
             <div style={{ fontSize: ".62rem", letterSpacing: ".6px", color: "var(--muted)", marginBottom: "5px" }}>
               WHAT THE TRAINING BUYS
             </div>
-            <div style={{ display: "flex", gap: "6px" }}>
+            {/* ⚠️ WITH NO TRAINING IN THE WEEK THESE TWO ARE THE SAME BUTTON
+                (S220d, Kevin: "I don't see much change when I click on each
+                button"). EVERY numeric branch on the mode is a multiple of the
+                week's burn — simRawIntakeForRate adds `weeklyBurn / 7` in
+                eat-back and nothing in accelerate, `burnWeek` is 0 or the whole
+                week, and each display row is gated `… && trainWeek > 0`. At zero
+                burn the two are byte-identical and only the sentence below
+                changes. A live control that provably cannot move anything reads
+                as broken, so say which it is. */}
+            <div style={{ display: "flex", gap: "6px", opacity: trainWeek > 0 ? 1 : 0.55 }}>
               {[[true, "More food"], [false, "Faster loss"]].map(([on, label]) => (
                 <button key={label} onClick={() => setSimEat(on)} aria-pressed={eatback === on}
                   style={{ flex: 1, padding: "8px 6px", borderRadius: "9px", cursor: "pointer",
@@ -14531,10 +14566,117 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                 </button>
               ))}
             </div>
+            {/* ⚠️ KEPT CLICKABLE, NOT `disabled`. The two modes still MEAN
+                different things with an empty week, and the sentence below is
+                where that is explained — disabling the control would lock the
+                explanation away exactly when somebody is asking what it does. */}
+            {trainWeek === 0 && (
+              <div style={{ marginTop: "5px", fontSize: ".65rem", color: "var(--yellow)", lineHeight: 1.45 }}>
+                Nothing to buy yet &mdash; with no training in the week these two give the
+                <b> same numbers</b>. Add a session above and they separate by whatever it burns.
+              </div>
+            )}
             <div style={{ marginTop: "5px", fontSize: ".65rem", color: "var(--muted)", lineHeight: 1.45 }}>
+              {/* ⚠️ THE SECOND SENTENCE OF EACH ONLY HOLDS WITH TRAINING IN THE
+                  WEEK. "Training at Maintain now shows a real loss below" sat
+                  directly under a note saying the two modes are identical — the
+                  box contradicting itself in consecutive lines. */}
               {eatback
-                ? <>The burn is added to what {they} can eat, so {th} weight holds and the training makes the diet easier. Eating the Maintain number means no loss &mdash; that is what it means here.</>
-                : <>{Th} food stays where it is, so every calorie {they} burn is a calorie off. Training at Maintain now shows a real loss below.</>}
+                ? <>The burn is added to what {they} can eat, so {th} weight holds and the training makes the diet easier.
+                  {trainWeek > 0 && <> Eating the Maintain number means no loss &mdash; that is what it means here.</>}</>
+                : <>{Th} food stays where it is, so every calorie {they} burn is a calorie off.
+                  {trainWeek > 0 && <> Training at Maintain now shows a real loss below.</>}</>}
+            </div>
+
+            {/* ── How fast, and where it comes from (S220d, Kevin) ──────────
+                The pace was only reachable by scrolling back to section 1, and
+                nothing on the screen ever said how much faster "Faster loss"
+                actually is. Both fixed in one place: the same three loss paces,
+                and the split between food and movement that produces them.
+                ⚠️ THE SAME `rate` THE CHIPS AT THE TOP SET. One control rendered
+                twice, never a second number — a second pace state is how this
+                sheet would start quoting two different goals. */}
+            <div style={{ marginTop: "9px", paddingTop: "8px", borderTop: "1px solid var(--border)" }}>
+              <div style={{ fontSize: ".62rem", letterSpacing: ".6px", color: "var(--muted)", marginBottom: "5px" }}>
+                HOW FAST, AND WHERE IT COMES FROM
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "5px" }}>
+                {[[0, "Maintain"], [0.5, "½ lb/wk"], [1, "1 lb/wk"], [2, "2 lbs/wk"]].map(([r, label]) => {
+                  const on = Math.abs(rate - r) < 0.01;
+                  return (
+                    <button key={label} onClick={() => setRate(r)} aria-pressed={on}
+                      style={{ padding: "8px 3px", borderRadius: "8px", cursor: "pointer", fontFamily: "inherit",
+                        fontSize: ".68rem", fontWeight: 700,
+                        border: on ? "1.5px solid var(--accent)" : "1px solid var(--border)",
+                        background: on ? "rgba(var(--accent-rgb),.12)" : "var(--s2)",
+                        color: on ? "var(--accent)" : "var(--text-secondary)" }}>{label}</button>
+                  );
+                })}
+              </div>
+              <div style={{ marginTop: "9px" }}>
+                {/* ⚠️ THE LABEL FLIPS WITH THE NUMBER. On a gain pace — or an
+                    eat-back plan whose training out-earns the pace — this row is
+                    food going IN, and calling that "from eating less" describes
+                    the opposite of what it is. */}
+                {/* ⚠️ THE LABEL DESCRIBES WHAT THEY ARE DOING WITH FOOD — eating
+                    under or over their own burn — which is true whichever way the
+                    total runs. The SIGN beside it is the contribution to that
+                    total, so the three numbers close. */}
+                <div style={bankRowS}>
+                  <span>{paceFromFood >= 0 ? "From eating less" : "From eating more"}</span>
+                  <b style={{ color: paceFoodShown >= 0 ? "var(--green)" : "var(--yellow)" }}>
+                    {paceFoodShown >= 0 ? "+" : "−"}{calN(paceFoodShown)}
+                  </b>
+                </div>
+                <div style={bankRowS}>
+                  <span>From training</span>
+                  <b style={{ color: paceTrainDay === 0 ? "var(--muted)"
+                    : paceTrainShown >= 0 ? "var(--green)" : "var(--yellow)" }}>
+                    {paceTrainShown >= 0 ? "+" : "−"}{calN(paceTrainShown)}
+                  </b>
+                </div>
+                <div style={bankTotS}>
+                  <b>{bankMade >= 0 ? "Total deficit a day" : "Total surplus a day"}</b>
+                  <b style={{ color: bankMade > 0 ? "var(--green)" : bankMade < 0 ? "var(--red)" : "var(--muted)" }}>
+                    {calN(bankMade)}
+                  </b>
+                </div>
+              </div>
+              {/* ⚠️ EVERY CLAUSE HERE IS GATED ON THE STATE THAT MAKES IT TRUE.
+                  A first pass said "they land on exactly the pace they picked"
+                  on a plan the 1,200 floor was holding ABOVE that pace, called
+                  accelerate "faster" on a GAIN plan (where it is slower), and
+                  credited training with carrying a surplus on a plan that had
+                  no training at all. Same shape as S217: prose composed for one
+                  direction and left running in every other. */}
+              <div style={{ marginTop: "6px", fontSize: ".66rem", color: "var(--muted)", lineHeight: 1.5 }}>
+                {Math.abs(paceLbsWk) < 0.05
+                  ? <>That holds {th} weight steady.</>
+                  : <>That is <b style={{ color: paceLbsWk > 0 ? "var(--green)" : "var(--red)" }}>
+                      {paceLbsWk > 0 ? "−" : "+"}{fmtLbs(paceLbsWk)}</b> a week.</>}
+                {flooredAtRate(rate)
+                  ? <> The 1,200 floor is holding the goal up, so this lands short of the pace above
+                    &mdash; the plan cannot deliver more without taking it out of movement.</>
+                  : trainWeek > 0 && (eatback
+                    ? <> The training is already inside what {they} eat, so {they} land on exactly the
+                      pace {they} picked &mdash; it just buys a bigger plate getting there.</>
+                    : rate > 0
+                      ? <> The training lands on TOP of the pace rather than in the food, which is what
+                        &ldquo;faster&rdquo; means here.</>
+                      : rate === 0
+                        ? <> The training isn&rsquo;t eaten back, so it is the whole of the loss here.</>
+                        : <> The training isn&rsquo;t eaten back, so it comes off the surplus and {they} gain
+                          more slowly than the pace above.</>)}
+                {/* ⚠️ ONLY WHERE TRAINING IS ACTUALLY CARRYING SOMETHING. Gated on
+                    a real net deficit, so it cannot fire on a gain pace — where
+                    `paceFromFood` is negative for a reason that has nothing to do
+                    with exercise — and `paceTrainDay > 0` keeps it off an empty
+                    week entirely. */}
+                {bankMade > 0 && paceTrainDay > 0 && paceFromFood < 0 && (
+                  <> {They} are eating <b>{Math.abs(paceFromFood).toLocaleString()} (cal)</b> a day
+                    above {th} body&rsquo;s own burn &mdash; the training is carrying this on its own.</>
+                )}
+              </div>
             </div>
             {/* Only offer the way back when there IS a plan to go back to. */}
             {!standalone && simEat !== null && isEatback(dPlan) !== eatback && (
