@@ -954,6 +954,27 @@ ok("the premium gate reaches it rather than defaulting open",
        M.SIM_RATES.filter((t) => t.group === "loss").map((t) => t.rate).join(",") === "0.5,1,2"
        && M.SIM_RATES.filter((t) => t.group === "gain").map((t) => t.rate).join(",") === "-0.5,-1,-2",
        M.SIM_RATES.map((t) => t.group + ":" + t.rate));
+    // ── ONE SPELLING OF EACH PACE (S220g, Kevin: "unify the spelling to lbs") ──
+    // Two pounds takes the plural; a half and a one do not. RATE_SHORT printed
+    // "2 lb/wk" in prose on the Daily Dashboard while the chips a few lines above
+    // said "2 LBS/WK" — one pace spelled two ways without scrolling.
+    // ⚠️ SCANNED WITH COMMENTS STRIPPED. This file narrates old bugs in its own
+    // comments ("a client set to 2 lb/wk was told 20 weeks"), and a guard that
+    // could not tell prose from history would either fire on the past or have to
+    // be loosened until it saw nothing — the S208 trap, where a check matched the
+    // very comment naming the thing it forbids.
+    const strings = codeOnly(APP);
+    ok("no pace is spelled with a singular pound after a plural number",
+       !/2 lb\/(wk|week)/.test(strings),
+       (strings.match(/.{0,34}2 lb\/(wk|week).{0,10}/g) || []).slice(0, 3));
+    // Control: the plural spelling really is what is there, so the check above is
+    // not passing because the labels vanished.
+    ok("(control) and two pounds is spelled out in both forms",
+       /2 lbs\/wk/.test(strings) && /2 lbs\/week/.test(strings));
+    // ...and a half and a one stay singular, which is the other half of the rule.
+    ok("...while a half and a one keep the singular",
+       !/(½|0\.5|\b1) lbs\/(wk|week)/.test(strings));
+
     const four = M.SIM_RATES.filter((t) => t.group === "maintain" || t.group === "loss");
     ok("(run) the filter really yields Maintain and the three losing rungs, in order",
        four.length === 4 && four.map((t) => t.rate).join(",") === "0,0.5,1,2"

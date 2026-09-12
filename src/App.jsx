@@ -446,13 +446,19 @@ function weeksToGoal(totalLbs, weeklyDeficitCal) {
 // non-positive deficit, so a surplus produces "no ETA" rather than a negative
 // one, and the goal-date maths never divides the wrong way.
 // Symmetric by design (S198z, Kevin): the same three paces in both directions,
-// so "gain 2 lb/week" is as reachable as "lose 2 lb/week" instead of the gain
+// so "gain 2 lbs/week" is as reachable as "lose 2 lbs/week" instead of the gain
 // side stopping short at 1. A NEGATIVE rate is a surplus — see the note above.
 const RATE_OPTS = [-2, -1, -0.5, 0, 0.5, 1, 2];
-const RATE_LABEL = { "-2": "Gain 2 lb/week", "-1": "Gain 1 lb/week", "-0.5": "Gain ½ lb/week",
-  0: "Maintenance", 0.5: "Lose ½ lb/week", 1: "Lose 1 lb/week", 2: "Lose 2 lb/week" };
-const RATE_SHORT = { "-2": "+2 lb/wk", "-1": "+1 lb/wk", "-0.5": "+½ lb/wk",
-  0: "Maintain", 0.5: "½ lb/wk", 1: "1 lb/wk", 2: "2 lb/wk" };
+// ⚠️ TWO POUNDS TAKES THE PLURAL, HALF AND ONE DO NOT (S220g, Kevin: "unify the
+// spelling to lbs"). Every other pace table in this file already reads
+// "2 lbs/wk"; these two were the holdouts, and RATE_SHORT prints on the Daily
+// Dashboard — the same screen whose chips say "−2 LBS/WK" — so a client could
+// read one pace spelled two ways without scrolling. scripts/test-what-if-week.mjs
+// scans the STRINGS (comments stripped) so a third spelling cannot creep back.
+const RATE_LABEL = { "-2": "Gain 2 lbs/week", "-1": "Gain 1 lb/week", "-0.5": "Gain ½ lb/week",
+  0: "Maintenance", 0.5: "Lose ½ lb/week", 1: "Lose 1 lb/week", 2: "Lose 2 lbs/week" };
+const RATE_SHORT = { "-2": "+2 lbs/wk", "-1": "+1 lb/wk", "-0.5": "+½ lb/wk",
+  0: "Maintain", 0.5: "½ lb/wk", 1: "1 lb/wk", 2: "2 lbs/wk" };
 // The pace as a sentence, in the direction it actually goes. "Eat less to lose
 // ~+1 lb/wk" is what the deficit-only phrasing produced once surpluses existed.
 const RATE_SENTENCE = (r) => (r === 0 ? "Maintenance — no deficit"

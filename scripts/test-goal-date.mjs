@@ -153,12 +153,20 @@ ok("...it says the plan's own pace", /easier diet, \$\{pacePhrase\}/.test(SUM_CO
     ${liftDecl(APP, "RATE_SHORT")}
     ${liftDecl(APP, "pacePhrase").replace(/^const pacePhrase = /, "return ")}
   `);
-  ok("2 lb/wk reads as itself", phrase(2) === "a steady ~2 lb/wk", phrase(2));
+  // ⚠️ TWO POUNDS TAKES THE PLURAL (S220g, Kevin: "unify the spelling to lbs").
+  // RATE_SHORT used to say "2 lb/wk" here while the chips on the same dashboard
+  // said "2 LBS/WK". This assertion is what caught the change in a second
+  // surface — which is the point of pinning the string rather than the shape.
+  ok("2 lbs/wk reads as itself", phrase(2) === "a steady ~2 lbs/wk", phrase(2));
   ok("1 lb/wk is unchanged", phrase(1) === "a steady ~1 lb/wk", phrase(1));
   ok("half a pound reads properly", phrase(0.5) === "a steady ~½ lb/wk", phrase(0.5));
   // ⚠️ "steady ~Maintain" is not English — RATE_SHORT[0] is a NOUN.
   ok("maintenance gets a sentence, not a label", phrase(0) === "holding your weight steady", phrase(0));
   ok("a gaining pace keeps its plus", phrase(-1) === "a steady ~+1 lb/wk", phrase(-1));
+  ok("...and a gaining two takes the plural too", phrase(-2) === "a steady ~+2 lbs/wk", phrase(-2));
+  // The other half of the rule: a half and a one stay singular in both directions.
+  ok("...while a half and a one stay singular",
+     [0.5, 1, -0.5, -1].every((r) => !/lbs\//.test(phrase(r))), [0.5, 1, -0.5, -1].map(phrase));
   ok("every offered rate produces English", M.RATE_OPTS.every((r) => !/undefined|Maintain/.test(phrase(r))),
      M.RATE_OPTS.map(phrase));
 }
