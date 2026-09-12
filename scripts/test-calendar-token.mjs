@@ -211,5 +211,23 @@ ok("the app sends the remove flag", /callCalendarLink\(\{ remove: true \}\)/.tes
 ok("…and clears the link locally so the screen matches the server",
    /setLink\(null\); setConfirmOff\(false\)/.test(APP));
 
+// ── 5. Findability (S226) ───────────────────────────────────────────────────
+// A client's ONLY route to this is the ≡ menu, and it was rendering below the
+// master switch and twenty per-type toggles — far enough down that the feature
+// was effectively hidden from the people who most need it.
+{
+  const mounts = (APP.match(/<CalendarSubscribe \/>/g) || []).length;
+  ok("it is still offered in both places (menu and the calendar page)", mounts === 2, mounts);
+  // Positional, because this is precisely the kind of thing a later edit slides
+  // back down the file without anyone noticing.
+  const menuMount = APP.lastIndexOf("<CalendarSubscribe />");
+  const toggleList = APP.indexOf("types.map((ty) => {");
+  const master = APP.indexOf("All notifications");
+  ok("in the menu it renders BEFORE the toggle list",
+     menuMount !== -1 && toggleList !== -1 && menuMount < toggleList, { menuMount, toggleList });
+  ok("…and before the master switch, so it is the first thing in the section",
+     menuMount < master, { menuMount, master });
+}
+
 console.log(`${checks - fails}/${checks} calendar-token assertions passed`);
 if (fails) process.exit(1);

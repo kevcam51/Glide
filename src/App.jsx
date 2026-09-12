@@ -37608,6 +37608,13 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
               {showNotif && (
                 <div style={{ padding: "4px 16px 12px", display: "flex", flexDirection: "column", gap: 12 }}>
                   <div style={{ fontSize: ".74rem", color: "var(--muted)" }}>Choose which nudges &amp; reminders you get — turn everything off, or pick by type.</div>
+                  {/* FIRST, not last (S226). This is the one thing in here that
+                      is not a toggle — it puts your sessions in the calendar app
+                      you already use — and it was sitting underneath twenty of
+                      them. A trainer can also reach it from the calendar page's
+                      Settings; a client has no such page, so this menu is the
+                      only route they have and burying it hid the feature. */}
+                  <CalendarSubscribe />
                   <div style={row}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: ".88rem" }}>All notifications</div>
@@ -37627,12 +37634,15 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
                       </div>
                     );
                   })}
-                  {/* Lead times and the calendar subscription live here TOO, not
-                      only on the trainer calendar page — a client has no such
-                      page, and this is where anyone comes looking for "when do
-                      I get told about things". Same prefs either way. */}
+                  {/* Lead times live here TOO, not only on the trainer calendar
+                      page — a client has no such page, and this is where anyone
+                      comes looking for "when do I get told about things". Same
+                      prefs either way.
+                      The calendar SUBSCRIPTION moved to the top of this section
+                      (S226): it sat below twenty toggle rows, which for a client
+                      — whose only route to it is this menu — meant it was
+                      effectively unfindable. */}
                   <SessionReminderPrefs notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs} />
-                  <CalendarSubscribe />
                   {/* Push DELIVERY for this device (S90) — notifications that
                       arrive even when Glidna is closed. Per-device; the prompt
                       must come from this tap (browser rule). */}
