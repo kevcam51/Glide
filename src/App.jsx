@@ -12778,6 +12778,29 @@ function simBankRows(d, weeklyBurn, r, tdeeOverride, spent) {
   };
 }
 
+// What the body actually spends in a day — a MEASUREMENT, and so never floored.
+//
+// ⚠️ THIS IS THE DISTINCTION THE 1,200 FLOOR TURNS ON, AND IT HAD BEEN COLLAPSED.
+// `simIntakeForRate(d, burn, 0)` is what we would PRESCRIBE to hold weight, and
+// the floor rightly lifts it to 1,200. What a body BURNS is not a prescription
+// and cannot be floored: a 105 lb, 62-year-old, sedentary client burns about
+// 1,130, and telling her that eating the 1,200 we insist on "holds her weight
+// steady" is false in the flattering direction — it is a 70 cal/day surplus.
+//
+// ⚠️ CLAUDE.md's floor clause ("anything DERIVED from a floored target must use
+// the floored value") still governs the INTAKE side, and still does: every
+// projection here eats `paceAtWeight`, which is floored. It was never about the
+// burn, and reading it that way put two break-even numbers on one screen the
+// moment the bank page printed the honest one.
+//
+// ⚠️ AND IT IS BYTE-IDENTICAL WHEREVER THE FLOOR IS NOT BINDING — Math.round is
+// exactly what atLeastMinCal does above 1,200 — so every plan with a daily burn
+// over 1,200, which is very nearly all of them, is untouched.
+function simHoldDay(d, weeklyBurn, tdeeOverride) {
+  const raw = simRawIntakeForRate(d, weeklyBurn, 0, tdeeOverride);
+  return raw === null ? null : Math.round(raw);
+}
+
 // What a typed daily burn is allowed to be.
 //
 // ⚠️ THE PARSER CAP AND THE PLAUSIBLE BAND ARE DIFFERENT JOBS. The cap is what
@@ -13260,15 +13283,24 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   const weekIntake = wp.weekIntake;
   const intake = Math.round(weekIntake / 7);
   // Negative = a deficit = weight comes off.
-  const weekBalance = weekIntake - burnWeek - maintain * 7;
+  // ⚠️ THE BODY'S BURN, NOT THE PRESCRIBED MAINTAIN. These differ only when the
+  // floor is binding, and there the floored one is comparing 1,200 against
+  // itself — the one case where this line could be wrong, it was.
+  const holdDay = simHoldDay(d, trainWeek, mNum) ?? 0;
+  const weekBalance = weekIntake - burnWeek - holdDay * 7;
   const balance = weekBalance / 7;
   // ── Walking it forward, with the body re-priced as the weight moves ──────
   // ⚠️ EVERY INPUT TO THE WALK IS THE SAME EXPRESSION THE SCREEN ALREADY SHOWS.
-  // `weekHold` reproduces exactly what `weekBalance` subtracts — the floored
-  // maintain, times seven, plus the burn the ladder has not already paid for —
-  // so at day 0 the two agree term for term. Using the RAW maintain here would
-  // put two break-even numbers on one card, and CLAUDE.md's floor clause says a
-  // projection must be computed from the number the plan will actually deliver.
+  // `weekHold` reproduces exactly what `weekBalance` subtracts — the body's own
+  // burn, times seven, plus the training the ladder has not already paid for —
+  // so at day 0 the two agree term for term.
+  //
+  // ⚠️ THE BURN SIDE IS NOT FLOORED, AND AN EARLIER NOTE HERE HAD IT BACKWARDS.
+  // It read CLAUDE.md's floor clause as covering this term too, which put the
+  // PRESCRIBED 1,200 where the MEASURED expenditure belongs: on a plan whose
+  // true burn is 1,130 that compares 1,200 against itself and reports "holds
+  // your weight steady" while she slowly gains. The clause governs what somebody
+  // is told to EAT — `dayIntake` below, which is still floored, deliberately.
   //
   // ⚠️ AND WHEN THERE IS NO BODY TO RE-PRICE, THESE GO CONSTANT ON PURPOSE. A
   // typed daily burn has no BMR behind it and no weight means no MET can be
@@ -13282,8 +13314,9 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
     : trainWeek);
   const weekHold = (lbs) => {
     const dw = atWeight(lbs), tw = trainWeekAt(lbs);
-    if (simRawIntakeForRate(dw, tw, 0, mNum) === null) return null;
-    return simIntakeForRate(dw, tw, 0, mNum) * 7 + (isEatback(dw) ? 0 : tw);
+    const hold = simHoldDay(dw, tw, mNum);
+    if (hold === null) return null;
+    return hold * 7 + (isEatback(dw) ? 0 : tw);
   };
   // A blank day is the pace AT THAT WEIGHT — which is why an untouched screen
   // projects exactly what it did before: the deficit stays `cut` for ever.
@@ -13373,7 +13406,10 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
   // `maintain` alone painted every day amber ("over") while the headline
   // underneath said LOSING. Same ±20 dead band as `dir`, so the two can never
   // disagree.
-  const holdSteady = maintain + burnPerDay;
+  // ⚠️ AND THIS IS NOW THE SAME NUMBER THE BANK PAGE CALLS THE LIMIT
+  // (`bank.earned`) — one break-even figure for the whole sheet, asserted equal
+  // in scripts/test-what-if-week.mjs rather than left to coincidence.
+  const holdSteady = holdDay + burnPerDay;
   const dayTone = (v) => (v < holdSteady - 20 ? "var(--green)" : v > holdSteady + 20 ? "var(--yellow)" : "var(--muted)");
   const setDay = (i, val) => setWeekCals((prev) => prev.map((x, ix) => (ix === i ? val : x)));
   // ⚠️ ANY typed day, INCLUDING a rejected one — otherwise the escape hatch is
@@ -14840,13 +14876,15 @@ function CalorieSimulator({ data, weightLbs, planRate, dayCalsAll, onClose, stan
                 </div>
               </>
             )}
-            {/* ⚠️ NOT "your body burns". `maintain` is intakeFor(0) — the intake
-                that HOLDS the weight, which in eat-back mode already contains the
-                WEEK's training spread across seven days. Calling it basal
-                expenditure was a false statement about a real number. */}
+            {/* ⚠️ `holdDay`, NOT THE MAINTAIN CHIP. The chip is a PRESCRIPTION and
+                is floored at 1,200; this row is what the line above is measured
+                against, so it has to be what the body actually spends. Identical
+                on every plan the floor does not bind. It still is not "basal" —
+                in eat-back it already carries the week's training, which is
+                exactly what eat-back means. */}
             <div style={{ display: "flex", justifyContent: "space-between" }}>
               <span style={{ color: "var(--muted)" }}>To hold steady (week)</span>
-              <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--muted)" }}>{(maintain * 7).toLocaleString()} cal</span>
+              <span style={{ fontFamily: "'Sora',sans-serif", color: "var(--muted)" }}>{(holdDay * 7).toLocaleString()} cal</span>
             </div>
           </div>
           <div style={{ fontSize: ".64rem", color: "var(--muted)", marginTop: "5px" }}>

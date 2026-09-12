@@ -101,10 +101,10 @@ const FNS = ["calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx"
   "restingKcalPerMin", "calcBurn", "cardioExFor", "exBurn", "isEatback", "dailyDeficitOf", "weeklyRateOf",
   "planEnergy", "planIntakeForRate", "computeClientCalories",
   "simNum", "simRejected", "weekPlan", "joinDays",
-  "seedSimCardio", "simSessionBurn", "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simBudgetRows", "simBankRows", "simProject",
+  "seedSimCardio", "simSessionBurn", "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simBudgetRows", "simBankRows", "simHoldDay", "simProject",
   "ymdLocal", "simWeekdayIdx", "simDateAt", "simScenarioDay"];
 const EXPORTS = ["simNum", "simRejected", "weekPlan", "joinDays", "seedSimCardio", "simSessionBurn",
-  "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simBudgetRows", "simBankRows", "planEnergy",
+  "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simBudgetRows", "simBankRows", "simHoldDay", "planEnergy",
   "planIntakeForRate", "computeClientCalories", "cardioExFor", "exBurn", "isEatback", "SIM_RATES",
   "SIM_MANUAL", "MIN_DAILY_CAL", "CAL_PER_LB", "DAYS", "DAY_SHORT", "atLeastMinCal", "simProject",
   "simWeekdayIdx", "simDateAt", "simScenarioDay", "SIM_HORIZONS"];
@@ -1309,6 +1309,76 @@ ok("...and hands it the days the compliance strip already built",
 // The in-plan button is untouched — Kevin: "of course, keep it under specific clients."
 ok("the in-plan entry point survives", /<button onClick=\{\(\)=>setShowSim\(true\)\}/.test(codeOnly(APP)));
 
+// ── Break-even is measured, not prescribed (S220e, found by review) ─────────
+// The sheet had TWO break-even numbers the moment the bank page printed an
+// honest one: section 4 compared intake against the PRESCRIBED maintain, which
+// the 1,200 floor lifts, so on a small client it compared 1,200 against itself
+// and reported "holds your weight steady" while she gained.
+{
+  // ⚠️ IDENTICAL WHEREVER THE FLOOR DOES NOT BIND — which is nearly every plan,
+  // so this change has to be invisible there or it is not a fix, it is a
+  // rewrite. Math.round is exactly what atLeastMinCal does above 1,200.
+  let drift = null, n = 0, flooredSeen = 0;
+  for (const [name, d] of PLANS) {
+    const planBurn = M.planEnergy(d).weeklyBurn;
+    for (const burn of [0, planBurn, 1400, 4200]) {
+      for (const ov of [undefined, 1800, 2400, 3600]) {
+        n++;
+        const hold = M.simHoldDay(d, burn, ov);
+        const prescribed = M.simIntakeForRate(d, burn, 0, ov);
+        if (hold !== null && hold < M.MIN_DAILY_CAL) { flooredSeen++; continue; }
+        if (hold !== prescribed) drift = { name, burn, ov, hold, prescribed };
+      }
+    }
+  }
+  ok(`the measured burn matches the prescribed maintain wherever the floor is not binding (${n} cases)`, !drift, drift);
+  ok("(control) and the floor-binding case was actually reached", flooredSeen > 0, flooredSeen);
+
+  // ⚠️ THE CASE THE FIX EXISTS FOR. A 105 lb, 62-year-old, sedentary client
+  // burns ~1,130; the floor will not let the plan prescribe under 1,200; eating
+  // 1,200 is a real surplus. The old basis called that "holds steady".
+  const fl = PLANS.find(([nm]) => nm === "floor-bound small frame")[1];
+  const hold = M.simHoldDay(fl, 0, undefined);
+  const prescribed = M.simIntakeForRate(fl, 0, 0, undefined);
+  ok("a body whose burn is under 1,200 is reported at its real burn",
+     hold < M.MIN_DAILY_CAL && prescribed === M.MIN_DAILY_CAL, { hold, prescribed });
+  // The old line: intake priced at the pace, compared against the FLOORED
+  // maintain, is exactly zero — break-even by construction, for any pace.
+  const pace = M.simIntakeForRate(fl, 0, 2, undefined);
+  ok("(control) the old basis reported break-even no matter the pace",
+     pace * 7 - prescribed * 7 === 0, { pace, prescribed });
+  ok("...while the real one reports the surplus it is", pace - hold > 0, { pace, hold });
+
+  // ⚠️ ONE BREAK-EVEN NUMBER FOR THE WHOLE SHEET. `holdSteady` (section 4) and
+  // `bank.earned` (the bank page's LIMIT) are now the same figure by identity,
+  // not by coincidence — swept so they cannot drift apart again.
+  let split = null, m = 0;
+  for (const [name, d] of PLANS) {
+    for (const burn of [0, 1400, 2800, 4200]) {
+      for (const ov of [undefined, 1800, 2400, 3600]) {
+        m++;
+        const holdD = M.simHoldDay(d, burn, ov) ?? 0;
+        const burnPerDay = Math.round((M.isEatback(d) ? 0 : burn) / 7);
+        const earned = M.simBankRows(d, burn, 1, ov, 2000).earned;
+        if (holdD + burnPerDay !== earned) split = { name, burn, ov, holdSteady: holdD + burnPerDay, earned };
+      }
+    }
+  }
+  ok(`section 4 and the bank page agree on break-even (${m} cases)`, !split, split);
+  // Source pins, so the two readers keep using the shared expression.
+  ok("...and both read it from the same place",
+     /const holdDay = simHoldDay\(d, trainWeek, mNum\) \?\? 0;/.test(SIM_CODE)
+     && /const holdSteady = holdDay \+ burnPerDay;/.test(SIM_CODE)
+     && /\{\(holdDay \* 7\)\.toLocaleString\(\)\} cal/.test(SIM_CODE));
+  // ⚠️ AND THE INTAKE SIDE IS STILL FLOORED, which is what CLAUDE.md's floor
+  // clause actually governs — a projection must eat the number the plan will
+  // really prescribe.
+  ok("the walk still EATS the floored target", /const paceAtWeight = \(lbs\) => simIntakeForRate\(/.test(SIM_CODE));
+  ok("...while it BURNS the measured one",
+     /const hold = simHoldDay\(dw, tw, mNum\);/.test(SIM_CODE)
+     && !/return simIntakeForRate\(dw, tw, 0, mNum\) \* 7/.test(SIM_CODE));
+}
+
 // ── 5. seeding the planner must not double-count the plan's own training ────
 // ⚠️ THE BUG THE SEEDING INVITES. The planner starts from data.cardio so it
 // opens on reality — but in eat-back mode `intakeFor` ALREADY carries the whole
@@ -1322,7 +1392,7 @@ ok("the in-plan entry point survives", /<button onClick=\{\(\)=>setShowSim\(true
   // ⚠️ AND IT IS THE WEEK, NOT A ROUNDED DAY TIMES SEVEN. Rounding first put
   // "Cardio this week 684" a hundred pixels above "Training burns (week) −686"
   // — two numbers for the same sessions inside one card.
-  ok("...and it is the true week", /const weekBalance = weekIntake - burnWeek - maintain \* 7;/.test(SIM_CODE));
+  ok("...and it is the true week", /const weekBalance = weekIntake - burnWeek - holdDay \* 7;/.test(SIM_CODE));
   ok("...the per-day figure is a rounding OF it, not the other way round",
      /const burnPerDay = Math\.round\(burnWeek \/ 7\);/.test(SIM_CODE));
   // ⚠️ `lbsIn` IS DELIBERATELY NOT LIFTED ANY MORE. Since S217 it reads the
@@ -1331,7 +1401,7 @@ ok("the in-plan entry point survives", /<button onClick=\{\(\)=>setShowSim\(true
   // semicolon" trap. What this block is about is the weekly BALANCE; the flat
   // reference below is what the projector must reproduce at day 0, and
   // scripts/test-what-if-week.mjs proves that separately by running simProject.
-  const engine = new Function("weekIntake", "burnWeek", "maintain", "CAL_PER_LB", `
+  const engine = new Function("weekIntake", "burnWeek", "holdDay", "CAL_PER_LB", `
     ${SIM_CODE.match(/const weekBalance = [^\n]*/)[0]}
     ${SIM_CODE.match(/const balance = weekBalance \/ 7;/)[0]}
     ${SIM_CODE.match(/const dir = balance [^\n]*/)[0]}
@@ -1344,7 +1414,7 @@ ok("the in-plan entry point survives", /<button onClick=\{\(\)=>setShowSim\(true
     const intakeFor = (r) => M.simIntakeForRate(d, trainWeek, r);
     const burnWeek = doubleCount ? trainWeek : (M.isEatback(d) ? 0 : trainWeek);
     const pace = intakeFor(rate);
-    return engine(pace * 7, burnWeek, intakeFor(0), CAL_PER_LB);
+    return engine(pace * 7, burnWeek, M.simHoldDay(d, trainWeek), CAL_PER_LB);
   };
   for (const rate of [0.5, 1, 2]) {
     const d = P({ weeklyRate: rate });
@@ -1512,10 +1582,15 @@ ok("...so no tile still subtracts the pounds off the start weight",
 ok("the four horizons are memoised, not walked per render",
    /const projAt = useMemo\(/.test(SIM_CODE));
 // ⚠️ THE WALK'S HOLD MUST BE THE SAME TERM `weekBalance` SUBTRACTS, or the card
-// carries two break-even numbers. Floored, times seven, plus the burn the ladder
-// has not already paid for.
+// carries two break-even numbers. The body's MEASURED burn, times seven, plus
+// the training the ladder has not already paid for.
+// ⚠️ IT USED TO READ `simIntakeForRate(…, 0, …)` — the PRESCRIBED maintain,
+// which the 1,200 floor lifts. On a plan whose true burn is under 1,200 that
+// walked a body burning 1,200 while feeding it 1,200, so it could only ever
+// report "steady" (S220e).
 ok("the walk holds steady on the same expression the answer panel does",
-   /return simIntakeForRate\(dw, tw, 0, mNum\) \* 7 \+ \(isEatback\(dw\) \? 0 : tw\);/.test(SIM_CODE));
+   /const hold = simHoldDay\(dw, tw, mNum\);/.test(SIM_CODE)
+   && /return hold \* 7 \+ \(isEatback\(dw\) \? 0 : tw\);/.test(SIM_CODE));
 ok("...and a blank day is the pace AT THAT WEIGHT, which is what keeps it inert",
    /const paceAtWeight = \(lbs\) => simIntakeForRate\(atWeight\(lbs\), trainWeekAt\(lbs\), rate, mNum\);/.test(SIM_CODE));
 // ⚠️ WITH NO BODY TO RE-PRICE IT GOES CONSTANT ON PURPOSE — a typed daily burn
@@ -1726,7 +1801,7 @@ ok("the calendar writes nothing either", !/onChange\(/.test(SIM_CODE) && !/stora
   // semicolon" trap. What this block is about is the weekly BALANCE; the flat
   // reference below is what the projector must reproduce at day 0, and
   // scripts/test-what-if-week.mjs proves that separately by running simProject.
-  const engine = new Function("weekIntake", "burnWeek", "maintain", "CAL_PER_LB", `
+  const engine = new Function("weekIntake", "burnWeek", "holdDay", "CAL_PER_LB", `
     ${SIM_CODE.match(/const weekBalance = [^\n]*/)[0]}
     ${SIM_CODE.match(/const balance = weekBalance \/ 7;/)[0]}
     ${SIM_CODE.match(/const dir = balance [^\n]*/)[0]}
@@ -2105,7 +2180,7 @@ ok("the floor gate counts LOW DAYS, not the mean", /\{wp\.lowDays\.length > 0 &&
 ok("...and nothing judges the floor on an average", !/weekIntake \/ 7[^\n]*< 1200/.test(SIM_CODE));
 ok("burn spreading is disclosed, not assumed", /Training is spread evenly across the week/.test(SIM_CODE));
 // ── the day rows must agree with the headline ─────────────────────────────
-ok("holding steady includes the burn the ladder has not already paid for", /const holdSteady = maintain \+ burnPerDay;/.test(SIM_CODE));
+ok("holding steady includes the burn the ladder has not already paid for", /const holdSteady = holdDay \+ burnPerDay;/.test(SIM_CODE));
 ok("...the row colours use it", /v < holdSteady - 20 \? "var\(--green\)" : v > holdSteady \+ 20/.test(SIM_CODE));
 ok("...and so does the delta printed next to them",
    /Math\.abs\(val - holdSteady\) <= 20 \? "even"/.test(SIM_CODE)
