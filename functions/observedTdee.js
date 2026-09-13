@@ -109,6 +109,12 @@ const TUNING = {
   HIGH_CONF_LOGGED_DAYS: 21,
   HIGH_CONF_COVERAGE: 0.75,
   HIGH_CONF_WEIGH_INS: 8,
+  // How far ABOVE the formula a measurement may move a real prescription.
+  // Named here rather than left inline in clampToFormula so the mirror test
+  // guards it: this is the ceiling on the only automatic, silent correction in
+  // the app, and it is re-applied on READ, so a forged or stale stored value
+  // cannot exceed it either.
+  MAX_RISE_PCT: 0.20,
 };
 
 // ── date helpers ───────────────────────────────────────────────────────────
@@ -309,7 +315,7 @@ function estimateObservedTdee(input) {
 function clampToFormula(observed, formulaTdee, opts) {
   const o = opts || {};
   const downPct = o.maxDropPct != null ? o.maxDropPct : 0.10;   // refuse below 10% under
-  const upPct = o.maxRisePct != null ? o.maxRisePct : 0.20;     // clamp at 20% over
+  const upPct = o.maxRisePct != null ? o.maxRisePct : TUNING.MAX_RISE_PCT;   // clamp at 20% over
   const f = Number(formulaTdee);
   const v = Number(observed);
   if (!(f > 0) || !isFinite(v)) {

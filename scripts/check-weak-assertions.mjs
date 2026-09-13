@@ -44,6 +44,11 @@ const SRC = {
   INDEX: read("functions/index.js"),
   AI: read("functions/aitools.js"),
   FIELDS: read("src/App.jsx"),
+  // S228 — the session start code lives in two new files, and an assertion
+  // against a file this map does not know about is invisible here.
+  STARTCODE: read("functions/startCode.js"),
+  SESSIONSTART: read("functions/sessionStart.js"),
+  PROXY: read("proxy/server.js"),
 };
 
 // Lines confirmed by mutation testing to be sound or not-a-guard. Each needs a

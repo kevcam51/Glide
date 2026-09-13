@@ -26,22 +26,32 @@ if (!CLIENT_ID || !CLIENT_SECRET || !PROXY_SECRET) {
   process.exit(1);
 }
 
-// OAuth2 client-credentials token, cached in memory (valid ~24h; refresh early).
-let _token = null, _tokenExp = 0;
-async function getToken() {
+// OAuth2 client-credentials tokens, cached in memory PER SCOPE (valid ~24h;
+// refresh early). The search path still asks for exactly "basic", byte for
+// byte. The barcode path needs the `barcode` scope as well — and if FatSecret
+// refuses that combination it is asked again with NO scope parameter at all,
+// which their docs say grants whatever the account actually holds. That second
+// form is the only way to discover an entitlement we cannot see from here.
+const _tokens = new Map();   // scope → { token, exp }
+async function getToken(scope = "basic") {
   const now = Date.now();
-  if (_token && now < _tokenExp - 60000) return _token;
+  const c = _tokens.get(scope);
+  if (c && now < c.exp - 60000) return c.token;
   const basic = Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64");
-  const r = await fetch("https://oauth.fatsecret.com/connect/token", {
+  const ask = (body) => fetch("https://oauth.fatsecret.com/connect/token", {
     method: "POST",
     headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded" },
-    body: "grant_type=client_credentials&scope=basic",
+    body,
   });
+  let r = await ask(`grant_type=client_credentials&scope=${encodeURIComponent(scope)}`);
+  if (!r.ok && scope !== "basic") {
+    console.error("fatsecret token scope", JSON.stringify(scope), "rejected", r.status, "— retrying with no scope");
+    r = await ask("grant_type=client_credentials");
+  }
   if (!r.ok) throw new Error("fatsecret-auth-" + r.status);
   const j = await r.json();
-  _token = j.access_token;
-  _tokenExp = now + (Number(j.expires_in) || 86400) * 1000;
-  return _token;
+  _tokens.set(scope, { token: j.access_token, exp: now + (Number(j.expires_in) || 86400) * 1000 });
+  return j.access_token;
 }
 
 async function fsCall(method, q, token) {
@@ -90,6 +100,49 @@ async function getFatSecretFood(id) {
   return r.json();
 }
 
+// Barcode → food (S228). FatSecret is the app's primary library, so a branded
+// US product it holds and the crowd-sourced sources do not is exactly the scan
+// that fails today. Two shapes are tried: the v2 route answers with the whole
+// food in one call, the older method answers with an id we then fetch.
+//
+// ⚠️ THE GATE PREDICATE IS NARROW, deliberately, exactly as _v3Blocked's is. A
+// transient in-body error must not permanently disable barcode for the life of
+// a VM process nobody restarts. Only a scope/method refusal latches.
+let _barcodeGate = false;
+const gateErr = (e) => !!e && (e.code === 14 || /missing scope|unknown method/i.test(String(e.message || "")));
+
+async function fsBarcode(gtin13) {
+  if (_barcodeGate) return { gated: true };
+  const token = await getToken("basic barcode");
+  const r2 = await fetch("https://platform.fatsecret.com/rest/food/barcode/find-by-id/v2"
+    + `?barcode=${encodeURIComponent(gtin13)}&format=json`, { headers: { Authorization: `Bearer ${token}` } });
+  if (r2.ok) {
+    const j2 = await r2.json();
+    if (j2 && j2.food && j2.food.servings) return { food: j2.food };      // whole food, one call
+    if (j2 && j2.error) {
+      console.error("fatsecret barcode v2 error:", JSON.stringify(j2.error));
+      if (gateErr(j2.error)) { _barcodeGate = true; return { gated: true }; }
+    } else if (j2 && j2.food_id) {                                        // id only
+      const id = String((j2.food_id && j2.food_id.value) || j2.food_id || "");
+      if (/^\d+$/.test(id) && Number(id) > 0) return { food: (await getFatSecretFood(id)).food || null };
+      return { food: null };
+    }
+  } else { console.error("fatsecret barcode v2 http", r2.status); }
+  const r1 = await fetch("https://platform.fatsecret.com/rest/server.api?method=food.find_id_for_barcode"
+    + `&format=json&barcode=${encodeURIComponent(gtin13)}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!r1.ok) throw new Error("fatsecret-barcode-" + r1.status);
+  const j1 = await r1.json();
+  if (j1 && j1.error) {
+    console.error("fatsecret barcode v1 error:", JSON.stringify(j1.error));
+    if (gateErr(j1.error)) { _barcodeGate = true; return { gated: true }; }
+    throw new Error("fatsecret-barcode-error");
+  }
+  const id = String((j1 && j1.food_id && j1.food_id.value) || "");
+  if (!/^\d+$/.test(id) || Number(id) <= 0) return { food: null };        // a REAL miss, not a gate
+  const det = await getFatSecretFood(id);
+  return { food: (det && det.food) || null };
+}
+
 const send = (res, code, obj) => {
   const body = JSON.stringify(obj);
   res.writeHead(code, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
@@ -100,9 +153,14 @@ const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, `http://localhost:${PORT}`);
     if (u.pathname === "/health") return send(res, 200, { ok: true });
-    if (u.pathname !== "/search" && u.pathname !== "/food") return send(res, 404, { error: "not-found" });
+    if (u.pathname !== "/search" && u.pathname !== "/food" && u.pathname !== "/barcode") return send(res, 404, { error: "not-found" });
     // Shared-secret gate so only our Cloud Function can use our FatSecret quota.
     if (req.headers["x-proxy-secret"] !== PROXY_SECRET) return send(res, 403, { error: "forbidden" });
+    if (u.pathname === "/barcode") {
+      const code = (u.searchParams.get("code") || "").trim();
+      if (!/^\d{13}$/.test(code)) return send(res, 400, { error: "bad-code" });
+      return send(res, 200, await fsBarcode(code));
+    }
     if (u.pathname === "/food") {
       const id = (u.searchParams.get("id") || "").trim().slice(0, 24);
       if (!/^\d+$/.test(id)) return send(res, 400, { error: "bad-id" });

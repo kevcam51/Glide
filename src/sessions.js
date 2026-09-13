@@ -161,6 +161,45 @@ export const ON_MY_WAY_LEAD_MIN = 240;
 // estimate nobody has refreshed.
 export const ON_MY_WAY_STALE_MIN = 45;
 
+// ── Session start codes (S228) ──────────────────────────────────────────────
+// ⚠️ THESE TWO NUMBERS MUST EQUAL THE ONES IN functions/startCode.js.
+// scripts/test-session-start-code.mjs reads both out of both files and fails if
+// they drift — a wider client window shows a code the server refuses to mint;
+// a narrower one hides a card that would have worked.
+export const START_CODE_LEAD_MIN = 30;
+export const START_CODE_GRACE_MIN = 20;
+
+// Has this session been started, and how?
+// `via` is never collapsed: "code" means two devices exchanged a secret,
+// "client-tap" means one person asserted it. The UI says which.
+export const startCodeState = (s) => {
+  const v = (s && s.verify) || {};
+  return v.at ? { verified: true, at: Number(v.at) || 0, via: v.via || "", by: v.by || "" }
+    : { verified: false, at: 0, via: "", by: "" };
+};
+
+// Is the code offer live for this session right now?
+// ⚠️ THIS IS NOT `!isPastSession`. The grace window runs 20 minutes past the
+// END, and every list in the app filters on isPastSession or `startAt > now` —
+// so a card mounted behind one of those filters vanishes at the exact moment
+// someone running late needs it. Every mount of this feature is gated on THIS
+// predicate, never on a list's own idea of "past".
+export function canShowStartCode(s, now = Date.now()) {
+  if (!s || s.status === "cancelled") return false;
+  if (startCodeState(s).verified) return false;
+  const start = Number(s.startAt) || 0;
+  if (!start) return false;
+  const end = start + (Number(s.durationMin) || SESSION_DEFAULT_MIN) * 60000;
+  return now >= start - START_CODE_LEAD_MIN * 60000 && now <= end + START_CODE_GRACE_MIN * 60000;
+}
+
+// Six digits are read aloud, so they are shown in two groups of three — and
+// compared unspaced, because people type what they see.
+export const prettyStartCode = (c) => {
+  const d = String(c || "").replace(/\D/g, "");
+  return d.length === 6 ? `${d.slice(0, 3)} ${d.slice(3)}` : d;
+};
+
 // May I tell the other person I'm on the way to this session, right now?
 // Mirrors onMyWayDecision on the server, minus the participant check the rules
 // and the callable both make anyway.

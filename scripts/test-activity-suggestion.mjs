@@ -204,7 +204,15 @@ ok("...and that call IS the memo the card reads",
 ok("...with no second rung search anywhere in the file",
    (APP.match(/let best = ACTIVITY_LEVELS\[0\], bestErr = Infinity;/g) || []).length === 1,
    (APP.match(/let best = ACTIVITY_LEVELS\[0\], bestErr = Infinity;/g) || []).length);
-ok("the memo re-runs when the decision is recorded", /\}\), \[observed, data\.activityLevel, data\.activityCheck, tdee\]\);/.test(APP));
+// The memo must re-run when the decision is recorded, and it now also depends on
+// whether a measured correction is in force (S228) — the dep list grew, so this
+// names the members rather than the exact string it used to match.
+ok("the memo re-runs when the decision is recorded",
+   /\}\), \[observed, data\.activityLevel, data\.activityCheck, [^\]]*\]\);/.test(APP));
+// ⚠️ AND IT COMPARES AGAINST THE FORMULA, NOT THE FITTED NUMBER. Handing it the
+// fitted maintenance would hide the rung suggestion the moment a correction
+// landed, including at the ceiling where the rung is still the right fix.
+ok("the rung question is asked of the formula", /tdee: formulaTdee, activityLevel/.test(APP));
 ok("accepting records the cooldown", /activityCheck: \{ at: Date\.now\(\), to: id, decision: "accepted" \}/.test(APP));
 ok("dismissing records the cooldown", /activityCheck: \{ at: Date\.now\(\), to: id, decision: "dismissed" \}/.test(APP));
 ok("there is a Not now to dismiss with", /onDismissActivitySuggestion\(activitySuggestion\.to\.id\)/.test(APP));

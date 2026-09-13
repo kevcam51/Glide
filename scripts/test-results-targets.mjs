@@ -33,6 +33,11 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+// planEnergy now prices through planMaintenance, whose read clamp reads the
+// estimator's own ceiling (S228). Passing the REAL TUNING in — rather than
+// letting the sandbox work only because no fixture here carries a fit — keeps
+// the next fitted fixture from failing with a bare ReferenceError.
+import { TUNING as TDEE_TUNING } from "../src/observedTdee.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
@@ -89,9 +94,9 @@ const CONSTS = ["DAYS", "REST_ST", "STRENGTH_EXERCISES", "CARDIO_GROUPS", "ALL_C
   "ACTIVITY_LEVELS", "MIN_DAILY_CAL", "HR_ZONES", "RATE_OPTS", "OVER_TOLERANCE", "PARTIAL_DAY_MIN"];
 const FNS = ["calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx", "hrCaloriesPerMin",
   "restingKcalPerMin", "calcBurn", "cardioExFor", "exBurn", "isEatback", "dailyDeficitOf", "weeklyRateOf",
-  "planEnergy", "planIntakeForRate", "computeClientCalories", "wearableTdee"];
+  "MAINT_STALE_DAYS", "maintBasis", "maintenanceK", "planMaintenance", "planEnergy", "planIntakeForRate", "computeClientCalories", "wearableTdee"];
 const src = [...CONSTS, "atLeastMinCal", ...FNS].map((n) => liftDecl(APP, n)).join("\n");
-const M = new Function(`${src}; return { planEnergy, planIntakeForRate, computeClientCalories, isEatback, weeklyRateOf, dailyDeficitOf, exBurn, atLeastMinCal, MIN_DAILY_CAL, wearableTdee, ACTIVITY_LEVELS, calcBMR, effectiveAge, DAYS };`)();
+const M = new Function("TDEE_TUNING", `${src}; return { planEnergy, planIntakeForRate, computeClientCalories, isEatback, weeklyRateOf, dailyDeficitOf, exBurn, atLeastMinCal, MIN_DAILY_CAL, wearableTdee, ACTIVITY_LEVELS, calcBMR, effectiveAge, DAYS };`)(TDEE_TUNING);
 
 const STRENGTH_ID = [...APP.matchAll(/id:"([a-z_0-9]+)"[^}]*cat:"/g)].map((m) => m[1])[0];
 const CARDIO_ID = [...APP.matchAll(/\{ id:"([a-z_0-9]+)",\s+label:"[^"]*",\s+icon:"[^"]*",\s+met:/g)].map((m) => m[1])[0];

@@ -15,6 +15,9 @@
 
 const admin = require("firebase-admin");
 const { CARDIO, STRENGTH, CARDIO_IDS, STRENGTH_IDS, MET } = require("./exercises");
+// The ceiling on the adaptive maintenance correction comes from the estimator
+// that produces it — never re-declared here, so the mirror test guards it.
+const { TUNING: TDEE_TUNING } = require("./observedTdee");
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -817,13 +820,57 @@ function weeklyPlanBurn(d) {
   return total;
 }
 
+// ── Adaptive maintenance, the server half (S228) ─────────────────────────────
+// ⚠️ MIRRORS maintBasis / maintenanceK / planMaintenance in src/App.jsx. The AI,
+// coach_summary, get_profile and the MCP connector all price a day through
+// here, so a difference between the two files is the AI quoting a target no
+// screen shows. scripts/test-adaptive-maintenance.mjs runs BOTH and requires
+// them to agree across a fixture sweep.
+//
+// Upward only. The measurement cannot tell a low burn from under-logging, so a
+// measurement BELOW the formula is reported, never applied — see the long note
+// in src/App.jsx and the header of observedTdee.js.
+const MAINT_STALE_DAYS = 60;
+
+function maintBasis(d) {
+  const x = d || {};
+  return { activityLevel: x.activityLevel || "", gender: x.gender || "",
+    heightFt: String(x.heightFt == null ? "" : x.heightFt),
+    heightIn: String(x.heightIn == null ? "" : x.heightIn) };
+}
+
+// ⚠️ THE CLAMP HERE IS NOT REDUNDANT. A plan owner can write their own kv
+// unvalidated, so maintenanceFit.k is forgeable; this read is what bounds it.
+function maintenanceK(d) {
+  const dd = d || {};
+  if (dd.maintenanceAuto === false) return 1;
+  const f = dd.maintenanceFit;
+  if (!f || typeof f !== "object") return 1;
+  const k = Number(f.k);
+  if (!isFinite(k) || !(k > 1)) return 1;
+  if (JSON.stringify(maintBasis(dd)) !== JSON.stringify(f.basis || {})) return 1;
+  const at = Number(f.at) || 0;
+  if (!(at > 0) || Date.now() - at > MAINT_STALE_DAYS * 86400000) return 1;
+  return Math.min(k, 1 + TDEE_TUNING.MAX_RISE_PCT);
+}
+
+// Round the formula FIRST, then apply k, then round — the same order as the
+// app, or the two disagree by a calorie.
+function planMaintenance(d) {
+  const dd = d || {};
+  const bmr = calcBMR(dd.gender, Number(dd.weightLbs), dd.heightFt, dd.heightIn, effectiveAge(dd));
+  if (!bmr || !isFinite(bmr)) return { bmr: null, formulaTdee: null, k: 1, tdee: null, fitted: false };
+  const formulaTdee = Math.round(bmr * (ACTIVITY_MULT[dd.activityLevel] || 1.2));
+  const k = maintenanceK(dd);
+  return { bmr, formulaTdee, k, tdee: Math.round(formulaTdee * k), fitted: k > 1 };
+}
+
 function nutritionTargets(d) {
   const w = Number(d.weightLbs);
   let cal = null;
   if (w && d.gender) {
-    const bmr = calcBMR(d.gender, w, d.heightFt, d.heightIn, effectiveAge(d));
+    const { bmr, tdee } = planMaintenance(d);
     if (bmr && isFinite(bmr)) {
-      const tdee = Math.round(bmr * (ACTIVITY_MULT[d.activityLevel] || 1.2));
       // Nutrition approach (matches App.jsx isEatback): "eatback" (default)
       // adds workout burn to the eating target; "accelerate" keeps the deficit
       // and lets the burn speed up the goal date instead.

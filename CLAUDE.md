@@ -108,6 +108,82 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S228 (Sep 12): four asks from Kevin, all shipped. Frontend + FOUR new
+> functions files; `firestore.rules` UNCHANGED, so **no rules publish** — but
+> `sessionStartCode`/`verifySessionStart` must be DEPLOYED BEFORE THE PUSH, and
+> the FatSecret barcode route needs the **proxy VM redeployed** (`proxy/deploy.sh`).
+> **3,499 assertions across 49 suites** (was 3,156/45) + **283 rules tests**
+> (was 281); build, `check:undef`, `check:weak` all clean.
+> **(1) THE COMPOSER TRAPPED A DICTATED TRANSCRIPT.** The cap was declared
+> TWICE with two different numbers — JS clamped at 200, a Tailwind
+> `max-h-[140px]` clamped the element at 140, and CSS max-height beats an inline
+> height — so between them the box was cut off while `overflowY` was explicitly
+> `"hidden"`, on a `resize-none` box. Measured in a real browser: **6 of 11
+> transcript lengths had up to 42px of text unreachable**; now zero.
+> ⚠️ **AND overflow:hidden IS WHY THE PAGE MOVED** — a non-scrolling box hands
+> the gesture to the document, which is Kevin's "the only thing I was able to do
+> was scroll the background". `usePullToRefresh` compounded it: it listens on
+> `document` and never looked at `e.target`, so a drag inside the composer armed
+> the refresh pill. `overscroll-behavior` cannot cover either half.
+> The ceiling is now ONE number written to max-height by the function that
+> clamps to it, and `ptrShouldArm` is extracted so the arming DECISION is RUN by
+> the suite (a dropped `!` is invisible to a source-pattern assertion).
+> **(2) MAINTENANCE NOW FOLLOWS MEASURED BURN — UPWARD ONLY.** Three of the five
+> inputs already adapted (weight per weigh-in, age yearly, training burn per
+> edit); the fourth — the activity rung — was stated once at signup and is worth
+> **0.175 x BMR = 319 cal/day**, which is 45 lb of bodyweight. `observedTdee`
+> already measured the truth and only ever PROPOSED. It now applies as a stored
+> RATIO `data.maintenanceFit.k` (never an absolute — that would freeze the one
+> input that already adapts).
+> ⚠️ **UPWARD ONLY, AND THE ASYMMETRY IS THE DESIGN.** The estimator cannot tell
+> a low burn from under-logging, so a downward auto-apply would answer
+> under-logging with less food, measure that, and prescribe less again. Wrong
+> upward shows on the scale; wrong downward starves someone. Below the formula it
+> retracts to the formula and stops.
+> ⚠️ **THE DENOMINATOR IS THE FORMULA, NEVER THE NUMBER IN FORCE** — dividing by
+> the fitted value oscillates forever (2400 → 2800 → 2400 → …). A fixed-point
+> test runs six rounds and requires it to settle.
+> ⚠️ **THE READ CLAMP IS NOT REDUNDANT WITH THE WRITE CLAMP**: a plan owner may
+> write their own kv unvalidated, so `maintenanceFit.k` is forgeable — the +20%
+> ceiling on READ (in BOTH files) is what bounds it. A basis fingerprint retires
+> a fit when activity/sex/height change (covering all FOUR writers of
+> activityLevel incl. `functions/trainerize.js`), and it expires at 60 days on
+> the read side, because the only writer is a dashboard effect and the people
+> with a stale fit are the ones who stopped opening that screen.
+> **(3) SESSION START CODES (Uber-style).** ⚠️ **THE CODE CANNOT LIVE ON THE
+> SESSION DOC** — read rules are per-DOCUMENT and both participants read it, so
+> a `startCode` field is one console read from the trainer, who could then verify
+> from their car. It lives in `sessionStartCodes`, Admin-SDK-only.
+> ⚠️ **AND IT CANNOT TRAVEL IN A PUSH**: `sendPushTo` writes the body verbatim
+> into the client's kv feed, which their trainer can read. `functions/sessionStart.js`
+> does not `require("./push")` at all, and a test asserts it.
+> ⚠️ **THE ATTEMPT COUNTER IS ON THE SESSION, NOT THE RECORD** — on the record,
+> lockout deleted it, the next fetch minted a fresh code with a zeroed counter,
+> and the trainer got five more guesses for ever.
+> ⚠️ **VERIFICATION DOES NOT GATE BILLING, DELIBERATELY.** A gate inverts the
+> safety incentive (the trainer would want the code more than the client and
+> start collecting it by text in advance) and every failure lands on the innocent
+> party. It attaches EVIDENCE to a charge that was happening anyway — and only a
+> real code exchange counts, never a client tap.
+> **NO RULES CHANGE**: `verify` is server-written and absent from
+> `bookingFields()`, the `onMyWay` precedent — pinned by two new emulator
+> assertions that go red if anyone "completes" that list.
+> **(4) THE BARCODE SCANNER ASKED TWO DATABASES OF THREE — AND THE BIGGER BUG
+> WAS UPC-E.** The scanner enables `UPC_E`, so a small package (a single-serve
+> protein bar — exactly what Kevin scanned) decodes to 8 digits and NOTHING
+> expanded it. Open Food Facts files the compressed code and the expanded one as
+> TWO SEPARATE products; USDA files some records under each. Both are now asked.
+> FatSecret (the +55 PRIMARY library) is the new third rung, via a `/barcode`
+> route on the proxy — **and it degrades to today's exact behaviour until the VM
+> is redeployed**, because an old proxy answers 404.
+> ⚠️ **Traps paid for this session:** a `{/* */}` comment is not valid in a
+> `{cond && (` expression position (S217 again, cost one build); `liftDecl`
+> reads a quote BEFORE `//` so an apostrophe inside a lifted body kills the
+> suite; SIX of my own assertions matched MY OWN COMMENTS naming the thing they
+> forbid (`Math.random`, `sendPushTo`) — strip comments before asserting; and
+> TWO guards that fire together (`lockedAt` and the attempt count) covered for
+> each other until each got its own isolating case._
+>
 > _**S218 (Sep 10): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S218)"
 > first, and `docs/MET-AUDIT-S218.md` before touching any burn maths.**
 > **2,832 assertions across 41 suites.** ⚠️ **FUNCTIONS DEPLOYED BEFORE THE

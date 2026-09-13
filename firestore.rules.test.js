@@ -665,6 +665,24 @@ await check("a CLIENT cannot set meetAt", assertFails(updateDoc(sess(c1, "s41"),
 await check("...not even a valid one on their own session", assertFails(updateDoc(sess(c1, "s42"),
   { meetAt: "client", updatedAt: Date.now() })));
 
+// ---- S228: the session start code needs NO rules change, and this proves it --
+// The `verify` map is written onto a session by the server and is absent from
+// bookingFields(), exactly like `onMyWay`. Every client update rule gates on
+// changed().hasOnly(bookingFields()), so a key nobody edits never appears in
+// that diff — while a client who DOES touch it is refused for being on no
+// allowlist. These two assertions RUN that guard rather than trusting the
+// reasoning: if someone ever "completes" bookingFields() with `verify`, the
+// first one starts passing and this test goes red.
+console.log("\nSESSION START CODE — the verify map is server-only:");
+// ⚠️ ON SESSIONS EACH SIDE CAN OTHERWISE UPDATE, so the refusal is about
+// `verify` and nothing else. The trainer reschedules and re-prices s1 freely
+// (above), and the client cancels their own s20 freely — put the write on those
+// and the only new thing in the diff is the map under test.
+await check("a TRAINER cannot write the verify map themselves", assertFails(updateDoc(sess(head, "s1"),
+  { verify: { at: Date.now(), by: H, via: "code" }, updatedAt: Date.now() })));
+await check("...and neither can the CLIENT", assertFails(updateDoc(sess(c1, "s20"),
+  { verify: { at: Date.now(), by: C1, via: "client-tap" }, updatedAt: Date.now() })));
+
 // ---- S204: what set({merge:true}) ACTUALLY does to a nested map -------------
 // ⚠️ THIS IS HERE BECAUSE I GOT IT WRONG IN A COMMENT AND ALMOST SHIPPED IT.
 // The arrival record lives INSIDE the `onMyWay` map, and my first version of the

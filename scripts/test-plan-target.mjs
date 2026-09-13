@@ -34,6 +34,11 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+// planEnergy now prices through planMaintenance, whose read clamp reads the
+// estimator's own ceiling (S228). Passing the REAL TUNING in — rather than
+// letting the sandbox work only because no fixture here carries a fit — keeps
+// the next fitted fixture from failing with a bare ReferenceError.
+import { TUNING as TDEE_TUNING } from "../src/observedTdee.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
@@ -90,10 +95,10 @@ const CONSTS = ["DAYS", "REST_ST", "STRENGTH_EXERCISES", "CARDIO_GROUPS", "ALL_C
   "ACTIVITY_LEVELS", "MIN_DAILY_CAL", "HR_ZONES", "RATE_OPTS", "OVER_TOLERANCE", "PARTIAL_DAY_MIN"];
 const FNS = ["calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx", "hrCaloriesPerMin",
   "restingKcalPerMin", "calcBurn", "cardioExFor", "exBurn", "isEatback", "dailyDeficitOf", "weeklyRateOf",
-  "planEnergy", "planIntakeForRate", "computeClientCalories", "overDaysFrom", "makeUpPlan"];
+  "MAINT_STALE_DAYS", "maintBasis", "maintenanceK", "planMaintenance", "planEnergy", "planIntakeForRate", "computeClientCalories", "overDaysFrom", "makeUpPlan"];
 const grab = (re, n) => { const m = APP.match(re); if (!m) throw new Error(`could not lift ${n}`); return m[0]; };
 const source = () => [...CONSTS, "atLeastMinCal", ...FNS].map((n) => liftDecl(APP, n)).join("\n");
-const build = (src) => new Function(`${src}; return { planEnergy, planIntakeForRate, computeClientCalories, overDaysFrom, makeUpPlan, weeklyRateOf, OVER_TOLERANCE, atLeastMinCal };`)();
+const build = (src) => new Function("TDEE_TUNING", `${src}; return { planEnergy, planIntakeForRate, computeClientCalories, overDaysFrom, makeUpPlan, weeklyRateOf, OVER_TOLERANCE, atLeastMinCal };`)(TDEE_TUNING);
 const M = build(source());
 
 // Real catalog ids, taken from the file rather than typed from memory — a made-up

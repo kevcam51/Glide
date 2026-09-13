@@ -135,6 +135,12 @@ exports.foodSearch = onCall(
     if (!proxyUrl || !proxySecret || /placeholder/i.test(proxyUrl) || /placeholder/i.test(proxySecret)) {
       return { foods: [], configured: false };
     }
+    // BARCODE mode (S228): the scanner's third source. Filtered, never thrown —
+    // a junk scan must not surface a deployment-shaped error to the user.
+    const barcodes = request.data && request.data.barcodes;
+    if (Array.isArray(barcodes) && barcodes.length) {
+      return await barcodeLookup(barcodes, proxyUrl, proxySecret);
+    }
     // DETAIL mode (S94e): { foodId } → food.get.v4 via the proxy — one food's
     // REAL household servings + micros. Called lazily when the user taps a
     // FatSecret search result, so the picker opens at "1 cup"/"1 breast"
@@ -204,3 +210,49 @@ async function runFoodSearch(q, proxyUrl, proxySecret) {
   }
 }
 exports._runFoodSearch = runFoodSearch;
+
+// BARCODE mode (S228): { barcodes: ["0034100573652", ...] } -> the proxy's
+// /barcode route -> FatSecret's barcode method -> one food with its REAL
+// servings. The APP normalises (UPC-E expansion in particular) and this
+// function only VALIDATES, so that logic lives in ONE place a push can fix
+// rather than in two that can silently disagree.
+//
+// It NEVER throws for a deployment problem. An old proxy answers 404 and a
+// scope-gated FatSecret answers { gated: true }; both come back as
+// { mode: "barcode", food: null, unavailable: true }, which the app treats
+// exactly as it treats a two-source miss today. `mode` is the POSITIVE
+// acknowledgement that this code ran — an older deploy returns { foods: [] }
+// with no `mode` at all, and absence is ambiguous.
+async function barcodeLookup(codes, proxyUrl, proxySecret, _fetch = fetch) {
+  const list = (Array.isArray(codes) ? codes : [])
+    .map((c) => String(c || "").replace(/\D/g, ""))
+    .filter((c) => /^\d{13}$/.test(c)).slice(0, 2);
+  if (!list.length) return { mode: "barcode", food: null };
+  let unavailable = false, gated = false;
+  for (const code of list) {
+    const url = `${proxyUrl.replace(/\/+$/, "")}/barcode?code=${encodeURIComponent(code)}`;
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 6000);   // a scan is a person standing still
+    try {
+      const r = await _fetch(url, { headers: { "x-proxy-secret": proxySecret }, signal: ctl.signal });
+      if (!r.ok) { console.error("foodSearch barcode http", r.status); unavailable = true; continue; }
+      const j = await r.json();
+      if (j && j.gated) { gated = true; unavailable = true; break; }
+      const f = j && j.food;
+      const parsed = f && parseV3Food(f);
+      if (parsed && parsed.kcal > 0) {
+        return { mode: "barcode", food: {
+          name: tidy(f.food_name), brand: f.brand_name ? tidy(f.brand_name) : "",
+          source: "fatsecret", fsId: String(f.food_id || ""), ...parsed } };
+      }
+      // no food, or unparseable -> a genuine miss for THIS candidate; try the next
+    } catch (e) { console.error("foodSearch barcode", e && e.message); unavailable = true; }
+    finally { clearTimeout(t); }
+  }
+  const out = { mode: "barcode", food: null };
+  if (unavailable) out.unavailable = true;
+  if (gated) out.gated = true;
+  return out;
+}
+exports._barcodeLookup = barcodeLookup;
+

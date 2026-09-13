@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium, setAiOptOut, aiChoiceMade, ensureTimezone } from "./profile.js";
 import { getForUser, setForUser, mergeForUser, deleteForUser, listForUser, listEntriesForUser, latestKeyForUser, subscribeForUser } from "./clientData.js";
 import { mergePlanWrap } from "./planMerge.js";
-import { estimateObservedTdee, TUNING as TDEE_TUNING } from "./observedTdee.js";
+import { estimateObservedTdee, clampToFormula, TUNING as TDEE_TUNING } from "./observedTdee.js";
 import { threadIdFor, ensureThread, sendMessage, markThreadRead, subscribeThread, subscribeMyThreads, exportMyThreads } from "./messaging.js";
 import { pushStatus, enablePush, disablePush } from "./push.js";
 import { privGet, privSet, privSubscribe, privListEntries } from "./privateStore.js";
@@ -21,7 +21,8 @@ import { bookSession, updateSession, cancelSession, markNoShow, waiveSession, su
   MEETING_ADDRESS_KEY, MAX_ADDRESS_LEN, cleanMeetingAddress, parseMeetingAddress,
   MEET_AT, isMeetAt, meetAtLabel,
   canReportTrainerNoShow, trainerNoShowState, reportTrainerNoShow, denyTrainerNoShow,
-  sessionLedger, rescheduleHistory } from "./sessions.js";
+  sessionLedger, rescheduleHistory,
+  canShowStartCode, startCodeState, prettyStartCode, START_CODE_LEAD_MIN } from "./sessions.js";
 import { auth, functions, signOutAndClearCache} from "./firebase.js";
 import { signOut } from "firebase/auth";
 import { httpsCallable } from "firebase/functions";
@@ -540,7 +541,8 @@ function formatWeeks(w) {
 // shipping code rather than a transcription of it.
 const ACTIVITY_COOLDOWN_DAYS = 14;
 
-function activityRungSuggestion({ observed, tdee, activityLevel, activityCheck, now }) {
+function activityRungSuggestion({ observed, tdee, activityLevel, activityCheck, now, suppress }) {
+  if (suppress) return null;   // the measured correction already absorbed it (S228)
   if (!observed || !observed.tdee) return null;
   // High confidence only: this rewrites a profile field the whole app reads, so
   // an early read is not enough to propose it.
@@ -4662,9 +4664,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
   // Fall back to the first activity level when a plan is incomplete (no activity
   // set yet) so Results never crashes on a half-built plan. Matches the guarded
   // lookups elsewhere (computeClientCalories, App's computedTdee).
-  const actObj = ACTIVITY_LEVELS.find(a=>a.id===activityLevel) || ACTIVITY_LEVELS[0];
-  const bmr    = calcBMR(gender, Number(weightLbs), Number(heightFt), Number(heightIn), effectiveAge(data));
-  const tdee   = Math.round(bmr * actObj.multiplier);
+  const { actObj, bmr, tdee, formulaTdee: tdeeFormula, fitted: tdeeFitted } = planMaintenance(data);
 
   // ── Ideal Body Weight calculations ──
   const totalInches = Number(heightFt) * 12 + Number(heightIn);
@@ -8379,6 +8379,75 @@ function _offMicros(n) {
   for (const k of Object.keys(raw)) if (raw[k] != null) out[k] = _mRound(raw[k]);
   return Object.keys(out).length ? out : null;
 }
+// ── Scanning a barcode ───────────────────────────────────────────────────────
+// Every source the scanner consults, in one place, at module level so the test
+// suite can lift these and RUN them rather than pattern-match them.
+//
+// ⚠️ AN 8-DIGIT READ IS AMBIGUOUS AND BOTH READINGS ARE REAL. The scanner
+// enables UPC_E (see the format list in the scanner effect), so a small package
+// — a single-serve protein bar, exactly what Kevin scanned — decodes to 8
+// digits, and the decoded text cannot say whether it is an EAN-8 or a
+// compressed UPC-E. Measured against the live databases:
+//   • Open Food Facts keeps the compressed code and its expanded form as TWO
+//     SEPARATE products with different nutrition. It does not normalise.
+//   • USDA holds some records under the printed 8 digits and others under the
+//     expanded 12.
+// So asking only what was scanned misses perfectly good matches in both. Every
+// 8-digit scan now asks both forms.
+//
+// UPC-E to UPC-A. Returns null for anything that is not a compressed UPC — the
+// expansion is only defined for 8 digits starting 0 or 1, and guessing past
+// that would invent a product code.
+function upcEtoA(code) {
+  const d = String(code || "").replace(/\D/g, "");
+  if (!/^[01]\d{7}$/.test(d)) return null;
+  const n = d[0], s = d.slice(1, 7), c = d[7];
+  const last = s[5];
+  if (last === "0" || last === "1" || last === "2") return n + s.slice(0, 2) + last + "0000" + s.slice(2, 5) + c;
+  if (last === "3") return n + s.slice(0, 3) + "00000" + s.slice(3, 5) + c;
+  if (last === "4") return n + s.slice(0, 4) + "00000" + s[4] + c;
+  return n + s.slice(0, 5) + "0000" + last + c;
+}
+
+// A scanned code in every shape a database might store it. USDA is the reason
+// this exists: it holds the same brand as 12, 13 AND 14 digits, so an exact
+// lookup of what the scanner read misses perfectly good matches (S170c).
+function barcodeVariants(code) {
+  const d = String(code || "").replace(/\D/g, "");
+  if (!d) return [];
+  const set = new Set([d, d.replace(/^0+/, ""), d.padStart(13, "0"), d.padStart(14, "0")]);
+  if (d.length === 13 && d[0] === "0") set.add(d.slice(1));   // EAN-13 carrying a UPC-A
+  const a = upcEtoA(d);
+  if (a) { set.add(a); set.add(a.padStart(13, "0")); set.add(a.padStart(14, "0")); }
+  return [...set].filter(Boolean);
+}
+
+// The forms Open Food Facts might file a scanned code under.
+function offBarcodeForms(code) {
+  const d = String(code || "").replace(/\D/g, "");
+  if (!d) return [];
+  const a = upcEtoA(d);
+  return a ? [d, a] : [d];
+}
+
+// GTIN-13 candidates. FatSecret's barcode method takes GTIN-13 and nothing
+// else. Returns [] for anything that is not a product barcode — CODE_128 is in
+// the scanner format list and carries arbitrary text (shelf tags, shipping
+// labels), so this is the guard that stops one becoming a wasted round-trip.
+function barcodeGtins(code) {
+  const d = String(code || "").replace(/\D/g, "");
+  if (!/^\d{8,14}$/.test(d)) return [];
+  const out = [];
+  const push = (x) => {
+    const v = String(x).replace(/^0+/, "").padStart(13, "0");
+    if (v.length === 13 && !out.includes(v)) out.push(v);   // more than 13 significant digits: refuse rather than guess
+  };
+  push(d);
+  const a = upcEtoA(d);
+  if (a) push(a);
+  return out;
+}
+
 // Open Food Facts — free, no key, strong on BRANDED / packaged / international
 // foods + barcodes. CORS-enabled. Complements USDA. Per-100g nutriments.
 async function searchOFF(query) {
@@ -8418,6 +8487,144 @@ async function searchFatSecret(query) {
     return [];
   }
 }
+// ── The scan ladder ──────────────────────────────────────────────────────────
+// Open Food Facts, then FatSecret, then USDA. Sequential, and deliberately
+// UNCHANGED AT THE TOP: an Open Food Facts record WITH calories still wins, so
+// a barcode that resolves today resolves to the same food tomorrow. FatSecret
+// is a new rung UNDERNEATH it, reached only when OFF has nothing usable —
+// which is the failure Kevin reported. USDA stays last: it is the only source
+// that can cost seven sequential fetches and the only one that may be running
+// on the rate-limited DEMO_KEY.
+//
+// Sequential rather than raced on purpose. A race would make the winner of an
+// already-working scan non-deterministic, silently re-identifying products
+// people scanned last week under a different name, brand and serving basis —
+// an unrequested change to the path that currently succeeds. It also spends no
+// FatSecret quota on scans Open Food Facts already answers.
+
+// One Open Food Facts product lookup. Returns the food, or null.
+async function offFetchOne(v) {
+  const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(v)}.json?fields=product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_per`);
+  const j = await r.json();
+  if (!(j.status === 1 && j.product)) return null;
+  const p = j.product; const nm = p.nutriments || {};
+  const unit = p.nutrition_data_per === "100ml" ? "ml" : "g";
+  return { name: _tidyFood(p.product_name), brand: (p.brands || "").split(",")[0].trim(),
+    kcal: Math.round(nm["energy-kcal_100g"] || 0), p: Math.round(nm.proteins_100g || 0),
+    c: Math.round(nm.carbohydrates_100g || 0), f: Math.round(nm.fat_100g || 0),
+    unit, serving: Math.round(Number(p.serving_quantity)) || null,
+    servingText: (p.serving_size || "").trim(), micros: _offMicros(nm), source: "off" };
+}
+
+// A record with a name and NO calories is not a hit — Open Food Facts has
+// plenty of those — but the name is still worth keeping, because "we found your
+// product, just not its nutrition" is a different and more useful thing to say
+// than "no such product".
+async function offByBarcode(code) {
+  let named = null;
+  for (const v of offBarcodeForms(code)) {
+    let hit = null;
+    try { hit = await offFetchOne(v); } catch { /* try the next form */ }
+    if (hit && hit.kcal > 0) return hit;
+    if (hit && hit.name && !named) named = hit;
+  }
+  return named;
+}
+
+// USDA Branded, searched by UPC. Free, no proxy, and strongest exactly where
+// Open Food Facts is weakest: US packaged groceries. Only accepts a result
+// whose gtinUpc really equals the scanned code — a plain query would happily
+// return a name match for a number, which would log the wrong food.
+async function usdaByBarcode(code) {
+  const key = import.meta.env.VITE_USDA_API_KEY || "DEMO_KEY";
+  for (const v of barcodeVariants(code)) {
+    try {
+      const r = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${key}`
+        + `&query=${encodeURIComponent(v)}&dataType=Branded&pageSize=3`);
+      if (!r.ok) continue;
+      const j = await r.json();
+      const bare = (x) => String(x || "").replace(/^0+/, "");
+      const hit = (j.foods || []).find((f) => bare(f.gtinUpc) === bare(v));
+      if (!hit) continue;
+      const n = {};
+      for (const nu of hit.foodNutrients || []) n[nu.nutrientName] = nu.value;
+      const kcal = Math.round(n.Energy || 0);
+      if (!kcal) continue;
+      return {
+        name: _tidyFood(hit.description), brand: _tidyFood(hit.brandOwner || hit.brandName || ""),
+        kcal, p: Math.round(n.Protein || 0),
+        c: Math.round(n["Carbohydrate, by difference"] || 0),
+        f: Math.round(n["Total lipid (fat)"] || 0),
+        unit: (hit.servingSizeUnit || "g").toLowerCase() === "ml" ? "ml" : "g",
+        serving: Math.round(Number(hit.servingSize)) || null,
+        servingText: hit.householdServingFullText || "", micros: {}, source: "usda",
+      };
+    } catch { /* try the next variant */ }
+  }
+  return null;
+}
+
+// Session cache: the candidate key → FatSecret food, or null for a real miss.
+const _fsBarcodeCache = new Map();
+// ⚠️ LATCHED ONLY WHEN THE ROUTE ITSELF IS UNREACHABLE — an old proxy, an old
+// foodSearch, or a FatSecret scope gate. A transport blip or a junk scan must
+// NOT latch it: the scanner also decodes CODE_128, which carries arbitrary
+// text, and one shelf tag would otherwise disable this source for the whole
+// session. Same rule _fatSecretOff already follows for name search.
+let _fsBarcodeOff = false;
+
+async function fsByBarcode(code) {
+  if (_fsBarcodeOff || _fatSecretOff) return null;
+  const gtins = barcodeGtins(code);
+  if (!gtins.length) return null;
+  const key = gtins.join(",");
+  if (_fsBarcodeCache.has(key)) return _fsBarcodeCache.get(key);
+  let d;
+  try {
+    const res = await callFoodSearch({ barcodes: gtins });
+    d = (res && res.data) || {};
+  } catch (e) {
+    if (e && (e.code === "functions/not-found" || e.code === "not-found"
+           || e.code === "functions/unimplemented" || e.code === "unimplemented")) _fsBarcodeOff = true;
+    return null;
+  }
+  // `mode` is the POSITIVE acknowledgement that the barcode branch ran. An
+  // older deploy answers {foods:[]} with no mode at all, and absence is
+  // ambiguous — so anything but a real barcode reply retires the source.
+  if (d.mode !== "barcode" || d.unavailable) { _fsBarcodeOff = true; return null; }
+  const food = (d.food && d.food.kcal > 0) ? d.food : null;
+  _fsBarcodeCache.set(key, food);
+  if (_fsBarcodeCache.size > 50) _fsBarcodeCache.delete(_fsBarcodeCache.keys().next().value);
+  return food;
+}
+
+// Injectable so the suite can RUN the ladder and count which rungs were asked.
+async function barcodeSources(code, deps) {
+  const d = deps || { offByBarcode, fsByBarcode, usdaByBarcode };
+  let off = null;
+  try { off = await d.offByBarcode(code); } catch { off = null; }
+  if (off && off.kcal > 0) return { winner: off, off, fs: null, usda: null };
+  let fs = null;
+  try { fs = await d.fsByBarcode(code); } catch { fs = null; }
+  if (fs && fs.kcal > 0) return { winner: fs, off, fs, usda: null };
+  let usda = null;
+  try { usda = await d.usdaByBarcode(code); } catch { usda = null; }
+  return { winner: usda || null, off, fs, usda };
+}
+
+// What to say when nothing had it. A name from ANY source means we found the
+// PRODUCT and only its nutrition is missing — say that, rather than telling
+// someone the package in their hand does not exist. Deliberately names no
+// vendors: the app white-labels, and a list of database names tells the person
+// holding a protein bar nothing they can act on.
+function barcodeMiss(off, fs, code) {
+  const named = (off && off.name) || (fs && fs.name) || "";
+  if (named) return { name: named,
+    err: "Found the product, but none of our food databases have its nutrition — enter the numbers below, or use AI estimate." };
+  return { name: "",
+    err: `No product found for barcode ${code} in any of our food databases. Search by name, or use AI estimate.` };
+}
+
 // Score a result for a query so the closest, most GENERIC food ranks first — this
 // is what makes typed search feel accurate. Exact/leading name matches win; USDA's
 // curated generic datasets (Foundation/SR Legacy/Survey) beat Branded + crowd-sourced
@@ -10111,89 +10318,19 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, title
   // calories yet (picking one fills calories → the list auto-hides).
   const showSuggest = !editingId && !!name.trim() && !cals && nameMatches.length > 0
     && !(nameMatches.length === 1 && nameMatches[0].name.toLowerCase() === name.trim().toLowerCase());
-  // ── Barcode scanning: LIVE camera (auto-detects as you aim) → look it up in
-  // Open Food Facts → prefill the food. Uses @zxing/browser (works on iOS Safari
-  // + Chrome, unlike the native BarcodeDetector); OFF is barcode-native so the
-  // lookup is a single request. ──
-  // A scanned code, in every shape a database might store it. USDA is the
-  // reason this exists: it holds the same brand's UPC as 12, 13 AND 14 digits
-  // (028400335799 / 0028400695640 / 00028400027540), so an exact-string lookup
-  // of what the scanner read misses perfectly good matches (S170c).
-  const barcodeVariants = (code) => {
-    const d = String(code || "").replace(/\D/g, "");
-    if (!d) return [];
-    const set = new Set([d, d.replace(/^0+/, ""), d.padStart(13, "0"), d.padStart(14, "0")]);
-    if (d.length === 13 && d[0] === "0") set.add(d.slice(1));   // EAN-13 carrying a UPC-A
-    return [...set].filter(Boolean);
-  };
-
-  // USDA Branded, searched by UPC. Free, no proxy, and strongest exactly where
-  // Open Food Facts is weakest: US packaged groceries. Only accepts a result
-  // whose gtinUpc really equals the scanned code — a plain query would happily
-  // return a name match for a number, which would log the wrong food.
-  const usdaByBarcode = async (code) => {
-    const key = import.meta.env.VITE_USDA_API_KEY || "DEMO_KEY";
-    for (const v of barcodeVariants(code)) {
-      try {
-        const r = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${key}`
-          + `&query=${encodeURIComponent(v)}&dataType=Branded&pageSize=3`);
-        if (!r.ok) continue;
-        const j = await r.json();
-        const bare = (x) => String(x || "").replace(/^0+/, "");
-        const hit = (j.foods || []).find((f) => bare(f.gtinUpc) === bare(v));
-        if (!hit) continue;
-        const n = {};
-        for (const nu of hit.foodNutrients || []) n[nu.nutrientName] = nu.value;
-        const kcal = Math.round(n.Energy || 0);
-        if (!kcal) continue;
-        const tidy = (x) => (x || "Food").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
-        return {
-          name: tidy(hit.description), brand: tidy(hit.brandOwner || hit.brandName || ""),
-          kcal, p: Math.round(n.Protein || 0),
-          c: Math.round(n["Carbohydrate, by difference"] || 0),
-          f: Math.round(n["Total lipid (fat)"] || 0),
-          unit: (hit.servingSizeUnit || "g").toLowerCase() === "ml" ? "ml" : "g",
-          serving: Math.round(Number(hit.servingSize)) || null,
-          servingText: hit.householdServingFullText || "", micros: {}, source: "usda",
-        };
-      } catch { /* try the next variant */ }
-    }
-    return null;
-  };
-
-  // Open Food Facts first — barcode-native, one request, best on international
-  // and specialty items. USDA second for the US groceries OFF's crowd-sourced
-  // data tends to miss. (FatSecret would be the natural third, but the proxy
-  // exposes no barcode route — it would need one adding server-side.)
+  // ── Barcode scanning: LIVE camera (auto-detects as you aim) → the source
+  // ladder at module level (barcodeSources) → prefill the food. Uses
+  // @zxing/browser, which works on iOS Safari as the native BarcodeDetector
+  // does not. The ladder itself is module-level and unit-tested; this is only
+  // the wiring into the form. ──
   const lookupBarcode = async (code) => {
-    let off = null;
-    try {
-      const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,brands,nutriments,serving_size,serving_quantity,nutrition_data_per`);
-      const j = await r.json();
-      if (j.status === 1 && j.product) {
-        const p = j.product; const nm = p.nutriments || {};
-        const tidy = (x) => (x || "Food").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
-        const unit = p.nutrition_data_per === "100ml" ? "ml" : "g";
-        off = { name: tidy(p.product_name), brand: (p.brands || "").split(",")[0].trim(),
-          kcal: Math.round(nm["energy-kcal_100g"] || 0), p: Math.round(nm.proteins_100g || 0),
-          c: Math.round(nm.carbohydrates_100g || 0), f: Math.round(nm.fat_100g || 0),
-          unit, serving: Math.round(Number(p.serving_quantity)) || null,
-          servingText: (p.serving_size || "").trim(), micros: _offMicros(nm), source: "off" };
-      }
-    } catch { /* fall through to USDA */ }
-
-    // A hit with no calories is not a hit — OFF has plenty of entries that are
-    // just a name. Fall through and let USDA try before giving up.
-    if (off && off.kcal) { setSearchOpen(true); setScanErr(""); pickFood(off); return; }
-
-    let usda = null;
-    try { usda = await usdaByBarcode(code); } catch { /* handled below */ }
+    const { winner, off, fs } = await barcodeSources(code);
     setSearchOpen(true);
-    if (usda) { setScanErr(""); pickFood(usda); return; }
-    if (off) { setName(off.name); setScanErr("Found the product, but neither database has its nutrition — enter the numbers manually."); return; }
-    setScanErr(`No product found for barcode ${code} in Open Food Facts or USDA. Search by name, or use AI estimate.`);
+    if (winner) { setScanErr(""); pickFood(winner); return; }
+    const miss = barcodeMiss(off, fs, code);
+    if (miss.name) setName(miss.name);
+    setScanErr(miss.err);
   };
-
   const openScan = () => { setScanErr(""); setScanOpen(true); };
   const closeScan = () => { setScanOpen(false); };
   const toggleTorch = async () => {
@@ -15561,7 +15698,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // most people never make. eslint's no-undef had it the whole time.
   logAdherence,
   viewDate, viewIsToday = true, todayKeyProp, onStepDay, onGoToday,
-  data, step, tdee, dayData, strengthDayData, avgBurnPerDay,
+  data, step, tdee, dayData, strengthDayData, avgBurnPerDay, onSetMaintenanceFit, onSetMaintenanceAuto,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood,
   savedFoods, onToggleSaveFood, onRemoveSavedFood, onLogFoods, weekSummary, recentWearable, history, onRefresh, isRemote,
@@ -16161,8 +16298,14 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // Free: `dayCalsAll` is date→calories for the whole plan, already in memory
   // from the single range query that runs on plan open, and `data.checkIns`
   // rides the plan document. Zero extra Firestore reads.
+  // ⚠️ THE MEASUREMENT IS ALWAYS COMPARED WITH THE FORMULA, NEVER WITH THE
+  // NUMBER IN FORCE (S228). Dividing by the fitted maintenance oscillates —
+  // formula 2400, measured 2800 gives 2800 in force, then 2800/2800 returns it
+  // to 2400, forever. The formula is the fixed point.
+  const maint = planMaintenance(data);
+  const formulaTdee = maint.formulaTdee;
   const observed = useMemo(() => {
-    if (!dayCalsAll || !isFinite(tdee) || tdee <= 0) return null;
+    if (!dayCalsAll || !isFinite(formulaTdee) || formulaTdee <= 0) return null;
     // ⚠️ THE WINDOW ENDS YESTERDAY. Today is partial by definition — a day
     // measured at 9am is a 400-calorie day, and including it drags the mean
     // down and the estimate with it, every single morning.
@@ -16176,17 +16319,36 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
       weighIns: (data.checkIns || [])
         .filter((c) => c && c.weight > 0 && c.date && !c.isFuturePlan)
         .map((c) => ({ date: c.date, weight: Number(c.weight) })),
-      asOf, formulaTdee: tdee,
+      asOf, formulaTdee,
     });
-  }, [dayCalsAll, data.checkIns, tdee, todayKeyProp, dashToday]);
+  }, [dayCalsAll, data.checkIns, formulaTdee, todayKeyProp, dashToday]);
+
+  // ⚠️ THE ONE PLACE A MEASUREMENT IS ALLOWED TO MOVE A REAL PRESCRIPTION, and
+  // it can only ever move it UP. nextMaintenanceFit holds every rule (upward
+  // only, +20% ceiling, 14-day cooldown, hysteresis, retraction with no
+  // cooldown); this effect only carries its answer to disk. `undefined` means
+  // leave the stored fit alone — it is NOT the same as `null`, which retracts.
+  useEffect(() => {
+    if (!onSetMaintenanceFit || !observed) return;
+    const next = nextMaintenanceFit({
+      observed, formulaTdee, basis: maintBasis(data),
+      current: data.maintenanceFit, auto: data.maintenanceAuto, now: Date.now(),
+    });
+    if (next !== undefined) onSetMaintenanceFit(next);
+  }, [observed, formulaTdee, data.maintenanceFit, data.maintenanceAuto, onSetMaintenanceFit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // What the measurement says about the activity level — see
   // activityRungSuggestion (module level, so the rule is testable and the
   // 14-day cooldown cannot drift away from the card that honours it).
   const activitySuggestion = useMemo(() => activityRungSuggestion({
-    observed, tdee, activityLevel: data.activityLevel,
+    observed, tdee: formulaTdee, activityLevel: data.activityLevel,
     activityCheck: data.activityCheck, now: Date.now(),
-  }), [observed, data.activityLevel, data.activityCheck, tdee]);
+    // A fit that is NOT at the ceiling has already absorbed the gap, so asking
+    // about the rung as well would be asking twice. At the ceiling it has not:
+    // sedentary to very active is +43.8% and the clamp stops at +20%, so a
+    // quarter of the gap stays unreachable and the rung is still the right fix.
+    suppress: maint.fitted && !(data.maintenanceFit && data.maintenanceFit.clamped),
+  }), [observed, data.activityLevel, data.activityCheck, formulaTdee, maint.fitted, data.maintenanceFit]);
 
   // ── Try a different rate without committing to it (S198q, Kevin) ──────────
   // Tapping a daily target previews it IN THE RING, so the question "what would
@@ -16625,12 +16787,27 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                 </div>
                 <div style={{paddingBottom:"3px"}}>
                   <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.05rem",color:"var(--text-secondary)",lineHeight:1.1}}>
-                    {Math.round(tdee).toLocaleString()}
+                    {Math.round(formulaTdee).toLocaleString()}
                   </div>
                   <div style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>
-                    the estimate
+                    your profile predicts
                   </div>
                 </div>
+                {/* ⚠️ THREE NUMBERS, NOT TWO, WHENEVER THEY DIFFER (S228). Once a
+                    measured correction is live, "measured" and "predicted" are
+                    both true and NEITHER is the number the plan is using. Showing
+                    only two left the person unable to find the figure their own
+                    targets came from. */}
+                {maint.fitted && (
+                  <div style={{paddingBottom:"3px"}}>
+                    <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.05rem",color:"var(--green)",lineHeight:1.1}}>
+                      {Math.round(tdee).toLocaleString()}
+                    </div>
+                    <div style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".5px"}}>
+                      your plan uses
+                    </div>
+                  </div>
+                )}
                 {observed.deltaVsFormula != null && Math.abs(observed.deltaVsFormula) >= 25 && (
                   <div style={{paddingBottom:"5px",fontSize:".74rem",fontWeight:700,
                     color: observed.diverged ? "var(--yellow)" : "var(--muted)"}}>
@@ -16647,6 +16824,54 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                 )}
                 {observed.confidence === "low" && <> · <span style={{color:"var(--yellow)"}}>early read</span></>}
               </div>
+              {/* What the correction IS, and how to stop it. A silent automatic
+                  change to what someone is told to eat has to be visible and
+                  reversible on the same screen that shows it. */}
+              {maint.fitted && (
+                <div style={{marginTop:"9px",padding:"10px 11px",borderRadius:"10px",
+                  border:"1px solid var(--green)",background:"rgba(47,224,168,.10)"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:"7px",marginBottom:"3px"}}>
+                    <Icon name="target" size={15} color="var(--green)" />
+                    <div style={{fontSize:".74rem",fontWeight:800,color:"var(--green)"}}>
+                      Your targets follow what you actually burn
+                    </div>
+                  </div>
+                  <div style={{fontSize:".7rem",color:"var(--text-secondary)",lineHeight:1.5}}>
+                    Your logged food and your weigh-ins say you burn more than your profile predicts,
+                    so every calorie target here has been raised by{" "}
+                    <strong style={{color:"var(--text)"}}>{Math.round(tdee - formulaTdee).toLocaleString()} cal/day</strong>.
+                    {data.maintenanceFit && data.maintenanceFit.clamped && (
+                      <> That is as far as it goes on its own — your measurement is higher still,
+                      so check your activity level is right.</>
+                    )}
+                    {" "}It only ever adjusts upward, it re-checks itself as you log, and it steps
+                    back to the prediction if your numbers change.
+                  </div>
+                  {onSetMaintenanceAuto && (
+                    <button onClick={() => onSetMaintenanceAuto(false)}
+                      style={{marginTop:"8px",padding:"6px 11px",borderRadius:"8px",cursor:"pointer",
+                        border:"1px solid var(--border)",background:"transparent",
+                        color:"var(--muted)",fontSize:".68rem",fontWeight:700}}>
+                      Turn this off
+                    </button>
+                  )}
+                </div>
+              )}
+              {/* Off, with a way back. Without this the switch is one-way from
+                  the only screen that explains what it does. */}
+              {data.maintenanceAuto === false && onSetMaintenanceAuto && (
+                <div style={{marginTop:"9px",display:"flex",alignItems:"center",gap:"9px",flexWrap:"wrap"}}>
+                  <span style={{fontSize:".7rem",color:"var(--muted)"}}>
+                    Targets are following your profile only — measured burn is not being applied.
+                  </span>
+                  <button onClick={() => onSetMaintenanceAuto(true)}
+                    style={{padding:"6px 11px",borderRadius:"8px",cursor:"pointer",
+                      border:"1px solid var(--accent)",background:"transparent",
+                      color:"var(--accent)",fontSize:".68rem",fontWeight:700}}>
+                    Use my measured burn
+                  </button>
+                </div>
+              )}
               {observed.diverged && (
                 <div style={{marginTop:"9px",padding:"10px 11px",borderRadius:"10px",
                   border:"1px solid var(--yellow)",background:"rgba(251,191,36,.10)"}}>
@@ -21742,6 +21967,78 @@ function UpdateBanner() {
     </div>, document.body);
 }
 
+// ── Composer textareas ───────────────────────────────────────────────────────
+// A composer grows with its content and then SCROLLS. It must never be clipped
+// with overflow hidden — which is what the chat composer did: the JS clamped at
+// 200 while a Tailwind `max-h-[140px]` on the same element clamped at 140, and
+// CSS max-height beats an inline height. Between those two numbers the box was
+// cut off while overflowY was explicitly "hidden", on a resize-none box — the
+// text was invisible AND unreachable, on the exact screen a voice transcript
+// lands in (Kevin, S228: "I wanted to scroll up and down to read it, but I'm
+// unable to scroll within the text box").
+//
+// ⚠️ THE CEILING IS DECLARED ONCE, HERE, AND WRITTEN TO max-height BY THE SAME
+// FUNCTION THAT CLAMPS TO IT. Never give a textarea that uses autoGrowTextarea
+// a max-h-* class or an inline maxHeight; scripts/test-composer-scroll.mjs goes
+// red if one appears.
+// (`ciGrow` and `growNotes` further up have their own caps and are NOT this
+// bug: they leave overflowY at "auto" and carry no competing CSS cap.)
+const COMPOSER_MAX_H = 200;   // px — about 6.5 lines at the touch-device size
+const COMPOSER_MIN_H = 46;    // px — matches the composer min-h-[46px] class
+const COMPOSER_SHARE = 0.5;   // a composer may take at most half of its panel
+
+// The ceiling for a composer inside a panel panelPx tall. A flat 200 inside the
+// docked bar (a third of the viewport) would leave the transcript above it no
+// room at all, so the ceiling follows the room there is. Pass 0 when the
+// composer has the whole viewport (full-screen chat, the DM overlay).
+function composerMaxH(panelPx) {
+  const p = Number(panelPx) > 0 ? Number(panelPx) : 0;
+  if (!p) return COMPOSER_MAX_H;
+  return Math.max(COMPOSER_MIN_H, Math.min(COMPOSER_MAX_H, Math.round(p * COMPOSER_SHARE)));
+}
+
+// Grow to fit, then scroll. The cap and the clamp come from one number.
+// ⚠️ DELIBERATELY DOES NOT SAVE AND RESTORE scrollTop. Collapsing to height auto
+// RAISES the scrollable range, so scrollTop survives the measure untouched.
+// Restoring a pre-growth offset would fight the caret while typing.
+function autoGrowTextarea(el, max) {
+  if (!el) return;
+  const cap = Number(max) > 0 ? Number(max) : COMPOSER_MAX_H;
+  el.style.maxHeight = cap + "px";
+  el.style.height = "auto";
+  if (!el.value) {
+    // An EMPTY textarea reports a too-tall scrollHeight in some browsers, about
+    // two rows, which made the box shrink on the first keystroke. Leave it at
+    // the rows=1 height.
+    el.style.overflowY = "hidden";
+    return;
+  }
+  // box-sizing is border-box but scrollHeight excludes the border, so without
+  // this every sized composer is 2px short and clips its own last line.
+  const borderY = Math.max(0, (el.offsetHeight || 0) - (el.clientHeight || 0));
+  const want = el.scrollHeight + borderY;
+  el.style.height = Math.min(want, cap) + "px";
+  // >= not >: at exactly the cap the content already fills the box, and hidden
+  // there is the trap this function exists to prevent.
+  el.style.overflowY = want >= cap ? "auto" : "hidden";
+}
+
+// Pull-to-refresh must not arm inside something that scrolls itself.
+// ⚠️ overscroll-behavior does NOT cover this: usePullToRefresh listens on
+// `document`, so a touchmove inside a scrolling textarea reaches it whether or
+// not the scroll chained, and the refresh pill appears over a box you are only
+// trying to read. The CSS and this guard cover different halves of the gesture.
+const PTR_IGNORE = "textarea, [data-ptr-ignore]";
+function ptrIgnored(target) {
+  return !!(target && typeof target.closest === "function" && target.closest(PTR_IGNORE));
+}
+// Extracted so the arming DECISION can be RUN by a test instead of matched in
+// the source. A dropped "!" inverts this and no source-pattern assertion can
+// see that, because the matched substring is unchanged.
+function ptrShouldArm(target, bodyLocked, atTop, touchCount) {
+  return !ptrIgnored(target) && !bodyLocked && !!atTop && touchCount === 1;
+}
+
 function usePullToRefresh(onRefresh, enabled = true) {
   const fnRef = useRef(onRefresh); fnRef.current = onRefresh;
   const [pull, setPull] = useState(0);      // px pulled, for the indicator
@@ -21757,7 +22054,13 @@ function usePullToRefresh(onRefresh, enabled = true) {
     // which pins window.scrollY at 0 — so atTop() was permanently true and every
     // downward drag inside a modal, sheet or the side menu armed a refresh.
     const onStart = (e) => {
-      startY.current = (!isBodyLocked() && atTop() && e.touches.length === 1) ? e.touches[0].clientY : null;
+      // ⚠️ AND NOT INSIDE SOMETHING THAT SCROLLS ITSELF (S228). This listens on
+      // `document`, so a drag inside the chat composer reached it and the page
+      // pulled instead of the box — "the only thing I was able to do was scroll
+      // the background". overscroll-behavior cannot cover this; the touchmove
+      // bubbles here whether or not the inner scroll chained.
+      startY.current = ptrShouldArm(e.target, isBodyLocked(), atTop(), e.touches.length)
+        ? e.touches[0].clientY : null;
     };
     const onMove = (e) => {
       if (startY.current == null) return;
@@ -22063,6 +22366,128 @@ const wearableTdee = (d, log) => {
   return Math.round(resting + active);
 };
 
+// ── Adaptive maintenance (S228) ──────────────────────────────────────────────
+// Kevin: "Can we have a users maintenance calories be automatically adjusted
+// based on a clients progress?"
+//
+// Three of the five inputs to maintenance already adapt on their own: weight on
+// every weigh-in, age once a year through effectiveAge, and the training burn
+// whenever the schedule is edited. The FOURTH — the activity multiplier — is
+// stated once at signup and never revisited, and every step on that ladder is
+// worth 0.175 x BMR. On a 200 lb man that is 319 cal/day, which is 45 POUNDS of
+// bodyweight. One wrong rung outweighs everything the app already tracks.
+//
+// observedTdee.js MEASURES the truth instead of predicting it. What follows is
+// the decision — deliberately NOT in that module, whose header says the choice
+// to move a target belongs to the caller — about when a measurement may move a
+// real prescription.
+//
+// ⚠️ UPWARD ONLY, AND THE ASYMMETRY IS THE WHOLE DESIGN. The measurement cannot
+// tell a genuinely low burn from under-logging; they are arithmetically
+// identical. If it could push a target DOWN, someone logging 60% of their food
+// would be told to eat less, would log 60% of that, and would be told to eat
+// less again. Being wrong upward over-feeds someone slightly for a few weeks
+// and shows up on the scale where both coach and client can see it. Being wrong
+// downward starves someone who is already mis-measuring themselves. The
+// mistakes are not symmetric, so the mechanism is not symmetric: a measurement
+// below the formula is REPORTED and offered as a rung change, never applied.
+const MAINT_STALE_DAYS = 60;
+
+// The STATED settings a fit was measured against. Weight and age are
+// DELIBERATELY ABSENT — they are supposed to keep moving, and a ratio is
+// designed to ride them.
+function maintBasis(d) {
+  const x = d || {};
+  return { activityLevel: x.activityLevel || "", gender: x.gender || "",
+    heightFt: String(x.heightFt == null ? "" : x.heightFt),
+    heightIn: String(x.heightIn == null ? "" : x.heightIn) };
+}
+
+// The multiplier a stored fit is allowed to apply RIGHT NOW. Every safety rule
+// lives here rather than at the write, because this is the side both the app
+// and the server read, and the only side that runs when nobody opens a screen.
+//
+// ⚠️ THE READ CLAMP IS NOT REDUNDANT WITH THE WRITE CLAMP. firestore.rules
+// grants a plan owner an unvalidated write over their own kv, so maintenanceFit
+// is directly forgeable from a console. What bounds a forged value is this
+// clamp, in both files — not the one at the write.
+function maintenanceK(d) {
+  const dd = d || {};
+  if (dd.maintenanceAuto === false) return 1;
+  const f = dd.maintenanceFit;
+  if (!f || typeof f !== "object") return 1;
+  const k = Number(f.k);
+  if (!isFinite(k) || !(k > 1)) return 1;            // never lowers maintenance
+  // A fit is a correction TO a stated profile. If the statement changed, the
+  // correction is about somebody else. This covers every writer of
+  // activityLevel — the wizard, the AI tool, and the Trainerize sync, which
+  // re-stamps it on exactly the imported clients this feature serves.
+  if (JSON.stringify(maintBasis(dd)) !== JSON.stringify(f.basis || {})) return 1;
+  // A fit nobody has re-measured in two months describes a different person,
+  // and it can only ever be feeding them MORE.
+  const at = Number(f.at) || 0;
+  if (!(at > 0) || Date.now() - at > MAINT_STALE_DAYS * 86400000) return 1;
+  return Math.min(k, 1 + TDEE_TUNING.MAX_RISE_PCT);
+}
+
+// One answer to "what does this body burn in a day", for every screen.
+// ⚠️ ROUND THE FORMULA FIRST, THEN APPLY k, THEN ROUND. The server mirror does
+// the same, in the same order, or the two disagree by a calorie and the app and
+// the AI start quoting different numbers.
+function planMaintenance(d) {
+  const dd = d || {};
+  const w = Number(dd.weightLbs) || 0;
+  const actObj = ACTIVITY_LEVELS.find((a) => a.id === dd.activityLevel) || ACTIVITY_LEVELS[0];
+  const bmr = calcBMR(dd.gender, w, Number(dd.heightFt), Number(dd.heightIn), effectiveAge(dd));
+  const formulaTdee = Math.round(bmr * actObj.multiplier);
+  const k = maintenanceK(dd);
+  return { bmr, actObj, formulaTdee, k, tdee: Math.round(formulaTdee * k), fitted: k > 1 };
+}
+
+// What to store after a measurement, or nothing. Pure, so the suite runs it.
+//   undefined = leave the stored fit alone
+//   null      = clear it (retract to the formula)
+//   object    = the new fit
+function nextMaintenanceFit(args) {
+  const a = args || {};
+  const { observed, formulaTdee, basis, current, now } = a;
+  const cur = current && typeof current === "object" ? current : null;
+  if (a.auto === false) return cur ? null : undefined;
+  if (!(Number(formulaTdee) > 0)) return undefined;
+  if (!observed || observed.confidence !== "high" || !(Number(observed.tdee) > 0)) return undefined;
+  // ⚠️ THE DENOMINATOR IS THE FORMULA, NEVER THE NUMBER IN FORCE. Dividing by
+  // the fitted maintenance oscillates: formula 2400, measured 2800 gives k
+  // 1.1667, so 2800 is in force; next measurement divides 2800 by 2800, k
+  // returns to 1, 2400 is in force, and it starts again. The formula is a fixed
+  // point: the same measurement returns the same k every time.
+  const c = clampToFormula(observed.tdee, formulaTdee);
+  // RETRACTION. A measurement at or below the formula removes the correction
+  // and stops there. It never goes below. Deliberately EXEMPT from the cooldown
+  // below: making someone wait a fortnight to stop being over-fed is the wrong
+  // side of the asymmetry this whole mechanism is built on.
+  if (!c.applied || !(Number(c.value) > Number(formulaTdee))) return cur ? null : undefined;
+  const k = c.value / formulaTdee;
+  const curK = (cur && Number(cur.k)) || 1;
+  // HYSTERESIS. A prescription that shuffles by 20 calories every time someone
+  // opens the dashboard reads as instability, not precision.
+  if (Math.abs(k - curK) * formulaTdee < Math.max(40, formulaTdee * 0.02)) return undefined;
+  // COOLDOWN — the SAME constant the rung proposal uses, for the same reason
+  // argued there: at 14 days half the evidence is new. It matters more here,
+  // because for four weeks after a fit lands the 28-day window is a mix of
+  // pre-fit and post-fit intake.
+  const at = cur && Number(cur.at);
+  if (cur && at > 0 && Number(now) - at < ACTIVITY_COOLDOWN_DAYS * 86400000) return undefined;
+  return {
+    k, formulaTdee: Number(formulaTdee),
+    // The UNCLAMPED measurement, kept beside the clamped flag, so the card can
+    // say what was measured AND that the adjustment was capped.
+    observedTdee: Number(observed.tdee), clamped: !!c.clamped,
+    at: Number(now), loggedDays: observed.loggedDays || 0, weighIns: observed.weighIns || 0,
+    trendLbsPerWeek: observed.trendLbsPerWeek == null ? null : observed.trendLbsPerWeek,
+    basis: basis || {}, source: "log",
+  };
+}
+
 // ── The plan's flat energy (S214) ───────────────────────────────────────────
 // One place answers "what does this plan burn, and what does a week of its
 // training come to", so every screen quoting a daily target quotes the same
@@ -22088,9 +22513,10 @@ const wearableTdee = (d, log) => {
 function planEnergy(d) {
   const dd = d || {};
   const w = Number(dd.weightLbs) || 0;
-  const actObj = ACTIVITY_LEVELS.find((a) => a.id === dd.activityLevel) || ACTIVITY_LEVELS[0];
-  const bmr = calcBMR(dd.gender, w, Number(dd.heightFt), Number(dd.heightIn), effectiveAge(dd));
-  const tdee = Math.round(bmr * actObj.multiplier);
+  // ⚠️ ONE ANSWER TO "WHAT DOES THIS BODY BURN". planMaintenance applies any
+  // measured correction (S228); computing bmr * multiplier here instead would
+  // make this ladder disagree with Results, the dashboard and the AI.
+  const { bmr, formulaTdee, tdee, k: maintK, fitted } = planMaintenance(dd);
   const allStrEx = [REST_ST, ...STRENGTH_EXERCISES, ...customOf(dd.customExercises, "strength")];
   let cardio = 0, strength = 0;
   DAYS.forEach((day) => {
@@ -22102,7 +22528,8 @@ function planEnergy(d) {
     });
   });
   const weeklyBurn = cardio + strength;
-  return { bmr, tdee, weeklyBurn, eatbackPerDay: isEatback(dd) ? weeklyBurn / 7 : 0 };
+  return { bmr, tdee, formulaTdee, maintK, fitted, weeklyBurn,
+    eatbackPerDay: isEatback(dd) ? weeklyBurn / 7 : 0 };
 }
 
 // What this plan lets you eat at a given weekly rate — the SAME answer on a
@@ -22677,6 +23104,9 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // One live subscription over MY sessions (array-contains me) covers every
   // client at once — no per-client listener.
   const [sessionCounts, setSessionCounts] = useState({});
+  // The same subscription also feeds the session-code row below — a trainer
+  // standing in front of a client should not have to find the calendar.
+  const [liveSessions, setLiveSessions] = useState([]);
   useEffect(() => {
     if (!meUid) return;
     return subscribeMySessions(meUid, (all) => {
@@ -22686,8 +23116,26 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         counts[s.clientUid] = (counts[s.clientUid] || 0) + 1;
       });
       setSessionCounts(counts);
+      setLiveSessions(all);
     });
   }, [meUid]);
+  // ⚠️ EXACTLY ONE SESSION, AND IT ALWAYS NAMES THE CLIENT (S228). A 30-minute
+  // lead plus a 20-minute grace gives each session a ~110-minute window, so an
+  // hourly trainer always has two live at once — showing both is how a code
+  // gets typed into the wrong session. Ticks on the clock so the row appears
+  // and disappears without needing an unrelated re-render.
+  const [codeNow, setCodeNow] = useState(() => Date.now());
+  useEffect(() => { const t = setInterval(() => setCodeNow(Date.now()), 30000); return () => clearInterval(t); }, []);
+  const codeSession = useMemo(
+    () => liveSessions.filter((s) => canShowStartCode(s, codeNow))
+      .sort((a, b) => Math.abs(a.startAt - codeNow) - Math.abs(b.startAt - codeNow))[0] || null,
+    [liveSessions, codeNow]);
+  // The roster rows already carry a resolved name; fall back to something
+  // recognisable rather than a raw uid if the roster has not loaded yet.
+  const nameOfClient = useCallback((uid) => {
+    const row = (clients || []).find((c) => c.uid === uid);
+    return (row && row.name) || "your client";
+  }, [clients]);
   // Permanent #numbers for clients + local plans (assigned on first sight).
   const [idNums, setIdNums] = useState({});
   const idSig = [...clients.map((c) => c.uid), ...(profiles || []).map((p) => p.id)].join(",");
@@ -23465,6 +23913,21 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                 )}
               </>
             )}
+          </div>
+        )}
+
+        {/* ⚠️ ABOVE THE ROSTER, ON PURPOSE (S228). A trainer standing in front of
+            a client should not have to open the calendar and find the session to
+            start it. Exactly one session, always named, and it disappears the
+            moment it is started or its window closes. */}
+        {codeSession && (
+          <div className={cardCls}>
+            <div className="text-[.72rem] text-muted mb-1">
+              {nameOfClient(codeSession.clientUid)} · {new Date(codeSession.startAt)
+                .toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+            </div>
+            <SessionStartCode session={codeSession} meUid={meUid}
+              otherName={nameOfClient(codeSession.clientUid)} compact />
           </div>
         )}
 
@@ -25349,6 +25812,186 @@ function onMyWaySentNote(d, otherName, hadFix) {
   return head;
 }
 
+// ── The session code (S228) ─────────────────────────────────────────────────
+// One component, both sides. The CLIENT sees six digits and reads them out; the
+// TRAINER types them in and the session flips to started for both people at
+// once.
+//
+// ⚠️ THE COPY IS AN INSTRUCTION, NOT A GUARANTEE. A code proves the person in
+// front of you is holding a phone signed into the other account — nothing more.
+// A code read out over the phone in advance produces an identical stamp, so
+// what makes it meaningful is the client withholding the digits until the
+// trainer is actually there. Saying "this proves you are both here" would be a
+// claim the mechanism cannot deliver.
+//
+// ⚠️ AND IT IS NOT GATED ON A LIST'S IDEA OF "PAST". canShowStartCode runs 20
+// minutes past the END of a session; every list in this app filters on
+// isPastSession or startAt > now, so mounting this behind one of those makes
+// the grace window unreachable for the person running late — which is the case
+// it exists for.
+function SessionStartCode({ session: s, meUid, otherName, compact = false }) {
+  const iAmClient = !!s && meUid === s.clientUid;
+  const [now, setNow] = useState(() => Date.now());
+  const [code, setCode] = useState("");
+  const [entry, setEntry] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [note, setNote] = useState("");
+  const [helpOpen, setHelpOpen] = useState(false);
+  // The window opens and closes on the clock, so the card has to re-render on
+  // its own — one rendered once is still offering a code an hour later.
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(t); }, []);
+
+  const state = startCodeState(s);
+  const live = canShowStartCode(s, now);
+
+  // ⚠️ KEYED ON startAt, NOT ON MOUNT. A rescheduled session invalidates the
+  // code server-side; without this the client goes on showing the old number
+  // while the trainer is told it is out of date.
+  useEffect(() => {
+    if (!iAmClient || !live) return;
+    let dead = false;
+    (async () => {
+      try {
+        const r = await callSessionStartCode({ sessionId: s.id });
+        if (!dead && r && r.data && r.data.code) setCode(r.data.code);
+      } catch { /* the card falls back to its own message */ }
+    })();
+    return () => { dead = true; };
+  }, [iAmClient, live, s && s.id, s && s.startAt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!s) return null;
+
+  // Already started — the half that makes this bidirectional. The client's real
+  // protection is not the digits, it is watching their own card flip the moment
+  // the trainer uses them.
+  if (state.verified) {
+    const when = new Date(state.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return (
+      <div className="mt-2 flex items-center gap-2 text-[.78rem]" style={{ color: "var(--green)" }}>
+        <Icon name="check" size={15} color="var(--green)" />
+        <span>
+          {state.via === "code"
+            ? (iAmClient ? `${otherName || "Your trainer"} confirmed your code at ${when}` : `Started with ${otherName || "your client"}'s code at ${when}`)
+            : `Session started at ${when}`}
+        </span>
+      </div>
+    );
+  }
+  if (!live) return null;
+
+  const rotate = async () => {
+    setBusy(true); setErr(""); setNote("");
+    try {
+      const r = await callSessionStartCode({ sessionId: s.id, rotate: true });
+      if (r && r.data && r.data.code) { setCode(r.data.code); setNote("New code — read this one out instead."); }
+    } catch (e) { setErr((e && e.message) || "Could not get a new code."); }
+    setBusy(false);
+  };
+
+  const startWithoutCode = async () => {
+    setBusy(true); setErr(""); setNote("");
+    try { await callVerifySessionStart({ sessionId: s.id, clientTap: true }); }
+    catch (e) { setErr((e && e.message) || "Could not start the session."); }
+    setBusy(false);
+  };
+
+  const submit = async () => {
+    const digits = entry.replace(/\D/g, "");
+    if (digits.length !== 6 || busy) return;
+    setBusy(true); setErr(""); setNote("");
+    try {
+      const r = await callVerifySessionStart({ sessionId: s.id, code: digits });
+      // ⚠️ THE SUCCESS STATE READS `via`, NEVER "my submit returned ok". The
+      // call is idempotent, so after a client tap ANY six digits come back ok —
+      // rendering that as a confirmed code exchange would be a lie.
+      const via = r && r.data && r.data.via;
+      setNote(via === "code" ? "Confirmed — session started." : "This session was already started.");
+      setEntry("");
+    } catch (e) { setErr((e && e.message) || "Could not check that code."); }
+    setBusy(false);
+  };
+
+  const box = "rounded-card border p-3";
+  const late = now > (Number(s.startAt) || 0) + 10 * 60000;
+
+  if (iAmClient) {
+    return (
+      <div className={box} style={{ borderColor: "var(--accent)", background: "rgba(var(--accent-rgb),.07)", marginTop: 10 }}>
+        <div className="flex items-center gap-2" style={{ marginBottom: 6 }}>
+          <Icon name="fingerprint" size={16} color="var(--accent)" />
+          <span className="text-[.7rem] font-bold uppercase tracking-wide" style={{ color: "var(--accent)" }}>
+            Session code
+          </span>
+        </div>
+        <div style={{ fontFamily: "'Sora',sans-serif", fontSize: compact ? "1.9rem" : "2.3rem",
+          letterSpacing: "3px", color: "var(--text)", lineHeight: 1.1 }}>
+          {code ? prettyStartCode(code) : "— — —"}
+        </div>
+        <div className="text-[.72rem]" style={{ color: "var(--text-secondary)", marginTop: 6, lineHeight: 1.5 }}>
+          <strong style={{ color: "var(--text)" }}>Read this to {otherName || "your trainer"} once they are in front of you.</strong>{" "}
+          Only their Glidna account can use it.
+        </div>
+        {note && <div className="text-[.72rem]" style={{ color: "var(--green)", marginTop: 6 }}>{note}</div>}
+        {err && <div className="text-[.72rem]" style={{ color: "var(--red)", marginTop: 6 }}>{err}</div>}
+        {/* Both escape hatches sit behind a disclosure so they do not compete
+            with the thing that actually works — but it opens itself once
+            someone is properly late, when a stuck person needs it visible. */}
+        {(helpOpen || late) ? (
+          <div className="flex flex-wrap gap-2" style={{ marginTop: 9 }}>
+            <button onClick={rotate} disabled={busy}
+              className="rounded-md border px-2.5 py-1.5 text-[.72rem] font-semibold cursor-pointer disabled:opacity-50"
+              style={{ borderColor: "var(--border)", background: "transparent", color: "var(--muted)" }}>
+              Get a new code
+            </button>
+            <button onClick={startWithoutCode} disabled={busy}
+              className="rounded-md border px-2.5 py-1.5 text-[.72rem] font-semibold cursor-pointer disabled:opacity-50"
+              style={{ borderColor: "var(--border)", background: "transparent", color: "var(--muted)" }}>
+              Start it myself — they are here
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setHelpOpen(true)}
+            className="border-0 bg-transparent p-0 text-[.7rem] cursor-pointer"
+            style={{ color: "var(--muted)", marginTop: 8, textDecoration: "underline" }}>
+            Having trouble?
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // The trainer's side.
+  return (
+    <div className={box} style={{ borderColor: "var(--border)", background: "var(--s2)", marginTop: 10 }}>
+      <div className="flex items-center gap-2" style={{ marginBottom: 6 }}>
+        <Icon name="fingerprint" size={16} color="var(--accent)" />
+        <span className="text-[.7rem] font-bold uppercase tracking-wide" style={{ color: "var(--accent)" }}>
+          Start with {otherName || "your client"}
+        </span>
+      </div>
+      <div className="text-[.72rem]" style={{ color: "var(--text-secondary)", marginBottom: 8, lineHeight: 1.5 }}>
+        Ask {otherName || "them"} to read you the six-digit code on their Glidna.
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={entry} onChange={(e) => setEntry(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          type="text" inputMode="numeric" autoComplete="off" placeholder="000000" aria-label="Session code"
+          style={{ fontFamily: "'Sora',sans-serif", letterSpacing: "3px", width: 130,
+            padding: "9px 11px", borderRadius: 9, border: "1.5px solid var(--border)",
+            background: "var(--surface)", color: "var(--text)", fontSize: "1.05rem" }} />
+        <button onClick={submit} disabled={busy || entry.replace(/\D/g, "").length !== 6}
+          className="rounded-md border-0 px-3.5 py-2 text-[.78rem] font-bold cursor-pointer disabled:opacity-50"
+          style={{ background: "var(--accent)", color: "var(--bg)" }}>
+          {busy ? "…" : "Start session"}
+        </button>
+      </div>
+      {note && <div className="text-[.72rem]" style={{ color: "var(--green)", marginTop: 7 }}>{note}</div>}
+      {err && <div className="text-[.72rem]" style={{ color: "var(--red)", marginTop: 7 }}>{err}</div>}
+    </div>
+  );
+}
+
 function OnMyWay({ session: s, meUid, otherName, compact = false, enabled = false }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -26692,6 +27335,11 @@ function CalSessionSheet({ session: s, nameOf, now, busy, meUid, meName, hasCard
         {!past && s.status !== "cancelled" && (
           <OnMyWay session={s} meUid={meUid} otherName={nameOf(s.clientUid)} enabled={driveOn} />
         )}
+        {/* Not gated on `past` — see the note in SessionsPanel. The grace window
+            outlives the session by 20 minutes on purpose. */}
+        {s.status !== "cancelled" && (
+          <SessionStartCode session={s} meUid={meUid} otherName={nameOf(s.clientUid)} compact />
+        )}
 
         <div className="flex flex-wrap gap-1.5">
           {!past && s.status !== "cancelled" && <button className={btn} onClick={onEdit} disabled={busy}>Reschedule</button>}
@@ -28000,6 +28648,11 @@ const callSessionTravel = httpsCallable(functions, "sessionTravel");   // drive 
 // "On my way" (S201). One GPS fix goes up, an ETA comes back; the position is
 // never stored — see functions/availability.js sessionOnMyWay.
 const callSessionOnMyWay = httpsCallable(functions, "sessionOnMyWay");
+// Session start codes (S228). The code itself never touches the session
+// document — it lives in an Admin-SDK-only collection — so both directions go
+// through the server.
+const callSessionStartCode = httpsCallable(functions, "sessionStartCode");
+const callVerifySessionStart = httpsCallable(functions, "verifySessionStart");
 // Address suggestions (S207). Proxied so the Maps key stays server-side.
 const callPlacesAutocomplete = httpsCallable(functions, "placesAutocomplete");
 const callListAppRequests = httpsCallable(functions, "listAppRequests");        // S140 admin
@@ -28592,6 +29245,21 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
     const n = Number(stored) > 0 ? Number(stored) : Math.round(H * frac);
     return Math.max(160, Math.min(n, Math.round(H * 0.9)));
   };
+  // The panel height, resolved once per render, so the dock variable below, the
+  // panel style and the composer ceiling can never quote different numbers.
+  // ⚠️ IT MUST BE DECLARED HERE, NOT BESIDE THE JSX THAT USES IT. The panel
+  // markup lives inside `return createPortal(` — not a statement position — and
+  // putting `maxTa` there would place it BELOW the effect whose dependency array
+  // reads it. A dependency array is evaluated during render, so that is a TDZ
+  // ReferenceError on every render and the app unmounts. That is the S213
+  // muMinutes white screen exactly, and `npm run check:undef` is blind to it
+  // (the binding exists, it just comes later).
+  const barPx = safeH(barH, 0.33);
+  const cardPx = safeH(cardH, 0.68);
+  // Mirrors the style ternary below exactly. 0 = full-screen: no stored height,
+  // so the composer gets the flat ceiling.
+  const panelPx = size === "full" ? 0 : size === "bar" ? barPx : cardPx;
+  const maxTa = composerMaxH(panelPx);
   const dragRef = useRef(null);   // {startY, startH, mode}
   // Drag the top edge: up grows, down shrinks. Clamped so it can neither vanish
   // nor swallow the page it exists to keep visible.
@@ -28599,7 +29267,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
   const onResizeStart = (mode) => (e) => {
     setDragging(true);
     const y = e.touches ? e.touches[0].clientY : e.clientY;
-    dragRef.current = { startY: y, startH: mode === "bar" ? safeH(barH, 0.33) : safeH(cardH, 0.68), mode };
+    dragRef.current = { startY: y, startH: mode === "bar" ? barPx : cardPx, mode };
     e.preventDefault();
   };
   useEffect(() => {
@@ -28712,10 +29380,10 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
   // with the chat docked must not bury the chat, and the sheet's own list must
   // stay scrollable above it.
   useEffect(() => {
-    const px = open && size === "bar" ? `${safeH(barH, 0.33) + 12}px` : "0px";
+    const px = open && size === "bar" ? `${barPx + 12}px` : "0px";
     document.documentElement.style.setProperty("--glidna-dock-h", px);
     return () => document.documentElement.style.setProperty("--glidna-dock-h", "0px");
-  }, [open, size, barH]);
+  }, [open, size, barPx]);
   useEffect(() => {
     if (!lockPage) return;
     const prev = document.body.style.overflow;
@@ -29319,25 +29987,10 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [open, activeChatId]);
 
-  // Auto-grow the composer like Claude's: the textarea height follows its content
-  // (from one line up to a max, then it scrolls). Runs on every draft change and
-  // when the panel opens, and resets after send (draft cleared).
-  const MAX_TA = 200; // px before the textarea starts scrolling instead of growing
-  const autoGrowTextarea = () => {
-    const el = taRef.current;
-    if (!el) return;
-    el.style.height = "auto"; // collapse so scrollHeight reflects content, not the old height
-    // An EMPTY textarea reports a too-tall scrollHeight in some browsers (≈2 rows),
-    // which made the box shrink on the first keystroke. For empty content, leave it
-    // at the one-row "auto"/rows=1 height; only size to content when there's text.
-    if (el.value) {
-      el.style.height = Math.min(el.scrollHeight, MAX_TA) + "px";
-      el.style.overflowY = el.scrollHeight > MAX_TA ? "auto" : "hidden";
-    } else {
-      el.style.overflowY = "hidden";
-    }
-  };
-  useEffect(() => { autoGrowTextarea(); }, [draft, open]);
+  // Auto-grow the composer like Claude's: the height follows the content up to a
+  // ceiling, then it SCROLLS. The ceiling is composerMaxH(panelPx), so a docked
+  // bar never gives the composer more room than the transcript above it.
+  useEffect(() => { autoGrowTextarea(taRef.current, maxTa); }, [draft, open, maxTa]);
 
   // ⚠️ MESSAGES SENT WHILE IT IS THINKING ARE QUEUED, NOT REFUSED (S201, Kevin:
   // "I don't want a point where a client is just sitting there waiting for a
@@ -29637,13 +30290,13 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
           level meter while you talk, then the transcript to confirm before it
           sends. No transcript history, no controls; the page stays readable. */}
       {micOnly && !open && (
-        <div className={`fixed ${sheetUp ? "z-[1655]" : "z-[1396]"} rounded-card border border-border bg-surface text-fg shadow-2xl`}
+        <div data-ptr-ignore className={`fixed ${sheetUp ? "z-[1655]" : "z-[1396]"} rounded-card border border-border bg-surface text-fg shadow-2xl`}
           style={{ left: "8px", right: "8px", maxWidth: 640, margin: "0 auto",
             bottom: "calc(12px + env(safe-area-inset-bottom,0px))", padding: "10px 12px" }}>
           {voicePreview ? (
             <>
               <div className="mb-2 text-[.72rem] text-muted">Send this to Glidna?</div>
-              <div className="mb-2.5 max-h-[26vh] overflow-y-auto text-[.92rem] leading-relaxed text-fg">{voicePreview}</div>
+              <div className="mb-2.5 max-h-[26vh] overflow-y-auto overscroll-contain text-[.92rem] leading-relaxed text-fg">{voicePreview}</div>
               {/* A name in the transcript → offer that subject before it sends.
                   One tap goes there; ignoring the row keeps the safe default. */}
               {voiceCands.length > 0 && !destPicker && (
@@ -29804,7 +30457,10 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
         // open) and the panel rendered BEHIND the sheet — the button vanished
         // and nothing came back. Raised above sheets only while one is up, so
         // the normal stack (side menu 1400 wins over the chat) is untouched.
-        <div className={`fixed kb-safe ${sheetUp ? "z-[1660]" : "z-[1395]"} flex flex-col overflow-hidden rounded-card border border-border bg-surface text-fg shadow-2xl`}
+        // data-ptr-ignore: pull-to-refresh is not a gesture inside a floating
+        // chat panel — a drag through the transcript or the composer used to
+        // pull the page behind it instead (S228).
+        <div data-ptr-ignore className={`fixed kb-safe ${sheetUp ? "z-[1660]" : "z-[1395]"} flex flex-col overflow-hidden rounded-card border border-border bg-surface text-fg shadow-2xl`}
           style={size === "full" ? {
             top: "calc(10px + env(safe-area-inset-top,0px))",
             bottom: "calc(10px + env(safe-area-inset-bottom,0px))",
@@ -29818,12 +30474,12 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
             left: "8px", right: "8px",
             bottom: "calc(8px + env(safe-area-inset-bottom,0px))",
             maxWidth: 900, margin: "0 auto",
-            height: safeH(barH, 0.33),
+            height: barPx,
           } : {
             right: "calc(12px + env(safe-area-inset-right,0px))",
             bottom: "calc(12px + env(safe-area-inset-bottom,0px))",
             width: "min(440px, calc(100vw - 20px))",
-            height: safeH(cardH, 0.68),
+            height: cardPx,
           }}>
           {/* Drag the top edge to resize. Sits above the header so the whole strip
               is grabbable, and is deliberately absent in full-screen (nothing to
@@ -30306,7 +30962,7 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
               <textarea ref={taRef} value={draft} onChange={e => setDraft(e.target.value)} rows={1}
                 placeholder={recording ? "Listening… tap ⏹ to stop" : transcribing ? "Transcribing…" : pendingImages.length ? "Add a note (optional)…" : "Message Glidna AI…"}
                 style={{ fontFamily: "var(--font-sans)" }}
-                className="order-first basis-full w-full resize-none box-border min-h-[46px] max-h-[140px] rounded-xl border border-border bg-surface2 px-3.5 py-3 text-[.95rem] leading-relaxed text-fg outline-none placeholder:text-muted"
+                className="order-first basis-full w-full resize-none box-border min-h-[46px] overscroll-contain rounded-xl border border-border bg-surface2 px-3.5 py-3 text-[.95rem] leading-relaxed text-fg outline-none placeholder:text-muted"
                 onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} />
               <button onClick={send} disabled={recording || transcribing || (!draft.trim() && !pendingImages.length)} aria-label="Send"
                 className="ml-auto rounded-xl border-none bg-primaryfill px-6 py-2.5 text-[.9rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50 disabled:cursor-default">
@@ -30759,6 +31415,17 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   };
   const upcomingSessions = mySessions.filter((s) => s.status !== "cancelled" && !isPastSession(s));
   const nextSession = upcomingSessions[0] || null;
+  // ⚠️ ITS OWN SESSION, NOT nextSession (S228). The code window runs 20 minutes
+  // past the END, and the list above drops a session the moment it is past — so
+  // reusing nextSession here would take the code off screen exactly when
+  // somebody running late reaches for it. Ticks so the window opens and closes
+  // on the clock rather than on the next unrelated re-render.
+  const [codeNow, setCodeNow] = useState(() => Date.now());
+  useEffect(() => { const t = setInterval(() => setCodeNow(Date.now()), 30000); return () => clearInterval(t); }, []);
+  const startCodeSession = useMemo(
+    () => mySessions.filter((s) => canShowStartCode(s, codeNow))
+      .sort((a, b) => Math.abs(a.startAt - codeNow) - Math.abs(b.startAt - codeNow))[0] || null,
+    [mySessions, codeNow]);
   // Do I have a place saved? (S204) Read once — it drives a single prompt on the
   // next-session card, not a screen.
   const [myAddrC, setMyAddrC] = useState(undefined);
@@ -31623,6 +32290,14 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
             <OnMyWay session={nextSession} meUid={meUid}
               enabled={!!(trainerInfo && trainerInfo.drive)}
               otherName={trainerInfo ? trainerInfo.name : "Your trainer"} />
+            {/* ⚠️ NOT nextSession (S228). `upcomingSessions` filters on
+                isPastSession, so the session vanishes from it the instant it
+                ends — while the code is still live for another 20 minutes.
+                This picks the session whose code window is actually open. */}
+            {startCodeSession && (
+              <SessionStartCode session={startCodeSession} meUid={meUid}
+                otherName={trainerInfo ? trainerInfo.name : "Your trainer"} />
+            )}
           </div>
         )}
 
@@ -33780,6 +34455,7 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
   const [draft, setDraft] = useState("");
   const [err, setErr] = useState(false);
   const endRef = useRef(null);
+  const taRef = useRef(null);   // composer textarea (auto-grows with content)
   // Live status for any to-do messages in this thread (S124). The message is
   // only a pointer; truth lives in the client's caliq-requests, so we resolve
   // it here. Client reads their own kv; trainer reads the client's (allowed by
@@ -33931,6 +34607,10 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
     return () => { dead = true; if (unsub) unsub(); };
   }, [tid]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (endRef.current) endRef.current.scrollIntoView({ block: "end" }); }, [msgs]);
+  // Grow with the message, then scroll. This overlay owns the whole viewport
+  // (useBodyScrollLock above), so the composer gets the full ceiling — and
+  // there is nothing behind it to chain a scroll into.
+  useEffect(() => { autoGrowTextarea(taRef.current, COMPOSER_MAX_H); }, [draft]);
   const doSend = async () => {
     const t = draft.trim();
     if (!t) return;
@@ -34116,9 +34796,9 @@ function MessageThread({ trainerUid, clientUid, meUid, otherName, onClose }) {
             <Icon name="meal" size={18} color="var(--yellow,#fbbf24)" />
           </button>
         )}
-        <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={1}
+        <textarea ref={taRef} value={draft} onChange={(e) => setDraft(e.target.value)} rows={1}
           placeholder="Message…" style={{ fontFamily: "var(--font-sans)" }}
-          className="min-h-[42px] max-h-[120px] flex-1 resize-none rounded-xl border border-border bg-surface px-3 py-2.5 text-[.92rem] text-fg outline-none placeholder:text-muted"
+          className="min-h-[42px] flex-1 resize-none rounded-xl border border-border bg-surface px-3 py-2.5 text-[.92rem] text-fg outline-none placeholder:text-muted"
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSend(); } }} />
         <button onClick={doSend} disabled={!draft.trim()}
           className="rounded-xl border-none bg-primaryfill px-5 py-2.5 text-[.88rem] font-bold text-primaryfg cursor-pointer disabled:opacity-50">Send</button>
@@ -35387,6 +36067,15 @@ function SessionsPanel({ meUid, meName = "", role, trainerUid, clientUid, otherN
           statement, so it does not sit on next month's booking. */}
       {!opts.past && !opts.cancelled && (
         <OnMyWay session={s} meUid={meUid} otherName={otherName} compact enabled={driveOn} />
+      )}
+      {/* ⚠️ DELIBERATELY OUTSIDE THE `past` GUARD (S228). `past` is end <= now,
+          and the session code stays usable for 20 minutes AFTER the end — which
+          is exactly the person running late this exists for. Gating it here the
+          way "On my way" is gated would make the grace window unreachable, and
+          a test that only compares the window predicate to itself cannot see
+          that. canShowStartCode is the gate, and it is the component's own. */}
+      {!opts.cancelled && (
+        <SessionStartCode session={s} meUid={meUid} otherName={otherName} compact />
       )}
       {!opts.past && !opts.cancelled && (
         <div className="mt-2 flex gap-1.5 flex-wrap">
@@ -40110,9 +40799,7 @@ export default function App() {
   }, [activeId, activeRemoteUid, viewDate]);
 
   // ── Compute values for dashboard (same formulas as Results) ──
-  const actObj = ACTIVITY_LEVELS.find(a=>a.id===data.activityLevel) || ACTIVITY_LEVELS[0];
-  const bmr = calcBMR(data.gender, Number(data.weightLbs), Number(data.heightFt), Number(data.heightIn), effectiveAge(data));
-  const computedTdee = Math.round(bmr * actObj.multiplier);
+  const { actObj, bmr, tdee: computedTdee } = planMaintenance(data);
   const allStrEx = [REST_ST, ...STRENGTH_EXERCISES, ...customOf(data.customExercises, "strength")];
   const computedDayData = DAYS.map(day => {
     const raw = data.cardio[day];
@@ -40473,6 +41160,22 @@ export default function App() {
                 // already on disk, so every read floors too (S200u).
                 if(n>0) x.calorieTarget=atLeastMinCal(n); else delete x.calorieTarget; return x; })}
               dayCalsAll={dayCalsAll}
+              // The measured correction (S228). `null` retracts it to the
+              // formula; an object replaces it. The effect that calls this never
+              // fires with `undefined`, which means "leave it alone".
+              onSetMaintenanceFit={(fit)=>setDataAndSave(p=>{
+                const x={...p};
+                if(fit) x.maintenanceFit=fit; else delete x.maintenanceFit;
+                return x; })}
+              onSetMaintenanceAuto={(on)=>setDataAndSave(p=>{
+                const x={...p};
+                // Absent means ON, so turning it back on REMOVES the flag rather
+                // than storing true — one representation, not two.
+                if(on) delete x.maintenanceAuto; else x.maintenanceAuto=false;
+                // Switching it off retracts immediately; leaving a fit on disk
+                // that the read rule ignores is a number nobody can account for.
+                if(!on) delete x.maintenanceFit;
+                return x; })}
               onSetActivityLevel={(id)=>setDataAndSave(p=>({...p, activityLevel: id,
                 // The anti-clobber marker is stamped by stampLocalEdits (S200g).
                 // This records the DECISION, which starts the 14-day cooldown so

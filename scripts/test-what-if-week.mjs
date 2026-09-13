@@ -48,6 +48,11 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+// planEnergy now prices through planMaintenance, whose read clamp reads the
+// estimator's own ceiling (S228). Passing the REAL TUNING in — rather than
+// letting the sandbox work only because no fixture here carries a fit — keeps
+// the next fitted fixture from failing with a bare ReferenceError.
+import { TUNING as TDEE_TUNING } from "../src/observedTdee.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
@@ -99,7 +104,7 @@ const CONSTS = ["DAYS", "DAY_SHORT", "REST_ST", "STRENGTH_EXERCISES", "CARDIO_GR
   "ACTIVITY_LEVELS", "MIN_DAILY_CAL", "HR_ZONES", "RATE_OPTS", "OVER_TOLERANCE", "CAL_PER_LB", "SIM_MANUAL", "SIM_RATES", "SIM_HORIZONS"];
 const FNS = ["calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx", "hrCaloriesPerMin",
   "restingKcalPerMin", "calcBurn", "cardioExFor", "exBurn", "isEatback", "dailyDeficitOf", "weeklyRateOf",
-  "planEnergy", "planIntakeForRate", "computeClientCalories",
+  "MAINT_STALE_DAYS", "maintBasis", "maintenanceK", "planMaintenance", "planEnergy", "planIntakeForRate", "computeClientCalories",
   "simNum", "simRejected", "weekPlan", "joinDays",
   "seedSimCardio", "simSessionBurn", "simDayBurn", "simWeekBurn", "simRawIntakeForRate", "simIntakeForRate", "simBudgetRows", "simBankRows", "simHoldDay", "simProject",
   "ymdLocal", "simWeekdayIdx", "simDateAt", "simScenarioDay"];
@@ -109,7 +114,7 @@ const EXPORTS = ["simNum", "simRejected", "weekPlan", "joinDays", "seedSimCardio
   "SIM_MANUAL", "MIN_DAILY_CAL", "CAL_PER_LB", "DAYS", "DAY_SHORT", "atLeastMinCal", "simProject",
   "simWeekdayIdx", "simDateAt", "simScenarioDay", "SIM_HORIZONS"];
 const source = () => [...CONSTS, "atLeastMinCal", ...FNS].map((n) => liftDecl(APP, n)).join("\n");
-const build = (src) => new Function(`${src}; return { ${EXPORTS.join(", ")} };`)();
+const build = (src) => new Function("TDEE_TUNING", `${src}; return { ${EXPORTS.join(", ")} };`)(TDEE_TUNING);
 const M = build(source());
 const { simNum, weekPlan, joinDays, simRejected, DAY_SHORT, CAL_PER_LB } = M;
 // The plan's own rate list, so "the sandbox offers exactly the plan's rates" is a

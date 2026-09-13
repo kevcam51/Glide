@@ -62,6 +62,7 @@ const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const { sendPushTo } = require("./push");
+const { attendanceEvidence } = require("./startCode");
 
 const STRIPE_SECRET_KEY = defineSecret("STRIPE_SECRET_KEY");
 const STRIPE_TEST_SECRET_KEY = defineSecret("STRIPE_TEST_SECRET_KEY");
@@ -544,7 +545,18 @@ async function settleGroup(db, items, { now, nowDate, force, dryRun }) {
       // was what stranded unpriced sessions in "processing" forever and fired a
       // "your package covered 0 sessions" notice at people with no package.
       if (cents <= 0) { freebies.push(s); continue; }
-      billable.push({ s, cents, settledAs: "charged", isNoShow: s.noShow === true, consentAgreedAt: consent ? consent.agreedAt : null });
+      // ⚠️ EVIDENCE ONLY, NEVER A GATE (S228). Verification does not decide
+      // whether a session bills — a gate would invert the safety incentive
+      // (the trainer would want the code more than the client, and start
+      // collecting it in advance by text, which is the exact fraud it exists to
+      // prevent) and every failure would land on the innocent party: a trainer
+      // who forgets loses real money for real work, a client who declines gets
+      // free training, and a flat battery punishes whoever is holding it. This
+      // attaches a fact to a charge that was going to happen anyway.
+      // attendanceEvidence is deliberately silent unless a CODE was exchanged.
+      billable.push({ s, cents, settledAs: "charged", isNoShow: s.noShow === true,
+        evidence: attendanceEvidence(s) || undefined,
+        consentAgreedAt: consent ? consent.agreedAt : null });
     } else if (policy) {
       const fee = lateFeeCents(s, policy);
       if (fee > 0) billable.push({ s, cents: fee, settledAs: "charged", evidence: evidenceSummary(s, policy), isFee: true, consentAgreedAt: consent ? consent.agreedAt : null });
