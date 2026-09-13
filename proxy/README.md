@@ -5,9 +5,13 @@ Functions have dynamic IPs. This tiny server runs on a VM with **one fixed IP**
 that you whitelist in FatSecret. Our `foodSearch` Cloud Function calls it (behind
 a shared secret); it relays to FatSecret and returns the raw JSON.
 
-**Status:** code is ready; **not deployed yet** (to avoid the ~$4/mo until needed).
-When you want FatSecret live, follow the steps below (~20–30 min, then up to 24h
-for FatSecret to activate the whitelisted IP).
+**Status: DEPLOYED AND RUNNING.** (This line said "not deployed yet" for a long
+time after it went live — verified S228 by probing /health, which answers 200.)
+
+- **Creating** the VM: the steps below, or `bash proxy/deploy.sh`.
+- **Updating** `server.js` on the VM that already exists: `bash proxy/update.sh`.
+  That is the common case, it touches no secrets, and it proves the new route
+  answers before reporting success.
 
 Cost: compute is Google's always-free `e2-micro` tier; the only charge is the
 static external IPv4 (~$4/mo).
