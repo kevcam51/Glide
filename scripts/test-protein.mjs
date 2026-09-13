@@ -88,9 +88,11 @@ const codeOnly = (src) => stripComments(src)
 const APP_CODE = codeOnly(APP);
 
 // ── the two implementations, both lifted and run ───────────────────────────
-const APP_SRC = ["PROTEIN_REF_BF", "PROTEIN_MAX_PCT", "proteinBasisOf", "proteinPlan", "autoProteinG"]
+const APP_SRC = ["PROTEIN_REF_BF", "PROTEIN_MAX_PCT", "proteinBasisOf", "proteinPlan", "autoProteinG",
+  "MACRO_SPLITS", "MACRO_KEYS_PLAN", "MACRO_KEYS_BUILD", "splitGrams", "macroSplitTiles"]
   .map((n) => liftDecl(APP, n)).join("\n");
-const buildApp = (src) => new Function(`${src}; return { proteinPlan, autoProteinG, PROTEIN_REF_BF, PROTEIN_MAX_PCT };`)();
+const buildApp = (src) => new Function(`${src}; return { proteinPlan, autoProteinG, PROTEIN_REF_BF, PROTEIN_MAX_PCT,
+  MACRO_SPLITS, MACRO_KEYS_PLAN, MACRO_KEYS_BUILD, splitGrams, macroSplitTiles };`)();
 const A = buildApp(APP_SRC);
 
 const SRV_SRC = ["PROTEIN_REF_BF", "PROTEIN_MAX_PCT", "proteinPlan"].map((n) => liftDecl(TOOLS, n)).join("\n");
@@ -242,8 +244,10 @@ const P = (over = {}) => ({ weightLbs: 180, ...over });
   // ⚠️ THE PRESET CAPTION MUST DESCRIBE THE NUMBER BESIDE IT. It read "1 g/lb
   // protein" over a tile showing 199 g for a 260 lb client — the denominator had
   // moved and the caption went on quoting the old rule. Found by rendering it.
-  ok("the preset caption follows the same three cases, in the same order",
-     /sub: o\.tail \? `\$\{pWord\}, \$\{o\.tail\}`\s*\n\s*: !protMoved \? `\$\{proteinPerLb\} g\/lb protein`\s*\n\s*: protPlan\.capped \? `protein held at \$\{Math\.round\(PROTEIN_MAX_PCT \* 100\)\}% of cal`\s*\n\s*: "protein from lean mass" \};/.test(APP_CODE));
+  // The anchor tile is the only caption the card writes itself, because only
+  // this screen knows the protein BASIS; every comparative comes measured.
+  ok("the anchor caption follows the same three cases, in the same order",
+     /sub: x\.sub != null \? x\.sub\s*\n\s*: !protMoved \? `\$\{proteinPerLb\} g\/lb protein`\s*\n\s*: protPlan\.capped \? `protein held at \$\{Math\.round\(PROTEIN_MAX_PCT \* 100\)\}% of cal`\s*\n\s*: "protein from lean mass" \}\)\);/.test(APP_CODE));
   ok("...and no longer hardcodes the g\/lb caption", !/sub: `\$\{proteinPerLb\} g\/lb protein`,/.test(APP_CODE));
   // The three cases the render check walked, as arithmetic: unchanged, moved by
   // the denominator, moved by the ceiling.
@@ -311,108 +315,196 @@ const P = (over = {}) => ({ weightLbs: 180, ...over });
      noBand.proteinPlan({ weightLbs: 180, bodyFat: 0 }, 4000).grams > 200);
 }
 
-// ── 10. the four splits, and the contradiction they used to carry ─────────
+// ── 10. the splits, the contradiction they used to carry, and the surfaces ─
 {
   // ⚠️ THE PRESETS USED TO SET PROTEIN AS A PERCENTAGE, WHICH FOUGHT THE
   // DEFAULT AND RAN BACKWARDS. A 180 lb client on 2,200 cal was offered 33%
   // protein by their plan and 40% by the Cutting tile beside it; and a
   // percentage falls with the calories, so the deeper the deficit the LESS
   // protein it asked for — the opposite of every deficit-specific source.
-  // Protein is grams in all four now, built by the same helper.
-  ok("no preset sets protein as a percentage any more",
+  ok("no split sets protein as a percentage any more",
      !/protein: 40, carbs: 35, fat: 25/.test(APP_CODE) && !/protein: 30, carbs: 45, fat: 25/.test(APP_CODE));
   ok("...and the goal-derived tile is gone with it",
      !/goalLbl/.test(APP_CODE) && !/sub: "from your goal"/.test(APP_CODE));
+  // ⚠️ COUNT, DON'T FIND. A second copy of the table inside MuscleTab would be
+  // lifted by nothing here (liftDecl takes the FIRST match) and would drift in
+  // silence — the exact shape of the six-readers-four-answers bug above.
+  ok("there is exactly one split table", (APP_CODE.match(/const MACRO_SPLITS = \[/g) || []).length === 1);
+  ok("...and exactly one builder", (APP_CODE.match(/function splitGrams\(/g) || []).length === 1);
 
-  // Lifted and RUN. These live inside the component, so the free variables the
-  // table needs are passed in rather than the table being retyped here.
-  const SPLIT_SRC = ["MACRO_SPLITS", "splitGrams", "recPct"].map((n) => liftDecl(APP, n)).join("\n");
-  const mkSplits = new Function("target", "autoProtein", "PROTEIN_MAX_PCT", "gToPct",
-    `${SPLIT_SRC}; return { MACRO_SPLITS, splitGrams, recPct };`);
-  const at = (cal, prot) => mkSplits(cal, prot, A.PROTEIN_MAX_PCT,
-    (g, per) => (cal > 0 ? Math.round((Number(g) * per / cal) * 100) : 0));
+  const P0 = (over = {}) => ({ weightLbs: 180, ...over });
 
+  // ── the plan surface ────────────────────────────────────────────────────
   {
-    const { MACRO_SPLITS } = at(2000, 180);
-    ok("there are four of them", MACRO_SPLITS.length === 4, MACRO_SPLITS.map((o) => o.key));
-    ok("...with unique keys", new Set(MACRO_SPLITS.map((o) => o.key)).size === 4);
-    ok("...and Kevin's bodyweight option leads", MACRO_SPLITS[0].key === "bodyweight" && MACRO_SPLITS[0].pMul === 1);
+    const tiles = A.macroSplitTiles(P0(), 1876, A.MACRO_KEYS_PLAN);
+    ok("the dashboard shows four", tiles.length === 4, tiles.map((x) => x.key));
+    ok("...anchored on the bodyweight tile", tiles[0].key === "bodyweight");
+    ok("...which carries no comparative caption, because it is the thing compared to",
+       tiles[0].sub === null);
     // "the protein can be different for some of the other ones that are not
     // high protein based" — two of the four sit below the basis.
-    ok("...and two of the four carry less protein than the basis",
-       MACRO_SPLITS.filter((o) => o.pMul < 1).length === 2, MACRO_SPLITS.map((o) => o.pMul));
+    ok("...and two of the four carry less protein than the anchor",
+       tiles.filter((x) => x.t.protein < tiles[0].t.protein).length === 2, tiles.map((x) => x.t.protein));
+    ok("...the anchor IS the plan's own target", tiles[0].t.protein === A.proteinPlan(P0(), 1876).grams);
   }
 
-  // The structural claims the captions make, swept over real plans.
-  let badSum = null, badCarbs = null, badCeil = null, badBase = null, swept = 0;
-  for (const cal of [1200, 1500, 1876, 2102, 2439, 3200]) {
-    for (const prot of [120, 180, 199, 262, 320]) {
-      const { MACRO_SPLITS, splitGrams } = at(cal, prot);
-      const g = Object.fromEntries(MACRO_SPLITS.map((o) => [o.key, splitGrams(o)]));
-      const ceilG = Math.floor((cal * A.PROTEIN_MAX_PCT) / 4);
-      for (const [k, t] of Object.entries(g)) {
-        swept++;
-        // The three must still add up to the day — the gap check on the card
-        // reports one that doesn't, and a preset should never trip it.
-        const sum = t.protein * 4 + t.carbs * 4 + t.fat * 9;
-        if (Math.abs(sum - cal) > 6) badSum = { cal, prot, k, t, sum };
-        if (t.protein > ceilG) badCeil = { cal, prot, k, t, ceilG };
-        if (t.carbs < 0) badCarbs = { cal, prot, k, t };
+  // ── the build surface ───────────────────────────────────────────────────
+  {
+    const tiles = A.macroSplitTiles(P0(), 2900, A.MACRO_KEYS_BUILD);
+    ok("the Muscle tab shows three", tiles.length === 3, tiles.map((x) => x.key));
+    // ⚠️ THE BULKING TILE IS EXCLUDED ON PURPOSE. pMul 0.80 against a 1 g/lb
+    // basis IS 0.8 g/lb — verbatim the figure S224 deleted from this tab as a
+    // defect — and it would be the one-tap obvious choice on the screen whose
+    // own copy calls protein "your most important macro".
+    ok("...and never the bulking one", !tiles.some((x) => x.key === "bulking"));
+    ok("(control) bulking really does prescribe 0.8 g/lb",
+       A.splitGrams(A.MACRO_SPLITS.find((o) => o.key === "bulking"), P0(), 4000).protein === 144);
+    ok("...anchored on the tab's own lean-bulk split", tiles[0].key === "leanbulk");
+    ok("...which is unchanged from what the tab prescribed before the chooser existed",
+       tiles[0].t.protein === A.proteinPlan(P0(), 2900).grams
+       && tiles[0].t.fat === Math.round((2900 * 0.25) / 9), tiles[0].t);
+    // ⚠️ AND THE NAMES CHANGE WITH THE SURFACE. "Cutting" on a lean-bulk screen
+    // is the only tile that RAISES protein, so the arithmetically right choice
+    // would carry the word telling you not to take it.
+    ok("...and the labels are the build ones", tiles[1].label === "High protein" && tiles[2].label === "Higher fat",
+       tiles.map((x) => x.label));
+    ok("(control) the same keys read differently on the plan surface",
+       A.macroSplitTiles(P0(), 1876, ["bodyweight", "cutting", "balanced"])[1].label === "Cutting");
+  }
+
+  // ⚠️ THE CAPTION BUG THIS SURFACE WOULD HAVE SHIPPED. The build anchor prices
+  // fat at 25%, which is the high-protein split's OWN share — so a hardcoded
+  // "less fat" tail would have sat beside a fat number identical to the
+  // reader's. Measured, it says "same fat".
+  {
+    const tiles = A.macroSplitTiles(P0(), 2900, A.MACRO_KEYS_BUILD);
+    ok("the fat word is measured, so it says same fat when the fat is the same",
+       tiles[1].t.fat === tiles[0].t.fat && /same fat/.test(tiles[1].sub), tiles[1]);
+    ok("(control) the same tile says less fat on the plan surface, where it is",
+       /less fat/.test(A.macroSplitTiles(P0(), 1876, A.MACRO_KEYS_PLAN)[1].sub));
+    // ⚠️ \b MATTERS: a bare /tail: "/ also matches `detail: "`, which appears
+    // twice in an unrelated connector-status helper. My own false positive.
+    ok("...and no tail is asserted in the table any more", !/\btail: "/.test(APP_CODE));
+  }
+
+  // ── structural claims, swept over real plans, on BOTH surfaces ──────────
+  let badSum = null, badCarbs = null, badCeil = null, badWord = null, swept = 0;
+  for (const cal of [1200, 1500, 1876, 2102, 2439, 2900, 3200, 3600]) {
+    for (const over of [{}, { weightLbs: 120 }, { weightLbs: 260, bodyFat: 35 }, { weightLbs: 320 }, { weightLbs: 320, bodyFat: 42 }]) {
+      for (const keys of [A.MACRO_KEYS_PLAN, A.MACRO_KEYS_BUILD]) {
+        const tiles = A.macroSplitTiles(P0(over), cal, keys);
+        const ceilG = Math.floor((cal * A.PROTEIN_MAX_PCT) / 4);
+        const base = tiles[0].t;
+        const maxCarbs = Math.max(...tiles.map((x) => x.t.carbs));
+        for (const x of tiles) {
+          swept++;
+          // The three must still add up to the day — macroCalorieGap warns about
+          // a split that doesn't, and a preset should never trip its own check.
+          const sum = x.t.protein * 4 + x.t.carbs * 4 + x.t.fat * 9;
+          if (Math.abs(sum - cal) > 6) badSum = { cal, over, k: x.key, t: x.t, sum };
+          if (x.t.protein > ceilG) badCeil = { cal, over, k: x.key, t: x.t, ceilG };
+          if (x.t.carbs < 0) badCarbs = { cal, over, k: x.key, t: x.t };
+          if (x.sub == null) continue;
+          // EVERY word in a caption must match the numbers beside it.
+          const pOk = /more protein/.test(x.sub) ? x.t.protein > base.protein
+                    : /less protein/.test(x.sub) ? x.t.protein < base.protein
+                    : x.t.protein === base.protein;
+          const fOk = /more fat/.test(x.sub) ? x.t.fat > base.fat
+                    : /less fat/.test(x.sub) ? x.t.fat < base.fat
+                    : /same fat/.test(x.sub) ? x.t.fat === base.fat : true;
+          const cOk = /most carbs/.test(x.sub) ? (x.t.carbs === maxCarbs && maxCarbs > base.carbs)
+                    : /more carbs/.test(x.sub) ? x.t.carbs > base.carbs
+                    : /fewer carbs/.test(x.sub) ? x.t.carbs < base.carbs
+                    : /same carbs/.test(x.sub) ? x.t.carbs === base.carbs : true;
+          if (!(pOk && fOk && cOk)) badWord = { cal, over, k: x.key, sub: x.sub, t: x.t, base };
+        }
       }
-      // The bodyweight tile IS the plan's own target, which is what lets the
-      // card mark it YOURS without a second calculation.
-      if (g.bodyweight.protein !== Math.min(prot, ceilG)) badBase = { cal, prot, g: g.bodyweight, ceilG };
-      // "most carbs" on the bulking caption is a structural claim: it takes both
-      // the lowest protein multiplier and the lowest fat share.
-      if (!(g.bulking.carbs >= g.cutting.carbs && g.bulking.carbs >= g.balanced.carbs
-            && g.bulking.carbs >= g.bodyweight.carbs)) badCarbs = { cal, prot, g };
-      // "less fat" / "more fat" are fixed against the 28% tile.
-      if (!(g.cutting.fat <= g.bodyweight.fat && g.balanced.fat >= g.bodyweight.fat)) badSum = { cal, prot, g };
     }
   }
-  ok("every preset still adds up to the day", !badSum, badSum);
+  ok("every split still adds up to the day", !badSum, badSum);
   ok("...and none of them steps over the ceiling", !badCeil, badCeil);
-  ok("...nor leaves the carb budget negative, and bulking always holds the most", !badCarbs, badCarbs);
-  ok("...and the bodyweight tile is the plan's own target", !badBase, badBase);
-  ok("(control) the sweep ran", swept === 6 * 5 * 4, swept);
+  ok("...nor leaves the carb budget negative", !badCarbs, badCarbs);
+  ok("...and EVERY caption word matches the numbers beside it, on both surfaces", !badWord, badWord);
+  ok("(control) the sweep ran", swept === 8 * 5 * (4 + 3), swept);
 
-  // ⚠️ ONE TABLE, TWO SURFACES. The hand-entry editor types PERCENTAGES; its
-  // shortcut chips used to carry their own list of kinds, which is how
-  // "Goal-based" outlived the preset it named. They read the same table now, and
-  // the percentages are converted from the same grams.
+  // ⚠️ THE CALORIES AND THE BASIS ARE NOT INDEPENDENT, which is why splitGrams
+  // takes the plan rather than a precomputed protein figure: a mismatched pair
+  // returns protein and carbs that disagree while macroCalorieGap still reports
+  // off:false, because the three do add up.
+  ok("the builder derives the basis from the same calories it splits",
+     /function splitGrams\(o, d, cal\) \{[\s\S]{0,220}const base = proteinPlan\(d, c\)\.grams \|\| 0;/.test(APP_CODE));
+
+  // ⚠️ ONE TABLE, TWO SURFACES, AND THE EDITOR MAKES THREE. The hand-entry
+  // editor types PERCENTAGES; its shortcut chips used to carry their own list of
+  // kinds, which is how "Goal-based" outlived the preset it named.
   ok("the editor chips iterate the shared table", /\{MACRO_SPLITS\.map\(\(\{key:kind,label:lbl\}\)=>\(/.test(APP_CODE));
   ok("...and no longer carry their own list",
      !/\[\["bodyweight","Bodyweight"\],\["balanced","Balanced"\],\["goal","Goal-based"\]\]/.test(APP_CODE));
   {
-    const { MACRO_SPLITS, splitGrams, recPct } = at(2000, 180);
+    // recPct is still component-local: only the dashboard converts to percent.
+    const recSrc = liftDecl(APP, "recPct");
+    const mk = new Function("splitTiles", "gToPct", `${recSrc}; return recPct;`);
+    const cal = 2000;
+    const tiles = A.macroSplitTiles(P0(), cal, A.MACRO_KEYS_PLAN);
+    const recPct = mk(tiles, (g, per) => Math.round((Number(g) * per / cal) * 100));
     let drift = null;
-    for (const o of MACRO_SPLITS) {
-      const g = splitGrams(o), r = recPct(o.key);
-      // A percentage is a rounded view of the grams; converting back must land
-      // within rounding, or the two surfaces disagree by a visible amount.
-      if (Math.abs(Math.round((r.protein / 100) * 2000 / 4) - g.protein) > 6) drift = { k: o.key, g, r };
-      if (Math.abs(Math.round((r.fat / 100) * 2000 / 9) - g.fat) > 3) drift = { k: o.key, g, r };
+    for (const x of tiles) {
+      const r = recPct(x.key);
+      if (Math.abs(Math.round((r.protein / 100) * cal / 4) - x.t.protein) > 6) drift = { k: x.key, t: x.t, r };
+      if (Math.abs(Math.round((r.fat / 100) * cal / 9) - x.t.fat) > 3) drift = { k: x.key, t: x.t, r };
     }
     ok("the editor's percentages are the card's grams", !drift, drift);
     ok("(control) an unknown kind falls back rather than throwing",
        recPct("nope").protein === recPct("bodyweight").protein);
   }
 
-  // ⚠️ THE CEILING CAN LEVEL CUTTING WITH BODYWEIGHT, and the caption has to
+  // ⚠️ THE CEILING CAN LEVEL A TILE WITH ITS ANCHOR, and the caption has to
   // notice — it read "more protein" on exactly that plan. Rendered at 320 lb.
   {
-    const { MACRO_SPLITS, splitGrams } = at(2102, 262);
-    const base = splitGrams(MACRO_SPLITS[0]), cut = splitGrams(MACRO_SPLITS[1]);
-    ok("the ceiling levels Cutting with Bodyweight on a heavy plan", cut.protein === base.protein, { base, cut });
-    ok("...and they still differ where the caption says they do", cut.fat < base.fat && cut.carbs > base.carbs, { base, cut });
-    ok("...so the protein half of the caption is measured, not asserted",
-       /const pWord = t\.protein > baseT\.protein \? "more protein"/.test(APP_CODE)
-       && /: t\.protein < baseT\.protein \? "less protein" : "same protein";/.test(APP_CODE));
+    const tiles = A.macroSplitTiles(P0({ weightLbs: 320 }), 2102, A.MACRO_KEYS_PLAN);
+    ok("the ceiling levels Cutting with Bodyweight on a heavy plan", tiles[1].t.protein === tiles[0].t.protein, tiles.map((x) => x.t));
+    ok("...and the caption says so rather than claiming more", /same protein/.test(tiles[1].sub), tiles[1].sub);
   }
 
   // Four across is ~80px a tile on a phone; rendered at 375px to check.
   ok("four tiles wrap to two rows rather than four columns",
      /macroPresets\.length >= 4 \? "repeat\(2,1fr\)"/.test(APP_CODE));
+
+  // ── the Muscle tab writes nothing ───────────────────────────────────────
+  // ⚠️ THE SINGLE MOST IMPORTANT PROPERTY HERE. data.macroTargets is one gram
+  // triple with no record of the calories it came from; a bulk-derived triple
+  // read against the plan target is ~750 cal adrift on five screens plus the
+  // server, and this tab never reads that field back, so the screen that wrote
+  // it is the one screen that could not show the result.
+  {
+    const a = APP_CODE.indexOf("function MuscleTab(");
+    const b = APP_CODE.indexOf("\nfunction ", a + 10);
+    ok("found the MuscleTab body", a > 0 && b > a);
+    // ⚠️ THE S208 TRAP, IN MY OWN NEW CODE. The JSX comment explaining WHY this
+    // tab writes nothing names `data.macroTargets` — and the shared stripper
+    // leaves it, because an apostrophe upstream in JSX prose desynchronised it.
+    // So the tab's own JSX comments come off explicitly, with a control on how
+    // much that removed (the 60k-character deletion S229b fixed was this shape).
+    const MTraw = APP_CODE.slice(a, b);
+    const MT = MTraw.replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, " ");
+    ok("(control) stripping the tab's own JSX comments removed only comments",
+       MTraw.length - MT.length < 3000, MTraw.length - MT.length);
+    ok("it never writes macro targets", !/onSetMacroTargets|macroTargets/.test(MT));
+    ok("...and takes no setter that could", !/onSet[A-Z]/.test(MT), (MT.match(/onSet[A-Z]\w+/) || [])[0]);
+    ok("...it stores the KEY, not the numbers, so the live basis wins",
+       /const \[splitKey, setSplitKey\] = useState\(MACRO_KEYS_BUILD\[0\]\);/.test(MT));
+    ok("...and says so on screen", /Nothing here changes your plan/.test(MT));
+    ok("...naming the calories it is built from", /lean-bulk[\s\S]{0,40}number above, not your daily goal/.test(MT));
+    ok("the fat card no longer hardcodes its share",
+       !/note:`25% of total calories/.test(MT) && /note:`\$\{pctF\}% of total calories/.test(MT));
+    ok("...and the flatten-out sentence is gated off the ceiling and off a moved split",
+       /splitKey === MACRO_KEYS_BUILD\[0\]\s*\n?\s*\? `\$\{basis\} In training studies gains flatten out/.test(MT));
+    // ⚠️ IT WAS PRINTED TWICE, AND ONLY A RENDER SHOWED IT. The card template
+    // appended the same sentence the note had just been given, so the protein
+    // card read it through twice in a row. Counted, not found.
+    ok("...and appears exactly once in the tab",
+       (MT.match(/gains flatten out/g) || []).length === 1, (MT.match(/gains flatten out/g) || []).length);
+  }
 }
 
 console.log(`\n  ${checks - fails}/${checks} checks passed`);

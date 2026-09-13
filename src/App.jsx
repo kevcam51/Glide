@@ -6530,6 +6530,10 @@ const SURPLUS_OPTIONS_MUSCLE = [200, 250, 300, 350, 400, 500];
 function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gender, age, name,
   activeStrDays, strengthDayData, totalStrBurn }) {
   const [experience, setExperience] = useState("intermediate");
+  // ⚠️ THE KEY ONLY, NEVER THE NUMBERS. The experience buttons and the cardio
+  // toggle both move displayCals, so a frozen preview would go stale the moment
+  // either is touched — the tiles are recomputed from the live basis every render.
+  const [splitKey, setSplitKey] = useState(MACRO_KEYS_BUILD[0]);
   const [showCardio, setShowCardio]   = useState(false);
   const [openSuppCat, setOpenSuppCat] = useState(null);
   const [showMuscleDisclaimer, setShowMuscleDisclaimer] = useState(false);
@@ -6602,20 +6606,37 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
   // ⚠️ THIS TAB SAID 0.8 g/lb WHILE THE DASHBOARD SAID 1.0 (S224). Same
   // client, two tabs, two prescriptions. It asks the shared helper now, so a
   // plan's protein basis and its lean-mass denominator reach here too.
-  const proteinPlanM = proteinPlan({ ...(data || {}), weightLbs }, displayCals);
-  const proteinG  = proteinPlanM.grams || 0;
-  const proteinNoteM = proteinPlanM.capped
-    ? `Held at ${PROTEIN_MAX_PCT * 100}% of your calories so fat and carbs keep a budget.`
-    : proteinPlanM.basis === "lean"
+  const planForMacros = { ...(data || {}), weightLbs };
+  const proteinPlanM = proteinPlan(planForMacros, displayCals);
+  // ⚠️ AGAINST displayCals, NOT THE PLAN TARGET. These are lean-bulk calories —
+  // a surplus roughly 750 above what the dashboard prescribes — which is exactly
+  // why nothing here is offered for saving: `data.macroTargets` is one gram
+  // triple with no record of the calories it came from, and every other screen
+  // plus functions/aitools.js would read a bulk-sized triple against a deficit
+  // target. The Nutrients tab's rate chips are the precedent: they change what
+  // is shown and touch nothing.
+  const buildTiles = macroSplitTiles(planForMacros, displayCals, MACRO_KEYS_BUILD);
+  const shownTile  = buildTiles.find((x) => x.key === splitKey) || buildTiles[0];
+  const anchorG    = buildTiles.length ? buildTiles[0].t.protein : 0;
+  const proteinG  = shownTile ? shownTile.t.protein : 0;
+  const proteinNoteM = (() => {
+    if (proteinPlanM.capped) return `Held at ${Math.round(PROTEIN_MAX_PCT * 100)}% of your calories so fat and carbs keep a budget.`;
+    const basis = proteinPlanM.basis === "lean"
       ? `Built from your ${proteinPlanM.leanLbs} lbs of lean mass — fat tissue doesn't need feeding.`
       : `${proteinPlanM.perLb}g per lb of bodyweight.`;
+    // ⚠️ THE "GAINS FLATTEN OUT" SENTENCE IS ABOUT THE RECOMMENDED NUMBER. Left
+    // ungated it would describe a ceiling the reader was clamped to, or a split
+    // they deliberately moved away from — a sentence quoting a rule the number
+    // beside it no longer follows, which is the bug this tab has now had twice.
+    return splitKey === MACRO_KEYS_BUILD[0]
+      ? `${basis} In training studies gains flatten out around this level rather than climbing past it, so this is a number to hit, not one to beat.`
+      : `${basis} The split you picked moves it off the ${anchorG}g this tab recommends.`;
+  })();
   const proteinCal = proteinG * 4;
-  // Fat: 20–30% of calories — keep at 25% for hormone support
-  const fatCal   = Math.round(displayCals * 0.25);
-  const fatG     = Math.round(fatCal / 9);
-  // Carbs: remainder — primary fuel for training
-  const carbCal  = Math.max(0, displayCals - proteinCal - fatCal);
-  const carbG    = Math.round(carbCal / 4);
+  const fatG     = shownTile ? shownTile.t.fat : 0;
+  const fatCal   = fatG * 9;
+  const carbG    = shownTile ? shownTile.t.carbs : 0;
+  const carbCal  = carbG * 4;
   // Fibre, creatine, hydration
   const fibreG   = Math.max(gender === "male" ? 38 : 25, Math.round(displayCals / 1000 * 14));
   const waterOz  = Math.round(weightLbs * 0.6); // slightly higher for muscle building
@@ -6834,6 +6855,40 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
 
       {/* Macros */}
       <div className="sec-title">Muscle-Building Macros</div>
+      {/* ⚠️ THIS ROW WRITES NOTHING, AND SAYS SO. The Nutrients tab's rate chips
+          are the precedent — they change what is shown and never touch the plan.
+          A save here would store a bulk-sized gram triple into the single
+          `data.macroTargets` every other screen and the AI read against the
+          deficit target, ~750 cal adrift, and this tab does not even read that
+          field back, so the screen you tapped would be the one screen not
+          showing the result. */}
+      {buildTiles.length > 1 && displayCals > 0 && (
+        <>
+          <div style={{display:"grid",gridTemplateColumns:`repeat(${buildTiles.length},1fr)`,gap:"6px",marginBottom:"7px"}}>
+            {buildTiles.map((x) => {
+              const on = x.key === splitKey;
+              return (
+                <button key={x.key} onClick={()=>setSplitKey(x.key)}
+                  style={{padding:"8px 4px",borderRadius:"9px",textAlign:"center",cursor:"pointer",fontFamily:"inherit",
+                    background: on ? "rgba(var(--accent-rgb),.12)" : "var(--surface)",
+                    border: on ? "1px solid var(--accent)" : "1px solid var(--border)"}}>
+                  <div style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>{x.label}</div>
+                  <div style={{fontFamily:"'Sora',sans-serif",fontSize:".95rem",color: on ? "var(--accent)" : "var(--text)"}}>
+                    {x.t.protein}<span style={{opacity:.5}}>/</span>{x.t.carbs}<span style={{opacity:.5}}>/</span>{x.t.fat}
+                  </div>
+                  <div style={{fontSize:".5rem",color:"var(--muted)"}}>g P/C/F{x.sub ? ` · ${x.sub}` : ""}</div>
+                  {x.key === buildTiles[0].key && <div style={{fontSize:".5rem",color:"var(--accent)",fontWeight:800,marginTop:"1px"}}>RECOMMENDED</div>}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{fontSize:".64rem",color:"var(--muted)",marginBottom:"9px",lineHeight:1.5}}>
+            Built from the <strong style={{color:"var(--text-secondary)"}}>{displayCals.toLocaleString()} cal</strong> lean-bulk
+            number above, not your daily goal. <strong style={{color:"var(--text-secondary)"}}>Nothing here changes your plan</strong> —
+            to make a bulk your actual target, set your pace to gaining on the Daily Dashboard.
+          </div>
+        </>
+      )}
       <div className="muscle-macro-bar">
         <div style={{width:`${pctP}%`,background:"var(--pink)",height:"100%"}}></div>
         <div style={{width:`${pctC}%`,background:"var(--yellow)",height:"100%"}}></div>
@@ -6848,11 +6903,11 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
       <div className="muscle-macro-grid">
         {[
           { emoji:"🥩", name:"Protein", g:proteinG, cal:proteinCal, cls:"protein",
-            note:`${proteinNoteM} In training studies gains flatten out around this level rather than climbing past it, so this is a number to hit, not one to beat. Your most important macro.` },
+            note:`${proteinNoteM} Your most important macro.` },
           { emoji:"🌾", name:"Carbs",   g:carbG,    cal:carbCal,   cls:"carbs",
             note:`Primary fuel for your training sessions. Eat the bulk of your carbs around workouts — before for energy, after for glycogen replenishment.` },
           { emoji:"🥑", name:"Fat",     g:fatG,     cal:fatCal,    cls:"fat",
-            note:`25% of total calories. Essential for testosterone and hormone production — going below 20% of calories from fat blunts anabolic hormones.` },
+            note:`${pctF}% of total calories. Essential for testosterone and hormone production — going below 20% of calories from fat blunts anabolic hormones.` },
           { emoji:"🥦", name:"Fibre",   g:fibreG,   cal:null,      cls:"fibre",
             note:`Daily minimum for gut health and satiety. High protein diets can cause constipation without adequate fibre.` },
         ].map(m => (
@@ -16526,34 +16581,14 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // So protein is GRAMS in all four, built by the one helper. What a preset
   // chooses is how much protein it wants RELATIVE to that basis, and how the
   // calories left over split between fat and carbs.
-  // ⚠️ AND EVERY PRESET IS RE-CLAMPED. `autoProtein` is already inside the
-  // ceiling; multiplying it by 1.15 would step straight back over.
-  const MACRO_SPLITS = [
-    { key: "bodyweight", label: "Bodyweight", pMul: 1.00, fatPct: 0.28 },
-    // Above the basis on purpose: Helms 2014 and the 2025 Refalo update put a
-    // lean client cutting at 2.3–3.1 g/kg, which is 1.05–1.4 g/lb.
-    // ⚠️ THE SECOND CLAUSE IS STRUCTURAL, THE FIRST IS MEASURED. Fat share is
-    // fixed against the bodyweight tile's 28%, so "less fat"/"more fat" are true
-    // by construction; and bulking takes both the lowest protein and the lowest
-    // fat, so it always has the most carbs. Protein is the one that can come out
-    // level — the ceiling clamps Cutting onto Bodyweight for a heavy client — so
-    // that half is read off the numbers rather than asserted.
-    { key: "cutting",    label: "Cutting",    pMul: 1.15, fatPct: 0.25, tail: "less fat" },
-    { key: "balanced",   label: "Balanced",   pMul: 0.85, fatPct: 0.30, tail: "more fat" },
-    { key: "bulking",    label: "Bulking",    pMul: 0.80, fatPct: 0.22, tail: "most carbs" },
-  ];
-  const splitGrams = (o) => {
-    const ceilG = target > 0 ? Math.floor((target * PROTEIN_MAX_PCT) / 4) : Infinity;
-    const protein = Math.min(Math.round(autoProtein * o.pMul), ceilG);
-    const fat = Math.round((target * o.fatPct) / 9);
-    return { protein, fat, carbs: Math.max(0, Math.round((target - protein * 4 - fat * 9) / 4)) };
-  };
+  // The table and the builder are module level (see macroSplitTiles) — the
+  // Muscle tab asks the same question about its own lean-bulk calories.
+  const splitTiles = macroSplitTiles({ ...data, weightLbs }, target, MACRO_KEYS_PLAN);
   // The hand-entry editor types PERCENTAGES, so its shortcut chips convert the
   // same grams rather than carrying a second table — two tables is how the old
   // contradiction got in.
   const recPct = (kind) => {
-    const o = MACRO_SPLITS.find((x) => x.key === kind) || MACRO_SPLITS[0];
-    const g = splitGrams(o);
+    const g = (splitTiles.find((x) => x.key === kind) || splitTiles[0]).t;
     return { protein: gToPct(g.protein, 4), carbs: gToPct(g.carbs, 4), fat: gToPct(g.fat, 9) };
   };
   // Live gram preview of the % draft (for the conversion labels under the % inputs).
@@ -16575,17 +16610,13 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
     // one did not: the bodyweight tile read "1 g/lb protein" while showing 199 g
     // for a 260 lb client, and Cutting read "more protein" on a 320 lb plan where
     // the ceiling had levelled it with Bodyweight. Both found by rendering it.
-    const baseT = splitGrams(MACRO_SPLITS[0]);
-    const list = MACRO_SPLITS.map((o) => {
-      const t = splitGrams(o);
-      const pWord = t.protein > baseT.protein ? "more protein"
-                  : t.protein < baseT.protein ? "less protein" : "same protein";
-      return { key: o.key, label: o.label, t,
-        sub: o.tail ? `${pWord}, ${o.tail}`
-           : !protMoved ? `${proteinPerLb} g/lb protein`
-           : protPlan.capped ? `protein held at ${Math.round(PROTEIN_MAX_PCT * 100)}% of cal`
-           : "protein from lean mass" };
-    });
+    // The comparatives come measured from macroSplitTiles; only the anchor's own
+    // caption is local, because only this screen knows the protein BASIS.
+    const list = splitTiles.map((x) => ({ key: x.key, label: x.label, t: x.t,
+      sub: x.sub != null ? x.sub
+         : !protMoved ? `${proteinPerLb} g/lb protein`
+         : protPlan.capped ? `protein held at ${Math.round(PROTEIN_MAX_PCT * 100)}% of cal`
+         : "protein from lean mass" }));
     // Two buttons with identical numbers is noise, not choice — when the
     // goal-based split lands on the balanced one (i.e. maintaining), drop it.
     const seen = new Set();
@@ -23121,6 +23152,94 @@ function proteinPlan(d, calorieTarget) {
 }
 // The grams alone, for the readers that only want the number.
 const autoProteinG = (d, cal) => proteinPlan(d, cal).grams;
+
+// ── The macro splits (S224b; module level and surface-aware since S225) ──────
+// Protein is GRAMS in every split, from proteinPlan. What a split chooses is how
+// much protein it wants relative to that basis and how the calories left over
+// divide between fat and carbs.
+//
+// ⚠️ MODULE LEVEL BECAUSE THERE ARE TWO SURFACES NOW. These lived inside
+// DailyDashboard and were built against the plan's daily target. The Muscle tab
+// asks the same question about a DIFFERENT number — its lean-bulk calories are a
+// SURPLUS, not the plan target — so the table takes the plan and the calories as
+// arguments instead of closing over one screen's scope.
+//
+// ⚠️ AND THE SURPLUS INVERTS WHAT TWO OF THE NAMES MEAN, WHICH IS WHY EACH
+// SURFACE PICKS ITS OWN SUBSET. Carried over whole, the tile labelled "Bulking"
+// would prescribe 0.80 x the basis — exactly the 0.8 g/lb that S224 deleted from
+// the Muscle tab as a defect — as the one-tap obvious choice on the
+// muscle-building screen, two inches above a card reading "your most important
+// macro". And "Cutting" would be the only tile that RAISES protein, so the
+// arithmetically right choice there carries the word telling you not to take it.
+// The build surfaces get `buildLabel` and leave `bulking` out.
+const MACRO_SPLITS = [
+  // Two anchors, one per surface. A surface's FIRST key is its anchor: it is the
+  // numbers that surface already prescribes, so it is the tile marked as theirs
+  // and the tile every comparative caption is measured against.
+  { key: "bodyweight", label: "Bodyweight", pMul: 1.00, fatPct: 0.28, axis: "fat" },
+  // The Muscle tab's own long-standing split — 20–30% of calories from fat, held
+  // at 25% for hormone support with the rest going to training fuel. Keeping it
+  // as the anchor is what stops adding a chooser from silently re-prescribing.
+  { key: "leanbulk",   label: "Lean bulk",  pMul: 1.00, fatPct: 0.25, axis: "fat" },
+  // Above the basis on purpose: Helms 2014 and the 2025 Refalo update put a
+  // lean client cutting at 2.3–3.1 g/kg, which is 1.05–1.4 g/lb.
+  { key: "cutting",    label: "Cutting",    buildLabel: "High protein", pMul: 1.15, fatPct: 0.25, axis: "fat" },
+  { key: "balanced",   label: "Balanced",   buildLabel: "Higher fat",   pMul: 0.85, fatPct: 0.30, axis: "fat" },
+  { key: "bulking",    label: "Bulking",    pMul: 0.80, fatPct: 0.22, axis: "carbs" },
+];
+const MACRO_KEYS_PLAN = ["bodyweight", "cutting", "balanced", "bulking"];
+const MACRO_KEYS_BUILD = ["leanbulk", "cutting", "balanced"];
+
+// ⚠️ THE CALORIES AND THE PROTEIN BASIS ARE NOT INDEPENDENT, so this takes the
+// PLAN and derives the basis itself rather than accepting both. The ceiling is a
+// share of the same calorie number the fat and carbs come out of; hand it a
+// basis computed against a different total and it returns a protein figure and a
+// carb figure that disagree — while macroCalorieGap still reports off:false,
+// because the three do add up. Silent and self-consistent is the worst shape.
+// ⚠️ AND EVERY SPLIT IS RE-CLAMPED. The basis is already inside the ceiling, so
+// multiplying it by 1.15 would step straight back over — without this a 320 lb
+// plan's high-protein tile offers 368 g and zero carbs.
+function splitGrams(o, d, cal) {
+  const c = Number(cal) || 0;
+  const base = proteinPlan(d, c).grams || 0;
+  const ceilG = c > 0 ? Math.floor((c * PROTEIN_MAX_PCT) / 4) : Infinity;
+  const protein = Math.min(Math.round(base * o.pMul), ceilG);
+  const fat = Math.round((c * o.fatPct) / 9);
+  return { protein, fat, carbs: Math.max(0, Math.round((c - protein * 4 - fat * 9) / 4)) };
+}
+
+// The tiles for one surface, with captions READ OFF THE NUMBERS.
+//
+// ⚠️ THE CAPTIONS USED TO ASSERT HALF OF THEMSELVES, AND THAT ONLY HELD ON ONE
+// SCREEN (S225). "less fat" was true by construction against the dashboard's 28%
+// anchor — but the Muscle tab prices fat at 25%, which is the high-protein
+// split's own share, so carried over unchanged that tile would have read "less
+// fat" beside a fat number identical to the one the reader was already on. Same
+// class as the two caption bugs this work has already shipped: a word quoting a
+// rule instead of describing the number next to it. Nothing is asserted now.
+function macroSplitTiles(d, cal, keys) {
+  const want = keys && keys.length ? keys : MACRO_KEYS_PLAN;
+  const build = want === MACRO_KEYS_BUILD || want[0] === "leanbulk";
+  const list = want
+    .map((k) => MACRO_SPLITS.find((o) => o.key === k))
+    .filter(Boolean)
+    .map((o) => ({ key: o.key, label: (build && o.buildLabel) || o.label, axis: o.axis, t: splitGrams(o, d, cal) }));
+  if (!list.length) return list;
+  const base = list[0].t;
+  const maxCarbs = Math.max(...list.map((x) => x.t.carbs));
+  const word = (v, b, more, less, same) => (v > b ? more : v < b ? less : same);
+  for (const x of list) {
+    if (x.key === list[0].key) { x.sub = null; continue; }   // the anchor names its own basis
+    const p = word(x.t.protein, base.protein, "more protein", "less protein", "same protein");
+    const tail = x.axis === "carbs"
+      ? (x.t.carbs === maxCarbs && maxCarbs > base.carbs
+          ? "most carbs"
+          : word(x.t.carbs, base.carbs, "more carbs", "fewer carbs", "same carbs"))
+      : word(x.t.fat, base.fat, "more fat", "less fat", "same fat");
+    x.sub = `${p}, ${tail}`;
+  }
+  return list;
+}
 
 // Tracker-adjusted target (S89, Kevin's call — opt-in via data.wearableAdjust):
 // a watch's resting + active energy IS the day's actual measured TDEE, so on a
