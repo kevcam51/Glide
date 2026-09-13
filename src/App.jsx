@@ -16246,6 +16246,9 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const [mtMode, setMtMode] = useState("grams"); // "grams" | "pct" — how you enter targets
   const [mtPct, setMtPct] = useState({ protein:"", carbs:"", fat:"" });       // percentage draft
   const [savAffOpen, setSavAffOpen] = useState(false);   // "what can I afford?" (S223)
+  // Day / Week / 2 weeks / Month. Week leads because that is the unit a plan is
+  // written in and the one Kevin asked to see first.
+  const [savWin, setSavWin] = useState("7");
   const [savSpend, setSavSpend] = useState("");          // a day's intake, typed
   // ⚠️ LOCAL ONLY, AND NOTHING HERE IS LOGGED (S232). Kevin's question is "that
   // burrito is 1,000 over — what does it cost me?", which needs real food rather
@@ -16657,6 +16660,18 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // The average day of the phase, from TRACKED days only. Used for "at this
   // rate", never for "you will have".
   const savPerDay = savPh && savPh.tracked > 0 ? Math.round(savPh.banked / savPh.tracked) : 0;
+  // ── The recent window (S236, Kevin) ──────────────────────────────────────
+  // The balance answers "how am I doing overall"; this answers "how am I doing
+  // lately", which is the question a coach actually asks on a Monday.
+  // ⚠️ CLAMPED TO THE PHASE START. A month-long window on a phase that began
+  // last Tuesday would credit this phase with days that belong to the one
+  // before it, and the balance above would disagree with the window below it.
+  const savWinDays = (SAV_WINDOWS.find((w) => w.id === savWin) || SAV_WINDOWS[1]).days;
+  const savWinFrom = savEnd ? simDateAt(savEnd, -(savWinDays - 1)) : null;
+  const savWinStart = savWinFrom && savStart && savWinFrom < savStart ? savStart : savWinFrom;
+  const savWinPh = (savWinStart && savEnd && savWinStart <= savEnd)
+    ? savingsPhase(data, savingsDays, savWinStart, savEnd, savTrainDay) : null;
+  const savWinView = savWinPh ? savingsWindow(savWinPh.banked, savWinPh.tracked, savPh && savPh.rate) : null;
   // ⚠️ AN EMPTY BOX IS NOT A ZERO-CALORIE DAY. Number("") is 0, not NaN, so the
   // untouched panel priced a day of eating NOTHING and announced it as "adds
   // 2,270 to your savings" — the most flattering possible answer, shown before
@@ -17560,6 +17575,96 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                 : <>You&rsquo;re <b style={{color:"var(--text-secondary)"}}>saving</b> &mdash; every day you
                   finish under what your body burned adds to this.</>}
           </div>
+
+          {/* ── Lately (S236, Kevin) ──────────────────────────────────────
+              The balance above is the whole phase; this is the recent window,
+              which is the question a coach asks on a Monday. */}
+          {savWinView && (
+            <div style={{marginTop:"12px",paddingTop:"10px",borderTop:"1px solid var(--border)"}}>
+              <div style={{display:"flex",gap:"4px",marginBottom:"9px"}}>
+                {SAV_WINDOWS.map((w) => (
+                  <button key={w.id} onClick={() => setSavWin(w.id)} aria-pressed={savWin === w.id}
+                    style={{flex:1,padding:"6px 2px",borderRadius:"8px",cursor:"pointer",fontFamily:"inherit",
+                      fontSize:".66rem",fontWeight:700,
+                      border:"1px solid "+(savWin === w.id ? "var(--accent)" : "var(--border)"),
+                      background: savWin === w.id ? "rgba(var(--accent-rgb),.12)" : "transparent",
+                      color: savWin === w.id ? "var(--accent)" : "var(--muted)"}}>{w.label}</button>
+                ))}
+              </div>
+              {savWinPh.tracked === 0 ? (
+                <div style={{fontSize:".68rem",color:"var(--muted)",lineHeight:1.45}}>
+                  Nothing logged in that stretch, so there is no pace to read. The balance above still stands.
+                </div>
+              ) : (
+                <>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:"8px"}}>
+                    {/* ⚠️ NAME THE SPAN THAT EXISTS, NOT THE ONE REQUESTED. The
+                        window is clamped to the phase start, so "Month" on a
+                        20-day-old phase read "Last 30 days" above a line saying
+                        "18 of 20 days logged" — the header contradicting the
+                        caption directly beneath it. Found by clicking Month. */}
+                    <span style={{fontSize:".72rem",color:"var(--muted)"}}>
+                      {savWinPh.span === 1 ? "Yesterday" : `Last ${savWinPh.span} days`}
+                    </span>
+                    <b style={{fontFamily:"'Sora',sans-serif",fontSize:"1.05rem",
+                      color: savWinView.banked >= 0 ? "var(--green)" : "var(--red)"}}>
+                      {savWinView.banked >= 0 ? "" : "−"}{Math.abs(savWinView.banked).toLocaleString()} (cal)
+                    </b>
+                  </div>
+                  <div style={{marginTop:"3px",display:"flex",justifyContent:"space-between",fontSize:".68rem",color:"var(--muted)"}}>
+                    <span>
+                      {savWinDays === 1 ? "That day" : <>Average of <b style={{color:"var(--text-secondary)"}}>{savWinView.perDay.toLocaleString()}</b> a day</>}
+                      {/* ⚠️ COVERAGE SHOWN, because the average is over tracked
+                          days. A 3-of-7 week is a real pace on a thin sample,
+                          and hiding that makes it look like a full one. */}
+                      {savWinDays > 1 && ` · ${savWinView.tracked} of ${savWinPh.span} days logged`}
+                    </span>
+                    <b style={{color: savWinView.banked >= 0 ? "var(--green)" : "var(--red)"}}>
+                      {savWinView.banked >= 0 ? "−" : "+"}{Math.abs(savWinView.lbs).toFixed(2)} lbs
+                    </b>
+                  </div>
+                  {/* What that daily pace is worth if it holds. Never "you will have". */}
+                  {savWinView.perDay !== 0 && (
+                    <>
+                      {/* ⚠️ THIS PROJECTS THE DAILY PACE ACROSS EVERY DAY, so on a
+                          week with days missing it does NOT equal the window total
+                          above it — 7,175 actual beside 10,045 projected, which
+                          reads as the card disagreeing with itself unless the
+                          heading says which is which. It is the potential, and the
+                          difference is unlogged days, not days that went badly. */}
+                      <div style={{marginTop:"9px",fontSize:".6rem",color:"var(--muted)",textTransform:"uppercase",
+                        letterSpacing:".5px",fontWeight:800}}>At that pace, every day</div>
+                      <div style={{marginTop:"5px",display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"5px"}}>
+                        {savWinView.horizons.map((h) => (
+                          <div key={h.days} style={{padding:"7px 3px",borderRadius:"9px",textAlign:"center",
+                            background:"var(--s2)",border:"1px solid var(--border)"}}>
+                            <div style={{fontSize:".55rem",color:"var(--muted)",textTransform:"uppercase"}}>
+                              {h.days === 7 ? "a week" : h.days === 14 ? "2 weeks" : "a month"}
+                            </div>
+                            <div style={{fontFamily:"'Sora',sans-serif",fontSize:".95rem",
+                              color: h.lbs >= 0 ? "var(--green)" : "var(--red)"}}>
+                              {h.lbs >= 0 ? "−" : "+"}{Math.abs(h.lbs).toFixed(1)} lbs
+                            </div>
+                            <div style={{fontSize:".55rem",color:"var(--muted)"}}>{Math.abs(h.cal).toLocaleString()} (cal)</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{marginTop:"6px",fontSize:".6rem",color:"var(--muted)",lineHeight:1.45}}>
+                        At {savWinView.per.toLocaleString()} (cal) a pound{savWinView.measured ? " — your own measured rate" : ""}.
+                        A projection from the days you logged, not a promise.
+                        {savWinPh.tracked < savWinPh.span && (
+                          <> These run every day at that average, which is why they come to more than the{" "}
+                            {Math.abs(savWinView.banked).toLocaleString()} above &mdash;{" "}
+                            {savWinPh.span - savWinPh.tracked} day{savWinPh.span - savWinPh.tracked === 1 ? " was" : "s were"} never
+                            logged, so we simply do not know what happened.</>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           {savWorth && savPh.banked !== 0 && (
             <div style={{marginTop:"10px",display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:".8rem"}}>
@@ -23807,6 +23912,48 @@ function savingsPhase(d, byDate, startKey, endKey, trainDayCal) {
 function savingsLbs(banked, rate) {
   const per = rate || CAL_PER_LB;
   return { lbs: Math.round((Number(banked) || 0) / per * 100) / 100, per, measured: !!rate };
+}
+
+// ── A window on the account, and what that pace is worth (S236, Kevin) ──────
+// "we should have the savings be the average of seven days and then also we
+// should also show a daily savings option … estimate someone's potential if
+// they're able to burn or eat a deficit a certain amount within that seven day
+// window … the option to check two weeks and a month out as well."
+//
+// ⚠️ THE AVERAGE IS OVER TRACKED DAYS, NOT OVER THE WINDOW. A day nobody logged
+// is not a day of eating nothing — dividing a week's deposits by 7 when only 4
+// were tracked reports a pace this person never ran, and always downward. Same
+// rule the step ladder settled in S229: a missing day leaves the sample. The
+// caller shows the coverage beside it so a thin week is visible rather than
+// silently averaged away.
+//
+// ⚠️ AND THESE HORIZONS ARE FLAT-SAFE ON PURPOSE. The flat 3,500 drifts because
+// maintenance falls as the body does, which is a 2% error at a month and a 40%
+// one at a year (S217). A week, a fortnight and a month are all inside the
+// honest range, so this multiplies rather than walking — but that is a fact
+// about the horizons, not a licence, and anything longer belongs in simProject.
+const SAV_WINDOWS = [
+  { id: "1",  days: 1,  label: "Day" },
+  { id: "7",  days: 7,  label: "Week" },
+  { id: "14", days: 14, label: "2 weeks" },
+  { id: "30", days: 30, label: "Month" },
+];
+function savingsWindow(banked, trackedDays, ratePerLb, horizons = [7, 14, 30]) {
+  const per = ratePerLb || CAL_PER_LB;
+  const cal = Number(banked) || 0;
+  const days = Number(trackedDays) || 0;
+  const perDay = days > 0 ? cal / days : 0;
+  const lbsOf = (c) => Math.round((c / per) * 100) / 100;
+  return {
+    perDay: Math.round(perDay),
+    banked: Math.round(cal),
+    tracked: days,
+    lbs: lbsOf(cal),
+    per,
+    measured: !!ratePerLb,
+    // What that daily pace comes to if it holds — "at this rate", never "you will".
+    horizons: horizons.map((d) => ({ days: d, cal: Math.round(perDay * d), lbs: lbsOf(perDay * d) })),
+  };
 }
 
 // ── What a day off would cost (S223, Kevin) ─────────────────────────────────
@@ -43031,4 +43178,5 @@ export default function App() {
     </>
   );
 }
+
 

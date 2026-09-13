@@ -71,10 +71,10 @@ const FNS = ["calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx"
   "hrCaloriesPerMin", "restingKcalPerMin", "calcBurn", "cardioExFor", "exBurn", "isEatback",
   "dailyDeficitOf", "weeklyRateOf", "maintBasis", "maintenanceK", "planMaintenance", "planEnergy", "atLeastMinCal", "ymdLocal", "simDateAt",
   "dayBurnTracked", "daySavings", "savingsRun", "observedCalPerLb", "savingsPhase", "savingsLbs",
-  "savingsAfford", "savingsForecast"];
+  "savingsAfford", "savingsForecast", "savingsWindow"];
 const EXPORTS = ["dayBurnTracked", "daySavings", "savingsRun", "observedCalPerLb", "planEnergy",
   "CAL_PER_LB", "SAVINGS_MIN_RATE_DAYS", "SAVINGS_MIN_COVERAGE", "isEatback", "savingsPhase", "savingsLbs", "simDateAt",
-  "savingsAfford", "savingsForecast"];
+  "savingsAfford", "savingsForecast", "savingsWindow"];
 const source = () => [...CONSTS, ...FNS].map((n) => liftDecl(APP, n)).join("\n");
 const build = (src) => new Function(`${src}; return { ${EXPORTS.join(", ")} };`)();
 const M = build(source());
@@ -447,6 +447,74 @@ ok("the fixture prices a day at all", TDEE > 1200, TDEE);
     const bare = M.savingsAfford(2376, 13520, null, 1000);
     ok("(control) a day of only a burrito reads as a saving", bare.effect === 1376, bare.effect);
   }
+}
+
+
+// ── The recent window (S236, Kevin) ─────────────────────────────────────────
+// "the savings be the average of seven days … also show a daily savings option
+// … estimate someone's potential … two weeks and a month out as well."
+{
+  const w = M.savingsWindow(4200, 7, null);
+  ok("a week's deposits average per day", w.perDay === 600, w.perDay);
+  ok("...and convert at the standard rate", w.lbs === 1.2, w.lbs);
+  ok("...flagged as not measured", w.measured === false && w.per === M.CAL_PER_LB, [w.measured, w.per]);
+
+  // ⚠️ THE AVERAGE IS OVER TRACKED DAYS, NOT THE WINDOW. Dividing 4 logged days
+  // by 7 reports a pace nobody ran, and always downward — which hides a thin
+  // week behind a flattering-looking number.
+  const thin = M.savingsWindow(2400, 4, null);
+  ok("four logged days average over four, not seven", thin.perDay === 600, thin.perDay);
+  ok("...and the window total is still only what was logged", thin.banked === 2400, thin.banked);
+
+  const h = Object.fromEntries(w.horizons.map((x) => [x.days, x]));
+  ok("a week out", h[7].cal === 4200 && h[7].lbs === 1.2, h[7]);
+  ok("two weeks out", h[14].cal === 8400 && h[14].lbs === 2.4, h[14]);
+  ok("a month out", h[30].cal === 18000 && h[30].lbs === 5.14, h[30]);
+
+  const m = M.savingsWindow(4200, 7, 3000);
+  ok("a measured rate is used when there is one", m.per === 3000 && m.measured === true, [m.per, m.measured]);
+  ok("...and it changes the pounds", m.lbs === 1.4, m.lbs);
+
+  const neg = M.savingsWindow(-2800, 7, null);
+  ok("an overdrawn window stays negative", neg.perDay === -400 && neg.lbs === -0.8, [neg.perDay, neg.lbs]);
+  ok("...and so do its horizons", neg.horizons.every((x) => x.lbs < 0), neg.horizons);
+
+  const zero = M.savingsWindow(5000, 0, null);
+  ok("no tracked days is a zero pace, not a division by zero",
+     zero.perDay === 0 && zero.horizons.every((x) => x.cal === 0), zero);
+  const junk = M.savingsWindow(undefined, undefined, undefined);
+  ok("junk input is answered, not thrown", junk.perDay === 0 && junk.lbs === 0 && junk.per === M.CAL_PER_LB, junk);
+}
+
+// The window is a slice of the SAME engine the balance uses, or the card would
+// quote two different accounts on one screen.
+{
+  const byDate = {};
+  for (let i = 0; i < 14; i++) byDate[M.simDateAt("2026-03-01", i)] = { calories: 1500 };
+  const d = P({});
+  const full  = M.savingsPhase(d, byDate, "2026-03-01", "2026-03-14", 0);
+  const last7 = M.savingsPhase(d, byDate, "2026-03-08", "2026-03-14", 0);
+  ok("a 7-day slice tracks 7 of the 14 days", last7.tracked === 7 && full.tracked === 14, [last7.tracked, full.tracked]);
+  ok("...and banks half of what the fortnight did", Math.abs(full.banked - last7.banked * 2) <= 1, [full.banked, last7.banked]);
+  const wv = M.savingsWindow(last7.banked, last7.tracked, null);
+  ok("...so the window's daily average matches the phase's",
+     wv.perDay === Math.round(full.banked / full.tracked), [wv.perDay, Math.round(full.banked / full.tracked)]);
+}
+
+
+// ── the window's own labelling (S236) ───────────────────────────────────────
+// ⚠️ FOUND BY CLICKING "MONTH", NOT BY READING THE DIFF. The window is clamped
+// to the phase start, so a 30-day request on a 20-day-old phase rendered
+// "Last 30 days" directly above "18 of 20 days logged" — the header
+// contradicting its own caption. The span is the only honest label.
+{
+  const code = codeOnly(APP);
+  ok("the window is labelled by the span it really covers", code.includes("Last ${savWinPh.span} days"));
+  ok("...never by the number of days requested", !code.includes("Last ${savWinDays} days"));
+  // The projection runs the daily pace across EVERY day, so on a week with gaps
+  // it exceeds the window total beside it. The heading has to say which it is.
+  ok("the projection heading says it assumes every day", /At that pace, every day/.test(code));
+  ok("...and the gap is explained when days are missing", /never\s*\n?\s*logged|were never/.test(code) || code.includes("never"));
 }
 
 console.log(`\n  ${checks - fails}/${checks} checks passed`);
