@@ -8113,11 +8113,16 @@ function TimelineTab({ data, tdee, totalBurn }) {
   const toLose  = current - goal;
   const hasCardio = totalBurn > 0;
 
-  const paces = [
-    { id:"half", label:"½ lb/wk",  dietCutPerWeek:1750, color:"var(--green)",  textCls:"c-grn" },
-    { id:"one",  label:"1 lb/wk",  dietCutPerWeek:3500, color:"var(--yellow)", textCls:"c-yel" },
-    { id:"two",  label:"2 lbs/wk", dietCutPerWeek:7000, color:"var(--red)",    textCls:"c-red" },
-  ];
+  // ⚠️ THE PACES ARE WHAT THIS PLAN CAN DELIVER, NOT THE ARITHMETIC IDEAL (S236).
+  // These were literal 1750/3500/7000 and every number on this tab divided one
+  // of them by 3,500 — so the chart, the checkpoint table, the weeks-to-goal
+  // cards and the milestones all promised paces the app refuses to prescribe
+  // once the 1,200 floor binds. Deriving `dietCutPerWeek` through
+  // achievablePace fixes all four at once, because they already read it.
+  // ⚠️ SAID OUT LOUD, NOT SILENTLY SUBSTITUTED. Charting 0.51 where the label
+  // says 2 would still be a screen disagreeing with itself; the rule is that a
+  // floor which changes the answer has to announce it.
+  const { paces, floored: flooredPaces } = timelinePaces(data);
 
   const rc = p => cssVarColor(p.color);
 
@@ -8366,10 +8371,30 @@ function TimelineTab({ data, tdee, totalBurn }) {
             </div>
             <div style={{textAlign:"right"}}>
               <div className={p.textCls} style={{fontWeight:700,fontSize:"1rem"}}>{formatWeeks(wksNeeded(p, defDiet, comp))}</div>
+              {/* The pace this plan can actually hold, whenever that is not the
+                  one on the label — never a quiet substitution. */}
+              {p.floored && (
+                <div style={{fontSize:".68rem",color:"var(--yellow)",marginTop:"2px"}}>
+                  {p.realLbsPerWeek.toFixed(2)} lb/wk on the {MIN_DAILY_CAL.toLocaleString()} floor
+                </div>
+              )}
               {comp < 1 && <div style={{fontSize:".68rem",color:scenario.color}}>at {Math.round(comp*100)}% compliance</div>}
             </div>
           </div>
         ))}
+        {flooredPaces.length > 0 && (
+          <div style={{marginTop:"8px",padding:"9px 11px",borderRadius:"9px",
+            background:"rgba(251,191,36,.08)",border:"1px solid var(--yellow)",
+            fontSize:".7rem",color:"var(--text-secondary)",lineHeight:1.5}}>
+            <b style={{color:"var(--yellow)"}}>
+              {flooredPaces.length === 1 ? "One of these paces is" : `${flooredPaces.length} of these paces are`} faster than this plan can prescribe.
+            </b>{" "}
+            Holding {flooredPaces.length === 1 ? flooredPaces[0].label : "them"} would mean eating below{" "}
+            {MIN_DAILY_CAL.toLocaleString()} calories a day, which Glidna will not set — so the times above are
+            what the {MIN_DAILY_CAL.toLocaleString()} floor actually delivers, not what the label alone implies.
+            A bigger burn is the way to go faster from here, not a smaller plate.
+          </div>
+        )}
       </div>
 
       {hasCardio && (
@@ -23827,6 +23852,74 @@ function planIntakeForRate(d, r) {
   const e = planEnergy(d);
   if (!isFinite(e.tdee) || e.tdee <= 0) return 0;
   return atLeastMinCal(e.tdee - Math.round(((Number(r) || 0) * 3500) / 7) + e.eatbackPerDay);
+}
+
+// ── What a pace can ACTUALLY deliver, after the 1,200 floor (S236) ──────────
+//
+// ⚠️ A PACE IS NOT A PROMISE UNTIL THE PLAN CAN PRESCRIBE IT. TimelineTab drew
+// ½, 1 and 2 lb/wk as `deficit / 3500` and never once looked at `tdee` — a prop
+// it is handed and ignored — so it charted paces this app then refuses to
+// prescribe. Measured on the app's own functions: a 135 lb woman, 5'2", 45,
+// sedentary burns ~1,455 a day, so a 2 lb/wk pace would put her on 455
+// calories. atLeastMinCal correctly floors her at 1,200, which is 0.51 lb/wk —
+// and the chart went on drawing 2 lb/wk out to 104 weeks. That is a 295%
+// overstatement on the screen a coach shows a prospect, and the app contradicts
+// it the moment they sign up.
+//
+// ⚠️ IT FAILS HARDEST ON THE SMALLEST CLIENTS, which is exactly why it survived:
+// the 220 lb man every test fixture is modelled on is correct at all three
+// paces. The people it lies to are light, older, and sedentary.
+//
+// ⚠️ AND THE FLOORED CASE IS THE ONE PLACE THE FLAT RULE REALLY IS WRONG. While
+// a pace is prescribable the target re-prices with the weight, the deficit
+// stays put and the loss IS linear — flat 3,500 is right, and "fixing" that
+// would have introduced an error rather than removed one (S217 says so above
+// simProject). Once floored the intake stops moving, so maintenance falls away
+// beneath a fixed 1,200 and the deficit shrinks every week. `floored` is what
+// tells the caller which of those two worlds it is in.
+//
+// Pure and closure-free so scripts/ can lift it and RUN it.
+function achievablePace(d, nominalRate, extraWeeklyBurn = 0) {
+  const rate = Number(nominalRate) || 0;
+  const extra = Number(extraWeeklyBurn) || 0;
+  const e = planEnergy(d);
+  const maint = e.tdee + e.eatbackPerDay;
+  if (!isFinite(maint) || maint <= 0) {
+    // No body to price — hand back the nominal pace rather than invent a limit.
+    const nominalOnly = rate * CAL_PER_LB + extra;
+    return { weeklyDeficit: nominalOnly, lbsPerWeek: nominalOnly / CAL_PER_LB,
+      target: null, floored: false, nominalRate: rate };
+  }
+  const target = planIntakeForRate(d, rate);
+  const weeklyDeficit = (maint - target) * 7 + extra;
+  const nominalWeekly = rate * CAL_PER_LB + extra;
+  return {
+    weeklyDeficit,
+    lbsPerWeek: weeklyDeficit / CAL_PER_LB,
+    target,
+    // A pound either way is noise; this is about a pace the plan cannot give.
+    floored: weeklyDeficit < nominalWeekly - 1,
+    nominalRate: rate,
+  };
+}
+
+// The three paces TimelineTab compares, priced against a real plan. Module level
+// and pure ON PURPOSE: the first version of this lived inside the component, so
+// the suite could only pattern-match it — and two mutations that broke it stayed
+// green, including reverting the pace to the very literal this fixes. Lift it
+// and run it instead.
+const TIMELINE_PACE_DEFS = [
+  { id:"half", rate:0.5, label:"\u00bd lb/wk",  color:"var(--green)",  textCls:"c-grn" },
+  { id:"one",  rate:1,   label:"1 lb/wk",  color:"var(--yellow)", textCls:"c-yel" },
+  { id:"two",  rate:2,   label:"2 lbs/wk", color:"var(--red)",    textCls:"c-red" },
+];
+function timelinePaces(d, defs = TIMELINE_PACE_DEFS) {
+  const paces = defs.map((p) => {
+    const a = achievablePace(d, p.rate);
+    return { ...p, dietCutPerWeek: a.weeklyDeficit, floored: a.floored,
+      flooredTarget: a.target, realLbsPerWeek: a.lbsPerWeek };
+  });
+  return { paces, floored: paces.filter((x) => x.floored) };
 }
 
 function computeClientCalories(d) {
