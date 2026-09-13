@@ -585,6 +585,199 @@ function activityRungSuggestion({ observed, tdee, activityLevel, activityCheck, 
   return { from: cur, to: best, newTdee: Math.round(bmr * best.multiplier) };
 }
 
+// ── Steps and the activity ladder (S229) ────────────────────────────────────
+// Kevin: "as people continue to track their movement, and if their activity
+// level increases consistently, then it would make sense for their activity
+// level that we have on record to also increase.. but same goes for those
+// people that decrease their workout for stretches of time then we would have
+// to send a notification to recommend decreasing their activity level."
+//
+// The ladder is the single crudest input to maintenance — one rung is 0.175 x
+// BMR, about 319 cal/day on a 200 lb man — and it is stated once at signup and
+// never revisited. activityRungSuggestion already proposes a change, but only
+// from LOGGED FOOD plus the scale. Someone who wears a watch and never logs a
+// meal is never asked anything, and that is the gap this closes.
+//
+// ⚠️ THE BANDS ARE PARSED FROM THE STRING PEOPLE READ, NEVER RE-TYPED.
+// ACTIVITY_LEVELS already publishes them as display text, and this repo already
+// carries hand-written copies of those numbers elsewhere. A fresh copy written
+// for comparison logic is the drift that keeps costing releases: someone edits
+// the label and the rule that acts on it silently keeps the old number.
+// scripts/test-steps-activity.mjs asserts a byte-identical ROUND TRIP back to
+// the original string for all five rungs, so the two cannot separate.
+//
+// Both dash forms are accepted so a later edit typing a plain hyphen does not
+// silently produce a band of NaN.
+function parseStepBand(text) {
+  const t = String(text == null ? "" : text).replace(/,/g, "").trim();
+  let m = t.match(/^under\s+(\d+)$/i);
+  if (m) return { lo: 0, hi: Number(m[1]) };
+  m = t.match(/^(\d+)\s*\+$/);
+  if (m) return { lo: Number(m[1]), hi: Infinity };
+  m = t.match(/^(\d+)\s*[-–—]\s*(\d+)$/);
+  if (m) return { lo: Number(m[1]), hi: Number(m[2]) };
+  return null;
+}
+
+// Which rung does a daily step count sit in? Bands run [lo, hi) upward, so a
+// value exactly on a boundary belongs to the HIGHER rung — matching how the
+// labels read: "5,000-7,500" then "7,500-11,000" makes 7,500 the start of the
+// second, not the end of the first.
+function rungForSteps(steps) {
+  const n = Number(steps);
+  if (!isFinite(n) || n < 0) return null;
+  for (let i = ACTIVITY_LEVELS.length - 1; i >= 0; i--) {
+    const b = parseStepBand(ACTIVITY_LEVELS[i].steps);
+    if (b && n >= b.lo) return ACTIVITY_LEVELS[i];
+  }
+  return ACTIVITY_LEVELS[0];
+}
+
+// How far past a band edge the evidence must sit before the rung is questioned.
+// ⚠️ MEASURED FROM THE CURRENT RUNG'S OWN EDGE, so the round trip is 2,000
+// steps: light becomes moderate at 8,500 and moderate falls back to light at
+// 6,500. Without that gap someone sitting near a boundary is asked, answers,
+// and is asked the opposite a fortnight later, forever.
+const STEP_DEADBAND = 1000;
+// The window, and the evidence each direction needs inside it. Down is stricter
+// than up for the reason the whole design turns on: being wrong upward feeds
+// someone slightly too much and shows on the scale, being wrong downward cuts
+// the food of someone who may simply have a gap in their data.
+const STEP_WINDOW_DAYS = 28;
+const STEP_MIN_DAYS_UP = 10;
+const STEP_MIN_DAYS_DOWN = 14;
+const STEP_MIN_COVERAGE_UP = 0.5;
+const STEP_MIN_COVERAGE_DOWN = 0.7;
+
+// The typical ORDINARY day in the window.
+//
+// ⚠️ WORKOUT DAYS ARE EXCLUDED, AND THAT IS THE WHOLE REASON THIS IS SAFE TO
+// ACT ON. The activity multiplier describes the life around training; the
+// training itself is already priced separately as the eat-back burn. A step
+// average that includes workout days counts the training twice — which is
+// exactly why the wizard shows its tracker figure and deliberately refuses to
+// auto-pick a rung from it.
+//
+// ⚠️ A DAY WITH NO STEP RECORD IS NOT A ZERO-STEP DAY. Treating a missing sync
+// as zero would recommend a downgrade for everyone whose watch has a patchy
+// week, which is the single most likely way this feature does harm. Missing
+// days leave the sample entirely; they do not enter the denominator either.
+// A stored steps of 0 is the same thing — a day the watch did not report.
+//
+// The median, not the mean: one 30,000-step day at a theme park should not
+// promote someone, and one 400-step sick day should not demote them.
+function summariseSteps(byDate, data, asOf, windowDays) {
+  const d = data || {};
+  const days = Number(windowDays) > 0 ? Number(windowDays) : STEP_WINDOW_DAYS;
+  const worked = new Set();
+  for (const c of (d.checkIns || [])) if (c && c.date && c.workedOut === true) worked.add(c.date);
+  const scheduled = new Set();
+  DAYS.forEach((day) => {
+    const cardio = Array.isArray((d.cardio || {})[day]) ? d.cardio[day] : [];
+    const strength = Array.isArray((d.strength || {})[day]) ? d.strength[day] : [];
+    if (cardio.length || strength.length) scheduled.add(day);
+  });
+  const base = asOf ? new Date(asOf + "T12:00:00") : null;
+  if (!base || isNaN(base.getTime())) return null;
+  const sample = [];
+  let ordinary = 0;
+  for (let i = 1; i <= days; i++) {
+    const dt = new Date(base.getTime());
+    dt.setDate(dt.getDate() - i);
+    const key = ymdLocal(dt);
+    // A training day is not an ordinary day, so it is not in the universe this
+    // is a proportion OF either.
+    if (worked.has(key) || scheduled.has(DAYS[(dt.getDay() + 6) % 7])) continue;
+    ordinary++;
+    const w = (byDate || {})[key] && byDate[key].wearable;
+    const n = w && Number(w.steps);
+    if (n > 0) sample.push(n);
+  }
+  if (!sample.length) return { median: 0, dayCount: 0, ordinaryDays: ordinary, coverage: 0, windowDays: days };
+  const sorted = [...sample].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+  return { median, dayCount: sample.length, ordinaryDays: ordinary,
+    coverage: ordinary > 0 ? sample.length / ordinary : 0, windowDays: days };
+}
+
+// Does the watch's own whole-day burn agree that this person belongs on a LOWER
+// rung? This is the only corroborator a step-only downgrade may use.
+//
+// ⚠️ IT COMPARES WHOLE-DAY BURN WITH WHOLE-DAY BURN, not active energy with the
+// ladder's add-on: the ladder counts standing, carrying and holding, which a
+// wrist tracker systematically under-reads, so an active-energy test would fire
+// for exactly the lifter it is meant to protect. A day is only counted when its
+// resting figure looks like a full day (the same partial-day gate wearableTdee
+// uses), because a half-synced day reads low for a reason that is not the person.
+function watchAgreesLower(byDate, data, asOf, toLevel, windowDays) {
+  const d = data || {};
+  const bmr = calcBMR(d.gender, Number(d.weightLbs), Number(d.heightFt), Number(d.heightIn), effectiveAge(d));
+  if (!bmr || !isFinite(bmr) || !toLevel) return false;
+  const ceiling = bmr * toLevel.multiplier;
+  const base = asOf ? new Date(asOf + "T12:00:00") : null;
+  if (!base || isNaN(base.getTime())) return false;
+  const days = Number(windowDays) > 0 ? Number(windowDays) : STEP_WINDOW_DAYS;
+  let agree = 0, seen = 0;
+  for (let i = 1; i <= days; i++) {
+    const dt = new Date(base.getTime());
+    dt.setDate(dt.getDate() - i);
+    const w = (byDate || {})[ymdLocal(dt)] && byDate[ymdLocal(dt)].wearable;
+    if (!w) continue;
+    const resting = Number(w.resting) || 0;
+    const active = Number(w.active) || 0;
+    const total = Number(w.total) || 0;
+    const whole = total > 0 ? total : (resting >= bmr * PARTIAL_DAY_MIN ? resting + active : 0);
+    if (!(whole > 0)) continue;
+    seen++;
+    if (whole <= ceiling) agree++;
+  }
+  return seen >= 3 && agree > seen / 2;
+}
+
+// Should we ask this person to move a rung, on the evidence of their steps?
+// Returns null, or { from, to, dir, median, dayCount, corroborated }.
+//
+// ⚠️ A PROPOSAL, NEVER A WRITE. activityLevel is a STATED profile field that
+// every screen reads, and a silent change to it moves the target, every pace
+// chip and every projection at once. It also composes with the measured
+// maintenance top-up by being a proposal: accepting one changes maintBasis,
+// which retires any live fit, so the two can never compound.
+function stepsActivitySuggestion(args) {
+  const a = args || {};
+  const { summary, data, now } = a;
+  const d = data || {};
+  if (d.activityStepsOff === true) return null;
+  if (!summary || !(summary.median > 0)) return null;
+  const cur = ACTIVITY_LEVELS.find((x) => x.id === d.activityLevel) || ACTIVITY_LEVELS[0];
+  const band = parseStepBand(cur.steps);
+  if (!band) return null;
+  // ⚠️ THE DEADBAND IS MEASURED FROM THE CURRENT RUNG'S EDGE, not from the
+  // target's, so moving up and moving back need 2,000 steps between them.
+  const up = summary.median >= band.hi + STEP_DEADBAND;
+  const down = summary.median < band.lo - STEP_DEADBAND;
+  if (!up && !down) return null;
+  const to = rungForSteps(summary.median);
+  if (!to || to.id === cur.id) return null;
+  // The same 14-day answer-cooldown the food-driven proposal honours, and the
+  // same record, so answering one does not leave the other asking.
+  const at = a.activityCheck && Number(a.activityCheck.at);
+  if (at > 0 && Number(now) - at < ACTIVITY_COOLDOWN_DAYS * 86400000) return null;
+  if (up) {
+    if (summary.dayCount < STEP_MIN_DAYS_UP || summary.coverage < STEP_MIN_COVERAGE_UP) return null;
+    return { from: cur, to, dir: "up", median: summary.median, dayCount: summary.dayCount, corroborated: true };
+  }
+  if (summary.dayCount < STEP_MIN_DAYS_DOWN || summary.coverage < STEP_MIN_COVERAGE_DOWN) return null;
+  // ⚠️ STEPS ALONE MAY NEVER LOWER A RUNG. The ladder is described by JOB TYPE
+  // and load — "Physical job: lifting, carrying, climbing", with a note reading
+  // "or heavy lifting" — and a powerlifter or a cyclist is genuinely Very Active
+  // on 4,000 steps. Cutting their calories on a metric that does not describe
+  // them is the one outcome this feature must not produce, so a downgrade needs
+  // a second signal that measures ENERGY, not footfalls.
+  if (!a.watchAgrees) return null;
+  return { from: cur, to, dir: "down", median: summary.median, dayCount: summary.dayCount, corroborated: true };
+}
+
 // Fields the Trainerize sync re-stamps from its own snapshot, and the mark that
 // says a person changed one here on purpose (S200g).
 //
@@ -15699,6 +15892,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   logAdherence,
   viewDate, viewIsToday = true, todayKeyProp, onStepDay, onGoToday,
   data, step, tdee, dayData, strengthDayData, avgBurnPerDay, onSetMaintenanceFit, onSetMaintenanceAuto,
+  stepProfile, watchLower = false, onSetActivityStepsOff,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood,
   savedFoods, onToggleSaveFood, onRemoveSavedFood, onLogFoods, weekSummary, savingsDays, recentWearable, history, onRefresh, isRemote,
@@ -16372,6 +16566,20 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
     // quarter of the gap stays unreachable and the rung is still the right fix.
     suppress: maint.fitted && !(data.maintenanceFit && data.maintenanceFit.clamped),
   }), [observed, data.activityLevel, data.activityCheck, formulaTdee, maint.fitted, data.maintenanceFit]);
+
+  // The same question asked of the WATCH rather than the food log (S229). It is
+  // a second route to one decision, not a second feature: it shares the card,
+  // the accept button and the 14-day answer cooldown.
+  //
+  // ⚠️ THE FOOD-DRIVEN ANSWER WINS WHEN BOTH SPEAK. It measures energy directly
+  // — intake against the scale — where steps are a proxy for it; and two
+  // proposals on one screen asking to move the same field in possibly opposite
+  // directions is not a feature, it is a contradiction the reader has to
+  // adjudicate.
+  const stepSuggestion = useMemo(() => (activitySuggestion ? null : stepsActivitySuggestion({
+    summary: stepProfile, data, activityCheck: data.activityCheck,
+    now: Date.now(), watchAgrees: watchLower,
+  })), [activitySuggestion, stepProfile, data, watchLower]);
 
   // ── Try a different rate without committing to it (S198q, Kevin) ──────────
   // Tapping a daily target previews it IN THE RING, so the question "what would
@@ -17104,6 +17312,112 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         </div>
       )}
 
+      {/* ── The watch's answer to the same question (S229) ──────────────────
+          Kevin: "as people continue to track their movement, and if their
+          activity level increases consistently, then it would make sense for
+          their activity level that we have on record to also increase.. but
+          same goes for those people that decrease their workout for stretches
+          of time."
+
+          ⚠️ ITS OWN CARD, NOT A ROW INSIDE "MEASURED BURN". That card is about
+          intake measured against the scale, and the person this one serves is
+          precisely the one who wears a watch and logs no food — so nesting it
+          there would put a step proposal under a heading about logging, beneath
+          a line saying nothing has been logged.
+
+          ⚠️ AND IT IS A PROPOSAL. activityLevel is a STATED field that every
+          screen reads; changing it silently would move the target, all seven
+          pace chips and every projection at once. */}
+      {stepSuggestion && (() => {
+        const inForce = planMaintenance(data).tdee;
+        const after = planMaintenance({ ...data, activityLevel: stepSuggestion.to.id }).tdee;
+        const delta = after - inForce;
+        const down = stepSuggestion.dir === "down";
+        return (
+          <div className="card" style={{ marginTop: "14px" }}>
+            <div className="sec-title" style={{ marginBottom: "8px", display: "flex", alignItems: "center", gap: "8px" }}>
+              <Icon name="walk" size={17} color="var(--accent)" />Your steps say something different
+            </div>
+            <div style={{ fontSize: ".76rem", color: "var(--text-secondary)", lineHeight: 1.55 }}>
+              On a typical non-training day you take{" "}
+              <strong style={{ color: "var(--text)" }}>{stepSuggestion.median.toLocaleString()} steps</strong>
+              {" "}— that is <strong style={{ color: "var(--text)" }}>{stepSuggestion.to.label}</strong>, not the{" "}
+              <strong style={{ color: "var(--text)" }}>{stepSuggestion.from.label}</strong> on your profile.
+              {/* The median of the days that reported, over the days that were
+                  not training days — said plainly, because "average" would be
+                  the wrong word for it and people check these numbers. */}
+              <span style={{ color: "var(--muted)" }}> Measured across {stepSuggestion.dayCount} days.</span>
+            </div>
+            {/* ⚠️ SAY WHAT IT COSTS, IN BOTH DIRECTIONS. The older proposal
+                quoted only the new burn, which is fine when the answer is "eat
+                more" and quietly misleading when it is not. */}
+            <div style={{ marginTop: "8px", padding: "9px 11px", borderRadius: "9px",
+              border: `1px solid ${down ? "var(--yellow)" : "var(--green)"}`,
+              background: down ? "rgba(251,191,36,.09)" : "rgba(47,224,168,.09)" }}>
+              <div style={{ fontSize: ".74rem", color: "var(--text)", fontWeight: 700 }}>
+                {inForce.toLocaleString()} → {after.toLocaleString()} cal/day
+              </div>
+              <div style={{ fontSize: ".7rem", color: "var(--text-secondary)", marginTop: "2px", lineHeight: 1.5 }}>
+                {down
+                  ? `That is ${Math.abs(delta).toLocaleString()} fewer calories a day to eat, at every pace.`
+                  : `That is ${Math.abs(delta).toLocaleString()} more calories a day to eat, at every pace.`}
+              </div>
+            </div>
+            {onSetActivityLevel && (
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", marginTop: "9px" }}>
+                <button onClick={() => onSetActivityLevel(stepSuggestion.to.id)}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "7px", padding: "8px 13px", borderRadius: "8px",
+                    cursor: "pointer", border: "none", fontFamily: "inherit", fontSize: ".76rem", fontWeight: 800,
+                    background: "var(--accent-fill,#08dce0)", color: "var(--color-primaryfg)" }}>
+                  <Icon name="check" size={13} color="var(--color-primaryfg)" />
+                  Set activity to {stepSuggestion.to.label}
+                </button>
+                {onDismissActivitySuggestion && (
+                  <button onClick={() => onDismissActivitySuggestion(stepSuggestion.to.id)}
+                    title={`We won't ask again for about ${ACTIVITY_COOLDOWN_DAYS} days`}
+                    style={{ padding: "8px 13px", borderRadius: "8px", cursor: "pointer", fontFamily: "inherit",
+                      fontSize: ".76rem", fontWeight: 700, border: "1px solid var(--border)",
+                      background: "transparent", color: "var(--text-secondary)" }}>
+                    Not now
+                  </button>
+                )}
+              </div>
+            )}
+            {/* ⚠️ THE LIFTER'S WAY OUT, AND IT HAS A WAY BACK. The ladder is
+                described by job type and load — "Physical job: lifting,
+                carrying, climbing" — so someone genuinely Very Active on 4,000
+                steps exists and must be able to say so once rather than decline
+                this every fortnight. */}
+            {onSetActivityStepsOff && (
+              <button onClick={() => onSetActivityStepsOff(true)}
+                className="border-0 bg-transparent p-0 cursor-pointer"
+                style={{ marginTop: "9px", fontSize: ".68rem", color: "var(--muted)", textDecoration: "underline" }}>
+                My activity isn&rsquo;t about steps — stop using them
+              </button>
+            )}
+            <div style={{ fontSize: ".62rem", color: "var(--muted)", marginTop: "9px", lineHeight: 1.45 }}>
+              Training days are left out of this on purpose — your workouts are already counted separately,
+              so counting their steps here would count them twice.
+            </div>
+          </div>
+        );
+      })()}
+      {/* Off, with a way back — the same shape the measured-burn switch uses.
+          Without this the opt-out is one-way from the only screen that explains
+          what it does. */}
+      {data.activityStepsOff === true && onSetActivityStepsOff && (
+        <div className="card" style={{ marginTop: "14px", display: "flex", alignItems: "center", gap: "9px", flexWrap: "wrap" }}>
+          <span style={{ fontSize: ".72rem", color: "var(--muted)" }}>
+            Your steps aren&rsquo;t being used to suggest an activity level.
+          </span>
+          <button onClick={() => onSetActivityStepsOff(false)}
+            style={{ padding: "6px 11px", borderRadius: "8px", cursor: "pointer",
+              border: "1px solid var(--accent)", background: "transparent",
+              color: "var(--accent)", fontSize: ".68rem", fontWeight: 700 }}>
+            Use my steps again
+          </button>
+        </div>
+      )}
       {/* ── Macro Targets (S198y, Kevin) ─────────────────────────────────────
           The macro half of Daily Calorie Targets, and it sits directly under it
           because that is what "an equivalent" means. The only macro controls
@@ -22921,6 +23235,89 @@ function tzSyncSummary(r) {
 // Assigned once, in load order, into the trainer's own kv (caliq-idnums) and
 // NEVER renumbered — deleting #2 does not shift #3, and a client keeps their
 // number for life.
+// ── Finding a client on a long roster (S229) ────────────────────────────────
+// Kevin: "Add a search bar for the plans section so it is easier to find plans
+// and connected clients."
+//
+// ⚠️ ONE BOX ACROSS BOTH LISTS, BECAUSE THE QUESTION IS "WHERE IS DANA", NOT
+// "IS DANA A CONNECTED ACCOUNT OR A PLAN FILE". A trainer does not know, or
+// care, which of the two a person lives in — much of this roster is Trainerize
+// imports with no account at all. Two boxes would make the answer depend on
+// guessing the storage shape first.
+//
+// Pure and module-level so scripts/test-client-search.mjs runs the shipping
+// matcher rather than a transcription of it.
+
+// Fold case and strip accents so "jose" finds "Jose" spelled with an accent — a
+// roster of real names is exactly where an accent-sensitive search fails and
+// looks broken. The escape is written \u0300-\u036f rather than as literal
+// combining marks: those are invisible in a diff and in a review.
+// Below this many rows the box is clutter, and on a phone it would push the
+// roster it is meant to help you read below the fold.
+const SEARCH_MIN_ROWS = 8;
+
+function searchNorm(s) {
+  return String(s == null ? "" : s)
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().trim();
+}
+
+// The free-text haystack: the things a substring match makes sense over.
+// The raw id is in here so an id pasted from a support question or an AI reply
+// still finds its person.
+function searchHaystack(row) {
+  const r = row || {};
+  const id = r.uid || r.id;
+  return searchNorm([r.name, r.customName, r.email, r.label, id].filter(Boolean).join("   "));
+}
+
+// The identifiers a row answers to EXACTLY: the sequential "#6" from
+// caliq-idnums and the 4-char code IdBadge shows beside it.
+//
+// ⚠️ EXACT, BECAUSE A SUBSTRING MATCH ON A NUMBER IS USELESS. Measured before
+// this split existed: searching "#3" returned client #30 as well as client #3,
+// and a bare "3" returned the WHOLE roster, because a 28-character Firebase uid
+// almost always contains a 3 somewhere. A number that matches everyone is not a
+// search result, and on the long roster this feature exists for it is the query
+// people would reach for first.
+function searchIds(row, idNum) {
+  const r = row || {};
+  const out = [];
+  if (idNum != null && idNum !== "") out.push(String(idNum));
+  const id = r.uid || r.id;
+  if (id) out.push(searchNorm(String(id).slice(-4)));
+  return out;
+}
+
+// Does this row match? Every whitespace-separated term must appear somewhere,
+// so "dana s" narrows rather than widening — on a long roster an OR search
+// returns nearly everyone and is no better than no search at all.
+// An empty query matches everything: the list is not hidden until asked for.
+function rowMatchesSearch(row, query, idNum) {
+  const q = searchNorm(query);
+  if (!q) return true;
+  const hay = searchHaystack(row);
+  const ids = searchIds(row, idNum);
+  return q.split(/\s+/).filter(Boolean).every((t) => {
+    // A term that is just digits (with or without the #) is asking for an
+    // IDENTIFIER, so it is answered exactly and never as a substring.
+    const bare = t.replace(/^#/, "");
+    if (/^\d+$/.test(bare)) return ids.includes(bare);
+    // "#dd30" — the hash form of the short code. Same rule.
+    if (t.startsWith("#")) return ids.includes(bare) || hay.includes(bare);
+    return hay.includes(t);
+  });
+}
+
+// Filter a list, carrying the id-number map in. Returns the SAME array when the
+// query is empty, so an untouched screen pays nothing for this.
+function filterRows(rows, query, idNums) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!searchNorm(query)) return list;
+  const nums = idNums || {};
+  return list.filter((r) => rowMatchesSearch(r, query, nums[(r && (r.uid || r.id)) || ""]));
+}
+
 async function ensureIdNums(keys) {
   let docv = {};
   try { const r = await window.storage.get("caliq-idnums"); docv = JSON.parse(r.value) || {}; } catch (e) { /* first use */ }
@@ -23385,6 +23782,14 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const [lastLog, setLastLog] = useState({}); // id -> "YYYY-MM-DD"
   const [sort, setSort] = useState("attention");
   const [clientSort, setClientSort] = useState("attention"); // sort for connected clients
+  const [rosterQ, setRosterQ] = useState("");                // one search across clients AND plan files (S229)
+  const searchable = (clients.length + profiles.length) >= SEARCH_MIN_ROWS;
+  // ⚠️ A QUERY MUST NOT OUTLIVE THE BOX THAT CLEARS IT. Deleting a plan can drop
+  // the roster under the threshold and unmount the input; if the lists read the
+  // raw query they would stay filtered with nothing on screen to reset them.
+  // Deriving what they filter on from the SAME condition that renders the box
+  // makes that state unreachable rather than merely tidied up afterwards.
+  const activeQ = searchable ? rosterQ : "";
   const [planFilter, setPlanFilter] = useState("all");       // all | plans | sims (merged local list)
   const [confirmDelFor, setConfirmDelFor] = useState(null);  // local-plan id awaiting delete confirm
   const [clients, setClients] = useState([]); // connected client accounts (live data)
@@ -23667,6 +24072,9 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         ? `${data.firstName || ""} ${data.lastName || ""}`.trim()
         : (c.displayName || c.email || "Client");
       return { uid: c.uid, name: nm, hasPlan: !!data,
+        // Carried for search (S229). Without it the box promised "name, email
+        // or #number" and silently could not do one of the three.
+        email: c.email || "",
         weight: latestWeighIn ? latestWeighIn.weight : (data ? data.weightLbs : ""),
         goal: data ? data.goalWeight : "",
         target: cal ? cal.target : null, lastLogDate, requests,
@@ -23930,11 +24338,11 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
 
   // Connected-client sort (real clients to keep track of).
   const clientActiveTs = (c) => (c.lastLogDate ? new Date(c.lastLogDate + "T00:00:00").getTime() : 0);
-  const sortedClients = [...clients].sort((a, b) => {
+  const sortedClients = filterRows([...clients].sort((a, b) => {
     if (clientSort === "name") return (a.name || "").localeCompare(b.name || "");
     if (clientSort === "recent") return clientActiveTs(b) - clientActiveTs(a);
     return clientActiveTs(a) - clientActiveTs(b); // "attention": quietest first
-  });
+  }), activeQ, idNums);
 
   // Merged local plans: regular plans + simulations in one sortable, filterable
   // list (a simulation is just a local plan with isSimulation:true).
@@ -23945,8 +24353,24 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     if (sort === "recent") return lastActiveTs(b) - lastActiveTs(a);
     return lastActiveTs(a) - lastActiveTs(b); // "attention": quietest first
   });
-  const filteredLocal = sorted.filter((p) =>
-    planFilter === "plans" ? !p.isSimulation : planFilter === "sims" ? p.isSimulation : true);
+  const filteredLocal = filterRows(sorted.filter((p) =>
+    planFilter === "plans" ? !p.isSimulation : planFilter === "sims" ? p.isSimulation : true),
+    activeQ, idNums);
+  // ⚠️ A SEARCH THAT SILENTLY MISSES MATCHES BEHIND A COLLAPSED SECTION IS
+  // WORSE THAN NO SEARCH. Local Plans is collapsed by default, so a hit inside
+  // it would be invisible and the honest-looking answer would be "no results".
+  const searching = !!searchNorm(activeQ);
+  const planHits = searching ? filteredLocal.length : 0;
+  const clientHits = searching ? sortedClients.length : 0;
+  // ⚠️ THE SEARCH OPENS THE DRAWER, IT DOES NOT OVERRIDE IT. This was
+  // `plansOpen || (searching && planHits > 0)` for one revision, which made the
+  // Hide button DEAD while a search was open: the tap flipped plansOpen, the
+  // derived value stayed true, and the section did not move. One state, set by
+  // the search, still owned by the button.
+  useEffect(() => {
+    if (searching && planHits > 0) setPlansOpen(true);
+  }, [searching, planHits]);
+  const plansShown = plansOpen;
   const complete = realPlans.filter((p) => p.stepLabel === "Results").length;
   const activeWeek = realPlans.filter((p) => Date.now() - lastActiveTs(p) < 7 * 86400000).length;
 
@@ -24227,7 +24651,40 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
           </div>
         )}
 
-        {clients.length > 0 && (
+        {/* ⚠️ ONE BOX, ABOVE BOTH LISTS (S229). It only appears once there is
+            enough to search — a search box over four people is clutter, and it
+            would push the roster itself below the fold on a phone. */}
+        {searchable && (
+          <div className="mb-3" style={{ scrollMarginTop: "calc(74px + env(safe-area-inset-top,0px))" }}>
+            <div className="flex items-center gap-2">
+              <Icon name="search" size={16} color="var(--muted)" />
+              <input value={rosterQ} onChange={(e) => setRosterQ(e.target.value)}
+                type="search" inputMode="search" autoComplete="off" enterKeyHint="search"
+                aria-label="Search clients and plans"
+                placeholder="Search by name, email or #number…"
+                /* ⚠️ text-base (16px), NOT a smaller size: iOS Safari zooms the
+                   page on focus of any input under 16px, and index.html sets no
+                   maximum-scale because pinch-zoom was deliberately restored. A
+                   14px box here zoom-and-reflows the home screen on every use. */
+                className="min-w-0 flex-1 rounded-lg border border-border bg-surface2 px-3 py-2.5 text-base text-fg outline-none placeholder:text-muted" />
+              {searching && (
+                <button onClick={() => setRosterQ("")} aria-label="Clear search"
+                  className="shrink-0 rounded-lg border border-border bg-transparent px-2.5 py-2 text-muted cursor-pointer">
+                  <Icon name="close" size={14} color="var(--muted)" />
+                </button>
+              )}
+            </div>
+            {searching && (
+              <div className={`${subCls} mt-2`} role="status" aria-live="polite">
+                {clientHits + planHits === 0
+                  ? "Nothing matches that. Try part of a name, an email, or their #number."
+                  : `${clientHits} connected client${clientHits === 1 ? "" : "s"} · ${planHits} plan file${planHits === 1 ? "" : "s"}`}
+              </div>
+            )}
+          </div>
+        )}
+
+        {clients.length > 0 && (clientHits > 0 || !searching) && (
           <div className={cardCls}>
             <div className={`${sectionTitleCls} flex items-center gap-2`}><Icon name="link" size={19} color="var(--accent)" />Your Connected Clients</div>
             <div className={`${subCls} mt-1 mb-2`}>
@@ -24919,17 +25376,20 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
         )}
 
         <div className={cardCls}>
-          <button onClick={() => setPlansOpen((v) => !v)} aria-expanded={plansOpen}
+          <button onClick={() => setPlansOpen((v) => !v)} aria-expanded={plansShown}
             className="w-full flex items-center gap-2 bg-transparent border-0 p-0 cursor-pointer text-left"
             style={{ minHeight: 44 }}>
             <div className={`${sectionTitleCls} whitespace-nowrap flex items-center gap-2 mb-0`}><Icon name="clipboard" size={18} color="var(--accent)" />Local Plans</div>
-            <span className="text-xs text-muted ml-1">{realPlans.length + sims.length || ""}</span>
-            <span className="ml-auto text-muted text-xs">{plansOpen ? "Hide" : "Show"}</span>
+            <span className="text-xs text-muted ml-1">{(searching ? planHits : realPlans.length + sims.length) || ""}</span>
+            <span className="ml-auto text-muted text-xs">{plansShown ? "Hide" : "Show"}</span>
           </button>
-          {!plansOpen && (
+          {!plansShown && (
             <div className={`${subCls} mt-1`}>Your own working files — templates, simulations and imported plans.</div>
           )}
-          {plansOpen && (<>
+          {/* ⚠️ A MATCH HIDING BEHIND A COLLAPSED SECTION IS THE SEARCH LYING.
+              Local Plans is collapsed by default, so a hit inside it would show
+              a count and then nothing to look at. Searching opens it. */}
+          {plansShown && (<>
           <div className="flex gap-1.5 mt-2 flex-wrap">
             <button onClick={onNewPlan} className={mPrimaryCls}>+ Plan</button>
             <button onClick={onNewSimulation}
@@ -25090,7 +25550,9 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
               No local plans yet — tap “+ Plan” to make one, or “+ Simulation” for a what-if projection.
             </div>
           ) : filteredLocal.length === 0 ? (
-            <div className="text-muted text-[.85rem] py-2">Nothing in this filter.</div>
+            <div className="text-muted text-[.85rem] py-2">
+              {searching ? "No plan files match that." : "Nothing in this filter."}
+            </div>
           ) : (
             <div className="flex flex-col gap-2.5 mt-1.5">
               {filteredLocal.map((p) => {
@@ -29412,8 +29874,11 @@ function blobToBase64(blob) {
 // isn't a letter or digit as a separator. "Renée's" and "Renee" should be the
 // same word to us.
 function nameTokens(str) {
-  return String(str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  // Shares searchNorm's lowercase + accent strip (S229) rather than repeating
+  // it: two copies of one normalisation is how "Jose" starts matching on one
+  // screen and not the other. The SPLIT is what makes this different — tokens
+  // for exact word matching, where the search box wants substrings.
+  return searchNorm(str).split(/[^a-z0-9]+/).filter(Boolean);
 }
 // Which of the caller's own subjects (connected clients, local plan files) does
 // this transcript name? Voice notes are the one place the destination is easy to
@@ -39015,6 +39480,11 @@ export default function App() {
   // 7-day mean step count, for the Activity step of the wizard (S200l). Derived
   // from the SAME day map the week summary already read — no extra round-trips.
   const [trackerSteps, setTrackerSteps] = useState(null); // {avg, days} | null
+  // The 28-day ordinary-day step picture, and whether the watch's own whole-day
+  // burn agrees with a lower rung (S229). Both derived from the day-log map the
+  // dashboard effect already loads.
+  const [stepProfile, setStepProfile] = useState(null);
+  const [watchLower, setWatchAgreesLower] = useState(false);
   const [meName, setMeName] = useState("");   // current user's display name
   const [meUid, setMeUid] = useState("");     // current user's uid
 
@@ -39803,7 +40273,7 @@ export default function App() {
     setSavingsDays({});
     setDayCalsAll({});
     setLoggedDaysTotal(null);
-    setRecentWearable(null); setTrackerSteps(null);
+    setRecentWearable(null); setTrackerSteps(null); setStepProfile(null); setWatchAgreesLower(false);
   };
 
   const openClientPlan = async (clientUid, planId) => {
@@ -41100,6 +41570,14 @@ export default function App() {
         ? { avg: Math.round(stepDays.reduce((a, b) => a + b, 0) / stepDays.length), days: stepDays.length }
         : null);
       setRecentWearable(rw);
+      // The 28-day ORDINARY-day step picture (S229), off the same map — no
+      // further reads. Workout days are excluded because the training is
+      // already priced separately as the eat-back burn; see summariseSteps.
+      const sp = summariseSteps(byDate, data, viewDate, STEP_WINDOW_DAYS);
+      setStepProfile(sp);
+      setWatchAgreesLower(sp && sp.median > 0
+        ? watchAgreesLower(byDate, data, viewDate, rungForSteps(sp.median), STEP_WINDOW_DAYS)
+        : false);
     })();
     // Cancel this loader if the open plan/client changes before it finishes.
     return () => { alive = false; };
@@ -41472,6 +41950,15 @@ export default function App() {
               // The measured correction (S228). `null` retracts it to the
               // formula; an object replaces it. The effect that calls this never
               // fires with `undefined`, which means "leave it alone".
+              stepProfile={stepProfile}
+              watchLower={watchLower}
+              // "My activity is not steps" — a lifter or a cyclist saying so.
+              // Absent means on, so switching it back on REMOVES the flag rather
+              // than storing a second representation of the same state.
+              onSetActivityStepsOff={(off)=>setDataAndSave(p=>{
+                const x={...p};
+                if(off) x.activityStepsOff=true; else delete x.activityStepsOff;
+                return x; })}
               onSetMaintenanceFit={(fit)=>setDataAndSave(p=>{
                 const x={...p};
                 if(fit) x.maintenanceFit=fit; else delete x.maintenanceFit;

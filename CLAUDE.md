@@ -108,6 +108,70 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S229 (Sep 13): roster search + steps-driven activity level. Frontend only —
+> no functions, no rules — so THE PUSH IS THE RELEASE. **3,686 assertions across
+> 51 suites** (was 3,522/49); build, `check:undef`, `check:weak` clean.
+> **(1) ONE SEARCH BOX ACROSS BOTH LISTS.** A trainer asking "where is Dana"
+> does not know whether Dana is a connected account or a plan file — much of
+> this roster is Trainerize imports with no account — so a search scoped to one
+> list makes the answer depend on guessing the storage shape.
+> ⚠️ **A NUMBER MUST MATCH EXACTLY, NOT AS A SUBSTRING** — caught by a reviewer
+> before it shipped: `#3` returned client **#30**, and a bare `3` returned
+> roughly a third of any roster, because a 28-character Firebase uid almost
+> always contains a 3. Identifier terms are now answered exactly; text stays
+> substring.
+> ⚠️ **AND THE PLACEHOLDER PROMISED EMAIL THE DATA COULD NOT DELIVER** —
+> `loadClients` built its row without `email`, so the box advertised a search
+> that silently returned nothing. One key; the profile was already in hand.
+> Also: the collapsed Local Plans drawer OPENS on a hit (a search that hides
+> matches behind a collapsed card is worse than none) — and it **opens the
+> state rather than overriding it**, because the first version made Hide a dead
+> control. The filtered query is DERIVED from the same condition that renders
+> the box, so a roster shrinking under the threshold cannot strand an
+> unclearable filter. 16px input (iOS zooms the page under that, and pinch-zoom
+> is deliberately on). A search miss no longer says "Nothing in this filter",
+> which blamed the chips.
+> **(2) STEPS CAN MOVE THE ACTIVITY RUNG.** Kevin remembered the app asking him
+> — that is `activityRungSuggestion`, which already proposes both ways but only
+> from LOGGED FOOD plus the scale, so a watch-wearer who never logs a meal was
+> never asked anything.
+> ⚠️ **THE BANDS ARE PARSED FROM THE LABELS PEOPLE READ, NEVER RE-TYPED.**
+> ACTIVITY_LEVELS already publishes "Under 5,000" … "15,000+"; a test asserts a
+> byte-identical ROUND TRIP for all five rungs, so a label edit cannot leave the
+> rule on the old number.
+> ⚠️ **TRAINING DAYS ARE EXCLUDED, AND THAT IS WHY THIS IS SAFE TO ACT ON.** The
+> multiplier describes the life AROUND training; the training is already priced
+> as the eat-back burn. This is exactly why the wizard shows its tracker figure
+> and refuses to auto-pick a rung from it.
+> ⚠️ **A MISSING DAY IS NOT A ZERO-STEP DAY** — treating a patchy sync as zeros
+> would recommend a downgrade for everyone whose watch missed a week. Missing
+> days leave the sample and the denominator. Median, not mean.
+> ⚠️ **STEPS ALONE MAY NEVER LOWER A RUNG.** The ladder is described by JOB TYPE
+> and load ("Physical job — lifting, carrying, climbing", "or heavy lifting"), so
+> a lifter or cyclist is genuinely Very Active on 4,000 steps. A downgrade needs
+> the watch's own WHOLE-DAY burn to agree — whole-day against whole-day, because
+> an active-energy test under-reads resistance work and would fire for exactly
+> the person it protects. There is also a "my activity isn't steps" opt-out,
+> with a way back.
+> **Proposals, never writes**, and the food-driven answer WINS when both speak —
+> two proposals to move one field in possibly opposite directions is a
+> contradiction, not a feature. 1,000-step deadband off the CURRENT rung's edge,
+> so the round trip between rungs is 2,000. Shares the existing 14-day
+> `activityCheck` cooldown.
+> ⚠️ **NO DOUBLE COUNT WITH S228, MEASURED:** accepting a rung changes
+> `maintBasis`, which RETIRES a live `maintenanceFit` — 3,165 → 3,145, not 3,522.
+> **NOT BUILT, deliberately: the push.** The review found two faults that would
+> make it a silent no-op or a dead end — the trainer boot path routes every
+> unknown tag to the roster screen, not to the card inside a plan; and the
+> scheduled pass resolves `caliq-plans.active`, while a trainer's own watch data
+> goes to the plan they PICKED in `caliq-tz-links`. The in-app proposal works;
+> the push needs that routing first.
+> ⚠️ **Traps:** a mutation anchor that exists TWICE silently mutates the wrong
+> copy and reports a false pass (hit twice); `#3`-style fixtures far outside a
+> band prove nothing about the deadband — the case has to sit next to the edge;
+> and the admin screen has its OWN search with the same substring-number
+> weakness, left alone as out of scope._
+>
 > _**S228 (Sep 12): four asks from Kevin, all shipped. Frontend + FOUR new
 > functions files; `firestore.rules` UNCHANGED, so **no rules publish** — but
 > `sessionStartCode`/`verifySessionStart` must be DEPLOYED BEFORE THE PUSH, and
