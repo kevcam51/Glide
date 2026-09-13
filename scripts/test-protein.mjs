@@ -187,21 +187,36 @@ const P = (over = {}) => ({ weightLbs: 180, ...over });
   // observedTdee precedent asserts byte-identity; this one runs both, which also
   // catches a divergence introduced by an "equivalent" rewrite.
   ok("the mirrored constants match", S.PROTEIN_REF_BF === A.PROTEIN_REF_BF && S.PROTEIN_MAX_PCT === A.PROTEIN_MAX_PCT);
+  // ⚠️ hideBodyFat IS IN THE SWEEP BECAUSE IT IS THE ONE FIELD WHOSE HANDLING IS
+  // A POLICY DECISION RATHER THAN ARITHMETIC — "someone who asked not to see that
+  // number should not have it quoted back at them". A sweep that never sets it
+  // lets the two copies disagree about the only thing they could reasonably
+  // disagree about.
   let bad = null, swept = 0;
   for (const w of [0, 110, 150, 180, 220, 260, 320, 400]) {
     for (const bf of [null, 8, 15, 22, 30, 42, 55]) {
       for (const perLb of [undefined, 0.7, 1.0]) {
         for (const cal of [null, 1200, 1500, 1960, 2400, 3200]) {
-          const d = { weightLbs: w, bodyFat: bf, proteinPerLb: perLb };
+         for (const hide of [undefined, true]) {
+          const d = { weightLbs: w, bodyFat: bf, proteinPerLb: perLb, hideBodyFat: hide };
           const a = A.proteinPlan(d, cal), s = S.proteinPlan(d, cal);
           swept++;
           if (a.grams !== s.grams || a.basis !== s.basis || a.capped !== s.capped || a.raw !== s.raw) bad = { d, cal, a, s };
+         }
         }
       }
     }
   }
   ok("the app and the AI agree on every plan in the sweep", !bad, bad);
-  ok("(control) the sweep is not empty", swept === 8 * 7 * 3 * 6, swept);
+  ok("(control) the sweep is not empty", swept === 8 * 7 * 3 * 6 * 2, swept);
+  {
+    // Break ONLY the hideBodyFat arm in the server copy and require the sweep to
+    // notice — a control that cannot go red proves nothing.
+    const noHide = new Function(`${SRV_SRC.replace("const useLean = !d.hideBodyFat &&", "const useLean = true &&")}; return { proteinPlan };`)();
+    const d = { weightLbs: 260, bodyFat: 35, hideBodyFat: true };
+    ok("(mutation) a mirror that ignores hideBodyFat is caught",
+       noHide.proteinPlan(d, 2200).grams !== A.proteinPlan(d, 2200).grams);
+  }
   // A control that cannot go red proves nothing (S214) — break the mirror and
   // require the comparison above to notice.
   const brokenSrv = new Function(`${SRV_SRC.replace("const PROTEIN_REF_BF = 15;", "const PROTEIN_REF_BF = 20;")}; return { proteinPlan };`)();
@@ -213,10 +228,31 @@ const P = (over = {}) => ({ weightLbs: 180, ...over });
 {
   // ⚠️ COUNT, DON'T FIND (S210). Each of these shapes existed exactly once and
   // each was a different answer to the same question.
+  // ⚠️ AN ABSENCE IS NOT A GUARD. `!/weightLbs \* 0\.8/` forbids ONE spelling:
+  // `* 0.80`, `/ 1.25` or a fresh local constant all walk back in and stay green.
+  // Each reader is pinned to what it DOES now, not to what it no longer says.
   ok("the muscle tab no longer hardcodes 0.8 g/lb", !/Math\.round\(weightLbs \* 0\.8\)/.test(APP_CODE));
+  ok("...because its protein comes off the chosen split",
+     /const proteinG  = shownTile \? shownTile\.t\.protein : 0;/.test(APP_CODE));
+  // ⚠️ THE CALL SITE, NOT THE CONSTANT. Every other assertion checks what is
+  // INSIDE MACRO_KEYS_BUILD; none checked which list the Muscle tab hands over.
+  // Swap it for MACRO_KEYS_PLAN and the `bulking` tile — 0.8 g/lb, the defect
+  // S224 deleted from this very tab — is back on the muscle-building screen with
+  // the whole suite green.
+  ok("...built by the shared table for the BUILD surface",
+     /const buildTiles = macroSplitTiles\(planForMacros, displayCals, MACRO_KEYS_BUILD\);/.test(APP_CODE));
+  ok("...and no surface is handed the raw table", !/macroSplitTiles\([^)]*MACRO_SPLITS\)/.test(APP_CODE));
+  {
+    const wrong = A.macroSplitTiles({ weightLbs: 180 }, 2900, A.MACRO_KEYS_PLAN);
+    ok("(control) the plan list really would put bulking on that tab",
+       wrong.some((x) => x.key === "bulking"));
+  }
   ok("the pace no longer picks the protein multiplier", !/proteinMultiplier/.test(APP_CODE));
   ok("the beginners' view no longer reads a bare bodyweight",
      !/const protein = Math\.round\(Number\(data\.macroTargets\?\.protein\) \|\| w\)/.test(APP_CODE));
+  ok("...it reads the helper, and keeps what the helper reports",
+     /const protPlanS = proteinPlan\(data, target\);/.test(APP_CODE)
+     && /const protein = \(Number\(data\.macroTargets\?\.protein\) \|\| protPlanS\.grams\) \|\| null;/.test(APP_CODE));
   ok("the share card routes through the helper", /const proteinG = mtS\.protein != null \? Number\(mtS\.protein\) : autoProteinG\(data, targetCals\);/.test(APP_CODE));
   // Five call sites in App (dashboard, share card, muscle, nutrients, simple view
   // via autoProteinG) and one in the server.
@@ -224,8 +260,14 @@ const P = (over = {}) => ({ weightLbs: 180, ...over });
   ok("every App reader calls the helper", appCalls >= 6, appCalls);   // 1 declaration + ≥5 uses
   ok("...and so does the server", /proteinPlan\(d, cal\)\.grams/.test(codeOnly(TOOLS)));
   // The basis chips must advertise what the plan will actually show.
+  // ⚠️ AND ON THE SAME BASIS THE CARD DIVIDES BY. S231 moved the card to the
+  // plan's day and left this chip on the VIEWED day, so the two could advertise
+  // different grams for the same choice — the defect that commit exists to fix,
+  // surviving one line away from it.
   ok("the basis chip prices itself through the helper",
-     /proteinPlan\(\{ \.\.\.data, weightLbs, proteinPerLb: v \}, target\)\.grams/.test(APP_CODE));
+     /proteinPlan\(\{ \.\.\.data, weightLbs, proteinPerLb: v \}, planDayCal\)\.grams/.test(APP_CODE));
+  ok("...and nothing in the macro block still prices on the viewed day",
+     !/proteinPlan\([^)]*\}, target\)/.test(APP_CODE));
   ok("...and no longer multiplies the weight itself", !/\{Math\.round\(Number\(weightLbs\)\*v\)\}g/.test(APP_CODE));
 }
 
@@ -723,6 +765,79 @@ const P = (over = {}) => ({ weightLbs: 180, ...over });
   ok("...and reads the default the same way nutritionTargets does",
      (TOOLS.match(/\(data\.deficitMode \|\| "eatback"\) !== "accelerate"/g) || []).length >= 1
      && /const eatback = \(d\.deficitMode \|\| "eatback"\) !== "accelerate";/.test(TOOLS));
+}
+
+// ── 17. the splits must actually differ, and in the stated direction ──────
+{
+  // ⚠️ NOTHING REQUIRED THE CHOOSER TO CHANGE A NUMBER. Every assertion about the
+  // Muscle tab's tiles checked labels, captions and exclusions; none checked that
+  // picking one moves the prescription. A table where two multipliers collapsed
+  // — or where `pMul` stopped being read at all — would leave three identical
+  // tiles and a chooser that does nothing, with the suite green.
+  for (const [surface, keys, cal] of [["plan", A.MACRO_KEYS_PLAN, 1876], ["build", A.MACRO_KEYS_BUILD, 2900]]) {
+    const tiles = A.macroSplitTiles({ weightLbs: 180 }, cal, keys);
+    const triples = new Set(tiles.map((x) => `${x.t.protein}/${x.t.carbs}/${x.t.fat}`));
+    ok(`every ${surface} tile is a different prescription`, triples.size === tiles.length,
+       tiles.map((x) => x.t));
+    ok(`...and every ${surface} tile carries real grams`,
+       tiles.every((x) => x.t.protein > 0 && x.t.fat > 0), tiles.map((x) => x.t));
+  }
+
+  // ⚠️ AND THE HIGH-PROTEIN SPLIT MUST CARRY MORE PROTEIN THAN ITS ANCHOR. That
+  // is the entire claim of its name and of its caption, and it was asserted
+  // nowhere — `pMul: 1.15` could have been 0.15 and only the caption would have
+  // noticed. Below the ceiling, where the clamp is not levelling them.
+  for (const [surface, keys] of [["plan", A.MACRO_KEYS_PLAN], ["build", A.MACRO_KEYS_BUILD]]) {
+    const tiles = A.macroSplitTiles({ weightLbs: 180 }, 3200, keys);
+    const anchor = tiles[0].t, high = tiles[1].t;
+    ok(`the ${surface} high-protein tile really is higher`, high.protein > anchor.protein,
+       { anchor: anchor.protein, high: high.protein });
+    ok(`...and the two lower ones really are lower`,
+       tiles.slice(2).every((x) => x.t.protein < anchor.protein), tiles.map((x) => x.t.protein));
+  }
+  // The order the table declares is the order the tiles come back in, or the
+  // comparisons above are testing whichever row happened to be second.
+  ok("the anchor leads each surface",
+     A.MACRO_KEYS_PLAN[0] === "bodyweight" && A.MACRO_KEYS_BUILD[0] === "leanbulk");
+  ok("...and the high-protein split is the one after it",
+     A.MACRO_KEYS_PLAN[1] === "cutting" && A.MACRO_KEYS_BUILD[1] === "cutting");
+}
+
+// ── 18. the beginners' screen says what moved its number (S233) ───────────
+{
+  // ⚠️ IT APPLIED BOTH BOUNDS IN SILENCE, on the CLIENT DEFAULT view. autoProteinG
+  // hands back grams and discards `capped`, `basis` and `leanLbs`, so the one
+  // screen written for people least able to reconcile a changed number was the
+  // only one not explaining it — while the same component writes a paragraph
+  // about the 1,200 floor when THAT binds. proteinPlan's own header says the
+  // bounds are "never silent"; this was the exception.
+  const a = APP_CODE.indexOf("function SimplePlanView(");
+  const b = APP_CODE.indexOf("\nfunction ", a + 10);
+  ok("found the beginners' view", a > 0 && b > a);
+  const SV = APP_CODE.slice(a, b);
+  ok("it explains the ceiling", /Held at \$\{Math\.round\(PROTEIN_MAX_PCT \* 100\)\}% of your calories/.test(SV));
+  ok("...and the lean-mass denominator", /Worked out from your \$\{protPlanS\.leanLbs\} lbs of lean mass/.test(SV));
+  ok("...and says nothing when nothing moved", /: null;/.test(SV) && /protPlanS\.basis === "lean"/.test(SV));
+  ok("...and stays quiet on a hand-set target",
+     /\(Number\(data\.macroTargets\?\.protein\) \|\| !protein \|\| !protMovedS\) \? null/.test(SV));
+  // ⚠️ ONE SENTENCE, ONE RULE, ON BOTH SCREENS. Rendered, the first version
+  // explained lean mass to a client whose number had not moved by a gram, while
+  // the dashboard stayed quiet on the identical case.
+  ok("...and only when the answer moved, on the same threshold as the dashboard",
+     /const protMovedS = protPlanS\.grams != null\s*\n\s*&& Math\.abs\(protPlanS\.grams - Math\.round\(w \* protPlanS\.perLb\)\) > 2;/.test(SV)
+     && /Math\.abs\(protPlan\.grams - Math\.round\(Number\(weightLbs\) \* protPlan\.perLb\)\) > 2;/.test(APP_CODE));
+  ok("...and the sentence is actually rendered", /\{proteinWhy && <span/.test(SV));
+
+  // ⚠️ A PER-MEAL RULE THAT CANNOT REACH THE TARGET IN ITS OWN SENTENCE. "25–40g
+  // per meal across 3–5 meals" tops out at 200 g, and this arc routinely
+  // prescribes more — the Nutrients tab printed both numbers one clause apart.
+  ok("the per-meal split is derived from the target, not a fixed band",
+     /That is about \$\{Math\.round\(proteinG \/ 4\)\}g per meal across 4 meals/.test(APP_CODE));
+  ok("...and the old band is gone", !/25–40g protein per meal across 3–5 meals/.test(APP_CODE));
+  {
+    const big = A.autoProteinG({ weightLbs: 260 }, 2600);
+    ok("(control) the old band really could not reach a real target", big > 200, big);
+  }
 }
 
 console.log(`\n  ${checks - fails}/${checks} checks passed`);

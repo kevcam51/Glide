@@ -4638,7 +4638,27 @@ function SimplePlanView({ data, tdee, hasGoal, totalBurn, totalStrBurn, workoutD
   // ⚠️ THIS READ A BARE BODYWEIGHT (S224) — the basis chip, the lean-mass
   // denominator and the ceiling all bypassed, on the one screen written for
   // beginners. One helper now answers for every screen.
-  const protein = (Number(data.macroTargets?.protein) || autoProteinG(data, target)) || null;
+  // ⚠️ AND IT SAYS WHAT MOVED THE NUMBER (S233). autoProteinG returns the grams
+  // and throws away `capped`, `basis` and `leanLbs`, so this screen applied the
+  // lean-mass denominator and the 50% ceiling in silence — on the CLIENT DEFAULT
+  // view, for the audience least able to reconcile a number that changed. Every
+  // other surface explains it, and this component already writes a paragraph
+  // about the 1,200 floor when that binds. Same rule, same screen.
+  const protPlanS = proteinPlan(data, target);
+  const protein = (Number(data.macroTargets?.protein) || protPlanS.grams) || null;
+  // ⚠️ AND ONLY WHEN THE ANSWER MOVED — the same threshold the dashboard note
+  // uses. A lean client's lean-mass target IS the number 1 g/lb already gave
+  // them, so explaining it every visit is a permanent sentence about a change
+  // that did not happen. Two screens carrying one sentence under two different
+  // rules is the inconsistency this whole arc has been closing.
+  const protMovedS = protPlanS.grams != null
+    && Math.abs(protPlanS.grams - Math.round(w * protPlanS.perLb)) > 2;
+  const proteinWhy = (Number(data.macroTargets?.protein) || !protein || !protMovedS) ? null
+    : protPlanS.capped
+      ? `Held at ${Math.round(PROTEIN_MAX_PCT * 100)}% of your calories so fat and carbs still fit.`
+      : protPlanS.basis === "lean"
+        ? `Worked out from your ${protPlanS.leanLbs} lbs of lean mass, not your scale weight.`
+        : null;
   const cups = w ? Math.round((w * 0.5) / 8) : null;
   const lbsToGo = hasGoal ? Math.round((w - goal) * 10) / 10 : null;
   const lbsToGain = goal && goal > w ? Math.round((goal - w) * 10) / 10 : null;
@@ -4765,7 +4785,7 @@ function SimplePlanView({ data, tdee, hasGoal, totalBurn, totalStrBurn, workoutD
         {protein && (
           <div style={rowS}>
             <Icon name="muscle" size={16} color="var(--accent)" />
-            <div>Get about <span style={numS}>{protein}g</span> of protein — roughly <span style={numS}>{Math.max(2, Math.round(protein / 25))}</span> palm-sized portions of chicken, fish, meat, eggs, or Greek yogurt across the day. {goalMode === "build" ? "Protein is the raw material your training builds with." : "Protein keeps you full and protects your muscle."}</div>
+            <div>Get about <span style={numS}>{protein}g</span> of protein — roughly <span style={numS}>{Math.max(2, Math.round(protein / 25))}</span> palm-sized portions of chicken, fish, meat, eggs, or Greek yogurt across the day. {goalMode === "build" ? "Protein is the raw material your training builds with." : "Protein keeps you full and protects your muscle."}{proteinWhy && <span style={{color:"var(--muted)"}}> {proteinWhy}</span>}</div>
           </div>
         )}
         {cups && (
@@ -7786,7 +7806,7 @@ function NutrientsTab({ data, weightLbs, gender, age, name, targets,
               ))}
               <div style={{marginTop:"10px",fontSize:".75rem",color:"var(--muted)",lineHeight:1.5,padding:"8px 10px",background:"rgba(var(--accent-rgb),.04)",borderRadius:"8px",border:"1px solid var(--border)"}}>
                 {cat.id==="protein"
-                  ? `Aim for 25–40g protein per meal across 3–5 meals to maximize muscle protein synthesis. Spread evenly — don't back-load all ${proteinG}g into dinner.`
+                  ? `That is about ${Math.round(proteinG / 4)}g per meal across 4 meals, or ${Math.round(proteinG / 5)}g across 5. Spread it evenly — don't back-load all ${proteinG}g into dinner.`
                   : cat.id==="carbs"
                   ? `Prioritize carbs around your workouts — before for energy, after for glycogen replenishment. Complex carbs (rice, oats, potato) for sustained energy; fruit for quick fuel.`
                   : `Don't fear fat — it's essential for hormones (including testosterone). Focus on unsaturated sources. Save saturated fats for ≤10% of daily intake.`
@@ -18646,7 +18666,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                   border:"1px solid "+(proteinPerLb===v?"var(--accent)":"var(--border)"),
                   background: proteinPerLb===v?"rgba(var(--accent-rgb),.12)":"transparent",
                   color: proteinPerLb===v?"var(--accent)":"var(--muted)"}}>
-                {l} · {proteinPlan({ ...data, weightLbs, proteinPerLb: v }, target).grams}g
+                {l} · {proteinPlan({ ...data, weightLbs, proteinPerLb: v }, planDayCal).grams}g
               </button>
             ))}
           </div>
