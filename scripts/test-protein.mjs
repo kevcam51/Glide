@@ -75,15 +75,12 @@ function liftDecl(src, name) {
 // dangerous half is not a failing assertion; it is an absence check like the
 // Morton one below passing over code that is really there.
 //
-// ⚠️ AND THE SHARED SCANNER IS NOT ENOUGH ON ITS OWN HERE. It has no idea JSX
-// text is not code, so an apostrophe in prose — "Glidna's library", "we'll
-// build your plan" — opens a string that runs to the next apostrophe thousands
-// of characters later. 90 such spans in App.jsx, and every comment inside one
-// survives the strip. Harmless for an absence check (it fails loudly rather
-// than passing quietly) but not for a positive one, so comment-only lines are
-// dropped afterwards as well.
-const codeOnly = (src) => stripComments(src)
-  .split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
+// This suite carried its own belt-and-braces pass — the shared scanner used to
+// leave 565 comment lines in App.jsx, because an apostrophe in JSX prose opened
+// a string that ran to the next apostrophe. S230 fixed that in the scanner, and
+// scripts/test-strip-comments.mjs now asserts zero survivors in this file, so
+// the local workaround is gone.
+const codeOnly = stripComments;
 
 const APP_CODE = codeOnly(APP);
 
@@ -480,15 +477,12 @@ const P = (over = {}) => ({ weightLbs: 180, ...over });
     const a = APP_CODE.indexOf("function MuscleTab(");
     const b = APP_CODE.indexOf("\nfunction ", a + 10);
     ok("found the MuscleTab body", a > 0 && b > a);
-    // ⚠️ THE S208 TRAP, IN MY OWN NEW CODE. The JSX comment explaining WHY this
-    // tab writes nothing names `data.macroTargets` — and the shared stripper
-    // leaves it, because an apostrophe upstream in JSX prose desynchronised it.
-    // So the tab's own JSX comments come off explicitly, with a control on how
-    // much that removed (the 60k-character deletion S229b fixed was this shape).
-    const MTraw = APP_CODE.slice(a, b);
-    const MT = MTraw.replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, " ");
-    ok("(control) stripping the tab's own JSX comments removed only comments",
-       MTraw.length - MT.length < 3000, MTraw.length - MT.length);
+    // ⚠️ THIS SLICE USED TO NEED ITS OWN JSX-COMMENT PASS. The comment
+    // explaining WHY this tab writes nothing names `data.macroTargets`, and the
+    // desynchronised scanner left it there to be matched by the very assertion
+    // below — the S208 trap, in code written the same afternoon. The scanner
+    // strips it now, so the slice is used as it comes.
+    const MT = APP_CODE.slice(a, b);
     ok("it never writes macro targets", !/onSetMacroTargets|macroTargets/.test(MT));
     ok("...and takes no setter that could", !/onSet[A-Z]/.test(MT), (MT.match(/onSet[A-Z]\w+/) || [])[0]);
     ok("...it stores the KEY, not the numbers, so the live basis wins",
