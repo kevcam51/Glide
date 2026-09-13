@@ -63,8 +63,8 @@ function liftDecl(src, name) {
   throw new Error("unterminated " + name);
 }
 
-const NAMES = ["SEARCH_MIN_ROWS", "searchNorm", "searchHaystack", "searchIds", "rowMatchesSearch", "filterRows", "nameTokens"];
-const { SEARCH_MIN_ROWS, searchNorm, searchHaystack, searchIds, rowMatchesSearch, filterRows, nameTokens } =
+const NAMES = ["SEARCH_MIN_ROWS", "searchNorm", "searchHaystack", "searchIds", "rowMatchesSearch", "filterRows", "nameTokens", "searchResultRows"];
+const { SEARCH_MIN_ROWS, searchNorm, searchHaystack, searchIds, rowMatchesSearch, filterRows, nameTokens, searchResultRows } =
   new Function(NAMES.map((n) => liftDecl(APP, n)).join("\n") + "\nreturn { " + NAMES.join(", ") + " };")();
 
 console.log("\n  Finding a client on a long roster\n");
@@ -225,7 +225,13 @@ ok("the client row carries the email the placeholder promises",
   /email: c\.email \|\| "",[\s\S]{0,400}?hasCard:/.test(C));
 ok("a sensible threshold", SEARCH_MIN_ROWS >= 5 && SEARCH_MIN_ROWS <= 20, SEARCH_MIN_ROWS);
 ok("there is a way to clear it", /setRosterQ\(""\)/.test(C));
+// ⚠️ ONE STRING, SHOWN IN TWO PLACES. check:weak flagged this the moment the
+// dropdown grew its own empty state: the pattern matched twice, so it would
+// have stayed green with either half broken. The copy is a constant now, and
+// both surfaces are asserted to USE it rather than to repeat it.
 ok("the empty state says what to try", /Try part of a name, an email, or their #number/.test(APP));
+ok("...from one place", (APP.match(/Try part of a name, an email, or their #number/g) || []).length === 1);
+ok("...which the summary line shows", /clientHits \+ planHits === 0\s*\?\s*SEARCH_EMPTY_HINT/.test(C));
 // ⚠️ A SEARCH MISS MUST NOT BLAME THE CHIPS. The drawer's own empty line says
 // "Nothing in this filter", which points at the all/plans/sims chips — wrong,
 // and unfixable by the reader, when the query is what emptied it.
@@ -233,7 +239,16 @@ ok("a search miss does not blame the filter chips",
   /searching \? "No plan files match that\." : "Nothing in this filter\."/.test(C));
 // The box is a compact row, not another padded card pushing the roster it
 // exists to help you read further down the screen.
-ok("the search box is a row, not a card", /\{searchable && \(\s*<div className="mb-3"/.test(C));
+// ⚠️ ASSERT THE PROPERTY, NOT THE CLASS STRING. This pinned the exact opening
+// tag, so it went red when the dropdown's positioning wrapper was added to the
+// same div — a change that could not possibly have turned the box into a card.
+{
+  const i = C.indexOf("{searchable && (");
+  const end = C.indexOf("{clients.length > 0 && (clientHits", i);
+  const block = i > 0 && end > i ? C.slice(i, end) : "";
+  ok("the search box is a row, not a card",
+    !!block && !/cardCls/.test(block) && /className="[^"]*\bmb-3\b/.test(block));
+}
 // iOS scrolls a focused input into view; without this it can land under the
 // two fixed chrome buttons at the top of every screen.
 ok("a focused box does not land under the fixed chrome", /scrollMarginTop: "calc\(74px/.test(C));
@@ -245,6 +260,168 @@ ok("the plan count describes the list you are looking at",
 ok("it is a real search field", /type="search"/.test(C));
 ok("the phone keyboard says search", /enterKeyHint="search"/.test(C));
 ok("it is labelled for screen readers", /aria-label="Search clients and plans"/.test(C));
+
+// ── 7. The dropdown (S231) ────────────────────────────────────────────────
+// Kevin: "can the search create its own dropdown and search for the plan."
+// Filtering the two lists in place still made you scroll past a card to reach
+// the one you asked for. These run the real row builder, then pin the wiring
+// that turns those rows into something you can tap or arrow onto.
+
+// The same two lists the screen filters, in the order the screen shows them.
+const ROWS = searchResultRows(
+  [{ uid: "uidAAAA1111", name: "Dana Reyes", hasPlan: true },
+   { uid: "uidBBBB2222", name: "Danny Okafor", hasPlan: false }],
+  PLANS, NUMS);
+
+ok("every match becomes a row", ROWS.length === 5, ROWS.length);
+// ⚠️ CLIENTS FIRST. A real account outranks a file about someone, and the
+// keyboard walks this order.
+ok("connected clients lead", ROWS[0].kind === "client" && ROWS[1].kind === "client");
+ok("plan files follow", ROWS.slice(2).every((r) => r.kind !== "client"));
+ok("a sandbox is marked as one", ROWS.some((r) => r.kind === "sim" && r.note === "Sandbox file"));
+ok("a plan file says so", ROWS.some((r) => r.kind === "plan" && r.note === "Plan file"));
+ok("a renamed plan shows the name its owner gave it",
+  ROWS.some((r) => r.label === "Marcus — contest prep"));
+ok("the id number rides along for the badge", ROWS[0].n === 3);
+ok("the row carries the id the badge copies", ROWS[0].uid === "uidAAAA1111");
+// ⚠️ A CONNECTED CLIENT WITH NO PLAN IS STILL A SEARCH HIT — leaving them out
+// would have the search deny that a real person exists.
+{
+  const noPlan = ROWS.find((r) => r.uid === "uidBBBB2222");
+  ok("a client with no plan is still listed", !!noPlan);
+  ok("...and says so", noPlan && /no plan yet/.test(noPlan.note));
+  // ⚠️ AND IS NOT A DEAD ROW. There is nothing to open, so it reveals the card
+  // that explains why and carries the controls that fix it.
+  ok("...and reveals rather than opens", noPlan && noPlan.action === "reveal");
+}
+ok("a client with a plan opens it", ROWS[0].action === "open");
+ok("every plan file opens", ROWS.slice(2).every((r) => r.action === "open"));
+// Keys must be unique or React drops rows silently; a uid and a plan id could
+// in principle collide, so the kind is part of the key.
+ok("the keys are unique", new Set(ROWS.map((r) => r.key)).size === ROWS.length);
+ok("a client key and a plan key cannot collide",
+  searchResultRows([{ uid: "same" }], [{ id: "same" }], {}).map((r) => r.key).join() === "c:same,p:same");
+// Nothing found is an empty list, not a crash or a placeholder row.
+ok("no matches is no rows", searchResultRows([], [], {}).length === 0);
+ok("a missing list is no rows", searchResultRows(null, undefined, null).length === 0);
+ok("a row with no id is skipped", searchResultRows([{ name: "ghost" }], [{ name: "ghost" }], {}).length === 0);
+ok("an unnamed plan still has something to read",
+  searchResultRows([], [{ id: "p1" }], {})[0].label === "Unnamed client");
+ok("an unnamed sandbox says it is one",
+  searchResultRows([], [{ id: "s1", isSimulation: true }], {})[0].label === "Untitled simulation");
+
+// ── The wiring ────────────────────────────────────────────────────────────
+ok("the dropdown is built from the filtered lists",
+  /searchResultRows\(sortedClients, filteredLocal, idNums\)/.test(C));
+// ⚠️ THE SAME RULE AS activeQ: everything hanging off the input has to die with
+// the input, or a roster that shrinks under the threshold strands an open
+// dropdown with nothing on screen to close it.
+ok("the dropdown cannot outlive the box",
+  /const dropShown = searchable && searching && dropOpen;/.test(C));
+ok("typing opens it", /setRosterQ\(e\.target\.value\); setDropOpen\(true\)/.test(C));
+ok("clearing the box closes it", /setRosterQ\(""\); setDropOpen\(false\)/.test(C));
+ok("returning to a box that still has a query reopens it",
+  /onFocus=\{\(\) => \{ if \(searchNorm\(rosterQ\)\) setDropOpen\(true\); \}\}/.test(C));
+// ⚠️ AND A CLICK REOPENS IT TOO, WHICH onFocus CANNOT COVER. Escape closes the
+// list without blurring the box, so the box is already focused and a click on
+// it fires no focus event — the dropdown stayed shut until you typed another
+// character. Measured in a browser, not read off the source.
+ok("...and so does clicking a box that never lost focus",
+  /onClick=\{\(\) => \{ if \(searchNorm\(rosterQ\)\) setDropOpen\(true\); \}\}/.test(C));
+// ArrowDown is the third way in, for a keyboard that never touches the mouse.
+ok("...and ArrowDown opens a closed list",
+  /if \(!dropOpen\) \{ setDropOpen\(true\); return; \}/.test(C));
+
+// ⚠️ ABSOLUTE, NOT FIXED. ".page-transition" keeps a CSS transform, which makes
+// it the containing block for anything positioned "fixed" — the trap every
+// modal in this app goes through createPortal to escape. An absolute child of a
+// relative wrapper is immune to it, so this must stay absolute AND stay wrapped.
+{
+  const i = C.indexOf('id="roster-search-list"');
+  const tag = i > 0 ? C.slice(i, C.indexOf(">", i)) : "";
+  ok("the dropdown is positioned absolutely", /\babsolute\b/.test(tag));
+  ok("...never fixed", !/\bfixed\b/.test(tag));
+  ok("...against a relative wrapper",
+    /<div ref=\{searchWrapRef\} className="relative/.test(C));
+  // A drag inside a scrolling list at the very top of the page is not a pull to
+  // refresh (S228); PTR_IGNORE is how a subtree opts out.
+  ok("...and pull-to-refresh does not arm inside it", /data-ptr-ignore/.test(tag));
+  ok("...it scrolls rather than growing past the screen", /overflow-y-auto/.test(tag));
+  ok("...without chaining that scroll to the page", /overscroll-contain/.test(tag));
+  ok("...and paints over the cards below it", /z-\[30\]/.test(tag));
+}
+// ⚠️ NO SILENT CAP. The list is bounded by a scrolling height, not by dropping
+// matches — a search that shows 8 of 30 and says nothing is lying.
+ok("no match is hidden by a row cap",
+  !/searchRows\.slice\(0,/.test(C) && !/searchRows\.slice\(-/.test(C));
+
+// Keyboard: a laptop trainer should never have to reach for the mouse.
+ok("arrow keys move the highlight", /e\.key === "ArrowDown" \|\| e\.key === "ArrowUp"/.test(C));
+ok("...wrapping at both ends", /i < 0 \? \(d > 0 \? 0 : len - 1\) : \(i \+ d \+ len\) % len/.test(C));
+ok("...and the highlighted row is scrolled into view", /block: "nearest"/.test(C));
+// ⚠️ ANCHORED TO THIS HANDLER, NOT TO THE WORD. App.jsx closes a dozen sheets
+// on Escape, so a bare /e.key === "Escape"/ stayed GREEN with THIS one deleted —
+// it was matching somebody else's modal.
+ok("Escape closes it",
+  /if \(e\.key === "Escape"\) \{\s*if \(dropOpen\) \{[^}]*setDropOpen\(false\); \}/.test(C));
+// ...and only closes the dropdown. Swallowing Escape when it is already shut
+// would eat the key the screen behind it is listening for.
+ok("...without eating Escape when it is already shut", /if \(dropOpen\) \{ e\.preventDefault\(\)/.test(C));
+// ⚠️ ONE RESULT AND NOTHING HIGHLIGHTED IS STILL AN UNAMBIGUOUS ANSWER, and
+// several results is not — Enter must not guess.
+ok("Enter opens the only result", /searchRows\.length === 1 \? searchRows\[0\] : null/.test(C));
+// A new query's results are a different list; an index into the old one points
+// at the wrong person.
+ok("a new query starts with nothing highlighted",
+  /useEffect\(\(\) => \{ setActiveIdx\(-1\); \}, \[activeQ\]\);/.test(C));
+
+// ⚠️ pointerdown IN CAPTURE, NOT blur. Closing on blur races the tap that is
+// choosing a result: on iOS the input blurs first and the row unmounts out from
+// under the finger.
+ok("a tap outside closes it", /document\.addEventListener\("pointerdown", away, true\)/.test(C));
+ok("...and the listener is removed again",
+  /document\.removeEventListener\("pointerdown", away, true\)/.test(C));
+ok("...but a tap inside is ours", /!w\.contains\(e\.target\)/.test(C));
+
+// Choosing: exactly the two actions the cards already perform.
+ok("a client row opens their plan",
+  /if \(row\.kind === "client"\) \{ if \(onOpenClientPlan\) onOpenClientPlan\(row\.uid\); return; \}/.test(C));
+ok("a plan row opens the file", /setDropOpen\(false\);[\s\S]{0,400}?onSelect\(row\.id\);/.test(C));
+ok("a reveal scrolls to that client's card", /document\.getElementById\("roster-" \+ row\.uid\)/.test(C));
+ok("...and the card has that id to be found by", /id=\{.roster-\$\{c\.uid\}.\}/.test(C));
+// ⚠️ THE MARK IS TWO THINGS, SO IT IS COUNTED AS TWO. One assertion on
+// "flashUid === c.uid" stayed GREEN with the ring deleted, because the same
+// expression also drives the border — the repeat-occurrence trap this repo has
+// paid for four times. Each half is pinned where it lives.
+ok("...and is marked so the scroll reads as a result",
+  /boxShadow: flashUid === c\.uid \? "0 0 0 2px rgba\(var\(--accent-rgb\)[^"]*" : undefined/.test(C));
+ok("...on the border as well as the ring",
+  /border \$\{flashUid === c\.uid \? "border-primary" : "border-border"\}/.test(C));
+// A ring left behind reads as state the card does not have.
+ok("the mark clears itself", /setFlashUid\(""\), 2200/.test(C));
+// The card must not land under the two fixed chrome buttons.
+ok("the revealed card clears the fixed chrome", /scrollMarginTop: "calc\(96px/.test(C));
+
+// ⚠️ TWO ANSWERS TO THE SAME QUERY ON SCREEN AT ONCE IS ONE TOO MANY. The count
+// line is what is left once the dropdown is dismissed.
+ok("the summary yields to the dropdown", /\{searching && !dropShown && \(/.test(C));
+{
+  const i = C.indexOf('id="roster-search-list"');
+  const block = i > 0 ? C.slice(i, i + 1400) : "";
+  ok("an empty dropdown says what to try",
+    /searchRows\.length === 0[\s\S]{0,200}?\{SEARCH_EMPTY_HINT\}/.test(block));
+}
+
+// It is a combobox, and says so.
+ok("the input announces itself as a combobox", /role="combobox"/.test(C));
+ok("...with the list it controls", /aria-controls="roster-search-list"/.test(C));
+ok("...and whether it is open", /aria-expanded=\{dropShown\}/.test(C));
+ok("...and which row is active", /aria-activedescendant=/.test(C));
+ok("the list is a listbox", /role="listbox"/.test(C));
+ok("its rows are options", /role="option"/.test(C));
+ok("...with the selected one marked", /aria-selected=\{on\}/.test(C));
+// A heading inside a listbox must not read as a choosable row.
+ok("the group headings are not options", /role="presentation"/.test(C));
 
 console.log(`\n  ${checks - fails}/${checks} checks passed`);
 console.log("  One box, both lists, and nothing hiding behind a collapsed card.\n");

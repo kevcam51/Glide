@@ -24249,6 +24249,12 @@ function tzSyncSummary(r) {
 // Below this many rows the box is clutter, and on a phone it would push the
 // roster it is meant to help you read below the fold.
 const SEARCH_MIN_ROWS = 8;
+// ⚠️ ONE STRING, TWO PLACES IT IS SHOWN. The dropdown's empty state and the
+// summary line under a dismissed dropdown answer the same question, so the copy
+// is declared once — two hand-kept copies of a sentence drift, and npm run
+// check:weak correctly flagged the duplicate as an assertion that could go
+// green over a broken half.
+const SEARCH_EMPTY_HINT = "Nothing matches that. Try part of a name, an email, or their #number.";
 
 function searchNorm(s) {
   return String(s == null ? "" : s)
@@ -24310,6 +24316,46 @@ function filterRows(rows, query, idNums) {
   if (!searchNorm(query)) return list;
   const nums = idNums || {};
   return list.filter((r) => rowMatchesSearch(r, query, nums[(r && (r.uid || r.id)) || ""]));
+}
+
+// ── What the search box drops down (S231) ─────────────────────────────────
+// Kevin: "can the search create its own dropdown and search for the plan."
+// Filtering the two lists in place still leaves you scrolling past a card to
+// reach the one you asked for; a dropdown puts the answer under your finger.
+//
+// ⚠️ ONE FLAT, ORDERED LIST, BECAUSE THE KEYBOARD NEEDS ONE. Arrow keys walk a
+// single index, and the group headings are DERIVED from `kind` at render time
+// rather than being rows of their own — so a heading can never be highlighted
+// and the index can never point at something there is nothing to open.
+//
+// Connected clients come first: a real account outranks a file about someone.
+function searchResultRows(clients, plans, idNums) {
+  const nums = idNums || {};
+  const rows = [];
+  for (const c of (Array.isArray(clients) ? clients : [])) {
+    if (!c || !c.uid) continue;
+    rows.push({
+      key: "c:" + c.uid, kind: "client", uid: c.uid, n: nums[c.uid],
+      label: c.name || "Unnamed client",
+      // ⚠️ A CONNECTED CLIENT WITH NO PLAN IS STILL A SEARCH HIT. Dropping them
+      // would have the search quietly deny that a real person exists — and the
+      // row still has somewhere to go, because their CARD is what carries the
+      // "no plan linked yet" line and the controls that fix it.
+      note: c.hasPlan ? "Connected client" : "Connected \u00b7 no plan yet",
+      action: c.hasPlan ? "open" : "reveal",
+    });
+  }
+  for (const p of (Array.isArray(plans) ? plans : [])) {
+    if (!p || !p.id) continue;
+    const sim = !!p.isSimulation;
+    rows.push({
+      key: "p:" + p.id, kind: sim ? "sim" : "plan", id: p.id, n: nums[p.id],
+      label: p.customName || p.name || (sim ? "Untitled simulation" : "Unnamed client"),
+      note: sim ? "Sandbox file" : "Plan file",
+      action: "open",
+    });
+  }
+  return rows;
 }
 
 async function ensureIdNums(keys) {
@@ -24794,6 +24840,14 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   // Deriving what they filter on from the SAME condition that renders the box
   // makes that state unreachable rather than merely tidied up afterwards.
   const activeQ = searchable ? rosterQ : "";
+  // The dropdown (S231). `dropOpen` is the user's INTENT — typing opens it,
+  // Escape / a tap outside / choosing a result closes it — and it is only ever
+  // honoured while there is both a query and a box to hang it from.
+  const [dropOpen, setDropOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(-1);
+  const [flashUid, setFlashUid] = useState("");   // card the dropdown scrolled to
+  const searchWrapRef = useRef(null);
+  const dropListRef = useRef(null);
   const [planFilter, setPlanFilter] = useState("all");       // all | plans | sims (merged local list)
   const [confirmDelFor, setConfirmDelFor] = useState(null);  // local-plan id awaiting delete confirm
   // Has the roster actually been fetched? `clients.length === 0` on its own
@@ -25374,6 +25428,80 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
     if (searching && planHits > 0) setPlansOpen(true);
   }, [searching, planHits]);
   const plansShown = plansOpen;
+
+  // ── The search dropdown ──────────────────────────────────────────────────
+  const searchRows = searchResultRows(sortedClients, filteredLocal, idNums);
+  // ⚠️ DERIVED FROM THE SAME CONDITION THAT RENDERS THE BOX, for the reason
+  // `activeQ` is: everything hanging off the input has to die with the input.
+  const dropShown = searchable && searching && dropOpen;
+  // An index into a list that changed underneath it points at the wrong person,
+  // so a new query always starts with nothing highlighted.
+  useEffect(() => { setActiveIdx(-1); }, [activeQ]);
+  // ⚠️ pointerdown IN THE CAPTURE PHASE, NOT blur. Closing on blur races the
+  // tap that is choosing a result — on iOS the input blurs first and the row
+  // unmounts out from under the finger. Containment keeps our own taps ours.
+  useEffect(() => {
+    if (!dropShown) return;
+    const away = (e) => {
+      const w = searchWrapRef.current;
+      if (w && e.target && !w.contains(e.target)) setDropOpen(false);
+    };
+    document.addEventListener("pointerdown", away, true);
+    return () => document.removeEventListener("pointerdown", away, true);
+  }, [dropShown]);
+  // Keep the highlighted row on screen inside the scrolling list.
+  useEffect(() => {
+    if (!dropShown || activeIdx < 0) return;
+    const el = dropListRef.current && dropListRef.current.querySelector(`[data-idx="${activeIdx}"]`);
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+  }, [dropShown, activeIdx]);
+  // A highlight has to clear itself, or it reads as state the card does not have.
+  useEffect(() => {
+    if (!flashUid) return;
+    const t = setTimeout(() => setFlashUid(""), 2200);
+    return () => clearTimeout(t);
+  }, [flashUid]);
+
+  const openSearchRow = (row) => {
+    if (!row) return;
+    setDropOpen(false);
+    if (row.action === "open") {
+      if (row.kind === "client") { if (onOpenClientPlan) onOpenClientPlan(row.uid); return; }
+      onSelect(row.id);
+      return;
+    }
+    // ⚠️ NO DEAD ROWS. A client with no plan has nothing to open, so the tap
+    // takes you to their card — which is where the explanation and the controls
+    // are — and marks it, because a silent scroll reads as a tap that missed.
+    setFlashUid(row.uid);
+    const card = typeof document !== "undefined" && document.getElementById("roster-" + row.uid);
+    if (card && card.scrollIntoView) card.scrollIntoView({ block: "center", behavior: "smooth" });
+  };
+
+  const onSearchKey = (e) => {
+    if (e.key === "Escape") {
+      if (dropOpen) { e.preventDefault(); e.stopPropagation(); setDropOpen(false); }
+      return;
+    }
+    if (!searching) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!dropOpen) { setDropOpen(true); return; }
+      const len = searchRows.length;
+      if (!len) return;
+      const d = e.key === "ArrowDown" ? 1 : -1;
+      setActiveIdx((i) => (i < 0 ? (d > 0 ? 0 : len - 1) : (i + d + len) % len));
+      return;
+    }
+    if (e.key === "Enter") {
+      // ⚠️ ONE RESULT AND NOTHING HIGHLIGHTED IS STILL AN UNAMBIGUOUS ANSWER.
+      // Enter on a search that found exactly one thing should open that thing;
+      // with several, it must not guess.
+      const row = activeIdx >= 0 ? searchRows[activeIdx]
+        : (searchRows.length === 1 ? searchRows[0] : null);
+      if (row) { e.preventDefault(); openSearchRow(row); }
+    }
+  };
   const complete = realPlans.filter((p) => p.stepLabel === "Results").length;
   const activeWeek = realPlans.filter((p) => Date.now() - lastActiveTs(p) < 7 * 86400000).length;
 
@@ -25658,11 +25786,25 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
             enough to search — a search box over four people is clutter, and it
             would push the roster itself below the fold on a phone. */}
         {searchable && (
-          <div className="mb-3" style={{ scrollMarginTop: "calc(74px + env(safe-area-inset-top,0px))" }}>
+          <div ref={searchWrapRef} className="relative z-[30] mb-3" style={{ scrollMarginTop: "calc(74px + env(safe-area-inset-top,0px))" }}>
             <div className="flex items-center gap-2">
               <Icon name="search" size={16} color="var(--muted)" />
-              <input value={rosterQ} onChange={(e) => setRosterQ(e.target.value)}
+              <input value={rosterQ}
+                onChange={(e) => { setRosterQ(e.target.value); setDropOpen(true); }}
+                onFocus={() => { if (searchNorm(rosterQ)) setDropOpen(true); }}
+                /* ⚠️ onClick AS WELL AS onFocus, AND THE REASON IS ESCAPE. Escape
+                   closes the list but does NOT blur the box — so the box is
+                   already focused, a click on it fires no focus event, and
+                   without this the only ways back were to type another character
+                   or to click away and return. Found by using it, not by reading
+                   it. Reopening on a click is also what a browser's own search
+                   suggestions do. */
+                onClick={() => { if (searchNorm(rosterQ)) setDropOpen(true); }}
+                onKeyDown={onSearchKey}
                 type="search" inputMode="search" autoComplete="off" enterKeyHint="search"
+                role="combobox" aria-autocomplete="list" aria-controls="roster-search-list"
+                aria-expanded={dropShown}
+                aria-activedescendant={dropShown && activeIdx >= 0 ? `roster-opt-${activeIdx}` : undefined}
                 aria-label="Search clients and plans"
                 placeholder="Search by name, email or #number…"
                 /* ⚠️ text-base (16px), NOT a smaller size: iOS Safari zooms the
@@ -25671,16 +25813,63 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                    14px box here zoom-and-reflows the home screen on every use. */
                 className="min-w-0 flex-1 rounded-lg border border-border bg-surface2 px-3 py-2.5 text-base text-fg outline-none placeholder:text-muted" />
               {searching && (
-                <button onClick={() => setRosterQ("")} aria-label="Clear search"
+                <button onClick={() => { setRosterQ(""); setDropOpen(false); }} aria-label="Clear search"
                   className="shrink-0 rounded-lg border border-border bg-transparent px-2.5 py-2 text-muted cursor-pointer">
                   <Icon name="close" size={14} color="var(--muted)" />
                 </button>
               )}
             </div>
-            {searching && (
+
+            {/* ⚠️ ABSOLUTE, NOT FIXED (S231). `.page-transition` keeps a CSS
+                transform, which makes it the containing block for anything
+                `fixed` — the trap that sent every modal in this app through
+                createPortal. An absolutely-positioned child of a relative
+                wrapper is unaffected by that and needs no portal at all.
+                data-ptr-ignore: a drag inside a scrolling list is not a pull to
+                refresh, and this sits at the very top of the page where the
+                gesture arms. */}
+            {dropShown && (
+              <div id="roster-search-list" role="listbox" ref={dropListRef} data-ptr-ignore
+                aria-label={`${searchRows.length} result${searchRows.length === 1 ? "" : "s"}`}
+                className="absolute left-0 right-0 top-full z-[30] mt-1.5 max-h-[min(52vh,340px)] overflow-y-auto overscroll-contain rounded-lg border border-border bg-surface shadow-2xl">
+                {searchRows.length === 0 ? (
+                  <div className="px-3 py-3 text-[.8rem] text-muted">{SEARCH_EMPTY_HINT}</div>
+                ) : searchRows.flatMap((r, i) => {
+                  // The heading sits at the boundary between the two kinds, so
+                  // there is exactly one of each and neither is a selectable row.
+                  const head = i === 0 || (searchRows[i - 1].kind === "client") !== (r.kind === "client");
+                  const on = i === activeIdx;
+                  const out = [];
+                  if (head) out.push(
+                    <div key={r.key + ":h"} role="presentation"
+                      className="px-3 pt-2.5 pb-1 text-[.62rem] font-bold uppercase tracking-wider text-muted">
+                      {r.kind === "client" ? "Connected clients" : "Plan files"}
+                    </div>
+                  );
+                  out.push(
+                    <div key={r.key} id={`roster-opt-${i}`} data-idx={i} role="option" aria-selected={on}
+                      onMouseEnter={() => setActiveIdx(i)} onClick={() => openSearchRow(r)}
+                      className={`flex cursor-pointer items-center gap-2.5 px-3 py-2.5 ${on ? "bg-surface2" : ""}`}>
+                      <Icon name={r.kind === "client" ? "link" : r.kind === "sim" ? "flask" : "file"} size={15}
+                        color={r.kind === "sim" ? "var(--color-sim)" : "var(--accent)"} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[.88rem] font-semibold text-fg">{r.label}</span>
+                        <span className="block text-[.68rem] text-muted">{r.note}</span>
+                      </span>
+                      <IdBadge id={r.uid || r.id} n={r.n} />
+                    </div>
+                  );
+                  return out;
+                })}
+              </div>
+            )}
+
+            {/* The summary is what is left once the dropdown is dismissed — two
+                answers to the same query on screen at once is one too many. */}
+            {searching && !dropShown && (
               <div className={`${subCls} mt-2`} role="status" aria-live="polite">
                 {clientHits + planHits === 0
-                  ? "Nothing matches that. Try part of a name, an email, or their #number."
+                  ? SEARCH_EMPTY_HINT
                   : `${clientHits} connected client${clientHits === 1 ? "" : "s"} · ${planHits} plan file${planHits === 1 ? "" : "s"}`}
               </div>
             )}
@@ -25727,7 +25916,10 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                 const openReqs = reqs.filter((r) => r.status !== "done");
                 const doneReqs = reqs.filter((r) => r.status === "done");
                 return (
-                  <div key={c.uid} className="p-3.5 rounded-[10px] bg-surface2 border border-border">
+                  <div key={c.uid} id={`roster-${c.uid}`}
+                    style={{ scrollMarginTop: "calc(96px + env(safe-area-inset-top,0px))",
+                      boxShadow: flashUid === c.uid ? "0 0 0 2px rgba(var(--accent-rgb),.55)" : undefined }}
+                    className={`p-3.5 rounded-[10px] bg-surface2 border ${flashUid === c.uid ? "border-primary" : "border-border"}`}>
                     {/* Tapping the card body opens the client's active plan (buttons below stay separate). */}
                     <div onClick={() => { if (c.hasPlan && onOpenClientPlan) onOpenClientPlan(c.uid); }}
                       className={c.hasPlan ? "cursor-pointer" : "cursor-default"}>

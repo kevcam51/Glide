@@ -108,6 +108,59 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S237 (Sep 13): the roster search got its own dropdown.** Kevin: "for the
+> client plan search, can the search create its own dropdown and search for the
+> plan." Frontend only — no functions, no rules — so the push IS the release.
+> **57 suites, 4,322 assertions** (was 4,257 — the search suite went 82 → 147);
+> build, `check:undef`, `check:tdz` and `check:weak` all clean. **Rebased onto S232–S236** (this started from
+> `817a251`, twelve commits back — go by SHA, not session number).
+>
+> **Filtering the two lists in place still left you scrolling past a card to
+> reach the one you asked for.** Typing now drops a combobox list under the box —
+> connected clients first, then plan files, each with the id badge the cards
+> show — and one tap opens it. The in-place filtering stays: it is what is left
+> when you dismiss the dropdown, which is also why the count line only renders
+> when the dropdown is shut. Two answers to the same query on screen at once is
+> one too many.
+> **Absolute, never fixed.** `.page-transition` keeps a CSS transform, which makes
+> it the containing block for anything `fixed` — the trap every modal here goes
+> through `createPortal` to escape. An absolute child of a relative wrapper is
+> immune to it and needs no portal at all.
+> ⚠️ **NO DEAD ROWS.** A connected client with NO plan is still a hit — dropping
+> them would have the search quietly deny that a real person exists — and since
+> there is nothing to open, the tap scrolls to their CARD, which is what carries
+> "No plan linked yet", and marks it for two seconds. A silent scroll reads as a
+> tap that missed.
+> **No silent cap:** the list is bounded by a scrolling height, never by dropping
+> matches. `data-ptr-ignore` on it, or a drag inside a scrolling list would arm
+> pull-to-refresh (S228) — it sits at the very top of the page, where that
+> gesture lives.
+> **Keyboard:** arrows wrap both ways, Enter opens the only result and refuses to
+> guess among several, Escape closes without eating the key when already shut.
+> ⚠️ **FOUND BY USING IT, NOT BY READING IT: Escape closes the list WITHOUT
+> blurring the box**, so a click on the already-focused input fired no focus
+> event and the dropdown stayed shut until you typed another character — a
+> control that looks dead. Three ways in now: type, click, ArrowDown.
+> **Traps paid for.** One assertion on `flashUid === c.uid` stayed GREEN with the
+> highlight ring deleted, because the same expression also drives the border —
+> the repeat-occurrence trap, again; a bare `/e.key === "Escape"/` stayed green
+> with this handler deleted, because a dozen other sheets close on Escape;
+> `check:weak` flagged the empty-state copy the moment the dropdown grew its own
+> (one constant, two surfaces now); and the old "the search box is a row, not a
+> card" pinned an exact className string, so it went red for a positioning
+> wrapper that could not possibly have made it a card — assert the property, not
+> the string. **45 mutations applied to App.jsx, all caught.**
+> ⚠️ **AND IT REPRODUCED S236'S BLANK SCREEN INDEPENDENTLY, WHICH IS WORTH
+> RECORDING.** Building this from `817a251` meant loading the trainer home, and
+> it threw `Cannot access 'clients' before initialization` on every render — in
+> the production build too. Same TDZ, same line, found the same afternoon from
+> the other end: S236 started from Kevin's error card, this started from a
+> feature that would not render. **The fix on main holds** (`677913d` moved the
+> declaration above `searchable`), and `npm run check:tdz` reports zero on this
+> branch. Nothing to do — but it is the second confirmation that the class is
+> invisible to every other check here, so **run check:tdz before believing a
+> screen is fine.**_
+>
 > _**S234–S236 (Sep 13): THE BLANK SCREEN ON KEVIN'S PHONE — three attempts, and
 > the first two were fixes to real bugs that were not his bug.**
 > ⚠️ **THE APP HAD NO ERROR BOUNDARY, ANYWHERE, AND THAT IS WHY IT TOOK THREE
