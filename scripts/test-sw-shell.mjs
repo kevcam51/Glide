@@ -12,7 +12,7 @@
 // (false)` — the trap this repo has paid for repeatedly.
 //
 // Run: node scripts/test-sw-shell.mjs
-import { readFileSync } from "fs";
+import { readFileSync, readdirSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
@@ -280,15 +280,109 @@ const SRC = liftHelpers(SW);
     ok("a thrown fetch is answered, not propagated", out.code === 404 && /lookup failed/.test(out.body));
   }
 
+  // ── the other four fifths (S236) ─────────────────────────────────────────
+  // index.html names five assets and S235 covered one of them, which is why
+  // Kevin's phone did not move. A non-entry name cannot be SUBSTITUTED — handing
+  // back the current entry for a dead App-*.js would execute the wrong module —
+  // so it gets a module that repairs the device instead.
+  {
+    const r = await run("/api/entry?f=react-DEAD.js", { "/": LIVE_HTML, "/assets/index-LIVE.js": "console.log(1)" });
+    ok("a dead NON-entry chunk answers with working JavaScript, not a 404",
+       r.code === 200 && /application\/javascript/.test(r.headers["content-type"] || ""), r.code);
+    ok("...and it is the heal module, NOT the entry served under the wrong name",
+       r.body !== "console.log(1)" && /caches|unregister/.test(r.body));
+    ok("...labelled as a heal in the response header", r.headers["x-glidna-fallback"] === "heal");
+    ok("...and never cached", r.headers["cache-control"] === "no-store");
+  }
+  {
+    // The rewrite passes the filename because a rewritten request wears the
+    // DESTINATION's url. If that ever stopped being read, every name would look
+    // like "entry" and the wrong branch would run.
+    const r = await run("/api/entry?f=index-DEAD.js", { "/": LIVE_HTML, "/assets/index-LIVE.js": "console.log(1)" });
+    ok("the filename comes from the rewrite's ?f=, not the path",
+       r.code === 200 && r.body === "console.log(1)", r.body.slice(0, 40));
+  }
+  {
+    const r = await run("/api/entry?f=App-DEAD.css", { "/": LIVE_HTML });
+    ok("a dead non-entry stylesheet is answered as harmless CSS, not a reload",
+       r.code === 200 && /text\/css/.test(r.headers["content-type"] || "") && !/reload/.test(r.body));
+  }
+  {
+    const r = await run("/api/entry?f=evil.txt", { "/": LIVE_HTML });
+    ok("a name that is not an asset is refused", r.code === 404, r.code);
+  }
+
+  // ⚠️ RUN THE HEAL MODULE, DO NOT PATTERN-MATCH IT. A string that merely
+  // mentions caches.delete would pass a regex and do nothing in a browser.
+  {
+    const { HEAL } = await import(join(ROOT, "api", "entry.js"));
+    const runHeal = async (session = {}) => {
+      const order = [];
+      let done; const finished = new Promise((r) => (done = r));
+      const store = new Map(Object.entries(session));
+      const ss = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, v) };
+      const cachesStub = {
+        keys: async () => ["glidna-shell-v4", "glidna-assets-v3"],
+        delete: async (k) => { order.push(`cache:${k}`); return true; },
+      };
+      const nav = { serviceWorker: { getRegistrations: async () =>
+        [{ unregister: async () => { order.push("unregister"); return true; } }] } };
+      const loc = { reload: () => { order.push("reload"); done(); } };
+      new Function("sessionStorage", "self", "caches", "navigator", "location", HEAL)(
+        ss, { caches: cachesStub }, cachesStub, nav, loc);
+      await Promise.race([finished, new Promise((r) => setTimeout(r, 80))]);
+      return { order, stamped: store.get("glidna-chunk-heal") };
+    };
+
+    const fresh = await runHeal();
+    ok("the heal clears every cache", fresh.order.filter((x) => x.startsWith("cache:")).length === 2, fresh.order);
+    ok("...unregisters the worker", fresh.order.includes("unregister"));
+    ok("...and reloads", fresh.order.includes("reload"));
+    // ⚠️ ORDER IS LOAD-BEARING: if unregistering fails, a worker with no caches
+    // left must still go to the network. Clearing second could leave it serving
+    // the same dead shell it just served.
+    ok("...caches before the worker, so a failed unregister still starves it",
+       fresh.order.indexOf("cache:glidna-shell-v4") < fresh.order.indexOf("unregister"), fresh.order);
+    ok("...and records when it ran", !!fresh.stamped);
+
+    // The loop guard, isolated: a heal moments ago must do NOTHING, or a device
+    // that stays broken reloads for ever.
+    const looped = await runHeal({ "glidna-chunk-heal": String(Date.now()) });
+    ok("a heal that just ran does not run again", looped.order.length === 0, looped.order);
+    // ...and the window really does expire, so this is a damper and not an off switch.
+    const stale = await runHeal({ "glidna-chunk-heal": String(Date.now() - 120000) });
+    ok("...but an old one is allowed to", stale.order.includes("reload"), stale.order);
+  }
+
   // ⚠️ THE REWRITE MUST SIT WHERE THE FILESYSTEM STILL WINS. Vercel checks static
   // files before rewrites, so a LIVE chunk never reaches the function — that is
   // the only reason this is safe to leave on permanently.
   const VERCEL = JSON.parse(readFileSync(join(ROOT, "vercel.json"), "utf8"));
   const srcs = VERCEL.rewrites.map((r) => r.source);
-  ok("the js fallback is wired", srcs.includes("/assets/index-:hash.js"));
-  ok("the css fallback is wired", srcs.includes("/assets/index-:hash.css"));
-  ok("...and nothing rewrites the whole asset directory",
-     !srcs.some((s) => s === "/assets/:path*" || s === "/assets/(.*)"), srcs.filter((s) => s.startsWith("/assets")));
+  ok("the asset fallback is wired", srcs.includes("/assets/:file"));
+  ok("...and carries the filename through, or the handler cannot tell the entry apart",
+     VERCEL.rewrites.some((r) => r.source === "/assets/:file" && /[?&]f=:file/.test(r.destination)));
+
+  // ⚠️ DERIVED FROM THE REAL BUILD, NOT FROM A LIST I KEEP BY HAND. S235 covered
+  // index-* and missed react, firebase, rolldown-runtime and App — a hand-kept
+  // list is exactly what let that happen. A new chunk family now fails here.
+  {
+    const dir = join(ROOT, "dist", "assets");
+    if (existsSync(dir)) {
+      const matches = (src, path) => {
+        const re = new RegExp("^" + src.replace(/:[A-Za-z]+\*/g, ".+").replace(/:[A-Za-z]+/g, "[^/]+") + "$");
+        return re.test(path);
+      };
+      const built = readdirSync(dir).filter((f) => /\.(js|css)$/.test(f));
+      const uncovered = built.filter((f) => !srcs.some((src) => matches(src, `/assets/${f}`)));
+      ok(`every built chunk family is covered by the fallback (${built.length} files)`,
+         built.length > 0 && uncovered.length === 0, uncovered.slice(0, 5));
+      // A negative control: the matcher must be able to FAIL, or the line above
+      // proves nothing.
+      ok("...and the coverage check can actually fail",
+         !matches("/assets/:file", "/assets/deep/nested.js"));
+    }
+  }
 }
 
 console.log(`\n  ${checks - fails}/${checks} checks passed`);

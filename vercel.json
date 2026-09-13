@@ -2,12 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
-      "source": "/assets/index-:hash.js",
-      "destination": "/api/entry"
-    },
-    {
-      "source": "/assets/index-:hash.css",
-      "destination": "/api/entry?css=1"
+      "source": "/assets/:file",
+      "destination": "/api/entry?f=:file"
     },
     {
       "source": "/i/:code",

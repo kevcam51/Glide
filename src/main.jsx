@@ -3,6 +3,10 @@ import { createRoot } from 'react-dom/client'
 import './index.css'           // Tailwind v4 (theme + utilities; preflight intentionally excluded)
 import './storage.js'          // installs window.storage (Firestore-backed) + imports firebase
 import AuthGate from './AuthGate.jsx'
+// Catches a render throw or a chunk that never arrived, and says so instead
+// of leaving a blank screen. Eager on purpose: the thing that reports a
+// failed download cannot itself be a download that might fail.
+import BootBoundary from './BootBoundary.jsx'
 // ── The app itself is lazy, and warmed immediately (S196g) ──────────────────
 // App.jsx is ~1.2MB of the bundle on its own. Loading it eagerly meant a
 // SIGNED-OUT visitor downloaded and parsed the entire application before a
@@ -46,20 +50,23 @@ const container = document.getElementById('root')
 const root = (globalThis.__glidnaRoot ||= createRoot(container))
 root.render(
   <StrictMode>
-    {isShowcase ? (
-      <Suspense fallback={null}><Showcase /></Suspense>
-    ) : isOAuthConsent ? (
-      <AuthGate>
-        <Suspense fallback={null}><OAuthConsent /></Suspense>
-      </AuthGate>
-    ) : (
-      <AuthGate>
-        {/* No fallback markup: AuthGate has already painted its own frame, and
-            a second spinner underneath it reads as a stutter. In practice the
-            warm import means this rarely renders at all. */}
-        <Suspense fallback={null}><App /></Suspense>
-      </AuthGate>
-    )}
+    {/* Outside AuthGate, so a failure in the login screen itself is caught too. */}
+    <BootBoundary>
+      {isShowcase ? (
+        <Suspense fallback={null}><Showcase /></Suspense>
+      ) : isOAuthConsent ? (
+        <AuthGate>
+          <Suspense fallback={null}><OAuthConsent /></Suspense>
+        </AuthGate>
+      ) : (
+        <AuthGate>
+          {/* No fallback markup: AuthGate has already painted its own frame, and
+              a second spinner underneath it reads as a stutter. In practice the
+              warm import means this rarely renders at all. */}
+          <Suspense fallback={null}><App /></Suspense>
+        </AuthGate>
+      )}
+    </BootBoundary>
   </StrictMode>,
 )
 
