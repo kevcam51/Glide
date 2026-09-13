@@ -15701,11 +15701,11 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   data, step, tdee, dayData, strengthDayData, avgBurnPerDay, onSetMaintenanceFit, onSetMaintenanceAuto,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood,
-  savedFoods, onToggleSaveFood, onRemoveSavedFood, onLogFoods, weekSummary, recentWearable, history, onRefresh, isRemote,
+  savedFoods, onToggleSaveFood, onRemoveSavedFood, onLogFoods, weekSummary, savingsDays, recentWearable, history, onRefresh, isRemote,
   savedMeals, onToggleSaveMeal, onRemoveSavedMeal, onLogMeal, onSetPlanned, onPlanDays, onEatPlanned,
   onReadDay, onWriteDay, onListLoggedDays, onSaveCheckIn, onDeleteCheckIn, onSetMacroTargets, onSetProteinBasis, onSetCalorieTarget, dayCalsAll,
   onSaveMeasurements, onSaveMeasurementsFor, onDeleteMeasurement, onToggleBodyFat, onSetBfSource, onSetGoalWeight, onAddCustomExercise,
-  onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetHideCompliance, meUid: dashMeUid, peerUid,
+  onTrackerSync, onSetWeeklyRate, onSetDeficitMode, onSetCalorieGoal, onSetSavingsPhase, onSetHideCompliance, meUid: dashMeUid, peerUid,
   premium = true, role, onOpenMealPlanner, onSetActivityLevel, onDismissActivitySuggestion }) {
 
   // Swipe-down to refresh the daily view (S104) — reuses the existing onRefresh
@@ -16205,6 +16205,29 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // a rounding error; red is reserved for meaningfully over.
   const overMild = overCals && target > 0 && logged <= target * 1.1;
   const pct = target > 0 ? Math.min(100, Math.round((logged / target) * 100)) : 0; // arc caps at full
+  // ── The savings account (S221, Kevin) ────────────────────────────────────
+  // "Their maintenance is what is deposited in their account every day, and
+  // whatever they do not spend (eat) gets placed in their savings along with
+  // whatever they burn (exercise)."
+  //
+  // ⚠️ ANCHORED ON TODAY, NOT ON THE VIEWED DAY. Every other number on this
+  // screen answers "what about this day"; a balance is a running total, and
+  // stepping back through the calendar must not appear to empty an account.
+  const savTrainDay = Math.round((planEnergy(data).weeklyBurn || 0) / 7);
+  const savFirst = Object.keys(savingsDays || {}).sort()[0] || null;
+  const savStart = (data.savingsPhase && data.savingsPhase.startedAt) || savFirst;
+  const savEnd = dashToday ? simDateAt(dashToday, -1) : null;
+  const savPh = (savStart && savEnd && savStart <= savEnd)
+    ? savingsPhase(data, savingsDays, savStart, savEnd, savTrainDay) : null;
+  const savLife = (savFirst && savEnd && savFirst <= savEnd && savFirst !== savStart)
+    ? savingsPhase(data, savingsDays, savFirst, savEnd, savTrainDay) : null;
+  const savWorth = savPh ? savingsLbs(savPh.banked, savPh.rate) : null;
+  // How far the balance and the scale are apart. The gap is the finding, not an
+  // embarrassment — it is untracked days, or food going unlogged.
+  const savGap = (savPh && savPh.scaleLbs !== null && savWorth)
+    ? Math.round((savWorth.lbs - savPh.scaleLbs) * 10) / 10 : null;
+  const savDate = (k) => { try { return new Date(k + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch { return k; } };
+
   // Macro targets. Default (estimates): protein 1g/lb bodyweight, fat 28% of
   // calories, carbs fill the remaining calories. A coach or client can override
   // any/all of them per plan via data.macroTargets — those take precedence.
@@ -16967,6 +16990,120 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           </div>
         </div>
       )}
+      {/* ── The savings account (S221, Kevin) ────────────────────────────────
+          "We want to accumulate calorie deficit from eating and calorie burning
+          from activity as if it's a savings account … the higher that number is
+          the higher the likely chance is that they lose weight."
+          ⚠️ THE SCALE IS THE TRUTH AND THE BALANCE IS WHAT YOU DID. Both are
+          shown, and when they disagree the gap is named — hiding it would make
+          the balance look like the more reliable of the two, which it is not. */}
+      {savPh && savPh.span > 0 && (
+        <div className="card" style={{marginTop:"14px"}}>
+          <div className="sec-title" style={{marginBottom:"4px"}}>Savings account</div>
+          <div style={{fontSize:".7rem",color:"var(--muted)",marginBottom:"10px"}}>
+            Since {savDate(savStart)} &middot; what you didn&rsquo;t eat, plus what you burned.
+          </div>
+          <div style={{textAlign:"center",padding:"12px",borderRadius:"12px",
+            background: savPh.banked >= 0 ? "rgba(47,224,168,.09)" : "rgba(248,113,113,.09)",
+            border:`1px solid ${savPh.banked >= 0 ? "var(--green)" : "var(--red)"}`}}>
+            <div style={{fontFamily:"'Sora',sans-serif",fontSize:"2rem",lineHeight:1.15,
+              color: savPh.banked >= 0 ? "var(--green)" : "var(--red)"}}>
+              {savPh.banked >= 0 ? "" : "−"}{Math.abs(savPh.banked).toLocaleString()}
+            </div>
+            <div style={{fontSize:".64rem",color:"var(--muted)"}}>
+              (cal) {savPh.banked >= 0 ? "banked" : "overdrawn"} across {savPh.tracked} day{savPh.tracked === 1 ? "" : "s"}
+            </div>
+          </div>
+
+          {savWorth && savPh.banked !== 0 && (
+            <div style={{marginTop:"10px",display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:".8rem"}}>
+              <span style={{color:"var(--muted)"}}>That&rsquo;s worth</span>
+              <b style={{color: savPh.banked >= 0 ? "var(--green)" : "var(--red)"}}>
+                {savPh.banked >= 0 ? "−" : "+"}{Math.abs(savWorth.lbs).toFixed(1)} lbs
+              </b>
+            </div>
+          )}
+          {savWorth && savPh.banked !== 0 && (
+            <div style={{marginTop:"3px",fontSize:".64rem",color:"var(--muted)",lineHeight:1.45}}>
+              {savWorth.measured
+                ? <>At <b style={{color:"var(--text-secondary)"}}>{savWorth.per.toLocaleString()} (cal)</b> a
+                  pound &mdash; your own rate, measured from what you logged and what the scale did.</>
+                : savPh.tracked >= SAVINGS_MIN_RATE_DAYS && savPh.span > 0
+                  && savPh.tracked / savPh.span < SAVINGS_MIN_COVERAGE
+                  ? <>At the standard {CAL_PER_LB.toLocaleString()} (cal) a pound. Your own rate needs the days to
+                    be mostly there &mdash; with {savPh.span - savPh.tracked} of {savPh.span} missing, the balance
+                    is short by however much those days held, and a rate worked out from it would read too cheap.</>
+                  : <>At the standard {CAL_PER_LB.toLocaleString()} (cal) a pound. After{" "}
+                    {SAVINGS_MIN_RATE_DAYS} tracked days and a pound of movement this becomes your own number.</>}
+            </div>
+          )}
+
+          {/* ⚠️ THE SCALE, BESIDE IT, ALWAYS — and the gap named when there is one. */}
+          {savPh.scaleLbs !== null && (
+            <div style={{marginTop:"9px",paddingTop:"9px",borderTop:"1px solid var(--border)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:".8rem"}}>
+                <span style={{color:"var(--muted)"}}>The scale says</span>
+                <b style={{color: savPh.scaleLbs > 0 ? "var(--green)" : savPh.scaleLbs < 0 ? "var(--red)" : "var(--muted)"}}>
+                  {savPh.scaleLbs > 0 ? "−" : savPh.scaleLbs < 0 ? "+" : ""}{Math.abs(savPh.scaleLbs).toFixed(1)} lbs
+                </b>
+              </div>
+              {savGap !== null && (
+                <div style={{marginTop:"4px",fontSize:".64rem",lineHeight:1.45,
+                  color: Math.abs(savGap) <= 1 ? "var(--muted)" : "var(--yellow)"}}>
+                  {Math.abs(savGap) <= 1
+                    ? <>In step with the balance &mdash; what you logged explains what the scale did.</>
+                    : <>The balance is <b>{Math.abs(savGap).toFixed(1)} lbs</b> {savGap > 0 ? "ahead of" : "behind"} the
+                      scale. {savPh.tracked < savPh.span
+                        ? <>Most likely the {savPh.span - savPh.tracked} untracked day{savPh.span - savPh.tracked === 1 ? "" : "s"}.</>
+                        : <>With every day tracked, that usually means food going in unlogged &mdash; or just water
+                          and timing, if it is a small gap.</>}
+                      {" "}The scale is the one to believe.</>}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ⚠️ COVERAGE IS NOT A FOOTNOTE. A balance that climbs on three logged
+              days out of seven, with nothing said, is the balance quietly
+              contradicting the scale. */}
+          <div style={{marginTop:"9px",fontSize:".66rem",lineHeight:1.45,
+            color: savPh.tracked === savPh.span ? "var(--muted)" : "var(--yellow)"}}>
+            Tracked <b>{savPh.tracked} of {savPh.span}</b> days
+            {savPh.tracked === savPh.span
+              ? <> &mdash; every day in this phase.</>
+              : <> &mdash; the balance only speaks for the days you logged. The rest are neither
+                counted nor guessed at.</>}
+            {savPh.measuredDays > 0 && <> {savPh.measuredDays} of them used your tracker&rsquo;s own burn.</>}
+          </div>
+
+          {savLife && (
+            <div style={{marginTop:"7px",fontSize:".66rem",color:"var(--muted)"}}>
+              All time: <b style={{color:"var(--text-secondary)"}}>{savLife.banked.toLocaleString()} (cal)</b> across{" "}
+              {savLife.tracked} tracked day{savLife.tracked === 1 ? "" : "s"}.
+            </div>
+          )}
+
+          {onSetSavingsPhase && savEnd && (
+            <div style={{marginTop:"10px",display:"flex",gap:"7px"}}>
+              <button onClick={()=>onSetSavingsPhase({ startedAt: dashToday })}
+                style={{flex:1,padding:"9px",borderRadius:"9px",cursor:"pointer",fontFamily:"inherit",
+                  fontSize:".74rem",fontWeight:700,border:"1px solid var(--border)",
+                  background:"var(--s2)",color:"var(--text-secondary)"}}>
+                Start a new phase today
+              </button>
+              {data.savingsPhase && data.savingsPhase.startedAt && (
+                <button onClick={()=>onSetSavingsPhase(null)}
+                  style={{flex:"0 0 auto",padding:"9px 12px",borderRadius:"9px",cursor:"pointer",fontFamily:"inherit",
+                    fontSize:".74rem",fontWeight:700,border:"1px solid var(--border)",
+                    background:"transparent",color:"var(--muted)"}}>
+                  All time
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Macro Targets (S198y, Kevin) ─────────────────────────────────────
           The macro half of Daily Calorie Targets, and it sits directly under it
           because that is what "an equivalent" means. The only macro controls
@@ -22486,6 +22623,165 @@ function nextMaintenanceFit(args) {
     trendLbsPerWeek: observed.trendLbsPerWeek == null ? null : observed.trendLbsPerWeek,
     basis: basis || {}, source: "log",
   };
+}
+
+// ── The savings account (S221, Kevin) ───────────────────────────────────────
+// "Their maintenance is what is deposited in their account every day, and
+// whatever they do not spend (eat) gets placed in their savings along with
+// whatever they burn (exercise). If someone eats exactly at maintenance and
+// does not work out there's no money that goes into the savings account. If a
+// user doesn't work out and eats under 500 cal of their maintenance that means
+// that 500 cal goes into the savings account. If a user eats under 500 cal and
+// also exercises and burns 300 cal that means that they have 800 cal in their
+// savings account for that day."
+//
+// saved = what the body SPENT that day − what they ATE that day. Exercise
+// raises the first term, so it reaches the balance without a second rule, and
+// the two examples above fall out of the one subtraction.
+//
+// ⚠️ MEASURED, NEVER PRESCRIBED. `wearableTdee` above is gated on
+// data.wearableAdjust and on eat-back BECAUSE IT DECIDES WHAT SOMEBODY IS TOLD
+// TO EAT. What a body actually spent on a day that has already happened is a
+// fact about that day, so a synced tracker counts here whichever way those
+// settings are set — the same distinction that had the break-even number
+// comparing the 1,200 floor against itself (S220e).
+function dayBurnTracked(d, log) {
+  const w = log && log.wearable;
+  if (!w) return null;
+  const total = Number(w.total) || 0;
+  if (total > 0) return Math.round(total);
+  const resting = Number(w.resting) || 0;
+  const active = Number(w.active) || 0;
+  if (resting <= 0) return null;
+  // The cumulative-watch guard, for the same reason wearableTdee carries it: a
+  // resting figure far below BMR is a day still filling in, not a day that
+  // burned very little.
+  const bmr = calcBMR(d.gender, Number(d.weightLbs), Number(d.heightFt), Number(d.heightIn), effectiveAge(d));
+  if (bmr && isFinite(bmr) && resting < bmr * PARTIAL_DAY_MIN) return null;
+  return Math.round(resting + active);
+}
+
+// One completed day. Returns null when the plan cannot price a day at all —
+// refusing rather than banking a zero, which would quietly count an unusable
+// plan as a perfect day.
+function daySavings(d, log, trainDayCal) {
+  const tracked = dayBurnTracked(d, log);
+  const est = planEnergy(d).tdee;
+  if (tracked === null && (!isFinite(est) || est <= 0)) return null;
+  const burn = tracked !== null ? tracked : Math.round(est + (Math.round(Number(trainDayCal) || 0)));
+  const eaten = Math.round(Number((log || {}).calories) || 0);
+  return { burn, eaten, saved: burn - eaten, measured: tracked !== null };
+}
+
+// A run of days — a phase, a week, a lifetime.
+//
+// ⚠️ ONLY WHAT WAS TRACKED IS COUNTED, AND THE COVERAGE IS RETURNED WITH IT.
+// The alternative — treating an untracked day as break-even — lets somebody log
+// three good days, eat freely for four, and watch the balance climb while the
+// scale climbs too. That breaks the rule this whole feature rests on (the scale
+// is the truth; the balance is what you did), and it breaks it invisibly. So
+// untracked days are neither credited nor invented: `tracked` and `span` come
+// back alongside `banked` so every screen can say what the number covers.
+//
+// ⚠️ A DAY WITH NO FOOD LOGGED IS NOT A DAY OF FASTING. `logged` requires real
+// intake on the day; a log doc that exists only because a weigh-in was saved
+// would otherwise bank a whole day's burn and read as the best day of the run.
+function savingsRun(d, days, trainDayCal) {
+  const out = { banked: 0, tracked: 0, span: 0, measuredDays: 0, byDay: [] };
+  for (const entry of (Array.isArray(days) ? days : [])) {
+    out.span += 1;
+    const log = entry && entry.log;
+    const logged = !!log && (Number(log.calories) || 0) > 0;
+    if (!logged) { out.byDay.push({ key: entry && entry.key, tracked: false }); continue; }
+    const r = daySavings(d, log, trainDayCal);
+    if (!r) { out.byDay.push({ key: entry.key, tracked: false }); continue; }
+    out.tracked += 1;
+    out.banked += r.saved;
+    if (r.measured) out.measuredDays += 1;
+    out.byDay.push({ key: entry.key, tracked: true, ...r });
+  }
+  return out;
+}
+
+// What a run of days says one pound cost THIS person (S221, Kevin: "someone's
+// 10K might be different than the next person's 10k … we need to make sure that
+// the formula that we use for each person is specific for each person's
+// results").
+//
+// ⚠️ THE RATE IS MEASURED, AND IT IS ONLY HONEST OVER ENOUGH TIME. Early weight
+// change is mostly water and glycogen, so a first week routinely reads near
+// 1,000 cal per pound — three and a half times cheaper than fat actually is.
+// Right for "what will this weekend cost me", and a promise nobody can keep if
+// a year gets projected on it. So: refuse under MIN_RATE_DAYS or under a pound
+// of movement, and report the days it is built on so a screen can say how firm
+// it is. CAL_PER_LB stays the fallback and the long-run anchor.
+// ⚠️ AND IT NEEDS THE DAYS TO BE MOSTLY THERE, NOT JUST NUMEROUS. Found by
+// reading a sparse fixture on screen rather than by any assertion here: 18
+// tracked days against 30 days of scale movement quoted a personal rate of
+// 6,104 cal per pound. The rate was not wrong about the arithmetic — the banked
+// total is missing twelve days, so every pound looks like it cost more than it
+// did. And the error runs the DANGEROUS way: an inflated rate prices a fun meal
+// as almost free. 80% is observedTdee's own coverage bar, reused so two features
+// do not disagree about what counts as a well-tracked stretch.
+const SAVINGS_MIN_RATE_DAYS = 14;
+const SAVINGS_MIN_COVERAGE = 0.8;
+function observedCalPerLb(banked, lbsLost, trackedDays, spanDays) {
+  if (!(trackedDays >= SAVINGS_MIN_RATE_DAYS)) return null;
+  if (spanDays > 0 && trackedDays / spanDays < SAVINGS_MIN_COVERAGE) return null;
+  if (!(banked > 0) || !(lbsLost > 0.95)) return null;
+  const rate = banked / lbsLost;
+  // A rate outside a sane band is measurement noise, not a metabolism, and the
+  // band is expressed against the physical anchor rather than as two magic
+  // numbers: fat is ~CAL_PER_LB a pound, so a third of that is water still
+  // leaving, and twice it means the log and the scale disagree so badly that
+  // neither should be quoted.
+  // (The lower bound is deliberately NOT 1,200 — that number is the daily
+  // calorie FLOOR and has nothing to do with what a pound costs. Writing it as
+  // a bare 1200 tripped scripts/test-calorie-floor.mjs, correctly.)
+  if (rate < CAL_PER_LB / 3 || rate > CAL_PER_LB * 2) return null;
+  return Math.round(rate);
+}
+
+// One phase of the savings account, from the date map the dashboard already
+// holds (S221). No extra reads: `byDate` is built once per plan load for the
+// streak and the weekly summary, and this walks the same map.
+//
+// ⚠️ TODAY IS NOT BANKED. A day still in progress has eaten only part of what it
+// will eat, so counting it would drag the balance down every morning and let it
+// climb all afternoon — the same shape as the half-synced watch above. The span
+// ends yesterday, and the card says what today is running at separately.
+//
+// ⚠️ THE SCALE IS THE TRUTH AND THE BALANCE IS WHAT YOU DID (Kevin). Both come
+// back so a screen can show them together: when they disagree, the gap IS the
+// finding — untracked days, or food going unlogged — and hiding it would make
+// the balance the more trustworthy-looking of the two, which it is not.
+function savingsPhase(d, byDate, startKey, endKey, trainDayCal) {
+  if (!startKey || !endKey || startKey > endKey) {
+    return { banked: 0, tracked: 0, span: 0, measuredDays: 0, byDay: [], scaleLbs: null, rate: null };
+  }
+  const days = [];
+  for (let i = 0; i < 3660; i++) {
+    const k = simDateAt(startKey, i);
+    if (k > endKey) break;
+    days.push({ key: k, log: (byDate || {})[k] });
+  }
+  const run = savingsRun(d, days, trainDayCal);
+  // What the scale actually did across the same window — first to last weigh-in
+  // INSIDE it, so a reading from before the phase cannot be credited to it.
+  const ins = (Array.isArray(d && d.checkIns) ? d.checkIns : [])
+    .filter((c) => c && Number(c.weight) > 0 && c.date >= startKey && c.date <= endKey)
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const scaleLbs = ins.length >= 2 ? Math.round((Number(ins[0].weight) - Number(ins[ins.length - 1].weight)) * 10) / 10 : null;
+  return { ...run, scaleLbs, rate: observedCalPerLb(run.banked, scaleLbs, run.tracked, run.span) };
+}
+
+// What the balance is worth in pounds — at THIS person's measured rate when
+// there is one, at the physical anchor when there is not. Returns the rate it
+// used so the screen can say which, rather than presenting a measured number
+// and a default one in the same typeface.
+function savingsLbs(banked, rate) {
+  const per = rate || CAL_PER_LB;
+  return { lbs: Math.round((Number(banked) || 0) / per * 100) / 100, per, measured: !!rate };
 }
 
 // ── The plan's flat energy (S214) ───────────────────────────────────────────
@@ -38694,6 +38990,9 @@ export default function App() {
   const [savedMeals, setSavedMeals] = useState([]);
   const savedMealsRef = useRef([]);
   const [weekSummary, setWeekSummary] = useState(null); // last-7-day nutrition averages
+  // date → { calories, wearable } for every day with food logged (S221). The
+  // savings account's own view of the same single list read.
+  const [savingsDays, setSavingsDays] = useState({});
   // date -> calories for EVERY day this plan has logged — the raw input for the
   // adherence memo below and for the check-in form's auto-answer.
   const [dayCalsAll, setDayCalsAll] = useState({});
@@ -39501,6 +39800,7 @@ export default function App() {
     setHistory([]);      historyRef.current = [];
     setRecentFoods([]);  recentFoodsRef.current = [];
     setWeekSummary(null);
+    setSavingsDays({});
     setDayCalsAll({});
     setLoggedDaysTotal(null);
     setRecentWearable(null); setTrackerSteps(null);
@@ -40732,14 +41032,23 @@ export default function App() {
       // check-in auto-answer. Back-dating needs no special handling: a day filled
       // in later is just a day doc with calories in it.
       const calsByDate = {};
+      // ── The savings account's days (S221) ──────────────────────────────
+      // Carries the TRACKER reading alongside the calories, which `calsByDate`
+      // deliberately does not — that map answers "how much did this day eat"
+      // for the calendar tint and the adherence checks, and widening it would
+      // change a structure five other readers share. This one is the savings
+      // account's own, built in the same pass, so it costs no extra reads.
+      const savingsByDate = {};
       let activeDays = 0;
       for (const [date, pl] of Object.entries(byDate)) {
         const kc = pl.calories || 0;
         if (kc > 0) calsByDate[date] = kc;
+        if (kc > 0) savingsByDate[date] = { calories: kc, wearable: pl.wearable || null };
         // A CHECK-IN is a day you used the app: food, water, a weigh-in or a meal.
         if (kc > 0 || (pl.water || 0) > 0 || (pl.weight || 0) > 0 || ((pl.meals || []).length > 0)) activeDays++;
       }
       setDayCalsAll(calsByDate);
+      setSavingsDays(savingsByDate);
       setLoggedDaysTotal(activeDays);
       // Load this plan's edit history
       const hv = await pHist;
@@ -41151,7 +41460,7 @@ export default function App() {
               onOpenPlan={()=>{setNavFrom("dashboard");setStepAndSave(0);}} onOpenResults={()=>{setNavFrom("dashboard");setShowDash(false);}}
               onEditWorkouts={()=>{setNavFrom("dashboard");setStepAndSave(3);}}
               onLogUpdate={onLogUpdate} dailyLog={dailyLog} streak={streak}
-              onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} onLogFoods={onLogFoodsFromCalendar} onSetPlanned={onSetPlanned} onPlanDays={onPlanDays} onEatPlanned={onEatPlanned} weekSummary={weekSummary} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid} premium={mePremium} role={role} onOpenMealPlanner={() => setShowMealPlanner(true)}
+              onAddMeal={onAddMeal} onAddMeals={onAddMeals} onRemoveMeal={onRemoveMeal} onEditMeal={onEditMeal} recentFoods={recentFoods} onRemoveRecentFood={onRemoveRecentFood} onLogFoods={onLogFoodsFromCalendar} onSetPlanned={onSetPlanned} onPlanDays={onPlanDays} onEatPlanned={onEatPlanned} weekSummary={weekSummary} savingsDays={savingsDays} recentWearable={recentWearable} history={history} onRefresh={reloadPlanLive} isRemote={!!activeRemoteUid} premium={mePremium} role={role} onOpenMealPlanner={() => setShowMealPlanner(true)}
               onSetMacroTargets={(t)=>setDataAndSave(p=>{ const n={...p}; if(t) n.macroTargets=t; else delete n.macroTargets; n.macroTargetsEditedAt=Date.now(); return n; })}
               onSetProteinBasis={(v)=>setDataAndSave(p=>({...p, proteinPerLb: v}))}
               onSetCalorieTarget={(n)=>setDataAndSave(p=>{ const x={...p};
@@ -41203,6 +41512,7 @@ export default function App() {
               onSetWeeklyRate={(r)=>setDataAndSave(p=>({...p, weeklyRate: r}))}
               onSetDeficitMode={(m)=>setDataAndSave(p=>({...p, deficitMode: m}))}
               onSetCalorieGoal={(g)=>setDataAndSave(p=>({...p, calorieGoalDirection: g}))}
+              onSetSavingsPhase={(ph)=>setDataAndSave(p=>{ const n={...p}; if (ph) n.savingsPhase=ph; else delete n.savingsPhase; return n; })}
               onSetHideCompliance={(h)=>setDataAndSave(p=>({...p, hideCompliance: h}))}
               // Sessions on the calendar are MINE — and when a trainer is
               // viewing a CLIENT's plan, only the ones shared with that client
