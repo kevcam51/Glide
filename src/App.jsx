@@ -24452,6 +24452,16 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const [sort, setSort] = useState("attention");
   const [clientSort, setClientSort] = useState("attention"); // sort for connected clients
   const [rosterQ, setRosterQ] = useState("");                // one search across clients AND plan files (S229)
+  // ⚠️ THIS MUST STAY ABOVE `searchable`, WHICH READS IT (S236). It sat nine
+  // lines below and threw "Cannot access 'clients' before initialization" on
+  // EVERY render of the trainer home — a const is in its temporal dead zone
+  // until its own line, so this was not a late value, it was a hard throw. With
+  // no error boundary in the app at the time, React unmounted the tree and
+  // Kevin got a blank screen the moment he signed in, for two days, while I
+  // looked at the service worker. `npm run check:undef` cannot see this class:
+  // the binding EXISTS, it is merely later, so no-undef stays quiet. That is
+  // what `npm run check:tdz` is for now.
+  const [clients, setClients] = useState([]); // connected client accounts (live data)
   const searchable = (clients.length + profiles.length) >= SEARCH_MIN_ROWS;
   // ⚠️ A QUERY MUST NOT OUTLIVE THE BOX THAT CLEARS IT. Deleting a plan can drop
   // the roster under the threshold and unmount the input; if the lists read the
@@ -24461,7 +24471,6 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   const activeQ = searchable ? rosterQ : "";
   const [planFilter, setPlanFilter] = useState("all");       // all | plans | sims (merged local list)
   const [confirmDelFor, setConfirmDelFor] = useState(null);  // local-plan id awaiting delete confirm
-  const [clients, setClients] = useState([]); // connected client accounts (live data)
   // Has the roster actually been fetched? `clients.length === 0` on its own
   // cannot tell "this trainer has no clients" from "the multi-round-trip fetch
   // hasn't finished" or "it failed" — and reading it as the first flashed
