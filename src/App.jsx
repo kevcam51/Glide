@@ -17156,38 +17156,114 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         const flooredAt = (r) => rawTargetForRate(r) < MIN_DAILY_CAL;
         const shownRate = previewing ? previewRate : planRate;
         const shownFloored = flooredAt(shownRate);
+        // ⚠️ THE HEADER CARRIES THE RING'S NUMBER, NOT THE SAVED ONE (S237b).
+        // Folded, this line IS the card — a header reading only "Daily Calorie
+        // Targets" costs a tap to answer the one question the card exists for.
+        // And while a preview is running the ring has moved, so a header still
+        // showing the saved figure would make the tap that moved it look broken.
+        const calTone = (previewing || shownFloored) ? "var(--yellow)" : "var(--accent)";
+        const calSummary = (
+          <span style={{display:"inline-flex",alignItems:"baseline",gap:"6px",flexWrap:"wrap",justifyContent:"flex-end"}}>
+            <span style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>
+              {previewing
+                ? rateName(SIM_RATES.find((r) => Math.abs(r.rate - shownRate) < 0.01))
+                : manualTarget != null ? "Set by hand" : rateName(SIM_RATES.find((r) => Math.abs(r.rate - planRate) < 0.01))}
+            </span>
+            <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color:calTone}}>{ringTarget.toLocaleString()}</span>
+            <span style={{fontSize:".5rem",fontWeight:800,letterSpacing:".4px",color:calTone}}>
+              {previewing ? "NOT SAVED YET" : "YOURS"}</span>
+          </span>
+        );
+        // ⚠️ NEVER FOLDS. See the note on FoldCard's `always`.
+        const calAlways = (
+          <>
+            {previewing && (
+              <div style={{marginTop:"8px",display:"flex",gap:"6px"}}>
+                {/* ⚠️ COMMITTING A RATE MUST ALSO CLEAR A MANUAL TARGET (S198s).
+                    data.calorieTarget WINS over the rate calculation, so setting a
+                    new rate while one is in force would change the plan's maths
+                    and nothing on screen — the ring would sit where it was and the
+                    tap would look broken. Choosing a rate here is an explicit
+                    choice to go back to the calculated number. */}
+                {onSetWeeklyRate && (
+                  <button onClick={()=>{ onSetWeeklyRate(previewRate);
+                      if (manualTarget != null && onSetCalorieTarget) onSetCalorieTarget(0);
+                      // ⚠️ AND KEEP THE DAILY GOAL HONEST (S198u). Deficit /
+                      // Maintain / Surplus decides whether the word under the ring
+                      // reads green or red — it is "what counts as a good day",
+                      // not a calorie number. Choosing Maintain as your TARGET
+                      // while that still says Deficit would paint a perfect
+                      // maintenance day red. The two are separate settings and
+                      // stay separate; this only stops them contradicting.
+                      if (onSetCalorieGoal) onSetCalorieGoal(previewRate === 0 ? "maintain" : previewRate < 0 ? "surplus" : "deficit");
+                      setPreviewRate(null); }}
+                    style={{flex:2,padding:"8px",borderRadius:"8px",cursor:"pointer",border:"none",
+                      background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)",
+                      fontSize:".74rem",fontWeight:800}}>
+                    Make {rateName(SIM_RATES.find(r=>Math.abs(r.rate-previewRate)<0.01))} my target
+                  </button>
+                )}
+                <button onClick={()=>setPreviewRate(null)}
+                  style={{flex:1,padding:"8px",borderRadius:"8px",cursor:"pointer",
+                    border:"1px solid var(--border)",background:"var(--s2)",
+                    color:"var(--text-secondary)",fontSize:".72rem",fontWeight:700}}>
+                  Cancel
+                </button>
+              </div>
+            )}
+            {shownFloored && (
+              <div style={{marginTop:"9px",padding:"10px 11px",borderRadius:"10px",
+                border:"1px solid var(--yellow)",background:"rgba(251,191,36,.10)"}}>
+                <div style={{fontSize:".76rem",fontWeight:800,color:"var(--yellow)",marginBottom:"3px"}}>
+                  That rate would put you under 1,200 calories
+                </div>
+                <div style={{fontSize:".7rem",color:"var(--text-secondary)",lineHeight:1.5}}>
+                  Too low to be healthy or sustainable, so we don’t go there — the number stays at
+                  1,200. Eating less isn’t the lever here: <strong style={{color:"var(--text)"}}>burning more
+                  is</strong>. Add movement — more workout days, longer sessions, more steps — and the
+                  deficit comes from training while you still eat enough to keep muscle, energy, and
+                  the habit.
+                </div>
+              </div>
+            )}
+          </>
+        );
         return (
-        <div className="card" style={{marginTop:"14px"}}>
-          <div className="sec-title" style={{marginBottom:"8px"}}>Daily Calorie Targets</div>
+        <FoldCard id="cal-targets" title="Daily Calorie Targets" summary={calSummary} always={calAlways}>
           <div style={{fontSize:".68rem",color:"var(--muted)",marginBottom:"8px"}}>
             Tap one to see it in the ring above — your plan doesn’t change.
           </div>
           {(() => {
-            const rateBtn = (t, wide) => {
+            // ⚠️ ONE PER ROW, NOT THREE ACROSS (S237b). A tile 80px wide wrapped
+            // "2,819" away from the pace it belonged to. Inside a fold the height
+            // is only spent while you are choosing. aria-pressed, not
+            // role="option": these toggle a preview, they are not a listbox.
+            const rateBtn = (t) => {
               const isPlan = Math.abs(planRate - t.rate) < 0.01;
               const isShown = Math.abs(shownRate - t.rate) < 0.01;
               const val = targetForRate(t.rate);
               const low = flooredAt(t.rate);
               return (
-                <button key={t.group + t.rate}
+                <button key={t.group + t.rate} aria-pressed={isShown}
                   onClick={()=>setPreviewRate(previewing && isShown ? null : (isPlan ? null : t.rate))}
-                  style={{padding:wide?"9px 4px":"8px 4px",borderRadius:"9px",textAlign:"center",cursor:"pointer",
+                  style={{display:"flex",alignItems:"center",gap:"8px",width:"100%",textAlign:"left",
+                    padding:"9px 11px",borderRadius:"9px",cursor:"pointer",fontFamily:"inherit",
                     background: isShown ? "rgba(var(--accent-rgb),.12)" : "var(--s2)",
                     border: isShown ? "1px solid var(--accent)" : "1px solid var(--border)"}}>
-                  <div style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px",
-                    display:"inline-flex",alignItems:"baseline",gap:"1px"}}>
+                  <span style={{fontSize:".62rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px",
+                    display:"inline-flex",alignItems:"baseline",gap:"2px"}}>
                     {/* The sign is the fastest read on the card, so it is set
                         bigger than the words beside it rather than hiding inside
                         them at label size (S198z, Kevin). */}
                     {t.sign ? <span style={{fontSize:".95rem",fontWeight:900,lineHeight:.9,
                       color: isShown ? "var(--accent)" : "var(--text-secondary)"}}>{t.sign}</span> : null}
                     <span>{t.lbl}</span>
-                  </div>
-                  <div style={{fontFamily:"'Sora',sans-serif",fontSize:"1.05rem",
-                    color: low ? "var(--yellow)" : isShown ? "var(--accent)" : "var(--text)"}}>{val.toLocaleString()}</div>
-                  <div style={{fontSize:".5rem",color: low ? "var(--yellow)" : "var(--muted)"}}>
-                    {low ? "floored" : "cal/day"}</div>
-                  {isPlan && <div style={{fontSize:".5rem",color:"var(--accent)",fontWeight:800,marginTop:"1px"}}>YOURS</div>}
+                  </span>
+                  <span style={{marginLeft:"auto",fontFamily:"'Sora',sans-serif",fontSize:"1.05rem",
+                    color: low ? "var(--yellow)" : isShown ? "var(--accent)" : "var(--text)"}}>{val.toLocaleString()}</span>
+                  <span style={{fontSize:".52rem",color: low ? "var(--yellow)" : "var(--muted)",minWidth:"36px"}}>
+                    {low ? "floored" : "cal/day"}</span>
+                  {isPlan && <span style={{fontSize:".5rem",color:"var(--accent)",fontWeight:800}}>YOURS</span>}
                 </button>
               );
             };
@@ -17196,14 +17272,14 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                 letterSpacing:".8px",fontWeight:800,margin:"9px 0 4px"}}>{txt}</div>
             );
             const row = (g) => (
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"6px"}}>
+              <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
                 {SIM_RATES.filter((t)=>t.group===g).map((t)=>rateBtn(t))}
               </div>
             );
             return (
               <>
-                <div style={{display:"grid",gridTemplateColumns:"1fr",gap:"6px"}}>
-                  {SIM_RATES.filter((t)=>t.group==="maintain").map((t)=>rateBtn(t, true))}
+                <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
+                  {SIM_RATES.filter((t)=>t.group==="maintain").map((t)=>rateBtn(t))}
                 </div>
                 {heading("Weight loss")}
                 {row("loss")}
@@ -17212,40 +17288,6 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               </>
             );
           })()}
-          {previewing && (
-            <div style={{marginTop:"8px",display:"flex",gap:"6px"}}>
-              {/* ⚠️ COMMITTING A RATE MUST ALSO CLEAR A MANUAL TARGET (S198s).
-                  data.calorieTarget WINS over the rate calculation, so setting a
-                  new rate while one is in force would change the plan's maths
-                  and nothing on screen — the ring would sit where it was and the
-                  tap would look broken. Choosing a rate here is an explicit
-                  choice to go back to the calculated number. */}
-              {onSetWeeklyRate && (
-                <button onClick={()=>{ onSetWeeklyRate(previewRate);
-                    if (manualTarget != null && onSetCalorieTarget) onSetCalorieTarget(0);
-                    // ⚠️ AND KEEP THE DAILY GOAL HONEST (S198u). Deficit /
-                    // Maintain / Surplus decides whether the word under the ring
-                    // reads green or red — it is "what counts as a good day",
-                    // not a calorie number. Choosing Maintain as your TARGET
-                    // while that still says Deficit would paint a perfect
-                    // maintenance day red. The two are separate settings and
-                    // stay separate; this only stops them contradicting.
-                    if (onSetCalorieGoal) onSetCalorieGoal(previewRate === 0 ? "maintain" : previewRate < 0 ? "surplus" : "deficit");
-                    setPreviewRate(null); }}
-                  style={{flex:2,padding:"8px",borderRadius:"8px",cursor:"pointer",border:"none",
-                    background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)",
-                    fontSize:".74rem",fontWeight:800}}>
-                  Make {rateName(SIM_RATES.find(r=>Math.abs(r.rate-previewRate)<0.01))} my target
-                </button>
-              )}
-              <button onClick={()=>setPreviewRate(null)}
-                style={{flex:1,padding:"8px",borderRadius:"8px",cursor:"pointer",
-                  border:"1px solid var(--border)",background:"var(--s2)",
-                  color:"var(--text-secondary)",fontSize:".72rem",fontWeight:700}}>
-                Cancel
-              </button>
-            </div>
-          )}
           {/* Try a combination before committing to it (S198z, Kevin). The grid
               above answers "what would this pace let me eat"; this answers the
               question underneath it — "what if I also trained, and what does
@@ -17302,21 +17344,9 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               exist. Say so loudly the moment such a rate is the one on screen,
               and point at the lever that does work. Same position the plan page
               has always taken; this is the first time the dashboard takes it. */}
-          {shownFloored ? (
-            <div style={{marginTop:"9px",padding:"10px 11px",borderRadius:"10px",
-              border:"1px solid var(--yellow)",background:"rgba(251,191,36,.10)"}}>
-              <div style={{fontSize:".76rem",fontWeight:800,color:"var(--yellow)",marginBottom:"3px"}}>
-                That rate would put you under 1,200 calories
-              </div>
-              <div style={{fontSize:".7rem",color:"var(--text-secondary)",lineHeight:1.5}}>
-                Too low to be healthy or sustainable, so we don’t go there — the number stays at
-                1,200. Eating less isn’t the lever here: <strong style={{color:"var(--text)"}}>burning more
-                is</strong>. Add movement — more workout days, longer sessions, more steps — and the
-                deficit comes from training while you still eat enough to keep muscle, energy, and
-                the habit.
-              </div>
-            </div>
-          ) : (
+          {/* The 1,200 notice that used to share this slot is in `always` now,
+              so it survives the fold. This half never needed to. */}
+          {!shownFloored && (
             /* ⚠️ NAME THE BASIS THE CHIPS ACTUALLY USED (S215). This said
                 "your body's daily burn of {tdee}" unconditionally, but the chips
                 are targetForRate — whose basis is the TRACKER's measured burn
@@ -17338,7 +17368,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               {" "}Targets are floored at {MIN_DAILY_CAL.toLocaleString()} cal/day for safety, and are estimates — individual needs vary.
             </div>
           )}
-        </div>
+        </FoldCard>
         );
       })()}
       {/* ── Measured burn (S199) ──────────────────────────────────────────────
@@ -18021,47 +18051,93 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           one tap to adopt. The editor stays where it is; it is still where a
           number that is nobody's recommendation gets typed. */}
       {onSetMacroTargets && macroPresets.length > 0 && planDayCal > 0 && (
-        <div className="card" style={{marginTop:"14px"}}>
-          <div className="sec-title" style={{marginBottom:"8px"}}>Macro Targets</div>
+        <FoldCard id="macro-targets" title="Macro Targets"
+          summary={
+            <span style={{display:"inline-flex",alignItems:"baseline",gap:"6px",flexWrap:"wrap",justifyContent:"flex-end"}}>
+              <span style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>
+                {previewMacros
+                  ? (macroPresets.find((o)=>o.key===previewMacros.key)||{}).label
+                  : planMacroKey ? (macroPresets.find((o)=>o.key===planMacroKey)||{}).label : "Set by hand"}
+              </span>
+              <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",
+                color: previewMacros ? "var(--yellow)" : "var(--accent)"}}>{shownP}/{shownC}/{shownF}</span>
+              <span style={{fontSize:".5rem",fontWeight:800,letterSpacing:".4px",
+                color: previewMacros ? "var(--yellow)" : "var(--accent)"}}>
+                {previewMacros ? "NOT SAVED YET" : "YOURS"}</span>
+            </span>
+          }
+          always={
+            <>
+            {previewMacros && (
+              <div style={{marginTop:"8px",display:"flex",gap:"6px"}}>
+                <button onClick={()=>{ onSetMacroTargets({ ...previewMacros.t }); setPreviewMacros(null); setEditMacros(false); }}
+                  style={{flex:2,padding:"8px",borderRadius:"8px",cursor:"pointer",border:"none",
+                    background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)",fontSize:".74rem",fontWeight:800}}>
+                  Make {(macroPresets.find((o)=>o.key===previewMacros.key)||{}).label} my macro targets
+                </button>
+                <button onClick={()=>setPreviewMacros(null)}
+                  style={{flex:1,padding:"8px",borderRadius:"8px",cursor:"pointer",border:"1px solid var(--border)",
+                    background:"var(--surface)",color:"var(--text-secondary)",fontSize:".72rem",fontWeight:700}}>
+                  Cancel
+                </button>
+              </div>
+            )}
+            {/* The honesty check. Shown for whatever split is CURRENTLY on screen —
+                a preview as well as the saved plan — because the point is to say
+                so before someone adopts it, not after. */}
+            {(() => {
+              const shown = previewMacros ? previewMacros.t : { protein: proteinTarget, carbs: carbsTarget, fat: fatTarget };
+              const chk = macroCalorieGap(shown.protein, shown.carbs, shown.fat, planDayCal);
+              if (!chk.off) return null;
+              const over = chk.gap > 0;
+              return (
+                <div style={{marginTop:"9px",padding:"9px 11px",borderRadius:"9px",
+                  border:"1px solid var(--yellow)",background:"rgba(251,191,36,.09)"}}>
+                  <div style={{fontSize:".72rem",fontWeight:800,color:"var(--yellow)",marginBottom:"3px"}}>
+                    These macros don&rsquo;t add up to your day
+                  </div>
+                  <div style={{fontSize:".7rem",color:"var(--text-secondary)",lineHeight:1.5}}>
+                    {shown.protein}p / {shown.carbs}c / {shown.fat}f comes to{" "}
+                    <strong style={{color:"var(--text)"}}>{chk.cals.toLocaleString()} cal</strong>, but your daily
+                    target is <strong style={{color:"var(--text)"}}>{target.toLocaleString()}</strong> —{" "}
+                    {Math.abs(chk.gap).toLocaleString()} {over ? "more" : "less"}. Eating to these macros means
+                    eating {over ? "above" : "below"} the number in the ring.
+                  </div>
+                </div>
+              );
+            })()}
+            </>
+          }>
           <div style={{fontSize:".68rem",color:"var(--muted)",marginBottom:"8px"}}>
             Grams of protein / carbs / fat a day. Tap one to see what it comes to — your plan doesn’t change until you say so.
           </div>
-          {/* Four across is ~80px a tile on a phone, which wraps "180/159/58"
-              mid-number. Two rows of two above three presets. */}
-          <div style={{display:"grid",gridTemplateColumns:macroPresets.length >= 4 ? "repeat(2,1fr)" : `repeat(${macroPresets.length},1fr)`,gap:"6px"}}>
+          {/* ⚠️ ONE PER ROW (S237b). Four across was ~80px a tile and wrapped
+              "180/159/58" mid-number; two across still could not fit the
+              sub-label. Inside a fold the height is spent only while choosing. */}
+          <div style={{display:"flex",flexDirection:"column",gap:"6px"}}>
             {macroPresets.map((o) => {
               const isPlan = planMacroKey === o.key;
               const isShown = previewMacros ? previewMacros.key === o.key : isPlan;
               return (
-                <button key={o.key}
+                <button key={o.key} aria-pressed={isShown}
                   onClick={()=>setPreviewMacros(previewMacros && previewMacros.key === o.key ? null : (isPlan ? null : { key:o.key, t:o.t }))}
-                  style={{padding:"8px 4px",borderRadius:"9px",textAlign:"center",cursor:"pointer",
+                  style={{display:"flex",alignItems:"center",gap:"8px",width:"100%",textAlign:"left",
+                    padding:"9px 11px",borderRadius:"9px",cursor:"pointer",fontFamily:"inherit",
                     background: isShown ? "rgba(var(--accent-rgb),.12)" : "var(--surface)",
                     border: isShown ? "1px solid var(--accent)" : "1px solid var(--border)"}}>
-                  <div style={{fontSize:".58rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>{o.label}</div>
-                  <div style={{fontFamily:"'Sora',sans-serif",fontSize:".95rem",color: isShown ? "var(--accent)" : "var(--text)"}}>
+                  <span style={{minWidth:0,flex:1}}>
+                    <span style={{display:"block",fontSize:".6rem",color:"var(--muted)",textTransform:"uppercase",letterSpacing:".4px"}}>{o.label}</span>
+                    <span style={{display:"block",fontSize:".54rem",color:"var(--muted)"}}>{o.sub}</span>
+                  </span>
+                  <span style={{fontFamily:"'Sora',sans-serif",fontSize:"1rem",color: isShown ? "var(--accent)" : "var(--text)"}}>
                     {o.t.protein}<span style={{opacity:.5}}>/</span>{o.t.carbs}<span style={{opacity:.5}}>/</span>{o.t.fat}
-                  </div>
-                  <div style={{fontSize:".5rem",color:"var(--muted)"}}>g P/C/F · {o.sub}</div>
-                  {isPlan && <div style={{fontSize:".5rem",color:"var(--accent)",fontWeight:800,marginTop:"1px"}}>YOURS</div>}
+                  </span>
+                  <span style={{fontSize:".52rem",color:"var(--muted)"}}>g P/C/F</span>
+                  {isPlan && <span style={{fontSize:".5rem",color:"var(--accent)",fontWeight:800}}>YOURS</span>}
                 </button>
               );
             })}
           </div>
-          {previewMacros && (
-            <div style={{marginTop:"8px",display:"flex",gap:"6px"}}>
-              <button onClick={()=>{ onSetMacroTargets({ ...previewMacros.t }); setPreviewMacros(null); setEditMacros(false); }}
-                style={{flex:2,padding:"8px",borderRadius:"8px",cursor:"pointer",border:"none",
-                  background:"var(--accent-fill,#08dce0)",color:"var(--color-primaryfg)",fontSize:".74rem",fontWeight:800}}>
-                Make {(macroPresets.find((o)=>o.key===previewMacros.key)||{}).label} my macro targets
-              </button>
-              <button onClick={()=>setPreviewMacros(null)}
-                style={{flex:1,padding:"8px",borderRadius:"8px",cursor:"pointer",border:"1px solid var(--border)",
-                  background:"var(--surface)",color:"var(--text-secondary)",fontSize:".72rem",fontWeight:700}}>
-                Cancel
-              </button>
-            </div>
-          )}
           {/* ⚠️ A BOUND THAT CHANGES THE ANSWER SAYS SO (S224) — the same rule the
               1,200 floor lives by, and it belongs HERE, on the card that shows the
               number, rather than four taps down beside the basis chips. Without it
@@ -18085,30 +18161,6 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               )}
             </div>
           )}
-          {/* The honesty check. Shown for whatever split is CURRENTLY on screen —
-              a preview as well as the saved plan — because the point is to say
-              so before someone adopts it, not after. */}
-          {(() => {
-            const shown = previewMacros ? previewMacros.t : { protein: proteinTarget, carbs: carbsTarget, fat: fatTarget };
-            const chk = macroCalorieGap(shown.protein, shown.carbs, shown.fat, planDayCal);
-            if (!chk.off) return null;
-            const over = chk.gap > 0;
-            return (
-              <div style={{marginTop:"9px",padding:"9px 11px",borderRadius:"9px",
-                border:"1px solid var(--yellow)",background:"rgba(251,191,36,.09)"}}>
-                <div style={{fontSize:".72rem",fontWeight:800,color:"var(--yellow)",marginBottom:"3px"}}>
-                  These macros don&rsquo;t add up to your day
-                </div>
-                <div style={{fontSize:".7rem",color:"var(--text-secondary)",lineHeight:1.5}}>
-                  {shown.protein}p / {shown.carbs}c / {shown.fat}f comes to{" "}
-                  <strong style={{color:"var(--text)"}}>{chk.cals.toLocaleString()} cal</strong>, but your daily
-                  target is <strong style={{color:"var(--text)"}}>{target.toLocaleString()}</strong> —{" "}
-                  {Math.abs(chk.gap).toLocaleString()} {over ? "more" : "less"}. Eating to these macros means
-                  eating {over ? "above" : "below"} the number in the ring.
-                </div>
-              </div>
-            );
-          })()}
           {macrosCustom && !planMacroKey && !previewMacros && (
             <div style={{marginTop:"7px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"8px",flexWrap:"wrap"}}>
               <span style={{fontSize:".68rem",color:"var(--text-secondary)"}}>
@@ -18131,7 +18183,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
             {previewMacros ? <span style={{color:"var(--yellow)",fontWeight:700}}> · not saved yet</span> : null}.
             {!previewMacros && " Want a number that isn’t here? Set any of the three by hand under Macros & Micros."}
           </div>
-        </div>
+        </FoldCard>
       )}
       {/* Discoverability (S104, Kevin: "I didn't see the weight projection").
           The projected weight loss lives in the sheet the ring opens — say so,
@@ -23954,7 +24006,15 @@ function savingsLbs(banked, rate) {
 // plan view) rather than per plan: it is a preference about a screen, not a fact
 // about a client, and writing it to Firestore would sync one person's tidiness
 // onto every trainer looking at them.
-function FoldCard({ id, title, summary, defaultOpen = false, children, style }) {
+// `always` (S237b) renders between the header and the fold and NEVER collapses.
+// ⚠️ IT EXISTS BECAUSE A DRAWER THAT CAN HIDE A WARNING IS WORSE THAN A CARD
+// THAT IS TOO LONG. The two target cards carry the 1,200-calorie notice, the
+// "these macros don't add up" notice and an unanswered preview's
+// Make-it-my-target / Cancel bar. The first two are disclosures about the number
+// in the header; the third is an action someone still has to answer, and folding
+// it away strands the ring on a figure with no way to keep or drop it.
+// Additive: the cards that pass nothing are unchanged.
+function FoldCard({ id, title, summary, defaultOpen = false, always, children, style }) {
   const key = `glidna-fold-${id}`;
   const [open, setOpen] = useState(() => {
     try { const v = localStorage.getItem(key); return v === null ? defaultOpen : v === "1"; }
@@ -23977,6 +24037,7 @@ function FoldCard({ id, title, summary, defaultOpen = false, children, style }) 
         )}
         <span style={{color:"var(--muted)",fontSize:".7rem",flex:"0 0 auto"}}>{open ? "▲" : "▼"}</span>
       </button>
+      {always}
       {open && <div style={{marginTop:"10px"}}>{children}</div>}
     </div>
   );

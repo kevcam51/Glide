@@ -517,9 +517,16 @@ const P = (over = {}) => ({ weightLbs: 180, ...over });
     ok("...and the caption says so rather than claiming more", /same protein/.test(tiles[1].sub), tiles[1].sub);
   }
 
-  // Four across is ~80px a tile on a phone; rendered at 375px to check.
-  ok("four tiles wrap to two rows rather than four columns",
-     /macroPresets\.length >= 4 \? "repeat\(2,1fr\)"/.test(APP_CODE));
+  // ⚠️ THE TWO-COLUMN GRID WENT IN S237b, AND SO DID THE PROBLEM IT SOLVED.
+  // Four across was ~80px a tile on a phone and wrapped "180/159/58"
+  // mid-number; two across still could not fit the sub-label beneath it. The
+  // presets live in a drawer now, where height is spent only while you are
+  // choosing, so each gets a full row. The claim worth pinning is that nothing
+  // puts them side by side again — measured at 375px, not assumed.
+  ok("the macro presets are one per row, never side by side",
+     /flexDirection:"column",gap:"6px"\}\}>\s*\{macroPresets\.map/.test(APP_CODE)
+     && !/macroPresets\.length >= 4 \? "repeat\(2,1fr\)"/.test(APP_CODE)
+     && !/gridTemplateColumns[^\n]*macroPresets/.test(APP_CODE));
 
   // ── the Muscle tab writes nothing ───────────────────────────────────────
   // ⚠️ THE SINGLE MOST IMPORTANT PROPERTY HERE. data.macroTargets is one gram

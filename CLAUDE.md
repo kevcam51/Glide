@@ -108,6 +108,70 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S237b (Sep 13): the two target cards fold.** Kevin, straight after the
+> search dropdown: "can we also make the daily calorie targets and macro targets
+> a drop down as well." Frontend only — no functions, no rules.
+> **58 suites, 4,386 assertions** (the drawer suite is 52 of them); build,
+> `check:undef`, `check:tdz` and `check:weak` clean.
+>
+> **MEASURED FIRST, IN A BROWSER AT 375×812: 512px + 321px = 833px of pick-list
+> on an 812px screen.** The two cards together were taller than the phone, so
+> the meal log, the week summary and the activity feed all sat behind two lists
+> most people set once and never touch. Folded they are **110px and 100px**.
+> Each header keeps the option you are ON — `−1 LB/WK · 2,569 · YOURS`,
+> `BODYWEIGHT · 154/308/80 · YOURS` — because a header reading only "Daily
+> Calorie Targets" costs a tap to answer the one question the card exists for.
+> The figure is **the one in the RING**, so a live preview shows there too, in
+> the preview's colour, badged NOT SAVED YET: a header still showing the saved
+> number while the ring had moved would make the tap that moved it look broken.
+>
+> ⚠️ **THEY USE S236's `FoldCard`. THE FIRST VERSION SHIPPED ITS OWN AND THAT
+> WAS THE MISTAKE.** A parallel session folded Measured Burn and Savings account
+> on this same screen hours earlier; this work was built from `7849b2d`, before
+> that landed, and grew a `DrawerHead` of its own — which would have put FOUR
+> foldable cards on one dashboard folding two different ways, the "two spellings
+> of one list" this repo keeps paying for. Rebased onto `cadb178`, `DrawerHead`
+> deleted, and FoldCard gained ONE additive prop instead. **Go by SHA.**
+> ⚠️ **THAT PROP IS `always`, AND IT IS THE WHOLE DESIGN.** A fold that can hide
+> a warning is worse than a card that is too long, so three things render
+> outside the fold: the **1,200-calorie notice** (the floor is a standard, and a
+> fold that could hide it is a silent clamp with extra steps), the **"these
+> macros don't add up to your day"** notice (S224, same rule), and an
+> **unanswered preview's Make-it-my-target / Cancel bar** — folding that away
+> strands the ring on a number with no way to keep or drop it. Verified in the
+> browser on a plan whose rates actually floor: notice visible with the card
+> shut, header yellow, and the confirm bar survives folding mid-preview.
+> ⚠️ **AND THE TESTS FOR IT WERE GREEN OVER BROKEN VERSIONS TWICE.** (1)
+> Checking that a bar sits OUTSIDE the `{open && …}` gate says nothing about its
+> own condition — gating it on the fold leaves it exactly where it was and hides
+> it anyway, and both confirm bars passed that mutation. The invariant is that
+> nothing in the always-half consults the fold at all. (2) The macro notice is
+> an IIFE, so its TEXT stayed present when its body was mutated to return null
+> every time; the calorie notice was caught because its `{shownFloored && (`
+> condition is pinned. The early-return is pinned now too.
+>
+> **Folded by default and remembered per device** (FoldCard's own
+> localStorage), like the two cards beside it. **A preview tap does NOT fold it
+> back** — comparing two paces would mean reopening between each one.
+> **One option per row**: three across was ~80px a tile and wrapped "2,819" away
+> from its pace; four across wrapped "180/159/58" mid-number. `aria-pressed`,
+> not `role="option"` — these toggle a preview, they are not a listbox, and a
+> role that lies is worse than none.
+> **Nothing about the arithmetic moved**; every number still comes from
+> `targetForRate` / `macroSplitTiles`, and committing still clears a manual
+> target and still keeps the daily-goal word honest.
+> ⚠️ **Traps:** a negative assertion on `rateBtn(t, true)` went red on
+> `CalorieSimulator`, which has its own `rateBtn` and its own full-width
+> Maintain tile — the repeat-occurrence trap pointing the other way, so it is
+> scoped to the card now; two older assertions pinned exact layout strings
+> (`repeat(2,1fr)`, the `wide` argument) and went red for a change that could
+> not have caused the problem they guarded, so both assert the property now; and
+> a slicer that found the end of a JSX opening tag with `indexOf(">")` landed on
+> the first `>` INSIDE an inline prop, so six assertions failed against correct
+> code — it counts brace depth now.
+> **NOT touched:** the read-only BMR/TDEE table on Full Plan → Summary, which
+> shares the name "Daily Calorie Targets" but is a static list, not a chooser._
+>
 > _**S237 (Sep 13): the roster search got its own dropdown.** Kevin: "for the
 > client plan search, can the search create its own dropdown and search for the
 > plan." Frontend only — no functions, no rules — so the push IS the release.

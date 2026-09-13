@@ -957,9 +957,15 @@ ok("the premium gate reaches it rather than defaulting open",
        && M.SIM_RATES.filter((t) => t.group === "loss").length === 3
        && M.SIM_RATES.filter((t) => t.group === "gain").length === 3);
     // The card must be READING it, not merely not-declaring its own.
+    // ⚠️ THE SECOND ARGUMENT WENT IN S237b AND THIS WENT RED FOR IT. `rateBtn(t,
+    // wide)` existed because Maintain was one full-width tile above two rows of
+    // three; the drawer makes every option full width, so there is nothing for
+    // `wide` to mean. The claim being made is that all three groups READ the
+    // shared table rather than declaring their own — pin that, not the argument
+    // list.
     ok("the Daily Calorie Targets card reads the shared table",
        /\{SIM_RATES\.filter\(\(t\)=>t\.group===g\)\.map\(\(t\)=>rateBtn\(t\)\)\}/.test(APP)
-       && /\{SIM_RATES\.filter\(\(t\)=>t\.group==="maintain"\)\.map\(\(t\)=>rateBtn\(t, true\)\)\}/.test(APP)
+       && /\{SIM_RATES\.filter\(\(t\)=>t\.group==="maintain"\)\.map\(\(t\)=>rateBtn\(t\)\)\}/.test(APP)
        && /rateName\(SIM_RATES\.find\(r=>Math\.abs\(r\.rate-previewRate\)<0\.01\)\)/.test(APP));
     // ⚠️ THE CARD FILTERS BY GROUP AND FINDS BY RATE, so only the order WITHIN
     // each group is load-bearing — pinned here because "SIM_RATES is already in
