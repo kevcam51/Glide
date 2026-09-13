@@ -108,6 +108,35 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S229c (Sep 13): FatSecret barcode is PLUMBED AND PARKED — do not re-test it
+> by hand.** The proxy VM serves /barcode and FatSecret answers, verbatim:
+> `{"gated":true,"why":"Missing scope: scope 'barcode'"}`. The account is not
+> entitled to their barcode method. **Kevin's call: the scanner is good enough as
+> it is, revisit later.** Nothing is broken — the app treats `gated` as "source
+> unavailable", latches it once per session and falls back to Open Food Facts +
+> USDA with no error. It will start working with NO deploy the day the scope is
+> enabled.
+> ⚠️ **THE FIX IS PROBABLY FREE, AND IT IS NOT AN UPGRADE.** FatSecret's own
+> editions page lists barcode lookup as INCLUDED in the free Basic plan we are
+> already on, which contradicts the refusal — so it reads as a permission to be
+> switched on for the app, not bought. Failing that, **Premier Free** is $0 for
+> companies under $1M revenue AND under $1M raised (Smooth Training qualifies).
+> Paid Premier is quote-only. See docs/FOOD-DB-OPTIONS.md, which had scoped this
+> before the work started.
+> ⚠️ **AND THE REAL FIX FOR THE REPORTED BUG WAS NOT FATSECRET.** Kevin's protein
+> bar failed because of UPC-E: small packages carry a compressed 8-digit barcode
+> and nothing expanded it. That shipped in S229 and he confirmed the scan works.
+> FatSecret was the third-source safety net, not the cure.
+> ⚠️ **THREE VM TRAPS, PAID FOR — read before touching that box again.** (1) It
+> rewrites /opt/proxy/server.js from a base64 payload inside its own
+> startup-script metadata on EVERY boot, so an scp-installed file (what
+> proxy/update.sh does) is silently reverted at the next reset; the metadata
+> payload is the real deployment. (2) `systemctl enable --now` does NOT restart a
+> running unit, so each update needed TWO reboots — fixed on the instance and in
+> deploy.sh. (3) Both proxy scripts hardcoded ZONE=us-central1-a; **the VM is in
+> us-west1-a**, so update.sh reported "run deploy.sh first" about a box that was
+> up and serving. It discovers the zone now._
+>
 > _**S229b (Sep 13): the activity-drift push, and a test helper that was eating
 > 60,000 characters of App.jsx.** Functions deployed BEFORE the push (41 in the
 > set — push.js is required widely). **3,818 assertions across 54 suites**
