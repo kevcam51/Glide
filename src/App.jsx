@@ -16140,6 +16140,20 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const [mtPct, setMtPct] = useState({ protein:"", carbs:"", fat:"" });       // percentage draft
   const [savAffOpen, setSavAffOpen] = useState(false);   // "what can I afford?" (S223)
   const [savSpend, setSavSpend] = useState("");          // a day's intake, typed
+  // ⚠️ LOCAL ONLY, AND NOTHING HERE IS LOGGED (S232). Kevin's question is "that
+  // burrito is 1,000 over — what does it cost me?", which needs real food rather
+  // than a number somebody guesses. This is the What if… bank sheet's move
+  // exactly: the REAL MealLog driven by local state, so the panel gets the food
+  // database, the barcode scanner, macros and the AI estimate for free and
+  // cannot drift from the logger — and writes not one byte.
+  const [savFoodsOpen, setSavFoodsOpen] = useState(false);
+  const [savFoods, setSavFoods] = useState([]);
+  const savFoodSeq = useRef(0);
+  const savFoodAdd = (m) => setSavFoods((xs) => [...xs, { ...m, id: `s${++savFoodSeq.current}` }]);
+  const savFoodAddMany = (list) => setSavFoods((xs) => [...xs,
+    ...(Array.isArray(list) ? list : []).map((m) => ({ ...m, id: `s${++savFoodSeq.current}` }))]);
+  const savFoodRemove = (id) => setSavFoods((xs) => xs.filter((x) => x.id !== id));
+  const savFoodEdit = (id, patch) => setSavFoods((xs) => xs.map((x) => (x.id === id ? { ...x, ...patch, id } : x)));
   // Try a macro split without committing to it (S198y, Kevin) — the same move
   // Daily Calorie Targets makes for calories. Holds { key, t:{protein,carbs,fat} }.
   const [previewMacros, setPreviewMacros] = useState(null);
@@ -16546,8 +16560,19 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
     const n = Math.round(Number(raw));
     return isFinite(n) && n >= 0 ? n : null;
   })();
+  // ⚠️ A TYPED DAY WINS OVER THE FOOD LIST, AND THE SCREEN SAYS SO — the rule the
+  // bank sheet settled in S220. Two sources for one number is how a screen starts
+  // disagreeing with itself, and silently adding them would double-count a day
+  // somebody entered twice.
+  // ⚠️ AND THE LIST IS THE WHOLE DAY, not an extra on top of one. The panel's own
+  // premise is "you can eat up to N on any day", so the food list has to mean the
+  // same thing the typed box means. A list that meant "as well as my usual" would
+  // make one burrito read as a 1,270-calorie SAVING.
+  const savFoodsCal = savFoods.reduce((n, m) => n + (Number(m.calories) || 0), 0);
+  const savSpendUsed = savSpendNum !== null ? savSpendNum
+    : (savFoods.length ? Math.round(savFoodsCal) : null);
   const savAff = savPh && savDayBurn > 0
-    ? savingsAfford(savDayBurn, savPh.banked, savPh.rate, savSpendNum === null ? savDayBurn : savSpendNum) : null;
+    ? savingsAfford(savDayBurn, savPh.banked, savPh.rate, savSpendUsed === null ? savDayBurn : savSpendUsed) : null;
   const savDate = (k) => { try { return new Date(k + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch { return k; } };
 
   // Macro targets. Default (estimates): protein 1g/lb bodyweight, fat 28% of
@@ -16560,6 +16585,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // ⚠️ THE DENOMINATOR IS LEAN MASS WHEN WE KNOW IT (S224) — see proteinPlan.
   // `protPlan.basis` and `.capped` are what the note under the card reports, so
   // a target the helper moved is never moved silently.
+  // The plan's own daily calorie number — day-independent, and now read by two
+  // things: the macro card, and the savings panel's "a usual day" seed.
   // ⚠️ MACROS ARE A PROPERTY OF THE PLAN, NOT OF THE DAY ON SCREEN (S231, and
   // this is S214's defect wearing a new coat). `target` follows the VIEWED DAY —
   // through dayIdx → burnShown, and through that day's log → wearableTdee — which
@@ -16573,8 +16600,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // an incomplete plan, which would silently zero the macro card for exactly the
   // people still filling it in — the S214 warning about tidying gates down. The
   // shared ladder is lenient and day-independent, which is what this needs.
-  const macroBasisCal = manualTarget != null ? manualTarget : planIntakeForRate(data, weeklyRateOf(data));
-  const protPlan = proteinPlan({ ...data, weightLbs }, macroBasisCal);
+  const planDayCal = manualTarget != null ? manualTarget : planIntakeForRate(data, weeklyRateOf(data));
+  const protPlan = proteinPlan({ ...data, weightLbs }, planDayCal);
   // ⚠️ SPEAK ONLY WHEN THE ANSWER MOVED. A lean client's lean-mass target is the
   // same number 1 g/lb already gave them — saying so on every visit is a
   // permanent paragraph explaining nothing. The rule the 1,200 floor states is
@@ -16583,19 +16610,19 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
     && Math.abs(protPlan.grams - Math.round(Number(weightLbs) * protPlan.perLb)) > 2;
   const proteinPerLb = protPlan.perLb;
   const autoProtein = protPlan.grams || 0;
-  const autoFat = autoFatG(macroBasisCal);
+  const autoFat = autoFatG(planDayCal);
   const proteinTarget = mt && mt.protein != null ? mt.protein : autoProtein;
   const fatTarget = mt && mt.fat != null ? mt.fat : autoFat;
   const carbsTarget = mt && mt.carbs != null ? mt.carbs
-    : Math.max(0, Math.round((macroBasisCal - proteinTarget * 4 - fatTarget * 9) / 4));
+    : Math.max(0, Math.round((planDayCal - proteinTarget * 4 - fatTarget * 9) / 4));
   const macrosCustom = !!mt;
 
   // ── Macro % helpers (S94) ──────────────────────────────────────────────────
   // A macro's share of the calorie target: grams → % (protein/carbs = 4 cal/g,
   // fat = 9 cal/g). Used both to DISPLAY the current split as % and to convert a
   // %-entered target back to grams. `target` is the daily calorie goal.
-  const gToPct = (g, calPerG) => (macroBasisCal > 0 ? Math.round((Number(g) * calPerG / macroBasisCal) * 100) : 0);
-  const pctToG = (p, calPerG) => (macroBasisCal > 0 ? Math.round((Number(p) / 100) * macroBasisCal / calPerG) : 0);
+  const gToPct = (g, calPerG) => (planDayCal > 0 ? Math.round((Number(g) * calPerG / planDayCal) * 100) : 0);
+  const pctToG = (p, calPerG) => (planDayCal > 0 ? Math.round((Number(p) / 100) * planDayCal / calPerG) : 0);
   // Current effective split, as whole percentages (what the plan is targeting now).
   const splitP = gToPct(proteinTarget, 4), splitC = gToPct(carbsTarget, 4), splitF = gToPct(fatTarget, 9);
   // ── The four splits (S224, Kevin: "we should have those four options you
@@ -16615,7 +16642,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // calories left over split between fat and carbs.
   // The table and the builder are module level (see macroSplitTiles) — the
   // Muscle tab asks the same question about its own lean-bulk calories.
-  const splitTiles = macroSplitTiles({ ...data, weightLbs }, macroBasisCal, MACRO_KEYS_PLAN);
+  const splitTiles = macroSplitTiles({ ...data, weightLbs }, planDayCal, MACRO_KEYS_PLAN);
   // The hand-entry editor types PERCENTAGES, so its shortcut chips convert the
   // same grams rather than carrying a second table — two tables is how the old
   // contradiction got in.
@@ -17537,6 +17564,54 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                           color:"var(--accent)",fontSize:".7rem",fontWeight:600,fontFamily:"inherit"}}>Clear</button>
                     )}
                   </div>
+                  {/* ── Price a real meal, not a guess (S232, Kevin) ──────────
+                      "That burrito is 1,000 over. At your rate that's about a
+                      third of a pound, and you've got 52,500 banked."
+                      ⚠️ THE REAL MealLog ON LOCAL STATE, which is what the What
+                      if… bank sheet does — so this gets the food database, the
+                      barcode scanner, macros and the AI estimate without a second
+                      picker to drift from the first. Recents/saved/meals and every
+                      day-stepping prop are DELIBERATELY not passed: each is read
+                      as `x || []` inside, so their absence hides those sections,
+                      and offering "log again" on a panel that logs nothing would
+                      promise a history it never writes. */}
+                  <button onClick={()=>setSavFoodsOpen(v=>!v)} aria-expanded={savFoodsOpen}
+                    style={{marginTop:"9px",width:"100%",textAlign:"left",padding:"8px 10px",borderRadius:"8px",
+                      border:"1px dashed var(--border)",background:"transparent",color:"var(--accent)",
+                      fontFamily:"inherit",fontSize:".72rem",fontWeight:700,cursor:"pointer"}}>
+                    {savFoodsOpen ? "▲ Hide the food" : "▾ Build that day from real food"}
+                    {!savFoodsOpen && savFoods.length > 0 && ` · ${savFoods.length} item${savFoods.length === 1 ? "" : "s"}, ${Math.round(savFoodsCal).toLocaleString()} (cal)`}
+                  </button>
+                  {savFoodsOpen && (
+                    <div style={{marginTop:"8px"}}>
+                      {/* ⚠️ THE LIST IS THE WHOLE DAY, AND ONE BURRITO IS NOT A DAY.
+                          Adding a 1,000 cal burrito to an empty list priced it as a
+                          1,376 SAVING — true for "my entire day is one burrito", and
+                          the opposite of the question being asked. Rather than add a
+                          second mode (two meanings for one number is the defect this
+                          panel already avoids), the usual day is one tap: seed it,
+                          then put the burrito on top and the answer is what the
+                          burrito actually costs. Found by driving the panel. */}
+                      {planDayCal > 0 && !savFoods.some((m) => m.id === "sday") && (
+                        <button onClick={()=>setSavFoods((xs)=>[{ id:"sday", name:"A usual day at your target", calories: planDayCal }, ...xs])}
+                          style={{width:"100%",marginBottom:"7px",padding:"7px 10px",borderRadius:"8px",
+                            border:"1px solid var(--border)",background:"var(--s2)",color:"var(--text-secondary)",
+                            fontFamily:"inherit",fontSize:".68rem",fontWeight:700,cursor:"pointer"}}>
+                          + Start from a usual day ({planDayCal.toLocaleString()} cal), then add to it
+                        </button>
+                      )}
+                      <MealLog meals={savFoods} onAddMeal={savFoodAdd} onAddMeals={savFoodAddMany}
+                        onRemoveMeal={savFoodRemove} onEditMeal={savFoodEdit} premium={premium}
+                        title="What that day looks like" hideLibrary hideMicros />
+                      <div style={{marginTop:"6px",fontSize:".64rem",color:"var(--muted)",lineHeight:1.45}}>
+                        Nothing here is logged &mdash; it only prices the day.
+                        {savSpendNum !== null && savFoods.length > 0 && (
+                          <> You typed <b>{savSpendNum.toLocaleString()}</b> above, so that is the number being
+                            used and this list is not counted. Clear it to price the food instead.</>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div style={{marginTop:"10px",paddingTop:"9px",borderTop:"1px solid var(--border)",
                     fontSize:".78rem",display:"flex",justifyContent:"space-between"}}>
                     <b>{savAff.effect >= 0 ? "Adds to your savings" : "Costs you"}</b>
@@ -17724,7 +17799,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           same three recommendations that editor already offers, shown as grams,
           one tap to adopt. The editor stays where it is; it is still where a
           number that is nobody's recommendation gets typed. */}
-      {onSetMacroTargets && macroPresets.length > 0 && macroBasisCal > 0 && (
+      {onSetMacroTargets && macroPresets.length > 0 && planDayCal > 0 && (
         <div className="card" style={{marginTop:"14px"}}>
           <div className="sec-title" style={{marginBottom:"8px"}}>Macro Targets</div>
           <div style={{fontSize:".68rem",color:"var(--muted)",marginBottom:"8px"}}>
@@ -17794,7 +17869,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               so before someone adopts it, not after. */}
           {(() => {
             const shown = previewMacros ? previewMacros.t : { protein: proteinTarget, carbs: carbsTarget, fat: fatTarget };
-            const chk = macroCalorieGap(shown.protein, shown.carbs, shown.fat, macroBasisCal);
+            const chk = macroCalorieGap(shown.protein, shown.carbs, shown.fat, planDayCal);
             if (!chk.off) return null;
             const over = chk.gap > 0;
             return (
@@ -17831,7 +17906,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           <div style={{fontSize:".62rem",color:"var(--muted)",marginTop:"7px",lineHeight:1.45}}>
             {previewMacros ? "That would be " : "Right now: "}
             <strong style={{color: previewMacros ? "var(--yellow)" : "var(--text-secondary)"}}>{shownP}g protein · {shownC}g carbs · {shownF}g fat</strong>
-            {" — "}{gToPct(shownP,4)}/{gToPct(shownC,4)}/{gToPct(shownF,9)}% of your {macroBasisCal.toLocaleString()} cal
+            {" — "}{gToPct(shownP,4)}/{gToPct(shownC,4)}/{gToPct(shownF,9)}% of your {planDayCal.toLocaleString()} cal
             {previewMacros ? <span style={{color:"var(--yellow)",fontWeight:700}}> · not saved yet</span> : null}.
             {!previewMacros && " Want a number that isn’t here? Set any of the three by hand under Macros & Micros."}
           </div>
@@ -18552,7 +18627,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           {previewMacros ? "preview — not saved yet" : macrosCustom ? "custom targets set by you" : "estimates from bodyweight & calorie goal"}
         </div>
         {/* Recommended/current split shown as % of calories (S94, part a). */}
-        {macroBasisCal > 0 && (shownP || shownC || shownF) > 0 && (
+        {planDayCal > 0 && (shownP || shownC || shownF) > 0 && (
           <div style={{fontSize:".65rem",color:"var(--muted)",marginTop:"3px",textAlign:"center"}}>
             Split: <span style={{color:"var(--pink)",fontWeight:700}}>{gToPct(shownP,4)}%</span> protein · <span style={{color:"var(--yellow)",fontWeight:700}}>{gToPct(shownC,4)}%</span> carbs · <span style={{color:"var(--blue)",fontWeight:700}}>{gToPct(shownF,9)}%</span> fat
           </div>
@@ -18661,7 +18736,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               )}
             </div>
             <div style={{fontSize:".62rem",color:"var(--muted)",fontStyle:"italic"}}>
-              Enter targets in grams or as a % of your {macroBasisCal}-cal goal (P/C = 4 cal/g, fat = 9 cal/g).
+              Enter targets in grams or as a % of your {planDayCal}-cal goal (P/C = 4 cal/g, fat = 9 cal/g).
               Saving locks them for this plan; "Reset to auto" returns to the bodyweight/calorie estimates.
             </div>
           </div>

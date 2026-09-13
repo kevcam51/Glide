@@ -16,9 +16,11 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { stripComments } from "./lib/strip-comments.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
+const codeOnly = stripComments;
 
 let fails = 0, checks = 0;
 const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n, x !== undefined ? JSON.stringify(x) : ""); } };
@@ -360,8 +362,10 @@ ok("the fixture prices a day at all", TDEE > 1200, TDEE);
   // panel falls back to the burn, which reads "costs nothing".
   ok("the empty-field parse returns null rather than zero",
      /const raw = String\(savSpend == null \? "" : savSpend\)\.trim\(\);\s*\n\s*if \(raw === ""\) return null;/.test(APP));
+  // S232 put a food list beside the typed box, so the fallback now reads through
+  // `savSpendUsed` — the one number both sources resolve into.
   ok("...and the panel falls back to the burn, which is break-even",
-     /savSpendNum === null \? savDayBurn : savSpendNum/.test(APP)
+     /savSpendUsed === null \? savDayBurn : savSpendUsed/.test(APP)
      && M.savingsAfford(2270, 16430, null, 2270).effect === 0);
 }
 
@@ -373,6 +377,76 @@ ok("the fixture prices a day at all", TDEE > 1200, TDEE);
   ok("a spending streak forecasts downward", M.savingsForecast(14000, -300, 7) === 11900);
   ok("zero days changes nothing", M.savingsForecast(14000, 500, 0) === 14000);
   ok("junk is answered, not thrown", M.savingsForecast(undefined, undefined, undefined) === 0);
+}
+
+// ── 13. pricing a REAL meal, not a typed guess (S232, Kevin) ─────────────
+// "That burrito is 1,000 over. At your rate that's about a third of a pound,
+//  and you've got 52,500 banked."
+{
+  const APP_CODE = codeOnly(APP);
+
+  // ⚠️ THE REAL MealLog ON LOCAL STATE — the What if… bank sheet's move, so the
+  // panel gets the food database, the barcode scanner, macros and the AI
+  // estimate without a second picker that can drift from the first. Rebuilding
+  // that search once already reintroduced a solved bug (no sequence guard).
+  const a = APP_CODE.indexOf("What can I afford");
+  const b = APP_CODE.indexOf("Keep this up and you", a);
+  ok("found the afford panel", a > 0 && b > a);
+  const PANEL = APP_CODE.slice(a, b);
+  ok("it renders the real meal logger", /<MealLog meals=\{savFoods\}/.test(PANEL));
+  ok("...driven by local handlers only",
+     /onAddMeal=\{savFoodAdd\} onAddMeals=\{savFoodAddMany\}/.test(PANEL)
+     && /onRemoveMeal=\{savFoodRemove\} onEditMeal=\{savFoodEdit\}/.test(PANEL));
+  // ⚠️ NOTHING HERE MAY REACH A WRITER. The panel prices a day; it does not log
+  // one, and a picker that looks like the logger must not quietly become it.
+  for (const bad of ["onLogFoods", "onLogMeal", "onSetPlanned", "onEatPlanned", "onWriteDay", "dateKey"])
+    ok(`the panel never passes ${bad}`, !new RegExp(bad).test(PANEL), bad);
+  ok("...and says so on screen", /Nothing here is logged/.test(PANEL));
+  // Recents/saved/meals are omitted so those sections hide — offering "log
+  // again" on a panel that logs nothing would promise a history it never writes.
+  ok("recents and saved are deliberately not passed",
+     !/recentFoods=/.test(PANEL) && !/savedFoods=/.test(PANEL) && !/savedMeals=/.test(PANEL));
+  ok("...and the library is hidden outright", /hideLibrary/.test(PANEL));
+
+  // ⚠️ ONE MEANING FOR ONE NUMBER. A typed day wins over the food list and the
+  // screen says so; silently adding them would double-count a day entered twice.
+  ok("a typed day wins over the list",
+     /const savSpendUsed = savSpendNum !== null \? savSpendNum\s*\n\s*: \(savFoods\.length \? Math\.round\(savFoodsCal\) : null\);/.test(APP_CODE));
+  ok("...and the panel says which one it used",
+     /so that is the number being\s*\n?\s*used and this list is not counted/.test(PANEL));
+  ok("an empty list still falls back to the burn, which is break-even",
+     /savSpendUsed === null \? savDayBurn : savSpendUsed/.test(APP_CODE));
+
+  // ⚠️ THE LIST IS THE WHOLE DAY, AND ONE BURRITO IS NOT A DAY. Priced against an
+  // empty list, a 1,000 cal burrito reads as a 1,376 SAVING — true for "my entire
+  // day is one burrito" and the opposite of the question. One tap seeds the usual
+  // day instead of adding a second mode.
+  ok("a usual day is one tap", /\+ Start from a usual day \(\{planDayCal\.toLocaleString\(\)\} cal\), then add to it/.test(PANEL));
+  // ⚠️ THE VALUE, NOT JUST THE LABEL. Pinning only the caption let a mutation
+  // swap the seeded calories for the viewed day's target while the button went on
+  // advertising the plan's — the same label-vs-number split this codebase has now
+  // shipped six of, one assertion away from being the seventh.
+  ok("...and the number it seeds is the one the button names",
+     /name:"A usual day at your target", calories: planDayCal \}/.test(PANEL));
+  ok("...gated on there being one to seed", /\{planDayCal > 0 && !savFoods\.some/.test(PANEL));
+  ok("...seeded from the plan's own day, not the viewed one",
+     /const planDayCal = manualTarget != null \? manualTarget : planIntakeForRate\(data, weeklyRateOf\(data\)\);/.test(APP_CODE));
+  ok("...and it cannot be added twice", /!savFoods\.some\(\(m\) => m\.id === "sday"\)/.test(PANEL));
+
+  // The arithmetic the screen showed, run rather than asserted. Burn 2,376,
+  // balance 13,520, a usual day at 1,876 plus a 1,000 cal burrito.
+  {
+    const seeded = M.savingsAfford(2376, 13520, null, 1876 + 1000);
+    ok("a usual day plus a burrito costs the overshoot, not the burrito",
+       seeded.effect === -500, seeded.effect);
+    ok("...priced at the standard rate when none is measured",
+       Math.abs(seeded.lbs) === 0.14 && seeded.per === M.CAL_PER_LB, seeded);
+    ok("...leaving the rest banked", seeded.after === 13020, seeded.after);
+    // (control) the un-seeded version really does read as a saving, which is the
+    // whole reason the seed exists.
+    const bare = M.savingsAfford(2376, 13520, null, 1000);
+    ok("(control) a day of only a burrito reads as a saving", bare.effect === 1376, bare.effect);
+  }
 }
 
 console.log(`\n  ${checks - fails}/${checks} checks passed`);

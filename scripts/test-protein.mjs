@@ -537,7 +537,7 @@ const P = (over = {}) => ({ weightLbs: 180, ...over });
   for (const [who, re] of [
     ["the share card", /const fatG = mtS\.fat != null \? Number\(mtS\.fat\) : autoFatG\(targetCals\);/],
     ["the Nutrients tab", /const fatG   = mtN\.fat != null \? Number\(mtN\.fat\) : autoFatG\(targetCals\);/],
-    ["the dashboard", /const autoFat = autoFatG\(macroBasisCal\);/],
+    ["the dashboard", /const autoFat = autoFatG\(planDayCal\);/],
   ]) ok(`${who} calls the helper`, re.test(APP_CODE));
 
   // ⚠️ THE ANCHOR TILE AND THE PLAN'S OWN TARGET MUST BE THE SAME NUMBER, or the
@@ -608,25 +608,25 @@ const P = (over = {}) => ({ weightLbs: 180, ...over });
 
   // Every macro on that card now divides out of ONE day-independent number.
   ok("the basis is the shared ladder, not the viewed day",
-     /const macroBasisCal = manualTarget != null \? manualTarget : planIntakeForRate\(data, weeklyRateOf\(data\)\);/.test(APP_CODE));
+     /const planDayCal = manualTarget != null \? manualTarget : planIntakeForRate\(data, weeklyRateOf\(data\)\);/.test(APP_CODE));
   for (const [who, re] of [
-    ["protein", /const protPlan = proteinPlan\(\{ \.\.\.data, weightLbs \}, macroBasisCal\);/],
-    ["fat", /const autoFat = autoFatG\(macroBasisCal\);/],
-    ["carbs", /Math\.max\(0, Math\.round\(\(macroBasisCal - proteinTarget \* 4 - fatTarget \* 9\) \/ 4\)\)/],
-    ["the tiles that get saved", /macroSplitTiles\(\{ \.\.\.data, weightLbs \}, macroBasisCal, MACRO_KEYS_PLAN\)/],
-    ["the percent helpers", /const gToPct = \(g, calPerG\) => \(macroBasisCal > 0/],
-    ["the honesty check", /macroCalorieGap\(shown\.protein, shown\.carbs, shown\.fat, macroBasisCal\)/],
+    ["protein", /const protPlan = proteinPlan\(\{ \.\.\.data, weightLbs \}, planDayCal\);/],
+    ["fat", /const autoFat = autoFatG\(planDayCal\);/],
+    ["carbs", /Math\.max\(0, Math\.round\(\(planDayCal - proteinTarget \* 4 - fatTarget \* 9\) \/ 4\)\)/],
+    ["the tiles that get saved", /macroSplitTiles\(\{ \.\.\.data, weightLbs \}, planDayCal, MACRO_KEYS_PLAN\)/],
+    ["the percent helpers", /const gToPct = \(g, calPerG\) => \(planDayCal > 0/],
+    ["the honesty check", /macroCalorieGap\(shown\.protein, shown\.carbs, shown\.fat, planDayCal\)/],
   ]) ok(`${who} uses the plan basis`, re.test(APP_CODE));
   // ⚠️ AND THE LABELS QUOTE THE SAME NUMBER. A card that divides by one figure
   // and prints another is the caption bug this arc has already shipped three of.
   ok("the split label quotes the basis it divided by",
-     /% of your \{macroBasisCal\.toLocaleString\(\)\} cal/.test(APP_CODE));
-  ok("...and so does the editor's hint", /% of your \{macroBasisCal\}-cal goal/.test(APP_CODE));
+     /% of your \{planDayCal\.toLocaleString\(\)\} cal/.test(APP_CODE));
+  ok("...and so does the editor's hint", /% of your \{planDayCal\}-cal goal/.test(APP_CODE));
   // ⚠️ NOT computeClientCalories: it gates on gender/bmr and returns null for an
   // incomplete plan, which would zero the macro card for the people still
   // filling it in. planIntakeForRate is the lenient, day-independent ladder.
   ok("the basis does not gate on a complete profile",
-     !/const macroBasisCal = [^\n]*computeClientCalories/.test(APP_CODE));
+     !/const planDayCal = [^\n]*computeClientCalories/.test(APP_CODE));
 }
 
 // ── 14. the calendar was the seventh reader (S231) ────────────────────────

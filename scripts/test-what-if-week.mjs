@@ -410,13 +410,21 @@ ok("the two plan-backed mounts pass the client's own history",
   ok("...and the Library button is gated on the opt-out, not removed",
      /\{!hideLibrary && \(/.test(MEAL) && /Icon name="book"/.test(MEAL));
   // Negative control: the real meal log must NOT be opting out.
-  // ⚠️ TWO, NOT ONE, SINCE S220 — the budget panel and the bank page, which are
-  // the same sandbox asking two questions. Every mount OUTSIDE this sheet must
-  // still be absent from the list, which is what this count is really guarding.
+  // ⚠️ THREE SINCE S232, AND THE THIRD IS OUTSIDE THIS SHEET. Two are the budget
+  // panel and the bank page — the same sandbox asking two questions. The third is
+  // the savings card's "What can I afford?", which lives on the real dashboard
+  // but shares the property that earns the opt-out: it prices a day and writes
+  // nothing, so a drawer onto logging history would promise a write it never
+  // makes. This count is guarding the rule, not the number — a FOURTH mount is a
+  // question to answer, not a total to bump.
   const realMounts = (APP.match(/<MealLog [^>]*hideLibrary/g) || []);
-  ok("(control) only this sheet opts out of the library", realMounts.length === 2, realMounts.length);
-  ok("...and both of them are inside the simulator",
+  ok("(control) only the sheets that write nothing opt out of the library",
+     realMounts.length === 3, realMounts.length);
+  ok("...two of them inside the simulator",
      (SIM_CODE.match(/<MealLog [^>]*hideLibrary/g) || []).length === 2);
+  ok("...and the third is the savings panel, which also logs nothing",
+     /<MealLog meals=\{savFoods\}[^>]*hideLibrary/.test(APP)
+     && /Nothing here is logged/.test(APP));
 }
 ok("the budget names itself rather than claiming to be today",
    /title=\{standalone \? "What they eat in a day"/.test(SIM_CODE) && /hideLibrary \/>/.test(SIM_CODE));
