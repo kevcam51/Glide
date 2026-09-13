@@ -16511,20 +16511,50 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const pctToG = (p, calPerG) => (target > 0 ? Math.round((Number(p) / 100) * target / calPerG) : 0);
   // Current effective split, as whole percentages (what the plan is targeting now).
   const splitP = gToPct(proteinTarget, 4), splitC = gToPct(carbsTarget, 4), splitF = gToPct(fatTarget, 9);
-  // Three recommended splits the user can lead with (Kevin's call: offer all,
-  // lead with bodyweight). Each returns {protein,carbs,fat} percentages summing ~100.
+  // ── The four splits (S224, Kevin: "we should have those four options you
+  // suggested, and then the protein can be different for some of the other ones
+  // that are not high protein based") ──────────────────────────────────────────
+  //
+  // ⚠️ THE PRESETS USED TO SET PROTEIN AS A PERCENTAGE, AND THAT FOUGHT THE
+  // DEFAULT. A 180 lb client on 2,200 cal was offered 33% protein by their plan
+  // and 40% by the "Cutting" tile beside it — same app, same client, two
+  // answers. Worse, percentage protein runs BACKWARDS in a deficit: fewer
+  // calories means fewer protein grams, exactly when every deficit-specific
+  // source says raise them. Verified on a real render before this changed: a
+  // 260 lb plan targeting 199 g sat next to a Cutting tile offering 244 g.
+  //
+  // So protein is GRAMS in all four, built by the one helper. What a preset
+  // chooses is how much protein it wants RELATIVE to that basis, and how the
+  // calories left over split between fat and carbs.
+  // ⚠️ AND EVERY PRESET IS RE-CLAMPED. `autoProtein` is already inside the
+  // ceiling; multiplying it by 1.15 would step straight back over.
+  const MACRO_SPLITS = [
+    { key: "bodyweight", label: "Bodyweight", pMul: 1.00, fatPct: 0.28 },
+    // Above the basis on purpose: Helms 2014 and the 2025 Refalo update put a
+    // lean client cutting at 2.3–3.1 g/kg, which is 1.05–1.4 g/lb.
+    // ⚠️ THE SECOND CLAUSE IS STRUCTURAL, THE FIRST IS MEASURED. Fat share is
+    // fixed against the bodyweight tile's 28%, so "less fat"/"more fat" are true
+    // by construction; and bulking takes both the lowest protein and the lowest
+    // fat, so it always has the most carbs. Protein is the one that can come out
+    // level — the ceiling clamps Cutting onto Bodyweight for a heavy client — so
+    // that half is read off the numbers rather than asserted.
+    { key: "cutting",    label: "Cutting",    pMul: 1.15, fatPct: 0.25, tail: "less fat" },
+    { key: "balanced",   label: "Balanced",   pMul: 0.85, fatPct: 0.30, tail: "more fat" },
+    { key: "bulking",    label: "Bulking",    pMul: 0.80, fatPct: 0.22, tail: "most carbs" },
+  ];
+  const splitGrams = (o) => {
+    const ceilG = target > 0 ? Math.floor((target * PROTEIN_MAX_PCT) / 4) : Infinity;
+    const protein = Math.min(Math.round(autoProtein * o.pMul), ceilG);
+    const fat = Math.round((target * o.fatPct) / 9);
+    return { protein, fat, carbs: Math.max(0, Math.round((target - protein * 4 - fat * 9) / 4)) };
+  };
+  // The hand-entry editor types PERCENTAGES, so its shortcut chips convert the
+  // same grams rather than carrying a second table — two tables is how the old
+  // contradiction got in.
   const recPct = (kind) => {
-    if (kind === "balanced") return { protein: 30, carbs: 40, fat: 30 };
-    if (kind === "goal") {
-      // Cut / maintain / bulk from the goal direction (goalWeight vs current).
-      const gw = Number(goalWeight), cw = Number(weightLbs);
-      if (gw && cw && gw < cw - 0.5) return { protein: 40, carbs: 35, fat: 25 }; // cut: protein-forward
-      if (gw && cw && gw > cw + 0.5) return { protein: 30, carbs: 45, fat: 25 }; // bulk: carb-forward
-      return { protein: 30, carbs: 40, fat: 30 };                               // maintain
-    }
-    // "bodyweight" (default/lead): the app's existing auto targets, expressed as %.
-    return { protein: gToPct(autoProtein, 4), carbs: gToPct(
-      Math.max(0, Math.round((target - autoProtein * 4 - autoFat * 9) / 4)), 4), fat: gToPct(autoFat, 9) };
+    const o = MACRO_SPLITS.find((x) => x.key === kind) || MACRO_SPLITS[0];
+    const g = splitGrams(o);
+    return { protein: gToPct(g.protein, 4), carbs: gToPct(g.carbs, 4), fat: gToPct(g.fat, 9) };
   };
   // Live gram preview of the % draft (for the conversion labels under the % inputs).
   const pctDraftG = {
@@ -16541,23 +16571,21 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // one is a PREVIEW: nothing is written until the confirm button, and the
   // macro bars (further down the same page) follow the preview while it is up.
   const macroPresets = (() => {
-    const fromPct = (r) => ({ protein: pctToG(r.protein, 4), carbs: pctToG(r.carbs, 4), fat: pctToG(r.fat, 9) });
-    const autoCarbs = Math.max(0, Math.round((target - autoProtein * 4 - autoFat * 9) / 4));
-    const gw = Number(goalWeight), cw = Number(weightLbs);
-    const goalLbl = gw && cw && gw < cw - 0.5 ? "Cutting" : gw && cw && gw > cw + 0.5 ? "Bulking" : "Maintaining";
-    const list = [
-      // ⚠️ THE LABEL HAS TO DESCRIBE THE NUMBER BESIDE IT (S224). It read
-      // "1 g/lb protein" while the tile showed 199 g for a 260 lb client — the
-      // lean-mass denominator and the ceiling had both moved it and the caption
-      // went on quoting the old rule. Found by rendering it, not by a test.
-      { key: "bodyweight", label: "Bodyweight",
-        sub: !protMoved ? `${proteinPerLb} g/lb protein`
+    // ⚠️ EVERY CAPTION DESCRIBES THE NUMBER BESIDE IT (S224), because twice now
+    // one did not: the bodyweight tile read "1 g/lb protein" while showing 199 g
+    // for a 260 lb client, and Cutting read "more protein" on a 320 lb plan where
+    // the ceiling had levelled it with Bodyweight. Both found by rendering it.
+    const baseT = splitGrams(MACRO_SPLITS[0]);
+    const list = MACRO_SPLITS.map((o) => {
+      const t = splitGrams(o);
+      const pWord = t.protein > baseT.protein ? "more protein"
+                  : t.protein < baseT.protein ? "less protein" : "same protein";
+      return { key: o.key, label: o.label, t,
+        sub: o.tail ? `${pWord}, ${o.tail}`
+           : !protMoved ? `${proteinPerLb} g/lb protein`
            : protPlan.capped ? `protein held at ${Math.round(PROTEIN_MAX_PCT * 100)}% of cal`
-           : "protein from lean mass",
-        t: { protein: autoProtein, carbs: autoCarbs, fat: autoFat } },
-      { key: "balanced", label: "Balanced", sub: "30 / 40 / 30", t: fromPct(recPct("balanced")) },
-      { key: "goal", label: goalLbl, sub: "from your goal", t: fromPct(recPct("goal")) },
-    ];
+           : "protein from lean mass" };
+    });
     // Two buttons with identical numbers is noise, not choice — when the
     // goal-based split lands on the balanced one (i.e. maintaining), drop it.
     const seen = new Set();
@@ -17637,7 +17665,9 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           <div style={{fontSize:".68rem",color:"var(--muted)",marginBottom:"8px"}}>
             Grams of protein / carbs / fat a day. Tap one to see what it comes to — your plan doesn’t change until you say so.
           </div>
-          <div style={{display:"grid",gridTemplateColumns:`repeat(${macroPresets.length},1fr)`,gap:"6px"}}>
+          {/* Four across is ~80px a tile on a phone, which wraps "180/159/58"
+              mid-number. Two rows of two above three presets. */}
+          <div style={{display:"grid",gridTemplateColumns:macroPresets.length >= 4 ? "repeat(2,1fr)" : `repeat(${macroPresets.length},1fr)`,gap:"6px"}}>
             {macroPresets.map((o) => {
               const isPlan = planMacroKey === o.key;
               const isShown = previewMacros ? previewMacros.key === o.key : isPlan;
@@ -18507,10 +18537,12 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               </div>
             ) : (
               <>
-                {/* Recommended split presets (lead with bodyweight, then balanced + goal). */}
+                {/* ⚠️ THE SAME FOUR, FROM THE SAME TABLE. These chips used to carry
+                    their own list of kinds, which is how "Goal-based" outlived the
+                    goal-derived preset the card dropped. */}
                 <div style={{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap"}}>
                   <span style={{fontSize:".66rem",color:"var(--muted)"}}>Recommended:</span>
-                  {[["bodyweight","Bodyweight"],["balanced","Balanced"],["goal","Goal-based"]].map(([kind,lbl])=>(
+                  {MACRO_SPLITS.map(({key:kind,label:lbl})=>(
                     <button key={kind} onClick={()=>{ const r=recPct(kind); setMtPct({ protein:String(r.protein), carbs:String(r.carbs), fat:String(r.fat) }); }}
                       style={{padding:"4px 10px",fontSize:".68rem",fontWeight:700,borderRadius:"999px",cursor:"pointer",border:"1px solid var(--border)",background:"transparent",color:"var(--accent)"}}>{lbl}</button>
                   ))}
