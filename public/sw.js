@@ -209,9 +209,16 @@ self.addEventListener("fetch", (e) => {
         // the next host, not a bug in this one.
         const htmlForCode = res && /\.(?:js|css)$/.test(url.pathname)
           && /text\/html/i.test(res.headers.get("content-type") || "");
+        // ⚠️ AND A no-store ANSWER IS NEVER CACHED UNDER A HASHED NAME (S235).
+        // /api/entry serves the CURRENT bundle when a dead chunk name is asked
+        // for, so a stuck device boots instead of going blank — but storing that
+        // under the dead hash would make the name permanent and wrong, which is
+        // the opposite of what content hashing promises. It is a one-boot rescue,
+        // not a second copy of the app.
+        const noStore = res && /no-store/i.test(res.headers.get("cache-control") || "");
         if (htmlForCode) {
           caches.open(SHELL).then((c) => c.delete("/")).catch(() => {});
-        } else if (res && res.ok) {
+        } else if (res && res.ok && !noStore) {
           const copy = res.clone();
           caches.open(ASSETS).then((c) => c.put(req, copy)).then(trimAssets).catch(() => {});
         } else if (res && res.status === 404) {

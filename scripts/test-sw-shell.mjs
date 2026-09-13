@@ -141,6 +141,9 @@ const SRC = liftHelpers(SW);
      SW.indexOf("shellIsBootable(cached)") < SW.indexOf("Promise.race([network"));
   ok("a 404 on a hashed asset drops the shell",
      /res\.status === 404[\s\S]{0,400}caches\.open\(SHELL\)\.then\(\(c\) => c\.delete\("\/"\)\)/.test(SW));
+  ok("a no-store answer is never cached under a hashed name",
+     /const noStore = res && \/no-store\/i\.test\(res\.headers\.get\("cache-control"\) \|\| ""\);/.test(SW)
+     && /res && res\.ok && !noStore/.test(SW));
   ok("an HTML answer for a .js request is never cached as code",
      /const htmlForCode = res && \/\\\.\(\?:js\|css\)\$\/\.test\(url\.pathname\)/.test(SW)
      && /text\\\/html/.test(SW));
@@ -201,6 +204,91 @@ const SRC = liftHelpers(SW);
     ok("(mutation) an empty document would pass as bootable",
        (await M.shellIsBootable(res("<!doctype html><p>hi"))) === true);
   }
+}
+
+// ── 6. the server-side half: a dead chunk name still boots (S235) ─────────
+{
+  const { default: handler, pickAsset } = await import(join(ROOT, "api", "entry.js"));
+
+  ok("it finds the current script in real index.html",
+     pickAsset(HTML.replace("/src/main.jsx", "/assets/index-LIVE.js"), false) === "/assets/index-LIVE.js");
+  ok("...and the current stylesheet when asked for css",
+     pickAsset('<link rel="stylesheet" href="/assets/index-LIVE.css">', true) === "/assets/index-LIVE.css");
+  ok("...and answers null rather than throwing on junk",
+     pickAsset("", false) === null && pickAsset(null, true) === null);
+
+  // A fake request/response pair plus a stubbed fetch, so the handler runs.
+  const run = async (url, routes) => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (u) => {
+      const path = new URL(u).pathname;
+      const r = routes[path];
+      if (!r) return { ok: false, status: 404, async text() { return ""; } };
+      return { ok: true, status: 200, async text() { return r; } };
+    };
+    const out = { headers: {}, code: 0, body: "" };
+    const res = {
+      setHeader(k, v) { out.headers[k.toLowerCase()] = v; },
+      status(c) { out.code = c; return res; },
+      send(b) { out.body = b; return res; },
+    };
+    try { await handler({ url, headers: { host: "glidna.com" } }, res); }
+    finally { globalThis.fetch = realFetch; }
+    return out;
+  };
+
+  const LIVE_HTML = '<script type="module" src="/assets/index-LIVE.js"></script><link href="/assets/index-LIVE.css">';
+  {
+    const r = await run("/assets/index-DEAD.js", { "/": LIVE_HTML, "/assets/index-LIVE.js": "console.log(1)" });
+    // ⚠️ THE WHOLE POINT: a name that would 404 answers with working code.
+    ok("a dead chunk name serves the current entry", r.code === 200 && r.body === "console.log(1)", r.code);
+    ok("...as JavaScript", /application\/javascript/.test(r.headers["content-type"] || ""));
+    // ⚠️ NEVER CACHED. A hashed URL promises immutable content; parking the live
+    // bundle under a dead hash would make that promise false for everyone after.
+    ok("...and never cached under the dead name", r.headers["cache-control"] === "no-store");
+    ok("...naming what it substituted, so this is visible in a response header",
+       r.headers["x-glidna-fallback"] === "/assets/index-LIVE.js");
+  }
+  {
+    const r = await run("/assets/index-DEAD.css?css=1", { "/": LIVE_HTML, "/assets/index-LIVE.css": "body{}" });
+    ok("a dead stylesheet name serves the current one", r.code === 200 && r.body === "body{}");
+    ok("...as CSS", /text\/css/.test(r.headers["content-type"] || ""));
+  }
+  {
+    // ⚠️ THE RECURSION GUARD. The rewrite catches anything the filesystem missed,
+    // so fetching the name we were ASKED for would come straight back here — a
+    // function calling itself until the platform kills it.
+    const r = await run("/assets/index-LIVE.js", { "/": LIVE_HTML });
+    ok("it refuses to fetch the very name it was asked for", r.code === 404, r.code);
+    ok("...and says why", /itself missing/.test(r.body));
+  }
+  {
+    const r = await run("/assets/index-DEAD.js", { "/": "<p>no assets here</p>" });
+    ok("no entry in the HTML is a 404, not a crash", r.code === 404 && /no current entry/.test(r.body));
+  }
+  {
+    const r = await run("/assets/index-DEAD.js", { "/": LIVE_HTML });   // upstream chunk missing
+    ok("an upstream miss is a 404, not a crash", r.code === 404 && /upstream/.test(r.body));
+  }
+  {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error("network down"); };
+    const out = { code: 0, body: "", headers: {} };
+    const res = { setHeader(k, v) { out.headers[k.toLowerCase()] = v; }, status(c) { out.code = c; return res; }, send(b) { out.body = b; return res; } };
+    await handler({ url: "/assets/index-DEAD.js", headers: { host: "glidna.com" } }, res);
+    globalThis.fetch = realFetch;
+    ok("a thrown fetch is answered, not propagated", out.code === 404 && /lookup failed/.test(out.body));
+  }
+
+  // ⚠️ THE REWRITE MUST SIT WHERE THE FILESYSTEM STILL WINS. Vercel checks static
+  // files before rewrites, so a LIVE chunk never reaches the function — that is
+  // the only reason this is safe to leave on permanently.
+  const VERCEL = JSON.parse(readFileSync(join(ROOT, "vercel.json"), "utf8"));
+  const srcs = VERCEL.rewrites.map((r) => r.source);
+  ok("the js fallback is wired", srcs.includes("/assets/index-:hash.js"));
+  ok("the css fallback is wired", srcs.includes("/assets/index-:hash.css"));
+  ok("...and nothing rewrites the whole asset directory",
+     !srcs.some((s) => s === "/assets/:path*" || s === "/assets/(.*)"), srcs.filter((s) => s.startsWith("/assets")));
 }
 
 console.log(`\n  ${checks - fails}/${checks} checks passed`);
