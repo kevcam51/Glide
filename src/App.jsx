@@ -4635,7 +4635,10 @@ function SimplePlanView({ data, tdee, hasGoal, totalBurn, totalStrBurn, workoutD
     : goalMode === "build" ? atLeastMinCal(tdee + 250 + weeklyBurn / 7)   // lean surplus + fuel the training
     : goalMode === "health" ? atLeastMinCal(tdee + weeklyBurn / 7)        // maintenance: eat what you burn
     : atLeastMinCal(rawDeficit);
-  const protein = Math.round(Number(data.macroTargets?.protein) || w) || null;
+  // ⚠️ THIS READ A BARE BODYWEIGHT (S224) — the basis chip, the lean-mass
+  // denominator and the ceiling all bypassed, on the one screen written for
+  // beginners. One helper now answers for every screen.
+  const protein = (Number(data.macroTargets?.protein) || autoProteinG(data, target)) || null;
   const cups = w ? Math.round((w * 0.5) / 8) : null;
   const lbsToGo = hasGoal ? Math.round((w - goal) * 10) / 10 : null;
   const lbsToGain = goal && goal > w ? Math.round((goal - w) * 10) / 10 : null;
@@ -5847,6 +5850,7 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
       {/* ─ Muscle Building ─ */}
       {tab === (hasGoal ? 5 : 4) && (
         <MuscleTab
+          data={data}
           tdee={tdee}
           totalBurn={totalBurn}
           avgBurnPerDay={avgBurnPerDay}
@@ -6009,7 +6013,7 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
   const targetCals = eatback ? targetEat : targetAcc;
   const calTxt = (v) => (v > 0 ? v.toLocaleString() : "—");
   const mtS = data.macroTargets || {};
-  const proteinG = mtS.protein != null ? Number(mtS.protein) : Math.round(Number(weightLbs) * proteinBasisOf(data));
+  const proteinG = mtS.protein != null ? Number(mtS.protein) : autoProteinG(data, targetCals);
   const fatG = mtS.fat != null ? Number(mtS.fat) : Math.round(Math.round(targetCals * 0.28) / 9);
   const fatCal = fatG * 9;
   const carbG = mtS.carbs != null ? Number(mtS.carbs)
@@ -6352,7 +6356,7 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
           {/* Long-term projections */}
           <div className="sec-title">Projected Results Over Time</div>
           <p style={{fontSize:".76rem",color:"var(--muted)",marginBottom:"10px",lineHeight:1.5}}>
-            Based on {activeStrDays}×/week training. Muscle gain assumes adequate protein (0.8g/lb) and progressive overload. Body fat reduction assumes a maintained calorie deficit alongside training.
+            Based on {activeStrDays}×/week training. Muscle gain assumes adequate protein and progressive overload. Body fat reduction assumes a maintained calorie deficit alongside training.
           </p>
           <div className="str-proj-grid">
             {[
@@ -6503,7 +6507,13 @@ function StrengthTab({ data, tdee, weightLbs, gender, age, name,
 //     Build Muscle and Lose Fat Simultaneously?" Strength Cond J 42(5):7–21.
 //   • Morton RW et al. (2018). "A systematic review, meta-analysis and
 //     meta-regression of protein supplementation for resistance exercise."
-//     Br J Sports Med 52:376–384. → 1.62g/kg (0.73g/lb) optimal protein ceiling.
+//     Br J Sports Med 52:376–384.
+//     ⚠️ THIS PAPER IS NOT A "PROVEN CEILING" AND THIS APP USED TO TELL CLIENTS
+//     IT WAS (S224). The 1.62 g/kg (0.73 g/lb) breakpoint was NOT statistically
+//     significant (p=0.079); the subjects were in energy BALANCE, not a deficit,
+//     which is the population most of ours are in; and the outcome measured was
+//     lean mass, not muscle protein synthesis. It is a reasonable landmark, not
+//     a limit — and it is no longer quoted at users anywhere in the app.
 //   • Slater G & Phillips SM (2011). "Nutrition guidelines for strength sports."
 //     J Sports Sci 29(S1):S67–S77.
 //   • Lean bulk surplus of 200–500 cal/day supported by Haff & Triplett (2016),
@@ -6517,7 +6527,7 @@ const EXPERIENCE_LEVELS = [
 
 const SURPLUS_OPTIONS_MUSCLE = [200, 250, 300, 350, 400, 500];
 
-function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gender, age, name,
+function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gender, age, name,
   activeStrDays, strengthDayData, totalStrBurn }) {
   const [experience, setExperience] = useState("intermediate");
   const [showCardio, setShowCardio]   = useState(false);
@@ -6589,8 +6599,16 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
     : ((gainLow + gainHigh) / 2).toFixed(2);
 
   // ── Macros for muscle building ──
-  // Protein: 0.73–0.8g/lb (Morton et al. 2018 meta-analysis)
-  const proteinG  = Math.round(weightLbs * 0.8);
+  // ⚠️ THIS TAB SAID 0.8 g/lb WHILE THE DASHBOARD SAID 1.0 (S224). Same
+  // client, two tabs, two prescriptions. It asks the shared helper now, so a
+  // plan's protein basis and its lean-mass denominator reach here too.
+  const proteinPlanM = proteinPlan({ ...(data || {}), weightLbs }, displayCals);
+  const proteinG  = proteinPlanM.grams || 0;
+  const proteinNoteM = proteinPlanM.capped
+    ? `Held at ${PROTEIN_MAX_PCT * 100}% of your calories so fat and carbs keep a budget.`
+    : proteinPlanM.basis === "lean"
+      ? `Built from your ${proteinPlanM.leanLbs} lbs of lean mass — fat tissue doesn't need feeding.`
+      : `${proteinPlanM.perLb}g per lb of bodyweight.`;
   const proteinCal = proteinG * 4;
   // Fat: 20–30% of calories — keep at 25% for hormone support
   const fatCal   = Math.round(displayCals * 0.25);
@@ -6639,10 +6657,9 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
       <div className="surplus-science">
         <div className="ss-label">Scientific Basis</div>
         <p>
-          Based on <strong>Helms et al. (2014)</strong>, <strong>Barakat et al. (2020)</strong>, and
-          <strong> Morton et al. (2018)</strong>. A lean bulk surplus of <strong>200–500 cal/day</strong> above
-          maintenance maximizes muscle protein synthesis while minimizing fat accumulation — confirmed by the
-          <em> British Journal of Sports Medicine</em> and NSCA guidelines. Projections are adjusted by your
+          Based on <strong>Helms et al. (2014)</strong> and <strong>Barakat et al. (2020)</strong>.
+          A lean bulk surplus of <strong>200–500 cal/day</strong> above maintenance supports muscle growth
+          while limiting fat gain — NSCA guidelines. Projections are adjusted by your
           <strong> actual training plan from Step 5</strong> — training frequency scales the dose-response
           (<strong>Schoenfeld 2017</strong>), and compound movement ratio reflects exercise quality
           (<strong>Schoenfeld 2010</strong>: multi-joint exercises produce greater hypertrophic stimulus than isolation work).
@@ -6811,7 +6828,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
         <div className="recomp-note">
           <strong>Body Recomposition Possible</strong><br/>
           As a beginner, your body can simultaneously build muscle AND lose fat — even at or near maintenance calories.
-          This "newbie gains" window typically lasts 6–12 months. Prioritize protein (0.8g/lb) and progressive overload in the gym.
+          This "newbie gains" window typically lasts 6–12 months. Prioritize protein and progressive overload in the gym.
         </div>
       )}
 
@@ -6831,7 +6848,7 @@ function MuscleTab({ tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs, gend
       <div className="muscle-macro-grid">
         {[
           { emoji:"🥩", name:"Protein", g:proteinG, cal:proteinCal, cls:"protein",
-            note:`0.8g per lb bodyweight — the proven ceiling for maximizing muscle protein synthesis (Morton et al. 2018). This is your most important macro.` },
+            note:`${proteinNoteM} In training studies gains flatten out around this level rather than climbing past it, so this is a number to hit, not one to beat. Your most important macro.` },
           { emoji:"🌾", name:"Carbs",   g:carbG,    cal:carbCal,   cls:"carbs",
             note:`Primary fuel for your training sessions. Eat the bulk of your carbs around workouts — before for energy, after for glycogen replenishment.` },
           { emoji:"🥑", name:"Fat",     g:fatG,     cal:fatCal,    cls:"fat",
@@ -7290,11 +7307,18 @@ function NutrientsTab({ data, weightLbs, gender, age, name, targets,
   // the estimates below, matching the Daily Dashboard (S86 — this tab used to
   // show recomputed defaults even when custom targets were set).
   const mtN = macroTargets || {};
-  // Honor the plan's protein-basis choice (data.proteinPerLb) if set; otherwise the
-  // maintenance/loss default (0.8g maintenance, 1.0g loss for muscle sparing).
-  const proteinMultiplier = Number(proteinPerLb) === 0.7 || Number(proteinPerLb) === 1.0
-    ? Number(proteinPerLb) : (rateChoice > 0 ? 1.0 : 0.8);
-  const proteinG  = mtN.protein != null ? Number(mtN.protein) : Math.round(weightLbs * proteinMultiplier);
+  // ⚠️ THE PACE USED TO PICK THE PROTEIN (S224): 1.0 g/lb on a losing pace,
+  // 0.8 on maintenance, so moving the rate chips on THIS tab silently moved a
+  // number no other screen agreed with. The basis is the plan's, not the tab's.
+  const proteinPlanN = proteinPlan({ ...(data || {}), weightLbs, proteinPerLb }, targetCals);
+  const proteinG  = mtN.protein != null ? Number(mtN.protein) : (proteinPlanN.grams || 0);
+  const proteinNoteN = mtN.protein != null
+    ? "Set by hand on your plan."
+    : proteinPlanN.capped
+      ? `Held at ${Math.round(PROTEIN_MAX_PCT * 100)}% of your calories so fat and carbs keep a budget.`
+      : proteinPlanN.basis === "lean"
+        ? `Built from your ${proteinPlanN.leanLbs} lbs of lean mass rather than your scale weight.`
+        : `${proteinPlanN.perLb}g per lb of body weight.`;
   const proteinCal = proteinG * 4;
 
   // Fat: 25–30% of target cals (use 28%)
@@ -7532,7 +7556,7 @@ function NutrientsTab({ data, weightLbs, gender, age, name, targets,
       <div className="macro-grid">
         {[
           { name:"Protein",  g:proteinG,  cal:proteinCal, cls:"protein", emoji:"🥩",
-            why:`${proteinMultiplier}g per lb of body weight. Higher protein protects muscle during a calorie deficit and keeps you full longer.` },
+            why:`${proteinNoteN} Higher protein protects muscle during a calorie deficit and keeps you full longer.` },
           { name:"Carbs",    g:carbG,     cal:carbCal,    cls:"carbs",   emoji:"🌾",
             why:"Your primary fuel source for training. Adjusted after protein and fat are set from remaining calories." },
           { name:"Fat",      g:fatG,      cal:fatCal,     cls:"fat",     emoji:"🥑",
@@ -16460,8 +16484,18 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // Protein basis is a user choice (data.proteinPerLb): 1.0 g/lb (default, muscle-
   // gain / higher-protein) or 0.7 g/lb (moderate, common in a deficit). Custom
   // targets (data.macroTargets) still override everything.
-  const proteinPerLb = Number(data.proteinPerLb) === 0.7 ? 0.7 : 1.0;
-  const autoProtein = Math.round(Number(weightLbs) * proteinPerLb) || 0;
+  // ⚠️ THE DENOMINATOR IS LEAN MASS WHEN WE KNOW IT (S224) — see proteinPlan.
+  // `protPlan.basis` and `.capped` are what the note under the card reports, so
+  // a target the helper moved is never moved silently.
+  const protPlan = proteinPlan({ ...data, weightLbs }, target);
+  // ⚠️ SPEAK ONLY WHEN THE ANSWER MOVED. A lean client's lean-mass target is the
+  // same number 1 g/lb already gave them — saying so on every visit is a
+  // permanent paragraph explaining nothing. The rule the 1,200 floor states is
+  // "if it changes the answer, say so", not "narrate the formula".
+  const protMoved = protPlan.grams != null
+    && Math.abs(protPlan.grams - Math.round(Number(weightLbs) * protPlan.perLb)) > 2;
+  const proteinPerLb = protPlan.perLb;
+  const autoProtein = protPlan.grams || 0;
   const autoFat = Math.round(target * 0.28 / 9);
   const proteinTarget = mt && mt.protein != null ? mt.protein : autoProtein;
   const fatTarget = mt && mt.fat != null ? mt.fat : autoFat;
@@ -16512,7 +16546,15 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
     const gw = Number(goalWeight), cw = Number(weightLbs);
     const goalLbl = gw && cw && gw < cw - 0.5 ? "Cutting" : gw && cw && gw > cw + 0.5 ? "Bulking" : "Maintaining";
     const list = [
-      { key: "bodyweight", label: "Bodyweight", sub: `${proteinPerLb} g/lb protein`, t: { protein: autoProtein, carbs: autoCarbs, fat: autoFat } },
+      // ⚠️ THE LABEL HAS TO DESCRIBE THE NUMBER BESIDE IT (S224). It read
+      // "1 g/lb protein" while the tile showed 199 g for a 260 lb client — the
+      // lean-mass denominator and the ceiling had both moved it and the caption
+      // went on quoting the old rule. Found by rendering it, not by a test.
+      { key: "bodyweight", label: "Bodyweight",
+        sub: !protMoved ? `${proteinPerLb} g/lb protein`
+           : protPlan.capped ? `protein held at ${Math.round(PROTEIN_MAX_PCT * 100)}% of cal`
+           : "protein from lean mass",
+        t: { protein: autoProtein, carbs: autoCarbs, fat: autoFat } },
       { key: "balanced", label: "Balanced", sub: "30 / 40 / 30", t: fromPct(recPct("balanced")) },
       { key: "goal", label: goalLbl, sub: "from your goal", t: fromPct(recPct("goal")) },
     ];
@@ -17629,6 +17671,23 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               </button>
             </div>
           )}
+          {/* ⚠️ A BOUND THAT CHANGES THE ANSWER SAYS SO (S224) — the same rule the
+              1,200 floor lives by, and it belongs HERE, on the card that shows the
+              number, rather than four taps down beside the basis chips. Without it
+              the lean-mass denominator and the ceiling are invisible edits to
+              somebody's prescription. */}
+          {!macrosCustom && protMoved && (
+            <div style={{fontSize:".64rem",color:"var(--muted)",marginTop:"8px",lineHeight:1.55}}>
+              {protPlan.capped ? (
+                <>Protein is held at <strong style={{color:"var(--text-secondary)"}}>{Math.round(PROTEIN_MAX_PCT*100)}%</strong> of your
+                  calories. {proteinPerLb}g per lb of bodyweight would be {protPlan.raw}g, which leaves too little for fat and carbs.
+                  {protPlan.basis !== "lean" && " Add your body fat % under Body & Measurements and it works from lean mass instead."}</>
+              ) : (
+                <>Protein comes from your <strong style={{color:"var(--text-secondary)"}}>{protPlan.leanLbs} lbs of lean mass</strong>, not
+                  your scale weight — fat tissue doesn&rsquo;t need feeding.</>
+              )}
+            </div>
+          )}
           {/* The honesty check. Shown for whatever split is CURRENTLY on screen —
               a preview as well as the saved plan — because the point is to say
               so before someone adopts it, not after. */}
@@ -18401,13 +18460,17 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
         {!macrosCustom && onSetProteinBasis && Number(weightLbs) > 0 && (
           <div style={{display:"flex",alignItems:"center",gap:"6px",padding:"8px 0 0",flexWrap:"wrap"}}>
             <span style={{fontSize:".68rem",color:"var(--muted)"}}>Protein target:</span>
+            {/* ⚠️ THE CHIP SHOWS WHAT THAT CHOICE ACTUALLY PRODUCES (S224). It
+                used to print weight × the number, so once lean mass or the
+                ceiling moved the real target the chip advertised a figure the
+                card above it did not show. */}
             {[[1.0,"1 g/lb"],[0.7,"0.7 g/lb"]].map(([v,l])=>(
               <button key={v} onClick={()=>onSetProteinBasis(v)}
                 style={{padding:"4px 10px",fontSize:".7rem",fontWeight:700,borderRadius:"999px",cursor:"pointer",
                   border:"1px solid "+(proteinPerLb===v?"var(--accent)":"var(--border)"),
                   background: proteinPerLb===v?"rgba(var(--accent-rgb),.12)":"transparent",
                   color: proteinPerLb===v?"var(--accent)":"var(--muted)"}}>
-                {l} · {Math.round(Number(weightLbs)*v)}g
+                {l} · {proteinPlan({ ...data, weightLbs, proteinPerLb: v }, target).grams}g
               </button>
             ))}
           </div>
@@ -22973,6 +23036,59 @@ const NEW_PLAN_DEFICIT_MODE = "accelerate";
 // Protein target basis (g per lb bodyweight) — user choice, default 1.0. Used for
 // the AUTO protein target everywhere so the dashboard + Results agree.
 const proteinBasisOf = (d) => (Number(d && d.proteinPerLb) === 0.7 ? 0.7 : 1.0);
+
+// ── The protein target: ONE function, every reader (S224) ────────────────────
+// This number was being computed in SIX places and gave at least FOUR answers
+// for the same client: 0.8 g/lb in the Muscle tab, 0.8-or-1.0 chosen by PACE in
+// Nutrients, the plan's basis on the dashboard and the share card, and a bare
+// bodyweight in the beginners' view that ignored the basis chip entirely. Three
+// of those screens sit within two taps of each other.
+//
+// ⚠️ PROTEIN NEED TRACKS LEAN MASS, NOT TOTAL BODYWEIGHT. Fat tissue does not
+// need feeding, so multiplying total weight hands the most protein per pound of
+// muscle to the clients who need the least. At 1 g/lb a 320 lb client at 42%
+// body fat was told to eat 320 g — 71% of their calories, which left FOUR grams
+// of carbs once fat was taken, and no screen said a word about it.
+//   • Body fat known → lean mass carries it, normalised at PROTEIN_REF_BF so a
+//     lean client's number does not move by a single gram.
+//   • Not known → the bodyweight basis stands exactly as it did, with a sanity
+//     ceiling at PROTEIN_MAX_PCT of calories for the pathological case.
+//
+// ⚠️ THE CEILING IS A SANITY BOUND, NOT A RESEARCH LIMIT, and it is set high on
+// purpose. The IOM's 35% AMDR is a population guideline for general diets;
+// applying it here would LOWER protein exactly when every deficit-specific
+// source says raise it — the same misuse as quoting Morton at a dieter. 50%
+// binds only where the number is already absurd.
+// ⚠️ AND IT IS NEVER SILENT. Same rule as the 1,200 floor: if the bound changes
+// the answer the screen says so, which is why `capped` and `basis` come back
+// alongside the grams instead of the function returning a bare number.
+// ⚠️ `hideBodyFat` IS HONOURED. Someone who asked not to see that number should
+// not have it quoted back at them in a macro note, so their target stays on the
+// bodyweight basis — the ceiling is what protects them instead.
+const PROTEIN_REF_BF = 15;    // % body fat at which "1 g per lb of bodyweight" IS the answer
+const PROTEIN_MAX_PCT = 0.5;  // sanity ceiling, as a share of the calorie target
+function proteinPlan(d, calorieTarget) {
+  d = d || {};
+  const perLb = proteinBasisOf(d);
+  const w = Number(d.weightLbs) || 0;
+  const empty = { grams: null, raw: null, perLb, capped: false, basis: null, leanLbs: null };
+  if (!(w > 0)) return empty;
+  const bf = Number(d.bodyFat);
+  const useLean = !d.hideBodyFat && isFinite(bf) && bf >= 3 && bf <= 70;
+  const leanLbs = useLean ? w * (1 - bf / 100) : null;
+  const raw = Math.round(useLean ? (leanLbs * perLb) / (1 - PROTEIN_REF_BF / 100) : w * perLb);
+  const cal = Number(calorieTarget) || 0;
+  const maxG = cal > 0 ? Math.floor((cal * PROTEIN_MAX_PCT) / 4) : null;
+  const capped = maxG != null && raw > maxG;
+  return {
+    grams: capped ? maxG : raw,
+    raw, perLb, capped,
+    basis: useLean ? "lean" : "weight",
+    leanLbs: leanLbs != null ? Math.round(leanLbs) : null,
+  };
+}
+// The grams alone, for the readers that only want the number.
+const autoProteinG = (d, cal) => proteinPlan(d, cal).grams;
 
 // Tracker-adjusted target (S89, Kevin's call — opt-in via data.wearableAdjust):
 // a watch's resting + active energy IS the day's actual measured TDEE, so on a

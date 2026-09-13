@@ -865,6 +865,40 @@ function planMaintenance(d) {
   return { bmr, formulaTdee, k, tdee: Math.round(formulaTdee * k), fitted: k > 1 };
 }
 
+// ⚠️ MIRROR OF src/App.jsx proteinPlan (S224) — functions/ cannot import from
+// src/, so this is a hand-kept copy and scripts/test-protein.mjs runs BOTH and
+// requires identical grams across a sweep. If you change one, change both.
+//
+// Protein need tracks LEAN MASS, not total bodyweight: at 1 g/lb a 320 lb client
+// at 42% body fat is told to eat 320 g, which is 71% of their calories. Body fat
+// known → lean mass, normalised at PROTEIN_REF_BF so a lean client's number does
+// not move. Not known → the bodyweight basis with a sanity ceiling at
+// PROTEIN_MAX_PCT of calories (high on purpose — the IOM's 35% AMDR is a
+// general-diet guideline and would lower protein exactly when a dieter needs it
+// raised).
+const PROTEIN_REF_BF = 15;
+const PROTEIN_MAX_PCT = 0.5;
+function proteinPlan(d, calorieTarget) {
+  d = d || {};
+  const perLb = Number(d.proteinPerLb) === 0.7 ? 0.7 : 1.0;
+  const w = Number(d.weightLbs) || 0;
+  const empty = { grams: null, raw: null, perLb, capped: false, basis: null, leanLbs: null };
+  if (!(w > 0)) return empty;
+  const bf = Number(d.bodyFat);
+  const useLean = !d.hideBodyFat && isFinite(bf) && bf >= 3 && bf <= 70;
+  const leanLbs = useLean ? w * (1 - bf / 100) : null;
+  const raw = Math.round(useLean ? (leanLbs * perLb) / (1 - PROTEIN_REF_BF / 100) : w * perLb);
+  const cal = Number(calorieTarget) || 0;
+  const maxG = cal > 0 ? Math.floor((cal * PROTEIN_MAX_PCT) / 4) : null;
+  const capped = maxG != null && raw > maxG;
+  return {
+    grams: capped ? maxG : raw,
+    raw, perLb, capped,
+    basis: useLean ? "lean" : "weight",
+    leanLbs: leanLbs != null ? Math.round(leanLbs) : null,
+  };
+}
+
 function nutritionTargets(d) {
   const w = Number(d.weightLbs);
   let cal = null;
@@ -897,10 +931,7 @@ function nutritionTargets(d) {
   // typed 1 came back as a 1 cal/day prescription with macros divided out of it.
   if (Number(d.calorieTarget) > 0) cal = atLeastMinCal(d.calorieTarget);
   const mt = d.macroTargets || {};
-  // Protein basis is a per-plan user choice (App.jsx proteinBasisOf): 1.0 g/lb
-  // (default) or 0.7 g/lb. Keep the AI's target in sync with the app.
-  const proteinPerLb = Number(d.proteinPerLb) === 0.7 ? 0.7 : 1.0;
-  const protein = mt.protein != null ? Number(mt.protein) : (w ? Math.round(w * proteinPerLb) : null);
+  const protein = mt.protein != null ? Number(mt.protein) : proteinPlan(d, cal).grams;
   const fat = mt.fat != null ? Number(mt.fat) : (cal ? Math.round((cal * 0.28) / 9) : null);
   const carbs = mt.carbs != null ? Number(mt.carbs)
     : (cal != null && protein != null && fat != null

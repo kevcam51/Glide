@@ -332,7 +332,12 @@ ok("prescriptions still floor through atLeastMinCal",
   }
   ok("the chooser keeps a RATE now, not a daily cut", /const \[rateChoice, setRateChoice\] = useState\(1\);/.test(NUT));
   ok("...and the buttons set and compare it", /rateChoice===t\.rate/.test(NUT) && /setRateChoice\(t\.rate\)/.test(NUT));
-  ok("...so the protein basis follows the rate", /rateChoice > 0 \? 1\.0 : 0\.8/.test(NUT));
+  // ⚠️ THE PACE USED TO PICK THE PROTEIN HERE — 1.0 g/lb on a losing pace, 0.8 on
+  // maintenance — so moving these chips silently moved a number no other screen
+  // agreed with, and the tab contradicted the dashboard two taps away (S224).
+  // The basis is the PLAN's now; this assertion was pinning the defect.
+  ok("...but the protein basis is the plan's, not this tab's",
+     !/rateChoice > 0 \? 1\.0 : 0\.8/.test(NUT) && /proteinPlan\(\{ \.\.\.\(data \|\| \{\}\), weightLbs, proteinPerLb \}, targetCals\)/.test(NUT));
   ok("...and so does the micronutrient relevance", /const isCutting = rateChoice > 0;/.test(NUT));
   // ⚠️ THE CHOICES DID NOT CHANGE — the table has carried both columns since
   // S95 and 0/250/500/1000 IS 0/½/1/2 lb a week. If they ever stop matching,
