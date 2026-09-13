@@ -98,6 +98,43 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- ⚠️ A PAGE THAT CANNOT BOOT MUST NOT SIT THERE BLANK (S234). The entry
+         module is a hashed file; if the HTML around it is ever older than the
+         deploy serving it, that file 404s, nothing mounts, and #root stays empty
+         for ever — the inline script above has already painted the background,
+         so it reads as "it loads for a second and the screen goes blank", which
+         is exactly how Kevin described it. The service worker is fixed so the
+         pair cannot drift, but a screen with no way to repair itself is worth a
+         second belt: purge the caches once and reload.
+         Once per session, and only when #root is genuinely empty, so a slow
+         network cannot put anyone in a reload loop. -->
+    <script>
+      (function () {
+        var healed = false;
+        function heal(why) {
+          if (healed) return; healed = true;
+          try { if (sessionStorage.getItem("glidna-healed")) return; sessionStorage.setItem("glidna-healed", why); } catch (e) { return; }
+          var done = function () { location.reload(); };
+          try {
+            if (!window.caches) return done();
+            caches.keys().then(function (ks) {
+              return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+            }).then(done, done);
+          } catch (e) { done(); }
+        }
+        // A hashed asset failing to load is decisive — those names are immutable,
+        // so a miss means this HTML belongs to a deploy that no longer exists.
+        window.addEventListener("error", function (ev) {
+          var t = ev && ev.target;
+          if (t && t.tagName === "SCRIPT" && String(t.src || "").indexOf("/assets/") > -1) heal("asset");
+        }, true);
+        // Backstop for anything else that leaves the tree unmounted.
+        setTimeout(function () {
+          var r = document.getElementById("root");
+          if (r && r.children.length === 0) heal("empty");
+        }, 12000);
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

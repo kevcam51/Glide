@@ -12,8 +12,15 @@
 // v3 (S183q): the cached navigation HTML carries the inline pre-paint script, so
 // any change to that script needs a new cache name or one launch runs the old
 // copy — which would mean a cold start ignoring the user's accent colour.
-const SHELL = "glidna-shell-v3";
-const ASSETS = "glidna-assets-v2";
+// ⚠️ BUMPED TO v4/v3 TO PURGE A POISONED CACHE (S234). A cached shell names the
+// hashed assets of the deploy it was cached from, and those 404 the moment the
+// next deploy lands. The activate handler below deletes every cache that is not
+// on the allowlist, so renaming these IS the repair: the first launch after this
+// worker activates drops the stale shell and goes to the network. Anyone already
+// stuck on a blank screen recovers that way and no other — a blank page cannot
+// run the code that would fix it, so the fix has to live in the worker.
+const SHELL = "glidna-shell-v4";
+const ASSETS = "glidna-assets-v3";
 const ASSET_CAP = 60;   // trim old hashed files so the cache can't grow forever
 // Where a photo shared INTO Glidna waits between the share-sheet POST and the
 // app reading it (S221). Cache Storage rather than IndexedDB because a Response
@@ -39,15 +46,49 @@ self.addEventListener("activate", (e) => {
   );
 });
 
+// Which hashed assets does a cached HTML document actually need to boot?
+function assetRefs(html) {
+  return [...String(html).matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]);
+}
+
+// ⚠️ A CACHED SHELL IS ONLY VALID TOGETHER WITH THE ASSETS IT NAMES (S234), and
+// nothing linked the two. The shell was refreshed on every navigation while the
+// asset cache was trimmed on its own schedule, so the pair could — and did —
+// drift apart. Serving a shell whose entry script is gone gives the worst
+// outcome available: the inline pre-paint script runs, the background paints,
+// the module 404s, and #root stays empty. A blank screen, for ever, with no way
+// for the page to repair itself. Kevin's phone, verified by reproducing it.
+async function shellIsBootable(res) {
+  try {
+    const refs = assetRefs(await res.clone().text()).filter((r) => r.endsWith(".js"));
+    if (!refs.length) return false;                  // no entry script named — not a shell
+    const c = await caches.open(ASSETS);
+    for (const r of refs) if (!(await c.match(r))) return false;
+    return true;
+  } catch { return false; }
+}
+
 // Keep the asset cache bounded: superseded hashed files are never requested
 // again (the fresh HTML only references current ones), so drop the oldest.
+//
+// ⚠️ EXCEPT THE ONES THE CACHED SHELL STILL NEEDS. One deploy emits 14 assets and
+// a launch caches roughly half of them, so a handful of deploys in a day walks
+// straight past ASSET_CAP — and the oldest entries, the ones evicted first, are
+// exactly the ones an older cached shell points at. The cap was quietly creating
+// the mismatch it now refuses to create.
 async function trimAssets() {
   try {
     const c = await caches.open(ASSETS);
     const keys = await c.keys();
-    if (keys.length > ASSET_CAP) {
-      await Promise.all(keys.slice(0, keys.length - ASSET_CAP).map((k) => c.delete(k)));
-    }
+    if (keys.length <= ASSET_CAP) return;
+    let keep = new Set();
+    try {
+      const shell = await (await caches.open(SHELL)).match("/");
+      if (shell) keep = new Set(assetRefs(await shell.text()));
+    } catch { /* no shell to protect */ }
+    const droppable = keys.filter((k) => !keep.has(new URL(k.url).pathname));
+    const over = keys.length - ASSET_CAP;
+    await Promise.all(droppable.slice(0, over).map((k) => c.delete(k)));
   } catch { /* trimming is best-effort */ }
 }
 
@@ -139,6 +180,14 @@ self.addEventListener("fetch", (e) => {
       });
       // No cached shell yet (first ever launch) — nothing to fall back to.
       if (!cached) return network.catch(() => caches.match("/"));
+      // ⚠️ AND A SHELL WHOSE ASSETS ARE GONE IS WORSE THAN NO SHELL. The race
+      // below exists so a slow radio still boots instantly from cache — but it
+      // was willing to win with a shell that could not run, which is how a
+      // 1.2-second network hiccup turned into a permanently blank app. If the
+      // pair has drifted, wait for the network however long it takes; a spinner
+      // is recoverable and a blank screen is not. Offline with a broken shell
+      // now surfaces the browser's own error page rather than a silent void.
+      if (!(await shellIsBootable(cached))) return network;
       const timeout = new Promise((resolve) => setTimeout(() => resolve(null), SHELL_TIMEOUT_MS));
       const winner = await Promise.race([network.catch(() => null), timeout]);
       // Let the network write its cache update either way (don't await it).
@@ -152,9 +201,25 @@ self.addEventListener("fetch", (e) => {
   if (url.origin === self.location.origin && url.pathname.startsWith("/assets/")) {
     e.respondWith(
       caches.match(req).then((hit) => hit || fetch(req).then((res) => {
-        if (res && res.ok) {
+        // ⚠️ A 200 IS NOT PROOF IT IS THE ASSET. Hosts and dev servers with an
+        // SPA fallback answer a missing /assets/ file with index.html at 200 —
+        // caching that would park an HTML document under a hashed .js name, and
+        // a cached-first hit would then feed HTML to a module parser on every
+        // launch. Vercel 404s correctly (checked), so this is insurance against
+        // the next host, not a bug in this one.
+        const htmlForCode = res && /\.(?:js|css)$/.test(url.pathname)
+          && /text\/html/i.test(res.headers.get("content-type") || "");
+        if (htmlForCode) {
+          caches.open(SHELL).then((c) => c.delete("/")).catch(() => {});
+        } else if (res && res.ok) {
           const copy = res.clone();
           caches.open(ASSETS).then((c) => c.put(req, copy)).then(trimAssets).catch(() => {});
+        } else if (res && res.status === 404) {
+          // ⚠️ A HASHED ASSET THAT 404s CAN ONLY MEAN THE SHELL IS FROM A DEAD
+          // DEPLOY — the names are immutable, so a miss is never transient.
+          // Dropping the shell is what lets the NEXT launch go to the network
+          // instead of asking for the same missing file for ever.
+          caches.open(SHELL).then((c) => c.delete("/")).catch(() => {});
         }
         return res;
       }))
