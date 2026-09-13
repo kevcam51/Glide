@@ -16650,10 +16650,6 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const savLife = (savFirst && savEnd && savFirst <= savEnd && savFirst !== savStart)
     ? savingsPhase(data, savingsDays, savFirst, savEnd, savTrainDay) : null;
   const savWorth = savPh ? savingsLbs(savPh.banked, savPh.rate) : null;
-  // How far the balance and the scale are apart. The gap is the finding, not an
-  // embarrassment — it is untracked days, or food going unlogged.
-  const savGap = (savPh && savPh.scaleLbs !== null && savWorth)
-    ? Math.round((savWorth.lbs - savPh.scaleLbs) * 10) / 10 : null;
   // What a typical day of theirs costs the body — the same basis daySavings
   // uses when no tracker reading exists, so the panel and the balance agree.
   const savDayBurn = Math.round(planEnergy(data).tdee || 0) + savTrainDay;
@@ -16672,6 +16668,18 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const savWinPh = (savWinStart && savEnd && savWinStart <= savEnd)
     ? savingsPhase(data, savingsDays, savWinStart, savEnd, savTrainDay) : null;
   const savWinView = savWinPh ? savingsWindow(savWinPh.banked, savWinPh.tracked, savPh && savPh.rate) : null;
+  // The headline follows the tab; the phase total is still what the rate and the
+  // afford panel are built on, because a pace needs a long sample and one day is
+  // not one.
+  const savHead = savWinPh ? savWinPh.banked : savPh.banked;
+  // ⚠️ AND THE SCALE HAS TO COVER THE SAME STRETCH. Comparing a one-day balance
+  // against a whole phase's weight change would invent a gap out of two
+  // different windows. savingsPhase already scopes check-ins to its own range.
+  const savScaleLbs = savWinPh ? savWinPh.scaleLbs : savPh.scaleLbs;
+  const savGapWin = (savScaleLbs !== null && savWinView)
+    ? Math.round((savWinView.lbs - savScaleLbs) * 10) / 10 : null;
+  // Coverage for whatever stretch the card is currently showing.
+  const savCov = savWinPh || savPh;
   // ⚠️ AN EMPTY BOX IS NOT A ZERO-CALORIE DAY. Number("") is 0, not NaN, so the
   // untouched panel priced a day of eating NOTHING and announced it as "adds
   // 2,270 to your savings" — the most flattering possible answer, shown before
@@ -17340,8 +17348,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           nothing: no target, no macro, no stored field. Saying so on the card
           is the point, not a disclaimer. */}
       {observed && (
-        <div className="card" style={{marginTop:"14px"}}>
-          <div className="sec-title" style={{marginBottom:"8px"}}>Measured Burn</div>
+        <FoldCard id="burn" title="Measured Burn"
+          summary={observed.tdee ? `${observed.tdee.toLocaleString()} cal/day` : "not enough data yet"}>
           {observed.tdee ? (
             <>
               <div style={{display:"flex",alignItems:"flex-end",gap:"12px",flexWrap:"wrap"}}>
@@ -17533,7 +17541,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
             Measured from what you logged and what the scale did — not a formula. It doesn&rsquo;t change your
             target; it&rsquo;s here so you can see whether the estimate above matches what your body is actually doing.
           </div>
-        </div>
+        </FoldCard>
       )}
       {/* ── The savings account (S221, Kevin) ────────────────────────────────
           "We want to accumulate calorie deficit from eating and calorie burning
@@ -17543,21 +17551,47 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           shown, and when they disagree the gap is named — hiding it would make
           the balance look like the more reliable of the two, which it is not. */}
       {savPh && savPh.span > 0 && (
-        <div className="card" style={{marginTop:"14px"}}>
-          <div className="sec-title" style={{marginBottom:"4px"}}>Savings account</div>
-          <div style={{fontSize:".7rem",color:"var(--muted)",marginBottom:"10px"}}>
+        <FoldCard id="savings" title="Savings account"
+          summary={`${savHead >= 0 ? "" : "−"}${Math.abs(savHead).toLocaleString()} (cal)`}>
+          {/* ⚠️ ONE NUMBER, CHOSEN BY THE TAB (S236, Kevin: "banked across ___ days
+              should be an option to show the day, week, 2 weeks, and month
+              number"). The card used to show the whole phase up top and a window
+              lower down, which is two totals for one account on one screen. The
+              selector now drives the headline and everything under it. */}
+          <div style={{fontSize:".7rem",color:"var(--muted)",marginBottom:"9px"}}>
             Since {savDate(savStart)} &middot; what you didn&rsquo;t eat, plus what you burned.
           </div>
+          <div style={{display:"flex",gap:"4px",marginBottom:"9px"}}>
+            {SAV_WINDOWS.map((w) => (
+              <button key={w.id} onClick={() => setSavWin(w.id)} aria-pressed={savWin === w.id}
+                style={{flex:1,padding:"6px 2px",borderRadius:"8px",cursor:"pointer",fontFamily:"inherit",
+                  fontSize:".66rem",fontWeight:700,
+                  border:"1px solid "+(savWin === w.id ? "var(--accent)" : "var(--border)"),
+                  background: savWin === w.id ? "rgba(var(--accent-rgb),.12)" : "transparent",
+                  color: savWin === w.id ? "var(--accent)" : "var(--muted)"}}>{w.label}</button>
+            ))}
+          </div>
           <div style={{textAlign:"center",padding:"12px",borderRadius:"12px",
-            background: savPh.banked >= 0 ? "rgba(47,224,168,.09)" : "rgba(248,113,113,.09)",
-            border:`1px solid ${savPh.banked >= 0 ? "var(--green)" : "var(--red)"}`}}>
+            background: savHead >= 0 ? "rgba(47,224,168,.09)" : "rgba(248,113,113,.09)",
+            border:`1px solid ${savHead >= 0 ? "var(--green)" : "var(--red)"}`}}>
             <div style={{fontFamily:"'Sora',sans-serif",fontSize:"2rem",lineHeight:1.15,
-              color: savPh.banked >= 0 ? "var(--green)" : "var(--red)"}}>
-              {savPh.banked >= 0 ? "" : "−"}{Math.abs(savPh.banked).toLocaleString()}
+              color: savHead >= 0 ? "var(--green)" : "var(--red)"}}>
+              {savHead >= 0 ? "" : "−"}{Math.abs(savHead).toLocaleString()}
             </div>
             <div style={{fontSize:".64rem",color:"var(--muted)"}}>
-              (cal) {savPh.banked >= 0 ? "banked" : "overdrawn"} across {savPh.tracked} day{savPh.tracked === 1 ? "" : "s"}
+              (cal) {savHead >= 0 ? "banked" : "overdrawn"}
+              {savWinPh ? <> across {savWinPh.tracked} logged day{savWinPh.tracked === 1 ? "" : "s"}
+                {savWinPh.tracked < savWinPh.span && <> of {savWinPh.span}</>}</> : null}
             </div>
+            {/* The pounds, on the number itself — which is why the separate
+                "That's worth" row below it is gone (Kevin: "may not need to be
+                there"). One conversion, beside the figure it converts. */}
+            {savWinView && savWinView.lbs !== 0 && (
+              <div style={{marginTop:"4px",fontSize:".74rem",fontWeight:700,
+                color: savHead >= 0 ? "var(--green)" : "var(--red)"}}>
+                {savHead >= 0 ? "−" : "+"}{Math.abs(savWinView.lbs).toFixed(2)} lbs
+              </div>
+            )}
           </div>
 
           {/* ⚠️ THE INTENT FRAMES THE BALANCE (S222). A falling balance is a
@@ -17576,52 +17610,21 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                   finish under what your body burned adds to this.</>}
           </div>
 
-          {/* ── Lately (S236, Kevin) ──────────────────────────────────────
-              The balance above is the whole phase; this is the recent window,
-              which is the question a coach asks on a Monday. */}
-          {savWinView && (
+          {/* ── The pace behind the headline (S236, Kevin) ────────────────
+              The selector and the total moved UP to the headline, so what is
+              left here is the part the headline cannot carry: the daily average
+              Kevin asked for, and what that pace is worth if it holds.
+              ⚠️ ONE SELECTOR. Adding the headline control left the original one
+              still rendering below it — two identical controls and the same
+              number twice on one card. Found by opening the card, not by reading
+              the diff. */}
+          {savWinView && savWinPh.tracked > 0 && (
             <div style={{marginTop:"12px",paddingTop:"10px",borderTop:"1px solid var(--border)"}}>
-              <div style={{display:"flex",gap:"4px",marginBottom:"9px"}}>
-                {SAV_WINDOWS.map((w) => (
-                  <button key={w.id} onClick={() => setSavWin(w.id)} aria-pressed={savWin === w.id}
-                    style={{flex:1,padding:"6px 2px",borderRadius:"8px",cursor:"pointer",fontFamily:"inherit",
-                      fontSize:".66rem",fontWeight:700,
-                      border:"1px solid "+(savWin === w.id ? "var(--accent)" : "var(--border)"),
-                      background: savWin === w.id ? "rgba(var(--accent-rgb),.12)" : "transparent",
-                      color: savWin === w.id ? "var(--accent)" : "var(--muted)"}}>{w.label}</button>
-                ))}
-              </div>
-              {savWinPh.tracked === 0 ? (
-                <div style={{fontSize:".68rem",color:"var(--muted)",lineHeight:1.45}}>
-                  Nothing logged in that stretch, so there is no pace to read. The balance above still stands.
-                </div>
-              ) : (
-                <>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:"8px"}}>
-                    {/* ⚠️ NAME THE SPAN THAT EXISTS, NOT THE ONE REQUESTED. The
-                        window is clamped to the phase start, so "Month" on a
-                        20-day-old phase read "Last 30 days" above a line saying
-                        "18 of 20 days logged" — the header contradicting the
-                        caption directly beneath it. Found by clicking Month. */}
-                    <span style={{fontSize:".72rem",color:"var(--muted)"}}>
-                      {savWinPh.span === 1 ? "Yesterday" : `Last ${savWinPh.span} days`}
-                    </span>
-                    <b style={{fontFamily:"'Sora',sans-serif",fontSize:"1.05rem",
-                      color: savWinView.banked >= 0 ? "var(--green)" : "var(--red)"}}>
-                      {savWinView.banked >= 0 ? "" : "−"}{Math.abs(savWinView.banked).toLocaleString()} (cal)
-                    </b>
-                  </div>
-                  <div style={{marginTop:"3px",display:"flex",justifyContent:"space-between",fontSize:".68rem",color:"var(--muted)"}}>
-                    <span>
-                      {savWinDays === 1 ? "That day" : <>Average of <b style={{color:"var(--text-secondary)"}}>{savWinView.perDay.toLocaleString()}</b> a day</>}
-                      {/* ⚠️ COVERAGE SHOWN, because the average is over tracked
-                          days. A 3-of-7 week is a real pace on a thin sample,
-                          and hiding that makes it look like a full one. */}
-                      {savWinDays > 1 && ` · ${savWinView.tracked} of ${savWinPh.span} days logged`}
-                    </span>
-                    <b style={{color: savWinView.banked >= 0 ? "var(--green)" : "var(--red)"}}>
-                      {savWinView.banked >= 0 ? "−" : "+"}{Math.abs(savWinView.lbs).toFixed(2)} lbs
-                    </b>
+                  <div style={{fontSize:".68rem",color:"var(--muted)"}}>
+                    {savWinPh.span === 1
+                      ? <>Yesterday on its own &mdash; the projections below run that day forward.</>
+                      : <>Average of <b style={{color:"var(--text-secondary)"}}>{savWinView.perDay.toLocaleString()}</b> a
+                        day on the days you logged.</>}
                   </div>
                   {/* What that daily pace is worth if it holds. Never "you will have". */}
                   {savWinView.perDay !== 0 && (
@@ -17650,7 +17653,10 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                         ))}
                       </div>
                       <div style={{marginTop:"6px",fontSize:".6rem",color:"var(--muted)",lineHeight:1.45}}>
-                        At {savWinView.per.toLocaleString()} (cal) a pound{savWinView.measured ? " — your own measured rate" : ""}.
+                        {/* ⚠️ THE RATE IS STATED ONCE. This footnote and the note
+                            below it both opened "At 4,508 (cal) a pound", two
+                            sentences apart — so the rate is left to the note that
+                            also explains what happens when there isn't one yet. */}
                         A projection from the days you logged, not a promise.
                         {savWinPh.tracked < savWinPh.span && (
                           <> These run every day at that average, which is why they come to more than the{" "}
@@ -17661,21 +17667,12 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
                       </div>
                     </>
                   )}
-                </>
-              )}
             </div>
           )}
 
-          {savWorth && savPh.banked !== 0 && (
-            <div style={{marginTop:"10px",display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:".8rem"}}>
-              <span style={{color:"var(--muted)"}}>That&rsquo;s worth</span>
-              <b style={{color: savPh.banked >= 0 ? "var(--green)" : "var(--red)"}}>
-                {savPh.banked >= 0 ? "−" : "+"}{Math.abs(savWorth.lbs).toFixed(1)} lbs
-              </b>
-            </div>
-          )}
-          {savWorth && savPh.banked !== 0 && (
-            <div style={{marginTop:"3px",fontSize:".64rem",color:"var(--muted)",lineHeight:1.45}}>
+          {/* The rate note stays — it is what the pounds above were converted at. */}
+          {savWorth && savHead !== 0 && (
+            <div style={{marginTop:"8px",fontSize:".64rem",color:"var(--muted)",lineHeight:1.45}}>
               {savWorth.measured
                 ? <>At <b style={{color:"var(--text-secondary)"}}>{savWorth.per.toLocaleString()} (cal)</b> a
                   pound &mdash; your own rate, measured from what you logged and what the scale did.</>
@@ -17690,22 +17687,30 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           )}
 
           {/* ⚠️ THE SCALE, BESIDE IT, ALWAYS — and the gap named when there is one. */}
-          {savPh.scaleLbs !== null && (
+          {savScaleLbs !== null && (
             <div style={{marginTop:"9px",paddingTop:"9px",borderTop:"1px solid var(--border)"}}>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:".8rem"}}>
                 <span style={{color:"var(--muted)"}}>The scale says</span>
-                <b style={{color: savPh.scaleLbs > 0 ? "var(--green)" : savPh.scaleLbs < 0 ? "var(--red)" : "var(--muted)"}}>
-                  {savPh.scaleLbs > 0 ? "−" : savPh.scaleLbs < 0 ? "+" : ""}{Math.abs(savPh.scaleLbs).toFixed(1)} lbs
+                <b style={{color: savScaleLbs > 0 ? "var(--green)" : savScaleLbs < 0 ? "var(--red)" : "var(--muted)"}}>
+                  {savScaleLbs > 0 ? "−" : savScaleLbs < 0 ? "+" : ""}{Math.abs(savScaleLbs).toFixed(1)} lbs
                 </b>
               </div>
-              {savGap !== null && (
+              {/* ⚠️ THE GAP, THE SCALE AND THE BALANCE MUST ALL COVER THE SAME
+                  STRETCH. The condition was moved to the window and the body left
+                  reading the phase, which would have compared a week's balance
+                  against a month of weight change and called the difference a
+                  finding. Every reference below is the window's.
+                  (And this comment sits ABOVE the guard, not inside it: a JSX
+                  comment is not valid in a `{cond && (` expression position —
+                  the same build this file has already been broken by twice.) */}
+              {savGapWin !== null && (
                 <div style={{marginTop:"4px",fontSize:".64rem",lineHeight:1.45,
-                  color: Math.abs(savGap) <= 1 ? "var(--muted)" : "var(--yellow)"}}>
-                  {Math.abs(savGap) <= 1
+                  color: Math.abs(savGapWin) <= 1 ? "var(--muted)" : "var(--yellow)"}}>
+                  {Math.abs(savGapWin) <= 1
                     ? <>In step with the balance &mdash; what you logged explains what the scale did.</>
-                    : <>The balance is <b>{Math.abs(savGap).toFixed(1)} lbs</b> {savGap > 0 ? "ahead of" : "behind"} the
-                      scale. {savPh.tracked < savPh.span
-                        ? <>Most likely the {savPh.span - savPh.tracked} untracked day{savPh.span - savPh.tracked === 1 ? "" : "s"}.</>
+                    : <>The balance is <b>{Math.abs(savGapWin).toFixed(1)} lbs</b> {savGapWin > 0 ? "ahead of" : "behind"} the
+                      scale. {savWinPh.tracked < savWinPh.span
+                        ? <>Most likely the {savWinPh.span - savWinPh.tracked} untracked day{savWinPh.span - savWinPh.tracked === 1 ? "" : "s"}.</>
                         : <>With every day tracked, that usually means food going in unlogged &mdash; or just water
                           and timing, if it is a small gap.</>}
                       {" "}The scale is the one to believe.</>}
@@ -17718,13 +17723,17 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               days out of seven, with nothing said, is the balance quietly
               contradicting the scale. */}
           <div style={{marginTop:"9px",fontSize:".66rem",lineHeight:1.45,
-            color: savPh.tracked === savPh.span ? "var(--muted)" : "var(--yellow)"}}>
-            Tracked <b>{savPh.tracked} of {savPh.span}</b> days
-            {savPh.tracked === savPh.span
-              ? <> &mdash; every day in this phase.</>
+            color: savCov.tracked === savCov.span ? "var(--muted)" : "var(--yellow)"}}>
+            {/* ⚠️ SCOPED TO THE WINDOW, like everything else on this card now. It
+                read the PHASE, so a 7-day view carrying "5 of 7" in its headline
+                sat above a sentence saying "Tracked 18 of 20 days" — two
+                coverage figures for one number. */}
+            Tracked <b>{savCov.tracked} of {savCov.span}</b> days
+            {savCov.tracked === savCov.span
+              ? <> &mdash; every day of it.</>
               : <> &mdash; the balance only speaks for the days you logged. The rest are neither
                 counted nor guessed at.</>}
-            {savPh.measuredDays > 0 && <> {savPh.measuredDays} of them used your tracker&rsquo;s own burn.</>}
+            {savCov.measuredDays > 0 && <> {savCov.measuredDays} of them used your tracker&rsquo;s own burn.</>}
           </div>
 
           {savLife && (
@@ -17893,7 +17902,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               )}
             </div>
           )}
-        </div>
+        </FoldCard>
       )}
 
       {/* ── The watch's answer to the same question (S229) ──────────────────
@@ -23932,6 +23941,47 @@ function savingsLbs(banked, rate) {
 // one at a year (S217). A week, a fortnight and a month are all inside the
 // honest range, so this multiplies rather than walking — but that is a fact
 // about the horizons, not a licence, and anything longer belongs in simProject.
+// ── A card that folds away (S236, Kevin) ───────────────────────────────────
+// "lets make the measured burn section and savings account section be a
+// clickable drop down instead of the full tab being open at all times."
+//
+// ⚠️ THE SUMMARY IS THE POINT, NOT THE CHEVRON. Collapsing a card that carries a
+// number is only an improvement if the number survives the collapse — otherwise
+// the dashboard is tidier and less useful, and people stop opening it. The
+// headline figure moves into the header and the detail folds behind it.
+//
+// The open/closed choice is per DEVICE (localStorage, like the Simple/Detailed
+// plan view) rather than per plan: it is a preference about a screen, not a fact
+// about a client, and writing it to Firestore would sync one person's tidiness
+// onto every trainer looking at them.
+function FoldCard({ id, title, summary, defaultOpen = false, children, style }) {
+  const key = `glidna-fold-${id}`;
+  const [open, setOpen] = useState(() => {
+    try { const v = localStorage.getItem(key); return v === null ? defaultOpen : v === "1"; }
+    catch { return defaultOpen; }
+  });
+  const toggle = () => {
+    setOpen((v) => {
+      try { localStorage.setItem(key, v ? "0" : "1"); } catch { /* private mode */ }
+      return !v;
+    });
+  };
+  return (
+    <div className="card" style={{marginTop:"14px", ...(style || {})}}>
+      <button onClick={toggle} aria-expanded={open}
+        style={{width:"100%",display:"flex",alignItems:"center",gap:"8px",background:"transparent",
+          border:"none",padding:0,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+        <span className="sec-title" style={{marginBottom:0,flex:"0 0 auto"}}>{title}</span>
+        {summary != null && (
+          <span style={{marginLeft:"auto",fontSize:".74rem",fontWeight:700,color:"var(--text-secondary)"}}>{summary}</span>
+        )}
+        <span style={{color:"var(--muted)",fontSize:".7rem",flex:"0 0 auto"}}>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && <div style={{marginTop:"10px"}}>{children}</div>}
+    </div>
+  );
+}
+
 const SAV_WINDOWS = [
   { id: "1",  days: 1,  label: "Day" },
   { id: "7",  days: 7,  label: "Week" },
@@ -43370,5 +43420,6 @@ export default function App() {
     </>
   );
 }
+
 
 

@@ -509,12 +509,62 @@ ok("the fixture prices a day at all", TDEE > 1200, TDEE);
 // contradicting its own caption. The span is the only honest label.
 {
   const code = codeOnly(APP);
-  ok("the window is labelled by the span it really covers", code.includes("Last ${savWinPh.span} days"));
-  ok("...never by the number of days requested", !code.includes("Last ${savWinDays} days"));
+  // The headline names the window's own coverage; the separate "Last N days"
+  // row went when the duplicate selector did.
+  ok("the headline names the days the window really covers",
+     code.includes("across {savWinPh.tracked} logged day"));
+  ok("...never the number of days requested", !code.includes("Last ${savWinDays} days"));
   // The projection runs the daily pace across EVERY day, so on a week with gaps
   // it exceeds the window total beside it. The heading has to say which it is.
   ok("the projection heading says it assumes every day", /At that pace, every day/.test(code));
   ok("...and the gap is explained when days are missing", /never\s*\n?\s*logged|were never/.test(code) || code.includes("never"));
+}
+
+
+// ── the card's own shape (S236) ─────────────────────────────────────────────
+// ⚠️ ALL FOUR OF THESE WERE FOUND BY OPENING THE CARD, NOT BY READING THE DIFF,
+// which is how every defect in this area has been found. They are pinned here so
+// they cannot come back quietly.
+{
+  const start = APP.indexOf("function DailyDashboard(");
+  const next = APP.indexOf("\nfunction ", start + 1);
+  const dash = codeOnly(APP.slice(start, next < 0 ? APP.length : next));
+  ok("the dashboard slice was actually found", dash.length > 20000, dash.length);
+
+  // ONE selector. Adding the headline control left the original rendering below
+  // it — two identical controls and the same number twice on one card.
+  ok("the savings card renders exactly one window selector",
+     (dash.match(/SAV_WINDOWS\.map/g) || []).length === 1, (dash.match(/SAV_WINDOWS\.map/g) || []).length);
+
+  // The headline, the scale, the gap and the coverage note must all describe the
+  // SAME stretch, or the card compares a week against a month and calls the
+  // difference a finding.
+  // ⚠️ ANCHOR THE DEFINITION, NOT THE NAME. Both of these first matched
+  // /savHead/ and /savCov\.tracked/ — which stay true when the const is
+  // redefined back to the phase, so the mutation that undoes the whole feature
+  // sailed through green. The binding is what has to be pinned.
+  ok("the headline is DEFINED from the window",
+     /savHead = savWinPh \? savWinPh\.banked/.test(dash), (dash.match(/savHead = [^;]{0,50}/) || [])[0]);
+  ok("the coverage note is DEFINED from the window",
+     /savCov = savWinPh \|\| savPh/.test(dash), (dash.match(/savCov = [^;]{0,40}/) || [])[0]);
+  ok("...and the note reads it", /savCov\.tracked/.test(dash));
+  ok("...and no longer reads the phase there", !/Tracked <b>\{savPh\.tracked\}/.test(dash));
+  ok("the scale row reads the window", /savScaleLbs/.test(dash) && !/savPh\.scaleLbs !== null/.test(dash));
+
+  // The rate is stated once. Two sentences apart, both opening "At N (cal) a
+  // pound", read as the card stammering.
+  // The projection footnote and the rate note below it both opened "At N (cal)
+  // a pound", two sentences apart. The footnote gives it up.
+  const foot = dash.slice(dash.indexOf("A projection from the days you logged"));
+  ok("the projection footnote no longer restates the rate",
+     !/^.{0,200}a pound/s.test(foot), foot.slice(0, 90));
+
+  // Both cards fold, and the number survives the fold — a collapsed card that
+  // hides its own figure is tidier and less useful.
+  ok("the savings card folds", /FoldCard id="savings"/.test(dash));
+  ok("...carrying its number in the header", /summary=\{`\$\{savHead >= 0/.test(dash));
+  ok("the measured-burn card folds", /FoldCard id="burn"/.test(dash));
+  ok("...carrying its number too", /summary=\{observed\.tdee \?/.test(dash));
 }
 
 console.log(`\n  ${checks - fails}/${checks} checks passed`);
