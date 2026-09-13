@@ -16377,14 +16377,25 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // Maintain: within ±5% of target (min ±100 cal) reads as "On target" (green);
   // drifting either way past the band reads red. Tunable.
   const maintainBand = Math.max(100, Math.round(target * 0.05));
+  // ⚠️ THIS WORD IS MEASURED AGAINST THE TARGET, AND NOW SAYS SO (S222). It sat
+  // directly under "CAL REMAINING", which is also against the target, but read
+  // "Deficit" / "Surplus" — words that mean "against MAINTENANCE" everywhere
+  // else in the app and in the savings account. On a 1 lb/wk plan a perfectly
+  // on-plan day is a real 500-calorie deficit, and this called it neither.
+  // "Under / On / Over target" is what it has always actually measured.
+  //
+  // ⚠️ AND THE SAVINGS VOCABULARY DELIBERATELY STAYS OFF IT. Saving / Holding /
+  // Spending are about the ACCOUNT, which is measured against the burn; putting
+  // them on a number measured against the target would make one small component
+  // quote two different bases.
   const goalState = (() => {
     const GRN = "var(--green)", RED = "var(--red)", MUT = "var(--muted)";
     if (goalDir === "maintain") {
       if (Math.abs(deficitVal) <= maintainBand) return { word: "On target", color: GRN };
-      return { word: todaySurplus > 0 ? "Surplus" : "Deficit", color: RED };
+      return { word: todaySurplus > 0 ? "Over target" : "Under target", color: RED };
     }
-    if (todaySurplus > 0) return { word: "Surplus", color: goalDir === "surplus" ? GRN : RED };
-    if (todayDeficit > 0) return { word: "Deficit", color: goalDir === "deficit" ? GRN : RED };
+    if (todaySurplus > 0) return { word: "Over target", color: goalDir === "surplus" ? GRN : RED };
+    if (todayDeficit > 0) return { word: "Under target", color: goalDir === "deficit" ? GRN : RED };
     return { word: "On target", color: MUT };
   })();
   // The "with your workout" option (S102h, Kevin: "both options to see"). The
@@ -17223,6 +17234,22 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
             </div>
           </div>
 
+          {/* ⚠️ THE INTENT FRAMES THE BALANCE (S222). A falling balance is a
+              failure while you are SAVING and the plan working while you are
+              SPENDING — reading it the same way in both is the S217 mistake, and
+              it is the whole reason the three buttons exist now. */}
+          <div style={{marginTop:"8px",fontSize:".66rem",color:"var(--muted)",lineHeight:1.45}}>
+            {goalDir === "surplus"
+              ? <>You&rsquo;re <b style={{color:"var(--text-secondary)"}}>spending</b> &mdash; this is what
+                is left to enjoy before the weight starts coming back on. Drawing it down on purpose is
+                the point; it is only a problem if you meant to be saving.</>
+              : goalDir === "maintain"
+                ? <>You&rsquo;re <b style={{color:"var(--text-secondary)"}}>holding</b> &mdash; the balance
+                  should sit roughly where it is. Drift either way is the thing to watch.</>
+                : <>You&rsquo;re <b style={{color:"var(--text-secondary)"}}>saving</b> &mdash; every day you
+                  finish under what your body burned adds to this.</>}
+          </div>
+
           {savWorth && savPh.banked !== 0 && (
             <div style={{marginTop:"10px",display:"flex",justifyContent:"space-between",alignItems:"baseline",fontSize:".8rem"}}>
               <span style={{color:"var(--muted)"}}>That&rsquo;s worth</span>
@@ -17537,11 +17564,25 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               they decide what counts as a good day, which is why the word under
               the ring turns green or red. The number lives in Daily Calorie
               Targets below. */}
+          {/* ── What you're doing with the account (S222, Kevin) ──────────────
+              "Those buttons do seem a little useless … can we find another way
+              to use the logic?"
+              They were not useless, they were named for the old model: three
+              states that only ever coloured one word. As the account's INTENT
+              they earn the room — they say which way the balance is meant to be
+              going, the savings card frames itself accordingly, and Spending is
+              the deliberate cash-in that tells "a wedding I planned for" apart
+              from "a Tuesday that got away from me".
+              ⚠️ THE STORED VALUES ARE UNCHANGED (deficit / maintain / surplus).
+              Every existing plan carries one, and committing a pace writes one —
+              renaming the data to match the labels would silently reset the
+              lot. */}
           <div style={{fontSize:".6rem",color:"var(--muted)",marginBottom:"6px"}}>
-            What counts as a good day — colours the word in the ring. Your calorie number is set below.
+            What you&rsquo;re doing with your account right now &mdash; it frames your savings and colours the
+            word in the ring. Your calorie number is set below.
           </div>
           <div style={{display:"inline-flex",gap:6}}>
-            {[["deficit","Deficit"],["maintain","Maintain"],["surplus","Surplus"]].map(([v,l])=>{
+            {[["deficit","Saving"],["maintain","Holding"],["surplus","Spending"]].map(([v,l])=>{
               const on = goalDir===v;
               return (
                 <button key={v} onClick={()=>onSetCalorieGoal(v)}

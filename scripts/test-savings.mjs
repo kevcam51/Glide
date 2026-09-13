@@ -279,6 +279,41 @@ ok("the fixture prices a day at all", TDEE > 1200, TDEE);
   ok("...and it says so rather than passing itself off as measured", fallback.lbs !== measured.lbs);
 }
 
+// ── 10. the account's intent (S222, Kevin: "those buttons do seem a little
+// useless … can we find another way to use the logic?") ───────────────────
+{
+  // ⚠️ THE STORED VALUES ARE UNCHANGED. Every existing plan carries one of these
+  // three strings, and committing a pace writes one; renaming the DATA to match
+  // the new labels would silently reset every plan in the field to the default.
+  ok("the three states are still stored as they always were",
+     /\[\["deficit","Saving"\],\["maintain","Holding"\],\["surplus","Spending"\]\]/.test(APP));
+  ok("...and nothing writes the label as the value",
+     !/onSetCalorieGoal\("(Saving|Holding|Spending)"\)/.test(APP)
+     && /onSetCalorieGoal\(previewRate === 0 \? "maintain" : previewRate < 0 \? "surplus" : "deficit"\)/.test(APP));
+  // ⚠️ THE RING WORD IS MEASURED AGAINST THE TARGET AND NOW SAYS SO. It sits
+  // under "CAL REMAINING", also against the target, but used to read
+  // "Deficit"/"Surplus" — words that mean "against MAINTENANCE" everywhere else,
+  // including in this very file.
+  // ⚠️ COUNTED, NOT MERELY FOUND. Both branches of goalState produce this pair —
+  // the maintain arm and the deficit/surplus arm — and a negative like
+  // !/word: "Surplus"/ does not match `word: todaySurplus > 0 ? "Surplus"`, so
+  // reverting ONE arm stayed green. Caught by mutating exactly that arm.
+  ok("the ring word names what it is measured against, in both arms",
+     (APP.match(/"Over target"/g) || []).length === 2
+     && (APP.match(/"Under target"/g) || []).length === 2,
+     { over: (APP.match(/"Over target"/g) || []).length, under: (APP.match(/"Under target"/g) || []).length });
+  ok("...and the old maintenance-relative words are gone from it",
+     !/\? "Surplus" : "Deficit"/.test(APP) && !/word: "Surplus"/.test(APP) && !/word: "Deficit"/.test(APP));
+  // ⚠️ AND THE SAVINGS WORDS STAY OFF IT, so one component cannot quote two bases.
+  ok("...and the savings vocabulary is not put on a target-based number",
+     !/word: "(Saving|Holding|Spending)"/.test(APP));
+  // The intent has to reach the card, or the buttons are decoration again.
+  ok("the savings card is framed by the intent",
+     /\{goalDir === "surplus"/.test(APP)
+     && /is left to enjoy before the weight starts coming back on/.test(APP)
+     && /every day you\s*\n?\s*finish under what your body burned adds to this/.test(APP));
+}
+
 console.log(`\n  ${checks - fails}/${checks} checks passed`);
 if (fails) { console.log(`  ${fails} FAILED`); process.exit(1); }
 console.log("  Savings: what the day banked, and what a pound costs this person.\n");
