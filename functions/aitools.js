@@ -878,6 +878,12 @@ function planMaintenance(d) {
 // raised).
 const PROTEIN_REF_BF = 15;
 const PROTEIN_MAX_PCT = 0.5;
+// ⚠️ MIRROR OF src/App.jsx MACRO_SPLITS[0].fatPct / autoFatG (S231). The app has
+// one fat rule now instead of the same arithmetic written out in four places;
+// this is the server's copy of it, and scripts/test-protein.mjs runs both across
+// a sweep of targets and requires identical grams.
+const DEFAULT_FAT_PCT = 0.28;
+const autoFatG = (cal) => Math.round(((Number(cal) || 0) * DEFAULT_FAT_PCT) / 9);
 function proteinPlan(d, calorieTarget) {
   d = d || {};
   const perLb = Number(d.proteinPerLb) === 0.7 ? 0.7 : 1.0;
@@ -932,7 +938,7 @@ function nutritionTargets(d) {
   if (Number(d.calorieTarget) > 0) cal = atLeastMinCal(d.calorieTarget);
   const mt = d.macroTargets || {};
   const protein = mt.protein != null ? Number(mt.protein) : proteinPlan(d, cal).grams;
-  const fat = mt.fat != null ? Number(mt.fat) : (cal ? Math.round((cal * 0.28) / 9) : null);
+  const fat = mt.fat != null ? Number(mt.fat) : (cal ? autoFatG(cal) : null);
   const carbs = mt.carbs != null ? Number(mt.carbs)
     : (cal != null && protein != null && fat != null
         ? Math.max(0, Math.round((cal - protein * 4 - fat * 9) / 4)) : null);
@@ -2920,7 +2926,9 @@ async function runTool(name, input, ctx) {
       goalWeightLbs: data.goalWeight != null ? Number(data.goalWeight) : null,
       note: t.calorieTarget == null
         ? "Calorie target unavailable — the plan is missing gender/age/height."
-        : `Calorie target is the baseline diet target (excludes scheduled-exercise calories). NEVER recommend eating below ${MIN_DAILY_CAL} cal/day, whatever the maths says — if a bigger deficit is wanted it comes from movement, not from less food.`
+        : `Calorie target ${(data.deficitMode || "eatback") !== "accelerate"
+              ? "ALREADY INCLUDES the scheduled-exercise calories (eat-back is the default approach: the week's planned training burn is divided by 7 and added back)"
+              : "EXCLUDES the scheduled-exercise calories (accelerate approach: the burn speeds up the goal date instead of being eaten back)"}. NEVER recommend eating below ${MIN_DAILY_CAL} cal/day, whatever the maths says — if a bigger deficit is wanted it comes from movement, not from less food.`
           + (data.wearableAdjust && (data.deficitMode || "eatback") !== "accelerate"
             ? " Tracker adjustment is ON: on days the person's watch synced its measured burn, the app's day target is (measured resting+active − 500) instead of this baseline."
             : ""),

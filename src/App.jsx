@@ -6014,7 +6014,7 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
   const calTxt = (v) => (v > 0 ? v.toLocaleString() : "—");
   const mtS = data.macroTargets || {};
   const proteinG = mtS.protein != null ? Number(mtS.protein) : autoProteinG(data, targetCals);
-  const fatG = mtS.fat != null ? Number(mtS.fat) : Math.round(Math.round(targetCals * 0.28) / 9);
+  const fatG = mtS.fat != null ? Number(mtS.fat) : autoFatG(targetCals);
   const fatCal = fatG * 9;
   const carbG = mtS.carbs != null ? Number(mtS.carbs)
     : Math.round(Math.max(0, targetCals - proteinG * 4 - fatCal) / 4);
@@ -6637,9 +6637,12 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
   const fatCal   = fatG * 9;
   const carbG    = shownTile ? shownTile.t.carbs : 0;
   const carbCal  = carbG * 4;
-  // Fibre, creatine, hydration
+  // Fibre. (The comment here used to say "Fibre, creatine, hydration" and a
+  // `waterOz` was computed beside it — written to be shown, wired to nothing, and
+  // never rendered in the 614 lines that follow. Creatine does appear, in the
+  // supplements table; hydration never landed. Removed rather than left reading
+  // as though this tab prescribes a water target, S231.)
   const fibreG   = Math.max(gender === "male" ? 38 : 25, Math.round(displayCals / 1000 * 14));
-  const waterOz  = Math.round(weightLbs * 0.6); // slightly higher for muscle building
 
   // Macro %
   const pctP = Math.round((proteinCal / displayCals) * 100);
@@ -6798,7 +6801,7 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
           {muscleInfo === "gain" && (<>
             <strong style={{color:"var(--accent)",display:"block",marginBottom:"6px"}}>Estimated Muscle Gain Per Month</strong>
             <p style={{marginBottom:"8px"}}>This is how much muscle you could realistically gain each month, based on your experience level, training frequency, exercise quality, and gender. It uses the <strong>Aragon/Helms model</strong> — the most respected evidence-based estimate in sports science.</p>
-            <p style={{marginBottom:"8px"}}>The range shown ({gainLow}–{gainHigh} lbs/mo) is already adjusted for your specific plan. The more consistently you train with progressive overload (gradually increasing weight), eat adequate protein (~1g per lb bodyweight), and sleep well, the closer you'll be to the upper end.</p>
+            <p style={{marginBottom:"8px"}}>The range shown ({gainLow}–{gainHigh} lbs/mo) is already adjusted for your specific plan. The more consistently you train with progressive overload (gradually increasing weight), eat adequate protein (the {proteinG}g above), and sleep well, the closer you'll be to the upper end.</p>
             <div style={{padding:"8px 12px",background:"var(--s2)",borderRadius:"6px",fontSize:".78rem",marginBottom:"6px"}}>
               <strong>How it's calculated:</strong> Base rate ({baseGainLow}–{baseGainHigh} lbs/mo for {experience} {gender==="female"?"women":"men"}) × Frequency ({(freqFactor*100).toFixed(0)}%) × Quality ({(qualityFactor*100).toFixed(0)}%){gender==="female"?" × Gender (55%)":""} = <strong>{gainLow}–{gainHigh} lbs/mo</strong>
             </div>
@@ -7377,7 +7380,7 @@ function NutrientsTab({ data, weightLbs, gender, age, name, targets,
   const proteinCal = proteinG * 4;
 
   // Fat: 25–30% of target cals (use 28%)
-  const fatG   = mtN.fat != null ? Number(mtN.fat) : Math.round(Math.round(targetCals * 0.28) / 9);
+  const fatG   = mtN.fat != null ? Number(mtN.fat) : autoFatG(targetCals);
   const fatCal = fatG * 9;
 
   // Carbs: remaining
@@ -7615,7 +7618,7 @@ function NutrientsTab({ data, weightLbs, gender, age, name, targets,
           { name:"Carbs",    g:carbG,     cal:carbCal,    cls:"carbs",   emoji:"🌾",
             why:"Your primary fuel source for training. Adjusted after protein and fat are set from remaining calories." },
           { name:"Fat",      g:fatG,      cal:fatCal,     cls:"fat",     emoji:"🥑",
-            why:"Set at 28% of target calories. Essential for hormone production, joint health, and fat-soluble vitamin absorption." },
+            why:`${mtN.fat != null ? "Set by hand on your plan" : `Set at ${pctFat}% of target calories`}. Essential for hormone production, joint health, and fat-soluble vitamin absorption.` },
           { name:"Fibre",    g:fibreG,    cal:null,       cls:"fibre",   emoji:"🥦",
             why:"Supports digestion, blood sugar regulation, and satiety. Scaled to calorie intake — aim for this daily minimum." },
         ].map(m=>(
@@ -11851,10 +11854,17 @@ function CalendarView({ data, tdee, onClose, onReadDay, onWriteDay, onListLogged
 
   // Daily calorie target — same formula the dashboard/Results use, for adherence tinting.
   const calTarget = (computeClientCalories(data) || {}).target || null;
-  // Daily protein target — custom override, else the dashboard default (~1 g per lb bodyweight).
+  // Daily protein target — custom override, else the shared helper.
+  // ⚠️ THIS WAS THE SEVENTH READER, AND S224 MISSED IT (fixed S231). It read a
+  // BARE bodyweight, so it ignored the basis chip, the lean-mass denominator and
+  // the ceiling all at once: a 320 lb client at 42% body fat was scored against
+  // 320 g while every other screen prescribed 218. And it is not a label — it
+  // paints the day green on `dayProt >= protTarget` and drives the weekly
+  // roll-up, so someone eating exactly what the app told them to eat saw the
+  // week rendered as a miss.
   const protTarget = (data.macroTargets && data.macroTargets.protein != null)
     ? Number(data.macroTargets.protein)
-    : (data.weightLbs ? Math.round(Number(data.weightLbs)) : null);
+    : autoProteinG(data, calTarget);
 
   // Client start date (when they signed up / began). Days BEFORE this aren't
   // tracked: we don't mark them missed / scheduled / adherence, because the
@@ -16550,7 +16560,21 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // ⚠️ THE DENOMINATOR IS LEAN MASS WHEN WE KNOW IT (S224) — see proteinPlan.
   // `protPlan.basis` and `.capped` are what the note under the card reports, so
   // a target the helper moved is never moved silently.
-  const protPlan = proteinPlan({ ...data, weightLbs }, target);
+  // ⚠️ MACROS ARE A PROPERTY OF THE PLAN, NOT OF THE DAY ON SCREEN (S231, and
+  // this is S214's defect wearing a new coat). `target` follows the VIEWED DAY —
+  // through dayIdx → burnShown, and through that day's log → wearableTdee — which
+  // was harmless while protein was `weightLbs × perLb`. PROTEIN_MAX_PCT made the
+  // grams a function of the calorie number, so one 260 lb client read 260 g on a
+  // training day, 184 g on a rest day and 218 g on every other screen: a 41%
+  // spread on one body, one plan. Worse, the tiles below are what the confirm
+  // button FREEZES into data.macroTargets, so which day happened to be on screen
+  // decided what got stored.
+  // ⚠️ NOT computeClientCalories HERE. It gates on gender/bmr and returns null for
+  // an incomplete plan, which would silently zero the macro card for exactly the
+  // people still filling it in — the S214 warning about tidying gates down. The
+  // shared ladder is lenient and day-independent, which is what this needs.
+  const macroBasisCal = manualTarget != null ? manualTarget : planIntakeForRate(data, weeklyRateOf(data));
+  const protPlan = proteinPlan({ ...data, weightLbs }, macroBasisCal);
   // ⚠️ SPEAK ONLY WHEN THE ANSWER MOVED. A lean client's lean-mass target is the
   // same number 1 g/lb already gave them — saying so on every visit is a
   // permanent paragraph explaining nothing. The rule the 1,200 floor states is
@@ -16559,19 +16583,19 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
     && Math.abs(protPlan.grams - Math.round(Number(weightLbs) * protPlan.perLb)) > 2;
   const proteinPerLb = protPlan.perLb;
   const autoProtein = protPlan.grams || 0;
-  const autoFat = Math.round(target * 0.28 / 9);
+  const autoFat = autoFatG(macroBasisCal);
   const proteinTarget = mt && mt.protein != null ? mt.protein : autoProtein;
   const fatTarget = mt && mt.fat != null ? mt.fat : autoFat;
   const carbsTarget = mt && mt.carbs != null ? mt.carbs
-    : Math.max(0, Math.round((target - proteinTarget * 4 - fatTarget * 9) / 4));
+    : Math.max(0, Math.round((macroBasisCal - proteinTarget * 4 - fatTarget * 9) / 4));
   const macrosCustom = !!mt;
 
   // ── Macro % helpers (S94) ──────────────────────────────────────────────────
   // A macro's share of the calorie target: grams → % (protein/carbs = 4 cal/g,
   // fat = 9 cal/g). Used both to DISPLAY the current split as % and to convert a
   // %-entered target back to grams. `target` is the daily calorie goal.
-  const gToPct = (g, calPerG) => (target > 0 ? Math.round((Number(g) * calPerG / target) * 100) : 0);
-  const pctToG = (p, calPerG) => (target > 0 ? Math.round((Number(p) / 100) * target / calPerG) : 0);
+  const gToPct = (g, calPerG) => (macroBasisCal > 0 ? Math.round((Number(g) * calPerG / macroBasisCal) * 100) : 0);
+  const pctToG = (p, calPerG) => (macroBasisCal > 0 ? Math.round((Number(p) / 100) * macroBasisCal / calPerG) : 0);
   // Current effective split, as whole percentages (what the plan is targeting now).
   const splitP = gToPct(proteinTarget, 4), splitC = gToPct(carbsTarget, 4), splitF = gToPct(fatTarget, 9);
   // ── The four splits (S224, Kevin: "we should have those four options you
@@ -16591,7 +16615,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // calories left over split between fat and carbs.
   // The table and the builder are module level (see macroSplitTiles) — the
   // Muscle tab asks the same question about its own lean-bulk calories.
-  const splitTiles = macroSplitTiles({ ...data, weightLbs }, target, MACRO_KEYS_PLAN);
+  const splitTiles = macroSplitTiles({ ...data, weightLbs }, macroBasisCal, MACRO_KEYS_PLAN);
   // The hand-entry editor types PERCENTAGES, so its shortcut chips convert the
   // same grams rather than carrying a second table — two tables is how the old
   // contradiction got in.
@@ -16625,8 +16649,10 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
          : !protMoved ? `${proteinPerLb} g/lb protein`
          : protPlan.capped ? `protein held at ${Math.round(PROTEIN_MAX_PCT * 100)}% of cal`
          : "protein from lean mass" }));
-    // Two buttons with identical numbers is noise, not choice — when the
-    // goal-based split lands on the balanced one (i.e. maintaining), drop it.
+    // Two buttons with identical numbers is noise, not choice. This was written
+    // for the goal-derived tile, which S224b removed; it stays because the
+    // ceiling can still collapse two splits onto one triple, and a tile the
+    // reader cannot tell apart from its neighbour is worse than three tiles.
     const seen = new Set();
     return list.filter((o) => {
       if (!(o.t.protein > 0 || o.t.carbs > 0 || o.t.fat > 0)) return false;
@@ -17698,7 +17724,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           same three recommendations that editor already offers, shown as grams,
           one tap to adopt. The editor stays where it is; it is still where a
           number that is nobody's recommendation gets typed. */}
-      {onSetMacroTargets && macroPresets.length > 0 && target > 0 && (
+      {onSetMacroTargets && macroPresets.length > 0 && macroBasisCal > 0 && (
         <div className="card" style={{marginTop:"14px"}}>
           <div className="sec-title" style={{marginBottom:"8px"}}>Macro Targets</div>
           <div style={{fontSize:".68rem",color:"var(--muted)",marginBottom:"8px"}}>
@@ -17749,8 +17775,14 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
             <div style={{fontSize:".64rem",color:"var(--muted)",marginTop:"8px",lineHeight:1.55}}>
               {protPlan.capped ? (
                 <>Protein is held at <strong style={{color:"var(--text-secondary)"}}>{Math.round(PROTEIN_MAX_PCT*100)}%</strong> of your
-                  calories. {proteinPerLb}g per lb of bodyweight would be {protPlan.raw}g, which leaves too little for fat and carbs.
-                  {protPlan.basis !== "lean" && " Add your body fat % under Body & Measurements and it works from lean mass instead."}</>
+                  calories. {/* ⚠️ `raw` IS THE LEAN-DERIVED FIGURE ON A LEAN-BASIS PLAN, and this
+                      sentence used to call it "per lb of bodyweight" regardless — naming a
+                      denominator that produced a different number entirely (218g attributed to
+                      a rule that gives 320g). The fourth caption of this shape in one arc. */}
+                  {protPlan.basis === "lean"
+                    ? <>Your {protPlan.leanLbs} lbs of lean mass works out to {protPlan.raw}g, which leaves too little for fat and carbs.</>
+                    : <>{proteinPerLb}g per lb of bodyweight would be {protPlan.raw}g, which leaves too little for fat and carbs.
+                        {" Add your body fat % under Body & Measurements and it works from lean mass instead."}</>}</>
               ) : (
                 <>Protein comes from your <strong style={{color:"var(--text-secondary)"}}>{protPlan.leanLbs} lbs of lean mass</strong>, not
                   your scale weight — fat tissue doesn&rsquo;t need feeding.</>
@@ -17762,7 +17794,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               so before someone adopts it, not after. */}
           {(() => {
             const shown = previewMacros ? previewMacros.t : { protein: proteinTarget, carbs: carbsTarget, fat: fatTarget };
-            const chk = macroCalorieGap(shown.protein, shown.carbs, shown.fat, target);
+            const chk = macroCalorieGap(shown.protein, shown.carbs, shown.fat, macroBasisCal);
             if (!chk.off) return null;
             const over = chk.gap > 0;
             return (
@@ -17799,7 +17831,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           <div style={{fontSize:".62rem",color:"var(--muted)",marginTop:"7px",lineHeight:1.45}}>
             {previewMacros ? "That would be " : "Right now: "}
             <strong style={{color: previewMacros ? "var(--yellow)" : "var(--text-secondary)"}}>{shownP}g protein · {shownC}g carbs · {shownF}g fat</strong>
-            {" — "}{gToPct(shownP,4)}/{gToPct(shownC,4)}/{gToPct(shownF,9)}% of your {target.toLocaleString()} cal
+            {" — "}{gToPct(shownP,4)}/{gToPct(shownC,4)}/{gToPct(shownF,9)}% of your {macroBasisCal.toLocaleString()} cal
             {previewMacros ? <span style={{color:"var(--yellow)",fontWeight:700}}> · not saved yet</span> : null}.
             {!previewMacros && " Want a number that isn’t here? Set any of the three by hand under Macros & Micros."}
           </div>
@@ -18520,7 +18552,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
           {previewMacros ? "preview — not saved yet" : macrosCustom ? "custom targets set by you" : "estimates from bodyweight & calorie goal"}
         </div>
         {/* Recommended/current split shown as % of calories (S94, part a). */}
-        {target > 0 && (shownP || shownC || shownF) > 0 && (
+        {macroBasisCal > 0 && (shownP || shownC || shownF) > 0 && (
           <div style={{fontSize:".65rem",color:"var(--muted)",marginTop:"3px",textAlign:"center"}}>
             Split: <span style={{color:"var(--pink)",fontWeight:700}}>{gToPct(shownP,4)}%</span> protein · <span style={{color:"var(--yellow)",fontWeight:700}}>{gToPct(shownC,4)}%</span> carbs · <span style={{color:"var(--blue)",fontWeight:700}}>{gToPct(shownF,9)}%</span> fat
           </div>
@@ -18576,12 +18608,18 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               </div>
             ) : (
               <>
-                {/* ⚠️ THE SAME FOUR, FROM THE SAME TABLE. These chips used to carry
-                    their own list of kinds, which is how "Goal-based" outlived the
-                    goal-derived preset the card dropped. */}
+                {/* ⚠️ THE SAME TILES THE CARD SHOWS — NOT THE RAW TABLE (S231).
+                    These chips used to carry their own list of kinds, which is how
+                    "Goal-based" outlived the preset it named; S224b pointed them at
+                    MACRO_SPLITS to stop that, and then S225 added the Muscle tab's
+                    build-only `leanbulk` row to the same table. The chip appeared
+                    here, `recPct` could not find it among the PLAN tiles, and the
+                    `|| splitTiles[0]` fallback wrote Bodyweight's numbers under a
+                    Lean bulk label — which "Save targets" then persisted. Iterating
+                    the tiles is what actually makes the two surfaces agree. */}
                 <div style={{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap"}}>
                   <span style={{fontSize:".66rem",color:"var(--muted)"}}>Recommended:</span>
-                  {MACRO_SPLITS.map(({key:kind,label:lbl})=>(
+                  {splitTiles.map(({key:kind,label:lbl})=>(
                     <button key={kind} onClick={()=>{ const r=recPct(kind); setMtPct({ protein:String(r.protein), carbs:String(r.carbs), fat:String(r.fat) }); }}
                       style={{padding:"4px 10px",fontSize:".68rem",fontWeight:700,borderRadius:"999px",cursor:"pointer",border:"1px solid var(--border)",background:"transparent",color:"var(--accent)"}}>{lbl}</button>
                   ))}
@@ -18623,7 +18661,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
               )}
             </div>
             <div style={{fontSize:".62rem",color:"var(--muted)",fontStyle:"italic"}}>
-              Enter targets in grams or as a % of your {target}-cal goal (P/C = 4 cal/g, fat = 9 cal/g).
+              Enter targets in grams or as a % of your {macroBasisCal}-cal goal (P/C = 4 cal/g, fat = 9 cal/g).
               Saving locks them for this plan; "Reset to auto" returns to the bodyweight/calorie estimates.
             </div>
           </div>
@@ -23207,6 +23245,18 @@ const MACRO_KEYS_BUILD = ["leanbulk", "cutting", "balanced"];
 // ⚠️ AND EVERY SPLIT IS RE-CLAMPED. The basis is already inside the ceiling, so
 // multiplying it by 1.15 would step straight back over — without this a 320 lb
 // plan's high-protein tile offers 368 g and zero carbs.
+// The plan's default fat target in grams, for the readers that want the number
+// without the whole split.
+//
+// ⚠️ THE SAME RULE WAS WRITTEN OUT IN FOUR PLACES (S231) — the share card, the
+// Nutrients tab, the dashboard, and the splits table — in TWO different roundings:
+// `round(round(cal * 0.28) / 9)` on two screens and `round(cal * 0.28 / 9)` on the
+// others. Measured across every target from 1,200 to 4,000 they agree on all 2,801,
+// so nothing was visibly wrong; this is the protein story one step earlier, before
+// the copies had a chance to drift. The share is read off MACRO_SPLITS[0] rather
+// than retyped, so the anchor tile and the plan's own target cannot disagree.
+const autoFatG = (cal) => Math.round(((Number(cal) || 0) * MACRO_SPLITS[0].fatPct) / 9);
+
 function splitGrams(o, d, cal) {
   const c = Number(cal) || 0;
   const base = proteinPlan(d, c).grams || 0;

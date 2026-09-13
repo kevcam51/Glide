@@ -25,6 +25,7 @@ import { stripComments } from "./lib/strip-comments.mjs";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
 const TOOLS = readFileSync(join(ROOT, "functions", "aitools.js"), "utf8");
+const KNOW = readFileSync(join(ROOT, "functions", "knowledge.js"), "utf8");
 
 let fails = 0, checks = 0;
 const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n, x !== undefined ? JSON.stringify(x) : ""); } };
@@ -86,14 +87,15 @@ const APP_CODE = codeOnly(APP);
 
 // ── the two implementations, both lifted and run ───────────────────────────
 const APP_SRC = ["PROTEIN_REF_BF", "PROTEIN_MAX_PCT", "proteinBasisOf", "proteinPlan", "autoProteinG",
-  "MACRO_SPLITS", "MACRO_KEYS_PLAN", "MACRO_KEYS_BUILD", "splitGrams", "macroSplitTiles"]
+  "MACRO_SPLITS", "MACRO_KEYS_PLAN", "MACRO_KEYS_BUILD", "autoFatG", "splitGrams", "macroSplitTiles"]
   .map((n) => liftDecl(APP, n)).join("\n");
 const buildApp = (src) => new Function(`${src}; return { proteinPlan, autoProteinG, PROTEIN_REF_BF, PROTEIN_MAX_PCT,
-  MACRO_SPLITS, MACRO_KEYS_PLAN, MACRO_KEYS_BUILD, splitGrams, macroSplitTiles };`)();
+  MACRO_SPLITS, MACRO_KEYS_PLAN, MACRO_KEYS_BUILD, autoFatG, splitGrams, macroSplitTiles };`)();
 const A = buildApp(APP_SRC);
 
-const SRV_SRC = ["PROTEIN_REF_BF", "PROTEIN_MAX_PCT", "proteinPlan"].map((n) => liftDecl(TOOLS, n)).join("\n");
-const S = new Function(`${SRV_SRC}; return { proteinPlan, PROTEIN_REF_BF, PROTEIN_MAX_PCT };`)();
+const SRV_SRC = ["PROTEIN_REF_BF", "PROTEIN_MAX_PCT", "DEFAULT_FAT_PCT", "autoFatG", "proteinPlan"]
+  .map((n) => liftDecl(TOOLS, n)).join("\n");
+const S = new Function(`${SRV_SRC}; return { proteinPlan, autoFatG, PROTEIN_REF_BF, PROTEIN_MAX_PCT, DEFAULT_FAT_PCT };`)();
 
 const P = (over = {}) => ({ weightLbs: 180, ...over });
 
@@ -434,7 +436,17 @@ const P = (over = {}) => ({ weightLbs: 180, ...over });
   // ⚠️ ONE TABLE, TWO SURFACES, AND THE EDITOR MAKES THREE. The hand-entry
   // editor types PERCENTAGES; its shortcut chips used to carry their own list of
   // kinds, which is how "Goal-based" outlived the preset it named.
-  ok("the editor chips iterate the shared table", /\{MACRO_SPLITS\.map\(\(\{key:kind,label:lbl\}\)=>\(/.test(APP_CODE));
+  // ⚠️ THE CHIPS ITERATE THE TILES, NOT THE RAW TABLE (S231). S224b pointed them
+  // at MACRO_SPLITS so a chip could not outlive the preset it named; S225 then
+  // added the Muscle tab's build-only `leanbulk` row to that same table, so a
+  // fifth chip appeared on the dashboard, `recPct` could not find it among the
+  // PLAN tiles, and the `|| splitTiles[0]` fallback wrote Bodyweight's numbers
+  // under a Lean bulk label — which "Save targets" then persisted.
+  ok("the editor chips iterate the plan's tiles", /\{splitTiles\.map\(\(\{key:kind,label:lbl\}\)=>\(/.test(APP_CODE));
+  ok("...and no longer the raw table", !/\{MACRO_SPLITS\.map\(/.test(APP_CODE));
+  ok("(control) the table really does hold a key the plan surface excludes",
+     A.MACRO_SPLITS.some((o) => !A.MACRO_KEYS_PLAN.includes(o.key)),
+     A.MACRO_SPLITS.map((o) => o.key));
   ok("...and no longer carry their own list",
      !/\[\["bodyweight","Bodyweight"\],\["balanced","Balanced"\],\["goal","Goal-based"\]\]/.test(APP_CODE));
   {
@@ -499,6 +511,218 @@ const P = (over = {}) => ({ weightLbs: 180, ...over });
     ok("...and appears exactly once in the tab",
        (MT.match(/gains flatten out/g) || []).length === 1, (MT.match(/gains flatten out/g) || []).length);
   }
+}
+
+// ── 11. one fat rule, four readers (S231) ─────────────────────────────────
+{
+  // ⚠️ THE SAME ARITHMETIC WAS WRITTEN OUT FOUR TIMES IN TWO ROUNDINGS: the share
+  // card and the Nutrients tab rounded the CALORIES first
+  // (`round(round(cal * 0.28) / 9)`), the dashboard and the splits table did not.
+  // Across every target from 1,200 to 4,000 the two agree on all 2,801, so nothing
+  // was visibly wrong — this is the protein story caught one step earlier, before
+  // the copies drifted. Counted, because "found somewhere" is not the claim.
+  ok("no screen retypes the fat share any more",
+     (APP_CODE.match(/Math\.round\(Math\.round\(\w+ \* 0\.28\) \/ 9\)/g) || []).length === 0);
+  // ⚠️ SCOPED TO THE FAT SHARE. A bare count of "0.28" is 2, and the other one is
+  // `opacity: inRange ? 1 : 0.28` — a CSS value in an unrelated chart. My own
+  // false positive; a number is not a rule just because it reads like one.
+  ok("...and the fat share is declared exactly once",
+     (APP_CODE.match(/fatPct: 0\.28/g) || []).length === 1);
+  ok("...with no other 0.28 doing macro arithmetic",
+     (APP_CODE.match(/0\.28/g) || []).filter(Boolean).length === 2
+     && /opacity: inRange \? 1 : 0\.28/.test(APP_CODE));
+  ok("the helper reads the share off the anchor rather than retyping it",
+     /const autoFatG = \(cal\) => Math\.round\(\(\(Number\(cal\) \|\| 0\) \* MACRO_SPLITS\[0\]\.fatPct\) \/ 9\);/.test(APP_CODE));
+  // The three readers now call it.
+  for (const [who, re] of [
+    ["the share card", /const fatG = mtS\.fat != null \? Number\(mtS\.fat\) : autoFatG\(targetCals\);/],
+    ["the Nutrients tab", /const fatG   = mtN\.fat != null \? Number\(mtN\.fat\) : autoFatG\(targetCals\);/],
+    ["the dashboard", /const autoFat = autoFatG\(macroBasisCal\);/],
+  ]) ok(`${who} calls the helper`, re.test(APP_CODE));
+
+  // ⚠️ THE ANCHOR TILE AND THE PLAN'S OWN TARGET MUST BE THE SAME NUMBER, or the
+  // card cannot mark it YOURS without lying. Run both, don't read them.
+  let bad = null, swept = 0;
+  for (let cal = 1200; cal <= 4000; cal += 7) {
+    swept++;
+    const viaHelper = A.autoFatG(cal);
+    const viaTile = A.macroSplitTiles({ weightLbs: 180 }, cal, A.MACRO_KEYS_PLAN)[0].t.fat;
+    const viaOldDouble = Math.round(Math.round(cal * 0.28) / 9);
+    const viaServer = S.autoFatG(cal);
+    if (viaHelper !== viaTile || viaHelper !== viaServer || viaHelper !== viaOldDouble) {
+      bad = { cal, viaHelper, viaTile, viaServer, viaOldDouble };
+    }
+  }
+  ok("the helper, the anchor tile and the server agree on every target", !bad, bad);
+  // ...and the rounding this replaced agreed too, which is why nobody saw it.
+  ok("(control) the old double-rounding gave the same answer throughout", !bad);
+  ok("(control) the sweep ran", swept === 401, swept);
+  ok("the mirrored share matches", S.DEFAULT_FAT_PCT === A.MACRO_SPLITS[0].fatPct);
+  // A control that cannot go red proves nothing — drift the mirror and require
+  // the comparison above to notice.
+  const drifted = new Function(`${SRV_SRC.replace("const DEFAULT_FAT_PCT = 0.28;", "const DEFAULT_FAT_PCT = 0.3;")}; return { autoFatG };`)();
+  ok("(mutation) a drifted server share is caught", drifted.autoFatG(2000) !== A.autoFatG(2000));
+  ok("junk is answered, not thrown", A.autoFatG(undefined) === 0 && A.autoFatG(null) === 0);
+}
+
+// ── 12. the Muscle tab's dead water target (S231) ─────────────────────────
+{
+  // ⚠️ COMPUTED AND NEVER RENDERED. `waterOz = round(weightLbs * 0.6)` sat under a
+  // comment reading "Fibre, creatine, hydration" — fibre is a macro card, creatine
+  // is in the supplements table, hydration was never wired in the 614 lines that
+  // follow. A number that looks like a prescription and reaches no screen.
+  const a = APP_CODE.indexOf("function MuscleTab(");
+  const b = APP_CODE.indexOf("\nfunction ", a + 10);
+  const MT = APP_CODE.slice(a, b);
+  ok("found the MuscleTab body for the water check", a > 0 && b > a);
+  ok("the Muscle tab no longer computes a water target it cannot show",
+     !/waterOz/.test(MT), (MT.match(/.{0,50}waterOz.{0,50}/) || [])[0]);
+  // ⚠️ AND SummaryTab's ONE IS ALIVE — declared AND rendered in a Water row — so
+  // this must not become a blanket ban on the name. (I first wrote this control
+  // against SharePlanCard, which never had one; it passed for the wrong reason
+  // until the count was pinned.)
+  const sa = APP_CODE.indexOf("function SummaryTab(");
+  const sb = APP_CODE.indexOf("\nfunction ", sa + 10);
+  const SC = APP_CODE.slice(sa, sb);
+  ok("found the SummaryTab body", sa > 0 && sb > sa);
+  ok("(control) SummaryTab still computes a water target AND shows it",
+     (SC.match(/waterOz/g) || []).length === 3 && /<Row label="Water"/.test(SC),
+     (SC.match(/waterOz/g) || []).length);
+}
+
+// ── 13. the macro card is a property of the PLAN, not of the day (S231) ───
+{
+  // ⚠️ S214's DEFECT WEARING A NEW COAT, AND I PUT IT THERE. DailyDashboard's
+  // `target` follows the VIEWED DAY — through dayIdx → burnShown and through
+  // that day's log → wearableTdee. That was harmless while protein was
+  // `weightLbs × perLb`; PROTEIN_MAX_PCT made the grams a function of the
+  // calorie number, so one body on one plan read three different prescriptions.
+  const d = { weightLbs: 260 };
+  const training = A.proteinPlan(d, 2122).grams;
+  const rest = A.proteinPlan(d, 1472).grams;
+  const plan = A.proteinPlan(d, 1751).grams;
+  ok("(control) the ceiling really does make grams depend on the calories",
+     training === 260 && rest === 184 && plan === 218, { training, rest, plan });
+  ok("...a 41% spread, which is why the basis has to be the plan's",
+     Math.round(((training - rest) / rest) * 100) === 41);
+
+  // Every macro on that card now divides out of ONE day-independent number.
+  ok("the basis is the shared ladder, not the viewed day",
+     /const macroBasisCal = manualTarget != null \? manualTarget : planIntakeForRate\(data, weeklyRateOf\(data\)\);/.test(APP_CODE));
+  for (const [who, re] of [
+    ["protein", /const protPlan = proteinPlan\(\{ \.\.\.data, weightLbs \}, macroBasisCal\);/],
+    ["fat", /const autoFat = autoFatG\(macroBasisCal\);/],
+    ["carbs", /Math\.max\(0, Math\.round\(\(macroBasisCal - proteinTarget \* 4 - fatTarget \* 9\) \/ 4\)\)/],
+    ["the tiles that get saved", /macroSplitTiles\(\{ \.\.\.data, weightLbs \}, macroBasisCal, MACRO_KEYS_PLAN\)/],
+    ["the percent helpers", /const gToPct = \(g, calPerG\) => \(macroBasisCal > 0/],
+    ["the honesty check", /macroCalorieGap\(shown\.protein, shown\.carbs, shown\.fat, macroBasisCal\)/],
+  ]) ok(`${who} uses the plan basis`, re.test(APP_CODE));
+  // ⚠️ AND THE LABELS QUOTE THE SAME NUMBER. A card that divides by one figure
+  // and prints another is the caption bug this arc has already shipped three of.
+  ok("the split label quotes the basis it divided by",
+     /% of your \{macroBasisCal\.toLocaleString\(\)\} cal/.test(APP_CODE));
+  ok("...and so does the editor's hint", /% of your \{macroBasisCal\}-cal goal/.test(APP_CODE));
+  // ⚠️ NOT computeClientCalories: it gates on gender/bmr and returns null for an
+  // incomplete plan, which would zero the macro card for the people still
+  // filling it in. planIntakeForRate is the lenient, day-independent ladder.
+  ok("the basis does not gate on a complete profile",
+     !/const macroBasisCal = [^\n]*computeClientCalories/.test(APP_CODE));
+}
+
+// ── 14. the calendar was the seventh reader (S231) ────────────────────────
+{
+  // ⚠️ S224 CLAIMED SIX READERS AND THERE WERE SEVEN. CalendarView read a BARE
+  // bodyweight, so it ignored the basis chip, the lean-mass denominator and the
+  // ceiling at once — and it is not a label: it paints a day green on
+  // `dayProt >= protTarget` and drives the weekly roll-up, so a client eating
+  // exactly what every other screen prescribed saw the week rendered as a miss.
+  ok("the calendar's protein target comes from the helper",
+     /: autoProteinG\(data, calTarget\);/.test(APP_CODE));
+  ok("...and no screen multiplies a bare bodyweight any more",
+     !/\(data\.weightLbs \? Math\.round\(Number\(data\.weightLbs\)\) : null\)/.test(APP_CODE));
+  // The gap it was scoring against, run rather than asserted.
+  const cal = 1800;
+  for (const [label, d, bare] of [
+    ["320 lb at 42%", { weightLbs: 320, bodyFat: 42 }, 320],
+    ["260 lb at 35%", { weightLbs: 260, bodyFat: 35 }, 260],
+    ["180 lb on the 0.7 basis", { weightLbs: 180, proteinPerLb: 0.7 }, 180],
+  ]) {
+    const now = A.autoProteinG(d, cal);
+    ok(`(control) ${label} was scored against a target it was never given`, now < bare, { now, bare });
+  }
+}
+
+// ── 15. the fourth, fifth and sixth captions of the same shape (S231) ─────
+{
+  // ⚠️ THIS ARC HAS NOW SHIPPED SIX CAPTIONS THAT QUOTED A RULE THE NUMBER
+  // BESIDE THEM DID NOT FOLLOW. Three were caught by rendering; these three by an
+  // adversarial review of the result. The pattern is always the same: prose
+  // written when one rule was true, left in place when the arithmetic moved.
+
+  // (4) The clamp note attributed a LEAN-DERIVED figure to bodyweight. On a
+  // 320 lb client at 42%, `raw` is 218g — and 1g per lb of bodyweight is 320g.
+  ok("the clamp note names the denominator that produced its own number",
+     /protPlan\.basis === "lean"\s*\n\s*\? <>Your \{protPlan\.leanLbs\} lbs of lean mass works out to \{protPlan\.raw\}g/.test(APP_CODE));
+  ok("...and only offers the body-fat prompt to someone who has not given one",
+     /: <>\{proteinPerLb\}g per lb of bodyweight would be \{protPlan\.raw\}g/.test(APP_CODE));
+  {
+    const capped = A.proteinPlan({ weightLbs: 320, bodyFat: 42 }, 1400);
+    ok("(control) a lean-basis plan really can hit the ceiling",
+       capped.capped === true && capped.basis === "lean", capped);
+    ok("...and its raw figure is not what bodyweight would have given",
+       capped.raw !== 320, capped.raw);
+  }
+
+  // (5) The Muscle tab's own gain popup told clients 1 g per lb of bodyweight
+  // while the card above it showed a lean-mass or clamped number. S224 removed
+  // two of these parentheticals from this tab and missed the third.
+  ok("the gain popup quotes the number the tab computed",
+     /eat adequate protein \(the \{proteinG\}g above\)/.test(APP_CODE));
+  ok("...and no prose hardcodes a per-lb protein rule any more",
+     !/protein \(~?1g per lb bodyweight\)/.test(APP_CODE) && !/protein \(0\.8g\/lb\)/.test(APP_CODE));
+
+  // (6) The Nutrients fat card asserted 28% even when the plan carried custom
+  // macros, where the share is whatever was typed.
+  ok("the Nutrients fat card reports its real share",
+     /Set at \$\{pctFat\}% of target calories/.test(APP_CODE));
+  ok("...and says so plainly when the number was typed", /Set by hand on your plan/.test(APP_CODE));
+  ok("...with 28 no longer asserted in that card", !/Set at 28% of target calories/.test(APP_CODE));
+}
+
+// ── 16. what the AI is TOLD, not just what the tools return (S231) ────────
+{
+  // ⚠️ THE MODEL WAS HOLDING TWO NUMBERS AT ONCE. functions/knowledge.js is
+  // appended verbatim to the system prompt of every AI conversation, both roles,
+  // every call — and under "Coaching principles (Smooth Training defaults)" it
+  // taught `roughly 1 g of protein per pound of bodyweight`. That is the exact
+  // denominator S224 deleted, framed as house doctrine, while
+  // get_nutrition_targets handed the same model proteinPlan's answer. For a
+  // 320 lb client at 42% body fat that is 320 g against 218 g — and a bare "how
+  // much protein?" answered from the prompt never calls the tool at all.
+  ok("the knowledge base no longer teaches the bodyweight rule as house method",
+     !/1 g of protein per pound of bodyweight/.test(KNOW));
+  ok("...it sends the model to the tool instead",
+     /call\s*\n?\s*get_nutrition_targets and quote proteinTarget/.test(KNOW));
+  ok("...and names the denominator that is actually used", /LEAN MASS/.test(KNOW));
+  ok("...and says where the rule of thumb breaks", /overshoots badly above about 25%/.test(KNOW));
+  {
+    const gap = A.proteinPlan({ weightLbs: 320, bodyFat: 42 }, 2200).grams;
+    ok("(control) the two answers really were that far apart", 320 - gap > 90, { rule: 320, tool: gap });
+  }
+
+  // ⚠️ AND THE TOOL'S OWN NOTE HAD THE EAT-BACK BACKWARDS. It told the model the
+  // calorie target "excludes scheduled-exercise calories" — but eat-back is the
+  // DEFAULT, and in that mode nutritionTargets computes
+  // `tdee - deficit + weeklyPlanBurn/7`, so the training calories are already in
+  // the number the sentence is describing. Only accelerate matched the note.
+  ok("the note no longer asserts one mode for both",
+     !/Calorie target is the baseline diet target \(excludes scheduled-exercise calories\)/.test(TOOLS));
+  ok("...it branches on the plan's actual approach",
+     /ALREADY INCLUDES the scheduled-exercise calories/.test(TOOLS)
+     && /EXCLUDES the scheduled-exercise calories/.test(TOOLS));
+  ok("...and reads the default the same way nutritionTargets does",
+     (TOOLS.match(/\(data\.deficitMode \|\| "eatback"\) !== "accelerate"/g) || []).length >= 1
+     && /const eatback = \(d\.deficitMode \|\| "eatback"\) !== "accelerate";/.test(TOOLS));
 }
 
 console.log(`\n  ${checks - fails}/${checks} checks passed`);

@@ -34,7 +34,12 @@ Reference GI by rice type (plain → with fat → with fat + cooled → with bee
 Don't display GI numbers by default; apply this when someone asks about blood sugar or meal optimization. Basmati is the lower-GI default rice recommendation.
 
 Coaching principles (Smooth Training defaults):
-- Protein first: aim for roughly 1 g of protein per pound of bodyweight to protect muscle in a deficit.
+- Protein first, to protect muscle in a deficit. Do NOT compute the target yourself: call
+  get_nutrition_targets and quote proteinTarget. It is built from LEAN MASS when a body-fat
+  reading exists (fat tissue does not need feeding) and from bodyweight otherwise, and it is
+  capped at half of calories so fat and carbs keep a budget. A rule of thumb like "1 g per
+  pound of bodyweight" is right only for a lean person and overshoots badly above about 25%
+  body fat, so never state it as the Smooth Training method.
 - Sustainable deficit: a moderate calorie deficit (around 500/day) is the durable default; very aggressive deficits risk muscle loss and adherence problems.
 - Consistency over perfection: logging most days and hitting targets on average beats occasional perfect days.`;
 
