@@ -11304,9 +11304,13 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, title
           </span>
           {items.length > 0 && <span>{subtotal.toLocaleString()} cal</span>}
         </div>
-        {items.length > 0 && (
-          <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>{items.map(mealRow)}</div>
-        )}
+        {/* ⚠️ THE ADD ROW SITS ABOVE THE FOOD, NOT UNDER IT (S236, Kevin: "can we
+            move the add meal section over the actual logged foods"). Under a
+            long list the control you came here to use is the one thing pushed
+            off screen — by dinner it can be a dozen rows down, and the form
+            itself opens down there too, so you scroll past everything you have
+            already eaten to type the next thing. The list is a record; the add
+            row is the action. The action goes first. */}
         {addingTo === t ? addForm() : (
           <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
             <button style={addBtn} onClick={() => openForm(t)}>+ Add food to {t}</button>
@@ -11317,6 +11321,9 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, title
             )}
           </div>
         )}
+        {items.length > 0 && (
+          <div style={{ display:"flex", flexDirection:"column", gap:"4px", marginTop:"6px" }}>{items.map(mealRow)}</div>
+        )}
       </div>
     );
   };
@@ -11325,9 +11332,7 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, title
     <div>
       <div style={{ fontSize:".72rem", fontWeight:700, color:"var(--muted)",
         textTransform:"uppercase", letterSpacing:".5px", marginBottom:"4px" }}>Other / quick entries</div>
-      {list.filter(isOther).length > 0 && (
-        <div style={{ display:"flex", flexDirection:"column", gap:"4px" }}>{list.filter(isOther).map(mealRow)}</div>
-      )}
+      {/* Same order as the meal sections above — the action, then the record. */}
       {addingTo === "other" ? addForm() : (
         <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
           <button style={addBtn} onClick={() => openForm("other")}>+ Add a quick entry</button>
@@ -11337,6 +11342,9 @@ function MealLog({ meals, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, title
             </button>
           )}
         </div>
+      )}
+      {list.filter(isOther).length > 0 && (
+        <div style={{ display:"flex", flexDirection:"column", gap:"4px", marginTop:"6px" }}>{list.filter(isOther).map(mealRow)}</div>
       )}
     </div>
   );
