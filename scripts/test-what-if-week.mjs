@@ -53,6 +53,7 @@ import { dirname, join } from "path";
 // letting the sandbox work only because no fixture here carries a fit — keeps
 // the next fitted fixture from failing with a bare ReferenceError.
 import { TUNING as TDEE_TUNING } from "../src/observedTdee.js";
+import { stripComments, stripJsxComments } from "./lib/strip-comments.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
@@ -130,7 +131,7 @@ const SIM = APP.slice(SIM_A, SIM_B);
 // ⚠️ STRIP COMMENTS BEFORE ASSERTING ON WHAT RENDERS. This bit S208 three times:
 // a check matched the very COMMENT that names the thing it forbids, and went
 // green on a correct file — or red on one.
-const codeOnly = (src) => src.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+const codeOnly = (src) => stripJsxComments(src);
 const SIM_CODE = codeOnly(SIM);
 // The module-level sandbox helpers sit ABOVE the component; some assertions are
 // about them.

@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
+import { stripJsxComments } from "./lib/strip-comments.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(here, "..");
@@ -38,7 +39,7 @@ const SETTLE = readFileSync(join(ROOT, "functions", "sessionSettle.js"), "utf8")
 // require("./push") — so a naive grep for those names matches the explanation
 // and reports the defect it was written to rule out. This is the S208 trap, and
 // it fired on six assertions in this very suite before the strip was added.
-const code = (src) => src.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+const code = (src) => stripJsxComments(src);
 
 let fails = 0, checks = 0;
 const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n, x !== undefined ? JSON.stringify(x) : ""); } };

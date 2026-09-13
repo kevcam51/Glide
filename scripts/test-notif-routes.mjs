@@ -57,7 +57,7 @@ ok("it is module-level so both callers share it", /^function notifDestination\(n
 
 // ── 3. the destinations the app can actually act on ─────────────────────────
 // Kept in step with ClientHome's intent effect + App's feed handler.
-const HANDLED = new Set(["messages", "sessions", "card", "todos", "referrals", "weighIn", "food"]);
+const HANDLED = new Set(["messages", "sessions", "card", "todos", "referrals", "weighIn", "food", "activity"]);
 
 // Tags that legitimately open nothing, each with the reason. Anything NOT
 // listed here and NOT routed is a bug, which is the point of this file.

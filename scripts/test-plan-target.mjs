@@ -39,6 +39,7 @@ import { dirname, join } from "path";
 // letting the sandbox work only because no fixture here carries a fit — keeps
 // the next fitted fixture from failing with a bare ReferenceError.
 import { TUNING as TDEE_TUNING } from "../src/observedTdee.js";
+import { stripJsxComments } from "./lib/strip-comments.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
@@ -204,7 +205,7 @@ const P = (over = {}) => ({
   ok("five judging readers plus overDaysFrom all use the named tolerance", uses === 6, uses);
   // ⚠️ AGAINST CODE, NOT PROSE — the comment above OVER_TOLERANCE names the very
   // string it forbids, and matching that is the S208 trap this repo keeps paying.
-  const APP_CODE = APP.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const APP_CODE = stripJsxComments(APP);
   ok("no bare `* 1.05` comparison is left", !/\* 1\.05/.test(APP_CODE));
   // fmtLbs's `>= 1.05` is a singular/plural threshold, NOT this tolerance.
   ok("fmtLbs's own 1.05 was left alone", /Math\.abs\(n\) >= 1\.05/.test(APP));
@@ -215,7 +216,7 @@ const P = (over = {}) => ({
   const SIM_A = APP.indexOf("function CalorieSimulator(");
   const SIM_B = APP.indexOf("function DailyDashboard(", SIM_A);
   const SIM = APP.slice(SIM_A, SIM_B);
-  const code = (src) => src.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const code = (src) => stripJsxComments(src);
   const SIM_CODE = code(SIM);
   // ⚠️ ASSERT THE ABSENCE, NOT THE WHOLE SIGNATURE. Pinning the exact parameter
   // list made this fail the moment a legitimate prop was added (S217's

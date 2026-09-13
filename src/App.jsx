@@ -15892,7 +15892,7 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   logAdherence,
   viewDate, viewIsToday = true, todayKeyProp, onStepDay, onGoToday,
   data, step, tdee, dayData, strengthDayData, avgBurnPerDay, onSetMaintenanceFit, onSetMaintenanceAuto,
-  stepProfile, watchLower = false, onSetActivityStepsOff,
+  stepProfile, watchLower = false, onSetActivityStepsOff, onSetActivityDrift,
   onOpenPlan, onOpenResults, onEditWorkouts, onLogUpdate, dailyLog, streak,
   onUpdateCardio, onUpdateStrength, onAddMeal, onAddMeals, onRemoveMeal, onEditMeal, recentFoods, onRemoveRecentFood,
   savedFoods, onToggleSaveFood, onRemoveSavedFood, onLogFoods, weekSummary, savingsDays, recentWearable, history, onRefresh, isRemote,
@@ -16611,6 +16611,28 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
     summary: stepProfile, data, activityCheck: data.activityCheck,
     now: Date.now(), watchAgrees: watchLower,
   })), [activitySuggestion, stepProfile, data, watchLower]);
+
+  // ⚠️ THE APP RECORDS WHAT IT FOUND; THE SERVER ONLY DELIVERS IT (S229b).
+  // A scheduled push needs to know a proposal exists — but computing one
+  // server-side would mean a second copy of the step bands, the workout
+  // exclusion, the coverage bars and the corroborator, in a repo whose mirrors
+  // have drifted repeatedly. Storing the RESULT keeps that logic in one place
+  // and makes a false push structurally impossible: the notification can only
+  // ever describe a proposal this code actually produced.
+  //
+  // Written only when it CHANGES. Re-writing the plan on every dashboard render
+  // would be a Firestore write per open for no new information.
+  useEffect(() => {
+    if (!onSetActivityDrift) return;
+    const cur = data.activityDrift || null;
+    const next = stepSuggestion
+      ? { to: stepSuggestion.to.id, from: stepSuggestion.from.id, dir: stepSuggestion.dir,
+          median: stepSuggestion.median, at: Date.now() }
+      : null;
+    if (!next && !cur) return;
+    if (next && cur && cur.to === next.to && cur.from === next.from && cur.dir === next.dir) return;
+    onSetActivityDrift(next);
+  }, [stepSuggestion, data.activityDrift, onSetActivityDrift]);
 
   // ── Try a different rate without committing to it (S198q, Kevin) ──────────
   // Tapping a daily target previews it IN THE RING, so the question "what would
@@ -21917,6 +21939,10 @@ function notifDestination(n) {
   // A coach confirming a meal and a "you haven't logged food" nudge both want
   // the same place: where food is logged.
   if (tag === "food-reminder" || tag === "meal-review") return "food";
+  // The activity-level drift nudge (S229b). It points at the plan dashboard,
+  // where the proposal card lives — for a trainer that means OPENING a plan,
+  // not landing on the roster, which is what every unrouted tag used to do.
+  if (tag === "activity-drift") return "activity";
   return null;
 }
 
@@ -21953,6 +21979,29 @@ function takeNotifIntent() {
     return v || null;
   } catch (e) { return null; }
 }
+// ⚠️ THE PLAN THE PUSH IS ABOUT, CARRIED BESIDE THE TAG (S229b). A trainer has
+// many plans, so "open the activity card" is not actionable without knowing
+// which one — and resolving it here rather than guessing the active plan is the
+// difference between landing on the card and landing on the roster.
+const NOTIF_PLAN_STASH = "glide-notif-plan";
+function stashNotifPlan() {
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const v = (p.get("nplan") || "").slice(0, 60);
+    if (!v) return;
+    localStorage.setItem(NOTIF_PLAN_STASH, v);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("nplan");
+    window.history.replaceState({}, "", url.toString());
+  } catch (e) { /* private mode / no history API */ }
+}
+function takeNotifPlan() {
+  try {
+    const v = localStorage.getItem(NOTIF_PLAN_STASH);
+    if (v) localStorage.removeItem(NOTIF_PLAN_STASH);
+    return v || null;
+  } catch (e) { return null; }
+}
 function takeTodoIntent() {
   try {
     const v = localStorage.getItem(TODO_STASH);
@@ -21966,6 +22015,7 @@ function takeTodoIntent() {
 stashSaveCardIntent();
 stashTodoIntent();
 stashNotifIntent();
+stashNotifPlan();
 // Same reason, and more acutely: a share can arrive at a signed-out app, and the
 // ?shared= marker would be gone by the time anyone reaches a screen (S221).
 stashSharedIntent();
@@ -32300,6 +32350,9 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
     // the card agree instead of one of them being a dead end.
     else if (homeIntent.kind === "weighIn") setShowWt(true);
     else if (homeIntent.kind === "food") openActivePlan();
+    // The activity-drift card lives on the plan dashboard beside the measured
+    // burn, so this is the same door as a food nudge.
+    else if (homeIntent.kind === "activity") openActivePlan();
     // ⚠️ TELL APP IT IS SPENT (S197v). lastIntentRef is a ref, so it resets
     // whenever this component REMOUNTS — and App held the intent forever. Going
     // Home → plan → Home re-fired it: for "food" that means onOpenPlan() again,
@@ -39324,6 +39377,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
                 { key: "sessionReminders", label: "Session reminders", desc: "Before a booked session — set your lead times on the calendar page" },
                 { key: "sessionOnMyWay", label: "“On my way” alerts", desc: "When a client sets off for a session and shares an ETA" },
                 { key: "mealReviews", label: "Meals to check", desc: "When a client tags a meal and sends it over" },
+                { key: "activityNudges", label: "Activity level check", desc: "When your steps say your own activity level should change" },
               ]
             : [
                 { key: "trainerReminders", label: "Trainer to-do reminders", desc: "To-dos your trainer sends you" },
@@ -39331,6 +39385,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
                 { key: "foodReminders", label: "Food-logging reminders", desc: "Nudge when you haven't logged food — in-app, and push if enabled below" },
                 { key: "weighInReminders", label: "Weigh-in reminders", desc: "Nudge for a weekly weigh-in — in-app, and push if enabled below" },
                 { key: "coachingNudges", label: "AI coaching tips", desc: "Occasional tips from your AI coach" },
+                { key: "activityNudges", label: "Activity level check", desc: "When your steps say your activity level should change" },
                 { key: "automations", label: "Automation results", desc: "When a scheduled automation finishes" },
                 { key: "referralRewards", label: "Referral rewards", desc: "When credit you've earned is ready to claim" },
                 { key: "sessionBilling", label: "Session billing", desc: "When you're charged for a session" },
@@ -39810,6 +39865,7 @@ export default function App() {
   const bootCard = takeSaveCardIntent();
   const bootTodo = takeTodoIntent();
   const bootNotif = takeNotifIntent();
+  const bootNotifPlan = takeNotifPlan();
   const [homeIntent, setHomeIntent] = useState(() => {
     if (bootCard) return { kind: "card", n: 1 };
     // A push tapped from outside the app navigates to /?todo=<id>; the stash
@@ -41825,6 +41881,7 @@ export default function App() {
   // Gated on a ref so it fires exactly once per launch, and only after the role
   // is actually known.
   const bootNotifRef = useRef(bootNotif);
+  const bootNotifPlanRef = useRef(bootNotifPlan);
   useEffect(() => {
     if (!role || !bootNotifRef.current) return;
     const tag = bootNotifRef.current;
@@ -41834,6 +41891,15 @@ export default function App() {
     // Referrals is App-level and shared by both roles.
     if (dest === "referrals") { setShowReferrals(true); goToProfiles(); return; }
     if (role === ROLES.HEAD_TRAINER || role === ROLES.SUB_TRAINER) {
+      // ⚠️ A TRAINER'S ACTIVITY NUDGE OPENS THE PLAN IT IS ABOUT (S229b).
+      // Every destination that was not sessions/card fell through to the roster
+      // screen — which is where the card ISN'T, so the notification arrived and
+      // then dead-ended. The push carries the plan id for exactly this.
+      if (dest === "activity") {
+        const pid = bootNotifPlanRef.current;
+        bootNotifPlanRef.current = null;
+        if (pid) { selectProfile(pid); return; }
+      }
       // Same mapping the in-app feed uses — deliberately, so a tap from the
       // lock screen and a tap in the bell land in the same place.
       setHomeTab(dest === "sessions" || dest === "card" ? "calendar" : "dashboard");
@@ -42154,6 +42220,12 @@ export default function App() {
               // "My activity is not steps" — a lifter or a cyclist saying so.
               // Absent means on, so switching it back on REMOVES the flag rather
               // than storing a second representation of the same state.
+              // What the app found, recorded so the scheduled push can deliver it
+              // without a second copy of the step logic on the server.
+              onSetActivityDrift={(d)=>setDataAndSave(p=>{
+                const x={...p};
+                if(d) x.activityDrift=d; else delete x.activityDrift;
+                return x; })}
               onSetActivityStepsOff={(off)=>setDataAndSave(p=>{
                 const x={...p};
                 if(off) x.activityStepsOff=true; else delete x.activityStepsOff;

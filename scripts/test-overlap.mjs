@@ -18,6 +18,7 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { stripComments, stripJsxComments } from "./lib/strip-comments.mjs";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = readFileSync(join(ROOT, "src", "sessions.js"), "utf8");
 const APP = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
@@ -203,7 +204,7 @@ ok("the plan gate identifies admin by UID",
 // and a blanket negative match failed on a correct file because of it. Same
 // mistake, twice in one session; strip the comments first.
 ok("...and no longer by a profile-doc role",
-   !/role === "admin"/.test(AVAIL.replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "")));
+   !/role === "admin"/.test(stripComments(AVAIL)));
 ok("...and it is the single gate both map callables use",
    (AVAIL.match(/await trainerHasDriveFeatures\(/g) || []).length === 2,
    (AVAIL.match(/await trainerHasDriveFeatures\(/g) || []).length);

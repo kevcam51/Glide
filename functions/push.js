@@ -286,7 +286,19 @@ async function pushCapableUids(db) {
 
 // Shared walk: for each push-capable CLIENT with the pref on, decide() reads
 // their data and returns a payload (or null to skip). Returns counts for logs.
-async function runReminderPass(db, prefKey, decide) {
+// ⚠️ THE DEFAULTS REPRODUCE THE ORIGINAL BEHAVIOUR EXACTLY — clients only, the
+// manifest's active plan. The food and weigh-in passes pass no options and are
+// unchanged; only the activity pass opts into anything different.
+const CLIENTS_ONLY = ["client"];
+// ⚠️ MUST EQUAL ACTIVITY_COOLDOWN_DAYS in src/App.jsx. The card goes quiet for
+// a fortnight after either button is pressed; a push on a different number
+// would ask again about a question the person already closed.
+// scripts/test-activity-push.mjs reads both out of both files and fails if they
+// drift.
+const ACTIVITY_COOLDOWN_DAYS_PUSH = 14;
+async function runReminderPass(db, prefKey, decide, opts) {
+  const o = opts || {};
+  const roles = o.roles || CLIENTS_ONLY;
   const uids = await pushCapableUids(db);
   let sent = 0, skipped = 0;
   for (const uid of uids) {
@@ -294,10 +306,24 @@ async function runReminderPass(db, prefKey, decide) {
       const prefs = await notifPrefsOf(db, uid);
       if (!prefOn(prefs, prefKey)) { skipped++; continue; }
       const prof = (await db.doc(`users/${uid}`).get()).data() || {};
-      if (prof.role !== "client") { skipped++; continue; }
+      if (!roles.includes(prof.role)) { skipped++; continue; }
       const manifest = await kvJSON(db, uid, "caliq-plans");
-      const plan = (manifest && manifest.active) || "self";
-      const payload = await decide(uid, plan);
+      const active = (manifest && manifest.active) || "self";
+      // ⚠️ THE ACTIVE PLAN IS THE CLIENT CONVENTION AND IT IS WRONG FOR A
+      // TRAINER'S OWN WATCH DATA (S229b). Watch-only Trainerize links write into
+      // the plan the person PICKED (caliq-tz-links[...].planId), and
+      // functions/trainerize.js says so where it writes them. A pass that only
+      // ever reads `active` would look at a plan that has no step data in it and
+      // conclude, silently, that there was nothing to say.
+      const plans = o.plansFor ? await o.plansFor(uid, active, prof) : [active];
+      // `decide` is handed each candidate plan and builds its own url, so the
+      // plan the notification is about travels on the link rather than as an
+      // extra key the feed would then carry around.
+      let payload = null;
+      for (const p of plans) {
+        payload = await decide(uid, p, prof);
+        if (payload) break;
+      }
       if (!payload) { skipped++; continue; }
       await sendPushTo(db, uid, payload, prefKey);
       sent++;
@@ -375,3 +401,91 @@ exports.weighInReminderPush = onSchedule(
     });
     console.log("weighInReminderPush", JSON.stringify(r));
   });
+
+// ── The activity-level drift nudge (S229b) ──────────────────────────────────
+// Kevin: "if their activity level increases consistently, then it would make
+// sense for their activity level that we have on record to also increase.. but
+// same goes for those people that decrease their workout for stretches of time
+// then we would have to send a notification to recommend decreasing."
+//
+// ⚠️ THIS DELIVERS A PROPOSAL; IT DOES NOT COMPUTE ONE. The app writes
+// `data.activityDrift` when its own step logic produces a suggestion — bands,
+// workout-day exclusion, coverage bars, the watch corroborator and the lifter
+// opt-out all live there, in one place. Recomputing any of it here would be a
+// second copy of five functions in a repo whose mirrors have drifted more than
+// once, and it makes a FALSE push structurally impossible: this can only ever
+// describe a proposal the app actually made.
+//
+// The cost is honest and worth stating: someone who never opens the app has
+// nothing recorded, so this reaches people who have opened it and then stopped —
+// which is the population a nudge is for.
+const DRIFT_STALE_DAYS = 45;
+
+// Which plans might hold this person's step data?
+// ⚠️ THE MANIFEST'S ACTIVE PLAN IS THE CLIENT CONVENTION. A trainer's own
+// watch-only Trainerize link writes into the plan they PICKED, so a pass that
+// only looked at `active` would read a plan with no steps in it and conclude
+// there was nothing to say. Candidates are tried in order; the first with a
+// recorded proposal wins.
+async function activityPlanCandidates(db, uid, active) {
+  const out = [active];
+  try {
+    const links = (await kvJSON(db, uid, "caliq-tz-links")) || {};
+    for (const k of Object.keys(links)) {
+      const l = links[k];
+      if (!l || typeof l !== "object") continue;
+      if (l.uid !== uid || !l.healthOnly || !l.planId) continue;
+      if (!out.includes(l.planId)) out.push(l.planId);
+    }
+  } catch (e) { /* no links is the ordinary case */ }
+  return out;
+}
+
+// 9am ET on a Wednesday: far from the Monday weigh-in nudge and the 3pm food
+// one, so nobody collects three pushes in a morning. Weekly, because an
+// activity level is a thing that changes over months.
+exports.activityDriftPush = onSchedule(
+  { schedule: "0 9 * * 3", timeZone: "America/New_York", region: "us-central1",
+    secrets: [VAPID_PRIVATE_KEY], timeoutSeconds: 300, maxInstances: 1 },
+  async () => {
+    const db = admin.firestore();
+    const now = Date.now();
+    const r = await runReminderPass(db, "activityNudges", async (uid, plan) => {
+      const wrap = await kvJSON(db, uid, `caliq-${plan}`);
+      const d = (wrap && wrap.data) || null;
+      if (!d || d.activityStepsOff === true) return null;
+      const drift = d.activityDrift;
+      if (!drift || !drift.to || !drift.from || drift.to === drift.from) return null;
+      // A proposal nobody has re-measured in six weeks describes someone else.
+      const at = Number(drift.at) || 0;
+      if (!(at > 0) || now - at > DRIFT_STALE_DAYS * 86400000) return null;
+      // ⚠️ AND IT MUST STILL BE UNANSWERED. `activityCheck` is stamped by BOTH
+      // the accept and the "Not now" button, so a push that ignored it would
+      // ask again about a question the person already closed — on a schedule,
+      // which is how a nudge becomes a nag.
+      const ac = d.activityCheck;
+      const acAt = ac && Number(ac.at);
+      if (acAt > 0 && now - acAt < ACTIVITY_COOLDOWN_DAYS_PUSH * 86400000) return null;
+      // The rung they are on now, not the one recorded when the drift was
+      // measured: accepting it elsewhere, or a manual edit, settles the question.
+      if (d.activityLevel && d.activityLevel !== drift.from) return null;
+      const up = drift.dir === "up";
+      return {
+        title: up ? "Your steps have gone up" : "Your steps have eased off",
+        tag: "activity-drift",
+        url: `/?notif=activity-drift&nplan=${encodeURIComponent(plan)}`,
+        body: up
+          ? "You are moving more than your profile says. Open Glidna to update it and get your calories back."
+          : "You are moving less than your profile says. Open Glidna to check your calorie target still fits.",
+      };
+    }, {
+      // ⚠️ TRAINERS TOO — and this is the whole reason the pass was widened.
+      // Every other nudge is a client thing, so the pass was client-only, which
+      // meant the one person who asked for this feature could never receive it.
+      roles: ["client", "head_trainer", "sub_trainer"],
+      plansFor: (uid, active) => activityPlanCandidates(db, uid, active),
+    });
+    console.log("activityDriftPush", JSON.stringify(r));
+    return null;
+  }
+);

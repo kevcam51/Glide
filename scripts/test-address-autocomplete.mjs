@@ -20,6 +20,7 @@ import { readFileSync } from "fs";
 import { createRequire } from "module";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { stripComments, stripJsxComments } from "./lib/strip-comments.mjs";
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -32,7 +33,7 @@ let fails = 0, checks = 0;
 const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n, x !== undefined ? JSON.stringify(x) : ""); } };
 // Assertions about rendered markup must not match the prose ABOVE it — the
 // mistake this session made three times in one afternoon.
-const codeOnly = (src) => src.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+const codeOnly = (src) => stripJsxComments(src);
 const APP_CODE = codeOnly(APP);
 
 // ── what we spend a request on ──────────────────────────────────────────────

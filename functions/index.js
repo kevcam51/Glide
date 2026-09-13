@@ -205,6 +205,7 @@ exports.onMealReviewWritten = require("./push").onMealReviewWritten; // meal tag
 // Scheduled reminder pushes (S96) — the S77 in-app nudges, delivered for real.
 exports.foodReminderPush = require("./push").foodReminderPush;
 exports.weighInReminderPush = require("./push").weighInReminderPush;
+exports.activityDriftPush = require("./push").activityDriftPush;
 // Client → trainer requests (S90) — server-side write into the trainer's
 // inbox (a client can't touch trainer kv under the rules). functions/requests.js.
 exports.sendTrainerRequest = require("./requests").sendTrainerRequest;

@@ -38,10 +38,11 @@ import { dirname, join } from "path";
 // letting the sandbox work only because no fixture here carries a fit — keeps
 // the next fitted fixture from failing with a bare ReferenceError.
 import { TUNING as TDEE_TUNING } from "../src/observedTdee.js";
+import { stripComments, stripJsxComments } from "./lib/strip-comments.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
-const CODE = APP.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+const CODE = stripJsxComments(APP);
 
 // ⚠️ A BRACE-BALANCED LIFTER, NOT A LAZY REGEX. `const isEatback = (d) => …;` is
 // a one-liner, so a `[\s\S]*?\n\};` pattern ran on to the NEXT function's

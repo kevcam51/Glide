@@ -34,6 +34,7 @@ import { readFileSync } from "fs";
 import { createRequire } from "module";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { stripComments, stripJsxComments } from "./lib/strip-comments.mjs";
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -44,7 +45,7 @@ const RULES = readFileSync(join(ROOT, "firestore.rules"), "utf8");
 const AUDIT = require(join(ROOT, "functions", "sessionAudit.js"));
 
 // Prose that names the thing it forbids has failed three checks in this repo.
-const codeOnly = (src) => src.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+const codeOnly = (src) => stripJsxComments(src);
 const APP_CODE = codeOnly(APP);
 
 let fails = 0, checks = 0;

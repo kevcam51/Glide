@@ -16,6 +16,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { stripJsxComments } from "./lib/strip-comments.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP = readFileSync(join(here, "..", "src", "App.jsx"), "utf8");
@@ -25,7 +26,7 @@ const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n,
 
 // Strip comments before asserting an ABSENCE — a regex looking for a thing the
 // code must not do will happily match a comment saying it must not do it.
-const code = (src) => src.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+const code = (src) => stripJsxComments(src);
 
 // Brace-balanced lifter (S215).
 function liftDecl(src, name) {

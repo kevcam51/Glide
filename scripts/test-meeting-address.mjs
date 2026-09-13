@@ -21,6 +21,7 @@
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { stripComments, stripJsxComments } from "./lib/strip-comments.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SESSIONS = readFileSync(join(ROOT, "src", "sessions.js"), "utf8");
@@ -32,7 +33,7 @@ const AVAIL = readFileSync(join(ROOT, "functions", "availability.js"), "utf8");
 // session matched a COMMENT that names the very thing it forbids (or, here, the
 // section header above the control) and failed on a correct file. Any assertion
 // about what RENDERS must run against code with the prose removed.
-const codeOnly = (src) => src.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+const codeOnly = (src) => stripJsxComments(src);
 const APP_CODE = codeOnly(APP);
 
 let fails = 0, checks = 0;

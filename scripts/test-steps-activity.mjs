@@ -29,13 +29,14 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { stripJsxComments } from "./lib/strip-comments.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP = readFileSync(join(here, "..", "src", "App.jsx"), "utf8");
 
 let fails = 0, checks = 0;
 const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n, x !== undefined ? JSON.stringify(x) : ""); } };
-const code = (src) => src.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+const code = (src) => stripJsxComments(src);
 
 function liftDecl(src, name) {
   const re = new RegExp("\\n([ \\t]*)(?:function " + name + "\\(|const " + name + "\\s*=)");

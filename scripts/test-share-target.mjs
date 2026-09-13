@@ -235,8 +235,12 @@ const runStash = (href) => {
 }
 
 // ── 6. The app actually consumes it ─────────────────────────────────────────
+// The invariant is that every deep-link capture happens together at import —
+// not that any two of them are adjacent. S229b added stashNotifPlan() to the
+// same block, which is exactly the kind of correct change the stricter form
+// would have called a regression.
 ok("the intent is captured at import, beside the other deep links",
-   /stashNotifIntent\(\);\s*\n(?:\/\/[^\n]*\n)*stashSharedIntent\(\);/.test(APP));
+   /stashNotifIntent\(\);(?:\s*\n(?:\/\/[^\n]*\n)*\s*stash[A-Za-z]+\(\);)*\s*\n(?:\/\/[^\n]*\n)*stashSharedIntent\(\);/.test(APP));
 // ⚠️ THIS ASSERTION CAUGHT A REAL CHANGE AND THEN NEEDED UPDATING ITSELF (S222).
 // It used to match `takeSharedPhotos().then(`, which stopped being true the
 // moment the iOS inbox joined the same effect. The behaviour was still correct —

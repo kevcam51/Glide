@@ -22,6 +22,7 @@ import { createRequire } from "module";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { stripComments, stripJsxComments } from "./lib/strip-comments.mjs";
 const require = createRequire(import.meta.url);
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -100,7 +101,7 @@ ok("SimplePlanView floors all three goal modes",
 // The S215 ladder bug is exactly what the anti-pattern produces — one literal
 // applied at a different point in a chain than the others.
 {
-  const code = APP.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const code = stripJsxComments(APP);
   // ⚠️ DIGITS ONLY IN THE LOOKAROUND. Excluding "," and "." as well — the obvious
   // way to skip "120000" and "1,200" — also excludes `Math.max(1200, …)`, which
   // is the one shape this whole assertion exists to catch. The first version of

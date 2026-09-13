@@ -108,6 +108,48 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S229b (Sep 13): the activity-drift push, and a test helper that was eating
+> 60,000 characters of App.jsx.** Functions deployed BEFORE the push (41 in the
+> set — push.js is required widely). **3,818 assertions across 54 suites**
+> (was 3,686/51); build, `check:undef`, `check:weak` clean. No rules change.
+> **THE PUSH KEVIN ASKED FOR, WITH ITS THREE FAULTS FIXED.**
+> ⚠️ **THE PASS WAS CLIENT-ONLY** — `if (prof.role !== "client") continue`, so a
+> head_trainer, the one person who asked for this, could never receive it. It
+> now takes its roles from options; the DEFAULT is still clients only, so the
+> food and weigh-in passes are untouched.
+> ⚠️ **IT READ THE WRONG PLAN.** It resolved `caliq-plans.active`, the CLIENT
+> convention — a trainer's own watch-only Trainerize link writes into the plan
+> they PICKED, and functions/trainerize.js says so where it writes it. Candidates
+> are now [active, ...watch-linked], first with a proposal wins.
+> ⚠️ **AND A TAP DEAD-ENDED.** Every destination that was not sessions/card sent
+> a trainer to the roster screen. There is an `activity` destination now, the
+> push carries the plan id (`&nplan=`), and a trainer's tap calls
+> `selectProfile(planId)`.
+> ⚠️ **NO SERVER MIRROR, DELIBERATELY.** The app records what its own step logic
+> found (`data.activityDrift`) and the server only DELIVERS it. Recomputing
+> server-side would have been a second copy of five functions plus the ladder —
+> and this way a FALSE push is structurally impossible: the notification can only
+> describe a proposal the app actually made. The cost, stated honestly: someone
+> who never opens the app has nothing recorded.
+> **⚠️ THE BIGGER FIND — A TEST HELPER WAS SILENTLY EATING CODE.** Ten suites
+> carried the same three-replace comment stripper. `src/App.jsx` contains
+> `accept="image/*,video/*"`; the `/*` inside that STRING looked like a block
+> comment, so the last replace ran to the next real `*/` and deleted everything
+> between — **35,140 characters in one case and 24,927 in the other**. The
+> failing assertion is the harmless half; the dangerous half is any assertion
+> saying "this file does NOT do X", which passed over code that was really there.
+> Replaced with a real string-aware scanner in `scripts/lib/strip-comments.mjs`,
+> and `scripts/test-strip-comments.mjs` sweeps EVERY `scripts/test-*.mjs` so a
+> re-introduced copy fails — a hand-kept list would have missed the same five
+> twice (I found five, then ten).
+> ⚠️ **My first version of that scanner ate `catch (e) { /* … */ }` whole**,
+> turning it into `catch (e) ` — a JS block containing only a comment is
+> indistinguishable from a JSX comment without a parser, so the braces stay.
+> Also: `test-notif-routes` needed `activity` in HANDLED (its allowlist is
+> hand-maintained by design), and `test-share-target` pinned two stash calls as
+> ADJACENT — correct code failed it, so it now asserts the real invariant (all
+> deep-link captures together at import)._
+>
 > _**S229 (Sep 13): roster search + steps-driven activity level. Frontend only —
 > no functions, no rules — so THE PUSH IS THE RELEASE. **3,686 assertions across
 > 51 suites** (was 3,522/49); build, `check:undef`, `check:weak` clean.
