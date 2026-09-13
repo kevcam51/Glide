@@ -8863,7 +8863,15 @@ async function fsByBarcode(code) {
   // `mode` is the POSITIVE acknowledgement that the barcode branch ran. An
   // older deploy answers {foods:[]} with no mode at all, and absence is
   // ambiguous — so anything but a real barcode reply retires the source.
-  if (d.mode !== "barcode" || d.unavailable) { _fsBarcodeOff = true; return null; }
+  // ⚠️ LATCH ON "THE ROUTE IS NOT THERE", NEVER ON "THIS CALL WAS SLOW".
+  // `unavailable` is set by the server on any non-2xx AND on any fetch failure,
+  // including its own 6-second timeout — so latching on it meant one slow scan
+  // disabled FatSecret for the rest of the session, which is the opposite of
+  // what the note above promises. An old proxy answers 404 and a scope gate
+  // answers `gated`; those are facts about the deployment. A timeout is weather.
+  if (d.mode !== "barcode") { _fsBarcodeOff = true; return null; }
+  if (d.gated || d.routeMissing) { _fsBarcodeOff = true; return null; }
+  if (d.unavailable) return null;   // try again on the next scan
   const food = (d.food && d.food.kcal > 0) ? d.food : null;
   _fsBarcodeCache.set(key, food);
   if (_fsBarcodeCache.size > 50) _fsBarcodeCache.delete(_fsBarcodeCache.keys().next().value);

@@ -228,14 +228,21 @@ async function barcodeLookup(codes, proxyUrl, proxySecret, _fetch = fetch) {
     .map((c) => String(c || "").replace(/\D/g, ""))
     .filter((c) => /^\d{13}$/.test(c)).slice(0, 2);
   if (!list.length) return { mode: "barcode", food: null };
-  let unavailable = false, gated = false;
+  let unavailable = false, gated = false, routeMissing = false;
   for (const code of list) {
     const url = `${proxyUrl.replace(/\/+$/, "")}/barcode?code=${encodeURIComponent(code)}`;
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), 6000);   // a scan is a person standing still
     try {
       const r = await _fetch(url, { headers: { "x-proxy-secret": proxySecret }, signal: ctl.signal });
-      if (!r.ok) { console.error("foodSearch barcode http", r.status); unavailable = true; continue; }
+      if (!r.ok) {
+        console.error("foodSearch barcode http", r.status);
+        unavailable = true;
+        // A 404 is the proxy not having the route yet — a fact about the
+        // deployment, not about this request, so the app may stop asking.
+        if (r.status === 404) routeMissing = true;
+        continue;
+      }
       const j = await r.json();
       if (j && j.gated) { gated = true; unavailable = true; break; }
       const f = j && j.food;
@@ -252,6 +259,7 @@ async function barcodeLookup(codes, proxyUrl, proxySecret, _fetch = fetch) {
   const out = { mode: "barcode", food: null };
   if (unavailable) out.unavailable = true;
   if (gated) out.gated = true;
+  if (routeMissing) out.routeMissing = true;
   return out;
 }
 exports._barcodeLookup = barcodeLookup;

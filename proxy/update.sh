@@ -4,6 +4,14 @@
 # Run this in YOUR terminal:
 #     bash proxy/update.sh
 #
+# ⚠️ THIS ALONE DOES NOT SURVIVE A REBOOT. The VM installs /opt/proxy/server.js
+# from a base64 payload inside its own startup-script metadata, and GCE runs that
+# script on EVERY boot — so an scp-installed file is replaced by the old one at
+# the next reset or maintenance event, silently, because the app treats a
+# missing route as "source unavailable" with no error. For a lasting change the
+# metadata payload has to be swapped too (S229c did that by hand over the
+# Compute API). Use this for a quick fix; re-run deploy.sh for a durable one.
+#
 # deploy.sh CREATES the VM. This one only updates the code on a VM that already
 # exists, which is the common case — the credentials in /opt/proxy/.env are left
 # exactly as they are, so this script never touches a secret at all.
@@ -13,8 +21,12 @@
 
 set -euo pipefail
 PROJECT=calorieiq-29762
-ZONE=us-central1-a
 NAME=fatsecret-proxy
+# ⚠️ THE ZONE IS DISCOVERED, NOT DECLARED. deploy.sh creates the VM in
+# us-central1-a and the real one is in us-west1-a — so a hardcoded zone here
+# sent this script looking for an instance that does not exist, and it reported
+# "run deploy.sh first" about a VM that was up and serving. Ask the project
+# where it is.
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 export PATH="$HOME/.local/bin:$HOME/google-cloud-sdk/bin:$PATH"
@@ -30,18 +42,22 @@ fi
 "$GCLOUD" config set project "$PROJECT" >/dev/null
 echo "    $("$GCLOUD" auth list --format='value(account)' | head -1)"
 
-"$GCLOUD" compute instances describe "$NAME" --zone="$ZONE" >/dev/null 2>&1 \
-  || { echo "!! VM '$NAME' does not exist — run 'bash proxy/deploy.sh' first."; exit 1; }
+ZONE=$("$GCLOUD" compute instances list --filter="name=$NAME" --format='value(zone)' 2>/dev/null | head -1)
+[ -n "$ZONE" ] || { echo "!! VM '$NAME' does not exist in $PROJECT — run 'bash proxy/deploy.sh' first."; exit 1; }
+echo "    found $NAME in $ZONE"
 
 echo "==> 2/4  Copy the new server.js up"
 "$GCLOUD" compute scp "$HERE/server.js" "$NAME:/tmp/server.js" --zone="$ZONE" --quiet
 
 echo "==> 3/4  Install it and restart the service"
+# ⚠️ VALIDATE BEFORE RESTARTING. The unit is Restart=always, so a truncated copy
+# is not a broken barcode route — it is a crash loop, i.e. every food search in
+# the app failing until someone intervenes.
 # ⚠️ The file is copied to /tmp first and moved with sudo: the login user cannot
 # write /opt/proxy directly, and a failed copy must not leave a half-written
 # server.js behind a restart.
 "$GCLOUD" compute ssh "$NAME" --zone="$ZONE" --quiet --command \
-  'sudo install -m 644 /tmp/server.js /opt/proxy/server.js && sudo systemctl restart fatsecret-proxy && sleep 2 && systemctl is-active fatsecret-proxy'
+  'node --check /tmp/server.js && sudo cp -a /opt/proxy/server.js /opt/proxy/server.js.bak && sudo install -m 644 /tmp/server.js /opt/proxy/server.js && sudo systemctl restart fatsecret-proxy && sleep 2 && systemctl is-active fatsecret-proxy'
 
 echo "==> 4/4  Prove the new route actually answers"
 # The proxy address lives in Secret Manager. It is read into a variable and never
@@ -56,6 +72,12 @@ BARCODE=$(curl -s -o /tmp/glidna-barcode.$$ -w "%{http_code}" "${URL%/}/barcode?
 BODY=$(head -c 200 /tmp/glidna-barcode.$$ 2>/dev/null || true); rm -f /tmp/glidna-barcode.$$
 unset URL
 
+# ⚠️ /health IS A STATIC LITERAL AND PROVES NOTHING ABOUT FATSECRET. The route
+# earning its keep right now is /search, and this change touched the token layer
+# it shares — so check that too, not just the new route.
+SEARCH=$(curl -s -o /dev/null -w "%{http_code}" -H "x-proxy-secret: $(firebase functions:secrets:access FATSECRET_PROXY_SECRET --project "$PROJECT" 2>/dev/null)" "${URL%/}/search?q=chicken" --max-time 25 || echo "000")
+echo "    /search  -> HTTP $SEARCH   (this one is live traffic)"
+[ "$SEARCH" = "200" ] || echo "    ⚠️ SEARCH IS NOT ANSWERING — roll back: sudo cp -a /opt/proxy/server.js.bak /opt/proxy/server.js && sudo systemctl restart fatsecret-proxy"
 echo "    /health  -> HTTP $HEALTH"
 echo "    /barcode -> HTTP $BARCODE  $BODY"
 echo

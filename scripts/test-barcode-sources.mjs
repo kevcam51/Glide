@@ -33,7 +33,7 @@ const ROOT = join(here, "..");
 const APP = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
 const PROXY = readFileSync(join(ROOT, "proxy", "server.js"), "utf8");
 
-let fails = 0, checks = 0;
+let fails = 0, checks = 0, return_;
 const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n, x !== undefined ? JSON.stringify(x) : ""); } };
 
 // Brace-balanced lifter (S215) — see scripts/test-what-if-week.mjs for why a
@@ -260,6 +260,71 @@ const res = (obj, okFlag = true, status = 200) => async () => ({ ok: okFlag, sta
   ok("at most two candidates are ever sent upstream", asked === 2, asked);
 }
 
+// ── 6b. The client latch, RUN ─────────────────────────────────────────────
+// ⚠️ THE LATCH USED TO FIRE ON A TIMEOUT. `unavailable` is set by the server on
+// ANY non-2xx and on any fetch failure, including its own 6-second abort — so
+// one slow scan disabled FatSecret for the whole browser session, which is the
+// exact opposite of what the comment above it promised. Latch on facts about
+// the DEPLOYMENT (an old proxy, a scope gate), never on the weather.
+{
+  const mk = (reply) => {
+    const prelude = "let _fsBarcodeOff = false; let _fatSecretOff = false;"
+      + " const _fsBarcodeCache = new Map();"
+      + " const callFoodSearch = async () => ({ data: REPLY });";
+    const body = [liftDecl(APP, "upcEtoA"), liftDecl(APP, "barcodeGtins"), liftDecl(APP, "fsByBarcode")].join("\n");
+    const f = new Function("REPLY", prelude + "\n" + body
+      + "\nreturn { fsByBarcode, off: () => _fsBarcodeOff };");
+    return f(reply);
+  };
+  const CODE = "0049000006346";
+  {
+    const m = mk({ mode: "barcode", food: null, unavailable: true });
+    return_ = await m.fsByBarcode(CODE);
+    ok("a slow call returns no food", return_ === null);
+    ok("...and does NOT retire the source", m.off() === false);
+  }
+  {
+    const m = mk({ mode: "barcode", food: null, unavailable: true, routeMissing: true });
+    await m.fsByBarcode(CODE);
+    ok("an un-redeployed proxy DOES retire the source", m.off() === true);
+  }
+  {
+    const m = mk({ mode: "barcode", food: null, unavailable: true, gated: true });
+    await m.fsByBarcode(CODE);
+    ok("a scope gate DOES retire the source", m.off() === true);
+  }
+  {
+    const m = mk({ foods: [] });                       // an older deploy: no `mode`
+    await m.fsByBarcode(CODE);
+    ok("a reply with no barcode mode retires the source", m.off() === true);
+  }
+  {
+    const m = mk({ mode: "barcode", food: { name: "Bar", kcal: 210, source: "fatsecret" } });
+    const hit = await m.fsByBarcode(CODE);
+    ok("a hit comes back", hit && hit.kcal === 210, hit);
+    ok("...and leaves the source enabled", m.off() === false);
+  }
+}
+{
+  // A 404 from the proxy is a fact about the deployment and must be reported
+  // as one — it is what tells the app it may stop asking.
+  const res404 = async () => ({ ok: false, status: 404, json: async () => ({ error: "not-found" }) });
+  const r = await _barcodeLookup(["0049000006346"], "https://p", "s", res404);
+  ok("a 404 is reported as a missing route", r.routeMissing === true, r);
+  const resSlow = async () => { throw new Error("aborted"); };
+  const r2 = await _barcodeLookup(["0049000006346"], "https://p", "s", resSlow);
+  ok("a timeout is NOT reported as a missing route", !r2.routeMissing && r2.unavailable === true, r2);
+}
+{
+  // ⚠️ ORDER, NOT PRESENCE. A 200 carrying no token must be refused BEFORE the
+  // cache line, or `undefined` is cached for 24 hours and every later call
+  // sends "Bearer undefined" with no way to self-heal.
+  const guard = PROXY.indexOf("fatsecret-auth-no-token");
+  const cache = PROXY.indexOf("_tokens.set(scope,");
+  ok("a tokenless 200 is refused", guard > 0, guard);
+  ok("...before anything is cached", guard > 0 && cache > guard, { guard, cache });
+}
+
 // ── 7. Wiring only the source can answer ──────────────────────────────────
 // ⚠️ THE ALLOWLIST, NOT THE HANDLER. Asserting the handler exists stays green
 // when the path is removed from the 404 guard above it — the handler is then
@@ -269,7 +334,7 @@ ok("the barcode path survives the 404 guard",
 ok("the proxy has a barcode handler", /if \(u\.pathname === "\/barcode"\)/.test(PROXY));
 ok("the proxy validates the GTIN before spending a call", /\\d\{13\}\$\/\.test\(code\)/.test(PROXY));
 ok("the proxy still asks for the basic scope by default", /getToken\(scope = "basic"\)/.test(PROXY));
-ok("the barcode path asks for the barcode scope", /getToken\("basic barcode"\)/.test(PROXY));
+ok("the barcode path asks for the barcode scope", /const SCOPE = "basic barcode";/.test(PROXY));
 ok("a refused scope is retried without one", /retrying with no scope/.test(PROXY));
 {
   // ⚠️ RUN THE PREDICATE, DO NOT MATCH IT. Widening this to `!!e` is invisible to
@@ -277,6 +342,27 @@ ok("a refused scope is retried without one", /retrying with no scope/.test(PROXY
   // barcode" and "one rate-limit blip disabled barcode for the life of a VM
   // process nobody restarts".
   const gateErr = new Function(liftDecl(PROXY, "gateErr") + "\nreturn gateErr;")();
+  // ⚠️ RUN THE SCOPE-RETRY DECISION TOO. It used to retry WITHOUT the scope on
+  // any failure at all — so a 429 or a 503 from FatSecret's oauth endpoint
+  // produced a basic-only token, cached for 24 hours, which then answered
+  // "missing scope" and latched the gate permanently. One bad minute disabled
+  // barcode on an account that holds the entitlement, silently.
+  const scopeRefused = new Function(liftDecl(PROXY, "scopeRefused") + "\nreturn scopeRefused;")();
+  ok("a 400 is a scope refusal", scopeRefused(400) === true);
+  ok("a 401 is a scope refusal", scopeRefused(401) === true);
+  ok("a 403 is a scope refusal", scopeRefused(403) === true);
+  ok("a RATE LIMIT is not a scope refusal", scopeRefused(429) === false);
+  ok("a server error is not a scope refusal", scopeRefused(500) === false);
+  ok("a gateway error is not a scope refusal", scopeRefused(502) === false);
+  ok("a timeout-shaped 504 is not a scope refusal", scopeRefused(504) === false);
+  // ⚠️ AND THE GATE EXPIRES, so a wrong conclusion cannot outlive the process
+  // that reached it — recovery used to need an SSH session.
+  const barcodeGated = new Function(liftDecl(PROXY, "GATE_TTL_MS") + "\nlet _barcodeGateAt = 0;\n"
+    + liftDecl(PROXY, "barcodeGated") + "\nreturn (at, now) => { _barcodeGateAt = at; return barcodeGated(now); };")();
+  const T = 1757000000000;
+  ok("an ungated process is not gated", barcodeGated(0, T) === false);
+  ok("a fresh gate holds", barcodeGated(T - 60000, T) === true);
+  ok("an hour-old gate has expired", barcodeGated(T - 61 * 60000, T) === false);
   ok("a missing-scope code gates", gateErr({ code: 14, message: "Missing scope" }) === true);
   ok("a missing-scope message gates", gateErr({ code: 2, message: "missing scope: barcode" }) === true);
   ok("an unknown-method message gates", gateErr({ code: 3, message: "Unknown method" }) === true);

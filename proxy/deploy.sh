@@ -16,7 +16,7 @@
 set -euo pipefail
 PROJECT=calorieiq-29762
 REGION=us-central1
-ZONE=us-central1-a
+ZONE=us-west1-a   # where the instance actually lives (S229c)
 NAME=fatsecret-proxy
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export PATH="$HOME/.local/bin:$HOME/google-cloud-sdk/bin:$PATH"
@@ -90,7 +90,12 @@ Restart=always
 WantedBy=multi-user.target
 SVCEOF
 systemctl daemon-reload
-systemctl enable --now fatsecret-proxy
+# ⚠️ enable --now DOES NOT RESTART AN ALREADY-RUNNING UNIT, and this script runs
+# on EVERY boot — so after the line above rewrote server.js, systemd was still
+# serving the file it started with. Every update needed a second reboot, and in
+# between the disk and the process disagreed with nothing to show for it.
+systemctl enable fatsecret-proxy
+systemctl restart fatsecret-proxy
 STARTUP_EOF
 )
 

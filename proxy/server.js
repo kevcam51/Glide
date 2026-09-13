@@ -32,7 +32,16 @@ if (!CLIENT_ID || !CLIENT_SECRET || !PROXY_SECRET) {
 // refuses that combination it is asked again with NO scope parameter at all,
 // which their docs say grants whatever the account actually holds. That second
 // form is the only way to discover an entitlement we cannot see from here.
-const _tokens = new Map();   // scope → { token, exp }
+const _tokens = new Map();   // scope → { token, exp, viaFallback }
+
+// ⚠️ ONLY A SCOPE REFUSAL IS WORTH RETRYING WITHOUT THE SCOPE. Falling back on
+// ANY failure turns a 429 or a 503 — oauth.fatsecret.com having a bad minute —
+// into a basic-only token cached for 24 hours. The barcode call then sees
+// "Missing scope", the gate below latches, and barcode is permanently off on an
+// account that really does hold it. Exported so the suite can RUN the decision
+// rather than match it: a widened predicate is invisible to a source grep.
+const scopeRefused = (status) => status === 400 || status === 401 || status === 403;
+
 async function getToken(scope = "basic") {
   const now = Date.now();
   const c = _tokens.get(scope);
@@ -43,16 +52,25 @@ async function getToken(scope = "basic") {
     headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
+  let viaFallback = false;
   let r = await ask(`grant_type=client_credentials&scope=${encodeURIComponent(scope)}`);
-  if (!r.ok && scope !== "basic") {
-    console.error("fatsecret token scope", JSON.stringify(scope), "rejected", r.status, "— retrying with no scope");
+  if (!r.ok && scope !== "basic" && scopeRefused(r.status)) {
+    console.error("fatsecret token scope", JSON.stringify(scope), "refused", r.status, "— retrying with no scope");
     r = await ask("grant_type=client_credentials");
+    viaFallback = true;
   }
   if (!r.ok) throw new Error("fatsecret-auth-" + r.status);
   const j = await r.json();
-  _tokens.set(scope, { token: j.access_token, exp: now + (Number(j.expires_in) || 86400) * 1000 });
+  // ⚠️ A 200 CARRYING NO TOKEN MUST NOT BE CACHED. Caching `undefined` for 24
+  // hours sends "Bearer undefined" on every later call with no way to self-heal.
+  if (!j || !j.access_token) throw new Error("fatsecret-auth-no-token");
+  _tokens.set(scope, { token: j.access_token, exp: now + (Number(j.expires_in) || 86400) * 1000, viaFallback });
   return j.access_token;
 }
+// Did the token we are holding for this scope come from the unscoped retry? If
+// so a "missing scope" answer says nothing about the ACCOUNT, only about the
+// token — so it must not latch anything.
+const tokenViaFallback = (scope) => !!(_tokens.get(scope) || {}).viaFallback;
 
 async function fsCall(method, q, token) {
   const url = `https://platform.fatsecret.com/rest/server.api?method=${method}&format=json&max_results=20` +
@@ -108,12 +126,19 @@ async function getFatSecretFood(id) {
 // ⚠️ THE GATE PREDICATE IS NARROW, deliberately, exactly as _v3Blocked's is. A
 // transient in-body error must not permanently disable barcode for the life of
 // a VM process nobody restarts. Only a scope/method refusal latches.
-let _barcodeGate = false;
+// ⚠️ THE GATE EXPIRES. It used to latch for the life of a process nobody ever
+// restarts, so recovering from a wrong conclusion needed an SSH session. An
+// hour is long enough to stop hammering a genuinely ungranted endpoint and
+// short enough that a transient fault heals itself.
+const GATE_TTL_MS = 60 * 60 * 1000;
+let _barcodeGateAt = 0;
 const gateErr = (e) => !!e && (e.code === 14 || /missing scope|unknown method/i.test(String(e.message || "")));
+const barcodeGated = (now = Date.now()) => _barcodeGateAt > 0 && now - _barcodeGateAt < GATE_TTL_MS;
 
 async function fsBarcode(gtin13) {
-  if (_barcodeGate) return { gated: true };
-  const token = await getToken("basic barcode");
+  if (barcodeGated()) return { gated: true };
+  const SCOPE = "basic barcode";
+  const token = await getToken(SCOPE);
   const r2 = await fetch("https://platform.fatsecret.com/rest/food/barcode/find-by-id/v2"
     + `?barcode=${encodeURIComponent(gtin13)}&format=json`, { headers: { Authorization: `Bearer ${token}` } });
   if (r2.ok) {
@@ -121,7 +146,10 @@ async function fsBarcode(gtin13) {
     if (j2 && j2.food && j2.food.servings) return { food: j2.food };      // whole food, one call
     if (j2 && j2.error) {
       console.error("fatsecret barcode v2 error:", JSON.stringify(j2.error));
-      if (gateErr(j2.error)) { _barcodeGate = true; return { gated: true }; }
+      if (gateErr(j2.error)) {
+        if (!tokenViaFallback(SCOPE)) _barcodeGateAt = Date.now();
+        return { gated: true, why: String(j2.error.message || j2.error.code || "scope") };
+      }
     } else if (j2 && j2.food_id) {                                        // id only
       const id = String((j2.food_id && j2.food_id.value) || j2.food_id || "");
       if (/^\d+$/.test(id) && Number(id) > 0) return { food: (await getFatSecretFood(id)).food || null };
@@ -134,8 +162,18 @@ async function fsBarcode(gtin13) {
   const j1 = await r1.json();
   if (j1 && j1.error) {
     console.error("fatsecret barcode v1 error:", JSON.stringify(j1.error));
-    if (gateErr(j1.error)) { _barcodeGate = true; return { gated: true }; }
-    throw new Error("fatsecret-barcode-error");
+    if (gateErr(j1.error)) {
+      // A gate-shaped refusal on a token we had to fetch WITHOUT the scope says
+      // nothing about the account — only about the token — so it is reported,
+      // not latched. Either way the caller learns the route is unavailable
+      // rather than being handed a 502 it can only retry.
+      if (!tokenViaFallback(SCOPE)) _barcodeGateAt = Date.now();
+      return { gated: true, why: String(j1.error.message || j1.error.code || "scope") };
+    }
+    // ⚠️ CARRY FATSECRET'S OWN WORDS. "fatsecret-barcode-error" told an
+    // operator nothing, and the only way to learn more was an SSH session onto
+    // a box with no SSH keys. This is FatSecret's error text, not a credential.
+    throw new Error("fatsecret-barcode: " + JSON.stringify(j1.error).slice(0, 200));
   }
   const id = String((j1 && j1.food_id && j1.food_id.value) || "");
   if (!/^\d+$/.test(id) || Number(id) <= 0) return { food: null };        // a REAL miss, not a gate
