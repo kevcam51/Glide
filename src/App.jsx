@@ -16041,6 +16041,8 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   const [mtDraft, setMtDraft] = useState({ protein:"", carbs:"", fat:"" });   // grams draft
   const [mtMode, setMtMode] = useState("grams"); // "grams" | "pct" — how you enter targets
   const [mtPct, setMtPct] = useState({ protein:"", carbs:"", fat:"" });       // percentage draft
+  const [savAffOpen, setSavAffOpen] = useState(false);   // "what can I afford?" (S223)
+  const [savSpend, setSavSpend] = useState("");          // a day's intake, typed
   // Try a macro split without committing to it (S198y, Kevin) — the same move
   // Daily Calorie Targets makes for calories. Holds { key, t:{protein,carbs,fat} }.
   const [previewMacros, setPreviewMacros] = useState(null);
@@ -16431,6 +16433,24 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
   // embarrassment — it is untracked days, or food going unlogged.
   const savGap = (savPh && savPh.scaleLbs !== null && savWorth)
     ? Math.round((savWorth.lbs - savPh.scaleLbs) * 10) / 10 : null;
+  // What a typical day of theirs costs the body — the same basis daySavings
+  // uses when no tracker reading exists, so the panel and the balance agree.
+  const savDayBurn = Math.round(planEnergy(data).tdee || 0) + savTrainDay;
+  // The average day of the phase, from TRACKED days only. Used for "at this
+  // rate", never for "you will have".
+  const savPerDay = savPh && savPh.tracked > 0 ? Math.round(savPh.banked / savPh.tracked) : 0;
+  // ⚠️ AN EMPTY BOX IS NOT A ZERO-CALORIE DAY. Number("") is 0, not NaN, so the
+  // untouched panel priced a day of eating NOTHING and announced it as "adds
+  // 2,270 to your savings" — the most flattering possible answer, shown before
+  // anyone typed anything. Found by opening the panel, not by a test.
+  const savSpendNum = (() => {
+    const raw = String(savSpend == null ? "" : savSpend).trim();
+    if (raw === "") return null;
+    const n = Math.round(Number(raw));
+    return isFinite(n) && n >= 0 ? n : null;
+  })();
+  const savAff = savPh && savDayBurn > 0
+    ? savingsAfford(savDayBurn, savPh.banked, savPh.rate, savSpendNum === null ? savDayBurn : savSpendNum) : null;
   const savDate = (k) => { try { return new Date(k + "T12:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch { return k; } };
 
   // Macro targets. Default (estimates): protein 1g/lb bodyweight, fat 28% of
@@ -17315,6 +17335,99 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
             <div style={{marginTop:"7px",fontSize:".66rem",color:"var(--muted)"}}>
               All time: <b style={{color:"var(--text-secondary)"}}>{savLife.banked.toLocaleString()} (cal)</b> across{" "}
               {savLife.tracked} tracked day{savLife.tracked === 1 ? "" : "s"}.
+            </div>
+          )}
+
+          {/* ── What can I afford? (S223, Kevin) ────────────────────────────
+              "This can be a great way for users to run tests to see if they will
+              potentially go over budget and have to touch their savings, or if
+              they might have been overthinking it and they are actually doing a
+              good job … We can even plan out far ahead by showing how much they
+              will have in their balance in a week or two that they can spend and
+              take a break to enjoy food, or continue to save."
+              ⚠️ IT OPENS AT THEIR BURN, so the first thing it says is "this
+              costs nothing" — the honest starting point, and the number most
+              people have never been told. */}
+          {savAff && (
+            <div style={{marginTop:"10px"}}>
+              <button onClick={()=>setSavAffOpen(v=>!v)} aria-expanded={savAffOpen}
+                style={{width:"100%",textAlign:"left",padding:"9px 11px",borderRadius:"9px",
+                  border:"1px solid var(--border)",background:"var(--s2)",color:"var(--text)",
+                  fontFamily:"inherit",fontSize:".76rem",fontWeight:700,cursor:"pointer"}}>
+                What can I afford? {savAffOpen ? "▲" : "▼"}
+              </button>
+              {savAffOpen && (
+                <div style={{marginTop:"8px",padding:"11px",borderRadius:"10px",
+                  border:"1px solid var(--border)",background:"var(--bg)"}}>
+                  <div style={{fontSize:".7rem",color:"var(--muted)",lineHeight:1.5,marginBottom:"10px"}}>
+                    You can eat up to <b style={{color:"var(--green)"}}>{savAff.headroom.toLocaleString()} (cal)</b> on
+                    any day without touching your savings. That is what your body spends.
+                  </div>
+                  <div style={{fontSize:".62rem",color:"var(--muted)",textTransform:"uppercase",
+                    letterSpacing:".5px",fontWeight:800,marginBottom:"5px"}}>If I ate</div>
+                  <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+                    <input type="number" inputMode="numeric" min="0" max="20000" step="50"
+                      aria-label="What you would eat that day, in calories"
+                      placeholder={savAff.headroom.toLocaleString()}
+                      value={savSpend} onChange={(e)=>setSavSpend(e.target.value)}
+                      style={{width:"130px",boxSizing:"border-box",padding:"9px 12px",borderRadius:"8px",
+                        border:"1px solid var(--border)",background:"var(--surface)",color:"var(--text)",
+                        fontFamily:"inherit",fontSize:".88rem",textAlign:"center",outline:"none"}} />
+                    <span style={{fontSize:".72rem",color:"var(--muted)"}}>(cal) that day</span>
+                    {savSpend !== "" && (
+                      <button onClick={()=>setSavSpend("")}
+                        style={{marginLeft:"auto",background:"transparent",border:"none",cursor:"pointer",
+                          color:"var(--accent)",fontSize:".7rem",fontWeight:600,fontFamily:"inherit"}}>Clear</button>
+                    )}
+                  </div>
+                  <div style={{marginTop:"10px",paddingTop:"9px",borderTop:"1px solid var(--border)",
+                    fontSize:".78rem",display:"flex",justifyContent:"space-between"}}>
+                    <b>{savAff.effect >= 0 ? "Adds to your savings" : "Costs you"}</b>
+                    <b style={{color: savAff.effect >= 0 ? "var(--green)" : "var(--red)"}}>
+                      {savAff.effect >= 0 ? "+" : "−"}{Math.abs(savAff.effect).toLocaleString()} (cal)
+                    </b>
+                  </div>
+                  <div style={{marginTop:"5px",fontSize:".68rem",color:"var(--muted)",lineHeight:1.5}}>
+                    {savAff.effect === 0
+                      ? <>Exactly break-even &mdash; the balance sits where it is.</>
+                      : savAff.effect > 0
+                        ? <>Still under what you burn, so the balance <b style={{color:"var(--green)"}}>grows</b> to{" "}
+                          {savAff.after.toLocaleString()} (cal). A day over your TARGET can still be a day that saves.</>
+                        : <>About <b style={{color:"var(--red)"}}>{Math.abs(savAff.lbs).toFixed(2)} lbs</b> at{" "}
+                          {savAff.per.toLocaleString()} (cal) a pound{savAff.measured ? " — your own rate" : ""},
+                          leaving <b>{savAff.after.toLocaleString()} (cal)</b> banked.</>}
+                  </div>
+                  {/* At this rate — never "you will have". */}
+                  {savPerDay !== 0 && (
+                    <div style={{marginTop:"11px",paddingTop:"9px",borderTop:"1px solid var(--border)"}}>
+                      <div style={{fontSize:".62rem",color:"var(--muted)",textTransform:"uppercase",
+                        letterSpacing:".5px",fontWeight:800,marginBottom:"6px"}}>
+                        Keep this up and you&rsquo;d have
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"5px"}}>
+                        {[[7,"1 week"],[14,"2 weeks"],[28,"4 weeks"]].map(([n,lbl])=>{
+                          const f = savingsForecast(savPh.banked, savPerDay, n);
+                          const w = savingsLbs(f, savPh.rate);
+                          return (
+                            <div key={n} style={{padding:"8px 3px",borderRadius:"9px",textAlign:"center",
+                              background:"var(--s2)",border:"1px solid var(--border)"}}>
+                              <div style={{fontSize:".55rem",color:"var(--muted)",textTransform:"uppercase"}}>{lbl}</div>
+                              <div style={{fontFamily:"'Sora',sans-serif",fontSize:".9rem",
+                                color: f >= 0 ? "var(--green)" : "var(--red)"}}>{f.toLocaleString()}</div>
+                              <div style={{fontSize:".55rem",color:"var(--muted)"}}>{Math.abs(w.lbs).toFixed(1)} lbs</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{marginTop:"6px",fontSize:".64rem",color:"var(--muted)",lineHeight:1.45}}>
+                        At the <b style={{color:"var(--text-secondary)"}}>{Math.abs(savPerDay).toLocaleString()} (cal)</b> a
+                        day you have averaged across tracked days &mdash; not a promise, and it only counts days
+                        you log.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -23137,6 +23250,51 @@ function savingsPhase(d, byDate, startKey, endKey, trainDayCal) {
 function savingsLbs(banked, rate) {
   const per = rate || CAL_PER_LB;
   return { lbs: Math.round((Number(banked) || 0) / per * 100) / 100, per, measured: !!rate };
+}
+
+// ── What a day off would cost (S223, Kevin) ─────────────────────────────────
+// "We find out that their meal might cost them $1,000 against their balance …
+// and based on their progress and their numbers … tell them they might gain
+// .8lbs from this $1,000 meal. For reference, the $1,000 in this case is the
+// client's calories that will end up being OVER their calorie burn and deficit …
+// and of course if they are under their calories then it will not negatively
+// affect the balance and actually improve it."
+//
+// ⚠️ MEASURED AGAINST THE BURN, NOT THE TARGET — Kevin's own sentence, and it is
+// the difference between a useful answer and a scolding one. Someone on a
+// 1 lb/wk plan who eats 400 over TARGET is still 100 under what their body
+// spent: their balance goes UP that day, and a screen that called it a cost
+// would be wrong in a way that discourages exactly the person doing well.
+//
+// ⚠️ AND THE POUNDS ARE PRICED AT THEIR OWN RATE when there is one. The whole
+// point of Kevin's example is that one person's 10,000 is not another's.
+function savingsAfford(dayBurn, banked, rate, eaten) {
+  const burn = Math.round(Number(dayBurn) || 0);
+  const ate = Math.max(0, Math.round(Number(eaten) || 0));
+  const effect = burn - ate;                       // + adds to the balance, − draws it down
+  const per = rate || CAL_PER_LB;
+  const now = Math.round(Number(banked) || 0);
+  return {
+    burn, eaten: ate, effect, per, measured: !!rate,
+    after: now + effect,
+    // + = the balance still grew that day, − = what it cost. Signed so the
+    // caller never has to know which way round it is.
+    lbs: Math.round((effect / per) * 100) / 100,
+    // Eat up to this and the balance does not move at all — the number Kevin
+    // wants people to know before they go out.
+    headroom: burn,
+    // What eating the WHOLE balance in one day would take, on top of the burn.
+    // Refused when there is nothing banked: "spend your overdraft" is not advice.
+    allIn: now > 0 ? burn + now : null,
+  };
+}
+
+// Where the balance lands if they keep up what they have been doing. Honest
+// about being a projection: `perDay` comes from tracked days only, so this says
+// "at this rate", never "you will have".
+function savingsForecast(banked, perDayCal, days) {
+  const per = Number(perDayCal) || 0;
+  return Math.round((Number(banked) || 0) + per * (Number(days) || 0));
 }
 
 // ── The plan's flat energy (S214) ───────────────────────────────────────────

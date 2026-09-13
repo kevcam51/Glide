@@ -68,9 +68,11 @@ const CONSTS = ["DAYS", "REST_ST", "STRENGTH_EXERCISES", "CARDIO_GROUPS", "ALL_C
 const FNS = ["calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx", "findStrengthEx",
   "hrCaloriesPerMin", "restingKcalPerMin", "calcBurn", "cardioExFor", "exBurn", "isEatback",
   "dailyDeficitOf", "weeklyRateOf", "maintBasis", "maintenanceK", "planMaintenance", "planEnergy", "atLeastMinCal", "ymdLocal", "simDateAt",
-  "dayBurnTracked", "daySavings", "savingsRun", "observedCalPerLb", "savingsPhase", "savingsLbs"];
+  "dayBurnTracked", "daySavings", "savingsRun", "observedCalPerLb", "savingsPhase", "savingsLbs",
+  "savingsAfford", "savingsForecast"];
 const EXPORTS = ["dayBurnTracked", "daySavings", "savingsRun", "observedCalPerLb", "planEnergy",
-  "CAL_PER_LB", "SAVINGS_MIN_RATE_DAYS", "SAVINGS_MIN_COVERAGE", "isEatback", "savingsPhase", "savingsLbs", "simDateAt"];
+  "CAL_PER_LB", "SAVINGS_MIN_RATE_DAYS", "SAVINGS_MIN_COVERAGE", "isEatback", "savingsPhase", "savingsLbs", "simDateAt",
+  "savingsAfford", "savingsForecast"];
 const source = () => [...CONSTS, ...FNS].map((n) => liftDecl(APP, n)).join("\n");
 const build = (src) => new Function(`${src}; return { ${EXPORTS.join(", ")} };`)();
 const M = build(source());
@@ -312,6 +314,65 @@ ok("the fixture prices a day at all", TDEE > 1200, TDEE);
      /\{goalDir === "surplus"/.test(APP)
      && /is left to enjoy before the weight starts coming back on/.test(APP)
      && /every day you\s*\n?\s*finish under what your body burned adds to this/.test(APP));
+}
+
+// ── 11. what a day off costs (S223, Kevin) ────────────────────────────────
+{
+  // Kevin's worked example, in his own units: a balance, a day, a price.
+  const a = M.savingsAfford(2400, 52500, 3500, 3400);      // 1,000 over the burn
+  ok("eating 1,000 over the burn costs 1,000 off the balance", a.effect === -1000, a);
+  ok("...priced in pounds at their rate", a.lbs === -0.29, a.lbs);
+  ok("...and the balance after is the balance less the spend", a.after === 51500, a.after);
+
+  // ⚠️ THE COST IS AGAINST THE BURN, NOT THE TARGET (Kevin). Someone on a
+  // 1 lb/wk plan eating 400 over TARGET is still 100 under what their body
+  // spent — their balance GROWS that day, and calling it a cost would be wrong
+  // in the direction that discourages the person doing well.
+  const under = M.savingsAfford(2400, 10000, 3500, 2300);  // over a 1,900 target, under the burn
+  ok("a day over target but under the burn still adds to the balance",
+     under.effect === 100 && under.after === 10100 && under.lbs > 0, under);
+
+  // The number to know before going out.
+  ok("headroom is the burn itself", a.headroom === 2400);
+  ok("...and eating exactly it moves nothing",
+     M.savingsAfford(2400, 10000, 3500, 2400).effect === 0);
+
+  // ⚠️ "SPEND THE WHOLE BALANCE" IS ONLY OFFERED WHEN THERE IS ONE.
+  ok("spending it all is the burn plus the balance", a.allIn === 2400 + 52500, a.allIn);
+  ok("...and is refused when the account is empty or overdrawn",
+     M.savingsAfford(2400, 0, 3500, 2400).allIn === null
+     && M.savingsAfford(2400, -500, 3500, 2400).allIn === null);
+
+  // Their own rate is what prices it — the whole point of Kevin's example.
+  const fast = M.savingsAfford(2400, 52500, 2500, 3400);
+  ok("a different person gets a different price for the same meal",
+     fast.lbs === -0.4 && fast.measured === true, fast.lbs);
+  const none = M.savingsAfford(2400, 52500, null, 3400);
+  ok("...and with no measured rate it falls back and says so",
+     none.per === M.CAL_PER_LB && none.measured === false);
+
+  // Junk in must not produce a confident number.
+  ok("a negative intake is floored, not trusted", M.savingsAfford(2400, 100, 3500, -900).eaten === 0);
+  // ⚠️ AN EMPTY BOX IS NOT A ZERO-CALORIE DAY. Number("") is 0, not NaN, so the
+  // untouched panel priced a day of eating nothing and announced "adds 2,270 to
+  // your savings" before anyone typed a thing — the most flattering answer
+  // possible, shown by default. The parse now returns null for blank, and the
+  // panel falls back to the burn, which reads "costs nothing".
+  ok("the empty-field parse returns null rather than zero",
+     /const raw = String\(savSpend == null \? "" : savSpend\)\.trim\(\);\s*\n\s*if \(raw === ""\) return null;/.test(APP));
+  ok("...and the panel falls back to the burn, which is break-even",
+     /savSpendNum === null \? savDayBurn : savSpendNum/.test(APP)
+     && M.savingsAfford(2270, 16430, null, 2270).effect === 0);
+}
+
+// ── 12. where the balance lands if they keep it up ────────────────────────
+{
+  ok("a fortnight at 500 a day adds 7,000", M.savingsForecast(14000, 500, 14) === 21000);
+  ok("...which is two pounds at the standard rate",
+     M.savingsLbs(M.savingsForecast(14000, 500, 14) - 14000, null).lbs === 2);
+  ok("a spending streak forecasts downward", M.savingsForecast(14000, -300, 7) === 11900);
+  ok("zero days changes nothing", M.savingsForecast(14000, 500, 0) === 14000);
+  ok("junk is answered, not thrown", M.savingsForecast(undefined, undefined, undefined) === 0);
 }
 
 console.log(`\n  ${checks - fails}/${checks} checks passed`);
