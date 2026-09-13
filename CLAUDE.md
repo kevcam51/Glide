@@ -108,6 +108,42 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S234–S236 (Sep 13): THE BLANK SCREEN ON KEVIN'S PHONE — three attempts, and
+> the first two were fixes to real bugs that were not his bug.**
+> ⚠️ **THE APP HAD NO ERROR BOUNDARY, ANYWHERE, AND THAT IS WHY IT TOOK THREE
+> ROUNDS.** React unmounts the whole tree on a render throw and nothing in `src/`
+> caught it, so every failure — dead chunk, render throw, anything — arrived
+> looking identical and looking like the same bug. `src/BootBoundary.jsx` now
+> names the error ON THE DEVICE IT HAPPENED ON, with a reset button, and
+> auto-heals a failed import once (60s loop guard). It sits OUTSIDE AuthGate
+> deliberately: **App.jsx is lazy and only mounts AFTER sign-in**, so a signed-out
+> check (mine, twice) renders the login box perfectly while the app is broken.
+> "It loads for a second and the screen goes blank" is that boundary exactly.
+> ⚠️ **THE CAUSE: a cached shell and its assets are two caches with nothing
+> linking them.** Vercel serves only the CURRENT deployment, so every chunk an
+> older shell names 404s. `ASSET_CAP = 60` with 14 assets/deploy and **six deploys
+> in one day** meant the trim evicted exactly what older shells needed. I own the
+> trigger.
+> ⚠️ **S235 RESCUED ONE ASSET NAME OF FIVE, AND IT WAS THE WRONG ONE.** index.html
+> names index, react, firebase, rolldown-runtime and the lazy App chunk. I covered
+> `index-*` only — and a worker holding the old entry IN CACHE never asks the
+> network for it, so the endpoint I verified against production was never once
+> asked, while the four uncovered names 404'd. **An endpoint that works is not a
+> fix; trace the request path that actually fails.**
+> ⚠️ **S236: `/assets/:file` covers everything, and the handler splits by name.**
+> The entry is still SUBSTITUTED with the current one (every chunk lives in
+> `/assets/`, imports resolve against the file's own URL, so it boots with no
+> reload). Nothing else can be — returning react for a dead `App-*` name would
+> execute the wrong module — so those get a module that clears caches,
+> unregisters the worker and reloads. **The import RESOLVES either way: a 404 ends
+> the page, a valid module gets a second chance.** `no-store` throughout, so the
+> live bundle is never parked under a hashed name that lies.
+> ⚠️ **THE COVERAGE TEST IS DERIVED FROM `dist/assets`, NOT FROM A LIST BY HAND** —
+> a hand-kept list is precisely what let a chunk family slip through. A new family
+> now fails `scripts/test-sw-shell.mjs` (59 assertions; five mutations red,
+> including narrowing the rewrite back to `index-*`).
+> **Frontend + vercel.json + api/ only — no functions, no rules.**_
+>
 > _**S229c (Sep 13): FatSecret barcode is PLUMBED AND PARKED — do not re-test it
 > by hand.** The proxy VM serves /barcode and FatSecret answers, verbatim:
 > `{"gated":true,"why":"Missing scope: scope 'barcode'"}`. The account is not
