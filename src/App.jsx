@@ -5861,7 +5861,9 @@ function Results({ data, isSimulation, meUid, meName, logAdherence, loggedDaysTo
         <SurplusTab
           tdee={tdee}
           totalBurn={totalBurn}
+          totalStrBurn={totalStrBurn}
           avgBurnPerDay={avgBurnPerDay}
+          avgStrPerDay={avgStrPerDay}
           activeDays={activeDays}
           name={name}
         />
@@ -6602,11 +6604,30 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
   const gainHigh = +(baseGainHigh * freqFactor * qualityFactor * genderMult).toFixed(2);
 
   // ── Lean Bulk Calorie Target ──
+  // ⚠️ THE LIFTING WAS ON THE SCREEN AND OUT OF THE BUDGET (S236). This read
+  // `tdee + buildSurplus`, adding back only the CARDIO burn — while the strength
+  // burn it excluded was printed twice on this very tab as a headline stat. tdee
+  // here is bmr x activity multiplier: the life AROUND training, never the
+  // training. So on a real lifting plan the "Lean Bulk Target" landed BELOW the
+  // app's own maintenance while the tab projected months of muscle AND fat gain:
+  //
+  //   200 lb, 4x60 min   target 3,154  vs  true maintenance 3,203   = -49 cal/day
+  //   220 lb, 5x60 min   target 3,294  vs  maintenance 3,455      = -161 cal/day
+  //   260 lb, 5x60 min   target 3,576  vs  maintenance 3,812      = -236 cal/day
+  //
+  // ⚠️ AND IT FAILED HARDEST ON THE HARDEST TRAINERS, which on a muscle-building
+  // tab is its entire audience: the omission scales with training volume, so the
+  // five-day lifter it is written for was the one told to eat at a deficit.
+  //
+  // Lifting is always performed, so it always counts. Cardio counts when the
+  // toggle includes it — that is what the toggle means.
   const buildSurplus = exp.surplusRec;
-  const leanBulkCals = tdee + buildSurplus;
-  const leanBulkWithCardio = tdee + buildSurplus + avgBurnPerDay;
-
-  const displayCals = showCardio && hasCardio ? leanBulkWithCardio : leanBulkCals;
+  // What this body actually spends, training included — the same shape as
+  // planEnergy's tdee + eatbackPerDay, which is what every other screen quotes.
+  const { maintenance: maintenanceWithTraining, target: displayCals } = leanBulkBudget({
+    tdee, totalStrBurn, avgBurnPerDay,
+    includeCardio: showCardio && hasCardio, surplus: buildSurplus,
+  });
 
   // Fat gain at lean bulk: a well-run lean bulk yields ~1 lb fat per ~2–3 lbs muscle
   // Conservative estimate: 25–35% of weight gained is fat (Barakat 2020)
@@ -6671,12 +6692,20 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
 
   // ── Surplus comparison table: fat gained vs muscle gained ──
   // At each surplus level, per month
+  // ⚠️ THE NETTING IS GONE, AND IT WAS ON THE WRONG BRANCH ANYWAY (S236). It read
+  // `showCardio ? max(0, s - avgBurnPerDay) : s` — subtracting the cardio burn on
+  // the branch whose TARGET had already added it back, and not subtracting on the
+  // branch that never added it. Wrong by avgBurnPerDay in both directions at
+  // once. The two notes it produced contradicted each other on one screen ("your
+  // eating target increases to account for the extra burn" beside "cardio offsets
+  // some surplus, reducing fat gain"); both cannot be true.
+  // Now the target is priced against real expenditure above, so the surplus IS
+  // the surplus and there is nothing left to net.
   const tableRows = SURPLUS_OPTIONS_MUSCLE.map(s => {
-    const netSurplus = showCardio && hasCardio ? Math.max(0, s - avgBurnPerDay) : s;
-    const fatGainPerMonth = (netSurplus * 30 / 3500) * fatGainRatioHigh;
+    const fatGainPerMonth = (s * 30 / 3500) * fatGainRatioHigh;
     const musclePerMonth  = ((gainLow + gainHigh) / 2);
     const ratio           = musclePerMonth / Math.max(fatGainPerMonth, 0.01);
-    return { surplus: s, netSurplus, fatGainPerMonth, musclePerMonth, ratio };
+    return { surplus: s, netSurplus: s, fatGainPerMonth, musclePerMonth, ratio };
   });
 
   // Body recomposition note (possible for beginners & overweight)
@@ -6849,7 +6878,17 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
           <div className="mch-cals">{displayCals.toLocaleString()}</div>
           <div className="mch-unit">calories / day</div>
           <div className="mch-breakdown">
-            Maintenance {tdee.toLocaleString()} + surplus +{buildSurplus}
+            {/* ⚠️ THE CAPTION HAS TO ADD UP TO THE NUMBER ABOVE IT. It read
+                "Maintenance {tdee} + surplus" while the hero was priced against
+                tdee + training — so it showed 3,044 + 250 beside a 3,705 target
+                and invited the reader to check the arithmetic and find it broken.
+                Seven caption bugs in this repo's recent history are this exact
+                shape: prose quoting a rule the number beside it no longer obeys. */}
+            Maintenance {maintenanceWithTraining.toLocaleString()} + surplus +{buildSurplus}
+            {maintenanceWithTraining > tdee && (
+              <span style={{opacity:.75}}> &mdash; {tdee.toLocaleString()} day-to-day
+                {" "}+ {(maintenanceWithTraining - tdee).toLocaleString()} training</span>
+            )}
             {showCardio && hasCardio && ` + cardio +${avgBurnPerDay}`}
           </div>
         </div>
@@ -7013,7 +7052,7 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
       <div className="sec-title">Surplus Size: Muscle vs. Fat Gain</div>
       <p style={{fontSize:".76rem",color:"var(--muted)",marginBottom:"10px",lineHeight:1.5}}>
         How different lean bulk surpluses compare — projected muscle gain, fat gain, and muscle-to-fat ratio per month as a {exp.label.toLowerCase()} trainee.
-        {showCardio && hasCardio && " Cardio offsets some surplus, reducing fat gain."}
+        {showCardio && hasCardio && " Your target already covers the cardio, so the surplus above is what you actually net."}
       </p>
       <div className="surplus-table-wrap">
         <div className="muscle-table">
@@ -7034,11 +7073,11 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
                   <span className="mt-surplus">+{r.surplus}</span>
                   <span className="mt-unit"> cal/day</span>
                   {isRec && <span className="mt-rec-badge">Recommended</span>}
-                  {showCardio && hasCardio && r.netSurplus < r.surplus && (
-                    <div style={{fontSize:".6rem",color:"var(--accent)"}}>net: +{r.netSurplus}</div>
-                  )}
                 </div>
-                <div className="mt-col" style={{color:"var(--accent)",fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{(tdee + r.surplus + (showCardio&&hasCardio?avgBurnPerDay:0)).toLocaleString()}</div>
+                {/* The same expenditure the headline target is priced against — this column
+                    repeated the bug independently, so a reader could check the hero
+                    number against the table and find them agreeing and both wrong. */}
+                <div className="mt-col" style={{color:"var(--accent)",fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{(maintenanceWithTraining + r.surplus).toLocaleString()}</div>
                 <div className="mt-col" style={{color:"var(--green)",fontFamily:"'Sora',sans-serif",fontSize:".95rem"}}>{((gainLow+gainHigh)/2).toFixed(2)} lbs</div>
                 <div className="mt-col" style={{color:mfColor,fontFamily:"'Sora',sans-serif",fontSize:".95rem"}}>{r.fatGainPerMonth.toFixed(2)} lbs</div>
                 <div className="mt-col" style={{color:mfColor,fontFamily:"'Sora',sans-serif",fontSize:".95rem"}}>{mfRatio}:1</div>
@@ -7165,21 +7204,26 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
 const SURPLUS_AMOUNTS = [100, 200, 300, 400, 500, 750, 1000];
 const FAT_GAIN_LBS    = [1, 2, 3, 4, 5, 6];
 
-function SurplusTab({ tdee, totalBurn, avgBurnPerDay, activeDays, name }) {
+function SurplusTab({ tdee, totalBurn, totalStrBurn = 0, avgBurnPerDay, avgStrPerDay = 0, activeDays, name }) {
   const [showCardio, setShowCardio] = useState(false);
-  const hasCardio = totalBurn > 0;
+  // ⚠️ LIFTING IS TRAINING TOO (S236). This was `totalBurn > 0`, and totalBurn is
+  // CARDIO ONLY — so a client whose whole plan is lifting got no toggle at all
+  // and was told their overage was entirely un-offset. A 250 lb client doing
+  // 4x60 min burns ~408 cal/day of real training; the +400 column then read 41.7
+  // lbs of fat a year when the honest net is about zero. The app already names
+  // the right figure one tab over, as "Combined weekly".
+  const trainPerDay = (avgBurnPerDay || 0) + (avgStrPerDay || 0);
+  const hasCardio = (totalBurn || 0) + (totalStrBurn || 0) > 0;
 
-  // Net surplus per day accounting for cardio
-  // If exercising, average daily cardio burn partially offsets the surplus
-  const netSurplus = (surplus) => showCardio && hasCardio
-    ? Math.max(0, surplus - avgBurnPerDay)
-    : surplus;
+  // Net surplus per day accounting for the training this plan actually does.
+  const netSurplus = (surplus) =>
+    surplusNetPerDay(surplus, avgBurnPerDay, avgStrPerDay, showCardio && hasCardio);
 
   // Weeks to gain X lbs of fat at a given daily surplus
   // Formula: (lbs × 3500) / daily_surplus = days → / 7 = weeks
   const weeksToGain = (surplus, lbs) => {
     const net = netSurplus(surplus);
-    if (net <= 0) return null; // cardio fully offsets
+    if (net <= 0) return null; // training fully offsets
     return (lbs * 3500) / net / 7;
   };
 
@@ -7232,14 +7276,16 @@ function SurplusTab({ tdee, totalBurn, avgBurnPerDay, activeDays, name }) {
       {/* Cardio toggle */}
       {hasCardio && (
         <div className="surplus-toggle-wrap">
-          <span className="surplus-toggle-lbl">Show effect of your cardio?</span>
+          <span className="surplus-toggle-lbl">Show effect of your training?</span>
           <div className="surplus-toggle-btns">
             <button className={`tl-tbtn${!showCardio?" active":""}`} onClick={()=>setShowCardio(false)}>No Exercise</button>
-            <button className={`tl-tbtn${showCardio?" active":""}`}  onClick={()=>setShowCardio(true)}>With My Cardio</button>
+            <button className={`tl-tbtn${showCardio?" active":""}`}  onClick={()=>setShowCardio(true)}>With My Training</button>
           </div>
           {showCardio && (
             <div className="surplus-cardio-note">
-              Your {activeDays}-day cardio plan burns ~<strong style={{color:"var(--orange)"}}>{totalBurn.toLocaleString()} cal/week</strong> (avg +{avgBurnPerDay} cal/day).
+              {/* The label has to name exactly what the arithmetic counts, or the
+                  honest number becomes a dishonest sentence. */}
+              Your training burns ~<strong style={{color:"var(--orange)"}}>{((totalBurn || 0) + (totalStrBurn || 0)).toLocaleString()} cal/week</strong> (avg +{trainPerDay} cal/day){totalStrBurn > 0 && totalBurn > 0 ? " — cardio and lifting combined" : ""}.
               This offsets some of the surplus — but overeating still adds fat if the surplus exceeds your burn.
             </div>
           )}
@@ -7306,7 +7352,7 @@ function SurplusTab({ tdee, totalBurn, avgBurnPerDay, activeDays, name }) {
             <div key={s} className={`surplus-card${isOffset?" surplus-card-offset":""}`}>
               <div className="sc-surplus">{surplusLabel(s)}<span className="sc-surplus-unit">/day</span></div>
               {isOffset ? (
-                <div className="sc-offset">Your cardio fully offsets this surplus</div>
+                <div className="sc-offset">Your training fully offsets this surplus</div>
               ) : (
                 <>
                   <div className="sc-row">
@@ -7337,9 +7383,17 @@ function SurplusTab({ tdee, totalBurn, avgBurnPerDay, activeDays, name }) {
         <div>
           <div className="st-title">The Bottom Line</div>
           <p className="st-body">
+            {/* ⚠️ THE SENTENCE AND THE NUMBER USED DIFFERENT MODELS (S236). "A glass
+                of juice … without adjustments" describes a fixed daily INTAKE, but the
+                figure beside it was a fixed SURPLUS held all year — and a fixed intake
+                is precisely the case where maintenance rises out from under you and
+                flat 3,500 overstates by ~40% at twelve months (S217, and the calorie
+                bank cites the same figure for the same reason). Everything else on
+                this tab holds a surplus and is correct flat; this one sentence did
+                not, so it says what it means instead. */}
             Even a modest daily overage compounds fast. <strong>+200 cal/day</strong> — the equivalent of a small handful of nuts or a glass of juice — adds roughly <strong style={{color:"var(--orange)"}}>
-            {showCardio && hasCardio && netSurplus(200) === 0 ? "nothing (your cardio covers it)" : `${(netSurplus(200) * 365 / 3500).toFixed(1)} lbs of fat per year`}
-            </strong> without adjustments.
+              {showCardio && hasCardio && netSurplus(200) === 0 ? "nothing (your cardio covers it)" : `${(netSurplus(200) * 365 / 3500).toFixed(1)} lbs of fat per year`}
+            </strong> in a year <em>if you stay that far above maintenance the whole way</em>. Keep eating the same amount instead and the gain is smaller, because a heavier body burns more.
             Consistency in both diet and exercise is what keeps the scale from creeping up.
           </p>
         </div>
@@ -23920,6 +23974,29 @@ function timelinePaces(d, defs = TIMELINE_PACE_DEFS) {
       flooredTarget: a.target, realLbsPerWeek: a.lbsPerWeek };
   });
   return { paces, floored: paces.filter((x) => x.floored) };
+}
+
+// ── What a lean bulk actually costs (S236) ─────────────────────────────────
+// ⚠️ EXTRACTED SO A TEST CAN RUN IT, not read it. The version that shipped this
+// bug lived inline in MuscleTab, where the only thing a suite could do was
+// pattern-match — and two pattern-matched assertions in this same session went
+// green over mutations that broke the code outright.
+//
+// `tdee` is bmr x activity multiplier: the life AROUND training. Lifting always
+// happens, so it always counts; cardio counts when the toggle includes it.
+function leanBulkBudget({ tdee, totalStrBurn, avgBurnPerDay, includeCardio, surplus }) {
+  const strPerDay = Math.round((Number(totalStrBurn) || 0) / 7);
+  const trainPerDay = strPerDay + (includeCardio ? (Number(avgBurnPerDay) || 0) : 0);
+  const maintenance = (Number(tdee) || 0) + trainPerDay;
+  return { strPerDay, trainPerDay, maintenance, target: maintenance + (Number(surplus) || 0) };
+}
+
+// What a daily overage nets once this plan's TRAINING is counted — lifting
+// included, which is what SurplusTab was missing.
+function surplusNetPerDay(surplus, avgBurnPerDay, avgStrPerDay, include) {
+  const s = Number(surplus) || 0;
+  if (!include) return s;
+  return Math.max(0, s - ((Number(avgBurnPerDay) || 0) + (Number(avgStrPerDay) || 0)));
 }
 
 function computeClientCalories(d) {
