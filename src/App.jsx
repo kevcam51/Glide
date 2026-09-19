@@ -22997,6 +22997,10 @@ const REQUEST_TEMPLATES = [
   { type: "weigh_in",    iconName: "scale",    label: "Do a weigh-in",     prompt: "Please record today's weight." },
   { type: "log_workout", iconName: "dumbbell", label: "Record a workout",  prompt: "Please record your workout for today." },
   { type: "enter_info",  iconName: "edit",     label: "Enter your info",   prompt: "Please fill in your details and goals so we can build your plan." },
+  // ⚠️ NO NEW NOTIFICATION TAG. This rides sendTrainerRequest like every other
+  // template, so it arrives tagged `todos` and notifDestination already routes
+  // it — which is most of why the intake needed no backend at all (S236).
+  { type: "intake",      iconName: "clipboard", label: "Fill in your intake", prompt: "Please fill in your intake so I can build your plan around you." },
 ];
 // Sent from the client's own card, not the quick-template row — it is only
 // offerable by a trainer who can actually take payment (S196z), and it exists
@@ -23342,7 +23346,246 @@ async function writePlansManifest(setFn, m) {
 // inline, auto-marks the request done, and closes with a ✓ — so the client never
 // leaves the home screen. For types that need the full editor (enter info / a
 // custom ask) it offers an "Open my plan" jump instead. (Session 19)
-function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenPlan, onOpenCard, onMarkDone, onClose }) {
+// ── Client intake (S236, Kevin) ─────────────────────────────────────────────
+// "I need to make the glide app almost like an intake for all new and potential
+// clients."
+//
+// ⚠️ ONE FORM, THREE DOORS, AND NO NEW INFRASTRUCTURE. The prospect a trainer
+// most wants to capture has NO ACCOUNT, and every rule in this app assumes an
+// authenticated user — so an intake that needs a public write endpoint is a
+// different, much larger project with a real abuse surface. This one reaches the
+// same people through doors that already exist: a connected client fills it in
+// themselves, a trainer sends it as a to-do, and a prospect with no account is
+// filled in BY the trainer on a local plan file. Frontend only.
+//
+// ⚠️ IT IS NOT A WAIVER AND MUST NOT BECOME ONE. Injuries and conditions are
+// here because no coach can program safely without them, and because the plan
+// builder can use them. A liability release is a legal document and needs an
+// attorney, not a form field — see docs/PRICING.md for the same reasoning about
+// published promises.
+const INTAKE_VERSION = 1;
+const INTAKE_SECTIONS = [
+  { id: "about", title: "About you", icon: "person", fields: [
+    { k: "phone",     label: "Best number",            type: "tel",  ph: "(305) 555-0147" },
+    { k: "dob",       label: "Date of birth",          type: "date", help: "Used for the calorie maths — age changes the number." },
+    { k: "occupation",label: "What do you do all day?",type: "text", ph: "Desk job, nurse, contractor…",
+      help: "This sets the activity level, and it is the input people get most wrong." },
+  ]},
+  { id: "goal", title: "What you want", icon: "target", fields: [
+    { k: "primary",   label: "Main goal",   type: "choice",
+      options: ["Lose fat", "Build muscle", "Both", "Get stronger", "Maintain", "Health / energy"] },
+    { k: "why",       label: "Why now?",    type: "long", ph: "A wedding, a scan result, tired of being tired…",
+      help: "The honest answer here is worth more than the rest of the form." },
+    { k: "deadline",  label: "Anything you're working towards?", type: "text", ph: "Holiday in June, nothing in particular…" },
+    { k: "tried",     label: "What have you already tried?",     type: "long",
+      ph: "Keto for 3 months, ran a lot, a trainer last year…",
+      help: "What did not work, and why, is the shortcut to what will." },
+  ]},
+  { id: "training", title: "Training", icon: "dumbbell", fields: [
+    { k: "experience", label: "How long have you trained?", type: "choice",
+      options: ["Brand new", "On and off", "Under a year", "1–3 years", "3+ years"] },
+    { k: "daysPerWeek",label: "Realistic days a week",    type: "choice",
+      options: ["1", "2", "3", "4", "5", "6"],
+      help: "Realistic, not aspirational — the plan is built on this number." },
+    { k: "where",      label: "Where will you train?",    type: "choice",
+      options: ["Commercial gym", "Home", "Outdoors", "With me in person", "Mix"] },
+    { k: "injuries",   label: "Injuries, pain or anything that limits you", type: "long",
+      ph: "Left shoulder, lower back, bad knee…",
+      help: "Say it even if it is old or minor. It changes the exercise choice, not the goal." },
+  ]},
+  { id: "food", title: "Food", icon: "meal", fields: [
+    { k: "pattern",    label: "How do you eat now?", type: "choice",
+      options: ["Anything", "Vegetarian", "Vegan", "Pescatarian", "Halal", "Kosher", "Low carb", "Other"] },
+    { k: "allergies",  label: "Allergies or foods you will not eat", type: "long", ph: "Shellfish, peanuts, mushrooms…" },
+    { k: "cooking",    label: "Who cooks, and how often do you eat out?", type: "text", ph: "I cook 4 nights, takeaway the rest" },
+    { k: "typicalDay", label: "A typical day of eating",  type: "long",
+      ph: "Coffee, skip lunch, big dinner, snack at night…",
+      help: "Roughly is fine. Nobody is being marked." },
+  ]},
+  { id: "health", title: "Health", icon: "heart", fields: [
+    { k: "conditions", label: "Any conditions we should know about?", type: "long",
+      ph: "Blood pressure, diabetes, thyroid, pregnancy…" },
+    { k: "meds",       label: "Medications or supplements", type: "long", ph: "Optional — it can affect appetite and weight." },
+    { k: "sleep",      label: "Hours of sleep, typically", type: "choice", options: ["Under 5", "5–6", "6–7", "7–8", "8+"] },
+    { k: "stress",     label: "Stress right now", type: "choice", options: ["Low", "Manageable", "High", "Through the roof"] },
+  ]},
+];
+
+// ⚠️ ONE KEY FUNCTION, TWO HOMES. A connected client owns their intake in their
+// own kv; a prospect with no account has theirs in the TRAINER's kv, filed
+// against the local plan id — which is the only place it can live, because that
+// person has no account for it to live in.
+const intakeKey = (localId) => (localId ? `caliq-intake-${localId}` : "caliq-intake");
+
+// How much of it is filled in. Used for the chip on a client card and to decide
+// whether to nudge — never to grade anybody.
+function intakeProgress(answers) {
+  const all = INTAKE_SECTIONS.flatMap((s) => s.fields.map((f) => f.k));
+  const done = all.filter((k) => String((answers || {})[k] ?? "").trim() !== "").length;
+  return { done, total: all.length, pct: all.length ? Math.round((done / all.length) * 100) : 0 };
+}
+
+// ⚠️ ABSENCE IS NOT FAILURE, AND THE TWO READ DIFFERENTLY (S196L/S197s).
+// window.storage.get THROWS for a missing doc while getForUser returns null, so
+// a first-time intake and an unreachable network arrive at the same catch. An
+// empty form over a doc that exists but could not be fetched would overwrite it
+// on the next save — so a genuine failure refuses rather than starting blank.
+async function readIntake(get, localId) {
+  try {
+    const raw = await get(intakeKey(localId));
+    if (!raw || !raw.value) return { answers: {}, updatedAt: null, ok: true };
+    const doc = JSON.parse(raw.value) || {};
+    return { answers: doc.answers || {}, updatedAt: doc.updatedAt || null, ok: true };
+  } catch (e) {
+    if (e && e.code === "not-found") return { answers: {}, updatedAt: null, ok: true };
+    console.error("intake read failed", e);
+    return { answers: {}, updatedAt: null, ok: false };
+  }
+}
+
+async function writeIntake(set, localId, answers, by) {
+  const doc = { version: INTAKE_VERSION, answers: answers || {}, updatedAt: Date.now(), updatedBy: by || null };
+  await set(intakeKey(localId), JSON.stringify(doc));
+  return doc;
+}
+
+// The form. Deliberately one scroll rather than a wizard: a prospect abandons a
+// 5-step flow at step 2, and a trainer filling this in on someone's behalf wants
+// to jump straight to the two fields they care about.
+//
+// ⚠️ NOTHING HERE IS REQUIRED. A half-filled intake is worth more than an empty
+// one, so Save works at any point and every field can stay blank. The progress
+// figure exists to show the trainer where the gaps are, never to block a save.
+function IntakeSheet({ title, subtitle, initial, onSave, onClose, readOnly = false, loadFailed = false }) {
+  useBodyScrollLock(true);
+  useBackClose(true, () => (dirty ? setConfirmClose(true) : onClose()));
+  const [answers, setAnswers] = useState(initial || {});
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [failed, setFailed] = useState("");
+  const [confirmClose, setConfirmClose] = useState(false);
+  const prog = intakeProgress(answers);
+
+  const set = (k, v) => { setAnswers((a) => ({ ...a, [k]: v })); setDirty(true); setSaved(false); };
+
+  const save = async () => {
+    setBusy(true); setFailed("");
+    try {
+      // The same bounded wait QuickActionModal uses: an offline write that hangs
+      // rather than rejecting would otherwise trap someone in a full-screen form.
+      const ok = await Promise.race([
+        Promise.resolve(onSave(answers)),
+        new Promise((res) => setTimeout(() => res("timeout"), 15000)),
+      ]);
+      if (ok === "timeout") { setBusy(false); setFailed("That's taking too long — check your connection and try again."); return; }
+      if (ok === false) { setBusy(false); setFailed(SAVE_FAILED_MSG); return; }
+      setBusy(false); setDirty(false); setSaved(true);
+    } catch (e) {
+      console.error("intake save failed", e);
+      setBusy(false); setFailed(SAVE_FAILED_MSG);
+    }
+  };
+
+  const inputCls = "w-full box-border rounded-lg border border-border bg-surface2 px-3 py-2.5 text-[1rem] keep-size text-fg outline-none placeholder:text-muted";
+  const chip = (on) => `rounded-full border px-3 py-1.5 text-[.78rem] font-semibold cursor-pointer ${on ? "border-primary bg-[rgba(var(--accent-rgb),.14)] text-primary" : "border-border bg-transparent text-muted"}`;
+
+  const field = (f) => {
+    const v = answers[f.k] ?? "";
+    return (
+      <div key={f.k} className="mb-3.5">
+        <label className="block text-[.76rem] font-semibold text-fg mb-1">{f.label}</label>
+        {f.type === "choice" ? (
+          <div className="flex flex-wrap gap-1.5">
+            {f.options.map((o) => (
+              <button key={o} type="button" disabled={readOnly} className={chip(v === o)}
+                onClick={() => set(f.k, v === o ? "" : o)}>{o}</button>
+            ))}
+          </div>
+        ) : f.type === "long" ? (
+          <textarea rows={3} value={v} disabled={readOnly} placeholder={f.ph || ""}
+            className={`${inputCls} resize-none`} onChange={(e) => set(f.k, e.target.value)} />
+        ) : (
+          <input type={f.type === "date" ? "date" : f.type === "tel" ? "tel" : "text"}
+            value={v} disabled={readOnly} placeholder={f.ph || ""} className={inputCls}
+            onChange={(e) => set(f.k, e.target.value)} />
+        )}
+        {f.help && <div className="mt-1 text-[.68rem] leading-snug text-muted">{f.help}</div>}
+      </div>
+    );
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 z-[1600] flex flex-col bg-bg text-fg"
+      style={{ fontFamily: "var(--font-sans)",
+        paddingTop: "calc(10px + env(safe-area-inset-top,0px))",
+        paddingBottom: "calc(10px + env(safe-area-inset-bottom,0px))" }}>
+      <div className="flex items-center gap-2 border-b border-border px-4 pb-2.5">
+        <button onClick={() => (dirty ? setConfirmClose(true) : onClose())}
+          className="flex items-center gap-1.5 border-none bg-transparent p-0 text-[.86rem] font-semibold text-primary cursor-pointer">
+          <Icon name="back" size={16} color="var(--accent)" />Close
+        </button>
+        <div className="ml-auto text-[.7rem] text-muted">{prog.done} of {prog.total} answered</div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 pt-3.5">
+        <div className="text-[1.15rem] font-extrabold">{title}</div>
+        {subtitle && <div className="mt-1 text-[.8rem] leading-snug text-muted">{subtitle}</div>}
+        {/* ⚠️ A FAILED READ MUST NOT LOOK LIKE AN EMPTY FORM. Saving over a
+            document we could not fetch would wipe answers that are really there. */}
+        {loadFailed && (
+          <div className="mt-3 rounded-lg border px-3 py-2.5 text-[.78rem] leading-snug"
+            style={{ borderColor: "var(--red)", background: "rgba(248,113,113,.08)", color: "var(--text-secondary)" }}>
+            We couldn&rsquo;t load what was already answered, so this is showing blank. Close and reopen
+            rather than saving over it &mdash; anything already filled in is still safe.
+          </div>
+        )}
+        {INTAKE_SECTIONS.map((sec) => (
+          <div key={sec.id} className="mt-5">
+            <div className="mb-2 flex items-center gap-2 text-[.72rem] font-extrabold uppercase tracking-[.5px] text-primary">
+              <Icon name={sec.icon} size={15} color="var(--accent)" />{sec.title}
+            </div>
+            {sec.fields.map(field)}
+          </div>
+        ))}
+        <div className="h-6" />
+      </div>
+
+      {!readOnly && (
+        <div className="border-t border-border px-4 pt-2.5">
+          {failed && <div className="mb-2 text-[.8rem] font-semibold leading-snug" style={{ color: "var(--red)" }}>{failed}</div>}
+          <button onClick={save} disabled={busy || (!dirty && saved)}
+            className="w-full rounded-[9px] border-none bg-primaryfill px-3.5 py-3 text-[.95rem] font-bold text-primaryfg cursor-pointer disabled:opacity-55 disabled:cursor-default">
+            {busy ? "Saving…" : saved && !dirty ? "Saved" : "Save"}
+          </button>
+          <div className="mt-1.5 text-center text-[.66rem] text-muted">
+            Nothing here is required &mdash; save as much or as little as you like and come back to it.
+          </div>
+        </div>
+      )}
+
+      {confirmClose && (
+        <div className="absolute inset-0 z-[10] flex items-center justify-center bg-black/60 px-4"
+          onClick={() => setConfirmClose(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-[340px] rounded-card border border-border bg-surface p-4">
+            <div className="text-[.95rem] font-bold">Close without saving?</div>
+            <div className="mt-1.5 text-[.8rem] text-muted">Your changes on this screen will be lost.</div>
+            <div className="mt-3.5 flex gap-2">
+              <button onClick={() => { setConfirmClose(false); onClose(); }}
+                className="flex-1 rounded-[9px] border-none px-3 py-2.5 text-[.85rem] font-bold cursor-pointer"
+                style={{ background: "var(--red)", color: "#fff" }}>Discard</button>
+              <button onClick={() => setConfirmClose(false)}
+                className="flex-1 rounded-[9px] border border-border bg-transparent px-3 py-2.5 text-[.85rem] font-semibold text-fg cursor-pointer">Keep editing</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>,
+    document.body,
+  );
+}
+
+function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenPlan, onOpenCard, onOpenIntake, onMarkDone, onClose }) {
   useBodyScrollLock(true);
   const [val, setVal] = useState("");
   const [busy, setBusy] = useState(false);
@@ -23446,6 +23689,22 @@ function QuickActionModal({ request, onWeighIn, onLogFood, onLogWorkout, onOpenP
             <div className="flex gap-2.5">
               <button className={primaryCls} onClick={() => { onMarkDone(); onOpenCard && onOpenCard(); }}>Add my card →</button>
               <button className={ghostCls} onClick={onClose}>Not now</button>
+            </div>
+          </>
+          ) : type === "intake" && onOpenIntake ? (
+          <>
+            <div className="mb-1 text-[1.05rem] font-extrabold flex items-center gap-2"><Icon name="clipboard" size={17} color="var(--accent)" />{request.prompt}</div>
+            <div className="mb-4 text-[.82rem] text-muted">
+              A few questions about your goal, your training and how you eat. Nothing is required, and
+              you can come back to it.
+            </div>
+            <div className="flex gap-2.5">
+              {/* ⚠️ NOT MARKED DONE ON OPEN. The other branches complete a single
+                  action; this one opens a form somebody may close again after two
+                  fields, and ticking the trainer's to-do for that would report
+                  work that did not happen. ClientHome marks it when they save. */}
+              <button className={primaryCls} onClick={() => { onClose(); onOpenIntake(); }}>Start &rarr;</button>
+              <button className={ghostCls} onClick={onClose}>Later</button>
             </div>
           </>
           ) : (
@@ -25016,6 +25275,18 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
   }, [idSig]);
   const [renamingId, setRenamingId] = useState(null);
   const [renameDraft, setRenameDraft] = useState("");
+  // ── Intake, from the trainer's side (S236) ───────────────────────────────
+  // Two homes, one sheet: a connected client's lives in THEIR kv, a prospect's
+  // lives in this trainer's own kv against the local plan id — because a person
+  // with no account has nowhere else for it to be.
+  const [intakeFor, setIntakeFor] = useState(null); // { uid?, localId?, name }
+  const [intakeLoad, setIntakeLoad] = useState(null);
+  const openIntakeFor = async (target) => {
+    const get = target.uid ? (k) => getForUser(target.uid, k) : (k) => window.storage.get(k);
+    const d = await readIntake(get, target.localId || null);
+    setIntakeLoad(d);
+    setIntakeFor(target);
+  };
   // Connected-client management (moved here from the role panel).
   const [linkingFor, setLinkingFor] = useState(null);   // clientUid choosing a profile to link
   const [pendingLink, setPendingLink] = useState(null);  // { clientUid, localId, label } awaiting confirm
@@ -26141,6 +26412,10 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                             <Icon name="card" size={16} color="var(--accent)" />Card link
                           </button>
                         )}
+                        <button className={`${mBtnCls} inline-flex items-center gap-1.5`}
+                          onClick={() => openIntakeFor({ uid: c.uid, name: c.name })}>
+                          <Icon name="clipboard" size={16} color="var(--accent)" />Intake
+                        </button>
                         {c.hasPlan && (
                           <button className={mBtnCls} onClick={() => onOpenClientPlan && onOpenClientPlan(c.uid)}>Open plan</button>
                         )}
@@ -26936,6 +27211,18 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
                           Convert to client plan →
                         </button>
                       ))}
+                      {/* ⚠️ THE DOOR FOR SOMEONE WITH NO ACCOUNT (S236). A plan file
+                          is how this app already represents a person who has not
+                          signed up — most of Kevin's roster is exactly that — so
+                          their intake is filled in here, by the trainer, and stored
+                          against the plan id in the trainer's own kv. No public
+                          endpoint, no anonymous auth, no new rule. */}
+                      {!sim && (
+                        <button onClick={() => openIntakeFor({ localId: p.id, name: p.customName || p.name })}
+                          className={`${mBtnCls} inline-flex items-center gap-1.5`}>
+                          <Icon name="clipboard" size={15} color="var(--accent)" />Intake
+                        </button>
+                      )}
                       {confirmDelFor === p.id ? (
                         <span className="inline-flex gap-1.5 items-center">
                           <button onClick={() => { onDeletePlan && onDeletePlan(p.id); setConfirmDelFor(null); }}
@@ -26963,6 +27250,27 @@ function TrainerDashboard({ profiles, loading, onSelect, onManageClients, onOpen
       {msgFor && (
         <MessageThread trainerUid={meUid} clientUid={msgFor.uid} meUid={meUid}
           otherName={msgFor.name} onClose={() => setMsgFor(null)} />
+      )}
+      {/* Mounted here for the same reason as the four above: inside the
+          collapsible Local Plans fragment it would silently do nothing whenever
+          that section was closed, which is its default state. */}
+      {intakeFor && (
+        <IntakeSheet
+          title={`${intakeFor.name || "Client"} — intake`}
+          subtitle={intakeFor.uid
+            ? "What they've filled in. You can add to it, and they'll see the same form."
+            : "They have no account yet, so this is yours to fill in. It travels with the plan when you link them."}
+          initial={intakeLoad ? intakeLoad.answers : {}}
+          loadFailed={!!(intakeLoad && !intakeLoad.ok)}
+          onSave={async (answers) => {
+            const set = intakeFor.uid
+              ? (k, v) => setForUser(intakeFor.uid, k, v)
+              : (k, v) => window.storage.set(k, v);
+            await writeIntake(set, intakeFor.localId || null, answers,
+              { uid: meUid, name: meName, role: meRole });
+            return true;
+          }}
+          onClose={() => { setIntakeFor(null); setIntakeLoad(null); }} />
       )}
       {sessionsFor && (
         <SessionsPanel meUid={meUid} role={meRole} trainerUid={meUid} clientUid={sessionsFor.uid}
@@ -33314,6 +33622,26 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
   }, [saveErr]);
   const [requests, setRequests] = useState([]);    // trainer → client requests (Session 19)
   const [quickReq, setQuickReq] = useState(null);  // request being completed in the quick-action popup
+  // ── Intake (S236) ────────────────────────────────────────────────────────
+  // Read on OPEN rather than on mount: most visits never touch it, and a
+  // dashboard that fetches a document nobody asked for is the read-cost mistake
+  // S85 spent a session undoing.
+  const [intakeOpen, setIntakeOpen] = useState(false);
+  const [intakeDoc, setIntakeDoc] = useState(null);     // { answers, ok }
+  const [intakeProg, setIntakeProg] = useState(null);   // { done, total, pct } | null once read
+  const openIntake = async () => {
+    const d = await readIntake((k) => window.storage.get(k), null);
+    setIntakeDoc(d);
+    setIntakeOpen(true);
+  };
+  // A cheap one-off read so the card can say where they are, without opening it.
+  useEffect(() => {
+    let live = true;
+    readIntake((k) => window.storage.get(k), null)
+      .then((d) => { if (live && d.ok) setIntakeProg(intakeProgress(d.answers)); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [meUid]);
   // Whether the trainer to-do reminders show — driven by the shared notification
   // prefs (master + per-type), lifted to App so the menu's Notification Center and
   // this inline toggle stay in sync.
@@ -34428,6 +34756,36 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
           </div>
         )}
 
+        {/* ── Intake (S236) ────────────────────────────────────────────────
+            Reachable without a to-do, because the person who most wants to fill
+            this in is the one who just signed up and hasn't been sent anything
+            yet. Shows what is left rather than a bare "incomplete": a progress
+            figure is an invitation, a red cross is a telling-off.
+            ⚠️ HIDDEN ONLY WHEN IT IS ACTUALLY FINISHED, never when the read
+            failed — `intakeProg` stays null on a failed read, and a card that
+            vanishes on a flaky network is the S200e gate bug again. */}
+        {intakeProg && intakeProg.done < intakeProg.total && (
+          <button onClick={openIntake}
+            className={`${cardCls} mb-4 w-full text-left cursor-pointer border-primary`}
+            style={{ background: "color-mix(in srgb, var(--color-primary) 5%, var(--color-surface))" }}>
+            <div className="flex items-center gap-2">
+              <Icon name="clipboard" size={18} color="var(--accent)" />
+              <div className="font-display text-base tracking-wide text-primary uppercase">
+                {intakeProg.done === 0 ? "Your intake" : "Finish your intake"}
+              </div>
+              <div className="ml-auto text-xs font-bold text-muted">{intakeProg.done}/{intakeProg.total}</div>
+            </div>
+            <div className="mt-1.5 text-sm text-muted leading-snug">
+              {intakeProg.done === 0
+                ? "A few questions about your goal, your training and how you eat — so your plan is built around your life."
+                : `${intakeProg.total - intakeProg.done} left. Pick it up wherever you stopped.`}
+            </div>
+            <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-surface2">
+              <div className="h-full rounded-full bg-primaryfill" style={{ width: `${intakeProg.pct}%` }} />
+            </div>
+          </button>
+        )}
+
         {/* Trainer requests — actionable to-dos at the very top (Session 19).
             The client can hide these (some users just want the chat / one feature
             and don't want to-do nudges) — data still arrives, just not shown. */}
@@ -34777,8 +35135,29 @@ function ClientHome({ onOpenPlan, onOpenTimeline, meUid, meName, role, notifPref
           // Opens the Sessions panel, which is where the card lives — the same
           // destination the /card/CODE link reaches, minus the browser trip.
           onOpenCard={() => { setQuickReq(null); setShowSessions(true); }}
+          onOpenIntake={() => { setQuickReq(null); openIntake(); }}
           onMarkDone={() => markRequestDone(quickReq.id)}
           onClose={() => setQuickReq(null)} />
+      )}
+
+      {intakeOpen && (
+        <IntakeSheet
+          title="Your intake"
+          subtitle="So your plan is built around your life, not a template. Nothing here is required."
+          initial={intakeDoc ? intakeDoc.answers : {}}
+          loadFailed={!!(intakeDoc && !intakeDoc.ok)}
+          onSave={async (answers) => {
+            await writeIntake((k, v) => window.storage.set(k, v), null, answers,
+              { uid: meUid, name: meName, role });
+            setIntakeProg(intakeProgress(answers));
+            // ⚠️ THE TO-DO IS TICKED ON SAVE, NOT ON OPEN. Opening a form is not
+            // doing it, and a trainer seeing "done" against an empty intake is
+            // worse than seeing it still outstanding.
+            const open = (requests || []).find((r) => r.type === "intake" && r.status === "open");
+            if (open) await markRequestDone(open.id);
+            return true;
+          }}
+          onClose={() => setIntakeOpen(false)} />
       )}
 
       {/* A to-do notification that has nothing left to open still has to say so
@@ -43481,6 +43860,7 @@ export default function App() {
     </>
   );
 }
+
 
 
 
