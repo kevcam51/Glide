@@ -119,12 +119,49 @@ await check("brand-new user reads own (not-yet-created) profile — signup path"
 await check("signed-in user CANNOT read a stranger's non-existent profile", assertFails(getDoc(prof(c1, "nonexistent_other_uid"))));
 await check("trainer reads own client's profile", assertSucceeds(getDoc(prof(head, C1))));
 await check("client reads their trainer's profile (directory)", assertSucceeds(getDoc(prof(c1, H))));
-await check("any signed-in user reads a trainer's profile (join directory)", assertSucceeds(getDoc(prof(c3, T2))));
+// ⚠️ THIS ASSERTION USED TO EXPECT SUCCESS, AND THAT WAS THE LEAK (S236).
+// The blanket trainer directory made every trainer profile — email and
+// inviteCode included — readable by any signed-in account. Joining is
+// server-side now (joinTrainerByCode), so nothing needs it.
+await check("unrelated signed-in user CANNOT read a trainer's profile", assertFails(getDoc(prof(c3, T2))));
 await check("head reads their sub-trainer's profile", assertSucceeds(getDoc(prof(head, S))));
 await check("client CANNOT read another client's profile", assertFails(getDoc(prof(c1, C2))));
 await check("unrelated trainer CANNOT read a client they don't train", assertFails(getDoc(prof(t2, C1))));
 await check("signed-out cannot read any profile", assertFails(getDoc(prof(anon, C1))));
 await check("signed-out cannot read a trainer profile", assertFails(getDoc(prof(anon, H))));
+
+// ── The escalation the narrowing would have opened (S236) ──────────────────
+// ⚠️ isMyTrainer() reads the REQUESTER's OWN assignedTrainerId / headTrainerId.
+// Both were writable — headTrainerId was pinned nowhere at all, and neither was
+// constrained on CREATE — so the first draft of this change let any signed-in
+// account grant itself read on ANY profile, CLIENT profiles included, which the
+// rules otherwise correctly deny. An adversarial pass demonstrated it here
+// before it shipped. These four are what keep the helper a restriction rather
+// than a hole; if any goes green, the read rule above is an escalation.
+console.log("\nPROFILE — self-granted links (the escalation):");
+await check("client CANNOT point their own headTrainerId at someone else",
+  assertFails(updateDoc(prof(c1, C1), { headTrainerId: T2 })));
+await check("client CANNOT point their own assignedTrainerId at someone else",
+  assertFails(updateDoc(prof(c1, C1), { assignedTrainerId: T2 })));
+// ⚠️ AND THIS ONE IS A HOLE THAT WAS ALREADY LIVE, not one the narrowing made.
+// A stranger could create their own profile pre-linked to any trainer — a uid
+// every public /i/CODE invite link hands out through inviteCodes — which makes
+// isTrainerOf true, opens a DM with that trainer, and walks past the free
+// roster cap joinTrainerByCode exists to enforce.
+await check("a new profile CANNOT arrive already linked to a trainer",
+  assertFails(setDoc(prof(ctx("selflink_uid"), "selflink_uid"),
+    { uid: "selflink_uid", role: "client", assignedTrainerId: H })));
+await check("...nor already claiming someone else as its head",
+  assertFails(setDoc(prof(ctx("selfhead_uid"), "selfhead_uid"),
+    { uid: "selfhead_uid", role: "client", headTrainerId: H })));
+// ⚠️ AND THE PIN MUST NOT DENY A REAL SIGNUP. createProfile sets a HEAD's
+// headTrainerId to their OWN uid — a naive `== null` guard denies every trainer
+// who ever signs up, which is the lockout this whole exercise exists to avoid.
+await check("a head-trainer signup CAN set headTrainerId to their own uid",
+  assertSucceeds(setDoc(prof(ctx("newhead_uid"), "newhead_uid"),
+    { uid: "newhead_uid", role: "head_trainer", headTrainerId: "newhead_uid", assignedTrainerId: null })));
+await check("leaving a trainer is still a plain self-write",
+  assertSucceeds(updateDoc(prof(c1, C1), { assignedTrainerId: null })));
 
 console.log("\nPROFILE — list queries:");
 const usersCol = (db) => collection(db, "users");
@@ -132,6 +169,14 @@ await check("trainer lists own clients (assignedTrainerId==me)", assertSucceeds(
 await check("head lists own sub-trainers (headTrainerId==me)", assertSucceeds(getDocs(query(usersCol(head), where("headTrainerId", "==", H)))));
 await check("trainer CANNOT list another trainer's clients", assertFails(getDocs(query(usersCol(t2), where("assignedTrainerId", "==", H)))));
 await check("client CANNOT list all users (unconstrained)", assertFails(getDocs(usersCol(c1))));
+// ⚠️ THE HARVEST ITSELF. The unconstrained list above was already denied, which
+// is why this went unnoticed: a ROLE-CONSTRAINED list was allowed, because every
+// document it returned satisfied the directory clause. One line in a console
+// returned every trainer's email and invite code.
+await check("client CANNOT harvest the trainer directory (role-constrained list)",
+  assertFails(getDocs(query(usersCol(c1), where("role", "==", "head_trainer")))));
+await check("...nor with an 'in' query across both trainer roles",
+  assertFails(getDocs(query(usersCol(c1), where("role", "in", ["head_trainer", "sub_trainer"])))));
 
 console.log("\nPROFILE — update / delete:");
 // S179 free roster cap. Joining moved server-side (functions/roster.js

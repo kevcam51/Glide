@@ -108,15 +108,25 @@ ok("undefined is not a place", !M.isMeetAt(undefined));
 }
 
 // ── it is stored where it cannot leak ───────────────────────────────────────
-// ⚠️ THE PROFILE DOC WOULD HAVE BEEN LESS CODE AND A REAL LEAK. `users/{uid}` is
-// readable by ANY signed-in user when the role is head/sub trainer — the
-// directory rule a client needs to resolve their coach — so a trainer who
-// trains from home would have published their home address platform-wide.
+// ⚠️ THE PROFILE DOC WOULD HAVE BEEN LESS CODE AND A REAL LEAK, AND STILL IS —
+// but the reason got narrower in S236 and this test moved with it rather than
+// being deleted. `users/{uid}` USED to be readable by any signed-in account
+// whenever the role was head/sub trainer; that blanket directory is gone, and
+// this file's old assertion — "a trainer profile really is world-readable" —
+// was encoding the leak as intended behaviour.
+// The design is unchanged and still right: a trainer's profile is readable by
+// every client on their roster and by the head above them, so a home address on
+// it would still be published to everyone they train. kv is where it belongs.
 {
-  const usersBlock = RULES.slice(RULES.indexOf("match /users/{uid}"), RULES.indexOf("match /users/{uid}") + 1400);
-  ok("a trainer profile really is world-readable to signed-in users",
-     /resource\.data\.role in \['head_trainer', 'sub_trainer'\]/.test(usersBlock), true);
-  ok("...so the address is NOT a profile field", !/meetingAddress/.test(RULES), true);
+  const usersBlock = RULES.slice(RULES.indexOf("match /users/{uid}"), RULES.indexOf("match /users/{uid}") + 2600);
+  ok("the blanket trainer directory is gone from the read rule",
+     !/resource\.data\.role in \['head_trainer', 'sub_trainer'\]/.test(usersBlock), true);
+  ok("...replaced by a link the requester actually has", /isMyTrainer\(uid\)/.test(usersBlock), true);
+  // Still readable by the people who ARE linked — which is the whole reason the
+  // address stays out of it.
+  ok("...and a trainer's own clients can still read them",
+     /resource\.data\.assignedTrainerId == request\.auth\.uid/.test(usersBlock), true);
+  ok("so the address is NOT a profile field", !/meetingAddress/.test(RULES), true);
   ok("...and lives in the owner's own kv instead", /MEETING_ADDRESS_KEY = "caliq-meeting-address"/.test(SESSIONS));
   ok("the reason is written down where the next person will look",
      /ANY SIGNED-IN USER/.test(SESSIONS), true);

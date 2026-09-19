@@ -35,9 +35,17 @@ const ok = (n, c, x) => { checks++; if (!c) { fails++; console.log("  FAIL:", n,
 const coll = (FN.match(/const TOKENS = "([^"]+)"/) || [])[1];
 ok("the token has its own collection", !!coll, { coll });
 ok("…with NO client rules, so it is Admin-SDK only", !!coll && !RULES.includes(coll), { coll });
-// Pinned so that whoever changes the directory rule sees why this exists.
-ok("the trainer-directory read rule is what makes that necessary",
-   /resource\.data\.role in \['head_trainer', 'sub_trainer'\]/.test(RULES));
+// ⚠️ THE SECOND TRIPWIRE OF THIS KIND TO FIRE ON ONE RULES CHANGE (S236), and
+// both were right to. It pinned the blanket trainer-directory read so that
+// whoever narrowed it would come and look. The directory is gone — it let any
+// signed-in account harvest every trainer's email and invite code — but the
+// reason this token lives in its own Admin-SDK-only collection survives: a
+// trainer's profile is still readable by every client on their roster, and this
+// URL IS the credential.
+ok("the profile is no longer a blanket directory",
+   !/resource\.data\.role in \['head_trainer', 'sub_trainer'\]/.test(RULES));
+ok("...but their own clients can still read it, which is why the token is not on it",
+   /resource\.data\.assignedTrainerId == request\.auth\.uid/.test(RULES));
 // ⚠️ The regression that matters: a token written back to the profile.
 ok("the token is never WRITTEN to the profile document",
    !/users\/\$\{uid\}`\)\.set\(\{[^}]*calendarFeedToken/.test(FN)

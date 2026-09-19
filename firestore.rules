@@ -15,6 +15,33 @@ service cloud.firestore {
     function profileExists(uid) {
       return exists(/databases/$(database)/documents/users/$(uid));
     }
+    // Is the REQUESTER linked to this trainer? Claim first (free, and set
+    // server-side by syncRoleClaims), falling back to a live read of the
+    // requester's OWN profile.
+    //
+    // ⚠️ THE FALLBACK IS LOAD-BEARING, NOT BELT-AND-BRACES. A client who has
+    // just joined has assignedTrainerId in Firestore but NOT yet in this
+    // session's token — forgetClaimsStamp only forces a refresh on the NEXT
+    // load — and the invite auto-link reads their trainer's name milliseconds
+    // later. Same for a client who switched trainers (stale claim for up to an
+    // hour) and for any account whose claims were never backfilled (S56/S57).
+    // Claim-only was measured DENYING all three in the emulator.
+    //
+    // ⚠️ AND IT IS ONLY SAFE BECAUSE BOTH FIELDS ARE NOW PINNED. This reads the
+    // requester's own document, so if they could write assignedTrainerId or
+    // headTrainerId freely they could grant themselves read on ANY profile —
+    // which an adversarial pass demonstrated in the emulator against the first
+    // version of this rule. See the create/update guards below: without those
+    // this helper is an escalation, not a restriction.
+    function isMyTrainer(uid) {
+      return request.auth.token.get('assignedTrainerId', null) == uid
+        || request.auth.token.get('headTrainerId', null) == uid
+        || (profileExists(request.auth.uid) && (
+             profileData(request.auth.uid).get('assignedTrainerId', null) == uid
+             || profileData(request.auth.uid).get('headTrainerId', null) == uid
+           ));
+    }
+
     function profileData(uid) {
       return get(/databases/$(database)/documents/users/$(uid)).data;
     }
@@ -108,9 +135,20 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         request.auth.uid == uid
         || isAdmin()
-        || resource.data.role in ['head_trainer', 'sub_trainer']
         || resource.data.assignedTrainerId == request.auth.uid
         || resource.data.headTrainerId == request.auth.uid
+        // ⚠️ WAS `resource.data.role in ['head_trainer','sub_trainer']` — a
+        // blanket directory that made EVERY trainer profile readable AND
+        // LISTABLE by any signed-in account. Trainer docs carry `email` and
+        // `inviteCode`, so `where('role','==','head_trainer')` harvested the lot
+        // in one query; confirmed in the emulator, and the existing test missed
+        // it because it only checked the UNCONSTRAINED list.
+        // The justification is gone: joining is server-side now
+        // (joinTrainerByCode), so no client reads a trainer profile to link.
+        // ⚠️ LAST IN THE CHAIN ON PURPOSE — the two clauses above are pure
+        // resource.data, so a trainer listing their own roster short-circuits
+        // here and does zero document lookups.
+        || isMyTrainer(uid)
       );
 
       // CREATE: only your own uid; role must be client or head_trainer ONLY
@@ -122,7 +160,22 @@ service cloud.firestore {
         && request.resource.data.uid == uid
         && request.resource.data.role in ['client', 'head_trainer']
         && !request.resource.data.keys().hasAny(['entitlements', 'sessionCredits', 'sessionBillingHold', 'sessionPaymentMethod', 'sessionBillingTest'])
-        && request.resource.data.get('subscriptionStatus', 'trial') == 'trial';
+        && request.resource.data.get('subscriptionStatus', 'trial') == 'trial'
+        // ⚠️ A NEW PROFILE MAY NOT ARRIVE ALREADY LINKED. This was unconstrained,
+        // and it is a live hole independent of any read rule: a signed-in
+        // stranger could create their own profile with assignedTrainerId set to
+        // any trainer — a uid that every public /i/CODE invite link hands out via
+        // inviteCodes — which makes isTrainerOf true, opens a DM thread with that
+        // trainer, and walks straight past the S179 free-roster cap that
+        // joinTrainerByCode exists to enforce. Confirmed in the emulator against
+        // the CURRENT rules. Joining is server-side; a create never needs it.
+        && request.resource.data.get('assignedTrainerId', null) == null
+        // ⚠️ AND `headTrainerId == null` WOULD DENY EVERY HEAD-TRAINER SIGNUP:
+        // createProfile sets a head's headTrainerId to their OWN uid
+        // (src/profile.js:58), because a head is the head of their own tree.
+        // Own-uid or nothing — never somebody else's.
+        && (request.resource.data.get('headTrainerId', null) == null
+            || request.resource.data.get('headTrainerId', null) == uid);
 
       // UPDATE: admin anything; owner may update own profile but MUST NOT
       // change role (blocks self-promotion) and MUST NOT touch the billing /
@@ -167,6 +220,22 @@ service cloud.firestore {
             request.resource.data.get('assignedTrainerId', null)
               == resource.data.get('assignedTrainerId', null)
             || request.resource.data.get('assignedTrainerId', null) == null
+          )
+          // ⚠️ headTrainerId WAS NOT PINNED AT ALL, and isMyTrainer reads it on
+          // the REQUESTER's own document — so without this anyone could set
+          // their own headTrainerId to a victim's uid and read that profile,
+          // CLIENT profiles included, which today's rules correctly deny. An
+          // adversarial pass demonstrated exactly that against the first draft
+          // of this change: a narrowing that opened a strictly worse hole.
+          // Sub-trainer placement is admin-assigned; a self-write never needs it.
+          // ⚠️ ITS OWN PARENTHESES. `A || B && C` parses as `A || (B && C)`, and
+          // A is true whenever the field is unchanged — so an unbracketed pin
+          // never fires and the emulator reports ALLOW while the rule text reads
+          // correctly. That trap was hit during this work.
+          && (
+            request.resource.data.get('headTrainerId', null)
+              == resource.data.get('headTrainerId', null)
+            || request.resource.data.get('headTrainerId', null) == null
           )
         );
 

@@ -68,10 +68,17 @@ ok("a bad token is refused with 403, not a generic error", /status\(403\)/.test(
   // pattern trainerizeCreds and webauthnCreds already use for credentials.
   ok("…and that collection has NO client rules, so it is Admin-SDK only",
      !!coll && !RULES.includes(coll), { coll });
-  // The directory rule this is defending against — pinned so that if it ever
-  // changes, whoever changes it sees why this collection exists.
-  ok("the trainer-directory read rule is still what makes that necessary",
-     /resource\.data\.role in \['head_trainer', 'sub_trainer'\]/.test(RULES));
+  // ⚠️ THIS TRIPWIRE FIRED, AND IT WAS RIGHT TO (S236). It pinned the blanket
+  // trainer-directory read rule "so that if it ever changes, whoever changes it
+  // sees why this collection exists" — and when that rule was narrowed to close
+  // a harvest of every trainer's email and invite code, this went red and made
+  // someone come and look. It does still exist, for a narrower reason: a
+  // trainer's profile is readable by every client on their roster, so a secret
+  // inbox token on it would be handed to exactly the people it defends against.
+  ok("the profile is no longer a blanket directory",
+     !/resource\.data\.role in \['head_trainer', 'sub_trainer'\]/.test(RULES));
+  ok("...but a trainer's own clients can still read it, which is why this token is elsewhere",
+     /resource\.data\.assignedTrainerId == request\.auth\.uid/.test(RULES));
 }
 ok("the link is rotatable", /reset/.test(FN) && /\{ uid, token, at: Date\.now\(\) \}/.test(FN));
 // ⚠️ Minting on every call would silently break the Shortcut the person already
