@@ -89,14 +89,14 @@ function liftDecl(src, name) {
 }
 
 // ── lift the real thing ─────────────────────────────────────────────────────
-const CONSTS = ["CAL_PER_LB", "TIMELINE_PACE_DEFS", "DAYS", "REST_ST", "STRENGTH_EXERCISES", "CARDIO_GROUPS", "ALL_CARDIO",
+const CONSTS = ["CAL_PER_LB", "FAT_SHARE_LOW", "FAT_SHARE_HIGH", "TIMELINE_PACE_DEFS", "DAYS", "REST_ST", "STRENGTH_EXERCISES", "CARDIO_GROUPS", "ALL_CARDIO",
   "ACTIVITY_LEVELS", "MIN_DAILY_CAL", "HR_ZONES", "RATE_OPTS", "OVER_TOLERANCE", "PARTIAL_DAY_MIN"];
 const FNS = ["calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx", "hrCaloriesPerMin",
   "restingKcalPerMin", "calcBurn", "cardioExFor", "exBurn", "isEatback", "dailyDeficitOf", "weeklyRateOf",
-  "MAINT_STALE_DAYS", "maintBasis", "maintenanceK", "planMaintenance", "planEnergy", "planIntakeForRate", "computeClientCalories", "overDaysFrom", "makeUpPlan", "achievablePace", "timelinePaces", "leanBulkBudget", "surplusNetPerDay"];
+  "MAINT_STALE_DAYS", "maintBasis", "maintenanceK", "planMaintenance", "planEnergy", "planIntakeForRate", "computeClientCalories", "overDaysFrom", "makeUpPlan", "achievablePace", "timelinePaces", "leanBulkBudget", "surplusNetPerDay", "fatGainPerMonth", "muscleToFatRatio"];
 const grab = (re, n) => { const m = APP.match(re); if (!m) throw new Error(`could not lift ${n}`); return m[0]; };
 const source = () => [...CONSTS, "atLeastMinCal", ...FNS].map((n) => liftDecl(APP, n)).join("\n");
-const build = (src) => new Function("TDEE_TUNING", `${src}; return { planEnergy, planIntakeForRate, computeClientCalories, overDaysFrom, makeUpPlan, weeklyRateOf, OVER_TOLERANCE, atLeastMinCal, achievablePace, MIN_DAILY_CAL, CAL_PER_LB, timelinePaces, TIMELINE_PACE_DEFS, leanBulkBudget, surplusNetPerDay, STRENGTH_EXERCISES, exBurn };`)(TDEE_TUNING);
+const build = (src) => new Function("TDEE_TUNING", `${src}; return { planEnergy, planIntakeForRate, computeClientCalories, overDaysFrom, makeUpPlan, weeklyRateOf, OVER_TOLERANCE, atLeastMinCal, achievablePace, MIN_DAILY_CAL, CAL_PER_LB, timelinePaces, TIMELINE_PACE_DEFS, leanBulkBudget, surplusNetPerDay, STRENGTH_EXERCISES, exBurn, fatGainPerMonth, muscleToFatRatio, FAT_SHARE_LOW, FAT_SHARE_HIGH };`)(TDEE_TUNING);
 const M = build(source());
 
 
@@ -299,6 +299,54 @@ for (const d of [SMALL, MID, BIG]) {
   ok("...and no longer gates on cardio alone", !/hasCardio = totalBurn > 0/.test(surplusTab));
 }
 
+
+// ── one basis for fat gain (S236) ───────────────────────────────────────────
+// ⚠️ THE SAME CONSTANT MEANT TWO THINGS EIGHT INCHES APART. The hero box priced
+// fat as a share of the MUSCLE gained, the table and the timeline as a share of
+// the TOTAL weight the surplus buys — measured on an intermediate at the tab's
+// own recommended +250, the hero said 0.10-0.31 lbs a month beside a table
+// saying 0.75.
+{
+  // 250/day x 30 = 7,500 cal = 2.143 lbs of gain; 35% of it fat = 0.75.
+  ok("fat is a share of the total the surplus buys",
+     Math.abs(M.fatGainPerMonth(250, M.FAT_SHARE_HIGH) - 0.75) < 0.01, M.fatGainPerMonth(250, M.FAT_SHARE_HIGH));
+  ok("...and the low share is lower", M.fatGainPerMonth(250, M.FAT_SHARE_LOW) < M.fatGainPerMonth(250, M.FAT_SHARE_HIGH));
+  ok("a bigger surplus means more fat", M.fatGainPerMonth(500, M.FAT_SHARE_HIGH) > M.fatGainPerMonth(250, M.FAT_SHARE_HIGH));
+  ok("no surplus, no fat", M.fatGainPerMonth(0, M.FAT_SHARE_HIGH) === 0);
+  ok("junk is answered, not thrown", M.fatGainPerMonth(undefined, undefined) === 0);
+  // ⚠️ THE ASSERTION THAT WAS HERE COMPARED A CALL TO ITSELF — it could not fail,
+  // and the mutation that reverted the hero to pricing fat off MUSCLE sailed
+  // straight through it. What has to be pinned is the hero's CALL SITE.
+  const mus = stripJsxComments(APP.slice(APP.indexOf("function MuscleTab("),
+    APP.indexOf("\nfunction ", APP.indexOf("function MuscleTab(") + 1)));
+  ok("the hero prices fat off the SURPLUS", /fatPerMoLow\s*=\s*fatGainPerMonth\(buildSurplus/.test(mus),
+     (mus.match(/fatPerMoLow[^;]{0,60}/) || [])[0]);
+  ok("...both ends of it", /fatPerMoHigh\s*=\s*fatGainPerMonth\(buildSurplus/.test(mus),
+     (mus.match(/fatPerMoHigh[^;]{0,60}/) || [])[0]);
+  ok("...and never off the muscle figure", !/fatPerMo(Low|High)\s*=\s*\(?gain(Low|High)/.test(mus));
+}
+
+// ── the ratio refuses rather than printing its own guard ───────────────────
+{
+  ok("a real ratio comes back", M.muscleToFatRatio(0.7, 0.35) === 2, M.muscleToFatRatio(0.7, 0.35));
+  // ⚠️ `muscle / max(fat, 0.01)` showed "90.5:1" to a client whose surplus was
+  // fully offset — the epsilon on screen dressed as a result.
+  ok("a negligible fat figure gets no ratio at all", M.muscleToFatRatio(0.905, 0) === null);
+  ok("...and neither does one just above zero", M.muscleToFatRatio(0.905, 0.001) === null);
+  ok("but a small real one still counts", M.muscleToFatRatio(0.9, 0.09) === 10, M.muscleToFatRatio(0.9, 0.09));
+  ok("junk is answered", M.muscleToFatRatio(undefined, undefined) === null);
+}
+
+// The three sites must READ the helper rather than keep their own copy.
+{
+  const start = APP.indexOf("function MuscleTab(");
+  const next = APP.indexOf("\nfunction ", start + 1);
+  const m = stripJsxComments(APP.slice(start, next < 0 ? APP.length : next));
+  ok("no inline fat arithmetic survives in MuscleTab",
+     !/30 ?\/ ?3500 ?\* ?fatGainRatio|30 ?\/ ?3500\) ?\* ?fatGainRatio/.test(m));
+  ok("no epsilon-guarded ratio survives either", !/Math\.max\([^)]*fatGainPerMonth[^)]*0\.01\)/.test(m));
+  ok("the slice reached the table", /mt-rec-badge/.test(m), m.length);
+}
 console.log(`\n  ${checks - fails}/${checks} checks passed`);
 if (fails) { console.log(`  ${fails} FAILED`); process.exit(1); }
 console.log("  A charted pace is one the plan will actually prescribe.\n");

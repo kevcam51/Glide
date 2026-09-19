@@ -6631,10 +6631,14 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
 
   // Fat gain at lean bulk: a well-run lean bulk yields ~1 lb fat per ~2–3 lbs muscle
   // Conservative estimate: 25–35% of weight gained is fat (Barakat 2020)
-  const fatGainRatioLow  = 0.20; // best case — especially with cardio
-  const fatGainRatioHigh = 0.35;
-  const fatPerMoLow  = (gainLow  * fatGainRatioLow).toFixed(2);
-  const fatPerMoHigh = (gainHigh * fatGainRatioHigh).toFixed(2);
+  // ⚠️ PRICED OFF THE SURPLUS, LIKE THE TABLE AND THE TIMELINE (S236). These
+  // read `gainLow x ratio` — a share of the MUSCLE — while every other fat
+  // figure on this tab was a share of the TOTAL weight the surplus buys. The
+  // hero said 0.10–0.31 lbs a month beside a table saying 0.75.
+  const fatGainRatioLow  = FAT_SHARE_LOW;
+  const fatGainRatioHigh = FAT_SHARE_HIGH;
+  const fatPerMoLow  = fatGainPerMonth(buildSurplus, FAT_SHARE_LOW).toFixed(2);
+  const fatPerMoHigh = fatGainPerMonth(buildSurplus, FAT_SHARE_HIGH).toFixed(2);
 
   // With cardio: cardio helps partition nutrients toward muscle (Barakat 2020)
   // Reduces fat ratio by ~5-10%
@@ -6702,10 +6706,10 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
   // Now the target is priced against real expenditure above, so the surplus IS
   // the surplus and there is nothing left to net.
   const tableRows = SURPLUS_OPTIONS_MUSCLE.map(s => {
-    const fatGainPerMonth = (s * 30 / 3500) * fatGainRatioHigh;
-    const musclePerMonth  = ((gainLow + gainHigh) / 2);
-    const ratio           = musclePerMonth / Math.max(fatGainPerMonth, 0.01);
-    return { surplus: s, netSurplus: s, fatGainPerMonth, musclePerMonth, ratio };
+    const fatPerMonth    = fatGainPerMonth(s, FAT_SHARE_HIGH);
+    const musclePerMonth = ((gainLow + gainHigh) / 2);
+    const ratio          = muscleToFatRatio(musclePerMonth, fatPerMonth);
+    return { surplus: s, netSurplus: s, fatGainPerMonth: fatPerMonth, musclePerMonth, ratio };
   });
 
   // Body recomposition note (possible for beginners & overweight)
@@ -7065,7 +7069,11 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
           </div>
           {tableRows.map(r => {
             const isRec = r.surplus === buildSurplus;
-            const mfRatio = (((gainLow+gainHigh)/2) / Math.max(r.fatGainPerMonth,0.01)).toFixed(1);
+            // ⚠️ USE THE ROW'S OWN RATIO, DO NOT RECOMPUTE IT. This was a third
+            // copy of `muscle / max(fat, 0.01)` beside the one in tableRows, and
+            // it printed the GUARD as a result: a surplus fully offset showed
+            // "90.5:1", which is the epsilon on screen dressed as a finding.
+            const mfRatio = r.ratio;
             const mfColor = r.fatGainPerMonth < 0.3 ? "var(--green)" : r.fatGainPerMonth < 0.6 ? "var(--yellow)" : "var(--orange)";
             return (
               <div key={r.surplus} className={`mt-row${isRec?" mt-row-rec":""}`}>
@@ -7080,7 +7088,9 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
                 <div className="mt-col" style={{color:"var(--accent)",fontFamily:"'Sora',sans-serif",fontSize:"1rem"}}>{(maintenanceWithTraining + r.surplus).toLocaleString()}</div>
                 <div className="mt-col" style={{color:"var(--green)",fontFamily:"'Sora',sans-serif",fontSize:".95rem"}}>{((gainLow+gainHigh)/2).toFixed(2)} lbs</div>
                 <div className="mt-col" style={{color:mfColor,fontFamily:"'Sora',sans-serif",fontSize:".95rem"}}>{r.fatGainPerMonth.toFixed(2)} lbs</div>
-                <div className="mt-col" style={{color:mfColor,fontFamily:"'Sora',sans-serif",fontSize:".95rem"}}>{mfRatio}:1</div>
+                <div className="mt-col" style={{color:mfColor,fontFamily:"'Sora',sans-serif",fontSize:".95rem"}}>
+                  {mfRatio === null ? <span style={{color:"var(--muted)",fontSize:".8rem"}}>barely any fat</span> : `${mfRatio.toFixed(1)}:1`}
+                </div>
               </div>
             );
           })}
@@ -7092,7 +7102,8 @@ function MuscleTab({ data, tdee, totalBurn, avgBurnPerDay, activeDays, weightLbs
       <div className="muscle-timeline">
         {[3, 6, 12].map(months => {
           const muscleGained = ((gainLow+gainHigh)/2) * months;
-          const fatGained    = (buildSurplus * 30 / 3500 * fatGainRatioHigh) * months * (showCardio&&hasCardio?0.85:1);
+          // The third site, now on the same helper as the hero and the table.
+          const fatGained    = fatGainPerMonth(buildSurplus, FAT_SHARE_HIGH) * months * (showCardio&&hasCardio?0.85:1);
           const netWeight    = muscleGained + fatGained;
           return (
             <div key={months} className="mtl-card">
@@ -24252,6 +24263,40 @@ function savingsLbs(banked, rate) {
 // one at a year (S217). A week, a fortnight and a month are all inside the
 // honest range, so this multiplies rather than walking — but that is a fact
 // about the horizons, not a licence, and anything longer belongs in simProject.
+// ── One basis for "how much of this is fat" (S236) ─────────────────────────
+//
+// ⚠️ THE SAME CONSTANT MEANT TWO DIFFERENT THINGS ON ONE SCREEN. MuscleTab's
+// hero box computed `musclePerMonth x ratio` — fat as a share of the MUSCLE —
+// while its comparison table and its 12-month timeline computed
+// `(surplus x 30 / 3500) x ratio`, fat as a share of the TOTAL weight the
+// surplus buys. Measured on an intermediate at the tab's own recommended +250:
+// the hero said 0.10–0.31 lbs of fat a month while the table said 0.75, for the
+// same person, eight inches apart.
+//
+// The literature it cites (Barakat 2020) is about TOTAL weight gained — "25–35%
+// of weight gained is fat" — so that is the basis all three use now.
+//
+// ⚠️ AND A DEEPER QUESTION IS DELIBERATELY LEFT ALONE, NOT MISSED: muscle costs
+// roughly 700 cal a pound to build, not 3,500, so pricing total gain at 3,500
+// understates it. Fixing that is re-deriving the model rather than removing a
+// contradiction, and it would change every number on the tab — a coaching call,
+// not a bug fix. Raised with Kevin with the figures rather than decided here.
+const FAT_SHARE_LOW = 0.20;   // best case — especially alongside cardio
+const FAT_SHARE_HIGH = 0.35;
+function fatGainPerMonth(surplusPerDay, share) {
+  const cal = (Number(surplusPerDay) || 0) * 30;
+  return (cal / CAL_PER_LB) * (Number(share) || 0);
+}
+// Muscle-to-fat, or an honest refusal. `muscle / max(fat, 0.01)` printed the
+// GUARD when the surplus was fully offset — a client with no surplus was shown
+// "90.5:1", which is the epsilon leaking onto the screen dressed as a result.
+function muscleToFatRatio(musclePerMonth, fatPerMonth) {
+  const m = Number(musclePerMonth) || 0;
+  const f = Number(fatPerMonth) || 0;
+  if (f < 0.05) return null;          // below this it is rounding, not a ratio
+  return Math.round((m / f) * 10) / 10;
+}
+
 // ── A card that folds away (S236, Kevin) ───────────────────────────────────
 // "lets make the measured burn section and savings account section be a
 // clickable drop down instead of the full tab being open at all times."
