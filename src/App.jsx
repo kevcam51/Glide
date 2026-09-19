@@ -23477,6 +23477,25 @@ function IntakeSheet({ title, subtitle, initial, onSave, onClose, readOnly = fal
   const [failed, setFailed] = useState("");
   const [confirmClose, setConfirmClose] = useState(false);
   const prog = intakeProgress(answers);
+  // ⚠️ FOR DOING THIS ON A CALL (S236, Kevin: "they might get on a call with a
+  // client and just do it with them on the phone"). A conversation does not run
+  // in form order — they mention a bad shoulder while you are on their job, and
+  // you want Training now, not after four scrolls. Each chip carries its own
+  // count, so you can see at a glance what is still missing while they talk.
+  const secRefs = useRef({});
+  const jump = (id) => {
+    const el = secRefs.current[id];
+    // ⚠️ INSTANT, NOT SMOOTH, AND THAT IS NOT A PREFERENCE. This sheet
+    // body-scroll-locks, which sets body{position:fixed} and collapses the
+    // document to one viewport; a SMOOTH scrollIntoView inside that does
+    // nothing at all, while the identical instant call scrolls correctly.
+    // Verified by instrumenting the handler: the ref held the right element,
+    // it was in the document, and only `behavior:"smooth"` failed to move.
+    // useBodyScrollLock forces scroll-behavior:auto for its own restore for
+    // the same underlying reason (see the note there, S97n).
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: "start" });
+  };
+  const secDone = (sec) => sec.fields.filter((f) => String(answers[f.k] ?? "").trim() !== "").length;
 
   const set = (k, v) => { setAnswers((a) => ({ ...a, [k]: v })); setDirty(true); setSaved(false); };
 
@@ -23551,8 +23570,19 @@ function IntakeSheet({ title, subtitle, initial, onSave, onClose, readOnly = fal
             rather than saving over it &mdash; anything already filled in is still safe.
           </div>
         )}
+        <div className="mt-3.5 flex flex-wrap gap-1.5">
+          {INTAKE_SECTIONS.map((sec) => {
+            const d = secDone(sec), full = d === sec.fields.length;
+            return (
+              <button key={sec.id} type="button" onClick={() => jump(sec.id)}
+                className={`rounded-full border px-2.5 py-1 text-[.7rem] font-semibold cursor-pointer ${full ? "border-[color:var(--green)] text-[color:var(--green)]" : "border-border text-muted"}`}>
+                {sec.title} {d}/{sec.fields.length}
+              </button>
+            );
+          })}
+        </div>
         {INTAKE_SECTIONS.map((sec) => (
-          <div key={sec.id} className="mt-5">
+          <div key={sec.id} className="mt-5" ref={(el) => { secRefs.current[sec.id] = el; }}>
             <div className="mb-2 flex items-center gap-2 text-[.72rem] font-extrabold uppercase tracking-[.5px] text-primary">
               <Icon name={sec.icon} size={15} color="var(--accent)" />{sec.title}
             </div>
@@ -43905,6 +43935,7 @@ export default function App() {
     </>
   );
 }
+
 
 
 
