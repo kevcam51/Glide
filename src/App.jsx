@@ -16814,9 +16814,15 @@ function DailyDashboard({ hiddenTiles = [], onSetHiddenTiles,
     // caption is local, because only this screen knows the protein BASIS.
     const list = splitTiles.map((x) => ({ key: x.key, label: x.label, t: x.t,
       sub: x.sub != null ? x.sub
-         : !protMoved ? `${proteinPerLb} g/lb protein`
+         // Spelled out: "0.7 g/lb protein" beside 154 g leaves someone looking
+         // at a 220 lb client to work out what the 154 is per lb OF.
+         : !protMoved ? `${proteinPerLb} g per lb of bodyweight`
          : protPlan.capped ? `protein held at ${Math.round(PROTEIN_MAX_PCT * 100)}% of cal`
-         : "protein from lean mass" }));
+         // ⚠️ NAME THE DENOMINATOR, NOT THE RULE (S225's lesson, S237c's bug).
+         // "protein from lean mass" is true and unfalsifiable — it does not let
+         // anyone check that 168 g came from 143 lbs, which is exactly what
+         // someone staring at a 220 lb client wants to know.
+         : `from your ${protPlan.leanLbs} lbs of lean mass` }));
     // Two buttons with identical numbers is noise, not choice. This was written
     // for the goal-derived tile, which S224b removed; it stays because the
     // ceiling can still collapse two splits onto one triple, and a tile the
@@ -23926,10 +23932,26 @@ function splitGrams(o, d, cal) {
 function macroSplitTiles(d, cal, keys) {
   const want = keys && keys.length ? keys : MACRO_KEYS_PLAN;
   const build = want === MACRO_KEYS_BUILD || want[0] === "leanbulk";
+  // ⚠️ THE ANCHOR'S NAME HAS TO DESCRIBE ITS OWN NUMBER (S237c). Kevin: "the
+  // bodyweight one does not even look like it is the users actual body weight."
+  // It was not: whenever body fat is known the basis is LEAN MASS, so a tile
+  // headed "Bodyweight" showed 168 g beside a 220 lb client — and 194 g, and
+  // 218 g, depending on the body fat. Measured across realistic plans the
+  // effective rate ran 0.68–1.00 g/lb under a heading promising one of them.
+  //
+  // ⚠️ AND THIS IS THE SEVENTH CAPTION OF THIS SHAPE IN THE ARC — a word
+  // quoting a rule the number beside it does not follow. It is the first where
+  // the offender is the tile's NAME: S224 and S225 each corrected the line
+  // UNDER the heading and left the heading itself saying the same wrong thing
+  // one line above it. When a caption is wrong, check what is titling it.
+  const anchorBasis = proteinPlan(d, cal).basis;
+  const nameOf = (o) => (o.key === "bodyweight" && anchorBasis === "lean"
+    ? "Lean mass"
+    : (build && o.buildLabel) || o.label);
   const list = want
     .map((k) => MACRO_SPLITS.find((o) => o.key === k))
     .filter(Boolean)
-    .map((o) => ({ key: o.key, label: (build && o.buildLabel) || o.label, axis: o.axis, t: splitGrams(o, d, cal) }));
+    .map((o) => ({ key: o.key, label: nameOf(o), axis: o.axis, t: splitGrams(o, d, cal) }));
   if (!list.length) return list;
   const base = list[0].t;
   const maxCarbs = Math.max(...list.map((x) => x.t.carbs));

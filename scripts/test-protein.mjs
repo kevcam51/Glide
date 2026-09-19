@@ -288,7 +288,14 @@ const P = (over = {}) => ({ weightLbs: 180, ...over });
   // The anchor tile is the only caption the card writes itself, because only
   // this screen knows the protein BASIS; every comparative comes measured.
   ok("the anchor caption follows the same three cases, in the same order",
-     /sub: x\.sub != null \? x\.sub\s*\n\s*: !protMoved \? `\$\{proteinPerLb\} g\/lb protein`\s*\n\s*: protPlan\.capped \? `protein held at \$\{Math\.round\(PROTEIN_MAX_PCT \* 100\)\}% of cal`\s*\n\s*: "protein from lean mass" \}\)\);/.test(APP_CODE));
+     /sub: x\.sub != null \? x\.sub\s*\n\s*: !protMoved \? `\$\{proteinPerLb\} g per lb of bodyweight`\s*\n\s*: protPlan\.capped \? `protein held at \$\{Math\.round\(PROTEIN_MAX_PCT \* 100\)\}% of cal`\s*\n\s*: `from your \$\{protPlan\.leanLbs\} lbs of lean mass` \}\)\);/.test(APP_CODE));
+  // ⚠️ AND THE LEAN CAPTION NAMES ITS DENOMINATOR (S237c). It used to read
+  // "protein from lean mass" — true, and unfalsifiable: it does not let anyone
+  // check that 194 g came from 165 lbs, which is the first thing someone
+  // staring at a 220 lb client wants to know. Same rule as the clamp note.
+  ok("...and the lean caption names the lean figure, not just the rule",
+     /`from your \$\{protPlan\.leanLbs\} lbs of lean mass`/.test(APP_CODE)
+     && !/"protein from lean mass"/.test(APP_CODE));
   ok("...and no longer hardcodes the g\/lb caption", !/sub: `\$\{proteinPerLb\} g\/lb protein`,/.test(APP_CODE));
   // The three cases the render check walked, as arithmetic: unchanged, moved by
   // the denominator, moved by the ceiling.
@@ -844,6 +851,81 @@ const P = (over = {}) => ({ weightLbs: 180, ...over });
   {
     const big = A.autoProteinG({ weightLbs: 260 }, 2600);
     ok("(control) the old band really could not reach a real target", big > 200, big);
+  }
+}
+
+// ── 16. the SEVENTH caption of that shape, and the first that was a NAME (S237c) ──
+//
+// Kevin, looking at the macro card: "the bodyweight and cutting have completly
+// different protein numbers and the bodyweight one dose not even look like it
+// is the users actual body weight."
+//
+// He was right, and the arithmetic was not the problem. Whenever body fat is
+// known the basis is LEAN MASS, so the tile HEADED "Bodyweight" was showing:
+//
+//     220 lb @ 25% bf → 194 g   (0.88 g/lb)
+//     220 lb @ 35% bf → 168 g   (0.76 g/lb)
+//     320 lb @ 42% bf → 218 g   (0.68 g/lb)
+//
+// ⚠️ SECTIONS 14 AND 15 OF THIS FILE ALREADY GUARD SIX CAPTIONS OF EXACTLY THIS
+// SHAPE, AND EVERY ONE OF THOSE FIXES CORRECTED THE LINE UNDER THE HEADING AND
+// LEFT THE HEADING ITSELF SAYING THE SAME WRONG THING ONE LINE ABOVE IT. When a
+// caption quotes a rule its number does not follow, check what is titling it.
+{
+  const tiles = (d, cal) => A.macroSplitTiles(d, cal, A.MACRO_KEYS_PLAN);
+  const anchor = (d, cal) => tiles(d, cal)[0];
+
+  // The name follows the basis, measured — not asserted from the source.
+  ok("no body fat: the anchor really is bodyweight, and says so",
+     anchor({ weightLbs: 220 }, 2569).label === "Bodyweight"
+     && anchor({ weightLbs: 220 }, 2569).t.protein === 220);
+  ok("body fat known: the anchor is lean mass, and says THAT",
+     anchor({ weightLbs: 220, bodyFat: 25 }, 2569).label === "Lean mass");
+  // ⚠️ THE CASE THAT MADE IT A BUG RATHER THAN A QUIBBLE: the heading was off by
+  // 52 g on one client, in the direction of under-feeding protein in a deficit.
+  {
+    const a = anchor({ weightLbs: 220, bodyFat: 35 }, 2569);
+    ok("...on the client who prompted this", a.label === "Lean mass" && a.t.protein === 168, a.t);
+    ok("(control) and the old heading would have been wrong by 52 g",
+       220 - a.t.protein === 52);
+  }
+  // ⚠️ hideBodyFat IS STILL HONOURED. Someone who asked not to see that number
+  // must not have it named at them by a tile heading either — their target is
+  // on the bodyweight basis, so "Bodyweight" is the true heading for them.
+  ok("a hidden body fat keeps the bodyweight heading",
+     anchor({ weightLbs: 220, bodyFat: 30, hideBodyFat: true }, 2569).label === "Bodyweight");
+  // An implausible reading falls back to bodyweight, so the heading must too.
+  ok("an implausible body fat keeps the bodyweight heading",
+     anchor({ weightLbs: 220, bodyFat: 95 }, 2569).label === "Bodyweight");
+  // The 0.7 chooser is a bodyweight basis, so the heading stays honest — the
+  // caption carries the rate.
+  ok("the 0.7 basis is still a bodyweight heading",
+     anchor({ weightLbs: 220, proteinPerLb: 0.7 }, 2569).label === "Bodyweight");
+  ok("...and its caption spells out what the 0.7 is per lb OF",
+     /\{proteinPerLb\} g per lb of bodyweight/.test(APP_CODE));
+
+  // ⚠️ THE BUILD SURFACE IS UNTOUCHED. Its anchor is `leanbulk`, whose own name
+  // is already correct; renaming by basis must not reach it, or the Muscle tab
+  // would suddenly headline "Lean mass" over lean-BULK calories — two different
+  // things one word apart.
+  ok("the Muscle tab's anchor keeps its own name",
+     A.macroSplitTiles({ weightLbs: 200, bodyFat: 20 }, 3000, A.MACRO_KEYS_BUILD)[0].label === "Lean bulk");
+  ok("...and the rename is scoped to the bodyweight key",
+     /o\.key === "bodyweight" && anchorBasis === "lean"/.test(APP_CODE));
+
+  // Only the HEADING changed. Every gram is exactly what it was.
+  for (const [w, bf] of [[220, null], [220, 25], [220, 35], [320, 42], [150, 22]]) {
+    const d = bf == null ? { weightLbs: w } : { weightLbs: w, bodyFat: bf };
+    const t = tiles(d, 2400);
+    ok(`(${w} lb${bf ? " @ " + bf + "%" : ""}) the anchor still equals the plan's own protein target`,
+       t[0].t.protein === A.proteinPlan(d, 2400).grams, { tile: t[0].t.protein, plan: A.proteinPlan(d, 2400).grams });
+    // Cutting sitting above the anchor is the DESIGN (Helms 2014 / Refalo 2025
+    // put a lean client cutting at 1.05–1.4 g/lb), not the defect Kevin saw —
+    // and it is 15%, not "completely different", once the anchor is named right.
+    const cut = t.find((x) => x.key === "cutting");
+    ok(`...and Cutting is the intended 15% above it, not an unrelated number`,
+       Math.abs(cut.t.protein - Math.round(t[0].t.protein * 1.15)) <= 1,
+       { anchor: t[0].t.protein, cutting: cut.t.protein });
   }
 }
 

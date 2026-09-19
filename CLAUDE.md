@@ -108,6 +108,43 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S237c (Sep 19): the macro tile called "Bodyweight" was not bodyweight.**
+> Kevin: "the bodyweight and cutting have completly different protein numbers
+> and the bodyweight one dose not even look like it is the users actual body
+> weight." He was right, and **the arithmetic was never wrong** — the heading
+> was. Frontend only; no functions, no rules.
+>
+> ⚠️ **WHENEVER BODY FAT IS KNOWN THE BASIS IS LEAN MASS**, so the tile headed
+> "Bodyweight" was showing 194 g at 25% bf, **168 g at 35%**, 218 g on a 320 lb
+> plan at 42% — an effective 0.68–1.00 g/lb under a heading promising one of
+> them. On the 220 lb / 35% case the heading was off by **52 g**, in the
+> direction of under-feeding protein in a deficit. The anchor now names its own
+> basis: **"Lean mass"** when it is lean-derived, "Bodyweight" when it really is
+> scale weight × the rate. `hideBodyFat` and an implausible reading both keep
+> the bodyweight heading, because for them the target IS bodyweight-based.
+> ⚠️ **AND THIS IS THE SEVENTH CAPTION OF THIS SHAPE IN THE ARC — THE FIRST
+> WHERE THE OFFENDER WAS THE TILE'S NAME.** `scripts/test-protein.mjs` §14 and
+> §15 already guard six others, and **every one of those fixes corrected the
+> line UNDER the heading and left the heading saying the same wrong thing one
+> line above it.** When a caption quotes a rule its number does not follow,
+> check what is titling it.
+> **The captions name their denominators now**, per the same rule the clamp note
+> follows: "from your 143 lbs of lean mass" rather than the unfalsifiable
+> "protein from lean mass", and "0.7 g per lb of bodyweight" rather than
+> "0.7 g/lb protein" — which left someone looking at a 220 lb client to work out
+> what the 154 was per lb OF.
+> **The other half of the report is the design, not a defect.** Cutting sits
+> **15%** above the anchor on purpose (Helms 2014 and the 2025 Refalo update put
+> a lean client cutting at 1.05–1.4 g/lb), and a sweep over five body types
+> asserts it stays exactly that — and that the anchor still equals the plan's
+> own stored protein target to the gram. **Only the heading changed; no number
+> moved.**
+> ⚠️ **Traps:** the rename is scoped to the `bodyweight` key, or the Muscle tab
+> would headline "Lean mass" over lean-BULK calories — two different things one
+> word apart; and one mutation came back green because `proteinPlan(d, cal).basis`
+> does not depend on `cal` at all — **arithmetically equivalent, not a gap.**
+> 12 mutations applied, the rest all caught._
+>
 > _**S237b (Sep 13): the two target cards fold.** Kevin, straight after the
 > search dropdown: "can we also make the daily calorie targets and macro targets
 > a drop down as well." Frontend only — no functions, no rules.
