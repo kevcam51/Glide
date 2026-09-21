@@ -863,7 +863,16 @@ enabled (Blaze has no default spending cap).
 > ⚠️ **Three lessons worth more than the fixes:** a falling assertion COUNT is a failure
 > (the suite aborts and the total drops — I pushed red twice); a test can be GREEN against
 > the bug it is supposed to guard; and Vercel lags the push, so diff the deployed bundle
-> for a marker before asking Kevin to reload._
+> for a marker before asking Kevin to reload.
+> ⚠️ **AND THE MARKER MUST BE A LITERAL THE MINIFIER CANNOT ASSEMBLE (S237d).** Two
+> deploy probes polled glidna.com forever waiting for `glidna-fold-cal-targets`,
+> which the shipping code builds as `\`glidna-fold-\${id}\`` — so it exists at
+> RUNTIME and never as a string in the bundle. The work had been live for days;
+> the check could not have passed on any deploy, ever. **Same shape as S218's
+> "a regex that cannot match its own target fails silently", one layer out.**
+> Pick a marker and confirm it appears in your OWN `dist/assets/App-*.js` before
+> pointing it at production — a probe that has never once gone green is not
+> evidence of anything._
 >
 > _**S200c (Sep 6): read `Glide-Session-Handoff-NEXT.md` §"START HERE (S200c)" first.** Tip
 > `2f33483`, all pushed and deployed, `npm run test:units` green at **781 assertions across 16
