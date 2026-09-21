@@ -34,6 +34,7 @@ import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { stripComments, stripJsxComments } from "./lib/strip-comments.mjs";
+import { TUNING as TDEE_TUNING } from "../src/observedTdee.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP = readFileSync(join(ROOT, "src", "App.jsx"), "utf8");
@@ -95,21 +96,39 @@ ok("found the SummaryTab body", SUM_A > 0 && SUM_B > SUM_A);
 const SUM = APP.slice(SUM_A, SUM_B);
 const SUM_CODE = CODE.slice(CODE.indexOf("function SummaryTab("), CODE.indexOf("\nfunction ", CODE.indexOf("function SummaryTab(") + 10));
 
-// ── 1. the card reads the plan's pace, and nothing else ────────────────────
-ok("the weekly deficit is the plan's rate, not a literal",
-   /const weeklyDeficitS = planRateS \* 3500;/.test(SUM_CODE));
+// ── 1. the card reads the pace the plan can DELIVER ────────────────────────
+// ⚠️ THESE FIVE PINNED `planRateS * 3500` UNTIL S237e, AND THAT WAS ONLY HALF
+// THE ANSWER. S216 fixed the card's first defect — it dated every plan at 1
+// lb/week — and this suite locked in the fix by pinning its exact shape. But
+// the nominal rate is not what a floored plan delivers: the 1,200 floor can
+// refuse most of the deficit, and the card went on quoting the chip. Same
+// assertions, one property stronger: the deficit is the plan's rate AFTER the
+// floor has had its say.
+ok("the deficit is the pace the plan can actually deliver",
+   /const paceEat = achievablePace\(\{ \.\.\.data, deficitMode: "eatback" \}, planRateS\);/.test(SUM_CODE));
 ok("...and planRateS IS weeklyRateOf", /const planRateS = weeklyRateOf\(data\);/.test(SUM_CODE));
-ok("the eat-back timeline uses it", /const wksEat = hasGoal \? weeksToGoal\(toLose, weeklyDeficitS\) : null;/.test(SUM_CODE));
+ok("the eat-back timeline uses it", /const wksEat = hasGoal \? weeksToGoal\(toLose, paceEat\.weeklyDeficit\) : null;/.test(SUM_CODE));
 // ⚠️ ACCELERATE IS THAT SAME DEFICIT PLUS THE WHOLE WEEK'S BURN — cardio AND
-// strength. Dropping either half is the S215 defect in a different card.
+// strength. Dropping either half is the S215 defect in a different card. It
+// rides in as achievablePace's extraWeeklyBurn so the floor prices it too.
 ok("the accelerate timeline stacks the whole weekly burn on it",
-   /const wksAcc = hasGoal \? weeksToGoal\(toLose, weeklyDeficitS \+ weeklyBurnAll\) : null;/.test(SUM_CODE));
+   /const paceAcc = achievablePace\(\{ \.\.\.data, deficitMode: "accelerate" \}, planRateS, weeklyBurnAll\);/.test(SUM_CODE)
+   && /const wksAcc = hasGoal \? weeksToGoal\(toLose, paceAcc\.weeklyDeficit\) : null;/.test(SUM_CODE));
 ok("...and that burn really is cardio plus strength",
    /const weeklyBurnAll = \(totalBurn \|\| 0\) \+ \(totalStrBurn \|\| 0\);/.test(SUM_CODE));
-// ⚠️ COUNTED, NOT FOUND. A bare 3,500 anywhere else in this component is the
-// same defect wearing a different variable name.
+// ⚠️ A MODE-FORCED COPY, NOT THE PLAN ITSELF. achievablePace reads deficitMode,
+// and this chooser prices BOTH outcomes; passing `data` answers the active mode
+// twice and the two rows agree when they should differ.
+ok("each option is priced against its own mode",
+   /deficitMode: "eatback" \}, planRateS\)/.test(SUM_CODE) && /deficitMode: "accelerate" \}, planRateS, weeklyBurnAll\)/.test(SUM_CODE));
+// ⚠️ COUNTED, NOT FOUND. A bare 3,500 anywhere in this component is the same
+// defect wearing a different variable name — and it is ZERO now, not one,
+// because the last one WAS the bug.
 ok("no bare 3,500 survives in the card",
-   (SUM_CODE.match(/3500/g) || []).length === 1, (SUM_CODE.match(/3500/g) || []).length);
+   (SUM_CODE.match(/3500/g) || []).length === 0, (SUM_CODE.match(/3500/g) || []).length);
+// ⚠️ AND THE FLOOR IS DISCLOSED, never applied silently — the 1,200 standard.
+ok("a floored pace says so on the card", /paceEat\.floored \|\| paceAcc\.floored/.test(SUM_CODE));
+ok("...naming the pace the plan really gives", /lbsPerWeek\.toFixed\(1\)/.test(SUM_CODE));
 
 // ── 2. what the dates actually come out at ─────────────────────────────────
 // 20 lbs to lose, no training, one plan per pace — the case named in the
@@ -176,11 +195,150 @@ ok("...it says the plan's own pace", /easier diet, \$\{pacePhrase\}/.test(SUM_CO
 // SimulationSummary has multiplied by weeklyRateOf since S95; this fix must not
 // have "tidied" it in the other direction.
 {
-  const SIM_A = APP.indexOf("function SimulationSummary(");
-  const SIM = APP.slice(SIM_A, APP.indexOf("\nfunction ", SIM_A + 10));
+  // ⚠️ THE COMMENT-STRIPPED COPY, like SUM_CODE above. The raw slice was fine
+  // while every assertion here was POSITIVE; the moment one said "no bare 3,500
+  // survives", it matched the comment EXPLAINING that there is no bare 3,500.
+  // Sixth time in this repo — strip comments before asserting an absence.
+  const SIM_A = CODE.indexOf("function SimulationSummary(");
+  const SIM = CODE.slice(SIM_A, CODE.indexOf("\nfunction ", SIM_A + 10));
   ok("SimulationSummary still uses the plan's rate",
-     /weeksToGoal\(diff, weeklyRateOf\(data\) \* 3500\)/.test(SIM)
-     && /weeksToGoal\(diff, weeklyRateOf\(data\) \* 3500 \+ weeklyBurnAll\)/.test(SIM));
+     /const simRate = weeklyRateOf\(data\);/.test(SIM));
+  // ⚠️ AND IT IS FLOOR-AWARE TOO (S237e). This card is shown to a PROSPECT, so
+  // it was the worst place in the app to headline a date four times faster than
+  // the plan delivers. It had the same unfloored nominal-rate arithmetic the
+  // paragraph above congratulates it for having got right in S95.
+  ok("...and prices it through the floor",
+     /const paceEat = achievablePace\(\{ \.\.\.data, deficitMode: "eatback" \}, simRate\);/.test(SIM)
+     && /const paceAcc = achievablePace\(\{ \.\.\.data, deficitMode: "accelerate" \}, simRate, weeklyBurnAll\);/.test(SIM));
+  ok("...and the sales card discloses a floored pace", /paceEat\.floored \|\| paceAcc\.floored/.test(SIM));
+  ok("...with no bare 3,500 left in it", (SIM.match(/3500/g) || []).length === 0, (SIM.match(/3500/g) || []).length);
+}
+
+// ── 6. the floored client, run rather than pattern-matched (S237e) ─────────
+//
+// ⚠️ EVERY ASSERTION ABOVE IS A REGEX, AND A REGEX CANNOT TELL YOU THE DATE IS
+// RIGHT. This section lifts achievablePace and the energy ladder out of the
+// shipping file and RUNS them on the client the defect was found on, so a
+// change that keeps the shape and breaks the arithmetic goes red.
+{
+  const NAMES = ["CAL_PER_LB", "FLOOR_NOISE_CAL", "MIN_DAILY_CAL", "ACTIVITY_LEVELS", "DAYS", "REST_ST",
+    "STRENGTH_EXERCISES", "CARDIO_GROUPS", "ALL_CARDIO", "HR_ZONES", "PARTIAL_DAY_MIN",
+    "calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx", "hrCaloriesPerMin",
+    "restingKcalPerMin", "calcBurn", "cardioExFor", "exBurn", "isEatback", "atLeastMinCal",
+    "MAINT_STALE_DAYS", "maintBasis", "maintenanceK", "planMaintenance", "planEnergy",
+    "planIntakeForRate", "achievablePace"];
+  const R = new Function("TDEE_TUNING",
+    NAMES.map((n) => liftDecl(APP, n)).join("\n") + "\nreturn { achievablePace, planEnergy, MIN_DAILY_CAL, CAL_PER_LB, FLOOR_NOISE_CAL };")(TDEE_TUNING);
+
+  // The client this was found on: 45, 5'2", 135 lbs, sedentary, wants 120.
+  // A real and common roster profile, which is why it matters.
+  const her = { gender: "female", age: 45, heightFt: 5, heightIn: 2, weightLbs: 135,
+    goalWeight: 120, activityLevel: "sedentary", cardio: {}, strength: {}, checkIns: [] };
+  const toLose = 15;
+  const maint = R.planEnergy(her).tdee;
+  ok("(fixture) she burns about 1,450 a day", Math.abs(maint - 1453) < 15, Math.round(maint));
+
+  const wksAt = (rate) => M.weeksToGoal(toLose, R.achievablePace({ ...her, deficitMode: "eatback" }, rate).weeklyDeficit);
+  const nominalWks = (rate) => M.weeksToGoal(toLose, rate * 3500);
+
+  // ⚠️ THE DEFECT, AS ARITHMETIC. A 2 lb/wk plan floors to ~0.51, so the honest
+  // date is ~6.8 months where the card printed ~1.7 — four times too fast.
+  {
+    const p = R.achievablePace({ ...her, deficitMode: "eatback" }, 2);
+    ok("a 2 lb/wk plan floors her target at 1,200", p.target === R.MIN_DAILY_CAL, p.target);
+    ok("...and is flagged as floored", p.floored === true);
+    ok("...delivering about half a pound a week, not two", Math.abs(p.lbsPerWeek - 0.51) < 0.05, p.lbsPerWeek);
+    ok("...so the honest date is ~6.8 months", Math.abs(wksAt(2) / 4.345 - 6.8) < 0.4, wksAt(2) / 4.345);
+    // The control: what the card used to say, and how far out it was.
+    ok("(control) the old nominal date was ~1.7 months", Math.abs(nominalWks(2) / 4.345 - 1.7) < 0.2, nominalWks(2) / 4.345);
+    ok("(control) ...so the fix moves this date by a factor of ~4",
+       wksAt(2) / nominalWks(2) > 3.5 && wksAt(2) / nominalWks(2) < 4.5, wksAt(2) / nominalWks(2));
+  }
+  // ⚠️ AND A PACE THE PLAN CAN AFFORD MUST NOT MOVE AT ALL. If the fix changed
+  // un-floored dates it would be a regression dressed as a correction — this is
+  // the assertion that says the other 90% of plans see nothing.
+  {
+    const p = R.achievablePace({ ...her, deficitMode: "eatback" }, 0.5);
+    ok("her ½ lb/wk pace is NOT floored", p.floored === false, p);
+    ok("...and its date is unchanged by the fix",
+       Math.abs(wksAt(0.5) - nominalWks(0.5)) < 0.15, { now: wksAt(0.5), before: nominalWks(0.5) });
+  }
+  // A bigger body has room for the whole deficit, so nothing moves there either.
+  {
+    const him = { ...her, gender: "male", weightLbs: 240, heightFt: 5, heightIn: 11, age: 35, activityLevel: "moderate" };
+    const p = R.achievablePace({ ...him, deficitMode: "eatback" }, 2);
+    ok("a 240 lb moderately-active man is not floored at 2 lb/wk", p.floored === false, p);
+    ok("...and still dates at the full 2 lb/wk", Math.abs(p.lbsPerWeek - 2) < 0.02, p.lbsPerWeek);
+  }
+  // ⚠️ A FIXTURE WITH NO TRAINING NEVER EXERCISES THE ACCELERATE PATH, and a
+  // mutation that deleted `+ extra` from achievablePace stayed GREEN through
+  // every assertion above because weeklyBurnAll was 0 in all of them. The
+  // training burn is the whole difference between the two rows this card
+  // compares, so one fixture has to actually train.
+  //
+  // ⚠️ AND IT HAS TO BE AN UNFLOORED BODY, which the first version of this got
+  // wrong. Once the floor binds, the two approaches are ALGEBRAICALLY THE SAME
+  // deficit — eat-back is (tdee + burn/7 − 1200)·7 and accelerate is
+  // (tdee − 1200)·7 + burn, which are one expression — so a floored fixture
+  // cannot tell a working `+ extra` from a deleted one. That identity is real
+  // and worth its own assertion, below.
+  const TRAIN = { Monday: [{ type: "walk_flat", duration: 45 }],
+                  Wednesday: [{ type: "walk_flat", duration: 45 }],
+                  Friday: [{ type: "walk_flat", duration: 45 }] };
+  {
+    const him = { ...her, gender: "male", weightLbs: 240, heightFt: 5, heightIn: 11,
+                  age: 35, activityLevel: "moderate", cardio: TRAIN };
+    const burn = R.planEnergy(him).weeklyBurn;
+    ok("(fixture) he actually trains", burn > 300, Math.round(burn));
+    ok("(fixture) and he is NOT floored", R.achievablePace({ ...him, deficitMode: "eatback" }, 1).floored === false);
+    const eat = R.achievablePace({ ...him, deficitMode: "eatback" }, 1);
+    const acc = R.achievablePace({ ...him, deficitMode: "accelerate" }, 1, burn);
+    ok("the accelerate pace is faster than the eat-back one", acc.weeklyDeficit > eat.weeklyDeficit + 1,
+       { eat: Math.round(eat.weeklyDeficit), acc: Math.round(acc.weeklyDeficit) });
+    // ⚠️ THE CONTROL FOR THE MUTATION THAT GOT THROUGH: drop `+ extra` and the
+    // two rows collapse onto one number, which is exactly what this forbids.
+    // ⚠️ THE SAME ROUNDING SLACK THE FLAG USES, AND FOR THE SAME REASON: the
+    // target is rounded to a whole calorie and eatbackPerDay is a weekly burn
+    // over seven, so the two modes land a few calories apart from arithmetic
+    // alone. Asserting "< 1" here is what exposed the `floored` flag's own
+    // 1-calorie tolerance, so this reuses the constant rather than a new magic
+    // number — if one moves, so does the other.
+    ok("...by the training burn, within rounding",
+       Math.abs((acc.weeklyDeficit - eat.weeklyDeficit) - burn) <= R.FLOOR_NOISE_CAL,
+       { gap: Math.round(acc.weeklyDeficit - eat.weeklyDeficit), burn: Math.round(burn) });
+    ok("...so it reaches the goal sooner",
+       M.weeksToGoal(toLose, acc.weeklyDeficit) < M.weeksToGoal(toLose, eat.weeklyDeficit));
+  }
+  // ⚠️ THE IDENTITY THE BROKEN FIXTURE REVEALED, PINNED ON PURPOSE. For a
+  // floored client the nutrition approach cannot change the pace: the target is
+  // held at 1,200 either way and the training burn is energy out regardless. A
+  // future change that made these two differ for a floored plan would be
+  // promising a choice that does not exist.
+  {
+    const t = { ...her, cardio: TRAIN };
+    const burn = R.planEnergy(t).weeklyBurn;
+    const eat = R.achievablePace({ ...t, deficitMode: "eatback" }, 2);
+    const acc = R.achievablePace({ ...t, deficitMode: "accelerate" }, 2, burn);
+    ok("(fixture) she is floored even with training", eat.floored && acc.floored);
+    ok("a floored plan gives the same pace either way",
+       Math.abs(acc.weeklyDeficit - eat.weeklyDeficit) < 0.01,
+       { eat: eat.weeklyDeficit, acc: acc.weeklyDeficit });
+  }
+  // ⚠️ THE FLOOR NEVER MAKES A PLAN LOOK FASTER. Whatever the body, the
+  // floor-aware deficit is at most the nominal one — a fix that let any plan
+  // date EARLIER than before would be a new bug, not this one fixed.
+  {
+    let worst = 0;
+    for (const w of [110, 125, 135, 150, 175, 200, 240, 300]) {
+      for (const rate of [0.5, 1, 1.5, 2]) {
+        for (const act of ["sedentary", "light", "moderate", "very"]) {
+          const p = R.achievablePace({ ...her, weightLbs: w, activityLevel: act, deficitMode: "eatback" }, rate);
+          worst = Math.max(worst, p.weeklyDeficit - rate * R.CAL_PER_LB);
+        }
+      }
+    }
+    ok("across 128 bodies the floor never inflates the deficit", worst <= 1, worst);
+  }
 }
 
 console.log(`\n  ${checks - fails}/${checks} checks passed`);

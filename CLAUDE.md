@@ -108,6 +108,59 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S237e (Sep 21): two screens promised a goal date the plan refuses to
+> prescribe — and the flag that was supposed to catch it was firing on
+> everybody.** Found while answering Kevin's question about the 3,500 rule, by
+> mapping every place calories become pounds. Frontend only; no functions, no
+> rules. **59 suites**; build, `check:undef`, `check:tdz`, `check:weak` clean.
+>
+> ⚠️ **SummaryTab AND SimulationSummary DATED THE GOAL FROM THE NOMINAL PACE.**
+> `planRateS * 3500` ignores the 1,200 floor, so a 45-year-old woman, 5'2",
+> 135 lbs, sedentary (burning 1,453) set to 2 lb/wk was told **1.7 months** for
+> 15 lbs where the truth is **6.8** — her target floors at 1,200 and her real
+> pace is 0.51 lb/wk. **Four times too fast, printed inches below the floored
+> 1,200 target itself**, on the card clients plan around and on **the sales card
+> shown to a prospect**. CLAUDE.md already states the rule: *"Anything DERIVED
+> from a floored target must use the floored value."* `achievablePace` has
+> existed since S236 and TimelineTab reads it; these two were never wired up —
+> the same shape as S216, when this card was the last one still hardcoding
+> 1 lb/week. **Both now price through the floor, and DISCLOSE it** (the 1,200
+> standard: a clamp that changes the answer is never silent).
+> ⚠️ **A MODE-FORCED COPY, like `targetEat`/`targetAcc` beside it.**
+> `achievablePace` reads the plan's own `deficitMode` and this chooser prices
+> BOTH outcomes; passing `data` answers the active mode twice.
+>
+> ⚠️ **AND THE FIX EXPOSED A LIVE DEFECT IN `achievablePace` ITSELF.** Its
+> verdict was `weeklyDeficit < nominalWeekly - 1` — one calorie a WEEK — while
+> the target it compares against is ROUNDED (`atLeastMinCal` rounds;
+> `eatbackPerDay` is a weekly burn over seven). So **any eat-back plan with any
+> training** lands up to 3.5 cal/week short of nominal from arithmetic alone and
+> was flagged floored. Measured on a 220 lb moderately-active man with three
+> 45-minute walks: **all three paces `floored=true`, targets 2,085 / 2,585 /
+> 2,835**, the floor nowhere near them — and **TimelineTab has been disclosing
+> that to clients since S236**. `FLOOR_NOISE_CAL = 7` (one calorie a day, double
+> the worst rounding, 0.002 lb/wk) replaces the bare `- 1`.
+> ⚠️ **THE SUITE COULD NOT SEE IT: NOT ONE FIXTURE IN
+> `test-achievable-pace.mjs` SCHEDULED CARDIO**, so `eatbackPerDay` was 0 in
+> every case and the rounding never happened. A training fixture is now in
+> there, with an assertion that its weekly burn is NOT a multiple of 7 — or the
+> remainder never appears and the fixture is the old blind spot in a tracksuit.
+>
+> ⚠️ **AND A FLOORED PLAN GIVES THE SAME PACE IN EITHER NUTRITION APPROACH** —
+> pinned, because a broken fixture revealed it: eat-back is
+> `(tdee + burn/7 − 1200)·7`, accelerate is `(tdee − 1200)·7 + burn`, which are
+> one expression. Once the floor binds, the chooser is offering a choice that
+> does not exist. It also means a floored fixture **cannot** test the training
+> burn — the un-floored body is what catches a deleted `+ extra`, and a mutation
+> proved the first version of that test could not.
+> **Traps:** an assertion counting bare `3500`s in SimulationSummary matched MY
+> OWN COMMENT explaining there are none — sixth time in this repo, so that slice
+> reads the comment-stripped source now. **11 mutations, all caught.**
+> **NOT fixed, and worth a session:** TimelineTab projects a FLOORED deficit
+> flatly across 104 weeks (the one case where flat really is wrong, since intake
+> can no longer follow the weight down), and its "+Cardio" column stacks the
+> burn unconditionally — the S216b eat-back defect still standing one tab over._
+>
 > _**S237c (Sep 19): the macro tile called "Bodyweight" was not bodyweight.**
 > Kevin: "the bodyweight and cutting have completly different protein numbers
 > and the bodyweight one dose not even look like it is the users actual body

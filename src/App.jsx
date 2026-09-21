@@ -4558,8 +4558,17 @@ function SimulationSummary({ data, totalBurn, totalStrBurn = 0 }) {
   // food target; accelerate = the workout burn stacks onto the deficit for a
   // faster date at a tighter target. The plan's chosen approach headlines.
   const weeklyBurnAll = (totalBurn || 0) + (totalStrBurn || 0);
-  const wksEat = losing ? weeksToGoal(diff, weeklyRateOf(data) * 3500) : null;
-  const wksAcc = losing ? weeksToGoal(diff, weeklyRateOf(data) * 3500 + weeklyBurnAll) : null;
+  // ⚠️ THE FLOORED PACE, NOT THE NOMINAL ONE (S237e) — and this is the card where
+  // it matters most, because it is the one shown to a PROSPECT to close them.
+  // Same defect as SummaryTab: `weeklyRateOf(data) * 3500` ignores the 1,200
+  // floor, so a small, older, sedentary client — a large share of a real roster —
+  // was headlined a date up to four times faster than the plan can deliver, on a
+  // card whose whole job is to be believed. See the note in SummaryTab.
+  const simRate = weeklyRateOf(data);
+  const paceEat = achievablePace({ ...data, deficitMode: "eatback" }, simRate);
+  const paceAcc = achievablePace({ ...data, deficitMode: "accelerate" }, simRate, weeklyBurnAll);
+  const wksEat = losing ? weeksToGoal(diff, paceEat.weeklyDeficit) : null;
+  const wksAcc = losing ? weeksToGoal(diff, paceAcc.weeklyDeficit) : null;
   const eatback = isEatback(data);
   const bestWks = eatback ? wksEat : wksAcc;
   const targetDate = bestWks
@@ -4594,6 +4603,15 @@ function SimulationSummary({ data, totalBurn, totalStrBurn = 0 }) {
           <Icon name="meal" size={12} color="var(--accent)" /> Eat More: bigger food budget · ~{friendlyTime(wksEat)}
           <span>·</span>
           <Icon name="bolt" size={12} color="var(--accent)" /> Faster: tighter budget · ~{friendlyTime(wksAcc)}
+        </div>
+      )}
+      {/* ⚠️ THE FLOOR IS DISCLOSED ON THE SALES CARD TOO. A prospect being shown a
+          slower date deserves the reason, and a trainer quoting it needs to know
+          the pace chip is not what the plan delivers. */}
+      {losing && (paceEat.floored || paceAcc.floored) && (
+        <div style={{ textAlign: "center", marginTop: 8, fontSize: ".72rem", color: "var(--yellow)", lineHeight: 1.5 }}>
+          A {RATE_SHORT[simRate] || "faster"} pace would drop below {MIN_DAILY_CAL.toLocaleString()} calories, so this
+          is the real pace at the floor — about {(isEatback(data) ? paceEat : paceAcc).lbsPerWeek.toFixed(1)} lb/wk.
         </div>
       )}
       <div style={{ textAlign: "center", marginTop: 10, fontSize: ".72rem", color: "var(--muted)" }}>
@@ -6059,9 +6077,29 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
   // 3,500 produced a confident date for a plan that was never going to get
   // there by eating.
   const weeklyBurnAll = (totalBurn || 0) + (totalStrBurn || 0);
-  const weeklyDeficitS = planRateS * 3500;
-  const wksEat = hasGoal ? weeksToGoal(toLose, weeklyDeficitS) : null;
-  const wksAcc = hasGoal ? weeksToGoal(toLose, weeklyDeficitS + weeklyBurnAll) : null;
+  // ⚠️ THE PACE THE PLAN CAN ACTUALLY DELIVER, NOT THE ONE IT IS SET TO (S237e).
+  // `planRateS * 3500` is the NOMINAL deficit, and the 1,200 floor can refuse
+  // most of it: a 45-year-old woman, 5'2", 135 lbs, sedentary burns 1,453, so a
+  // 2 lb/wk pace wants her at 453 and the floor holds her at 1,200 — a real
+  // 0.51 lb/wk. This card dated her 15 lbs at 1.7 months where the truth is 6.8,
+  // FOUR TIMES too fast, printed inches below the floored 1,200 target itself.
+  //
+  // ⚠️ AND CLAUDE.MD ALREADY STATES THE RULE THIS BROKE: "Anything DERIVED from a
+  // floored target must use the floored value. An ETA computed from the unclamped
+  // deficit promises a date the plan cannot deliver." `achievablePace` exists for
+  // exactly this and TimelineTab has read it since S236; this card was simply
+  // never wired to it, the same way it was never wired to `weeklyRateOf` until
+  // S216 — one tab over, same shape, same fix.
+  //
+  // ⚠️ A MODE-FORCED COPY, like targetEat/targetAcc above. achievablePace reads
+  // the plan's OWN deficitMode, and this chooser prices BOTH outcomes; asking it
+  // about `data` would answer the active mode twice. The accelerate option takes
+  // the training burn as the extra weekly burn, which is what "the burn speeds up
+  // the goal date instead of buying food" means arithmetically.
+  const paceEat = achievablePace({ ...data, deficitMode: "eatback" }, planRateS);
+  const paceAcc = achievablePace({ ...data, deficitMode: "accelerate" }, planRateS, weeklyBurnAll);
+  const wksEat = hasGoal ? weeksToGoal(toLose, paceEat.weeklyDeficit) : null;
+  const wksAcc = hasGoal ? weeksToGoal(toLose, paceAcc.weeklyDeficit) : null;
   // How to say this plan's pace in a sentence. "steady ~Maintain" is not English.
   const pacePhrase = planRateS === 0 ? "holding your weight steady" : `a steady ~${RATE_SHORT[planRateS]}`;
   const goalDate = (wks) => wks
@@ -6234,6 +6272,17 @@ function SummaryTab({ data, bmr, tdee, actObj, dayData, strengthDayData,
             {weeklyBurnAll > 0 && <Row label={<span style={{display:"inline-flex",alignItems:"center",gap:6}}><Icon name="bolt" size={13} color="var(--accent)" />Faster Results pace{!eatback ? " (active)" : ""}</span>}
               value={friendlyTime(wksAcc)} color={!eatback ? "var(--green)" : "var(--muted-light)"} />}
             {weeklyBurnAll > 0 && wksEat && wksAcc && <Row label="Difference" value={friendlyTime(wksEat - wksAcc)} color="var(--accent)" />}
+            {/* ⚠️ A FLOOR THAT MOVES THE DATE SAYS SO (the 1,200 standard). Without
+                this the card silently prints a slower date than the pace above it
+                and reads like a bug rather than the floor doing its job. */}
+            {(paceEat.floored || paceAcc.floored) && (
+              <div style={{ fontSize: ".76rem", color: "var(--yellow)", lineHeight: 1.5, marginTop: 8 }}>
+                Your plan is set to <strong>{RATE_SHORT[planRateS] || "maintenance"}</strong>, but that would put you
+                under {MIN_DAILY_CAL.toLocaleString()} calories — so the target holds at the floor and the real pace is
+                about <strong>{(eatback ? paceEat : paceAcc).lbsPerWeek.toFixed(1)} lb/wk</strong>. These dates are the
+                floored pace, not the one on the chip. Eating less isn&rsquo;t the lever here — more movement is.
+              </div>
+            )}
             {/* ⚠️ SAY WHY THERE IS NO DATE INSTEAD OF PRINTING A DASH. A plan set
                 to maintain, or to gain, has no deficit for eating to work with —
                 so weeksToGoal refuses, and the honest answer is what to change,
@@ -24547,6 +24596,8 @@ function planIntakeForRate(d, r) {
 // tells the caller which of those two worlds it is in.
 //
 // Pure and closure-free so scripts/ can lift it and RUN it.
+// Rounding slack for the `floored` verdict — see the note on the flag below.
+const FLOOR_NOISE_CAL = 7;
 function achievablePace(d, nominalRate, extraWeeklyBurn = 0) {
   const rate = Number(nominalRate) || 0;
   const extra = Number(extraWeeklyBurn) || 0;
@@ -24565,8 +24616,22 @@ function achievablePace(d, nominalRate, extraWeeklyBurn = 0) {
     weeklyDeficit,
     lbsPerWeek: weeklyDeficit / CAL_PER_LB,
     target,
-    // A pound either way is noise; this is about a pace the plan cannot give.
-    floored: weeklyDeficit < nominalWeekly - 1,
+    // ⚠️ ONE CALORIE A DAY OF SLACK, AND IT IS NOT COSMETIC (S237e). This read
+    // `- 1` — one calorie a WEEK — while the target it compares against is
+    // ROUNDED: `atLeastMinCal` rounds to a whole calorie and `eatbackPerDay` is
+    // a weekly burn divided by seven, so an eat-back plan with any training
+    // lands up to 3.5 cal/week short of nominal from arithmetic alone. Every
+    // such plan was therefore flagged `floored`. Measured on a 220 lb
+    // moderately-active man with three 45-minute walks: ALL THREE paces came
+    // back floored, targets 2,085–2,835, with the 1,200 floor nowhere in sight —
+    // and TimelineTab has been disclosing that to clients since S236.
+    // ⚠️ THE EXISTING SUITE COULD NOT SEE IT: no fixture in
+    // test-achievable-pace.mjs schedules cardio, so eatbackPerDay was 0 in every
+    // case and the rounding never occurred. A fixture that trains is the fix.
+    // 7 is one calorie a day — double the 3.5 the rounding can produce, and far
+    // below any floor worth telling someone about (the case this exists for
+    // costs 1,700 cal/week).
+    floored: weeklyDeficit < nominalWeekly - FLOOR_NOISE_CAL,
     nominalRate: rate,
   };
 }

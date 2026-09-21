@@ -89,14 +89,14 @@ function liftDecl(src, name) {
 }
 
 // ── lift the real thing ─────────────────────────────────────────────────────
-const CONSTS = ["CAL_PER_LB", "FAT_SHARE_LOW", "FAT_SHARE_HIGH", "TIMELINE_PACE_DEFS", "DAYS", "REST_ST", "STRENGTH_EXERCISES", "CARDIO_GROUPS", "ALL_CARDIO",
+const CONSTS = ["CAL_PER_LB", "FLOOR_NOISE_CAL", "FAT_SHARE_LOW", "FAT_SHARE_HIGH", "TIMELINE_PACE_DEFS", "DAYS", "REST_ST", "STRENGTH_EXERCISES", "CARDIO_GROUPS", "ALL_CARDIO",
   "ACTIVITY_LEVELS", "MIN_DAILY_CAL", "HR_ZONES", "RATE_OPTS", "OVER_TOLERANCE", "PARTIAL_DAY_MIN"];
 const FNS = ["calcBMR", "ageFromDob", "effectiveAge", "customOf", "findCardioEx", "hrCaloriesPerMin",
   "restingKcalPerMin", "calcBurn", "cardioExFor", "exBurn", "isEatback", "dailyDeficitOf", "weeklyRateOf",
   "MAINT_STALE_DAYS", "maintBasis", "maintenanceK", "planMaintenance", "planEnergy", "planIntakeForRate", "computeClientCalories", "overDaysFrom", "makeUpPlan", "achievablePace", "timelinePaces", "leanBulkBudget", "surplusNetPerDay", "fatGainPerMonth", "muscleToFatRatio"];
 const grab = (re, n) => { const m = APP.match(re); if (!m) throw new Error(`could not lift ${n}`); return m[0]; };
 const source = () => [...CONSTS, "atLeastMinCal", ...FNS].map((n) => liftDecl(APP, n)).join("\n");
-const build = (src) => new Function("TDEE_TUNING", `${src}; return { planEnergy, planIntakeForRate, computeClientCalories, overDaysFrom, makeUpPlan, weeklyRateOf, OVER_TOLERANCE, atLeastMinCal, achievablePace, MIN_DAILY_CAL, CAL_PER_LB, timelinePaces, TIMELINE_PACE_DEFS, leanBulkBudget, surplusNetPerDay, STRENGTH_EXERCISES, exBurn, fatGainPerMonth, muscleToFatRatio, FAT_SHARE_LOW, FAT_SHARE_HIGH };`)(TDEE_TUNING);
+const build = (src) => new Function("TDEE_TUNING", `${src}; return { FLOOR_NOISE_CAL, planEnergy, planIntakeForRate, computeClientCalories, overDaysFrom, makeUpPlan, weeklyRateOf, OVER_TOLERANCE, atLeastMinCal, achievablePace, MIN_DAILY_CAL, CAL_PER_LB, timelinePaces, TIMELINE_PACE_DEFS, leanBulkBudget, surplusNetPerDay, STRENGTH_EXERCISES, exBurn, fatGainPerMonth, muscleToFatRatio, FAT_SHARE_LOW, FAT_SHARE_HIGH };`)(TDEE_TUNING);
 const M = build(source());
 
 
@@ -347,6 +347,59 @@ for (const d of [SMALL, MID, BIG]) {
   ok("no epsilon-guarded ratio survives either", !/Math\.max\([^)]*fatGainPerMonth[^)]*0\.01\)/.test(m));
   ok("the slice reached the table", /mt-rec-badge/.test(m), m.length);
 }
+// ── 8. the fixture this suite never had (S237e) ────────────────────────────
+//
+// ⚠️ NOT ONE FIXTURE ABOVE SCHEDULES CARDIO, so `eatbackPerDay` was 0 in every
+// case in this file and the target never picked up a rounding remainder. That
+// blind spot hid a live defect for a whole session: `floored` compared against
+// `nominalWeekly - 1` — one calorie a WEEK — while `atLeastMinCal` rounds the
+// target and `eatbackPerDay` is a weekly burn over seven, so an eat-back plan
+// with ANY training lands up to 3.5 cal/week short of nominal from arithmetic
+// alone and was flagged as refused by the floor.
+//
+// Measured before the fix, on the man below: all three paces `floored=true`,
+// targets 2,085 / 2,585 / 2,835, the 1,200 floor nowhere near any of them —
+// and TimelineTab discloses that list to the client.
+{
+  const TRAIN = { Monday:    [{ type: "walk_flat", duration: 45 }],
+                  Wednesday: [{ type: "walk_flat", duration: 45 }],
+                  Friday:    [{ type: "walk_flat", duration: 45 }] };
+  const TRAINS = { ...BIG, cardio: TRAIN, strength: {} };
+
+  const burn = M.planEnergy(TRAINS).weeklyBurn;
+  ok("(fixture) the plan really does train", burn > 300, Math.round(burn));
+  // ⚠️ AND THE BURN MUST NOT DIVIDE EVENLY BY 7, or the remainder never appears
+  // and this fixture is the old blind spot wearing a tracksuit.
+  ok("(fixture) ...and its weekly burn is not a multiple of 7", Math.abs(burn / 7 - Math.round(burn / 7)) > 0.01, burn / 7);
+
+  for (const r of [0.5, 1, 2]) {
+    const a = M.achievablePace(TRAINS, r);
+    ok(`a training plan at ${r} lb/wk is NOT called floored`, a.floored === false, a);
+    ok(`...and its target is far above the floor at ${r} lb/wk`, a.flooredTarget === undefined ? a.target > M.MIN_DAILY_CAL + 500 : true, a.target);
+    ok(`...and it still delivers ${r} lb/wk`, Math.abs(a.lbsPerWeek - r) < 0.01, a.lbsPerWeek);
+  }
+  // The disclosure list TimelineTab renders must be empty for this plan.
+  ok("TimelineTab discloses nothing for a training plan that is not floored",
+     M.timelinePaces(TRAINS).floored.length === 0,
+     M.timelinePaces(TRAINS).floored.map((p) => p.id));
+
+  // ⚠️ AND THE SLACK MUST NOT SWALLOW A REAL FLOOR. The small client trains too
+  // here, so rounding and a genuine bind are both in play at once — the case
+  // the tolerance has to separate.
+  {
+    const her = { ...SMALL, cardio: TRAIN, strength: {} };
+    const a = M.achievablePace(her, 2);
+    ok("a genuinely floored plan is still called floored, training or not", a.floored === true, a);
+    ok("...and the shortfall dwarfs the rounding slack",
+       (2 * M.CAL_PER_LB - a.weeklyDeficit) > M.FLOOR_NOISE_CAL * 100,
+       Math.round(2 * M.CAL_PER_LB - a.weeklyDeficit));
+  }
+  // The constant itself: big enough to clear the rounding, small enough to be
+  // invisible as a pace.
+  ok("the slack clears the worst rounding", M.FLOOR_NOISE_CAL >= 4, M.FLOOR_NOISE_CAL);
+  ok("...and is under a hundredth of a pound a week", M.FLOOR_NOISE_CAL / M.CAL_PER_LB < 0.01, M.FLOOR_NOISE_CAL / M.CAL_PER_LB);
+}
+
 console.log(`\n  ${checks - fails}/${checks} checks passed`);
 if (fails) { console.log(`  ${fails} FAILED`); process.exit(1); }
 console.log("  A charted pace is one the plan will actually prescribe.\n");
