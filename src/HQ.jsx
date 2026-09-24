@@ -749,10 +749,13 @@ const CSS = `
   border: 1px solid rgba(8,220,224,.4); border-radius: 12px; overflow: hidden;
   background: #020607; box-shadow: 0 0 0 1px #000, 0 0 28px rgba(8,220,224,.08);
 }
+/* Six numbers: three by two until there's room for all six in one row, so a
+   row is never left with one number on its own. */
 .hq-console-top {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
   border-bottom: 1px solid rgba(8,220,224,.28); background: #03090A;
 }
+@media (min-width: 820px) { .hq-console-top { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
 .hq-stat {
   display: grid; gap: 2px; padding: 8px 12px; min-width: 0; text-align: left;
   border: 0; border-right: 1px solid rgba(8,220,224,.14); background: transparent; color: inherit;
