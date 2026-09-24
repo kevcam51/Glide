@@ -57,7 +57,7 @@ export const SEATS = [
   { id: "finance-manager", room: "finance", role: "head", title: "Finance Manager", short: "Manager", status: "open",
     job: "Double-checks the Bookkeeper's numbers before they reach you and writes the monthly money summary." },
   { id: "bookkeeper", room: "finance", role: "worker", title: "Bookkeeper", short: "Bookkeeper", status: "training",
-    firstHire: true, waitingOn: "QuickBooks connected to Glidna",
+    firstHire: true, engine: "claude", waitingOn: "the crew's front door (the next piece)",
     job: "Checks your QuickBooks every Monday: money in, money out, who owes you and anything unusual." },
   { id: "billing-specialist", room: "finance", role: "worker", title: "Billing Specialist", short: "Billing", status: "open",
     job: "Watches session payments: failed cards, refunds to review and clients with no card on file." },
@@ -88,7 +88,7 @@ export const SEATS = [
   { id: "front-office-manager", room: "front", role: "head", title: "Front Office Manager", short: "Manager", status: "open",
     job: "Checks every drafted reply before it reaches you and keeps track of how fast people hear back." },
   { id: "front-desk", room: "front", role: "worker", title: "Front Desk Coordinator", short: "Front Desk", status: "training",
-    firstHire: true, waitingOn: "Gmail connected to Glidna",
+    firstHire: true, engine: "claude", waitingOn: "the crew's front door, and Gmail connected in Claude",
     job: "Reads new inquiries in your email and drafts replies in your voice. You send them yourself." },
   { id: "scheduling", room: "front", role: "worker", title: "Scheduling Coordinator", short: "Scheduling", status: "open",
     job: "Keeps an eye on sessions, reschedules and no-shows, and drafts reminders." },
@@ -111,10 +111,26 @@ export const CREW_RULES = [
   { title: "Drafts, never sends", body: "Workers write the email, the post or the reminder. You read it and send it yourself." },
   { title: "Never moves money", body: "No payments, refunds or transfers. Finance reports on money; it never touches it." },
   { title: "Never deletes", body: "Nothing in your inbox, your books or Glidna gets deleted by a worker." },
+  { title: "Only the tools the job needs", body: "The Bookkeeper can read QuickBooks but not your email. The Front Desk can draft emails but not send them." },
   { title: "Every shift is logged", body: "Each worker keeps a time card: when it clocked in, what it looked at and what it produced." },
   { title: "A manager checks the work", body: "Each department head reviews its team's work before it reaches your desk." },
   { title: "Advice stays with the pros", body: "No tax, legal, investment or medical advice. Those questions go to your accountant, lawyer or doctor." },
 ];
+
+// Where a worker's thinking runs (S238, Kevin: "I'm already paying $200 a
+// month and I want to be able to use that as well").
+//   claude — a Claude routine on the owner's own Claude plan, in Anthropic's
+//            cloud: no extra bill within the plan's limits, runs with his Mac
+//            closed, and reaches QuickBooks / Gmail through the connectors he
+//            has already signed into. At most hourly; shares the plan's limits.
+//   cloud  — a Glidna Cloud Function on Google's servers, paying per use from
+//            Glidna's own Anthropic account: any schedule, always on, but every
+//            outside connection has to be built into Glidna first.
+export const ENGINES = {
+  claude: { label: "Your Claude plan", short: "Claude" },
+  cloud: { label: "Glidna cloud", short: "Cloud" },
+  manual: { label: "By hand", short: "Manual" },
+};
 
 // The HQ is built one piece at a time (Kevin: "every time we build something
 // please let me know what it is that was built and how we're going to use
@@ -122,19 +138,22 @@ export const CREW_RULES = [
 export const BLUEPRINT = [
   { id: "building", title: "The building and the org chart", status: "built",
     use: "See every department, every title and who's hired, at a glance." },
-  { id: "desk", title: "Your desk and time cards", status: "next",
+  { id: "desk", title: "Your desk and time cards", status: "built",
     use: "One tray for everything waiting on your OK, and a log of every shift." },
-  { id: "engine", title: "The worker engine", status: "planned",
-    use: "Workers clock in on their schedule on Google's servers, even with your Mac off." },
-  { id: "finance", title: "Finance: the Bookkeeper on QuickBooks", status: "planned",
-    use: "A Monday money report, checked by the Finance Manager before it reaches you." },
-  { id: "front", title: "Front Office: the Front Desk on Gmail", status: "planned",
-    use: "Drafted replies to new inquiries, waiting in your Gmail for you to send." },
+  { id: "door", title: "The crew's front door", status: "next",
+    use: "Workers running on your Claude plan hand their work to this desk through the Glidna connector." },
+  { id: "finance", title: "Finance: the Bookkeeper, on your Claude plan", status: "planned",
+    use: "Every Monday it reads QuickBooks and puts a money report on your desk." },
+  { id: "front", title: "Front Office: the Front Desk, on your Claude plan", status: "planned",
+    use: "Drafts replies to new inquiries in your Gmail. You send them yourself." },
+  { id: "cloud", title: "Glidna cloud workers", status: "planned",
+    use: "Round-the-clock jobs that watch Glidna itself, like the Systems Watchdog." },
   { id: "chief", title: "Chief of Staff: your morning brief", status: "planned",
-    use: "One page each morning with what every department did and what needs you." },
+    use: "One page each morning: what every department did and what needs you." },
 ];
 
 export const roomById = (id) => ROOMS.find((r) => r.id === id) || null;
+export const seatById = (id) => SEATS.find((s) => s.id === id) || null;
 export const seatsIn = (roomId) => SEATS.filter((s) => s.room === roomId);
 export const headOf = (roomId) => SEATS.find((s) => s.room === roomId && (s.role === "head" || s.role === "owner")) || null;
 export const roomsOnFloor = (floor) => ROOMS.filter((r) => r.floor === floor);

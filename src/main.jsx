@@ -42,7 +42,13 @@ const isShowcase = (() => {
 const isHQPreview = import.meta.env.DEV && (() => {
   try { return new URLSearchParams(window.location.search).has('hq-preview') } catch { return false }
 })()
-const HQPreview = import.meta.env.DEV ? lazy(() => import('./HQ.jsx')) : null
+// The preview has no signed-in owner, so it can't open the real desk; it
+// renders example items instead (src/hqSamples.js — dev only, never shipped).
+const HQPreview = import.meta.env.DEV ? lazy(async () => {
+  const [hq, samples] = await Promise.all([import('./HQ.jsx'), import('./hqSamples.js')])
+  const Preview = (props) => <hq.default {...props} sample={samples.SAMPLE} />
+  return { default: Preview }
+}) : null
 
 // /oauth/authorize — a user's own Claude (or any MCP client) sent them here to
 // connect their Glidna account. Rendered INSIDE AuthGate so signing in reuses

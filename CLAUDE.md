@@ -139,7 +139,23 @@ enabled (Blaze has no default spending cap).
 > ⚠️ **QUICKBOOKS TRAP, measured:** the claude.ai QuickBooks connector's
 > multi-month "Monthly Breakdown" table disagrees with QuickBooks' own P&L
 > (Aug 2026 off by ~$2.2k); single-month P&L line items reconcile exactly to
-> the period total. A worker that reports a number reports QuickBooks' own._
+> the period total. A worker that reports a number reports QuickBooks' own.
+> **PIECE 2 (same day): the desk and time cards are LIVE.** `functions/hq.js`
+> `hqApi` (DEPLOYED before the push) is the only door: owner uid checked on the
+> server, `hqDesk`/`hqShifts` are Admin-SDK-only (no rules match — a copied
+> request from any other account is refused, asserted against firestore.rules).
+> Workers file through `postDeskItem`/`logShift`, whose sanitizers strip a
+> forged status/filing time, refuse non-https links and cap every field; there
+> is no delete. ⚠️ **Open items are queried by status alone and sorted in code**
+> — an ordered, limited query would push an old unanswered item off the desk;
+> the suite's fake Firestore refuses a where+orderBy pair the way real
+> Firestore does without a composite index. `scripts/test-hq-desk.mjs` 44
+> checks; five deliberate breaks each went red. **Engines (Kevin):** workers
+> that need QuickBooks/Gmail run as Claude ROUTINES on his Max plan (cloud, Mac
+> closed, connectors built in, ≥1 h interval, daily cap, NO permission prompts
+> — so each gets only the connectors its job needs); round-the-clock Glidna
+> jobs run on Cloud Functions with Glidna's API key. Piece 3 = the door that
+> lets a routine hand work to this desk._
 >
 > _**S237e (Sep 21): two screens promised a goal date the plan refuses to
 > prescribe — and the flag that was supposed to catch it was firing on

@@ -5,22 +5,28 @@
 // sit at their desks and open seats are empty chairs. Tap a room to see who
 // works there and how Kevin will use that department.
 //
+// Piece 2: the desk and the time cards are live. Both come from the `hqApi`
+// callable (functions/hq.js), which checks the owner's uid on the server —
+// the collections themselves are Admin-SDK-only, so the app never reads them
+// directly and no other account can either.
+//
 // ⚠️ ADMIN ONLY, AND LAZY ON PURPOSE. The ≡ menu row that opens this renders
 // only for the owner's uid, and App.jsx imports this file with lazy(), so no
-// other account ever downloads it. It holds NO business data — titles and job
-// descriptions only (see hqOrg.js). Reports, drafts and anything from
-// QuickBooks or Gmail arrive with later pieces, server-side behind an admin
-// check, never in this bundle.
+// other account ever downloads it. The bundle holds NO business data — titles
+// and job descriptions only (see hqOrg.js). Reports and drafts arrive at run
+// time from the server-checked callable, never baked into this file.
 //
 // ⚠️ NOT THE REEL'S ART. The Instagram reel that started this used StarNet,
 // whose sprites and artwork belong to its author. Everything here is drawn in
 // hqPixels.js from rectangles, in Smooth Training's black and cyan.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { httpsCallable } from "firebase/functions";
+import { functions } from "./firebase.js";
 import {
-  ROOMS, FLOORS, SEATS, CREW_RULES, BLUEPRINT,
-  roomById, seatsIn, roomsOnFloor, orgCounts, roomSummary, headOf,
+  ROOMS, FLOORS, SEATS, CREW_RULES, BLUEPRINT, ENGINES,
+  roomById, seatById, seatsIn, roomsOnFloor, orgCounts, roomSummary, headOf,
 } from "./hqOrg.js";
 import { W, H, roomScene, seatCenters, palmTree, van, PALM_W, PALM_H, VAN_W, VAN_H } from "./hqPixels.js";
 
@@ -33,6 +39,49 @@ const DEPT_ROOMS = ROOMS.filter((r) => r.id !== "owner" && r.id !== "chief");
 
 const STATUS_LABEL = { you: "You", training: "In training", open: "Open position" };
 const BLUEPRINT_LABEL = { built: "Built", next: "Next", planned: "Planned" };
+const KIND_LABEL = { report: "Report", draft: "Draft to review", question: "Question for you", alert: "Heads-up", note: "Note" };
+const SHIFT_LABEL = { done: "Done", failed: "Didn't finish", skipped: "Skipped" };
+
+// The one door to the desk: owner-checked on the server (functions/hq.js).
+const callHq = httpsCallable(functions, "hqApi");
+
+// A failed call says what happened and what to do, never a bare error code.
+// "not-found" means two different things: on a load, the desk's server piece
+// isn't there to answer (not deployed yet); on a status change, the item
+// itself is gone.
+function deskError(e, during = "load") {
+  const code = String((e && e.code) || "").replace(/^functions\//, "");
+  if (code === "permission-denied") return "This desk only opens for the owner's account.";
+  if (code === "unauthenticated") return "Your sign-in has expired. Close the HQ, sign in again and reopen it.";
+  if (code === "not-found") {
+    return during === "resolve"
+      ? "That item is no longer on your desk. Refresh to see the latest."
+      : "Your desk isn't switched on yet. Try again in a few minutes.";
+  }
+  return "Couldn't reach your desk. Check your connection, then tap Refresh.";
+}
+
+function fmtWhen(ms) {
+  if (!Number.isFinite(ms)) return "";
+  const d = new Date(ms);
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const today = new Date();
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return `Today ${time}`;
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`;
+  return `${d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })} · ${time}`;
+}
+
+function fmtDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const m = Math.round(ms / 60000);
+  if (m < 1) return "under a minute";
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h ${m % 60} min`;
+}
+
+const workerTitle = (id) => (seatById(id) || {}).title || id;
+const deptName = (id) => (roomById(id) || {}).name || id;
 
 // Fixed star positions, so the sky doesn't reshuffle on every render.
 const STARS = [
@@ -104,7 +153,7 @@ function StatusPill({ status }) {
   return <span className={`hq-pill hq-pill-${status}`}>{STATUS_LABEL[status] || status}</span>;
 }
 
-function SeatRow({ s }) {
+function SeatRow({ s, lastShift }) {
   return (
     <li className={`hq-seat hq-seat-${s.status}`}>
       <div className="hq-seat-head">
@@ -113,29 +162,104 @@ function SeatRow({ s }) {
       </div>
       {s.role === "head" && <span className="hq-seat-role">Department head</span>}
       <p className="hq-seat-job">{s.job}</p>
+      {s.engine && ENGINES[s.engine] && <p className="hq-seat-meta">Runs on: {ENGINES[s.engine].label}</p>}
+      {lastShift && (
+        <p className="hq-seat-meta">Last shift: {fmtWhen(lastShift.startedAt)} · {SHIFT_LABEL[lastShift.status] || lastShift.status}</p>
+      )}
       {s.waitingOn && <p className="hq-seat-note">First shift after: {s.waitingOn}</p>}
       {s.hireWhen && <p className="hq-seat-note">When to hire: {s.hireWhen}</p>}
     </li>
   );
 }
 
-function DeptPanel({ roomId, panelRef }) {
+function DeptPanel({ roomId, panelRef, shifts }) {
   const room = roomById(roomId);
   const seats = seatsIn(roomId);
+  // Shifts arrive newest first, so the first one per worker is its latest.
+  const lastShift = (seatId) => (shifts || []).find((sh) => sh.worker === seatId) || null;
   return (
     <section className="hq-card hq-dept" aria-labelledby="hq-dept-title" ref={panelRef} tabIndex={-1}>
       <div className="hq-eyebrow">Floor {room.floor} · {room.tagline}</div>
       <h2 id="hq-dept-title" className="hq-h2">{room.name}</h2>
       <p className="hq-uses"><span className="hq-uses-label">How you&rsquo;ll use it</span>{room.uses}</p>
       <ul className="hq-seats">
-        {seats.map((s) => <SeatRow key={s.id} s={s} />)}
+        {seats.map((s) => <SeatRow key={s.id} s={s} lastShift={lastShift(s.id)} />)}
       </ul>
     </section>
   );
 }
 
-export default function HQ({ onClose, ownerName = "" }) {
+function DeskItem({ item, onStatus }) {
+  const head = headOf(item.dept);
+  return (
+    <li className={`hq-item hq-item-${item.kind}`}>
+      {/* The kind rides in the meta line, not beside the title: beside it, a
+          phone squeezed the title into a one-word-wide column. */}
+      <div className="hq-item-meta">
+        <span className="hq-eyebrow">{deptName(item.dept)}</span>
+        <span>{workerTitle(item.worker)}</span>
+        <span>{fmtWhen(item.createdAt)}</span>
+        <span className="hq-kind">{KIND_LABEL[item.kind] || item.kind}</span>
+      </div>
+      <h3 className="hq-item-title">{item.title}</h3>
+      {item.summary && <p className="hq-item-summary">{item.summary}</p>}
+      {item.headNote && (
+        <div className="hq-headnote">
+          <span className="hq-headnote-label">{head && head.role === "head" ? `${head.title}'s note` : "Manager's note"}</span>
+          <p>{item.headNote}</p>
+        </div>
+      )}
+      {item.body && (
+        <details className="hq-item-body">
+          <summary>Read the full {item.kind === "draft" ? "draft" : item.kind === "report" ? "report" : "details"}</summary>
+          <div className="hq-body">{item.body}</div>
+        </details>
+      )}
+      <div className="hq-item-actions">
+        {item.link && (
+          <a className="hq-btn hq-btn-primary" href={item.link.url} target="_blank" rel="noopener noreferrer">{item.link.label}</a>
+        )}
+        <button type="button" className={`hq-btn ${item.link ? "hq-btn-ghost" : "hq-btn-primary"}`}
+          onClick={() => onStatus(item, "done")}>Mark done</button>
+        <button type="button" className="hq-btn hq-btn-ghost" onClick={() => onStatus(item, "dismissed")}>Dismiss</button>
+      </div>
+    </li>
+  );
+}
+
+function ShiftRow({ sh }) {
+  const engine = ENGINES[sh.engine];
+  return (
+    <li className={`hq-shift hq-shift-${sh.status}`}>
+      <div className="hq-row">
+        <span className="hq-shift-who">{workerTitle(sh.worker)}</span>
+        <span className={`hq-pill hq-pill-shift-${sh.status}`}>{SHIFT_LABEL[sh.status] || sh.status}</span>
+      </div>
+      <div className="hq-shift-meta">
+        <span>{fmtWhen(sh.startedAt)}</span>
+        {sh.endedAt > sh.startedAt && <span>{fmtDuration(sh.endedAt - sh.startedAt)}</span>}
+        {engine && <span>{engine.label}</span>}
+        {Number.isFinite(sh.costCents) && <span>{sh.costCents < 1 ? "under 1¢" : `${Math.round(sh.costCents)}¢`}</span>}
+      </div>
+      {sh.summary && <p className="hq-shift-summary">{sh.summary}</p>}
+      {Array.isArray(sh.actions) && sh.actions.length > 0 && (
+        <details className="hq-shift-actions">
+          <summary>What it did ({sh.actions.length})</summary>
+          <ol>{sh.actions.map((a, i) => <li key={i}>{a}</li>)}</ol>
+        </details>
+      )}
+    </li>
+  );
+}
+
+// `sample` is the dev-only preview's example desk (src/hqSamples.js). With it,
+// nothing is fetched and a tap only changes the screen.
+export default function HQ({ onClose, ownerName = "", sample = null }) {
   const [selected, setSelected] = useState("finance");
+  const [desk, setDesk] = useState(() => (sample
+    ? { phase: "ready", open: sample.open, recent: sample.recent, shifts: sample.shifts, openMore: false }
+    : { phase: "loading", open: [], recent: [], shifts: [], openMore: false }));
+  const [deskErr, setDeskErr] = useState("");
   const rootRef = useRef(null);
   const panelRef = useRef(null);
   const deskRef = useRef(null);
@@ -175,6 +299,52 @@ export default function HQ({ onClose, ownerName = "" }) {
       window.removeEventListener("keydown", onKey);
     };
   }, []);
+
+  // The whole desk in one round trip: open items, recently handled ones and
+  // the latest time cards.
+  const load = useCallback(async () => {
+    if (sample) return;
+    setDesk((d) => ({ ...d, phase: d.phase === "loading" ? "loading" : "refreshing" }));
+    try {
+      const { data } = await callHq({ action: "overview" });
+      setDesk({
+        phase: "ready",
+        open: Array.isArray(data && data.open) ? data.open : [],
+        recent: Array.isArray(data && data.recent) ? data.recent : [],
+        shifts: Array.isArray(data && data.shifts) ? data.shifts : [],
+        openMore: !!(data && data.openMore),
+      });
+      setDeskErr("");
+    } catch (e) {
+      // Keep whatever was already on screen; only a first load has nothing to show.
+      setDesk((d) => ({ ...d, phase: d.phase === "loading" ? "error" : "ready" }));
+      setDeskErr(deskError(e));
+    }
+  }, [sample]);
+  useEffect(() => { load(); }, [load]);
+
+  // Mark done, dismiss or undo. The screen changes at once; if the server
+  // refuses, the item goes back where it was and the reason is shown.
+  const setStatus = async (item, status) => {
+    const before = desk;
+    const now = Date.now();
+    setDesk((d) => {
+      const without = (list) => list.filter((x) => x.id !== item.id);
+      if (status === "open") {
+        const back = { ...item, status: "open", resolvedAt: null };
+        return { ...d, recent: without(d.recent), open: [back, ...without(d.open)].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)) };
+      }
+      return { ...d, open: without(d.open), recent: [{ ...item, status, resolvedAt: now }, ...without(d.recent)] };
+    });
+    if (sample) return;
+    try {
+      await callHq({ action: "resolve", id: item.id, status });
+      setDeskErr("");
+    } catch (e) {
+      setDesk(before);
+      setDeskErr(`Couldn't update “${item.title}”. ${deskError(e, "resolve")}`);
+    }
+  };
 
   const behavior = reduceMotion ? "auto" : "smooth";
   const pick = (roomId) => {
@@ -217,9 +387,17 @@ export default function HQ({ onClose, ownerName = "" }) {
             <span className="hq-chip"><b>{counts.total}</b> seats</span>
             <span className="hq-chip hq-chip-training"><b>{counts.training}</b> in training</span>
             <span className="hq-chip"><b>{counts.open}</b> open</span>
-            <button type="button" className="hq-chip hq-chip-desk" onClick={showDesk}><b>0</b> waiting on you</button>
+            <button type="button" className="hq-chip hq-chip-desk" onClick={showDesk}>
+              <b>{desk.phase === "loading" || desk.phase === "error" ? "–" : desk.open.length}</b> waiting on you
+            </button>
           </div>
         </div>
+
+        {sample && (
+          <p className="hq-preview-note" role="note">
+            Preview with example items. The real desk only opens for the owner&rsquo;s account.
+          </p>
+        )}
 
         <section className="hq-building" aria-label="The building. Tap a room to see that department.">
           <div className="hq-sky" aria-hidden="true">
@@ -252,18 +430,66 @@ export default function HQ({ onClose, ownerName = "" }) {
           </div>
         </section>
 
-        <DeptPanel roomId={selected} panelRef={panelRef} />
+        <DeptPanel roomId={selected} panelRef={panelRef} shifts={desk.shifts} />
 
         <section className="hq-card hq-desk" aria-labelledby="hq-desk-title" ref={deskRef} tabIndex={-1}>
           <div className="hq-row">
             <h2 id="hq-desk-title" className="hq-h2">Your desk</h2>
-            <span className="hq-count">0 waiting</span>
+            <div className="hq-row-end">
+              <span className="hq-count">{desk.phase === "ready" || desk.phase === "refreshing" ? `${desk.open.length} waiting` : ""}</span>
+              {!sample && (
+                <button type="button" className="hq-btn hq-btn-ghost" onClick={load}
+                  disabled={desk.phase === "loading" || desk.phase === "refreshing"}>
+                  {desk.phase === "refreshing" ? "Refreshing…" : "Refresh"}
+                </button>
+              )}
+            </div>
           </div>
-          <div className="hq-empty">
-            <p><strong>Nothing needs you right now.</strong></p>
-            <p>When a worker finishes a draft, a report or a question for you, it lands here with its
-              department head&rsquo;s note on top. Nothing goes out until you say so.</p>
-          </div>
+          {deskErr && <p className="hq-error" role="alert">{deskErr}</p>}
+          {desk.phase === "loading" && <p className="hq-quiet">Checking your desk…</p>}
+          {(desk.phase === "ready" || desk.phase === "refreshing") && desk.open.length === 0 && (
+            <div className="hq-empty">
+              <p><strong>Nothing needs you right now.</strong></p>
+              <p>When a worker finishes a draft, a report or a question for you, it lands here with its
+                department head&rsquo;s note on top. Nothing goes out until you say so.</p>
+            </div>
+          )}
+          {desk.open.length > 0 && (
+            <ul className="hq-items">
+              {desk.open.map((item) => <DeskItem key={item.id} item={item} onStatus={setStatus} />)}
+            </ul>
+          )}
+          {desk.openMore && <p className="hq-quiet">Showing your 300 newest waiting items.</p>}
+          {desk.recent.length > 0 && (
+            <details className="hq-recent">
+              <summary>Recently handled ({desk.recent.length})</summary>
+              <ul className="hq-recent-list">
+                {desk.recent.map((item) => (
+                  <li key={item.id}>
+                    <span className={`hq-pill hq-pill-${item.status}`}>{item.status === "done" ? "Done" : "Dismissed"}</span>
+                    <span className="hq-recent-title">{item.title}</span>
+                    <span className="hq-recent-when">{fmtWhen(item.resolvedAt)}</span>
+                    <button type="button" className="hq-link" onClick={() => setStatus(item, "open")}
+                      aria-label={`Put “${item.title}” back on your desk`}>Undo</button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </section>
+
+        <section className="hq-card" aria-labelledby="hq-shifts-title">
+          <h2 id="hq-shifts-title" className="hq-h2">Time cards</h2>
+          <p className="hq-sub">Every shift is logged: when a worker clocked in, what it looked at and what it handed you.</p>
+          {desk.phase === "loading" && <p className="hq-quiet">Loading time cards…</p>}
+          {desk.phase !== "loading" && desk.shifts.length === 0 && (
+            <div className="hq-empty"><p>No shifts yet. Each worker&rsquo;s first shift will show up here.</p></div>
+          )}
+          {desk.shifts.length > 0 && (
+            <ul className="hq-shifts">
+              {desk.shifts.map((sh) => <ShiftRow key={sh.id} sh={sh} />)}
+            </ul>
+          )}
         </section>
 
         <section className="hq-card" aria-labelledby="hq-org-title">
@@ -519,6 +745,48 @@ const CSS = `
 .hq-pill-open { color: var(--hq-muted); border-color: var(--hq-line2); background: transparent; }
 
 .hq-desk .hq-count { font-size: 13px; color: var(--hq-muted); font-variant-numeric: tabular-nums; }
+.hq-row-end { display: flex; align-items: center; gap: 10px; }
+.hq-btn {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 6px 14px;
+  border-radius: 9px; font-size: 13.5px; font-weight: 600; text-decoration: none; cursor: pointer; border: 1px solid;
+}
+.hq-btn:disabled { opacity: .55; cursor: default; }
+.hq-btn-primary { background: var(--hq-cyan); border-color: var(--hq-cyan); color: #03161A !important; }
+.hq-btn-ghost { background: transparent; border-color: var(--hq-line2); color: var(--hq-text); }
+.hq-error { margin: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(248,113,113,.45); background: rgba(248,113,113,.08); color: #FCA5A5; font-size: 13.5px; }
+.hq-quiet { margin: 0; color: var(--hq-muted); font-size: 13.5px; }
+.hq-preview-note { margin: 0; padding: 8px 12px; border-radius: 10px; border: 1px dashed rgba(251,191,36,.5); color: var(--hq-amber); font-size: 13px; }
+.hq-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.hq-item { padding: 14px; border-radius: 12px; border: 1px solid var(--hq-line2); background: #0A1114; display: grid; gap: 8px; }
+.hq-item-draft { border-color: rgba(8,220,224,.4); }
+.hq-item-question { border-color: rgba(251,191,36,.4); }
+.hq-item-alert { border-color: rgba(248,113,113,.45); }
+.hq-item-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12.5px; color: var(--hq-muted); align-items: baseline; }
+.hq-item-title { margin: 0; font-family: var(--hq-display); font-size: 16px; font-weight: 600; text-wrap: balance; }
+.hq-kind { margin-left: auto; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--hq-text); padding: 1px 7px; border-radius: 999px; border: 1px solid var(--hq-line2); }
+.hq-item-summary { margin: 0; font-size: 14px; color: #C9DCDC; max-width: 70ch; }
+.hq-headnote { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(8,220,224,.28); background: rgba(8,220,224,.05); display: grid; gap: 2px; }
+.hq-headnote-label { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--hq-cyan); }
+.hq-headnote p { margin: 0; font-size: 13.5px; color: #C9DCDC; }
+.hq-item-body summary, .hq-recent summary, .hq-shift-actions summary { cursor: pointer; color: var(--hq-cyan); font-size: 13.5px; }
+.hq-body { margin-top: 8px; padding: 12px; border-radius: 10px; background: #070C0E; border: 1px solid var(--hq-line); white-space: pre-wrap; font-size: 13.5px; line-height: 1.55; color: #D5E5E5; max-height: 420px; overflow: auto; }
+.hq-item-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.hq-pill-done { color: #2FE0A8; border-color: rgba(47,224,168,.5); }
+.hq-pill-dismissed { color: var(--hq-muted); border-color: var(--hq-line2); }
+.hq-recent-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+.hq-recent-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13.5px; }
+.hq-recent-title { flex: 1 1 200px; min-width: 0; }
+.hq-recent-when { color: var(--hq-muted); font-size: 12.5px; }
+.hq-shifts { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.hq-shift { padding: 12px; border-radius: 10px; border: 1px solid var(--hq-line); background: #0A1114; display: grid; gap: 4px; }
+.hq-shift-who { font-family: var(--hq-display); font-weight: 600; font-size: 14.5px; }
+.hq-shift-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--hq-muted); font-variant-numeric: tabular-nums; }
+.hq-shift-summary { margin: 0; font-size: 13.5px; color: #C9DCDC; }
+.hq-shift-actions ol { margin: 6px 0 0; padding-left: 20px; font-size: 13px; color: #C9DCDC; display: grid; gap: 2px; }
+.hq-pill-shift-done { color: #2FE0A8; border-color: rgba(47,224,168,.5); }
+.hq-pill-shift-failed { color: #FCA5A5; border-color: rgba(248,113,113,.5); }
+.hq-pill-shift-skipped { color: var(--hq-muted); border-color: var(--hq-line2); }
+.hq-seat-meta { margin: 0; font-size: 12.5px; color: var(--hq-muted); }
 .hq-empty { padding: 14px; border-radius: 10px; border: 1px dashed var(--hq-line2); display: grid; gap: 4px; font-size: 14px; color: #C9DCDC; }
 .hq-empty p { margin: 0; max-width: 65ch; }
 .hq-empty strong { color: var(--hq-text); }

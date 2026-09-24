@@ -77,7 +77,39 @@ console.log("structure only");
   const code = stripComments(HQ) + JSON.stringify({ ROOMS, SEATS, CREW_RULES, BLUEPRINT });
   ok(!/\$\s?\d[\d,]*\.\d\d/.test(code), "no dollar figures anywhere in the HQ's code or org data");
   ok(!/@[a-z0-9-]+\.(com|net|org)/i.test(code), "no email addresses in the HQ's code or org data");
-  ok(!/getForUser|window\.storage|httpsCallable|firebase/.test(stripComments(HQ)), "piece 1 reads no data at all (no Firestore, no callables)");
+  // Piece 2: the desk is live, and it reads through ONE door — the hqApi
+  // callable, which checks the owner's uid on the server. No direct Firestore,
+  // no kv reads, no second callable that might forget the check.
+  const hqCode = stripComments(HQ);
+  ok(/const callHq = httpsCallable\(functions, "hqApi"\)/.test(hqCode), "the HQ reads its desk through the hqApi callable");
+  ok((hqCode.match(/httpsCallable\(/g) || []).length === 1, "…and through no other callable");
+  ok(!/from "firebase\/firestore"|getForUser|window\.storage|onSnapshot/.test(hqCode), "the HQ never reads Firestore or kv directly");
+}
+
+// ── 2b. The desk's controls do what they say ────────────────────────────────
+console.log("desk controls");
+{
+  const hqCode = stripComments(HQ);
+  ok(/onClick=\{\(\) => onStatus\(item, "done"\)\}>Mark done</.test(hqCode), "Mark done files the item as done");
+  ok(/onClick=\{\(\) => onStatus\(item, "dismissed"\)\}>Dismiss</.test(hqCode), "Dismiss files the item as dismissed");
+  ok(/onClick=\{\(\) => setStatus\(item, "open"\)\}[\s\S]{0,120}>Undo</.test(hqCode), "Undo puts a handled item back on the desk");
+  ok(/await callHq\(\{ action: "resolve", id: item\.id, status \}\)/.test(hqCode), "a status change is saved through the resolve action");
+  ok(/setDesk\(before\)/.test(hqCode), "a refused save puts the item back where it was");
+  ok(/desk\.open\.length\}<\/b> waiting on you/.test(hqCode.replace(/\s+/g, " ")) || /: desk\.open\.length\}<\/b> waiting on you/.test(hqCode.replace(/\s+/g, " ")),
+    "the \"waiting on you\" count is the real number of open items");
+  ok(!/<b>0<\/b> waiting on you/.test(hqCode), "…not a hardcoded zero");
+  // A callable's error message IS its code ("internal", "not-found"), so it is
+  // never shown raw (S202's lesson).
+  ok(/setDeskErr\(deskError\(e\)\)/.test(hqCode) && !/setDeskErr\(e\.message\)|setDeskErr\(String\(e/.test(hqCode),
+    "desk errors are translated into plain words, never the raw error");
+  // Example items live in a dev-only file that the shipped app never imports.
+  // Comment-stripped: HQ.jsx's own comment NAMES the file while explaining it,
+  // and an assertion that fails on its own documentation gets deleted, not fixed.
+  ok(!/hqSamples/.test(stripComments(HQ)) && !/hqSamples/.test(APP), "HQ.jsx and App.jsx never import the example items");
+  const devBlock = MAIN.slice(MAIN.indexOf("const HQPreview"), MAIN.indexOf("const HQPreview") + 400);
+  ok(/import\.meta\.env\.DEV \? lazy\(/.test(devBlock) && /import\('\.\/hqSamples\.js'\)/.test(devBlock),
+    "main.jsx loads the example items only inside the dev-only preview");
+  ok((MAIN.match(/hqSamples/g) || []).length === 1, "…and nowhere else");
 }
 
 // ── 3. The org chart holds together ─────────────────────────────────────────

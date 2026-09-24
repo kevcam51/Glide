@@ -163,7 +163,8 @@ const base = {
 // pinned here instead.
 {
   const files = ["functions/availability.js", "functions/aitools.js", "functions/mcp.js",
-    "functions/aichat.js", "functions/transcribe.js", "functions/index.js", "functions/billing.js"];
+    "functions/aichat.js", "functions/transcribe.js", "functions/index.js", "functions/billing.js",
+    "functions/hq.js"];
   // Comments QUOTE the banned pattern while explaining it, so strip them first —
   // otherwise the assertion fails on its own documentation, which is the kind of
   // test that gets deleted rather than fixed.
@@ -180,7 +181,8 @@ const base = {
   }
   // ...and every file that gates on admin declares the same UID.
   for (const f of ["functions/availability.js", "functions/aitools.js", "functions/mcp.js",
-                   "functions/aichat.js", "functions/transcribe.js", "functions/index.js"]) {
+                   "functions/aichat.js", "functions/transcribe.js", "functions/index.js",
+                   "functions/hq.js"]) {
     ok(`${f} identifies admin by the shared UID`,
        /ADMIN_UIDS = \["G7QUZ8Kat1fgyoMjdGKz4DYoVHi1"\]/.test(src[f]));
   }
