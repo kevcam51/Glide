@@ -34,6 +34,16 @@ const isShowcase = (() => {
   try { return new URLSearchParams(window.location.search).has('showcase') } catch { return false }
 })()
 
+// Dev-only preview of the Smooth Training HQ (S238): /?hq-preview renders it
+// with no login, so its design can be checked in a browser without signing in
+// as the owner. `import.meta.env.DEV` is false in a production build, so this
+// branch — and any way to reach the HQ without the owner-only menu row — does
+// not exist on glidna.com.
+const isHQPreview = import.meta.env.DEV && (() => {
+  try { return new URLSearchParams(window.location.search).has('hq-preview') } catch { return false }
+})()
+const HQPreview = import.meta.env.DEV ? lazy(() => import('./HQ.jsx')) : null
+
 // /oauth/authorize — a user's own Claude (or any MCP client) sent them here to
 // connect their Glidna account. Rendered INSIDE AuthGate so signing in reuses
 // the existing email / Google / Face ID flow instead of a second login.
@@ -52,7 +62,9 @@ root.render(
   <StrictMode>
     {/* Outside AuthGate, so a failure in the login screen itself is caught too. */}
     <BootBoundary>
-      {isShowcase ? (
+      {isHQPreview ? (
+        <Suspense fallback={null}><HQPreview ownerName="Kevin" onClose={() => { window.location.search = '' }} /></Suspense>
+      ) : isShowcase ? (
         <Suspense fallback={null}><Showcase /></Suspense>
       ) : isOAuthConsent ? (
         <AuthGate>

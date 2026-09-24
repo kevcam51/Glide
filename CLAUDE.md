@@ -108,6 +108,39 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S238 (Sep 24): SMOOTH TRAINING HQ, PIECE 1 — Kevin's AI business crew,
+> drawn as a building, owner-only.** Kevin saw a reel of StarNet (an
+> open-source pixel-art agent harness) and wanted the SYSTEM — in his words,
+> "workers, not slaves" — without the reel's deceptive businesses (Etsy
+> knockoffs, Fiverr upsells, fake AI influencers). Frontend only; no
+> functions, no rules — the push is the release. **60 suites** (the new
+> `scripts/test-hq.mjs` is 91 checks); build, `check:undef`, `check:tdz`,
+> `check:weak` clean.
+> **≡ → HQ, rendered only under `isAdminUid`** (meUid === OWNER_UID), and the
+> screen mounts only under `{isAdminUid && showHQ && (` — a guard on the
+> button alone would leave the state able to mount it for anyone. **Lazy
+> (`lazy(() => import("./HQ.jsx"))`), never static**, so no other account
+> downloads it; the suite asserts both, and four deliberate breaks (row
+> guard, mount guard, static import, preview route) each went red.
+> Files: `src/HQ.jsx` (screen), `src/hqOrg.js` (8 rooms, 20 seats with
+> titles, crew rules, `BLUEPRINT` build order), `src/hqPixels.js` (original
+> pixel art as rectangles — **StarNet's sprites are NOT licensed with its MIT
+> code; never trace them**). Dev-only no-login preview: `/?hq-preview`,
+> gated on `import.meta.env.DEV` and absent from the production entry chunk.
+> ⚠️ **STRUCTURE ONLY, NEVER BUSINESS DATA IN THE BUNDLE.** A lazy chunk is
+> still a public file; QuickBooks figures, drafts and client names belong
+> server-side behind an admin check. Piece 1 reads no data at all, asserted.
+> ⚠️ **HQ worker tools will be owner-only business ops, NOT `buildTools()`
+> capabilities** — keep them out of the client assistant and the MCP
+> connector's user surface. **Build order (`BLUEPRINT`):** desk + time cards →
+> worker engine → Finance/Bookkeeper → Front Office/Front Desk → Chief of
+> Staff brief. Kevin wants each piece explained as "what was built + how
+> you'll use it".
+> ⚠️ **QUICKBOOKS TRAP, measured:** the claude.ai QuickBooks connector's
+> multi-month "Monthly Breakdown" table disagrees with QuickBooks' own P&L
+> (Aug 2026 off by ~$2.2k); single-month P&L line items reconcile exactly to
+> the period total. A worker that reports a number reports QuickBooks' own._
+>
 > _**S237e (Sep 21): two screens promised a goal date the plan refuses to
 > prescribe — and the flag that was supposed to catch it was firing on
 > everybody.** Found while answering Kevin's question about the 3,500 rule, by

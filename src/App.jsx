@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { ROLES, getProfile, joinTrainer, getMyClients, ensureInviteCode, formatInviteCode, setName, splitName, leaveTrainer, trialInfo, isPremium, setAiOptOut, aiChoiceMade, ensureTimezone } from "./profile.js";
 import { getForUser, setForUser, mergeForUser, deleteForUser, listForUser, listEntriesForUser, latestKeyForUser, subscribeForUser } from "./clientData.js";
@@ -31192,6 +31192,10 @@ const callPlacesAutocomplete = httpsCallable(functions, "placesAutocomplete");
 const callListAppRequests = httpsCallable(functions, "listAppRequests");        // S140 admin
 const callSetAppRequestStatus = httpsCallable(functions, "setAppRequestStatus"); // S140 admin
 const callAdminOverview = httpsCallable(functions, "adminOverview"); // admin all-users dashboard (S90)
+// Smooth Training HQ (S238): Kevin's business crew, drawn as a building. Lazy
+// on purpose: the only row that opens it is owner-only, so no other account
+// ever downloads it. It holds titles and job descriptions, never business data.
+const HQScreen = lazy(() => import("./HQ.jsx"));
 const callAdminUserUsage = httpsCallable(functions, "adminUserUsage"); // one user's AI spend history (S167)
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
 const callAiSeats = httpsCallable(functions, "aiSeats"); // AI-client seats view (S176f)
@@ -40672,6 +40676,7 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
   const [upgradeBusy, setUpgradeBusy] = useState(false); // Stripe portal redirect in flight (S89)
   const [showPicker, setShowPicker] = useState(false);   // S89c plan picker (Upgrade → choose plan → Checkout)
   const [showAdmin, setShowAdmin] = useState(false);      // S90 admin all-users dashboard
+  const [showHQ, setShowHQ] = useState(false);            // S238 Smooth Training HQ (owner only)
   const [showAppReqs, setShowAppReqs] = useState(false);  // S140 app requests (admin)
   const [showMyNotes, setShowMyNotes] = useState(false);  // S91 trainer general notes
   const [showAddr, setShowAddr] = useState(false);        // S203 saved meeting address
@@ -40860,6 +40865,20 @@ function SideMenu({ open, onClose, role, meName, meEmail, isTrainer, hasCoach, t
             onClick={async () => { setUpgradeBusy(true); const ok = await openBillingPortal(); if (!ok) { setUpgradeBusy(false); setUpgradeErr(true); } }}>
             <Icon name="card" size={19} color="var(--accent)" /> <span>{upgradeBusy ? "Opening…" : "Manage subscription"}</span>
           </button>
+        )}
+
+        {/* Smooth Training HQ (S238, Kevin): his business crew, as a building.
+            OWNER ONLY — isAdminUid is meUid === OWNER_UID. First row, because
+            it's the screen he runs the business from. */}
+        {isAdminUid && (
+          <button style={item} onClick={() => setShowHQ(true)}>
+            <Icon name="building" size={19} color="var(--accent)" /> <span>HQ</span>
+          </button>
+        )}
+        {isAdminUid && showHQ && (
+          <Suspense fallback={null}>
+            <HQScreen onClose={() => setShowHQ(false)} ownerName={meName} />
+          </Suspense>
         )}
 
         {/* Refer & earn (S181) — for EVERY role. The whole idea is that a client

@@ -38,6 +38,8 @@ const GLYPHS = {
   camera: (<><path d="M3 8.5a1 1 0 0 1 1-1h2.8l1.4-2h5.6l1.4 2H20a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" /><circle cx="12" cy="13" r="3.4" /></>),
   alert: (<><path d="M12 4 2.5 20.5h19z" /><path d="M12 10.5v4" /><path d="M12 17.4v.01" /></>),
   inbox: (<><path d="M3.5 13.5 6 6h12l2.5 7.5" /><path d="M3.5 13.5V18a1 1 0 0 0 1 1h15a1 1 0 0 0 1-1v-4.5" /><path d="M3.5 13.5h4l1.5 2.5h6l1.5-2.5h4" /></>),
+  // S238: Smooth Training HQ — a building, four floors of windows, one door.
+  building: (<><rect x="5" y="3.5" width="14" height="17" rx="1.5" /><path d="M3 20.5h18" /><path d="M8.5 7.5h2" /><path d="M13.5 7.5h2" /><path d="M8.5 11h2" /><path d="M13.5 11h2" /><path d="M8.5 14.5h2" /><path d="M13.5 14.5h2" /><path d="M10.5 20.5v-3h3v3" /></>),
   folder: (<path d="M4 6h4l1.6 2H19a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" />),
   meal: (<><path d="M5 2.5V7.5" /><path d="M7.5 2.5V8" /><path d="M10 2.5V7.5" /><path d="M5 7.5h5" /><path d="M7.5 8V21" /><path d="M16.5 2.5V21" /><path d="M16.5 2.5c-2.6 1-2.6 8 0 9.6" /></>),
   clock: (<><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>),
