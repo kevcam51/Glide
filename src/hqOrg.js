@@ -136,8 +136,8 @@ export const ENGINES = {
 // please let me know what it is that was built and how we're going to use
 // this piece"). The screen shows this list so the plan lives where he looks.
 export const BLUEPRINT = [
-  { id: "building", title: "The building and the org chart", status: "built",
-    use: "See every department, every title and who's hired, at a glance." },
+  { id: "building", title: "The station and the org chart", status: "built",
+    use: "Watch the crew on the map, with every department's numbers down the sides." },
   { id: "desk", title: "Your desk and time cards", status: "built",
     use: "One tray for everything waiting on your OK, and a log of every shift." },
   { id: "door", title: "The crew's front door", status: "next",

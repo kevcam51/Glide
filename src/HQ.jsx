@@ -29,6 +29,7 @@ import {
   roomById, seatById, seatsIn, roomsOnFloor, orgCounts, roomSummary, headOf,
 } from "./hqOrg.js";
 import { W, H, roomScene, seatCenters, palmTree, van, PALM_W, PALM_H, VAN_W, VAN_H } from "./hqPixels.js";
+import HQStation from "./HQStation.jsx";
 
 const FONT_ID = "hq-silkscreen";
 const FONT_HREF = "https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap";
@@ -81,7 +82,36 @@ function fmtDuration(ms) {
 }
 
 const workerTitle = (id) => (seatById(id) || {}).title || id;
+const workerShort = (id) => (seatById(id) || {}).short || id;
 const deptName = (id) => (roomById(id) || {}).name || id;
+
+// The departments list on the station's left, in building order.
+const DEPT_ORDER = ["owner", "chief", "finance", "ops", "coaching", "marketing", "research", "front"];
+const VIEW_KEY = "glidna-hq-view";
+
+function readView() {
+  try { return localStorage.getItem(VIEW_KEY) === "building" ? "building" : "station"; } catch { return "station"; }
+}
+
+function clock(ms) {
+  if (!Number.isFinite(ms)) return "";
+  const d = new Date(ms);
+  const today = new Date();
+  const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return d.toDateString() === today.toDateString() ? hm : `${d.toLocaleDateString([], { month: "numeric", day: "numeric" })} ${hm}`;
+}
+
+// The crew log: real events only — a shift clocked, an item filed, an item
+// handled. With none yet, it says where each hired worker stands.
+function crewLog(desk) {
+  const rows = [];
+  for (const sh of desk.shifts || []) {
+    rows.push({ at: sh.startedAt, who: workerShort(sh.worker), text: `${SHIFT_LABEL[sh.status] || sh.status}${sh.summary ? ` · ${sh.summary}` : ""}` });
+  }
+  for (const it of desk.open || []) rows.push({ at: it.createdAt, who: workerShort(it.worker), text: `to your desk · ${it.title}` });
+  for (const it of desk.recent || []) rows.push({ at: it.resolvedAt, who: "You", text: `${it.status === "done" ? "done" : "dismissed"} · ${it.title}` });
+  return rows.filter((r) => Number.isFinite(r.at)).sort((a, b) => b.at - a.at).slice(0, 12);
+}
 
 // Fixed star positions, so the sky doesn't reshuffle on every render.
 const STARS = [
@@ -266,6 +296,15 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
   const counts = orgCounts();
   const firstName = String(ownerName || "").trim().split(/\s+/)[0] || "";
   const boardLights = useMemo(() => BOARD_ORDER.map(deptState), []);
+  // Each room's door light on the station map: the owner's office is always
+  // lit, since that is where Kevin sits.
+  const roomStates = useMemo(() => Object.fromEntries(
+    ROOMS.map((r) => [r.id, r.id === "owner" ? "on" : deptState(r.id)])), []);
+  const [view, setView] = useState(readView);
+  const chooseView = (v) => {
+    setView(v);
+    try { localStorage.setItem(VIEW_KEY, v); } catch { /* a private window keeps the default */ }
+  };
   const palm = useMemo(() => palmTree(), []);
   const vanRects = useMemo(() => van(), []);
   const reduceMotion = typeof window !== "undefined" && window.matchMedia
@@ -346,6 +385,18 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
     }
   };
 
+  // The station's numbers. Spend counts only Glidna cloud shifts that report a
+  // cost; a shift run on the owner's Claude plan costs Glidna nothing.
+  const deskKnown = desk.phase === "ready" || desk.phase === "refreshing";
+  const onShift = SEATS.filter((s) => s.status === "on-shift" || s.status === "working").length;
+  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+  const monthStart = new Date(dayStart.getFullYear(), dayStart.getMonth(), 1).getTime();
+  const shiftsToday = desk.shifts.filter((sh) => sh.startedAt >= dayStart.getTime()).length;
+  const spendCents = desk.shifts
+    .filter((sh) => sh.startedAt >= monthStart && Number.isFinite(sh.costCents))
+    .reduce((sum, sh) => sum + sh.costCents, 0);
+  const log = crewLog(desk);
+
   const behavior = reduceMotion ? "auto" : "smooth";
   const pick = (roomId) => {
     setSelected(roomId);
@@ -381,17 +432,7 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
       </header>
 
       <main className="hq-wrap">
-        <div className="hq-intro">
-          <p className="hq-hello">{firstName ? `Welcome in, ${firstName}.` : "Welcome in."}</p>
-          <div className="hq-glance">
-            <span className="hq-chip"><b>{counts.total}</b> seats</span>
-            <span className="hq-chip hq-chip-training"><b>{counts.training}</b> in training</span>
-            <span className="hq-chip"><b>{counts.open}</b> open</span>
-            <button type="button" className="hq-chip hq-chip-desk" onClick={showDesk}>
-              <b>{desk.phase === "loading" || desk.phase === "error" ? "–" : desk.open.length}</b> waiting on you
-            </button>
-          </div>
-        </div>
+        <p className="hq-hello">{firstName ? `Welcome in, ${firstName}.` : "Welcome in."}</p>
 
         {sample && (
           <p className="hq-preview-note" role="note">
@@ -399,34 +440,116 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
           </p>
         )}
 
-        <section className="hq-building" aria-label="The building. Tap a room to see that department.">
-          <div className="hq-sky" aria-hidden="true">
-            {STARS.map(([left, top, delay], i) => (
-              <span key={i} className="hq-star" style={{ left: `${left}%`, top, animationDelay: `${delay}s` }} />
-            ))}
-            <Pixels rects={MOON} w={9} h={9} className="hq-moon" />
+        <section className="hq-console" aria-label="The station">
+          <div className="hq-console-top">
+            {/* Six numbers, so a phone shows two even rows of three. Labels stay
+                short enough not to be cut off at that width. */}
+            <div className="hq-stat hq-stat-green"><span>On shift</span><b>{onShift}</b></div>
+            <div className="hq-stat hq-stat-amber"><span>In training</span><b>{counts.training}</b></div>
+            <div className="hq-stat"><span>Open seats</span><b>{counts.open}</b></div>
+            <button type="button" className="hq-stat hq-stat-desk" onClick={showDesk}>
+              <span>Your desk</span><b>{deskKnown ? desk.open.length : "–"}</b>
+            </button>
+            <div className="hq-stat"><span>Shifts today</span><b>{deskKnown ? shiftsToday : "–"}</b></div>
+            <div className="hq-stat" title="What Glidna's own cloud workers cost this month. Work done on your Claude plan costs Glidna nothing.">
+              <span>Cloud spend</span><b>{deskKnown ? `$${(spendCents / 100).toFixed(2)}` : "–"}</b>
+            </div>
           </div>
-          <div className="hq-sign" aria-hidden="true">
-            <span className="hq-sign-text">Smooth Training</span>
-            <span className="hq-sign-hq">HQ</span>
-          </div>
-          <div className="hq-tower">
-            {FLOORS.map((f) => (
-              <div className="hq-floor" key={f}>
-                <span className="hq-floor-no" aria-hidden="true">{f}F</span>
-                <div className="hq-floor-rooms">
-                  {roomsOnFloor(f).map((room) => (
-                    <Room key={room.id} room={room} selected={selected === room.id}
-                      onSelect={pick} boardLights={boardLights} />
+
+          <div className="hq-console-grid">
+            <aside className="hq-side hq-side-left" aria-label="Departments">
+              <div className="hq-side-title">Departments</div>
+              <ul className="hq-dept-list">
+                {DEPT_ORDER.map((id) => {
+                  const room = roomById(id);
+                  const seats = seatsIn(id);
+                  const filled = seats.filter((s) => s.status !== "open").length;
+                  const training = seats.filter((s) => s.status === "training").length;
+                  const state = id === "owner" ? "you" : deptState(id);
+                  return (
+                    <li key={id}>
+                      <button type="button" onClick={() => pick(id)} aria-pressed={selected === id}
+                        className={`hq-dept-row${selected === id ? " is-selected" : ""}`}>
+                        <span className={`hq-dot hq-dot-${state === "on" ? "you" : state}`} aria-hidden="true" />
+                        <span className="hq-dept-name">{room.name}</span>
+                        <span className="hq-dept-num">{filled}/{seats.length}</span>
+                        <span className="hq-dept-bar" aria-hidden="true"><i style={{ width: `${(filled / seats.length) * 100}%` }} /></span>
+                        <span className="hq-dept-sub">{training ? `${training} in training` : filled ? "Staffed" : "Hiring"}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </aside>
+
+            <div className="hq-center">
+              {view === "station" ? (
+                <HQStation seats={SEATS} roomStates={roomStates} board={boardLights}
+                  selected={selected} onSelect={pick} reduceMotion={reduceMotion} />
+              ) : (
+                <section className="hq-building" aria-label="The building, floor by floor. Tap a room to see that department.">
+                  <div className="hq-sky" aria-hidden="true">
+                    {STARS.map(([left, top, delay], i) => (
+                      <span key={i} className="hq-star" style={{ left: `${left}%`, top, animationDelay: `${delay}s` }} />
+                    ))}
+                    <Pixels rects={MOON} w={9} h={9} className="hq-moon" />
+                  </div>
+                  <div className="hq-sign" aria-hidden="true">
+                    <span className="hq-sign-text">Smooth Training</span>
+                    <span className="hq-sign-hq">HQ</span>
+                  </div>
+                  <div className="hq-tower">
+                    {FLOORS.map((f) => (
+                      <div className="hq-floor" key={f}>
+                        <span className="hq-floor-no" aria-hidden="true">{f}F</span>
+                        <div className="hq-floor-rooms">
+                          {roomsOnFloor(f).map((room) => (
+                            <Room key={room.id} room={room} selected={selected === room.id}
+                              onSelect={pick} boardLights={boardLights} />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="hq-street" aria-hidden="true">
+                    <Pixels rects={palm} w={PALM_W} h={PALM_H} className="hq-palm hq-palm-l" />
+                    <Pixels rects={vanRects} w={VAN_W} h={VAN_H} className="hq-van" />
+                    <Pixels rects={palm} w={PALM_W} h={PALM_H} className="hq-palm hq-palm-r" />
+                  </div>
+                </section>
+              )}
+            </div>
+
+            <aside className="hq-side hq-side-right" aria-label="Crew activity">
+              <div className="hq-side-title">Your desk</div>
+              <button type="button" className="hq-side-big" onClick={showDesk}>
+                <b>{deskKnown ? desk.open.length : "–"}</b><span>waiting on you</span>
+              </button>
+              <div className="hq-side-title">Crew log</div>
+              {log.length > 0 ? (
+                <ol className="hq-log">
+                  {log.map((row, i) => (
+                    <li key={i}><time>{clock(row.at)}</time><b>{row.who}</b><span>{row.text}</span></li>
                   ))}
-                </div>
-              </div>
-            ))}
+                </ol>
+              ) : (
+                <ol className="hq-log hq-log-quiet">
+                  {SEATS.filter((s) => s.status === "training").map((s) => (
+                    <li key={s.id}><time>--:--</time><b>{s.short}</b><span>in training · first shift after {s.waitingOn}</span></li>
+                  ))}
+                </ol>
+              )}
+            </aside>
           </div>
-          <div className="hq-street" aria-hidden="true">
-            <Pixels rects={palm} w={PALM_W} h={PALM_H} className="hq-palm hq-palm-l" />
-            <Pixels rects={vanRects} w={VAN_W} h={VAN_H} className="hq-van" />
-            <Pixels rects={palm} w={PALM_W} h={PALM_H} className="hq-palm hq-palm-r" />
+
+          <div className="hq-console-foot">
+            <span className="hq-legend-item"><span className="hq-dot hq-dot-you" aria-hidden="true" /> On shift</span>
+            <span className="hq-legend-item"><span className="hq-dot hq-dot-training" aria-hidden="true" /> In training</span>
+            <span className="hq-legend-item"><span className="hq-dot hq-dot-open" aria-hidden="true" /> Open seat</span>
+            <span className="hq-view" role="group" aria-label="Map style">
+              <button type="button" aria-pressed={view === "station"} onClick={() => chooseView("station")}>Station</button>
+              <button type="button" aria-pressed={view === "building"} onClick={() => chooseView("building")}>Building</button>
+            </span>
           </div>
         </section>
 
@@ -606,7 +729,7 @@ const CSS = `
 .hq-only { margin-left: auto; font-size: 12px; color: var(--hq-muted); white-space: nowrap; }
 @media (max-width: 420px) { .hq-only { display: none; } }
 
-.hq-wrap { max-width: 980px; margin: 0 auto; padding-inline: 16px; padding-block: 16px calc(48px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 20px; }
+.hq-wrap { max-width: 1200px; margin: 0 auto; padding-inline: 16px; padding-block: 16px calc(48px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 20px; }
 .hq-intro { display: grid; gap: 10px; }
 .hq-hello { margin: 0; font-family: var(--hq-display); font-size: 22px; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
 .hq-glance { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -620,6 +743,108 @@ const CSS = `
 .hq-chip-training b { color: var(--hq-amber); }
 .hq-chip-desk { cursor: pointer; border-color: rgba(8,220,224,.45); }
 .hq-chip-desk b { color: var(--hq-cyan); }
+
+/* ── The station console ────────────────────────────────────── */
+.hq-console {
+  border: 1px solid rgba(8,220,224,.4); border-radius: 12px; overflow: hidden;
+  background: #020607; box-shadow: 0 0 0 1px #000, 0 0 28px rgba(8,220,224,.08);
+}
+.hq-console-top {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  border-bottom: 1px solid rgba(8,220,224,.28); background: #03090A;
+}
+.hq-stat {
+  display: grid; gap: 2px; padding: 8px 12px; min-width: 0; text-align: left;
+  border: 0; border-right: 1px solid rgba(8,220,224,.14); background: transparent; color: inherit;
+  background-image: repeating-linear-gradient(0deg, rgba(8,220,224,.03) 0 1px, transparent 1px 3px);
+}
+.hq-stat span { font-family: var(--hq-pixel); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; color: var(--hq-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hq-stat b { font-family: var(--hq-pixel); font-weight: 400; font-size: 20px; line-height: 1.1; color: var(--hq-cyan); text-shadow: 0 0 8px rgba(8,220,224,.55); font-variant-numeric: tabular-nums; }
+.hq-stat-green b { color: #2FE0A8; text-shadow: 0 0 8px rgba(47,224,168,.5); }
+.hq-stat-amber b { color: var(--hq-amber); text-shadow: 0 0 8px rgba(251,191,36,.45); }
+.hq-stat-desk { cursor: pointer; }
+.hq-stat-desk:hover { background-color: rgba(8,220,224,.06); }
+
+.hq-console-grid { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "center" "left" "right"; }
+@media (min-width: 760px) {
+  .hq-console-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "center center" "left right"; }
+}
+@media (min-width: 1100px) {
+  .hq-console-grid { grid-template-columns: 230px minmax(0, 1fr) 250px; grid-template-areas: "left center right"; }
+}
+.hq-center { grid-area: center; min-width: 0; background: #020405; }
+.hq-side-left { grid-area: left; }
+.hq-side-right { grid-area: right; }
+.hq-side {
+  display: grid; align-content: start; gap: 8px; padding: 12px; min-width: 0;
+  border-top: 1px solid rgba(8,220,224,.14);
+  background: #030809 repeating-linear-gradient(0deg, rgba(8,220,224,.025) 0 1px, transparent 1px 3px);
+}
+@media (min-width: 1100px) {
+  .hq-side { border-top: 0; }
+  .hq-side-left { border-right: 1px solid rgba(8,220,224,.2); }
+  .hq-side-right { border-left: 1px solid rgba(8,220,224,.2); }
+}
+@media (min-width: 760px) and (max-width: 1099px) { .hq-side-left { border-right: 1px solid rgba(8,220,224,.14); } }
+.hq-side-title { font-family: var(--hq-pixel); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--hq-cyan); padding-bottom: 4px; border-bottom: 1px dashed rgba(8,220,224,.25); }
+.hq-dept-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.hq-dept-row {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; grid-template-rows: auto auto auto; column-gap: 8px; row-gap: 3px;
+  width: 100%; padding: 7px 8px; border-radius: 6px; border: 1px solid transparent; background: transparent; color: inherit; cursor: pointer; text-align: left;
+}
+.hq-dept-row:hover { background: rgba(8,220,224,.05); }
+.hq-dept-row.is-selected { border-color: rgba(8,220,224,.45); background: rgba(8,220,224,.07); }
+.hq-dept-row .hq-dot { grid-row: 1; margin-top: 4px; }
+.hq-dept-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hq-dept-num { font-family: var(--hq-pixel); font-size: 12px; color: var(--hq-cyan); font-variant-numeric: tabular-nums; }
+.hq-dept-bar { grid-column: 2 / 4; height: 3px; background: #0E1A1D; border-radius: 2px; overflow: hidden; }
+.hq-dept-bar i { display: block; height: 100%; background: var(--hq-cyan); box-shadow: 0 0 6px rgba(8,220,224,.6); }
+.hq-dept-sub { grid-column: 2 / 4; font-size: 11.5px; color: var(--hq-muted); }
+.hq-side-big { display: grid; justify-items: start; gap: 0; padding: 6px 2px; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.hq-side-big b { font-family: var(--hq-pixel); font-weight: 400; font-size: 34px; line-height: 1; color: var(--hq-cyan); text-shadow: 0 0 10px rgba(8,220,224,.6); }
+.hq-side-big span { font-size: 12px; color: var(--hq-muted); }
+.hq-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 12px; line-height: 1.4; }
+.hq-log li { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 6px; align-items: baseline; }
+.hq-log time { font-family: var(--hq-pixel); font-size: 10px; color: #5F7878; font-variant-numeric: tabular-nums; }
+.hq-log b { font-family: var(--hq-pixel); font-weight: 400; font-size: 10px; text-transform: uppercase; color: var(--hq-cyan); white-space: nowrap; }
+.hq-log span { color: #C9DCDC; overflow-wrap: anywhere; }
+.hq-log-quiet b { color: var(--hq-amber); }
+.hq-console-foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 8px 12px;
+  border-top: 1px solid rgba(8,220,224,.28); background: #03090A; font-size: 12px; color: var(--hq-muted);
+}
+.hq-legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.hq-view { margin-left: auto; display: inline-flex; border: 1px solid var(--hq-line2); border-radius: 8px; overflow: hidden; }
+.hq-view button { border: 0; background: transparent; color: var(--hq-muted); padding: 5px 12px; font-family: var(--hq-pixel); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }
+.hq-view button[aria-pressed="true"] { background: rgba(8,220,224,.14); color: var(--hq-cyan); }
+.hq-dot-on { background: #2FE0A8; }
+
+/* the map itself */
+.hq-map { position: relative; line-height: 0; }
+/* A faint screen over the map — scan lines and a darkened edge — so it reads
+   as a live monitor rather than a picture. Purely visual; it never takes a tap. */
+.hq-map::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, rgba(0,0,0,.16) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, transparent 58%, rgba(0,0,0,.45) 100%);
+  box-shadow: inset 0 0 24px rgba(8,220,224,.12);
+}
+.hq-map canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; image-rendering: crisp-edges; }
+.hq-map-label {
+  position: absolute; line-height: 1.2; pointer-events: none; white-space: nowrap;
+  font-family: var(--hq-pixel); font-size: clamp(7px, 1.25vw, 11px); letter-spacing: .04em; text-transform: uppercase;
+  color: #CFE7E7; text-shadow: 0 1px 0 #000, 0 0 4px #000;
+}
+.hq-map-label.is-selected { color: var(--hq-cyan); text-shadow: 0 0 6px rgba(8,220,224,.7), 0 1px 0 #000; }
+.hq-map-tag {
+  position: absolute; transform: translate(-50%, -100%); line-height: 1.2; pointer-events: none; white-space: nowrap;
+  padding: 1px 3px; border-radius: 3px; background: rgba(2,5,6,.85); border: 1px solid;
+  font-family: var(--hq-pixel); font-size: clamp(7px, 1vw, 9px); text-transform: uppercase;
+}
+.hq-map-tag-you { color: var(--hq-cyan); border-color: rgba(8,220,224,.6); }
+.hq-map-tag-training { color: var(--hq-amber); border-color: rgba(251,191,36,.6); }
+.hq-center .hq-building { border: 0; border-radius: 0; }
 
 /* ── The building ───────────────────────────────────────────── */
 .hq-building {

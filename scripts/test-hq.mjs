@@ -95,9 +95,17 @@ console.log("desk controls");
   ok(/onClick=\{\(\) => setStatus\(item, "open"\)\}[\s\S]{0,120}>Undo</.test(hqCode), "Undo puts a handled item back on the desk");
   ok(/await callHq\(\{ action: "resolve", id: item\.id, status \}\)/.test(hqCode), "a status change is saved through the resolve action");
   ok(/setDesk\(before\)/.test(hqCode), "a refused save puts the item back where it was");
-  ok(/desk\.open\.length\}<\/b> waiting on you/.test(hqCode.replace(/\s+/g, " ")) || /: desk\.open\.length\}<\/b> waiting on you/.test(hqCode.replace(/\s+/g, " ")),
-    "the \"waiting on you\" count is the real number of open items");
-  ok(!/<b>0<\/b> waiting on you/.test(hqCode), "…not a hardcoded zero");
+  // The station's "Your desk" number and the side panel's big number both
+  // count the open items — two places, so both are counted (check:weak's rule).
+  const flat = hqCode.replace(/\s+/g, " ");
+  ok(/<span>Your desk<\/span><b>\{deskKnown \? desk\.open\.length : "–"\}<\/b>/.test(flat),
+    "the station's \"Your desk\" number is the real count of open items");
+  ok(/<b>\{deskKnown \? desk\.open\.length : "–"\}<\/b><span>waiting on you<\/span>/.test(flat),
+    "…and so is the side panel's");
+  ok(!/<b>0<\/b>/.test(flat), "…neither is a hardcoded zero");
+  // The station is part of the HQ's lazy chunk too, never the main bundle.
+  ok(/import HQStation from "\.\/HQStation\.jsx";/.test(hqCode), "the station map is loaded by the HQ screen");
+  ok(!/HQStation|hqStation/.test(APP), "App.jsx never pulls the station map into the main bundle");
   // A callable's error message IS its code ("internal", "not-found"), so it is
   // never shown raw (S202's lesson).
   ok(/setDeskErr\(deskError\(e\)\)/.test(hqCode) && !/setDeskErr\(e\.message\)|setDeskErr\(String\(e/.test(hqCode),

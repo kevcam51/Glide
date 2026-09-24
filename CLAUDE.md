@@ -155,7 +155,21 @@ enabled (Blaze has no default spending cap).
 > closed, connectors built in, ≥1 h interval, daily cap, NO permission prompts
 > — so each gets only the connectors its job needs); round-the-clock Glidna
 > jobs run on Cloud Functions with Glidna's API key. Piece 3 = the door that
-> lets a routine hand work to this desk._
+> lets a routine hand work to this desk.
+> **THE STATION (same day), Kevin: "take almost all the inspiration from ...
+> that guy on GitHub ... the numbers on the sides, all the departments, and
+> also seeing the people moving."** `src/hqStation.js` (pure: map, doors,
+> routes, walkers, draw calls) + `src/HQStation.jsx` (canvas at 320×240 scaled
+> with `image-rendering: pixelated`, still layer drawn once, people and
+> lights each frame, HTML name tags that follow them). StarNet's LAYOUT,
+> Smooth Training's art — cyan on black, a palm courtyard, the van out front.
+> ⚠️ **ONLY REAL SEATS MOVE:** walkers exist for workers in training and
+> nobody else; open seats are dim outlines; no filler people. ⚠️ Routes are
+> door → hallway → cross-hallway → door, every leg axis-aligned, and
+> `scripts/test-hq-station.mjs` (78) samples all 81 routes every half pixel,
+> simulates 20 minutes of walking, and draws against a recording context that
+> refuses anything off the map; five deliberate breaks each went red. The
+> old cutaway stays as a "Building" view beside "Station" (per device)._
 >
 > _**S237e (Sep 21): two screens promised a goal date the plan refuses to
 > prescribe — and the flag that was supposed to catch it was firing on
