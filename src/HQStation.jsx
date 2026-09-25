@@ -261,8 +261,10 @@ export default function HQStation({
           if (!s.swapAt) { el.style.opacity = "0"; s.swapAt = now + LABEL_FADE_MS; }
           else if (now >= s.swapAt) { put(el, slots[s.next]); s.shown = s.next; s.swapAt = 0; el.style.opacity = show; }
         } else {
-          // Staying (or it changed its mind while fading): shown unless hidden.
-          s.swapAt = 0; el.style.opacity = show;
+          // Staying (or it changed its mind while fading): shown unless
+          // hidden, and re-placed — a resize or the pixel font arriving
+          // changes the name's size, and with it where that place is.
+          put(el, slots[s.shown]); s.swapAt = 0; el.style.opacity = show;
         }
         if (!s.hidden) hung.push(slots[s.shown]);
       }

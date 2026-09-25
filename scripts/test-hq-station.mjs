@@ -784,6 +784,8 @@ console.log("the page");
     "names are placed at their size as measured on screen, in map units");
   ok(/fonts\.addEventListener\("loadingdone", again\)/.test(page), "…measured again once the pixel font arrives");
   ok(/const \[x, y\] = w\.mode === "sit" \? w\.seat : \[w\.x, w\.y\];/.test(page), "a seated walker's tag sits over their chair");
+  ok(/\} else \{\s*put\(el, slots\[s\.shown\]\); s\.swapAt = 0; el\.style\.opacity = show;\s*\}/.test(page),
+    "a name that stays put is re-placed at its current size, so a resize never leaves it off its wall");
 }
 
 console.log(`\n${checks - fails}/${checks} HQ station checks passed`);
