@@ -186,8 +186,9 @@ function seed(db) {
   eq(r.crew.claudeMinutes, 6, "…for six minutes");
   eq(r.buckets[1].crewCents, 3.5, "a shift at 9:30pm Monday in Miami lands on Monday, not UTC's Tuesday");
   ok(r.buckets[0].claudeShifts === 1, "the Claude shift lands on its own day");
-  eq(r.claude.planCents, 20000, "the plan defaults to $200 a month");
-  eq(r.claude.shareCents, Math.round((20000 * 7) / 30), "the week carries its share of the plan");
+  eq(r.claude.planCents, 1667, "the plan defaults to Claude Pro, $200 a year: $16.67 a month");
+  eq(r.claude.planName, "Claude Pro (yearly)", "…and says which plan it is");
+  eq(r.claude.shareCents, Math.round((1667 * 7) / 30), "the week carries its share of the plan");
   eq(r.totalCents, Math.round((40 + 3.5 + r.claude.shareCents) * 100) / 100, "the total is all three lines");
   ok(r.hasNext === false, "there is no later week than this one");
 

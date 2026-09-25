@@ -22,7 +22,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { stripComments } from "./lib/strip-comments.mjs";
 import {
-  ROOMS, SEATS, FLOORS, CREW_RULES, BLUEPRINT,
+  ROOMS, SEATS, FLOORS, CREW_RULES, BLUEPRINT, ENGINES,
   seatsIn, headOf, orgCounts, roomSummary, roomsOnFloor, liveSeats,
 } from "../src/hqOrg.js";
 import { W, H, roomScene, seatCenters, palmTree, van, PALM_W, PALM_H, VAN_W, VAN_H } from "../src/hqPixels.js";
@@ -149,10 +149,24 @@ console.log("org chart");
   }
 
   const training = SEATS.filter((s) => s.status === "training");
-  ok(training.map((s) => s.id).sort().join() === "bookkeeper,front-desk,progress-analyst",
+  const first = training.filter((s) => s.firstHire);
+  ok(first.map((s) => s.id).sort().join() === "bookkeeper,front-desk,progress-analyst",
     "the first hires are the Bookkeeper, the Front Desk Coordinator and the Progress Analyst");
-  ok(training.every((s) => s.firstHire && s.waitingOn && s.engine === "claude"), "each first hire says what it's waiting on and where it runs");
+  ok(first.every((s) => s.waitingOn && s.engine === "claude"), "each first hire says what it's waiting on and runs on the Claude plan");
+  ok(training.map((s) => s.id).sort().join() === "bookkeeper,front-desk,progress-analyst,systems-watchdog",
+    "…and the Systems Watchdog joins them to watch the plan's usage");
+  const dog = training.find((s) => s.id === "systems-watchdog");
+  ok(dog && dog.engine === "mac" && ENGINES.mac && dog.waitingOn, "…from the Claude app on the owner's Mac, the one place the usage meter can be read");
   ok(training.every((s) => s.role === "worker"), "first hires are workers, not heads");
+  // Kevin: "let me know how to check mark for each one" — every hire names the
+  // apps to leave on for it, and every one reaches the desk through Glidna.
+  ok(training.every((s) => Array.isArray(s.apps) && s.apps.length && s.apps.some((a) => /^Glidna/.test(a))),
+    "every hire lists the apps to leave checked for it, Glidna among them");
+  ok(SEATS.filter((s) => s.status === "open").every((s) => !s.apps), "…and an open seat lists none until it is hired");
+  ok(/Gmail \(drafts only\)/.test(training.find((s) => s.id === "front-desk").apps.join()) &&
+    !training.some((s) => s.id !== "front-desk" && s.apps.join().includes("Gmail")),
+    "only the Front Desk gets Gmail, and only for drafts");
+  ok(!training.some((s) => s.id !== "bookkeeper" && s.apps.join().includes("QuickBooks")), "…only the Bookkeeper gets QuickBooks");
   ok(/After Finance and the Front Office are running/.test(SEATS.find((s) => s.id === "chief-of-staff").hireWhen || ""),
     "the Chief of Staff waits until there is a desk's worth of work to brief on");
 
@@ -194,7 +208,7 @@ console.log("live seats");
   ok(liveSeats(SEATS, { active: [{ worker: "owner" }] }).find((s) => s.id === "owner").status === "you",
     "…and not even a clock-in can move the owner");
   const counts = orgCounts(moved);
-  ok(counts.onShift === 1 && counts.working === 3 && counts.training === 0, `the counts follow (${JSON.stringify(counts)})`);
+  ok(counts.onShift === 1 && counts.working === 3 && counts.training === 1, `the counts follow (${JSON.stringify(counts)})`);
   ok(roomSummary("front", moved) === "1 on shift · 3 open", `a room's line says who is on shift (${roomSummary("front", moved)})`);
   ok(roomSummary("finance", moved) === "1 working · 2 open", `…and who is working (${roomSummary("finance", moved)})`);
   ok(roomSummary("finance") === "1 in training · 2 open", "the chart's own line is unchanged without live data");

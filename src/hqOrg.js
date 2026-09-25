@@ -60,6 +60,7 @@ export const SEATS = [
     job: "Double-checks the Bookkeeper's numbers before they reach you and writes the monthly money summary." },
   { id: "bookkeeper", room: "finance", role: "worker", title: "Bookkeeper", short: "Bookkeeper", status: "training",
     firstHire: true, engine: "claude", waitingOn: "its routine is set up from the crew's repository (QuickBooks + Glidna)",
+    apps: ["Intuit QuickBooks (reports only)", "Glidna"],
     job: "Checks your QuickBooks every Monday: money in, money out, who owes you and anything unusual." },
   { id: "billing-specialist", room: "finance", role: "worker", title: "Billing Specialist", short: "Billing", status: "open",
     job: "Watches session payments: failed cards, refunds to review and clients with no card on file." },
@@ -67,8 +68,9 @@ export const SEATS = [
   // ── Operations & Tech ─────────────────────────────────────────────────────
   { id: "operations-manager", room: "ops", role: "head", title: "Operations Manager", short: "Manager", status: "open",
     job: "Keeps the tools running and decides which problems are worth your time." },
-  { id: "systems-watchdog", room: "ops", role: "worker", title: "Systems Watchdog", short: "Watchdog", status: "open",
-    job: "Opens glidna.com and runs the tests every morning, and reports anything broken." },
+  { id: "systems-watchdog", room: "ops", role: "worker", title: "Systems Watchdog", short: "Watchdog", status: "training",
+    engine: "mac", waitingOn: "its first evening check on your Mac", apps: ["Your Claude app (its usage meter)", "Glidna"],
+    job: "Every evening, checks how much of your Claude plan you and the crew have used and whether every crew run went through, and puts a note on your desk when it's time to upgrade." },
 
   // ── Marketing ─────────────────────────────────────────────────────────────
   { id: "marketing-manager", room: "marketing", role: "head", title: "Marketing Manager", short: "Manager", status: "open",
@@ -91,6 +93,7 @@ export const SEATS = [
     job: "Checks every drafted reply before it reaches you and keeps track of how fast people hear back." },
   { id: "front-desk", room: "front", role: "worker", title: "Front Desk Coordinator", short: "Front Desk", status: "training",
     firstHire: true, engine: "claude", waitingOn: "its routine is set up from the crew's repository (Gmail + Glidna, drafts only)",
+    apps: ["Gmail (drafts only)", "Glidna"],
     job: "Reads new inquiries in your email and drafts replies in your voice. You send them yourself." },
   { id: "scheduling", room: "front", role: "worker", title: "Scheduling Coordinator", short: "Scheduling", status: "open",
     job: "Keeps an eye on sessions, reschedules and no-shows, and drafts reminders." },
@@ -102,6 +105,7 @@ export const SEATS = [
     job: "Reviews every check-in and progress note before it reaches you." },
   { id: "progress-analyst", room: "coaching", role: "worker", title: "Progress Analyst", short: "Progress", status: "training",
     firstHire: true, engine: "claude", waitingOn: "its routine is set up from the crew's repository (Glidna only)",
+    apps: ["Glidna"],
     job: "Reads Glidna each week to see who's slipping, who's winning and who needs a call, and drafts check-ins for you to send." },
   { id: "check-in-coordinator", room: "coaching", role: "worker", title: "Check-In Coordinator", short: "Check-ins", status: "open",
     job: "Drafts personal check-in messages for your clients, for you to approve." },
@@ -120,17 +124,23 @@ export const CREW_RULES = [
   { title: "Advice stays with the pros", body: "No tax, legal, investment or medical advice. Those questions go to your accountant, lawyer or doctor." },
 ];
 
-// Where a worker's thinking runs (S238, Kevin: "I'm already paying $200 a
-// month and I want to be able to use that as well").
+// Where a worker's thinking runs (S238, Kevin: "I'm already paying $200 ...
+// and I want to be able to use that as well"). The plan is Claude Pro, paid
+// yearly: $200 a YEAR, not a month (confirmed from the app, round 5).
 //   claude — a Claude routine on the owner's own Claude plan, in Anthropic's
 //            cloud: no extra bill within the plan's limits, runs with his Mac
 //            closed, and reaches QuickBooks / Gmail through the connectors he
-//            has already signed into. At most hourly; shares the plan's limits.
+//            has already signed into. At most hourly; shares the plan's limits
+//            with his own use of Claude, and Pro caps how many can run a day.
+//   mac    — a scheduled task in the Claude app on the owner's Mac. Runs when
+//            the app is open (or the next time it opens). Only for what the
+//            cloud can't see, like the plan's own usage meter.
 //   cloud  — a Glidna Cloud Function on Google's servers, paying per use from
 //            Glidna's own Anthropic account: any schedule, always on, but every
 //            outside connection has to be built into Glidna first.
 export const ENGINES = {
   claude: { label: "Your Claude plan", short: "Claude" },
+  mac: { label: "The Claude app on your Mac", short: "Mac" },
   cloud: { label: "Glidna cloud", short: "Cloud" },
   manual: { label: "By hand", short: "Manual" },
 };
@@ -145,14 +155,16 @@ export const BLUEPRINT = [
     use: "One tray for everything waiting on your OK, and a log of every shift." },
   { id: "door", title: "The crew's front door", status: "built",
     use: "Workers running on your Claude plan hand their work to this desk through the Glidna connector." },
-  { id: "office", title: "The crew's own office: handbook, jobs and a guard", status: "next",
+  { id: "office", title: "The crew's own office: handbook, jobs and a guard", status: "built",
     use: "A private repository every routine works from. A guard in it refuses any tool that could send, pay, delete or change something, in code." },
-  { id: "finance", title: "Finance: the Bookkeeper, on your Claude plan", status: "planned",
-    use: "Every Monday it reads QuickBooks and puts a money report on your desk." },
+  { id: "watchdog", title: "The Systems Watchdog: your plan's usage", status: "built",
+    use: "Every evening it reads your Claude plan's usage meter and checks every crew run went through. When it's time to upgrade, a note lands on your desk." },
+  { id: "finance", title: "The first shifts: Bookkeeper, Front Desk and Progress Analyst", status: "next",
+    use: "Each gets its own routine on your Claude plan, with only its own apps. The Bookkeeper reads QuickBooks every Monday and puts a money report on your desk." },
   { id: "front", title: "Front Office: the Front Desk, on your Claude plan", status: "planned",
     use: "Twice each weekday it drafts replies to new inquiries in your Gmail. You send them yourself." },
   { id: "coaching", title: "Coaching: the Progress Analyst, on your Claude plan", status: "planned",
-    use: "Every Monday it reads Glidna, shows who's slipping or winning, and drafts check-ins for you to send." },
+    use: "Every Tuesday it reads Glidna, shows who's slipping or winning, and drafts check-ins for you to send." },
   { id: "cloud", title: "Glidna cloud workers", status: "planned",
     use: "Round-the-clock jobs that watch Glidna itself, like the Systems Watchdog." },
   { id: "chief", title: "Chief of Staff: your morning brief", status: "planned",

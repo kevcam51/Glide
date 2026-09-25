@@ -140,7 +140,12 @@ console.log("Claude's own tools");
   for (const t of ["Bash", "BashOutput", "KillShell", "Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch", "Task", "Agent"]) {
     ok(call(t).refused, `${t} is refused: no crew job runs commands, edits files or reaches the web`);
   }
-  for (const t of ["Read", "Glob", "Grep", "LS", "TodoWrite", "ToolSearch"]) {
+  // A worker that could set up a routine of its own could start a copy of
+  // itself from another repository, where this guard isn't watching.
+  for (const t of ["RemoteTrigger", "CronCreate", "PushNotification", "SendMessage", "Skill", "AskUserQuestion", "TaskOutput", "TaskStop", "SomeToolFromNextYear"]) {
+    ok(call(t).refused && /crew's rulebook/.test(call(t).why), `${t} is refused: a built-in tool nobody has cleared is not part of a crew job`);
+  }
+  for (const t of ["Read", "Glob", "Grep", "LS", "TodoWrite", "ToolSearch", "TaskCreate", "TaskUpdate", "TaskList"]) {
     ok(call(t).allowed, `${t} is allowed: reading this repository and loading a connector's tools change nothing`);
   }
 }

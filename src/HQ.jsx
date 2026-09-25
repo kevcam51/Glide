@@ -212,6 +212,9 @@ function SeatRow({ s, lastShift }) {
       {s.role === "head" && <span className="hq-seat-role">Department head</span>}
       <p className="hq-seat-job">{s.job}</p>
       {s.engine && ENGINES[s.engine] && <p className="hq-seat-meta">Runs on: {ENGINES[s.engine].label}</p>}
+      {/* Kevin: "let me know how to check mark for each one" — the apps to
+          leave on for this worker, and nothing else. */}
+      {s.apps && s.apps.length > 0 && <p className="hq-seat-meta">Apps: {s.apps.join(" + ")}. Every other app off.</p>}
       {lastShift && (
         <p className="hq-seat-meta">Last shift: {fmtWhen(lastShift.startedAt)} · {SHIFT_LABEL[lastShift.status] || lastShift.status}</p>
       )}

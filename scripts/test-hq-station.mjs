@@ -38,6 +38,7 @@ import {
   seatStand, PERSONAL_SPACE, crowded, claimedSpots, DOORWAYS, FIRST_RUN_MS, RUN_GAP_MS, HANDOFF_MS,
   HANG_BACK, behind, PERSON_W, personBox, tagBox, boxesMeet, labelSlots, placeLabel, crowdBoxes,
   tagsUnderLabels, ahead, LABEL_SETTLE_MS, LABEL_LOOKAHEAD_S,
+  DESK_TIME_MS, FIRST_STROLL_MS, STROLL_LIMIT, strolling,
 } from "../src/hqStation.js";
 
 let fails = 0, checks = 0;
@@ -362,13 +363,14 @@ console.log("personal space");
   const chair = seatStand(b.home, b.seat);
   ok(claimed.some(([x, y]) => x === chair[0] && y === chair[1]), "…and so is their chair while they're out");
   ok(!claimedSpots([a, b], a).some(([x, y]) => x === a.x && y === a.y), "…but never your own spot");
-  // Every seat on the org chart filled at once — far busier than today — for twenty minutes.
+  // Every seat on the org chart filled at once — far busier than today — for
+  // two hours: people mostly sit now, so it takes that long to see hundreds of stops.
   const all = SEATS.map((s) => (s.status === "open" ? { ...s, status: "training" } : s));
   const ws = makeWalkers(all, 0, 21);
   const station = makeStation(0, 21);
   let clash = 0, doorway = 0, stops = 0;
   const seen = [];
-  for (let step = 0; step < 24000; step++) {
+  for (let step = 0; step < 144000; step++) {
     const now = step * 50;
     if (step % 600 === 300) queueDelivery(ws[Math.floor(step / 600) % ws.length], [`d${step}`], station);
     const modes = ws.map((w) => w.mode);
@@ -383,8 +385,62 @@ console.log("personal space");
     }
   }
   ok(stops > 300, `the full crew makes plenty of stops (${stops})`);
-  ok(clash === 0, `with every seat filled, no two people ever stand within arm's reach of each other in twenty minutes${seen.length ? ` (${seen.join("; ")})` : ""}`);
+  ok(clash === 0, `with every seat filled, no two people ever stand within arm's reach of each other in two hours${seen.length ? ` (${seen.join("; ")})` : ""}`);
   ok(doorway === 0, "…and nobody stops in a doorway");
+}
+
+// ── 3d½. Mostly at their desks ─────────────────────────────────────────────
+// Kevin: "most of the time they're going to be at their desks but
+// occasionally we have them walk around, especially if they're sending me
+// something" — and the building must never look like a crowd as the crew grows.
+console.log("mostly at their desks");
+{
+  const run = (seats, seed, minutes, work = false) => {
+    const ws = makeWalkers(seats, 0, seed);
+    const station = makeStation(0, seed);
+    let seated = 0, samples = 0, mostStrolling = 0, mostUp = 0, delivered = 0;
+    const leftDesk = new Set();
+    for (let step = 0; step < minutes * 1200; step++) {
+      const now = step * 50;
+      if (work && step % 1200 === 600) queueDelivery(ws[(step / 1200) % ws.length | 0], [`w${step}`], station);
+      stepCrew(ws, 0.05, now, station);
+      for (const w of ws) {
+        delivered += w.events.filter((e) => e.type === "delivered").length;
+        w.events.length = 0;
+        if (w.errand === "stroll") leftDesk.add(w.id);
+      }
+      const up = ws.filter((w) => w.mode !== "sit").length;
+      seated += ws.length - up; samples += ws.length;
+      mostStrolling = Math.max(mostStrolling, strolling(ws));
+      mostUp = Math.max(mostUp, up);
+    }
+    return { share: seated / samples, mostStrolling, mostUp, leftDesk, count: ws.length, delivered };
+  };
+  const TODAY_IDS = ["bookkeeper", "front-desk", "progress-analyst"];
+  const crewOf = (ids) => SEATS.map((x) => (x.status === "you" ? x : { ...x, status: ids.includes(x.id) ? "training" : "open" }));
+  const today = run(crewOf(TODAY_IDS), 3, 20);
+  ok(today.share >= 0.65, `today's crew spends most of its time at its desks (${Math.round(today.share * 100)}% seated)`);
+  ok(today.leftDesk.size === today.count, `…but everyone still gets up for a stroll now and then (${today.leftDesk.size} of ${today.count} in twenty minutes)`);
+  const full = run(crewOf(SEATS.map((x) => x.id)), 3, 20, true);
+  ok(full.share >= 0.85, `with every seat filled, the building is mostly people at desks (${Math.round(full.share * 100)}% seated)`);
+  ok(full.mostStrolling <= STROLL_LIMIT, `…never more than ${STROLL_LIMIT} out strolling at once (most: ${full.mostStrolling})`);
+  ok(full.mostUp <= STROLL_LIMIT + 2, `…and never more than a handful on their feet, deliveries included (most: ${full.mostUp})`);
+  ok(full.delivered >= 15, `…while work still reaches the owner's desk (${full.delivered} hand-overs in twenty minutes)`);
+  ok(DESK_TIME_MS[0] >= 30000 && FIRST_STROLL_MS[1] <= 60000,
+    "a stroll comes after a good while at the desk, and the first one soon enough that the map isn't frozen when you open it");
+  // A stroll limit must never hold up work for the owner.
+  const ws = makeWalkers(crewOf(SEATS.map((x) => x.id)), 0, 8);
+  ws.slice(0, STROLL_LIMIT).forEach((w) => { w.errand = "stroll"; w.mode = "pause"; w.until = 1e12; });
+  const courier = ws[STROLL_LIMIT];
+  const station = makeStation(0, 8);
+  queueDelivery(courier, ["urgent"], station);
+  station.nextRunAt = 0;
+  ok(strolling(ws) === STROLL_LIMIT && dispatch(ws, 1, station) === courier && courier.errand === "deliver",
+    "with the stroll limit reached, work for the owner still goes straight away");
+  const idle = ws[STROLL_LIMIT + 1];
+  idle.until = 0;
+  stepCrew([idle, ...ws.slice(0, STROLL_LIMIT)], 0.05, 10, null);
+  ok(idle.mode === "sit", "…while someone who only wants a stroll waits their turn at the desk");
 }
 
 // ── 3e. Hanging back ───────────────────────────────────────────────────────

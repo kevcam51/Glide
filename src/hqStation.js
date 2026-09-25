@@ -290,6 +290,24 @@ function freeStop(w, crew) {
   return null;
 }
 
+// Kevin: "most of the time they're going to be at their desks but
+// occasionally we have them walk around, especially if they're sending me
+// something." A worker stays at its desk for a good while between strolls, and
+// only a couple of people are ever out strolling at once, however big the crew
+// grows, so the building never looks like a crowd. Carrying work to the owner
+// doesn't wait on either: deliveries keep their own turns (makeStation).
+export const DESK_TIME_MS = [45000, 120000];
+export const FIRST_STROLL_MS = [4000, 40000];
+export const STROLL_LIMIT = 2;
+
+// Who is out on a stroll right now (on the way, stopped somewhere, or on the
+// way back). Someone taking work to the owner is on an errand, not a stroll.
+export function strolling(crew, self = null) {
+  let n = 0;
+  for (const o of crew) if (o !== self && o.errand === "stroll") n++;
+  return n;
+}
+
 export function makeWalkers(seats, now = 0, seed = 0) {
   const byRoom = {};
   const out = [];
@@ -302,11 +320,11 @@ export function makeWalkers(seats, now = 0, seed = 0) {
     const [x, y] = seatStand(s.room, spot);
     out.push({
       id: s.id, home: s.room, room: s.room, seat: spot,
-      x, y, mode: "sit", until: now + 1500 + rng() * 5000,
+      x, y, mode: "sit", until: now + FIRST_STROLL_MS[0] + rng() * (FIRST_STROLL_MS[1] - FIRST_STROLL_MS[0]),
       path: [], seg: 0, dest: s.room, walked: 0, speed: 20,
       dir: SEAT_FACING[s.room] || "down",
       onShift: s.status === "on-shift",
-      queue: [], queuedAt: null, carrying: [], purpose: null, events: [], held: 0, rng,
+      queue: [], queuedAt: null, carrying: [], purpose: null, errand: null, events: [], held: 0, rng,
     });
   }
   return out;
@@ -361,6 +379,9 @@ function startWalk(w, dest, target, purpose) {
   w.dest = dest;
   w.mode = "walk";
   w.purpose = purpose;
+  // Why they're up: a stroll, or work for the owner. Coming back keeps it.
+  if (purpose === "tour") w.errand = "stroll";
+  else if (purpose === "deliver") w.errand = "deliver";
 }
 
 // Whose turn it is to take work over, if anyone's: only when nobody is on a
@@ -465,8 +486,9 @@ export function stepWalker(w, dt, now, { crew = null, station = null } = {}) {
         w.until = now + HANDOFF_MS;
       } else if (w.dest === w.home) {
         w.mode = "sit";
+        w.errand = null;
         w.dir = SEAT_FACING[w.home] || "down";
-        w.until = now + (w.onShift ? 30000 : 5000 + w.rng() * 5000);
+        w.until = now + (w.onShift ? 30000 : DESK_TIME_MS[0] + w.rng() * (DESK_TIME_MS[1] - DESK_TIME_MS[0]));
       } else {
         w.mode = "pause";
         w.until = now + 2500 + w.rng() * 3500;
@@ -495,6 +517,7 @@ export function stepWalker(w, dt, now, { crew = null, station = null } = {}) {
     return w;
   }
   if (atHome) {
+    if (strolling(crew || [w], w) >= STROLL_LIMIT) { w.until = now + 8000 + w.rng() * 12000; return w; }
     const stop = freeStop(w, crew || [w]);
     if (!stop) { w.until = now + 2000 + w.rng() * 3000; return w; }
     startWalk(w, stop.room, stop.spot, "tour");

@@ -18,7 +18,8 @@
 //                   ⚠️ A cloud worker must record its cost on its time card and
 //                   NOT through aiusage.recordUsage under a member's uid — that
 //                   would count the same dollars twice, once in each line.
-//   Claude plan   — the owner's flat monthly subscription. The dollars don't
+//   Claude plan   — the owner's flat subscription (Claude Pro, paid yearly:
+//                   $200 a year, so about $16.67 of each month). The dollars don't
 //                   move with use, so this line shows the plan's price, the
 //                   share of it a period covers, and how many crew shifts ran
 //                   on it. Anthropic gives apps no way to read the plan's live
@@ -36,7 +37,10 @@
 
 const TZ = "America/New_York";
 const PERIODS = ["week", "2weeks", "month", "year"];
-const DEFAULT_COSTS = { claudePlanCents: 20000, claudePlanName: "Claude plan", claudeSince: "2026-09" };
+// A month's share of the plan. Kevin's "$200" is Claude Pro's YEARLY price
+// (the app reports the plan as Pro), so a month is a twelfth of it — the old
+// default of $200 a month made his Claude spending look twelve times too big.
+const DEFAULT_COSTS = { claudePlanCents: 1667, claudePlanName: "Claude Pro (yearly)", claudeSince: "2026-09" };
 // A day is final once it ended this long ago. aiusage.js keys a call by the
 // moment it FINISHES, so a call that runs across midnight still writes to the
 // new day — the margin covers a write that is slow to commit.

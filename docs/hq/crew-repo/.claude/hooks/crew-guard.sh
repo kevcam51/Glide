@@ -60,15 +60,17 @@ case "$name" in
       *) refuse "\"$tool\" could send, pay, publish, delete or change something, and no crew worker may. Put what you would have done in your report for the owner instead." ;;
     esac
     ;;
-  # Built-in tools that run commands, change files or reach the web. None of
-  # the crew's jobs needs them, and a worker reading strangers' email must have
-  # no way to send what it read anywhere.
-  Bash|BashOutput|KillShell|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|Task|Agent)
-    refuse "the crew works only through its connectors; \"$name\" is not part of any crew job."
+  # Claude's own tools: reading this repository, loading a connector's tools,
+  # and keeping a to-do list for the shift. They change nothing outside the run.
+  Read|Glob|Grep|LS|ToolSearch|TodoWrite|TodoRead|TaskCreate|TaskGet|TaskList|TaskUpdate)
+    exit 0
     ;;
   *)
-    # Reading this repository and Claude's own bookkeeping (loading a
-    # connector's tools, a to-do list) change nothing outside the run.
-    exit 0
+    # Everything else Claude has: running commands, changing files, reaching
+    # the web, starting helpers, setting up routines or notifications of its
+    # own — and any tool a later version of Claude adds. A worker reading
+    # strangers' email must have no way to send what it read anywhere, or to
+    # start a copy of itself that this guard isn't watching.
+    refuse "the crew works only through its connectors and this repository; \"$name\" is not part of any crew job."
     ;;
 esac

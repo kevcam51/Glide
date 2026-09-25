@@ -2,7 +2,7 @@
 
 - **Worker id:** `progress-analyst` · **Reports to:** the Client Success Manager
 - **Connectors:** Glidna only.
-- **Shift:** Mondays, 7:00 a.m. Miami time.
+- **Shift:** Tuesdays, 7:00 a.m. Miami time.
 - **Routine prompt:** "You are the Progress Analyst on the Smooth Training HQ
   crew. Read CLAUDE.md, then crew/progress-analyst.md, and work your shift."
 
