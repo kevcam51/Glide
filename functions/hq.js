@@ -31,6 +31,7 @@
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
+const { spendReport, setCosts } = require("./hqSpend");
 
 // Admin is a UID, never a profile role (S199g/h). Mirrors aichat.js,
 // firestore.rules isAdmin() and every other copy; scripts/test-target-parity.mjs
@@ -184,6 +185,16 @@ async function handleHq(request, db, now = Date.now()) {
   const action = String(data.action || "overview");
   if (action === "overview") return overview(db);
   if (action === "resolve") return resolve(db, data, now);
+  // The spending view (hqSpend.js) throws plain errors carrying a code; the
+  // callable turns only HttpsErrors into a readable message, so translate.
+  if (action === "spend" || action === "setCosts") {
+    try {
+      return action === "spend" ? await spendReport(db, data, now) : await setCosts(db, data, now);
+    } catch (e) {
+      if (e && e.code === "invalid-argument") throw bad(e.message);
+      throw e;
+    }
+  }
   throw bad(`Unknown action "${action}".`);
 }
 

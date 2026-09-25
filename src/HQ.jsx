@@ -30,6 +30,7 @@ import {
 } from "./hqOrg.js";
 import { W, H, roomScene, seatCenters, palmTree, van, PALM_W, PALM_H, VAN_W, VAN_H } from "./hqPixels.js";
 import HQStation from "./HQStation.jsx";
+import HQSpend, { SPEND_CSS, money } from "./HQSpend.jsx";
 
 const FONT_ID = "hq-silkscreen";
 const FONT_HREF = "https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap";
@@ -290,6 +291,11 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
     ? { phase: "ready", open: sample.open, recent: sample.recent, shifts: sample.shifts, openMore: false }
     : { phase: "loading", open: [], recent: [], shifts: [], openMore: false }));
   const [deskErr, setDeskErr] = useState("");
+  // This month's spending for the station's numbers; the sheet asks for more.
+  const [spend, setSpend] = useState(() => (sample ? sample.spend("month", 0) : null));
+  const [spendView, setSpendView] = useState(null);
+  const spendViewRef = useRef(null);
+  const spendOpener = useRef(null);
   const rootRef = useRef(null);
   const panelRef = useRef(null);
   const deskRef = useRef(null);
@@ -327,10 +333,17 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
   // behind it re-rendered. The ref keeps Escape calling the latest one.
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  const closeSpendRef = useRef(() => {});
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    const onKey = (e) => { if (e.key === "Escape" && onCloseRef.current) onCloseRef.current(); };
+    // Escape closes the spending sheet first, and the HQ only when nothing
+    // is open over it.
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      if (spendViewRef.current) { closeSpendRef.current(); return; }
+      if (onCloseRef.current) onCloseRef.current();
+    };
     window.addEventListener("keydown", onKey);
     if (rootRef.current) rootRef.current.focus({ preventScroll: true });
     return () => {
@@ -362,6 +375,45 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
   }, [sample]);
   useEffect(() => { load(); }, [load]);
 
+  // Spending, through the same owner-checked door. A failure here leaves the
+  // station's money numbers as dashes rather than zeros that look real.
+  const loadSpend = useCallback(async (period, offset) => {
+    if (sample) return sample.spend(period, offset);
+    try {
+      const { data } = await callHq({ action: "spend", period, offset });
+      return data;
+    } catch (e) {
+      throw new Error(deskError(e));
+    }
+  }, [sample]);
+  const saveCosts = useCallback(async (patch) => {
+    if (sample) throw new Error("The preview can't change prices.");
+    try {
+      await callHq({ action: "setCosts", ...patch });
+    } catch (e) {
+      throw new Error(deskError(e));
+    }
+    try { setSpend(await loadSpend("month", 0)); } catch { /* the sheet shows its own error */ }
+  }, [sample, loadSpend]);
+  useEffect(() => {
+    if (sample) return;
+    let alive = true;
+    loadSpend("month", 0).then((r) => { if (alive) setSpend(r); }).catch(() => {});
+    return () => { alive = false; };
+  }, [sample, loadSpend]);
+  const openSpend = (focus, e) => {
+    spendOpener.current = e && e.currentTarget;
+    spendViewRef.current = focus;
+    setSpendView(focus);
+  };
+  const closeSpend = () => {
+    spendViewRef.current = null;
+    setSpendView(null);
+    const back = spendOpener.current;
+    if (back && back.focus) requestAnimationFrame(() => back.focus({ preventScroll: true }));
+  };
+  closeSpendRef.current = closeSpend;
+
   // Mark done, dismiss or undo. The screen changes at once; if the server
   // refuses, the item goes back where it was and the reason is shown.
   const setStatus = async (item, status) => {
@@ -385,16 +437,15 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
     }
   };
 
-  // The station's numbers. Spend counts only Glidna cloud shifts that report a
-  // cost; a shift run on the owner's Claude plan costs Glidna nothing.
+  // The station's numbers. AI spend is this month's Glidna AI plus the crew's
+  // cloud shifts — the spending that moves with use. The Claude plan is flat,
+  // so its number is how many crew shifts ran on it this month.
   const deskKnown = desk.phase === "ready" || desk.phase === "refreshing";
   const onShift = SEATS.filter((s) => s.status === "on-shift" || s.status === "working").length;
   const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
-  const monthStart = new Date(dayStart.getFullYear(), dayStart.getMonth(), 1).getTime();
   const shiftsToday = desk.shifts.filter((sh) => sh.startedAt >= dayStart.getTime()).length;
-  const spendCents = desk.shifts
-    .filter((sh) => sh.startedAt >= monthStart && Number.isFinite(sh.costCents))
-    .reduce((sum, sh) => sum + sh.costCents, 0);
+  const aiSpendCents = spend ? spend.glidna.cents + spend.crew.cloudCents : null;
+  const claudeRuns = spend ? spend.crew.claudeShifts : null;
   const log = crewLog(desk);
 
   const behavior = reduceMotion ? "auto" : "smooth";
@@ -418,7 +469,7 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
 
   return createPortal(
     <div className="hq-root" role="dialog" aria-modal="true" aria-label="Smooth Training HQ" ref={rootRef} tabIndex={-1}>
-      <style>{CSS}</style>
+      <style>{CSS + SPEND_CSS}</style>
       <header className="hq-top">
         <button type="button" className="hq-close" onClick={onClose} aria-label="Close HQ">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2"
@@ -450,10 +501,14 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
             <button type="button" className="hq-stat hq-stat-desk" onClick={showDesk}>
               <span>Your desk</span><b>{deskKnown ? desk.open.length : "–"}</b>
             </button>
-            <div className="hq-stat"><span>Shifts today</span><b>{deskKnown ? shiftsToday : "–"}</b></div>
-            <div className="hq-stat" title="What Glidna's own cloud workers cost this month. Work done on your Claude plan costs Glidna nothing.">
-              <span>Cloud spend</span><b>{deskKnown ? `$${(spendCents / 100).toFixed(2)}` : "–"}</b>
-            </div>
+            <button type="button" className="hq-stat hq-stat-desk" onClick={(e) => openSpend("all", e)}
+              aria-label={aiSpendCents == null ? "AI spend this month. Open spending." : `AI spend this month: ${money(aiSpendCents)}. Open spending.`}>
+              <span>AI spend</span><b>{aiSpendCents == null ? "–" : money(aiSpendCents)}</b>
+            </button>
+            <button type="button" className="hq-stat hq-stat-desk" onClick={(e) => openSpend("claude", e)}
+              aria-label={claudeRuns == null ? "Crew shifts on your Claude plan this month. Open spending." : `${claudeRuns} crew shifts on your Claude plan this month. Open spending.`}>
+              <span>Claude runs</span><b>{claudeRuns == null ? "–" : claudeRuns}</b>
+            </button>
           </div>
 
           <div className="hq-console-grid">
@@ -525,7 +580,7 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
               <button type="button" className="hq-side-big" onClick={showDesk}>
                 <b>{deskKnown ? desk.open.length : "–"}</b><span>waiting on you</span>
               </button>
-              <div className="hq-side-title">Crew log</div>
+              <div className="hq-side-title">Crew log{deskKnown && <span className="hq-side-count"> · {shiftsToday} today</span>}</div>
               {log.length > 0 ? (
                 <ol className="hq-log">
                   {log.map((row, i) => (
@@ -691,6 +746,9 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
           </ol>
         </section>
       </main>
+      {spendView && (
+        <HQSpend load={loadSpend} saveCosts={saveCosts} initial={spend} focus={spendView} onClose={closeSpend} />
+      )}
     </div>,
     document.body,
   );
@@ -790,6 +848,7 @@ const CSS = `
 }
 @media (min-width: 760px) and (max-width: 1099px) { .hq-side-left { border-right: 1px solid rgba(8,220,224,.14); } }
 .hq-side-title { font-family: var(--hq-pixel); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--hq-cyan); padding-bottom: 4px; border-bottom: 1px dashed rgba(8,220,224,.25); }
+.hq-side-count { color: var(--hq-muted); }
 .hq-dept-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .hq-dept-row {
   display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; grid-template-rows: auto auto auto; column-gap: 8px; row-gap: 3px;
@@ -834,6 +893,18 @@ const CSS = `
   box-shadow: inset 0 0 24px rgba(8,220,224,.12);
 }
 .hq-map canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; image-rendering: crisp-edges; }
+/* The painted station: the building is an image, the desks and crew a canvas
+   laid exactly over it at the screen's own resolution. */
+.hq-map-art { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; user-select: none; -webkit-user-drag: none; pointer-events: none; }
+.hq-map.is-painted canvas { position: absolute; inset: 0; height: 100%; image-rendering: auto; }
+.hq-map.is-painted::after {
+  background:
+    repeating-linear-gradient(0deg, rgba(0,0,0,.08) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, transparent 62%, rgba(0,0,0,.4) 100%);
+}
+.hq-map-dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%; margin-right: .4em; vertical-align: .02em; background: #3A4B4D; }
+.hq-map-dot-on { background: #2FE0A8; box-shadow: 0 0 5px rgba(47,224,168,.8); }
+.hq-map-dot-training { background: var(--hq-amber); box-shadow: 0 0 5px rgba(251,191,36,.7); }
 .hq-map-label {
   position: absolute; line-height: 1.2; pointer-events: none; white-space: nowrap;
   font-family: var(--hq-pixel); font-size: clamp(7px, 1.25vw, 11px); letter-spacing: .04em; text-transform: uppercase;

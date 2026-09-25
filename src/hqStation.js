@@ -22,6 +22,17 @@
 // is pure and runs in node for the suite. Only the draw functions touch a
 // canvas, and the suite runs them against a recording context that refuses a
 // non-finite number (an SVG or canvas draws NaN as nothing, silently).
+//
+// THE SECOND LOOK (same day). Kevin wanted it "almost identical" to StarNet's
+// art — detailed, clear, "almost 3D". StarNet's art is theirs and unlicensed,
+// but its own repo shows HOW it was made: an image model, prompted with a
+// structure guide, then keyed and cut into sprites. So the building here was
+// made the same way from THIS file's layout: drawStatic() rendered the empty
+// map, an image model repainted it (src/hq-art/station-*), and the desks and
+// the crew are separate sprites drawn over it, sorted front to back. The
+// rectangles below still decide where everything is — the painting was made to
+// fit them, not the other way round — so the routes, the doors and the suite
+// are unchanged, and drawStatic() stays as the fallback if the art won't load.
 
 export const MAP_W = 320;
 export const MAP_H = 240;
@@ -62,18 +73,42 @@ export const MAP_LABELS = {
   marketing: "Marketing", research: "Research", front: "Front Office",
 };
 
-// Where each seat's person sits, in the order hqOrg.js lists that room's seats.
-// Low enough in each room that a name tag above a seated person clears the
-// room's own label at the top-left — on a phone they overlapped.
+// Where each seat's person sits (their feet), in the order hqOrg.js lists that
+// room's seats. Rooms entered from the south (the top row) face their desks
+// north, so the camera sees the crew's backs and the glowing screens; rooms
+// entered from the north face south, so a walker coming home reaches the chair
+// without walking through the desk. The Front Office's four seats stand behind
+// one reception counter. The owner faces the door, like any boss: a matte-black
+// figure seen from behind at a black chair simply disappeared.
 export const SEAT_SPOTS = {
-  owner: [[56, 46]],
-  chief: [[164, 46]],
-  finance: [[244, 44], [268, 44], [292, 44]],
-  coaching: [[60, 118], [76, 118], [92, 118]],
-  ops: [[244, 118], [270, 118]],
-  marketing: [[30, 186], [56, 186], [82, 186]],
-  research: [[140, 186], [164, 186], [188, 186]],
-  front: [[240, 184], [258, 184], [276, 184], [294, 184]],
+  owner: [[56, 40]],
+  chief: [[164, 38]],
+  finance: [[246, 38], [268, 38], [290, 38]],
+  coaching: [[54, 126], [72, 126], [90, 126]],
+  ops: [[252, 126], [274, 126]],
+  marketing: [[32, 190], [52, 190], [72, 190]],
+  research: [[144, 190], [164, 190], [184, 190]],
+  front: [[240, 188], [258, 188], [276, 188], [294, 188]],
+};
+
+// Which way someone at a desk faces, per room.
+export const SEAT_FACING = {
+  owner: "down", chief: "up", finance: "up",
+  coaching: "down", ops: "down", marketing: "down", research: "down", front: "down",
+};
+
+// Open floor to wander to in each room: clear of the desks and of the
+// furniture painted along the walls. A visitor stops somewhere in here.
+export const WANDER = {
+  owner: { x: 46, y: 52, w: 26, h: 6 },
+  chief: { x: 136, y: 46, w: 56, h: 18 },
+  finance: { x: 236, y: 46, w: 52, h: 16 },
+  coaching: { x: 44, y: 100, w: 52, h: 10 },
+  atrium: { x: 140, y: 100, w: 48, h: 30 },
+  ops: { x: 236, y: 100, w: 52, h: 10 },
+  marketing: { x: 20, y: 170, w: 60, h: 6 },
+  research: { x: 132, y: 170, w: 56, h: 6 },
+  front: { x: 232, y: 172, w: 72, h: 2 },
 };
 
 // Floor inside the walls: 3px walls at the sides, a 7px wall face at the top.
@@ -146,10 +181,14 @@ function seedFor(id) {
   return h >>> 0;
 }
 
-// A spot to stand in a room: inside the walls, clear of the top wall face.
+// A spot to stand in a room: somewhere on its open floor.
 export function spotIn(roomId, rng) {
-  const f = interior(roomId);
-  return [Math.round(f.x + 6 + rng() * (f.w - 12)), Math.round(f.y + 8 + rng() * (f.h - 14))];
+  const z = WANDER[roomId];
+  if (!z) {
+    const f = interior(roomId);
+    return [Math.round(f.x + 6 + rng() * (f.w - 12)), Math.round(f.y + 8 + rng() * (f.h - 14))];
+  }
+  return [Math.round(z.x + rng() * z.w), Math.round(z.y + rng() * z.h)];
 }
 
 // Where a trainee goes between stints at the desk: the courtyard, the training
@@ -170,10 +209,17 @@ export function makeWalkers(seats, now = 0) {
       id: s.id, home: s.room, room: s.room, seat: spot,
       x: spot[0], y: spot[1], mode: "sit", until: now + 1500 + rng() * 5000,
       path: [], seg: 0, dest: s.room, walked: 0, speed: 20,
+      dir: SEAT_FACING[s.room] || "down",
       stops: TOUR_STOPS.filter((r) => r !== s.room), rng,
     });
   }
   return out;
+}
+
+// Which way a sprite faces while moving by (dx, dy): the larger axis wins.
+export function facingFor(dx, dy) {
+  if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "right" : "left";
+  return dy > 0 ? "down" : "up";
 }
 
 // One tick of a walker's day. Mutates and returns it; `dt` in seconds, `now`
@@ -185,6 +231,7 @@ export function stepWalker(w, dt, now) {
       const [tx, ty] = w.path[w.seg];
       const dx = tx - w.x, dy = ty - w.y;
       const dist = Math.hypot(dx, dy);
+      if (dist > 0.001) w.dir = facingFor(dx, dy);
       if (dist <= left) {
         w.x = tx; w.y = ty; w.walked += dist; left -= dist; w.seg++;
       } else {
@@ -195,6 +242,7 @@ export function stepWalker(w, dt, now) {
       const home = w.dest === w.home;
       w.room = w.dest;
       w.mode = home ? "sit" : "pause";
+      if (home) w.dir = SEAT_FACING[w.home] || "down";
       w.until = now + (home ? 5000 + w.rng() * 5000 : 2500 + w.rng() * 3500);
     }
     return w;
@@ -208,6 +256,157 @@ export function stepWalker(w, dt, now) {
   w.dest = dest;
   w.mode = "walk";
   return w;
+}
+
+// ── The painted station: desks and crew drawn over the backdrop ─────────────
+
+// The sprite sheets in src/hq-art/, measured in their own pixels. Both people
+// sheets are four rows (the direction they face) by four walk frames.
+export const SPRITES = {
+  person: { frameW: 54, frameH: 100, footY: 98, rows: ["down", "left", "right", "up"], cols: 4 },
+  props: {
+    desk: [4, 4, 240, 212],
+    desk_off: [248, 4, 240, 203],
+    exec: [492, 4, 280, 212],
+    counter: [776, 4, 520, 194],
+    desk_front: [1300, 4, 240, 163],
+    exec_front: [1544, 4, 280, 150],
+  },
+};
+
+// A standing crew member, head to toe, in map units. Everything below is sized
+// against this, so the building and its people stay in proportion.
+export const PERSON_H = 14;
+const PROP_W = { desk: 17, desk_off: 17, exec: 21, desk_front: 17, exec_front: 22, counter: 66 };
+const PROP_SQUASH = { counter: 0.72 };
+// How far someone walks between walk-cycle frames.
+const STEP = 2.4;
+
+// Where a prop sits for the person whose feet are at (cx, feetY), and the depth
+// it is sorted at. A north-facing desk is behind its chair, so it sorts at its
+// own front edge and the person in the chair draws after it; a south-facing
+// desk and the reception counter are in FRONT of the person, so they sort at
+// their bottom edge and draw after them, hiding their legs.
+export function propBox(kind, cx, feetY) {
+  const [, , sw, sh] = SPRITES.props[kind];
+  const w = PROP_W[kind];
+  const h = (sh / sw) * w * (PROP_SQUASH[kind] || 1);
+  if (kind === "counter") {
+    const top = feetY - 4;
+    return { x: cx - w / 2, y: top, w, h, sortY: top + h };
+  }
+  if (kind === "desk_front" || kind === "exec_front") {
+    const top = feetY - 9;
+    return { x: cx - w / 2, y: top, w, h, sortY: top + h };
+  }
+  const top = feetY + 2 - h;
+  return { x: cx - w / 2, y: top, w, h, sortY: top + h * 0.45 };
+}
+
+function deskKind(room, seat) {
+  if (room === "owner") return SEAT_FACING.owner === "down" ? "exec_front" : "exec";
+  if (SEAT_FACING[room] === "down") return "desk_front";
+  return seat.status === "open" ? "desk_off" : "desk";
+}
+
+// Someone at their desk. Facing north they sit lower than they stand and only
+// their top half shows over the chair; facing south the desk in front of them
+// does the hiding.
+function seatedPerson(id, room, [x, y], sprite) {
+  const dir = SEAT_FACING[room] || "down";
+  if (dir === "up") {
+    const box = propBox(room === "owner" ? "exec" : "desk", x, y);
+    return { type: "person", sprite, id, x, y: y + 3, dir, frame: 0, seated: true,
+      clipY: box.y + box.h * 0.62, sortY: box.sortY + 0.01 };
+  }
+  return { type: "person", sprite, id, x, y, dir, frame: 0, seated: true, sortY: y - 0.01 };
+}
+
+// Everything drawn over the backdrop this frame, back to front: a desk for every
+// seat (dark when nobody fills it), one counter across the Front Office, the
+// owner at their desk, and the crew wherever their day has taken them.
+export function sceneItems(seats, walkers = []) {
+  const items = [];
+  const byRoom = {};
+  for (const s of seats) (byRoom[s.room] = byRoom[s.room] || []).push(s);
+  const walkingIds = new Set(walkers.map((w) => w.id));
+  for (const [room, list] of Object.entries(byRoom)) {
+    const spots = SEAT_SPOTS[room] || [];
+    if (room === "front" && spots.length) {
+      const xs = spots.slice(0, list.length).map((p) => p[0]);
+      const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+      items.push({ type: "prop", kind: "counter", room, ...propBox("counter", cx, spots[0][1]) });
+    }
+    list.forEach((seat, i) => {
+      const spot = spots[i];
+      if (!spot) return;
+      if (room !== "front") {
+        const kind = deskKind(room, seat);
+        items.push({ type: "prop", kind, room, seatId: seat.id, ...propBox(kind, spot[0], spot[1]) });
+      }
+      if (walkingIds.has(seat.id)) return;
+      if (seat.status === "you") items.push(seatedPerson(seat.id, room, spot, "owner"));
+      else if (seat.status === "on-shift" || seat.status === "working") items.push(seatedPerson(seat.id, room, spot, "crew"));
+    });
+  }
+  for (const w of walkers) {
+    if (w.mode === "sit") { items.push(seatedPerson(w.id, w.home, w.seat, "crew")); continue; }
+    items.push({ type: "person", sprite: "crew", id: w.id, x: w.x, y: w.y, dir: w.dir || "down",
+      frame: w.mode === "walk" ? Math.floor(w.walked / STEP) % 4 : 0, seated: false, sortY: w.y });
+  }
+  return items.sort((a, b) => a.sortY - b.sortY);
+}
+
+// Where a person's name tag goes: just above their head.
+export function tagPoint(item) {
+  const top = item.y - PERSON_H + (item.seated && item.dir === "up" ? 0 : 0);
+  return [item.x, top - 1.5];
+}
+
+// Draw the items over the backdrop. `ctx` is already scaled so one unit is one
+// map unit; `images` holds the loaded sheets ({ props, crew, owner }) and any
+// that haven't loaded yet are skipped rather than drawn as holes.
+export function drawScene(ctx, items, images, { t = 0, selected = null } = {}) {
+  const P = SPRITES.person;
+  const k = PERSON_H / P.footY;
+  for (const it of items) {
+    if (it.type === "prop") {
+      const img = images && images.props;
+      if (!img) continue;
+      const [sx, sy, sw, sh] = SPRITES.props[it.kind];
+      ctx.drawImage(img, sx, sy, sw, sh, it.x, it.y, it.w, it.h);
+      continue;
+    }
+    const img = images && images[it.sprite];
+    if (!img) continue;
+    const row = Math.max(0, P.rows.indexOf(it.dir));
+    const col = ((it.frame % P.cols) + P.cols) % P.cols;
+    const dw = P.frameW * k, dh = P.frameH * k;
+    const dx = it.x - dw / 2, dy = it.y - P.footY * k;
+    if (!it.seated) {
+      ctx.fillStyle = "rgba(0,0,0,.35)";
+      ctx.beginPath();
+      ctx.ellipse(it.x, it.y - 0.3, 3, 1.1, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    const clip = it.clipY != null;
+    if (clip) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(dx - 1, dy - 1, dw + 2, Math.max(0, it.clipY - dy + 1));
+      ctx.clip();
+    }
+    ctx.drawImage(img, col * P.frameW, row * P.frameH, P.frameW, P.frameH, dx, dy, dw, dh);
+    if (clip) ctx.restore();
+  }
+  if (selected && ROOM_RECTS[selected]) {
+    const r = ROOM_RECTS[selected];
+    const a = 0.55 + 0.3 * Math.sin(t / 380);
+    const th = 0.8;
+    ctx.fillStyle = `rgba(8,220,224,${a.toFixed(3)})`;
+    ctx.fillRect(r.x, r.y, r.w, th); ctx.fillRect(r.x, r.y + r.h - th, r.w, th);
+    ctx.fillRect(r.x, r.y, th, r.h); ctx.fillRect(r.x + r.w - th, r.y, th, r.h);
+  }
 }
 
 // ── Looks ───────────────────────────────────────────────────────────────────

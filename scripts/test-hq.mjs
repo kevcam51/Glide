@@ -17,7 +17,7 @@
 // because an SVG draws NaN as nothing and a missing desk is silent.
 //
 // Run: node scripts/test-hq.mjs
-import { readFileSync } from "fs";
+import { readFileSync, readdirSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { stripComments } from "./lib/strip-comments.mjs";
@@ -106,6 +106,13 @@ console.log("desk controls");
   // The station is part of the HQ's lazy chunk too, never the main bundle.
   ok(/import HQStation from "\.\/HQStation\.jsx";/.test(hqCode), "the station map is loaded by the HQ screen");
   ok(!/HQStation|hqStation/.test(APP), "App.jsx never pulls the station map into the main bundle");
+  // The painted art (S238) rides the same lazy chunk: only the station map
+  // imports it, so no other account ever downloads a pixel of it.
+  const srcFiles = readdirSync(join(ROOT, "src")).filter((f) => /\.(jsx?|mjs)$/.test(f));
+  const artUsers = srcFiles.filter((f) => /hq-art\//.test(stripComments(readFileSync(join(ROOT, "src", f), "utf8"))));
+  ok(artUsers.length === 1 && artUsers[0] === "HQStation.jsx", `only the station map loads the HQ's art (found in: ${artUsers.join(", ")})`);
+  ok(/import HQSpend, \{ SPEND_CSS, money \} from "\.\/HQSpend\.jsx";/.test(hqCode), "the spending sheet is part of the HQ screen");
+  ok(!/HQSpend/.test(APP), "App.jsx never pulls the spending sheet into the main bundle");
   // A callable's error message IS its code ("internal", "not-found"), so it is
   // never shown raw (S202's lesson).
   ok(/setDeskErr\(deskError\(e\)\)/.test(hqCode) && !/setDeskErr\(e\.message\)|setDeskErr\(String\(e/.test(hqCode),
