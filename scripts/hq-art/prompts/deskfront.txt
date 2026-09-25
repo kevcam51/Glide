@@ -1,0 +1,5 @@
+Image 1 is this game's prop sheet. Its top-left prop is an office workstation seen from behind the chair. Create that SAME workstation seen from the opposite side, from the FRONT, keeping the exact same design, materials, scale, camera height, lighting and level of detail.
+
+From this side the camera sees the front panel of the matte-black desk with its thin glowing cyan (#08DCE0) LED strip, the dark BACKS of the same two slim monitors (their screens face away from the camera, with only a faint cyan glow spilling around their edges), the far edge of the keyboard, and the black mesh office chair on the FAR side of the desk, mostly hidden behind it with just the top of its backrest showing above the desk.
+
+One single prop, isolated and centered, on a perfectly flat, uniform, solid pure magenta (#FF00FF) background: no floor, no cast shadow, no gradients, no border, no text, no people.

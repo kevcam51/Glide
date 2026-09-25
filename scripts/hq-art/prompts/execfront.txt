@@ -1,0 +1,5 @@
+Image 1 is this game's prop sheet. Its bottom-left prop is the owner's executive desk seen from behind the chair. Create that SAME executive desk seen from the opposite side, from the FRONT, keeping the exact same design, materials (dark walnut and black steel), scale, camera height, lighting and level of detail.
+
+From this side the camera sees the desk's handsome front panel (dark walnut with black steel trim and a thin glowing cyan (#08DCE0) accent line along its base), the dark BACKS of the same three monitors (their screens face away from the camera, with only a faint cyan glow spilling around their edges), the small desk lamp on one corner, and just the top of the black leather executive chair's backrest peeking up behind the monitors on the far side.
+
+One single prop, isolated and centered, on a perfectly flat, uniform, solid pure magenta (#FF00FF) background: no floor, no cast shadow, no gradients, no border, no text, no people.

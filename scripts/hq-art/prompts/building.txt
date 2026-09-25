@@ -1,0 +1,22 @@
+Image 1 is a rough placeholder map and the STRICT LAYOUT LOCK. Repaint it as a finished, premium, high-detail top-down game map of the same building. Keep every room, wall, hallway, doorway, the courtyard, the street, the palm trees and the van exactly where they are in Image 1, with the same sizes and proportions, so the finished art lines up with Image 1 when overlaid. Do not add, remove, merge, rotate or move any room, wall or hallway.
+
+The building is the night-time headquarters of Smooth Training, a premium personal-training company in Miami, drawn as a cutaway seen from above, in the style of a polished indie management-sim game set on a sleek dark space station. It is a luxury fitness company's HQ: clean and premium, not a dirty spaceship.
+
+Camera: straight top-down with a very slight three-quarter tilt. The top (north) wall of each room shows a short upright wall face (the strip across the top of each room in Image 1); furniture shows its top and a thin sliver of its front. No isometric rotation; every wall perfectly horizontal or vertical.
+
+Room by room (Image 1 left to right, top to bottom):
+Top-left, the owner's office: a window strip on the back wall, a small lit shelf, a charcoal leather sofa at the lower left, a potted palm at the lower right, a rug.
+Top-middle, the Chief of Staff's office: a large wall display across the back wall with glowing status bars.
+Top-right, Finance: a white wall screen with glowing charts on the back wall, grey filing cabinets at the lower left, a small safe with a cyan light at the lower right.
+Middle-left, the Coaching training floor: black rubber gym flooring, a steel squat rack with a loaded barbell at the left, a dumbbell rack along the bottom, a teal stretching mat.
+Middle-center, the Courtyard: an indoor garden with a lush palm tree in a planter in each corner, pale stone tiles, a wooden bench at the bottom, and a plain round dark tile medallion in the very center (no symbols on it).
+Middle-right, Ops & Tech: three tall black server racks along the right wall with tiny green and cyan lights, a dark wall monitor on the back wall.
+Bottom-left, Marketing: a creative studio with a magenta neon shape on the back wall (no letters) and a camera on a tripod with a softbox light at the right.
+Bottom-middle, Research: a whiteboard with orange, cyan and pink sticky notes on the back wall and a tall wooden bookshelf on the right.
+Bottom-right, the Front Office: a bright entrance lobby with a welcome mat by the door at the lower right.
+Hallways: dark polished corridors with a dashed cyan guide line down the middle and small recessed lights along the edges.
+Along the bottom: the street at night, with a sidewalk, two palm trees, dark asphalt with a dashed yellow center line, and a sleek matte-black van parked by the entrance.
+
+Important: the MIDDLE of every room's floor stays EMPTY open floor. No desks, tables, chairs, counters or people anywhere; the game adds those later. Furniture only where Image 1 shows it, along the walls.
+
+Look: night, moody and premium. Dark charcoal, gunmetal and matte-black materials, a subtly different floor pattern in each room, brushed-steel wall panels, a glowing cyan (#08DCE0) neon strip along the top wall of every room (the brand color), small amber and green indicator lights beside each doorway, soft pools of warm and cyan light, rich material detail with crisp edges that stays readable when small. Absolutely NO people or characters, and NO text, letters, numbers, logos or watermarks anywhere.

@@ -108,6 +108,47 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S238, round 2 (Sep 24): the PAINTED station, the SPENDING sheet, and piece
+> 3 — THE CREW'S FRONT DOOR. All live** (`8cb6f75`, `f0a8851`; `hqApi` and `mcp`
+> deployed before the pushes). Kevin: make it look "almost identical" to StarNet.
+> ⚠️ **STARNET'S ART IS AI-GENERATED AND STILL NOT OURS** — its own repo shows the
+> method (Codex `image_gen`, magenta-keyed sprites, a structure guide per prop),
+> so ours was made the same way from OUR layout: `drawStatic()` renders the
+> empty map as a guide, `gpt-image-2` repaints it (Glidna's OpenAI key, ~$2),
+> and desks + crew (white androids; the owner black with a cyan rim) are sprites
+> sorted front to back over it. `src/hq-art/` (~450 KB WebP, lazy chunk only);
+> pipeline + prompts in `scripts/hq-art/` with a README. The rectangles still
+> decide where everything is; the pixel map is the fallback if any art fails.
+> ⚠️ **DESKS FACE AWAY FROM THE DOOR THEIR ROOM IS ENTERED BY**, or a walker
+> coming home walks through the desk; the owner faces the door (a black figure
+> seen from behind at a black chair vanished). Room names sit on the FRONT wall
+> or they land under name tags. ⚠️ **gpt-image requests over ~60s were cut off
+> on this network** — `generate.py` uses Responses API background mode + polling.
+> **Spending:** "AI spend" (Glidna AI + crew cloud, this month) and "Claude runs"
+> open a week / 2 weeks / month / year sheet (`functions/hqSpend.js`): Glidna AI
+> is the SUM of aiusage.js's per-person `costMicros` (recorded since S167 — older
+> use is reported as untracked, never priced at zero); finished days/months are
+> cached once in `hqSpendDays`/`hqSpendMonths`, today always fresh. ⚠️ A CLOUD
+> WORKER MUST PUT ITS COST ON ITS TIME CARD, NOT THROUGH `recordUsage` under a
+> member's uid, or the same dollars count twice. The Claude plan is flat
+> (`hqSettings/costs`, default $200), shown as the period's share; **no app can
+> read the Claude usage meter** (confirmed in the docs), so the sheet links to
+> claude.ai/settings/usage and can show a reading recorded through the door.
+> **The door:** `functions/hqtools.js` — `hq_file_report`, `hq_log_shift`,
+> `hq_read_desk`, `hq_record_plan_usage` on the MCP connector for the ADMIN UID's
+> connection ONLY (registered inside the owner check, re-checked per call),
+> outside `buildTools()` on purpose: the HQ is the owner's back office, not a
+> member ability, so S111 parity doesn't pull it into the members' toolset. The
+> door only adds: items land open, the seat's room comes from a server mirror of
+> hqOrg.js (tested), the engine is always "claude". **Next:** Kevin adds the
+> Glidna connector at claude.ai (https://glidna.com/mcp), then the Bookkeeper
+> routine runs `docs/hq/crew/bookkeeper.md`. ⚠️ **A routine gets EVERY tool of
+> each connector it includes** (QuickBooks' include send-invoice) and runs with
+> no permission prompts — include only what the job needs. ⚠️ The Claude app's
+> account reported plan **"Pro"** while Kevin says he pays $200 (Max): check
+> which login the crew runs under. Suites: HQ station 175, spending 99, door 51,
+> HQ 110 — every guard mutation-tested._
+>
 > _**S238 (Sep 24): SMOOTH TRAINING HQ, PIECE 1 — Kevin's AI business crew,
 > drawn as a building, owner-only.** Kevin saw a reel of StarNet (an
 > open-source pixel-art agent harness) and wanted the SYSTEM — in his words,

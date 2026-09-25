@@ -1,0 +1,10 @@
+Image 1 is the finished game map these props will be placed into. Match its exact camera, lighting, materials and level of detail.
+
+Create a PROP SPRITE SHEET on a perfectly flat, uniform, solid pure magenta (#FF00FF) background: no floor, no cast shadows, no gradients, no borders, no text. Four separate props in a 2 x 2 grid with generous magenta space between them, each one complete, isolated and centered in its quarter:
+
+1 (top-left): an office workstation seen from the same high overhead three-quarter camera as Image 1, from behind the chair. A sleek matte-black desk with a thin glowing cyan (#08DCE0) LED strip along its front edge, two slim monitors on the far edge whose screens face the camera and glow with abstract blue and cyan dashboards (no readable text), a keyboard and mouse, a small coffee mug, and a black mesh office chair on the near side with its back to the camera.
+2 (top-right): the very same workstation with the monitors switched off (dark screens), the chair pushed in, the desk tidy and unused.
+3 (bottom-left): a larger executive desk for the owner, dark walnut and black steel, three monitors with glowing screens facing the camera, a small desk lamp, and a black leather executive chair with its back to the camera.
+4 (bottom-right): a long, sleek reception counter seen from the lobby side, so the camera sees the FRONT of the counter: a matte-black front panel with a glowing cyan light strip along its base and a white stone countertop, with four slim monitors on top facing away from the camera (we see their dark backs). Wide and shallow, about five times wider than it is deep, with nothing behind it.
+
+Every prop at the same scale as the others (a person standing beside the workstation would be about as tall as the desk is wide). Crisp, readable edges; premium dark style matching Image 1. No people, no characters, no text.

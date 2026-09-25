@@ -1,0 +1,10 @@
+A character sprite sheet for a top-down management game, on a perfectly flat, uniform, solid pure magenta (#FF00FF) background: no floor, no shadows, no gradients, no borders, no grid lines, no text.
+
+The character: a friendly AI crew member. A sleek android with a smooth glossy white shell body, a round white head with a dark glossy visor band across the face, matte charcoal joints at the neck, shoulders, elbows, hips and knees, and a small glowing cyan (#08DCE0) emblem on the chest. A clean dark outline around the whole figure so it reads at tiny sizes. Cute, clean, confident proportions about 3 heads tall. Finely rendered premium indie-game sprite art (not blocky pixel art, not a photo), soft light from the upper left.
+
+Layout: exactly 4 rows and 4 columns of equal cells, evenly spaced with generous magenta space between figures, one full-body figure per cell, every figure the same size with its feet on the same baseline within its row, seen from a high three-quarter top-down game camera (slightly from above).
+Row 1: walking toward the camera (front view), 4 frames of a walk cycle.
+Row 2: walking to the left (side view facing left), 4 frames.
+Row 3: walking to the right (side view facing right), 4 frames.
+Row 4: walking away from the camera (back view), 4 frames.
+The same character, same colors and same scale in all 16 cells.
