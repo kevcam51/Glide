@@ -153,3 +153,91 @@ Kevin-only — it's naturally multi-tenant:
   and get the token from Kevin (stored as a secret, never in the repo).
 
 **Status: NOT started — reference + plan only. Kevin wants to build this later.**
+
+## S238 — exercise library + workout creation (verified live, Sep 24)
+
+Plan built on these: `docs/WORKOUT-BUILDER.md` — on the PARKED branch `claude/trainerize-login-access-87dab5`
+(commit `0934b1b`), not on main; it waits on Trainerize's written OK to show their stock media.
+
+- **`exercise/search`** — NOT in the reference; it's what Trainerize's own web app calls. Body
+  `{start, count}` → `{total, exercises:[{id, name, alternateName, description, type:"system"|"custom",
+  recordType, tags:[{type, name}], media:{type:"vimeo"|"awss3"|"none", videoUrl, loopVideoUrl,
+  thumbnailUrl:{hd, sd}}}]}`. ⚠️ **`count` is silently capped at 100** (asking for 500 returns 100),
+  so page by 100. ⚠️ **`searchTerm` is ignored** — the whole library comes back regardless.
+  Kevin's group: 3,174 exercises.
+- **Tag `type`s:** `mainMuscle`, `equipment`, `movement`, `level`, `mechanics`, `force`. Names are
+  camelCase codes (`chestMid`, `kettlebells`, `hipDominant`, `antiRotationCore`, …).
+- **`workoutTemplate/getList`** `{view:"mine"|"shared"|"other"|"all", start, count, userID, searchTerm}`
+  → `{total, workouts:[{id, name, duration, instruction, type:"workoutRegular", exercises:[…]}]}`.
+  `searchTerm` DOES work here. Kevin's trainer `userID` = 21014507.
+- **`workoutDef/get`** `{ids:[…]}` → `{workoutDef:[{id, name, type, instructions, exercises:[{def:{id,
+  name, sets, target, targetDetail, restTime, superSetID, supersetType, side, intervalTime, recordType,
+  …}, note}], trackingStats, dateCreated, dateUpdated}]}`.
+- **`workoutDef/add`** — body that WORKS: `{type:"mine", userID:<trainerId>, workoutDef:{name,
+  type:"workoutRegular", instructions, exercises:[{def:{id, sets, target:"8-10 reps", restTime:90,
+  superSetID:0, supersetType:"none"}}]}}` → `{workoutID}`. Trainerize fills in the names and computes
+  `duration` itself. Landed in the private ("mine") library; visible on the website under Workouts →
+  Personal. ⚠️ **There is no `workoutDef/delete`** — a created workout can only be removed by hand.
+- **Exercise id `326` is "Rest"** (recordType `rest`) — the most-used row in Kevin's workouts.
+- **Videos:** Vimeo stock → `player.vimeo.com/progressive_redirect/...` MP4 + `.m3u8`, CORS `*`, the
+  redirect target carries a short `exp`. Uploads → `video.trainerize.com/videos/{n}/{uuid}/HLSHD.m3u8`
+  (+ `HLS`, `HLSSD`), `.ts` segments, no MP4; CORS reflects any https Origin (not `http://localhost`).
+  Thumbnails: `…/HD-00001.jpg` (uploads) or `…/images/{n}/{uuid}/HD.jpg` (stock), public.
+- Test residue: workout **230667127 `TEST – Glidna (delete me)`** in Kevin's private library — delete
+  by hand.
+
+## S238b — messages, photos, webhooks and client programs (verified live, Sep 25)
+
+Read-only checks for the Workout Programmer (`docs/WORKOUT-PROGRAMMER.md`). No message text or
+client data was printed or kept; only field shapes and counts.
+
+**Messages**
+- `message/getThreads` `{userID, view:"inbox", start, count}` → `{total, threads:[{threadID, subject,
+  excerpt, threadType, unread, totalUnreadMessages, ccUsers:[…]}]}` — threads only, NO messages.
+- `message/get` needs a `messageID`, and nothing in the thread list gives you one.
+- ⚠️ **`message/getMessages` — NOT in the reference; it's what the web app calls to open a
+  conversation.** `{threadID, start, count}` → `{subject, total, messages:[{messageID, type
+  ("text"|"file"), source, attachment, body, sender:{userID, …}, sentTime, workoutInfo,
+  appointmentInfo, …}]}`. Kevin's inbox: 47 threads, 1,723 messages, 4 with a file.
+- `message/reply` `{userID, threadID, body, type:"text"}`; `message/send` starts a thread. With group-level
+  auth, `userID` may be ANOTHER user in the group — so a reply can come from a named team member.
+
+**Photos in messages — readable.**
+- A file message's `attachment` is `{id, fileName, contentType:"image/jpeg", attachType:
+  "messageAttachment", storageType:"awss3", fileToken, fileSize, metaData:{image, detailInfo}}` — an
+  id, never a URL.
+- ⚠️ **`file/getFile` is GET, not POST** (POST → 405, unlike every other endpoint):
+  `GET /v03/file/getFile?fileID=<id>` with the same Basic auth → the image (`image/jpeg`; a
+  ~63 KB copy of a 387 KB original — plenty for vision).
+
+**Webhooks — exist, but registration is NOT self-serve.**
+- Events: `dailyWorkout.completed`, `dailyCardio.completed`, `goal.added/updated/deleted/hit`,
+  `goal.dailyNutrition.hit`, `msg.received` (1:1 or group), `msg.unreadCountChanged`,
+  `group.mentioned`, `trainingPlan.updated`, `mealPlan.updated`. (The help article also lists
+  "a new client is added" as an example trigger — not in the reference's table; ask.)
+- Delivery: HTTP POST, JSON `{id:"evt_…", eventType, created (UTC), data:{userID, …}}`, with header
+  **`TR-SecretKey: <key>`** to verify the sender. **500 ms timeout** and 3 retries — so the receiver
+  must acknowledge immediately and do the work from a queue.
+- No endpoint registers a URL, and no settings page offers it. Studio plans include it; the route
+  is **help@trainerize.com** (their "conduit" to the API team). ⚠️ CLAUDE.md S86d said "Trainerize has
+  no webhooks" — that was wrong; the 30-minute poll can be replaced once they're registered.
+
+**Client programs — the shape, read from a real client.**
+- `program/getUserProgramList {userID}` → `{programs:[{id, name, durationType, subscribeType, startDate,
+  endDate, isEmpty, accessLevel, programSource}]}`.
+- `trainingPlan/getList {userid}` (lowercase!) → `{plans:[{id, name, instruction, startDate,
+  duration, durationType:"week", endDate, order, planType, version}]}` — a program is a list of
+  PHASES (training plans).
+- `trainingPlan/getWorkoutDefList {planID, start, count}` → the workouts inside a phase, same
+  shape as `workoutTemplate/getList`.
+- `calendar/getList {userID, startDate, endDate, unitDistance, unitWeight}` → `{calendar:[{date,
+  items:[{id, type ("workoutRegular"|"workoutInterval"|…), status ("scheduled"|"tracked"),
+  detail:{workoutID, rpe}, fromProgram, userProgramID, title, …}]}]}`.
+- `dailyWorkout/get {ids}` → `{dailyWorkouts:[{id, workoutID, userID, name, date, status, exercises,
+  programDay, fromProgram, …}]}`.
+- **Writing a new phase for a client = three calls:** `trainingPlan/add {userid, plan}` →
+  `workoutDef/add {type:"trainingPlan", trainingPlanID, workoutDef}` (proven for type "mine") →
+  `dailyWorkout/set {userID, unitWeight, unitDistance, dailyWorkouts:[…]}` to put them on days.
+  ⚠️ The first and last are UNPROVEN: the reference names `plan` and `dailyWorkouts` without their
+  fields. Prove them on a TEST client only — a phase written to a real client appears in their
+  app immediately.
