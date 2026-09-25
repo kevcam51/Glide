@@ -108,6 +108,50 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S238, round 4 (Sep 25): room names and people never cover each other,
+> deliveries take turns, and the crew gets its own office.** Frontend only (no
+> functions, no rules) — the push is the release. Kevin: names "can't be
+> blocked by anyone who's walking and also the titles don't block the worker";
+> deliveries not "squished up on top of each other", arriving "at different
+> times" like a real office. ⚠️ **ON A PHONE A ROOM NAME IS MOST OF A ROOM WIDE
+> AND A NAME TAG NEARLY A PERSON TALL** (measured: 7.2 × up to 68.5 map units;
+> tags 9.4 tall), so NO fixed spot on a wall is clear of everyone. Each name
+> has four places (`labelSlots`: each end of the back and front wall) and
+> `placeLabel` moves it before anyone arrives, from bodies now AND ahead
+> (`crowdBoxes`: walkers' next 1.2 s, plus anyone about to leave a room — a
+> finished stop, a hand-over, a break from the desk). Tags are NOT obstacles
+> (half a room wide: a name dodging them never stops moving); a tag under a
+> name fades instead (`tagsUnderLabels`). Nowhere clear → the name hides for
+> that moment. Top row hangs on the back wall (the building's edge), bottom
+> row on the street side: **never move, never touched, even with every seat
+> filled.** ⚠️ **THE MIDDLE ROW SITS BETWEEN TWO HALLWAYS AND ITS DOORS ARE
+> CENTRED, so its names step aside ~1–2×/min with 3 walkers and hide more as
+> the crew grows** — the real fix is the next repaint (doors off-centre, a sign
+> band per room). Walkers: keep RIGHT in every hallway (lanes by direction),
+> hang back behind someone going the same way (`behind`, never waits on
+> someone standing), never stop within `PERSONAL_SPACE` of anyone or anyone's
+> chair or a doorway. Deliveries: `makeStation`/`dispatch` — one courier at a
+> time, oldest work first, 8–20 s after the last hand-over; a worker holding
+> work waits at the desk for its turn; papers appear on the owner's desk only
+> as they're handed over. `stepCrew` replaces per-walker stepping everywhere.
+> **The crew's office** (`docs/hq/crew-repo/`, the template of a private repo
+> Kevin still has to OK publishing): a one-page handbook, `facts.md`
+> (placeholders, never guesses), `crew/<id>.md` jobs (Bookkeeper moved here;
+> Front Desk and Progress Analyst new — the Analyst is now hired, "training"),
+> and **a PreToolUse guard** (`.claude/hooks/crew-guard.sh`, plain sh): an
+> ALLOW-LIST — reads, Gmail drafts, the HQ door; everything else from a
+> connector refused, unknown tools refused, an unreadable call refused.
+> ⚠️ **ROUTINES CAN ONLY INCLUDE OR DROP A WHOLE CONNECTOR** (no per-tool
+> setting); the docs say project hooks run in cloud sessions, so the guard is
+> the enforcement — **not yet proven by a real cloud run.** ⚠️ **NEVER POINT A
+> ROUTINE AT THE GLIDNA REPO:** this CLAUDE.md is 333 KB (~110k tokens) and a
+> routine loads it every run. ⚠️ The Claude app's account still reports plan
+> **"Pro"** (third time) while Kevin says he pays $200 — resolve before creating
+> routines from here. Suites: station 296, crew 439 (every tool of Gmail,
+> Calendar, QuickBooks and Glidna run through the real guard, judged by an
+> independent rule), HQ 130; 28/29 + 6/6 + 12/12 mutations caught (the one
+> green is a redundant guard, arithmetically equivalent)._
+>
 > _**S238, round 3 (Sep 25): the crew comes alive — all LIVE** (`29b42f1`;
 > `hqApi` + `mcp` deployed before the push). Kevin: routes "always different",
 > and workers walk to his desk "whenever they're doing work or trying to send me

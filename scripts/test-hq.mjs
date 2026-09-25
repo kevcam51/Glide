@@ -149,9 +149,12 @@ console.log("org chart");
   }
 
   const training = SEATS.filter((s) => s.status === "training");
-  ok(training.map((s) => s.id).sort().join() === "bookkeeper,front-desk", "the two first hires are the Bookkeeper and the Front Desk Coordinator");
-  ok(training.every((s) => s.firstHire && s.waitingOn), "each first hire says what it's waiting on");
+  ok(training.map((s) => s.id).sort().join() === "bookkeeper,front-desk,progress-analyst",
+    "the first hires are the Bookkeeper, the Front Desk Coordinator and the Progress Analyst");
+  ok(training.every((s) => s.firstHire && s.waitingOn && s.engine === "claude"), "each first hire says what it's waiting on and where it runs");
   ok(training.every((s) => s.role === "worker"), "first hires are workers, not heads");
+  ok(/After Finance and the Front Office are running/.test(SEATS.find((s) => s.id === "chief-of-staff").hireWhen || ""),
+    "the Chief of Staff waits until there is a desk's worth of work to brief on");
 
   const c = orgCounts();
   ok(c.total === SEATS.length && c.you + c.training + c.open === c.total, "orgCounts adds up to every seat");
@@ -202,8 +205,8 @@ console.log("live seats");
   // the map and come back marked.
   ok(/const live = liveSeats\(SEATS, desk\);/.test(hqCode), "the HQ screen works from live seats");
   ok(/<HQStation seats=\{seats\}/.test(hqCode), "…and hands them to the map");
-  ok(/deliveries=\{toDeliver\} onDelivered=\{markDelivered\} deskCount=\{desk\.open\.length\}/.test(hqCode),
-    "the map gets what to deliver, tells the screen when it's delivered, and knows how full the desk is");
+  ok(/deliveries=\{toDeliver\} onDelivered=\{markDelivered\}\s*deskCount=\{Math\.max\(0, desk\.open\.length - toDeliver\.length\)\}/.test(hqCode),
+    "the map gets what to deliver, tells the screen when it's delivered, and puts on the owner's desk only what has been handed over");
   ok(/document\.visibilityState === "visible"\) load\(\{ quiet: true \}\)/.test(hqCode), "the minute poll runs only while the HQ is on screen, and quietly");
   ok(/const POLL_MS = 60000;/.test(hqCode), "…once a minute");
   ok(/\.slice\(-DELIVERED_CAP\)/.test(hqCode) && /const DELIVERED_CAP = 300;/.test(hqCode), "the delivered list on this device is capped");

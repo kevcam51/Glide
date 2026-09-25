@@ -98,14 +98,16 @@ export const SEAT_FACING = {
 };
 
 // Open floor to wander to in each room: clear of the desks and of the
-// furniture painted along the walls. A visitor stops somewhere in here.
+// furniture painted along the walls. A visitor stops somewhere in here. In the
+// middle row it starts a body's height below the back wall, where that room's
+// name usually hangs, so a visitor never stands in front of it.
 export const WANDER = {
   owner: { x: 46, y: 52, w: 26, h: 6 },
   chief: { x: 136, y: 46, w: 56, h: 18 },
   finance: { x: 236, y: 46, w: 52, h: 16 },
-  coaching: { x: 44, y: 100, w: 52, h: 10 },
-  atrium: { x: 140, y: 100, w: 48, h: 30 },
-  ops: { x: 236, y: 100, w: 52, h: 10 },
+  coaching: { x: 44, y: 110, w: 52, h: 3 },
+  atrium: { x: 140, y: 110, w: 48, h: 20 },
+  ops: { x: 236, y: 110, w: 52, h: 3 },
   marketing: { x: 20, y: 170, w: 60, h: 6 },
   research: { x: 132, y: 170, w: 56, h: 6 },
   front: { x: 232, y: 172, w: 72, h: 2 },
@@ -147,9 +149,12 @@ export function doorPoints(roomId) {
   return { inside, hall: [d.x, d.hall] };
 }
 
-// Hallway lanes: people keep a little to one side of the centre line or the
-// other, so two walks down the same hallway rarely trace the same line.
-export const LANES = [-4, -2, 0, 2, 4];
+// Hallway lanes: how far off a hallway's centre line someone walks. Everyone
+// keeps to THEIR OWN RIGHT, the way people pass in a real corridor, so two
+// people walking toward each other pass side by side instead of through each
+// other (Kevin: "we don't have workers overlapping"); how far right varies
+// trip to trip, so two walks down the same hallway rarely trace the same line.
+export const LANES = [2, 2.5, 3, 3.5, 4];
 
 // Door to door along the hallways, never through a wall: out of the room,
 // along its hallway to a cross-hallway, down or up it, and along the other
@@ -165,16 +170,24 @@ export function route(from, to, rng = null) {
   if (from === to) return [a.inside];
   const b = doorPoints(to);
   const lane = () => (rng ? LANES[Math.floor(rng() * LANES.length)] : 0);
-  const ay = a.hall[1] + lane();
-  const pts = [a.inside, [a.hall[0], ay]];
+  // Keep right. Heading east, your right hand points down the map (south);
+  // heading west, up it; heading south, to the map's left; heading north, to
+  // its right.
+  const across = (x0, x1) => (x1 > x0 ? 1 : -1) * lane();
+  const along = (y0, y1) => (y1 > y0 ? -1 : 1) * lane();
+  const pts = [a.inside];
   if (a.hall[1] !== b.hall[1]) {
     const cost = (vx) => Math.abs(a.hall[0] - vx) + Math.abs(b.hall[0] - vx);
     const [near, far] = [...V_XS].sort((p, q) => cost(p) - cost(q));
-    const vx = (rng && rng() < 0.3 ? far : near) + lane();
-    const by = b.hall[1] + lane();
-    pts.push([vx, ay], [vx, by], [b.hall[0], by]);
+    const v = rng && rng() < 0.3 ? far : near;
+    const ay = a.hall[1] + across(a.hall[0], v);
+    const vx = v + along(a.hall[1], b.hall[1]);
+    const by = b.hall[1] + across(v, b.hall[0]);
+    pts.push([a.hall[0], ay], [vx, ay], [vx, by], [b.hall[0], by]);
   } else {
-    pts.push([b.hall[0], ay]);
+    // Straight across the hallway (two doors facing each other) needs no lane.
+    const ay = a.hall[1] + (a.hall[0] === b.hall[0] ? 0 : across(a.hall[0], b.hall[0]));
+    pts.push([a.hall[0], ay], [b.hall[0], ay]);
   }
   pts.push(b.inside);
   return pts.filter((p, i) => i === 0 || p[0] !== pts[i - 1][0] || p[1] !== pts[i - 1][1]);
@@ -220,6 +233,41 @@ const HIRED = new Set(["training", "working", "on-shift"]);
 // Where the owner stands a visitor: in front of his desk, facing him.
 export const OWNER_DROP = [56, 49];
 
+// Where someone stands to take their seat. At a north-facing desk the seated
+// figure is drawn three units nearer the camera than the seat is measured
+// from, so they walk to the chair itself and sitting down moves nobody.
+export function seatStand(room, [x, y]) {
+  return SEAT_FACING[room] === "up" ? [x, y + 3] : [x, y];
+}
+
+// Personal space (Kevin: no workers "overlapping and also standing in the same
+// exact location"). Nobody stops within this reach of anyone standing or
+// sitting, or of a spot someone is already walking to: an ellipse wider than
+// it is deep, because two people side by side need more room than one standing
+// a step in front of the other.
+export const PERSONAL_SPACE = [10, 7];
+export function crowded([x, y], spots) {
+  const [rx, ry] = PERSONAL_SPACE;
+  return spots.some(([sx, sy]) => ((x - sx) / rx) ** 2 + ((y - sy) / ry) ** 2 < 1);
+}
+
+// Doorways are for walking through: nobody stops in one.
+export const DOORWAYS = Object.keys(ROOM_RECTS).map((id) => doorPoints(id).inside);
+
+// Where everyone but `self` is, or is about to be: someone walking has already
+// claimed the end of their walk, and everyone's own chair stays theirs while
+// they are out — or a visitor could stop right behind it just before they sit
+// back down.
+export function claimedSpots(crew, self = null) {
+  const out = [];
+  for (const o of crew) {
+    if (o === self) continue;
+    out.push(o.mode === "walk" && o.path.length ? o.path[o.path.length - 1] : [o.x, o.y]);
+    out.push(seatStand(o.home, o.seat));
+  }
+  return out;
+}
+
 // Where someone goes between stints at the desk: the courtyard most often,
 // otherwise any department's open floor — never another department's desk,
 // and NEVER the owner's office. A walk to the owner means there is something
@@ -228,6 +276,18 @@ function tourStop(w) {
   if (w.rng() < 0.35) return "atrium";
   const others = Object.keys(ROOM_RECTS).filter((id) => id !== w.home && id !== "owner" && id !== "atrium");
   return others[Math.floor(w.rng() * others.length)];
+}
+
+// A clear spot to go and stand: a few tries, else nothing (and the walker
+// stays at the desk a little longer).
+function freeStop(w, crew) {
+  const taken = [...claimedSpots(crew, w), ...DOORWAYS];
+  for (let i = 0; i < 8; i++) {
+    const room = tourStop(w);
+    const spot = spotIn(room, w.rng);
+    if (!crowded(spot, taken)) return { room, spot };
+  }
+  return null;
 }
 
 export function makeWalkers(seats, now = 0, seed = 0) {
@@ -239,13 +299,14 @@ export function makeWalkers(seats, now = 0, seed = 0) {
     const spot = (SEAT_SPOTS[s.room] || [])[i];
     if (!spot) continue;
     const rng = makeRng((seedFor(s.id) ^ Math.imul(seed >>> 0, 2654435761)) >>> 0);
+    const [x, y] = seatStand(s.room, spot);
     out.push({
       id: s.id, home: s.room, room: s.room, seat: spot,
-      x: spot[0], y: spot[1], mode: "sit", until: now + 1500 + rng() * 5000,
+      x, y, mode: "sit", until: now + 1500 + rng() * 5000,
       path: [], seg: 0, dest: s.room, walked: 0, speed: 20,
       dir: SEAT_FACING[s.room] || "down",
       onShift: s.status === "on-shift",
-      queue: [], carrying: [], purpose: null, events: [], rng,
+      queue: [], queuedAt: null, carrying: [], purpose: null, events: [], held: 0, rng,
     });
   }
   return out;
@@ -253,19 +314,44 @@ export function makeWalkers(seats, now = 0, seed = 0) {
 
 // Which desk items still need carrying to the owner: open, not yet delivered
 // on this device, and filed within the last week (older ones just count as
-// delivered — a week-old report doesn't need a walk).
+// delivered — a week-old report doesn't need a walk). Oldest first, because
+// that is the order they come through the door.
 export const DELIVERY_WINDOW_MS = 7 * 86400000;
 export function deliveriesDue(open = [], delivered = new Set(), now = Date.now()) {
   return open
     .filter((i) => i && i.id && i.worker && !delivered.has(i.id) && (i.createdAt || 0) >= now - DELIVERY_WINDOW_MS)
+    .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
     .map((i) => ({ id: i.id, worker: i.worker }));
 }
 
-// Hand a walker something to take to the owner: desk item ids they filed. They
-// set off at the next moment they are free — straight away from their desk,
-// or as soon as the walk they are on ends.
-export function queueDelivery(w, ids) {
-  for (const id of ids) if (!w.queue.includes(id) && !w.carrying.includes(id)) w.queue.push(id);
+// ── Taking work to the owner ────────────────────────────────────────────────
+// Kevin: deliveries must not come in "all squished up on top of each other";
+// they should arrive "at different times" like a real office. So the station
+// hands out turns. One person at a time walks work over, oldest work first,
+// and the next leaves their desk only after the last has handed theirs over,
+// and a little while after that. Anyone holding work for him waits at their
+// desk for their turn instead of wandering off.
+export const FIRST_RUN_MS = [2500, 7000];
+export const RUN_GAP_MS = [8000, 20000];
+export const HANDOFF_MS = 2600;
+// A turn nobody finished would stop every delivery after it; it can't happen,
+// but if it ever did, the turn is given up after this long.
+const COURIER_TIMEOUT_MS = 90000;
+const between = (rng, [lo, hi]) => lo + rng() * (hi - lo);
+
+export function makeStation(now = 0, seed = 0) {
+  const rng = makeRng((seed ^ 0x9e3779b9) >>> 0);
+  return { rng, courier: null, courierSince: 0, nextRunAt: now + between(rng, FIRST_RUN_MS), order: 0 };
+}
+
+// Hand a walker something to take to the owner: desk item ids they filed.
+// Their place in line is the moment their first item joined it.
+export function queueDelivery(w, ids, station = null) {
+  let added = false;
+  for (const id of ids) {
+    if (!w.queue.includes(id) && !w.carrying.includes(id)) { w.queue.push(id); added = true; }
+  }
+  if (added && w.queuedAt == null) w.queuedAt = station ? station.order++ : 0;
   return w;
 }
 
@@ -277,16 +363,86 @@ function startWalk(w, dest, target, purpose) {
   w.purpose = purpose;
 }
 
+// Whose turn it is to take work over, if anyone's: only when nobody is on a
+// run and the gap after the last one has passed, and only someone already
+// back at their desk. Returns the walker who set off, or null.
+export function dispatch(crew, now, station) {
+  if (station.courier) {
+    if (now - station.courierSince < COURIER_TIMEOUT_MS) return null;
+    station.courier = null;
+  }
+  if (now < station.nextRunAt) return null;
+  let pick = null;
+  for (const w of crew) {
+    if (!w.queue.length || w.mode !== "sit") continue;
+    if (!pick || w.queuedAt < pick.queuedAt) pick = w;
+  }
+  if (!pick) return null;
+  pick.carrying = pick.queue.splice(0);
+  pick.queuedAt = null;
+  startWalk(pick, "owner", OWNER_DROP, "deliver");
+  station.courier = pick.id;
+  station.courierSince = now;
+  return pick;
+}
+
 // Which way a sprite faces while moving by (dx, dy): the larger axis wins.
 export function facingFor(dx, dy) {
   if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "right" : "left";
   return dy > 0 ? "down" : "up";
 }
 
+// Someone walking the same way just ahead: hang back rather than walk into
+// their back. People heading the OTHER way keep to their own side of the
+// hallway instead (route keeps everyone right), and nobody waits on someone
+// standing still. A hold never lasts more than a moment, so two walkers can
+// never keep each other waiting for good.
+export const HANG_BACK = 9;
+const HANG_BACK_MAX_S = 1.5;
+function heading(w) {
+  const t = w.path[w.seg];
+  if (!t) return null;
+  const dx = t[0] - w.x, dy = t[1] - w.y, d = Math.hypot(dx, dy);
+  return d > 0.001 ? [dx / d, dy / d] : null;
+}
+export function behind(w, crew) {
+  const h = heading(w);
+  if (!h) return false;
+  for (const o of crew) {
+    if (o === w || o.mode !== "walk") continue;
+    const oh = heading(o);
+    if (!oh || oh[0] * h[0] + oh[1] * h[1] < 0.7) continue;
+    const rx = o.x - w.x, ry = o.y - w.y;
+    const along = rx * h[0] + ry * h[1];
+    const side = Math.abs(rx * h[1] - ry * h[0]);
+    if (side >= 5) continue;
+    if (along > 0.01 && along < HANG_BACK) return true;
+    // Exactly level: one of the two (always the same one) lets the other go.
+    if (Math.abs(along) <= 0.01 && side < 0.5 && o.id < w.id) return true;
+  }
+  return false;
+}
+
+// One tick for the whole crew: whose turn it is to take work over, then
+// everyone's step. `station` holds the turns (makeStation).
+export function stepCrew(crew, dt, now, station = null) {
+  if (station) dispatch(crew, now, station);
+  for (const w of crew) {
+    if (w.mode === "walk" && behind(w, crew)) {
+      w.held += dt;
+      if (w.held < HANG_BACK_MAX_S) continue;
+    }
+    w.held = 0;
+    stepWalker(w, dt, now, { crew, station });
+  }
+  return crew;
+}
+
 // One tick of a walker's day. Mutates and returns it; `dt` in seconds, `now`
 // in milliseconds. Anything the page needs to know about — a delivery handed
-// over — is pushed onto `w.events` for the page to take.
-export function stepWalker(w, dt, now) {
+// over — is pushed onto `w.events` for the page to take. `crew` lets a walker
+// keep its distance from everyone else; `station` hands out delivery turns.
+export function stepWalker(w, dt, now, { crew = null, station = null } = {}) {
   if (w.mode === "walk") {
     let left = w.speed * dt;
     while (left > 0 && w.seg < w.path.length) {
@@ -306,7 +462,7 @@ export function stepWalker(w, dt, now) {
         // At the owner's desk: face him and hand it over.
         w.mode = "handoff";
         w.dir = "up";
-        w.until = now + 2200;
+        w.until = now + HANDOFF_MS;
       } else if (w.dest === w.home) {
         w.mode = "sit";
         w.dir = SEAT_FACING[w.home] || "down";
@@ -323,29 +479,27 @@ export function stepWalker(w, dt, now) {
     if (now < w.until) return w;
     w.events.push({ type: "delivered", ids: w.carrying });
     w.carrying = [];
-    startWalk(w, w.home, w.seat, "return");
-    return w;
-  }
-  // Something for the owner goes first: from the desk at once, or as soon as
-  // a pause ends.
-  if (w.queue.length && (w.mode === "sit" || now >= w.until)) {
-    w.carrying = w.queue.splice(0);
-    startWalk(w, "owner", OWNER_DROP, "deliver");
+    if (station && station.courier === w.id) {
+      station.courier = null;
+      station.nextRunAt = now + between(station.rng, RUN_GAP_MS);
+    }
+    startWalk(w, w.home, seatStand(w.home, w.seat), "return");
     return w;
   }
   if (now < w.until) return w;
   const atHome = w.room === w.home;
-  if (w.onShift) {
-    // On shift, the desk is where the work is.
-    if (atHome) { w.until = now + 30000; return w; }
-    startWalk(w, w.home, w.seat, "return");
+  // Holding work for the owner, or on a shift: the desk is the place to be.
+  if (w.queue.length || w.onShift) {
+    if (atHome) { w.until = now + (w.onShift ? 30000 : 1000); return w; }
+    startWalk(w, w.home, seatStand(w.home, w.seat), "return");
     return w;
   }
   if (atHome) {
-    const stop = tourStop(w);
-    startWalk(w, stop, spotIn(stop, w.rng), "tour");
+    const stop = freeStop(w, crew || [w]);
+    if (!stop) { w.until = now + 2000 + w.rng() * 3000; return w; }
+    startWalk(w, stop.room, stop.spot, "tour");
   } else {
-    startWalk(w, w.home, w.seat, "return");
+    startWalk(w, w.home, seatStand(w.home, w.seat), "return");
   }
   return w;
 }
@@ -456,6 +610,132 @@ export function sceneItems(seats, walkers = []) {
 export function tagPoint(item) {
   const top = item.y - PERSON_H + (item.seated && item.dir === "up" ? 0 : 0);
   return [item.x, top - 1.5];
+}
+
+// ── Room names on the painted map ───────────────────────────────────────────
+// Kevin: the names must never be "blocked by anyone who's walking", and must
+// never block a worker. On a phone a readable name is most of a room wide and
+// a name tag nearly a person tall, so no one spot on a wall is clear of
+// everyone all the time. So every name has four places it can hang — each end
+// of its room's back wall and of its front wall — and moves to a clear one
+// before anyone reaches it. Its usual place comes first: the wall nobody
+// walks along, where there is one.
+
+// The room a standing person takes up, feet at (x, feetY), and their name
+// tag's, which the page draws centred one unit above the head (`tw` × `th`,
+// measured on screen and given in map units).
+export const PERSON_W = 8;
+export function personBox(x, feetY) {
+  return { x: x - PERSON_W / 2, y: feetY - PERSON_H, w: PERSON_W, h: PERSON_H };
+}
+export function tagBox(x, feetY, tw, th) {
+  return { x: x - tw / 2, y: feetY - PERSON_H - 1 - th, w: tw, h: th };
+}
+export const boxesMeet = (a, b, pad = 0) =>
+  a.x < b.x + b.w + pad && b.x < a.x + a.w + pad && a.y < b.y + b.h + pad && b.y < a.y + a.h + pad;
+
+// The places a room's name (w × h map units) can hang, its usual one first.
+export function labelSlots(roomId, w, h) {
+  const r = ROOM_RECTS[roomId];
+  const back = r.y - 0.5;
+  const front = r.y + r.h - 1.2 - h;
+  const left = r.x + 4;
+  const right = Math.max(left, r.x + r.w - 4 - w);
+  const slot = (x, y, wall) => ({ x, y, w, h, wall });
+  const bl = slot(left, back, "back"), br = slot(right, back, "back");
+  const fl = slot(left, front, "front"), fr = slot(right, front, "front");
+  // The top row's back wall is the building's edge: nobody ever walks there.
+  if (r.door.side === "bottom") return [bl, br, fl, fr];
+  // The bottom row's front wall faces the street: nobody walks there either.
+  if (r.y + r.h > H2_Y) return [fl, fr, bl, br];
+  // The middle row sits between two hallways, so no wall is always clear. Its
+  // back wall is busy only when someone uses that room's own door; its front
+  // wall has the whole bottom row walking under it.
+  return [bl, br, fl, fr];
+}
+
+// Everyone's body, now and over the next moment, for the room names to keep
+// clear of. `items` is the frame's scene (everyone drawn: seated, standing and
+// walking) and `crew` the walkers, whose next steps are known. Name tags are
+// NOT in here: a tag is as wide as half a room on a phone, so a name that
+// dodged tags too would never stop moving. Instead a tag passing under a
+// room's name fades for that moment (tagsUnderLabels) — the worker stays in
+// full view, and so does the room's name.
+export const LABEL_LOOKAHEAD_S = 1.2;
+export function crowdBoxes(items, crew, { now = null, lookahead = LABEL_LOOKAHEAD_S, step = 0.2 } = {}) {
+  const out = [];
+  for (const it of items) if (it.type === "person") out.push(personBox(it.x, it.y));
+  for (const w of crew) {
+    let walk = w;
+    if (w.mode !== "walk") {
+      // About to set off (a stop ending, a hand-over done, a break from the
+      // desk): whatever comes next starts out through this room's door. Someone
+      // on shift, or waiting at the desk for their turn to deliver, stays put.
+      const leaving = now != null && w.until - now < lookahead * 1000
+        && (w.mode !== "sit" || (!w.onShift && !w.queue.length));
+      if (!leaving) continue;
+      const d = doorPoints(w.room);
+      walk = { x: w.x, y: w.y, seg: 0, speed: w.speed, path: [d.inside, d.hall] };
+    }
+    for (const [x, y] of ahead(walk, lookahead, step)) out.push(personBox(x, y));
+  }
+  return out;
+}
+
+// Which people's name tags are passing under a room's name right now: those
+// fade until they're clear. `people` is [{ id, x, feet }], `tagSize(id)` their
+// tag's size in map units, `labels` the boxes the names hang in.
+export function tagsUnderLabels(people, tagSize, labels) {
+  const out = new Set();
+  for (const p of people) {
+    const t = tagSize(p.id);
+    if (!t) continue;
+    const box = tagBox(p.x, p.feet, t[0], t[1]);
+    if (labels.some((l) => boxesMeet(box, l))) out.add(p.id);
+  }
+  return out;
+}
+
+// Where a walker will be over the next `seconds`, if nobody holds them up.
+export function ahead(w, seconds, step) {
+  const out = [];
+  let x = w.x, y = w.y, seg = w.seg;
+  for (let t = step; t <= seconds + 1e-9; t += step) {
+    let left = w.speed * step;
+    while (left > 0 && seg < w.path.length) {
+      const [tx, ty] = w.path[seg];
+      const d = Math.hypot(tx - x, ty - y);
+      if (d <= left) { x = tx; y = ty; left -= d; seg++; } else { x += ((tx - x) / d) * left; y += ((ty - y) / d) * left; left = 0; }
+    }
+    out.push([x, y]);
+  }
+  return out;
+}
+
+// Which of its places a room's name hangs in now. It stays put while its spot
+// is clear; when someone is about to reach it, it moves to the first clear
+// place; and it goes back to its usual place only once that has been clear
+// for a quiet minute, so it doesn't hop to and fro as people pass. In the rare moment
+// every place is taken at once (someone at each wall), it steps out of sight
+// — `state.hidden` — rather than cover anyone, and comes back as soon as a
+// place clears. `state` is kept between calls ({ slot, hidden, clearSince }).
+export const LABEL_SETTLE_MS = 60000;
+export function placeLabel(slots, blocked, state, now) {
+  const hits = slots.map((s) => blocked.some((b) => boxesMeet(s, b, 0.8)));
+  const since = (state.clearSince = state.clearSince || []);
+  hits.forEach((hit, i) => { since[i] = hit ? null : (since[i] ?? now); });
+  const cur = Math.min(state.slot ?? 0, slots.length - 1);
+  if (!hits[cur]) {
+    const home = hits.findIndex((hit, i) => i < cur && !hit && now - since[i] >= LABEL_SETTLE_MS);
+    state.slot = home >= 0 ? home : cur;
+    state.hidden = false;
+    return state.slot;
+  }
+  const free = hits.findIndex((hit) => !hit);
+  if (free >= 0) { state.slot = free; state.hidden = false; return free; }
+  state.slot = cur;
+  state.hidden = true;
+  return cur;
 }
 
 // A sheet of paper, the size of a hand, for someone carrying work to the owner
@@ -776,7 +1056,10 @@ export function drawDynamic(ctx, t, { walkers = [], seats = [], selected = null,
   [...walkers].sort((p, q) => p.y - q.y).forEach((w) => {
     const seat = byId[w.id] || { id: w.id, role: "worker" };
     const seated = w.mode === "sit";
-    drawPerson(ctx, w.x, w.y, lookFor(seat), { seated, frame: Math.floor(w.walked / 3) % 2 });
+    // Seated, they are drawn in the chair (their feet stand a step in front
+    // of it on the painted map, where the chair sits lower).
+    const [x, y] = seated ? w.seat : [w.x, w.y];
+    drawPerson(ctx, x, y, lookFor(seat), { seated, frame: Math.floor(w.walked / 3) % 2 });
   });
   // the selected room, outlined
   if (selected && ROOM_RECTS[selected]) {

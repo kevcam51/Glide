@@ -415,7 +415,9 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
   // Deliveries: every new item on the desk is walked to the owner's office by
   // the worker who filed it. Which items have already been carried is
   // remembered on this device, so a report is delivered once, not every time
-  // the HQ opens. Items older than a week just count as delivered.
+  // the HQ opens. Items older than a week just count as delivered. The papers
+  // drawn on the owner's desk are only what has been handed over: a report
+  // still on its way isn't on the desk yet.
   const [delivered, setDelivered] = useState(readDelivered);
   const markDelivered = useCallback((ids) => {
     if (!ids || !ids.length) return;
@@ -594,7 +596,8 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
               {view === "station" ? (
                 <HQStation seats={seats} roomStates={roomStates} board={boardLights}
                   selected={selected} onSelect={pick} reduceMotion={reduceMotion}
-                  deliveries={toDeliver} onDelivered={markDelivered} deskCount={desk.open.length} />
+                  deliveries={toDeliver} onDelivered={markDelivered}
+                  deskCount={Math.max(0, desk.open.length - toDeliver.length)} />
               ) : (
                 <section className="hq-building" aria-label="The building, floor by floor. Tap a room to see that department.">
                   <div className="hq-sky" aria-hidden="true">
@@ -961,17 +964,21 @@ const CSS = `
 .hq-map-dot { display: inline-block; width: .6em; height: .6em; border-radius: 50%; margin-right: .4em; vertical-align: .02em; background: #3A4B4D; }
 .hq-map-dot-on { background: #2FE0A8; box-shadow: 0 0 5px rgba(47,224,168,.8); }
 .hq-map-dot-training { background: var(--hq-amber); box-shadow: 0 0 5px rgba(251,191,36,.7); }
+/* Room names and name tags move out of each other's way (HQStation.jsx), so
+   both fade rather than jump. Kept slim: on a phone every unit of height is a
+   place a walker's head can't go. */
 .hq-map-label {
-  position: absolute; line-height: 1.2; pointer-events: none; white-space: nowrap;
+  position: absolute; line-height: 1.1; pointer-events: none; white-space: nowrap;
   font-family: var(--hq-pixel); font-size: clamp(7px, 1.25vw, 11px); letter-spacing: .04em; text-transform: uppercase;
-  color: #CFE7E7; text-shadow: 0 1px 0 #000, 0 0 4px #000;
+  color: #CFE7E7; text-shadow: 0 1px 0 #000, 0 0 4px #000; transition: opacity .16s ease;
 }
 .hq-map-label.is-selected { color: var(--hq-cyan); text-shadow: 0 0 6px rgba(8,220,224,.7), 0 1px 0 #000; }
 .hq-map-tag {
-  position: absolute; transform: translate(-50%, -100%); line-height: 1.2; pointer-events: none; white-space: nowrap;
-  padding: 1px 3px; border-radius: 3px; background: rgba(2,5,6,.85); border: 1px solid;
-  font-family: var(--hq-pixel); font-size: clamp(7px, 1vw, 9px); text-transform: uppercase;
+  position: absolute; transform: translate(-50%, -100%); line-height: 1.15; pointer-events: none; white-space: nowrap;
+  padding: 0 3px; border-radius: 3px; background: rgba(2,5,6,.85); border: 1px solid;
+  font-family: var(--hq-pixel); font-size: clamp(7px, 1vw, 9px); text-transform: uppercase; transition: opacity .15s ease;
 }
+@media (prefers-reduced-motion: reduce) { .hq-map-label, .hq-map-tag { transition: none; } }
 .hq-map-tag-you { color: var(--hq-cyan); border-color: rgba(8,220,224,.6); }
 .hq-map-tag-training { color: var(--hq-amber); border-color: rgba(251,191,36,.6); }
 .hq-map-tag-working { color: #2FE0A8; border-color: rgba(47,224,168,.6); }

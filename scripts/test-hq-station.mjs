@@ -15,15 +15,29 @@
 //   • A DAY ALWAYS ENDS BACK AT THE DESK, the same way every time (seeded), and
 //     never with a NaN — a canvas draws NaN as nothing, silently.
 //   • NOTHING IS DRAWN OFF THE MAP, run against a recording context.
+//   • NOBODY STANDS ON ANYONE (Kevin: "we don't have workers overlapping and
+//     also standing in the same exact location"): a whole crew runs for
+//     twenty minutes and no two people ever stop within reach of each other,
+//     walkers keep right, and someone behind hangs back.
+//   • WORK REACHES THE OWNER ONE PERSON AT A TIME, oldest first, with a gap
+//     between hand-overs — "not all squished up on top of each other".
+//   • A ROOM'S NAME AND A PERSON NEVER COVER EACH OTHER: at phone sizes, the
+//     top and bottom rows' names are never touched at all, and every name
+//     steps aside before anyone reaches it.
 //
 // Run: node scripts/test-hq-station.mjs
+import { readFileSync } from "fs";
 import { SEATS, ROOMS } from "../src/hqOrg.js";
+import { stripComments } from "./lib/strip-comments.mjs";
 import {
   MAP_W, MAP_H, HALLS, H1_Y, H2_Y, V_XS, ROOM_RECTS, MAP_LABELS, SEAT_SPOTS,
   interior, walkable, roomAt, doorPoints, route, makeRng, spotIn,
-  makeWalkers, stepWalker, drawStatic, drawDynamic,
+  makeWalkers, stepCrew, makeStation, dispatch, drawStatic, drawDynamic,
   SEAT_FACING, WANDER, SPRITES, PERSON_H, propBox, sceneItems, drawScene, facingFor,
   LANES, OWNER_DROP, queueDelivery, deliveriesDue, DELIVERY_WINDOW_MS,
+  seatStand, PERSONAL_SPACE, crowded, claimedSpots, DOORWAYS, FIRST_RUN_MS, RUN_GAP_MS, HANDOFF_MS,
+  HANG_BACK, behind, PERSON_W, personBox, tagBox, boxesMeet, labelSlots, placeLabel, crowdBoxes,
+  tagsUnderLabels, ahead, LABEL_SETTLE_MS, LABEL_LOOKAHEAD_S,
 } from "../src/hqStation.js";
 
 let fails = 0, checks = 0;
@@ -102,13 +116,15 @@ console.log("walkers");
 
   const simulate = (seconds) => {
     const ws = makeWalkers(SEATS, 0);
+    const station = makeStation(0);
     const log = ws.map(() => ({ left: 0, back: 0, rooms: new Set(), offFloor: 0, nan: 0, trail: [] }));
     const dt = 0.05;
     for (let step = 0; step * dt < seconds; step++) {
       const now = step * dt * 1000;
+      const was = ws.map((w) => w.room);
+      stepCrew(ws, dt, now, station);
       ws.forEach((w, i) => {
-        const before = w.room;
-        stepWalker(w, dt, now);
+        const before = was[i];
         const L = log[i];
         if (!Number.isFinite(w.x) || !Number.isFinite(w.y)) L.nan++;
         if (!walkable(w.x, w.y)) L.offFloor++;
@@ -135,9 +151,10 @@ console.log("walkers");
   // Kevin: routes "always different". Every opening seeds a new day.
   const trailFor = (seed) => {
     const ws = makeWalkers(SEATS, 0, seed);
+    const station = makeStation(0, seed);
     const t = [];
     for (let step = 0; step < 4000; step++) {
-      ws.forEach((w) => stepWalker(w, 0.05, step * 50));
+      stepCrew(ws, 0.05, step * 50, station);
       if (step % 40 === 0) t.push(ws.map((w) => `${w.x.toFixed(1)},${w.y.toFixed(1)}`).join(";"));
     }
     return t.join("|");
@@ -181,72 +198,225 @@ console.log("route variety");
     }
   }
   ok(bad.length === 0, `300 random days of routes between every pair stay on the floor${bad.length ? `: ${bad.slice(0, 3).join("; ")}` : ""}`);
-  const fewest = Math.min(...[...shapes.values()].map((v) => v.size));
+  // Two doors facing each other across a hallway are joined by one walk:
+  // straight across. Every other pair has many.
+  const facing = (key) => { const [a, b] = key.split(">"); return doorPoints(a).hall[0] === doorPoints(b).hall[0] && doorPoints(a).hall[1] === doorPoints(b).hall[1]; };
+  const fewest = Math.min(...[...shapes.entries()].filter(([k]) => !facing(k)).map(([, v]) => v.size));
   ok(fewest >= 5, `every pair of rooms is joined by many different walks (fewest: ${fewest})`);
+  const across = [...shapes.entries()].filter(([k]) => facing(k));
+  ok(across.length === 6 && across.every(([k, v]) => v.size === 1 && JSON.parse([...v][0]).every((pt) => pt[0] === doorPoints(k.split(">")[0]).hall[0])),
+    `…and doors facing each other across a hallway are joined straight across (${across.length} pairs)`);
   ok(farTaken > crossings * 0.15 && farTaken < crossings * 0.5, `the longer cross-hallway is taken now and then, not always (${farTaken} of ${crossings})`);
-  ok(LANES.every((l) => Math.abs(l) <= 4), "no lane strays more than four units off a hallway's centre line");
+  ok(LANES.every((l) => l > 0 && l <= 4), "no lane strays more than four units off a hallway's centre line");
+  // Keep right: every leg along a hallway is on the walker's own right-hand
+  // side of the centre line, so people heading opposite ways never share a
+  // line — they pass at least two lanes apart.
+  const wrongSide = [];
+  let legs = 0;
+  for (let seed = 1; seed <= 200; seed++) {
+    const rng = makeRng(seed);
+    for (const a of ids) for (const b of ids) {
+      if (a === b) continue;
+      const pts = route(a, b, rng);
+      for (let i = 1; i < pts.length; i++) {
+        const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+        const hall = [H1_Y, H2_Y].find((h) => Math.abs(y0 - h) <= 4 && y0 === y1);
+        if (hall !== undefined && x0 !== x1) {
+          legs++;
+          const off = y0 - hall;
+          if (off !== 0 && Math.sign(off) !== (x1 > x0 ? 1 : -1)) wrongSide.push(`${a}>${b} seed ${seed} leg ${i}`);
+          if (off === 0 && doorPoints(a).hall[0] !== doorPoints(b).hall[0]) wrongSide.push(`${a}>${b} seed ${seed} walks the centre line`);
+        }
+        const v = V_XS.find((vx) => Math.abs(x0 - vx) <= 4 && x0 === x1);
+        if (v !== undefined && y0 !== y1 && Math.abs(y0 - y1) > 20) {
+          legs++;
+          const off = x0 - v;
+          if (Math.sign(off) !== (y1 > y0 ? -1 : 1)) wrongSide.push(`${a}>${b} seed ${seed} cross-hallway leg ${i}`);
+        }
+      }
+    }
+  }
+  ok(legs > 5000 && wrongSide.length === 0, `everyone keeps to their own right in every hallway (${legs} legs${wrongSide.length ? `; wrong: ${wrongSide.slice(0, 3).join(", ")}` : ""})`);
+  const eastbound = route("marketing", "front", makeRng(3));
+  const westbound = route("front", "marketing", makeRng(3));
+  const lineOf = (pts) => pts.find((p, i) => i > 0 && pts[i - 1][1] === p[1] && p[0] !== pts[i - 1][0])[1];
+  ok(lineOf(eastbound) - H2_Y >= 2 && H2_Y - lineOf(westbound) >= 2,
+    `two people walking the same hallway toward each other pass on opposite sides (${lineOf(eastbound)} vs ${lineOf(westbound)})`);
   const plain = route("finance", "marketing");
   ok(JSON.stringify(plain) === JSON.stringify(route("finance", "marketing", null)), "without a generator the route is the plain shortest one");
 }
 
-// ── 3c. Deliveries: work walks to the owner's desk ─────────────────────────
+// ── 3c. Deliveries: work walks to the owner's desk, one person at a time ───
 console.log("deliveries");
 {
   const ws = makeWalkers(SEATS, 0, 7);
+  const station = makeStation(0, 7);
   const bk = ws.find((w) => w.id === "bookkeeper");
-  queueDelivery(bk, ["item-1", "item-2"]);
-  queueDelivery(bk, ["item-2"]);
+  const fd = ws.find((w) => w.id === "front-desk");
+  queueDelivery(bk, ["item-1", "item-2"], station);
+  queueDelivery(bk, ["item-2"], station);
   ok(bk.queue.length === 2, "the same item is never queued twice");
-  const seen = { handoff: false, carried: false, delivered: null, back: false, wall: false };
-  for (let step = 0; step < 3000 && !seen.back; step++) {
+  queueDelivery(fd, ["item-3"], station);
+  ok(bk.queuedAt < fd.queuedAt, "…and whoever had work first is first in line");
+  const line = makeStation(0, 1);
+  const [x1, x2] = makeWalkers(SEATS, 0, 1);
+  queueDelivery(x1, ["a"], line);
+  queueDelivery(x2, ["b"], line);
+  queueDelivery(x1, ["c"], line);
+  ok(x1.queuedAt < x2.queuedAt, "…and keeps that place when more work comes in behind it");
+
+  const handed = [], departures = [];
+  let maxInOffice = 0, wall = false, wandered = false, back = 0;
+  for (let step = 0; step < 12000 && back < 2; step++) {
     const now = step * 50;
-    stepWalker(bk, 0.05, now);
-    if (!walkable(bk.x, bk.y)) seen.wall = true;
-    if (bk.carrying.length) seen.carried = true;
-    if (bk.mode === "handoff") {
-      seen.handoff = true;
-      ok(Math.abs(bk.x - OWNER_DROP[0]) < 0.01 && Math.abs(bk.y - OWNER_DROP[1]) < 0.01 && bk.dir === "up",
-        "the hand-over happens at the owner's desk, facing him");
-      const item = sceneItems(SEATS, [bk]).find((i) => i.id === "bookkeeper");
-      ok(item.carrying === true, "…still holding the papers until they're handed over");
-    }
-    for (const e of bk.events.splice(0)) if (e.type === "delivered") seen.delivered = e.ids;
-    if (seen.delivered && bk.mode === "sit" && bk.room === bk.home) seen.back = true;
+    const modes = ws.map((w) => w.mode);
+    stepCrew(ws, 0.05, now, station);
+    ws.forEach((w, i) => {
+      if (!walkable(w.x, w.y)) wall = true;
+      if (modes[i] !== "walk" && w.mode === "walk" && w.dest === "owner") departures.push({ id: w.id, at: now });
+      if (modes[i] !== "handoff" && w.mode === "handoff") {
+        ok(Math.abs(w.x - OWNER_DROP[0]) < 0.01 && Math.abs(w.y - OWNER_DROP[1]) < 0.01 && w.dir === "up",
+          `${w.id} hands the work over at the owner's desk, facing him`);
+        const item = sceneItems(SEATS, ws).find((it) => it.id === w.id);
+        ok(item.carrying === true, `…still holding the papers until they're handed over (${w.id})`);
+      }
+      // Holding work for the owner: straight home to wait for the turn, never a stop somewhere else.
+      if (w.queue.length && w.mode === "walk" && w.dest !== w.home) wandered = true;
+      for (const e of w.events.splice(0)) if (e.type === "delivered") handed.push({ id: w.id, ids: e.ids, at: now });
+      if (handed.some((h) => h.id === w.id) && modes[i] === "walk" && w.mode === "sit" && w.room === w.home) back++;
+    });
+    maxInOffice = Math.max(maxInOffice, ws.filter((w) => roomAt(w.x, w.y) === "owner").length);
   }
-  ok(seen.carried && seen.handoff, "a queued delivery is carried to the owner");
-  ok(JSON.stringify(seen.delivered) === JSON.stringify(["item-1", "item-2"]), `the page is told exactly which items were handed over (${JSON.stringify(seen.delivered)})`);
-  ok(seen.back, "…and the worker goes back to their desk afterwards");
-  ok(!seen.wall, "a delivery never walks through a wall");
+  ok(JSON.stringify(handed.map((h) => h.ids)) === JSON.stringify([["item-1", "item-2"], ["item-3"]]),
+    `oldest work first, and the page is told exactly which items were handed over (${JSON.stringify(handed.map((h) => h.ids))})`);
+  ok(maxInOffice === 1, `never more than one person in the owner's office at a time (${maxInOffice})`);
+  ok(departures.length === 2 && departures[0].at >= FIRST_RUN_MS[0] && departures[0].at <= FIRST_RUN_MS[1],
+    `the first delivery sets off a few seconds after the HQ opens (${departures[0] && departures[0].at} ms)`);
+  ok(departures.length === 2 && departures[1].at - handed[0].at >= RUN_GAP_MS[0],
+    `the next leaves only after the last was handed over, and a while after (${departures[1] && departures[1].at - handed[0].at} ms)`);
+  ok(handed.length === 2 && handed[1].at - handed[0].at >= RUN_GAP_MS[0] + HANDOFF_MS,
+    `…so hand-overs come at different times, not all at once (${handed[1] && handed[1].at - handed[0].at} ms apart)`);
+  ok(!wandered, "someone holding work for the owner never wanders off with it");
+  ok(back === 2, "…and each goes back to their own desk afterwards");
+  ok(!wall, "a delivery never walks through a wall");
   ok(walkable(...OWNER_DROP) && roomAt(...OWNER_DROP) === "owner", "the drop-off spot is on the owner's office floor");
   const desk = propBox("exec_front", ...SEAT_SPOTS.owner[0]);
   ok(OWNER_DROP[1] > desk.y + desk.h, "…in front of his desk, not inside it");
 
-  // Someone on a live shift stays at the desk — until there is something to deliver.
+  // The turn itself.
+  const st = makeStation(1000, 5);
+  ok(st.nextRunAt >= 1000 + FIRST_RUN_MS[0] && st.nextRunAt <= 1000 + FIRST_RUN_MS[1], "the first turn comes a few seconds after the HQ opens");
+  const pair = makeWalkers(SEATS, 0, 5);
+  const [p, q] = pair;
+  queueDelivery(p, ["p1"], st);
+  queueDelivery(q, ["q1"], st);
+  ok(dispatch(pair, st.nextRunAt - 1, st) === null && p.mode === "sit", "nobody sets off before the turn comes");
+  ok(dispatch(pair, st.nextRunAt, st) === p && p.mode === "walk" && p.dest === "owner" && JSON.stringify(p.carrying) === '["p1"]',
+    "…then the first in line does, carrying their work");
+  ok(dispatch(pair, st.nextRunAt + 60000, st) === null && q.mode === "sit", "nobody else sets off while someone is on a run");
+  ok(dispatch(pair, st.nextRunAt + 90001, st) === q, "a turn nobody finished is given up after a while, so deliveries can't stop for good");
+  const away = makeWalkers(SEATS, 0, 6);
+  const st2 = makeStation(0, 6);
+  away.forEach((w) => { queueDelivery(w, [`${w.id}-x`], st2); w.mode = "pause"; });
+  ok(dispatch(away, 1e9, st2) === null, "only someone back at their desk is sent — never straight from a stop somewhere else");
+
+  // Someone on a live shift stays at the desk — until it's their turn to bring something over.
   const live = makeWalkers(SEATS.map((s) => (s.id === "bookkeeper" ? { ...s, status: "on-shift" } : s)), 0, 3);
+  const liveStation = makeStation(0, 3);
   const onShift = live.find((w) => w.id === "bookkeeper");
   let left = false;
-  for (let step = 0; step < 6000; step++) { stepWalker(onShift, 0.05, step * 50); if (onShift.room !== "finance") left = true; }
+  for (let step = 0; step < 6000; step++) { stepCrew(live, 0.05, step * 50, liveStation); if (onShift.room !== "finance") left = true; }
   ok(!left, "a worker on shift stays at the desk for the whole shift");
   const item = sceneItems(SEATS, [onShift]).find((i) => i.id === "bookkeeper");
   ok(item.working === true && item.seated === true, "…drawn seated and working");
-  queueDelivery(onShift, ["x"]);
-  stepWalker(onShift, 0.05, 6000 * 50);
-  ok(onShift.mode === "walk" && onShift.dest === "owner", "…and gets up at once to bring you what they finished");
+  queueDelivery(onShift, ["x"], liveStation);
+  stepCrew(live, 0.05, 6000 * 50, liveStation);
+  ok(onShift.mode === "walk" && onShift.dest === "owner", "…and gets up to bring you what they finished when it's their turn");
   const open = makeWalkers(SEATS.map((s) => ({ ...s, status: s.status === "you" ? "you" : "open" })), 0, 3);
   ok(open.length === 0, "nobody walks for an open seat, deliveries or not");
 
-  // Which items get walked over.
+  // Which items get walked over, and in what order.
   const NOW = Date.UTC(2026, 8, 25, 15, 0, 0);
   const items = [
     { id: "a", worker: "bookkeeper", createdAt: NOW - 3600000 },
     { id: "b", worker: "front-desk", createdAt: NOW - DELIVERY_WINDOW_MS - 1 },
     { id: "c", worker: "bookkeeper", createdAt: NOW - 60000 },
     { id: "d", worker: "", createdAt: NOW },
+    { id: "e", worker: "front-desk", createdAt: NOW - 7200000 },
   ];
   const due = deliveriesDue(items, new Set(["c"]), NOW);
-  ok(JSON.stringify(due) === JSON.stringify([{ id: "a", worker: "bookkeeper" }]),
-    `only new, undelivered items with a worker are carried (${JSON.stringify(due)})`);
-  ok(deliveriesDue(items, new Set(["a", "c"]), NOW).length === 0, "an item delivered on this device is never carried twice");
+  ok(JSON.stringify(due) === JSON.stringify([{ id: "e", worker: "front-desk" }, { id: "a", worker: "bookkeeper" }]),
+    `only new, undelivered items with a worker are carried, oldest first (${JSON.stringify(due)})`);
+  ok(deliveriesDue(items, new Set(["a", "c", "e"]), NOW).length === 0, "an item delivered on this device is never carried twice");
+}
+
+// ── 3d. Personal space ─────────────────────────────────────────────────────
+console.log("personal space");
+{
+  ok(crowded([150, 124], [[150, 120]]) && !crowded([162, 120], [[150, 120]]) && !crowded([150, 128], [[150, 120]]),
+    `arm's reach is wider than it is deep (${PERSONAL_SPACE.join(" × ")})`);
+  const [a, b] = makeWalkers(SEATS, 0, 4);
+  b.mode = "walk"; b.path = [[150, 120]]; b.seg = 0;
+  const claimed = claimedSpots([a, b], a);
+  ok(claimed.some(([x, y]) => x === 150 && y === 120), "the end of someone's walk is already theirs");
+  const chair = seatStand(b.home, b.seat);
+  ok(claimed.some(([x, y]) => x === chair[0] && y === chair[1]), "…and so is their chair while they're out");
+  ok(!claimedSpots([a, b], a).some(([x, y]) => x === a.x && y === a.y), "…but never your own spot");
+  // Every seat on the org chart filled at once — far busier than today — for twenty minutes.
+  const all = SEATS.map((s) => (s.status === "open" ? { ...s, status: "training" } : s));
+  const ws = makeWalkers(all, 0, 21);
+  const station = makeStation(0, 21);
+  let clash = 0, doorway = 0, stops = 0;
+  const seen = [];
+  for (let step = 0; step < 24000; step++) {
+    const now = step * 50;
+    if (step % 600 === 300) queueDelivery(ws[Math.floor(step / 600) % ws.length], [`d${step}`], station);
+    const modes = ws.map((w) => w.mode);
+    stepCrew(ws, 0.05, now, station);
+    ws.forEach((w, i) => { w.events.length = 0; if (modes[i] === "walk" && w.mode === "pause") stops++; });
+    const still = ws.filter((w) => w.mode !== "walk");
+    for (let i = 0; i < still.length; i++) {
+      for (let j = i + 1; j < still.length; j++) {
+        if (crowded([still[i].x, still[i].y], [[still[j].x, still[j].y]])) { clash++; if (seen.length < 3) seen.push(`${still[i].id} + ${still[j].id} at ${now} ms`); }
+      }
+      if (still[i].mode === "pause" && crowded([still[i].x, still[i].y], DOORWAYS)) doorway++;
+    }
+  }
+  ok(stops > 300, `the full crew makes plenty of stops (${stops})`);
+  ok(clash === 0, `with every seat filled, no two people ever stand within arm's reach of each other in twenty minutes${seen.length ? ` (${seen.join("; ")})` : ""}`);
+  ok(doorway === 0, "…and nobody stops in a doorway");
+}
+
+// ── 3e. Hanging back ───────────────────────────────────────────────────────
+console.log("hanging back");
+{
+  const ws = makeWalkers(SEATS, 0, 9);
+  const [a, b] = ws;
+  // Put both on the very same walk at the very same moment.
+  const path = route("research", "finance", makeRng(2));
+  for (const w of [a, b]) {
+    w.room = "research"; w.dest = "finance"; w.mode = "walk"; w.purpose = "tour";
+    w.path = path.map((pt) => [...pt]); w.seg = 0; [w.x, w.y] = path[0];
+  }
+  let closest = Infinity, arrived = 0;
+  for (let step = 0; step < 2000 && arrived < 2; step++) {
+    stepCrew(ws, 0.05, step * 50, null);
+    arrived = [a, b].filter((w) => w.mode !== "walk").length;
+    if (step > 20 && a.mode === "walk" && b.mode === "walk") closest = Math.min(closest, Math.hypot(a.x - b.x, a.y - b.y));
+  }
+  // Straight on they keep HANG_BACK apart; rounding a corner the one behind
+  // closes in a little before turning too, never nearer than about a body's width.
+  ok(closest >= 5, `two people setting off on the same walk together end up one behind the other, not on top of each other (closest ${closest.toFixed(1)})`);
+  ok(arrived === 2, "…and both still get there");
+  const east = { id: "e", mode: "walk", x: 150, y: 155, path: [[200, 155]], seg: 0 };
+  const west = { id: "w", mode: "walk", x: 156, y: 149, path: [[100, 149]], seg: 0 };
+  ok(!behind(east, [east, west]) && !behind(west, [east, west]), "people passing the other way don't stop for each other");
+  const lead = { id: "l", mode: "walk", x: 150 + HANG_BACK - 2, y: 155, path: [[200, 155]], seg: 0 };
+  ok(behind(east, [east, lead]) && !behind(lead, [east, lead]), "…but someone right behind another going the same way waits");
+  const far = { ...lead, x: 150 + HANG_BACK + 2 };
+  ok(!behind(east, [east, far]), "…only when they are really close");
+  const standing = { id: "s", mode: "pause", x: 154, y: 155, path: [], seg: 0 };
+  ok(!behind(east, [east, standing]), "…and nobody waits on someone standing still");
 }
 
 // ── 4. Drawing stays on the map ─────────────────────────────────────────────
@@ -270,7 +440,8 @@ console.log("drawing");
   ok(ghosts === SEATS.filter((s) => s.status === "open").length * 2, `one dim outline for each open seat (${ghosts / 2} drawn)`);
 
   const walkers = makeWalkers(SEATS, 0);
-  for (let s = 0; s < 400; s++) walkers.forEach((w) => stepWalker(w, 0.05, s * 50));
+  const drawStation = makeStation(0);
+  for (let s = 0; s < 400; s++) stepCrew(walkers, 0.05, s * 50, drawStation);
   const moving = new RecordingContext();
   drawDynamic(moving, 12345, { walkers, seats: SEATS, selected: "finance", board: ["training", "open", "open", "open", "training", "open"] });
   const offMapMoving = moving.rects.filter((r) => !inside(r));
@@ -354,9 +525,10 @@ console.log("painted station");
   eq2(facingFor(0, 2), "down", "moving down the map faces the camera");
   eq2(facingFor(1, -2), "up", "moving up the map shows their back");
   const walkers = makeWalkers(SEATS, 0);
+  const facingStation = makeStation(0);
   const seen = new Set();
   for (let step = 0; step < 6000; step++) {
-    walkers.forEach((w) => stepWalker(w, 0.05, step * 50));
+    stepCrew(walkers, 0.05, step * 50, facingStation);
     for (const it of sceneItems(SEATS, walkers)) {
       if (it.type !== "person") continue;
       if (!it.seated) seen.add(it.dir);
@@ -369,18 +541,28 @@ console.log("painted station");
   // …and still does after a walk: they arrive walking toward the chair and
   // have to turn to face their desk.
   const back = makeWalkers(SEATS, 0);
+  const backStation = makeStation(0);
   const returned = new Set();
   for (let step = 0; step < 8000 && returned.size < back.length; step++) {
-    back.forEach((w) => {
-      const was = w.mode;
-      stepWalker(w, 0.05, step * 50);
-      if (was === "walk" && w.mode === "sit") {
+    const was = back.map((w) => w.mode);
+    stepCrew(back, 0.05, step * 50, backStation);
+    back.forEach((w, i) => {
+      if (was[i] === "walk" && w.mode === "sit") {
         ok(w.dir === SEAT_FACING[w.home], `${w.id} sits back down facing ${SEAT_FACING[w.home]} (got ${w.dir})`);
+        // Sitting down moves nobody: they walk to the chair itself, which is
+        // exactly where the seated figure is drawn.
+        const seated = sceneItems(SEATS, [w]).find((it) => it.id === w.id);
+        ok(Math.abs(seated.x - w.x) < 0.01 && Math.abs(seated.y - w.y) < 0.01,
+          `${w.id} sits down where they stopped walking (${w.x.toFixed(1)},${w.y.toFixed(1)} → ${seated.x},${seated.y})`);
         returned.add(w.id);
       }
     });
   }
   ok(returned.size === back.length, "every walker comes home at least once in the test day");
+  ok(makeWalkers(SEATS, 0).every((w) => {
+    const item = sceneItems(SEATS, [w]).find((it) => it.id === w.id);
+    return Math.abs(item.x - w.x) < 0.01 && Math.abs(item.y - w.y) < 0.01;
+  }), "…and a walker starts the day in their chair, where they're drawn");
 
   // One person per seat, even if a seat is both walking and on shift.
   const busy = SEATS.map((s) => (s.id === "bookkeeper" ? { ...s, status: "on-shift" } : s));
@@ -415,7 +597,8 @@ console.log("painted station");
   const imgs = { props: { id: "props" }, crew: { id: "crew" }, owner: { id: "owner" } };
   const rec = new Rec();
   const midday = makeWalkers(SEATS, 0);
-  for (let i = 0; i < 300; i++) midday.forEach((w) => stepWalker(w, 0.05, i * 50));
+  const middayStation = makeStation(0);
+  for (let i = 0; i < 300; i++) stepCrew(midday, 0.05, i * 50, middayStation);
   const scene = sceneItems(everyone, midday);
   drawScene(rec, scene, imgs, { t: 1234, selected: "finance" });
   const draws = rec.calls.filter((c) => c[0] === "drawImage");
@@ -452,6 +635,155 @@ console.log("painted station");
   drawScene(empty, sceneItems(SEATS, []), {}, {});
   ok(empty.calls.filter((c) => c[0] === "drawImage").length === 0, "sheets that haven't loaded are skipped, not drawn as holes");
   ok(PERSON_H > 0 && SPRITES.person.footY <= SPRITES.person.frameH, "people are sized from their feet");
+}
+
+// ── 6. Room names and people never cover each other ─────────────────────────
+console.log("room names");
+{
+  // Sizes as measured on a phone (375 px wide), in map units: a name 7.2 tall
+  // and up to 68.5 wide, a name tag 9.4 tall. On a desktop both are smaller
+  // next to the map, so the phone is the hard case.
+  const H = 7.2;
+  const W = { owner: 57.9, chief: 68.5, finance: 40.4, coaching: 46.4, atrium: 46.7, ops: 53.5, marketing: 50.8, research: 46.4, front: 61.5 };
+  const TAG_H = 9.4;
+  const tagW = (short) => 9.7 + 4.46 * short.length;
+  const ids = Object.keys(ROOM_RECTS);
+  const TOP = ids.filter((id) => ROOM_RECTS[id].door.side === "bottom");
+  const BOTTOM = ids.filter((id) => ROOM_RECTS[id].y + ROOM_RECTS[id].h > H2_Y);
+  const MIDDLE = ids.filter((id) => !TOP.includes(id) && !BOTTOM.includes(id));
+  ok(TOP.length === 3 && MIDDLE.length === 3 && BOTTOM.length === 3, "three rows of three rooms");
+  for (const id of ids) {
+    const sl = labelSlots(id, W[id], H);
+    const r = ROOM_RECTS[id];
+    ok(sl.length === 4 && sl.every((x) => x.x >= r.x && x.x + x.w <= r.x + r.w && x.y >= 0 && x.y + x.h <= MAP_H),
+      `${id}: four places for its name, all along its own walls and on the map`);
+    const expect = BOTTOM.includes(id) ? "front" : "back";
+    ok(sl[0].wall === expect && new Set(sl.map((x) => `${x.wall}${x.x}`)).size === 4, `${id}: its name usually hangs on its ${expect} wall`);
+  }
+
+  // Visitors in the middle row stand a body's height clear of the back wall,
+  // where those rooms' names usually hang — nowhere on the open floor puts
+  // anyone in front of it.
+  for (const id of MIDDLE) {
+    const z = WANDER[id];
+    const back = labelSlots(id, W[id], H).filter((x) => x.wall === "back");
+    let hit = 0;
+    for (let x = z.x; x <= z.x + z.w; x += 1) for (let y = z.y; y <= z.y + z.h; y += 0.5) if (back.some((b) => boxesMeet(b, personBox(x, y), 0.8))) hit++;
+    ok(hit === 0, `${id}: a visitor never stands in front of its name on the back wall`);
+  }
+
+  // placeLabel, by hand.
+  const slots = labelSlots("atrium", W.atrium, H);
+  const on = (x) => ({ x: x.x + 2, y: x.y + 1, w: 2, h: 2 });
+  const st = {};
+  ok(placeLabel(slots, [], st, 0) === 0 && !st.hidden, "with nobody about, a name hangs in its usual place");
+  ok(placeLabel(slots, [on(slots[0])], st, 100) === 1 && !st.hidden, "someone about to reach it: it moves to the next clear place");
+  ok(placeLabel(slots, [], st, 200) === 1, "…and stays there once they've gone, rather than hopping straight back");
+  ok(placeLabel(slots, [], st, 200 + LABEL_SETTLE_MS) === 0, "…until its usual place has been clear a good while");
+  ok(placeLabel(slots, [on(slots[0]), on(slots[1])], st, 50000) === 2, "with two places taken it finds a third");
+  ok(placeLabel(slots, slots.map(on), st, 50100) === 2 && st.hidden === true, "with every place taken at once it steps out of sight, where it is");
+  ok(placeLabel(slots, [on(slots[0]), on(slots[1])], st, 50200) === 2 && st.hidden === false, "…and comes back as soon as a place clears");
+  ok(placeLabel(slots, [{ x: slots[2].x + slots[2].w + 1.5, y: slots[2].y, w: 2, h: 2 }], st, 50300) === 2, "someone a step away isn't in the way");
+
+  // Looking ahead: a walker heading for a name moves it before they arrive.
+  const [walker] = makeWalkers(SEATS, 0, 1);
+  Object.assign(walker, { mode: "walk", x: 150, y: 140, seg: 0, path: [[150, 80]], speed: 20 });
+  const future = crowdBoxes([], [walker], { now: 0 });
+  ok(future.some((b) => b.y + b.h < 130) && !future.some((b) => b.y + b.h < 140 - 20 * LABEL_LOOKAHEAD_S - 1),
+    "a walker's next steps count as taken, as far ahead as the names look and no further");
+  const pausing = { ...walker, mode: "pause", room: "atrium", x: 164, y: 112, until: 500, path: [], seg: 0, queue: [], onShift: false };
+  ok(crowdBoxes([], [pausing], { now: 0 }).some((b) => b.y < ROOM_RECTS.atrium.y + 4),
+    "someone about to leave a room counts as already on their way out through its door");
+  ok(crowdBoxes([], [{ ...pausing, until: 60000 }], { now: 0 }).length === 0, "…but not while they're staying put");
+  const sitting = { ...pausing, mode: "sit", until: 100 };
+  ok(crowdBoxes([], [sitting], { now: 0 }).length > 0, "…someone getting up from their desk counts too");
+  ok(crowdBoxes([], [{ ...sitting, onShift: true }], { now: 0 }).length === 0, "…but not someone on shift, who isn't going anywhere");
+  ok(crowdBoxes([], [{ ...sitting, queue: ["x"] }], { now: 0 }).length === 0, "…nor someone waiting at their desk for their turn to deliver");
+
+  // A name tag under a room's name fades.
+  const label = { x: 100, y: 100, w: 40, h: 7 };
+  const tagSize = (id) => (id === "none" ? null : [30, TAG_H]);
+  const under = tagsUnderLabels([
+    { id: "under", x: 120, feet: 100 + PERSON_H + 1 + TAG_H + 3 },
+    { id: "clear", x: 220, feet: 130 },
+    { id: "none", x: 120, feet: 120 },
+  ], tagSize, [label]);
+  ok(under.has("under") && !under.has("clear") && !under.has("none"), "a name tag passing under a room's name fades; one elsewhere doesn't");
+  ok(tagBox(120, 130, 30, TAG_H).y + TAG_H === 130 - PERSON_H - 1 && personBox(120, 130).w === PERSON_W,
+    "a tag sits one unit above the head it names");
+
+  // Twenty minutes of today's crew, and of a full one, at phone sizes, run the
+  // way the page runs it: everyone's body now and a moment ahead decides where
+  // each name hangs.
+  const simulate = (seats, seed) => {
+    const crew = makeWalkers(seats, 0, seed);
+    const station = makeStation(0, seed);
+    const tags = Object.fromEntries(seats.map((x) => [x.id, [tagW(x.short), TAG_H]]));
+    const state = Object.fromEntries(ids.map((id) => [id, {}]));
+    const out = Object.fromEntries(ids.map((id) => [id, { covered: 0, moves: 0, hidden: 0, tagged: 0, checks: 0 }]));
+    let q = 0;
+    for (let step = 0; step < 24000; step++) {
+      const now = step * 50;
+      if (step % 1200 === 600) for (let k = 0; k < 2; k++) queueDelivery(crew[(Math.floor(step / 1200) + k) % crew.length], [`r${q++}`], station);
+      stepCrew(crew, 0.05, now, station);
+      for (const w of crew) w.events.length = 0;
+      if (step % 2) continue;
+      const items = sceneItems(seats, crew);
+      const blocked = crowdBoxes(items, crew, { now });
+      const people = items.filter((it) => it.type === "person");
+      for (const id of ids) {
+        const sl = labelSlots(id, W[id], H);
+        const before = state[id].slot ?? 0;
+        const i = placeLabel(sl, blocked, state[id], now);
+        const o = out[id];
+        o.checks++;
+        if (i !== before) o.moves++;
+        if (state[id].hidden) { o.hidden++; continue; }
+        if (people.some((it) => boxesMeet(sl[i], personBox(it.x, it.y)))) o.covered++;
+        if (people.some((it) => tags[it.id] && boxesMeet(sl[i], tagBox(it.x, it.y, ...tags[it.id])))) o.tagged++;
+      }
+    }
+    return out;
+  };
+  // Today's crew is the three first hires, pinned here so that hiring someone
+  // new doesn't quietly change what this measures.
+  const TODAY = ["bookkeeper", "front-desk", "progress-analyst"];
+  const crewOf = (ids) => SEATS.map((x) => (x.status === "you" ? x : { ...x, status: ids.includes(x.id) ? "training" : "open" }));
+  const today = simulate(crewOf(TODAY), 11);
+  const full = simulate(crewOf(SEATS.map((x) => x.id)), 11);
+  for (const [name, run] of [["today's crew", today], ["every seat filled", full]]) {
+    const covered = ids.filter((id) => run[id].covered).map((id) => `${id} ${run[id].covered}`);
+    ok(covered.length === 0, `${name}: no room's name ever covers a worker, or is covered by one${covered.length ? ` (${covered.join(", ")})` : ""}`);
+    const moved = [...TOP, ...BOTTOM].filter((id) => run[id].moves || run[id].hidden || run[id].tagged);
+    ok(moved.length === 0, `${name}: the top and bottom rows' names never move, never hide and never meet even a name tag${moved.length ? ` (${moved.join(", ")})` : ""}`);
+  }
+  const perMin = (id) => today[id].moves / 20;
+  // The middle row sits between two hallways, so its names do step aside:
+  // measured, about once or twice a minute with three people walking.
+  ok(MIDDLE.every((id) => perMin(id) <= 2), `today's crew: the middle row's names step aside at most a couple of times a minute (${MIDDLE.map((id) => `${id} ${perMin(id).toFixed(1)}`).join(", ")})`);
+  ok(MIDDLE.every((id) => today[id].hidden / today[id].checks < 0.01),
+    `…and are almost never out of sight (${MIDDLE.map((id) => `${id} ${(100 * today[id].hidden / today[id].checks).toFixed(2)}%`).join(", ")})`);
+}
+
+// ── 7. The page runs it the same way ────────────────────────────────────────
+console.log("the page");
+{
+  const page = stripComments(readFileSync(new URL("../src/HQStation.jsx", import.meta.url), "utf8"));
+  ok(/stepCrew\(walkersRef\.current, dt, now, stationRef\.current\)/.test(page), "the map moves the whole crew together, with the delivery turns");
+  ok(!/stepWalker\(/.test(page), "…never one walker on their own, who couldn't see anyone else");
+  ok(/walkersRef\.current = makeWalkers\([^)]*\);\s*stationRef\.current = makeStation\(/.test(page),
+    "a new crew gets new turns, so a run nobody can finish never blocks the line");
+  ok(/queueDelivery\(w, \[d\.id\], stationRef\.current\)/.test(page), "work is put in line in the order it arrives");
+  ok(/const bodies = crowdBoxes\(items, moving \? walkersRef\.current : \[\], \{ now \}\);/.test(page),
+    "room names look where people are going, and who is about to leave");
+  ok(/const want = placeLabel\(slots, bodies, s, now\);/.test(page) && /const show = s\.hidden \? "0" : "1";/.test(page),
+    "…each name takes the place placeLabel chooses, and steps out of sight when it says so");
+  ok(/if \(!s\.hidden\) hung\.push\(slots\[s\.shown\]\);/.test(page) && /tagsUnderLabels\(people,/.test(page)
+    && /el\.style\.opacity = under\.has\(pid\) \? "0" : "";/.test(page), "…and a name tag under a name that is showing fades");
+  ok(/labelSlots\(id, sz\[0\], sz\[1\]\)/.test(page) && /el\.offsetWidth \/ k, el\.offsetHeight \/ k/.test(page),
+    "names are placed at their size as measured on screen, in map units");
+  ok(/fonts\.addEventListener\("loadingdone", again\)/.test(page), "…measured again once the pixel font arrives");
+  ok(/const \[x, y\] = w\.mode === "sit" \? w\.seat : \[w\.x, w\.y\];/.test(page), "a seated walker's tag sits over their chair");
 }
 
 console.log(`\n${checks - fails}/${checks} HQ station checks passed`);
