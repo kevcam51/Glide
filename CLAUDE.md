@@ -108,6 +108,29 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S238, round 3 (Sep 25): the crew comes alive — all LIVE** (`29b42f1`;
+> `hqApi` + `mcp` deployed before the push). Kevin: routes "always different",
+> and workers walk to his desk "whenever they're doing work or trying to send me
+> something". StarNet's station mirrors its agents' live state; so does this one.
+> Every opening seeds a new day (`makeRng` MIXES its seed — a plain LCG's first
+> draw is nearly linear in the seed, so seeds 1..300 all began the same walk);
+> every trip picks a hallway lane and sometimes the longer cross-hallway; tours
+> visit every department's open floor. ⚠️ **TOURS NEVER ENTER THE OWNER'S
+> OFFICE** — a walk to Kevin always means something for him: each new desk item
+> is carried there by the worker who filed it (`deliveriesDue` → `queueDelivery`
+> → hand-over facing him → the page marks it delivered in localStorage
+> `glidna-hq-delivered`; >7 days old or reduced motion = delivered at once).
+> `hq_clock_in` (the door) marks a worker on shift until it files/logs (or 2 h);
+> `liveSeats()` (hqOrg.js) moves a seat to "working" after real work and
+> "on-shift" while clocked in; the HQ polls every 60 s while visible. The
+> Claude-meter tool is GONE (Kevin: "not necessary") — the sheet links to
+> claude.ai. ⚠️ **A HIDDEN BROWSER PANE PAUSES requestAnimationFrame**, so the
+> walk never advances there; verify by stepping walkers by hand, not by waiting.
+> ⚠️ Probing the live HQ chunk: index.html does NOT name App-*.js — follow
+> index-*.js → App-*.js → HQ-*.js. Next: Kevin picks new rooms/departments;
+> Gmail + Google Calendar are now connected in his Claude (their routines must
+> uncheck them unless needed — Gmail can SEND and TRASH)._
+>
 > _**S238, round 2 (Sep 24): the PAINTED station, the SPENDING sheet, and piece
 > 3 — THE CREW'S FRONT DOOR. All live** (`8cb6f75`, `f0a8851`; `hqApi` and `mcp`
 > deployed before the pushes). Kevin: make it look "almost identical" to StarNet.
