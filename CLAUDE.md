@@ -108,6 +108,41 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S238, round 5 (Sep 25): the crew's office is a real repository, the crew
+> mostly sits, and a Watchdog tells Kevin when to upgrade** (`4f6659e`; `hqApi`
+> + `mcp` deployed before the push, for the plan-price default). ⚠️ **KEVIN'S
+> PLAN IS CLAUDE PRO PAID YEARLY — "$200" IS A YEAR, NOT A MONTH.** The spending
+> sheet had defaulted to $200/month, so Claude spending read 12× too high; the
+> default is now 1667¢/month, "Claude Pro (yearly)" (an owner edit in
+> `hqSettings/costs` would still win). **Private repo
+> `kevcam51/smooth-training-crew`** now exists (created through the GitHub API
+> with the keychain PAT — `gh` is not installed) and mirrors
+> `docs/hq/crew-repo/`: keep the two in sync. ⚠️ **CREATING A ROUTINE RETURNED
+> 403 `repo_access_denied`** — the Claude GitHub App has no access to the new
+> repo, which only Kevin can grant; and `job_config.ccr.environment_id` is
+> REQUIRED and no tool here lists environments (the fastest fix: Kevin creates
+> the first routine in the claude.ai UI, then `RemoteTrigger get` it). The body
+> shape (from the CLI's own /schedule skill) and this account's connector ids +
+> URLs are in the HQ memory file. ⚠️ **HOOKS LOAD ONLY IN A ONE-REPOSITORY CLOUD
+> SESSION** (docs), so a crew routine gets that repo and no other. The guard
+> now allow-lists Claude's BUILT-IN tools as well: a worker holding
+> `RemoteTrigger` could have started a copy of itself from a repo with no
+> guard. **Walkers mostly sit** (Kevin: "most of the time they're going to be
+> at their desks"): they were seated ~20% of the time; now 45–120 s at the desk
+> between strolls and `STROLL_LIMIT` 2 however big the crew gets (75% seated
+> today, 87% with every seat filled, never >3 on their feet), deliveries never
+> wait on it; a walker's `errand` says why it's up. **Hired: the Systems
+> Watchdog** — a desktop scheduled task (`hq-plan-check`, 9 p.m. daily) that
+> reads `get_usage` (the only place the plan meter can be read; a cloud routine
+> can't) and the crew's routine runs, and files an HQ alert/note when it's time
+> to upgrade. Its first run paused on a tool-approval prompt: Kevin approves
+> once. Seat cards now list each hire's apps ("every other app off"). `facts.md`
+> filled from smoothtraining.com (tiers $400/$800/$1,200 a month, free
+> consultation, South Florida) and Smooth Training's own emails; cancellation,
+> hours and session length stay placeholders. ⚠️ QuickBooks' product list is two
+> empty placeholders — it is NOT a source for prices. Suites: station 306, crew
+> 457, HQ 136, spend 100; three mutations of the desk-time rules all went red._
+>
 > _**S238, round 4 (Sep 25): room names and people never cover each other,
 > deliveries take turns, and the crew gets its own office.** Frontend only (no
 > functions, no rules) — the push is the release. Kevin: names "can't be
