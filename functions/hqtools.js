@@ -15,10 +15,15 @@
 //
 // ⚠️ THE CREW'S RULES ARE ENFORCED HERE, NOT TRUSTED TO A PROMPT. A routine is
 // a model and its output is input: it can only ADD a desk item (always "open",
-// never pre-approved), log a time card, read the desk, or record the plan's
-// usage meter. There is no tool to send, pay, publish or delete anything, and
+// never pre-approved), log a time card, read the desk, or
+// clock in. There is no tool to send, pay, publish or delete anything, and
 // the seat's department and the engine are set here, never taken from the
 // caller. Everything goes through hq.js's sanitizers.
+//
+// Kevin wanted the HQ to show the crew really working, the way StarNet's
+// station mirrors its agents' live state: hq_clock_in marks a worker on shift
+// (drawn at its desk, working) and filing its work clocks it out — and the
+// worker then walks what it filed to the owner's desk on the map.
 
 const { postDeskItem, logShift, HQ_LIMITS } = require("./hq");
 
@@ -122,30 +127,19 @@ const HQ_TOOLS = [
     },
   },
   {
-    name: "hq_record_plan_usage",
+    name: "hq_clock_in",
     scope: "write:logs",
     description:
-      "Smooth Training HQ, owner only: record a reading of the owner's Claude plan usage meter (the "
-      + "5-hour and weekly limits, in percent) so the HQ spending sheet can show it. Only call this with "
-      + "numbers you actually read from the meter; never estimate them.",
+      "Smooth Training HQ, owner only: clock in at the START of a crew shift, before any other work. "
+      + "While the shift runs, the owner's HQ shows this worker at their desk, working. The shift ends "
+      + "when you call hq_file_report or hq_log_shift for the same worker (or after two hours).",
     input_schema: {
       type: "object",
       properties: {
-        plan: { type: "string", description: "The plan's name as the meter shows it." },
-        windows: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              label: { type: "string", description: "e.g. 5-hour limit, Weekly · all models." },
-              percentUsed: { type: "number", description: "0 to 100." },
-              resetsAt: { type: "string", description: "ISO time the window resets." },
-            },
-            required: ["label", "percentUsed"],
-          },
-        },
+        worker: { type: "string", enum: CREW_SEATS, description: "The crew seat starting its shift." },
+        task: { type: "string", description: "What this shift is for, in a few words, e.g. Monday money check." },
       },
-      required: ["windows"],
+      required: ["worker"],
     },
   },
 ];
@@ -188,6 +182,7 @@ async function fileReport(db, input, now) {
     headNote: i.headNote, link: i.link || null, engine: "claude",
   }, now);
   const shiftId = await logShift(db, shiftFrom(i.worker, dept, { summary: i.summary, ...(i.shift || {}) }, now, [id]), now);
+  await clockOut(db, i.worker, now);
   return { ok: true, deskItemId: id, shiftId, filed: "On the owner's HQ desk, waiting for him. Nothing was sent." };
 }
 
@@ -195,6 +190,7 @@ async function logOnly(db, input, now) {
   const i = input || {};
   const dept = seatRoom(i.worker);
   const shiftId = await logShift(db, shiftFrom(i.worker, dept, i, now), now);
+  await clockOut(db, i.worker, now);
   return { ok: true, shiftId };
 }
 
@@ -225,18 +221,24 @@ async function readDesk(db, input) {
 // eslint-disable-next-line no-control-regex
 const plain = (v, max) => String(v == null ? "" : v).replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, max);
 
-async function recordPlanUsage(db, input, now) {
+// Presence, not data: a worker's hqActive doc says it is on shift right now,
+// so the HQ can draw it at its desk working. Filing or logging the shift ends
+// it; the HQ also ignores one older than two hours (a run that died quietly).
+async function clockIn(db, input, now) {
   const i = input || {};
-  const windows = (Array.isArray(i.windows) ? i.windows : []).slice(0, 6).map((w) => ({
-    label: plain(w && w.label, 40),
-    percentUsed: Math.max(0, Math.min(100, Math.round(Number(w && w.percentUsed) * 10) / 10)),
-    resetsAt: iso(toMs(w && w.resetsAt)),
-  })).filter((w) => w.label && Number.isFinite(w.percentUsed));
-  if (!windows.length) throw new DoorError("windows needs at least one { label, percentUsed } reading.");
-  await db.collection("hqPlanUsage").doc("latest").set({
-    plan: plain(i.plan, 40) || null, windows, capturedAt: now, source: "claude",
+  const dept = seatRoom(i.worker);
+  await db.collection("hqActive").doc(i.worker).set({
+    worker: i.worker, dept, task: plain(i.task, 120) || null, since: now, endedAt: null,
   });
-  return { ok: true, recorded: windows.length };
+  return { ok: true, clockedIn: i.worker, note: "The owner's HQ now shows you at your desk. File or log the shift to clock out." };
+}
+
+async function clockOut(db, worker, now) {
+  try {
+    await db.collection("hqActive").doc(worker).set({ endedAt: now }, { merge: true });
+  } catch (e) {
+    // Best effort: the HQ stops showing a stale shift after two hours anyway.
+  }
 }
 
 // Run one HQ tool. Throws DoorError (code "invalid-argument") for bad input;
@@ -246,7 +248,7 @@ async function runHqTool(name, input, { db, now = Date.now() }) {
     case "hq_file_report": return fileReport(db, input, now);
     case "hq_log_shift": return logOnly(db, input, now);
     case "hq_read_desk": return readDesk(db, input);
-    case "hq_record_plan_usage": return recordPlanUsage(db, input, now);
+    case "hq_clock_in": return clockIn(db, input, now);
     default: throw new DoorError(`Unknown HQ tool "${name}".`);
   }
 }

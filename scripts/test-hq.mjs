@@ -23,7 +23,7 @@ import { dirname, join } from "path";
 import { stripComments } from "./lib/strip-comments.mjs";
 import {
   ROOMS, SEATS, FLOORS, CREW_RULES, BLUEPRINT,
-  seatsIn, headOf, orgCounts, roomSummary, roomsOnFloor,
+  seatsIn, headOf, orgCounts, roomSummary, roomsOnFloor, liveSeats,
 } from "../src/hqOrg.js";
 import { W, H, roomScene, seatCenters, palmTree, van, PALM_W, PALM_H, VAN_W, VAN_H } from "../src/hqPixels.js";
 
@@ -169,6 +169,46 @@ console.log("org chart");
 }
 
 // ── 4. The pixel art lands inside its canvas ────────────────────────────────
+// ── The crew as it really is ─────────────────────────────────────────────────
+// The chart says where each seat STARTS; real events move it. Run, not read.
+console.log("live seats");
+{
+  const same = liveSeats(SEATS, {});
+  ok(same.every((s, i) => s.status === SEATS[i].status), "with nothing happening, every seat keeps its chart status");
+  const moved = liveSeats(SEATS, {
+    shifts: [{ worker: "bookkeeper" }], active: [{ worker: "front-desk" }], open: [{ worker: "progress-analyst" }],
+    recent: [{ worker: "content-creator" }],
+  });
+  const st = (id) => moved.find((s) => s.id === id).status;
+  ok(st("front-desk") === "on-shift", "a worker clocked in right now is on shift");
+  ok(st("bookkeeper") === "working", "a worker that has logged a shift is working");
+  ok(st("progress-analyst") === "working", "…so is one whose work is waiting on the desk");
+  ok(st("content-creator") === "working", "…or whose work the owner has already handled");
+  ok(st("owner") === "you", "the owner's seat never changes");
+  ok(st("scheduling") === "open", "a seat nobody has touched stays open");
+  const both = liveSeats(SEATS, { shifts: [{ worker: "bookkeeper" }], active: [{ worker: "bookkeeper" }] });
+  ok(both.find((s) => s.id === "bookkeeper").status === "on-shift", "on shift wins over working");
+  ok(liveSeats(SEATS, { active: [{ worker: "owner" }] }).find((s) => s.id === "owner").status === "you",
+    "…and not even a clock-in can move the owner");
+  const counts = orgCounts(moved);
+  ok(counts.onShift === 1 && counts.working === 3 && counts.training === 0, `the counts follow (${JSON.stringify(counts)})`);
+  ok(roomSummary("front", moved) === "1 on shift · 3 open", `a room's line says who is on shift (${roomSummary("front", moved)})`);
+  ok(roomSummary("finance", moved) === "1 working · 2 open", `…and who is working (${roomSummary("finance", moved)})`);
+  ok(roomSummary("finance") === "1 in training · 2 open", "the chart's own line is unchanged without live data");
+
+  const hqCode = stripComments(HQ);
+  // The screen wires it: live seats feed every count and the map, a poll
+  // looks again every minute while the page is visible, and deliveries go to
+  // the map and come back marked.
+  ok(/const live = liveSeats\(SEATS, desk\);/.test(hqCode), "the HQ screen works from live seats");
+  ok(/<HQStation seats=\{seats\}/.test(hqCode), "…and hands them to the map");
+  ok(/deliveries=\{toDeliver\} onDelivered=\{markDelivered\} deskCount=\{desk\.open\.length\}/.test(hqCode),
+    "the map gets what to deliver, tells the screen when it's delivered, and knows how full the desk is");
+  ok(/document\.visibilityState === "visible"\) load\(\{ quiet: true \}\)/.test(hqCode), "the minute poll runs only while the HQ is on screen, and quietly");
+  ok(/const POLL_MS = 60000;/.test(hqCode), "…once a minute");
+  ok(/\.slice\(-DELIVERED_CAP\)/.test(hqCode) && /const DELIVERED_CAP = 300;/.test(hqCode), "the delivered list on this device is capped");
+}
+
 console.log("pixel art");
 {
   const inBounds = (rects, w, h) => rects.every(([x, y, rw, rh, fill]) =>

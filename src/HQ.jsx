@@ -26,10 +26,11 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase.js";
 import {
   ROOMS, FLOORS, SEATS, CREW_RULES, BLUEPRINT, ENGINES,
-  roomById, seatById, seatsIn, roomsOnFloor, orgCounts, roomSummary, headOf,
+  roomById, seatById, roomsOnFloor, orgCounts, roomSummary, liveSeats, headOf,
 } from "./hqOrg.js";
 import { W, H, roomScene, seatCenters, palmTree, van, PALM_W, PALM_H, VAN_W, VAN_H } from "./hqPixels.js";
 import HQStation from "./HQStation.jsx";
+import { deliveriesDue } from "./hqStation.js";
 import HQSpend, { SPEND_CSS, money } from "./HQSpend.jsx";
 
 const FONT_ID = "hq-silkscreen";
@@ -39,7 +40,7 @@ const FONT_HREF = "https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;
 const BOARD_ORDER = ["finance", "ops", "marketing", "research", "front", "coaching"];
 const DEPT_ROOMS = ROOMS.filter((r) => r.id !== "owner" && r.id !== "chief");
 
-const STATUS_LABEL = { you: "You", training: "In training", open: "Open position" };
+const STATUS_LABEL = { you: "You", "on-shift": "On shift", working: "Working", training: "In training", open: "Open position" };
 const BLUEPRINT_LABEL = { built: "Built", next: "Next", planned: "Planned" };
 const KIND_LABEL = { report: "Report", draft: "Draft to review", question: "Question for you", alert: "Heads-up", note: "Note" };
 const SHIFT_LABEL = { done: "Done", failed: "Didn't finish", skipped: "Skipped" };
@@ -89,6 +90,16 @@ const deptName = (id) => (roomById(id) || {}).name || id;
 // The departments list on the station's left, in building order.
 const DEPT_ORDER = ["owner", "chief", "finance", "ops", "coaching", "marketing", "research", "front"];
 const VIEW_KEY = "glidna-hq-view";
+const DELIVERED_KEY = "glidna-hq-delivered";
+const DELIVERED_CAP = 300;
+const POLL_MS = 60000;
+
+function readDelivered() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(DELIVERED_KEY) || "[]");
+    return new Set(Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : []);
+  } catch { return new Set(); }
+}
 
 function readView() {
   try { return localStorage.getItem(VIEW_KEY) === "building" ? "building" : "station"; } catch { return "station"; }
@@ -106,6 +117,9 @@ function clock(ms) {
 // handled. With none yet, it says where each hired worker stands.
 function crewLog(desk) {
   const rows = [];
+  for (const a of desk.active || []) {
+    rows.push({ at: a.since, who: workerShort(a.worker), text: `clocked in${a.task ? ` · ${a.task}` : ""}` });
+  }
   for (const sh of desk.shifts || []) {
     rows.push({ at: sh.startedAt, who: workerShort(sh.worker), text: `${SHIFT_LABEL[sh.status] || sh.status}${sh.summary ? ` · ${sh.summary}` : ""}` });
   }
@@ -127,10 +141,14 @@ const MOON = [
   [2, 3, 2, 2, "#C9DEDC"], [6, 5, 1, 1, "#C9DEDC"], [5, 2, 1, 1, "#C9DEDC"],
 ]);
 
-function deptState(roomId) {
-  const seats = seatsIn(roomId);
-  if (seats.some((s) => s.status === "working" || s.status === "on-shift")) return "on";
-  if (seats.some((s) => s.status === "training")) return "training";
+// Live seats (hqOrg.js liveSeats), filtered to one room.
+const inRoom = (seats, roomId) => seats.filter((s) => s.room === roomId);
+const headIn = (seats, roomId) => seats.find((s) => s.room === roomId && (s.role === "head" || s.role === "owner")) || null;
+
+function deptState(roomId, seats = SEATS) {
+  const mine = inRoom(seats, roomId);
+  if (mine.some((s) => s.status === "working" || s.status === "on-shift")) return "on";
+  if (mine.some((s) => s.status === "training")) return "training";
   return "open";
 }
 
@@ -145,8 +163,8 @@ function Pixels({ rects, w, h, className }) {
   );
 }
 
-function Room({ room, selected, onSelect, boardLights }) {
-  const seats = seatsIn(room.id);
+function Room({ room, selected, onSelect, boardLights, allSeats }) {
+  const seats = inRoom(allSeats, room.id);
   const xs = seatCenters(room.id, seats.length);
   const lit = seats.some((s) => s.status !== "open");
   const rects = useMemo(
@@ -157,12 +175,12 @@ function Room({ room, selected, onSelect, boardLights }) {
   );
   return (
     <button type="button" onClick={() => onSelect(room.id)} aria-pressed={selected}
-      aria-label={`${room.name}. ${roomSummary(room.id)}.`}
+      aria-label={`${room.name}. ${roomSummary(room.id, allSeats)}.`}
       className={`hq-room${selected ? " is-selected" : ""}${lit ? "" : " is-dark"}`}>
       <Pixels rects={rects} w={W} h={H} className="hq-room-art" />
       <span className="hq-room-label" aria-hidden="true">
         <span className="hq-room-name">{room.name}</span>
-        <span className="hq-room-sum">{roomSummary(room.id)}</span>
+        <span className="hq-room-sum">{roomSummary(room.id, allSeats)}</span>
       </span>
       {/* In a room of three or four, every other tag rides one row higher, so
           neighbouring tags never overlap on a phone-width room. */}
@@ -203,9 +221,9 @@ function SeatRow({ s, lastShift }) {
   );
 }
 
-function DeptPanel({ roomId, panelRef, shifts }) {
+function DeptPanel({ roomId, panelRef, shifts, allSeats }) {
   const room = roomById(roomId);
-  const seats = seatsIn(roomId);
+  const seats = inRoom(allSeats, roomId);
   // Shifts arrive newest first, so the first one per worker is its latest.
   const lastShift = (seatId) => (shifts || []).find((sh) => sh.worker === seatId) || null;
   return (
@@ -288,8 +306,8 @@ function ShiftRow({ sh }) {
 export default function HQ({ onClose, ownerName = "", sample = null }) {
   const [selected, setSelected] = useState("finance");
   const [desk, setDesk] = useState(() => (sample
-    ? { phase: "ready", open: sample.open, recent: sample.recent, shifts: sample.shifts, openMore: false }
-    : { phase: "loading", open: [], recent: [], shifts: [], openMore: false }));
+    ? { phase: "ready", open: sample.open, recent: sample.recent, shifts: sample.shifts, active: sample.active || [], openMore: false }
+    : { phase: "loading", open: [], recent: [], shifts: [], active: [], openMore: false }));
   const [deskErr, setDeskErr] = useState("");
   // This month's spending for the station's numbers; the sheet asks for more.
   const [spend, setSpend] = useState(() => (sample ? sample.spend("month", 0) : null));
@@ -299,13 +317,19 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
   const rootRef = useRef(null);
   const panelRef = useRef(null);
   const deskRef = useRef(null);
-  const counts = orgCounts();
+  // The seats as the crew has actually left them: clocked in → on shift, has
+  // done real work → working (hqOrg.js liveSeats). Keyed by a signature so a
+  // poll that changes nothing doesn't rebuild the map under the walkers.
+  const live = liveSeats(SEATS, desk);
+  const seatSig = live.map((s) => `${s.id}:${s.status}`).join(",");
+  const seats = useMemo(() => live, [seatSig]);
+  const counts = orgCounts(seats);
   const firstName = String(ownerName || "").trim().split(/\s+/)[0] || "";
-  const boardLights = useMemo(() => BOARD_ORDER.map(deptState), []);
+  const boardLights = useMemo(() => BOARD_ORDER.map((id) => deptState(id, seats)), [seats]);
   // Each room's door light on the station map: the owner's office is always
   // lit, since that is where Kevin sits.
   const roomStates = useMemo(() => Object.fromEntries(
-    ROOMS.map((r) => [r.id, r.id === "owner" ? "on" : deptState(r.id)])), []);
+    ROOMS.map((r) => [r.id, r.id === "owner" ? "on" : deptState(r.id, seats)])), [seats]);
   const [view, setView] = useState(readView);
   const chooseView = (v) => {
     setView(v);
@@ -354,9 +378,9 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
 
   // The whole desk in one round trip: open items, recently handled ones and
   // the latest time cards.
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ quiet = false } = {}) => {
     if (sample) return;
-    setDesk((d) => ({ ...d, phase: d.phase === "loading" ? "loading" : "refreshing" }));
+    if (!quiet) setDesk((d) => ({ ...d, phase: d.phase === "loading" ? "loading" : "refreshing" }));
     try {
       const { data } = await callHq({ action: "overview" });
       setDesk({
@@ -364,16 +388,44 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
         open: Array.isArray(data && data.open) ? data.open : [],
         recent: Array.isArray(data && data.recent) ? data.recent : [],
         shifts: Array.isArray(data && data.shifts) ? data.shifts : [],
+        active: Array.isArray(data && data.active) ? data.active : [],
         openMore: !!(data && data.openMore),
       });
       setDeskErr("");
     } catch (e) {
       // Keep whatever was already on screen; only a first load has nothing to show.
-      setDesk((d) => ({ ...d, phase: d.phase === "loading" ? "error" : "ready" }));
-      setDeskErr(deskError(e));
+      if (!quiet) {
+        setDesk((d) => ({ ...d, phase: d.phase === "loading" ? "error" : "ready" }));
+        setDeskErr(deskError(e));
+      }
     }
   }, [sample]);
   useEffect(() => { load(); }, [load]);
+
+  // While the HQ is open and on screen, look again every minute, so a worker
+  // clocking in or filing something shows up without a tap on Refresh.
+  useEffect(() => {
+    if (sample) return undefined;
+    const id = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") load({ quiet: true });
+    }, POLL_MS);
+    return () => clearInterval(id);
+  }, [sample, load]);
+
+  // Deliveries: every new item on the desk is walked to the owner's office by
+  // the worker who filed it. Which items have already been carried is
+  // remembered on this device, so a report is delivered once, not every time
+  // the HQ opens. Items older than a week just count as delivered.
+  const [delivered, setDelivered] = useState(readDelivered);
+  const markDelivered = useCallback((ids) => {
+    if (!ids || !ids.length) return;
+    setDelivered((prev) => {
+      const next = [...new Set([...prev, ...ids])].slice(-DELIVERED_CAP);
+      try { localStorage.setItem(DELIVERED_KEY, JSON.stringify(next)); } catch { /* this device only */ }
+      return new Set(next);
+    });
+  }, []);
+  const toDeliver = useMemo(() => deliveriesDue(desk.open, delivered), [desk.open, delivered]);
 
   // Spending, through the same owner-checked door. A failure here leaves the
   // station's money numbers as dashes rather than zeros that look real.
@@ -441,7 +493,7 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
   // cloud shifts — the spending that moves with use. The Claude plan is flat,
   // so its number is how many crew shifts ran on it this month.
   const deskKnown = desk.phase === "ready" || desk.phase === "refreshing";
-  const onShift = SEATS.filter((s) => s.status === "on-shift" || s.status === "working").length;
+  const onShift = counts.onShift;
   const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
   const shiftsToday = desk.shifts.filter((sh) => sh.startedAt >= dayStart.getTime()).length;
   const aiSpendCents = spend ? spend.glidna.cents + spend.crew.cloudCents : null;
@@ -464,8 +516,8 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
   };
   const showDesk = () => deskRef.current && deskRef.current.scrollIntoView({ behavior, block: "start" });
 
-  const owner = SEATS.find((s) => s.role === "owner");
-  const chief = headOf("chief");
+  const owner = seats.find((s) => s.role === "owner");
+  const chief = headIn(seats, "chief");
 
   return createPortal(
     <div className="hq-root" role="dialog" aria-modal="true" aria-label="Smooth Training HQ" ref={rootRef} tabIndex={-1}>
@@ -517,15 +569,16 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
               <ul className="hq-dept-list">
                 {DEPT_ORDER.map((id) => {
                   const room = roomById(id);
-                  const seats = seatsIn(id);
-                  const filled = seats.filter((s) => s.status !== "open").length;
-                  const training = seats.filter((s) => s.status === "training").length;
-                  const state = id === "owner" ? "you" : deptState(id);
+                  const mine = inRoom(seats, id);
+                  const filled = mine.filter((s) => s.status !== "open").length;
+                  const training = mine.filter((s) => s.status === "training").length;
+                  const working = mine.filter((s) => s.status === "working" || s.status === "on-shift").length;
+                  const state = id === "owner" ? "you" : deptState(id, seats);
                   return (
                     <li key={id}>
                       <button type="button" onClick={() => pick(id)} aria-pressed={selected === id}
                         className={`hq-dept-row${selected === id ? " is-selected" : ""}`}>
-                        <span className={`hq-dot hq-dot-${state === "on" ? "you" : state}`} aria-hidden="true" />
+                        <span className={`hq-dot hq-dot-${state === "on" ? "working" : state}`} aria-hidden="true" />
                         <span className="hq-dept-name">{room.name}</span>
                         <span className="hq-dept-num">{filled}/{seats.length}</span>
                         <span className="hq-dept-bar" aria-hidden="true"><i style={{ width: `${(filled / seats.length) * 100}%` }} /></span>
@@ -539,8 +592,9 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
 
             <div className="hq-center">
               {view === "station" ? (
-                <HQStation seats={SEATS} roomStates={roomStates} board={boardLights}
-                  selected={selected} onSelect={pick} reduceMotion={reduceMotion} />
+                <HQStation seats={seats} roomStates={roomStates} board={boardLights}
+                  selected={selected} onSelect={pick} reduceMotion={reduceMotion}
+                  deliveries={toDeliver} onDelivered={markDelivered} deskCount={desk.open.length} />
               ) : (
                 <section className="hq-building" aria-label="The building, floor by floor. Tap a room to see that department.">
                   <div className="hq-sky" aria-hidden="true">
@@ -560,7 +614,7 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
                         <div className="hq-floor-rooms">
                           {roomsOnFloor(f).map((room) => (
                             <Room key={room.id} room={room} selected={selected === room.id}
-                              onSelect={pick} boardLights={boardLights} />
+                              onSelect={pick} boardLights={boardLights} allSeats={seats} />
                           ))}
                         </div>
                       </div>
@@ -589,7 +643,7 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
                 </ol>
               ) : (
                 <ol className="hq-log hq-log-quiet">
-                  {SEATS.filter((s) => s.status === "training").map((s) => (
+                  {seats.filter((s) => s.status === "training").map((s) => (
                     <li key={s.id}><time>--:--</time><b>{s.short}</b><span>in training · first shift after {s.waitingOn}</span></li>
                   ))}
                 </ol>
@@ -598,7 +652,8 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
           </div>
 
           <div className="hq-console-foot">
-            <span className="hq-legend-item"><span className="hq-dot hq-dot-you" aria-hidden="true" /> On shift</span>
+            <span className="hq-legend-item"><span className="hq-dot hq-dot-on-shift" aria-hidden="true" /> On shift</span>
+            <span className="hq-legend-item"><span className="hq-dot hq-dot-working" aria-hidden="true" /> Working</span>
             <span className="hq-legend-item"><span className="hq-dot hq-dot-training" aria-hidden="true" /> In training</span>
             <span className="hq-legend-item"><span className="hq-dot hq-dot-open" aria-hidden="true" /> Open seat</span>
             <span className="hq-view" role="group" aria-label="Map style">
@@ -608,7 +663,7 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
           </div>
         </section>
 
-        <DeptPanel roomId={selected} panelRef={panelRef} shifts={desk.shifts} />
+        <DeptPanel roomId={selected} panelRef={panelRef} shifts={desk.shifts} allSeats={seats} />
 
         <section className="hq-card hq-desk" aria-labelledby="hq-desk-title" ref={deskRef} tabIndex={-1}>
           <div className="hq-row">
@@ -687,8 +742,8 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
           </div>
           <div className="hq-org-grid">
             {DEPT_ROOMS.map((room) => {
-              const head = headOf(room.id);
-              const workers = seatsIn(room.id).filter((s) => s.role === "worker");
+              const head = headIn(seats, room.id);
+              const workers = inRoom(seats, room.id).filter((s) => s.role === "worker");
               return (
                 <article key={room.id} className="hq-org-dept">
                   <div className="hq-row">
@@ -715,6 +770,7 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
             })}
           </div>
           <p className="hq-legend">
+            <span><span className="hq-dot hq-dot-working" aria-hidden="true" /> Working</span>
             <span><span className="hq-dot hq-dot-training" aria-hidden="true" /> In training</span>
             <span><span className="hq-dot hq-dot-open" aria-hidden="true" /> Open position</span>
           </p>
@@ -918,6 +974,8 @@ const CSS = `
 }
 .hq-map-tag-you { color: var(--hq-cyan); border-color: rgba(8,220,224,.6); }
 .hq-map-tag-training { color: var(--hq-amber); border-color: rgba(251,191,36,.6); }
+.hq-map-tag-working { color: #2FE0A8; border-color: rgba(47,224,168,.6); }
+.hq-map-tag-on-shift { color: #03161A; background: #2FE0A8; border-color: #2FE0A8; }
 .hq-center .hq-building { border: 0; border-radius: 0; }
 
 /* ── The building ───────────────────────────────────────────── */
@@ -1040,6 +1098,7 @@ const CSS = `
 .hq-seat-note { margin: 0; font-size: 13px; color: var(--hq-amber); }
 .hq-pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; white-space: nowrap; border: 1px solid; }
 .hq-pill-you { color: var(--hq-cyan); border-color: rgba(8,220,224,.5); background: rgba(8,220,224,.08); }
+.hq-pill-working, .hq-pill-on-shift { color: #2FE0A8; border-color: rgba(47,224,168,.5); background: rgba(47,224,168,.08); }
 .hq-pill-training { color: var(--hq-amber); border-color: rgba(251,191,36,.5); background: rgba(251,191,36,.08); }
 .hq-pill-open { color: var(--hq-muted); border-color: var(--hq-line2); background: transparent; }
 
@@ -1106,6 +1165,8 @@ const CSS = `
 .hq-link { border: 0; background: none; padding: 2px 4px; color: var(--hq-cyan); font-size: 13px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .hq-dot { display: inline-block; width: 8px; height: 8px; flex: none; border-radius: 2px; }
 .hq-dot-you { background: var(--hq-cyan); }
+.hq-dot-working { background: #2FE0A8; }
+.hq-dot-on-shift { background: #2FE0A8; box-shadow: 0 0 6px rgba(47,224,168,.9); animation: hq-blink 1.8s steps(2) infinite; }
 .hq-dot-training { background: var(--hq-amber); }
 .hq-dot-open { background: transparent; border: 1.5px solid #5F7878; }
 .hq-legend { margin: 0; display: flex; gap: 16px; flex-wrap: wrap; font-size: 12.5px; color: var(--hq-muted); }

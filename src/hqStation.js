@@ -147,28 +147,50 @@ export function doorPoints(roomId) {
   return { inside, hall: [d.x, d.hall] };
 }
 
+// Hallway lanes: people keep a little to one side of the centre line or the
+// other, so two walks down the same hallway rarely trace the same line.
+export const LANES = [-4, -2, 0, 2, 4];
+
 // Door to door along the hallways, never through a wall: out of the room,
-// along its hallway to whichever cross-hallway is shorter, down or up it, and
-// along the other hallway to the destination's door. Every leg is straight
-// and axis-aligned, so it can be checked point by point.
-export function route(from, to) {
+// along its hallway to a cross-hallway, down or up it, and along the other
+// hallway to the destination's door. Every leg is straight and axis-aligned,
+// so it can be checked point by point.
+//
+// Kevin asked for routes that are "always different". With an `rng`, every
+// trip picks its own lane in each hallway and now and then takes the LONGER
+// cross-hallway, so the same two rooms are joined by many different walks.
+// Without one it is the shortest route down the centre line.
+export function route(from, to, rng = null) {
   const a = doorPoints(from);
   if (from === to) return [a.inside];
   const b = doorPoints(to);
-  const pts = [a.inside, a.hall];
+  const lane = () => (rng ? LANES[Math.floor(rng() * LANES.length)] : 0);
+  const ay = a.hall[1] + lane();
+  const pts = [a.inside, [a.hall[0], ay]];
   if (a.hall[1] !== b.hall[1]) {
     const cost = (vx) => Math.abs(a.hall[0] - vx) + Math.abs(b.hall[0] - vx);
-    const vx = V_XS.reduce((best, x) => (cost(x) < cost(best) ? x : best), V_XS[0]);
-    pts.push([vx, a.hall[1]], [vx, b.hall[1]]);
+    const [near, far] = [...V_XS].sort((p, q) => cost(p) - cost(q));
+    const vx = (rng && rng() < 0.3 ? far : near) + lane();
+    const by = b.hall[1] + lane();
+    pts.push([vx, ay], [vx, by], [b.hall[0], by]);
+  } else {
+    pts.push([b.hall[0], ay]);
   }
-  pts.push(b.hall, b.inside);
+  pts.push(b.inside);
   return pts.filter((p, i) => i === 0 || p[0] !== pts[i - 1][0] || p[1] !== pts[i - 1][1]);
 }
 
-// A small seeded generator, so a walker's day is the same on every render and
-// the suite can replay it.
+// A small seeded generator. The station seeds it from the moment the HQ opens,
+// so every visit is a different day; the suite passes a fixed seed so it can
+// replay one.
 export function makeRng(seed) {
-  let s = (seed >>> 0) || 1;
+  // Mix the seed first: without it, neighbouring seeds start almost the same
+  // sequence (a plain LCG's first draw is nearly linear in its seed), so two
+  // openings a moment apart would begin the same walk.
+  let s = seed >>> 0;
+  s = Math.imul(s ^ (s >>> 16), 0x45d9f3b) >>> 0;
+  s = Math.imul(s ^ (s >>> 16), 0x45d9f3b) >>> 0;
+  s = ((s ^ (s >>> 16)) >>> 0) || 1;
   return () => {
     s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
     return s / 4294967296;
@@ -191,29 +213,68 @@ export function spotIn(roomId, rng) {
   return [Math.round(z.x + rng() * z.w), Math.round(z.y + rng() * z.h)];
 }
 
-// Where a trainee goes between stints at the desk: the courtyard, the training
-// floor, and the owner's office to check in. Never another department's desk.
-const TOUR_STOPS = ["atrium", "coaching", "owner"];
-const MOVING = new Set(["training"]);
+// Everyone hired walks the building: a trainee, a worker between shifts, and
+// a worker on shift (who mostly stays at the desk). An open seat never walks.
+const HIRED = new Set(["training", "working", "on-shift"]);
 
-export function makeWalkers(seats, now = 0) {
+// Where the owner stands a visitor: in front of his desk, facing him.
+export const OWNER_DROP = [56, 49];
+
+// Where someone goes between stints at the desk: the courtyard most often,
+// otherwise any department's open floor — never another department's desk,
+// and NEVER the owner's office. A walk to the owner means there is something
+// for him (a delivery), so it is never made for nothing.
+function tourStop(w) {
+  if (w.rng() < 0.35) return "atrium";
+  const others = Object.keys(ROOM_RECTS).filter((id) => id !== w.home && id !== "owner" && id !== "atrium");
+  return others[Math.floor(w.rng() * others.length)];
+}
+
+export function makeWalkers(seats, now = 0, seed = 0) {
   const byRoom = {};
   const out = [];
   for (const s of seats) {
     const i = (byRoom[s.room] = (byRoom[s.room] || 0) + 1) - 1;
-    if (!MOVING.has(s.status)) continue;
+    if (!HIRED.has(s.status)) continue;
     const spot = (SEAT_SPOTS[s.room] || [])[i];
     if (!spot) continue;
-    const rng = makeRng(seedFor(s.id));
+    const rng = makeRng((seedFor(s.id) ^ Math.imul(seed >>> 0, 2654435761)) >>> 0);
     out.push({
       id: s.id, home: s.room, room: s.room, seat: spot,
       x: spot[0], y: spot[1], mode: "sit", until: now + 1500 + rng() * 5000,
       path: [], seg: 0, dest: s.room, walked: 0, speed: 20,
       dir: SEAT_FACING[s.room] || "down",
-      stops: TOUR_STOPS.filter((r) => r !== s.room), rng,
+      onShift: s.status === "on-shift",
+      queue: [], carrying: [], purpose: null, events: [], rng,
     });
   }
   return out;
+}
+
+// Which desk items still need carrying to the owner: open, not yet delivered
+// on this device, and filed within the last week (older ones just count as
+// delivered — a week-old report doesn't need a walk).
+export const DELIVERY_WINDOW_MS = 7 * 86400000;
+export function deliveriesDue(open = [], delivered = new Set(), now = Date.now()) {
+  return open
+    .filter((i) => i && i.id && i.worker && !delivered.has(i.id) && (i.createdAt || 0) >= now - DELIVERY_WINDOW_MS)
+    .map((i) => ({ id: i.id, worker: i.worker }));
+}
+
+// Hand a walker something to take to the owner: desk item ids they filed. They
+// set off at the next moment they are free — straight away from their desk,
+// or as soon as the walk they are on ends.
+export function queueDelivery(w, ids) {
+  for (const id of ids) if (!w.queue.includes(id) && !w.carrying.includes(id)) w.queue.push(id);
+  return w;
+}
+
+function startWalk(w, dest, target, purpose) {
+  w.path = [...route(w.room, dest, w.rng), target];
+  w.seg = 0;
+  w.dest = dest;
+  w.mode = "walk";
+  w.purpose = purpose;
 }
 
 // Which way a sprite faces while moving by (dx, dy): the larger axis wins.
@@ -223,7 +284,8 @@ export function facingFor(dx, dy) {
 }
 
 // One tick of a walker's day. Mutates and returns it; `dt` in seconds, `now`
-// in milliseconds.
+// in milliseconds. Anything the page needs to know about — a delivery handed
+// over — is pushed onto `w.events` for the page to take.
 export function stepWalker(w, dt, now) {
   if (w.mode === "walk") {
     let left = w.speed * dt;
@@ -239,22 +301,52 @@ export function stepWalker(w, dt, now) {
       }
     }
     if (w.seg >= w.path.length) {
-      const home = w.dest === w.home;
       w.room = w.dest;
-      w.mode = home ? "sit" : "pause";
-      if (home) w.dir = SEAT_FACING[w.home] || "down";
-      w.until = now + (home ? 5000 + w.rng() * 5000 : 2500 + w.rng() * 3500);
+      if (w.purpose === "deliver") {
+        // At the owner's desk: face him and hand it over.
+        w.mode = "handoff";
+        w.dir = "up";
+        w.until = now + 2200;
+      } else if (w.dest === w.home) {
+        w.mode = "sit";
+        w.dir = SEAT_FACING[w.home] || "down";
+        w.until = now + (w.onShift ? 30000 : 5000 + w.rng() * 5000);
+      } else {
+        w.mode = "pause";
+        w.until = now + 2500 + w.rng() * 3500;
+      }
+      w.purpose = null;
     }
+    return w;
+  }
+  if (w.mode === "handoff") {
+    if (now < w.until) return w;
+    w.events.push({ type: "delivered", ids: w.carrying });
+    w.carrying = [];
+    startWalk(w, w.home, w.seat, "return");
+    return w;
+  }
+  // Something for the owner goes first: from the desk at once, or as soon as
+  // a pause ends.
+  if (w.queue.length && (w.mode === "sit" || now >= w.until)) {
+    w.carrying = w.queue.splice(0);
+    startWalk(w, "owner", OWNER_DROP, "deliver");
     return w;
   }
   if (now < w.until) return w;
   const atHome = w.room === w.home;
-  const dest = atHome ? w.stops[Math.floor(w.rng() * w.stops.length)] : w.home;
-  const target = dest === w.home ? w.seat : spotIn(dest, w.rng);
-  w.path = [...route(w.room, dest), target];
-  w.seg = 0;
-  w.dest = dest;
-  w.mode = "walk";
+  if (w.onShift) {
+    // On shift, the desk is where the work is.
+    if (atHome) { w.until = now + 30000; return w; }
+    startWalk(w, w.home, w.seat, "return");
+    return w;
+  }
+  if (atHome) {
+    const stop = tourStop(w);
+    startWalk(w, stop, spotIn(stop, w.rng), "tour");
+  } else {
+    startWalk(w, w.home, w.seat, "return");
+  }
   return w;
 }
 
@@ -311,15 +403,15 @@ function deskKind(room, seat) {
 
 // Someone at their desk. Facing north they sit lower than they stand and only
 // their top half shows over the chair; facing south the desk in front of them
-// does the hiding.
-function seatedPerson(id, room, [x, y], sprite) {
+// does the hiding. `working` is someone on a live shift.
+function seatedPerson(id, room, [x, y], sprite, working = false) {
   const dir = SEAT_FACING[room] || "down";
   if (dir === "up") {
     const box = propBox(room === "owner" ? "exec" : "desk", x, y);
-    return { type: "person", sprite, id, x, y: y + 3, dir, frame: 0, seated: true,
+    return { type: "person", sprite, id, x, y: y + 3, dir, frame: 0, seated: true, working,
       clipY: box.y + box.h * 0.62, sortY: box.sortY + 0.01 };
   }
-  return { type: "person", sprite, id, x, y, dir, frame: 0, seated: true, sortY: y - 0.01 };
+  return { type: "person", sprite, id, x, y, dir, frame: 0, seated: true, working, sortY: y - 0.01 };
 }
 
 // Everything drawn over the backdrop this frame, back to front: a desk for every
@@ -346,13 +438,16 @@ export function sceneItems(seats, walkers = []) {
       }
       if (walkingIds.has(seat.id)) return;
       if (seat.status === "you") items.push(seatedPerson(seat.id, room, spot, "owner"));
-      else if (seat.status === "on-shift" || seat.status === "working") items.push(seatedPerson(seat.id, room, spot, "crew"));
+      else if (seat.status === "on-shift" || seat.status === "working") {
+        items.push(seatedPerson(seat.id, room, spot, "crew", seat.status === "on-shift"));
+      }
     });
   }
   for (const w of walkers) {
-    if (w.mode === "sit") { items.push(seatedPerson(w.id, w.home, w.seat, "crew")); continue; }
+    if (w.mode === "sit") { items.push(seatedPerson(w.id, w.home, w.seat, "crew", !!w.onShift)); continue; }
     items.push({ type: "person", sprite: "crew", id: w.id, x: w.x, y: w.y, dir: w.dir || "down",
-      frame: w.mode === "walk" ? Math.floor(w.walked / STEP) % 4 : 0, seated: false, sortY: w.y });
+      frame: w.mode === "walk" ? Math.floor(w.walked / STEP) % 4 : 0, seated: false,
+      carrying: (w.carrying || []).length > 0, sortY: w.y });
   }
   return items.sort((a, b) => a.sortY - b.sortY);
 }
@@ -363,10 +458,24 @@ export function tagPoint(item) {
   return [item.x, top - 1.5];
 }
 
+// A sheet of paper, the size of a hand, for someone carrying work to the owner
+// and for what is waiting on the owner's desk.
+function drawPaper(ctx, x, y) {
+  ctx.fillStyle = "rgba(0,0,0,.45)";
+  ctx.fillRect(x + 0.3, y + 0.3, 2.6, 3.2);
+  ctx.fillStyle = "#F2FBFB";
+  ctx.fillRect(x, y, 2.6, 3.2);
+  ctx.fillStyle = "rgba(8,220,224,.9)";
+  ctx.fillRect(x + 0.45, y + 0.7, 1.7, 0.35);
+  ctx.fillRect(x + 0.45, y + 1.5, 1.7, 0.35);
+  ctx.fillRect(x + 0.45, y + 2.3, 1.1, 0.35);
+}
+
 // Draw the items over the backdrop. `ctx` is already scaled so one unit is one
 // map unit; `images` holds the loaded sheets ({ props, crew, owner }) and any
-// that haven't loaded yet are skipped rather than drawn as holes.
-export function drawScene(ctx, items, images, { t = 0, selected = null } = {}) {
+// that haven't loaded yet are skipped rather than drawn as holes. `deskCount`
+// is how many items wait on the owner's desk: up to three sheets sit on it.
+export function drawScene(ctx, items, images, { t = 0, selected = null, deskCount = 0 } = {}) {
   const P = SPRITES.person;
   const k = PERSON_H / P.footY;
   for (const it of items) {
@@ -375,6 +484,9 @@ export function drawScene(ctx, items, images, { t = 0, selected = null } = {}) {
       if (!img) continue;
       const [sx, sy, sw, sh] = SPRITES.props[it.kind];
       ctx.drawImage(img, sx, sy, sw, sh, it.x, it.y, it.w, it.h);
+      if ((it.kind === "exec_front" || it.kind === "exec") && deskCount > 0) {
+        for (let i = 0; i < Math.min(3, deskCount); i++) drawPaper(ctx, it.x + it.w * 0.14 + i * 0.5, it.y + it.h * 0.3 - i * 0.6);
+      }
       continue;
     }
     const img = images && images[it.sprite];
@@ -389,6 +501,14 @@ export function drawScene(ctx, items, images, { t = 0, selected = null } = {}) {
       ctx.ellipse(it.x, it.y - 0.3, 3, 1.1, 0, 0, Math.PI * 2);
       ctx.fill();
     }
+    if (it.working) {
+      // On a live shift: a soft glow that breathes, so work in progress shows.
+      const a = 0.22 + 0.18 * Math.sin(t / 420);
+      ctx.fillStyle = `rgba(8,220,224,${a.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.ellipse(it.x, dy + dh * 0.28, 4.6, 4.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
     const clip = it.clipY != null;
     if (clip) {
       ctx.save();
@@ -398,6 +518,10 @@ export function drawScene(ctx, items, images, { t = 0, selected = null } = {}) {
     }
     ctx.drawImage(img, col * P.frameW, row * P.frameH, P.frameW, P.frameH, dx, dy, dw, dh);
     if (clip) ctx.restore();
+    if (it.carrying) {
+      const side = it.dir === "left" ? -1 : 1;
+      drawPaper(ctx, it.x + side * 1.6 - 1.3, it.y - PERSON_H * 0.46);
+    }
   }
   if (selected && ROOM_RECTS[selected]) {
     const r = ROOM_RECTS[selected];

@@ -1,14 +1,21 @@
 // Smooth Training HQ — the station map, animated (S238).
 //
 // The pure half lives in hqStation.js: the map, the routes, the scene and every
-// draw call. This file owns the page: the painted building (src/hq-art/) sits
-// in an <img>, and a transparent canvas over it draws the desks and the crew
+// draw call. This file owns the page: the painted building (src/hq-art/) is an
+// image element, and a transparent canvas over it draws the desks and the crew
 // each frame, front to back, at the screen's own resolution so they stay sharp.
 //
 // Name tags and room labels are HTML, not canvas text, so they stay crisp; a
-// walker's tag follows them by having its position written every frame (two or
-// three elements — cheap). With reduced motion on, nobody walks and the canvas
-// paints once, then again only when the selection changes.
+// walker's tag follows them by having its position written every frame (a
+// handful of elements — cheap). With reduced motion on, nobody walks and the
+// canvas paints once, then again only when something changes.
+//
+// ⚠️ THE MAP SHOWS WHAT THE CREW REALLY DOES. Kevin asked whether StarNet's
+// station was "just a visual" — it isn't; it mirrors its agents' live state,
+// and so does this one. A worker clocked in (hqtools.js hq_clock_in) sits at
+// its desk working; a worker that files something walks it to the owner's
+// desk (`deliveries`), and the page is told once it has been handed over.
+// Between those, the crew wanders the building, a different day every visit.
 //
 // ⚠️ THE PIXEL MAP IS THE FALLBACK, NOT A LEFTOVER. If any of the art fails to
 // load — a dead hashed name after a deploy, a flaky connection — the map
@@ -18,7 +25,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   MAP_W, MAP_H, ROOM_RECTS, MAP_LABELS, SEAT_SPOTS, SEAT_FACING, PERSON_H,
-  makeWalkers, stepWalker, drawStatic, drawDynamic, roomAt, sceneItems, drawScene,
+  makeWalkers, stepWalker, queueDelivery, drawStatic, drawDynamic, roomAt, sceneItems, drawScene,
 } from "./hqStation.js";
 import stationSm from "./hq-art/station-v1-1280.webp";
 import stationLg from "./hq-art/station-v1-2048.webp";
@@ -28,6 +35,7 @@ import propsUrl from "./hq-art/props-v1.webp";
 
 // The backing store never needs more pixels than the backdrop has.
 const MAX_BACKING = 2048;
+const HIRED = new Set(["training", "working", "on-shift"]);
 
 function loadImage(src) {
   return new Promise((resolve, reject) => {
@@ -58,21 +66,67 @@ function tagSpot(x, y, seated, room) {
   return [x, feet - PERSON_H - 1];
 }
 
-export default function HQStation({ seats, roomStates, board, selected, onSelect, reduceMotion }) {
+export default function HQStation({
+  seats, roomStates, board, selected, onSelect, reduceMotion,
+  deliveries = [], onDelivered = null, deskCount = 0,
+}) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
   const tagRefs = useRef({});
   const selectedRef = useRef(selected);
+  const deskCountRef = useRef(deskCount);
+  const seatsRef = useRef(seats);
+  const walkersRef = useRef([]);
+  const handedRef = useRef(new Set());
+  const onDeliveredRef = useRef(onDelivered);
   const repaintRef = useRef(null);
+  // One seed per opening: every visit to the HQ is a different day.
+  const seedRef = useRef((Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0);
   const sheets = useSheets();
   const [bgFailed, setBgFailed] = useState(false);
   const [size, setSize] = useState(0);
   const painted = !sheets.failed && !bgFailed;
 
+  useEffect(() => { onDeliveredRef.current = onDelivered; }, [onDelivered]);
   useEffect(() => {
     selectedRef.current = selected;
+    deskCountRef.current = deskCount;
     if (repaintRef.current) repaintRef.current();
-  }, [selected]);
+  }, [selected, deskCount]);
+
+  // Who walks. The crew is rebuilt only when that set changes, never on a poll
+  // that changed nothing — a rebuild sends everyone back to their desks.
+  const walkerSig = seats.filter((s) => HIRED.has(s.status)).map((s) => s.id).join(",");
+  useEffect(() => {
+    walkersRef.current = makeWalkers(seatsRef.current, performance.now(), seedRef.current);
+    if (repaintRef.current) repaintRef.current();
+  }, [walkerSig]);
+
+  // Who is on shift right now: updated in place, so nobody jumps.
+  useEffect(() => {
+    seatsRef.current = seats;
+    const byId = Object.fromEntries(seats.map((s) => [s.id, s]));
+    for (const w of walkersRef.current) w.onShift = (byId[w.id] || {}).status === "on-shift";
+    if (repaintRef.current) repaintRef.current();
+  }, [seats]);
+
+  // Hand each new desk item to the worker who filed it. With nobody on the
+  // map to carry it (a worker not drawn, or reduced motion), it counts as
+  // delivered at once — an item must never wait on an animation.
+  useEffect(() => {
+    const walkers = walkersRef.current;
+    const now = [];
+    for (const d of deliveries) {
+      if (handedRef.current.has(d.id)) continue;
+      const w = !reduceMotion && walkers.find((x) => x.id === d.worker);
+      if (w) queueDelivery(w, [d.id]);
+      else now.push(d.id);
+    }
+    if (now.length) {
+      now.forEach((id) => handedRef.current.add(id));
+      if (onDeliveredRef.current) onDeliveredRef.current(now);
+    }
+  }, [deliveries, walkerSig, reduceMotion]);
 
   // Track the map's on-screen width, so the canvas can match the screen's pixels.
   useEffect(() => {
@@ -90,14 +144,29 @@ export default function HQStation({ seats, roomStates, board, selected, onSelect
     const canvas = canvasRef.current;
     const ctx = canvas && canvas.getContext("2d");
     if (!ctx) return undefined;
-    const walkers = makeWalkers(seats, 0);
     const start = performance.now();
     let last = start;
     let raf = 0;
     let paint;
 
+    const step = (now) => {
+      const t = now - start;
+      const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
+      last = now;
+      if (!reduceMotion) {
+        for (const w of walkersRef.current) {
+          stepWalker(w, dt, now);
+          for (const e of w.events.splice(0)) {
+            if (e.type !== "delivered" || !e.ids.length) continue;
+            e.ids.forEach((id) => handedRef.current.add(id));
+            if (onDeliveredRef.current) onDeliveredRef.current(e.ids);
+          }
+        }
+      }
+      return t;
+    };
     const placeTags = () => {
-      for (const w of walkers) {
+      for (const w of walkersRef.current) {
         const el = tagRefs.current[w.id];
         if (!el) continue;
         const [tx, ty] = painted ? tagSpot(w.x, w.y, w.mode === "sit", w.home) : [w.x, w.y - 12];
@@ -117,14 +186,12 @@ export default function HQStation({ seats, roomStates, board, selected, onSelect
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
       paint = (now) => {
-        const t = now - start;
-        const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
-        last = now;
-        if (!reduceMotion) walkers.forEach((w) => stepWalker(w, dt, t));
+        const t = step(now);
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, bw, bh);
         ctx.setTransform(k, 0, 0, k, 0, 0);
-        drawScene(ctx, sceneItems(seats, walkers), sheets.images, { t: reduceMotion ? 0 : t, selected: selectedRef.current });
+        drawScene(ctx, sceneItems(seatsRef.current, walkersRef.current), sheets.images,
+          { t: reduceMotion ? 0 : t, selected: selectedRef.current, deskCount: deskCountRef.current });
         placeTags();
       };
     } else {
@@ -137,15 +204,12 @@ export default function HQStation({ seats, roomStates, board, selected, onSelect
       layer.height = MAP_H;
       const lctx = layer.getContext("2d");
       if (!lctx) return undefined;
-      drawStatic(lctx, { seats, roomStates });
+      drawStatic(lctx, { seats: seatsRef.current, roomStates });
       paint = (now) => {
-        const t = now - start;
-        const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
-        last = now;
-        if (!reduceMotion) walkers.forEach((w) => stepWalker(w, dt, t));
+        const t = step(now);
         ctx.clearRect(0, 0, MAP_W, MAP_H);
         ctx.drawImage(layer, 0, 0);
-        drawDynamic(ctx, reduceMotion ? 0 : t, { walkers, seats, selected: selectedRef.current, board });
+        drawDynamic(ctx, reduceMotion ? 0 : t, { walkers: walkersRef.current, seats: seatsRef.current, selected: selectedRef.current, board });
         placeTags();
       };
     }
@@ -159,7 +223,7 @@ export default function HQStation({ seats, roomStates, board, selected, onSelect
       raf = requestAnimationFrame(loop);
     }
     return () => { cancelAnimationFrame(raf); repaintRef.current = null; };
-  }, [seats, roomStates, board, reduceMotion, painted, sheets.images, size]);
+  }, [roomStates, board, reduceMotion, painted, sheets.images, size]);
 
   const pointAt = (e) => {
     const r = canvasRef.current.getBoundingClientRect();
@@ -179,7 +243,7 @@ export default function HQStation({ seats, roomStates, board, selected, onSelect
   const walkerStart = {};
   for (const s of seats) {
     const i = (byRoom[s.room] = (byRoom[s.room] || 0) + 1) - 1;
-    if (s.status === "training") {
+    if (HIRED.has(s.status)) {
       const spot = (SEAT_SPOTS[s.room] || [])[i];
       if (spot) walkerStart[s.id] = painted ? tagSpot(spot[0], spot[1], true, s.room) : [spot[0], spot[1] - 12];
     }
@@ -219,7 +283,7 @@ export default function HQStation({ seats, roomStates, board, selected, onSelect
         </span>
       )}
       {seats.filter((s) => walkerStart[s.id]).map((s) => (
-        <span key={s.id} aria-hidden="true" className="hq-map-tag hq-map-tag-training"
+        <span key={s.id} aria-hidden="true" className={`hq-map-tag hq-map-tag-${s.status}`}
           ref={(el) => { tagRefs.current[s.id] = el; }}
           style={{ left: `${(walkerStart[s.id][0] / MAP_W) * 100}%`, top: `${(walkerStart[s.id][1] / MAP_H) * 100}%` }}>
           {s.short}

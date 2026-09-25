@@ -244,13 +244,6 @@ export default function HQSpend({ load, saveCosts, initial = null, focus = null,
                       ? `${plural(r.crew.claudeShifts, "crew shift", "crew shifts")} ran on it (${plural(r.crew.claudeMinutes, "minute", "minutes")}).`
                       : "No crew shifts ran on it in this time frame."}
                   </p>
-                  {r.claude.meter && r.claude.meter.windows && (
-                    <ul className="hq-meter">
-                      {r.claude.meter.windows.map((w) => (
-                        <li key={w.label}><span>{w.label}</span><b>{Math.round(w.percentUsed)}% used</b></li>
-                      ))}
-                    </ul>
-                  )}
                   {editing ? (
                     <form className="hq-price" onSubmit={submitPrice}>
                       <label htmlFor="hq-plan-price">Monthly price in dollars</label>
@@ -354,8 +347,6 @@ export const SPEND_CSS = `
 .hq-swatch-claude { background: #D97757; }
 .hq-line-actions { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; }
 .hq-line-actions .hq-link { color: var(--hq-cyan); padding: 2px 0; font-size: 13px; }
-.hq-meter { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 2px; font-size: 13px; }
-.hq-meter li { display: flex; justify-content: space-between; gap: 12px; }
 .hq-price { margin-top: 10px; }
 .hq-price label { display: block; font-size: 12px; color: var(--hq-muted); margin-bottom: 4px; }
 .hq-price div { display: flex; gap: 8px; flex-wrap: wrap; }

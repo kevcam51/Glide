@@ -22,7 +22,8 @@
 //                   move with use, so this line shows the plan's price, the
 //                   share of it a period covers, and how many crew shifts ran
 //                   on it. Anthropic gives apps no way to read the plan's live
-//                   usage meter, so the screen links to claude.ai for that.
+//                   usage meter, so the screen links to claude.ai for that
+//                   (Kevin: reading it inside Glidna is "not necessary").
 //
 // ⚠️ ADMIN-SDK ONLY, like the desk. Everything here is reached through the
 // hqApi callable, which refuses any caller but the owner before this file runs.
@@ -257,11 +258,6 @@ function claudeShareCents(costs, days, todayYmd) {
   return Math.round(share);
 }
 
-async function readMeter(db) {
-  const snap = await db.collection("hqPlanUsage").doc("latest").get();
-  return snap && snap.exists ? snap.data() : null;
-}
-
 // ── The report ──────────────────────────────────────────────────────────────
 
 function bad(msg) {
@@ -294,9 +290,7 @@ async function spendReport(db, data, now = Date.now()) {
     const pastMonths = bucketKeys.filter((m) => m <= today.slice(0, 7));
     glidna = await glidnaTotals(db, pastMonths, { cache: "hqSpendMonths", docId: (k) => `m-${k}`, finalAt: monthFinalAt }, now);
   }
-  const [crew, costs, meter] = await Promise.all([
-    crewTotals(db, startMs, endMs, bucketOf), readCosts(db), readMeter(db),
-  ]);
+  const [crew, costs] = await Promise.all([crewTotals(db, startMs, endMs, bucketOf), readCosts(db)]);
 
   const buckets = bucketKeys.map((key) => {
     const g = glidna[key] || emptyTotal();
@@ -326,7 +320,7 @@ async function spendReport(db, data, now = Date.now()) {
     crew: { cloudCents: crew.cloudCents, cloudShifts: crew.cloudShifts,
       claudeShifts: crew.claudeShifts, claudeMinutes: crew.claudeMinutes },
     claude: { planCents: costs.claudePlanCents, planName: costs.claudePlanName, since: costs.claudeSince,
-      edited: costs.edited, shareCents: claudeCents, meter },
+      edited: costs.edited, shareCents: claudeCents },
     totalCents: Math.round((glidnaCents + crew.cloudCents + claudeCents) * 100) / 100,
   };
 }

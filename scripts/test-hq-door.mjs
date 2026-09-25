@@ -8,7 +8,7 @@
 //     the admin uid and nobody else — not a trainer, not a client, whatever
 //     scopes their token carries — and each call checks again.
 //   • THE DOOR ONLY ADDS. A routine can file an open item, log a time card,
-//     read the desk and record the plan's meter. It cannot mark its own work
+//     read the desk and clock in. It cannot mark its own work
 //     approved, pick another department, claim another engine, or reach
 //     anything else. The seat's room comes from a mirror of the org chart that
 //     this suite keeps honest.
@@ -121,7 +121,7 @@ console.log("filing");
 }
 
 // ── 3. The rest of the door ─────────────────────────────────────────────────
-console.log("time cards, reading, the meter");
+console.log("time cards, reading, clocking in");
 {
   const db = fakeDb();
   const r = await run("hq_log_shift", { worker: "front-desk", summary: "No new inquiries.", status: "skipped", startedAt: "2026-09-28T14:58:00Z" }, db);
@@ -139,15 +139,18 @@ console.log("time cards, reading, the meter");
   ok(withBody.items[1].body === "old body", "…and come back when asked");
   ok(Array.isArray(desk.recentShifts) && desk.recentShifts.length === 3, "the latest time cards come along");
 
-  const m = await run("hq_record_plan_usage", {
-    plan: "Max", windows: [{ label: "5-hour limit", percentUsed: 12.34, resetsAt: "2026-09-28T19:00:00Z" },
-      { label: "Weekly · all models", percentUsed: 180 }, { label: "", percentUsed: 4 }],
-  }, db);
-  const meter = db.docs.get("hqPlanUsage/latest");
-  ok(m.ok && meter.windows.length === 2, "a reading is recorded, and a window with no label is dropped");
-  ok(meter.windows[0].percentUsed === 12.3 && meter.windows[1].percentUsed === 100, "percentages are rounded and held to 0–100");
-  ok(meter.capturedAt === NOW && meter.source === "claude", "it says when and where it came from");
-  await rejects(() => run("hq_record_plan_usage", { windows: [] }, db), "a reading with no windows is refused");
+  // Clocking in: presence the station draws, closed by the filing itself.
+  const c = await run("hq_clock_in", { worker: "bookkeeper", task: "Monday money check\u0007" }, db);
+  const active = db.docs.get("hqActive/bookkeeper");
+  ok(c.ok && active.since === NOW && active.endedAt === null && active.dept === "finance",
+    "clocking in marks the worker on shift, in its own department");
+  ok(active.task === "Monday money check", "the task is plain text");
+  await rejects(() => run("hq_clock_in", { worker: "owner" }, db), "the owner doesn't clock in through the door");
+  await door.runHqTool("hq_file_report", { worker: "bookkeeper", kind: "report", title: "Filed", summary: "x" }, { db, now: NOW + 60000 });
+  ok(db.docs.get("hqActive/bookkeeper").endedAt === NOW + 60000, "filing the work clocks the worker out");
+  await run("hq_clock_in", { worker: "front-desk" }, db);
+  await door.runHqTool("hq_log_shift", { worker: "front-desk", summary: "Quiet inbox." }, { db, now: NOW + 5000 });
+  ok(db.docs.get("hqActive/front-desk").endedAt === NOW + 5000, "…and so does logging a quiet shift");
   await rejects(() => run("hq_delete_item", {}, db), "there is no delete through the door");
 }
 
@@ -169,7 +172,7 @@ console.log("who sees the door");
   const owner = toolsFor(OWNER, "head_trainer", ALL);
   ok(hqNames.every((n) => names(owner).includes(n)), "the owner's connection gets all four HQ tools");
   const ownerRead = toolsFor(OWNER, "head_trainer", "read");
-  ok(names(ownerRead).includes("hq_read_desk") && !names(ownerRead).some((n) => ["hq_file_report", "hq_log_shift", "hq_record_plan_usage"].includes(n)),
+  ok(names(ownerRead).includes("hq_read_desk") && !names(ownerRead).some((n) => ["hq_file_report", "hq_log_shift", "hq_clock_in"].includes(n)),
     "a read-only owner connection can read the desk but not file to it");
   for (const [who, role] of [["a trainer", "head_trainer"], ["a sub-trainer", "sub_trainer"], ["a client", "client"]]) {
     const other = toolsFor(`not-${role}`, role, ALL);

@@ -38,6 +38,8 @@ export const SAMPLE = {
       status: "done", createdAt: now - 3 * DAY, updatedAt: now - 2 * DAY, resolvedAt: now - 2 * DAY,
     },
   ],
+  // Example: the Front Desk on a live shift, drawn at its desk working.
+  active: [{ worker: "front-desk", since: now - 3 * MIN, task: "Checking new inquiries (example)" }],
   shifts: [
     {
       id: "example-shift-1", worker: "front-desk", dept: "front", engine: "claude", status: "done",

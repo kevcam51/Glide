@@ -14,11 +14,13 @@
 // name or a drafted email must live server-side behind an admin check, never
 // here.
 //
-// Every seat is one of four states:
+// Every seat STARTS in one of three states:
 //   you       — the owner's own seat
 //   training  — hired, waiting on a one-time connection before the first shift
 //   open      — a position on the org chart nobody fills yet
-// (Live states — on shift, working — arrive with the worker engine.)
+// and what the crew actually does moves it on (liveSeats, below):
+//   working   — has done real work (logged a shift or filed something)
+//   on-shift  — clocked in right now
 
 export const ROOMS = [
   { id: "owner",     floor: 4, name: "Your Office",       tagline: "Where every decision lands",
@@ -160,17 +162,37 @@ export const roomsOnFloor = (floor) => ROOMS.filter((r) => r.floor === floor);
 
 export function orgCounts(seats = SEATS) {
   const count = (status) => seats.filter((s) => s.status === status).length;
-  return { total: seats.length, you: count("you"), training: count("training"), open: count("open") };
+  return {
+    total: seats.length, you: count("you"), training: count("training"), open: count("open"),
+    working: count("working"), onShift: count("on-shift"),
+  };
+}
+
+// The seats as the crew has actually left them. The chart above says where a
+// seat starts; real events move it: a worker clocked in right now is on
+// shift, and one that has ever logged a shift or filed work is working —
+// hired, and doing the job. Nothing here reads business data beyond WHO did
+// something, and the owner's seat never changes.
+export function liveSeats(seats = SEATS, { shifts = [], open = [], recent = [], active = [] } = {}) {
+  const onShift = new Set((active || []).map((a) => a && a.worker));
+  const worked = new Set([...(shifts || []), ...(open || []), ...(recent || [])].map((x) => x && x.worker));
+  return seats.map((s) => {
+    if (s.status === "you") return s;
+    if (onShift.has(s.id)) return { ...s, status: "on-shift" };
+    if (worked.has(s.id)) return { ...s, status: "working" };
+    return s;
+  });
 }
 
 // One line under a room's name: what state its seats are in, in plain words.
-export function roomSummary(roomId) {
-  const seats = seatsIn(roomId);
-  const training = seats.filter((s) => s.status === "training").length;
-  const open = seats.filter((s) => s.status === "open").length;
+export function roomSummary(roomId, seats = SEATS) {
+  const mine = seats.filter((s) => s.room === roomId);
+  const n = (status) => mine.filter((s) => s.status === status).length;
   const parts = [];
-  if (seats.some((s) => s.status === "you")) parts.push("You");
-  if (training) parts.push(`${training} in training`);
-  if (open) parts.push(`${open} open`);
+  if (mine.some((s) => s.status === "you")) parts.push("You");
+  if (n("on-shift")) parts.push(`${n("on-shift")} on shift`);
+  if (n("working")) parts.push(`${n("working")} working`);
+  if (n("training")) parts.push(`${n("training")} in training`);
+  if (n("open")) parts.push(`${n("open")} open`);
   return parts.join(" · ");
 }

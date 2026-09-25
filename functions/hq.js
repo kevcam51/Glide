@@ -9,6 +9,8 @@
 //                    paid or published — that is the owner's decision.
 //   hqShifts/{id}  — one time card per worker shift: when it clocked in and
 //                    out, what it looked at, what it handed over, what it cost.
+//   hqActive/{seat} — presence: a worker clocked in right now (hqtools.js),
+//                    so the station can draw it working.
 //
 // ⚠️ ADMIN-SDK-ONLY, SERVER-CHECKED. firestore.rules has no match for either
 // collection, so every client read or write is denied by default — the owner's
@@ -147,22 +149,30 @@ async function logShift(db, input, now = Date.now()) {
 
 const withId = (d) => ({ id: d.id, ...d.data() });
 
-async function overview(db) {
+// A shift a worker clocked into and never closed stops showing after this.
+const ACTIVE_MAX_MS = 2 * 3600 * 1000;
+
+async function overview(db, now = Date.now()) {
   // Each query is single-field, so Firestore's automatic indexes serve it and
   // no composite index has to exist first. Open items are fetched by status
   // alone and sorted here: an ordered, limited query would silently drop an
   // old item still waiting on the owner once newer ones pushed it past the
   // limit, and an unanswered item vanishing is the one failure a desk cannot
   // have.
-  const [openSnap, recentSnap, shiftSnap] = await Promise.all([
+  const [openSnap, recentSnap, shiftSnap, activeSnap] = await Promise.all([
     db.collection("hqDesk").where("status", "==", "open").limit(300).get(),
     db.collection("hqDesk").orderBy("resolvedAt", "desc").limit(25).get(),
     db.collection("hqShifts").orderBy("startedAt", "desc").limit(40).get(),
+    // One doc per seat at most, so the whole collection is a handful of reads.
+    db.collection("hqActive").limit(60).get(),
   ]);
   const open = openSnap.docs.map(withId).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   const recent = recentSnap.docs.map(withId).filter((d) => d.status !== "open" && d.resolvedAt);
   const shifts = shiftSnap.docs.map(withId);
-  return { open, recent, shifts, openMore: openSnap.docs.length >= 300 };
+  const active = activeSnap.docs.map(withId)
+    .filter((a) => !a.endedAt && Number.isFinite(a.since) && now - a.since < ACTIVE_MAX_MS)
+    .map((a) => ({ worker: a.worker, since: a.since, task: a.task || null }));
+  return { open, recent, shifts, active, openMore: openSnap.docs.length >= 300 };
 }
 
 async function resolve(db, data, now) {
@@ -183,7 +193,7 @@ async function handleHq(request, db, now = Date.now()) {
   if (!isAdminUid(uid)) throw new HttpsError("permission-denied", "The HQ is only open to the owner.");
   const data = (request && request.data) || {};
   const action = String(data.action || "overview");
-  if (action === "overview") return overview(db);
+  if (action === "overview") return overview(db, now);
   if (action === "resolve") return resolve(db, data, now);
   // The spending view (hqSpend.js) throws plain errors carrying a code; the
   // callable turns only HttpsErrors into a readable message, so translate.

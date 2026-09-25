@@ -23,6 +23,7 @@ import {
   interior, walkable, roomAt, doorPoints, route, makeRng, spotIn,
   makeWalkers, stepWalker, drawStatic, drawDynamic,
   SEAT_FACING, WANDER, SPRITES, PERSON_H, propBox, sceneItems, drawScene, facingFor,
+  LANES, OWNER_DROP, queueDelivery, deliveriesDue, DELIVERY_WINDOW_MS,
 } from "../src/hqStation.js";
 
 let fails = 0, checks = 0;
@@ -125,11 +126,127 @@ console.log("walkers");
     ok(L.nan === 0, `${w.id}: never at a position that isn't a number`);
     ok(L.offFloor === 0, `${w.id}: never off the floor (${L.offFloor} steps were)`);
     ok(L.left >= 3 && L.back >= 3, `${w.id}: over 20 minutes leaves the desk and comes back, again and again (${L.left} out, ${L.back} back)`);
-    const allowed = new Set([w.home, "atrium", "coaching", "owner"]);
-    ok([...L.rooms].every((r) => allowed.has(r)), `${w.id}: only tours the courtyard, the training floor and your office (${[...L.rooms].join(", ")})`);
+    ok(!L.rooms.has("owner"), `${w.id}: never walks into your office on a tour — that walk is kept for deliveries (${[...L.rooms].join(", ")})`);
+    ok(L.rooms.size >= 5, `${w.id}: over 20 minutes visits many parts of the building (${L.rooms.size}: ${[...L.rooms].join(", ")})`);
   });
   const again = simulate(20 * 60);
   ok(again.log.every((L, i) => L.trail.join("|") === log[i].trail.join("|")), "the same seed walks the same day every time");
+
+  // Kevin: routes "always different". Every opening seeds a new day.
+  const trailFor = (seed) => {
+    const ws = makeWalkers(SEATS, 0, seed);
+    const t = [];
+    for (let step = 0; step < 4000; step++) {
+      ws.forEach((w) => stepWalker(w, 0.05, step * 50));
+      if (step % 40 === 0) t.push(ws.map((w) => `${w.x.toFixed(1)},${w.y.toFixed(1)}`).join(";"));
+    }
+    return t.join("|");
+  };
+  const days = new Set([1, 2, 3, 4, 5, 6].map(trailFor));
+  ok(days.size === 6, `six openings are six different days (${days.size} distinct)`);
+  ok(trailFor(0) === trailFor(0), "…while a fixed seed still replays exactly");
+}
+
+// ── 3b. Many routes between the same rooms ─────────────────────────────────
+console.log("route variety");
+{
+  const ids = Object.keys(ROOM_RECTS);
+  const bad = [];
+  const shapes = new Map();
+  let farTaken = 0, crossings = 0;
+  for (let seed = 1; seed <= 300; seed++) {
+    const rng = makeRng(seed);
+    for (const a of ids) for (const b of ids) {
+      if (a === b) continue;
+      const pts = route(a, b, rng);
+      const key = `${a}>${b}`;
+      if (!shapes.has(key)) shapes.set(key, new Set());
+      shapes.get(key).add(JSON.stringify(pts));
+      if (doorPoints(a).hall[1] !== doorPoints(b).hall[1]) {
+        crossings++;
+        const vx = pts.find((p, i) => i > 1 && pts[i - 1][1] === p[1] && Math.abs(p[0] - doorPoints(a).hall[0]) > 0 && V_XS.some((x) => Math.abs(p[0] - x) <= 4));
+        const cost = (x) => Math.abs(doorPoints(a).hall[0] - x) + Math.abs(doorPoints(b).hall[0] - x);
+        const near = [...V_XS].sort((p, q) => cost(p) - cost(q))[0];
+        if (vx && Math.abs(vx[0] - near) > 4) farTaken++;
+      }
+      for (let i = 1; i < pts.length; i++) {
+        const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+        if (x0 !== x1 && y0 !== y1) { bad.push(`${key} leg ${i} is diagonal`); break; }
+        const len = Math.hypot(x1 - x0, y1 - y0);
+        for (let t = 0; t <= len; t += 0.5) {
+          const x = x0 + ((x1 - x0) * t) / (len || 1), y = y0 + ((y1 - y0) * t) / (len || 1);
+          if (!walkable(x, y)) { bad.push(`${key} crosses a wall at (${x.toFixed(1)}, ${y.toFixed(1)}) seed ${seed}`); break; }
+        }
+      }
+    }
+  }
+  ok(bad.length === 0, `300 random days of routes between every pair stay on the floor${bad.length ? `: ${bad.slice(0, 3).join("; ")}` : ""}`);
+  const fewest = Math.min(...[...shapes.values()].map((v) => v.size));
+  ok(fewest >= 5, `every pair of rooms is joined by many different walks (fewest: ${fewest})`);
+  ok(farTaken > crossings * 0.15 && farTaken < crossings * 0.5, `the longer cross-hallway is taken now and then, not always (${farTaken} of ${crossings})`);
+  ok(LANES.every((l) => Math.abs(l) <= 4), "no lane strays more than four units off a hallway's centre line");
+  const plain = route("finance", "marketing");
+  ok(JSON.stringify(plain) === JSON.stringify(route("finance", "marketing", null)), "without a generator the route is the plain shortest one");
+}
+
+// ── 3c. Deliveries: work walks to the owner's desk ─────────────────────────
+console.log("deliveries");
+{
+  const ws = makeWalkers(SEATS, 0, 7);
+  const bk = ws.find((w) => w.id === "bookkeeper");
+  queueDelivery(bk, ["item-1", "item-2"]);
+  queueDelivery(bk, ["item-2"]);
+  ok(bk.queue.length === 2, "the same item is never queued twice");
+  const seen = { handoff: false, carried: false, delivered: null, back: false, wall: false };
+  for (let step = 0; step < 3000 && !seen.back; step++) {
+    const now = step * 50;
+    stepWalker(bk, 0.05, now);
+    if (!walkable(bk.x, bk.y)) seen.wall = true;
+    if (bk.carrying.length) seen.carried = true;
+    if (bk.mode === "handoff") {
+      seen.handoff = true;
+      ok(Math.abs(bk.x - OWNER_DROP[0]) < 0.01 && Math.abs(bk.y - OWNER_DROP[1]) < 0.01 && bk.dir === "up",
+        "the hand-over happens at the owner's desk, facing him");
+      const item = sceneItems(SEATS, [bk]).find((i) => i.id === "bookkeeper");
+      ok(item.carrying === true, "…still holding the papers until they're handed over");
+    }
+    for (const e of bk.events.splice(0)) if (e.type === "delivered") seen.delivered = e.ids;
+    if (seen.delivered && bk.mode === "sit" && bk.room === bk.home) seen.back = true;
+  }
+  ok(seen.carried && seen.handoff, "a queued delivery is carried to the owner");
+  ok(JSON.stringify(seen.delivered) === JSON.stringify(["item-1", "item-2"]), `the page is told exactly which items were handed over (${JSON.stringify(seen.delivered)})`);
+  ok(seen.back, "…and the worker goes back to their desk afterwards");
+  ok(!seen.wall, "a delivery never walks through a wall");
+  ok(walkable(...OWNER_DROP) && roomAt(...OWNER_DROP) === "owner", "the drop-off spot is on the owner's office floor");
+  const desk = propBox("exec_front", ...SEAT_SPOTS.owner[0]);
+  ok(OWNER_DROP[1] > desk.y + desk.h, "…in front of his desk, not inside it");
+
+  // Someone on a live shift stays at the desk — until there is something to deliver.
+  const live = makeWalkers(SEATS.map((s) => (s.id === "bookkeeper" ? { ...s, status: "on-shift" } : s)), 0, 3);
+  const onShift = live.find((w) => w.id === "bookkeeper");
+  let left = false;
+  for (let step = 0; step < 6000; step++) { stepWalker(onShift, 0.05, step * 50); if (onShift.room !== "finance") left = true; }
+  ok(!left, "a worker on shift stays at the desk for the whole shift");
+  const item = sceneItems(SEATS, [onShift]).find((i) => i.id === "bookkeeper");
+  ok(item.working === true && item.seated === true, "…drawn seated and working");
+  queueDelivery(onShift, ["x"]);
+  stepWalker(onShift, 0.05, 6000 * 50);
+  ok(onShift.mode === "walk" && onShift.dest === "owner", "…and gets up at once to bring you what they finished");
+  const open = makeWalkers(SEATS.map((s) => ({ ...s, status: s.status === "you" ? "you" : "open" })), 0, 3);
+  ok(open.length === 0, "nobody walks for an open seat, deliveries or not");
+
+  // Which items get walked over.
+  const NOW = Date.UTC(2026, 8, 25, 15, 0, 0);
+  const items = [
+    { id: "a", worker: "bookkeeper", createdAt: NOW - 3600000 },
+    { id: "b", worker: "front-desk", createdAt: NOW - DELIVERY_WINDOW_MS - 1 },
+    { id: "c", worker: "bookkeeper", createdAt: NOW - 60000 },
+    { id: "d", worker: "", createdAt: NOW },
+  ];
+  const due = deliveriesDue(items, new Set(["c"]), NOW);
+  ok(JSON.stringify(due) === JSON.stringify([{ id: "a", worker: "bookkeeper" }]),
+    `only new, undelivered items with a worker are carried (${JSON.stringify(due)})`);
+  ok(deliveriesDue(items, new Set(["a", "c"]), NOW).length === 0, "an item delivered on this device is never carried twice");
 }
 
 // ── 4. Drawing stays on the map ─────────────────────────────────────────────
@@ -288,7 +405,7 @@ console.log("painted station");
     set fillStyle(v) { this.style = v; }
     get fillStyle() { return this.style; }
     drawImage(img, ...a) { this.calls.push(["drawImage", img, ...a]); }
-    fillRect(...a) { this.calls.push(["fillRect", ...a]); }
+    fillRect(...a) { this.calls.push(["fillRect", ...a, this.style]); }
     beginPath() {} fill() { this.calls.push(["fill"]); }
     ellipse(...a) { this.calls.push(["ellipse", ...a]); }
     rect(...a) { this.calls.push(["rect", ...a]); }
@@ -315,6 +432,22 @@ console.log("painted station");
     `each person seated at a north-facing desk is clipped at the chair, and nobody else (${seatedNorth})`);
   const outline = rec.calls.filter((c) => c[0] === "fillRect");
   ok(outline.length === 4, "the selected room gets a four-sided outline");
+  // Papers: in a courier's hands, and stacked on the owner's desk (at most three).
+  const papersAt = (rec) => rec.calls.filter((c) => c[0] === "fillRect" && c[5] === "#F2FBFB").length;
+  const withDesk = new Rec();
+  drawScene(withDesk, sceneItems(SEATS, []), imgs, { deskCount: 7 });
+  ok(papersAt(withDesk) === 3, `a busy desk shows three sheets, not seven (${papersAt(withDesk)})`);
+  const clear = new Rec();
+  drawScene(clear, sceneItems(SEATS, []), imgs, { deskCount: 0 });
+  ok(papersAt(clear) === 0, "an empty desk shows none");
+  const courier = { type: "person", sprite: "crew", id: "c", x: 150, y: 80, dir: "left", frame: 1, seated: false, carrying: true, sortY: 80 };
+  const carried = new Rec();
+  drawScene(carried, [courier], imgs, {});
+  ok(papersAt(carried) === 1, "someone carrying work to the owner is drawn holding it");
+  const glow = new Rec();
+  drawScene(glow, [{ ...courier, carrying: false, seated: true, working: true }], imgs, { t: 500 });
+  ok(glow.calls.filter((c) => c[0] === "ellipse").length === 1, "someone on a live shift glows at the desk");
+
   const empty = new Rec();
   drawScene(empty, sceneItems(SEATS, []), {}, {});
   ok(empty.calls.filter((c) => c[0] === "drawImage").length === 0, "sheets that haven't loaded are skipped, not drawn as holes");

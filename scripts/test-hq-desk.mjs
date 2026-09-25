@@ -199,5 +199,20 @@ console.log("the desk");
   ok(withShifts.shifts.every((s) => s.loggedAt === NOW), "each time card is stamped when it was logged");
 }
 
+// ── Who is on shift right now ───────────────────────────────────────────────
+console.log("on shift");
+{
+  const db = fakeDb();
+  const HOUR = 3600000;
+  await db.collection("hqActive").doc("bookkeeper").set({ worker: "bookkeeper", since: NOW - 10 * 60000, endedAt: null, task: "Monday money check" });
+  await db.collection("hqActive").doc("front-desk").set({ worker: "front-desk", since: NOW - 20 * 60000, endedAt: NOW - 60000 });
+  await db.collection("hqActive").doc("progress-analyst").set({ worker: "progress-analyst", since: NOW - 3 * HOUR, endedAt: null });
+  const res = await handle({ auth: { uid: OWNER }, data: { action: "overview" } }, db, NOW);
+  ok(res.active.length === 1 && res.active[0].worker === "bookkeeper", "only a worker clocked in and not yet clocked out shows as on shift");
+  ok(res.active[0].task === "Monday money check" && res.active[0].since === NOW - 10 * 60000, "…with what it is doing and since when");
+  ok(!res.active.some((a) => a.worker === "progress-analyst"), "a shift left open for hours (a run that died) stops showing");
+  ok(!res.active.some((a) => a.worker === "front-desk"), "a shift that was clocked out doesn't show");
+}
+
 console.log(`\n${checks - fails}/${checks} HQ desk checks passed`);
 if (fails) process.exit(1);
