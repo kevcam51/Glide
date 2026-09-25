@@ -43,6 +43,9 @@ const { z } = require("zod");
 const { buildTools, runTool, seatCapFor } = require("./aitools");
 const { defineSecret } = require("firebase-functions/params");
 const { verifyAccessToken, RESOURCE_URL, CANONICAL_BASE } = require("./mcpauth");
+// Smooth Training HQ's door (S238): the crew's tools, for the owner's own
+// connection only. Deliberately NOT part of buildTools() — see hqtools.js.
+const { HQ_TOOLS, runHqTool } = require("./hqtools");
 
 // search_food_db reaches FatSecret through the same proxy the app uses. The
 // secrets must be bound to THIS function too: unbound, process.env is simply
@@ -224,6 +227,19 @@ function toZod(spec) {
     }
     default: return z.string();
   }
+}
+
+// The MCP SDK wants a Zod shape; our tools carry JSON Schema.
+function shapeFor(schema) {
+  const props = (schema && schema.properties) || {};
+  const required = new Set((schema && schema.required) || []);
+  const shape = {};
+  for (const [key, spec] of Object.entries(props)) {
+    let zt = toZod(spec);
+    if (spec && spec.description) zt = zt.describe(spec.description);
+    shape[key] = required.has(key) ? zt : zt.optional();
+  }
+  return shape;
 }
 
 // Daily call caps. These are ABUSE BACKSTOPS, not a revenue lever — measured
@@ -452,7 +468,12 @@ function buildServer(ctx, profile, db, scopes) {
             + `say so plainly — manual features and existing AI clients keep working — and point to `
             + `Plans & pricing in the Glidna app without quoting a price.`
           : ``)
-        + trialNote(profile, ctx.isTrainer),
+        + trialNote(profile, ctx.isTrainer)
+        + (isAdminUid(ctx.callerUid)
+          ? ` This is also the owner's Smooth Training HQ door: crew routines put finished work on his `
+            + `desk with hq_file_report (filing sends, pays and publishes nothing), log a quiet shift with `
+            + `hq_log_shift, and read what is waiting with hq_read_desk.`
+          : ``),
     },
   );
 
@@ -467,15 +488,7 @@ function buildServer(ctx, profile, db, scopes) {
   });
 
   for (const def of defs) {
-    // The MCP SDK wants a Zod shape; our tools carry JSON Schema.
-    const props = (def.input_schema && def.input_schema.properties) || {};
-    const required = new Set((def.input_schema && def.input_schema.required) || []);
-    const shape = {};
-    for (const [key, spec] of Object.entries(props)) {
-      let zt = toZod(spec);
-      if (spec && spec.description) zt = zt.describe(spec.description);
-      shape[key] = required.has(key) ? zt : zt.optional();
-    }
+    const shape = shapeFor(def.input_schema);
 
     // confirm_ai_client rides READ_TOOLS for EXPOSURE (read-only connections
     // must be able to seat someone) but is not annotated read-only — it spends
@@ -544,6 +557,42 @@ function buildServer(ctx, profile, db, scopes) {
         return { content: [{ type: "text", text }] };
       },
     );
+  }
+
+  // ── Smooth Training HQ's door (S238) ─────────────────────────────────────
+  // The owner's own connection also gets the crew's tools; no one else's ever
+  // does, whatever their role or scopes. The uid is checked here AND again on
+  // every call, the same defence in depth as the write scopes above.
+  if (isAdminUid(ctx.callerUid)) {
+    for (const def of HQ_TOOLS) {
+      if (!granted.has(def.scope)) continue;
+      server.registerTool(
+        def.name,
+        {
+          title: def.name.replace(/^hq_/, "HQ ").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+          description: def.description,
+          inputSchema: shapeFor(def.input_schema),
+          annotations: { readOnlyHint: def.scope === "read", destructiveHint: false, openWorldHint: false },
+        },
+        async (args) => {
+          if (!isAdminUid(ctx.callerUid) || !granted.has(def.scope)) {
+            return { isError: true, content: [{ type: "text", text: "The HQ is only open to the owner's own connection." }] };
+          }
+          const charge = await chargeCall(db, ctx.callerUid, plan);
+          if (!charge.ok) {
+            return { isError: true, content: [{ type: "text", text: `Daily Glidna connector limit reached (${charge.cap} calls). It resets at midnight UTC.` }] };
+          }
+          try {
+            const result = await runHqTool(def.name, args || {}, { db });
+            return { content: [{ type: "text", text: JSON.stringify(result) }] };
+          } catch (e) {
+            const readable = e && e.code === "invalid-argument";
+            if (!readable) console.error("mcp: HQ tool failed", def.name, e);
+            return { isError: true, content: [{ type: "text", text: readable ? e.message : "The HQ couldn't save that just now. Try again in a minute." }] };
+          }
+        },
+      );
+    }
   }
 
   return server;
@@ -638,3 +687,6 @@ function nowTimeLocal() {
     timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false,
   });
 }
+
+// For the suite: build the tool list a connection would see, without a request.
+exports._buildServer = buildServer;
