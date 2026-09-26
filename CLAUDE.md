@@ -108,6 +108,41 @@ enabled (Blaze has no default spending cap).
 ## Current state (built)
 
 > **RESUME-HERE SUMMARY (keep this updated; it's the fast path for a fresh chat).**
+> _**S238, round 6 (Sep 26): every agent has a profile, a search finds the
+> right one, and Finance gets its head** (`65071b2`; `mcp` deployed before the
+> push, for the new seat). Kevin: tapping an agent should show "all of the jobs
+> that they are responsible for", and a search where he types "a name, job
+> type, etc" should "take me to that agents profile". Every seat now carries
+> `duties` (all its jobs) and `keywords` (other words for its work);
+> `findAgents` (hqOrg.js) ranks the chart — stems both sides, prefix-matches
+> while typing, drops filler words, keeps only results scoring over half the
+> best, and says WHY (the matching duty). 29 real questions are pinned to the
+> right first answer. The profile (`AgentSheet`) opens from the search, a
+> department's seat card, the org chart, or a TAP ON THE PERSON on the map
+> (`personAt`: body or measured tag, fingertip slack 3). It shows every job, who
+> it reports to (`reportsTo`: worker → head → Chief of Staff → owner), its team,
+> where it runs, the apps to leave on, and "Talk to them": a copyable
+> `agentBrief` for a NEW CHAT IN THE CLAUDE APP, NOT Claude Code (Kevin asked
+> which). The brief tells a chat with Glidna on to `hq_clock_in` / file to the
+> desk, so a conversation shows on the map. `chatApps` names only real
+> connectors as switches. **Hired:** the Finance Manager (head of Finance; Kevin
+> wants to talk pricing through with "a finance officer") and a NEW seat, the
+> Web Designer (Ops & Tech: website, Glidna, other platforms). Both are
+> `engine: "chat"` — nothing scheduled, and they don't touch the Pro run cap.
+> Ops got a third desk (sprites, no repaint). ⚠️ **SQUARESPACE HAS NO CLAUDE
+> CONNECTOR** (registry checked; Wix and Webflow do). ⚠️ **THE WEBSITE'S PRICES
+> ARE OUT OF DATE** (Kevin) — facts.md now forbids quoting them and keeps only
+> what Smooth Training's own emails confirm. ⚠️ **NEIGHBOURS' NAME TAGS
+> OVERLAPPED** ("FINA|BOOKKEEPER"), seen in the preview the moment two shared a
+> room: desks are 22 units apart and a tag is 30–55. `stackTags`/`tagLifts`
+> stack them (seated first, so passers-by step aside). Letting room names dodge
+> lifted tags was tried and measured WORSE (Finance's name hopped ~2.7×/min), so
+> names never move for tags; a lifted tag under a name steps back (39% of the
+> time for Finance's second tag with today's six). **The real fix is the
+> repaint: a sign band per room, and bigger rooms as the crew fills them** —
+> Kevin's standing rule. Walkers' mostly-seated pacing cut the middle row's name
+> moves to 0.2–0.7/min. Suites: HQ 170, station 343, crew 469._
+>
 > _**S238, round 5 (Sep 25): the crew's office is a real repository, the crew
 > mostly sits, and a Watchdog tells Kevin when to upgrade** (`4f6659e`; `hqApi`
 > + `mcp` deployed before the push, for the plan-price default). ⚠️ **KEVIN'S
