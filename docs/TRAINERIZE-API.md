@@ -221,6 +221,18 @@ client data was printed or kept; only field shapes and counts.
 - No endpoint registers a URL, and no settings page offers it. Studio plans include it; the route
   is **help@trainerize.com** (their "conduit" to the API team). ⚠️ CLAUDE.md S86d said "Trainerize has
   no webhooks" — that was wrong; the 30-minute poll can be replaced once they're registered.
+- **The receiver is LIVE (Sep 26):** `https://glidna.com/hooks/trainerize` → vercel.json →
+  `trainerizeWebhook` (functions/trainerizeWebhook.js). It checks `TR-SecretKey` against the
+  `TRAINERIZE_WEBHOOK_SECRET` secret, stores each event once as `trainerizeEvents/{event id}`
+  (payload as `dataJson`, `handled:false`), and answers 200; nothing acts on events yet. Kevin's
+  short email asks Trainerize for ALL events to that address plus the key. **Until he sets the real
+  key, the secret is a random placeholder (version 1), so every real delivery is refused.** When it
+  arrives: `firebase functions:secrets:set TRAINERIZE_WEBHOOK_SECRET` (Kevin pastes it — never in a
+  chat), then DESTROY version 1 and redeploy `trainerizeWebhook` (the S199r trap: a redeploy can keep
+  mounting the old version). Measured: a cold start answers in ~1.0 s — over the 500 ms — and a
+  warm one in ~0.23 s, so the first event after a quiet spell is usually taken on Trainerize's retry;
+  the event-id dedupe makes that safe. `minInstances: 1` (~$3/month) would end it if it ever matters.
+  A `glidna.selftest` event from Sep 26 sits in the collection; consumers ignore unknown types.
 
 **Client programs — the shape, read from a real client.**
 - `program/getUserProgramList {userID}` → `{programs:[{id, name, durationType, subscribeType, startDate,
@@ -235,9 +247,27 @@ client data was printed or kept; only field shapes and counts.
   detail:{workoutID, rpe}, fromProgram, userProgramID, title, …}]}]}`.
 - `dailyWorkout/get {ids}` → `{dailyWorkouts:[{id, workoutID, userID, name, date, status, exercises,
   programDay, fromProgram, …}]}`.
-- **Writing a new phase for a client = three calls:** `trainingPlan/add {userid, plan}` →
-  `workoutDef/add {type:"trainingPlan", trainingPlanID, workoutDef}` (proven for type "mine") →
-  `dailyWorkout/set {userID, unitWeight, unitDistance, dailyWorkouts:[…]}` to put them on days.
-  ⚠️ The first and last are UNPROVEN: the reference names `plan` and `dailyWorkouts` without their
-  fields. Prove them on a TEST client only — a phase written to a real client appears in their
-  app immediately.
+- **Writing a new phase for a client = three calls — ALL PROVEN Sep 26 on Kevin's own client profile
+  (21029731, his OK: "use my profile as the test"):**
+  1. `trainingPlan/add {userid, plan:{name, instruction, startDate:"YYYY-MM-DD", duration:1,
+     durationType:"week"}}` → `{code:"0", id, name, startDate:"1/4/2027 12:00:00 AM", durationType:
+     "1 week (4 Jan 2027 - 10 Jan 2027)", endDate, numberOfWorkouts:0}`. (`userid` lowercase.)
+  2. `workoutDef/add {type:"trainingPlan", trainingPlanID, userID:<client>, workoutDef:{…same shape as
+     type "mine"…}}` → `{workoutID}`; it then lists in `trainingPlan/getWorkoutDefList`.
+  3. `dailyWorkout/set {userID, unitWeight, unitDistance, dailyWorkouts:[{userID, workoutID,
+     date:"YYYY-MM-DD"}]}` → `{code:0, dailyWorkoutIDs:[…], brokenRecords:[]}`. ⚠️ **`userID` MUST be
+     repeated inside every item** — without it the call answers 404 "User not found." The calendar
+     shows it `scheduled`, `fromProgram:false` (a one-off on that day, not a program-day slot).
+- **Editing afterwards (Kevin: "we can continue to update and modify these phases, and workouts even
+  after they are created, right?"):**
+  - A workout: `workoutDef/set {workoutDef:{id, name, type, instructions, exercises:[…]}}` →
+    `{code:0}` — the whole definition, replaced. Proven: name, notes and sets changed, and the
+    calendar entry follows the new name.
+  - A scheduled day: `dailyWorkout/set` with the scheduled item's own `id` MOVES it (proven: same
+    id, new date, no duplicate).
+  - A phase: **no call edits one** — the reference has only add / delete / getList /
+    getWorkoutDefList. Renaming or re-dating means a new phase, its workouts added again, and the old
+    one deleted (by Kevin). Kevin: "not really a big deal" — only worth building if needed.
+- ⚠️ **Test residue, Kevin to delete by hand:** on his own client profile, the phase `TEST – Glidna
+  (delete me)` (39032481, Jan 4–10 2027) with its workout (230798333) and the scheduled Jan 7 2027
+  entry (1185584187); and the library workout 230667127 from Sep 24.

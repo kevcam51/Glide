@@ -125,8 +125,11 @@ in the tools.
 
 ## Build order
 
-0. Kevin sends the email above.
-1. Kevin makes a **test client** in Trainerize; prove `trainingPlan/add` and `dailyWorkout/set` on it.
+0. Kevin sends the email above — shortened Sep 26 to one ask: every webhook event to
+   `https://glidna.com/hooks/trainerize` (the receiver is live) and the key.
+1. ~~Prove `trainingPlan/add` and `dailyWorkout/set`~~ — **DONE Sep 26 on Kevin's own client profile**
+   (his call instead of a test client): phase → workout → scheduled day, plus editing a workout and
+   moving its day. Shapes in docs/TRAINERIZE-API.md §S238b.
 2. The exercise catalog: bring the server half of the parked library sync to main, media-free.
 3. The program model and tools: build / revise / swap / progress, plus get/set the training profile.
 4. The message loop (polling first, webhook later), the urgent lane and HQ desk approvals.

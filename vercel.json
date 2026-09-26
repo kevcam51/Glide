@@ -18,6 +18,10 @@
       "destination": "https://us-central1-calorieiq-29762.cloudfunctions.net/mcp"
     },
     {
+      "source": "/hooks/trainerize",
+      "destination": "https://us-central1-calorieiq-29762.cloudfunctions.net/trainerizeWebhook"
+    },
+    {
       "source": "/.well-known/oauth-protected-resource",
       "destination": "https://us-central1-calorieiq-29762.cloudfunctions.net/mcpMetadata?doc=prm"
     },

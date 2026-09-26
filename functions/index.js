@@ -164,6 +164,7 @@ exports.hqApi = require("./hq").hqApi;
 exports.trainerizeTest = require("./trainerize").trainerizeTest; // Trainerize connection test (import step 1)
 exports.trainerizeImport = require("./trainerize").trainerizeImport; // Trainerize roster + snapshot importer (v1)
 exports.trainerizeAutoSync = require("./trainerize").trainerizeAutoSync; // 30-min background sync of imported clients
+exports.trainerizeWebhook = require("./trainerizeWebhook").trainerizeWebhook; // Trainerize events, via glidna.com/hooks/trainerize (S238b)
 // S215c — a trainer connects their OWN Trainerize account (Coach and above).
 exports.connectTrainerize = require("./trainerize").connectTrainerize;
 exports.disconnectTrainerize = require("./trainerize").disconnectTrainerize;
