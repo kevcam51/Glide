@@ -15,6 +15,8 @@ const GLYPHS = {
   // — Navigation / chrome —
   home: (<><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" /><path d="M9.5 21v-6h5v6" /></>),
   dashboard: (<><path d="M3.5 21h17" /><path d="M6 21V11" /><path d="M12 21V4.5" /><path d="M18 21v-6.5" /></>),
+  // The HQ crew (S238b): an android head, like the people on the HQ map.
+  crew: (<><rect x="5" y="8.5" width="14" height="11" rx="3" /><path d="M12 8.5V5.2" /><circle cx="12" cy="4.2" r="1" /><path d="M9.5 13.2v1.4" /><path d="M14.5 13.2v1.4" /><path d="M3 12.5v3" /><path d="M21 12.5v3" /></>),
   clients: (<><circle cx="9" cy="8" r="3.1" /><path d="M3.6 20a5.4 5.4 0 0 1 10.8 0" /><path d="M16 5.3a3 3 0 0 1 0 5.4" /><path d="M17.4 14.3A5.4 5.4 0 0 1 20.4 19.4" /></>),
   bell: (<><path d="M6 11a6 6 0 1 1 12 0v4l1.6 3H4.4L6 15z" /><path d="M10 20.5a2 2 0 0 0 4 0" /></>),
   bellOff: (<><path d="M6 11a6 6 0 1 1 12 0v4l1.6 3H4.4L6 15z" /><path d="M10 20.5a2 2 0 0 0 4 0" /><path d="M3.5 3.5 20.5 20.5" /></>),

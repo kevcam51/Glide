@@ -357,15 +357,16 @@ export const CREW_RULES = [
 //            the app is open (or the next time it opens). Only for what the
 //            cloud can't see, like the plan's own usage meter.
 //   chat   — nothing runs on a schedule: Kevin talks to it when he needs it,
-//            in an ordinary chat in his Claude app (not Claude Code), started
-//            from the brief on its HQ profile (agentBrief, below).
+//            right in the HQ (HQCrewChat, on Glidna's AI account) or in an
+//            ordinary chat in his Claude app (not Claude Code), started from
+//            the brief on its HQ profile (agentBrief, below).
 //   cloud  — a Glidna Cloud Function on Google's servers, paying per use from
 //            Glidna's own Anthropic account: any schedule, always on, but every
 //            outside connection has to be built into Glidna first.
 export const ENGINES = {
   claude: { label: "Your Claude plan", short: "Claude" },
   mac: { label: "The Claude app on your Mac", short: "Mac" },
-  chat: { label: "A chat you start in your Claude app", short: "Chat" },
+  chat: { label: "A chat: here in the HQ, or in your Claude app", short: "Chat" },
   cloud: { label: "Glidna cloud", short: "Cloud" },
   manual: { label: "By hand", short: "Manual" },
 };
@@ -386,7 +387,7 @@ export const BLUEPRINT = [
     use: "Every evening it reads your Claude plan's usage meter and checks every crew run went through. When it's time to upgrade, a note lands on your desk." },
   { id: "profiles", title: "Every agent's profile, and a search to find the right one", status: "built",
     use: "Tap anyone to see everything they're responsible for, or type a name, a job or a problem to find who handles it." },
-  { id: "talk", title: "Talk to your crew", status: "planned",
+  { id: "talk", title: "Talk to your crew", status: "built",
     use: "Tap anyone on the map or in a list, or pick them from Agents in the Glidna AI chat, and talk to them right here, at their desk. Or open their chat in your Claude app." },
   { id: "programs", title: "The Workout Programmer", status: "planned",
     use: "Clients message it in Trainerize; it builds and adapts their programs there. The Programs Lead checks every new program before it reaches you, and anything about pain or injury comes straight to you." },

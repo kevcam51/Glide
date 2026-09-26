@@ -169,10 +169,41 @@ async function overview(db, now = Date.now()) {
   const open = openSnap.docs.map(withId).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   const recent = recentSnap.docs.map(withId).filter((d) => d.status !== "open" && d.resolvedAt);
   const shifts = shiftSnap.docs.map(withId);
+  // `until` (S238b): a conversation in the HQ's own chat (hqChat.js) keeps its
+  // agent at the desk ten quiet minutes, not the two hours a routine gets.
   const active = activeSnap.docs.map(withId)
-    .filter((a) => !a.endedAt && Number.isFinite(a.since) && now - a.since < ACTIVE_MAX_MS)
+    .filter((a) => !a.endedAt && Number.isFinite(a.since) && now - a.since < ACTIVE_MAX_MS
+      && (!Number.isFinite(a.until) || now < a.until))
     .map((a) => ({ worker: a.worker, since: a.since, task: a.task || null }));
-  return { open, recent, shifts, active, openMore: openSnap.docs.length >= 300 };
+  const links = await crewLinks(db);
+  return { open, recent, shifts, active, links, openMore: openSnap.docs.length >= 300 };
+}
+
+// ── Links to each agent's chat in the Claude app (S238b) ────────────────────
+// Kevin: "have a link that will take me directly to them in claude app". A
+// Claude Project or chat has no API, so he saves its link once, per agent.
+// Only claude.ai links, so the button can never send him anywhere else.
+async function crewLinks(db) {
+  const snap = await db.collection("hqSettings").doc("crewLinks").get();
+  const links = (snap.exists && snap.data() && snap.data().links) || {};
+  return Object.fromEntries(Object.entries(links).filter(([k, v]) => SEAT_ID.test(k) && typeof v === "string"));
+}
+function cleanClaudeLink(v) {
+  const raw = clean(v, 500);
+  if (!raw) return "";
+  let u;
+  try { u = new URL(raw); } catch { throw bad("That isn't a link. Copy it from the address bar of the chat in Claude."); }
+  if (u.protocol !== "https:" || u.hostname !== "claude.ai") throw bad("Only a claude.ai link can be saved here.");
+  return u.toString();
+}
+async function setCrewLink(db, data, now) {
+  const seat = clean(data && data.seat, 60);
+  if (!SEAT_ID.test(seat) || seat === "owner") throw bad("seat must be a crew seat id.");
+  const url = cleanClaudeLink(data && data.url);
+  const links = await crewLinks(db);
+  if (url) links[seat] = url; else delete links[seat];
+  await db.collection("hqSettings").doc("crewLinks").set({ links, updatedAt: now });
+  return { ok: true, links };
 }
 
 async function resolve(db, data, now) {
@@ -195,6 +226,8 @@ async function handleHq(request, db, now = Date.now()) {
   const action = String(data.action || "overview");
   if (action === "overview") return overview(db, now);
   if (action === "resolve") return resolve(db, data, now);
+  if (action === "crewLinks") return { links: await crewLinks(db) };
+  if (action === "setCrewLink") return setCrewLink(db, data, now);
   // The spending view (hqSpend.js) throws plain errors carrying a code; the
   // callable turns only HttpsErrors into a readable message, so translate.
   if (action === "spend" || action === "setCosts") {

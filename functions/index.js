@@ -161,6 +161,7 @@ exports.runDueWorkflows = require("./workflows").runDueWorkflows; // hourly disp
 // Smooth Training HQ (S238): the owner's desk and the crew's time cards.
 // Owner-only and checked on the server; hqDesk / hqShifts are Admin-SDK-only.
 exports.hqApi = require("./hq").hqApi;
+exports.hqCrewChat = require("./hqChat").hqCrewChat; // talk to the crew inside the HQ (S238b)
 exports.trainerizeTest = require("./trainerize").trainerizeTest; // Trainerize connection test (import step 1)
 exports.trainerizeImport = require("./trainerize").trainerizeImport; // Trainerize roster + snapshot importer (v1)
 exports.trainerizeAutoSync = require("./trainerize").trainerizeAutoSync; // 30-min background sync of imported clients

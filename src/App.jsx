@@ -31196,6 +31196,9 @@ const callAdminOverview = httpsCallable(functions, "adminOverview"); // admin al
 // on purpose: the only row that opens it is owner-only, so no other account
 // ever downloads it. It holds titles and job descriptions, never business data.
 const HQScreen = lazy(() => import("./HQ.jsx"));
+// S238b: your agents, from the Glidna AI chat. Lazy like the HQ, and only
+// the owner ever renders it, so no other account downloads the org chart.
+const HQCrewPicker = lazy(() => import("./HQCrewPicker.jsx"));
 const callAdminUserUsage = httpsCallable(functions, "adminUserUsage"); // one user's AI spend history (S167)
 const callLogMeal = httpsCallable(functions, "logMeal"); // meal Accept-card direct write (Session 68)
 const callAiSeats = httpsCallable(functions, "aiSeats"); // AI-client seats view (S176f)
@@ -31701,7 +31704,10 @@ function matchVoiceSubjects(text, subjects) {
 // preference, not a per-visit accident.
 let chatUiState = { open: false, size: null };
 
-function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
+function AIChatPanel({ role, onDataChanged, premium = true, subject = null, agents = false }) {
+  // S238b, Kevin: "an \"Agents\" button" in this chat that lists his crew by
+  // department. `agents` is passed only for the owner's uid.
+  const [agentsOpen, setAgentsOpen] = useState(false);
   const [open, setOpen] = useState(chatUiState.open);
   const [messages, setMessages] = useState([]); // {role:'user'|'assistant', content, image?}
   const [draft, setDraft] = useState("");
@@ -33047,6 +33053,15 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                   <span className="text-[.66rem] font-bold">Chats</span>
                 </button>
               )}
+              {agents && (
+                <button onClick={() => setAgentsOpen(true)} aria-label="Agents" title="Your agents"
+                  className="ml-1.5 flex items-center rounded-lg border border-border bg-surface px-2 py-1.5 text-primary cursor-pointer hover:bg-surface2">
+                  <Icon name="crew" size={16} color="var(--accent)" />
+                </button>
+              )}
+              {agentsOpen && (
+                <Suspense fallback={null}><HQCrewPicker onClose={() => setAgentsOpen(false)} /></Suspense>
+              )}
             </div>
             <div className="flex flex-1 min-w-0 flex-col items-center text-center leading-tight">
               <span className="flex items-center gap-1.5 font-display text-sm uppercase tracking-wide text-primary">
@@ -33132,6 +33147,12 @@ function AIChatPanel({ role, onDataChanged, premium = true, subject = null }) {
                   <Icon name="clipboard" size={16} color="var(--accent)" />Paste from another AI
                 </button>
                 <div className="-mt-1 text-[.72rem] text-muted">Use ChatGPT or Claude for your meals? Paste its reply and I'll log it into Glidna.</div>
+                {agents && (
+                  <button onClick={() => setAgentsOpen(true)}
+                    className="mt-1 flex items-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-2.5 text-[.85rem] font-semibold text-fg cursor-pointer hover:border-primary">
+                    <Icon name="crew" size={16} color="var(--accent)" />Talk to your agents
+                  </button>
+                )}
               </div>
             ) : (
               messages.map((m, i) => (
@@ -43693,7 +43714,7 @@ export default function App() {
         onOpenClientPlan={openClientPlan}
         onGoClients={() => setHomeTab("clients")}
         meUid={meUid} meName={meName} meRole={role}
-      /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
+      /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} agents={isOwnerUid} /></>;
     }
     if (isTrainerHome && homeTab === "calendar") {
       return <>{chrome}<TrainerCalendar
@@ -43701,14 +43722,14 @@ export default function App() {
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
         onGoClients={() => setHomeTab("clients")}
         onOpenClientPlan={openClientPlan}
-      /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
+      /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} agents={isOwnerUid} /></>;
     }
     if (isTrainerHome && homeTab === "earnings") {
       return <>{chrome}<TrainerEarnings
         onOpenClientPlan={openClientPlan}
         onGoClients={() => setHomeTab("clients")}
         meUid={meUid}
-      /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
+      /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} agents={isOwnerUid} /></>;
     }
     if (isTrainerHome && homeTab === "dashboard") {
       return <>{chrome}<TrainerDashboard
@@ -43728,7 +43749,7 @@ export default function App() {
         onTrainerizeImport={importFromTrainerize} onRosterChanged={reloadProfilesIndex}
         meUid={meUid} meName={meName} meRole={role} rosterCap={rosterCap} rosterBlocked={rosterBlocked}
         notifPrefs={notifPrefs} onSetNotifPrefs={onSetNotifPrefs}
-      /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
+      /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} agents={isOwnerUid} /></>;
     }
     return <>{chrome}<ProfileSelector
       profiles={profiles} folders={folders} loading={loading}
@@ -43743,7 +43764,7 @@ export default function App() {
       onOpenClientPlan={openClientPlan}
       onLinked={removeLocalProfileById} onCopyToLocal={copyClientToLocal}
       onRename={renameProfile} onPullRefresh={reloadProfilesIndex}
-    /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} /></>;
+    /><AIChatPanel role={role} premium={mePremium} onDataChanged={reloadProfilesIndex} agents={isOwnerUid} /></>;
   }
 
   return (
@@ -44000,7 +44021,7 @@ export default function App() {
           THIS plan. Without it the write went to the trainer's own diary —
           silently, and looking like success. A CLIENT needs none: the server
           forces their own account either way. */}
-      {step === 5 && <AIChatPanel role={role} premium={mePremium} onDataChanged={reloadPlanLive}
+      {step === 5 && <AIChatPanel role={role} premium={mePremium} onDataChanged={reloadPlanLive} agents={isOwnerUid}
         subject={inPlanSubject} />}
       {/* Weekly Meal Planner (S180). Gate: clients need Premium (mePremium);
           trainers need Coach+ — the same teamsAllowed population the server

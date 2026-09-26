@@ -33,6 +33,7 @@ import { W, H, roomScene, seatCenters, palmTree, van, PALM_W, PALM_H, VAN_W, VAN
 import HQStation from "./HQStation.jsx";
 import { deliveriesDue } from "./hqStation.js";
 import HQSpend, { SPEND_CSS, money } from "./HQSpend.jsx";
+import HQCrewChat, { claudeNewChatUrl } from "./HQCrewChat.jsx";
 
 const FONT_ID = "hq-silkscreen";
 const FONT_HREF = "https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap";
@@ -57,6 +58,7 @@ function deskError(e, during = "load") {
   const code = String((e && e.code) || "").replace(/^functions\//, "");
   if (code === "permission-denied") return "This desk only opens for the owner's account.";
   if (code === "unauthenticated") return "Your sign-in has expired. Close the HQ, sign in again and reopen it.";
+  if (code === "invalid-argument" && e && e.message) return e.message;
   if (code === "not-found") {
     return during === "resolve"
       ? "That item is no longer on your desk. Refresh to see the latest."
@@ -233,7 +235,7 @@ function SeatRow({ s, lastShift, onOpen }) {
 // all of the jobs that they are responsible for?" Everything about one seat:
 // what it's responsible for, who it answers to, where it runs, the apps to
 // leave on for it, and how to start a conversation with it.
-function AgentSheet({ seat, seats, shifts, onClose, onOpen }) {
+function AgentSheet({ seat, seats, shifts, link = null, onClose, onOpen, onTalk, onSaveLink }) {
   const sheetRef = useRef(null);
   const [copied, setCopied] = useState("");
   useEffect(() => {
@@ -249,6 +251,7 @@ function AgentSheet({ seat, seats, shifts, onClose, onOpen }) {
   const engine = seat.engine && ENGINES[seat.engine];
   const hired = seat.status !== "open" && seat.status !== "you";
   const brief = agentBrief(seat, seats);
+  const otherApps = chatApps(seat).filter((a) => a !== "Glidna");
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(brief);
@@ -317,24 +320,71 @@ function AgentSheet({ seat, seats, shifts, onClose, onOpen }) {
         {seat.role !== "owner" && (
           <div className="hq-agent-talk">
             <h3 className="hq-agent-h">Talk to them</h3>
-            <p>
-              Start a new chat in your Claude app (a regular chat, not Claude Code).{" "}
-              {chatApps(seat).length ? `Switch on only ${chatApps(seat).join(" and ")}.` : "No apps needed."}{" "}
-              Paste in their brief, then ask what you need.
-            </p>
+            {/* S238b, Kevin: "a place that i can talk to them directly, or have a
+                link that will take me directly to them in claude app". */}
             <div className="hq-agent-actions">
-              <button type="button" className="hq-btn hq-btn-primary" onClick={copy}>Copy their brief</button>
-              <a className="hq-btn hq-btn-ghost" href="https://claude.ai/new" target="_blank" rel="noopener noreferrer">Open a new chat</a>
+              <button type="button" className="hq-btn hq-btn-primary" onClick={() => onTalk(seat.id)}>Talk here</button>
+              <a className="hq-btn hq-btn-ghost" href={link || claudeNewChatUrl(brief)} target="_blank" rel="noopener noreferrer">
+                {link ? "Open their chat in Claude" : "Start a chat in Claude"}
+              </a>
             </div>
-            {copied && <p className="hq-agent-copied" role="status">{copied}</p>}
+            <p className="hq-agent-talk-note">
+              Here, they answer at their desk and can put anything worth keeping on yours.{" "}
+              {otherApps.length
+                ? `For work that needs ${otherApps.join(" or ")}, use your Claude app (a regular chat, not Claude Code) with only ${chatApps(seat).join(" and ")} switched on.`
+                : "Your Claude app works too: a regular chat, not Claude Code."}{" "}
+              {link ? "" : "A new chat opens with their brief typed in: press Enter."}
+            </p>
+            <details className="hq-agent-brief">
+              <summary>{link ? "Change their link in Claude" : "Save their link in Claude"}</summary>
+              <ClaudeLinkForm link={link} onSave={(url) => onSaveLink(seat.id, url)} />
+            </details>
             <details className="hq-agent-brief">
               <summary>Show the brief</summary>
+              <div className="hq-agent-actions hq-agent-brief-actions">
+                <button type="button" className="hq-btn hq-btn-ghost" onClick={copy}>Copy their brief</button>
+              </div>
+              {copied && <p className="hq-agent-copied" role="status">{copied}</p>}
               <pre>{brief}</pre>
             </details>
           </div>
         )}
       </section>
     </div>
+  );
+}
+
+// Saves the link to an agent's own chat or Project in the Claude app, so
+// "Open their chat in Claude" goes straight there (hq.js setCrewLink: claude.ai
+// links only). A Project keeps every conversation with that agent together.
+function ClaudeLinkForm({ link, onSave }) {
+  const [val, setVal] = useState(link || "");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setVal(link || ""); }, [link]);
+  const save = async (url) => {
+    setBusy(true);
+    setNote("");
+    try {
+      await onSave(url);
+      setNote(url ? "Saved. \u201cOpen their chat in Claude\u201d goes there now." : "Removed.");
+    } catch (e) {
+      setNote((e && e.message) || "Couldn't save that link.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form className="hq-agent-link" onSubmit={(e) => { e.preventDefault(); save(val.trim()); }}>
+      <p>In your Claude app, make a Project for them (or open their chat), copy its link, and paste it here. It works on your phone and your computer.</p>
+      <input type="url" inputMode="url" autoComplete="off" value={val} onChange={(e) => setVal(e.target.value)}
+        placeholder="https://claude.ai/project/…" aria-label="Their link in Claude" />
+      <div className="hq-agent-actions">
+        <button type="submit" className="hq-btn hq-btn-primary" disabled={busy || !val.trim() || val.trim() === link}>Save link</button>
+        {link && <button type="button" className="hq-btn hq-btn-ghost" disabled={busy} onClick={() => save("")}>Remove</button>}
+      </div>
+      {note && <p className="hq-agent-copied" role="status">{note}</p>}
+    </form>
   );
 }
 
@@ -461,8 +511,8 @@ function ShiftRow({ sh }) {
 export default function HQ({ onClose, ownerName = "", sample = null }) {
   const [selected, setSelected] = useState("finance");
   const [desk, setDesk] = useState(() => (sample
-    ? { phase: "ready", open: sample.open, recent: sample.recent, shifts: sample.shifts, active: sample.active || [], openMore: false }
-    : { phase: "loading", open: [], recent: [], shifts: [], active: [], openMore: false }));
+    ? { phase: "ready", open: sample.open, recent: sample.recent, shifts: sample.shifts, active: sample.active || [], links: {}, openMore: false }
+    : { phase: "loading", open: [], recent: [], shifts: [], active: [], links: {}, openMore: false }));
   const [deskErr, setDeskErr] = useState("");
   // This month's spending for the station's numbers; the sheet asks for more.
   const [spend, setSpend] = useState(() => (sample ? sample.spend("month", 0) : null));
@@ -550,6 +600,7 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
         recent: Array.isArray(data && data.recent) ? data.recent : [],
         shifts: Array.isArray(data && data.shifts) ? data.shifts : [],
         active: Array.isArray(data && data.active) ? data.active : [],
+        links: (data && data.links && typeof data.links === "object") ? data.links : {},
         openMore: !!(data && data.openMore),
       });
       setDeskErr("");
@@ -644,6 +695,30 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
   };
   closeAgentRef.current = closeAgent;
   const agentSeat = agentId ? seats.find((s) => s.id === agentId) || null : null;
+  // A conversation with one of the crew, open over the profile (HQCrewChat).
+  const [talkId, setTalkId] = useState(null);
+  const talkSeat = talkId ? seats.find((s) => s.id === talkId) || null : null;
+  const closeTalk = () => {
+    setTalkId(null);
+    // Anything they filed during the conversation shows on the desk now.
+    load({ quiet: true });
+  };
+  const saveLink = useCallback(async (seatId, url) => {
+    if (sample) {
+      setDesk((d) => {
+        const links = { ...d.links };
+        if (url) links[seatId] = url; else delete links[seatId];
+        return { ...d, links };
+      });
+      return;
+    }
+    try {
+      const { data } = await callHq({ action: "setCrewLink", seat: seatId, url });
+      setDesk((d) => ({ ...d, links: (data && data.links) || {} }));
+    } catch (e) {
+      throw new Error(deskError(e));
+    }
+  }, [sample]);
 
   // Mark done, dismiss or undo. The screen changes at once; if the server
   // refuses, the item goes back where it was and the reason is shown.
@@ -988,7 +1063,13 @@ export default function HQ({ onClose, ownerName = "", sample = null }) {
         <HQSpend load={loadSpend} saveCosts={saveCosts} initial={spend} focus={spendView} onClose={closeSpend} />
       )}
       {agentSeat && (
-        <AgentSheet seat={agentSeat} seats={seats} shifts={desk.shifts} onClose={closeAgent} onOpen={openAgent} />
+        <AgentSheet seat={agentSeat} seats={seats} shifts={desk.shifts} link={desk.links[agentSeat.id] || null}
+          onClose={closeAgent} onOpen={openAgent} onTalk={setTalkId} onSaveLink={saveLink} />
+      )}
+      {talkSeat && (
+        <HQCrewChat
+          seat={{ id: talkSeat.id, title: talkSeat.title, short: talkSeat.short, roomName: (roomById(talkSeat.room) || {}).name }}
+          link={desk.links[talkSeat.id] || null} brief={agentBrief(talkSeat, seats)} preview={!!sample} onClose={closeTalk} />
       )}
     </div>,
     document.body,
@@ -1325,6 +1406,14 @@ const CSS = `
 .hq-agent-note { margin: 16px 0 0; font-size: 13.5px; color: var(--hq-amber); }
 .hq-agent-talk p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.45; color: #C9DCDC; }
 .hq-agent-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.hq-agent-talk .hq-agent-talk-note { margin: 10px 0 0; }
+.hq-agent-brief-actions { margin: 8px 0 0; }
+.hq-agent-link p { margin: 8px 0; }
+.hq-agent-link input {
+  width: 100%; min-height: 42px; padding: 8px 12px; margin: 0 0 8px; border-radius: 10px;
+  border: 1px solid var(--hq-line2); background: #0A1114; color: var(--hq-text); font: inherit; font-size: 16px;
+}
+.hq-agent-link input:focus { outline: 2px solid rgba(8,220,224,.55); outline-offset: 1px; }
 .hq-agent-talk .hq-agent-copied { margin: 8px 0 0; color: #2FE0A8; }
 .hq-agent-brief { margin-top: 10px; }
 .hq-agent-brief summary { cursor: pointer; font-size: 13px; color: var(--hq-cyan); }
